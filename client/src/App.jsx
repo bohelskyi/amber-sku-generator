@@ -17,9 +17,7 @@ function App() {
     fetchHistory();
   }, []);
 
-  const fetchHistory = () => {
-    axios.get('http://localhost:5000/api/products').then(res => setHistory(res.data));
-  };
+  const fetchHistory = () => { axios.get('http://localhost:5000/api/products').then(res => setHistory(res.data)); };
 
   const handleStart = (catCode) => {
     setSelectedCat(catCode);
@@ -31,8 +29,6 @@ function App() {
 
   const handleAnswer = (qId, valId) => {
     const selectedValue = parseInt(valId);
-    
-    // Логіка "Toggle": якщо клікнули те саме — знімаємо вибір
     if (answers[qId] === selectedValue) {
         const newAnswers = { ...answers };
         delete newAnswers[qId];
@@ -40,29 +36,24 @@ function App() {
     } else {
         const newAnswers = { ...answers, [qId]: selectedValue };
         setAnswers(newAnswers);
-        
-        // Якщо змінили на Формований (2) — скидаємо калібровку
-        if (qId === 'raw_type' && selectedValue === 2) {
-            setIsCalibrated(null);
-        }
+        if (qId === 'raw_type' && selectedValue === 2) setIsCalibrated(null);
     }
   };
 
-  const isWeightRequired = selectedCat !== 'AR';
+  // --- ОСНОВНА ЗМІНА ТУТ ---
+  // Беремо налаштування прямо з категорії
+  const categoryConfig = selectedCat && config ? config.categories[selectedCat] : null;
+  const isWeightRequired = categoryConfig ? (categoryConfig.requires_weight === 1) : true;
 
   const handlePreview = () => {
     if (isWeightRequired && !weight) return alert("Введіть вагу!");
-
     const payload = {
         categoryCode: selectedCat,
         answers,
         weight: isWeightRequired ? weight : 0,
         isCalibrated: isCalibrated === null ? 0 : isCalibrated
     };
-
-    axios.post('http://localhost:5000/api/preview', payload).then(res => {
-        setPreviewData(res.data);
-    });
+    axios.post('http://localhost:5000/api/preview', payload).then(res => { setPreviewData(res.data); });
   };
 
   const handleSave = () => {
@@ -83,23 +74,14 @@ function App() {
     });
   };
 
-  const handleCancel = () => {
-    handleStart(null);
-  };
+  const handleCancel = () => { handleStart(null); };
 
   const handleDelete = (sku) => {
     if(!sku) return;
     if(!window.confirm(`Видалити ${sku}?`)) return;
-
     axios.post('http://localhost:5000/api/delete', { skuToDelete: sku })
-        .then(res => {
-            alert(res.data.message);
-            setSkuToDelete('');
-            fetchHistory();
-        })
-        .catch(err => {
-            alert("ПОМИЛКА: " + (err.response?.data?.error || err.message));
-        });
+        .then(res => { alert(res.data.message); setSkuToDelete(''); fetchHistory(); })
+        .catch(err => { alert("ПОМИЛКА: " + (err.response?.data?.error || err.message)); });
   };
 
   if (!config) return <div className="p-10">Завантаження...</div>;
@@ -109,7 +91,6 @@ function App() {
       <div className="max-w-4xl mx-auto">
         <h1 className="text-3xl font-bold mb-6 text-amber-600">Amber SKU Manager</h1>
 
-        {/* --- ВИБІР КАТЕГОРІЇ --- */}
         {!selectedCat && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {Object.values(config.categories).map(cat => (
@@ -124,44 +105,29 @@ function App() {
           </div>
         )}
 
-        {/* --- ФОРМА ВВОДУ --- */}
         {selectedCat && !previewData && (
           <div className="bg-white p-6 rounded shadow-lg">
             <div className="flex justify-between items-center mb-4">
                 <h2 className="text-2xl font-bold">{config.categories[selectedCat].name}</h2>
                 <button onClick={() => setSelectedCat(null)} className="text-gray-500 hover:text-red-500">✕ Скасувати</button>
             </div>
-
             <div className="space-y-6">
                 {config.questions[selectedCat]?.map(q => (
                     <div key={q.id}>
-                        {/* 1. Основне питання */}
                         <label className="block text-sm font-medium text-gray-700 mb-2">{q.label}</label>
                         <div className="flex flex-wrap gap-2">
                             {q.options.map(opt => (
-                                <button
-                                    key={opt.id}
-                                    onClick={() => handleAnswer(q.id, opt.id)}
-                                    className={`px-4 py-2 rounded border transition duration-200 ${answers[q.id] === opt.id ? 'bg-amber-500 text-white border-amber-600' : 'bg-gray-50 hover:bg-gray-100'}`}
-                                >
+                                <button key={opt.id} onClick={() => handleAnswer(q.id, opt.id)} className={`px-4 py-2 rounded border transition duration-200 ${answers[q.id] === opt.id ? 'bg-amber-500 text-white border-amber-600' : 'bg-gray-50 hover:bg-gray-100'}`}>
                                     {opt.label}
                                 </button>
                             ))}
                         </div>
-
-                        {/* 2. ВСТАВКА: Якщо це питання 'raw_type' і обрано 'Натуральний' (1) - показуємо калібровку тут */}
                         {q.id === 'raw_type' && answers['raw_type'] === 1 && (
-                            <div className="mt-4 p-4 bg-blue-50 border border-blue-100 rounded animate-fade-in">
+                            <div className="mt-4 p-4 bg-blue-50 border border-blue-100 rounded">
                                 <label className="block text-sm font-medium text-blue-800 mb-2">{config.extraConfig.is_calibrated.label}</label>
                                 <div className="flex gap-2">
                                      {config.extraConfig.is_calibrated.options.map(opt => (
-                                         <button
-                                            key={opt.id}
-                                            onClick={() => setIsCalibrated(prev => prev === opt.id ? null : opt.id)}
-                                            className={`px-4 py-2 rounded border transition duration-200 ${isCalibrated === opt.id ? 'bg-blue-600 text-white' : 'bg-white'}`}
-                                         >
-                                             {opt.label}
-                                         </button>
+                                         <button key={opt.id} onClick={() => setIsCalibrated(prev => prev === opt.id ? null : opt.id)} className={`px-4 py-2 rounded border ${isCalibrated === opt.id ? 'bg-blue-600 text-white' : 'bg-white'}`}>{opt.label}</button>
                                      ))}
                                 </div>
                             </div>
@@ -169,34 +135,21 @@ function App() {
                     </div>
                 ))}
 
-                {/* Поле ваги (якщо потрібне) */}
                 {isWeightRequired && (
                     <div className="pt-4 border-t">
                         <label className="block text-sm font-medium text-gray-700 mb-2">Вага виробу (г)</label>
-                        <input 
-                            type="number" 
-                            value={weight}
-                            onChange={(e) => setWeight(e.target.value)}
-                            className="w-full p-3 border rounded text-lg outline-none ring-2 ring-transparent focus:ring-amber-500" 
-                            placeholder="0.00"
-                        />
+                        <input type="number" value={weight} onChange={(e) => setWeight(e.target.value)} className="w-full p-3 border rounded text-lg outline-none ring-2 ring-transparent focus:ring-amber-500" placeholder="0.00" />
                     </div>
                 )}
-
-                <button onClick={handlePreview} className="w-full py-4 bg-blue-600 text-white text-xl font-bold rounded hover:bg-blue-700 shadow transition duration-200">
-                    ПЕРЕВІРИТИ АРТИКУЛ
-                </button>
+                <button onClick={handlePreview} className="w-full py-4 bg-blue-600 text-white text-xl font-bold rounded hover:bg-blue-700 shadow">ПЕРЕВІРИТИ АРТИКУЛ</button>
             </div>
           </div>
         )}
 
-        {/* --- ПРЕВ'Ю (РЕЗУЛЬТАТ) --- */}
         {previewData && (
             <div className="bg-white p-8 rounded shadow-xl border-t-4 border-amber-500">
                 <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Перевірка Артикулу</h2>
-                
                 {previewData.mode === 'sequence' ? (
-                    // СТАРА ЛОГІКА (Картини)
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
                         <div className="p-4 bg-gray-100 rounded text-center opacity-75">
                             <p className="text-sm text-gray-500 uppercase font-bold">Останній в базі</p>
@@ -209,35 +162,21 @@ function App() {
                         </div>
                     </div>
                 ) : (
-                    // НОВА ЛОГІКА (Ювелірка)
                     <div className="mb-8">
                         <div className={`p-6 border-2 rounded text-center shadow-md ${previewData.existsInDb ? 'bg-yellow-50 border-yellow-400' : 'bg-green-50 border-green-500'}`}>
-                            <p className={`text-sm uppercase font-bold ${previewData.existsInDb ? 'text-yellow-700' : 'text-green-600'}`}>
-                                {previewData.existsInDb ? 'УВАГА: ТАКИЙ АРТИКУЛ ВЖЕ ІСНУЄ' : 'НОВИЙ УНІКАЛЬНИЙ АРТИКУЛ'}
-                            </p>
+                            <p className={`text-sm uppercase font-bold ${previewData.existsInDb ? 'text-yellow-700' : 'text-green-600'}`}>{previewData.existsInDb ? 'УВАГА: ТАКИЙ АРТИКУЛ ВЖЕ ІСНУЄ' : 'НОВИЙ УНІКАЛЬНИЙ АРТИКУЛ'}</p>
                             <div className="text-4xl font-mono font-bold text-gray-800 my-4">{previewData.fullProposedSku}</div>
                             <p className="text-2xl font-bold text-gray-800">${previewData.totalPrice}</p>
-                            {previewData.existsInDb && (
-                                <p className="mt-2 text-sm text-gray-600">Комірниця має просто додати кількість в системі обліку.</p>
-                            )}
                         </div>
                     </div>
                 )}
-
-                {parseFloat(previewData.pricePerGram) > 0 && (
-                    <div className="text-center mb-8 text-gray-600">
-                        <p>Ціна за грам: <strong>${previewData.pricePerGram}</strong> <span className="text-sm">({previewData.logMessage})</span></p>
-                    </div>
-                )}
-
+                {parseFloat(previewData.pricePerGram) > 0 && <div className="text-center mb-8 text-gray-600"><p>Ціна за грам: <strong>${previewData.pricePerGram}</strong></p></div>}
                 <div className="grid grid-cols-2 gap-4">
                     <button onClick={handleCancel} className="py-4 bg-gray-200 text-gray-800 font-bold rounded hover:bg-gray-300">ВІДМІНИТИ</button>
                     <button onClick={handleSave} className="py-4 bg-green-600 text-white font-bold rounded hover:bg-green-700">ЗБЕРЕГТИ</button>
                 </div>
             </div>
         )}
-
-        {/* --- ПАНЕЛЬ ВИДАЛЕННЯ (Тільки на головній) --- */}
         {!selectedCat && (
             <div className="mt-12 p-6 bg-red-50 border border-red-200 rounded">
                 <h3 className="text-lg font-bold text-red-700 mb-2">Коригування помилок</h3>
@@ -247,8 +186,6 @@ function App() {
                 </div>
             </div>
         )}
-
-        {/* --- ІСТОРІЯ --- */}
         <div className="mt-8">
             <h3 className="text-xl font-bold mb-4">Останні збережені</h3>
             <div className="bg-white shadow overflow-hidden rounded-md">
@@ -256,7 +193,7 @@ function App() {
                     <thead className="bg-gray-50">
                         <tr>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Артикул</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Категорія</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Кат.</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Вага</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Дія</th>
                         </tr>
@@ -268,9 +205,7 @@ function App() {
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{config.categories[item.category]?.name}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.weight > 0 ? `${item.weight}г` : '-'}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                    {!selectedCat && (
-                                        <button onClick={() => handleDelete(item.full_sku)} className="text-red-500 hover:text-red-700 font-bold text-xs border border-red-200 px-2 py-1 rounded hover:bg-red-50">Видалити</button>
-                                    )}
+                                    {!selectedCat && <button onClick={() => handleDelete(item.full_sku)} className="text-red-500 font-bold text-xs border border-red-200 px-2 py-1 rounded">Видалити</button>}
                                 </td>
                             </tr>
                         ))}
@@ -278,10 +213,8 @@ function App() {
                 </table>
             </div>
         </div>
-
       </div>
     </div>
   );
 }
-
 export default App;
