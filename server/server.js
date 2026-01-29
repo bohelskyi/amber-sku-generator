@@ -19,7 +19,7 @@ db.run(`CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     full_sku TEXT,
     base_sku TEXT,
-    sequence_number INTEGER,
+    sequence_number INTEGER, -- Для картин це лічильник, для ювелірки це вага
     category TEXT,
     weight REAL,
     total_price REAL,
@@ -32,9 +32,11 @@ app.get('/api/config', (req, res) => {
     res.json({ categories, questions, extraConfig });
 });
 
-// ПЕРЕВІРКА
+// --- ПЕРЕВІРКА ТА ГЕНЕРАЦІЯ ---
 app.post('/api/preview', (req, res) => {
     const { categoryCode, answers, weight, isCalibrated } = req.body;
+    
+    // 1. Формуємо базу артикулу
     const catQuestions = questions[categoryCode] || [];
     let skuParts = [categoryCode];
     catQuestions.forEach(q => {
@@ -43,6 +45,7 @@ app.post('/api/preview', (req, res) => {
     });
     const baseSku = skuParts.join('');
 
+    // 2. Рахуємо ціну
     let pricePerGram = 0;
     let logMessage = "";
     const rawType = answers['raw_type'];
@@ -81,18 +84,60 @@ app.post('/api/preview', (req, res) => {
     const weightVal = weight ? parseFloat(weight) : 0;
     const totalPrice = (pricePerGram * weightVal).toFixed(2);
 
-    db.all("SELECT sequence_number FROM products WHERE base_sku = ? ORDER BY sequence_number DESC LIMIT 1", [baseSku], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        let lastSeq = 0;
-        if (rows.length > 0) lastSeq = rows[0].sequence_number;
-        const nextSeq = lastSeq + 1;
-        const nextSeqString = String(nextSeq).padStart(3, '0'); 
-        const prevSeqString = lastSeq > 0 ? String(lastSeq).padStart(3, '0') : null;
-        const fullProposedSku = baseSku + nextSeqString;
-        const prevFullSku = lastSeq > 0 ? baseSku + prevSeqString : "Немає (Це перший)";
+    // --- ГОЛОВНА ЗМІНА ЛОГІКИ ---
+    
+    // Категорії, де використовуємо лічильник (стара логіка)
+    const sequenceCategories = ['AR', 'DK'];
+    const isSequenceBased = sequenceCategories.includes(categoryCode);
 
-        res.json({ baseSku, nextSeq, fullProposedSku, prevFullSku, pricePerGram: pricePerGram.toFixed(2), totalPrice, logMessage });
-    });
+    if (isSequenceBased) {
+        // ЛОГІКА ЛІЧИЛЬНИКА (Декор, Картини)
+        db.all("SELECT sequence_number FROM products WHERE base_sku = ? ORDER BY sequence_number DESC LIMIT 1", [baseSku], (err, rows) => {
+            if (err) return res.status(500).json({ error: err.message });
+            let lastSeq = 0;
+            if (rows.length > 0) lastSeq = rows[0].sequence_number;
+            
+            const nextSeq = lastSeq + 1;
+            const suffix = String(nextSeq).padStart(3, '0');
+            const fullProposedSku = baseSku + suffix;
+            
+            const prevSeqString = lastSeq > 0 ? String(lastSeq).padStart(3, '0') : null;
+            const prevFullSku = lastSeq > 0 ? baseSku + prevSeqString : "Немає (Перший запис)";
+
+            res.json({
+                mode: 'sequence', // Мітка для фронтенда
+                baseSku,
+                nextSeq, // Це піде в sequence_number
+                fullProposedSku,
+                prevFullSku,
+                pricePerGram: pricePerGram.toFixed(2),
+                totalPrice,
+                logMessage
+            });
+        });
+    } else {
+        // ЛОГІКА ВАГИ (Браслети, Чотки і т.д.)
+        // Суфікс = округлена вага
+        const weightInt = Math.round(weightVal);
+        const suffix = String(weightInt).padStart(3, '0');
+        const fullProposedSku = baseSku + suffix;
+
+        // Перевіряємо, чи такий артикул вже є в базі
+        db.get("SELECT full_sku FROM products WHERE full_sku = ?", [fullProposedSku], (err, row) => {
+            if (err) return res.status(500).json({ error: err.message });
+            
+            res.json({
+                mode: 'weight', // Мітка для фронтенда
+                baseSku,
+                nextSeq: weightInt, // В колонку sequence_number запишемо вагу, щоб було красиво
+                fullProposedSku,
+                existsInDb: !!row, // true, якщо такий вже є
+                pricePerGram: pricePerGram.toFixed(2),
+                totalPrice,
+                logMessage
+            });
+        });
+    }
 });
 
 // ЗБЕРЕЖЕННЯ
@@ -106,44 +151,47 @@ app.post('/api/save', (req, res) => {
     stmt.finalize();
 });
 
-// --- НОВИЙ ЕНДПОІНТ: ВИДАЛЕННЯ ---
+// ВИДАЛЕННЯ
 app.post('/api/delete', (req, res) => {
-    const { skuToDelete } = req.body; // Очікуємо повний SKU, наприклад CH111002
+    const { skuToDelete } = req.body; 
 
-    if (!skuToDelete || skuToDelete.length < 4) {
-        return res.status(400).json({ error: "Некоректний формат артикулу" });
-    }
+    if (!skuToDelete || skuToDelete.length < 4) return res.status(400).json({ error: "Некоректний формат" });
 
-    // 1. Розбиваємо артикул на Базу і Номер. 
-    // Ми знаємо, що останні 3 символи - це номер.
-    const baseSku = skuToDelete.slice(0, -3); 
-    
-    // 2. Перевіряємо, який останній номер в базі для цього baseSku
-    db.get("SELECT sequence_number FROM products WHERE base_sku = ? ORDER BY sequence_number DESC LIMIT 1", [baseSku], (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
+    // Визначаємо категорію з перших букв артикулу (BR, AR...)
+    const catCode = skuToDelete.substring(0, 2); 
+    const sequenceCategories = ['AR', 'DK'];
+    const isSequenceBased = sequenceCategories.includes(catCode);
 
-        if (!row) {
-            return res.status(404).json({ error: "Артикул не знайдено в базі." });
-        }
-
-        const lastSeqInDb = row.sequence_number;
-        const requestedSeq = parseInt(skuToDelete.slice(-3));
-
-        // 3. Порівнюємо
-        if (lastSeqInDb !== requestedSeq) {
-            // Користувач хоче видалити 001, а в базі вже є 002. Забороняємо.
-            return res.status(400).json({ 
-                error: `Неможливо видалити ${skuToDelete}, бо існує новіший запис з номером ${String(lastSeqInDb).padStart(3, '0')}. Спочатку видаліть останній.` 
-            });
-        }
-
-        // 4. Видаляємо
-        db.run("DELETE FROM products WHERE full_sku = ?", [skuToDelete], function(err) {
+    // Логіка видалення
+    if (isSequenceBased) {
+        // ДЛЯ КАРТИН/ДЕКОРУ: Перевіряємо чи це останній
+        const baseSku = skuToDelete.slice(0, -3); 
+        db.get("SELECT sequence_number FROM products WHERE base_sku = ? ORDER BY sequence_number DESC LIMIT 1", [baseSku], (err, row) => {
             if (err) return res.status(500).json({ error: err.message });
-            res.json({ success: true, message: `Артикул ${skuToDelete} видалено. Лічильник зменшено.` });
+            if (!row) return res.status(404).json({ error: "Артикул не знайдено." });
+
+            const lastSeqInDb = row.sequence_number;
+            const requestedSeq = parseInt(skuToDelete.slice(-3));
+
+            if (lastSeqInDb !== requestedSeq) {
+                return res.status(400).json({ error: `Неможливо видалити ${skuToDelete}, бо існує новіший запис. Видаляйте з кінця.` });
+            }
+            
+            deleteItem(skuToDelete, res);
         });
-    });
+    } else {
+        // ДЛЯ ЮВЕЛІРКИ: Видаляємо без перевірки порядку (бо вага не залежить одна від одної)
+        deleteItem(skuToDelete, res);
+    }
 });
+
+function deleteItem(sku, res) {
+    db.run("DELETE FROM products WHERE full_sku = ?", [sku], function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        if (this.changes === 0) return res.status(404).json({ error: "Артикул не знайдено." });
+        res.json({ success: true, message: `Артикул ${sku} успішно видалено.` });
+    });
+}
 
 app.get('/api/products', (req, res) => {
     db.all("SELECT * FROM products ORDER BY created_at DESC LIMIT 50", [], (err, rows) => {
