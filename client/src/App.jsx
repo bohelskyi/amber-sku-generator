@@ -35,7 +35,7 @@ function App() {
         setAnswers(newAnswers);
     } else {
         const newAnswers = { ...answers, [qId]: selectedValue };
-        setAnswers(newAnswers);
+        setAnswers(newAnswers);http://localhost:5173/admin
         if (qId === 'raw_type' && selectedValue === 2) setIsCalibrated(null);
     }
   };
@@ -45,8 +45,10 @@ function App() {
   const categoryConfig = selectedCat && config ? config.categories[selectedCat] : null;
   const isWeightRequired = categoryConfig ? (categoryConfig.requires_weight === 1) : true;
 
-  const handlePreview = () => {
-    if (isWeightRequired && !weight) return alert("Введіть вагу!");
+    const handlePreview = () => {
+        if (isWeightRequired && !weight) return alert("Введіть вагу!");
+        if (parseFloat(weight) < 0) return alert("Вага не може бути від'ємною!"); // <-- НОВИЙ РЯДОК
+
     const payload = {
         categoryCode: selectedCat,
         answers,
@@ -138,7 +140,20 @@ function App() {
                 {isWeightRequired && (
                     <div className="pt-4 border-t">
                         <label className="block text-sm font-medium text-gray-700 mb-2">Вага виробу (г)</label>
-                        <input type="number" value={weight} onChange={(e) => setWeight(e.target.value)} className="w-full p-3 border rounded text-lg outline-none ring-2 ring-transparent focus:ring-amber-500" placeholder="0.00" />
+                        <input 
+                            type="number" 
+                            min="0" // 1. Для браузера
+                            onKeyDown={(e) => e.key === '-' && e.preventDefault()} // 2. Заборона натискання клавіші "-"
+                            value={weight}
+                            onChange={(e) => {
+                                // 3. Додаткова перевірка при вставці тексту
+                                const val = e.target.value;
+                                if (val < 0) return; 
+                                setWeight(val);
+                            }}
+                            className="w-full p-3 border rounded text-lg outline-none ring-2 ring-transparent focus:ring-amber-500" 
+                            placeholder="0.00"
+                        />
                     </div>
                 )}
                 <button onClick={handlePreview} className="w-full py-4 bg-blue-600 text-white text-xl font-bold rounded hover:bg-blue-700 shadow">ПЕРЕВІРИТИ АРТИКУЛ</button>
