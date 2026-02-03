@@ -92,7 +92,7 @@ function App() {
     if(!window.confirm(`Видалити ${sku}?`)) return;
     axios.post('http://localhost:5000/api/delete', { skuToDelete: sku })
         .then(res => { alert(res.data.message); setSkuToDelete(''); fetchHistory(); })
-        .catch(err => { alert("ПОМИЛКА: " + (err.response?.data?.error || err.message)); });
+    .catch(err => { alert("ПОМИЛКА: " + (err.response?.data?.error || err.message)); });
   };
 
   const handleCopyText = async (text, label) => {
@@ -236,7 +236,7 @@ function App() {
             </div>
         )}
         <div className="mt-8">
-            <h3 className="text-xl font-bold mb-4">Останні збережені</h3>
+            <h3 className="text-xl font-bold mb-4">Останні збережені (15)</h3>
             <div className="bg-white shadow overflow-hidden rounded-md">
                 <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
@@ -244,6 +244,7 @@ function App() {
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Артикул</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Кат.</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Вага</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ціна</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Дія</th>
                         </tr>
                     </thead>
@@ -253,8 +254,15 @@ function App() {
                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-bold text-gray-800">{item.full_sku}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{config.categories[item.category]?.name}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.weight > 0 ? `${item.weight}г` : '-'}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.total_price ? `$${item.total_price}` : '-'}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                    {!selectedCat && <button onClick={() => handleDelete(item.full_sku)} className="text-red-500 font-bold text-xs border border-red-200 px-2 py-1 rounded">Видалити</button>}
+                                    {!selectedCat && (
+                                        <div className="flex gap-2">
+                                            <button onClick={() => handleCopyText(item.full_sku, 'SKU')} className="text-blue-600 font-bold text-xs border border-blue-200 px-2 py-1 rounded">Копіювати SKU</button>
+                                            <button onClick={() => item.total_price && handleCopyText(`$${item.total_price}`, 'Ціну')} className="text-blue-600 font-bold text-xs border border-blue-200 px-2 py-1 rounded">Копіювати ціну</button>
+                                            <button onClick={() => handleDelete(item.full_sku)} className="text-red-500 font-bold text-xs border border-red-200 px-2 py-1 rounded">Видалити</button>
+                                        </div>
+                                    )}
                                 </td>
                             </tr>
                         ))}

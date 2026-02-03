@@ -577,7 +577,7 @@ app.post('/api/delete', (req, res) => {
 });
 
 app.get('/api/products', (req, res) => {
-    db.all("SELECT * FROM products ORDER BY created_at DESC LIMIT 50", [], (err, rows) => {
+    db.all("SELECT * FROM products ORDER BY created_at DESC LIMIT 15", [], (err, rows) => {
         if (err) return res.status(500).json({error: err.message});
         res.json(rows);
     });
