@@ -121,6 +121,9 @@ function initDb() {
                 migrateData();
             }
         });
+
+        // Ensure sequence-based categories (override any existing DB values)
+        db.run("UPDATE categories SET requires_weight = 0 WHERE code IN ('AR', 'DK', 'SK')");
     });
 }
 
@@ -132,7 +135,7 @@ function migrateData() {
 
     db.serialize(() => {
         for (const [code, cat] of Object.entries(initialConfig.categories)) {
-            const reqWeight = (code === 'AR' || code === 'DK') ? 0 : 1;
+            const reqWeight = (code === 'AR' || code === 'DK' || code === 'SK') ? 0 : 1;
             stmtCat.run(code, cat.name, reqWeight);
             
             const questions = initialConfig.questions[code] || [];
@@ -438,57 +441,38 @@ app.post('/api/preview', (req, res) => {
                 return { uahRate, pricePerGramUah, totalPriceUah };
             };
 
+            const sendResponse = (currencyPayload) => {
+                // Логіка SKU (Sequence vs Weight)
+                db.get("SELECT requires_weight FROM categories WHERE code = ?", [categoryCode], (err, catRow) => {
+                    const requiresWeight = catRow && catRow.requires_weight === 1 && categoryCode !== 'SK';
+
+                    if (!requiresWeight) {
+                        db.all("SELECT sequence_number FROM products WHERE base_sku = ? ORDER BY sequence_number DESC LIMIT 1", [baseSku], (err, rows) => {
+                            let lastSeq = rows.length > 0 ? rows[0].sequence_number : 0;
+                            const nextSeq = lastSeq + 1;
+                            const fullProposedSku = baseSku + String(nextSeq).padStart(3, '0');
+                            const prevFullSku = lastSeq > 0 ? baseSku + String(lastSeq).padStart(3, '0') : "РќРµРјР°С”";
+                            res.json({ mode: 'sequence', baseSku, nextSeq, fullProposedSku, prevFullSku, pricePerGram: price.toFixed(2), totalPrice, logMessage: log, ...currencyPayload });
+                        });
+                    } else {
+                        const weightInt = Math.round(weightVal);
+                        const fullProposedSku = baseSku + String(weightInt).padStart(3, '0');
+                        db.get("SELECT full_sku FROM products WHERE full_sku = ?", [fullProposedSku], (err, row) => {
+                            res.json({ mode: 'weight', baseSku, nextSeq: weightInt, fullProposedSku, existsInDb: !!row, pricePerGram: price.toFixed(2), totalPrice, logMessage: log, ...currencyPayload });
+                        });
+                    }
+                });
+            };
+
             getUsdUahRate()
                 .then((uahRate) => {
-                    const currencyPayload = buildCurrencyPayload(uahRate);
-
-                    // Р›РѕРіС–РєР° SKU (Sequence vs Weight)
-                    db.get("SELECT requires_weight FROM categories WHERE code = ?", [categoryCode], (err, catRow) => {
-                        const requiresWeight = catRow && catRow.requires_weight === 1;
-
-                        if (!requiresWeight) {
-                            db.all("SELECT sequence_number FROM products WHERE base_sku = ? ORDER BY sequence_number DESC LIMIT 1", [baseSku], (err, rows) => {
-                                let lastSeq = rows.length > 0 ? rows[0].sequence_number : 0;
-                                const nextSeq = lastSeq + 1;
-                                const fullProposedSku = baseSku + String(nextSeq).padStart(3, '0');
-                                const prevFullSku = lastSeq > 0 ? baseSku + String(lastSeq).padStart(3, '0') : "РќРµРјР°С”";
-                                res.json({ mode: 'sequence', baseSku, nextSeq, fullProposedSku, prevFullSku, pricePerGram: price.toFixed(2), totalPrice, logMessage: log, ...currencyPayload });
-                            });
-                        } else {
-                            const weightInt = Math.round(weightVal);
-                            const fullProposedSku = baseSku + String(weightInt).padStart(3, '0');
-                            db.get("SELECT full_sku FROM products WHERE full_sku = ?", [fullProposedSku], (err, row) => {
-                                res.json({ mode: 'weight', baseSku, nextSeq: weightInt, fullProposedSku, existsInDb: !!row, pricePerGram: price.toFixed(2), totalPrice, logMessage: log, ...currencyPayload });
-                            });
-                        }
-                    });
+                    sendResponse(buildCurrencyPayload(uahRate));
                 })
                 .catch((err) => {
                     console.error('NBU rate error:', err.message || err);
-                    const currencyPayload = buildCurrencyPayload(null);
-
-                    db.get("SELECT requires_weight FROM categories WHERE code = ?", [categoryCode], (err, catRow) => {
-                        const requiresWeight = catRow && catRow.requires_weight === 1;
-
-                        if (!requiresWeight) {
-                            db.all("SELECT sequence_number FROM products WHERE base_sku = ? ORDER BY sequence_number DESC LIMIT 1", [baseSku], (err, rows) => {
-                                let lastSeq = rows.length > 0 ? rows[0].sequence_number : 0;
-                                const nextSeq = lastSeq + 1;
-                                const fullProposedSku = baseSku + String(nextSeq).padStart(3, '0');
-                                const prevFullSku = lastSeq > 0 ? baseSku + String(lastSeq).padStart(3, '0') : "РќРµРјР°С”";
-                                res.json({ mode: 'sequence', baseSku, nextSeq, fullProposedSku, prevFullSku, pricePerGram: price.toFixed(2), totalPrice, logMessage: log, ...currencyPayload });
-                            });
-                        } else {
-                            const weightInt = Math.round(weightVal);
-                            const fullProposedSku = baseSku + String(weightInt).padStart(3, '0');
-                            db.get("SELECT full_sku FROM products WHERE full_sku = ?", [fullProposedSku], (err, row) => {
-                                res.json({ mode: 'weight', baseSku, nextSeq: weightInt, fullProposedSku, existsInDb: !!row, pricePerGram: price.toFixed(2), totalPrice, logMessage: log, ...currencyPayload });
-                            });
-                        }
-                    });
+                    sendResponse(buildCurrencyPayload(null));
                 });
         }
-
     });
 });
 
@@ -516,34 +500,10 @@ app.post('/api/admin/category', (req, res) => {
     stmt.finalize();
 });
 
-// Оновити категорію (name, requires_weight)
-app.put('/api/admin/category', (req, res) => {
-    const { code, name, requires_weight } = req.body;
-    if (!code || !name) return res.status(400).json({ error: "Code and Name required" });
-    const stmt = db.prepare("UPDATE categories SET name = ?, requires_weight = ? WHERE code = ?");
-    stmt.run(name, requires_weight !== undefined ? requires_weight : 1, code, function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
-    });
-    stmt.finalize();
-});
-
 app.post('/api/admin/question', (req, res) => {
     const { category_code, key, label, sku_index } = req.body;
     const stmt = db.prepare("INSERT INTO questions (category_code, key, label, sku_index) VALUES (?, ?, ?, ?)");
     stmt.run(category_code, key, label, sku_index, function(err) { if (err) return res.status(500).json({ error: err.message }); res.json({ id: this.lastID }); });
-    stmt.finalize();
-});
-
-// Оновити питання (label, sku_index)
-app.put('/api/admin/question', (req, res) => {
-    const { id, label, sku_index } = req.body;
-    if (!id || label === undefined) return res.status(400).json({ error: "Id and Label required" });
-    const stmt = db.prepare("UPDATE questions SET label = ?, sku_index = ? WHERE id = ?");
-    stmt.run(label, sku_index, id, function(err) { 
-        if (err) return res.status(500).json({ error: err.message }); 
-        res.json({ success: true }); 
-    });
     stmt.finalize();
 });
 
