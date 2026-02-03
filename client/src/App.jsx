@@ -11,6 +11,8 @@ function App() {
   const [previewData, setPreviewData] = useState(null); 
   const [history, setHistory] = useState([]);
   const [skuToDelete, setSkuToDelete] = useState('');
+  const formatUah = (value) => (value !== null && value !== undefined ? `${value} ₴` : '---');
+  const formatUsd = (value) => (Number(value) > 0 ? `$${value}` : '---');
 
   useEffect(() => {
     axios.get('http://localhost:5000/api/config').then(res => setConfig(res.data));
@@ -35,7 +37,7 @@ function App() {
         setAnswers(newAnswers);
     } else {
         const newAnswers = { ...answers, [qId]: selectedValue };
-        setAnswers(newAnswers);http://localhost:5173/admin
+        setAnswers(newAnswers);
         if (qId === 'raw_type' && selectedValue === 2) setIsCalibrated(null);
     }
   };
@@ -173,7 +175,9 @@ function App() {
                         <div className="p-4 bg-green-50 border-2 border-green-500 rounded text-center transform scale-105 shadow-md">
                             <p className="text-sm text-green-600 uppercase font-bold">Буде створено</p>
                             <div className="text-3xl font-mono font-bold text-green-700 my-2">{previewData.fullProposedSku}</div>
-                            <p className="text-xl font-bold text-gray-800">{previewData.totalPrice > 0 ? `$${previewData.totalPrice}` : '---'}</p>
+                            <p className="text-xl font-bold text-gray-800">{formatUah(previewData.totalPriceUah)}</p>
+                            <p className="text-sm text-gray-600">{formatUsd(previewData.totalPrice)}</p>
+                            {previewData.uahRate && <p className="text-xs text-gray-500">1 USD = {previewData.uahRate} ₴</p>}
                         </div>
                     </div>
                 ) : (
@@ -181,11 +185,17 @@ function App() {
                         <div className={`p-6 border-2 rounded text-center shadow-md ${previewData.existsInDb ? 'bg-yellow-50 border-yellow-400' : 'bg-green-50 border-green-500'}`}>
                             <p className={`text-sm uppercase font-bold ${previewData.existsInDb ? 'text-yellow-700' : 'text-green-600'}`}>{previewData.existsInDb ? 'УВАГА: ТАКИЙ АРТИКУЛ ВЖЕ ІСНУЄ' : 'НОВИЙ УНІКАЛЬНИЙ АРТИКУЛ'}</p>
                             <div className="text-4xl font-mono font-bold text-gray-800 my-4">{previewData.fullProposedSku}</div>
-                            <p className="text-2xl font-bold text-gray-800">${previewData.totalPrice}</p>
+                            <p className="text-2xl font-bold text-gray-800">{formatUah(previewData.totalPriceUah)}</p>
+                            <p className="text-sm text-gray-600">{formatUsd(previewData.totalPrice)}</p>
+                            {previewData.uahRate && <p className="text-xs text-gray-500">1 USD = {previewData.uahRate} ₴</p>}
                         </div>
                     </div>
                 )}
-                {parseFloat(previewData.pricePerGram) > 0 && <div className="text-center mb-8 text-gray-600"><p>Ціна за грам: <strong>${previewData.pricePerGram}</strong></p></div>}
+                {parseFloat(previewData.pricePerGram) > 0 && (
+                    <div className="text-center mb-8 text-gray-600">
+                        <p>Ціна за грам: <strong>{formatUah(previewData.pricePerGramUah)}</strong> <span className="text-sm">({formatUsd(previewData.pricePerGram)})</span></p>
+                    </div>
+                )}
                 <div className="grid grid-cols-2 gap-4">
                     <button onClick={handleCancel} className="py-4 bg-gray-200 text-gray-800 font-bold rounded hover:bg-gray-300">ВІДМІНИТИ</button>
                     <button onClick={handleSave} className="py-4 bg-green-600 text-white font-bold rounded hover:bg-green-700">ЗБЕРЕГТИ</button>
