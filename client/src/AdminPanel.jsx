@@ -8,11 +8,11 @@ export default function AdminPanel() {
     const [selectedQuestion, setSelectedQuestion] = useState(null);
     const [pricesData, setPricesData] = useState(null);
     const [editCat, setEditCat] = useState({ name: '', requires_weight: true });
-    const [editQuestion, setEditQuestion] = useState({ label: '', sku_index: '' });
+    const [editQuestion, setEditQuestion] = useState({ label: '', sku_index: '', required: true });
 
     // РЎС‚Р°РЅРё С„РѕСЂРј
     const [newCat, setNewCat] = useState({ code: '', name: '', requires_weight: true });
-    const [newQuest, setNewQuest] = useState({ key: '', label: '', sku_index: '' });
+    const [newQuest, setNewQuest] = useState({ key: '', label: '', sku_index: '', required: true });
     const [newOpt, setNewOpt] = useState({ value_id: '', label: '' });
     
     // РќРѕРІС– СЃС‚Р°РЅРё РґР»СЏ С†С–РЅ
@@ -37,8 +37,8 @@ export default function AdminPanel() {
     };
     const addQuestion = () => {
         if(!selectedCat) return;
-        axios.post('http://localhost:5000/api/admin/question', { ...newQuest, category_code: selectedCat.code })
-             .then(() => { setNewQuest({ key: '', label: '', sku_index: '' }); fetchConfig(); });
+        axios.post('http://localhost:5000/api/admin/question', { ...newQuest, required: newQuest.required ? 1 : 0, category_code: selectedCat.code })
+             .then(() => { setNewQuest({ key: '', label: '', sku_index: '', required: true }); fetchConfig(); });
     };
     const addOption = () => {
         if(!selectedQuestion) return;
@@ -66,12 +66,19 @@ export default function AdminPanel() {
 
     const updateQuestion = () => {
         if (!selectedQuestion) return;
-        axios.put('http://localhost:5000/api/admin/question', { 
+        axios.post('http://localhost:5000/api/admin/question/update', { 
             id: selectedQuestion.q_db_id, 
             label: editQuestion.label, 
-            sku_index: editQuestion.sku_index 
+            sku_index: editQuestion.sku_index,
+            required: editQuestion.required ? 1 : 0
         })
-            .then(() => { fetchConfig(); });
+            .then(() => { 
+                fetchConfig();
+                alert('Збережено');
+            })
+            .catch(err => {
+                alert(`Помилка збереження: ${err.response?.data?.error || err.message}`);
+            });
     };
 
     // --- Р¦Р†РќРћР’Р† Р¤РЈРќРљР¦Р†Р‡ ---
@@ -122,12 +129,47 @@ export default function AdminPanel() {
     const currentCatQuestions = selectedCat ? (config.questions[selectedCat.code] || []) : [];
     const currentOptions = selectedQuestion ? (currentCatQuestions.find(q => q.id === selectedQuestion.id)?.options || []) : [];
 
+    const validationIssues = [];
+    if (config && config.categories && config.questions) {
+        Object.values(config.categories).forEach(cat => {
+            const questions = config.questions[cat.code] || [];
+            const keySet = new Set();
+            const indexSet = new Set();
+            questions.forEach(q => {
+                if (!q.label || q.label.trim().length === 0) {
+                    validationIssues.push(`Категорія ${cat.code}: питання ${q.id} без назви`);
+                }
+                if (keySet.has(q.id)) {
+                    validationIssues.push(`Категорія ${cat.code}: дубль key ${q.id}`);
+                }
+                keySet.add(q.id);
+                if (indexSet.has(q.sku_index)) {
+                    validationIssues.push(`Категорія ${cat.code}: дубль індексу ${q.sku_index}`);
+                }
+                indexSet.add(q.sku_index);
+                if (!q.options || q.options.length === 0) {
+                    validationIssues.push(`Категорія ${cat.code}: питання ${q.id} без варіантів`);
+                }
+            });
+        });
+    }
+
     return (
         <div className="min-h-screen bg-gray-100 p-4 font-sans pb-40">
             <div className="flex justify-between items-center mb-6">
                 <h1 className="text-2xl font-bold text-gray-800">⚙️ Адмін-панель</h1>
                 <Link to="/" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">← Назад до калькулятора</Link>
             </div>
+            {validationIssues.length > 0 && (
+                <div className="mb-6 p-4 rounded border border-red-200 bg-red-50">
+                    <div className="font-bold text-red-700 mb-2">Авто-валідатор виявив проблеми</div>
+                    <ul className="list-disc pl-5 text-sm text-red-700">
+                        {validationIssues.map((issue, idx) => (
+                            <li key={idx}>{issue}</li>
+                        ))}
+                    </ul>
+                </div>
+            )}
 
             {/* Р’Р•Р РҐРќРЇ Р§РђРЎРўРРќРђ: РЎРўР РЈРљРўРЈР Рђ */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12 items-start">
@@ -163,8 +205,11 @@ export default function AdminPanel() {
                     <h2 className="font-bold text-lg mb-4 border-b pb-2">2. Питання</h2>
                     <div className="h-96 overflow-y-auto space-y-2 pr-2">
                         {currentCatQuestions.map(q => (
-                            <div key={q.q_db_id} onClick={() => { setSelectedQuestion(q); setEditQuestion({ label: q.label, sku_index: q.sku_index }); }} className={`p-3 rounded cursor-pointer flex justify-between items-center border ${selectedQuestion?.id === q.id ? 'bg-blue-100 border-blue-500' : 'hover:bg-gray-50'}`}>
-                                <div><span className="font-bold">{q.label}</span><span className="text-xs text-gray-500 block">Key: {q.id} | Index: {q.sku_index}</span></div>
+                            <div key={q.q_db_id} onClick={() => { setSelectedQuestion(q); setEditQuestion({ label: q.label, sku_index: q.sku_index, required: q.required === 1 }); }} className={`p-3 rounded cursor-pointer flex justify-between items-center border ${selectedQuestion?.id === q.id ? 'bg-blue-100 border-blue-500' : 'hover:bg-gray-50'}`}>
+                                <div>
+                                    <span className="font-bold">{q.label}</span>
+                                    <span className="text-xs text-gray-500 block">Key: {q.id} | Index: {q.sku_index} | {q.required === 1 ? 'Обовʼязкове' : 'Необовʼязкове'}</span>
+                                </div>
                                 <button onClick={(e) => { e.stopPropagation(); deleteItem('question', q.q_db_id); }} className="text-red-400 px-2">×</button>
                             </div>
                         ))}
@@ -174,10 +219,11 @@ export default function AdminPanel() {
                             <div className="text-xs text-gray-500 mb-2">Редагувати питання</div>
                             <input className="w-full mb-2 p-1 border rounded" placeholder="Label" value={editQuestion.label} onChange={e => setEditQuestion({...editQuestion, label: e.target.value})}/>
                             <input className="w-full mb-2 p-1 border rounded" type="number" placeholder="Index" value={editQuestion.sku_index} onChange={e => setEditQuestion({...editQuestion, sku_index: e.target.value})}/>
+                            <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={editQuestion.required} onChange={e => setEditQuestion({...editQuestion, required: e.target.checked})} className="mr-2"/> Обовʼязкове</label>
                             <button onClick={updateQuestion} className="w-full bg-blue-600 text-white py-1 rounded hover:bg-blue-700">Зберегти</button>
                         </div>
                     )}
-                    {selectedCat && <div className="mt-4 pt-4 border-t bg-gray-50 p-2 rounded"><input className="w-full mb-2 p-1 border rounded" placeholder="Key (size)" value={newQuest.key} onChange={e => setNewQuest({...newQuest, key: e.target.value})}/><input className="w-full mb-2 p-1 border rounded" placeholder="Label" value={newQuest.label} onChange={e => setNewQuest({...newQuest, label: e.target.value})}/><input className="w-full mb-2 p-1 border rounded" type="number" placeholder="Index" value={newQuest.sku_index} onChange={e => setNewQuest({...newQuest, sku_index: e.target.value})}/><button onClick={addQuestion} className="w-full bg-green-500 text-white py-1 rounded hover:bg-green-600">Додати</button></div>}
+                    {selectedCat && <div className="mt-4 pt-4 border-t bg-gray-50 p-2 rounded"><input className="w-full mb-2 p-1 border rounded" placeholder="Key (size)" value={newQuest.key} onChange={e => setNewQuest({...newQuest, key: e.target.value})}/><input className="w-full mb-2 p-1 border rounded" placeholder="Label" value={newQuest.label} onChange={e => setNewQuest({...newQuest, label: e.target.value})}/><input className="w-full mb-2 p-1 border rounded" type="number" placeholder="Index" value={newQuest.sku_index} onChange={e => setNewQuest({...newQuest, sku_index: e.target.value})}/><label className="flex items-center text-sm mb-2"><input type="checkbox" checked={newQuest.required} onChange={e => setNewQuest({...newQuest, required: e.target.checked})} className="mr-2"/> Обовʼязкове</label><button onClick={addQuestion} className="w-full bg-green-500 text-white py-1 rounded hover:bg-green-600">Додати</button></div>}
                 </div>
 
                 {/* 3. Варіанти */}

@@ -73,9 +73,12 @@ function initDb() {
         // --- РЎРўР РЈРљРўРЈР Рђ (РљР°С‚РµРіРѕСЂС–С—, РџРёС‚Р°РЅРЅСЏ, РћРїС†С–С—) ---
         db.run(`CREATE TABLE IF NOT EXISTS categories (code TEXT PRIMARY KEY, name TEXT, requires_weight INTEGER DEFAULT 1)`);
         db.run(`CREATE TABLE IF NOT EXISTS questions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, category_code TEXT, key TEXT, label TEXT, sku_index INTEGER,
+            id INTEGER PRIMARY KEY AUTOINCREMENT, category_code TEXT, key TEXT, label TEXT, sku_index INTEGER, required INTEGER DEFAULT 1,
             FOREIGN KEY(category_code) REFERENCES categories(code)
         )`);
+        // Add required column for existing DBs (ignore error if already exists)
+        db.run("ALTER TABLE questions ADD COLUMN required INTEGER DEFAULT 1", () => {});
+        db.run("UPDATE questions SET required = 1 WHERE required IS NULL");
         db.run(`CREATE TABLE IF NOT EXISTS options (
             id INTEGER PRIMARY KEY AUTOINCREMENT, question_id INTEGER, value_id INTEGER, label TEXT,
             FOREIGN KEY(question_id) REFERENCES questions(id)
@@ -130,7 +133,7 @@ function initDb() {
 function migrateData() {
     // 1. РњС–РіСЂР°С†С–СЏ СЃС‚СЂСѓРєС‚СѓСЂРё (СЏРє РјРёРЅСѓР»РѕРіРѕ СЂР°Р·Сѓ)
     const stmtCat = db.prepare("INSERT INTO categories (code, name, requires_weight) VALUES (?, ?, ?)");
-    const stmtQuest = db.prepare("INSERT INTO questions (category_code, key, label, sku_index) VALUES (?, ?, ?, ?)");
+    const stmtQuest = db.prepare("INSERT INTO questions (category_code, key, label, sku_index, required) VALUES (?, ?, ?, ?, ?)");
     const stmtOpt = db.prepare("INSERT INTO options (question_id, value_id, label) VALUES (?, ?, ?)");
 
     db.serialize(() => {
@@ -140,7 +143,7 @@ function migrateData() {
             
             const questions = initialConfig.questions[code] || [];
             questions.forEach(q => {
-                stmtQuest.run(code, q.id, q.label, q.sku_index, function(err) {
+                stmtQuest.run(code, q.id, q.label, q.sku_index, 1, function(err) {
                     if (err) console.error(err);
                     const qId = this.lastID;
                     q.options.forEach(opt => {
@@ -222,7 +225,7 @@ app.get('/api/config', (req, res) => {
             };
         });
 
-        db.all(`SELECT q.id as q_db_id, q.category_code, q.key, q.label as q_label, q.sku_index,
+        db.all(`SELECT q.id as q_db_id, q.category_code, q.key, q.label as q_label, q.sku_index, q.required,
                        o.id as o_db_id, o.value_id, o.label as o_label
                 FROM questions q
                 LEFT JOIN options o ON q.id = o.question_id
@@ -237,6 +240,7 @@ app.get('/api/config', (req, res) => {
                         id: row.key,
                         label: row.q_label,
                         sku_index: row.sku_index,
+                        required: row.required,
                         cat: row.category_code,
                         options: []
                     };
@@ -500,10 +504,46 @@ app.post('/api/admin/category', (req, res) => {
     stmt.finalize();
 });
 
+// Оновити категорію (name, requires_weight)
+app.put('/api/admin/category', (req, res) => {
+    const { code, name, requires_weight } = req.body;
+    if (!code || !name) return res.status(400).json({ error: "Code and Name required" });
+    const stmt = db.prepare("UPDATE categories SET name = ?, requires_weight = ? WHERE code = ?");
+    stmt.run(name, requires_weight !== undefined ? requires_weight : 1, code, function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true });
+    });
+    stmt.finalize();
+});
+
 app.post('/api/admin/question', (req, res) => {
-    const { category_code, key, label, sku_index } = req.body;
-    const stmt = db.prepare("INSERT INTO questions (category_code, key, label, sku_index) VALUES (?, ?, ?, ?)");
-    stmt.run(category_code, key, label, sku_index, function(err) { if (err) return res.status(500).json({ error: err.message }); res.json({ id: this.lastID }); });
+    const { category_code, key, label, sku_index, required } = req.body;
+    const stmt = db.prepare("INSERT INTO questions (category_code, key, label, sku_index, required) VALUES (?, ?, ?, ?, ?)");
+    stmt.run(category_code, key, label, sku_index, required !== undefined ? required : 1, function(err) { if (err) return res.status(500).json({ error: err.message }); res.json({ id: this.lastID }); });
+    stmt.finalize();
+});
+
+// Оновити питання (label, sku_index, required)
+app.put('/api/admin/question', (req, res) => {
+    const { id, label, sku_index, required } = req.body;
+    if (!id || label === undefined) return res.status(400).json({ error: "Id and Label required" });
+    const stmt = db.prepare("UPDATE questions SET label = ?, sku_index = ?, required = ? WHERE id = ?");
+    stmt.run(label, sku_index, required !== undefined ? required : 1, id, function(err) { 
+        if (err) return res.status(500).json({ error: err.message }); 
+        res.json({ success: true }); 
+    });
+    stmt.finalize();
+});
+
+// Fallback for clients/environments where PUT is blocked
+app.post('/api/admin/question/update', (req, res) => {
+    const { id, label, sku_index, required } = req.body;
+    if (!id || label === undefined) return res.status(400).json({ error: "Id and Label required" });
+    const stmt = db.prepare("UPDATE questions SET label = ?, sku_index = ?, required = ? WHERE id = ?");
+    stmt.run(label, sku_index, required !== undefined ? required : 1, id, function(err) { 
+        if (err) return res.status(500).json({ error: err.message }); 
+        res.json({ success: true }); 
+    });
     stmt.finalize();
 });
 

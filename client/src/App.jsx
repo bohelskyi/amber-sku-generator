@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import axios from 'axios';
 
 function App() {
@@ -13,6 +13,7 @@ function App() {
   const [skuToDelete, setSkuToDelete] = useState('');
   const formatUah = (value) => (value !== null && value !== undefined ? `${value} ₴` : '---');
   const formatUsd = (value) => (Number(value) > 0 ? `$${value}` : '---');
+  const [copyMessage, setCopyMessage] = useState('');
 
   useEffect(() => {
     axios.get('http://localhost:5000/api/config').then(res => setConfig(res.data));
@@ -42,16 +43,22 @@ function App() {
     }
   };
 
-  // --- ОСНОВНА ЗМІНА ТУТ ---
-  // Беремо налаштування прямо з категорії
+  // --- РћРЎРќРћР’РќРђ Р—РњР†РќРђ РўРЈРў ---
+  // Р‘РµСЂРµРјРѕ РЅР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ РїСЂСЏРјРѕ Р· РєР°С‚РµгРѕСЂС–С—
   const categoryConfig = selectedCat && config ? config.categories[selectedCat] : null;
   const isWeightRequired = categoryConfig ? (categoryConfig.requires_weight === 1) : true;
 
     const handlePreview = () => {
         if (isWeightRequired && !weight) return alert("Введіть вагу!");
-        if (parseFloat(weight) < 0) return alert("Вага не може бути від'ємною!"); // <-- НОВИЙ РЯДОК
-
-    const payload = {
+        if (parseFloat(weight) < 0) return alert("Вага не може бути від'ємною!");
+        const requiredQuestions = config?.questions?.[selectedCat] || [];
+        const missingRequired = requiredQuestions
+            .filter(q => q.required === 1)
+            .filter(q => answers[q.id] === undefined);
+        if (missingRequired.length > 0) {
+            return alert(`Будь ласка, заповніть обов'язкові питання: ${missingRequired.map(q => q.label).join(', ')}`);
+        }
+        const payload = {
         categoryCode: selectedCat,
         answers,
         weight: isWeightRequired ? weight : 0,
@@ -88,6 +95,18 @@ function App() {
         .catch(err => { alert("ПОМИЛКА: " + (err.response?.data?.error || err.message)); });
   };
 
+  const handleCopyText = async (text, label) => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyMessage(`${label} скопійовано`);
+      setTimeout(() => setCopyMessage(''), 1500);
+    } catch (err) {
+      setCopyMessage('Не вдалося скопіювати');
+      setTimeout(() => setCopyMessage(''), 1500);
+    }
+  };
+
   if (!config) return <div className="p-10">Завантаження...</div>;
 
   return (
@@ -113,7 +132,7 @@ function App() {
           <div className="bg-white p-6 rounded shadow-lg">
             <div className="flex justify-between items-center mb-4">
                 <h2 className="text-2xl font-bold">{config.categories[selectedCat].name}</h2>
-                <button onClick={() => setSelectedCat(null)} className="text-gray-500 hover:text-red-500">✕ Скасувати</button>
+                <button onClick={() => setSelectedCat(null)} className="text-gray-500 hover:text-red-500">× Скасувати</button>
             </div>
             <div className="space-y-6">
                 {config.questions[selectedCat]?.map(q => (
@@ -144,11 +163,11 @@ function App() {
                         <label className="block text-sm font-medium text-gray-700 mb-2">Вага виробу (г)</label>
                         <input 
                             type="number" 
-                            min="0" // 1. Для браузера
-                            onKeyDown={(e) => e.key === '-' && e.preventDefault()} // 2. Заборона натискання клавіші "-"
+                            min="0" // 1. Р”Р»СЏ Р±СЂР°СѓР·РµСЂР°
+                            onKeyDown={(e) => e.key === '-' && e.preventDefault()} // 2. Р—Р°Р±РѕСЂРѕРЅР° РЅР°С‚РёСЃРєР°РЅРЅСЏ РєР»Р°РІС–С€С– "-"
                             value={weight}
                             onChange={(e) => {
-                                // 3. Додаткова перевірка при вставці тексту
+                                // 3. Р”РѕРґР°С‚РєРѕРІР° РїРµСЂРµРІС–СЂРєР° РїСЂРё РІСЃС‚Р°РІС†С– С‚РµРєСЃС‚Сѓ
                                 const val = e.target.value;
                                 if (val < 0) return; 
                                 setWeight(val);
@@ -175,6 +194,8 @@ function App() {
                         <div className="p-4 bg-green-50 border-2 border-green-500 rounded text-center transform scale-105 shadow-md">
                             <p className="text-sm text-green-600 uppercase font-bold">Буде створено</p>
                             <div className="text-3xl font-mono font-bold text-green-700 my-2">{previewData.fullProposedSku}</div>
+                            <button onClick={() => handleCopyText(previewData.fullProposedSku, 'SKU')} className="mt-2 px-3 py-1 text-sm bg-white border border-green-300 rounded hover:bg-green-100">Копіювати SKU</button>
+                            <button onClick={() => previewData.totalPriceUah && handleCopyText(`${previewData.totalPriceUah} ₴`, 'Ціну')} className="mt-2 ml-2 px-3 py-1 text-sm bg-white border border-green-300 rounded hover:bg-green-100">Копіювати ціну</button>
                             <p className="text-xl font-bold text-gray-800">{formatUah(previewData.totalPriceUah)}</p>
                             <p className="text-sm text-gray-600">{formatUsd(previewData.totalPrice)}</p>
                             {previewData.uahRate && <p className="text-xs text-gray-500">1 USD = {previewData.uahRate} ₴</p>}
@@ -185,12 +206,15 @@ function App() {
                         <div className={`p-6 border-2 rounded text-center shadow-md ${previewData.existsInDb ? 'bg-yellow-50 border-yellow-400' : 'bg-green-50 border-green-500'}`}>
                             <p className={`text-sm uppercase font-bold ${previewData.existsInDb ? 'text-yellow-700' : 'text-green-600'}`}>{previewData.existsInDb ? 'УВАГА: ТАКИЙ АРТИКУЛ ВЖЕ ІСНУЄ' : 'НОВИЙ УНІКАЛЬНИЙ АРТИКУЛ'}</p>
                             <div className="text-4xl font-mono font-bold text-gray-800 my-4">{previewData.fullProposedSku}</div>
+                            <button onClick={() => handleCopyText(previewData.fullProposedSku, 'SKU')} className="mb-3 px-3 py-1 text-sm bg-white border border-green-300 rounded hover:bg-green-100">Копіювати SKU</button>
+                            <button onClick={() => previewData.totalPriceUah && handleCopyText(`${previewData.totalPriceUah} ₴`, 'Ціну')} className="mb-3 ml-2 px-3 py-1 text-sm bg-white border border-green-300 rounded hover:bg-green-100">Копіювати ціну</button>
                             <p className="text-2xl font-bold text-gray-800">{formatUah(previewData.totalPriceUah)}</p>
                             <p className="text-sm text-gray-600">{formatUsd(previewData.totalPrice)}</p>
                             {previewData.uahRate && <p className="text-xs text-gray-500">1 USD = {previewData.uahRate} ₴</p>}
                         </div>
                     </div>
                 )}
+                {copyMessage && <div className="text-center mb-4 text-sm text-green-700">{copyMessage}</div>}
                 {parseFloat(previewData.pricePerGram) > 0 && (
                     <div className="text-center mb-8 text-gray-600">
                         <p>Ціна за грам: <strong>{formatUah(previewData.pricePerGramUah)}</strong> <span className="text-sm">({formatUsd(previewData.pricePerGram)})</span></p>
