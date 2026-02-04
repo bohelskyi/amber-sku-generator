@@ -44,3 +44,18 @@ docker compose exec -T postgres pg_dump -U amber amber > amber-backup.sql
 ```bash
 cat amber-backup.sql | docker compose exec -T postgres psql -U amber -d amber
 ```
+
+### Migrate config from old SQLite (optional)
+
+If you need to keep existing categories/questions/options and price settings from old `server/amber.db`, run:
+
+```bash
+cd amber-app/server
+npm install
+npm run migrate:config -- --sqlite=./amber.db --pg=postgresql://amber:amber_password@localhost:5432/amber
+```
+
+Notes:
+- This migrates only config/pricing tables.
+- Products history (`products`) is not copied.
+- The script replaces current config tables in PostgreSQL.
