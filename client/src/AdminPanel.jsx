@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 
@@ -10,12 +10,12 @@ export default function AdminPanel() {
     const [editCat, setEditCat] = useState({ name: '', requires_weight: true });
     const [editQuestion, setEditQuestion] = useState({ label: '', sku_index: '', required: true });
 
-    // РЎС‚Р°РЅРё С„РѕСЂРј
+    // Стани форм
     const [newCat, setNewCat] = useState({ code: '', name: '', requires_weight: true });
     const [newQuest, setNewQuest] = useState({ key: '', label: '', sku_index: '', required: true });
     const [newOpt, setNewOpt] = useState({ value_id: '', label: '' });
 
-    // РќРѕРІС– СЃС‚Р°РЅРё РґР»СЏ С†С–РЅ
+    // Стани для цін
     const [newScenario, setNewScenario] = useState({ name: '', match_json: '', axis_x_key: '', axis_y_key: '' });
     const [newModifier, setNewModifier] = useState({ trigger_key: '', trigger_val: '', factor: '' });
     const handleNumberWheel = (event) => {
@@ -36,28 +36,28 @@ export default function AdminPanel() {
         else setPricesData(null);
     }, [selectedCat]);
 
-    const fetchConfig = () => { axios.get('http://localhost:5000/api/config').then(res => setConfig(res.data)); };
-    const fetchPrices = () => { axios.get(`http://localhost:5000/api/admin/prices/${selectedCat.code}`).then(res => setPricesData(res.data)); };
+    const fetchConfig = () => { axios.get('/api/config').then(res => setConfig(res.data)); };
+    const fetchPrices = () => { axios.get(`/api/admin/prices/${selectedCat.code}`).then(res => setPricesData(res.data)); };
 
-    // --- CRUD Р¤РЈРќРљР¦Р†Р‡ ---
+    // --- CRUD функції ---
     const addCategory = () => {
         if(!newCat.code) return;
-        axios.post('http://localhost:5000/api/admin/category', { ...newCat, requires_weight: newCat.requires_weight ? 1 : 0 })
+        axios.post('/api/admin/category', { ...newCat, requires_weight: newCat.requires_weight ? 1 : 0 })
              .then(() => { setNewCat({ code: '', name: '', requires_weight: true }); fetchConfig(); });
     };
     const addQuestion = () => {
         if(!selectedCat) return;
-        axios.post('http://localhost:5000/api/admin/question', { ...newQuest, required: newQuest.required ? 1 : 0, category_code: selectedCat.code })
+        axios.post('/api/admin/question', { ...newQuest, required: newQuest.required ? 1 : 0, category_code: selectedCat.code })
              .then(() => { setNewQuest({ key: '', label: '', sku_index: '', required: true }); fetchConfig(); });
     };
     const addOption = () => {
         if(!selectedQuestion) return;
-        axios.post('http://localhost:5000/api/admin/option', { ...newOpt, question_id: selectedQuestion.q_db_id })
+        axios.post('/api/admin/option', { ...newOpt, question_id: selectedQuestion.q_db_id })
              .then(() => { setNewOpt({ value_id: '', label: '' }); fetchConfig(); });
     };
     const deleteItem = (type, id) => {
         if(!window.confirm("Видалити цей елемент?")) return;
-        axios.post('http://localhost:5000/api/admin/delete-item', { type, id })
+        axios.post('/api/admin/delete-item', { type, id })
              .then(() => {
                  fetchConfig();
                  if(type==='category') setSelectedCat(null);
@@ -66,7 +66,7 @@ export default function AdminPanel() {
     };
     const updateCategory = () => {
         if (!selectedCat) return;
-        axios.put('http://localhost:5000/api/admin/category', {
+        axios.put('/api/admin/category', {
             code: selectedCat.code,
             name: editCat.name,
             requires_weight: editCat.requires_weight ? 1 : 0
@@ -76,7 +76,7 @@ export default function AdminPanel() {
 
     const updateQuestion = () => {
         if (!selectedQuestion) return;
-        axios.post('http://localhost:5000/api/admin/question/update', {
+        axios.post('/api/admin/question/update', {
             id: selectedQuestion.q_db_id,
             label: editQuestion.label,
             sku_index: editQuestion.sku_index,
@@ -91,9 +91,9 @@ export default function AdminPanel() {
             });
     };
 
-    // --- Р¦Р†РќРћР’Р† Р¤РЈРќРљР¦Р†Р‡ ---
+    // --- Цінові функції ---
     const handlePriceChange = (scenarioId, xVal, yVal, newPrice) => {
-        axios.post('http://localhost:5000/api/admin/price-cell', {
+        axios.post('/api/admin/price-cell', {
             scenario_id: scenarioId,
             x_val: xVal,
             y_val: yVal,
@@ -106,14 +106,14 @@ export default function AdminPanel() {
 
         let parsedJson;
         try {
-            parsedJson = JSON.parse(newScenario.match_json); // 1. РџРµСЂРµС‚РІРѕСЂСЋС”РјРѕ С‚РµРєСЃС‚ РЅР° РѕР±'С”РєС‚ С‚СѓС‚
+            parsedJson = JSON.parse(newScenario.match_json); // 1. Перетворюємо текст у об'єкт
         } catch (e) {
             return alert("Помилка в JSON! Формат: {\"key\": value}");
         }
 
-        axios.post('http://localhost:5000/api/admin/scenario', {
+        axios.post('/api/admin/scenario', {
             ...newScenario,
-            match_json: parsedJson, // 2. Р’С–РґРїСЂР°РІР»СЏС”РјРѕ РІР¶Рµ РѕР±'С”РєС‚, Р° РЅРµ СЂСЏРґРѕРє
+            match_json: parsedJson, // 2. Відправляємо вже об'єкт, а не рядок
             category_code: selectedCat.code
         })
             .then(() => {
@@ -124,7 +124,7 @@ export default function AdminPanel() {
 
     const addModifier = () => {
         if(!newModifier.trigger_key || !newModifier.factor) return;
-        axios.post('http://localhost:5000/api/admin/modifier', { ...newModifier, category_code: selectedCat.code })
+        axios.post('/api/admin/modifier', { ...newModifier, category_code: selectedCat.code })
             .then(() => {
                 setNewModifier({ trigger_key: '', trigger_val: '', factor: '' });
                 fetchPrices();
@@ -132,7 +132,7 @@ export default function AdminPanel() {
     };
 
     const updateModifier = (id, newFactor) => {
-        axios.put('http://localhost:5000/api/admin/modifier', { id, factor: parseFloat(newFactor) });
+        axios.put('/api/admin/modifier', { id, factor: parseFloat(newFactor) });
     };
 
     if (!config) return (
@@ -196,7 +196,7 @@ export default function AdminPanel() {
                     </div>
                 )}
 
-                {/* Р’Р•Р РҐРќРЇ Р§РђРЎРўРРќРђ: РЎРўР РЈРљРўРЈР Рђ */}
+                {/* Верхня частина: структура */}
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start fade-up stagger-2">
                     {/* 1. Категорії */}
                     <div className="card p-5 sm:p-6 flex flex-col">
@@ -300,7 +300,7 @@ export default function AdminPanel() {
                     </div>
                 </div>
 
-                {/* РќРР–РќРЇ Р§РђРЎРўРРќРђ: Р¦Р†РќР */}
+                {/* Нижня частина: ціни */}
                 {selectedCat && pricesData && (
                     <div className="card p-6 sm:p-8 border-t-4 border-[rgba(20,32,59,0.4)] fade-up">
                         <div className="section-title mb-6">
@@ -310,7 +310,7 @@ export default function AdminPanel() {
                             </div>
                         </div>
 
-                        {/* РЎРџРРЎРћРљ РЎР¦Р•РќРђР Р†Р‡Р’ */}
+                        {/* Список сценаріїв */}
                         <div className="space-y-10">
                             {pricesData.scenarios.map(scen => {
                                 const qX = currentCatQuestions.find(q => q.id === scen.axis_x_key);
@@ -345,13 +345,13 @@ export default function AdminPanel() {
                                                                         <input
                                                                             type="number"
                                                                             min="0"
-                                                                            onKeyDown={(e) => { if (e.key === '-') e.preventDefault(); handleNumberKeyDown(e); }} // <-- Р‘Р»РѕРєСѓС”РјРѕ РјС–РЅСѓСЃ
+                                                                            onKeyDown={(e) => { if (e.key === '-') e.preventDefault(); handleNumberKeyDown(e); }} // Блокуємо мінус
                                                                             onWheel={handleNumberWheel}
                                                                             className="w-full h-full p-2 text-center focus:bg-amber-50 outline-none min-w-[60px]"
                                                                             defaultValue={cell ? cell.price : ''}
                                                                             placeholder="-"
                                                                             onBlur={(e) => {
-                                                                                if(e.target.value < 0) e.target.value = 0; // РЎРєРёРґР°С”РјРѕ РІ 0, СЏРєС‰Рѕ СЏРєРѕСЃСЊ РІРІРµР»Рё РјС–РЅСѓСЃ
+                                                                                if(e.target.value < 0) e.target.value = 0; // Скидаємо в 0, якщо раптом ввели мінус
                                                                                 handlePriceChange(scen.id, x.id, y.id, e.target.value);
                                                                             }}
                                                                         />
@@ -368,7 +368,7 @@ export default function AdminPanel() {
                             })}
                         </div>
 
-                        {/* Р”РћР”РђР’РђРќРќРЇ РќРћР’РћР“Рћ РЎР¦Р•РќРђР Р†Р® */}
+                        {/* Додавання нового сценарію */}
                         <div className="mt-8 p-4 border border-dashed border-slate-300 rounded-2xl bg-slate-50/70">
                             <h4 className="font-semibold text-slate-700 mb-2">Додати нову таблицю цін (Сценарій)</h4>
                             <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
@@ -380,7 +380,7 @@ export default function AdminPanel() {
                             <button onClick={addScenario} className="btn btn-primary mt-3">Створити сценарій</button>
                         </div>
 
-                        {/* РњРћР”РР¤Р†РљРђРўРћР Р */}
+                        {/* Модифікатори */}
                         <div className="mt-12 border-t border-slate-200 pt-6">
                             <h3 className="font-semibold text-lg mb-4 text-slate-800">Модифікатори (Знижки / Націнки)</h3>
                             <div className="space-y-2 mb-4">

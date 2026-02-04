@@ -1,5 +1,9 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
+
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+});
 
 function App() {
   const [config, setConfig] = useState(null);
@@ -30,11 +34,11 @@ function App() {
   const progressPercent = selectedCat ? (requiredCount === 0 ? 100 : Math.round((answeredRequiredCount / requiredCount) * 100)) : 0;
 
   useEffect(() => {
-    axios.get('http://localhost:5000/api/config').then(res => setConfig(res.data));
+    api.get('/config').then(res => setConfig(res.data));
     fetchHistory();
   }, []);
 
-  const fetchHistory = () => { axios.get('http://localhost:5000/api/products').then(res => setHistory(res.data)); };
+  const fetchHistory = () => { api.get('/products').then(res => setHistory(res.data)); };
 
   const handleStart = (catCode) => {
     setSelectedCat(catCode);
@@ -78,7 +82,7 @@ function App() {
       weight: isWeightRequired ? weight : 0,
       isCalibrated: isCalibrated === null ? 0 : isCalibrated
     };
-    axios.post('http://localhost:5000/api/preview', payload).then(res => { setPreviewData(res.data); });
+    api.post('/preview', payload).then(res => { setPreviewData(res.data); });
   };
 
   const handleSave = () => {
@@ -93,7 +97,7 @@ function App() {
       pricePerGram: previewData.pricePerGram,
       details: { answers, isCalibrated, logMessage: previewData.logMessage }
     };
-    axios.post('http://localhost:5000/api/save', payload).then(res => {
+    api.post('/save', payload).then(res => {
       fetchHistory();
       handleStart(null);
     });
@@ -104,7 +108,7 @@ function App() {
   const handleDelete = (sku) => {
     if(!sku) return;
     if(!window.confirm(`Видалити ${sku}?`)) return;
-    axios.post('http://localhost:5000/api/delete', { skuToDelete: sku })
+    api.post('/delete', { skuToDelete: sku })
       .then(res => { alert(res.data.message); setSkuToDelete(''); fetchHistory(); })
       .catch(err => { alert("ПОМИЛКА: " + (err.response?.data?.error || err.message)); });
   };
