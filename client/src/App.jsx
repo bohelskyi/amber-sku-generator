@@ -14,6 +14,20 @@ function App() {
   const formatUah = (value) => (value !== null && value !== undefined ? `${value} ₴` : '---');
   const formatUsd = (value) => (Number(value) > 0 ? `$${value}` : '---');
   const [copyMessage, setCopyMessage] = useState('');
+  const handleNumberWheel = (event) => {
+    if (document.activeElement === event.currentTarget) {
+      event.currentTarget.blur();
+    }
+  };
+  const handleNumberKeyDown = (event) => {
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault();
+    }
+  };
+  const questionsForSelected = selectedCat && config ? (config.questions?.[selectedCat] || []) : [];
+  const requiredCount = questionsForSelected.filter(q => q.required === 1).length;
+  const answeredRequiredCount = questionsForSelected.filter(q => q.required === 1 && answers[q.id] !== undefined).length;
+  const progressPercent = selectedCat ? (requiredCount === 0 ? 100 : Math.round((answeredRequiredCount / requiredCount) * 100)) : 0;
 
   useEffect(() => {
     axios.get('http://localhost:5000/api/config').then(res => setConfig(res.data));
@@ -119,20 +133,26 @@ function App() {
   return (
     <div className="min-h-screen app-bg">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-12 space-y-8">
-        <header className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="eyebrow">Amber Studio</p>
-            <h1 className="page-title">Amber SKU Manager</h1>
-            <p className="mt-2 text-sm sm:text-base text-slate-600 max-w-2xl">
-              Створюйте артикули, перевіряйте унікальність і тримайте історію під рукою —
-              усе в одному робочому просторі.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <span className="chip">
-              {selectedCat ? `Категорія: ${config.categories[selectedCat]?.name}` : 'Оберіть категорію'}
-            </span>
-            <span className="chip">Історія: {history.length}</span>
+        <header className="card-hero p-6 sm:p-8 fade-up">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="eyebrow">Amber Studio</p>
+              <h1 className="page-title">Amber SKU Manager</h1>
+              <p className="mt-2 text-sm sm:text-base text-slate-600 max-w-2xl">
+                Створюйте артикули, перевіряйте унікальність і тримайте історію під рукою —
+                усе в одному робочому просторі.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <span className="chip">
+                  {selectedCat ? `Категорія: ${config.categories[selectedCat]?.name}` : 'Оберіть категорію'}
+                </span>
+                <span className="chip">Історія: {history.length}</span>
+              </div>
+            </div>
+            <div className="stat-tile max-w-xs">
+              <div className="stat-label">Категорій</div>
+              <div className="stat-value">{Object.keys(config.categories).length}</div>
+            </div>
           </div>
         </header>
 
@@ -141,110 +161,184 @@ function App() {
         )}
 
         {!selectedCat && (
-          <section className="card p-6 sm:p-8">
-            <div className="section-title mb-6">
-              <div>
-                <h2 className="section-title-text">Категорії виробів</h2>
-                <p className="section-subtitle">Оберіть групу для старту розрахунку артикула.</p>
+          <div className="grid gap-6 lg:grid-cols-[1.2fr,0.8fr]">
+            <section className="card p-6 sm:p-8 fade-up stagger-1">
+              <div className="section-title mb-6">
+                <div>
+                  <h2 className="section-title-text">Категорії виробів</h2>
+                  <p className="section-subtitle">Оберіть групу для старту розрахунку артикула.</p>
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {Object.values(config.categories).map(cat => (
+                  <button
+                    key={cat.code}
+                    onClick={() => handleStart(cat.code)}
+                    className="category-card"
+                  >
+                    <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{cat.code}</div>
+                    <div className="mt-2 text-lg font-semibold text-slate-900">{cat.name}</div>
+                    <div className="mt-3 text-xs text-slate-500">
+                      {cat.requires_weight === 1 ? 'Потрібна вага' : 'Вага не потрібна'}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </section>
+            <div className="space-y-6 fade-up stagger-2">
+              <div className="card p-6 sm:p-8">
+                <p className="eyebrow">Процес</p>
+                <h3 className="section-title-text">3 кроки до артикула</h3>
+                <div className="mt-5 space-y-4">
+                  <div className="step-line">
+                    <div className="step-dot">1</div>
+                    <div>
+                      <div className="text-sm font-semibold text-slate-800">Оберіть категорію</div>
+                      <div className="text-xs text-slate-500">Система підставить потрібні параметри.</div>
+                    </div>
+                  </div>
+                  <div className="step-line">
+                    <div className="step-dot">2</div>
+                    <div>
+                      <div className="text-sm font-semibold text-slate-800">Заповніть характеристики</div>
+                      <div className="text-xs text-slate-500">Опції автоматично формують SKU.</div>
+                    </div>
+                  </div>
+                  <div className="step-line">
+                    <div className="step-dot">3</div>
+                    <div>
+                      <div className="text-sm font-semibold text-slate-800">Перевірте та збережіть</div>
+                      <div className="text-xs text-slate-500">Порівняння з базою і готова ціна.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="card p-6 sm:p-8">
+                <p className="eyebrow">Підказка</p>
+                <h3 className="section-title-text">Швидкі дії</h3>
+                <p className="section-subtitle mt-2">Копіювання SKU та ціни доступне після перевірки.</p>
               </div>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {Object.values(config.categories).map(cat => (
-                <button
-                  key={cat.code}
-                  onClick={() => handleStart(cat.code)}
-                  className="category-card"
-                >
-                  <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{cat.code}</div>
-                  <div className="mt-2 text-lg font-semibold text-slate-900">{cat.name}</div>
-                  <div className="mt-3 text-xs text-slate-500">
-                    {cat.requires_weight === 1 ? 'Потрібна вага' : 'Вага не потрібна'}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </section>
+          </div>
         )}
 
         {selectedCat && !previewData && (
-          <section className="card p-6 sm:p-8">
-            <div className="section-title mb-6">
-              <div>
-                <p className="eyebrow">Крок 1</p>
-                <h2 className="section-title-text">{config.categories[selectedCat].name}</h2>
-                <p className="section-subtitle">Заповніть параметри виробу для генерації артикула.</p>
+          <div className="grid gap-6 lg:grid-cols-[1.2fr,0.8fr]">
+            <section className="card p-6 sm:p-8 fade-up">
+              <div className="section-title mb-6">
+                <div>
+                  <p className="eyebrow">Крок 1</p>
+                  <h2 className="section-title-text">{config.categories[selectedCat].name}</h2>
+                  <p className="section-subtitle">Заповніть параметри виробу для генерації артикула.</p>
+                </div>
+                <button onClick={() => setSelectedCat(null)} className="btn btn-ghost">Скасувати</button>
               </div>
-              <button onClick={() => setSelectedCat(null)} className="btn btn-ghost">Скасувати</button>
-            </div>
 
-            <div className="space-y-6">
-              {config.questions[selectedCat]?.map(q => (
-                <div key={q.id} className="rounded-2xl border border-slate-200 bg-white/80 p-5">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <label className="text-sm font-semibold text-slate-700">{q.label}</label>
-                    {q.required === 1 && <span className="chip">Обов'язкове</span>}
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {q.options.map(opt => (
-                      <button
-                        key={opt.id}
-                        onClick={() => handleAnswer(q.id, opt.id)}
-                        className={`option-pill ${answers[q.id] === opt.id ? 'option-pill-active' : 'option-pill-idle'}`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {q.id === 'raw_type' && answers['raw_type'] === 1 && (
-                    <div className="info-panel mt-4 p-4">
-                      <label className="block text-sm font-semibold text-sky-800 mb-3">{config.extraConfig.is_calibrated.label}</label>
-                      <div className="flex flex-wrap gap-2">
-                        {config.extraConfig.is_calibrated.options.map(opt => (
-                          <button
-                            key={opt.id}
-                            onClick={() => setIsCalibrated(prev => prev === opt.id ? null : opt.id)}
-                            className={`option-pill ${isCalibrated === opt.id ? 'option-pill-active' : 'option-pill-idle'}`}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
+              <div className="space-y-6">
+                {config.questions[selectedCat]?.map(q => (
+                  <div key={q.id} className="rounded-2xl border border-slate-200 bg-white/80 p-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <label className="text-sm font-semibold text-slate-700">{q.label}</label>
+                      {q.required === 1 && <span className="chip">Обов'язкове</span>}
                     </div>
-                  )}
-                </div>
-              ))}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {q.options.map(opt => (
+                        <button
+                          key={opt.id}
+                          onClick={() => handleAnswer(q.id, opt.id)}
+                          className={`option-pill ${answers[q.id] === opt.id ? 'option-pill-active' : 'option-pill-idle'}`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
 
-              {isWeightRequired && (
-                <div className="rounded-2xl border border-slate-200 bg-white/80 p-5">
-                  <label className="block text-sm font-semibold text-slate-700">Вага виробу (г)</label>
-                  <input
-                    type="number"
-                    min="0" // 1. Р”Р»СЏ Р±СЂР°СѓР·РµСЂР°
-                    onKeyDown={(e) => e.key === '-' && e.preventDefault()} // 2. Р—Р°Р±РѕСЂРѕРЅР° РЅР°С‚РёСЃРєР°РЅРЅСЏ РєР»Р°РІС–С€С– "-"
-                    value={weight}
-                    onChange={(e) => {
-                      // 3. Р”РѕРґР°С‚РєРѕРІР° РїСЂРµРІС–СЂРєР° РїСЂРё РІСЃС‚Р°РІС†С– С‚РµРєСЃС‚Сѓ
-                      const val = e.target.value;
-                      if (val < 0) return;
-                      setWeight(val);
-                    }}
-                    className="input mt-3"
-                    placeholder="0.00"
-                  />
-                  <p className="mt-2 text-xs text-slate-500">Введіть фактичну вагу виробу в грамах.</p>
-                </div>
-              )}
+                    {q.id === 'raw_type' && answers['raw_type'] === 1 && (
+                      <div className="info-panel mt-4 p-4">
+                        <label className="block text-sm font-semibold text-slate-800 mb-3">{config.extraConfig.is_calibrated.label}</label>
+                        <div className="flex flex-wrap gap-2">
+                          {config.extraConfig.is_calibrated.options.map(opt => (
+                            <button
+                              key={opt.id}
+                              onClick={() => setIsCalibrated(prev => prev === opt.id ? null : opt.id)}
+                              className={`option-pill ${isCalibrated === opt.id ? 'option-pill-active' : 'option-pill-idle'}`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
 
-              <button onClick={handlePreview} className="btn btn-primary w-full py-4 text-base sm:text-lg">
-                Перевірити артикул
-              </button>
-            </div>
-          </section>
+                {isWeightRequired && (
+                  <div className="rounded-2xl border border-slate-200 bg-white/80 p-5">
+                    <label className="block text-sm font-semibold text-slate-700">Вага виробу (г)</label>
+                    <input
+                      type="number"
+                      min="0" // 1. Р”Р»СЏ Р±СЂР°СѓР·РµСЂР°
+                    onKeyDown={(e) => {
+                      if (e.key === '-') e.preventDefault();
+                      handleNumberKeyDown(e);
+                    }} // 2. Р—Р°Р±РѕСЂРѕРЅР° РЅР°С‚РёСЃРєР°РЅРЅСЏ РєР»Р°РІС–С€С– "-"
+                    onWheel={handleNumberWheel}
+                      value={weight}
+                      onChange={(e) => {
+                        // 3. Р”РѕРґР°С‚РєРѕРІР° РїСЂРµРІС–СЂРєР° РїСЂРё РІСЃС‚Р°РІС†С– С‚РµРєСЃС‚Сѓ
+                        const val = e.target.value;
+                        if (val < 0) return;
+                        setWeight(val);
+                      }}
+                      className="input mt-3"
+                      placeholder="0.00"
+                    />
+                    <p className="mt-2 text-xs text-slate-500">Введіть фактичну вагу виробу в грамах.</p>
+                  </div>
+                )}
+
+                <button onClick={handlePreview} className="btn btn-primary w-full py-4 text-base sm:text-lg">
+                  Перевірити артикул
+                </button>
+              </div>
+            </section>
+            <aside className="space-y-6 fade-up stagger-1">
+              <div className="card p-6 sm:p-8">
+                <p className="eyebrow">Підсумок</p>
+                <h3 className="section-title-text">{config.categories[selectedCat].name}</h3>
+                <div className="mt-4 space-y-3 text-sm text-slate-600">
+                  <div className="flex items-center justify-between">
+                    <span>Обов'язкові</span>
+                    <span className="font-semibold text-slate-800">{answeredRequiredCount}/{requiredCount}</span>
+                  </div>
+                  <div className="progress-track">
+                    <div className="progress-fill" style={{ width: `${progressPercent}%` }} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Готовність</span>
+                    <span className="font-semibold text-slate-800">{progressPercent}%</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Вага</span>
+                    <span className="font-semibold text-slate-800">
+                      {isWeightRequired ? (weight ? `${weight} г` : 'Потрібна') : 'Не потрібна'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="card p-6 sm:p-8">
+                <p className="eyebrow">Порада</p>
+                <h3 className="section-title-text">Працюйте швидко</h3>
+                <p className="section-subtitle mt-2">
+                  Натисніть опцію ще раз, щоб зняти вибір. Це дозволяє швидко змінювати параметри.
+                </p>
+              </div>
+            </aside>
+          </div>
         )}
 
         {previewData && (
-          <section className="card p-6 sm:p-8 border-t-4 border-amber-400">
+          <section className="card p-6 sm:p-8 border-t-4 border-[rgba(221,151,74,0.7)] fade-up">
             <div className="section-title mb-6">
               <div>
                 <p className="eyebrow">Крок 2</p>
@@ -260,8 +354,8 @@ function App() {
                   <div className="text-2xl font-mono text-slate-600 my-3">{previewData.prevFullSku}</div>
                 </div>
                 <div className="stat-card stat-card-hero">
-                  <p className="text-xs uppercase tracking-[0.28em] text-emerald-700 font-semibold">Буде створено</p>
-                  <div className="text-3xl font-mono font-bold text-emerald-700 my-3">{previewData.fullProposedSku}</div>
+                  <p className="text-xs uppercase tracking-[0.28em] text-slate-800 font-semibold">Буде створено</p>
+                  <div className="text-3xl font-mono font-bold text-slate-900 my-3">{previewData.fullProposedSku}</div>
                   <div className="flex flex-wrap items-center justify-center gap-2">
                     <button onClick={() => handleCopyText(previewData.fullProposedSku, 'SKU')} className="btn btn-outline text-xs px-3 py-1.5">Копіювати SKU</button>
                     <button onClick={() => previewData.totalPriceUah && handleCopyText(`${previewData.totalPriceUah} ₴`, 'Ціну')} className="btn btn-outline text-xs px-3 py-1.5">Копіювати ціну</button>
@@ -273,8 +367,8 @@ function App() {
               </div>
             ) : (
               <div className="mb-8">
-                <div className={`stat-card ${previewData.existsInDb ? 'border-amber-400 bg-amber-50' : 'border-emerald-400 bg-emerald-50'}`}>
-                  <p className={`text-xs uppercase tracking-[0.28em] font-semibold ${previewData.existsInDb ? 'text-amber-700' : 'text-emerald-700'}`}>
+                <div className={`stat-card ${previewData.existsInDb ? 'border-[rgba(221,151,74,0.7)] bg-[rgba(221,151,74,0.16)]' : 'border-[rgba(20,32,59,0.35)] bg-[rgba(20,32,59,0.06)]'}`}>
+                  <p className={`text-xs uppercase tracking-[0.28em] font-semibold ${previewData.existsInDb ? 'text-[#8a5f2b]' : 'text-slate-800'}`}>
                     {previewData.existsInDb ? 'УВАГА: ТАКИЙ АРТИКУЛ ВЖЕ ІСНУЄ' : 'НОВИЙ УНІКАЛЬНИЙ АРТИКУЛ'}
                   </p>
                   <div className="text-4xl font-mono font-bold text-slate-800 my-4">{previewData.fullProposedSku}</div>
@@ -302,29 +396,8 @@ function App() {
           </section>
         )}
 
-        {!selectedCat && (
-          <section className="danger-panel p-6 sm:p-8">
-            <div className="section-title mb-4">
-              <div>
-                <h3 className="section-title-text">Коригування помилок</h3>
-                <p className="section-subtitle">Видалення помилково збереженого артикула.</p>
-              </div>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <input
-                type="text"
-                value={skuToDelete}
-                onChange={(e) => setSkuToDelete(e.target.value)}
-                placeholder="Введіть повний артикул..."
-                className="input"
-              />
-              <button onClick={() => handleDelete(skuToDelete)} className="btn btn-danger px-6">Видалити</button>
-            </div>
-          </section>
-        )}
-
-        <section className="space-y-4">
-          <div className="section-title">
+        <section className="card p-6 sm:p-8 fade-up">
+          <div className="section-title mb-4">
             <div>
               <h3 className="section-title-text">Останні збережені</h3>
               <p className="section-subtitle">Швидкий доступ до останніх 15 записів.</p>
@@ -365,6 +438,34 @@ function App() {
             </div>
           </div>
         </section>
+
+        {!selectedCat && (
+          <section className="fade-up stagger-2">
+            <details className="collapsible">
+              <summary className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <p className="eyebrow">Додаткові дії</p>
+                  <h3 className="collapse-title">Коригування помилок</h3>
+                  <p className="section-subtitle">Видалення помилково збереженого артикула.</p>
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  <span className="collapse-toggle collapse-toggle-closed">Показати</span>
+                  <span className="collapse-toggle collapse-toggle-open">Сховати</span>
+                </div>
+              </summary>
+              <div className="mt-4 flex flex-col sm:flex-row gap-3">
+                <input
+                  type="text"
+                  value={skuToDelete}
+                  onChange={(e) => setSkuToDelete(e.target.value)}
+                  placeholder="Введіть повний артикул..."
+                  className="input"
+                />
+                <button onClick={() => handleDelete(skuToDelete)} className="btn btn-danger px-6">Видалити</button>
+              </div>
+            </details>
+          </section>
+        )}
       </div>
     </div>
   );

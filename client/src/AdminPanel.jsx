@@ -18,6 +18,16 @@ export default function AdminPanel() {
     // РќРѕРІС– СЃС‚Р°РЅРё РґР»СЏ С†С–РЅ
     const [newScenario, setNewScenario] = useState({ name: '', match_json: '', axis_x_key: '', axis_y_key: '' });
     const [newModifier, setNewModifier] = useState({ trigger_key: '', trigger_val: '', factor: '' });
+    const handleNumberWheel = (event) => {
+        if (document.activeElement === event.currentTarget) {
+            event.currentTarget.blur();
+        }
+    };
+    const handleNumberKeyDown = (event) => {
+        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+            event.preventDefault();
+        }
+    };
 
     useEffect(() => { fetchConfig(); }, []);
 
@@ -164,7 +174,7 @@ export default function AdminPanel() {
     return (
         <div className="min-h-screen app-bg">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12 pb-28 space-y-8">
-                <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between fade-up">
                     <div>
                         <p className="eyebrow">Admin Workspace</p>
                         <h1 className="page-title">Адмін-панель</h1>
@@ -176,7 +186,7 @@ export default function AdminPanel() {
                 </header>
 
                 {validationIssues.length > 0 && (
-                    <div className="danger-panel p-5">
+                    <div className="danger-panel p-5 fade-up stagger-1">
                         <div className="font-semibold text-rose-700 mb-2">Авто-валідатор виявив проблеми</div>
                         <ul className="list-disc pl-5 text-sm text-rose-700">
                             {validationIssues.map((issue, idx) => (
@@ -187,7 +197,7 @@ export default function AdminPanel() {
                 )}
 
                 {/* Р’Р•Р РҐРќРЇ Р§РђРЎРўРРќРђ: РЎРўР РЈРљРўРЈР Рђ */}
-                <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start fade-up stagger-2">
                     {/* 1. Категорії */}
                     <div className="card p-5 sm:p-6 flex flex-col">
                         <div className="section-title mb-4">
@@ -198,7 +208,7 @@ export default function AdminPanel() {
                                 <div
                                     key={cat.code}
                                     onClick={() => { setSelectedCat(cat); setSelectedQuestion(null); setEditCat({ name: cat.name, requires_weight: cat.requires_weight === 1 }); }}
-                                    className={`p-3 rounded-xl cursor-pointer flex justify-between items-center border transition ${selectedCat?.code === cat.code ? 'bg-amber-100 border-amber-400' : 'border-slate-200 hover:bg-slate-50'}`}
+                                    className={`p-3 rounded-xl cursor-pointer flex justify-between items-center border transition ${selectedCat?.code === cat.code ? 'bg-[rgba(221,151,74,0.18)] border-[rgba(221,151,74,0.5)]' : 'border-slate-200 hover:bg-slate-50'}`}
                                 >
                                     <div>
                                         <span className="font-semibold text-slate-800">{cat.name}</span>
@@ -234,7 +244,7 @@ export default function AdminPanel() {
                                 <div
                                     key={q.q_db_id}
                                     onClick={() => { setSelectedQuestion(q); setEditQuestion({ label: q.label, sku_index: q.sku_index, required: q.required === 1 }); }}
-                                    className={`p-3 rounded-xl cursor-pointer flex justify-between items-center border transition ${selectedQuestion?.id === q.id ? 'bg-sky-100 border-sky-400' : 'border-slate-200 hover:bg-slate-50'}`}
+                                    className={`p-3 rounded-xl cursor-pointer flex justify-between items-center border transition ${selectedQuestion?.id === q.id ? 'bg-[rgba(20,32,59,0.08)] border-[rgba(20,32,59,0.4)]' : 'border-slate-200 hover:bg-slate-50'}`}
                                 >
                                     <div>
                                         <span className="font-semibold text-slate-800">{q.label}</span>
@@ -248,7 +258,7 @@ export default function AdminPanel() {
                             <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-white/80">
                                 <div className="text-xs text-slate-500 mb-2">Редагувати питання</div>
                                 <input className="input-sm mb-2" placeholder="Label" value={editQuestion.label} onChange={e => setEditQuestion({...editQuestion, label: e.target.value})}/>
-                                <input className="input-sm mb-2" type="number" placeholder="Index" value={editQuestion.sku_index} onChange={e => setEditQuestion({...editQuestion, sku_index: e.target.value})}/>
+                                <input className="input-sm mb-2" type="number" placeholder="Index" value={editQuestion.sku_index} onChange={e => setEditQuestion({...editQuestion, sku_index: e.target.value})} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown}/>
                                 <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={editQuestion.required} onChange={e => setEditQuestion({...editQuestion, required: e.target.checked})} className="mr-2"/> Обовʼязкове</label>
                                 <button onClick={updateQuestion} className="btn btn-primary w-full">Зберегти</button>
                             </div>
@@ -257,7 +267,7 @@ export default function AdminPanel() {
                             <div className="mt-4 pt-4 border-t border-slate-200 bg-slate-50/70 p-3 rounded-xl">
                                 <input className="input-sm mb-2" placeholder="Key (size)" value={newQuest.key} onChange={e => setNewQuest({...newQuest, key: e.target.value})}/>
                                 <input className="input-sm mb-2" placeholder="Label" value={newQuest.label} onChange={e => setNewQuest({...newQuest, label: e.target.value})}/>
-                                <input className="input-sm mb-2" type="number" placeholder="Index" value={newQuest.sku_index} onChange={e => setNewQuest({...newQuest, sku_index: e.target.value})}/>
+                                <input className="input-sm mb-2" type="number" placeholder="Index" value={newQuest.sku_index} onChange={e => setNewQuest({...newQuest, sku_index: e.target.value})} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown}/>
                                 <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={newQuest.required} onChange={e => setNewQuest({...newQuest, required: e.target.checked})} className="mr-2"/> Обовʼязкове</label>
                                 <button onClick={addQuestion} className="btn btn-amber w-full">Додати</button>
                             </div>
@@ -282,7 +292,7 @@ export default function AdminPanel() {
                         </div>
                         {selectedQuestion && (
                             <div className="mt-4 pt-4 border-t border-slate-200 bg-slate-50/70 p-3 rounded-xl">
-                                <input className="input-sm mb-2" type="number" placeholder="Value ID" value={newOpt.value_id} onChange={e => setNewOpt({...newOpt, value_id: e.target.value})}/>
+                                <input className="input-sm mb-2" type="number" placeholder="Value ID" value={newOpt.value_id} onChange={e => setNewOpt({...newOpt, value_id: e.target.value})} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown}/>
                                 <input className="input-sm mb-2" placeholder="Label" value={newOpt.label} onChange={e => setNewOpt({...newOpt, label: e.target.value})}/>
                                 <button onClick={addOption} className="btn btn-amber w-full">Додати</button>
                             </div>
@@ -292,7 +302,7 @@ export default function AdminPanel() {
 
                 {/* РќРР–РќРЇ Р§РђРЎРўРРќРђ: Р¦Р†РќР */}
                 {selectedCat && pricesData && (
-                    <div className="card p-6 sm:p-8 border-t-4 border-sky-400">
+                    <div className="card p-6 sm:p-8 border-t-4 border-[rgba(20,32,59,0.4)] fade-up">
                         <div className="section-title mb-6">
                             <div>
                                 <p className="eyebrow">Ціни</p>
@@ -335,7 +345,8 @@ export default function AdminPanel() {
                                                                         <input
                                                                             type="number"
                                                                             min="0"
-                                                                            onKeyDown={(e) => e.key === '-' && e.preventDefault()} // <-- Р‘Р»РѕРєСѓС”РјРѕ РјС–РЅСѓСЃ
+                                                                            onKeyDown={(e) => { if (e.key === '-') e.preventDefault(); handleNumberKeyDown(e); }} // <-- Р‘Р»РѕРєСѓС”РјРѕ РјС–РЅСѓСЃ
+                                                                            onWheel={handleNumberWheel}
                                                                             className="w-full h-full p-2 text-center focus:bg-amber-50 outline-none min-w-[60px]"
                                                                             defaultValue={cell ? cell.price : ''}
                                                                             placeholder="-"
@@ -374,7 +385,7 @@ export default function AdminPanel() {
                             <h3 className="font-semibold text-lg mb-4 text-slate-800">Модифікатори (Знижки / Націнки)</h3>
                             <div className="space-y-2 mb-4">
                                 {pricesData.modifiers.map(mod => (
-                                    <div key={mod.id} className="flex flex-wrap items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                                    <div key={mod.id} className="flex flex-wrap items-center gap-3 p-3 bg-[rgba(221,151,74,0.14)] border border-[rgba(221,151,74,0.35)] rounded-xl">
                                         <span className="text-sm">Якщо <b>{mod.trigger_key}</b> = {mod.trigger_val}</span>
                                         <div className="flex items-center gap-2">
                                             <span className="text-sm text-slate-600">Множник:</span>
@@ -383,6 +394,8 @@ export default function AdminPanel() {
                                                 className="input-xs w-24 text-center font-semibold"
                                                 defaultValue={mod.factor}
                                                 onBlur={(e) => updateModifier(mod.id, e.target.value)}
+                                                onWheel={handleNumberWheel}
+                                                onKeyDown={handleNumberKeyDown}
                                             />
                                         </div>
                                         <button onClick={() => deleteItem('modifier', mod.id)} className="text-rose-500 hover:text-rose-700 px-2 font-bold">×</button>
@@ -393,7 +406,7 @@ export default function AdminPanel() {
                             <div className="flex flex-wrap gap-2 items-center bg-slate-100 p-3 rounded-xl">
                                 <span className="text-sm font-semibold">Новий:</span>
                                 <input className="input-xs w-28" placeholder="Key (quality)" value={newModifier.trigger_key} onChange={e => setNewModifier({...newModifier, trigger_key: e.target.value})} />
-                                <input className="input-xs w-24" type="number" placeholder="Val (2)" value={newModifier.trigger_val} onChange={e => setNewModifier({...newModifier, trigger_val: e.target.value})} />
+                                <input className="input-xs w-24" type="number" placeholder="Val (2)" value={newModifier.trigger_val} onChange={e => setNewModifier({...newModifier, trigger_val: e.target.value})} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
                                 <input
                                     className="input-xs w-24"
                                     type="number"
@@ -403,6 +416,8 @@ export default function AdminPanel() {
                                     onChange={e => {
                                         if(e.target.value >= 0) setNewModifier({...newModifier, factor: e.target.value})
                                     }}
+                                    onWheel={handleNumberWheel}
+                                    onKeyDown={handleNumberKeyDown}
                                 />
                                 <button onClick={addModifier} className="btn btn-amber">Додати</button>
                             </div>
