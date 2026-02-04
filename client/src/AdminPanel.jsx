@@ -135,6 +135,16 @@ export default function AdminPanel() {
         axios.put('/api/admin/modifier', { id, factor: parseFloat(newFactor) });
     };
 
+    const formatMatchJson = (value) => {
+        if (value === null || value === undefined) return '{}';
+        if (typeof value === 'string') return value;
+        try {
+            return JSON.stringify(value);
+        } catch {
+            return String(value);
+        }
+    };
+
     if (!config) return (
         <div className="min-h-screen app-bg flex items-center justify-center">
             <div className="card p-8 text-center">
@@ -324,7 +334,7 @@ export default function AdminPanel() {
                                             <h3 className="font-semibold text-lg text-slate-800">{scen.name}</h3>
                                             <button onClick={() => deleteItem('scenario', scen.id)} className="btn btn-outline text-xs">Видалити сценарій</button>
                                         </div>
-                                        <p className="text-xs text-slate-500 mb-4 bg-white px-2 py-1 inline-block rounded">Умова: {scen.match_json}</p>
+                                        <p className="text-xs text-slate-500 mb-4 bg-white px-2 py-1 inline-block rounded">Умова: {formatMatchJson(scen.match_json)}</p>
 
                                         <div className="overflow-x-auto">
                                             <table className="min-w-full bg-white border border-slate-200 rounded-xl">
