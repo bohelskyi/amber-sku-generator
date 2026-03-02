@@ -78,6 +78,24 @@ function asRuleObject(value) {
   return value;
 }
 
+function parseVariationSku(skuValue) {
+  const normalizedSku = String(skuValue || '').trim().toUpperCase();
+  const variationMatch = normalizedSku.match(/^(.*)-(\d{3})$/);
+  if (!variationMatch) {
+    return {
+      normalizedSku,
+      baseFullSku: normalizedSku,
+      variationNumber: null,
+    };
+  }
+
+  return {
+    normalizedSku,
+    baseFullSku: variationMatch[1],
+    variationNumber: Number(variationMatch[2]),
+  };
+}
+
 async function getAllCategories() {
   const result = await pool.query(
     'SELECT code, name, requires_weight FROM categories ORDER BY LENGTH(code) DESC, code ASC'
@@ -186,19 +204,19 @@ function decodeSkuAnswers(questions, encodedPart, index = 0, decodedAnswers = []
 }
 
 async function decodeSku(skuValue) {
-  const normalizedSku = String(skuValue || '').trim().toUpperCase();
+  const { normalizedSku, baseFullSku, variationNumber } = parseVariationSku(skuValue);
   if (!normalizedSku) {
     throw new Error('Введіть артикул для розшифровки');
   }
 
   const categories = await getAllCategories();
-  const category = categories.find((item) => normalizedSku.startsWith(item.code));
+  const category = categories.find((item) => baseFullSku.startsWith(item.code));
   if (!category) {
     throw new Error('Не вдалося визначити категорію за кодом артикула');
   }
 
   const questions = await getQuestionsForCategory(category.code);
-  const skuWithoutCategory = normalizedSku.slice(category.code.length);
+  const skuWithoutCategory = baseFullSku.slice(category.code.length);
   const attempts = [];
 
   if (skuWithoutCategory.length >= 3) {
@@ -247,12 +265,48 @@ async function decodeSku(skuValue) {
           : 'none',
         value: suffixValue,
       },
+      variation: variationNumber !== null
+        ? {
+            number: variationNumber,
+            suffix: `-${String(variationNumber).padStart(3, '0')}`,
+          }
+        : null,
       existsInDb: productResult.rows.length > 0,
       product: productResult.rows[0] || null,
     };
   }
 
   throw new Error('Артикул не відповідає поточній конфігурації категорії');
+}
+
+async function getNextVariationSku(skuValue) {
+  const { baseFullSku } = parseVariationSku(skuValue);
+  if (!baseFullSku) {
+    throw new Error('Потрібен базовий артикул');
+  }
+
+  const result = await pool.query(
+    'SELECT full_sku FROM products WHERE full_sku = $1 OR full_sku LIKE $2',
+    [baseFullSku, `${baseFullSku}-%`]
+  );
+
+  let maxVariationNumber = 0;
+  for (const row of result.rows) {
+    const match = String(row.full_sku).match(new RegExp(`^${baseFullSku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\-(\\d{3})$`));
+    if (!match) continue;
+    maxVariationNumber = Math.max(maxVariationNumber, Number(match[1]));
+  }
+
+  const nextVariationNumber = maxVariationNumber + 1;
+  if (nextVariationNumber > 999) {
+    throw new Error('Досягнуто ліміт варіацій для цього артикула');
+  }
+
+  return {
+    baseFullSku,
+    variationNumber: nextVariationNumber,
+    fullSku: `${baseFullSku}-${String(nextVariationNumber).padStart(3, '0')}`,
+  };
 }
 
 async function initDb() {
@@ -786,6 +840,16 @@ app.post('/api/decode', async (req, res) => {
     const { sku } = req.body;
     const decoded = await decodeSku(sku);
     res.json(decoded);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/variation', async (req, res) => {
+  try {
+    const { sku } = req.body;
+    const variation = await getNextVariationSku(sku);
+    res.json(variation);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

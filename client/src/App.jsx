@@ -13,6 +13,10 @@ function App() {
   const [weight, setWeight] = useState('');
 
   const [previewData, setPreviewData] = useState(null);
+  const [displaySku, setDisplaySku] = useState('');
+  const [variationData, setVariationData] = useState(null);
+  const [variationError, setVariationError] = useState('');
+  const [isVariationLoading, setIsVariationLoading] = useState(false);
   const [history, setHistory] = useState([]);
   const [skuToDelete, setSkuToDelete] = useState('');
   const [skuToDecode, setSkuToDecode] = useState('');
@@ -48,6 +52,10 @@ function App() {
     setAnswers({});
     setIsCalibrated(null);
     setPreviewData(null);
+    setDisplaySku('');
+    setVariationData(null);
+    setVariationError('');
+    setIsVariationLoading(false);
     setWeight('');
   };
 
@@ -85,20 +93,32 @@ function App() {
       weight: isWeightRequired ? weight : 0,
       isCalibrated: isCalibrated === null ? 0 : isCalibrated
     };
-    api.post('/preview', payload).then(res => { setPreviewData(res.data); });
+    api.post('/preview', payload).then(res => {
+      setPreviewData(res.data);
+      setDisplaySku(res.data.fullProposedSku);
+      setVariationData(null);
+      setVariationError('');
+      setIsVariationLoading(false);
+    });
   };
 
   const handleSave = () => {
     if (!previewData) return;
     const payload = {
-      fullSku: previewData.fullProposedSku,
+      fullSku: displaySku || previewData.fullProposedSku,
       baseSku: previewData.baseSku,
       nextSeq: previewData.nextSeq,
       category: selectedCat,
       weight: isWeightRequired ? weight : 0,
       totalPrice: previewData.totalPrice,
       pricePerGram: previewData.pricePerGram,
-      details: { answers, isCalibrated, logMessage: previewData.logMessage }
+      details: {
+        answers,
+        isCalibrated,
+        logMessage: previewData.logMessage,
+        variationNumber: variationData?.variationNumber || null,
+        baseGeneratedSku: previewData.fullProposedSku,
+      }
     };
     api.post('/save', payload).then(res => {
       fetchHistory();
@@ -107,6 +127,24 @@ function App() {
   };
 
   const handleCancel = () => { handleStart(null); };
+
+  const handleAddVariation = () => {
+    if (!previewData) return;
+    setIsVariationLoading(true);
+    setVariationError('');
+
+    api.post('/variation', { sku: previewData.fullProposedSku })
+      .then((res) => {
+        setDisplaySku(res.data.fullSku);
+        setVariationData(res.data);
+      })
+      .catch((err) => {
+        setVariationError(err.response?.data?.error || err.message);
+      })
+      .finally(() => {
+        setIsVariationLoading(false);
+      });
+  };
 
   const handleDelete = (sku) => {
     if(!sku) return;
@@ -148,6 +186,9 @@ function App() {
     if (suffix.type === 'sequence') return suffix.raw || String(suffix.value || '');
     return suffix.raw || '---';
   };
+
+  const finalSku = displaySku || previewData?.fullProposedSku || '';
+  const isVariationActive = Boolean(variationData);
 
   const handleCopyText = async (text, label) => {
     if (!text) return;
@@ -297,11 +338,18 @@ function App() {
                       </div>
                       <div>
                         <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                          {decodeData.suffix.type === 'weight' ? 'Вага' : decodeData.suffix.type === 'sequence' ? 'Порядковий номер' : 'Суфікс'}
+                          {decodeData.variation ? 'Варіація' : decodeData.suffix.type === 'weight' ? 'Вага' : decodeData.suffix.type === 'sequence' ? 'Порядковий номер' : 'Суфікс'}
                         </div>
-                        <div className="mt-1 font-semibold text-slate-900">{formatDecodedSuffix(decodeData.suffix)}</div>
+                        <div className="mt-1 font-semibold text-slate-900">
+                          {decodeData.variation ? decodeData.variation.suffix : formatDecodedSuffix(decodeData.suffix)}
+                        </div>
                       </div>
                     </div>
+                    {decodeData.variation && (
+                      <div className="text-sm text-slate-600">
+                        Основний артикул: <span className="font-mono font-semibold text-slate-900">{decodeData.baseSku}{decodeData.suffix.raw || ''}</span>
+                      </div>
+                    )}
                     <div className="rounded-2xl border border-slate-200 bg-white/80">
                       {decodeData.decodedAnswers.map((item) => (
                         <div key={item.key} className="flex items-start justify-between gap-3 px-4 py-3 border-b border-slate-200 last:border-b-0">
@@ -455,9 +503,12 @@ function App() {
                 </div>
                 <div className="stat-card stat-card-hero">
                   <p className="text-xs uppercase tracking-[0.28em] text-slate-800 font-semibold">Буде створено</p>
-                  <div className="text-3xl font-mono font-bold text-slate-900 my-3">{previewData.fullProposedSku}</div>
+                  <div className="text-3xl font-mono font-bold text-slate-900 my-3">{finalSku}</div>
+                  {isVariationActive && (
+                    <p className="text-sm text-slate-600">Варіація #{String(variationData.variationNumber).padStart(3, '0')} для {previewData.fullProposedSku}</p>
+                  )}
                   <div className="flex flex-wrap items-center justify-center gap-2">
-                    <button onClick={() => handleCopyText(previewData.fullProposedSku, 'SKU')} className="btn btn-outline text-xs px-3 py-1.5">Копіювати SKU</button>
+                    <button onClick={() => handleCopyText(finalSku, 'SKU')} className="btn btn-outline text-xs px-3 py-1.5">Копіювати SKU</button>
                     <button onClick={() => previewData.totalPriceUah && handleCopyText(`${previewData.totalPriceUah} ₴`, 'Ціну')} className="btn btn-outline text-xs px-3 py-1.5">Копіювати ціну</button>
                   </div>
                   <p className="mt-4 text-2xl font-semibold text-slate-800">{formatUah(previewData.totalPriceUah)}</p>
@@ -467,13 +518,16 @@ function App() {
               </div>
             ) : (
               <div className="mb-8">
-                <div className={`stat-card ${previewData.existsInDb ? 'border-[rgba(221,151,74,0.7)] bg-[rgba(221,151,74,0.16)]' : 'border-[rgba(20,32,59,0.35)] bg-[rgba(20,32,59,0.06)]'}`}>
-                  <p className={`text-xs uppercase tracking-[0.28em] font-semibold ${previewData.existsInDb ? 'text-[#8a5f2b]' : 'text-slate-800'}`}>
-                    {previewData.existsInDb ? 'УВАГА: ТАКИЙ АРТИКУЛ ВЖЕ ІСНУЄ' : 'НОВИЙ УНІКАЛЬНИЙ АРТИКУЛ'}
+                <div className={`stat-card ${isVariationActive ? 'border-[rgba(20,32,59,0.35)] bg-[rgba(20,32,59,0.06)]' : previewData.existsInDb ? 'border-[rgba(221,151,74,0.7)] bg-[rgba(221,151,74,0.16)]' : 'border-[rgba(20,32,59,0.35)] bg-[rgba(20,32,59,0.06)]'}`}>
+                  <p className={`text-xs uppercase tracking-[0.28em] font-semibold ${isVariationActive ? 'text-slate-800' : previewData.existsInDb ? 'text-[#8a5f2b]' : 'text-slate-800'}`}>
+                    {isVariationActive ? 'НОВА ВАРІАЦІЯ ДО АРТИКУЛУ' : previewData.existsInDb ? 'УВАГА: ТАКИЙ АРТИКУЛ ВЖЕ ІСНУЄ' : 'НОВИЙ УНІКАЛЬНИЙ АРТИКУЛ'}
                   </p>
-                  <div className="text-4xl font-mono font-bold text-slate-800 my-4">{previewData.fullProposedSku}</div>
+                  <div className="text-4xl font-mono font-bold text-slate-800 my-4">{finalSku}</div>
+                  {isVariationActive && (
+                    <p className="text-sm text-slate-600">Базовий артикул: {previewData.fullProposedSku}</p>
+                  )}
                   <div className="flex flex-wrap items-center justify-center gap-2">
-                    <button onClick={() => handleCopyText(previewData.fullProposedSku, 'SKU')} className="btn btn-outline text-xs px-3 py-1.5">Копіювати SKU</button>
+                    <button onClick={() => handleCopyText(finalSku, 'SKU')} className="btn btn-outline text-xs px-3 py-1.5">Копіювати SKU</button>
                     <button onClick={() => previewData.totalPriceUah && handleCopyText(`${previewData.totalPriceUah} ₴`, 'Ціну')} className="btn btn-outline text-xs px-3 py-1.5">Копіювати ціну</button>
                   </div>
                   <p className="mt-4 text-2xl font-semibold text-slate-800">{formatUah(previewData.totalPriceUah)}</p>
@@ -489,8 +543,17 @@ function App() {
               </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {variationError && (
+              <div className="danger-panel p-4 mb-6 text-sm">
+                {variationError}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <button onClick={handleCancel} className="btn btn-outline py-3">Відмінити</button>
+              <button onClick={handleAddVariation} className="btn btn-primary py-3" disabled={isVariationLoading}>
+                {isVariationLoading ? 'Підбираємо...' : 'Додати варіацію'}
+              </button>
               <button onClick={handleSave} className="btn btn-amber py-3">Зберегти</button>
             </div>
           </section>
