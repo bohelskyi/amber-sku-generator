@@ -78,6 +78,183 @@ function asRuleObject(value) {
   return value;
 }
 
+async function getAllCategories() {
+  const result = await pool.query(
+    'SELECT code, name, requires_weight FROM categories ORDER BY LENGTH(code) DESC, code ASC'
+  );
+  return result.rows.map((row) => ({
+    code: row.code,
+    name: row.name,
+    requires_weight: Number(row.requires_weight),
+  }));
+}
+
+async function getQuestionsForCategory(categoryCode) {
+  const result = await pool.query(
+    `
+      SELECT
+        q.key,
+        q.label AS q_label,
+        q.sku_index,
+        q.required,
+        o.value_id,
+        o.label AS o_label
+      FROM questions q
+      LEFT JOIN options o ON q.id = o.question_id
+      WHERE q.category_code = $1
+      ORDER BY q.sku_index, LENGTH(CAST(o.value_id AS TEXT)) DESC, o.value_id ASC
+    `,
+    [categoryCode]
+  );
+
+  const questions = [];
+  let currentQuestion = null;
+
+  for (const row of result.rows) {
+    if (!currentQuestion || currentQuestion.key !== row.key) {
+      currentQuestion = {
+        key: row.key,
+        label: row.q_label,
+        sku_index: Number(row.sku_index),
+        required: Number(row.required),
+        options: [],
+      };
+      questions.push(currentQuestion);
+    }
+
+    if (row.value_id !== null && row.value_id !== undefined) {
+      currentQuestion.options.push({
+        id: Number(row.value_id),
+        label: row.o_label,
+      });
+    }
+  }
+
+  return questions;
+}
+
+function decodeSkuAnswers(questions, encodedPart, index = 0, decodedAnswers = []) {
+  if (index === questions.length) {
+    return encodedPart.length === 0 ? decodedAnswers : null;
+  }
+
+  const question = questions[index];
+  const options = [...question.options].sort(
+    (a, b) => String(b.id).length - String(a.id).length || a.id - b.id
+  );
+
+  for (const option of options) {
+    const optionCode = String(option.id);
+    if (!encodedPart.startsWith(optionCode)) continue;
+
+    const nextDecoded = decodeSkuAnswers(
+      questions,
+      encodedPart.slice(optionCode.length),
+      index + 1,
+      [
+        ...decodedAnswers,
+        {
+          key: question.key,
+          label: question.label,
+          sku_index: question.sku_index,
+          value_id: option.id,
+          value_label: option.label,
+          is_placeholder: false,
+        },
+      ]
+    );
+
+    if (nextDecoded) return nextDecoded;
+  }
+
+  const hasZeroOption = question.options.some((option) => Number(option.id) === 0);
+  if (question.required !== 1 && !hasZeroOption && encodedPart.startsWith('0')) {
+    return decodeSkuAnswers(questions, encodedPart.slice(1), index + 1, [
+      ...decodedAnswers,
+      {
+        key: question.key,
+        label: question.label,
+        sku_index: question.sku_index,
+        value_id: null,
+        value_label: 'Не обрано',
+        is_placeholder: true,
+      },
+    ]);
+  }
+
+  return null;
+}
+
+async function decodeSku(skuValue) {
+  const normalizedSku = String(skuValue || '').trim().toUpperCase();
+  if (!normalizedSku) {
+    throw new Error('Введіть артикул для розшифровки');
+  }
+
+  const categories = await getAllCategories();
+  const category = categories.find((item) => normalizedSku.startsWith(item.code));
+  if (!category) {
+    throw new Error('Не вдалося визначити категорію за кодом артикула');
+  }
+
+  const questions = await getQuestionsForCategory(category.code);
+  const skuWithoutCategory = normalizedSku.slice(category.code.length);
+  const attempts = [];
+
+  if (skuWithoutCategory.length >= 3) {
+    attempts.push({
+      encodedPart: skuWithoutCategory.slice(0, -3),
+      suffixRaw: skuWithoutCategory.slice(-3),
+      hasSuffix: true,
+    });
+  }
+
+  attempts.push({
+    encodedPart: skuWithoutCategory,
+    suffixRaw: null,
+    hasSuffix: false,
+  });
+
+  for (const attempt of attempts) {
+    const decodedAnswers = decodeSkuAnswers(questions, attempt.encodedPart);
+    if (!decodedAnswers) continue;
+
+    const suffixValue =
+      attempt.suffixRaw !== null && /^\d+$/.test(attempt.suffixRaw)
+        ? Number(attempt.suffixRaw)
+        : null;
+
+    const productResult = await pool.query(
+      'SELECT id, full_sku, base_sku, sequence_number, category, weight, total_price, created_at FROM products WHERE full_sku = $1 LIMIT 1',
+      [normalizedSku]
+    );
+
+    return {
+      sku: normalizedSku,
+      category: {
+        code: category.code,
+        name: category.name,
+        requires_weight: category.requires_weight,
+      },
+      baseSku: category.code + attempt.encodedPart,
+      decodedAnswers,
+      suffix: {
+        raw: attempt.suffixRaw,
+        type: attempt.hasSuffix
+          ? category.requires_weight === 1
+            ? 'weight'
+            : 'sequence'
+          : 'none',
+        value: suffixValue,
+      },
+      existsInDb: productResult.rows.length > 0,
+      product: productResult.rows[0] || null,
+    };
+  }
+
+  throw new Error('Артикул не відповідає поточній конфігурації категорії');
+}
+
 async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS products (
@@ -601,6 +778,16 @@ app.post('/api/preview', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/decode', async (req, res) => {
+  try {
+    const { sku } = req.body;
+    const decoded = await decodeSku(sku);
+    res.json(decoded);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

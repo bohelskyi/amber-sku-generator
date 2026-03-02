@@ -15,6 +15,9 @@ function App() {
   const [previewData, setPreviewData] = useState(null);
   const [history, setHistory] = useState([]);
   const [skuToDelete, setSkuToDelete] = useState('');
+  const [skuToDecode, setSkuToDecode] = useState('');
+  const [decodeData, setDecodeData] = useState(null);
+  const [decodeError, setDecodeError] = useState('');
   const formatUah = (value) => (value !== null && value !== undefined ? `${value} ₴` : '---');
   const formatUsd = (value) => (Number(value) > 0 ? `$${value}` : '---');
   const [copyMessage, setCopyMessage] = useState('');
@@ -111,6 +114,39 @@ function App() {
     api.post('/delete', { skuToDelete: sku })
       .then(res => { alert(res.data.message); setSkuToDelete(''); fetchHistory(); })
       .catch(err => { alert("ПОМИЛКА: " + (err.response?.data?.error || err.message)); });
+  };
+
+  const handleDecode = (skuValue = skuToDecode) => {
+    const normalizedSku = skuValue.trim().toUpperCase();
+    if (!normalizedSku) {
+      setDecodeData(null);
+      setDecodeError('Введіть артикул для розшифровки.');
+      return;
+    }
+
+    api.post('/decode', { sku: normalizedSku })
+      .then((res) => {
+        setSkuToDecode(normalizedSku);
+        setDecodeData(res.data);
+        setDecodeError('');
+      })
+      .catch((err) => {
+        setDecodeData(null);
+        setDecodeError(err.response?.data?.error || err.message);
+      });
+  };
+
+  const handleDecodeInputChange = (value) => {
+    setSkuToDecode(value.toUpperCase());
+    setDecodeData(null);
+    setDecodeError('');
+  };
+
+  const formatDecodedSuffix = (suffix) => {
+    if (!suffix || suffix.type === 'none') return 'Без фінального суфікса';
+    if (suffix.type === 'weight') return suffix.value !== null ? `${suffix.value} г` : suffix.raw;
+    if (suffix.type === 'sequence') return suffix.raw || String(suffix.value || '');
+    return suffix.raw || '---';
   };
 
   const handleCopyText = async (text, label) => {
@@ -218,9 +254,69 @@ function App() {
                 </div>
               </div>
               <div className="card p-6 sm:p-8">
-                <p className="eyebrow">Підказка</p>
-                <h3 className="section-title-text">Швидкі дії</h3>
-                <p className="section-subtitle mt-2">Копіювання SKU та ціни доступне після перевірки.</p>
+                <p className="eyebrow">Decoder</p>
+                <h3 className="section-title-text">Розшифрувати артикул</h3>
+                <p className="section-subtitle mt-2">
+                  Введіть готовий SKU, щоб побачити категорію та вибрані характеристики.
+                </p>
+                <div className="mt-5 flex flex-col gap-3">
+                  <input
+                    type="text"
+                    value={skuToDecode}
+                    onChange={(e) => handleDecodeInputChange(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleDecode();
+                    }}
+                    placeholder="Наприклад, BN123456001"
+                    className="input"
+                  />
+                  <button onClick={() => handleDecode()} className="btn btn-primary">
+                    Розшифрувати
+                  </button>
+                </div>
+
+                {decodeError && (
+                  <div className="danger-panel p-4 mt-4 text-sm">
+                    {decodeError}
+                  </div>
+                )}
+
+                {decodeData && (
+                  <div className="info-panel mt-4 p-4 space-y-4">
+                    <div className="flex flex-wrap gap-2">
+                      <span className="chip">{decodeData.category.code}</span>
+                      <span className="chip">{decodeData.category.name}</span>
+                      <span className="chip">
+                        {decodeData.existsInDb ? 'Є в базі' : 'Не знайдено в базі'}
+                      </span>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2 text-sm text-slate-700">
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Базовий SKU</div>
+                        <div className="mt-1 font-mono font-semibold text-slate-900">{decodeData.baseSku}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                          {decodeData.suffix.type === 'weight' ? 'Вага' : decodeData.suffix.type === 'sequence' ? 'Порядковий номер' : 'Суфікс'}
+                        </div>
+                        <div className="mt-1 font-semibold text-slate-900">{formatDecodedSuffix(decodeData.suffix)}</div>
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-white/80">
+                      {decodeData.decodedAnswers.map((item) => (
+                        <div key={item.key} className="flex items-start justify-between gap-3 px-4 py-3 border-b border-slate-200 last:border-b-0">
+                          <div className="text-sm font-medium text-slate-700">{item.label}</div>
+                          <div className="text-sm text-right text-slate-900">
+                            {item.value_label}
+                            {item.value_id !== null && (
+                              <span className="block text-xs font-mono text-slate-500">{item.value_id}</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -430,6 +526,7 @@ function App() {
                         {!selectedCat && (
                           <div className="flex flex-wrap gap-2">
                             <button onClick={() => handleCopyText(item.full_sku, 'SKU')} className="btn btn-outline text-xs px-2 py-1">Копіювати SKU</button>
+                            <button onClick={() => handleDecode(item.full_sku)} className="btn btn-outline text-xs px-2 py-1">Розшифрувати</button>
                             <button onClick={() => item.total_price && handleCopyText(`$${item.total_price}`, 'Ціну')} className="btn btn-outline text-xs px-2 py-1">Копіювати ціну</button>
                             <button onClick={() => handleDelete(item.full_sku)} className="btn btn-danger text-xs px-2 py-1">Видалити</button>
                           </div>
