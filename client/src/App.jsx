@@ -19,6 +19,10 @@ function App() {
   const [isVariationLoading, setIsVariationLoading] = useState(false);
   const [history, setHistory] = useState([]);
   const [skuToDelete, setSkuToDelete] = useState('');
+  const [exportFromSku, setExportFromSku] = useState('');
+  const [exportToSku, setExportToSku] = useState('');
+  const [exportError, setExportError] = useState('');
+  const [isExportLoading, setIsExportLoading] = useState(false);
   const [skuToDecode, setSkuToDecode] = useState('');
   const [decodeData, setDecodeData] = useState(null);
   const [decodeError, setDecodeError] = useState('');
@@ -111,7 +115,9 @@ function App() {
       category: selectedCat,
       weight: isWeightRequired ? weight : 0,
       totalPrice: previewData.totalPrice,
+      totalPriceUah: previewData.totalPriceUah,
       pricePerGram: previewData.pricePerGram,
+      uahRate: previewData.uahRate,
       details: {
         answers,
         isCalibrated,
@@ -144,6 +150,56 @@ function App() {
       .finally(() => {
         setIsVariationLoading(false);
       });
+  };
+
+  const handleExportCsv = async () => {
+    const fromSku = exportFromSku.trim().toUpperCase();
+    const toSku = exportToSku.trim().toUpperCase();
+
+    if (!fromSku) {
+      setExportError('Вкажіть артикул, з якого починати експорт.');
+      return;
+    }
+
+    setIsExportLoading(true);
+    setExportError('');
+
+    try {
+      const response = await api.get('/export/csv', {
+        params: {
+          fromSku,
+          ...(toSku ? { toSku } : {}),
+        },
+        responseType: 'blob',
+      });
+
+      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const fileNameMatch = response.headers['content-disposition']?.match(/filename="(.+)"/);
+      const fileName = fileNameMatch?.[1] || `amber-export-${fromSku}.csv`;
+
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      if (err.response?.data instanceof Blob) {
+        const errorText = await err.response.data.text();
+        try {
+          const parsed = JSON.parse(errorText);
+          setExportError(parsed.error || 'Не вдалося виконати експорт.');
+        } catch {
+          setExportError('Не вдалося виконати експорт.');
+        }
+      } else {
+        setExportError(err.response?.data?.error || err.message);
+      }
+    } finally {
+      setIsExportLoading(false);
+    }
   };
 
   const handleDelete = (sku) => {
@@ -584,13 +640,22 @@ function App() {
                       <td className="table-cell whitespace-nowrap text-sm font-mono font-semibold text-slate-800">{item.full_sku}</td>
                       <td className="table-cell whitespace-nowrap text-sm text-slate-500">{config.categories[item.category]?.name}</td>
                       <td className="table-cell whitespace-nowrap text-sm text-slate-500">{item.weight > 0 ? `${item.weight}г` : '-'}</td>
-                      <td className="table-cell whitespace-nowrap text-sm text-slate-500">{item.total_price ? `$${item.total_price}` : '-'}</td>
+                      <td className="table-cell whitespace-nowrap text-sm text-slate-500">
+                        {item.total_price_uah ? `${item.total_price_uah} ₴` : item.total_price ? `$${item.total_price}` : '-'}
+                      </td>
                       <td className="table-cell whitespace-nowrap text-sm">
                         {!selectedCat && (
                           <div className="flex flex-wrap gap-2">
                             <button onClick={() => handleCopyText(item.full_sku, 'SKU')} className="btn btn-outline text-xs px-2 py-1">Копіювати SKU</button>
                             <button onClick={() => handleDecode(item.full_sku)} className="btn btn-outline text-xs px-2 py-1">Розшифрувати</button>
-                            <button onClick={() => item.total_price && handleCopyText(`$${item.total_price}`, 'Ціну')} className="btn btn-outline text-xs px-2 py-1">Копіювати ціну</button>
+                            <button
+                              onClick={() => item.total_price_uah
+                                ? handleCopyText(`${item.total_price_uah} ₴`, 'Ціну')
+                                : item.total_price && handleCopyText(`$${item.total_price}`, 'Ціну')}
+                              className="btn btn-outline text-xs px-2 py-1"
+                            >
+                              Копіювати ціну
+                            </button>
                             <button onClick={() => handleDelete(item.full_sku)} className="btn btn-danger text-xs px-2 py-1">Видалити</button>
                           </div>
                         )}
@@ -609,23 +674,75 @@ function App() {
               <summary className="flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <p className="eyebrow">Додаткові дії</p>
-                  <h3 className="collapse-title">Коригування помилок</h3>
-                  <p className="section-subtitle">Видалення помилково збереженого артикула.</p>
+                  <h3 className="collapse-title">Експорт та коригування</h3>
+                  <p className="section-subtitle">CSV-експорт по діапазону збережень і видалення помилкових артикулів.</p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
                   <span className="collapse-toggle collapse-toggle-closed">Показати</span>
                   <span className="collapse-toggle collapse-toggle-open">Сховати</span>
                 </div>
               </summary>
-              <div className="mt-4 flex flex-col sm:flex-row gap-3">
-                <input
-                  type="text"
-                  value={skuToDelete}
-                  onChange={(e) => setSkuToDelete(e.target.value)}
-                  placeholder="Введіть повний артикул..."
-                  className="input"
-                />
-                <button onClick={() => handleDelete(skuToDelete)} className="btn btn-danger px-6">Видалити</button>
+              <div className="mt-4 space-y-6">
+                <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+                  <div className="section-title mb-3">
+                    <div>
+                      <h4 className="section-title-text text-lg">Експорт CSV</h4>
+                      <p className="section-subtitle">Перша колонка: артикул. Друга: зафіксована ціна в гривні.</p>
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <input
+                      type="text"
+                      value={exportFromSku}
+                      onChange={(e) => {
+                        setExportFromSku(e.target.value.toUpperCase());
+                        setExportError('');
+                      }}
+                      placeholder="З якого SKU"
+                      className="input"
+                    />
+                    <input
+                      type="text"
+                      value={exportToSku}
+                      onChange={(e) => {
+                        setExportToSku(e.target.value.toUpperCase());
+                        setExportError('');
+                      }}
+                      placeholder="По який SKU або пусто"
+                      className="input"
+                    />
+                    <button onClick={handleExportCsv} className="btn btn-primary px-6" disabled={isExportLoading}>
+                      {isExportLoading ? 'Експортуємо...' : 'Експорт CSV'}
+                    </button>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Якщо поле "по який SKU" порожнє, експорт піде від вказаного артикула до останнього збереженого.
+                  </p>
+                  {exportError && (
+                    <div className="danger-panel p-3 mt-3 text-sm">
+                      {exportError}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+                  <div className="section-title mb-3">
+                    <div>
+                      <h4 className="section-title-text text-lg">Видалення</h4>
+                      <p className="section-subtitle">Видалення помилково збереженого артикула.</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <input
+                      type="text"
+                      value={skuToDelete}
+                      onChange={(e) => setSkuToDelete(e.target.value)}
+                      placeholder="Введіть повний артикул..."
+                      className="input"
+                    />
+                    <button onClick={() => handleDelete(skuToDelete)} className="btn btn-danger px-6">Видалити</button>
+                  </div>
+                </div>
               </div>
             </details>
           </section>

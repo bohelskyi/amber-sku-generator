@@ -96,6 +96,21 @@ function parseVariationSku(skuValue) {
   };
 }
 
+function escapeCsvValue(value) {
+  if (value === null || value === undefined) return '';
+  const stringValue = String(value);
+  if (/[",\n]/.test(stringValue)) {
+    return `"${stringValue.replace(/"/g, '""')}"`;
+  }
+  return stringValue;
+}
+
+function buildCsv(rows) {
+  return rows
+    .map((row) => row.map((value) => escapeCsvValue(value)).join(','))
+    .join('\n');
+}
+
 async function getAllCategories() {
   const result = await pool.query(
     'SELECT code, name, requires_weight FROM categories ORDER BY LENGTH(code) DESC, code ASC'
@@ -309,6 +324,68 @@ async function getNextVariationSku(skuValue) {
   };
 }
 
+async function getProductBySku(fullSku) {
+  const result = await pool.query(
+    'SELECT id, full_sku, created_at FROM products WHERE full_sku = $1 ORDER BY id ASC LIMIT 1',
+    [String(fullSku || '').trim().toUpperCase()]
+  );
+  return result.rows[0] || null;
+}
+
+async function getExportRows(fromSku, toSku) {
+  const normalizedFromSku = String(fromSku || '').trim().toUpperCase();
+  const normalizedToSku = String(toSku || '').trim().toUpperCase();
+
+  if (!normalizedFromSku) {
+    throw new Error('Потрібно вказати артикул, з якого починати експорт');
+  }
+
+  const fromProduct = await getProductBySku(normalizedFromSku);
+  if (!fromProduct) {
+    throw new Error(`Артикул ${normalizedFromSku} не знайдено`);
+  }
+
+  let toProduct = null;
+  if (normalizedToSku) {
+    toProduct = await getProductBySku(normalizedToSku);
+    if (!toProduct) {
+      throw new Error(`Артикул ${normalizedToSku} не знайдено`);
+    }
+  }
+
+  const idFrom = Number(fromProduct.id);
+  const idTo = toProduct ? Number(toProduct.id) : null;
+  const startId = idTo !== null ? Math.min(idFrom, idTo) : idFrom;
+  const endId = idTo !== null ? Math.max(idFrom, idTo) : null;
+
+  const params = [startId];
+  const whereClauses = ['id >= $1'];
+  if (endId !== null) {
+    params.push(endId);
+    whereClauses.push(`id <= $${params.length}`);
+  }
+
+  const result = await pool.query(
+    `
+      SELECT id, full_sku, total_price_uah, created_at
+      FROM products
+      WHERE ${whereClauses.join(' AND ')}
+      ORDER BY id ASC
+    `,
+    params
+  );
+
+  return {
+    rows: result.rows,
+    range: {
+      fromSku: fromProduct.full_sku,
+      toSku: toProduct ? toProduct.full_sku : null,
+      resolvedToSku:
+        result.rows.length > 0 ? result.rows[result.rows.length - 1].full_sku : fromProduct.full_sku,
+    },
+  };
+}
+
 async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS products (
@@ -323,6 +400,16 @@ async function initDb() {
       details JSONB,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
+  `);
+
+  await pool.query(`
+    ALTER TABLE products
+    ADD COLUMN IF NOT EXISTS total_price_uah REAL
+  `);
+
+  await pool.query(`
+    ALTER TABLE products
+    ADD COLUMN IF NOT EXISTS uah_rate REAL
   `);
 
   await pool.query(`
@@ -857,12 +944,23 @@ app.post('/api/variation', async (req, res) => {
 
 app.post('/api/save', async (req, res) => {
   try {
-    const { fullSku, baseSku, nextSeq, category, weight, totalPrice, pricePerGram, details } =
+    const {
+      fullSku,
+      baseSku,
+      nextSeq,
+      category,
+      weight,
+      totalPrice,
+      totalPriceUah,
+      pricePerGram,
+      uahRate,
+      details,
+    } =
       req.body;
     const result = await pool.query(
       `INSERT INTO products
-       (full_sku, base_sku, sequence_number, category, weight, total_price, price_per_gram, details)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+       (full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah, price_per_gram, uah_rate, details)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
        RETURNING id`,
       [
         fullSku,
@@ -871,7 +969,9 @@ app.post('/api/save', async (req, res) => {
         category,
         Number(weight || 0),
         Number(totalPrice || 0),
+        totalPriceUah !== undefined && totalPriceUah !== null ? Number(totalPriceUah) : null,
         Number(pricePerGram || 0),
+        uahRate !== undefined && uahRate !== null ? Number(uahRate) : null,
         JSON.stringify(details || {}),
       ]
     );
@@ -1000,6 +1100,34 @@ app.get('/api/products', async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/export/csv', async (req, res) => {
+  try {
+    const { fromSku, toSku } = req.query;
+    const exportData = await getExportRows(fromSku, toSku);
+
+    const csv = buildCsv([
+      ['sku', 'price_uah'],
+      ...exportData.rows.map((row) => [
+        row.full_sku,
+        row.total_price_uah !== null && row.total_price_uah !== undefined
+          ? Number(row.total_price_uah).toFixed(2)
+          : '',
+      ]),
+    ]);
+
+    const suffixPart = exportData.range.toSku
+      ? `-${exportData.range.toSku}`
+      : '-to-latest';
+    const fileName = `amber-export-${exportData.range.fromSku}${suffixPart}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(csv);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 
