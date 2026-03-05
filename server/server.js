@@ -386,6 +386,87 @@ async function getExportRows(fromSku, toSku) {
   };
 }
 
+async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated) {
+  const scenarios = await pool.query(
+    'SELECT * FROM price_scenarios WHERE category_code = $1',
+    [categoryCode]
+  );
+
+  let pricePerGram = 0;
+  let logMessage = 'Ціна не знайдена';
+  const normalizedCalibrated = Number(isCalibrated || 0);
+
+  const activeScenario = scenarios.rows.find((scen) => {
+    const rules = asRuleObject(scen.match_json);
+    for (const [key, val] of Object.entries(rules)) {
+      if (key === 'is_calibrated') {
+        if (Number(val) !== normalizedCalibrated) return false;
+      } else if (Number(answers[key] ?? -1) !== Number(val)) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  if (activeScenario) {
+    const xVal = Number(answers[activeScenario.axis_x_key] || 0);
+    const yVal = activeScenario.axis_y_key
+      ? Number(answers[activeScenario.axis_y_key] || 0)
+      : 0;
+
+    const priceRow = await pool.query(
+      `SELECT price
+       FROM price_matrix
+       WHERE scenario_id = $1 AND x_val = $2 AND y_val = $3`,
+      [activeScenario.id, xVal, yVal]
+    );
+
+    if (priceRow.rows.length > 0) {
+      pricePerGram = Number(priceRow.rows[0].price);
+      logMessage = `${activeScenario.name} (Базова: $${pricePerGram})`;
+
+      const mods = await pool.query(
+        'SELECT * FROM price_modifiers WHERE category_code = $1',
+        [categoryCode]
+      );
+      for (const mod of mods.rows) {
+        if (Number(answers[mod.trigger_key] ?? -1) === Number(mod.trigger_val)) {
+          pricePerGram *= Number(mod.factor);
+          logMessage += ` + Модифікатор (${Math.round((Number(mod.factor) - 1) * 100)}%)`;
+        }
+      }
+    } else {
+      logMessage = `${activeScenario.name} (Нема ціни для комбінації)`;
+    }
+  } else {
+    logMessage = 'Немає сценарію для цих параметрів';
+  }
+
+  const parsedWeight = Number.parseFloat(weight);
+  const weightVal = Number.isFinite(parsedWeight) ? parsedWeight : 0;
+  const totalPrice = (pricePerGram * weightVal).toFixed(2);
+
+  let currencyPayload = { uahRate: null, pricePerGramUah: null, totalPriceUah: null };
+  try {
+    const uahRate = await getUsdUahRate();
+    currencyPayload = {
+      uahRate,
+      pricePerGramUah: (pricePerGram * uahRate).toFixed(2),
+      totalPriceUah: (Number(totalPrice) * uahRate).toFixed(2),
+    };
+  } catch (err) {
+    console.error('NBU rate error:', err.message || err);
+  }
+
+  return {
+    weightVal,
+    pricePerGram,
+    totalPrice,
+    logMessage,
+    currencyPayload,
+  };
+}
+
 async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS products (
@@ -713,6 +794,78 @@ app.post('/api/admin/scenario', async (req, res) => {
   }
 });
 
+app.put('/api/admin/scenario', async (req, res) => {
+  try {
+    const { id, name, match_json, axis_x_key, axis_y_key } = req.body;
+    if (!id || !name || !axis_x_key) {
+      return res.status(400).json({ error: 'Потрібні id, назва та вісь X' });
+    }
+
+    const payload = typeof match_json === 'string' ? JSON.parse(match_json) : match_json || {};
+
+    await pool.query(
+      `UPDATE price_scenarios
+       SET name = $1, match_json = $2::jsonb, axis_x_key = $3, axis_y_key = $4
+       WHERE id = $5`,
+      [name, JSON.stringify(payload), axis_x_key, axis_y_key || null, Number(id)]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/scenario/duplicate', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'Потрібен id сценарію' });
+
+    await client.query('BEGIN');
+
+    const sourceScenario = await client.query(
+      'SELECT * FROM price_scenarios WHERE id = $1 LIMIT 1',
+      [Number(id)]
+    );
+    if (sourceScenario.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Сценарій не знайдено' });
+    }
+
+    const source = sourceScenario.rows[0];
+    const duplicatedScenario = await client.query(
+      `INSERT INTO price_scenarios (category_code, name, match_json, axis_x_key, axis_y_key)
+       VALUES ($1, $2, $3::jsonb, $4, $5)
+       RETURNING id`,
+      [
+        source.category_code,
+        `${source.name} (копія)`,
+        JSON.stringify(source.match_json || {}),
+        source.axis_x_key,
+        source.axis_y_key,
+      ]
+    );
+
+    const newScenarioId = duplicatedScenario.rows[0].id;
+    await client.query(
+      `INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
+       SELECT $1, x_val, y_val, price
+       FROM price_matrix
+       WHERE scenario_id = $2`,
+      [Number(newScenarioId), Number(id)]
+    );
+
+    await client.query('COMMIT');
+    res.json({ success: true, id: newScenarioId });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 app.post('/api/admin/modifier', async (req, res) => {
   try {
     const { category_code, trigger_key, trigger_val, factor } = req.body;
@@ -787,76 +940,8 @@ app.post('/api/preview', async (req, res) => {
       skuParts.push(val ? val : 0);
     }
     const baseSku = skuParts.join('');
-
-    const scenarios = await pool.query(
-      'SELECT * FROM price_scenarios WHERE category_code = $1',
-      [categoryCode]
-    );
-
-    let pricePerGram = 0;
-    let logMessage = 'Ціна не знайдена';
-    const normalizedCalibrated = Number(isCalibrated || 0);
-
-    const activeScenario = scenarios.rows.find((scen) => {
-      const rules = asRuleObject(scen.match_json);
-      for (const [key, val] of Object.entries(rules)) {
-        if (key === 'is_calibrated') {
-          if (Number(val) !== normalizedCalibrated) return false;
-        } else if (Number(answers[key] ?? -1) !== Number(val)) {
-          return false;
-        }
-      }
-      return true;
-    });
-
-    if (activeScenario) {
-      const xVal = Number(answers[activeScenario.axis_x_key] || 0);
-      const yVal = activeScenario.axis_y_key
-        ? Number(answers[activeScenario.axis_y_key] || 0)
-        : 0;
-
-      const priceRow = await pool.query(
-        `SELECT price
-         FROM price_matrix
-         WHERE scenario_id = $1 AND x_val = $2 AND y_val = $3`,
-        [activeScenario.id, xVal, yVal]
-      );
-
-      if (priceRow.rows.length > 0) {
-        pricePerGram = Number(priceRow.rows[0].price);
-        logMessage = `${activeScenario.name} (Базова: $${pricePerGram})`;
-
-        const mods = await pool.query(
-          'SELECT * FROM price_modifiers WHERE category_code = $1',
-          [categoryCode]
-        );
-        for (const mod of mods.rows) {
-          if (Number(answers[mod.trigger_key] ?? -1) === Number(mod.trigger_val)) {
-            pricePerGram *= Number(mod.factor);
-            logMessage += ` + Модифікатор (${Math.round((Number(mod.factor) - 1) * 100)}%)`;
-          }
-        }
-      } else {
-        logMessage = `${activeScenario.name} (Нема ціни для комбінації)`;
-      }
-    } else {
-      logMessage = 'Немає сценарію для цих параметрів';
-    }
-
-    const weightVal = weight ? parseFloat(weight) : 0;
-    const totalPrice = (pricePerGram * weightVal).toFixed(2);
-
-    let currencyPayload = { uahRate: null, pricePerGramUah: null, totalPriceUah: null };
-    try {
-      const uahRate = await getUsdUahRate();
-      currencyPayload = {
-        uahRate,
-        pricePerGramUah: (pricePerGram * uahRate).toFixed(2),
-        totalPriceUah: (Number(totalPrice) * uahRate).toFixed(2),
-      };
-    } catch (err) {
-      console.error('NBU rate error:', err.message || err);
-    }
+    const pricing = await calculatePricing(categoryCode, answers, weight, isCalibrated);
+    const { weightVal, pricePerGram, totalPrice, logMessage, currencyPayload } = pricing;
 
     const catResult = await pool.query(
       'SELECT requires_weight FROM categories WHERE code = $1',
@@ -916,6 +1001,21 @@ app.post('/api/preview', async (req, res) => {
       totalPrice,
       logMessage,
       ...currencyPayload,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/price-preview', async (req, res) => {
+  try {
+    const { categoryCode, answers = {}, weight, isCalibrated } = req.body;
+    const pricing = await calculatePricing(categoryCode, answers, weight, isCalibrated);
+    res.json({
+      pricePerGram: pricing.pricePerGram.toFixed(2),
+      totalPrice: pricing.totalPrice,
+      logMessage: pricing.logMessage,
+      ...pricing.currencyPayload,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -11,6 +11,9 @@ function App() {
   const [answers, setAnswers] = useState({});
   const [isCalibrated, setIsCalibrated] = useState(null);
   const [weight, setWeight] = useState('');
+  const [livePriceData, setLivePriceData] = useState(null);
+  const [livePriceError, setLivePriceError] = useState('');
+  const [isLivePriceLoading, setIsLivePriceLoading] = useState(false);
 
   const [previewData, setPreviewData] = useState(null);
   const [displaySku, setDisplaySku] = useState('');
@@ -60,6 +63,9 @@ function App() {
     setVariationData(null);
     setVariationError('');
     setIsVariationLoading(false);
+    setLivePriceData(null);
+    setLivePriceError('');
+    setIsLivePriceLoading(false);
     setWeight('');
   };
 
@@ -80,6 +86,67 @@ function App() {
   // Р‘РµСЂРµРјРѕ РЅР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ РїСЂСЏРјРѕ Р· РєР°С‚РµгРѕСЂС–С—
   const categoryConfig = selectedCat && config ? config.categories[selectedCat] : null;
   const isWeightRequired = categoryConfig ? (categoryConfig.requires_weight === 1) : true;
+
+  useEffect(() => {
+    if (!selectedCat || !config) {
+      setLivePriceData(null);
+      setLivePriceError('');
+      setIsLivePriceLoading(false);
+      return;
+    }
+
+    const requiredQuestions = config.questions?.[selectedCat] || [];
+    const hasMissingRequired = requiredQuestions
+      .filter((q) => q.required === 1)
+      .some((q) => answers[q.id] === undefined);
+
+    if (hasMissingRequired) {
+      setLivePriceData(null);
+      setLivePriceError('');
+      setIsLivePriceLoading(false);
+      return;
+    }
+
+    if (isWeightRequired) {
+      if (weight === '' || !Number.isFinite(Number(weight)) || Number(weight) < 0) {
+        setLivePriceData(null);
+        setLivePriceError('');
+        setIsLivePriceLoading(false);
+        return;
+      }
+    }
+
+    let isCancelled = false;
+    const timerId = setTimeout(() => {
+      setIsLivePriceLoading(true);
+      setLivePriceError('');
+
+      api.post('/price-preview', {
+        categoryCode: selectedCat,
+        answers,
+        weight: isWeightRequired ? weight : 0,
+        isCalibrated: isCalibrated === null ? 0 : isCalibrated,
+      })
+        .then((res) => {
+          if (isCancelled) return;
+          setLivePriceData(res.data);
+        })
+        .catch((err) => {
+          if (isCancelled) return;
+          setLivePriceData(null);
+          setLivePriceError(err.response?.data?.error || err.message);
+        })
+        .finally(() => {
+          if (isCancelled) return;
+          setIsLivePriceLoading(false);
+        });
+    }, 350);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timerId);
+    };
+  }, [selectedCat, config, answers, weight, isCalibrated, isWeightRequired]);
 
   const handlePreview = () => {
     if (isWeightRequired && !weight) return alert("Введіть вагу!");
@@ -528,6 +595,21 @@ function App() {
                       {isWeightRequired ? (weight ? `${weight} г` : 'Потрібна') : 'Не потрібна'}
                     </span>
                   </div>
+                  <div className="h-px bg-slate-200" />
+                  <div className="flex items-center justify-between">
+                    <span>Попередня ціна</span>
+                    <span className="font-semibold text-slate-800">
+                      {isLivePriceLoading ? 'Розрахунок...' : livePriceData?.totalPriceUah ? formatUah(livePriceData.totalPriceUah) : '---'}
+                    </span>
+                  </div>
+                  {livePriceData && (
+                    <div className="text-xs text-slate-500">
+                      USD: {formatUsd(livePriceData.totalPrice)} | За грам: {formatUah(livePriceData.pricePerGramUah)}
+                    </div>
+                  )}
+                  {livePriceError && (
+                    <div className="text-xs text-rose-600">{livePriceError}</div>
+                  )}
                 </div>
               </div>
               <div className="card p-6 sm:p-8">

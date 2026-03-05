@@ -17,6 +17,7 @@ export default function AdminPanel() {
 
     // Стани для цін
     const [newScenario, setNewScenario] = useState({ name: '', match_json: '', axis_x_key: '', axis_y_key: '' });
+    const [editScenario, setEditScenario] = useState(null);
     const [newModifier, setNewModifier] = useState({ trigger_key: '', trigger_val: '', factor: '' });
     const handleNumberWheel = (event) => {
         if (document.activeElement === event.currentTarget) {
@@ -34,6 +35,7 @@ export default function AdminPanel() {
     useEffect(() => {
         if (selectedCat) fetchPrices();
         else setPricesData(null);
+        setEditScenario(null);
     }, [selectedCat]);
 
     const fetchConfig = () => { axios.get('/api/config').then(res => setConfig(res.data)); };
@@ -120,6 +122,49 @@ export default function AdminPanel() {
                 setNewScenario({ name: '', match_json: '', axis_x_key: '', axis_y_key: '' });
                 fetchPrices();
             });
+    };
+
+    const beginScenarioEdit = (scen) => {
+        setEditScenario({
+            id: scen.id,
+            name: scen.name,
+            match_json: formatMatchJson(scen.match_json),
+            axis_x_key: scen.axis_x_key || '',
+            axis_y_key: scen.axis_y_key || '',
+        });
+    };
+
+    const updateScenario = () => {
+        if (!editScenario || !editScenario.id) return;
+        if (!editScenario.name || !editScenario.axis_x_key) {
+            return alert("Потрібні назва сценарію та вісь X");
+        }
+
+        let parsedJson;
+        try {
+            parsedJson = JSON.parse(editScenario.match_json || '{}');
+        } catch (e) {
+            return alert("Помилка в JSON умови");
+        }
+
+        axios.put('/api/admin/scenario', {
+            id: editScenario.id,
+            name: editScenario.name,
+            match_json: parsedJson,
+            axis_x_key: editScenario.axis_x_key,
+            axis_y_key: editScenario.axis_y_key || null,
+        })
+            .then(() => {
+                setEditScenario(null);
+                fetchPrices();
+            })
+            .catch(err => alert(`Помилка оновлення сценарію: ${err.response?.data?.error || err.message}`));
+    };
+
+    const duplicateScenario = (scenarioId) => {
+        axios.post('/api/admin/scenario/duplicate', { id: scenarioId })
+            .then(() => fetchPrices())
+            .catch(err => alert(`Помилка дублювання: ${err.response?.data?.error || err.message}`));
     };
 
     const addModifier = () => {
@@ -332,9 +377,48 @@ export default function AdminPanel() {
                                     <div key={scen.id} className="border border-slate-200 p-4 rounded-2xl bg-slate-50/80 relative">
                                         <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
                                             <h3 className="font-semibold text-lg text-slate-800">{scen.name}</h3>
-                                            <button onClick={() => deleteItem('scenario', scen.id)} className="btn btn-outline text-xs">Видалити сценарій</button>
+                                            <div className="flex flex-wrap gap-2">
+                                                <button onClick={() => beginScenarioEdit(scen)} className="btn btn-outline text-xs">Редагувати</button>
+                                                <button onClick={() => duplicateScenario(scen.id)} className="btn btn-outline text-xs">Дублювати</button>
+                                                <button onClick={() => deleteItem('scenario', scen.id)} className="btn btn-outline text-xs">Видалити сценарій</button>
+                                            </div>
                                         </div>
                                         <p className="text-xs text-slate-500 mb-4 bg-white px-2 py-1 inline-block rounded">Умова: {formatMatchJson(scen.match_json)}</p>
+
+                                        {editScenario?.id === scen.id && (
+                                            <div className="mb-4 p-3 border border-slate-200 rounded-xl bg-white">
+                                                <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                                                    <input
+                                                        className="input-sm"
+                                                        placeholder="Назва"
+                                                        value={editScenario.name}
+                                                        onChange={e => setEditScenario({ ...editScenario, name: e.target.value })}
+                                                    />
+                                                    <input
+                                                        className="input-sm font-mono text-xs"
+                                                        placeholder='JSON умова'
+                                                        value={editScenario.match_json}
+                                                        onChange={e => setEditScenario({ ...editScenario, match_json: e.target.value })}
+                                                    />
+                                                    <input
+                                                        className="input-sm"
+                                                        placeholder="Вісь X key"
+                                                        value={editScenario.axis_x_key}
+                                                        onChange={e => setEditScenario({ ...editScenario, axis_x_key: e.target.value })}
+                                                    />
+                                                    <input
+                                                        className="input-sm"
+                                                        placeholder="Вісь Y key"
+                                                        value={editScenario.axis_y_key}
+                                                        onChange={e => setEditScenario({ ...editScenario, axis_y_key: e.target.value })}
+                                                    />
+                                                </div>
+                                                <div className="mt-3 flex gap-2">
+                                                    <button onClick={updateScenario} className="btn btn-primary text-xs">Зберегти сценарій</button>
+                                                    <button onClick={() => setEditScenario(null)} className="btn btn-outline text-xs">Скасувати</button>
+                                                </div>
+                                            </div>
+                                        )}
 
                                         <div className="overflow-x-auto">
                                             <table className="min-w-full bg-white border border-slate-200 rounded-xl">
