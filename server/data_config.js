@@ -80,7 +80,11 @@ const questions = {
 const extraConfig = {
     is_calibrated: { 
         label: "Сировина калібрована?", 
-        options: [{id: 1, label: "Так (Калібрована)"}, {id: 0, label: "Ні (Некалібрована)"}] 
+        options: [
+            {id: 1, label: "Так (Калібрована)"},
+            {id: 2, label: "Напівкалібрована"},
+            {id: 0, label: "Ні (Некалібрована)"}
+        ] 
     }
 };
 

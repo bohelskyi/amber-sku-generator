@@ -467,7 +467,7 @@ export default function AdminPanel() {
                             <h4 className="font-semibold text-slate-700 mb-2">Додати нову таблицю цін (Сценарій)</h4>
                             <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                                 <input className="input-sm" placeholder="Назва (напр. Некалібровані)" value={newScenario.name} onChange={e => setNewScenario({...newScenario, name: e.target.value})} />
-                                <input className="input-sm font-mono text-xs" placeholder='JSON: {"raw_type":1, "is_calibrated":0}' value={newScenario.match_json} onChange={e => setNewScenario({...newScenario, match_json: e.target.value})} />
+                                <input className="input-sm font-mono text-xs" placeholder='JSON: {"raw_type":1, "is_calibrated":2}' value={newScenario.match_json} onChange={e => setNewScenario({...newScenario, match_json: e.target.value})} />
                                 <input className="input-sm" placeholder="Вісь X Key (напр. size)" value={newScenario.axis_x_key} onChange={e => setNewScenario({...newScenario, axis_x_key: e.target.value})} />
                                 <input className="input-sm" placeholder="Вісь Y Key (напр. processing)" value={newScenario.axis_y_key} onChange={e => setNewScenario({...newScenario, axis_y_key: e.target.value})} />
                             </div>

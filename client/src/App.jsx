@@ -604,7 +604,7 @@ function App() {
                   </div>
                   {livePriceData && (
                     <div className="text-xs text-slate-500">
-                      USD: {formatUsd(livePriceData.totalPrice)} | За грам: {formatUah(livePriceData.pricePerGramUah)}
+                      USD: {formatUsd(livePriceData.totalPrice)} | За грам: {formatUah(livePriceData.pricePerGramUah)} | За грам (USD): {formatUsd(livePriceData.pricePerGram)}
                     </div>
                   )}
                   {livePriceError && (
