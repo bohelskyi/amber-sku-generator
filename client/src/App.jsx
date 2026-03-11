@@ -691,7 +691,7 @@ function App() {
               </div>
             </section>
             <aside className="space-y-6 fade-up stagger-1">
-              <div className="card p-6 sm:p-8">
+              <div className="card p-6 sm:p-8 lg:sticky lg:top-6">
                 <p className="eyebrow">Підсумок</p>
                 <h3 className="section-title-text">{config.categories[selectedCat].name}</h3>
                 <div className="mt-4 space-y-3 text-sm text-slate-600">
@@ -728,13 +728,6 @@ function App() {
                     <div className="text-xs text-rose-600">{livePriceError}</div>
                   )}
                 </div>
-              </div>
-              <div className="card p-6 sm:p-8">
-                <p className="eyebrow">Порада</p>
-                <h3 className="section-title-text">Працюйте швидко</h3>
-                <p className="section-subtitle mt-2">
-                  Натисніть опцію ще раз, щоб зняти вибір. Це дозволяє швидко змінювати параметри.
-                </p>
               </div>
             </aside>
           </div>
