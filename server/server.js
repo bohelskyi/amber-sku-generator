@@ -348,6 +348,7 @@ async function getNonSkuQuestionMaps(categoryCodes) {
         q.key,
         q.label AS q_label,
         q.sku_index,
+        q.input_type,
         o.value_id,
         o.label AS o_label
       FROM questions q
@@ -367,6 +368,7 @@ async function getNonSkuQuestionMaps(categoryCodes) {
       questionMap.set(row.key, {
         key: row.key,
         label: row.q_label,
+        input_type: row.input_type || 'options',
         optionLabels: new Map(),
       });
     }
@@ -376,6 +378,46 @@ async function getNonSkuQuestionMaps(categoryCodes) {
   }
 
   return categoryMap;
+}
+
+function getExportTextValues(productRow, nonSkuQuestionMaps) {
+  const categoryCode = String(productRow.category || '');
+  const details = productRow.details && typeof productRow.details === 'object' ? productRow.details : {};
+  const answers = details.answers && typeof details.answers === 'object' ? details.answers : {};
+  const questionMap = nonSkuQuestionMaps.get(categoryCode);
+  if (!questionMap || questionMap.size === 0) return {};
+
+  const values = {};
+  for (const question of questionMap.values()) {
+    if (question.input_type !== 'text') continue;
+    const rawValue = answers[question.key];
+    if (rawValue === undefined || rawValue === null || rawValue === '') continue;
+    values[question.key] = String(rawValue);
+  }
+  return values;
+}
+
+function collectExportTextColumns(rows, nonSkuQuestionMaps) {
+  const seen = new Set();
+  const columns = [];
+
+  for (const row of rows) {
+    const categoryCode = String(row.category || '');
+    const questionMap = nonSkuQuestionMaps.get(categoryCode);
+    if (!questionMap || questionMap.size === 0) continue;
+
+    for (const question of questionMap.values()) {
+      if (question.input_type !== 'text') continue;
+      if (seen.has(question.key)) continue;
+      seen.add(question.key);
+      columns.push({
+        key: question.key,
+        label: question.label || question.key,
+      });
+    }
+  }
+
+  return columns;
 }
 
 function getExportSizeValue(productRow, nonSkuQuestionMaps) {
@@ -451,14 +493,20 @@ async function getExportRows(fromSku, toSku) {
     params
   );
 
-  const nonSkuQuestionMaps = await getNonSkuQuestionMaps(['BR', 'NM']);
+  const categoryCodes = Array.from(
+    new Set(result.rows.map((row) => String(row.category || '').trim()).filter((code) => code))
+  );
+  const nonSkuQuestionMaps = await getNonSkuQuestionMaps(categoryCodes);
+  const textColumns = collectExportTextColumns(result.rows, nonSkuQuestionMaps);
   const rowsWithSize = result.rows.map((row) => ({
     ...row,
     export_size: getExportSizeValue(row, nonSkuQuestionMaps),
+    export_text_values: getExportTextValues(row, nonSkuQuestionMaps),
   }));
 
   return {
     rows: rowsWithSize,
+    textColumns,
     range: {
       fromSku: fromProduct.full_sku,
       toSku: toProduct ? toProduct.full_sku : null,
@@ -1380,15 +1428,17 @@ app.get('/api/export/csv', async (req, res) => {
   try {
     const { fromSku, toSku } = req.query;
     const exportData = await getExportRows(fromSku, toSku);
+    const textHeaders = exportData.textColumns.map((column) => column.key);
 
     const csv = buildCsv([
-      ['sku', 'price_uah', 'size'],
+      ['sku', 'price_uah', 'size', ...textHeaders],
       ...exportData.rows.map((row) => [
         row.full_sku,
         row.total_price_uah !== null && row.total_price_uah !== undefined
           ? Number(row.total_price_uah).toFixed(2)
           : '',
         row.export_size || '',
+        ...exportData.textColumns.map((column) => row.export_text_values?.[column.key] || ''),
       ]),
     ]);
 
