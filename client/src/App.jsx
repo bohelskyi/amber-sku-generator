@@ -42,9 +42,54 @@ function App() {
       event.preventDefault();
     }
   };
+  const isTextQuestion = (question) => (question?.input_type || 'options') === 'text';
+  const normalizeRuleValue = (value) => {
+    if (value === null || value === undefined) return value;
+    const numericValue = Number(value);
+    return Number.isNaN(numericValue) ? String(value) : numericValue;
+  };
+
+  const isVisibilityRuleMatched = (rule, context) => {
+    if (!rule || typeof rule !== 'object') return true;
+
+    for (const [key, expected] of Object.entries(rule)) {
+      const actual = context[key];
+      const actualNormalized = normalizeRuleValue(actual);
+
+      if (Array.isArray(expected)) {
+        const expectedNormalized = expected.map((item) => normalizeRuleValue(item));
+        if (!expectedNormalized.includes(actualNormalized)) return false;
+      } else {
+        const expectedNormalized = normalizeRuleValue(expected);
+        if (actualNormalized !== expectedNormalized) return false;
+      }
+    }
+
+    return true;
+  };
+
+  const getVisibleOptionsForQuestion = (question, answersMap = answers, calibratedValue = isCalibrated) => {
+    if (isTextQuestion(question)) return [];
+    const context = {
+      ...answersMap,
+      is_calibrated: calibratedValue,
+    };
+
+    return (question.options || []).filter((option) =>
+      isVisibilityRuleMatched(option.visible_if_json, context)
+    );
+  };
+
   const questionsForSelected = selectedCat && config ? (config.questions?.[selectedCat] || []) : [];
-  const requiredCount = questionsForSelected.filter(q => q.required === 1).length;
-  const answeredRequiredCount = questionsForSelected.filter(q => q.required === 1 && answers[q.id] !== undefined).length;
+  const requiredQuestions = questionsForSelected
+    .filter((q) => q.required === 1)
+    .filter((q) => isTextQuestion(q) || getVisibleOptionsForQuestion(q).length > 0);
+  const requiredCount = requiredQuestions.length;
+  const answeredRequiredCount = requiredQuestions.filter((q) => {
+    const value = answers[q.id];
+    if (isTextQuestion(q)) return value !== undefined && String(value).trim() !== '';
+    return value !== undefined;
+  }).length;
   const progressPercent = selectedCat ? (requiredCount === 0 ? 100 : Math.round((answeredRequiredCount / requiredCount) * 100)) : 0;
 
   useEffect(() => {
@@ -82,10 +127,51 @@ function App() {
     }
   };
 
+  const handleTextAnswer = (qId, value) => {
+    setAnswers((prevAnswers) => {
+      const normalizedValue = String(value || '').trim();
+      if (!normalizedValue) {
+        const nextAnswers = { ...prevAnswers };
+        delete nextAnswers[qId];
+        return nextAnswers;
+      }
+      return { ...prevAnswers, [qId]: normalizedValue };
+    });
+  };
+
   // --- РћРЎРќРћР’РќРђ Р—РњР†РќРђ РўРЈРў ---
   // Р‘РµСЂРµРјРѕ РЅР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ РїСЂСЏРјРѕ Р· РєР°С‚РµгРѕСЂС–С—
   const categoryConfig = selectedCat && config ? config.categories[selectedCat] : null;
   const isWeightRequired = categoryConfig ? (categoryConfig.requires_weight === 1) : true;
+
+  useEffect(() => {
+    if (!selectedCat || !config) return;
+
+    setAnswers((prevAnswers) => {
+      let hasChanges = false;
+      const nextAnswers = { ...prevAnswers };
+      const categoryQuestions = config.questions?.[selectedCat] || [];
+
+      for (const question of categoryQuestions) {
+        const selectedValue = nextAnswers[question.id];
+        if (selectedValue === undefined) continue;
+        if (isTextQuestion(question)) continue;
+
+        const visibleOptionIds = getVisibleOptionsForQuestion(
+          question,
+          nextAnswers,
+          isCalibrated
+        ).map((option) => Number(option.id));
+
+        if (!visibleOptionIds.includes(Number(selectedValue))) {
+          delete nextAnswers[question.id];
+          hasChanges = true;
+        }
+      }
+
+      return hasChanges ? nextAnswers : prevAnswers;
+    });
+  }, [selectedCat, config, isCalibrated]);
 
   useEffect(() => {
     if (!selectedCat || !config) {
@@ -95,10 +181,15 @@ function App() {
       return;
     }
 
-    const requiredQuestions = config.questions?.[selectedCat] || [];
-    const hasMissingRequired = requiredQuestions
+    const categoryQuestions = config.questions?.[selectedCat] || [];
+    const hasMissingRequired = categoryQuestions
       .filter((q) => q.required === 1)
-      .some((q) => answers[q.id] === undefined);
+      .filter((q) => isTextQuestion(q) || getVisibleOptionsForQuestion(q).length > 0)
+      .some((q) => {
+        const value = answers[q.id];
+        if (isTextQuestion(q)) return value === undefined || String(value).trim() === '';
+        return value === undefined;
+      });
 
     if (hasMissingRequired) {
       setLivePriceData(null);
@@ -151,10 +242,15 @@ function App() {
   const handlePreview = () => {
     if (isWeightRequired && !weight) return alert("Введіть вагу!");
     if (parseFloat(weight) < 0) return alert("Вага не може бути від'ємною!");
-    const requiredQuestions = config?.questions?.[selectedCat] || [];
-    const missingRequired = requiredQuestions
+    const categoryQuestions = config?.questions?.[selectedCat] || [];
+    const missingRequired = categoryQuestions
       .filter(q => q.required === 1)
-      .filter(q => answers[q.id] === undefined);
+      .filter(q => isTextQuestion(q) || getVisibleOptionsForQuestion(q).length > 0)
+      .filter((q) => {
+        const value = answers[q.id];
+        if (isTextQuestion(q)) return value === undefined || String(value).trim() === '';
+        return value === undefined;
+      });
     if (missingRequired.length > 0) {
       return alert(`Будь ласка, заповніть обов'язкові питання: ${missingRequired.map(q => q.label).join(', ')}`);
     }
@@ -506,42 +602,63 @@ function App() {
               </div>
 
               <div className="space-y-6">
-                {config.questions[selectedCat]?.map(q => (
-                  <div key={q.id} className="rounded-2xl border border-slate-200 bg-white/80 p-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <label className="text-sm font-semibold text-slate-700">{q.label}</label>
-                      {q.required === 1 && <span className="chip">Обов'язкове</span>}
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {q.options.map(opt => (
-                        <button
-                          key={opt.id}
-                          onClick={() => handleAnswer(q.id, opt.id)}
-                          className={`option-pill ${answers[q.id] === opt.id ? 'option-pill-active' : 'option-pill-idle'}`}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-
-                    {q.id === 'raw_type' && answers['raw_type'] === 1 && (
-                      <div className="info-panel mt-4 p-4">
-                        <label className="block text-sm font-semibold text-slate-800 mb-3">{config.extraConfig.is_calibrated.label}</label>
-                        <div className="flex flex-wrap gap-2">
-                          {config.extraConfig.is_calibrated.options.map(opt => (
-                            <button
-                              key={opt.id}
-                              onClick={() => setIsCalibrated(prev => prev === opt.id ? null : opt.id)}
-                              className={`option-pill ${isCalibrated === opt.id ? 'option-pill-active' : 'option-pill-idle'}`}
-                            >
-                              {opt.label}
-                            </button>
-                          ))}
-                        </div>
+                {config.questions[selectedCat]?.map(q => {
+                  const visibleOptions = getVisibleOptionsForQuestion(q);
+                  const textQuestion = isTextQuestion(q);
+                  return (
+                    <div key={q.id} className="rounded-2xl border border-slate-200 bg-white/80 p-5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <label className="text-sm font-semibold text-slate-700">{q.label}</label>
+                        {q.required === 1 && (textQuestion || visibleOptions.length > 0) && <span className="chip">Обов'язкове</span>}
                       </div>
-                    )}
-                  </div>
-                ))}
+                      {textQuestion ? (
+                        <div className="mt-3">
+                          <input
+                            type="text"
+                            className="input"
+                            value={answers[q.id] || ''}
+                            onChange={(e) => handleTextAnswer(q.id, e.target.value)}
+                            placeholder="Введіть значення..."
+                          />
+                        </div>
+                      ) : (
+                        <>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {visibleOptions.map(opt => (
+                              <button
+                                key={opt.id}
+                                onClick={() => handleAnswer(q.id, opt.id)}
+                                className={`option-pill ${answers[q.id] === opt.id ? 'option-pill-active' : 'option-pill-idle'}`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                          {visibleOptions.length === 0 && (
+                            <p className="mt-3 text-xs text-slate-500">Немає доступних варіантів для поточних умов.</p>
+                          )}
+                        </>
+                      )}
+
+                      {q.id === 'raw_type' && answers['raw_type'] === 1 && (
+                        <div className="info-panel mt-4 p-4">
+                          <label className="block text-sm font-semibold text-slate-800 mb-3">{config.extraConfig.is_calibrated.label}</label>
+                          <div className="flex flex-wrap gap-2">
+                            {config.extraConfig.is_calibrated.options.map(opt => (
+                              <button
+                                key={opt.id}
+                                onClick={() => setIsCalibrated(prev => prev === opt.id ? null : opt.id)}
+                                className={`option-pill ${isCalibrated === opt.id ? 'option-pill-active' : 'option-pill-idle'}`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
 
                 {isWeightRequired && (
                   <div className="rounded-2xl border border-slate-200 bg-white/80 p-5">

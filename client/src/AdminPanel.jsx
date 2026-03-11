@@ -8,12 +8,13 @@ export default function AdminPanel() {
     const [selectedQuestion, setSelectedQuestion] = useState(null);
     const [pricesData, setPricesData] = useState(null);
     const [editCat, setEditCat] = useState({ name: '', requires_weight: true });
-    const [editQuestion, setEditQuestion] = useState({ label: '', sku_index: '', required: true });
+    const [editQuestion, setEditQuestion] = useState({ label: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options' });
 
     // Стани форм
     const [newCat, setNewCat] = useState({ code: '', name: '', requires_weight: true });
-    const [newQuest, setNewQuest] = useState({ key: '', label: '', sku_index: '', required: true });
-    const [newOpt, setNewOpt] = useState({ value_id: '', label: '' });
+    const [newQuest, setNewQuest] = useState({ key: '', label: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options' });
+    const [newOpt, setNewOpt] = useState({ value_id: '', label: '', visible_if_json: '' });
+    const [editOpt, setEditOpt] = useState({ id: null, value_id: '', label: '', visible_if_json: '' });
 
     // Стани для цін
     const [newScenario, setNewScenario] = useState({ name: '', match_json: '', axis_x_key: '', axis_y_key: '' });
@@ -38,6 +39,10 @@ export default function AdminPanel() {
         setEditScenario(null);
     }, [selectedCat]);
 
+    useEffect(() => {
+        setEditOpt({ id: null, value_id: '', label: '', visible_if_json: '' });
+    }, [selectedQuestion?.q_db_id]);
+
     const fetchConfig = () => { axios.get('/api/config').then(res => setConfig(res.data)); };
     const fetchPrices = () => { axios.get(`/api/admin/prices/${selectedCat.code}`).then(res => setPricesData(res.data)); };
 
@@ -49,13 +54,64 @@ export default function AdminPanel() {
     };
     const addQuestion = () => {
         if(!selectedCat) return;
-        axios.post('/api/admin/question', { ...newQuest, required: newQuest.required ? 1 : 0, category_code: selectedCat.code })
-             .then(() => { setNewQuest({ key: '', label: '', sku_index: '', required: true }); fetchConfig(); });
+        const isTextQuestion = newQuest.input_type === 'text';
+        axios.post('/api/admin/question', {
+            ...newQuest,
+            required: newQuest.required ? 1 : 0,
+            include_in_sku: isTextQuestion ? 0 : (newQuest.include_in_sku ? 1 : 0),
+            input_type: isTextQuestion ? 'text' : 'options',
+            category_code: selectedCat.code
+        })
+             .then(() => { setNewQuest({ key: '', label: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options' }); fetchConfig(); });
     };
     const addOption = () => {
         if(!selectedQuestion) return;
-        axios.post('/api/admin/option', { ...newOpt, question_id: selectedQuestion.q_db_id })
-             .then(() => { setNewOpt({ value_id: '', label: '' }); fetchConfig(); });
+        if ((selectedQuestion.input_type || 'options') === 'text') {
+            return alert("Для текстового питання варіанти не потрібні");
+        }
+        let parsedRule = null;
+        try {
+            parsedRule = newOpt.visible_if_json ? JSON.parse(newOpt.visible_if_json) : null;
+        } catch (e) {
+            return alert("Помилка JSON в visible_if");
+        }
+
+        axios.post('/api/admin/option', {
+            question_id: selectedQuestion.q_db_id,
+            value_id: newOpt.value_id,
+            label: newOpt.label,
+            visible_if_json: parsedRule
+        })
+             .then(() => { setNewOpt({ value_id: '', label: '', visible_if_json: '' }); fetchConfig(); });
+    };
+    const beginOptionEdit = (opt) => {
+        setEditOpt({
+            id: opt.db_id,
+            value_id: String(opt.id),
+            label: opt.label,
+            visible_if_json: opt.visible_if_json ? formatMatchJson(opt.visible_if_json) : '',
+        });
+    };
+    const updateOption = () => {
+        if (!editOpt.id) return;
+        let parsedRule = null;
+        try {
+            parsedRule = editOpt.visible_if_json ? JSON.parse(editOpt.visible_if_json) : null;
+        } catch (e) {
+            return alert("Помилка JSON в visible_if");
+        }
+
+        axios.put('/api/admin/option', {
+            id: editOpt.id,
+            value_id: editOpt.value_id,
+            label: editOpt.label,
+            visible_if_json: parsedRule,
+        })
+            .then(() => {
+                setEditOpt({ id: null, value_id: '', label: '', visible_if_json: '' });
+                fetchConfig();
+            })
+            .catch(err => alert(`Помилка оновлення опції: ${err.response?.data?.error || err.message}`));
     };
     const deleteItem = (type, id) => {
         if(!window.confirm("Видалити цей елемент?")) return;
@@ -78,11 +134,14 @@ export default function AdminPanel() {
 
     const updateQuestion = () => {
         if (!selectedQuestion) return;
+        const isTextQuestion = editQuestion.input_type === 'text';
         axios.post('/api/admin/question/update', {
             id: selectedQuestion.q_db_id,
             label: editQuestion.label,
             sku_index: editQuestion.sku_index,
-            required: editQuestion.required ? 1 : 0
+            required: editQuestion.required ? 1 : 0,
+            include_in_sku: isTextQuestion ? 0 : (editQuestion.include_in_sku ? 1 : 0),
+            input_type: isTextQuestion ? 'text' : 'options'
         })
             .then(() => {
                 fetchConfig();
@@ -200,6 +259,7 @@ export default function AdminPanel() {
     );
     const currentCatQuestions = selectedCat ? (config.questions[selectedCat.code] || []) : [];
     const currentOptions = selectedQuestion ? (currentCatQuestions.find(q => q.id === selectedQuestion.id)?.options || []) : [];
+    const selectedQuestionInputType = selectedQuestion ? (selectedQuestion.input_type || 'options') : 'options';
 
     const validationIssues = [];
     if (config && config.categories && config.questions) {
@@ -215,11 +275,13 @@ export default function AdminPanel() {
                     validationIssues.push(`Категорія ${cat.code}: дубль key ${q.id}`);
                 }
                 keySet.add(q.id);
-                if (indexSet.has(q.sku_index)) {
-                    validationIssues.push(`Категорія ${cat.code}: дубль індексу ${q.sku_index}`);
+                if (q.include_in_sku === 1) {
+                    if (indexSet.has(q.sku_index)) {
+                        validationIssues.push(`Категорія ${cat.code}: дубль індексу ${q.sku_index}`);
+                    }
+                    indexSet.add(q.sku_index);
                 }
-                indexSet.add(q.sku_index);
-                if (!q.options || q.options.length === 0) {
+                if ((q.input_type || 'options') !== 'text' && (!q.options || q.options.length === 0)) {
                     validationIssues.push(`Категорія ${cat.code}: питання ${q.id} без варіантів`);
                 }
             });
@@ -298,12 +360,12 @@ export default function AdminPanel() {
                             {currentCatQuestions.map(q => (
                                 <div
                                     key={q.q_db_id}
-                                    onClick={() => { setSelectedQuestion(q); setEditQuestion({ label: q.label, sku_index: q.sku_index, required: q.required === 1 }); }}
+                                    onClick={() => { setSelectedQuestion(q); setEditQuestion({ label: q.label, sku_index: q.sku_index, required: q.required === 1, include_in_sku: q.include_in_sku === 1, input_type: q.input_type || 'options' }); }}
                                     className={`p-3 rounded-xl cursor-pointer flex justify-between items-center border transition ${selectedQuestion?.id === q.id ? 'bg-[rgba(20,32,59,0.08)] border-[rgba(20,32,59,0.4)]' : 'border-slate-200 hover:bg-slate-50'}`}
                                 >
                                     <div>
                                         <span className="font-semibold text-slate-800">{q.label}</span>
-                                        <span className="text-xs text-slate-500 block">Key: {q.id} | Index: {q.sku_index} | {q.required === 1 ? 'Обовʼязкове' : 'Необовʼязкове'}</span>
+                                        <span className="text-xs text-slate-500 block">Key: {q.id} | Index: {q.sku_index} | {q.required === 1 ? 'Обовʼязкове' : 'Необовʼязкове'} | {q.include_in_sku === 1 ? 'Йде в SKU' : 'Лише в БД'} | Тип: {(q.input_type || 'options') === 'text' ? 'Текст' : 'Варіанти'}</span>
                                     </div>
                                     <button onClick={(e) => { e.stopPropagation(); deleteItem('question', q.q_db_id); }} className="text-rose-400 hover:text-rose-600 px-2">×</button>
                                 </div>
@@ -314,7 +376,12 @@ export default function AdminPanel() {
                                 <div className="text-xs text-slate-500 mb-2">Редагувати питання</div>
                                 <input className="input-sm mb-2" placeholder="Label" value={editQuestion.label} onChange={e => setEditQuestion({...editQuestion, label: e.target.value})}/>
                                 <input className="input-sm mb-2" type="number" placeholder="Index" value={editQuestion.sku_index} onChange={e => setEditQuestion({...editQuestion, sku_index: e.target.value})} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown}/>
+                                <select className="input-sm mb-2" value={editQuestion.input_type} onChange={e => setEditQuestion({...editQuestion, input_type: e.target.value, include_in_sku: e.target.value === 'text' ? false : editQuestion.include_in_sku })}>
+                                    <option value="options">Варіанти</option>
+                                    <option value="text">Текстове поле</option>
+                                </select>
                                 <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={editQuestion.required} onChange={e => setEditQuestion({...editQuestion, required: e.target.checked})} className="mr-2"/> Обовʼязкове</label>
+                                <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={editQuestion.include_in_sku} disabled={editQuestion.input_type === 'text'} onChange={e => setEditQuestion({...editQuestion, include_in_sku: e.target.checked})} className="mr-2"/> Додавати в SKU</label>
                                 <button onClick={updateQuestion} className="btn btn-primary w-full">Зберегти</button>
                             </div>
                         )}
@@ -323,7 +390,12 @@ export default function AdminPanel() {
                                 <input className="input-sm mb-2" placeholder="Key (size)" value={newQuest.key} onChange={e => setNewQuest({...newQuest, key: e.target.value})}/>
                                 <input className="input-sm mb-2" placeholder="Label" value={newQuest.label} onChange={e => setNewQuest({...newQuest, label: e.target.value})}/>
                                 <input className="input-sm mb-2" type="number" placeholder="Index" value={newQuest.sku_index} onChange={e => setNewQuest({...newQuest, sku_index: e.target.value})} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown}/>
+                                <select className="input-sm mb-2" value={newQuest.input_type} onChange={e => setNewQuest({...newQuest, input_type: e.target.value, include_in_sku: e.target.value === 'text' ? false : newQuest.include_in_sku })}>
+                                    <option value="options">Варіанти</option>
+                                    <option value="text">Текстове поле</option>
+                                </select>
                                 <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={newQuest.required} onChange={e => setNewQuest({...newQuest, required: e.target.checked})} className="mr-2"/> Обовʼязкове</label>
+                                <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={newQuest.include_in_sku} disabled={newQuest.input_type === 'text'} onChange={e => setNewQuest({...newQuest, include_in_sku: e.target.checked})} className="mr-2"/> Додавати в SKU</label>
                                 <button onClick={addQuestion} className="btn btn-amber w-full">Додати</button>
                             </div>
                         )}
@@ -335,20 +407,62 @@ export default function AdminPanel() {
                             <h2 className="section-title-text">3. Варіанти</h2>
                         </div>
                         <div className="h-96 overflow-y-auto space-y-2 pr-2">
+                            {selectedQuestionInputType === 'text' && (
+                                <div className="p-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-600">
+                                    Для текстового питання варіанти не використовуються.
+                                </div>
+                            )}
                             {currentOptions.map(opt => (
                                 <div key={opt.db_id} className="p-2 border border-slate-200 rounded-xl flex justify-between bg-white/80 items-center">
-                                    <span className="text-sm text-slate-700">{opt.label}</span>
+                                    <div>
+                                        <span className="text-sm text-slate-700">{opt.label}</span>
+                                        <span className="text-[11px] text-slate-500 block">
+                                            visible_if: {opt.visible_if_json ? formatMatchJson(opt.visible_if_json) : 'always'}
+                                        </span>
+                                    </div>
                                     <div className="flex items-center gap-2">
                                         <span className="bg-slate-100 px-2 rounded text-xs text-slate-600">{opt.id}</span>
+                                        <button onClick={() => beginOptionEdit(opt)} className="btn btn-outline text-xs px-2 py-1">Редагувати</button>
                                         <button onClick={() => deleteItem('option', opt.db_id)} className="text-rose-400 hover:text-rose-600 font-bold px-2">×</button>
                                     </div>
                                 </div>
                             ))}
                         </div>
-                        {selectedQuestion && (
+                        {editOpt.id && (
+                            <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-white/80">
+                                <div className="text-xs text-slate-500 mb-2">Редагувати опцію</div>
+                                <input
+                                    className="input-sm mb-2"
+                                    type="number"
+                                    placeholder="Value ID"
+                                    value={editOpt.value_id}
+                                    onChange={e => setEditOpt({...editOpt, value_id: e.target.value})}
+                                    onWheel={handleNumberWheel}
+                                    onKeyDown={handleNumberKeyDown}
+                                />
+                                <input
+                                    className="input-sm mb-2"
+                                    placeholder="Label"
+                                    value={editOpt.label}
+                                    onChange={e => setEditOpt({...editOpt, label: e.target.value})}
+                                />
+                                <input
+                                    className="input-sm font-mono text-xs mb-2"
+                                    placeholder='visible_if JSON, напр: {"raw_type":1,"is_calibrated":[0,2]}'
+                                    value={editOpt.visible_if_json}
+                                    onChange={e => setEditOpt({...editOpt, visible_if_json: e.target.value})}
+                                />
+                                <div className="flex gap-2">
+                                    <button onClick={updateOption} className="btn btn-primary w-full">Зберегти</button>
+                                    <button onClick={() => setEditOpt({ id: null, value_id: '', label: '', visible_if_json: '' })} className="btn btn-outline w-full">Скасувати</button>
+                                </div>
+                            </div>
+                        )}
+                        {selectedQuestion && selectedQuestionInputType !== 'text' && (
                             <div className="mt-4 pt-4 border-t border-slate-200 bg-slate-50/70 p-3 rounded-xl">
                                 <input className="input-sm mb-2" type="number" placeholder="Value ID" value={newOpt.value_id} onChange={e => setNewOpt({...newOpt, value_id: e.target.value})} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown}/>
                                 <input className="input-sm mb-2" placeholder="Label" value={newOpt.label} onChange={e => setNewOpt({...newOpt, label: e.target.value})}/>
+                                <input className="input-sm font-mono text-xs mb-2" placeholder='visible_if JSON, напр: {"raw_type":1,"is_calibrated":[0,2]}' value={newOpt.visible_if_json} onChange={e => setNewOpt({...newOpt, visible_if_json: e.target.value})}/>
                                 <button onClick={addOption} className="btn btn-amber w-full">Додати</button>
                             </div>
                         )}

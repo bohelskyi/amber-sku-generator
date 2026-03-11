@@ -78,6 +78,12 @@ function asRuleObject(value) {
   return value;
 }
 
+function parseOptionalRule(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'string') return JSON.parse(value);
+  return value;
+}
+
 function parseVariationSku(skuValue) {
   const normalizedSku = String(skuValue || '').trim().toUpperCase();
   const variationMatch = normalizedSku.match(/^(.*)-(\d{3})$/);
@@ -134,7 +140,7 @@ async function getQuestionsForCategory(categoryCode) {
         o.label AS o_label
       FROM questions q
       LEFT JOIN options o ON q.id = o.question_id
-      WHERE q.category_code = $1
+      WHERE q.category_code = $1 AND COALESCE(q.include_in_sku, 1) = 1
       ORDER BY q.sku_index, LENGTH(CAST(o.value_id AS TEXT)) DESC, o.value_id ASC
     `,
     [categoryCode]
@@ -332,6 +338,76 @@ async function getProductBySku(fullSku) {
   return result.rows[0] || null;
 }
 
+async function getNonSkuQuestionMaps(categoryCodes) {
+  if (!categoryCodes || categoryCodes.length === 0) return new Map();
+
+  const result = await pool.query(
+    `
+      SELECT
+        q.category_code,
+        q.key,
+        q.label AS q_label,
+        q.sku_index,
+        o.value_id,
+        o.label AS o_label
+      FROM questions q
+      LEFT JOIN options o ON o.question_id = q.id
+      WHERE q.category_code = ANY($1::text[])
+        AND COALESCE(q.include_in_sku, 1) = 0
+      ORDER BY q.category_code, q.sku_index, q.id, o.value_id
+    `,
+    [categoryCodes]
+  );
+
+  const categoryMap = new Map();
+  for (const row of result.rows) {
+    if (!categoryMap.has(row.category_code)) categoryMap.set(row.category_code, new Map());
+    const questionMap = categoryMap.get(row.category_code);
+    if (!questionMap.has(row.key)) {
+      questionMap.set(row.key, {
+        key: row.key,
+        label: row.q_label,
+        optionLabels: new Map(),
+      });
+    }
+    if (row.value_id !== null && row.value_id !== undefined) {
+      questionMap.get(row.key).optionLabels.set(Number(row.value_id), row.o_label);
+    }
+  }
+
+  return categoryMap;
+}
+
+function getExportSizeValue(productRow, nonSkuQuestionMaps) {
+  const categoryCode = String(productRow.category || '');
+  if (!['BR', 'NM'].includes(categoryCode)) return '';
+
+  const details = productRow.details && typeof productRow.details === 'object' ? productRow.details : {};
+  const answers = details.answers && typeof details.answers === 'object' ? details.answers : {};
+  const questionMap = nonSkuQuestionMaps.get(categoryCode);
+  if (!questionMap || questionMap.size === 0) return '';
+
+  const allQuestions = Array.from(questionMap.values());
+  const sizeQuestions = allQuestions.filter(
+    (question) =>
+      /size/i.test(String(question.key || '')) ||
+      /розмір/i.test(String(question.label || ''))
+  );
+  const targetQuestions = sizeQuestions.length > 0 ? sizeQuestions : allQuestions;
+
+  const labels = [];
+  for (const question of targetQuestions) {
+    const rawValue = answers[question.key];
+    if (rawValue === undefined || rawValue === null || rawValue === '') continue;
+    const numericValue = Number(rawValue);
+    const valueKey = Number.isNaN(numericValue) ? rawValue : numericValue;
+    const optionLabel = question.optionLabels.get(valueKey);
+    labels.push(optionLabel || String(rawValue));
+  }
+
+  return labels.join(' / ');
+}
+
 async function getExportRows(fromSku, toSku) {
   const normalizedFromSku = String(fromSku || '').trim().toUpperCase();
   const normalizedToSku = String(toSku || '').trim().toUpperCase();
@@ -367,7 +443,7 @@ async function getExportRows(fromSku, toSku) {
 
   const result = await pool.query(
     `
-      SELECT id, full_sku, total_price_uah, created_at
+      SELECT id, full_sku, category, total_price_uah, details, created_at
       FROM products
       WHERE ${whereClauses.join(' AND ')}
       ORDER BY id ASC
@@ -375,13 +451,21 @@ async function getExportRows(fromSku, toSku) {
     params
   );
 
+  const nonSkuQuestionMaps = await getNonSkuQuestionMaps(['BR', 'NM']);
+  const rowsWithSize = result.rows.map((row) => ({
+    ...row,
+    export_size: getExportSizeValue(row, nonSkuQuestionMaps),
+  }));
+
   return {
-    rows: result.rows,
+    rows: rowsWithSize,
     range: {
       fromSku: fromProduct.full_sku,
       toSku: toProduct ? toProduct.full_sku : null,
       resolvedToSku:
-        result.rows.length > 0 ? result.rows[result.rows.length - 1].full_sku : fromProduct.full_sku,
+        rowsWithSize.length > 0
+          ? rowsWithSize[rowsWithSize.length - 1].full_sku
+          : fromProduct.full_sku,
     },
   };
 }
@@ -508,7 +592,9 @@ async function initDb() {
       key TEXT,
       label TEXT,
       sku_index INTEGER,
-      required INTEGER DEFAULT 1
+      required INTEGER DEFAULT 1,
+      include_in_sku INTEGER DEFAULT 1,
+      input_type TEXT DEFAULT 'options'
     )
   `);
 
@@ -517,9 +603,12 @@ async function initDb() {
       id SERIAL PRIMARY KEY,
       question_id INTEGER REFERENCES questions(id) ON DELETE CASCADE,
       value_id INTEGER,
-      label TEXT
+      label TEXT,
+      visible_if_json JSONB
     )
   `);
+
+  await pool.query('ALTER TABLE options ADD COLUMN IF NOT EXISTS visible_if_json JSONB');
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS price_scenarios (
@@ -554,6 +643,10 @@ async function initDb() {
 
   await pool.query('ALTER TABLE questions ADD COLUMN IF NOT EXISTS required INTEGER DEFAULT 1');
   await pool.query('UPDATE questions SET required = 1 WHERE required IS NULL');
+  await pool.query('ALTER TABLE questions ADD COLUMN IF NOT EXISTS include_in_sku INTEGER DEFAULT 1');
+  await pool.query('UPDATE questions SET include_in_sku = 1 WHERE include_in_sku IS NULL');
+  await pool.query("ALTER TABLE questions ADD COLUMN IF NOT EXISTS input_type TEXT DEFAULT 'options'");
+  await pool.query("UPDATE questions SET input_type = 'options' WHERE input_type IS NULL OR input_type = ''");
 
   const { rows } = await pool.query('SELECT count(*)::int AS count FROM categories');
   if (rows[0].count === 0) {
@@ -582,8 +675,8 @@ async function migrateData() {
       const questions = initialConfig.questions[code] || [];
       for (const q of questions) {
         const qInsert = await client.query(
-          `INSERT INTO questions (category_code, key, label, sku_index, required)
-           VALUES ($1, $2, $3, $4, 1)
+          `INSERT INTO questions (category_code, key, label, sku_index, required, include_in_sku, input_type)
+           VALUES ($1, $2, $3, $4, 1, 1, 'options')
            RETURNING id`,
           [code, q.id, q.label, q.sku_index]
         );
@@ -680,9 +773,12 @@ app.get('/api/config', async (req, res) => {
         q.label AS q_label,
         q.sku_index,
         q.required,
+        q.include_in_sku,
+        q.input_type,
         o.id AS o_db_id,
         o.value_id,
-        o.label AS o_label
+        o.label AS o_label,
+        o.visible_if_json
       FROM questions q
       LEFT JOIN options o ON q.id = o.question_id
       ORDER BY q.category_code, q.sku_index, o.value_id
@@ -697,6 +793,8 @@ app.get('/api/config', async (req, res) => {
           label: row.q_label,
           sku_index: row.sku_index,
           required: row.required,
+          include_in_sku: row.include_in_sku,
+          input_type: row.input_type || 'options',
           cat: row.category_code,
           options: [],
         };
@@ -707,6 +805,7 @@ app.get('/api/config', async (req, res) => {
           db_id: row.o_db_id,
           id: row.value_id,
           label: row.o_label,
+          visible_if_json: row.visible_if_json || null,
         });
       }
     }
@@ -930,7 +1029,7 @@ app.post('/api/preview', async (req, res) => {
     const { categoryCode, answers = {}, weight, isCalibrated } = req.body;
 
     const qRows = await pool.query(
-      'SELECT key, sku_index FROM questions WHERE category_code = $1 ORDER BY sku_index ASC',
+      'SELECT key, sku_index FROM questions WHERE category_code = $1 AND COALESCE(include_in_sku, 1) = 1 ORDER BY sku_index ASC',
       [categoryCode]
     );
 
@@ -1113,12 +1212,27 @@ app.put('/api/admin/category', async (req, res) => {
 
 app.post('/api/admin/question', async (req, res) => {
   try {
-    const { category_code, key, label, sku_index, required } = req.body;
+    const { category_code, key, label, sku_index, required, include_in_sku, input_type } = req.body;
+    const normalizedInputType = String(input_type || 'options').trim().toLowerCase() === 'text' ? 'text' : 'options';
+    const normalizedIncludeInSku =
+      normalizedInputType === 'text'
+        ? 0
+        : include_in_sku !== undefined
+          ? Number(include_in_sku)
+          : 1;
     const result = await pool.query(
-      `INSERT INTO questions (category_code, key, label, sku_index, required)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO questions (category_code, key, label, sku_index, required, include_in_sku, input_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id`,
-      [category_code, key, label, Number(sku_index), required !== undefined ? Number(required) : 1]
+      [
+        category_code,
+        key,
+        label,
+        Number(sku_index),
+        required !== undefined ? Number(required) : 1,
+        normalizedIncludeInSku,
+        normalizedInputType,
+      ]
     );
     res.json({ id: result.rows[0].id });
   } catch (err) {
@@ -1128,14 +1242,28 @@ app.post('/api/admin/question', async (req, res) => {
 
 app.put('/api/admin/question', async (req, res) => {
   try {
-    const { id, label, sku_index, required } = req.body;
+    const { id, label, sku_index, required, include_in_sku, input_type } = req.body;
     if (!id || label === undefined) {
       return res.status(400).json({ error: 'Потрібні id та назва' });
     }
+    const normalizedInputType = String(input_type || 'options').trim().toLowerCase() === 'text' ? 'text' : 'options';
+    const normalizedIncludeInSku =
+      normalizedInputType === 'text'
+        ? 0
+        : include_in_sku !== undefined
+          ? Number(include_in_sku)
+          : 1;
 
     await pool.query(
-      'UPDATE questions SET label = $1, sku_index = $2, required = $3 WHERE id = $4',
-      [label, Number(sku_index), required !== undefined ? Number(required) : 1, Number(id)]
+      'UPDATE questions SET label = $1, sku_index = $2, required = $3, include_in_sku = $4, input_type = $5 WHERE id = $6',
+      [
+        label,
+        Number(sku_index),
+        required !== undefined ? Number(required) : 1,
+        normalizedIncludeInSku,
+        normalizedInputType,
+        Number(id),
+      ]
     );
     res.json({ success: true });
   } catch (err) {
@@ -1145,14 +1273,28 @@ app.put('/api/admin/question', async (req, res) => {
 
 app.post('/api/admin/question/update', async (req, res) => {
   try {
-    const { id, label, sku_index, required } = req.body;
+    const { id, label, sku_index, required, include_in_sku, input_type } = req.body;
     if (!id || label === undefined) {
       return res.status(400).json({ error: 'Потрібні id та назва' });
     }
+    const normalizedInputType = String(input_type || 'options').trim().toLowerCase() === 'text' ? 'text' : 'options';
+    const normalizedIncludeInSku =
+      normalizedInputType === 'text'
+        ? 0
+        : include_in_sku !== undefined
+          ? Number(include_in_sku)
+          : 1;
 
     await pool.query(
-      'UPDATE questions SET label = $1, sku_index = $2, required = $3 WHERE id = $4',
-      [label, Number(sku_index), required !== undefined ? Number(required) : 1, Number(id)]
+      'UPDATE questions SET label = $1, sku_index = $2, required = $3, include_in_sku = $4, input_type = $5 WHERE id = $6',
+      [
+        label,
+        Number(sku_index),
+        required !== undefined ? Number(required) : 1,
+        normalizedIncludeInSku,
+        normalizedInputType,
+        Number(id),
+      ]
     );
     res.json({ success: true });
   } catch (err) {
@@ -1162,12 +1304,43 @@ app.post('/api/admin/question/update', async (req, res) => {
 
 app.post('/api/admin/option', async (req, res) => {
   try {
-    const { question_id, value_id, label } = req.body;
+    const { question_id, value_id, label, visible_if_json } = req.body;
+    const visibleRule = parseOptionalRule(visible_if_json);
     const result = await pool.query(
-      'INSERT INTO options (question_id, value_id, label) VALUES ($1, $2, $3) RETURNING id',
-      [Number(question_id), Number(value_id), label]
+      'INSERT INTO options (question_id, value_id, label, visible_if_json) VALUES ($1, $2, $3, $4::jsonb) RETURNING id',
+      [
+        Number(question_id),
+        Number(value_id),
+        label,
+        visibleRule ? JSON.stringify(visibleRule) : null,
+      ]
     );
     res.json({ id: result.rows[0].id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/admin/option', async (req, res) => {
+  try {
+    const { id, value_id, label, visible_if_json } = req.body;
+    if (!id || !label || value_id === undefined || value_id === null || value_id === '') {
+      return res.status(400).json({ error: 'Потрібні id, label і value_id' });
+    }
+
+    const visibleRule = parseOptionalRule(visible_if_json);
+    await pool.query(
+      `UPDATE options
+       SET value_id = $1, label = $2, visible_if_json = $3::jsonb
+       WHERE id = $4`,
+      [
+        Number(value_id),
+        label,
+        visibleRule ? JSON.stringify(visibleRule) : null,
+        Number(id),
+      ]
+    );
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1209,12 +1382,13 @@ app.get('/api/export/csv', async (req, res) => {
     const exportData = await getExportRows(fromSku, toSku);
 
     const csv = buildCsv([
-      ['sku', 'price_uah'],
+      ['sku', 'price_uah', 'size'],
       ...exportData.rows.map((row) => [
         row.full_sku,
         row.total_price_uah !== null && row.total_price_uah !== undefined
           ? Number(row.total_price_uah).toFixed(2)
           : '',
+        row.export_size || '',
       ]),
     ]);
 
