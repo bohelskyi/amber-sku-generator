@@ -299,7 +299,13 @@ function App() {
     });
   };
 
-  const handleCancel = () => { handleStart(null); };
+  const handleBackToParameters = () => {
+    setPreviewData(null);
+    setDisplaySku('');
+    setVariationData(null);
+    setVariationError('');
+    setIsVariationLoading(false);
+  };
 
   const handleAddVariation = () => {
     if (!previewData) return;
@@ -802,7 +808,7 @@ function App() {
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <button onClick={handleCancel} className="btn btn-outline py-3">Відмінити</button>
+              <button onClick={handleBackToParameters} className="btn btn-outline py-3">Назад до параметрів</button>
               <button onClick={handleAddVariation} className="btn btn-primary py-3" disabled={isVariationLoading}>
                 {isVariationLoading ? 'Підбираємо...' : 'Додати варіацію'}
               </button>
