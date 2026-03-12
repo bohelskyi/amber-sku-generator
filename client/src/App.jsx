@@ -21,6 +21,7 @@ function App() {
   const [variationError, setVariationError] = useState('');
   const [isVariationLoading, setIsVariationLoading] = useState(false);
   const [history, setHistory] = useState([]);
+  const [exportStatus, setExportStatus] = useState(null);
   const [skuToDelete, setSkuToDelete] = useState('');
   const [exportFromSku, setExportFromSku] = useState('');
   const [exportToSku, setExportToSku] = useState('');
@@ -95,9 +96,11 @@ function App() {
   useEffect(() => {
     api.get('/config').then(res => setConfig(res.data));
     fetchHistory();
+    fetchExportStatus();
   }, []);
 
   const fetchHistory = () => { api.get('/products').then(res => setHistory(res.data)); };
+  const fetchExportStatus = () => { api.get('/export/status').then(res => setExportStatus(res.data)); };
 
   const handleStart = (catCode) => {
     setSelectedCat(catCode);
@@ -291,6 +294,7 @@ function App() {
     };
     api.post('/save', payload).then(res => {
       fetchHistory();
+      fetchExportStatus();
       handleStart(null);
     });
   };
@@ -348,6 +352,7 @@ function App() {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(downloadUrl);
+      fetchExportStatus();
     } catch (err) {
       if (err.response?.data instanceof Blob) {
         const errorText = await err.response.data.text();
@@ -369,7 +374,7 @@ function App() {
     if(!sku) return;
     if(!window.confirm(`Видалити ${sku}?`)) return;
     api.post('/delete', { skuToDelete: sku })
-      .then(res => { alert(res.data.message); setSkuToDelete(''); fetchHistory(); })
+      .then(res => { alert(res.data.message); setSkuToDelete(''); fetchHistory(); fetchExportStatus(); })
       .catch(err => { alert("ПОМИЛКА: " + (err.response?.data?.error || err.message)); });
   };
 
@@ -404,6 +409,12 @@ function App() {
     if (suffix.type === 'weight') return suffix.value !== null ? `${suffix.value} г` : suffix.raw;
     if (suffix.type === 'sequence') return suffix.raw || String(suffix.value || '');
     return suffix.raw || '---';
+  };
+  const formatDateTime = (value) => {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleString('uk-UA');
   };
 
   const finalSku = displaySku || previewData?.fullProposedSku || '';
@@ -487,31 +498,24 @@ function App() {
             </section>
             <div className="space-y-6 fade-up stagger-2">
               <div className="card p-6 sm:p-8">
-                <p className="eyebrow">Процес</p>
-                <h3 className="section-title-text">3 кроки до артикула</h3>
-                <div className="mt-5 space-y-4">
-                  <div className="step-line">
-                    <div className="step-dot">1</div>
-                    <div>
-                      <div className="text-sm font-semibold text-slate-800">Оберіть категорію</div>
-                      <div className="text-xs text-slate-500">Система підставить потрібні параметри.</div>
-                    </div>
+                <p className="eyebrow">Експорт</p>
+                <h3 className="section-title-text">
+                  {exportStatus
+                    ? `З останнього експорту додано ${exportStatus.countSinceLastExport} артикулів`
+                    : 'Завантаження статусу експорту...'}
+                </h3>
+                <p className="section-subtitle mt-2">
+                  {exportStatus
+                    ? (exportStatus.hasExport
+                      ? `Останній експорт: ${formatDateTime(exportStatus.lastExport?.createdAt)}`
+                      : 'Експортів ще не було')
+                    : 'Підтягуємо дані...'}
+                </p>
+                {exportStatus && (
+                  <div className="mt-4">
+                    <span className="chip">Всього в базі: {exportStatus.totalProducts}</span>
                   </div>
-                  <div className="step-line">
-                    <div className="step-dot">2</div>
-                    <div>
-                      <div className="text-sm font-semibold text-slate-800">Заповніть характеристики</div>
-                      <div className="text-xs text-slate-500">Опції автоматично формують SKU.</div>
-                    </div>
-                  </div>
-                  <div className="step-line">
-                    <div className="step-dot">3</div>
-                    <div>
-                      <div className="text-sm font-semibold text-slate-800">Перевірте та збережіть</div>
-                      <div className="text-xs text-slate-500">Порівняння з базою і готова ціна.</div>
-                    </div>
-                  </div>
-                </div>
+                )}
               </div>
               <div className="card p-6 sm:p-8">
                 <p className="eyebrow">Decoder</p>

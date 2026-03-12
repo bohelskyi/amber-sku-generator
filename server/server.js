@@ -518,6 +518,55 @@ async function getExportRows(fromSku, toSku) {
   };
 }
 
+async function getExportStatus() {
+  const lastExportResult = await pool.query(
+    `
+      SELECT id, from_sku, to_sku, resolved_to_sku, exported_to_product_id, row_count, created_at
+      FROM export_events
+      ORDER BY id DESC
+      LIMIT 1
+    `
+  );
+  const totalsResult = await pool.query(
+    'SELECT count(*)::int AS total_count, COALESCE(MAX(id), 0)::int AS max_id FROM products'
+  );
+
+  const totalCount = Number(totalsResult.rows[0]?.total_count || 0);
+  const latestProductId = Number(totalsResult.rows[0]?.max_id || 0);
+  if (lastExportResult.rows.length === 0) {
+    return {
+      hasExport: false,
+      totalProducts: totalCount,
+      countSinceLastExport: totalCount,
+      latestProductId,
+      lastExport: null,
+    };
+  }
+
+  const lastExport = lastExportResult.rows[0];
+  const exportedToId = Number(lastExport.exported_to_product_id || 0);
+  const sinceResult = await pool.query(
+    'SELECT count(*)::int AS count FROM products WHERE id > $1',
+    [exportedToId]
+  );
+
+  return {
+    hasExport: true,
+    totalProducts: totalCount,
+    countSinceLastExport: Number(sinceResult.rows[0]?.count || 0),
+    latestProductId,
+    lastExport: {
+      id: Number(lastExport.id),
+      fromSku: lastExport.from_sku,
+      toSku: lastExport.to_sku,
+      resolvedToSku: lastExport.resolved_to_sku,
+      exportedToProductId: exportedToId,
+      rowCount: Number(lastExport.row_count || 0),
+      createdAt: lastExport.created_at,
+    },
+  };
+}
+
 async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated) {
   const scenarios = await pool.query(
     'SELECT * FROM price_scenarios WHERE category_code = $1',
@@ -686,6 +735,18 @@ async function initDb() {
       trigger_key TEXT,
       trigger_val INTEGER,
       factor REAL
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS export_events (
+      id SERIAL PRIMARY KEY,
+      from_sku TEXT,
+      to_sku TEXT,
+      resolved_to_sku TEXT,
+      exported_to_product_id INTEGER,
+      row_count INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
@@ -1424,6 +1485,15 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
+app.get('/api/export/status', async (req, res) => {
+  try {
+    const status = await getExportStatus();
+    res.json(status);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/export/csv', async (req, res) => {
   try {
     const { fromSku, toSku } = req.query;
@@ -1446,6 +1516,22 @@ app.get('/api/export/csv', async (req, res) => {
       ? `-${exportData.range.toSku}`
       : '-to-latest';
     const fileName = `amber-export-${exportData.range.fromSku}${suffixPart}.csv`;
+
+    const exportedToProductId =
+      exportData.rows.length > 0 ? Number(exportData.rows[exportData.rows.length - 1].id) : 0;
+    await pool.query(
+      `
+        INSERT INTO export_events (from_sku, to_sku, resolved_to_sku, exported_to_product_id, row_count)
+        VALUES ($1, $2, $3, $4, $5)
+      `,
+      [
+        exportData.range.fromSku,
+        exportData.range.toSku,
+        exportData.range.resolvedToSku,
+        exportedToProductId,
+        exportData.rows.length,
+      ]
+    );
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
