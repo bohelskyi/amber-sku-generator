@@ -3,15 +3,40 @@ import { formatUah, formatUsd } from '../../lib/formatters';
 export function PreviewResult({
   previewData,
   finalSku,
+  effectivePricePerGram,
+  effectivePricePerGramUah,
+  effectiveTotalPrice,
+  effectiveTotalPriceUah,
+  hasManualPrice,
   isVariationActive,
   variationData,
   variationError,
   isVariationLoading,
+  isManualPriceEditing,
+  manualPriceUah,
   onCopyText,
   onBackToParameters,
   onAddVariation,
+  onManualPriceChange,
+  onResetManualPrice,
   onSave,
+  onStartManualPriceEdit,
+  onStopManualPriceEdit,
 }) {
+  const priceActions = (
+    <PriceActions
+      effectiveTotalPriceUah={effectiveTotalPriceUah}
+      hasManualPrice={hasManualPrice}
+      isManualPriceEditing={isManualPriceEditing}
+      manualPriceUah={manualPriceUah}
+      onCopyText={onCopyText}
+      onManualPriceChange={onManualPriceChange}
+      onResetManualPrice={onResetManualPrice}
+      onStartManualPriceEdit={onStartManualPriceEdit}
+      onStopManualPriceEdit={onStopManualPriceEdit}
+    />
+  );
+
   return (
     <section className="card p-6 sm:p-8 border-t-4 border-[rgba(221,151,74,0.7)] fade-up">
       <div className="section-title mb-6">
@@ -36,10 +61,11 @@ export function PreviewResult({
             )}
             <div className="flex flex-wrap items-center justify-center gap-2">
               <button onClick={() => onCopyText(finalSku, 'SKU')} className="btn btn-outline text-xs px-3 py-1.5">Копіювати SKU</button>
-              <button onClick={() => previewData.totalPriceUah && onCopyText(`${previewData.totalPriceUah} ₴`, 'Ціну')} className="btn btn-outline text-xs px-3 py-1.5">Копіювати ціну</button>
+              {priceActions}
             </div>
-            <p className="mt-4 text-2xl font-semibold text-slate-800">{formatUah(previewData.totalPriceUah)}</p>
-            <p className="text-sm text-slate-600">{formatUsd(previewData.totalPrice)}</p>
+            <p className="mt-4 text-2xl font-semibold text-slate-800">{formatUah(effectiveTotalPriceUah)}</p>
+            {hasManualPrice && <p className="text-xs font-semibold text-[#8a5f2b]">Ціну змінено вручну</p>}
+            <p className="text-sm text-slate-600">{formatUsd(effectiveTotalPrice)}</p>
             {previewData.uahRate && <p className="text-xs text-slate-500">1 USD = {previewData.uahRate} ₴</p>}
           </div>
         </div>
@@ -55,18 +81,19 @@ export function PreviewResult({
             )}
             <div className="flex flex-wrap items-center justify-center gap-2">
               <button onClick={() => onCopyText(finalSku, 'SKU')} className="btn btn-outline text-xs px-3 py-1.5">Копіювати SKU</button>
-              <button onClick={() => previewData.totalPriceUah && onCopyText(`${previewData.totalPriceUah} ₴`, 'Ціну')} className="btn btn-outline text-xs px-3 py-1.5">Копіювати ціну</button>
+              {priceActions}
             </div>
-            <p className="mt-4 text-2xl font-semibold text-slate-800">{formatUah(previewData.totalPriceUah)}</p>
-            <p className="text-sm text-slate-600">{formatUsd(previewData.totalPrice)}</p>
+            <p className="mt-4 text-2xl font-semibold text-slate-800">{formatUah(effectiveTotalPriceUah)}</p>
+            {hasManualPrice && <p className="text-xs font-semibold text-[#8a5f2b]">Ціну змінено вручну</p>}
+            <p className="text-sm text-slate-600">{formatUsd(effectiveTotalPrice)}</p>
             {previewData.uahRate && <p className="text-xs text-slate-500">1 USD = {previewData.uahRate} ₴</p>}
           </div>
         </div>
       )}
 
-      {parseFloat(previewData.pricePerGram) > 0 && (
+      {parseFloat(effectivePricePerGram) > 0 && (
         <div className="text-center mb-8 text-slate-600">
-          <p>Ціна за грам: <strong>{formatUah(previewData.pricePerGramUah)}</strong> <span className="text-sm">({formatUsd(previewData.pricePerGram)})</span></p>
+          <p>Ціна за грам: <strong>{formatUah(effectivePricePerGramUah)}</strong> <span className="text-sm">({formatUsd(effectivePricePerGram)})</span></p>
         </div>
       )}
 
@@ -84,5 +111,55 @@ export function PreviewResult({
         <button onClick={onSave} className="btn btn-amber py-3">Зберегти</button>
       </div>
     </section>
+  );
+}
+
+function PriceActions({
+  effectiveTotalPriceUah,
+  hasManualPrice,
+  isManualPriceEditing,
+  manualPriceUah,
+  onCopyText,
+  onManualPriceChange,
+  onResetManualPrice,
+  onStartManualPriceEdit,
+  onStopManualPriceEdit,
+}) {
+  return (
+    <>
+      <button
+        onClick={() => effectiveTotalPriceUah && onCopyText(`${effectiveTotalPriceUah} ₴`, 'Ціну')}
+        className="btn btn-outline text-xs px-3 py-1.5"
+      >
+        Копіювати ціну
+      </button>
+      <button
+        onClick={isManualPriceEditing ? onStopManualPriceEdit : onStartManualPriceEdit}
+        className="btn btn-outline text-xs px-3 py-1.5"
+      >
+        {isManualPriceEditing ? 'Готово' : 'Змінити ціну'}
+      </button>
+      {hasManualPrice && (
+        <button onClick={onResetManualPrice} className="btn btn-outline text-xs px-3 py-1.5">
+          Скинути авто
+        </button>
+      )}
+      {isManualPriceEditing && (
+        <div className="mt-3 w-full max-w-xs mx-auto">
+          <label className="block text-xs uppercase tracking-[0.2em] text-slate-500 mb-2">
+            Ручна ціна, грн
+          </label>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={manualPriceUah}
+            onChange={(event) => onManualPriceChange(event.target.value)}
+            className="input text-center"
+            placeholder="Введіть ціну"
+          />
+        </div>
+      )}
+    </>
   );
 }

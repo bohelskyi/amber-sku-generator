@@ -68,14 +68,25 @@ function AppPage() {
           <PreviewResult
             previewData={sku.previewData}
             finalSku={sku.finalSku}
+            effectivePricePerGram={sku.effectivePricePerGram}
+            effectivePricePerGramUah={sku.effectivePricePerGramUah}
+            effectiveTotalPrice={sku.effectiveTotalPrice}
+            effectiveTotalPriceUah={sku.effectiveTotalPriceUah}
+            hasManualPrice={sku.hasManualPrice}
             isVariationActive={sku.isVariationActive}
             variationData={sku.variationData}
             variationError={sku.variationError}
             isVariationLoading={sku.isVariationLoading}
+            isManualPriceEditing={sku.isManualPriceEditing}
+            manualPriceUah={sku.manualPriceUah}
             onCopyText={sku.handleCopyText}
             onBackToParameters={sku.handleBackToParameters}
             onAddVariation={sku.handleAddVariation}
+            onManualPriceChange={sku.handleManualPriceChange}
+            onResetManualPrice={sku.handleResetManualPrice}
             onSave={sku.handleSave}
+            onStartManualPriceEdit={sku.handleStartManualPriceEdit}
+            onStopManualPriceEdit={sku.handleStopManualPriceEdit}
           />
         )}
 

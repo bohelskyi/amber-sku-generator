@@ -27,6 +27,8 @@ export function useSkuManager() {
   const [decodeData, setDecodeData] = useState(null);
   const [decodeError, setDecodeError] = useState('');
   const [copyMessage, setCopyMessage] = useState('');
+  const [manualPriceUah, setManualPriceUah] = useState('');
+  const [isManualPriceEditing, setIsManualPriceEditing] = useState(false);
 
   const fetchHistory = () => {
     api.get('/products').then((res) => setHistory(res.data));
@@ -63,6 +65,26 @@ export function useSkuManager() {
   const isWeightRequired = categoryConfig ? categoryConfig.requires_weight === 1 : true;
   const finalSku = displaySku || previewData?.fullProposedSku || '';
   const isVariationActive = Boolean(variationData);
+  const manualPriceNumber =
+    manualPriceUah.trim() === '' ? null : Number(manualPriceUah);
+  const hasManualPrice =
+    manualPriceNumber !== null && Number.isFinite(manualPriceNumber) && manualPriceNumber >= 0;
+  const effectiveTotalPriceUah = hasManualPrice
+    ? manualPriceNumber.toFixed(2)
+    : previewData?.totalPriceUah;
+  const effectiveTotalPrice =
+    hasManualPrice && Number(previewData?.uahRate) > 0
+      ? (manualPriceNumber / Number(previewData.uahRate)).toFixed(2)
+      : previewData?.totalPrice;
+  const weightNumber = Number(weight || 0);
+  const effectivePricePerGramUah =
+    hasManualPrice && weightNumber > 0
+      ? (manualPriceNumber / weightNumber).toFixed(2)
+      : previewData?.pricePerGramUah;
+  const effectivePricePerGram =
+    hasManualPrice && Number(previewData?.uahRate) > 0 && weightNumber > 0
+      ? (manualPriceNumber / Number(previewData.uahRate) / weightNumber).toFixed(2)
+      : previewData?.pricePerGram;
 
   const resetProductFlow = (catCode) => {
     setSelectedCat(catCode);
@@ -77,6 +99,8 @@ export function useSkuManager() {
     setLivePriceError('');
     setIsLivePriceLoading(false);
     setWeight('');
+    setManualPriceUah('');
+    setIsManualPriceEditing(false);
   };
 
   const handleAnswer = (questionId, valueId) => {
@@ -227,6 +251,8 @@ export function useSkuManager() {
       setVariationData(null);
       setVariationError('');
       setIsVariationLoading(false);
+      setManualPriceUah('');
+      setIsManualPriceEditing(false);
     });
   };
 
@@ -239,9 +265,9 @@ export function useSkuManager() {
       nextSeq: previewData.nextSeq,
       category: selectedCat,
       weight: isWeightRequired ? weight : 0,
-      totalPrice: previewData.totalPrice,
-      totalPriceUah: previewData.totalPriceUah,
-      pricePerGram: previewData.pricePerGram,
+      totalPrice: effectiveTotalPrice,
+      totalPriceUah: effectiveTotalPriceUah,
+      pricePerGram: effectivePricePerGram,
       uahRate: previewData.uahRate,
       details: {
         answers,
@@ -249,6 +275,8 @@ export function useSkuManager() {
         logMessage: previewData.logMessage,
         variationNumber: variationData?.variationNumber || null,
         baseGeneratedSku: previewData.fullProposedSku,
+        manualPriceUah: hasManualPrice ? effectiveTotalPriceUah : null,
+        autoPriceUah: previewData.totalPriceUah,
       },
     }).then(() => {
       fetchHistory();
@@ -263,6 +291,8 @@ export function useSkuManager() {
     setVariationData(null);
     setVariationError('');
     setIsVariationLoading(false);
+    setManualPriceUah('');
+    setIsManualPriceEditing(false);
   };
 
   const handleAddVariation = () => {
@@ -376,6 +406,31 @@ export function useSkuManager() {
     setDecodeError('');
   };
 
+  const handleManualPriceChange = (value) => {
+    if (value === '') {
+      setManualPriceUah('');
+      return;
+    }
+
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue) || numericValue < 0) return;
+    setManualPriceUah(value);
+  };
+
+  const handleStartManualPriceEdit = () => {
+    setManualPriceUah(String(effectiveTotalPriceUah || previewData?.totalPriceUah || ''));
+    setIsManualPriceEditing(true);
+  };
+
+  const handleStopManualPriceEdit = () => {
+    setIsManualPriceEditing(false);
+  };
+
+  const handleResetManualPrice = () => {
+    setManualPriceUah('');
+    setIsManualPriceEditing(false);
+  };
+
   const handleCopyText = async (text, label) => {
     if (!text) return;
     try {
@@ -399,8 +454,13 @@ export function useSkuManager() {
     exportFromSku,
     exportStatus,
     exportToSku,
+    effectivePricePerGram,
+    effectivePricePerGramUah,
+    effectiveTotalPrice,
+    effectiveTotalPriceUah,
     finalSku,
     getVisibleOptions,
+    handleManualPriceChange,
     handleAddVariation,
     handleAnswer,
     handleBackToParameters,
@@ -410,18 +470,24 @@ export function useSkuManager() {
     handleDelete,
     handleExportCsv,
     handlePreview,
+    handleResetManualPrice,
     handleSave,
+    handleStartManualPriceEdit,
+    handleStopManualPriceEdit,
     handleTextAnswer,
+    hasManualPrice,
     history,
     isCalibrated,
     isExportLoading,
     isLivePriceLoading,
+    isManualPriceEditing,
     isTextQuestion,
     isVariationActive,
     isVariationLoading,
     isWeightRequired,
     livePriceData,
     livePriceError,
+    manualPriceUah,
     previewData,
     progressPercent,
     requiredCount,
