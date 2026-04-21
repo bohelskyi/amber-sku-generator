@@ -1,10 +1,17 @@
 const pool = require('../db/pool');
 const { calculatePricing } = require('./pricing.service');
-const { decodeSkuAnswers, parseVariationSku } = require('../utils/sku');
+const {
+  appendSkuSuffix,
+  buildBaseSku,
+  decodeSkuAnswers,
+  parseVariationSku,
+} = require('../utils/sku');
 
 async function getAllCategories() {
   const result = await pool.query(
-    'SELECT code, name, requires_weight FROM categories ORDER BY LENGTH(code) DESC, code ASC'
+    `SELECT code, name, requires_weight
+     FROM categories
+     ORDER BY LENGTH(code) DESC, code ASC`
   );
 
   return result.rows.map((row) => ({
@@ -21,6 +28,7 @@ async function getQuestionsForCategory(categoryCode) {
         q.key,
         q.label AS q_label,
         q.sku_index,
+        COALESCE(q.sku_separator, '') AS sku_separator,
         q.required,
         o.value_id,
         o.label AS o_label
@@ -41,6 +49,7 @@ async function getQuestionsForCategory(categoryCode) {
         key: row.key,
         label: row.q_label,
         sku_index: Number(row.sku_index),
+        sku_separator: row.sku_separator || '',
         required: Number(row.required),
         options: [],
       };
@@ -178,24 +187,37 @@ async function getProductBySku(fullSku) {
 
 async function buildProductPreview({ categoryCode, answers = {}, weight, isCalibrated }) {
   const questionRows = await pool.query(
-    'SELECT key, sku_index FROM questions WHERE category_code = $1 AND COALESCE(include_in_sku, 1) = 1 ORDER BY sku_index ASC',
+    `SELECT key, sku_index, COALESCE(sku_separator, '') AS sku_separator
+     FROM questions
+     WHERE category_code = $1 AND COALESCE(include_in_sku, 1) = 1
+     ORDER BY sku_index ASC`,
     [categoryCode]
   );
 
-  const skuParts = [categoryCode];
+  const answerCodes = [];
+  const answerCodeParts = [];
   for (const question of questionRows.rows) {
     const value = answers[question.key];
-    skuParts.push(value ? value : 0);
+    const normalizedValue = value !== undefined && value !== null && value !== '' ? value : 0;
+    answerCodes.push(normalizedValue);
+    answerCodeParts.push({
+      value: normalizedValue,
+      sku_separator: question.sku_separator || '',
+    });
   }
 
-  const baseSku = skuParts.join('');
-  const pricing = await calculatePricing(categoryCode, answers, weight, isCalibrated);
-  const { weightVal, pricePerGram, totalPrice, logMessage, currencyPayload } = pricing;
-
   const categoryResult = await pool.query(
-    'SELECT requires_weight FROM categories WHERE code = $1',
+    `SELECT requires_weight, COALESCE(sku_separator, '') AS legacy_sku_separator
+     FROM categories
+     WHERE code = $1`,
     [categoryCode]
   );
+  const legacySkuSeparator = categoryResult.rows[0]?.legacy_sku_separator || '';
+  const baseSku = buildBaseSku(categoryCode, answerCodeParts);
+  const compactBaseSku = buildBaseSku(categoryCode, answerCodes);
+  const legacySeparatedBaseSku = buildBaseSku(categoryCode, answerCodes, legacySkuSeparator);
+  const pricing = await calculatePricing(categoryCode, answers, weight, isCalibrated);
+  const { weightVal, pricePerGram, totalPrice, logMessage, currencyPayload } = pricing;
 
   const requiresWeight =
     categoryResult.rows.length > 0 &&
@@ -203,13 +225,16 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
     categoryCode !== 'SK';
 
   if (!requiresWeight) {
+    const baseSkuCandidates = Array.from(
+      new Set([baseSku, compactBaseSku, legacySeparatedBaseSku])
+    );
     const sequenceResult = await pool.query(
-      `SELECT sequence_number
+      `SELECT sequence_number, full_sku
        FROM products
-       WHERE base_sku = $1
+       WHERE base_sku = ANY($1::text[])
        ORDER BY sequence_number DESC
        LIMIT 1`,
-      [baseSku]
+      [baseSkuCandidates]
     );
 
     const lastSeq =
@@ -217,9 +242,9 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
         ? Number(sequenceResult.rows[0].sequence_number)
         : 0;
     const nextSeq = lastSeq + 1;
-    const fullProposedSku = baseSku + String(nextSeq).padStart(3, '0');
+    const fullProposedSku = appendSkuSuffix(baseSku, nextSeq);
     const prevFullSku =
-      lastSeq > 0 ? baseSku + String(lastSeq).padStart(3, '0') : 'Немає';
+      lastSeq > 0 ? sequenceResult.rows[0].full_sku || appendSkuSuffix(baseSku, lastSeq) : 'Немає';
 
     return {
       mode: 'sequence',
@@ -235,10 +260,18 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
   }
 
   const weightInt = Math.round(weightVal);
-  const fullProposedSku = baseSku + String(weightInt).padStart(3, '0');
+  const fullProposedSku = appendSkuSuffix(baseSku, weightInt);
   const existingProduct = await pool.query(
-    'SELECT full_sku FROM products WHERE full_sku = $1 LIMIT 1',
-    [fullProposedSku]
+    'SELECT full_sku FROM products WHERE full_sku = ANY($1::text[]) LIMIT 1',
+    [
+      Array.from(
+        new Set([
+          fullProposedSku,
+          appendSkuSuffix(compactBaseSku, weightInt),
+          appendSkuSuffix(legacySeparatedBaseSku, weightInt),
+        ])
+      ),
+    ]
   );
 
   return {

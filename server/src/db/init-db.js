@@ -122,9 +122,22 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS categories (
       code TEXT PRIMARY KEY,
       name TEXT,
-      requires_weight INTEGER DEFAULT 1
+      requires_weight INTEGER DEFAULT 1,
+      sku_separator TEXT DEFAULT ''
     )
   `);
+
+  await pool.query("ALTER TABLE categories ADD COLUMN IF NOT EXISTS sku_separator TEXT DEFAULT ''");
+
+  const questionSeparatorColumnResult = await pool.query(`
+    SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_name = 'questions'
+        AND column_name = 'sku_separator'
+    ) AS exists
+  `);
+  const hadQuestionSeparatorColumn = Boolean(questionSeparatorColumnResult.rows[0]?.exists);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS questions (
@@ -135,7 +148,8 @@ async function initDb() {
       sku_index INTEGER,
       required INTEGER DEFAULT 1,
       include_in_sku INTEGER DEFAULT 1,
-      input_type TEXT DEFAULT 'options'
+      input_type TEXT DEFAULT 'options',
+      sku_separator TEXT DEFAULT ''
     )
   `);
 
@@ -200,6 +214,7 @@ async function initDb() {
   await pool.query('UPDATE questions SET include_in_sku = 1 WHERE include_in_sku IS NULL');
   await pool.query("ALTER TABLE questions ADD COLUMN IF NOT EXISTS input_type TEXT DEFAULT 'options'");
   await pool.query("UPDATE questions SET input_type = 'options' WHERE input_type IS NULL OR input_type = ''");
+  await pool.query("ALTER TABLE questions ADD COLUMN IF NOT EXISTS sku_separator TEXT DEFAULT ''");
 
   const { rows } = await pool.query('SELECT count(*)::int AS count FROM categories');
   if (rows[0].count === 0) {
@@ -211,6 +226,12 @@ async function initDb() {
     "UPDATE categories SET requires_weight = 0 WHERE code = ANY($1::text[])",
     [['AR', 'DK', 'SK']]
   );
+
+  if (!hadQuestionSeparatorColumn) {
+    await pool.query(
+      "UPDATE questions SET sku_separator = '-' WHERE category_code = 'AR' AND key = 'size' AND COALESCE(sku_separator, '') = ''"
+    );
+  }
 }
 
 module.exports = {

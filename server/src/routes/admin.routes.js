@@ -109,7 +109,7 @@ router.post('/admin/category', async (req, res) => {
     const result = await createCategory(req.body);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
@@ -121,7 +121,7 @@ router.put('/admin/category', async (req, res) => {
     await updateCategory(req.body);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 

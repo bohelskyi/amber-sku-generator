@@ -4,7 +4,7 @@ import { getValidationIssues } from '../lib/admin-validation';
 
 const emptyEditOption = { id: null, value_id: '', label: '', visible_if_json: '' };
 const emptyNewCategory = { code: '', name: '', requires_weight: true };
-const emptyNewQuestion = { key: '', label: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options' };
+const emptyNewQuestion = { key: '', label: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '' };
 const emptyNewOption = { value_id: '', label: '', visible_if_json: '' };
 const emptyNewScenario = { name: '', match_json: '', axis_x_key: '', axis_y_key: '' };
 const emptyNewModifier = { trigger_key: '', trigger_val: '', factor: '' };
@@ -15,7 +15,7 @@ export function useAdminPanel() {
   const [selectedQuestion, setSelectedQuestion] = useState(null);
   const [pricesData, setPricesData] = useState(null);
   const [editCat, setEditCat] = useState({ name: '', requires_weight: true });
-  const [editQuestion, setEditQuestion] = useState({ label: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options' });
+  const [editQuestion, setEditQuestion] = useState({ label: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '' });
   const [newCat, setNewCat] = useState(emptyNewCategory);
   const [newQuest, setNewQuest] = useState(emptyNewQuestion);
   const [newOpt, setNewOpt] = useState(emptyNewOption);
@@ -70,6 +70,7 @@ export function useAdminPanel() {
       required: question.required === 1,
       include_in_sku: question.include_in_sku === 1,
       input_type: question.input_type || 'options',
+      sku_separator: question.sku_separator || '',
     });
   };
 
@@ -79,7 +80,8 @@ export function useAdminPanel() {
       .then(() => {
         setNewCat(emptyNewCategory);
         fetchConfig();
-      });
+      })
+      .catch((err) => alert(`Помилка створення категорії: ${err.response?.data?.error || err.message}`));
   };
 
   const updateCategory = () => {
@@ -88,7 +90,9 @@ export function useAdminPanel() {
       code: selectedCat.code,
       name: editCat.name,
       requires_weight: editCat.requires_weight ? 1 : 0,
-    }).then(() => fetchConfig());
+    })
+      .then(() => fetchConfig())
+      .catch((err) => alert(`Помилка оновлення категорії: ${err.response?.data?.error || err.message}`));
   };
 
   const addQuestion = () => {
@@ -99,6 +103,7 @@ export function useAdminPanel() {
       required: newQuest.required ? 1 : 0,
       include_in_sku: isNewTextQuestion ? 0 : (newQuest.include_in_sku ? 1 : 0),
       input_type: isNewTextQuestion ? 'text' : 'options',
+      sku_separator: isNewTextQuestion || !newQuest.include_in_sku ? '' : newQuest.sku_separator,
       category_code: selectedCat.code,
     }).then(() => {
       setNewQuest(emptyNewQuestion);
@@ -116,6 +121,7 @@ export function useAdminPanel() {
       required: editQuestion.required ? 1 : 0,
       include_in_sku: isEditedTextQuestion ? 0 : (editQuestion.include_in_sku ? 1 : 0),
       input_type: isEditedTextQuestion ? 'text' : 'options',
+      sku_separator: isEditedTextQuestion || !editQuestion.include_in_sku ? '' : editQuestion.sku_separator,
     })
       .then(() => {
         fetchConfig();

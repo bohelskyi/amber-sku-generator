@@ -1,9 +1,23 @@
 const initialConfig = require('../../data_config');
 const pool = require('../db/pool');
 const { parseOptionalRule } = require('../utils/rules');
+const { normalizeSkuSeparator } = require('../utils/sku');
 
 function normalizeInputType(inputType) {
   return String(inputType || 'options').trim().toLowerCase() === 'text' ? 'text' : 'options';
+}
+
+function normalizeEditableSkuSeparator(separator) {
+  const rawSeparator = String(separator || '').trim();
+  const normalizedSeparator = normalizeSkuSeparator(rawSeparator);
+
+  if (rawSeparator && !normalizedSeparator) {
+    const err = new Error('Розділювач SKU може містити тільки -, _, . або /');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return normalizedSeparator;
 }
 
 async function getAppConfig() {
@@ -28,6 +42,7 @@ async function getAppConfig() {
       q.required,
       q.include_in_sku,
       q.input_type,
+      q.sku_separator,
       o.id AS o_db_id,
       o.value_id,
       o.label AS o_label,
@@ -48,6 +63,7 @@ async function getAppConfig() {
         required: row.required,
         include_in_sku: row.include_in_sku,
         input_type: row.input_type || 'options',
+        sku_separator: row.sku_separator || '',
         cat: row.category_code,
         options: [],
       };
@@ -89,6 +105,7 @@ async function updateCategory({ code, name, requires_weight }) {
 
 async function createQuestion(payload) {
   const normalizedInputType = normalizeInputType(payload.input_type);
+  const skuSeparator = normalizeEditableSkuSeparator(payload.sku_separator);
   const normalizedIncludeInSku =
     normalizedInputType === 'text'
       ? 0
@@ -97,8 +114,8 @@ async function createQuestion(payload) {
         : 1;
 
   const result = await pool.query(
-    `INSERT INTO questions (category_code, key, label, sku_index, required, include_in_sku, input_type)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO questions (category_code, key, label, sku_index, required, include_in_sku, input_type, sku_separator)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING id`,
     [
       payload.category_code,
@@ -108,6 +125,7 @@ async function createQuestion(payload) {
       payload.required !== undefined ? Number(payload.required) : 1,
       normalizedIncludeInSku,
       normalizedInputType,
+      skuSeparator,
     ]
   );
 
@@ -116,6 +134,7 @@ async function createQuestion(payload) {
 
 async function updateQuestion(payload) {
   const normalizedInputType = normalizeInputType(payload.input_type);
+  const skuSeparator = normalizeEditableSkuSeparator(payload.sku_separator);
   const normalizedIncludeInSku =
     normalizedInputType === 'text'
       ? 0
@@ -124,13 +143,16 @@ async function updateQuestion(payload) {
         : 1;
 
   await pool.query(
-    'UPDATE questions SET label = $1, sku_index = $2, required = $3, include_in_sku = $4, input_type = $5 WHERE id = $6',
+    `UPDATE questions
+     SET label = $1, sku_index = $2, required = $3, include_in_sku = $4, input_type = $5, sku_separator = $6
+     WHERE id = $7`,
     [
       payload.label,
       Number(payload.sku_index),
       payload.required !== undefined ? Number(payload.required) : 1,
       normalizedIncludeInSku,
       normalizedInputType,
+      skuSeparator,
       Number(payload.id),
     ]
   );
