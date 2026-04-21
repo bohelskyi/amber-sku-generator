@@ -1,4 +1,5 @@
 import { handleNumberKeyDown, handleNumberWheel } from '../../lib/number-input';
+import { getPricingAxis } from '../../lib/pricing-axis';
 
 export function AdminPricingEditor({
   selectedCat,
@@ -33,10 +34,10 @@ export function AdminPricingEditor({
 
       <div className="space-y-10">
         {pricesData.scenarios.map((scenario) => {
-          const qX = currentCatQuestions.find((question) => question.id === scenario.axis_x_key);
-          const qY = currentCatQuestions.find((question) => question.id === scenario.axis_y_key);
-          const optionsX = qX ? qX.options : [];
-          const optionsY = qY ? qY.options : [{ id: 0, label: 'Base' }];
+          const axisX = getPricingAxis(scenario.axis_x_key, currentCatQuestions, 'X');
+          const axisY = getPricingAxis(scenario.axis_y_key, currentCatQuestions, 'Base');
+          const optionsX = axisX.options;
+          const optionsY = axisY.options;
 
           return (
             <div key={scenario.id} className="border border-slate-200 p-4 rounded-2xl bg-slate-50/80 relative">
@@ -56,7 +57,7 @@ export function AdminPricingEditor({
                     <input className="input-sm" placeholder="Назва" value={editScenario.name} onChange={(event) => setEditScenario({ ...editScenario, name: event.target.value })} />
                     <input className="input-sm font-mono text-xs" placeholder="JSON умова" value={editScenario.match_json} onChange={(event) => setEditScenario({ ...editScenario, match_json: event.target.value })} />
                     <input className="input-sm" placeholder="Вісь X key" value={editScenario.axis_x_key} onChange={(event) => setEditScenario({ ...editScenario, axis_x_key: event.target.value })} />
-                    <input className="input-sm" placeholder="Вісь Y key" value={editScenario.axis_y_key} onChange={(event) => setEditScenario({ ...editScenario, axis_y_key: event.target.value })} />
+                    <input className="input-sm" placeholder="Вісь Y key або glass+additional" value={editScenario.axis_y_key} onChange={(event) => setEditScenario({ ...editScenario, axis_y_key: event.target.value })} />
                   </div>
                   <div className="mt-3 flex gap-2">
                     <button onClick={updateScenario} className="btn btn-primary text-xs">Зберегти сценарій</button>
@@ -69,7 +70,7 @@ export function AdminPricingEditor({
                 <table className="min-w-full bg-white border border-slate-200 rounded-xl">
                   <thead>
                     <tr className="table-head">
-                      <th className="table-cell text-left min-w-[150px]">{qX?.label || 'X'} \ {qY?.label || 'Y'}</th>
+                      <th className="table-cell text-left min-w-[150px]">{axisX.label} \ {axisY.label}</th>
                       {optionsY.map((option) => <th key={option.id} className="table-cell text-left text-xs">{option.label}</th>)}
                     </tr>
                   </thead>
@@ -113,8 +114,11 @@ export function AdminPricingEditor({
           <input className="input-sm" placeholder="Назва (напр. Некалібровані)" value={newScenario.name} onChange={(event) => setNewScenario({ ...newScenario, name: event.target.value })} />
           <input className="input-sm font-mono text-xs" placeholder='JSON: {"raw_type":1, "is_calibrated":2}' value={newScenario.match_json} onChange={(event) => setNewScenario({ ...newScenario, match_json: event.target.value })} />
           <input className="input-sm" placeholder="Вісь X Key (напр. size)" value={newScenario.axis_x_key} onChange={(event) => setNewScenario({ ...newScenario, axis_x_key: event.target.value })} />
-          <input className="input-sm" placeholder="Вісь Y Key (напр. processing)" value={newScenario.axis_y_key} onChange={(event) => setNewScenario({ ...newScenario, axis_y_key: event.target.value })} />
+          <input className="input-sm" placeholder="Вісь Y Key (напр. glass+additional)" value={newScenario.axis_y_key} onChange={(event) => setNewScenario({ ...newScenario, axis_y_key: event.target.value })} />
         </div>
+        <p className="mt-2 text-xs text-slate-500">
+          Для комбінованої осі введи ключі через +, наприклад glass+additional. Перший ключ має варіант 1 = “так”, другий може бути необовʼязковим списком.
+        </p>
         <button onClick={addScenario} className="btn btn-primary mt-3">Створити сценарій</button>
       </div>
 

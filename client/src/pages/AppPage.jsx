@@ -73,6 +73,7 @@ function AppPage() {
             effectiveTotalPrice={sku.effectiveTotalPrice}
             effectiveTotalPriceUah={sku.effectiveTotalPriceUah}
             hasManualPrice={sku.hasManualPrice}
+            isWeightRequired={sku.isWeightRequired}
             isVariationActive={sku.isVariationActive}
             variationData={sku.variationData}
             variationError={sku.variationError}

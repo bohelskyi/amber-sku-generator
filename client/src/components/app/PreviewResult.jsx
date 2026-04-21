@@ -8,6 +8,7 @@ export function PreviewResult({
   effectiveTotalPrice,
   effectiveTotalPriceUah,
   hasManualPrice,
+  isWeightRequired,
   isVariationActive,
   variationData,
   variationError,
@@ -91,7 +92,7 @@ export function PreviewResult({
         </div>
       )}
 
-      {parseFloat(effectivePricePerGram) > 0 && (
+      {isWeightRequired && parseFloat(effectivePricePerGram) > 0 && (
         <div className="text-center mb-8 text-slate-600">
           <p>Ціна за грам: <strong>{formatUah(effectivePricePerGramUah)}</strong> <span className="text-sm">({formatUsd(effectivePricePerGram)})</span></p>
         </div>

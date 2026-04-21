@@ -1,23 +1,42 @@
 const pool = require('../db/pool');
 const { getUsdUahRate } = require('./currency.service');
+const { resolveAxisValue } = require('../utils/pricing-axis');
 const { asRuleObject } = require('../utils/rules');
+
+function getAnswerValue(answers, key) {
+  return answers[key] === undefined || answers[key] === null || answers[key] === ''
+    ? 0
+    : Number(answers[key]);
+}
 
 async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated) {
   const scenarios = await pool.query(
     'SELECT * FROM price_scenarios WHERE category_code = $1',
     [categoryCode]
   );
+  const categoryResult = await pool.query(
+    'SELECT requires_weight FROM categories WHERE code = $1 LIMIT 1',
+    [categoryCode]
+  );
 
   let pricePerGram = 0;
   let logMessage = 'Ціна не знайдена';
   const normalizedCalibrated = Number(isCalibrated || 0);
+  const isWeightBased =
+    categoryResult.rows.length > 0 &&
+    Number(categoryResult.rows[0].requires_weight) === 1 &&
+    categoryCode !== 'SK';
 
-  const activeScenario = scenarios.rows.find((scenario) => {
+  const activeScenario = [...scenarios.rows].sort((a, b) => {
+    const aRuleCount = Object.keys(asRuleObject(a.match_json)).length;
+    const bRuleCount = Object.keys(asRuleObject(b.match_json)).length;
+    return bRuleCount - aRuleCount || Number(a.id) - Number(b.id);
+  }).find((scenario) => {
     const rules = asRuleObject(scenario.match_json);
     for (const [key, value] of Object.entries(rules)) {
       if (key === 'is_calibrated') {
         if (Number(value) !== normalizedCalibrated) return false;
-      } else if (Number(answers[key] ?? -1) !== Number(value)) {
+      } else if (getAnswerValue(answers, key) !== Number(value)) {
         return false;
       }
     }
@@ -25,10 +44,8 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
   });
 
   if (activeScenario) {
-    const xVal = Number(answers[activeScenario.axis_x_key] || 0);
-    const yVal = activeScenario.axis_y_key
-      ? Number(answers[activeScenario.axis_y_key] || 0)
-      : 0;
+    const xVal = resolveAxisValue(activeScenario.axis_x_key, answers);
+    const yVal = resolveAxisValue(activeScenario.axis_y_key, answers);
 
     const priceRow = await pool.query(
       `SELECT price
@@ -39,7 +56,7 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
 
     if (priceRow.rows.length > 0) {
       pricePerGram = Number(priceRow.rows[0].price);
-      logMessage = `${activeScenario.name} (Базова: $${pricePerGram})`;
+      logMessage = `${activeScenario.name} (Базова: ${isWeightBased ? `$${pricePerGram}` : `${pricePerGram} ₴`})`;
 
       const modifiers = await pool.query(
         'SELECT * FROM price_modifiers WHERE category_code = $1',
@@ -47,7 +64,7 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
       );
 
       for (const modifier of modifiers.rows) {
-        if (Number(answers[modifier.trigger_key] ?? -1) === Number(modifier.trigger_val)) {
+        if (getAnswerValue(answers, modifier.trigger_key) === Number(modifier.trigger_val)) {
           pricePerGram *= Number(modifier.factor);
           logMessage += ` + Модифікатор (${Math.round((Number(modifier.factor) - 1) * 100)}%)`;
         }
@@ -61,18 +78,34 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
 
   const parsedWeight = Number.parseFloat(weight);
   const weightVal = Number.isFinite(parsedWeight) ? parsedWeight : 0;
-  const totalPrice = (pricePerGram * weightVal).toFixed(2);
+  let totalPrice = isWeightBased ? (pricePerGram * weightVal).toFixed(2) : '0.00';
 
   let currencyPayload = { uahRate: null, pricePerGramUah: null, totalPriceUah: null };
   try {
     const uahRate = await getUsdUahRate();
-    currencyPayload = {
-      uahRate,
-      pricePerGramUah: (pricePerGram * uahRate).toFixed(2),
-      totalPriceUah: (Number(totalPrice) * uahRate).toFixed(2),
-    };
+    if (isWeightBased) {
+      currencyPayload = {
+        uahRate,
+        pricePerGramUah: (pricePerGram * uahRate).toFixed(2),
+        totalPriceUah: (Number(totalPrice) * uahRate).toFixed(2),
+      };
+    } else {
+      totalPrice = uahRate > 0 ? (pricePerGram / uahRate).toFixed(2) : '0.00';
+      currencyPayload = {
+        uahRate,
+        pricePerGramUah: null,
+        totalPriceUah: pricePerGram.toFixed(2),
+      };
+    }
   } catch (err) {
     console.error('NBU rate error:', err.message || err);
+    if (!isWeightBased) {
+      currencyPayload = {
+        uahRate: null,
+        pricePerGramUah: null,
+        totalPriceUah: pricePerGram.toFixed(2),
+      };
+    }
   }
 
   return {

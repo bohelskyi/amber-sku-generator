@@ -159,7 +159,10 @@ export function ProductBuilder({
             </div>
             {livePriceData && (
               <div className="text-xs text-slate-500">
-                USD: {formatUsd(livePriceData.totalPrice)} | За грам: {formatUah(livePriceData.pricePerGramUah)} | За грам (USD): {formatUsd(livePriceData.pricePerGram)}
+                USD: {formatUsd(livePriceData.totalPrice)}
+                {isWeightRequired && (
+                  <> | За грам: {formatUah(livePriceData.pricePerGramUah)} | За грам (USD): {formatUsd(livePriceData.pricePerGram)}</>
+                )}
               </div>
             )}
             {livePriceError && (
