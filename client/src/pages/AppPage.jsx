@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
-
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
-});
+import { api } from '../lib/api';
+import { formatDateTime, formatUah, formatUsd } from '../lib/formatters';
+import { handleNumberKeyDown, handleNumberWheel } from '../lib/number-input';
 
 function App() {
   const [config, setConfig] = useState(null);
@@ -30,19 +28,7 @@ function App() {
   const [skuToDecode, setSkuToDecode] = useState('');
   const [decodeData, setDecodeData] = useState(null);
   const [decodeError, setDecodeError] = useState('');
-  const formatUah = (value) => (value !== null && value !== undefined ? `${value} ₴` : '---');
-  const formatUsd = (value) => (Number(value) > 0 ? `$${value}` : '---');
   const [copyMessage, setCopyMessage] = useState('');
-  const handleNumberWheel = (event) => {
-    if (document.activeElement === event.currentTarget) {
-      event.currentTarget.blur();
-    }
-  };
-  const handleNumberKeyDown = (event) => {
-    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-      event.preventDefault();
-    }
-  };
   const isTextQuestion = (question) => (question?.input_type || 'options') === 'text';
   const normalizeRuleValue = (value) => {
     if (value === null || value === undefined) return value;
@@ -416,13 +402,6 @@ function App() {
     if (suffix.type === 'sequence') return suffix.raw || String(suffix.value || '');
     return suffix.raw || '---';
   };
-  const formatDateTime = (value) => {
-    if (!value) return '—';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return '—';
-    return date.toLocaleString('uk-UA');
-  };
-
   const finalSku = displaySku || previewData?.fullProposedSku || '';
   const isVariationActive = Boolean(variationData);
 

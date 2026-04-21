@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
 import { Link } from 'react-router-dom';
+import { api } from '../lib/api';
+import { handleNumberKeyDown, handleNumberWheel } from '../lib/number-input';
 
-export default function AdminPanel() {
+export default function AdminPage() {
     const [config, setConfig] = useState(null);
     const [selectedCat, setSelectedCat] = useState(null);
     const [selectedQuestion, setSelectedQuestion] = useState(null);
@@ -20,16 +21,6 @@ export default function AdminPanel() {
     const [newScenario, setNewScenario] = useState({ name: '', match_json: '', axis_x_key: '', axis_y_key: '' });
     const [editScenario, setEditScenario] = useState(null);
     const [newModifier, setNewModifier] = useState({ trigger_key: '', trigger_val: '', factor: '' });
-    const handleNumberWheel = (event) => {
-        if (document.activeElement === event.currentTarget) {
-            event.currentTarget.blur();
-        }
-    };
-    const handleNumberKeyDown = (event) => {
-        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-            event.preventDefault();
-        }
-    };
 
     useEffect(() => { fetchConfig(); }, []);
 
@@ -43,19 +34,19 @@ export default function AdminPanel() {
         setEditOpt({ id: null, value_id: '', label: '', visible_if_json: '' });
     }, [selectedQuestion?.q_db_id]);
 
-    const fetchConfig = () => { axios.get('/api/config').then(res => setConfig(res.data)); };
-    const fetchPrices = () => { axios.get(`/api/admin/prices/${selectedCat.code}`).then(res => setPricesData(res.data)); };
+    const fetchConfig = () => { api.get('/config').then(res => setConfig(res.data)); };
+    const fetchPrices = () => { api.get(`/admin/prices/${selectedCat.code}`).then(res => setPricesData(res.data)); };
 
     // --- CRUD функції ---
     const addCategory = () => {
         if(!newCat.code) return;
-        axios.post('/api/admin/category', { ...newCat, requires_weight: newCat.requires_weight ? 1 : 0 })
+        api.post('/admin/category', { ...newCat, requires_weight: newCat.requires_weight ? 1 : 0 })
              .then(() => { setNewCat({ code: '', name: '', requires_weight: true }); fetchConfig(); });
     };
     const addQuestion = () => {
         if(!selectedCat) return;
         const isTextQuestion = newQuest.input_type === 'text';
-        axios.post('/api/admin/question', {
+        api.post('/admin/question', {
             ...newQuest,
             required: newQuest.required ? 1 : 0,
             include_in_sku: isTextQuestion ? 0 : (newQuest.include_in_sku ? 1 : 0),
@@ -76,7 +67,7 @@ export default function AdminPanel() {
             return alert("Помилка JSON в visible_if");
         }
 
-        axios.post('/api/admin/option', {
+        api.post('/admin/option', {
             question_id: selectedQuestion.q_db_id,
             value_id: newOpt.value_id,
             label: newOpt.label,
@@ -101,7 +92,7 @@ export default function AdminPanel() {
             return alert("Помилка JSON в visible_if");
         }
 
-        axios.put('/api/admin/option', {
+        api.put('/admin/option', {
             id: editOpt.id,
             value_id: editOpt.value_id,
             label: editOpt.label,
@@ -115,7 +106,7 @@ export default function AdminPanel() {
     };
     const deleteItem = (type, id) => {
         if(!window.confirm("Видалити цей елемент?")) return;
-        axios.post('/api/admin/delete-item', { type, id })
+        api.post('/admin/delete-item', { type, id })
              .then(() => {
                  fetchConfig();
                  if(type==='category') setSelectedCat(null);
@@ -124,7 +115,7 @@ export default function AdminPanel() {
     };
     const updateCategory = () => {
         if (!selectedCat) return;
-        axios.put('/api/admin/category', {
+        api.put('/admin/category', {
             code: selectedCat.code,
             name: editCat.name,
             requires_weight: editCat.requires_weight ? 1 : 0
@@ -135,7 +126,7 @@ export default function AdminPanel() {
     const updateQuestion = () => {
         if (!selectedQuestion) return;
         const isTextQuestion = editQuestion.input_type === 'text';
-        axios.post('/api/admin/question/update', {
+        api.post('/admin/question/update', {
             id: selectedQuestion.q_db_id,
             label: editQuestion.label,
             sku_index: editQuestion.sku_index,
@@ -154,7 +145,7 @@ export default function AdminPanel() {
 
     // --- Цінові функції ---
     const handlePriceChange = (scenarioId, xVal, yVal, newPrice) => {
-        axios.post('/api/admin/price-cell', {
+        api.post('/admin/price-cell', {
             scenario_id: scenarioId,
             x_val: xVal,
             y_val: yVal,
@@ -172,7 +163,7 @@ export default function AdminPanel() {
             return alert("Помилка в JSON! Формат: {\"key\": value}");
         }
 
-        axios.post('/api/admin/scenario', {
+        api.post('/admin/scenario', {
             ...newScenario,
             match_json: parsedJson, // 2. Відправляємо вже об'єкт, а не рядок
             category_code: selectedCat.code
@@ -206,7 +197,7 @@ export default function AdminPanel() {
             return alert("Помилка в JSON умови");
         }
 
-        axios.put('/api/admin/scenario', {
+        api.put('/admin/scenario', {
             id: editScenario.id,
             name: editScenario.name,
             match_json: parsedJson,
@@ -221,14 +212,14 @@ export default function AdminPanel() {
     };
 
     const duplicateScenario = (scenarioId) => {
-        axios.post('/api/admin/scenario/duplicate', { id: scenarioId })
+        api.post('/admin/scenario/duplicate', { id: scenarioId })
             .then(() => fetchPrices())
             .catch(err => alert(`Помилка дублювання: ${err.response?.data?.error || err.message}`));
     };
 
     const addModifier = () => {
         if(!newModifier.trigger_key || !newModifier.factor) return;
-        axios.post('/api/admin/modifier', { ...newModifier, category_code: selectedCat.code })
+        api.post('/admin/modifier', { ...newModifier, category_code: selectedCat.code })
             .then(() => {
                 setNewModifier({ trigger_key: '', trigger_val: '', factor: '' });
                 fetchPrices();
@@ -236,7 +227,7 @@ export default function AdminPanel() {
     };
 
     const updateModifier = (id, newFactor) => {
-        axios.put('/api/admin/modifier', { id, factor: parseFloat(newFactor) });
+        api.put('/admin/modifier', { id, factor: parseFloat(newFactor) });
     };
 
     const formatMatchJson = (value) => {
