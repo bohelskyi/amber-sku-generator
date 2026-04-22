@@ -9,6 +9,14 @@ function getAnswerValue(answers, key) {
     : Number(answers[key]);
 }
 
+function isRuleValueMatched(actualValue, expectedValue) {
+  if (Array.isArray(expectedValue)) {
+    return expectedValue.map((value) => Number(value)).includes(Number(actualValue));
+  }
+
+  return Number(actualValue) === Number(expectedValue);
+}
+
 async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated) {
   const scenarios = await pool.query(
     'SELECT * FROM price_scenarios WHERE category_code = $1',
@@ -35,8 +43,8 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
     const rules = asRuleObject(scenario.match_json);
     for (const [key, value] of Object.entries(rules)) {
       if (key === 'is_calibrated') {
-        if (Number(value) !== normalizedCalibrated) return false;
-      } else if (getAnswerValue(answers, key) !== Number(value)) {
+        if (!isRuleValueMatched(normalizedCalibrated, value)) return false;
+      } else if (!isRuleValueMatched(getAnswerValue(answers, key), value)) {
         return false;
       }
     }
