@@ -38,9 +38,9 @@ export function ProductBuilder({
 
         <div className="space-y-6">
           {config.questions[selectedCat]?.map((question) => {
-            if (!isQuestionVisible(question)) return null;
+            if (!isQuestionVisible(question, answers, isCalibrated)) return null;
 
-            const visibleOptions = getVisibleOptionsForQuestion(question);
+            const visibleOptions = getVisibleOptionsForQuestion(question, answers, isCalibrated);
             const textQuestion = isTextQuestion(question);
 
             return (

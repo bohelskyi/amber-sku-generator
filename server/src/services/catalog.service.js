@@ -108,7 +108,7 @@ async function updateCategory({ code, name, requires_weight }) {
 async function createQuestion(payload) {
   const normalizedInputType = normalizeInputType(payload.input_type);
   const skuSeparator = normalizeEditableSkuSeparator(payload.sku_separator);
-  const visibleRule = parseOptionalRule(payload.visible_if_json);
+  const visibleRule = parseOptionalRule(payload.visible_if_json ?? payload.visible_if);
   const normalizedIncludeInSku =
     normalizedInputType === 'text'
       ? 0
@@ -139,7 +139,7 @@ async function createQuestion(payload) {
 async function updateQuestion(payload) {
   const normalizedInputType = normalizeInputType(payload.input_type);
   const skuSeparator = normalizeEditableSkuSeparator(payload.sku_separator);
-  const visibleRule = parseOptionalRule(payload.visible_if_json);
+  const visibleRule = parseOptionalRule(payload.visible_if_json ?? payload.visible_if);
   const normalizedIncludeInSku =
     normalizedInputType === 'text'
       ? 0
@@ -165,7 +165,7 @@ async function updateQuestion(payload) {
 }
 
 async function createOption(payload) {
-  const visibleRule = parseOptionalRule(payload.visible_if_json);
+  const visibleRule = parseOptionalRule(payload.visible_if_json ?? payload.visible_if);
   const result = await pool.query(
     'INSERT INTO options (question_id, value_id, label, visible_if_json) VALUES ($1, $2, $3, $4::jsonb) RETURNING id',
     [
@@ -180,7 +180,7 @@ async function createOption(payload) {
 }
 
 async function updateOption(payload) {
-  const visibleRule = parseOptionalRule(payload.visible_if_json);
+  const visibleRule = parseOptionalRule(payload.visible_if_json ?? payload.visible_if);
   await pool.query(
     `UPDATE options
      SET value_id = $1, label = $2, visible_if_json = $3::jsonb

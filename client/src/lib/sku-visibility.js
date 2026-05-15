@@ -35,7 +35,7 @@ export const isQuestionVisible = (
     is_calibrated: calibratedValue,
   };
 
-  return isVisibilityRuleMatched(question?.visible_if_json, context);
+  return isVisibilityRuleMatched(question?.visible_if_json ?? question?.visible_if, context);
 };
 
 export const getVisibleOptionsForQuestion = (
