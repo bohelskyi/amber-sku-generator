@@ -1,4 +1,7 @@
+import { ConditionBuilder } from './ConditionBuilder';
+import { SkuTemplatePreview } from './SkuTemplatePreview';
 import { handleNumberKeyDown, handleNumberWheel } from '../../lib/number-input';
+import { formatConditionSummary } from '../../lib/admin-conditions';
 
 export function AdminStructureEditor({
   config,
@@ -29,7 +32,6 @@ export function AdminStructureEditor({
   beginOptionEdit,
   updateOption,
   deleteItem,
-  formatMatchJson,
 }) {
   return (
     <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start fade-up stagger-2">
@@ -72,6 +74,7 @@ export function AdminStructureEditor({
         <div className="section-title mb-4">
           <h2 className="section-title-text">2. Питання</h2>
         </div>
+        <SkuTemplatePreview category={selectedCat} questions={currentCatQuestions} />
         <div className="h-96 overflow-y-auto space-y-2 pr-2">
           {currentCatQuestions.map((question) => (
             <div
@@ -83,7 +86,7 @@ export function AdminStructureEditor({
                 <span className="font-semibold text-slate-800">{question.label}</span>
                 <span className="text-xs text-slate-500 block">Key: {question.id} | Index: {question.sku_index} | {question.required === 1 ? 'Обовʼязкове' : 'Необовʼязкове'} | {question.include_in_sku === 1 ? 'Йде в SKU' : 'Лише в БД'} | Тип: {(question.input_type || 'options') === 'text' ? 'Текст' : 'Варіанти'} | Розділювач: {question.sku_separator || 'немає'}</span>
                 <span className="text-[11px] text-slate-500 block">
-                  visible_if: {question.visible_if_json ? formatMatchJson(question.visible_if_json) : 'always'}
+                  {formatConditionSummary(question.visible_if_json, currentCatQuestions, config)}
                 </span>
               </div>
               <button onClick={(event) => { event.stopPropagation(); deleteItem('question', question.q_db_id); }} className="text-rose-400 hover:text-rose-600 px-2">×</button>
@@ -99,7 +102,14 @@ export function AdminStructureEditor({
               <option value="options">Варіанти</option>
               <option value="text">Текстове поле</option>
             </select>
-            <input className="input-sm font-mono text-xs mb-2" placeholder='visible_if JSON, напр: {"raw_type":1,"is_calibrated":[0,2]}' value={editQuestion.visible_if_json} onChange={(event) => setEditQuestion({ ...editQuestion, visible_if_json: event.target.value })} />
+            <ConditionBuilder
+              config={config}
+              excludeQuestionId={selectedQuestion.id}
+              label="Показувати питання"
+              questions={currentCatQuestions}
+              value={editQuestion.visible_if_json}
+              onChange={(nextValue) => setEditQuestion({ ...editQuestion, visible_if_json: nextValue })}
+            />
             <input className="input-sm mb-2" placeholder="Обгорнути параметр у SKU (-, _, . або /)" value={editQuestion.sku_separator} disabled={editQuestion.input_type === 'text' || !editQuestion.include_in_sku} onChange={(event) => setEditQuestion({ ...editQuestion, sku_separator: event.target.value })} />
             <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={editQuestion.required} onChange={(event) => setEditQuestion({ ...editQuestion, required: event.target.checked })} className="mr-2" /> Обовʼязкове</label>
             <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={editQuestion.include_in_sku} disabled={editQuestion.input_type === 'text'} onChange={(event) => setEditQuestion({ ...editQuestion, include_in_sku: event.target.checked })} className="mr-2" /> Додавати в SKU</label>
@@ -115,7 +125,13 @@ export function AdminStructureEditor({
               <option value="options">Варіанти</option>
               <option value="text">Текстове поле</option>
             </select>
-            <input className="input-sm font-mono text-xs mb-2" placeholder='visible_if JSON, напр: {"raw_type":1,"is_calibrated":[0,2]}' value={newQuest.visible_if_json} onChange={(event) => setNewQuest({ ...newQuest, visible_if_json: event.target.value })} />
+            <ConditionBuilder
+              config={config}
+              label="Показувати питання"
+              questions={currentCatQuestions}
+              value={newQuest.visible_if_json}
+              onChange={(nextValue) => setNewQuest({ ...newQuest, visible_if_json: nextValue })}
+            />
             <input className="input-sm mb-2" placeholder="Обгорнути параметр у SKU (-, _, . або /)" value={newQuest.sku_separator} disabled={newQuest.input_type === 'text' || !newQuest.include_in_sku} onChange={(event) => setNewQuest({ ...newQuest, sku_separator: event.target.value })} />
             <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={newQuest.required} onChange={(event) => setNewQuest({ ...newQuest, required: event.target.checked })} className="mr-2" /> Обовʼязкове</label>
             <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={newQuest.include_in_sku} disabled={newQuest.input_type === 'text'} onChange={(event) => setNewQuest({ ...newQuest, include_in_sku: event.target.checked })} className="mr-2" /> Додавати в SKU</label>
@@ -139,7 +155,7 @@ export function AdminStructureEditor({
               <div>
                 <span className="text-sm text-slate-700">{option.label}</span>
                 <span className="text-[11px] text-slate-500 block">
-                  visible_if: {option.visible_if_json ? formatMatchJson(option.visible_if_json) : 'always'}
+                  {formatConditionSummary(option.visible_if_json, currentCatQuestions, config)}
                 </span>
               </div>
               <div className="flex items-center gap-2">
@@ -155,7 +171,14 @@ export function AdminStructureEditor({
             <div className="text-xs text-slate-500 mb-2">Редагувати опцію</div>
             <input className="input-sm mb-2" type="number" placeholder="Value ID" value={editOpt.value_id} onChange={(event) => setEditOpt({ ...editOpt, value_id: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
             <input className="input-sm mb-2" placeholder="Label" value={editOpt.label} onChange={(event) => setEditOpt({ ...editOpt, label: event.target.value })} />
-            <input className="input-sm font-mono text-xs mb-2" placeholder='visible_if JSON, напр: {"raw_type":1,"is_calibrated":[0,2]}' value={editOpt.visible_if_json} onChange={(event) => setEditOpt({ ...editOpt, visible_if_json: event.target.value })} />
+            <ConditionBuilder
+              config={config}
+              excludeQuestionId={selectedQuestion.id}
+              label="Показувати варіант"
+              questions={currentCatQuestions}
+              value={editOpt.visible_if_json}
+              onChange={(nextValue) => setEditOpt({ ...editOpt, visible_if_json: nextValue })}
+            />
             <div className="flex gap-2">
               <button onClick={updateOption} className="btn btn-primary w-full">Зберегти</button>
               <button onClick={() => setEditOpt({ id: null, value_id: '', label: '', visible_if_json: '' })} className="btn btn-outline w-full">Скасувати</button>
@@ -166,7 +189,14 @@ export function AdminStructureEditor({
           <div className="mt-4 pt-4 border-t border-slate-200 bg-slate-50/70 p-3 rounded-xl">
             <input className="input-sm mb-2" type="number" placeholder="Value ID" value={newOpt.value_id} onChange={(event) => setNewOpt({ ...newOpt, value_id: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
             <input className="input-sm mb-2" placeholder="Label" value={newOpt.label} onChange={(event) => setNewOpt({ ...newOpt, label: event.target.value })} />
-            <input className="input-sm font-mono text-xs mb-2" placeholder='visible_if JSON, напр: {"raw_type":1,"is_calibrated":[0,2]}' value={newOpt.visible_if_json} onChange={(event) => setNewOpt({ ...newOpt, visible_if_json: event.target.value })} />
+            <ConditionBuilder
+              config={config}
+              excludeQuestionId={selectedQuestion.id}
+              label="Показувати варіант"
+              questions={currentCatQuestions}
+              value={newOpt.visible_if_json}
+              onChange={(nextValue) => setNewOpt({ ...newOpt, visible_if_json: nextValue })}
+            />
             <button onClick={addOption} className="btn btn-amber w-full">Додати</button>
           </div>
         )}
