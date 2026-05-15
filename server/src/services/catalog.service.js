@@ -43,6 +43,7 @@ async function getAppConfig() {
       q.include_in_sku,
       q.input_type,
       q.sku_separator,
+      q.visible_if_json AS q_visible_if_json,
       o.id AS o_db_id,
       o.value_id,
       o.label AS o_label,
@@ -64,6 +65,7 @@ async function getAppConfig() {
         include_in_sku: row.include_in_sku,
         input_type: row.input_type || 'options',
         sku_separator: row.sku_separator || '',
+        visible_if_json: row.q_visible_if_json || null,
         cat: row.category_code,
         options: [],
       };
@@ -106,6 +108,7 @@ async function updateCategory({ code, name, requires_weight }) {
 async function createQuestion(payload) {
   const normalizedInputType = normalizeInputType(payload.input_type);
   const skuSeparator = normalizeEditableSkuSeparator(payload.sku_separator);
+  const visibleRule = parseOptionalRule(payload.visible_if_json);
   const normalizedIncludeInSku =
     normalizedInputType === 'text'
       ? 0
@@ -114,8 +117,8 @@ async function createQuestion(payload) {
         : 1;
 
   const result = await pool.query(
-    `INSERT INTO questions (category_code, key, label, sku_index, required, include_in_sku, input_type, sku_separator)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `INSERT INTO questions (category_code, key, label, sku_index, required, include_in_sku, input_type, sku_separator, visible_if_json)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
      RETURNING id`,
     [
       payload.category_code,
@@ -126,6 +129,7 @@ async function createQuestion(payload) {
       normalizedIncludeInSku,
       normalizedInputType,
       skuSeparator,
+      visibleRule ? JSON.stringify(visibleRule) : null,
     ]
   );
 
@@ -135,6 +139,7 @@ async function createQuestion(payload) {
 async function updateQuestion(payload) {
   const normalizedInputType = normalizeInputType(payload.input_type);
   const skuSeparator = normalizeEditableSkuSeparator(payload.sku_separator);
+  const visibleRule = parseOptionalRule(payload.visible_if_json);
   const normalizedIncludeInSku =
     normalizedInputType === 'text'
       ? 0
@@ -144,8 +149,8 @@ async function updateQuestion(payload) {
 
   await pool.query(
     `UPDATE questions
-     SET label = $1, sku_index = $2, required = $3, include_in_sku = $4, input_type = $5, sku_separator = $6
-     WHERE id = $7`,
+     SET label = $1, sku_index = $2, required = $3, include_in_sku = $4, input_type = $5, sku_separator = $6, visible_if_json = $7::jsonb
+     WHERE id = $8`,
     [
       payload.label,
       Number(payload.sku_index),
@@ -153,6 +158,7 @@ async function updateQuestion(payload) {
       normalizedIncludeInSku,
       normalizedInputType,
       skuSeparator,
+      visibleRule ? JSON.stringify(visibleRule) : null,
       Number(payload.id),
     ]
   );

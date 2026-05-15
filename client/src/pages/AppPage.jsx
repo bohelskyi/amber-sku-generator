@@ -56,6 +56,7 @@ function AppPage() {
             livePriceError={sku.livePriceError}
             isLivePriceLoading={sku.isLivePriceLoading}
             getVisibleOptionsForQuestion={sku.getVisibleOptions}
+            isQuestionVisible={sku.getQuestionVisibility}
             isTextQuestion={sku.isTextQuestion}
             onAnswer={sku.handleAnswer}
             onTextAnswer={sku.handleTextAnswer}

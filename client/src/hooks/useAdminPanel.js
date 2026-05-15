@@ -4,7 +4,7 @@ import { getValidationIssues } from '../lib/admin-validation';
 
 const emptyEditOption = { id: null, value_id: '', label: '', visible_if_json: '' };
 const emptyNewCategory = { code: '', name: '', requires_weight: true };
-const emptyNewQuestion = { key: '', label: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '' };
+const emptyNewQuestion = { key: '', label: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' };
 const emptyNewOption = { value_id: '', label: '', visible_if_json: '' };
 const emptyNewScenario = { name: '', match_json: '', axis_x_key: '', axis_y_key: '' };
 const emptyNewModifier = { trigger_key: '', trigger_val: '', factor: '' };
@@ -15,7 +15,7 @@ export function useAdminPanel() {
   const [selectedQuestion, setSelectedQuestion] = useState(null);
   const [pricesData, setPricesData] = useState(null);
   const [editCat, setEditCat] = useState({ name: '', requires_weight: true });
-  const [editQuestion, setEditQuestion] = useState({ label: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '' });
+  const [editQuestion, setEditQuestion] = useState({ label: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' });
   const [newCat, setNewCat] = useState(emptyNewCategory);
   const [newQuest, setNewQuest] = useState(emptyNewQuestion);
   const [newOpt, setNewOpt] = useState(emptyNewOption);
@@ -51,6 +51,20 @@ export function useAdminPanel() {
     }
   };
 
+  const parseVisibleRuleInput = (value) => {
+    try {
+      return {
+        ok: true,
+        value: value ? JSON.parse(value) : null,
+      };
+    } catch {
+      return {
+        ok: false,
+        value: null,
+      };
+    }
+  };
+
   const handleSelectCategory = (category) => {
     setSelectedCat(category);
     setSelectedQuestion(null);
@@ -71,6 +85,7 @@ export function useAdminPanel() {
       include_in_sku: question.include_in_sku === 1,
       input_type: question.input_type || 'options',
       sku_separator: question.sku_separator || '',
+      visible_if_json: question.visible_if_json ? formatMatchJson(question.visible_if_json) : '',
     });
   };
 
@@ -98,12 +113,16 @@ export function useAdminPanel() {
   const addQuestion = () => {
     if (!selectedCat) return;
     const isNewTextQuestion = newQuest.input_type === 'text';
+    const parsedVisibleRule = parseVisibleRuleInput(newQuest.visible_if_json);
+    if (!parsedVisibleRule.ok) return alert('Помилка JSON в visible_if питання');
+
     api.post('/admin/question', {
       ...newQuest,
       required: newQuest.required ? 1 : 0,
       include_in_sku: isNewTextQuestion ? 0 : (newQuest.include_in_sku ? 1 : 0),
       input_type: isNewTextQuestion ? 'text' : 'options',
       sku_separator: isNewTextQuestion || !newQuest.include_in_sku ? '' : newQuest.sku_separator,
+      visible_if_json: parsedVisibleRule.value,
       category_code: selectedCat.code,
     }).then(() => {
       setNewQuest(emptyNewQuestion);
@@ -114,6 +133,9 @@ export function useAdminPanel() {
   const updateQuestion = () => {
     if (!selectedQuestion) return;
     const isEditedTextQuestion = editQuestion.input_type === 'text';
+    const parsedVisibleRule = parseVisibleRuleInput(editQuestion.visible_if_json);
+    if (!parsedVisibleRule.ok) return alert('Помилка JSON в visible_if питання');
+
     api.post('/admin/question/update', {
       id: selectedQuestion.q_db_id,
       label: editQuestion.label,
@@ -122,6 +144,7 @@ export function useAdminPanel() {
       include_in_sku: isEditedTextQuestion ? 0 : (editQuestion.include_in_sku ? 1 : 0),
       input_type: isEditedTextQuestion ? 'text' : 'options',
       sku_separator: isEditedTextQuestion || !editQuestion.include_in_sku ? '' : editQuestion.sku_separator,
+      visible_if_json: parsedVisibleRule.value,
     })
       .then(() => {
         fetchConfig();

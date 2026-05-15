@@ -25,6 +25,19 @@ export const isVisibilityRuleMatched = (rule, context) => {
   return true;
 };
 
+export const isQuestionVisible = (
+  question,
+  answersMap = {},
+  calibratedValue = null
+) => {
+  const context = {
+    ...answersMap,
+    is_calibrated: calibratedValue,
+  };
+
+  return isVisibilityRuleMatched(question?.visible_if_json, context);
+};
+
 export const getVisibleOptionsForQuestion = (
   question,
   answersMap = {},

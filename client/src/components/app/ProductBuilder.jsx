@@ -17,6 +17,7 @@ export function ProductBuilder({
   livePriceError,
   isLivePriceLoading,
   getVisibleOptionsForQuestion,
+  isQuestionVisible,
   isTextQuestion,
   onAnswer,
   onTextAnswer,
@@ -37,6 +38,8 @@ export function ProductBuilder({
 
         <div className="space-y-6">
           {config.questions[selectedCat]?.map((question) => {
+            if (!isQuestionVisible(question)) return null;
+
             const visibleOptions = getVisibleOptionsForQuestion(question);
             const textQuestion = isTextQuestion(question);
 

@@ -66,10 +66,16 @@ async function migrateData() {
       const questions = initialConfig.questions[code] || [];
       for (const question of questions) {
         const insertedQuestion = await client.query(
-          `INSERT INTO questions (category_code, key, label, sku_index, required, include_in_sku, input_type)
-           VALUES ($1, $2, $3, $4, 1, 1, 'options')
+          `INSERT INTO questions (category_code, key, label, sku_index, required, include_in_sku, input_type, visible_if_json)
+           VALUES ($1, $2, $3, $4, 1, 1, 'options', $5::jsonb)
            RETURNING id`,
-          [code, question.id, question.label, question.sku_index]
+          [
+            code,
+            question.id,
+            question.label,
+            question.sku_index,
+            question.visible_if_json ? JSON.stringify(question.visible_if_json) : null,
+          ]
         );
         const questionId = insertedQuestion.rows[0].id;
 
@@ -149,7 +155,8 @@ async function initDb() {
       required INTEGER DEFAULT 1,
       include_in_sku INTEGER DEFAULT 1,
       input_type TEXT DEFAULT 'options',
-      sku_separator TEXT DEFAULT ''
+      sku_separator TEXT DEFAULT '',
+      visible_if_json JSONB
     )
   `);
 
@@ -215,6 +222,7 @@ async function initDb() {
   await pool.query("ALTER TABLE questions ADD COLUMN IF NOT EXISTS input_type TEXT DEFAULT 'options'");
   await pool.query("UPDATE questions SET input_type = 'options' WHERE input_type IS NULL OR input_type = ''");
   await pool.query("ALTER TABLE questions ADD COLUMN IF NOT EXISTS sku_separator TEXT DEFAULT ''");
+  await pool.query('ALTER TABLE questions ADD COLUMN IF NOT EXISTS visible_if_json JSONB');
 
   const { rows } = await pool.query('SELECT count(*)::int AS count FROM categories');
   if (rows[0].count === 0) {

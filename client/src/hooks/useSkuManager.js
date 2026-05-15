@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { getVisibleOptionsForQuestion, isTextQuestion } from '../lib/sku-visibility';
+import {
+  getVisibleOptionsForQuestion,
+  isQuestionVisible,
+  isTextQuestion,
+} from '../lib/sku-visibility';
 
 export function useSkuManager() {
   const [config, setConfig] = useState(null);
@@ -46,10 +50,15 @@ export function useSkuManager() {
 
   const getVisibleOptions = (question, answersMap = answers, calibratedValue = isCalibrated) =>
     getVisibleOptionsForQuestion(question, answersMap, calibratedValue);
+  const getQuestionVisibility = (question, answersMap = answers, calibratedValue = isCalibrated) =>
+    isQuestionVisible(question, answersMap, calibratedValue);
 
   const questionsForSelected =
     selectedCat && config ? (config.questions?.[selectedCat] || []) : [];
-  const requiredQuestions = questionsForSelected
+  const visibleQuestionsForSelected = questionsForSelected.filter((question) =>
+    getQuestionVisibility(question)
+  );
+  const requiredQuestions = visibleQuestionsForSelected
     .filter((question) => question.required === 1)
     .filter((question) => isTextQuestion(question) || getVisibleOptions(question).length > 0);
   const requiredCount = requiredQuestions.length;
@@ -138,6 +147,16 @@ export function useSkuManager() {
 
       for (const question of categoryQuestions) {
         const selectedValue = nextAnswers[question.id];
+        const questionVisible = isQuestionVisible(question, nextAnswers, isCalibrated);
+
+        if (!questionVisible) {
+          if (selectedValue !== undefined) {
+            delete nextAnswers[question.id];
+            hasChanges = true;
+          }
+          continue;
+        }
+
         if (selectedValue === undefined || isTextQuestion(question)) continue;
 
         const visibleOptionIds = getVisibleOptionsForQuestion(
@@ -154,7 +173,7 @@ export function useSkuManager() {
 
       return hasChanges ? nextAnswers : prevAnswers;
     });
-  }, [selectedCat, config, isCalibrated]);
+  }, [selectedCat, config, answers, isCalibrated]);
 
   useEffect(() => {
     if (!selectedCat || !config) {
@@ -166,6 +185,7 @@ export function useSkuManager() {
 
     const categoryQuestions = config.questions?.[selectedCat] || [];
     const hasMissingRequired = categoryQuestions
+      .filter((question) => isQuestionVisible(question, answers, isCalibrated))
       .filter((question) => question.required === 1)
       .filter((question) =>
         isTextQuestion(question) ||
@@ -228,6 +248,7 @@ export function useSkuManager() {
     if (parseFloat(weight) < 0) return alert("Вага не може бути від'ємною!");
 
     const missingRequired = questionsForSelected
+      .filter((question) => getQuestionVisibility(question))
       .filter((question) => question.required === 1)
       .filter((question) => isTextQuestion(question) || getVisibleOptions(question).length > 0)
       .filter((question) => {
@@ -460,6 +481,7 @@ export function useSkuManager() {
     effectiveTotalPriceUah,
     finalSku,
     getVisibleOptions,
+    getQuestionVisibility,
     handleManualPriceChange,
     handleAddVariation,
     handleAnswer,

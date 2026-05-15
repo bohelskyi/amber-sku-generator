@@ -82,6 +82,9 @@ export function AdminStructureEditor({
               <div>
                 <span className="font-semibold text-slate-800">{question.label}</span>
                 <span className="text-xs text-slate-500 block">Key: {question.id} | Index: {question.sku_index} | {question.required === 1 ? 'Обовʼязкове' : 'Необовʼязкове'} | {question.include_in_sku === 1 ? 'Йде в SKU' : 'Лише в БД'} | Тип: {(question.input_type || 'options') === 'text' ? 'Текст' : 'Варіанти'} | Розділювач: {question.sku_separator || 'немає'}</span>
+                <span className="text-[11px] text-slate-500 block">
+                  visible_if: {question.visible_if_json ? formatMatchJson(question.visible_if_json) : 'always'}
+                </span>
               </div>
               <button onClick={(event) => { event.stopPropagation(); deleteItem('question', question.q_db_id); }} className="text-rose-400 hover:text-rose-600 px-2">×</button>
             </div>
@@ -96,6 +99,7 @@ export function AdminStructureEditor({
               <option value="options">Варіанти</option>
               <option value="text">Текстове поле</option>
             </select>
+            <input className="input-sm font-mono text-xs mb-2" placeholder='visible_if JSON, напр: {"raw_type":1,"is_calibrated":[0,2]}' value={editQuestion.visible_if_json} onChange={(event) => setEditQuestion({ ...editQuestion, visible_if_json: event.target.value })} />
             <input className="input-sm mb-2" placeholder="Обгорнути параметр у SKU (-, _, . або /)" value={editQuestion.sku_separator} disabled={editQuestion.input_type === 'text' || !editQuestion.include_in_sku} onChange={(event) => setEditQuestion({ ...editQuestion, sku_separator: event.target.value })} />
             <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={editQuestion.required} onChange={(event) => setEditQuestion({ ...editQuestion, required: event.target.checked })} className="mr-2" /> Обовʼязкове</label>
             <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={editQuestion.include_in_sku} disabled={editQuestion.input_type === 'text'} onChange={(event) => setEditQuestion({ ...editQuestion, include_in_sku: event.target.checked })} className="mr-2" /> Додавати в SKU</label>
@@ -111,6 +115,7 @@ export function AdminStructureEditor({
               <option value="options">Варіанти</option>
               <option value="text">Текстове поле</option>
             </select>
+            <input className="input-sm font-mono text-xs mb-2" placeholder='visible_if JSON, напр: {"raw_type":1,"is_calibrated":[0,2]}' value={newQuest.visible_if_json} onChange={(event) => setNewQuest({ ...newQuest, visible_if_json: event.target.value })} />
             <input className="input-sm mb-2" placeholder="Обгорнути параметр у SKU (-, _, . або /)" value={newQuest.sku_separator} disabled={newQuest.input_type === 'text' || !newQuest.include_in_sku} onChange={(event) => setNewQuest({ ...newQuest, sku_separator: event.target.value })} />
             <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={newQuest.required} onChange={(event) => setNewQuest({ ...newQuest, required: event.target.checked })} className="mr-2" /> Обовʼязкове</label>
             <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={newQuest.include_in_sku} disabled={newQuest.input_type === 'text'} onChange={(event) => setNewQuest({ ...newQuest, include_in_sku: event.target.checked })} className="mr-2" /> Додавати в SKU</label>
