@@ -88,6 +88,7 @@ export function AdminStructureEditor({
         {selectedCat && isCategoryEditOpen && (
           <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-white/80">
             <div className="text-xs text-slate-500 mb-2">Редагувати категорію: {selectedCat.code}</div>
+            <input className="input-sm mb-2" placeholder="Code" value={editCat.code} onChange={(event) => setEditCat({ ...editCat, code: event.target.value.toUpperCase() })} />
             <input className="input-sm mb-2" placeholder="Name" value={editCat.name} onChange={(event) => setEditCat({ ...editCat, name: event.target.value })} />
             <label className="flex items-center text-sm"><input type="checkbox" checked={editCat.requires_weight} onChange={(event) => setEditCat({ ...editCat, requires_weight: event.target.checked })} className="mr-2" /> Потрібна вага?</label>
             <button onClick={updateCategory} className="btn btn-primary w-full mt-3">Зберегти</button>
@@ -147,6 +148,7 @@ export function AdminStructureEditor({
         {selectedQuestion && isQuestionEditOpen && (
           <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-white/80">
             <div className="text-xs text-slate-500 mb-2">Редагувати питання</div>
+            <input className="input-sm mb-2" placeholder="Key (size)" value={editQuestion.key} onChange={(event) => setEditQuestion({ ...editQuestion, key: event.target.value })} />
             <input className="input-sm mb-2" placeholder="Label" value={editQuestion.label} onChange={(event) => setEditQuestion({ ...editQuestion, label: event.target.value })} />
             <input className="input-sm mb-2" type="number" placeholder="Index" value={editQuestion.sku_index} onChange={(event) => setEditQuestion({ ...editQuestion, sku_index: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
             <select className="input-sm mb-2" value={editQuestion.input_type} onChange={(event) => setEditQuestion({ ...editQuestion, input_type: event.target.value, include_in_sku: event.target.value === 'text' ? false : editQuestion.include_in_sku })}>

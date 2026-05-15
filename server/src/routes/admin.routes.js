@@ -118,8 +118,8 @@ router.put('/admin/category', async (req, res) => {
     const { code, name } = req.body || {};
     if (!code || !name) return res.status(400).json({ error: 'Потрібні код і назва' });
 
-    await updateCategory(req.body);
-    res.json({ success: true });
+    const result = await updateCategory(req.body);
+    res.json({ success: true, ...result });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
@@ -127,38 +127,43 @@ router.put('/admin/category', async (req, res) => {
 
 router.post('/admin/question', async (req, res) => {
   try {
+    const { key, label } = req.body || {};
+    if (!key || label === undefined) {
+      return res.status(400).json({ error: 'Потрібні key та назва' });
+    }
+
     const result = await createQuestion(req.body || {});
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
 router.put('/admin/question', async (req, res) => {
   try {
-    const { id, label } = req.body || {};
-    if (!id || label === undefined) {
-      return res.status(400).json({ error: 'Потрібні id та назва' });
+    const { id, key, label } = req.body || {};
+    if (!id || !key || label === undefined) {
+      return res.status(400).json({ error: 'Потрібні id, key та назва' });
     }
 
-    await updateQuestion(req.body);
-    res.json({ success: true });
+    const result = await updateQuestion(req.body);
+    res.json({ success: true, ...result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
 router.post('/admin/question/update', async (req, res) => {
   try {
-    const { id, label } = req.body || {};
-    if (!id || label === undefined) {
-      return res.status(400).json({ error: 'Потрібні id та назва' });
+    const { id, key, label } = req.body || {};
+    if (!id || !key || label === undefined) {
+      return res.status(400).json({ error: 'Потрібні id, key та назва' });
     }
 
-    await updateQuestion(req.body);
-    res.json({ success: true });
+    const result = await updateQuestion(req.body);
+    res.json({ success: true, ...result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 

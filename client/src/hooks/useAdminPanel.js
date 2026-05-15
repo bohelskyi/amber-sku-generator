@@ -14,8 +14,8 @@ export function useAdminPanel() {
   const [selectedCat, setSelectedCat] = useState(null);
   const [selectedQuestion, setSelectedQuestion] = useState(null);
   const [pricesData, setPricesData] = useState(null);
-  const [editCat, setEditCat] = useState({ name: '', requires_weight: true });
-  const [editQuestion, setEditQuestion] = useState({ label: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' });
+  const [editCat, setEditCat] = useState({ code: '', name: '', requires_weight: true });
+  const [editQuestion, setEditQuestion] = useState({ key: '', label: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' });
   const [newCat, setNewCat] = useState(emptyNewCategory);
   const [newQuest, setNewQuest] = useState(emptyNewQuestion);
   const [newOpt, setNewOpt] = useState(emptyNewOption);
@@ -24,9 +24,11 @@ export function useAdminPanel() {
   const [editScenario, setEditScenario] = useState(null);
   const [newModifier, setNewModifier] = useState(emptyNewModifier);
 
-  const fetchConfig = () => {
-    api.get('/config').then((res) => setConfig(res.data));
-  };
+  const fetchConfig = () =>
+    api.get('/config').then((res) => {
+      setConfig(res.data);
+      return res.data;
+    });
 
   const fetchPricesForCategory = (categoryCode) => {
     api.get(`/admin/prices/${categoryCode}`).then((res) => setPricesData(res.data));
@@ -68,7 +70,7 @@ export function useAdminPanel() {
   const handleSelectCategory = (category) => {
     setSelectedCat(category);
     setSelectedQuestion(null);
-    setEditCat({ name: category.name, requires_weight: category.requires_weight === 1 });
+    setEditCat({ code: category.code, name: category.name, requires_weight: category.requires_weight === 1 });
     setEditScenario(null);
     setEditOpt(emptyEditOption);
     setPricesData(null);
@@ -79,6 +81,7 @@ export function useAdminPanel() {
     setSelectedQuestion(question);
     setEditOpt(emptyEditOption);
     setEditQuestion({
+      key: question.id,
       label: question.label,
       sku_index: question.sku_index,
       required: question.required === 1,
@@ -101,12 +104,32 @@ export function useAdminPanel() {
 
   const updateCategory = () => {
     if (!selectedCat) return;
+    const nextCode = String(editCat.code || '').trim().toUpperCase();
+    if (!nextCode) return alert('Вкажіть код категорії');
+
     api.put('/admin/category', {
       code: selectedCat.code,
+      next_code: nextCode,
       name: editCat.name,
       requires_weight: editCat.requires_weight ? 1 : 0,
     })
-      .then(() => fetchConfig())
+      .then((res) => {
+        const savedCode = res.data?.code || nextCode;
+        return fetchConfig().then((nextConfig) => {
+          const nextCategory = nextConfig.categories?.[savedCode];
+          setSelectedCat(nextCategory || null);
+          if (nextCategory) {
+            setEditCat({
+              code: nextCategory.code,
+              name: nextCategory.name,
+              requires_weight: nextCategory.requires_weight === 1,
+            });
+            fetchPricesForCategory(nextCategory.code);
+          } else {
+            setPricesData(null);
+          }
+        });
+      })
       .catch((err) => alert(`Помилка оновлення категорії: ${err.response?.data?.error || err.message}`));
   };
 
@@ -138,6 +161,7 @@ export function useAdminPanel() {
 
     api.post('/admin/question/update', {
       id: selectedQuestion.q_db_id,
+      key: editQuestion.key,
       label: editQuestion.label,
       sku_index: editQuestion.sku_index,
       required: editQuestion.required ? 1 : 0,
@@ -146,8 +170,23 @@ export function useAdminPanel() {
       sku_separator: isEditedTextQuestion || !editQuestion.include_in_sku ? '' : editQuestion.sku_separator,
       visible_if_json: parsedVisibleRule.value,
     })
-      .then(() => {
-        fetchConfig();
+      .then(() => fetchConfig())
+      .then((nextConfig) => {
+        const refreshedQuestion = (nextConfig.questions?.[selectedCat.code] || [])
+          .find((question) => question.q_db_id === selectedQuestion.q_db_id);
+        if (refreshedQuestion) {
+          setSelectedQuestion(refreshedQuestion);
+          setEditQuestion({
+            key: refreshedQuestion.id,
+            label: refreshedQuestion.label,
+            sku_index: refreshedQuestion.sku_index,
+            required: refreshedQuestion.required === 1,
+            include_in_sku: refreshedQuestion.include_in_sku === 1,
+            input_type: refreshedQuestion.input_type || 'options',
+            sku_separator: refreshedQuestion.sku_separator || '',
+            visible_if_json: refreshedQuestion.visible_if_json ? formatMatchJson(refreshedQuestion.visible_if_json) : '',
+          });
+        }
         alert('Збережено');
       })
       .catch((err) => {
