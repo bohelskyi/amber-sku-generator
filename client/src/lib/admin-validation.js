@@ -123,6 +123,33 @@ const findQuestionVisibilityCycles = (questions) => {
   return uniqueCycles;
 };
 
+const validateBranchingSkuDependencies = ({ category, question, questionMap, validationIssues }) => {
+  if (category.skip_hidden_sku_questions !== 1 || question.include_in_sku !== 1) return;
+
+  const parsed = parseConditionRows(question.visible_if_json);
+  if (!parsed.isValid) return;
+
+  parsed.rows.forEach((row) => {
+    if (!row.key || row.key === 'is_calibrated') return;
+
+    const sourceQuestion = questionMap.get(row.key);
+    if (!sourceQuestion) return;
+
+    if (sourceQuestion.include_in_sku !== 1) {
+      validationIssues.push(
+        `Категорія ${category.code}: гілкове SKU питання ${question.label || question.id} залежить від ${sourceQuestion.label || row.key}, але це питання не додається в SKU`
+      );
+      return;
+    }
+
+    if (Number(sourceQuestion.sku_index) >= Number(question.sku_index)) {
+      validationIssues.push(
+        `Категорія ${category.code}: гілкове SKU питання ${question.label || question.id} має залежати тільки від попередніх SKU-питань`
+      );
+    }
+  });
+};
+
 export function getValidationIssues(config) {
   const validationIssues = [];
   if (!config?.categories || !config?.questions) return validationIssues;
@@ -159,6 +186,13 @@ export function getValidationIssues(config) {
         ownerQuestionId: question.id,
         questionMap,
         ruleValue: question.visible_if_json,
+        validationIssues,
+      });
+
+      validateBranchingSkuDependencies({
+        category,
+        question,
+        questionMap,
         validationIssues,
       });
 

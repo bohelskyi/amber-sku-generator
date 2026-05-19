@@ -4,12 +4,14 @@ const {
   appendSkuSuffix,
   buildBaseSku,
   decodeSkuAnswers,
+  decodeVisibleSkuAnswers,
   parseVariationSku,
 } = require('../utils/sku');
+const { isRuleMatched } = require('../utils/rules');
 
 async function getAllCategories() {
   const result = await pool.query(
-    `SELECT code, name, requires_weight
+    `SELECT code, name, requires_weight, skip_hidden_sku_questions
      FROM categories
      ORDER BY LENGTH(code) DESC, code ASC`
   );
@@ -18,6 +20,7 @@ async function getAllCategories() {
     code: row.code,
     name: row.name,
     requires_weight: Number(row.requires_weight),
+    skip_hidden_sku_questions: Number(row.skip_hidden_sku_questions || 0),
   }));
 }
 
@@ -30,6 +33,7 @@ async function getQuestionsForCategory(categoryCode) {
         q.sku_index,
         COALESCE(q.sku_separator, '') AS sku_separator,
         q.required,
+        q.visible_if_json,
         o.value_id,
         o.label AS o_label
       FROM questions q
@@ -51,6 +55,7 @@ async function getQuestionsForCategory(categoryCode) {
         sku_index: Number(row.sku_index),
         sku_separator: row.sku_separator || '',
         required: Number(row.required),
+        visible_if_json: row.visible_if_json || null,
         options: [],
       };
       questions.push(currentQuestion);
@@ -98,7 +103,10 @@ async function decodeSku(skuValue) {
   });
 
   for (const attempt of attempts) {
-    const decodedAnswers = decodeSkuAnswers(questions, attempt.encodedPart);
+    const decodedAnswers =
+      Number(category.skip_hidden_sku_questions || 0) === 1
+        ? decodeVisibleSkuAnswers(questions, attempt.encodedPart)
+        : decodeSkuAnswers(questions, attempt.encodedPart);
     if (!decodedAnswers) continue;
 
     const suffixValue =
@@ -117,6 +125,7 @@ async function decodeSku(skuValue) {
         code: category.code,
         name: category.name,
         requires_weight: category.requires_weight,
+        skip_hidden_sku_questions: category.skip_hidden_sku_questions,
       },
       baseSku: category.code + attempt.encodedPart,
       decodedAnswers,
@@ -185,9 +194,25 @@ async function getProductBySku(fullSku) {
   return result.rows[0] || null;
 }
 
+function isQuestionVisibleForSku(question, answers, isCalibrated) {
+  return isRuleMatched(question.visible_if_json, {
+    ...answers,
+    is_calibrated: isCalibrated,
+  });
+}
+
 async function buildProductPreview({ categoryCode, answers = {}, weight, isCalibrated }) {
+  const categoryResult = await pool.query(
+    `SELECT requires_weight, COALESCE(sku_separator, '') AS legacy_sku_separator, skip_hidden_sku_questions
+     FROM categories
+     WHERE code = $1`,
+    [categoryCode]
+  );
+  const skipHiddenSkuQuestions =
+    Number(categoryResult.rows[0]?.skip_hidden_sku_questions || 0) === 1;
+
   const questionRows = await pool.query(
-    `SELECT key, sku_index, COALESCE(sku_separator, '') AS sku_separator
+    `SELECT key, sku_index, COALESCE(sku_separator, '') AS sku_separator, visible_if_json
      FROM questions
      WHERE category_code = $1 AND COALESCE(include_in_sku, 1) = 1
      ORDER BY sku_index ASC`,
@@ -197,6 +222,13 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
   const answerCodes = [];
   const answerCodeParts = [];
   for (const question of questionRows.rows) {
+    if (
+      skipHiddenSkuQuestions &&
+      !isQuestionVisibleForSku(question, answers, isCalibrated)
+    ) {
+      continue;
+    }
+
     const value = answers[question.key];
     const normalizedValue = value !== undefined && value !== null && value !== '' ? value : 0;
     answerCodes.push(normalizedValue);
@@ -206,12 +238,6 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
     });
   }
 
-  const categoryResult = await pool.query(
-    `SELECT requires_weight, COALESCE(sku_separator, '') AS legacy_sku_separator
-     FROM categories
-     WHERE code = $1`,
-    [categoryCode]
-  );
   const legacySkuSeparator = categoryResult.rows[0]?.legacy_sku_separator || '';
   const baseSku = buildBaseSku(categoryCode, answerCodeParts);
   const compactBaseSku = buildBaseSku(categoryCode, answerCodes);

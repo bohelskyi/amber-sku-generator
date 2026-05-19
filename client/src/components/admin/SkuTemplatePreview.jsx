@@ -35,6 +35,7 @@ export function SkuTemplatePreview({ category, questions }) {
   const suffixLabel = category.requires_weight === 1 ? '045' : '001';
   const suffixText = category.requires_weight === 1 ? 'вага' : 'номер';
   const sampleSku = `${category.code}${parts.map((part) => part.token).join('')}${suffixLabel}`;
+  const isBranchingSku = category.skip_hidden_sku_questions === 1;
 
   return (
     <div className="mb-4 rounded-xl border border-slate-200 bg-white/80 p-3">
@@ -44,9 +45,15 @@ export function SkuTemplatePreview({ category, questions }) {
           <div className="mt-1 font-mono text-lg font-semibold text-slate-900">{sampleSku}</div>
         </div>
         <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs text-slate-600">
-          суфікс: {suffixText}
+          {isBranchingSku ? 'гілковий SKU' : 'фіксований SKU'} | суфікс: {suffixText}
         </span>
       </div>
+
+      {isBranchingSku && (
+        <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-slate-700">
+          У цій категорії приховані питання не потрапляють в артикул. Приклад нижче показує повний набір можливих SKU-полів.
+        </div>
+      )}
 
       {parts.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-600">

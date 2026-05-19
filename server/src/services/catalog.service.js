@@ -140,6 +140,7 @@ async function getAppConfig() {
       name: row.name,
       code: row.code,
       requires_weight: row.requires_weight,
+      skip_hidden_sku_questions: row.skip_hidden_sku_questions || 0,
     };
   }
 
@@ -200,20 +201,27 @@ async function getAppConfig() {
   return config;
 }
 
-async function createCategory({ code, name, requires_weight }) {
+async function createCategory({ code, name, requires_weight, skip_hidden_sku_questions }) {
   const normalizedCode = normalizeCategoryCode(code);
   await pool.query(
-    'INSERT INTO categories (code, name, requires_weight) VALUES ($1, $2, $3)',
-    [normalizedCode, name, requires_weight !== undefined ? Number(requires_weight) : 1]
+    'INSERT INTO categories (code, name, requires_weight, skip_hidden_sku_questions) VALUES ($1, $2, $3, $4)',
+    [
+      normalizedCode,
+      name,
+      requires_weight !== undefined ? Number(requires_weight) : 1,
+      skip_hidden_sku_questions !== undefined ? Number(skip_hidden_sku_questions) : 0,
+    ]
   );
 
   return { id: normalizedCode, name };
 }
 
-async function updateCategory({ code, next_code, name, requires_weight }) {
+async function updateCategory({ code, next_code, name, requires_weight, skip_hidden_sku_questions }) {
   const currentCode = normalizeCategoryCode(code);
   const nextCode = normalizeCategoryCode(next_code || code);
   const normalizedRequiresWeight = requires_weight !== undefined ? Number(requires_weight) : 1;
+  const normalizedSkipHidden =
+    skip_hidden_sku_questions !== undefined ? Number(skip_hidden_sku_questions) : 0;
 
   if (!currentCode || !nextCode) {
     const err = new Error('Потрібен код категорії');
@@ -223,8 +231,8 @@ async function updateCategory({ code, next_code, name, requires_weight }) {
 
   if (currentCode === nextCode) {
     await pool.query(
-      'UPDATE categories SET name = $1, requires_weight = $2 WHERE code = $3',
-      [name, normalizedRequiresWeight, currentCode]
+      'UPDATE categories SET name = $1, requires_weight = $2, skip_hidden_sku_questions = $3 WHERE code = $4',
+      [name, normalizedRequiresWeight, normalizedSkipHidden, currentCode]
     );
     return { code: nextCode };
   }
@@ -254,8 +262,8 @@ async function updateCategory({ code, next_code, name, requires_weight }) {
     }
 
     await client.query(
-      'INSERT INTO categories (code, name, requires_weight, sku_separator) SELECT $1, $2, $3, sku_separator FROM categories WHERE code = $4',
-      [nextCode, name, normalizedRequiresWeight, currentCode]
+      'INSERT INTO categories (code, name, requires_weight, sku_separator, skip_hidden_sku_questions) SELECT $1, $2, $3, sku_separator, $4 FROM categories WHERE code = $5',
+      [nextCode, name, normalizedRequiresWeight, normalizedSkipHidden, currentCode]
     );
     await client.query('UPDATE questions SET category_code = $1 WHERE category_code = $2', [nextCode, currentCode]);
     await client.query('UPDATE price_scenarios SET category_code = $1 WHERE category_code = $2', [nextCode, currentCode]);

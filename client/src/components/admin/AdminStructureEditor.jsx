@@ -91,6 +91,10 @@ export function AdminStructureEditor({
             <input className="input-sm mb-2" placeholder="Code" value={editCat.code} onChange={(event) => setEditCat({ ...editCat, code: event.target.value.toUpperCase() })} />
             <input className="input-sm mb-2" placeholder="Name" value={editCat.name} onChange={(event) => setEditCat({ ...editCat, name: event.target.value })} />
             <label className="flex items-center text-sm"><input type="checkbox" checked={editCat.requires_weight} onChange={(event) => setEditCat({ ...editCat, requires_weight: event.target.checked })} className="mr-2" /> Потрібна вага?</label>
+            <label className="mt-2 flex items-start text-sm">
+              <input type="checkbox" checked={editCat.skip_hidden_sku_questions} onChange={(event) => setEditCat({ ...editCat, skip_hidden_sku_questions: event.target.checked })} className="mr-2 mt-1" />
+              <span>Пропускати приховані питання в SKU</span>
+            </label>
             <button onClick={updateCategory} className="btn btn-primary w-full mt-3">Зберегти</button>
           </div>
         )}
@@ -106,6 +110,10 @@ export function AdminStructureEditor({
               <input className="input-sm mb-2" placeholder="Code" value={newCat.code} onChange={(event) => setNewCat({ ...newCat, code: event.target.value.toUpperCase() })} />
               <input className="input-sm mb-2" placeholder="Name" value={newCat.name} onChange={(event) => setNewCat({ ...newCat, name: event.target.value })} />
               <label className="flex items-center text-sm"><input type="checkbox" checked={newCat.requires_weight} onChange={(event) => setNewCat({ ...newCat, requires_weight: event.target.checked })} className="mr-2" /> Потрібна вага?</label>
+              <label className="mt-2 flex items-start text-sm">
+                <input type="checkbox" checked={newCat.skip_hidden_sku_questions} onChange={(event) => setNewCat({ ...newCat, skip_hidden_sku_questions: event.target.checked })} className="mr-2 mt-1" />
+                <span>Пропускати приховані питання в SKU</span>
+              </label>
               <button onClick={addCategory} className="btn btn-amber w-full mt-3">Зберегти категорію</button>
             </div>
           )}

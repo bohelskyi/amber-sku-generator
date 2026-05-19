@@ -129,11 +129,14 @@ async function initDb() {
       code TEXT PRIMARY KEY,
       name TEXT,
       requires_weight INTEGER DEFAULT 1,
-      sku_separator TEXT DEFAULT ''
+      sku_separator TEXT DEFAULT '',
+      skip_hidden_sku_questions INTEGER DEFAULT 0
     )
   `);
 
   await pool.query("ALTER TABLE categories ADD COLUMN IF NOT EXISTS sku_separator TEXT DEFAULT ''");
+  await pool.query('ALTER TABLE categories ADD COLUMN IF NOT EXISTS skip_hidden_sku_questions INTEGER DEFAULT 0');
+  await pool.query('UPDATE categories SET skip_hidden_sku_questions = 0 WHERE skip_hidden_sku_questions IS NULL');
 
   const questionSeparatorColumnResult = await pool.query(`
     SELECT EXISTS (

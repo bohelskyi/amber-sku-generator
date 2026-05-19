@@ -3,7 +3,7 @@ import { api } from '../lib/api';
 import { getValidationIssues } from '../lib/admin-validation';
 
 const emptyEditOption = { id: null, value_id: '', label: '', visible_if_json: '' };
-const emptyNewCategory = { code: '', name: '', requires_weight: true };
+const emptyNewCategory = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false };
 const emptyNewQuestion = { key: '', label: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' };
 const emptyNewOption = { value_id: '', label: '', visible_if_json: '' };
 const emptyNewScenario = { name: '', match_json: '', axis_x_key: '', axis_y_key: '' };
@@ -14,7 +14,7 @@ export function useAdminPanel() {
   const [selectedCat, setSelectedCat] = useState(null);
   const [selectedQuestion, setSelectedQuestion] = useState(null);
   const [pricesData, setPricesData] = useState(null);
-  const [editCat, setEditCat] = useState({ code: '', name: '', requires_weight: true });
+  const [editCat, setEditCat] = useState({ code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false });
   const [editQuestion, setEditQuestion] = useState({ key: '', label: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' });
   const [newCat, setNewCat] = useState(emptyNewCategory);
   const [newQuest, setNewQuest] = useState(emptyNewQuestion);
@@ -70,7 +70,12 @@ export function useAdminPanel() {
   const handleSelectCategory = (category) => {
     setSelectedCat(category);
     setSelectedQuestion(null);
-    setEditCat({ code: category.code, name: category.name, requires_weight: category.requires_weight === 1 });
+    setEditCat({
+      code: category.code,
+      name: category.name,
+      requires_weight: category.requires_weight === 1,
+      skip_hidden_sku_questions: category.skip_hidden_sku_questions === 1,
+    });
     setEditScenario(null);
     setEditOpt(emptyEditOption);
     setPricesData(null);
@@ -94,7 +99,11 @@ export function useAdminPanel() {
 
   const addCategory = () => {
     if (!newCat.code) return;
-    api.post('/admin/category', { ...newCat, requires_weight: newCat.requires_weight ? 1 : 0 })
+    api.post('/admin/category', {
+      ...newCat,
+      requires_weight: newCat.requires_weight ? 1 : 0,
+      skip_hidden_sku_questions: newCat.skip_hidden_sku_questions ? 1 : 0,
+    })
       .then(() => {
         setNewCat(emptyNewCategory);
         fetchConfig();
@@ -112,6 +121,7 @@ export function useAdminPanel() {
       next_code: nextCode,
       name: editCat.name,
       requires_weight: editCat.requires_weight ? 1 : 0,
+      skip_hidden_sku_questions: editCat.skip_hidden_sku_questions ? 1 : 0,
     })
       .then((res) => {
         const savedCode = res.data?.code || nextCode;
@@ -123,6 +133,7 @@ export function useAdminPanel() {
               code: nextCategory.code,
               name: nextCategory.name,
               requires_weight: nextCategory.requires_weight === 1,
+              skip_hidden_sku_questions: nextCategory.skip_hidden_sku_questions === 1,
             });
             fetchPricesForCategory(nextCategory.code);
           } else {
