@@ -4,6 +4,16 @@ import { SkuTemplatePreview } from './SkuTemplatePreview';
 import { handleNumberKeyDown, handleNumberWheel } from '../../lib/number-input';
 import { formatConditionSummary } from '../../lib/admin-conditions';
 
+function FieldControl({ children, hint, label }) {
+  return (
+    <label className="mb-2 block">
+      <span className="mb-1 block text-xs font-semibold text-slate-600">{label}</span>
+      {children}
+      {hint && <span className="mt-1 block text-[11px] text-slate-500">{hint}</span>}
+    </label>
+  );
+}
+
 export function AdminStructureEditor({
   config,
   selectedCat,
@@ -39,6 +49,8 @@ export function AdminStructureEditor({
   const [isQuestionEditOpen, setIsQuestionEditOpen] = useState(false);
   const [isNewQuestionOpen, setIsNewQuestionOpen] = useState(false);
   const [isNewOptionOpen, setIsNewOptionOpen] = useState(false);
+  const canEditQuestionSku = editQuestion.input_type !== 'text' && editQuestion.include_in_sku;
+  const canNewQuestionSku = newQuest.input_type !== 'text' && newQuest.include_in_sku;
 
   const selectCategory = (category) => {
     setIsCategoryEditOpen(false);
@@ -134,7 +146,7 @@ export function AdminStructureEditor({
             >
               <div>
                 <span className="font-semibold text-slate-800">{question.label}</span>
-                <span className="text-xs text-slate-500 block">Key: {question.id} | Index: {question.sku_index} | {question.required === 1 ? 'Обовʼязкове' : 'Необовʼязкове'} | {question.include_in_sku === 1 ? 'Йде в SKU' : 'Лише в БД'} | Тип: {(question.input_type || 'options') === 'text' ? 'Текст' : 'Варіанти'} | Розділювач: {question.sku_separator || 'немає'}</span>
+                <span className="text-xs text-slate-500 block">Key: {question.id} | Порядок: {question.display_order ?? question.sku_index} | SKU index: {question.include_in_sku === 1 ? question.sku_index : 'немає'} | {question.required === 1 ? 'Обовʼязкове' : 'Необовʼязкове'} | {question.include_in_sku === 1 ? 'Йде в SKU' : 'Лише в БД'} | Тип: {(question.input_type || 'options') === 'text' ? 'Текст' : 'Варіанти'} | Розділювач: {question.include_in_sku === 1 ? question.sku_separator || 'немає' : 'немає'}</span>
                 <span className="text-[11px] text-slate-500 block">
                   {formatConditionSummary(question.visible_if_json, currentCatQuestions, config)}
                 </span>
@@ -156,13 +168,37 @@ export function AdminStructureEditor({
         {selectedQuestion && isQuestionEditOpen && (
           <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-white/80">
             <div className="text-xs text-slate-500 mb-2">Редагувати питання</div>
-            <input className="input-sm mb-2" placeholder="Key (size)" value={editQuestion.key} onChange={(event) => setEditQuestion({ ...editQuestion, key: event.target.value })} />
-            <input className="input-sm mb-2" placeholder="Label" value={editQuestion.label} onChange={(event) => setEditQuestion({ ...editQuestion, label: event.target.value })} />
-            <input className="input-sm mb-2" type="number" placeholder="Index" value={editQuestion.sku_index} onChange={(event) => setEditQuestion({ ...editQuestion, sku_index: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
-            <select className="input-sm mb-2" value={editQuestion.input_type} onChange={(event) => setEditQuestion({ ...editQuestion, input_type: event.target.value, include_in_sku: event.target.value === 'text' ? false : editQuestion.include_in_sku })}>
-              <option value="options">Варіанти</option>
-              <option value="text">Текстове поле</option>
-            </select>
+            <FieldControl label="Key">
+              <input className="input-sm" placeholder="size" value={editQuestion.key} onChange={(event) => setEditQuestion({ ...editQuestion, key: event.target.value })} />
+            </FieldControl>
+            <FieldControl label="Назва питання">
+              <input className="input-sm" placeholder="Розмір" value={editQuestion.label} onChange={(event) => setEditQuestion({ ...editQuestion, label: event.target.value })} />
+            </FieldControl>
+            <FieldControl label="Тип питання">
+              <select className="input-sm" value={editQuestion.input_type} onChange={(event) => setEditQuestion({ ...editQuestion, input_type: event.target.value, include_in_sku: event.target.value === 'text' ? false : editQuestion.include_in_sku })}>
+                <option value="options">Варіанти</option>
+                <option value="text">Текстове поле</option>
+              </select>
+            </FieldControl>
+            <FieldControl label="Порядок у формі" hint="Відповідає тільки за місце питання на екрані. Можна вводити 0.5, 1.5 тощо.">
+              <input className="input-sm" type="number" step="0.1" placeholder="0.5" value={editQuestion.display_order} onChange={(event) => setEditQuestion({ ...editQuestion, display_order: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
+            </FieldControl>
+            <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={editQuestion.required} onChange={(event) => setEditQuestion({ ...editQuestion, required: event.target.checked })} className="mr-2" /> Обовʼязкове</label>
+            <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={editQuestion.include_in_sku} disabled={editQuestion.input_type === 'text'} onChange={(event) => setEditQuestion({ ...editQuestion, include_in_sku: event.target.checked })} className="mr-2" /> Додавати в SKU</label>
+            {canEditQuestionSku ? (
+              <>
+                <FieldControl label="SKU index" hint="Відповідає за позицію значення в артикулі.">
+                  <input className="input-sm" type="number" placeholder="1" value={editQuestion.sku_index} onChange={(event) => setEditQuestion({ ...editQuestion, sku_index: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
+                </FieldControl>
+                <FieldControl label="Розділювач у SKU" hint="Можна використовувати тільки -, _, . або /.">
+                  <input className="input-sm" placeholder="-" value={editQuestion.sku_separator} onChange={(event) => setEditQuestion({ ...editQuestion, sku_separator: event.target.value })} />
+                </FieldControl>
+              </>
+            ) : (
+              <p className="mb-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                SKU index не потрібен, бо це питання не додається в артикул.
+              </p>
+            )}
             <ConditionBuilder
               config={config}
               excludeQuestionId={selectedQuestion.id}
@@ -171,9 +207,6 @@ export function AdminStructureEditor({
               value={editQuestion.visible_if_json}
               onChange={(nextValue) => setEditQuestion({ ...editQuestion, visible_if_json: nextValue })}
             />
-            <input className="input-sm mb-2" placeholder="Обгорнути параметр у SKU (-, _, . або /)" value={editQuestion.sku_separator} disabled={editQuestion.input_type === 'text' || !editQuestion.include_in_sku} onChange={(event) => setEditQuestion({ ...editQuestion, sku_separator: event.target.value })} />
-            <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={editQuestion.required} onChange={(event) => setEditQuestion({ ...editQuestion, required: event.target.checked })} className="mr-2" /> Обовʼязкове</label>
-            <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={editQuestion.include_in_sku} disabled={editQuestion.input_type === 'text'} onChange={(event) => setEditQuestion({ ...editQuestion, include_in_sku: event.target.checked })} className="mr-2" /> Додавати в SKU</label>
             <button onClick={updateQuestion} className="btn btn-primary w-full">Зберегти</button>
           </div>
         )}
@@ -187,13 +220,37 @@ export function AdminStructureEditor({
             </button>
             {isNewQuestionOpen && (
               <div className="mt-3 bg-slate-50/70 p-3 rounded-xl">
-                <input className="input-sm mb-2" placeholder="Key (size)" value={newQuest.key} onChange={(event) => setNewQuest({ ...newQuest, key: event.target.value })} />
-                <input className="input-sm mb-2" placeholder="Label" value={newQuest.label} onChange={(event) => setNewQuest({ ...newQuest, label: event.target.value })} />
-                <input className="input-sm mb-2" type="number" placeholder="Index" value={newQuest.sku_index} onChange={(event) => setNewQuest({ ...newQuest, sku_index: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
-                <select className="input-sm mb-2" value={newQuest.input_type} onChange={(event) => setNewQuest({ ...newQuest, input_type: event.target.value, include_in_sku: event.target.value === 'text' ? false : newQuest.include_in_sku })}>
-                  <option value="options">Варіанти</option>
-                  <option value="text">Текстове поле</option>
-                </select>
+                <FieldControl label="Key">
+                  <input className="input-sm" placeholder="size" value={newQuest.key} onChange={(event) => setNewQuest({ ...newQuest, key: event.target.value })} />
+                </FieldControl>
+                <FieldControl label="Назва питання">
+                  <input className="input-sm" placeholder="Розмір" value={newQuest.label} onChange={(event) => setNewQuest({ ...newQuest, label: event.target.value })} />
+                </FieldControl>
+                <FieldControl label="Тип питання">
+                  <select className="input-sm" value={newQuest.input_type} onChange={(event) => setNewQuest({ ...newQuest, input_type: event.target.value, include_in_sku: event.target.value === 'text' ? false : newQuest.include_in_sku })}>
+                    <option value="options">Варіанти</option>
+                    <option value="text">Текстове поле</option>
+                  </select>
+                </FieldControl>
+                <FieldControl label="Порядок у формі" hint="Відповідає тільки за місце питання на екрані. Можна вводити 0.5, 1.5 тощо.">
+                  <input className="input-sm" type="number" step="0.1" placeholder="0.5" value={newQuest.display_order} onChange={(event) => setNewQuest({ ...newQuest, display_order: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
+                </FieldControl>
+                <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={newQuest.required} onChange={(event) => setNewQuest({ ...newQuest, required: event.target.checked })} className="mr-2" /> Обовʼязкове</label>
+                <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={newQuest.include_in_sku} disabled={newQuest.input_type === 'text'} onChange={(event) => setNewQuest({ ...newQuest, include_in_sku: event.target.checked })} className="mr-2" /> Додавати в SKU</label>
+                {canNewQuestionSku ? (
+                  <>
+                    <FieldControl label="SKU index" hint="Відповідає за позицію значення в артикулі.">
+                      <input className="input-sm" type="number" placeholder="1" value={newQuest.sku_index} onChange={(event) => setNewQuest({ ...newQuest, sku_index: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
+                    </FieldControl>
+                    <FieldControl label="Розділювач у SKU" hint="Можна використовувати тільки -, _, . або /.">
+                      <input className="input-sm" placeholder="-" value={newQuest.sku_separator} onChange={(event) => setNewQuest({ ...newQuest, sku_separator: event.target.value })} />
+                    </FieldControl>
+                  </>
+                ) : (
+                  <p className="mb-2 rounded-lg bg-white/80 px-3 py-2 text-xs text-slate-500">
+                    SKU index не потрібен, бо це питання не додається в артикул.
+                  </p>
+                )}
                 <ConditionBuilder
                   config={config}
                   label="Показувати питання"
@@ -201,9 +258,6 @@ export function AdminStructureEditor({
                   value={newQuest.visible_if_json}
                   onChange={(nextValue) => setNewQuest({ ...newQuest, visible_if_json: nextValue })}
                 />
-                <input className="input-sm mb-2" placeholder="Обгорнути параметр у SKU (-, _, . або /)" value={newQuest.sku_separator} disabled={newQuest.input_type === 'text' || !newQuest.include_in_sku} onChange={(event) => setNewQuest({ ...newQuest, sku_separator: event.target.value })} />
-                <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={newQuest.required} onChange={(event) => setNewQuest({ ...newQuest, required: event.target.checked })} className="mr-2" /> Обовʼязкове</label>
-                <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={newQuest.include_in_sku} disabled={newQuest.input_type === 'text'} onChange={(event) => setNewQuest({ ...newQuest, include_in_sku: event.target.checked })} className="mr-2" /> Додавати в SKU</label>
                 <button onClick={addQuestion} className="btn btn-amber w-full">Зберегти питання</button>
               </div>
             )}

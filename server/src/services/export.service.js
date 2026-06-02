@@ -11,6 +11,7 @@ async function getNonSkuQuestionMaps(categoryCodes) {
         q.key,
         q.label AS q_label,
         q.sku_index,
+        q.display_order,
         q.input_type,
         o.value_id,
         o.label AS o_label
@@ -18,7 +19,7 @@ async function getNonSkuQuestionMaps(categoryCodes) {
       LEFT JOIN options o ON o.question_id = q.id
       WHERE q.category_code = ANY($1::text[])
         AND COALESCE(q.include_in_sku, 1) = 0
-      ORDER BY q.category_code, q.sku_index, q.id, o.value_id
+      ORDER BY q.category_code, COALESCE(q.display_order, q.sku_index), q.sku_index, q.id, o.value_id
     `,
     [categoryCodes]
   );

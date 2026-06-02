@@ -5,8 +5,6 @@ export function ProductBuilder({
   config,
   selectedCat,
   answers,
-  isCalibrated,
-  setIsCalibrated,
   weight,
   setWeight,
   isWeightRequired,
@@ -38,9 +36,9 @@ export function ProductBuilder({
 
         <div className="space-y-6">
           {config.questions[selectedCat]?.map((question) => {
-            if (!isQuestionVisible(question, answers, isCalibrated)) return null;
+            if (!isQuestionVisible(question, answers)) return null;
 
-            const visibleOptions = getVisibleOptionsForQuestion(question, answers, isCalibrated);
+            const visibleOptions = getVisibleOptionsForQuestion(question, answers);
             const textQuestion = isTextQuestion(question);
 
             return (
@@ -79,23 +77,6 @@ export function ProductBuilder({
                       <p className="mt-3 text-xs text-slate-500">Немає доступних варіантів для поточних умов.</p>
                     )}
                   </>
-                )}
-
-                {question.id === 'raw_type' && answers.raw_type === 1 && (
-                  <div className="info-panel mt-4 p-4">
-                    <label className="block text-sm font-semibold text-slate-800 mb-3">{config.extraConfig.is_calibrated.label}</label>
-                    <div className="flex flex-wrap gap-2">
-                      {config.extraConfig.is_calibrated.options.map((option) => (
-                        <button
-                          key={option.id}
-                          onClick={() => setIsCalibrated((prev) => prev === option.id ? null : option.id)}
-                          className={`option-pill ${isCalibrated === option.id ? 'option-pill-active' : 'option-pill-idle'}`}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                 )}
               </div>
             );

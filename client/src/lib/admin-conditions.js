@@ -60,7 +60,8 @@ export const getConditionSources = (questions, config, excludeQuestionId) => {
     }));
 
   const calibratedConfig = config?.extraConfig?.is_calibrated;
-  if (calibratedConfig?.options?.length) {
+  const hasCalibratedQuestion = sources.some((source) => source.key === 'is_calibrated');
+  if (!hasCalibratedQuestion && calibratedConfig?.options?.length) {
     sources.push({
       key: 'is_calibrated',
       label: calibratedConfig.label || 'Калібрування',

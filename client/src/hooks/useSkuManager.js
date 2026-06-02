@@ -10,7 +10,6 @@ export function useSkuManager() {
   const [config, setConfig] = useState(null);
   const [selectedCat, setSelectedCat] = useState(null);
   const [answers, setAnswers] = useState({});
-  const [isCalibrated, setIsCalibrated] = useState(null);
   const [weight, setWeight] = useState('');
   const [livePriceData, setLivePriceData] = useState(null);
   const [livePriceError, setLivePriceError] = useState('');
@@ -47,6 +46,8 @@ export function useSkuManager() {
     fetchHistory();
     fetchExportStatus();
   }, []);
+
+  const isCalibrated = answers.is_calibrated ?? null;
 
   const getVisibleOptions = (question, answersMap = answers, calibratedValue = isCalibrated) =>
     getVisibleOptionsForQuestion(question, answersMap, calibratedValue);
@@ -98,7 +99,6 @@ export function useSkuManager() {
   const resetProductFlow = (catCode) => {
     setSelectedCat(catCode);
     setAnswers({});
-    setIsCalibrated(null);
     setPreviewData(null);
     setDisplaySku('');
     setVariationData(null);
@@ -120,8 +120,8 @@ export function useSkuManager() {
       setAnswers(nextAnswers);
     } else {
       const nextAnswers = { ...answers, [questionId]: selectedValue };
+      if (questionId === 'raw_type' && selectedValue === 2) delete nextAnswers.is_calibrated;
       setAnswers(nextAnswers);
-      if (questionId === 'raw_type' && selectedValue === 2) setIsCalibrated(null);
     }
   };
 
@@ -518,7 +518,6 @@ export function useSkuManager() {
     setExportError,
     setExportFromSku,
     setExportToSku,
-    setIsCalibrated,
     setSelectedCat,
     setSkuToDelete,
     setWeight,

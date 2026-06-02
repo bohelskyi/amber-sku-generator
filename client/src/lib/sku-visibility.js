@@ -30,9 +30,15 @@ export const isQuestionVisible = (
   answersMap = {},
   calibratedValue = null
 ) => {
+  const calibratedAnswer =
+    answersMap.is_calibrated !== undefined &&
+    answersMap.is_calibrated !== null &&
+    answersMap.is_calibrated !== ''
+      ? answersMap.is_calibrated
+      : calibratedValue;
   const context = {
     ...answersMap,
-    is_calibrated: calibratedValue,
+    is_calibrated: calibratedAnswer,
   };
 
   return isVisibilityRuleMatched(question?.visible_if_json ?? question?.visible_if, context);
@@ -45,9 +51,15 @@ export const getVisibleOptionsForQuestion = (
 ) => {
   if (isTextQuestion(question)) return [];
 
+  const calibratedAnswer =
+    answersMap.is_calibrated !== undefined &&
+    answersMap.is_calibrated !== null &&
+    answersMap.is_calibrated !== ''
+      ? answersMap.is_calibrated
+      : calibratedValue;
   const context = {
     ...answersMap,
-    is_calibrated: calibratedValue,
+    is_calibrated: calibratedAnswer,
   };
 
   return (question.options || []).filter((option) =>

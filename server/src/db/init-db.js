@@ -51,6 +51,47 @@ async function migratePricesToDb(client) {
   console.log('Prices migrated to DB');
 }
 
+async function ensureCalibratedQuestions() {
+  const categoryRows = await pool.query(`
+    SELECT q.category_code, q.sku_index, COALESCE(q.display_order, q.sku_index) AS display_order
+    FROM questions q
+    WHERE q.key = 'raw_type'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM questions cq
+        WHERE cq.category_code = q.category_code
+          AND cq.key = 'is_calibrated'
+      )
+  `);
+
+  const calibratedConfig = initialConfig.extraConfig?.is_calibrated;
+  if (!calibratedConfig?.options?.length) return;
+
+  for (const row of categoryRows.rows) {
+    const insertedQuestion = await pool.query(
+      `INSERT INTO questions
+       (category_code, key, label, sku_index, display_order, required, include_in_sku, input_type, sku_separator, visible_if_json)
+       VALUES ($1, 'is_calibrated', $2, $3, $4, 1, 0, 'options', '', $5::jsonb)
+       RETURNING id`,
+      [
+        row.category_code,
+        calibratedConfig.label || 'Сировина калібрована?',
+        Number(row.sku_index || 0) + 1,
+        Number(row.display_order || 0) + 0.5,
+        JSON.stringify({ raw_type: 1 }),
+      ]
+    );
+    const questionId = insertedQuestion.rows[0].id;
+
+    for (const option of calibratedConfig.options) {
+      await pool.query(
+        'INSERT INTO options (question_id, value_id, label) VALUES ($1, $2, $3)',
+        [questionId, option.id, option.label]
+      );
+    }
+  }
+}
+
 async function migrateData() {
   const client = await pool.connect();
   try {
@@ -66,14 +107,15 @@ async function migrateData() {
       const questions = initialConfig.questions[code] || [];
       for (const question of questions) {
         const insertedQuestion = await client.query(
-          `INSERT INTO questions (category_code, key, label, sku_index, required, include_in_sku, input_type, visible_if_json)
-           VALUES ($1, $2, $3, $4, 1, 1, 'options', $5::jsonb)
+          `INSERT INTO questions (category_code, key, label, sku_index, display_order, required, include_in_sku, input_type, visible_if_json)
+           VALUES ($1, $2, $3, $4, $5, 1, 1, 'options', $6::jsonb)
            RETURNING id`,
           [
             code,
             question.id,
             question.label,
             question.sku_index,
+            question.display_order !== undefined ? question.display_order : question.sku_index,
             question.visible_if_json ? JSON.stringify(question.visible_if_json) : null,
           ]
         );
@@ -155,6 +197,7 @@ async function initDb() {
       key TEXT,
       label TEXT,
       sku_index INTEGER,
+      display_order REAL,
       required INTEGER DEFAULT 1,
       include_in_sku INTEGER DEFAULT 1,
       input_type TEXT DEFAULT 'options',
@@ -226,6 +269,8 @@ async function initDb() {
   await pool.query("UPDATE questions SET input_type = 'options' WHERE input_type IS NULL OR input_type = ''");
   await pool.query("ALTER TABLE questions ADD COLUMN IF NOT EXISTS sku_separator TEXT DEFAULT ''");
   await pool.query('ALTER TABLE questions ADD COLUMN IF NOT EXISTS visible_if_json JSONB');
+  await pool.query('ALTER TABLE questions ADD COLUMN IF NOT EXISTS display_order REAL');
+  await pool.query('UPDATE questions SET display_order = sku_index WHERE display_order IS NULL');
 
   const { rows } = await pool.query('SELECT count(*)::int AS count FROM categories');
   if (rows[0].count === 0) {
@@ -243,6 +288,8 @@ async function initDb() {
       "UPDATE questions SET sku_separator = '-' WHERE category_code = 'AR' AND key = 'size' AND COALESCE(sku_separator, '') = ''"
     );
   }
+
+  await ensureCalibratedQuestions();
 }
 
 module.exports = {

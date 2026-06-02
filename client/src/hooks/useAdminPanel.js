@@ -4,7 +4,7 @@ import { getValidationIssues } from '../lib/admin-validation';
 
 const emptyEditOption = { id: null, value_id: '', label: '', visible_if_json: '' };
 const emptyNewCategory = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false };
-const emptyNewQuestion = { key: '', label: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' };
+const emptyNewQuestion = { key: '', label: '', display_order: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' };
 const emptyNewOption = { value_id: '', label: '', visible_if_json: '' };
 const emptyNewScenario = { name: '', match_json: '', axis_x_key: '', axis_y_key: '' };
 const emptyNewModifier = { trigger_key: '', trigger_val: '', factor: '' };
@@ -15,7 +15,7 @@ export function useAdminPanel() {
   const [selectedQuestion, setSelectedQuestion] = useState(null);
   const [pricesData, setPricesData] = useState(null);
   const [editCat, setEditCat] = useState({ code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false });
-  const [editQuestion, setEditQuestion] = useState({ key: '', label: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' });
+  const [editQuestion, setEditQuestion] = useState({ key: '', label: '', display_order: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' });
   const [newCat, setNewCat] = useState(emptyNewCategory);
   const [newQuest, setNewQuest] = useState(emptyNewQuestion);
   const [newOpt, setNewOpt] = useState(emptyNewOption);
@@ -88,6 +88,7 @@ export function useAdminPanel() {
     setEditQuestion({
       key: question.id,
       label: question.label,
+      display_order: question.display_order ?? question.sku_index,
       sku_index: question.sku_index,
       required: question.required === 1,
       include_in_sku: question.include_in_sku === 1,
@@ -147,15 +148,22 @@ export function useAdminPanel() {
   const addQuestion = () => {
     if (!selectedCat) return;
     const isNewTextQuestion = newQuest.input_type === 'text';
+    const shouldAddNewQuestionToSku = !isNewTextQuestion && newQuest.include_in_sku;
     const parsedVisibleRule = parseVisibleRuleInput(newQuest.visible_if_json);
     if (!parsedVisibleRule.ok) return alert('Помилка JSON в visible_if питання');
 
     api.post('/admin/question', {
       ...newQuest,
+      sku_index: shouldAddNewQuestionToSku ? newQuest.sku_index : 0,
       required: newQuest.required ? 1 : 0,
-      include_in_sku: isNewTextQuestion ? 0 : (newQuest.include_in_sku ? 1 : 0),
+      include_in_sku: shouldAddNewQuestionToSku ? 1 : 0,
       input_type: isNewTextQuestion ? 'text' : 'options',
-      sku_separator: isNewTextQuestion || !newQuest.include_in_sku ? '' : newQuest.sku_separator,
+      sku_separator: shouldAddNewQuestionToSku ? newQuest.sku_separator : '',
+      display_order: newQuest.display_order !== ''
+        ? newQuest.display_order
+        : shouldAddNewQuestionToSku
+          ? newQuest.sku_index
+          : 0,
       visible_if_json: parsedVisibleRule.value,
       category_code: selectedCat.code,
     }).then(() => {
@@ -167,6 +175,7 @@ export function useAdminPanel() {
   const updateQuestion = () => {
     if (!selectedQuestion) return;
     const isEditedTextQuestion = editQuestion.input_type === 'text';
+    const shouldAddEditedQuestionToSku = !isEditedTextQuestion && editQuestion.include_in_sku;
     const parsedVisibleRule = parseVisibleRuleInput(editQuestion.visible_if_json);
     if (!parsedVisibleRule.ok) return alert('Помилка JSON в visible_if питання');
 
@@ -174,11 +183,16 @@ export function useAdminPanel() {
       id: selectedQuestion.q_db_id,
       key: editQuestion.key,
       label: editQuestion.label,
-      sku_index: editQuestion.sku_index,
+      display_order: editQuestion.display_order !== ''
+        ? editQuestion.display_order
+        : shouldAddEditedQuestionToSku
+          ? editQuestion.sku_index
+          : 0,
+      sku_index: shouldAddEditedQuestionToSku ? editQuestion.sku_index : 0,
       required: editQuestion.required ? 1 : 0,
-      include_in_sku: isEditedTextQuestion ? 0 : (editQuestion.include_in_sku ? 1 : 0),
+      include_in_sku: shouldAddEditedQuestionToSku ? 1 : 0,
       input_type: isEditedTextQuestion ? 'text' : 'options',
-      sku_separator: isEditedTextQuestion || !editQuestion.include_in_sku ? '' : editQuestion.sku_separator,
+      sku_separator: shouldAddEditedQuestionToSku ? editQuestion.sku_separator : '',
       visible_if_json: parsedVisibleRule.value,
     })
       .then(() => fetchConfig())
@@ -190,6 +204,7 @@ export function useAdminPanel() {
           setEditQuestion({
             key: refreshedQuestion.id,
             label: refreshedQuestion.label,
+            display_order: refreshedQuestion.display_order ?? refreshedQuestion.sku_index,
             sku_index: refreshedQuestion.sku_index,
             required: refreshedQuestion.required === 1,
             include_in_sku: refreshedQuestion.include_in_sku === 1,

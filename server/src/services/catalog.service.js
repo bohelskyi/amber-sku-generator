@@ -28,6 +28,28 @@ function normalizeQuestionKey(key) {
   return String(key || '').trim();
 }
 
+function getNormalizedQuestionNumbers(payload, includeInSku) {
+  const skuIndex = includeInSku === 1 ? Number(payload.sku_index) : 0;
+  if (includeInSku === 1 && !Number.isFinite(skuIndex)) {
+    const err = new Error('Для питання, яке додається в SKU, потрібен SKU index');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const displayOrder =
+    payload.display_order !== undefined && payload.display_order !== ''
+      ? Number(payload.display_order)
+      : skuIndex;
+
+  if (!Number.isFinite(displayOrder)) {
+    const err = new Error('Потрібен порядок питання у формі');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return { skuIndex, displayOrder };
+}
+
 function renameJsonObjectKey(value, oldKey, newKey) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   if (!Object.prototype.hasOwnProperty.call(value, oldKey)) return value;
@@ -151,6 +173,7 @@ async function getAppConfig() {
       q.key,
       q.label AS q_label,
       q.sku_index,
+      q.display_order,
       q.required,
       q.include_in_sku,
       q.input_type,
@@ -162,17 +185,18 @@ async function getAppConfig() {
       o.visible_if_json
     FROM questions q
     LEFT JOIN options o ON q.id = o.question_id
-    ORDER BY q.category_code, q.sku_index, o.value_id
+    ORDER BY q.category_code, COALESCE(q.display_order, q.sku_index), q.sku_index, o.value_id
   `);
 
-  const tempQuestions = {};
+  const tempQuestions = new Map();
   for (const row of questions.rows) {
-    if (!tempQuestions[row.q_db_id]) {
-      tempQuestions[row.q_db_id] = {
+    if (!tempQuestions.has(row.q_db_id)) {
+      tempQuestions.set(row.q_db_id, {
         q_db_id: row.q_db_id,
         id: row.key,
         label: row.q_label,
         sku_index: row.sku_index,
+        display_order: row.display_order ?? row.sku_index,
         required: row.required,
         include_in_sku: row.include_in_sku,
         input_type: row.input_type || 'options',
@@ -180,11 +204,11 @@ async function getAppConfig() {
         visible_if_json: row.q_visible_if_json || null,
         cat: row.category_code,
         options: [],
-      };
+      });
     }
 
     if (row.o_db_id) {
-      tempQuestions[row.q_db_id].options.push({
+      tempQuestions.get(row.q_db_id).options.push({
         db_id: row.o_db_id,
         id: row.value_id,
         label: row.o_label,
@@ -193,7 +217,7 @@ async function getAppConfig() {
     }
   }
 
-  for (const question of Object.values(tempQuestions)) {
+  for (const question of tempQuestions.values()) {
     if (!config.questions[question.cat]) config.questions[question.cat] = [];
     config.questions[question.cat].push(question);
   }
@@ -292,16 +316,18 @@ async function createQuestion(payload) {
       : payload.include_in_sku !== undefined
         ? Number(payload.include_in_sku)
         : 1;
+  const { skuIndex, displayOrder } = getNormalizedQuestionNumbers(payload, normalizedIncludeInSku);
 
   const result = await pool.query(
-    `INSERT INTO questions (category_code, key, label, sku_index, required, include_in_sku, input_type, sku_separator, visible_if_json)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+    `INSERT INTO questions (category_code, key, label, sku_index, display_order, required, include_in_sku, input_type, sku_separator, visible_if_json)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
      RETURNING id`,
     [
       payload.category_code,
       questionKey,
       payload.label,
-      Number(payload.sku_index),
+      skuIndex,
+      displayOrder,
       payload.required !== undefined ? Number(payload.required) : 1,
       normalizedIncludeInSku,
       normalizedInputType,
@@ -324,6 +350,7 @@ async function updateQuestion(payload) {
       : payload.include_in_sku !== undefined
         ? Number(payload.include_in_sku)
         : 1;
+  const { skuIndex, displayOrder } = getNormalizedQuestionNumbers(payload, normalizedIncludeInSku);
 
   const client = await pool.connect();
   try {
@@ -363,12 +390,13 @@ async function updateQuestion(payload) {
 
     await client.query(
       `UPDATE questions
-       SET key = $1, label = $2, sku_index = $3, required = $4, include_in_sku = $5, input_type = $6, sku_separator = $7, visible_if_json = $8::jsonb
-       WHERE id = $9`,
+       SET key = $1, label = $2, sku_index = $3, display_order = $4, required = $5, include_in_sku = $6, input_type = $7, sku_separator = $8, visible_if_json = $9::jsonb
+       WHERE id = $10`,
       [
         nextKey,
         payload.label,
-        Number(payload.sku_index),
+        skuIndex,
+        displayOrder,
         payload.required !== undefined ? Number(payload.required) : 1,
         normalizedIncludeInSku,
         normalizedInputType,

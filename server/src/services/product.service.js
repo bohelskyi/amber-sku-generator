@@ -195,9 +195,15 @@ async function getProductBySku(fullSku) {
 }
 
 function isQuestionVisibleForSku(question, answers, isCalibrated) {
+  const calibratedAnswer =
+    answers.is_calibrated !== undefined &&
+    answers.is_calibrated !== null &&
+    answers.is_calibrated !== ''
+      ? answers.is_calibrated
+      : isCalibrated;
   return isRuleMatched(question.visible_if_json, {
     ...answers,
-    is_calibrated: isCalibrated,
+    is_calibrated: calibratedAnswer,
   });
 }
 

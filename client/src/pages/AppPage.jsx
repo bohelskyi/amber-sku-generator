@@ -44,8 +44,6 @@ function AppPage() {
             config={sku.config}
             selectedCat={sku.selectedCat}
             answers={sku.answers}
-            isCalibrated={sku.isCalibrated}
-            setIsCalibrated={sku.setIsCalibrated}
             weight={sku.weight}
             setWeight={sku.setWeight}
             isWeightRequired={sku.isWeightRequired}

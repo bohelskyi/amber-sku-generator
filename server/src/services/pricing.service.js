@@ -29,7 +29,13 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
 
   let pricePerGram = 0;
   let logMessage = 'Ціна не знайдена';
-  const normalizedCalibrated = Number(isCalibrated || 0);
+  const calibratedAnswer =
+    answers.is_calibrated !== undefined &&
+    answers.is_calibrated !== null &&
+    answers.is_calibrated !== ''
+      ? answers.is_calibrated
+      : isCalibrated;
+  const normalizedCalibrated = Number(calibratedAnswer || 0);
   const isWeightBased =
     categoryResult.rows.length > 0 &&
     Number(categoryResult.rows[0].requires_weight) === 1 &&
