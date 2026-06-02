@@ -446,6 +446,61 @@ async function updateOption(payload) {
   );
 }
 
+async function updateQuestionsOrder({ category_code, questions }) {
+  const categoryCode = normalizeCategoryCode(category_code);
+  if (!categoryCode || !Array.isArray(questions) || questions.length === 0) {
+    const err = new Error('Потрібна категорія та список питань');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    for (const question of questions) {
+      const questionId = Number(question.id);
+      const displayOrder = Number(question.display_order);
+      if (!Number.isFinite(questionId) || !Number.isFinite(displayOrder)) {
+        const err = new Error('Некоректні дані порядку питань');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      if (question.sku_index !== undefined && question.sku_index !== null && question.sku_index !== '') {
+        const skuIndex = Number(question.sku_index);
+        if (!Number.isFinite(skuIndex)) {
+          const err = new Error('Некоректний SKU index');
+          err.statusCode = 400;
+          throw err;
+        }
+
+        await client.query(
+          `UPDATE questions
+           SET display_order = $1, sku_index = $2
+           WHERE id = $3 AND category_code = $4`,
+          [displayOrder, skuIndex, questionId, categoryCode]
+        );
+      } else {
+        await client.query(
+          `UPDATE questions
+           SET display_order = $1
+           WHERE id = $2 AND category_code = $3`,
+          [displayOrder, questionId, categoryCode]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    return { success: true };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 async function deleteCatalogItem(type, id) {
   if (type === 'category') {
     await pool.query('DELETE FROM categories WHERE code = $1', [id]);
@@ -481,5 +536,6 @@ module.exports = {
   updateQuestion,
   createOption,
   updateOption,
+  updateQuestionsOrder,
   deleteCatalogItem,
 };

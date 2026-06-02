@@ -9,6 +9,30 @@ const emptyNewOption = { value_id: '', label: '', visible_if_json: '' };
 const emptyNewScenario = { name: '', match_json: '', axis_x_key: '', axis_y_key: '' };
 const emptyNewModifier = { trigger_key: '', trigger_val: '', factor: '' };
 
+const getNextDisplayOrder = (questions = []) => {
+  const maxOrder = questions.reduce((maxValue, question) => {
+    const orderValue = Number(question.display_order ?? question.sku_index);
+    return Number.isFinite(orderValue) ? Math.max(maxValue, orderValue) : maxValue;
+  }, 0);
+  return String(maxOrder + 1);
+};
+
+const getNextSkuIndex = (questions = []) => {
+  const maxIndex = questions
+    .filter((question) => question.include_in_sku === 1)
+    .reduce((maxValue, question) => {
+      const indexValue = Number(question.sku_index);
+      return Number.isFinite(indexValue) ? Math.max(maxValue, indexValue) : maxValue;
+    }, 0);
+  return String(maxIndex + 1);
+};
+
+const buildNewQuestionDefaults = (questions = []) => ({
+  ...emptyNewQuestion,
+  display_order: getNextDisplayOrder(questions),
+  sku_index: getNextSkuIndex(questions),
+});
+
 export function useAdminPanel() {
   const [config, setConfig] = useState(null);
   const [selectedCat, setSelectedCat] = useState(null);
@@ -37,6 +61,41 @@ export function useAdminPanel() {
   const fetchPrices = () => {
     if (!selectedCat) return;
     fetchPricesForCategory(selectedCat.code);
+  };
+
+  const updateSelectedQuestionState = (question) => {
+    if (!question) return;
+    setSelectedQuestion(question);
+    setEditQuestion({
+      key: question.id,
+      label: question.label,
+      display_order: question.display_order ?? question.sku_index,
+      sku_index: question.sku_index,
+      required: question.required === 1,
+      include_in_sku: question.include_in_sku === 1,
+      input_type: question.input_type || 'options',
+      sku_separator: question.sku_separator || '',
+      visible_if_json: question.visible_if_json ? formatMatchJson(question.visible_if_json) : '',
+    });
+  };
+
+  const applyConfigWithSelection = (nextConfig, categoryCode, questionDbId = selectedQuestion?.q_db_id) => {
+    const nextCategory = nextConfig.categories?.[categoryCode];
+    setSelectedCat(nextCategory || null);
+    setNewQuest(buildNewQuestionDefaults(nextConfig.questions?.[categoryCode] || []));
+
+    if (!questionDbId) {
+      setSelectedQuestion(null);
+      return;
+    }
+
+    const refreshedQuestion = (nextConfig.questions?.[categoryCode] || [])
+      .find((question) => question.q_db_id === questionDbId);
+    if (refreshedQuestion) {
+      updateSelectedQuestionState(refreshedQuestion);
+    } else {
+      setSelectedQuestion(null);
+    }
   };
 
   useEffect(() => {
@@ -68,6 +127,7 @@ export function useAdminPanel() {
   };
 
   const handleSelectCategory = (category) => {
+    const categoryQuestions = config?.questions?.[category.code] || [];
     setSelectedCat(category);
     setSelectedQuestion(null);
     setEditCat({
@@ -78,6 +138,7 @@ export function useAdminPanel() {
     });
     setEditScenario(null);
     setEditOpt(emptyEditOption);
+    setNewQuest(buildNewQuestionDefaults(categoryQuestions));
     setPricesData(null);
     fetchPricesForCategory(category.code);
   };
@@ -85,17 +146,7 @@ export function useAdminPanel() {
   const handleSelectQuestion = (question) => {
     setSelectedQuestion(question);
     setEditOpt(emptyEditOption);
-    setEditQuestion({
-      key: question.id,
-      label: question.label,
-      display_order: question.display_order ?? question.sku_index,
-      sku_index: question.sku_index,
-      required: question.required === 1,
-      include_in_sku: question.include_in_sku === 1,
-      input_type: question.input_type || 'options',
-      sku_separator: question.sku_separator || '',
-      visible_if_json: question.visible_if_json ? formatMatchJson(question.visible_if_json) : '',
-    });
+    updateSelectedQuestionState(question);
   };
 
   const addCategory = () => {
@@ -167,8 +218,9 @@ export function useAdminPanel() {
       visible_if_json: parsedVisibleRule.value,
       category_code: selectedCat.code,
     }).then(() => {
-      setNewQuest(emptyNewQuestion);
-      fetchConfig();
+      fetchConfig().then((nextConfig) => {
+        applyConfigWithSelection(nextConfig, selectedCat.code, null);
+      });
     });
   };
 
@@ -197,22 +249,7 @@ export function useAdminPanel() {
     })
       .then(() => fetchConfig())
       .then((nextConfig) => {
-        const refreshedQuestion = (nextConfig.questions?.[selectedCat.code] || [])
-          .find((question) => question.q_db_id === selectedQuestion.q_db_id);
-        if (refreshedQuestion) {
-          setSelectedQuestion(refreshedQuestion);
-          setEditQuestion({
-            key: refreshedQuestion.id,
-            label: refreshedQuestion.label,
-            display_order: refreshedQuestion.display_order ?? refreshedQuestion.sku_index,
-            sku_index: refreshedQuestion.sku_index,
-            required: refreshedQuestion.required === 1,
-            include_in_sku: refreshedQuestion.include_in_sku === 1,
-            input_type: refreshedQuestion.input_type || 'options',
-            sku_separator: refreshedQuestion.sku_separator || '',
-            visible_if_json: refreshedQuestion.visible_if_json ? formatMatchJson(refreshedQuestion.visible_if_json) : '',
-          });
-        }
+        applyConfigWithSelection(nextConfig, selectedCat.code, selectedQuestion.q_db_id);
         alert('Збережено');
       })
       .catch((err) => {
@@ -274,6 +311,85 @@ export function useAdminPanel() {
         fetchConfig();
       })
       .catch((err) => alert(`Помилка оновлення опції: ${err.response?.data?.error || err.message}`));
+  };
+
+  const persistQuestionOrder = (orderedQuestions, { reindexSku = false } = {}) => {
+    if (!selectedCat) return Promise.resolve();
+
+    const normalizedQuestions = orderedQuestions.map((question, index) => ({
+      ...question,
+      display_order: reindexSku
+        ? question.display_order ?? index + 1
+        : index + 1,
+    }));
+
+    let nextSkuIndex = 1;
+    const payloadQuestions = normalizedQuestions.map((question) => {
+      const payload = {
+        id: question.q_db_id,
+        display_order: question.display_order,
+      };
+
+      if (reindexSku) {
+        payload.sku_index = question.include_in_sku === 1 ? nextSkuIndex++ : 0;
+      }
+
+      return payload;
+    });
+
+    setConfig((prevConfig) => {
+      if (!prevConfig) return prevConfig;
+      const optimisticQuestions = reindexSku
+        ? normalizedQuestions.map((question) => ({
+            ...question,
+            sku_index: question.include_in_sku === 1
+              ? payloadQuestions.find((item) => item.id === question.q_db_id)?.sku_index
+              : question.sku_index,
+          }))
+        : normalizedQuestions;
+
+      return {
+        ...prevConfig,
+        questions: {
+          ...prevConfig.questions,
+          [selectedCat.code]: optimisticQuestions,
+        },
+      };
+    });
+
+    return api.put('/admin/questions/order', {
+      category_code: selectedCat.code,
+      questions: payloadQuestions,
+    })
+      .then(() => fetchConfig())
+      .then((nextConfig) => {
+        applyConfigWithSelection(nextConfig, selectedCat.code);
+      })
+      .catch((err) => {
+        fetchConfig();
+        alert(`Помилка збереження порядку: ${err.response?.data?.error || err.message}`);
+      });
+  };
+
+  const reorderQuestions = (orderedQuestions) => persistQuestionOrder(orderedQuestions);
+
+  const autoAssignSkuIndexes = () => {
+    if (!selectedCat) return;
+    const skuQuestionCount = currentCatQuestions.filter((question) => question.include_in_sku === 1).length;
+    if (skuQuestionCount === 0) {
+      alert('У цій категорії немає питань, які додаються в SKU');
+      return;
+    }
+
+    persistQuestionOrder(currentCatQuestions, { reindexSku: true });
+  };
+
+  const fillNextNewQuestionSkuIndex = () => {
+    setNewQuest((prevQuestion) => ({
+      ...prevQuestion,
+      display_order: prevQuestion.display_order || getNextDisplayOrder(currentCatQuestions),
+      sku_index: getNextSkuIndex(currentCatQuestions),
+    }));
   };
 
   const deleteItem = (type, id) => {
@@ -392,6 +508,7 @@ export function useAdminPanel() {
     addOption,
     addQuestion,
     addScenario,
+    autoAssignSkuIndexes,
     beginOptionEdit,
     beginScenarioEdit,
     config,
@@ -403,6 +520,7 @@ export function useAdminPanel() {
     editOpt,
     editQuestion,
     editScenario,
+    fillNextNewQuestionSkuIndex,
     formatMatchJson,
     handlePriceChange,
     handleSelectCategory,
@@ -425,6 +543,7 @@ export function useAdminPanel() {
     setNewQuest,
     setNewScenario,
     newScenario,
+    reorderQuestions,
     updateCategory,
     updateModifier,
     updateOption,

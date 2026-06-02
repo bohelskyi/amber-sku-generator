@@ -39,6 +39,9 @@ export function AdminStructureEditor({
   updateCategory,
   addQuestion,
   updateQuestion,
+  reorderQuestions,
+  autoAssignSkuIndexes,
+  fillNextNewQuestionSkuIndex,
   addOption,
   beginOptionEdit,
   updateOption,
@@ -49,6 +52,8 @@ export function AdminStructureEditor({
   const [isQuestionEditOpen, setIsQuestionEditOpen] = useState(false);
   const [isNewQuestionOpen, setIsNewQuestionOpen] = useState(false);
   const [isNewOptionOpen, setIsNewOptionOpen] = useState(false);
+  const [draggedQuestionId, setDraggedQuestionId] = useState(null);
+  const [questionDropTarget, setQuestionDropTarget] = useState({ id: null, position: null });
   const canEditQuestionSku = editQuestion.input_type !== 'text' && editQuestion.include_in_sku;
   const canNewQuestionSku = newQuest.input_type !== 'text' && newQuest.include_in_sku;
 
@@ -64,6 +69,57 @@ export function AdminStructureEditor({
     setIsQuestionEditOpen(false);
     setIsNewOptionOpen(false);
     onSelectQuestion(question);
+  };
+
+  const handleQuestionDragStart = (event, question) => {
+    setDraggedQuestionId(question.q_db_id);
+    setQuestionDropTarget({ id: null, position: null });
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(question.q_db_id));
+  };
+
+  const getDropPosition = (event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+  };
+
+  const handleQuestionDragOver = (event, question) => {
+    event.preventDefault();
+    const targetQuestionId = Number(question.q_db_id);
+    if (Number(draggedQuestionId) === targetQuestionId) {
+      setQuestionDropTarget({ id: null, position: null });
+      return;
+    }
+
+    event.dataTransfer.dropEffect = 'move';
+    setQuestionDropTarget({
+      id: targetQuestionId,
+      position: getDropPosition(event),
+    });
+  };
+
+  const handleQuestionDrop = (event, targetQuestion) => {
+    event.preventDefault();
+    const sourceQuestionId = Number(event.dataTransfer.getData('text/plain') || draggedQuestionId);
+    const targetQuestionId = Number(targetQuestion.q_db_id);
+    setDraggedQuestionId(null);
+    setQuestionDropTarget({ id: null, position: null });
+
+    if (!sourceQuestionId || sourceQuestionId === targetQuestionId) return;
+
+    const sourceIndex = currentCatQuestions.findIndex((question) => Number(question.q_db_id) === sourceQuestionId);
+    if (sourceIndex < 0) return;
+
+    const nextQuestions = [...currentCatQuestions];
+    const [movedQuestion] = nextQuestions.splice(sourceIndex, 1);
+    const targetIndexAfterRemoval = nextQuestions.findIndex((question) => Number(question.q_db_id) === targetQuestionId);
+    if (targetIndexAfterRemoval < 0) return;
+
+    const insertionIndex = getDropPosition(event) === 'after'
+      ? targetIndexAfterRemoval + 1
+      : targetIndexAfterRemoval;
+    nextQuestions.splice(insertionIndex, 0, movedQuestion);
+    reorderQuestions(nextQuestions);
   };
 
   return (
@@ -135,17 +191,44 @@ export function AdminStructureEditor({
       <div className="card p-5 sm:p-6 flex flex-col">
         <div className="section-title mb-4">
           <h2 className="section-title-text">2. Питання</h2>
+          {selectedCat && (
+            <button onClick={autoAssignSkuIndexes} className="btn btn-outline text-xs px-3 py-2">
+              Переіндексувати SKU
+            </button>
+          )}
         </div>
         <SkuTemplatePreview category={selectedCat} questions={currentCatQuestions} />
         <div className="h-96 overflow-y-auto space-y-2 pr-2">
           {currentCatQuestions.map((question) => (
             <div
               key={question.q_db_id}
+              draggable
               onClick={() => selectQuestion(question)}
-              className={`p-3 rounded-xl cursor-pointer flex justify-between items-center border transition ${selectedQuestion?.id === question.id ? 'bg-[rgba(20,32,59,0.08)] border-[rgba(20,32,59,0.4)]' : 'border-slate-200 hover:bg-slate-50'}`}
+              onDragStart={(event) => handleQuestionDragStart(event, question)}
+              onDragOver={(event) => handleQuestionDragOver(event, question)}
+              onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) {
+                  setQuestionDropTarget({ id: null, position: null });
+                }
+              }}
+              onDrop={(event) => handleQuestionDrop(event, question)}
+              onDragEnd={() => {
+                setDraggedQuestionId(null);
+                setQuestionDropTarget({ id: null, position: null });
+              }}
+              className={`relative p-3 rounded-xl cursor-move flex justify-between items-center border transition ${draggedQuestionId === question.q_db_id ? 'opacity-60 border-[rgba(221,151,74,0.6)] bg-[rgba(221,151,74,0.10)]' : selectedQuestion?.id === question.id ? 'bg-[rgba(20,32,59,0.08)] border-[rgba(20,32,59,0.4)]' : 'border-slate-200 hover:bg-slate-50'}`}
             >
-              <div>
-                <span className="font-semibold text-slate-800">{question.label}</span>
+              {questionDropTarget.id === question.q_db_id && questionDropTarget.position === 'before' && (
+                <div className="pointer-events-none absolute -top-1 left-3 right-3 h-1 rounded-full bg-[rgba(221,151,74,0.95)]" />
+              )}
+              {questionDropTarget.id === question.q_db_id && questionDropTarget.position === 'after' && (
+                <div className="pointer-events-none absolute -bottom-1 left-3 right-3 h-1 rounded-full bg-[rgba(221,151,74,0.95)]" />
+              )}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="select-none rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-semibold text-slate-400" title="Перетягніть питання вище або нижче">::</span>
+                  <span className="font-semibold text-slate-800">{question.label}</span>
+                </div>
                 <span className="text-xs text-slate-500 block">Key: {question.id} | Порядок: {question.display_order ?? question.sku_index} | SKU index: {question.include_in_sku === 1 ? question.sku_index : 'немає'} | {question.required === 1 ? 'Обовʼязкове' : 'Необовʼязкове'} | {question.include_in_sku === 1 ? 'Йде в SKU' : 'Лише в БД'} | Тип: {(question.input_type || 'options') === 'text' ? 'Текст' : 'Варіанти'} | Розділювач: {question.include_in_sku === 1 ? question.sku_separator || 'немає' : 'немає'}</span>
                 <span className="text-[11px] text-slate-500 block">
                   {formatConditionSummary(question.visible_if_json, currentCatQuestions, config)}
@@ -242,6 +325,9 @@ export function AdminStructureEditor({
                     <FieldControl label="SKU index" hint="Відповідає за позицію значення в артикулі.">
                       <input className="input-sm" type="number" placeholder="1" value={newQuest.sku_index} onChange={(event) => setNewQuest({ ...newQuest, sku_index: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
                     </FieldControl>
+                    <button onClick={fillNextNewQuestionSkuIndex} className="btn btn-outline mb-2 w-full text-xs">
+                      Наступний SKU index
+                    </button>
                     <FieldControl label="Розділювач у SKU" hint="Можна використовувати тільки -, _, . або /.">
                       <input className="input-sm" placeholder="-" value={newQuest.sku_separator} onChange={(event) => setNewQuest({ ...newQuest, sku_separator: event.target.value })} />
                     </FieldControl>

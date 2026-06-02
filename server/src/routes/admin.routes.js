@@ -6,6 +6,7 @@ const {
   updateQuestion,
   createOption,
   updateOption,
+  updateQuestionsOrder,
   deleteCatalogItem,
 } = require('../services/catalog.service');
 const {
@@ -162,6 +163,15 @@ router.post('/admin/question/update', async (req, res) => {
 
     const result = await updateQuestion(req.body);
     res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.put('/admin/questions/order', async (req, res) => {
+  try {
+    const result = await updateQuestionsOrder(req.body || {});
+    res.json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }

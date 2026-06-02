@@ -48,6 +48,9 @@ export default function AdminPage() {
           updateCategory={admin.updateCategory}
           addQuestion={admin.addQuestion}
           updateQuestion={admin.updateQuestion}
+          reorderQuestions={admin.reorderQuestions}
+          autoAssignSkuIndexes={admin.autoAssignSkuIndexes}
+          fillNextNewQuestionSkuIndex={admin.fillNextNewQuestionSkuIndex}
           addOption={admin.addOption}
           beginOptionEdit={admin.beginOptionEdit}
           updateOption={admin.updateOption}
