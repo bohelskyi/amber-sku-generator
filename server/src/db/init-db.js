@@ -6,8 +6,8 @@ async function migratePricesToDb(client) {
 
   for (const categoryCode of ['CH', 'BR', 'NM', 'KL']) {
     const formedScenario = await client.query(
-      `INSERT INTO price_scenarios (category_code, name, match_json, axis_x_key, axis_y_key)
-       VALUES ($1, 'Формований', $2::jsonb, 'quality', NULL)
+      `INSERT INTO price_scenarios (category_code, name, group_name, match_json, axis_x_key, axis_y_key)
+       VALUES ($1, 'Формований', 'Формовані', $2::jsonb, 'quality', NULL)
        RETURNING id`,
       [categoryCode, JSON.stringify({ raw_type: 2 })]
     );
@@ -24,8 +24,8 @@ async function migratePricesToDb(client) {
 
   for (const categoryCode of ['CH', 'BR', 'NM', 'KL']) {
     const naturalScenario = await client.query(
-      `INSERT INTO price_scenarios (category_code, name, match_json, axis_x_key, axis_y_key)
-       VALUES ($1, 'Натур. Калібрований', $2::jsonb, 'size', 'texture')
+      `INSERT INTO price_scenarios (category_code, name, group_name, match_json, axis_x_key, axis_y_key)
+       VALUES ($1, 'Натур. Калібрований', 'Натур. Калібрований', $2::jsonb, 'size', 'texture')
        RETURNING id`,
       [categoryCode, JSON.stringify({ raw_type: 1, is_calibrated: 1 })]
     );
@@ -42,9 +42,9 @@ async function migratePricesToDb(client) {
     }
 
     await client.query(
-      `INSERT INTO price_modifiers (category_code, trigger_key, trigger_val, factor)
-       VALUES ($1, 'quality', 2, 0.7)`,
-      [categoryCode]
+      `INSERT INTO price_modifiers (category_code, trigger_key, trigger_val, match_json, factor)
+       VALUES ($1, 'quality', 2, $2::jsonb, 0.7)`,
+      [categoryCode, JSON.stringify({ quality: 2 })]
     );
   }
 
@@ -223,10 +223,21 @@ async function initDb() {
       id SERIAL PRIMARY KEY,
       category_code TEXT REFERENCES categories(code) ON DELETE CASCADE,
       name TEXT,
+      group_name TEXT DEFAULT '',
       match_json JSONB,
       axis_x_key TEXT,
       axis_y_key TEXT
     )
+  `);
+
+  await pool.query("ALTER TABLE price_scenarios ADD COLUMN IF NOT EXISTS group_name TEXT DEFAULT ''");
+  await pool.query(`
+    UPDATE price_scenarios
+    SET group_name = CASE
+      WHEN position(' - ' in name) > 0 THEN split_part(name, ' - ', 1)
+      ELSE name
+    END
+    WHERE group_name IS NULL OR group_name = ''
   `);
 
   await pool.query(`
@@ -245,8 +256,19 @@ async function initDb() {
       category_code TEXT REFERENCES categories(code) ON DELETE CASCADE,
       trigger_key TEXT,
       trigger_val INTEGER,
+      match_json JSONB,
       factor REAL
     )
+  `);
+
+  await pool.query('ALTER TABLE price_modifiers ADD COLUMN IF NOT EXISTS match_json JSONB');
+  await pool.query(`
+    UPDATE price_modifiers
+    SET match_json = jsonb_build_object(trigger_key, trigger_val)
+    WHERE match_json IS NULL
+      AND trigger_key IS NOT NULL
+      AND trigger_key <> ''
+      AND trigger_val IS NOT NULL
   `);
 
   await pool.query(`

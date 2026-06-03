@@ -58,6 +58,7 @@ export default function AdminPage() {
           formatMatchJson={admin.formatMatchJson}
         />
         <AdminPricingEditor
+          config={admin.config}
           selectedCat={admin.selectedCat}
           pricesData={admin.pricesData}
           currentCatQuestions={admin.currentCatQuestions}
@@ -67,7 +68,10 @@ export default function AdminPage() {
           setNewScenario={admin.setNewScenario}
           newModifier={admin.newModifier}
           setNewModifier={admin.setNewModifier}
+          editModifier={admin.editModifier}
+          setEditModifier={admin.setEditModifier}
           beginScenarioEdit={admin.beginScenarioEdit}
+          beginModifierEdit={admin.beginModifierEdit}
           updateScenario={admin.updateScenario}
           duplicateScenario={admin.duplicateScenario}
           deleteItem={admin.deleteItem}
@@ -75,6 +79,7 @@ export default function AdminPage() {
           handlePriceChange={admin.handlePriceChange}
           addScenario={admin.addScenario}
           updateModifier={admin.updateModifier}
+          saveModifierEdit={admin.saveModifierEdit}
           addModifier={admin.addModifier}
         />
       </div>

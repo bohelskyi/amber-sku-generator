@@ -6,8 +6,8 @@ const emptyEditOption = { id: null, value_id: '', label: '', visible_if_json: ''
 const emptyNewCategory = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false };
 const emptyNewQuestion = { key: '', label: '', display_order: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' };
 const emptyNewOption = { value_id: '', label: '', visible_if_json: '' };
-const emptyNewScenario = { name: '', match_json: '', axis_x_key: '', axis_y_key: '' };
-const emptyNewModifier = { trigger_key: '', trigger_val: '', factor: '' };
+const emptyNewScenario = { name: '', group_name: '', match_json: '', axis_x_key: '', axis_y_key: '' };
+const emptyNewModifier = { match_json: '', factor: '' };
 
 const getNextDisplayOrder = (questions = []) => {
   const maxOrder = questions.reduce((maxValue, question) => {
@@ -47,6 +47,7 @@ export function useAdminPanel() {
   const [newScenario, setNewScenario] = useState(emptyNewScenario);
   const [editScenario, setEditScenario] = useState(null);
   const [newModifier, setNewModifier] = useState(emptyNewModifier);
+  const [editModifier, setEditModifier] = useState(null);
 
   const fetchConfig = () =>
     api.get('/config').then((res) => {
@@ -137,6 +138,7 @@ export function useAdminPanel() {
       skip_hidden_sku_questions: category.skip_hidden_sku_questions === 1,
     });
     setEditScenario(null);
+    setEditModifier(null);
     setEditOpt(emptyEditOption);
     setNewQuest(buildNewQuestionDefaults(categoryQuestions));
     setPricesData(null);
@@ -402,6 +404,7 @@ export function useAdminPanel() {
           setSelectedQuestion(null);
           setPricesData(null);
           setEditScenario(null);
+          setEditModifier(null);
           setEditOpt(emptyEditOption);
         }
         if (type === 'scenario' || type === 'modifier') fetchPrices();
@@ -418,15 +421,15 @@ export function useAdminPanel() {
   };
 
   const addScenario = () => {
-    if (!newScenario.name || !newScenario.match_json || !newScenario.axis_x_key) {
-      return alert('Заповніть назву, JSON умови та вісь X');
+    if (!newScenario.name || !newScenario.axis_x_key) {
+      return alert('Заповніть назву та вісь рядків матриці');
     }
 
     let parsedJson;
     try {
-      parsedJson = JSON.parse(newScenario.match_json);
+      parsedJson = JSON.parse(newScenario.match_json || '{}');
     } catch {
-      return alert('Помилка в JSON! Формат: {"key": value}');
+      return alert('Помилка в умові сценарію');
     }
 
     api.post('/admin/scenario', {
@@ -443,6 +446,7 @@ export function useAdminPanel() {
     setEditScenario({
       id: scenario.id,
       name: scenario.name,
+      group_name: scenario.group_name || '',
       match_json: formatMatchJson(scenario.match_json),
       axis_x_key: scenario.axis_x_key || '',
       axis_y_key: scenario.axis_y_key || '',
@@ -465,6 +469,7 @@ export function useAdminPanel() {
     api.put('/admin/scenario', {
       id: editScenario.id,
       name: editScenario.name,
+      group_name: editScenario.group_name,
       match_json: parsedJson,
       axis_x_key: editScenario.axis_x_key,
       axis_y_key: editScenario.axis_y_key || null,
@@ -483,16 +488,69 @@ export function useAdminPanel() {
   };
 
   const addModifier = () => {
-    if (!newModifier.trigger_key || !newModifier.factor) return;
-    api.post('/admin/modifier', { ...newModifier, category_code: selectedCat.code })
+    if (!newModifier.match_json || !newModifier.factor) {
+      return alert('Заповніть умови модифікатора та множник');
+    }
+
+    let parsedJson;
+    try {
+      parsedJson = JSON.parse(newModifier.match_json || '{}');
+    } catch {
+      return alert('Помилка в умові модифікатора');
+    }
+
+    api.post('/admin/modifier', {
+      ...newModifier,
+      match_json: parsedJson,
+      category_code: selectedCat.code,
+    })
       .then(() => {
         setNewModifier(emptyNewModifier);
         fetchPrices();
       });
   };
 
-  const updateModifier = (id, newFactor) => {
-    api.put('/admin/modifier', { id, factor: parseFloat(newFactor) });
+  const beginModifierEdit = (modifier) => {
+    setEditModifier({
+      id: modifier.id,
+      match_json: formatMatchJson(
+        modifier.match_json || (modifier.trigger_key ? { [modifier.trigger_key]: modifier.trigger_val } : {})
+      ),
+      factor: String(modifier.factor ?? ''),
+    });
+  };
+
+  const updateModifier = (payloadOrId, newFactor) => {
+    const payload = typeof payloadOrId === 'object'
+      ? payloadOrId
+      : { id: payloadOrId, factor: parseFloat(newFactor) };
+
+    return api.put('/admin/modifier', payload)
+      .then(() => {
+        setEditModifier(null);
+        fetchPrices();
+      })
+      .catch((err) => alert(`Помилка оновлення модифікатора: ${err.response?.data?.error || err.message}`));
+  };
+
+  const saveModifierEdit = () => {
+    if (!editModifier?.id) return;
+    if (!editModifier.match_json || !editModifier.factor) {
+      return alert('Заповніть умови модифікатора та множник');
+    }
+
+    let parsedJson;
+    try {
+      parsedJson = JSON.parse(editModifier.match_json || '{}');
+    } catch {
+      return alert('Помилка в умові модифікатора');
+    }
+
+    return updateModifier({
+      id: editModifier.id,
+      match_json: parsedJson,
+      factor: parseFloat(editModifier.factor),
+    });
   };
 
   const currentCatQuestions = selectedCat ? (config?.questions[selectedCat.code] || []) : [];
@@ -509,6 +567,7 @@ export function useAdminPanel() {
     addQuestion,
     addScenario,
     autoAssignSkuIndexes,
+    beginModifierEdit,
     beginOptionEdit,
     beginScenarioEdit,
     config,
@@ -517,6 +576,7 @@ export function useAdminPanel() {
     deleteItem,
     duplicateScenario,
     editCat,
+    editModifier,
     editOpt,
     editQuestion,
     editScenario,
@@ -533,7 +593,9 @@ export function useAdminPanel() {
     selectedCat,
     selectedQuestion,
     selectedQuestionInputType,
+    saveModifierEdit,
     setEditCat,
+    setEditModifier,
     setEditOpt,
     setEditQuestion,
     setEditScenario,

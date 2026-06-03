@@ -3,6 +3,16 @@ const { getUsdUahRate } = require('./currency.service');
 const { resolveAxisValue } = require('../utils/pricing-axis');
 const { asRuleObject } = require('../utils/rules');
 
+function normalizeScenarioGroup(groupName, scenarioName = '') {
+  const normalizedGroup = String(groupName || '').trim();
+  if (normalizedGroup) return normalizedGroup;
+
+  const normalizedName = String(scenarioName || '').trim();
+  if (!normalizedName) return 'Без групи';
+  if (normalizedName.includes(' - ')) return normalizedName.split(' - ')[0].trim() || 'Без групи';
+  return normalizedName;
+}
+
 function getAnswerValue(answers, key) {
   return answers[key] === undefined || answers[key] === null || answers[key] === ''
     ? 0
@@ -15,6 +25,20 @@ function isRuleValueMatched(actualValue, expectedValue) {
   }
 
   return Number(actualValue) === Number(expectedValue);
+}
+
+function getRuleAnswerValue(key, answers, normalizedCalibrated) {
+  return key === 'is_calibrated' ? normalizedCalibrated : getAnswerValue(answers, key);
+}
+
+function isPricingRuleMatched(ruleJson, answers, normalizedCalibrated) {
+  const rules = asRuleObject(ruleJson);
+  for (const [key, value] of Object.entries(rules)) {
+    if (!isRuleValueMatched(getRuleAnswerValue(key, answers, normalizedCalibrated), value)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated) {
@@ -46,15 +70,7 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
     const bRuleCount = Object.keys(asRuleObject(b.match_json)).length;
     return bRuleCount - aRuleCount || Number(a.id) - Number(b.id);
   }).find((scenario) => {
-    const rules = asRuleObject(scenario.match_json);
-    for (const [key, value] of Object.entries(rules)) {
-      if (key === 'is_calibrated') {
-        if (!isRuleValueMatched(normalizedCalibrated, value)) return false;
-      } else if (!isRuleValueMatched(getAnswerValue(answers, key), value)) {
-        return false;
-      }
-    }
-    return true;
+    return isPricingRuleMatched(scenario.match_json, answers, normalizedCalibrated);
   });
 
   if (activeScenario) {
@@ -78,7 +94,11 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
       );
 
       for (const modifier of modifiers.rows) {
-        if (getAnswerValue(answers, modifier.trigger_key) === Number(modifier.trigger_val)) {
+        const modifierRule = Object.keys(asRuleObject(modifier.match_json)).length > 0
+          ? modifier.match_json
+          : { [modifier.trigger_key]: modifier.trigger_val };
+
+        if (isPricingRuleMatched(modifierRule, answers, normalizedCalibrated)) {
           pricePerGram *= Number(modifier.factor);
           logMessage += ` + Модифікатор (${Math.round((Number(modifier.factor) - 1) * 100)}%)`;
         }
@@ -133,7 +153,10 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
 
 async function getAdminPrices(catCode) {
   const scenariosResult = await pool.query(
-    'SELECT * FROM price_scenarios WHERE category_code = $1 ORDER BY id',
+    `SELECT *
+     FROM price_scenarios
+     WHERE category_code = $1
+     ORDER BY COALESCE(NULLIF(group_name, ''), name), id`,
     [catCode]
   );
   const modifiersResult = await pool.query(
@@ -176,25 +199,27 @@ async function upsertPriceCell({ scenario_id, x_val, y_val, price }) {
   );
 }
 
-async function createScenario({ category_code, name, match_json, axis_x_key, axis_y_key }) {
+async function createScenario({ category_code, name, group_name, match_json, axis_x_key, axis_y_key }) {
   const payload = typeof match_json === 'string' ? JSON.parse(match_json) : match_json || {};
+  const scenarioGroup = normalizeScenarioGroup(group_name, name);
   const result = await pool.query(
-    `INSERT INTO price_scenarios (category_code, name, match_json, axis_x_key, axis_y_key)
-     VALUES ($1, $2, $3::jsonb, $4, $5)
+    `INSERT INTO price_scenarios (category_code, name, group_name, match_json, axis_x_key, axis_y_key)
+     VALUES ($1, $2, $3, $4::jsonb, $5, $6)
      RETURNING id`,
-    [category_code, name, JSON.stringify(payload), axis_x_key, axis_y_key]
+    [category_code, name, scenarioGroup, JSON.stringify(payload), axis_x_key, axis_y_key]
   );
 
   return { id: result.rows[0].id };
 }
 
-async function updateScenario({ id, name, match_json, axis_x_key, axis_y_key }) {
+async function updateScenario({ id, name, group_name, match_json, axis_x_key, axis_y_key }) {
   const payload = typeof match_json === 'string' ? JSON.parse(match_json) : match_json || {};
+  const scenarioGroup = normalizeScenarioGroup(group_name, name);
   await pool.query(
     `UPDATE price_scenarios
-     SET name = $1, match_json = $2::jsonb, axis_x_key = $3, axis_y_key = $4
-     WHERE id = $5`,
-    [name, JSON.stringify(payload), axis_x_key, axis_y_key || null, Number(id)]
+     SET name = $1, group_name = $2, match_json = $3::jsonb, axis_x_key = $4, axis_y_key = $5
+     WHERE id = $6`,
+    [name, scenarioGroup, JSON.stringify(payload), axis_x_key, axis_y_key || null, Number(id)]
   );
 }
 
@@ -215,12 +240,13 @@ async function duplicateScenario(id) {
 
     const source = sourceScenario.rows[0];
     const duplicatedScenario = await client.query(
-      `INSERT INTO price_scenarios (category_code, name, match_json, axis_x_key, axis_y_key)
-       VALUES ($1, $2, $3::jsonb, $4, $5)
+      `INSERT INTO price_scenarios (category_code, name, group_name, match_json, axis_x_key, axis_y_key)
+       VALUES ($1, $2, $3, $4::jsonb, $5, $6)
        RETURNING id`,
       [
         source.category_code,
         `${source.name} (копія)`,
+        normalizeScenarioGroup(source.group_name, source.name),
         JSON.stringify(source.match_json || {}),
         source.axis_x_key,
         source.axis_y_key,
@@ -246,22 +272,66 @@ async function duplicateScenario(id) {
   }
 }
 
-async function createModifier({ category_code, trigger_key, trigger_val, factor }) {
+function normalizeModifierRule({ match_json, trigger_key, trigger_val }) {
+  const payload = typeof match_json === 'string' ? JSON.parse(match_json || '{}') : match_json || {};
+  if (Object.keys(payload).length > 0) return payload;
+  if (trigger_key) return { [trigger_key]: Number(trigger_val) };
+  return {};
+}
+
+function getLegacyModifierTrigger(rule) {
+  const [firstKey, firstValue] = Object.entries(rule)[0] || ['', 0];
+  const normalizedValue = Array.isArray(firstValue) ? firstValue[0] : firstValue;
+  return {
+    triggerKey: firstKey || '',
+    triggerVal: normalizedValue === undefined || normalizedValue === null || normalizedValue === ''
+      ? 0
+      : Number(normalizedValue),
+  };
+}
+
+async function createModifier({ category_code, trigger_key, trigger_val, match_json, factor }) {
+  const payload = normalizeModifierRule({ match_json, trigger_key, trigger_val });
+  const legacyTrigger = getLegacyModifierTrigger(payload);
   const result = await pool.query(
-    `INSERT INTO price_modifiers (category_code, trigger_key, trigger_val, factor)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO price_modifiers (category_code, trigger_key, trigger_val, match_json, factor)
+     VALUES ($1, $2, $3, $4::jsonb, $5)
      RETURNING id`,
-    [category_code, trigger_key, Number(trigger_val), Number(factor)]
+    [
+      category_code,
+      legacyTrigger.triggerKey,
+      legacyTrigger.triggerVal,
+      JSON.stringify(payload),
+      Number(factor),
+    ]
   );
 
   return { id: result.rows[0].id };
 }
 
-async function updateModifier({ id, factor }) {
-  await pool.query('UPDATE price_modifiers SET factor = $1 WHERE id = $2', [
-    Number(factor),
-    Number(id),
-  ]);
+async function updateModifier({ id, factor, match_json, trigger_key, trigger_val }) {
+  if (match_json === undefined && trigger_key === undefined && trigger_val === undefined) {
+    await pool.query('UPDATE price_modifiers SET factor = $1 WHERE id = $2', [
+      Number(factor),
+      Number(id),
+    ]);
+    return;
+  }
+
+  const payload = normalizeModifierRule({ match_json, trigger_key, trigger_val });
+  const legacyTrigger = getLegacyModifierTrigger(payload);
+  await pool.query(
+    `UPDATE price_modifiers
+     SET trigger_key = $1, trigger_val = $2, match_json = $3::jsonb, factor = $4
+     WHERE id = $5`,
+    [
+      legacyTrigger.triggerKey,
+      legacyTrigger.triggerVal,
+      JSON.stringify(payload),
+      Number(factor),
+      Number(id),
+    ]
+  );
 }
 
 module.exports = {

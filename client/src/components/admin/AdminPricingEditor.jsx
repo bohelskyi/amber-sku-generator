@@ -1,7 +1,221 @@
+import { useState } from 'react';
+import { ConditionBuilder } from './ConditionBuilder';
 import { handleNumberKeyDown, handleNumberWheel } from '../../lib/number-input';
 import { getPricingAxis } from '../../lib/pricing-axis';
+import { formatConditionSummary } from '../../lib/admin-conditions';
+
+const getScenarioGroupName = (scenario) => {
+  const groupName = String(scenario.group_name || '').trim();
+  if (groupName) return groupName;
+
+  const scenarioName = String(scenario.name || '').trim();
+  if (scenarioName.includes(' - ')) return scenarioName.split(' - ')[0].trim() || 'Без групи';
+  return scenarioName || 'Без групи';
+};
+
+const groupScenarios = (scenarios = []) => {
+  const groups = [];
+  const groupMap = new Map();
+
+  scenarios.forEach((scenario) => {
+    const groupName = getScenarioGroupName(scenario);
+    if (!groupMap.has(groupName)) {
+      const group = { name: groupName, scenarios: [] };
+      groupMap.set(groupName, group);
+      groups.push(group);
+    }
+    groupMap.get(groupName).scenarios.push(scenario);
+  });
+
+  return groups;
+};
+
+const getAxisQuestions = (questions = []) =>
+  questions.filter((question) => (question.input_type || 'options') !== 'text' && (question.options || []).length > 0);
+
+const splitComboAxis = (axisKey) => {
+  const keys = String(axisKey || '')
+    .split('+')
+    .map((key) => key.trim())
+    .filter(Boolean);
+
+  return {
+    primaryKey: keys[0] || '',
+    secondaryKey: keys[1] || '',
+  };
+};
+
+function FieldControl({ children, hint, label }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-semibold text-slate-600">{label}</span>
+      {children}
+      {hint && <span className="mt-1 block text-[11px] text-slate-500">{hint}</span>}
+    </label>
+  );
+}
+
+function AxisSelector({
+  allowEmpty = false,
+  axisKey,
+  axisQuestions,
+  emptyLabel = 'Без колонок',
+  label,
+  onChange,
+  supportCombo = false,
+}) {
+  const { primaryKey, secondaryKey } = splitComboAxis(axisKey);
+
+  const commit = (nextPrimaryKey, nextSecondaryKey = secondaryKey) => {
+    if (!nextPrimaryKey) {
+      onChange('');
+      return;
+    }
+
+    onChange(nextSecondaryKey ? `${nextPrimaryKey}+${nextSecondaryKey}` : nextPrimaryKey);
+  };
+
+  return (
+    <div className={supportCombo ? 'grid grid-cols-1 sm:grid-cols-2 gap-2' : ''}>
+      <FieldControl label={label}>
+        <select className="input-sm" value={primaryKey} onChange={(event) => commit(event.target.value, '')}>
+          {allowEmpty && <option value="">{emptyLabel}</option>}
+          {!allowEmpty && <option value="">Оберіть питання</option>}
+          {axisQuestions.map((question) => (
+            <option key={question.id} value={question.id}>{question.label || question.id}</option>
+          ))}
+        </select>
+      </FieldControl>
+
+      {supportCombo && (
+        <FieldControl label="Додаткова колонка" hint="Для комбінованих осей на кшталт glass+additional.">
+          <select
+            className="input-sm"
+            value={secondaryKey}
+            disabled={!primaryKey}
+            onChange={(event) => commit(primaryKey, event.target.value)}
+          >
+            <option value="">Немає</option>
+            {axisQuestions
+              .filter((question) => question.id !== primaryKey)
+              .map((question) => (
+                <option key={question.id} value={question.id}>{question.label || question.id}</option>
+              ))}
+          </select>
+        </FieldControl>
+      )}
+    </div>
+  );
+}
+
+function ScenarioForm({
+  config,
+  currentCatQuestions,
+  groupOptions,
+  onCancel,
+  onSave,
+  scenario,
+  setScenario,
+  title,
+}) {
+  const axisQuestions = getAxisQuestions(currentCatQuestions);
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3">
+      {title && <div className="mb-3 text-xs font-semibold text-slate-500">{title}</div>}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <FieldControl label="Назва матриці">
+          <input className="input-sm" placeholder="Натур. Калібрований - 1 сорт" value={scenario.name} onChange={(event) => setScenario({ ...scenario, name: event.target.value })} />
+        </FieldControl>
+        <FieldControl label="Група">
+          <input className="input-sm" list="scenario-group-options" placeholder="Натур. Калібрований" value={scenario.group_name} onChange={(event) => setScenario({ ...scenario, group_name: event.target.value })} />
+        </FieldControl>
+      </div>
+
+      <datalist id="scenario-group-options">
+        {groupOptions.map((groupName) => (
+          <option key={groupName} value={groupName} />
+        ))}
+      </datalist>
+
+      <div className="mt-3">
+        <ConditionBuilder
+          config={config}
+          label="Коли використовувати цю матрицю"
+          questions={currentCatQuestions}
+          value={scenario.match_json}
+          onChange={(nextValue) => setScenario({ ...scenario, match_json: nextValue })}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <AxisSelector
+          axisKey={scenario.axis_x_key}
+          axisQuestions={axisQuestions}
+          label="Рядки матриці"
+          onChange={(nextValue) => setScenario({ ...scenario, axis_x_key: nextValue })}
+        />
+        <AxisSelector
+          allowEmpty
+          axisKey={scenario.axis_y_key}
+          axisQuestions={axisQuestions}
+          label="Колонки матриці"
+          onChange={(nextValue) => setScenario({ ...scenario, axis_y_key: nextValue })}
+          supportCombo
+        />
+      </div>
+
+      <div className="mt-3 flex gap-2">
+        <button onClick={onSave} className="btn btn-primary text-xs">{title?.includes('Редагувати') ? 'Зберегти сценарій' : 'Створити сценарій'}</button>
+        {onCancel && <button onClick={onCancel} className="btn btn-outline text-xs">Скасувати</button>}
+      </div>
+    </div>
+  );
+}
+
+function ModifierForm({
+  config,
+  currentCatQuestions,
+  modifier,
+  onCancel,
+  onSave,
+  setModifier,
+  title,
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3">
+      {title && <div className="mb-3 text-xs font-semibold text-slate-500">{title}</div>}
+      <ConditionBuilder
+        config={config}
+        label="Коли застосовувати модифікатор"
+        questions={currentCatQuestions}
+        value={modifier.match_json}
+        onChange={(nextValue) => setModifier({ ...modifier, match_json: nextValue })}
+      />
+      <FieldControl label="Множник" hint="0.7 = знижка 30%, 1.15 = націнка 15%.">
+        <input
+          className="input-sm"
+          type="number"
+          min="0"
+          placeholder="0.7"
+          value={modifier.factor}
+          onChange={(event) => {
+            if (event.target.value >= 0) setModifier({ ...modifier, factor: event.target.value });
+          }}
+          onWheel={handleNumberWheel}
+          onKeyDown={handleNumberKeyDown}
+        />
+      </FieldControl>
+      <div className="mt-3 flex gap-2">
+        <button onClick={onSave} className="btn btn-primary text-xs">{title?.includes('Редагувати') ? 'Зберегти' : 'Додати'}</button>
+        {onCancel && <button onClick={onCancel} className="btn btn-outline text-xs">Скасувати</button>}
+      </div>
+    </div>
+  );
+}
 
 export function AdminPricingEditor({
+  config,
   selectedCat,
   pricesData,
   currentCatQuestions,
@@ -11,6 +225,9 @@ export function AdminPricingEditor({
   setNewScenario,
   newModifier,
   setNewModifier,
+  editModifier,
+  setEditModifier,
+  beginModifierEdit,
   beginScenarioEdit,
   updateScenario,
   duplicateScenario,
@@ -18,10 +235,17 @@ export function AdminPricingEditor({
   formatMatchJson,
   handlePriceChange,
   addScenario,
-  updateModifier,
+  saveModifierEdit,
   addModifier,
 }) {
+  const [openGroups, setOpenGroups] = useState({});
   if (!selectedCat || !pricesData) return null;
+
+  const scenarioGroups = groupScenarios(pricesData.scenarios);
+  const knownGroupNames = scenarioGroups.map((group) => group.name);
+  const toggleGroup = (groupName) => {
+    setOpenGroups((prev) => ({ ...prev, [groupName]: !(prev[groupName] ?? false) }));
+  };
 
   return (
     <div className="card p-6 sm:p-8 border-t-4 border-[rgba(20,32,59,0.4)] fade-up">
@@ -32,77 +256,106 @@ export function AdminPricingEditor({
         </div>
       </div>
 
-      <div className="space-y-10">
-        {pricesData.scenarios.map((scenario) => {
-          const axisX = getPricingAxis(scenario.axis_x_key, currentCatQuestions, 'X');
-          const axisY = getPricingAxis(scenario.axis_y_key, currentCatQuestions, 'Base');
-          const optionsX = axisX.options;
-          const optionsY = axisY.options;
+      <div className="space-y-4">
+        {scenarioGroups.map((group, groupIndex) => {
+          const isOpen = openGroups[group.name] ?? groupIndex === 0;
 
           return (
-            <div key={scenario.id} className="border border-slate-200 p-4 rounded-2xl bg-slate-50/80 relative">
-              <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
-                <h3 className="font-semibold text-lg text-slate-800">{scenario.name}</h3>
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={() => beginScenarioEdit(scenario)} className="btn btn-outline text-xs">Редагувати</button>
-                  <button onClick={() => duplicateScenario(scenario.id)} className="btn btn-outline text-xs">Дублювати</button>
-                  <button onClick={() => deleteItem('scenario', scenario.id)} className="btn btn-outline text-xs">Видалити сценарій</button>
+            <div key={group.name} className="rounded-2xl border border-slate-200 bg-white/70">
+              <button
+                type="button"
+                onClick={() => toggleGroup(group.name)}
+                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+              >
+                <div>
+                  <div className="text-sm font-semibold text-slate-800">{group.name}</div>
+                  <div className="text-xs text-slate-500">Матриць: {group.scenarios.length}</div>
                 </div>
-              </div>
-              <p className="text-xs text-slate-500 mb-4 bg-white px-2 py-1 inline-block rounded">Умова: {formatMatchJson(scenario.match_json)}</p>
+                <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs text-slate-600">
+                  {isOpen ? 'Згорнути' : 'Розгорнути'}
+                </span>
+              </button>
 
-              {editScenario?.id === scenario.id && (
-                <div className="mb-4 p-3 border border-slate-200 rounded-xl bg-white">
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-                    <input className="input-sm" placeholder="Назва" value={editScenario.name} onChange={(event) => setEditScenario({ ...editScenario, name: event.target.value })} />
-                    <input className="input-sm font-mono text-xs" placeholder="JSON умова" value={editScenario.match_json} onChange={(event) => setEditScenario({ ...editScenario, match_json: event.target.value })} />
-                    <input className="input-sm" placeholder="Вісь X key" value={editScenario.axis_x_key} onChange={(event) => setEditScenario({ ...editScenario, axis_x_key: event.target.value })} />
-                    <input className="input-sm" placeholder="Вісь Y key або glass+additional" value={editScenario.axis_y_key} onChange={(event) => setEditScenario({ ...editScenario, axis_y_key: event.target.value })} />
-                  </div>
-                  <div className="mt-3 flex gap-2">
-                    <button onClick={updateScenario} className="btn btn-primary text-xs">Зберегти сценарій</button>
-                    <button onClick={() => setEditScenario(null)} className="btn btn-outline text-xs">Скасувати</button>
-                  </div>
+              {isOpen && (
+                <div className="space-y-6 border-t border-slate-200 p-4">
+                  {group.scenarios.map((scenario) => {
+                    const axisX = getPricingAxis(scenario.axis_x_key, currentCatQuestions, 'X');
+                    const axisY = getPricingAxis(scenario.axis_y_key, currentCatQuestions, 'Base');
+                    const optionsX = axisX.options;
+                    const optionsY = axisY.options;
+
+                    return (
+                      <div key={scenario.id} className="border border-slate-200 p-4 rounded-2xl bg-slate-50/80 relative">
+                        <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
+                          <div>
+                            <h3 className="font-semibold text-lg text-slate-800">{scenario.name}</h3>
+                            <div className="mt-1 text-xs text-slate-500">Група: {getScenarioGroupName(scenario)}</div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button onClick={() => beginScenarioEdit(scenario)} className="btn btn-outline text-xs">Редагувати</button>
+                            <button onClick={() => duplicateScenario(scenario.id)} className="btn btn-outline text-xs">Дублювати</button>
+                            <button onClick={() => deleteItem('scenario', scenario.id)} className="btn btn-outline text-xs">Видалити сценарій</button>
+                          </div>
+                        </div>
+                        <p className="text-xs text-slate-500 mb-4 bg-white px-2 py-1 inline-block rounded">Умова: {formatMatchJson(scenario.match_json)}</p>
+
+                        {editScenario?.id === scenario.id && (
+                          <div className="mb-4">
+                            <ScenarioForm
+                              config={config}
+                              currentCatQuestions={currentCatQuestions}
+                              groupOptions={knownGroupNames}
+                              onCancel={() => setEditScenario(null)}
+                              onSave={updateScenario}
+                              scenario={editScenario}
+                              setScenario={setEditScenario}
+                              title="Редагувати сценарій"
+                            />
+                          </div>
+                        )}
+
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full bg-white border border-slate-200 rounded-xl">
+                            <thead>
+                              <tr className="table-head">
+                                <th className="table-cell text-left min-w-[150px]">{axisX.label} \ {axisY.label}</th>
+                                {optionsY.map((option) => <th key={option.id} className="table-cell text-left text-xs">{option.label}</th>)}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {optionsX.map((xOption) => (
+                                <tr key={xOption.id} className="border-t border-slate-100">
+                                  <td className="table-cell font-semibold bg-slate-50 text-xs text-slate-700">{xOption.label}</td>
+                                  {optionsY.map((yOption) => {
+                                    const cell = scenario.matrix.find((item) => item.x_val === xOption.id && item.y_val === yOption.id);
+                                    return (
+                                      <td key={yOption.id} className="border-l border-slate-100 p-0">
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          onKeyDown={(event) => { if (event.key === '-') event.preventDefault(); handleNumberKeyDown(event); }}
+                                          onWheel={handleNumberWheel}
+                                          className="w-full h-full p-2 text-center focus:bg-amber-50 outline-none min-w-[60px]"
+                                          defaultValue={cell ? cell.price : ''}
+                                          placeholder="-"
+                                          onBlur={(event) => {
+                                            if (event.target.value < 0) event.target.value = 0;
+                                            handlePriceChange(scenario.id, xOption.id, yOption.id, event.target.value);
+                                          }}
+                                        />
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
-
-              <div className="overflow-x-auto">
-                <table className="min-w-full bg-white border border-slate-200 rounded-xl">
-                  <thead>
-                    <tr className="table-head">
-                      <th className="table-cell text-left min-w-[150px]">{axisX.label} \ {axisY.label}</th>
-                      {optionsY.map((option) => <th key={option.id} className="table-cell text-left text-xs">{option.label}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {optionsX.map((xOption) => (
-                      <tr key={xOption.id} className="border-t border-slate-100">
-                        <td className="table-cell font-semibold bg-slate-50 text-xs text-slate-700">{xOption.label}</td>
-                        {optionsY.map((yOption) => {
-                          const cell = scenario.matrix.find((item) => item.x_val === xOption.id && item.y_val === yOption.id);
-                          return (
-                            <td key={yOption.id} className="border-l border-slate-100 p-0">
-                              <input
-                                type="number"
-                                min="0"
-                                onKeyDown={(event) => { if (event.key === '-') event.preventDefault(); handleNumberKeyDown(event); }}
-                                onWheel={handleNumberWheel}
-                                className="w-full h-full p-2 text-center focus:bg-amber-50 outline-none min-w-[60px]"
-                                defaultValue={cell ? cell.price : ''}
-                                placeholder="-"
-                                onBlur={(event) => {
-                                  if (event.target.value < 0) event.target.value = 0;
-                                  handlePriceChange(scenario.id, xOption.id, yOption.id, event.target.value);
-                                }}
-                              />
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
             </div>
           );
         })}
@@ -110,50 +363,64 @@ export function AdminPricingEditor({
 
       <div className="mt-8 p-4 border border-dashed border-slate-300 rounded-2xl bg-slate-50/70">
         <h4 className="font-semibold text-slate-700 mb-2">Додати нову таблицю цін (Сценарій)</h4>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-          <input className="input-sm" placeholder="Назва (напр. Некалібровані)" value={newScenario.name} onChange={(event) => setNewScenario({ ...newScenario, name: event.target.value })} />
-          <input className="input-sm font-mono text-xs" placeholder='JSON: {"raw_type":1, "is_calibrated":2}' value={newScenario.match_json} onChange={(event) => setNewScenario({ ...newScenario, match_json: event.target.value })} />
-          <input className="input-sm" placeholder="Вісь X Key (напр. size)" value={newScenario.axis_x_key} onChange={(event) => setNewScenario({ ...newScenario, axis_x_key: event.target.value })} />
-          <input className="input-sm" placeholder="Вісь Y Key (напр. glass+additional)" value={newScenario.axis_y_key} onChange={(event) => setNewScenario({ ...newScenario, axis_y_key: event.target.value })} />
-        </div>
-        <p className="mt-2 text-xs text-slate-500">
-          Для комбінованої осі введи ключі через +, наприклад glass+additional. Перший ключ має варіант 1 = “так”, другий може бути необовʼязковим списком.
-        </p>
-        <button onClick={addScenario} className="btn btn-primary mt-3">Створити сценарій</button>
+        <ScenarioForm
+          config={config}
+          currentCatQuestions={currentCatQuestions}
+          groupOptions={knownGroupNames}
+          onSave={addScenario}
+          scenario={newScenario}
+          setScenario={setNewScenario}
+          title=""
+        />
       </div>
 
       <div className="mt-12 border-t border-slate-200 pt-6">
         <h3 className="font-semibold text-lg mb-4 text-slate-800">Модифікатори (Знижки / Націнки)</h3>
         <div className="space-y-2 mb-4">
-          {pricesData.modifiers.map((modifier) => (
-            <div key={modifier.id} className="flex flex-wrap items-center gap-3 p-3 bg-[rgba(221,151,74,0.14)] border border-[rgba(221,151,74,0.35)] rounded-xl">
-              <span className="text-sm">Якщо <b>{modifier.trigger_key}</b> = {modifier.trigger_val}</span>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-600">Множник:</span>
-                <input type="number" className="input-xs w-24 text-center font-semibold" defaultValue={modifier.factor} onBlur={(event) => updateModifier(modifier.id, event.target.value)} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
+          {pricesData.modifiers.map((modifier) => {
+            const modifierRule = modifier.match_json || (modifier.trigger_key ? { [modifier.trigger_key]: modifier.trigger_val } : {});
+            return (
+              <div key={modifier.id} className="p-3 bg-[rgba(221,151,74,0.14)] border border-[rgba(221,151,74,0.35)] rounded-xl">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800">
+                      {formatConditionSummary(modifierRule, currentCatQuestions, config, 'Завжди')}
+                    </div>
+                    <div className="text-xs text-slate-500">Множник: {modifier.factor}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={() => beginModifierEdit(modifier)} className="btn btn-outline text-xs">Редагувати</button>
+                    <button onClick={() => deleteItem('modifier', modifier.id)} className="text-rose-500 hover:text-rose-700 px-2 font-bold">×</button>
+                  </div>
+                </div>
+
+                {editModifier?.id === modifier.id && (
+                  <div className="mt-3">
+                    <ModifierForm
+                      config={config}
+                      currentCatQuestions={currentCatQuestions}
+                      modifier={editModifier}
+                      onCancel={() => setEditModifier(null)}
+                      onSave={saveModifierEdit}
+                      setModifier={setEditModifier}
+                      title="Редагувати модифікатор"
+                    />
+                  </div>
+                )}
               </div>
-              <button onClick={() => deleteItem('modifier', modifier.id)} className="text-rose-500 hover:text-rose-700 px-2 font-bold">×</button>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
-        <div className="flex flex-wrap gap-2 items-center bg-slate-100 p-3 rounded-xl">
-          <span className="text-sm font-semibold">Новий:</span>
-          <input className="input-xs w-28" placeholder="Key (quality)" value={newModifier.trigger_key} onChange={(event) => setNewModifier({ ...newModifier, trigger_key: event.target.value })} />
-          <input className="input-xs w-24" type="number" placeholder="Val (2)" value={newModifier.trigger_val} onChange={(event) => setNewModifier({ ...newModifier, trigger_val: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
-          <input
-            className="input-xs w-24"
-            type="number"
-            min="0"
-            placeholder="Factor (0.7)"
-            value={newModifier.factor}
-            onChange={(event) => {
-              if (event.target.value >= 0) setNewModifier({ ...newModifier, factor: event.target.value });
-            }}
-            onWheel={handleNumberWheel}
-            onKeyDown={handleNumberKeyDown}
+        <div className="bg-slate-100 p-3 rounded-xl">
+          <ModifierForm
+            config={config}
+            currentCatQuestions={currentCatQuestions}
+            modifier={newModifier}
+            onSave={addModifier}
+            setModifier={setNewModifier}
+            title="Новий модифікатор"
           />
-          <button onClick={addModifier} className="btn btn-amber">Додати</button>
         </div>
       </div>
     </div>
