@@ -30,8 +30,24 @@ const groupScenarios = (scenarios = []) => {
   return groups;
 };
 
-const getAxisQuestions = (questions = []) =>
-  questions.filter((question) => (question.input_type || 'options') !== 'text' && (question.options || []).length > 0);
+const getAxisQuestions = (questions = []) => {
+  const axisQuestions = questions.filter((question) =>
+    (question.input_type || 'options') !== 'text' && (question.options || []).length > 0
+  );
+  const weightQuestion = questions.find((question) => question.id === 'weight');
+
+  if (weightQuestion && !axisQuestions.some((question) => question.id === 'weight')) {
+    axisQuestions.push({
+      ...weightQuestion,
+      id: 'weight',
+      label: weightQuestion?.label || 'Вага',
+      input_type: 'text',
+      options: [{ id: 0, label: 'Ціна за грам' }],
+    });
+  }
+
+  return axisQuestions;
+};
 
 const splitComboAxis = (axisKey) => {
   const keys = String(axisKey || '')

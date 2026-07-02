@@ -43,6 +43,7 @@ router.post('/price-preview', async (req, res) => {
     res.json({
       pricePerGram: pricing.pricePerGram.toFixed(2),
       totalPrice: pricing.totalPrice,
+      weightVal: pricing.weightVal,
       logMessage: pricing.logMessage,
       ...pricing.currencyPayload,
     });

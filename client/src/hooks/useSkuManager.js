@@ -86,7 +86,7 @@ export function useSkuManager() {
     hasManualPrice && Number(previewData?.uahRate) > 0
       ? (manualPriceNumber / Number(previewData.uahRate)).toFixed(2)
       : previewData?.totalPrice;
-  const weightNumber = Number(weight || 0);
+  const weightNumber = Number(weight || previewData?.weightVal || 0);
   const effectivePricePerGramUah =
     hasManualPrice && weightNumber > 0
       ? (manualPriceNumber / weightNumber).toFixed(2)
@@ -285,7 +285,7 @@ export function useSkuManager() {
       baseSku: previewData.baseSku,
       nextSeq: previewData.nextSeq,
       category: selectedCat,
-      weight: isWeightRequired ? weight : 0,
+      weight: isWeightRequired ? weight : previewData.weightVal || 0,
       totalPrice: effectiveTotalPrice,
       totalPriceUah: effectiveTotalPriceUah,
       pricePerGram: effectivePricePerGram,

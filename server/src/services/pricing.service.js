@@ -41,6 +41,21 @@ function isPricingRuleMatched(ruleJson, answers, normalizedCalibrated) {
   return true;
 }
 
+function axisUsesKey(axisKey, targetKey) {
+  return String(axisKey || '')
+    .split('+')
+    .map((key) => key.trim())
+    .includes(targetKey);
+}
+
+function getPricingWeight(answers = {}, weight) {
+  const parsedWeight = Number.parseFloat(weight);
+  if (Number.isFinite(parsedWeight) && parsedWeight > 0) return parsedWeight;
+
+  const answerWeight = Number.parseFloat(answers.weight);
+  return Number.isFinite(answerWeight) ? answerWeight : 0;
+}
+
 async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated) {
   const scenarios = await pool.query(
     'SELECT * FROM price_scenarios WHERE category_code = $1',
@@ -60,10 +75,7 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
       ? answers.is_calibrated
       : isCalibrated;
   const normalizedCalibrated = Number(calibratedAnswer || 0);
-  const isWeightBased =
-    categoryResult.rows.length > 0 &&
-    Number(categoryResult.rows[0].requires_weight) === 1 &&
-    categoryCode !== 'SK';
+  const weightVal = getPricingWeight(answers, weight);
 
   const activeScenario = [...scenarios.rows].sort((a, b) => {
     const aRuleCount = Object.keys(asRuleObject(a.match_json)).length;
@@ -72,10 +84,20 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
   }).find((scenario) => {
     return isPricingRuleMatched(scenario.match_json, answers, normalizedCalibrated);
   });
+  const categoryRequiresWeight =
+    categoryResult.rows.length > 0 &&
+    Number(categoryResult.rows[0].requires_weight) === 1 &&
+    categoryCode !== 'SK';
+  const scenarioUsesWeight =
+    activeScenario &&
+    (axisUsesKey(activeScenario.axis_x_key, 'weight') ||
+      axisUsesKey(activeScenario.axis_y_key, 'weight'));
+  const isWeightBased = categoryRequiresWeight || scenarioUsesWeight;
 
   if (activeScenario) {
-    const xVal = resolveAxisValue(activeScenario.axis_x_key, answers);
-    const yVal = resolveAxisValue(activeScenario.axis_y_key, answers);
+    const matrixAnswers = scenarioUsesWeight ? { ...answers, weight: 0 } : answers;
+    const xVal = resolveAxisValue(activeScenario.axis_x_key, matrixAnswers);
+    const yVal = resolveAxisValue(activeScenario.axis_y_key, matrixAnswers);
 
     const priceRow = await pool.query(
       `SELECT price
@@ -110,8 +132,6 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
     logMessage = 'Немає сценарію для цих параметрів';
   }
 
-  const parsedWeight = Number.parseFloat(weight);
-  const weightVal = Number.isFinite(parsedWeight) ? parsedWeight : 0;
   let totalPrice = isWeightBased ? (pricePerGram * weightVal).toFixed(2) : '0.00';
 
   let currencyPayload = { uahRate: null, pricePerGramUah: null, totalPriceUah: null };

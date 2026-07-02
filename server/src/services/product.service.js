@@ -286,6 +286,7 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
       prevFullSku,
       pricePerGram: pricePerGram.toFixed(2),
       totalPrice,
+      weightVal,
       logMessage,
       ...currencyPayload,
     };
@@ -314,6 +315,7 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
     existsInDb: existingProduct.rows.length > 0,
     pricePerGram: pricePerGram.toFixed(2),
     totalPrice,
+    weightVal,
     logMessage,
     ...currencyPayload,
   };

@@ -18,6 +18,13 @@ export function getPricingAxis(axisKey, questions, fallbackLabel) {
   const comboKeys = parseComboAxisKey(axisKey);
   if (!comboKeys) {
     const question = questions.find((item) => item.id === axisKey);
+    if (axisKey === 'weight') {
+      return {
+        label: question?.label || 'Вага',
+        options: [{ id: 0, label: 'Ціна за грам' }],
+      };
+    }
+
     return {
       label: question?.label || axisKey,
       options: question?.options || [],
