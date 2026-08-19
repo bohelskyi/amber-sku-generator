@@ -48,6 +48,21 @@ function axisUsesKey(axisKey, targetKey) {
     .includes(targetKey);
 }
 
+function getAxisKeys(axisKey) {
+  return String(axisKey || '')
+    .split('+')
+    .map((key) => key.trim())
+    .filter(Boolean);
+}
+
+function getRuleKeys(ruleJson) {
+  return Object.keys(asRuleObject(ruleJson));
+}
+
+function uniqueKeys(keys) {
+  return Array.from(new Set(keys.filter(Boolean)));
+}
+
 function getPricingWeight(answers = {}, weight) {
   const parsedWeight = Number.parseFloat(weight);
   if (Number.isFinite(parsedWeight) && parsedWeight > 0) return parsedWeight;
@@ -76,6 +91,7 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
       : isCalibrated;
   const normalizedCalibrated = Number(calibratedAnswer || 0);
   const weightVal = getPricingWeight(answers, weight);
+  let pricingDetails = null;
 
   const activeScenario = [...scenarios.rows].sort((a, b) => {
     const aRuleCount = Object.keys(asRuleObject(a.match_json)).length;
@@ -107,6 +123,8 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
     );
 
     if (priceRow.rows.length > 0) {
+      const basePrice = Number(priceRow.rows[0].price);
+      const matchedModifiers = [];
       pricePerGram = Number(priceRow.rows[0].price);
       logMessage = `${activeScenario.name} (Базова: ${isWeightBased ? `$${pricePerGram}` : `${pricePerGram} ₴`})`;
 
@@ -122,9 +140,49 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
 
         if (isPricingRuleMatched(modifierRule, answers, normalizedCalibrated)) {
           pricePerGram *= Number(modifier.factor);
+          matchedModifiers.push({
+            id: modifier.id,
+            factor: Number(modifier.factor),
+            match_json: asRuleObject(modifierRule),
+            dependentKeys: getRuleKeys(modifierRule),
+          });
           logMessage += ` + Модифікатор (${Math.round((Number(modifier.factor) - 1) * 100)}%)`;
         }
       }
+
+      pricingDetails = {
+        isWeightBased,
+        calibratedValue: normalizedCalibrated,
+        scenario: {
+          id: activeScenario.id,
+          name: activeScenario.name,
+          group_name: activeScenario.group_name || '',
+          match_json: asRuleObject(activeScenario.match_json),
+          axis_x_key: activeScenario.axis_x_key,
+          axis_y_key: activeScenario.axis_y_key,
+        },
+        matrix: {
+          x: {
+            key: activeScenario.axis_x_key,
+            value: xVal,
+            dependentKeys: getAxisKeys(activeScenario.axis_x_key),
+          },
+          y: {
+            key: activeScenario.axis_y_key,
+            value: yVal,
+            dependentKeys: getAxisKeys(activeScenario.axis_y_key),
+          },
+        },
+        basePrice,
+        finalPricePerGram: pricePerGram,
+        matchedModifiers,
+        dependentKeys: uniqueKeys([
+          ...getRuleKeys(activeScenario.match_json),
+          ...getAxisKeys(activeScenario.axis_x_key),
+          ...getAxisKeys(activeScenario.axis_y_key),
+          ...matchedModifiers.flatMap((modifier) => modifier.dependentKeys),
+        ]),
+      };
     } else {
       logMessage = `${activeScenario.name} (Нема ціни для комбінації)`;
     }
@@ -168,6 +226,31 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
     totalPrice,
     logMessage,
     currencyPayload,
+    pricingDetails: pricingDetails || {
+      isWeightBased,
+      calibratedValue: normalizedCalibrated,
+      scenario: activeScenario
+        ? {
+            id: activeScenario.id,
+            name: activeScenario.name,
+            group_name: activeScenario.group_name || '',
+            match_json: asRuleObject(activeScenario.match_json),
+            axis_x_key: activeScenario.axis_x_key,
+            axis_y_key: activeScenario.axis_y_key,
+          }
+        : null,
+      matrix: null,
+      basePrice: null,
+      finalPricePerGram: pricePerGram,
+      matchedModifiers: [],
+      dependentKeys: activeScenario
+        ? uniqueKeys([
+            ...getRuleKeys(activeScenario.match_json),
+            ...getAxisKeys(activeScenario.axis_x_key),
+            ...getAxisKeys(activeScenario.axis_y_key),
+          ])
+        : [],
+    },
   };
 }
 

@@ -2,7 +2,7 @@ const { isRuleMatched } = require('./rules');
 
 function parseVariationSku(skuValue) {
   const normalizedSku = String(skuValue || '').trim().toUpperCase();
-  const variationMatch = normalizedSku.match(/^(.*)-(\d{3})$/);
+  const variationMatch = normalizedSku.match(/^(.*\d{3})-(\d{3})$/);
 
   if (!variationMatch) {
     return {
@@ -46,6 +46,28 @@ function buildBaseSku(categoryCode, answerCodes, separator = '') {
 
 function appendSkuSuffix(baseSku, suffixValue) {
   return `${baseSku}${String(suffixValue).padStart(3, '0')}`;
+}
+
+function buildSkuSuffixDecodeAttempts(skuWithoutCategory) {
+  const encodedValue = String(skuWithoutCategory || '');
+  const attempts = [];
+  const seenAttempts = new Set();
+
+  const addAttempt = (encodedPart, suffixRaw, hasSuffix) => {
+    const attemptKey = `${encodedPart}\u0000${suffixRaw || ''}\u0000${hasSuffix ? 1 : 0}`;
+    if (seenAttempts.has(attemptKey)) return;
+    seenAttempts.add(attemptKey);
+    attempts.push({ encodedPart, suffixRaw, hasSuffix });
+  };
+
+  for (let suffixLength = 3; suffixLength <= encodedValue.length; suffixLength += 1) {
+    const suffixRaw = encodedValue.slice(-suffixLength);
+    if (!/^\d+$/.test(suffixRaw)) continue;
+    addAttempt(encodedValue.slice(0, -suffixLength), suffixRaw, true);
+  }
+
+  addAttempt(encodedValue, null, false);
+  return attempts;
 }
 
 function stripSkuSeparators(encodedPart) {
@@ -336,6 +358,7 @@ function decodeVisibleSkuAnswers(questions, encodedPart) {
 
 module.exports = {
   appendSkuSuffix,
+  buildSkuSuffixDecodeAttempts,
   buildBaseSku,
   parseVariationSku,
   decodeSkuAnswers,

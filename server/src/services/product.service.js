@@ -2,6 +2,7 @@ const pool = require('../db/pool');
 const { calculatePricing } = require('./pricing.service');
 const {
   appendSkuSuffix,
+  buildSkuSuffixDecodeAttempts,
   buildBaseSku,
   decodeSkuAnswers,
   decodeVisibleSkuAnswers,
@@ -72,6 +73,87 @@ async function getQuestionsForCategory(categoryCode) {
   return questions;
 }
 
+function buildAnswerMap(decodedAnswers) {
+  return decodedAnswers.reduce((answers, item) => {
+    answers[item.key] = item.value_id === null ? 0 : item.value_id;
+    return answers;
+  }, {});
+}
+
+function getProductDetails(product) {
+  if (!product?.details || typeof product.details !== 'object') return {};
+  return product.details;
+}
+
+function uniqueValues(values) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function getPricingConditionValue(key, pricingAnswers, pricingDetails) {
+  if (key === 'is_calibrated') {
+    return pricingAnswers.is_calibrated ?? pricingDetails?.calibratedValue ?? null;
+  }
+
+  return pricingAnswers[key] ?? null;
+}
+
+function getDecodedPricingPayload({
+  decodedAnswers,
+  product,
+  pricing,
+  pricingAnswers,
+  suffixValue,
+}) {
+  const productDetails = getProductDetails(product);
+  const storedPricePerGram = product?.price_per_gram !== null && product?.price_per_gram !== undefined
+    ? Number(product.price_per_gram)
+    : null;
+  const storedUahRate = product?.uah_rate !== null && product?.uah_rate !== undefined
+    ? Number(product.uah_rate)
+    : null;
+  const storedWeight = product?.weight !== null && product?.weight !== undefined
+    ? Number(product.weight)
+    : null;
+  const calculatedPricePerGram = Number(pricing.pricePerGram || 0);
+  const pricePerGram = storedPricePerGram !== null ? storedPricePerGram : calculatedPricePerGram;
+  const uahRate = storedUahRate ?? pricing.currencyPayload?.uahRate ?? null;
+  const pricePerGramUah =
+    Number(pricePerGram) > 0 && Number(uahRate) > 0
+      ? (Number(pricePerGram) * Number(uahRate)).toFixed(2)
+      : pricing.currencyPayload?.pricePerGramUah || null;
+  const dependentKeys = pricing.pricingDetails?.dependentKeys || [];
+  const shouldShowCalibratedCondition =
+    Number(pricingAnswers.raw_type) === 1 ||
+    pricingAnswers.is_calibrated !== undefined ||
+    productDetails.isCalibrated !== undefined;
+  const conditionKeys = uniqueValues([
+    ...dependentKeys,
+    ...(shouldShowCalibratedCondition ? ['is_calibrated'] : []),
+  ]);
+
+  return {
+    source: storedPricePerGram !== null ? 'stored' : 'calculated',
+    isWeightBased: Boolean(pricing.pricingDetails?.isWeightBased),
+    weight: storedWeight ?? pricing.weightVal ?? suffixValue ?? null,
+    pricePerGram,
+    pricePerGramUah,
+    uahRate,
+    totalPrice: product?.total_price ?? pricing.totalPrice,
+    totalPriceUah: product?.total_price_uah ?? pricing.currencyPayload?.totalPriceUah ?? null,
+    logMessage: productDetails.logMessage || pricing.logMessage,
+    dependentKeys,
+    conditions: conditionKeys.map((key) => ({
+      key,
+      value: getPricingConditionValue(key, pricingAnswers, pricing.pricingDetails),
+      isInSku: decodedAnswers.some((answer) => answer.key === key),
+    })),
+    details: pricing.pricingDetails || null,
+    decodedPriceAnswers: decodedAnswers
+      .filter((answer) => dependentKeys.includes(answer.key))
+      .map((answer) => answer.key),
+  };
+}
+
 async function decodeSku(skuValue) {
   const { normalizedSku, baseFullSku, variationNumber } = parseVariationSku(skuValue);
   if (!normalizedSku) {
@@ -86,21 +168,16 @@ async function decodeSku(skuValue) {
 
   const questions = await getQuestionsForCategory(category.code);
   const skuWithoutCategory = baseFullSku.slice(category.code.length);
-  const attempts = [];
-
-  if (skuWithoutCategory.length >= 3) {
-    attempts.push({
-      encodedPart: skuWithoutCategory.slice(0, -3),
-      suffixRaw: skuWithoutCategory.slice(-3),
-      hasSuffix: true,
-    });
-  }
-
-  attempts.push({
-    encodedPart: skuWithoutCategory,
-    suffixRaw: null,
-    hasSuffix: false,
-  });
+  const attempts = buildSkuSuffixDecodeAttempts(skuWithoutCategory);
+  const productResult = await pool.query(
+    `SELECT id, full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah,
+            price_per_gram, uah_rate, details, created_at
+     FROM products
+     WHERE full_sku = $1
+     LIMIT 1`,
+    [normalizedSku]
+  );
+  const product = productResult.rows[0] || null;
 
   for (const attempt of attempts) {
     const decodedAnswers =
@@ -113,10 +190,27 @@ async function decodeSku(skuValue) {
       attempt.suffixRaw !== null && /^\d+$/.test(attempt.suffixRaw)
         ? Number(attempt.suffixRaw)
         : null;
-
-    const productResult = await pool.query(
-      'SELECT id, full_sku, base_sku, sequence_number, category, weight, total_price, created_at FROM products WHERE full_sku = $1 LIMIT 1',
-      [normalizedSku]
+    const decodedAnswerMap = buildAnswerMap(decodedAnswers);
+    const productDetails = getProductDetails(product);
+    const storedAnswers =
+      productDetails.answers && typeof productDetails.answers === 'object'
+        ? productDetails.answers
+        : {};
+    const pricingAnswers = {
+      ...decodedAnswerMap,
+      ...storedAnswers,
+    };
+    const pricingWeight =
+      product?.weight !== null && product?.weight !== undefined && Number(product.weight) > 0
+        ? Number(product.weight)
+        : category.requires_weight === 1
+          ? suffixValue
+          : 0;
+    const pricing = await calculatePricing(
+      category.code,
+      pricingAnswers,
+      pricingWeight,
+      productDetails.isCalibrated ?? pricingAnswers.is_calibrated ?? null
     );
 
     return {
@@ -138,6 +232,13 @@ async function decodeSku(skuValue) {
           : 'none',
         value: suffixValue,
       },
+      pricing: getDecodedPricingPayload({
+        decodedAnswers,
+        product,
+        pricing,
+        pricingAnswers,
+        suffixValue,
+      }),
       variation:
         variationNumber !== null
           ? {
@@ -146,7 +247,7 @@ async function decodeSku(skuValue) {
             }
           : null,
       existsInDb: productResult.rows.length > 0,
-      product: productResult.rows[0] || null,
+      product,
     };
   }
 

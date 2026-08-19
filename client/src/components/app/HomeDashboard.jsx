@@ -1,4 +1,22 @@
-import { formatDateTime, formatDecodedSuffix } from '../../lib/formatters';
+import { formatDateTime, formatDecodedSuffix, formatUah, formatUsd } from '../../lib/formatters';
+
+function getQuestionLabel(config, categoryCode, key) {
+  const question = (config.questions?.[categoryCode] || []).find((item) => item.id === key);
+  return question?.label || key;
+}
+
+function getConditionValueLabel(config, categoryCode, key, value) {
+  if (value === null || value === undefined || value === '') return 'Невідомо';
+
+  const question = (config.questions?.[categoryCode] || []).find((item) => item.id === key);
+  const options = question?.options || config.extraConfig?.[key]?.options || [];
+  const option = options.find((item) => Number(item.id) === Number(value));
+  return option?.label || String(value);
+}
+
+function getPricingSourceLabel(source) {
+  return source === 'stored' ? 'Збережена в базі' : 'Перерахована зараз';
+}
 
 export function HomeDashboard({
   config,
@@ -114,19 +132,77 @@ export function HomeDashboard({
                   Основний артикул: <span className="font-mono font-semibold text-slate-900">{decodeData.baseSku}{decodeData.suffix.raw || ''}</span>
                 </div>
               )}
-              <div className="rounded-2xl border border-slate-200 bg-white/80">
-                {decodeData.decodedAnswers.map((item) => (
-                  <div key={item.key} className="flex items-start justify-between gap-3 px-4 py-3 border-b border-slate-200 last:border-b-0">
-                    <div className="text-sm font-medium text-slate-700">{item.label}</div>
-                    <div className="text-sm text-right text-slate-900">
-                      {item.value_label}
-                      {item.value_id !== null && (
-                        <span className="block text-xs font-mono text-slate-500">{item.value_id}</span>
-                      )}
+              {decodeData.pricing && (
+                <div className="rounded-2xl border border-[rgba(221,151,74,0.5)] bg-[rgba(221,151,74,0.12)] p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs uppercase tracking-[0.2em] text-[#8a5f2b]">
+                        {decodeData.pricing.isWeightBased ? 'Ціна за грам' : 'Ціна за виріб'}
+                      </div>
+                      <div className="mt-1 text-lg font-semibold text-slate-900">
+                        {decodeData.pricing.isWeightBased
+                          ? `${formatUah(decodeData.pricing.pricePerGramUah)} (${formatUsd(decodeData.pricing.pricePerGram)})`
+                          : formatUah(decodeData.pricing.totalPriceUah)}
+                      </div>
                     </div>
+                    <span className="chip">{getPricingSourceLabel(decodeData.pricing.source)}</span>
                   </div>
-                ))}
+                  {decodeData.pricing.logMessage && (
+                    <div className="mt-2 text-xs text-slate-600">{decodeData.pricing.logMessage}</div>
+                  )}
+                  {decodeData.pricing.weight && decodeData.pricing.isWeightBased && (
+                    <div className="mt-2 text-xs text-slate-500">Вага для розрахунку: {decodeData.pricing.weight} г</div>
+                  )}
+                </div>
+              )}
+              <div className="rounded-2xl border border-slate-200 bg-white/80">
+                {decodeData.decodedAnswers.map((item) => {
+                  const isPriceDriver = decodeData.pricing?.dependentKeys?.includes(item.key);
+
+                  return (
+                    <div
+                      key={item.key}
+                      className={`flex items-start justify-between gap-3 px-4 py-3 border-b last:border-b-0 ${
+                        isPriceDriver
+                          ? 'border-[rgba(221,151,74,0.45)] bg-[rgba(221,151,74,0.12)]'
+                          : 'border-slate-200'
+                      }`}
+                    >
+                      <div className="text-sm font-medium text-slate-700">
+                        {item.label}
+                      </div>
+                      <div className="text-sm text-right text-slate-900">
+                        {item.value_label}
+                        {item.value_id !== null && (
+                          <span className="block text-xs font-mono text-slate-500">{item.value_id}</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
+              {decodeData.pricing?.conditions?.some(
+                (condition) => !condition.isInSku
+              ) && (
+                <div className="space-y-2 text-xs text-slate-500">
+                  <div>Цінові умови поза артикулом:</div>
+                  <div className="flex flex-wrap gap-2">
+                    {decodeData.pricing.conditions
+                      .filter((condition) => !condition.isInSku)
+                      .map((condition) => (
+                        <span key={condition.key} className="chip">
+                          {getQuestionLabel(config, decodeData.category.code, condition.key)}:{' '}
+                          {getConditionValueLabel(
+                            config,
+                            decodeData.category.code,
+                            condition.key,
+                            condition.value
+                          )}
+                        </span>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
