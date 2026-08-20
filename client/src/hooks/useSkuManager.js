@@ -29,6 +29,14 @@ export function useSkuManager() {
   const [skuToDecode, setSkuToDecode] = useState('');
   const [decodeData, setDecodeData] = useState(null);
   const [decodeError, setDecodeError] = useState('');
+  const [isRecountOpen, setIsRecountOpen] = useState(false);
+  const [recountAnswers, setRecountAnswers] = useState({});
+  const [recountReason, setRecountReason] = useState('');
+  const [recountPreview, setRecountPreview] = useState(null);
+  const [recountError, setRecountError] = useState('');
+  const [recountSuccess, setRecountSuccess] = useState('');
+  const [isRecountLoading, setIsRecountLoading] = useState(false);
+  const [isRecountApplying, setIsRecountApplying] = useState(false);
   const [copyMessage, setCopyMessage] = useState('');
   const [manualPriceUah, setManualPriceUah] = useState('');
   const [isManualPriceEditing, setIsManualPriceEditing] = useState(false);
@@ -414,6 +422,9 @@ export function useSkuManager() {
         setSkuToDecode(normalizedSku);
         setDecodeData(res.data);
         setDecodeError('');
+        setIsRecountOpen(false);
+        setRecountPreview(null);
+        setRecountError('');
       })
       .catch((err) => {
         setDecodeData(null);
@@ -425,6 +436,122 @@ export function useSkuManager() {
     setSkuToDecode(value.toUpperCase());
     setDecodeData(null);
     setDecodeError('');
+    setIsRecountOpen(false);
+    setRecountPreview(null);
+    setRecountError('');
+    setRecountSuccess('');
+  };
+
+  const getDecodedAnswerMap = (decoded) => {
+    const decodedMap = (decoded?.decodedAnswers || []).reduce((result, answer) => {
+      result[answer.key] = answer.value_id === null ? 0 : answer.value_id;
+      return result;
+    }, {});
+    const storedAnswers =
+      decoded?.product?.details?.answers && typeof decoded.product.details.answers === 'object'
+        ? decoded.product.details.answers
+        : {};
+    const nextAnswers = { ...decodedMap, ...storedAnswers };
+    const storedCalibrated = decoded?.product?.details?.isCalibrated;
+    if (storedCalibrated !== undefined && storedCalibrated !== null) {
+      nextAnswers.is_calibrated = storedCalibrated;
+    }
+    return nextAnswers;
+  };
+
+  const handleStartRecount = () => {
+    if (!decodeData?.existsInDb) {
+      setRecountError('Переоблік доступний тільки для артикула, який є в базі.');
+      return;
+    }
+
+    setRecountAnswers(getDecodedAnswerMap(decodeData));
+    setRecountReason('');
+    setRecountPreview(null);
+    setRecountError('');
+    setRecountSuccess('');
+    setIsRecountOpen(true);
+  };
+
+  const handleCancelRecount = () => {
+    setIsRecountOpen(false);
+    setRecountPreview(null);
+    setRecountError('');
+  };
+
+  const handleRecountAnswer = (questionId, valueId) => {
+    setRecountAnswers((prevAnswers) => ({
+      ...prevAnswers,
+      [questionId]: Number(valueId),
+    }));
+    setRecountPreview(null);
+    setRecountError('');
+  };
+
+  const handleRecountTextAnswer = (questionId, value) => {
+    setRecountAnswers((prevAnswers) => {
+      const normalizedValue = String(value || '').trim();
+      if (!normalizedValue) {
+        const nextAnswers = { ...prevAnswers };
+        delete nextAnswers[questionId];
+        return nextAnswers;
+      }
+      return { ...prevAnswers, [questionId]: normalizedValue };
+    });
+    setRecountPreview(null);
+    setRecountError('');
+  };
+
+  const buildRecountPayload = () => ({
+    sourceSku: decodeData?.sku,
+    answers: recountAnswers,
+    isCalibrated: recountAnswers.is_calibrated ?? null,
+    reason: recountReason,
+  });
+
+  const handleRecountPreview = () => {
+    if (!decodeData?.sku) return;
+    setIsRecountLoading(true);
+    setRecountError('');
+    setRecountSuccess('');
+
+    api.post('/recount/preview', buildRecountPayload())
+      .then((res) => {
+        setRecountPreview(res.data);
+      })
+      .catch((err) => {
+        setRecountPreview(null);
+        setRecountError(err.response?.data?.error || err.message);
+      })
+      .finally(() => {
+        setIsRecountLoading(false);
+      });
+  };
+
+  const handleApplyRecount = () => {
+    if (!decodeData?.sku || !recountPreview) return;
+    if (!window.confirm(`Створити коригувальний артикул ${recountPreview.corrected.fullSku}?`)) return;
+
+    setIsRecountApplying(true);
+    setRecountError('');
+    setRecountSuccess('');
+
+    api.post('/recount/apply', buildRecountPayload())
+      .then((res) => {
+        const correctedSku = res.data.corrected.fullSku;
+        setRecountSuccess(`Створено коригувальний артикул ${correctedSku}. Він не потрапить в експорт.`);
+        setIsRecountOpen(false);
+        setRecountPreview(null);
+        fetchHistory();
+        fetchExportStatus();
+        handleDecode(correctedSku);
+      })
+      .catch((err) => {
+        setRecountError(err.response?.data?.error || err.message);
+      })
+      .finally(() => {
+        setIsRecountApplying(false);
+      });
   };
 
   const handleManualPriceChange = (value) => {
@@ -484,17 +611,23 @@ export function useSkuManager() {
     getQuestionVisibility,
     handleManualPriceChange,
     handleAddVariation,
+    handleApplyRecount,
     handleAnswer,
     handleBackToParameters,
+    handleCancelRecount,
     handleCopyText,
     handleDecode,
     handleDecodeInputChange,
     handleDelete,
     handleExportCsv,
     handlePreview,
+    handleRecountAnswer,
+    handleRecountPreview,
+    handleRecountTextAnswer,
     handleResetManualPrice,
     handleSave,
     handleStartManualPriceEdit,
+    handleStartRecount,
     handleStopManualPriceEdit,
     handleTextAnswer,
     hasManualPrice,
@@ -503,6 +636,9 @@ export function useSkuManager() {
     isExportLoading,
     isLivePriceLoading,
     isManualPriceEditing,
+    isRecountApplying,
+    isRecountLoading,
+    isRecountOpen,
     isTextQuestion,
     isVariationActive,
     isVariationLoading,
@@ -513,12 +649,18 @@ export function useSkuManager() {
     previewData,
     progressPercent,
     requiredCount,
+    recountAnswers,
+    recountError,
+    recountPreview,
+    recountReason,
+    recountSuccess,
     resetProductFlow,
     selectedCat,
     setExportError,
     setExportFromSku,
     setExportToSku,
     setSelectedCat,
+    setRecountReason,
     setSkuToDelete,
     setWeight,
     skuToDecode,

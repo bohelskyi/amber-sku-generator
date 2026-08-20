@@ -6,6 +6,8 @@ const {
   decodeSku,
   getNextVariationSku,
   buildProductPreview,
+  buildProductRecountPreview,
+  applyProductRecount,
   saveProduct,
   deleteProductBySku,
   getRecentProducts,
@@ -67,6 +69,24 @@ router.post('/variation', async (req, res) => {
     res.json(variation);
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/recount/preview', async (req, res) => {
+  try {
+    const preview = await buildProductRecountPreview(req.body || {});
+    res.json(preview);
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
+  }
+});
+
+router.post('/recount/apply', async (req, res) => {
+  try {
+    const result = await applyProductRecount(req.body || {});
+    res.json(result);
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
   }
 });
 

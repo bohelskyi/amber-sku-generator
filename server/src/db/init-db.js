@@ -166,6 +166,14 @@ async function initDb() {
     ADD COLUMN IF NOT EXISTS uah_rate REAL
   `);
 
+  await pool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'");
+  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS exclude_from_export INTEGER DEFAULT 0');
+  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS corrected_from_product_id INTEGER REFERENCES products(id)');
+  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS corrected_to_product_id INTEGER REFERENCES products(id)');
+  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS correction_reason TEXT');
+  await pool.query("UPDATE products SET status = 'active' WHERE status IS NULL OR status = ''");
+  await pool.query('UPDATE products SET exclude_from_export = 0 WHERE exclude_from_export IS NULL');
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS categories (
       code TEXT PRIMARY KEY,
@@ -279,6 +287,21 @@ async function initDb() {
       resolved_to_sku TEXT,
       exported_to_product_id INTEGER,
       row_count INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS product_corrections (
+      id SERIAL PRIMARY KEY,
+      source_product_id INTEGER REFERENCES products(id),
+      corrected_product_id INTEGER REFERENCES products(id),
+      source_sku TEXT,
+      corrected_sku TEXT,
+      old_payload JSONB,
+      new_payload JSONB,
+      reason TEXT,
+      price_delta_uah REAL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);

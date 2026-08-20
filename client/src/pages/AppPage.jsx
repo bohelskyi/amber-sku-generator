@@ -33,7 +33,22 @@ function AppPage() {
             skuToDecode={sku.skuToDecode}
             decodeData={sku.decodeData}
             decodeError={sku.decodeError}
+            isRecountApplying={sku.isRecountApplying}
+            isRecountLoading={sku.isRecountLoading}
+            isRecountOpen={sku.isRecountOpen}
+            recountAnswers={sku.recountAnswers}
+            recountError={sku.recountError}
+            recountPreview={sku.recountPreview}
+            recountReason={sku.recountReason}
+            recountSuccess={sku.recountSuccess}
+            onApplyRecount={sku.handleApplyRecount}
+            onCancelRecount={sku.handleCancelRecount}
+            onRecountAnswer={sku.handleRecountAnswer}
+            onRecountPreview={sku.handleRecountPreview}
+            onRecountReasonChange={sku.setRecountReason}
+            onRecountTextAnswer={sku.handleRecountTextAnswer}
             onStart={sku.resetProductFlow}
+            onStartRecount={sku.handleStartRecount}
             onDecode={sku.handleDecode}
             onDecodeInputChange={sku.handleDecodeInputChange}
           />

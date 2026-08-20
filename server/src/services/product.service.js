@@ -80,6 +80,15 @@ function buildAnswerMap(decodedAnswers) {
   }, {});
 }
 
+function normalizeAnswerMap(answers = {}) {
+  return Object.entries(answers || {}).reduce((result, [key, value]) => {
+    if (value === undefined || value === null || value === '') return result;
+    const numericValue = Number(value);
+    result[key] = Number.isNaN(numericValue) ? value : numericValue;
+    return result;
+  }, {});
+}
+
 function getProductDetails(product) {
   if (!product?.details || typeof product.details !== 'object') return {};
   return product.details;
@@ -95,6 +104,46 @@ function getPricingConditionValue(key, pricingAnswers, pricingDetails) {
   }
 
   return pricingAnswers[key] ?? null;
+}
+
+function getStoredAnswers(product) {
+  const productDetails = getProductDetails(product);
+  return productDetails.answers && typeof productDetails.answers === 'object'
+    ? normalizeAnswerMap(productDetails.answers)
+    : {};
+}
+
+function buildProductAnswerContext(decodedProduct) {
+  return {
+    ...buildAnswerMap(decodedProduct.decodedAnswers || []),
+    ...getStoredAnswers(decodedProduct.product),
+  };
+}
+
+function getCorrectionWeight(decodedProduct) {
+  const product = decodedProduct.product;
+  if (product?.weight !== null && product?.weight !== undefined && Number(product.weight) > 0) {
+    return Number(product.weight);
+  }
+
+  return decodedProduct.suffix?.type === 'weight' && decodedProduct.suffix.value !== null
+    ? Number(decodedProduct.suffix.value)
+    : 0;
+}
+
+function getAnswerChanges(previousAnswers, nextAnswers) {
+  const keys = new Set([
+    ...Object.keys(previousAnswers || {}),
+    ...Object.keys(nextAnswers || {}),
+  ]);
+
+  return Array.from(keys)
+    .filter((key) => String(previousAnswers[key] ?? '') !== String(nextAnswers[key] ?? ''))
+    .map((key) => ({
+      key,
+      from: previousAnswers[key] ?? null,
+      to: nextAnswers[key] ?? null,
+    }));
 }
 
 function getDecodedPricingPayload({
@@ -171,7 +220,8 @@ async function decodeSku(skuValue) {
   const attempts = buildSkuSuffixDecodeAttempts(skuWithoutCategory);
   const productResult = await pool.query(
     `SELECT id, full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah,
-            price_per_gram, uah_rate, details, created_at
+            price_per_gram, uah_rate, details, status, exclude_from_export,
+            corrected_from_product_id, corrected_to_product_id, correction_reason, created_at
      FROM products
      WHERE full_sku = $1
      LIMIT 1`,
@@ -422,6 +472,185 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
   };
 }
 
+async function resolveCorrectionSku(proposedFullSku) {
+  const existingProduct = await getProductBySku(proposedFullSku);
+  if (!existingProduct) {
+    return {
+      fullSku: proposedFullSku,
+      variation: null,
+    };
+  }
+
+  const variation = await getNextVariationSku(proposedFullSku);
+  return {
+    fullSku: variation.fullSku,
+    variation,
+  };
+}
+
+async function buildProductRecountPreview({ sourceSku, answers = {}, isCalibrated, reason = '' }) {
+  const sourceDecoded = await decodeSku(sourceSku);
+  if (!sourceDecoded.existsInDb || !sourceDecoded.product) {
+    const err = new Error('Переоблік доступний тільки для артикула, який є в базі');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const categoryCode = sourceDecoded.category.code;
+  const previousAnswers = buildProductAnswerContext(sourceDecoded);
+  const nextAnswers = {
+    ...previousAnswers,
+    ...normalizeAnswerMap(answers),
+  };
+  const nextIsCalibrated =
+    isCalibrated !== undefined && isCalibrated !== null && isCalibrated !== ''
+      ? Number(isCalibrated)
+      : nextAnswers.is_calibrated ?? getProductDetails(sourceDecoded.product).isCalibrated ?? null;
+  if (nextIsCalibrated !== null && nextIsCalibrated !== undefined) {
+    nextAnswers.is_calibrated = Number(nextIsCalibrated);
+  }
+
+  const weight = getCorrectionWeight(sourceDecoded);
+  const correctedPreview = await buildProductPreview({
+    categoryCode,
+    answers: nextAnswers,
+    weight,
+    isCalibrated: nextIsCalibrated,
+  });
+  const correctionSku = await resolveCorrectionSku(correctedPreview.fullProposedSku);
+  const oldPriceUah = sourceDecoded.product.total_price_uah !== null &&
+    sourceDecoded.product.total_price_uah !== undefined
+      ? Number(sourceDecoded.product.total_price_uah)
+      : Number(sourceDecoded.pricing?.totalPriceUah || 0);
+  const newPriceUah = Number(correctedPreview.totalPriceUah || 0);
+
+  return {
+    source: {
+      sku: sourceDecoded.sku,
+      productId: sourceDecoded.product.id,
+      answers: previousAnswers,
+      decodedAnswers: sourceDecoded.decodedAnswers,
+      totalPriceUah: oldPriceUah,
+      pricePerGram: sourceDecoded.pricing?.pricePerGram ?? sourceDecoded.product.price_per_gram,
+      pricePerGramUah: sourceDecoded.pricing?.pricePerGramUah ?? null,
+      weight,
+    },
+    corrected: {
+      categoryCode,
+      answers: nextAnswers,
+      fullSku: correctionSku.fullSku,
+      proposedFullSku: correctedPreview.fullProposedSku,
+      baseSku: correctedPreview.baseSku,
+      nextSeq: correctedPreview.nextSeq,
+      mode: correctedPreview.mode,
+      variation: correctionSku.variation,
+      weight,
+      pricePerGram: correctedPreview.pricePerGram,
+      pricePerGramUah: correctedPreview.pricePerGramUah,
+      totalPrice: correctedPreview.totalPrice,
+      totalPriceUah: correctedPreview.totalPriceUah,
+      uahRate: correctedPreview.uahRate,
+      logMessage: correctedPreview.logMessage,
+    },
+    changes: getAnswerChanges(previousAnswers, nextAnswers),
+    priceDeltaUah: newPriceUah - oldPriceUah,
+    reason: String(reason || '').trim(),
+  };
+}
+
+async function applyProductRecount(payload) {
+  const preview = await buildProductRecountPreview(payload || {});
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const sourceProductId = Number(preview.source.productId);
+    const corrected = preview.corrected;
+    const details = {
+      answers: corrected.answers,
+      isCalibrated: corrected.answers.is_calibrated ?? null,
+      logMessage: corrected.logMessage,
+      correction: {
+        sourceProductId,
+        sourceSku: preview.source.sku,
+        reason: preview.reason,
+        changes: preview.changes,
+      },
+      baseGeneratedSku: corrected.proposedFullSku,
+      variationNumber: corrected.variation?.variationNumber || null,
+    };
+
+    const insertResult = await client.query(
+      `INSERT INTO products
+       (full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah,
+        price_per_gram, uah_rate, details, status, exclude_from_export, corrected_from_product_id,
+        correction_reason)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'correction', 1, $11, $12)
+       RETURNING id`,
+      [
+        corrected.fullSku,
+        corrected.baseSku,
+        Number(corrected.nextSeq || 0),
+        corrected.categoryCode,
+        Number(corrected.weight || 0),
+        Number(corrected.totalPrice || 0),
+        corrected.totalPriceUah !== undefined && corrected.totalPriceUah !== null
+          ? Number(corrected.totalPriceUah)
+          : null,
+        Number(corrected.pricePerGram || 0),
+        corrected.uahRate !== undefined && corrected.uahRate !== null
+          ? Number(corrected.uahRate)
+          : null,
+        JSON.stringify(details),
+        sourceProductId,
+        preview.reason || null,
+      ]
+    );
+    const correctedProductId = Number(insertResult.rows[0].id);
+
+    await client.query(
+      `UPDATE products
+       SET status = 'corrected',
+           corrected_to_product_id = $1,
+           exclude_from_export = 1,
+           correction_reason = $2
+       WHERE id = $3`,
+      [correctedProductId, preview.reason || null, sourceProductId]
+    );
+
+    await client.query(
+      `INSERT INTO product_corrections
+       (source_product_id, corrected_product_id, source_sku, corrected_sku, old_payload,
+        new_payload, reason, price_delta_uah)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)`,
+      [
+        sourceProductId,
+        correctedProductId,
+        preview.source.sku,
+        corrected.fullSku,
+        JSON.stringify(preview.source),
+        JSON.stringify(corrected),
+        preview.reason || null,
+        Number(preview.priceDeltaUah || 0),
+      ]
+    );
+
+    await client.query('COMMIT');
+
+    return {
+      success: true,
+      correctedProductId,
+      ...preview,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 async function saveProduct(payload) {
   const result = await pool.query(
     `INSERT INTO products
@@ -474,6 +703,8 @@ module.exports = {
   decodeSku,
   getNextVariationSku,
   buildProductPreview,
+  buildProductRecountPreview,
+  applyProductRecount,
   saveProduct,
   deleteProductBySku,
   getRecentProducts,

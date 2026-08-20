@@ -141,7 +141,7 @@ async function getExportRows(fromSku, toSku) {
   const endId = idTo !== null ? Math.max(idFrom, idTo) : null;
 
   const params = [startId];
-  const whereClauses = ['id >= $1'];
+  const whereClauses = ['id >= $1', 'COALESCE(exclude_from_export, 0) = 0'];
   if (endId !== null) {
     params.push(endId);
     whereClauses.push(`id <= $${params.length}`);
@@ -192,17 +192,26 @@ async function getExportStatus() {
     `
   );
   const totalsResult = await pool.query(
-    'SELECT count(*)::int AS total_count, COALESCE(MAX(id), 0)::int AS max_id FROM products'
+    `SELECT
+       count(*)::int AS total_count,
+       COALESCE(MAX(id), 0)::int AS max_id,
+       count(*) FILTER (WHERE COALESCE(exclude_from_export, 0) = 0)::int AS exportable_count,
+       COALESCE(MAX(id) FILTER (WHERE COALESCE(exclude_from_export, 0) = 0), 0)::int AS exportable_max_id
+     FROM products`
   );
 
   const totalCount = Number(totalsResult.rows[0]?.total_count || 0);
   const latestProductId = Number(totalsResult.rows[0]?.max_id || 0);
+  const exportableCount = Number(totalsResult.rows[0]?.exportable_count || 0);
+  const latestExportableProductId = Number(totalsResult.rows[0]?.exportable_max_id || 0);
   if (lastExportResult.rows.length === 0) {
     return {
       hasExport: false,
       totalProducts: totalCount,
-      countSinceLastExport: totalCount,
+      exportableProducts: exportableCount,
+      countSinceLastExport: exportableCount,
       latestProductId,
+      latestExportableProductId,
       lastExport: null,
     };
   }
@@ -210,15 +219,17 @@ async function getExportStatus() {
   const lastExport = lastExportResult.rows[0];
   const exportedToId = Number(lastExport.exported_to_product_id || 0);
   const sinceResult = await pool.query(
-    'SELECT count(*)::int AS count FROM products WHERE id > $1',
+    'SELECT count(*)::int AS count FROM products WHERE id > $1 AND COALESCE(exclude_from_export, 0) = 0',
     [exportedToId]
   );
 
   return {
     hasExport: true,
     totalProducts: totalCount,
+    exportableProducts: exportableCount,
     countSinceLastExport: Number(sinceResult.rows[0]?.count || 0),
     latestProductId,
+    latestExportableProductId,
     lastExport: {
       id: Number(lastExport.id),
       fromSku: lastExport.from_sku,
