@@ -421,6 +421,7 @@ function RecountPanel({
                     className="input mt-3"
                     value={recountAnswers[question.id] || ''}
                     onChange={(event) => onRecountTextAnswer(question.id, event.target.value)}
+                    disabled={isRecountLoading || isRecountApplying}
                   />
                 ) : (
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -428,6 +429,7 @@ function RecountPanel({
                       <button
                         key={option.id}
                         onClick={() => onRecountAnswer(question.id, option.id)}
+                        disabled={isRecountLoading || isRecountApplying}
                         className={`option-pill ${
                           Number(recountAnswers[question.id]) === Number(option.id)
                             ? 'option-pill-active'
@@ -528,9 +530,13 @@ function RecountPanel({
             <button
               onClick={onApplyRecount}
               className="btn btn-primary"
-              disabled={!hasRecountChanges || !recountPreview || isRecountApplying}
+              disabled={!hasRecountChanges || isRecountLoading || isRecountApplying}
             >
-              {isRecountApplying ? 'Застосовуємо...' : 'Застосувати переоблік'}
+              {isRecountApplying
+                ? 'Застосовуємо...'
+                : isRecountLoading
+                  ? 'Готуємо...'
+                  : 'Застосувати переоблік'}
             </button>
           </div>
         </aside>

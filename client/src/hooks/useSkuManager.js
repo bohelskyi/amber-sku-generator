@@ -551,7 +551,7 @@ export function useSkuManager() {
     reason: recountReason,
   });
 
-  const handleRecountPreview = () => {
+  const requestRecountPreview = (openConfirmation = false) => {
     if (!decodeData?.sku) return;
     if (!hasRecountChanges) {
       setRecountPreview(null);
@@ -566,6 +566,7 @@ export function useSkuManager() {
     api.post('/recount/preview', buildRecountPayload())
       .then((res) => {
         setRecountPreview(res.data);
+        if (openConfirmation) setIsRecountConfirmOpen(true);
       })
       .catch((err) => {
         setRecountPreview(null);
@@ -576,9 +577,19 @@ export function useSkuManager() {
       });
   };
 
+  const handleRecountPreview = () => {
+    if (isRecountLoading) return;
+    requestRecountPreview(false);
+  };
+
   const handleApplyRecount = () => {
-    if (!decodeData?.sku || !recountPreview || !hasRecountChanges) return;
-    setIsRecountConfirmOpen(true);
+    if (!decodeData?.sku || !hasRecountChanges || isRecountLoading) return;
+    if (recountPreview) {
+      setIsRecountConfirmOpen(true);
+      return;
+    }
+
+    requestRecountPreview(true);
   };
 
   const handleCancelRecountConfirmation = () => {
