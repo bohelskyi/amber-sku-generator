@@ -1,5 +1,34 @@
 import { useEffect, useRef } from 'react';
+import { Copy } from 'lucide-react';
 import { formatUah } from '../../lib/formatters';
+
+async function copyPlainText(value) {
+  const text = String(value ?? '');
+  if (!text) return;
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch {
+    // Fall back for internal HTTP deployments where Clipboard API may be unavailable.
+  }
+
+  const textArea = document.createElement('textarea');
+  textArea.value = text;
+  textArea.setAttribute('readonly', '');
+  textArea.style.position = 'fixed';
+  textArea.style.opacity = '0';
+  document.body.appendChild(textArea);
+  textArea.select();
+
+  try {
+    document.execCommand('copy');
+  } finally {
+    textArea.remove();
+  }
+}
 
 export function RecountConfirmDialog({
   isApplying,
@@ -33,6 +62,9 @@ export function RecountConfirmDialog({
 
   const oldPrice = preview.source.totalPriceUah;
   const newPrice = preview.corrected.totalPriceUah;
+  const plainNewPrice = Number.isFinite(Number(newPrice))
+    ? String(Math.round(Number(newPrice)))
+    : '';
   const priceDelta = Number(preview.priceDeltaUah || 0);
 
   return (
@@ -66,10 +98,34 @@ export function RecountConfirmDialog({
             </div>
             <div className="rounded-lg border border-[rgba(221,151,74,0.55)] bg-[rgba(221,151,74,0.12)] p-4">
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#8a5f2b]">Стане</div>
-              <div className="mt-2 break-all font-mono text-sm font-semibold text-slate-900">
-                {preview.corrected.fullSku}
+              <div className="mt-2 flex min-w-0 items-start gap-2">
+                <div className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-slate-900">
+                  {preview.corrected.fullSku}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => copyPlainText(preview.corrected.fullSku)}
+                  className="btn btn-outline h-8 w-8 shrink-0 p-0"
+                  aria-label="Скопіювати новий артикул"
+                  title="Скопіювати артикул"
+                >
+                  <Copy size={15} aria-hidden="true" />
+                </button>
               </div>
-              <div className="mt-1 text-sm font-semibold text-slate-900">{formatUah(newPrice)}</div>
+              <div className="mt-2 flex items-center gap-2">
+                <div className="min-w-0 flex-1 text-sm font-semibold text-slate-900">
+                  {formatUah(newPrice)}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => copyPlainText(plainNewPrice)}
+                  className="btn btn-outline h-8 w-8 shrink-0 p-0"
+                  aria-label="Скопіювати нову ціну"
+                  title="Скопіювати ціну"
+                >
+                  <Copy size={15} aria-hidden="true" />
+                </button>
+              </div>
             </div>
           </div>
 
