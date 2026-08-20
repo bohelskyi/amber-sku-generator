@@ -17,12 +17,15 @@ function getQuestionLabel(config, categoryCode, key) {
 }
 
 function getConditionValueLabel(config, categoryCode, key, value) {
-  if (value === null || value === undefined || value === '') return 'Невідомо';
-
   const question = (config.questions?.[categoryCode] || []).find((item) => item.id === key);
   const options = question?.options || config.extraConfig?.[key]?.options || [];
   const option = options.find((item) => Number(item.id) === Number(value));
-  return option?.label || String(value);
+  if (option) return option.label;
+  if (question?.required !== 1 && (value === null || value === undefined || value === '' || Number(value) === 0)) {
+    return 'Не обрано';
+  }
+  if (value === null || value === undefined || value === '') return 'Невідомо';
+  return String(value);
 }
 
 function getPricingSourceLabel(source) {
@@ -425,6 +428,20 @@ function RecountPanel({
                   />
                 ) : (
                   <div className="mt-3 flex flex-wrap gap-2">
+                    {question.required !== 1
+                      && !visibleOptions.some((option) => Number(option.id) === 0) && (
+                      <button
+                        onClick={() => onRecountAnswer(question.id, 0)}
+                        disabled={isRecountLoading || isRecountApplying}
+                        className={`option-pill ${
+                          Number(recountAnswers[question.id] || 0) === 0
+                            ? 'option-pill-active'
+                            : 'option-pill-idle'
+                        }`}
+                      >
+                        Не обрано
+                      </button>
+                    )}
                     {visibleOptions.map((option) => (
                       <button
                         key={option.id}

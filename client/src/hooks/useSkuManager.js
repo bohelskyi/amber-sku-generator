@@ -520,21 +520,38 @@ export function useSkuManager() {
   };
 
   const handleRecountAnswer = (questionId, valueId) => {
-    setRecountAnswers((prevAnswers) => ({
-      ...prevAnswers,
-      [questionId]: Number(valueId),
-    }));
+    const question = config?.questions?.[decodeData?.category?.code]?.find(
+      (item) => item.id === questionId
+    );
+    const selectedValue = Number(valueId);
+
+    setRecountAnswers((prevAnswers) => {
+      const shouldClear =
+        question?.required !== 1
+        && selectedValue !== 0
+        && Number(prevAnswers[questionId] || 0) === selectedValue;
+
+      return {
+        ...prevAnswers,
+        [questionId]: shouldClear ? 0 : selectedValue,
+      };
+    });
     setIsRecountConfirmOpen(false);
     setRecountPreview(null);
     setRecountError('');
   };
 
   const handleRecountTextAnswer = (questionId, value) => {
+    const question = config?.questions?.[decodeData?.category?.code]?.find(
+      (item) => item.id === questionId
+    );
+
     setRecountAnswers((prevAnswers) => {
       const normalizedValue = String(value || '').trim();
       if (!normalizedValue) {
         const nextAnswers = { ...prevAnswers };
-        delete nextAnswers[questionId];
+        if (question?.required === 1) delete nextAnswers[questionId];
+        else nextAnswers[questionId] = 0;
         return nextAnswers;
       }
       return { ...prevAnswers, [questionId]: normalizedValue };
