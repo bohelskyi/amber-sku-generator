@@ -18,7 +18,7 @@ export function ExportTools({
           <div>
             <p className="eyebrow">Додаткові дії</p>
             <h3 className="collapse-title">Експорт та коригування</h3>
-            <p className="section-subtitle">CSV-експорт по діапазону збережень і видалення помилкових артикулів.</p>
+            <p className="section-subtitle">CSV-експорт по діапазону збережень і архівування помилкових артикулів.</p>
           </div>
           <div className="flex flex-col items-end gap-1">
             <span className="collapse-toggle collapse-toggle-closed">Показати</span>
@@ -72,8 +72,8 @@ export function ExportTools({
           <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
             <div className="section-title mb-3">
               <div>
-                <h4 className="section-title-text text-lg">Видалення</h4>
-                <p className="section-subtitle">Видалення помилково збереженого артикула.</p>
+                <h4 className="section-title-text text-lg">Архівування</h4>
+                <p className="section-subtitle">Архівний артикул зберігається в базі, але не потрапляє в історію та експорт.</p>
               </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-3">
@@ -84,7 +84,7 @@ export function ExportTools({
                 placeholder="Введіть повний артикул..."
                 className="input"
               />
-              <button onClick={() => onDelete(skuToDelete)} className="btn btn-danger px-6">Видалити</button>
+              <button onClick={() => onDelete(skuToDelete)} className="btn btn-danger px-6">Архівувати</button>
             </div>
           </div>
         </div>

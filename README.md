@@ -28,6 +28,22 @@ docker compose ps
 docker compose down
 ```
 
+### Data integrity audit
+
+The audit is read-only. It reports missing and duplicate SKUs, plus products without a saved UAH price:
+
+```bash
+docker compose exec server npm run audit:data
+```
+
+For machine-readable output:
+
+```bash
+docker compose exec server npm run audit:data -- --json
+```
+
+Database migrations from `server/migrations` run automatically during server startup and are recorded in `schema_migrations`.
+
 ### Data persistence
 
 - PostgreSQL data is stored in Docker volume `postgres_data`.

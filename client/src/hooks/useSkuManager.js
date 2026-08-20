@@ -6,6 +6,42 @@ import {
   isTextQuestion,
 } from '../lib/sku-visibility';
 
+function pruneHiddenAnswers(categoryQuestions, answersMap) {
+  const nextAnswers = { ...answersMap };
+  let removedAnswer = false;
+
+  do {
+    removedAnswer = false;
+    const calibratedValue = nextAnswers.is_calibrated ?? null;
+
+    for (const question of categoryQuestions) {
+      const selectedValue = nextAnswers[question.id];
+      if (selectedValue === undefined) continue;
+
+      if (!isQuestionVisible(question, nextAnswers, calibratedValue)) {
+        delete nextAnswers[question.id];
+        removedAnswer = true;
+        continue;
+      }
+
+      if (isTextQuestion(question)) continue;
+
+      const visibleOptionIds = getVisibleOptionsForQuestion(
+        question,
+        nextAnswers,
+        calibratedValue
+      ).map((option) => Number(option.id));
+
+      if (!visibleOptionIds.includes(Number(selectedValue))) {
+        delete nextAnswers[question.id];
+        removedAnswer = true;
+      }
+    }
+  } while (removedAnswer);
+
+  return nextAnswers;
+}
+
 export function useSkuManager() {
   const [config, setConfig] = useState(null);
   const [selectedCat, setSelectedCat] = useState(null);
@@ -15,6 +51,8 @@ export function useSkuManager() {
   const [livePriceError, setLivePriceError] = useState('');
   const [isLivePriceLoading, setIsLivePriceLoading] = useState(false);
   const [previewData, setPreviewData] = useState(null);
+  const [saveError, setSaveError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   const [displaySku, setDisplaySku] = useState('');
   const [variationData, setVariationData] = useState(null);
   const [variationError, setVariationError] = useState('');
@@ -106,33 +144,48 @@ export function useSkuManager() {
       ? (roundedManualPriceNumber / Number(previewData.uahRate) / weightNumber).toFixed(2)
       : previewData?.pricePerGram;
 
+  const clearLivePrice = () => {
+    setLivePriceData(null);
+    setLivePriceError('');
+    setIsLivePriceLoading(false);
+  };
+
+  const normalizeAnswers = (answersMap) => {
+    if (!selectedCat || !config) return answersMap;
+    return pruneHiddenAnswers(config.questions?.[selectedCat] || [], answersMap);
+  };
+
   const resetProductFlow = (catCode) => {
     setSelectedCat(catCode);
     setAnswers({});
     setPreviewData(null);
+    setSaveError('');
+    setIsSaving(false);
     setDisplaySku('');
     setVariationData(null);
     setVariationError('');
     setIsVariationLoading(false);
-    setLivePriceData(null);
-    setLivePriceError('');
-    setIsLivePriceLoading(false);
+    clearLivePrice();
     setWeight('');
     setManualPriceUah('');
     setIsManualPriceEditing(false);
   };
 
   const handleAnswer = (questionId, valueId) => {
-    const selectedValue = parseInt(valueId);
-    if (answers[questionId] === selectedValue) {
-      const nextAnswers = { ...answers };
-      delete nextAnswers[questionId];
-      setAnswers(nextAnswers);
-    } else {
-      const nextAnswers = { ...answers, [questionId]: selectedValue };
-      if (questionId === 'raw_type' && selectedValue === 2) delete nextAnswers.is_calibrated;
-      setAnswers(nextAnswers);
-    }
+    const selectedValue = Number.parseInt(valueId, 10);
+    setAnswers((prevAnswers) => {
+      const nextAnswers = { ...prevAnswers };
+
+      if (prevAnswers[questionId] === selectedValue) {
+        delete nextAnswers[questionId];
+      } else {
+        nextAnswers[questionId] = selectedValue;
+        if (questionId === 'raw_type' && selectedValue === 2) delete nextAnswers.is_calibrated;
+      }
+
+      return normalizeAnswers(nextAnswers);
+    });
+    clearLivePrice();
   };
 
   const handleTextAnswer = (questionId, value) => {
@@ -141,57 +194,20 @@ export function useSkuManager() {
       if (!normalizedValue) {
         const nextAnswers = { ...prevAnswers };
         delete nextAnswers[questionId];
-        return nextAnswers;
+        return normalizeAnswers(nextAnswers);
       }
-      return { ...prevAnswers, [questionId]: normalizedValue };
+      return normalizeAnswers({ ...prevAnswers, [questionId]: normalizedValue });
     });
+    clearLivePrice();
+  };
+
+  const handleWeightChange = (value) => {
+    setWeight(value);
+    clearLivePrice();
   };
 
   useEffect(() => {
     if (!selectedCat || !config) return;
-
-    setAnswers((prevAnswers) => {
-      let hasChanges = false;
-      const nextAnswers = { ...prevAnswers };
-      const categoryQuestions = config.questions?.[selectedCat] || [];
-
-      for (const question of categoryQuestions) {
-        const selectedValue = nextAnswers[question.id];
-        const questionVisible = isQuestionVisible(question, nextAnswers, isCalibrated);
-
-        if (!questionVisible) {
-          if (selectedValue !== undefined) {
-            delete nextAnswers[question.id];
-            hasChanges = true;
-          }
-          continue;
-        }
-
-        if (selectedValue === undefined || isTextQuestion(question)) continue;
-
-        const visibleOptionIds = getVisibleOptionsForQuestion(
-          question,
-          nextAnswers,
-          isCalibrated
-        ).map((option) => Number(option.id));
-
-        if (!visibleOptionIds.includes(Number(selectedValue))) {
-          delete nextAnswers[question.id];
-          hasChanges = true;
-        }
-      }
-
-      return hasChanges ? nextAnswers : prevAnswers;
-    });
-  }, [selectedCat, config, answers, isCalibrated]);
-
-  useEffect(() => {
-    if (!selectedCat || !config) {
-      setLivePriceData(null);
-      setLivePriceError('');
-      setIsLivePriceLoading(false);
-      return;
-    }
 
     const categoryQuestions = config.questions?.[selectedCat] || [];
     const hasMissingRequired = categoryQuestions
@@ -208,17 +224,11 @@ export function useSkuManager() {
       });
 
     if (hasMissingRequired) {
-      setLivePriceData(null);
-      setLivePriceError('');
-      setIsLivePriceLoading(false);
       return;
     }
 
     if (isWeightRequired) {
       if (weight === '' || !Number.isFinite(Number(weight)) || Number(weight) < 0) {
-        setLivePriceData(null);
-        setLivePriceError('');
-        setIsLivePriceLoading(false);
         return;
       }
     }
@@ -278,6 +288,7 @@ export function useSkuManager() {
       isCalibrated: isCalibrated === null ? 0 : isCalibrated,
     }).then((res) => {
       setPreviewData(res.data);
+      setSaveError('');
       setDisplaySku(res.data.fullProposedSku);
       setVariationData(null);
       setVariationError('');
@@ -288,7 +299,10 @@ export function useSkuManager() {
   };
 
   const handleSave = () => {
-    if (!previewData) return;
+    if (!previewData || isSaving) return;
+
+    setIsSaving(true);
+    setSaveError('');
 
     api.post('/save', {
       fullSku: displaySku || previewData.fullProposedSku,
@@ -313,11 +327,16 @@ export function useSkuManager() {
       fetchHistory();
       fetchExportStatus();
       resetProductFlow(null);
+    }).catch((err) => {
+      setSaveError(err.response?.data?.error || err.message);
+    }).finally(() => {
+      setIsSaving(false);
     });
   };
 
   const handleBackToParameters = () => {
     setPreviewData(null);
+    setSaveError('');
     setDisplaySku('');
     setVariationData(null);
     setVariationError('');
@@ -330,6 +349,7 @@ export function useSkuManager() {
     if (!previewData) return;
     setIsVariationLoading(true);
     setVariationError('');
+    setSaveError('');
 
     api.post('/variation', { sku: previewData.fullProposedSku })
       .then((res) => {
@@ -397,7 +417,7 @@ export function useSkuManager() {
 
   const handleDelete = (sku) => {
     if (!sku) return;
-    if (!window.confirm(`Видалити ${sku}?`)) return;
+    if (!window.confirm(`Перенести ${sku} в архів?`)) return;
 
     api.post('/delete', { skuToDelete: sku })
       .then((res) => {
@@ -663,6 +683,7 @@ export function useSkuManager() {
     isRecountConfirmOpen,
     isRecountLoading,
     isRecountOpen,
+    isSaving,
     isTextQuestion,
     isVariationActive,
     isVariationLoading,
@@ -678,6 +699,7 @@ export function useSkuManager() {
     recountPreview,
     recountReason,
     recountSuccess,
+    saveError,
     resetProductFlow,
     selectedCat,
     setExportError,
@@ -686,7 +708,7 @@ export function useSkuManager() {
     setSelectedCat,
     setRecountReason,
     setSkuToDelete,
-    setWeight,
+    setWeight: handleWeightChange,
     skuToDecode,
     skuToDelete,
     variationData,

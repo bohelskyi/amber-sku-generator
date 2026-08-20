@@ -43,7 +43,7 @@ export function HistoryTable({ history, config, selectedCat, onCopyText, onDecod
                         >
                           Копіювати ціну
                         </button>
-                        <button onClick={() => onDelete(item.full_sku)} className="btn btn-danger text-xs px-2 py-1">Видалити</button>
+                        <button onClick={() => onDelete(item.full_sku)} className="btn btn-danger text-xs px-2 py-1">Архівувати</button>
                       </div>
                     )}
                   </td>

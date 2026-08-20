@@ -99,6 +99,14 @@ function uniqueValues(values) {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
+function normalizeSkuWriteError(err, sku) {
+  if (err?.code !== '23505') return err;
+
+  err.statusCode = 409;
+  err.message = `Артикул ${sku} вже існує або був зарезервований. Оновіть розрахунок і спробуйте ще раз.`;
+  return err;
+}
+
 function getPricingConditionValue(key, pricingAnswers, pricingDetails) {
   if (key === 'is_calibrated') {
     return pricingAnswers.is_calibrated ?? pricingDetails?.calibratedValue ?? null;
@@ -227,6 +235,7 @@ async function decodeSku(skuValue) {
             corrected_from_product_id, corrected_to_product_id, correction_reason, created_at
      FROM products
      WHERE full_sku = $1
+     ORDER BY id ASC
      LIMIT 1`,
     [normalizedSku]
   );
@@ -307,14 +316,14 @@ async function decodeSku(skuValue) {
   throw new Error('Артикул не відповідає поточній конфігурації категорії');
 }
 
-async function getNextVariationSku(skuValue) {
+async function getNextVariationSku(skuValue, queryable = pool) {
   const { baseFullSku } = parseVariationSku(skuValue);
   if (!baseFullSku) {
     throw new Error('Потрібен базовий артикул');
   }
 
-  const result = await pool.query(
-    'SELECT full_sku FROM products WHERE full_sku = $1 OR full_sku LIKE $2',
+  const result = await queryable.query(
+    'SELECT full_sku FROM sku_registry WHERE full_sku = $1 OR full_sku LIKE $2',
     [baseFullSku, `${baseFullSku}-%`]
   );
 
@@ -346,6 +355,14 @@ async function getProductBySku(fullSku) {
   );
 
   return result.rows[0] || null;
+}
+
+async function isSkuReserved(fullSku, queryable = pool) {
+  const result = await queryable.query(
+    'SELECT 1 FROM sku_registry WHERE full_sku = $1 LIMIT 1',
+    [String(fullSku || '').trim().toUpperCase()]
+  );
+  return result.rows.length > 0;
 }
 
 function isQuestionVisibleForSku(question, answers, isCalibrated) {
@@ -449,7 +466,7 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
   const weightInt = Math.round(weightVal);
   const fullProposedSku = appendSkuSuffix(baseSku, weightInt);
   const existingProduct = await pool.query(
-    'SELECT full_sku FROM products WHERE full_sku = ANY($1::text[]) LIMIT 1',
+    'SELECT full_sku FROM sku_registry WHERE full_sku = ANY($1::text[]) LIMIT 1',
     [
       Array.from(
         new Set([
@@ -475,16 +492,16 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
   };
 }
 
-async function resolveCorrectionSku(proposedFullSku) {
-  const existingProduct = await getProductBySku(proposedFullSku);
-  if (!existingProduct) {
+async function resolveCorrectionSku(proposedFullSku, queryable = pool) {
+  const reserved = await isSkuReserved(proposedFullSku, queryable);
+  if (!reserved) {
     return {
       fullSku: proposedFullSku,
       variation: null,
     };
   }
 
-  const variation = await getNextVariationSku(proposedFullSku);
+  const variation = await getNextVariationSku(proposedFullSku, queryable);
   return {
     fullSku: variation.fullSku,
     variation,
@@ -570,7 +587,36 @@ async function applyProductRecount(payload) {
     await client.query('BEGIN');
 
     const sourceProductId = Number(preview.source.productId);
-    const corrected = preview.corrected;
+    const sourceLockResult = await client.query(
+      `SELECT id, corrected_to_product_id
+       FROM products
+       WHERE id = $1
+       FOR UPDATE`,
+      [sourceProductId]
+    );
+    if (sourceLockResult.rows.length === 0) {
+      const err = new Error('Вихідний товар для переобліку більше не існує');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (sourceLockResult.rows[0].corrected_to_product_id) {
+      const err = new Error('Цей товар уже був переоблікований. Оновіть декодер і відкрийте актуальний артикул.');
+      err.statusCode = 409;
+      throw err;
+    }
+
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      preview.corrected.proposedFullSku,
+    ]);
+    const correctionSku = await resolveCorrectionSku(
+      preview.corrected.proposedFullSku,
+      client
+    );
+    const corrected = {
+      ...preview.corrected,
+      fullSku: correctionSku.fullSku,
+      variation: correctionSku.variation,
+    };
     const details = {
       answers: corrected.answers,
       isCalibrated: corrected.answers.is_calibrated ?? null,
@@ -646,57 +692,83 @@ async function applyProductRecount(payload) {
       success: true,
       correctedProductId,
       ...preview,
+      corrected,
     };
   } catch (err) {
     await client.query('ROLLBACK');
-    throw err;
+    throw normalizeSkuWriteError(err, preview.corrected.fullSku);
   } finally {
     client.release();
   }
 }
 
 async function saveProduct(payload) {
-  const result = await pool.query(
-    `INSERT INTO products
-     (full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah, price_per_gram, uah_rate, details)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
-     RETURNING id`,
-    [
-      payload.fullSku,
-      payload.baseSku,
-      Number(payload.nextSeq),
-      payload.category,
-      Number(payload.weight || 0),
-      Number(payload.totalPrice || 0),
-      payload.totalPriceUah !== undefined && payload.totalPriceUah !== null
-        ? roundUah(payload.totalPriceUah)
-        : null,
-      Number(payload.pricePerGram || 0),
-      payload.uahRate !== undefined && payload.uahRate !== null ? Number(payload.uahRate) : null,
-      JSON.stringify(payload.details || {}),
-    ]
-  );
+  const client = await pool.connect();
+  const fullSku = String(payload.fullSku || '').trim().toUpperCase();
 
-  return { success: true, id: result.rows[0].id };
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [fullSku]);
+    const result = await client.query(
+      `INSERT INTO products
+       (full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah, price_per_gram, uah_rate, details)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+       RETURNING id`,
+      [
+        fullSku,
+        payload.baseSku,
+        Number(payload.nextSeq),
+        payload.category,
+        Number(payload.weight || 0),
+        Number(payload.totalPrice || 0),
+        payload.totalPriceUah !== undefined && payload.totalPriceUah !== null
+          ? roundUah(payload.totalPriceUah)
+          : null,
+        Number(payload.pricePerGram || 0),
+        payload.uahRate !== undefined && payload.uahRate !== null ? Number(payload.uahRate) : null,
+        JSON.stringify(payload.details || {}),
+      ]
+    );
+    await client.query('COMMIT');
+
+    return { success: true, id: result.rows[0].id, fullSku };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw normalizeSkuWriteError(err, fullSku);
+  } finally {
+    client.release();
+  }
 }
 
 async function deleteProductBySku(skuToDelete) {
-  const result = await pool.query('DELETE FROM products WHERE full_sku = $1', [skuToDelete]);
+  const normalizedSku = String(skuToDelete || '').trim().toUpperCase();
+  const result = await pool.query(
+    `UPDATE products
+     SET status = 'archived', exclude_from_export = 1
+     WHERE full_sku = $1 AND COALESCE(status, 'active') <> 'archived'
+     RETURNING id`,
+    [normalizedSku]
+  );
   if (result.rowCount === 0) {
-    const err = new Error('Артикул не знайдено.');
+    const err = new Error('Артикул не знайдено або вже архівовано.');
     err.statusCode = 404;
     throw err;
   }
 
   return {
     success: true,
-    message: `Артикул ${skuToDelete} успішно видалено.`,
+    archivedCount: result.rowCount,
+    message: `Артикул ${normalizedSku} перенесено в архів.`,
   };
 }
 
 async function getRecentProducts() {
   const result = await pool.query(
-    'SELECT * FROM products ORDER BY created_at DESC LIMIT 15',
+    `SELECT *
+     FROM products
+     WHERE COALESCE(status, 'active') <> 'archived'
+     ORDER BY created_at DESC
+     LIMIT 15`,
     []
   );
 

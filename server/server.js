@@ -1,9 +1,11 @@
 const app = require('./src/app');
 const { PORT } = require('./src/config/env');
 const { initDb } = require('./src/db/init-db');
+const { runMigrations } = require('./src/db/run-migrations');
 
 async function start() {
   await initDb();
+  await runMigrations();
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });

@@ -94,6 +94,7 @@ function AppPage() {
             variationError={sku.variationError}
             isVariationLoading={sku.isVariationLoading}
             isManualPriceEditing={sku.isManualPriceEditing}
+            isSaving={sku.isSaving}
             manualPriceUah={sku.manualPriceUah}
             onCopyText={sku.handleCopyText}
             onBackToParameters={sku.handleBackToParameters}
@@ -103,6 +104,7 @@ function AppPage() {
             onSave={sku.handleSave}
             onStartManualPriceEdit={sku.handleStartManualPriceEdit}
             onStopManualPriceEdit={sku.handleStopManualPriceEdit}
+            saveError={sku.saveError}
           />
         )}
 

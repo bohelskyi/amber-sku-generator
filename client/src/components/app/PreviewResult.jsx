@@ -14,6 +14,7 @@ export function PreviewResult({
   variationError,
   isVariationLoading,
   isManualPriceEditing,
+  isSaving,
   manualPriceUah,
   onCopyText,
   onBackToParameters,
@@ -23,6 +24,7 @@ export function PreviewResult({
   onSave,
   onStartManualPriceEdit,
   onStopManualPriceEdit,
+  saveError,
 }) {
   const priceActions = (
     <PriceActions
@@ -104,12 +106,20 @@ export function PreviewResult({
         </div>
       )}
 
+      {saveError && (
+        <div className="danger-panel p-4 mb-6 text-sm">
+          {saveError}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <button onClick={onBackToParameters} className="btn btn-outline py-3">Назад до параметрів</button>
         <button onClick={onAddVariation} className="btn btn-primary py-3" disabled={isVariationLoading}>
           {isVariationLoading ? 'Підбираємо...' : 'Додати варіацію'}
         </button>
-        <button onClick={onSave} className="btn btn-amber py-3">Зберегти</button>
+        <button onClick={onSave} className="btn btn-amber py-3" disabled={isSaving}>
+          {isSaving ? 'Зберігаємо...' : 'Зберегти'}
+        </button>
       </div>
     </section>
   );

@@ -96,7 +96,7 @@ router.post('/save', async (req, res) => {
     const result = await saveProduct(req.body || {});
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 

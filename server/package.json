@@ -4,6 +4,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "audit:data": "node scripts/audit-data-integrity.js",
     "migrate:config": "node scripts/migrate-sqlite-config-to-postgres.js",
     "test": "node --test"
   },
@@ -18,6 +19,6 @@
     "pg": "^8.18.0"
   },
   "devDependencies": {
-    "sqlite3": "^5.1.7"
+    "sqlite3": "^6.0.1"
   }
 }
