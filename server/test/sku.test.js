@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   buildSkuSuffixDecodeAttempts,
   decodeSkuAnswers,
+  diagnoseSkuAttempts,
   parseVariationSku,
 } = require('../src/utils/sku');
 
@@ -87,4 +88,28 @@ test('decodes a SKU with question separators and a suffix over 999', () => {
       ['size', 3],
     ]
   );
+});
+
+test('diagnoses the first option code that does not match the configuration', () => {
+  const diagnosis = diagnoseSkuAttempts(
+    arQuestions,
+    buildSkuSuffixDecodeAttempts('19-3-001')
+  );
+
+  assert.equal(diagnosis.type, 'invalid_option');
+  assert.equal(diagnosis.questionKey, 'category');
+  assert.equal(diagnosis.questionLabel, 'Category');
+  assert.equal(diagnosis.received, '9');
+  assert.deepEqual(diagnosis.expected, [{ code: '2', label: 'Category 2' }]);
+});
+
+test('diagnoses characters left after all configured parameters', () => {
+  const diagnosis = diagnoseSkuAttempts(
+    arQuestions,
+    buildSkuSuffixDecodeAttempts('12-3-X001')
+  );
+
+  assert.equal(diagnosis.type, 'extra_characters');
+  assert.equal(diagnosis.received, 'X');
+  assert.equal(diagnosis.questionLabel, null);
 });

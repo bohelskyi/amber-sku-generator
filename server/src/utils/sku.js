@@ -356,6 +356,258 @@ function decodeVisibleSkuAnswers(questions, encodedPart) {
   return null;
 }
 
+function getExpectedQuestionValues(question) {
+  const expected = question.options.map((option) => ({
+    code: String(option.id),
+    label: option.label,
+  }));
+  const hasZeroOption = question.options.some((option) => Number(option.id) === 0);
+
+  if (question.required !== 1 && !hasZeroOption) {
+    expected.unshift({ code: '0', label: 'Не обрано' });
+  }
+
+  return expected;
+}
+
+function getMoreSpecificFailure(currentFailure, candidateFailure) {
+  if (!currentFailure) return candidateFailure;
+  if (!candidateFailure) return currentFailure;
+  if (candidateFailure.questionIndex !== currentFailure.questionIndex) {
+    return candidateFailure.questionIndex > currentFailure.questionIndex
+      ? candidateFailure
+      : currentFailure;
+  }
+  if (candidateFailure.offset !== currentFailure.offset) {
+    return candidateFailure.offset > currentFailure.offset ? candidateFailure : currentFailure;
+  }
+  return currentFailure;
+}
+
+function createQuestionFailure(type, question, questionIndex, offset, remaining, received) {
+  const readableReceived = received || 'кінець артикула';
+  let message = `Параметр «${question.label}» має невідомий код «${readableReceived}».`;
+
+  if (type === 'missing_opening_separator') {
+    message = `Перед параметром «${question.label}» очікується роздільник «${getQuestionSeparator(question)}».`;
+  } else if (type === 'missing_closing_separator') {
+    message = `Після значення параметра «${question.label}» немає закривального роздільника «${getQuestionSeparator(question)}».`;
+  }
+
+  return {
+    type,
+    message,
+    questionIndex,
+    position: questionIndex + 1,
+    offset,
+    questionKey: question.key,
+    questionLabel: question.label,
+    received: readableReceived,
+    remaining: remaining || '',
+    expected: getExpectedQuestionValues(question),
+    separator: getQuestionSeparator(question) || null,
+  };
+}
+
+function diagnoseSkuPath(
+  questions,
+  encodedPart,
+  { useSeparators = false, skipHiddenQuestions = false, isCalibrated = 0 } = {}
+) {
+  function walk(questionIndex, remaining, answers, offset) {
+    if (questionIndex === questions.length) {
+      if (!remaining) return { success: true };
+      return {
+        success: false,
+        failure: {
+          type: 'extra_characters',
+          message: `Після останнього параметра залишився нерозпізнаний фрагмент «${remaining}».`,
+          questionIndex,
+          position: questionIndex + 1,
+          offset,
+          questionKey: null,
+          questionLabel: null,
+          received: remaining,
+          remaining,
+          expected: [],
+          separator: null,
+        },
+      };
+    }
+
+    const question = questions[questionIndex];
+    if (
+      skipHiddenQuestions
+      && !isQuestionVisible(question, answers, isCalibrated)
+    ) {
+      return walk(questionIndex + 1, remaining, answers, offset);
+    }
+
+    const separator = useSeparators ? getQuestionSeparator(question) : '';
+    if (separator) {
+      if (!remaining.startsWith(separator)) {
+        return {
+          success: false,
+          failure: createQuestionFailure(
+            'missing_opening_separator',
+            question,
+            questionIndex,
+            offset,
+            remaining,
+            remaining.slice(0, separator.length)
+          ),
+        };
+      }
+
+      const afterOpeningSeparator = remaining.slice(separator.length);
+      const closingSeparatorIndex = afterOpeningSeparator.indexOf(separator);
+      if (closingSeparatorIndex < 0) {
+        return {
+          success: false,
+          failure: createQuestionFailure(
+            'missing_closing_separator',
+            question,
+            questionIndex,
+            offset + separator.length,
+            afterOpeningSeparator,
+            afterOpeningSeparator
+          ),
+        };
+      }
+
+      const optionCode = afterOpeningSeparator.slice(0, closingSeparatorIndex);
+      const consumedLength = separator.length * 2 + optionCode.length;
+      const nextRemaining = remaining.slice(consumedLength);
+      const option = question.options.find((item) => String(item.id) === optionCode);
+      const hasZeroOption = question.options.some((item) => Number(item.id) === 0);
+      const isPlaceholder = question.required !== 1 && !hasZeroOption && optionCode === '0';
+
+      if (!option && !isPlaceholder) {
+        return {
+          success: false,
+          failure: createQuestionFailure(
+            'invalid_option',
+            question,
+            questionIndex,
+            offset + separator.length,
+            afterOpeningSeparator,
+            optionCode
+          ),
+        };
+      }
+
+      const value = option ? option.id : 0;
+      return walk(
+        questionIndex + 1,
+        nextRemaining,
+        { ...answers, [question.key]: value },
+        offset + consumedLength
+      );
+    }
+
+    const options = [...question.options].sort(
+      (a, b) => String(b.id).length - String(a.id).length || a.id - b.id
+    );
+    let bestFailure = null;
+    let matchedPrefix = false;
+
+    for (const option of options) {
+      const optionCode = String(option.id);
+      if (!remaining.startsWith(optionCode)) continue;
+      matchedPrefix = true;
+      const result = walk(
+        questionIndex + 1,
+        remaining.slice(optionCode.length),
+        { ...answers, [question.key]: option.id },
+        offset + optionCode.length
+      );
+      if (result.success) return result;
+      bestFailure = getMoreSpecificFailure(bestFailure, result.failure);
+    }
+
+    const hasZeroOption = question.options.some((option) => Number(option.id) === 0);
+    if (question.required !== 1 && !hasZeroOption && remaining.startsWith('0')) {
+      matchedPrefix = true;
+      const result = walk(
+        questionIndex + 1,
+        remaining.slice(1),
+        { ...answers, [question.key]: 0 },
+        offset + 1
+      );
+      if (result.success) return result;
+      bestFailure = getMoreSpecificFailure(bestFailure, result.failure);
+    }
+
+    if (matchedPrefix && bestFailure) return { success: false, failure: bestFailure };
+
+    return {
+      success: false,
+      failure: createQuestionFailure(
+        'invalid_option',
+        question,
+        questionIndex,
+        offset,
+        remaining,
+        remaining.slice(0, 1)
+      ),
+    };
+  }
+
+  return walk(0, String(encodedPart || ''), {}, 0);
+}
+
+function diagnoseSkuAnswers(questions, encodedPart, { skipHiddenQuestions = false } = {}) {
+  const source = String(encodedPart || '');
+  const configuredSeparators = questions
+    .map((question) => getQuestionSeparator(question))
+    .filter(Boolean);
+  const containsConfiguredSeparator = configuredSeparators.some((separator) =>
+    source.includes(separator)
+  );
+  const calibratedCandidates = skipHiddenQuestions ? [0, 1, 2, null] : [0];
+  let bestFailure = null;
+
+  for (const isCalibrated of calibratedCandidates) {
+    if (containsConfiguredSeparator) {
+      const separatedResult = diagnoseSkuPath(questions, source, {
+        useSeparators: true,
+        skipHiddenQuestions,
+        isCalibrated,
+      });
+      if (separatedResult.success) return null;
+      bestFailure = getMoreSpecificFailure(bestFailure, separatedResult.failure);
+    }
+
+    const compactResult = diagnoseSkuPath(questions, stripSkuSeparators(source), {
+      skipHiddenQuestions,
+      isCalibrated,
+    });
+    if (compactResult.success) return null;
+    bestFailure = getMoreSpecificFailure(bestFailure, compactResult.failure);
+  }
+
+  return bestFailure;
+}
+
+function diagnoseSkuAttempts(questions, attempts, options = {}) {
+  let bestDiagnosis = null;
+
+  for (const attempt of attempts) {
+    const diagnosis = diagnoseSkuAnswers(questions, attempt.encodedPart, options);
+    if (!diagnosis) continue;
+
+    const candidate = {
+      ...diagnosis,
+      encodedPart: attempt.encodedPart,
+      suffixRaw: attempt.suffixRaw,
+      hasSuffix: attempt.hasSuffix,
+    };
+    bestDiagnosis = getMoreSpecificFailure(bestDiagnosis, candidate);
+  }
+
+  return bestDiagnosis;
+}
+
 module.exports = {
   appendSkuSuffix,
   buildSkuSuffixDecodeAttempts,
@@ -363,6 +615,8 @@ module.exports = {
   parseVariationSku,
   decodeSkuAnswers,
   decodeVisibleSkuAnswers,
+  diagnoseSkuAnswers,
+  diagnoseSkuAttempts,
   normalizeSkuSeparator,
   stripSkuSeparators,
 };

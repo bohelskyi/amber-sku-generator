@@ -95,6 +95,7 @@ export function useSkuManager() {
   const [skuToDecode, setSkuToDecode] = useState('');
   const [decodeData, setDecodeData] = useState(null);
   const [decodeError, setDecodeError] = useState('');
+  const [decodeErrorDetails, setDecodeErrorDetails] = useState(null);
   const [isRecountOpen, setIsRecountOpen] = useState(false);
   const [recountAnswers, setRecountAnswers] = useState({});
   const [recountReason, setRecountReason] = useState('');
@@ -467,6 +468,7 @@ export function useSkuManager() {
     if (!normalizedSku) {
       setDecodeData(null);
       setDecodeError('Введіть артикул для розшифровки.');
+      setDecodeErrorDetails(null);
       return;
     }
 
@@ -475,6 +477,7 @@ export function useSkuManager() {
         setSkuToDecode(normalizedSku);
         setDecodeData(res.data);
         setDecodeError('');
+        setDecodeErrorDetails(null);
         setIsRecountOpen(false);
         setIsRecountConfirmOpen(false);
         setRecountPreview(null);
@@ -483,6 +486,7 @@ export function useSkuManager() {
       .catch((err) => {
         setDecodeData(null);
         setDecodeError(err.response?.data?.error || err.message);
+        setDecodeErrorDetails(err.response?.data?.details || null);
       });
   };
 
@@ -490,6 +494,7 @@ export function useSkuManager() {
     setSkuToDecode(value.toUpperCase());
     setDecodeData(null);
     setDecodeError('');
+    setDecodeErrorDetails(null);
     setIsRecountOpen(false);
     setIsRecountConfirmOpen(false);
     setRecountPreview(null);
@@ -686,6 +691,7 @@ export function useSkuManager() {
     copyMessage,
     decodeData,
     decodeError,
+    decodeErrorDetails,
     exportError,
     exportFromSku,
     exportStatus,

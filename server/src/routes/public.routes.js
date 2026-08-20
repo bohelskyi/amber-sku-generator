@@ -60,7 +60,10 @@ router.post('/decode', async (req, res) => {
     const decoded = await decodeSku(req.body?.sku);
     res.json(decoded);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(err.statusCode || 400).json({
+      error: err.message,
+      ...(err.details ? { details: err.details } : {}),
+    });
   }
 });
 

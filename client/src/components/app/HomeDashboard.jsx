@@ -32,12 +32,77 @@ function getPricingSourceLabel(source) {
   return source === 'stored' ? 'Збережена в базі' : 'Перерахована зараз';
 }
 
+function DecodeErrorPanel({ details, message }) {
+  const issue = details?.issue;
+
+  return (
+    <div className="danger-panel mt-4 p-4 text-sm">
+      <div className="font-semibold">{message}</div>
+
+      {details?.type === 'unknown_category' && (
+        <div className="mt-3 space-y-3">
+          <div className="text-slate-700">
+            Отриманий код: <span className="font-mono font-semibold">{details.received}</span>
+          </div>
+          <div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Доступні категорії
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {(details.categories || []).map((category) => (
+                <span key={category.code} className="chip normal-case tracking-normal">
+                  <span className="font-mono">{category.code}</span> {category.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {details?.type === 'sku_config_mismatch' && (
+        <div className="mt-3 space-y-3 text-slate-700">
+          <div>
+            Категорія: <span className="font-semibold">{details.category?.name}</span>{' '}
+            <span className="font-mono text-slate-500">({details.category?.code})</span>
+          </div>
+          {issue?.questionLabel && (
+            <div>
+              Питання №{issue.position}: <span className="font-semibold">{issue.questionLabel}</span>
+            </div>
+          )}
+          {issue?.remaining && (
+            <div>
+              Нерозібраний фрагмент:{' '}
+              <span className="break-all font-mono font-semibold">{issue.remaining}</span>
+            </div>
+          )}
+          {issue?.expected?.length > 0 && (
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Допустимі значення
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {issue.expected.map((option) => (
+                  <span key={`${option.code}-${option.label}`} className="chip normal-case tracking-normal">
+                    <span className="font-mono">{option.code}</span> {option.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function HomeDashboard({
   config,
   exportStatus,
   skuToDecode,
   decodeData,
   decodeError,
+  decodeErrorDetails,
   hasRecountChanges,
   isRecountApplying,
   isRecountLoading,
@@ -130,9 +195,7 @@ export function HomeDashboard({
             </div>
 
             {decodeError && (
-              <div className="danger-panel p-4 mt-4 text-sm">
-                {decodeError}
-              </div>
+              <DecodeErrorPanel details={decodeErrorDetails} message={decodeError} />
             )}
           </div>
         </div>

@@ -34,6 +34,7 @@ function AppPage() {
             skuToDecode={sku.skuToDecode}
             decodeData={sku.decodeData}
             decodeError={sku.decodeError}
+            decodeErrorDetails={sku.decodeErrorDetails}
             hasRecountChanges={sku.hasRecountChanges}
             isRecountApplying={sku.isRecountApplying}
             isRecountLoading={sku.isRecountLoading}

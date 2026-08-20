@@ -8,6 +8,7 @@ const {
   buildBaseSku,
   decodeSkuAnswers,
   decodeVisibleSkuAnswers,
+  diagnoseSkuAttempts,
   parseVariationSku,
 } = require('../utils/sku');
 const { isRuleMatched } = require('../utils/rules');
@@ -221,7 +222,14 @@ async function decodeSku(skuValue) {
   const categories = await getAllCategories();
   const category = categories.find((item) => baseFullSku.startsWith(item.code));
   if (!category) {
-    throw new Error('Не вдалося визначити категорію за кодом артикула');
+    const err = new Error('Не вдалося визначити категорію за кодом артикула.');
+    err.statusCode = 422;
+    err.details = {
+      type: 'unknown_category',
+      received: baseFullSku.slice(0, 2) || normalizedSku,
+      categories: categories.map((item) => ({ code: item.code, name: item.name })),
+    };
+    throw err;
   }
 
   const questions = await getQuestionsForCategory(category.code);
@@ -311,7 +319,19 @@ async function decodeSku(skuValue) {
     };
   }
 
-  throw new Error('Артикул не відповідає поточній конфігурації категорії');
+  const diagnosis = diagnoseSkuAttempts(questions, attempts, {
+    skipHiddenQuestions: Number(category.skip_hidden_sku_questions || 0) === 1,
+  });
+  const err = new Error(
+    diagnosis?.message || 'Артикул не відповідає поточній конфігурації категорії.'
+  );
+  err.statusCode = 422;
+  err.details = {
+    type: 'sku_config_mismatch',
+    category: { code: category.code, name: category.name },
+    issue: diagnosis,
+  };
+  throw err;
 }
 
 async function getNextVariationSku(skuValue, queryable = pool) {
