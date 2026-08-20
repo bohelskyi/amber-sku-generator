@@ -37,6 +37,7 @@ export function useSkuManager() {
   const [recountSuccess, setRecountSuccess] = useState('');
   const [isRecountLoading, setIsRecountLoading] = useState(false);
   const [isRecountApplying, setIsRecountApplying] = useState(false);
+  const [isRecountConfirmOpen, setIsRecountConfirmOpen] = useState(false);
   const [copyMessage, setCopyMessage] = useState('');
   const [manualPriceUah, setManualPriceUah] = useState('');
   const [isManualPriceEditing, setIsManualPriceEditing] = useState(false);
@@ -87,21 +88,22 @@ export function useSkuManager() {
     manualPriceUah.trim() === '' ? null : Number(manualPriceUah);
   const hasManualPrice =
     manualPriceNumber !== null && Number.isFinite(manualPriceNumber) && manualPriceNumber >= 0;
+  const roundedManualPriceNumber = hasManualPrice ? Math.round(manualPriceNumber) : null;
   const effectiveTotalPriceUah = hasManualPrice
-    ? manualPriceNumber.toFixed(2)
+    ? roundedManualPriceNumber
     : previewData?.totalPriceUah;
   const effectiveTotalPrice =
     hasManualPrice && Number(previewData?.uahRate) > 0
-      ? (manualPriceNumber / Number(previewData.uahRate)).toFixed(2)
+      ? (roundedManualPriceNumber / Number(previewData.uahRate)).toFixed(2)
       : previewData?.totalPrice;
   const weightNumber = Number(weight || previewData?.weightVal || 0);
   const effectivePricePerGramUah =
     hasManualPrice && weightNumber > 0
-      ? (manualPriceNumber / weightNumber).toFixed(2)
+      ? (roundedManualPriceNumber / weightNumber).toFixed(2)
       : previewData?.pricePerGramUah;
   const effectivePricePerGram =
     hasManualPrice && Number(previewData?.uahRate) > 0 && weightNumber > 0
-      ? (manualPriceNumber / Number(previewData.uahRate) / weightNumber).toFixed(2)
+      ? (roundedManualPriceNumber / Number(previewData.uahRate) / weightNumber).toFixed(2)
       : previewData?.pricePerGram;
 
   const resetProductFlow = (catCode) => {
@@ -423,6 +425,7 @@ export function useSkuManager() {
         setDecodeData(res.data);
         setDecodeError('');
         setIsRecountOpen(false);
+        setIsRecountConfirmOpen(false);
         setRecountPreview(null);
         setRecountError('');
       })
@@ -437,6 +440,7 @@ export function useSkuManager() {
     setDecodeData(null);
     setDecodeError('');
     setIsRecountOpen(false);
+    setIsRecountConfirmOpen(false);
     setRecountPreview(null);
     setRecountError('');
     setRecountSuccess('');
@@ -470,11 +474,13 @@ export function useSkuManager() {
     setRecountPreview(null);
     setRecountError('');
     setRecountSuccess('');
+    setIsRecountConfirmOpen(false);
     setIsRecountOpen(true);
   };
 
   const handleCancelRecount = () => {
     setIsRecountOpen(false);
+    setIsRecountConfirmOpen(false);
     setRecountPreview(null);
     setRecountError('');
   };
@@ -484,6 +490,7 @@ export function useSkuManager() {
       ...prevAnswers,
       [questionId]: Number(valueId),
     }));
+    setIsRecountConfirmOpen(false);
     setRecountPreview(null);
     setRecountError('');
   };
@@ -498,6 +505,7 @@ export function useSkuManager() {
       }
       return { ...prevAnswers, [questionId]: normalizedValue };
     });
+    setIsRecountConfirmOpen(false);
     setRecountPreview(null);
     setRecountError('');
   };
@@ -512,6 +520,7 @@ export function useSkuManager() {
   const handleRecountPreview = () => {
     if (!decodeData?.sku) return;
     setIsRecountLoading(true);
+    setIsRecountConfirmOpen(false);
     setRecountError('');
     setRecountSuccess('');
 
@@ -530,7 +539,16 @@ export function useSkuManager() {
 
   const handleApplyRecount = () => {
     if (!decodeData?.sku || !recountPreview) return;
-    if (!window.confirm(`Створити коригувальний артикул ${recountPreview.corrected.fullSku}?`)) return;
+    setIsRecountConfirmOpen(true);
+  };
+
+  const handleCancelRecountConfirmation = () => {
+    if (isRecountApplying) return;
+    setIsRecountConfirmOpen(false);
+  };
+
+  const handleConfirmRecount = () => {
+    if (!decodeData?.sku || !recountPreview || isRecountApplying) return;
 
     setIsRecountApplying(true);
     setRecountError('');
@@ -539,6 +557,7 @@ export function useSkuManager() {
     api.post('/recount/apply', buildRecountPayload())
       .then((res) => {
         const correctedSku = res.data.corrected.fullSku;
+        setIsRecountConfirmOpen(false);
         setRecountSuccess(`Створено коригувальний артикул ${correctedSku}. Він не потрапить в експорт.`);
         setIsRecountOpen(false);
         setRecountPreview(null);
@@ -547,6 +566,7 @@ export function useSkuManager() {
         handleDecode(correctedSku);
       })
       .catch((err) => {
+        setIsRecountConfirmOpen(false);
         setRecountError(err.response?.data?.error || err.message);
       })
       .finally(() => {
@@ -571,6 +591,7 @@ export function useSkuManager() {
   };
 
   const handleStopManualPriceEdit = () => {
+    if (hasManualPrice) setManualPriceUah(String(roundedManualPriceNumber));
     setIsManualPriceEditing(false);
   };
 
@@ -615,6 +636,8 @@ export function useSkuManager() {
     handleAnswer,
     handleBackToParameters,
     handleCancelRecount,
+    handleCancelRecountConfirmation,
+    handleConfirmRecount,
     handleCopyText,
     handleDecode,
     handleDecodeInputChange,
@@ -637,6 +660,7 @@ export function useSkuManager() {
     isLivePriceLoading,
     isManualPriceEditing,
     isRecountApplying,
+    isRecountConfirmOpen,
     isRecountLoading,
     isRecountOpen,
     isTextQuestion,

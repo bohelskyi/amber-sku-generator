@@ -1,5 +1,16 @@
-export const formatUah = (value) =>
-  value !== null && value !== undefined ? `${value} ₴` : '---';
+export const formatUah = (value) => {
+  const numericValue = Number(value);
+  return value !== null && value !== undefined && Number.isFinite(numericValue)
+    ? `${Math.round(numericValue)} ₴`
+    : '---';
+};
+
+export const formatUahPerGram = (value) => {
+  const numericValue = Number(value);
+  return value !== null && value !== undefined && Number.isFinite(numericValue)
+    ? `${numericValue.toFixed(2)} ₴`
+    : '---';
+};
 
 export const formatUsd = (value) => (Number(value) > 0 ? `$${value}` : '---');
 

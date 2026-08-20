@@ -4,6 +4,7 @@ import { HomeDashboard } from '../components/app/HomeDashboard';
 import { PageHeader, Toast } from '../components/app/PageHeader';
 import { PreviewResult } from '../components/app/PreviewResult';
 import { ProductBuilder } from '../components/app/ProductBuilder';
+import { RecountConfirmDialog } from '../components/app/RecountConfirmDialog';
 import { useSkuManager } from '../hooks/useSkuManager';
 
 function AppPage() {
@@ -130,6 +131,14 @@ function AppPage() {
           />
         )}
       </div>
+      <RecountConfirmDialog
+        isApplying={sku.isRecountApplying}
+        isOpen={sku.isRecountConfirmOpen}
+        preview={sku.recountPreview}
+        reason={sku.recountReason}
+        onCancel={sku.handleCancelRecountConfirmation}
+        onConfirm={sku.handleConfirmRecount}
+      />
     </div>
   );
 }

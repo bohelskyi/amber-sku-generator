@@ -2,6 +2,7 @@ const pool = require('../db/pool');
 const { getUsdUahRate } = require('./currency.service');
 const { resolveAxisValue } = require('../utils/pricing-axis');
 const { asRuleObject } = require('../utils/rules');
+const { roundUah } = require('../utils/money');
 
 function normalizeScenarioGroup(groupName, scenarioName = '') {
   const normalizedGroup = String(groupName || '').trim();
@@ -199,14 +200,14 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
       currencyPayload = {
         uahRate,
         pricePerGramUah: (pricePerGram * uahRate).toFixed(2),
-        totalPriceUah: (Number(totalPrice) * uahRate).toFixed(2),
+        totalPriceUah: roundUah(Number(totalPrice) * uahRate),
       };
     } else {
       totalPrice = uahRate > 0 ? (pricePerGram / uahRate).toFixed(2) : '0.00';
       currencyPayload = {
         uahRate,
         pricePerGramUah: null,
-        totalPriceUah: pricePerGram.toFixed(2),
+        totalPriceUah: roundUah(pricePerGram),
       };
     }
   } catch (err) {
@@ -215,7 +216,7 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
       currencyPayload = {
         uahRate: null,
         pricePerGramUah: null,
-        totalPriceUah: pricePerGram.toFixed(2),
+        totalPriceUah: roundUah(pricePerGram),
       };
     }
   }

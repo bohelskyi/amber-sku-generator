@@ -1,5 +1,6 @@
 const pool = require('../db/pool');
 const { calculatePricing } = require('./pricing.service');
+const { roundUah } = require('../utils/money');
 const {
   appendSkuSuffix,
   buildSkuSuffixDecodeAttempts,
@@ -188,7 +189,9 @@ function getDecodedPricingPayload({
     pricePerGramUah,
     uahRate,
     totalPrice: product?.total_price ?? pricing.totalPrice,
-    totalPriceUah: product?.total_price_uah ?? pricing.currencyPayload?.totalPriceUah ?? null,
+    totalPriceUah: roundUah(
+      product?.total_price_uah ?? pricing.currencyPayload?.totalPriceUah ?? null
+    ),
     logMessage: productDetails.logMessage || pricing.logMessage,
     dependentKeys,
     conditions: conditionKeys.map((key) => ({
@@ -518,11 +521,11 @@ async function buildProductRecountPreview({ sourceSku, answers = {}, isCalibrate
     isCalibrated: nextIsCalibrated,
   });
   const correctionSku = await resolveCorrectionSku(correctedPreview.fullProposedSku);
-  const oldPriceUah = sourceDecoded.product.total_price_uah !== null &&
+  const oldPriceUah = roundUah(sourceDecoded.product.total_price_uah !== null &&
     sourceDecoded.product.total_price_uah !== undefined
       ? Number(sourceDecoded.product.total_price_uah)
-      : Number(sourceDecoded.pricing?.totalPriceUah || 0);
-  const newPriceUah = Number(correctedPreview.totalPriceUah || 0);
+      : Number(sourceDecoded.pricing?.totalPriceUah || 0)) || 0;
+  const newPriceUah = roundUah(correctedPreview.totalPriceUah) || 0;
 
   return {
     source: {
@@ -534,6 +537,7 @@ async function buildProductRecountPreview({ sourceSku, answers = {}, isCalibrate
       pricePerGram: sourceDecoded.pricing?.pricePerGram ?? sourceDecoded.product.price_per_gram,
       pricePerGramUah: sourceDecoded.pricing?.pricePerGramUah ?? null,
       weight,
+      pricing: sourceDecoded.pricing || null,
     },
     corrected: {
       categoryCode,
@@ -596,7 +600,7 @@ async function applyProductRecount(payload) {
         Number(corrected.weight || 0),
         Number(corrected.totalPrice || 0),
         corrected.totalPriceUah !== undefined && corrected.totalPriceUah !== null
-          ? Number(corrected.totalPriceUah)
+          ? roundUah(corrected.totalPriceUah)
           : null,
         Number(corrected.pricePerGram || 0),
         corrected.uahRate !== undefined && corrected.uahRate !== null
@@ -665,7 +669,7 @@ async function saveProduct(payload) {
       Number(payload.weight || 0),
       Number(payload.totalPrice || 0),
       payload.totalPriceUah !== undefined && payload.totalPriceUah !== null
-        ? Number(payload.totalPriceUah)
+        ? roundUah(payload.totalPriceUah)
         : null,
       Number(payload.pricePerGram || 0),
       payload.uahRate !== undefined && payload.uahRate !== null ? Number(payload.uahRate) : null,

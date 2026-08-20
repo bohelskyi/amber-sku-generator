@@ -1,4 +1,4 @@
-import { formatUah, formatUsd } from '../../lib/formatters';
+import { formatUah, formatUahPerGram, formatUsd } from '../../lib/formatters';
 
 export function PreviewResult({
   previewData,
@@ -94,7 +94,7 @@ export function PreviewResult({
 
       {isWeightRequired && parseFloat(effectivePricePerGram) > 0 && (
         <div className="text-center mb-8 text-slate-600">
-          <p>Ціна за грам: <strong>{formatUah(effectivePricePerGramUah)}</strong> <span className="text-sm">({formatUsd(effectivePricePerGram)})</span></p>
+          <p>Ціна за грам: <strong>{formatUahPerGram(effectivePricePerGramUah)}</strong> <span className="text-sm">({formatUsd(effectivePricePerGram)})</span></p>
         </div>
       )}
 
@@ -153,7 +153,7 @@ function PriceActions({
           <input
             type="number"
             min="0"
-            step="0.01"
+            step="1"
             value={manualPriceUah}
             onChange={(event) => onManualPriceChange(event.target.value)}
             className="input text-center"

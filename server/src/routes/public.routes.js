@@ -1,5 +1,6 @@
 const express = require('express');
 const { buildCsv } = require('../utils/csv');
+const { roundUah } = require('../utils/money');
 const { getAppConfig } = require('../services/catalog.service');
 const { calculatePricing } = require('../services/pricing.service');
 const {
@@ -142,7 +143,7 @@ router.get('/export/csv', async (req, res) => {
       ...exportData.rows.map((row) => [
         row.full_sku,
         row.total_price_uah !== null && row.total_price_uah !== undefined
-          ? Number(row.total_price_uah).toFixed(2)
+          ? roundUah(row.total_price_uah)
           : '',
         row.export_size || '',
         ...exportData.textColumns.map((column) => row.export_text_values?.[column.key] || ''),

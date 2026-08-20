@@ -1,4 +1,4 @@
-import { formatUah, formatUsd } from '../../lib/formatters';
+import { formatUah, formatUahPerGram, formatUsd } from '../../lib/formatters';
 import { handleNumberKeyDown, handleNumberWheel } from '../../lib/number-input';
 
 export function ProductBuilder({
@@ -145,7 +145,7 @@ export function ProductBuilder({
               <div className="text-xs text-slate-500">
                 USD: {formatUsd(livePriceData.totalPrice)}
                 {isWeightRequired && (
-                  <> | За грам: {formatUah(livePriceData.pricePerGramUah)} | За грам (USD): {formatUsd(livePriceData.pricePerGram)}</>
+                  <> | За грам: {formatUahPerGram(livePriceData.pricePerGramUah)} | За грам (USD): {formatUsd(livePriceData.pricePerGram)}</>
                 )}
               </div>
             )}

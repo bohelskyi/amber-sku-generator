@@ -1,3 +1,5 @@
+import { formatUah } from '../../lib/formatters';
+
 export function HistoryTable({ history, config, selectedCat, onCopyText, onDecode, onDelete }) {
   return (
     <section className="card p-6 sm:p-8 fade-up">
@@ -26,7 +28,7 @@ export function HistoryTable({ history, config, selectedCat, onCopyText, onDecod
                   <td className="table-cell whitespace-nowrap text-sm text-slate-500">{config.categories[item.category]?.name}</td>
                   <td className="table-cell whitespace-nowrap text-sm text-slate-500">{item.weight > 0 ? `${item.weight}г` : '-'}</td>
                   <td className="table-cell whitespace-nowrap text-sm text-slate-500">
-                    {item.total_price_uah ? `${item.total_price_uah} ₴` : item.total_price ? `$${item.total_price}` : '-'}
+                    {item.total_price_uah ? formatUah(item.total_price_uah) : item.total_price ? `$${item.total_price}` : '-'}
                   </td>
                   <td className="table-cell whitespace-nowrap text-sm">
                     {!selectedCat && (
@@ -35,7 +37,7 @@ export function HistoryTable({ history, config, selectedCat, onCopyText, onDecod
                         <button onClick={() => onDecode(item.full_sku)} className="btn btn-outline text-xs px-2 py-1">Розшифрувати</button>
                         <button
                           onClick={() => item.total_price_uah
-                            ? onCopyText(`${item.total_price_uah} ₴`, 'Ціну')
+                            ? onCopyText(formatUah(item.total_price_uah), 'Ціну')
                             : item.total_price && onCopyText(`$${item.total_price}`, 'Ціну')}
                           className="btn btn-outline text-xs px-2 py-1"
                         >

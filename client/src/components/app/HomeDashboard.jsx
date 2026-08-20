@@ -1,4 +1,10 @@
-import { formatDateTime, formatDecodedSuffix, formatUah, formatUsd } from '../../lib/formatters';
+import {
+  formatDateTime,
+  formatDecodedSuffix,
+  formatUah,
+  formatUahPerGram,
+  formatUsd,
+} from '../../lib/formatters';
 import {
   getVisibleOptionsForQuestion,
   isQuestionVisible,
@@ -176,6 +182,29 @@ function DecodeWorkspace({
     (condition) => !condition.isInSku
   ) || [];
 
+  if (isRecountOpen) {
+    return (
+      <section className="card p-6 sm:p-8 fade-up stagger-3">
+        <RecountPanel
+          config={config}
+          decodeData={decodeData}
+          isRecountApplying={isRecountApplying}
+          isRecountLoading={isRecountLoading}
+          recountAnswers={recountAnswers}
+          recountError={recountError}
+          recountPreview={recountPreview}
+          recountReason={recountReason}
+          onApplyRecount={onApplyRecount}
+          onCancelRecount={onCancelRecount}
+          onRecountAnswer={onRecountAnswer}
+          onRecountPreview={onRecountPreview}
+          onRecountReasonChange={onRecountReasonChange}
+          onRecountTextAnswer={onRecountTextAnswer}
+        />
+      </section>
+    );
+  }
+
   return (
     <section className="card p-6 sm:p-8 fade-up stagger-3">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-6">
@@ -233,7 +262,7 @@ function DecodeWorkspace({
                 </div>
                 <div className="mt-1 text-xl font-semibold text-slate-900">
                   {decodeData.pricing.isWeightBased
-                    ? `${formatUah(decodeData.pricing.pricePerGramUah)} (${formatUsd(decodeData.pricing.pricePerGram)})`
+                    ? `${formatUahPerGram(decodeData.pricing.pricePerGramUah)} (${formatUsd(decodeData.pricing.pricePerGram)})`
                     : formatUah(decodeData.pricing.totalPriceUah)}
                 </div>
                 <div className="mt-3">
@@ -313,34 +342,13 @@ function DecodeWorkspace({
             </div>
           )}
 
-          {decodeData.existsInDb && !isRecountOpen && (
+          {decodeData.existsInDb && (
             <button onClick={onStartRecount} className="btn btn-outline w-full">
               Переоблікувати
             </button>
           )}
         </aside>
       </div>
-
-      {isRecountOpen && (
-        <div className="border-t border-slate-200 pt-6">
-          <RecountPanel
-            config={config}
-            decodeData={decodeData}
-            isRecountApplying={isRecountApplying}
-            isRecountLoading={isRecountLoading}
-            recountAnswers={recountAnswers}
-            recountError={recountError}
-            recountPreview={recountPreview}
-            recountReason={recountReason}
-            onApplyRecount={onApplyRecount}
-            onCancelRecount={onCancelRecount}
-            onRecountAnswer={onRecountAnswer}
-            onRecountPreview={onRecountPreview}
-            onRecountReasonChange={onRecountReasonChange}
-            onRecountTextAnswer={onRecountTextAnswer}
-          />
-        </div>
-      )}
     </section>
   );
 }
@@ -366,6 +374,7 @@ function RecountPanel({
   const visibleQuestions = categoryQuestions.filter((question) =>
     isQuestionVisible(question, recountAnswers, recountAnswers.is_calibrated ?? null)
   );
+  const priceDependentKeys = decodeData.pricing?.dependentKeys || [];
 
   return (
     <div>
@@ -384,6 +393,7 @@ function RecountPanel({
         <div className="grid gap-3 md:grid-cols-2">
           {visibleQuestions.map((question) => {
             const textQuestion = isTextQuestion(question);
+            const isPriceDriver = priceDependentKeys.includes(question.id);
             const visibleOptions = getVisibleOptionsForQuestion(
               question,
               recountAnswers,
@@ -391,7 +401,14 @@ function RecountPanel({
             );
 
             return (
-              <div key={question.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <div
+                key={question.id}
+                className={`rounded-xl border p-4 ${
+                  isPriceDriver
+                    ? 'border-[rgba(221,151,74,0.5)] bg-[rgba(221,151,74,0.12)]'
+                    : 'border-slate-200 bg-slate-50/70'
+                }`}
+              >
                 <div className="text-sm font-semibold text-slate-700">{question.label}</div>
                 {textQuestion ? (
                   <input
@@ -423,6 +440,8 @@ function RecountPanel({
         </div>
 
         <aside className="space-y-4 xl:sticky xl:top-6">
+          <PreviousPricingSnapshot config={config} decodeData={decodeData} />
+
           <div className="rounded-xl border border-slate-200 bg-white/80 p-4">
             <label className="mb-2 block text-sm font-semibold text-slate-700">Причина переобліку</label>
             <textarea
@@ -441,22 +460,24 @@ function RecountPanel({
 
           {recountPreview && (
             <div className="space-y-4 rounded-xl border border-[rgba(221,151,74,0.5)] bg-[rgba(221,151,74,0.1)] p-4">
-              <div className="text-sm font-semibold text-slate-900">Результат перерахунку</div>
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-                <div>
-                  <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Було</div>
-                  <div className="mt-1 break-all font-mono text-sm font-semibold text-slate-900">
-                    {recountPreview.source.sku}
-                  </div>
-                  <div className="mt-1 text-sm text-slate-600">
-                    {formatUah(recountPreview.source.totalPriceUah?.toFixed?.(2) ?? recountPreview.source.totalPriceUah)}
-                  </div>
+              <div className="text-sm font-semibold text-slate-900">Новий розрахунок</div>
+              <div>
+                <div className="text-xs uppercase tracking-[0.18em] text-[#8a5f2b]">Новий SKU</div>
+                <div className="mt-1 break-all font-mono text-sm font-semibold text-slate-900">
+                  {recountPreview.corrected.fullSku}
                 </div>
-                <div>
-                  <div className="text-xs uppercase tracking-[0.18em] text-[#8a5f2b]">Стане</div>
-                  <div className="mt-1 break-all font-mono text-sm font-semibold text-slate-900">
-                    {recountPreview.corrected.fullSku}
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                {decodeData.pricing?.isWeightBased && (
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Ціна за грам</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-900">
+                      {formatUahPerGram(recountPreview.corrected.pricePerGramUah)} ({formatUsd(recountPreview.corrected.pricePerGram)})
+                    </div>
                   </div>
+                )}
+                <div>
+                  <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Ціна виробу</div>
                   <div className="mt-1 text-sm font-semibold text-slate-900">
                     {formatUah(recountPreview.corrected.totalPriceUah)}
                   </div>
@@ -465,7 +486,7 @@ function RecountPanel({
               <div className="border-t border-[rgba(221,151,74,0.35)] pt-3 text-sm text-slate-600">
                 Різниця:{' '}
                 <span className="font-semibold text-slate-900">
-                  {formatUah(recountPreview.priceDeltaUah.toFixed(2))}
+                  {formatUah(recountPreview.priceDeltaUah)}
                 </span>
                 {recountPreview.corrected.variation && (
                   <span className="mt-1 block text-xs">Створиться варіація, бо базовий SKU вже існує.</span>
@@ -503,6 +524,83 @@ function RecountPanel({
           </div>
         </aside>
       </div>
+    </div>
+  );
+}
+
+function PreviousPricingSnapshot({ config, decodeData }) {
+  const pricing = decodeData.pricing;
+  if (!pricing) return null;
+
+  const priceAnswers = decodeData.decodedAnswers.filter((answer) =>
+    pricing.dependentKeys?.includes(answer.key)
+  );
+  const externalConditions = (pricing.conditions || []).filter(
+    (condition) => !condition.isInSku
+  );
+
+  return (
+    <div className="rounded-xl border border-slate-300 bg-slate-50/90 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-slate-900">Попередній розрахунок</div>
+          <div className="mt-1 break-all font-mono text-xs text-slate-500">{decodeData.sku}</div>
+        </div>
+        <span className="chip">Зафіксовано</span>
+      </div>
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+        {pricing.isWeightBased && (
+          <div>
+            <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Ціна за грам</div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">
+              {formatUahPerGram(pricing.pricePerGramUah)} ({formatUsd(pricing.pricePerGram)})
+            </div>
+          </div>
+        )}
+        <div>
+          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Ціна виробу</div>
+          <div className="mt-1 text-sm font-semibold text-slate-900">
+            {formatUah(pricing.totalPriceUah)}
+          </div>
+        </div>
+        {pricing.isWeightBased && pricing.weight !== null && pricing.weight !== undefined && (
+          <div>
+            <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Вага</div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">{pricing.weight} г</div>
+          </div>
+        )}
+      </div>
+
+      {(priceAnswers.length > 0 || externalConditions.length > 0) && (
+        <div className="mt-4 border-t border-slate-200 pt-4">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+            Початкові цінові параметри
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {priceAnswers.map((answer) => (
+              <span key={answer.key} className="chip">
+                {answer.label}: {answer.value_label}
+              </span>
+            ))}
+            {externalConditions.map((condition) => (
+              <span key={condition.key} className="chip">
+                {getQuestionLabel(config, decodeData.category.code, condition.key)}:{' '}
+                {getConditionValueLabel(
+                  config,
+                  decodeData.category.code,
+                  condition.key,
+                  condition.value
+                )}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {pricing.logMessage && (
+        <div className="mt-3 text-xs leading-5 text-slate-500">{pricing.logMessage}</div>
+      )}
     </div>
   );
 }
