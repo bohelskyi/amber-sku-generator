@@ -35,6 +35,7 @@ export function HomeDashboard({
   skuToDecode,
   decodeData,
   decodeError,
+  hasRecountChanges,
   isRecountApplying,
   isRecountLoading,
   isRecountOpen,
@@ -138,6 +139,7 @@ export function HomeDashboard({
         <DecodeWorkspace
           config={config}
           decodeData={decodeData}
+          hasRecountChanges={hasRecountChanges}
           isRecountApplying={isRecountApplying}
           isRecountLoading={isRecountLoading}
           isRecountOpen={isRecountOpen}
@@ -162,6 +164,7 @@ export function HomeDashboard({
 function DecodeWorkspace({
   config,
   decodeData,
+  hasRecountChanges,
   isRecountApplying,
   isRecountLoading,
   isRecountOpen,
@@ -188,6 +191,7 @@ function DecodeWorkspace({
         <RecountPanel
           config={config}
           decodeData={decodeData}
+          hasRecountChanges={hasRecountChanges}
           isRecountApplying={isRecountApplying}
           isRecountLoading={isRecountLoading}
           recountAnswers={recountAnswers}
@@ -356,6 +360,7 @@ function DecodeWorkspace({
 function RecountPanel({
   config,
   decodeData,
+  hasRecountChanges,
   isRecountApplying,
   isRecountLoading,
   recountAnswers,
@@ -458,6 +463,12 @@ function RecountPanel({
             </div>
           )}
 
+          {!hasRecountChanges && !recountError && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+              Змініть хоча б один параметр виробу, щоб виконати переоблік.
+            </div>
+          )}
+
           {recountPreview && (
             <div className="space-y-4 rounded-xl border border-[rgba(221,151,74,0.5)] bg-[rgba(221,151,74,0.1)] p-4">
               <div className="text-sm font-semibold text-slate-900">Новий розрахунок</div>
@@ -510,14 +521,14 @@ function RecountPanel({
             <button
               onClick={onRecountPreview}
               className="btn btn-outline"
-              disabled={isRecountLoading}
+              disabled={!hasRecountChanges || isRecountLoading}
             >
               {isRecountLoading ? 'Рахуємо...' : 'Перерахувати'}
             </button>
             <button
               onClick={onApplyRecount}
               className="btn btn-primary"
-              disabled={!recountPreview || isRecountApplying}
+              disabled={!hasRecountChanges || !recountPreview || isRecountApplying}
             >
               {isRecountApplying ? 'Застосовуємо...' : 'Застосувати переоблік'}
             </button>

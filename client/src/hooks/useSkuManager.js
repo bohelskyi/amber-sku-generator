@@ -42,6 +42,34 @@ function pruneHiddenAnswers(categoryQuestions, answersMap) {
   return nextAnswers;
 }
 
+function getDecodedAnswerMap(decoded) {
+  const decodedMap = (decoded?.decodedAnswers || []).reduce((result, answer) => {
+    result[answer.key] = answer.value_id === null ? 0 : answer.value_id;
+    return result;
+  }, {});
+  const storedAnswers =
+    decoded?.product?.details?.answers && typeof decoded.product.details.answers === 'object'
+      ? decoded.product.details.answers
+      : {};
+  const nextAnswers = { ...decodedMap, ...storedAnswers };
+  const storedCalibrated = decoded?.product?.details?.isCalibrated;
+  if (storedCalibrated !== undefined && storedCalibrated !== null) {
+    nextAnswers.is_calibrated = storedCalibrated;
+  }
+  return nextAnswers;
+}
+
+function haveAnswersChanged(previousAnswers, nextAnswers) {
+  const keys = new Set([
+    ...Object.keys(previousAnswers || {}),
+    ...Object.keys(nextAnswers || {}),
+  ]);
+
+  return Array.from(keys).some(
+    (key) => String(previousAnswers?.[key] ?? '') !== String(nextAnswers?.[key] ?? '')
+  );
+}
+
 export function useSkuManager() {
   const [config, setConfig] = useState(null);
   const [selectedCat, setSelectedCat] = useState(null);
@@ -79,6 +107,9 @@ export function useSkuManager() {
   const [copyMessage, setCopyMessage] = useState('');
   const [manualPriceUah, setManualPriceUah] = useState('');
   const [isManualPriceEditing, setIsManualPriceEditing] = useState(false);
+  const hasRecountChanges = Boolean(
+    decodeData && haveAnswersChanged(getDecodedAnswerMap(decodeData), recountAnswers)
+  );
 
   const fetchHistory = () => {
     api.get('/products').then((res) => setHistory(res.data));
@@ -466,23 +497,6 @@ export function useSkuManager() {
     setRecountSuccess('');
   };
 
-  const getDecodedAnswerMap = (decoded) => {
-    const decodedMap = (decoded?.decodedAnswers || []).reduce((result, answer) => {
-      result[answer.key] = answer.value_id === null ? 0 : answer.value_id;
-      return result;
-    }, {});
-    const storedAnswers =
-      decoded?.product?.details?.answers && typeof decoded.product.details.answers === 'object'
-        ? decoded.product.details.answers
-        : {};
-    const nextAnswers = { ...decodedMap, ...storedAnswers };
-    const storedCalibrated = decoded?.product?.details?.isCalibrated;
-    if (storedCalibrated !== undefined && storedCalibrated !== null) {
-      nextAnswers.is_calibrated = storedCalibrated;
-    }
-    return nextAnswers;
-  };
-
   const handleStartRecount = () => {
     if (!decodeData?.existsInDb) {
       setRecountError('Переоблік доступний тільки для артикула, який є в базі.');
@@ -539,6 +553,11 @@ export function useSkuManager() {
 
   const handleRecountPreview = () => {
     if (!decodeData?.sku) return;
+    if (!hasRecountChanges) {
+      setRecountPreview(null);
+      setRecountError('Для переобліку змініть хоча б один параметр виробу.');
+      return;
+    }
     setIsRecountLoading(true);
     setIsRecountConfirmOpen(false);
     setRecountError('');
@@ -558,7 +577,7 @@ export function useSkuManager() {
   };
 
   const handleApplyRecount = () => {
-    if (!decodeData?.sku || !recountPreview) return;
+    if (!decodeData?.sku || !recountPreview || !hasRecountChanges) return;
     setIsRecountConfirmOpen(true);
   };
 
@@ -568,7 +587,7 @@ export function useSkuManager() {
   };
 
   const handleConfirmRecount = () => {
-    if (!decodeData?.sku || !recountPreview || isRecountApplying) return;
+    if (!decodeData?.sku || !recountPreview || !hasRecountChanges || isRecountApplying) return;
 
     setIsRecountApplying(true);
     setRecountError('');
@@ -673,6 +692,7 @@ export function useSkuManager() {
     handleStartRecount,
     handleStopManualPriceEdit,
     handleTextAnswer,
+    hasRecountChanges,
     hasManualPrice,
     history,
     isCalibrated,

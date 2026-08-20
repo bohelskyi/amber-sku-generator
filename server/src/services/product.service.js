@@ -1,5 +1,6 @@
 const pool = require('../db/pool');
 const { calculatePricing } = require('./pricing.service');
+const { getAnswerChanges } = require('../utils/answer-changes');
 const { roundUah } = require('../utils/money');
 const {
   appendSkuSuffix,
@@ -123,10 +124,22 @@ function getStoredAnswers(product) {
 }
 
 function buildProductAnswerContext(decodedProduct) {
-  return {
+  const answers = {
     ...buildAnswerMap(decodedProduct.decodedAnswers || []),
     ...getStoredAnswers(decodedProduct.product),
   };
+
+  const storedCalibrated = getProductDetails(decodedProduct.product).isCalibrated;
+  if (
+    answers.is_calibrated === undefined
+    && storedCalibrated !== undefined
+    && storedCalibrated !== null
+    && storedCalibrated !== ''
+  ) {
+    answers.is_calibrated = Number(storedCalibrated);
+  }
+
+  return answers;
 }
 
 function getCorrectionWeight(decodedProduct) {
@@ -138,21 +151,6 @@ function getCorrectionWeight(decodedProduct) {
   return decodedProduct.suffix?.type === 'weight' && decodedProduct.suffix.value !== null
     ? Number(decodedProduct.suffix.value)
     : 0;
-}
-
-function getAnswerChanges(previousAnswers, nextAnswers) {
-  const keys = new Set([
-    ...Object.keys(previousAnswers || {}),
-    ...Object.keys(nextAnswers || {}),
-  ]);
-
-  return Array.from(keys)
-    .filter((key) => String(previousAnswers[key] ?? '') !== String(nextAnswers[key] ?? ''))
-    .map((key) => ({
-      key,
-      from: previousAnswers[key] ?? null,
-      to: nextAnswers[key] ?? null,
-    }));
 }
 
 function getDecodedPricingPayload({
@@ -530,6 +528,13 @@ async function buildProductRecountPreview({ sourceSku, answers = {}, isCalibrate
     nextAnswers.is_calibrated = Number(nextIsCalibrated);
   }
 
+  const changes = getAnswerChanges(previousAnswers, nextAnswers);
+  if (changes.length === 0) {
+    const err = new Error('Для переобліку змініть хоча б один параметр виробу.');
+    err.statusCode = 422;
+    throw err;
+  }
+
   const weight = getCorrectionWeight(sourceDecoded);
   const correctedPreview = await buildProductPreview({
     categoryCode,
@@ -573,7 +578,7 @@ async function buildProductRecountPreview({ sourceSku, answers = {}, isCalibrate
       uahRate: correctedPreview.uahRate,
       logMessage: correctedPreview.logMessage,
     },
-    changes: getAnswerChanges(previousAnswers, nextAnswers),
+    changes,
     priceDeltaUah: newPriceUah - oldPriceUah,
     reason: String(reason || '').trim(),
   };
