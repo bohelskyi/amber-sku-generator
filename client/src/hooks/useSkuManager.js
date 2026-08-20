@@ -350,6 +350,7 @@ export function useSkuManager() {
         answers,
         isCalibrated,
         logMessage: previewData.logMessage,
+        pricingScenario: previewData.pricingDetails?.scenario || null,
         variationNumber: variationData?.variationNumber || null,
         baseGeneratedSku: previewData.fullProposedSku,
         manualPriceUah: hasManualPrice ? effectiveTotalPriceUah : null,

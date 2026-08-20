@@ -97,6 +97,15 @@ function getProductDetails(product) {
   return product.details;
 }
 
+function getStoredMatrixName(productDetails) {
+  const structuredName = productDetails?.pricingScenario?.name;
+  if (structuredName) return String(structuredName);
+
+  const legacyLogMessage = String(productDetails?.logMessage || '');
+  const detailsMarkerIndex = legacyLogMessage.indexOf(' (');
+  return detailsMarkerIndex > 0 ? legacyLogMessage.slice(0, detailsMarkerIndex) : null;
+}
+
 function uniqueValues(values) {
   return Array.from(new Set(values.filter(Boolean)));
 }
@@ -179,6 +188,10 @@ function getDecodedPricingPayload({
       ? (Number(pricePerGram) * Number(uahRate)).toFixed(2)
       : pricing.currencyPayload?.pricePerGramUah || null;
   const dependentKeys = pricing.pricingDetails?.dependentKeys || [];
+  const matrixName =
+    (storedPricePerGram !== null ? getStoredMatrixName(productDetails) : null)
+    || pricing.pricingDetails?.scenario?.name
+    || null;
   const shouldShowCalibratedCondition =
     Number(pricingAnswers.raw_type) === 1 ||
     pricingAnswers.is_calibrated !== undefined ||
@@ -200,6 +213,7 @@ function getDecodedPricingPayload({
       product?.total_price_uah ?? pricing.currencyPayload?.totalPriceUah ?? null
     ),
     logMessage: productDetails.logMessage || pricing.logMessage,
+    matrixName,
     dependentKeys,
     conditions: conditionKeys.map((key) => ({
       key,
@@ -438,7 +452,14 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
   const compactBaseSku = buildBaseSku(categoryCode, answerCodes);
   const legacySeparatedBaseSku = buildBaseSku(categoryCode, answerCodes, legacySkuSeparator);
   const pricing = await calculatePricing(categoryCode, answers, weight, isCalibrated);
-  const { weightVal, pricePerGram, totalPrice, logMessage, currencyPayload } = pricing;
+  const {
+    weightVal,
+    pricePerGram,
+    totalPrice,
+    logMessage,
+    currencyPayload,
+    pricingDetails,
+  } = pricing;
 
   const requiresWeight =
     categoryResult.rows.length > 0 &&
@@ -477,6 +498,7 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
       totalPrice,
       weightVal,
       logMessage,
+      pricingDetails,
       ...currencyPayload,
     };
   }
@@ -506,6 +528,7 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
     totalPrice,
     weightVal,
     logMessage,
+    pricingDetails,
     ...currencyPayload,
   };
 }
@@ -597,6 +620,7 @@ async function buildProductRecountPreview({ sourceSku, answers = {}, isCalibrate
       totalPriceUah: correctedPreview.totalPriceUah,
       uahRate: correctedPreview.uahRate,
       logMessage: correctedPreview.logMessage,
+      pricingDetails: correctedPreview.pricingDetails,
     },
     changes,
     priceDeltaUah: newPriceUah - oldPriceUah,
@@ -646,6 +670,7 @@ async function applyProductRecount(payload) {
       answers: corrected.answers,
       isCalibrated: corrected.answers.is_calibrated ?? null,
       logMessage: corrected.logMessage,
+      pricingScenario: corrected.pricingDetails?.scenario || null,
       correction: {
         sourceProductId,
         sourceSku: preview.source.sku,

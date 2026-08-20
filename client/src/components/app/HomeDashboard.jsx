@@ -328,23 +328,40 @@ function DecodeWorkspace({
             {decodeData.pricing && (
               <div className="mt-4 rounded-xl border border-[rgba(221,151,74,0.5)] bg-[rgba(221,151,74,0.12)] p-5">
                 <div className="text-xs uppercase tracking-[0.2em] text-[#8a5f2b]">
-                  {decodeData.pricing.isWeightBased ? 'Ціна за грам' : 'Ціна за виріб'}
+                  Ціна виробу
                 </div>
                 <div className="mt-1 text-xl font-semibold text-slate-900">
-                  {decodeData.pricing.isWeightBased
-                    ? `${formatUahPerGram(decodeData.pricing.pricePerGramUah)} (${formatUsd(decodeData.pricing.pricePerGram)})`
-                    : formatUah(decodeData.pricing.totalPriceUah)}
+                  {formatUah(decodeData.pricing.totalPriceUah)}
                 </div>
                 <div className="mt-3">
                   <span className="chip">{getPricingSourceLabel(decodeData.pricing.source)}</span>
                 </div>
+                {decodeData.pricing.isWeightBased && (
+                  <div className="mt-4 grid gap-3 border-t border-[rgba(221,151,74,0.35)] pt-4 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
+                    <div>
+                      <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Ціна за грам</div>
+                      <div className="mt-1 text-sm font-semibold text-slate-900">
+                        {formatUahPerGram(decodeData.pricing.pricePerGramUah)} ({formatUsd(decodeData.pricing.pricePerGram)})
+                      </div>
+                    </div>
+                    {decodeData.pricing.weight !== null && decodeData.pricing.weight !== undefined && (
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Вага</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-900">
+                          {decodeData.pricing.weight} г
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {decodeData.pricing.matrixName && (
+                  <div className="mt-3 text-sm text-slate-700">
+                    Матриця:{' '}
+                    <span className="font-bold text-slate-900">{decodeData.pricing.matrixName}</span>
+                  </div>
+                )}
                 {decodeData.pricing.logMessage && (
                   <div className="mt-3 text-xs leading-5 text-slate-600">{decodeData.pricing.logMessage}</div>
-                )}
-                {decodeData.pricing.weight && decodeData.pricing.isWeightBased && (
-                  <div className="mt-2 text-xs text-slate-500">
-                    Вага для розрахунку: {decodeData.pricing.weight} г
-                  </div>
                 )}
               </div>
             )}
@@ -668,6 +685,12 @@ function PreviousPricingSnapshot({ config, decodeData }) {
           </div>
         )}
       </div>
+
+      {pricing.matrixName && (
+        <div className="mt-4 border-t border-slate-200 pt-4 text-sm text-slate-700">
+          Матриця: <span className="font-bold text-slate-900">{pricing.matrixName}</span>
+        </div>
+      )}
 
       {(priceAnswers.length > 0 || externalConditions.length > 0) && (
         <div className="mt-4 border-t border-slate-200 pt-4">
