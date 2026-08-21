@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   buildSkuSuffixDecodeAttempts,
   decodeSkuAnswers,
+  decodeStoredSkuAnswers,
   diagnoseSkuAttempts,
   parseVariationSku,
 } = require('../src/utils/sku');
@@ -112,4 +113,58 @@ test('diagnoses characters left after all configured parameters', () => {
   assert.equal(diagnosis.type, 'extra_characters');
   assert.equal(diagnosis.received, 'X');
   assert.equal(diagnosis.questionLabel, null);
+});
+
+test('decodes a required historical placeholder from stored product answers', () => {
+  const questions = [
+    {
+      key: 'raw_type',
+      label: 'Raw type',
+      sku_index: 0,
+      sku_separator: '',
+      required: 1,
+      options: [{ id: 1, label: 'Natural' }],
+    },
+    {
+      key: 'size',
+      label: 'Size',
+      sku_index: 1,
+      sku_separator: '',
+      required: 1,
+      options: [{ id: 1, label: '5-10' }],
+    },
+    {
+      key: 'shape',
+      label: 'Shape',
+      sku_index: 2,
+      sku_separator: '',
+      required: 1,
+      options: [{ id: 6, label: 'Round' }],
+    },
+  ];
+
+  const decoded = decodeStoredSkuAnswers(questions, '106', {
+    raw_type: 1,
+    shape: 6,
+  });
+
+  assert.deepEqual(
+    decoded.map((answer) => [answer.key, answer.value_id, answer.is_placeholder]),
+    [
+      ['raw_type', 1, false],
+      ['size', null, true],
+      ['shape', 6, false],
+    ]
+  );
+});
+
+test('rejects stored answers that do not reproduce the SKU', () => {
+  assert.equal(
+    decodeStoredSkuAnswers(arQuestions, '12-4-', {
+      raw_type: 1,
+      category: 2,
+      size: 3,
+    }),
+    null
+  );
 });

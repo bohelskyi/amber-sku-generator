@@ -7,6 +7,7 @@ const {
   buildSkuSuffixDecodeAttempts,
   buildBaseSku,
   decodeSkuAnswers,
+  decodeStoredSkuAnswers,
   decodeVisibleSkuAnswers,
   diagnoseSkuAttempts,
   parseVariationSku,
@@ -81,6 +82,17 @@ function buildAnswerMap(decodedAnswers) {
     answers[item.key] = item.value_id === null ? 0 : item.value_id;
     return answers;
   }, {});
+}
+
+function haveSameDecodedAnswers(firstAnswers, secondAnswers) {
+  if (!firstAnswers || !secondAnswers || firstAnswers.length !== secondAnswers.length) {
+    return false;
+  }
+
+  const secondAnswerMap = buildAnswerMap(secondAnswers);
+  return firstAnswers.every((answer) => (
+    secondAnswerMap[answer.key] === (answer.value_id === null ? 0 : answer.value_id)
+  ));
 }
 
 function normalizeAnswerMap(answers = {}) {
@@ -260,12 +272,24 @@ async function decodeSku(skuValue) {
     [normalizedSku]
   );
   const product = productResult.rows[0] || null;
+  const productDetails = getProductDetails(product);
+  const storedAnswers = getStoredAnswers(product);
 
   for (const attempt of attempts) {
-    const decodedAnswers =
+    const configuredDecodedAnswers =
       Number(category.skip_hidden_sku_questions || 0) === 1
         ? decodeVisibleSkuAnswers(questions, attempt.encodedPart)
         : decodeSkuAnswers(questions, attempt.encodedPart);
+    const storedDecodedAnswers = !product || !Object.keys(storedAnswers).length
+      ? null
+      : decodeStoredSkuAnswers(questions, attempt.encodedPart, storedAnswers);
+    const usesStoredHistory = Boolean(
+      storedDecodedAnswers
+      && !haveSameDecodedAnswers(configuredDecodedAnswers, storedDecodedAnswers)
+    );
+    const decodedAnswers = usesStoredHistory
+      ? storedDecodedAnswers
+      : configuredDecodedAnswers || storedDecodedAnswers;
     if (!decodedAnswers) continue;
 
     const suffixValue =
@@ -273,11 +297,6 @@ async function decodeSku(skuValue) {
         ? Number(attempt.suffixRaw)
         : null;
     const decodedAnswerMap = buildAnswerMap(decodedAnswers);
-    const productDetails = getProductDetails(product);
-    const storedAnswers =
-      productDetails.answers && typeof productDetails.answers === 'object'
-        ? productDetails.answers
-        : {};
     const pricingAnswers = {
       ...decodedAnswerMap,
       ...storedAnswers,
@@ -297,6 +316,7 @@ async function decodeSku(skuValue) {
 
     return {
       sku: normalizedSku,
+      decodeSource: usesStoredHistory ? 'stored_history' : 'current_config',
       category: {
         code: category.code,
         name: category.name,

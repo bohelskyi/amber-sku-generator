@@ -327,6 +327,44 @@ function decodeSkuAnswers(questions, encodedPart) {
   return decodeCompactSkuAnswers(questions, encodedPart);
 }
 
+function decodeStoredSkuAnswers(questions, encodedPart, storedAnswers = {}) {
+  if (!storedAnswers || typeof storedAnswers !== 'object') return null;
+
+  const answerCodes = [];
+  const decodedAnswers = [];
+
+  for (const question of questions) {
+    const hasStoredValue =
+      Object.prototype.hasOwnProperty.call(storedAnswers, question.key)
+      && storedAnswers[question.key] !== null
+      && storedAnswers[question.key] !== '';
+    const storedValue = hasStoredValue ? storedAnswers[question.key] : 0;
+    const option = question.options.find(
+      (item) => String(item.id) === String(storedValue)
+    );
+
+    if (option) {
+      decodedAnswers.push(decodeQuestionOption(question, option));
+      answerCodes.push({ value: option.id, sku_separator: question.sku_separator });
+      continue;
+    }
+
+    const hasZeroOption = question.options.some((item) => Number(item.id) === 0);
+    if (Number(storedValue) !== 0 || hasZeroOption) return null;
+
+    decodedAnswers.push(decodePlaceholder(question));
+    answerCodes.push({ value: 0, sku_separator: question.sku_separator });
+  }
+
+  const source = String(encodedPart || '');
+  const configuredSkuPart = buildBaseSku('', answerCodes);
+  const compactSkuPart = buildBaseSku('', answerCodes.map((answer) => answer.value));
+  const matchesStoredAnswers =
+    source === configuredSkuPart || stripSkuSeparators(source) === compactSkuPart;
+
+  return matchesStoredAnswers ? decodedAnswers : null;
+}
+
 function decodeVisibleSkuAnswers(questions, encodedPart) {
   const configuredSeparators = questions
     .map((question) => getQuestionSeparator(question))
@@ -614,6 +652,7 @@ module.exports = {
   buildBaseSku,
   parseVariationSku,
   decodeSkuAnswers,
+  decodeStoredSkuAnswers,
   decodeVisibleSkuAnswers,
   diagnoseSkuAnswers,
   diagnoseSkuAttempts,

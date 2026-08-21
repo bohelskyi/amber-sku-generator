@@ -290,8 +290,18 @@ function DecodeWorkspace({
           <span className="chip">
             {decodeData.existsInDb ? 'Є в базі' : 'Не знайдено в базі'}
           </span>
+          {decodeData.decodeSource === 'stored_history' && (
+            <span className="chip">Історичний формат</span>
+          )}
         </div>
       </div>
+
+      {decodeData.decodeSource === 'stored_history' && (
+        <div className="mt-4 border-l-4 border-amber-500 bg-amber-50 px-4 py-3 text-sm text-slate-700">
+          Артикул створено за попередньою конфігурацією. Параметри відновлено зі
+          збереженого товару.
+        </div>
+      )}
 
       <div className="grid gap-6 py-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(300px,0.65fr)]">
         <div>
