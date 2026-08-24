@@ -247,6 +247,7 @@ function DecodeWorkspace({
   onRecountTextAnswer,
   onStartRecount,
 }) {
+  const isCalibrationUnknown = decodeData.calibration?.status === 'unknown';
   const pricingConditions = decodeData.pricing?.conditions?.filter(
     (condition) => !condition.isInSku
   ) || [];
@@ -293,6 +294,11 @@ function DecodeWorkspace({
           {decodeData.decodeSource === 'stored_history' && (
             <span className="chip">Історичний формат</span>
           )}
+          {isCalibrationUnknown && (
+            <span className="chip border-amber-300 bg-amber-50 text-amber-800">
+              Калібрування не визначено
+            </span>
+          )}
         </div>
       </div>
 
@@ -335,6 +341,15 @@ function DecodeWorkspace({
         <aside className="space-y-4">
           <div>
             <h3 className="text-lg font-semibold text-slate-900">Розрахунок</h3>
+            {isCalibrationUnknown && (
+              <div className="mt-4 border-l-4 border-amber-500 bg-amber-50 px-4 py-3">
+                <div className="text-sm font-semibold text-slate-900">Ціну не визначено</div>
+                <div className="mt-1 text-sm leading-5 text-slate-600">
+                  Калібрування не закодоване в артикулі та відсутнє у збережених
+                  параметрах товару.
+                </div>
+              </div>
+            )}
             {decodeData.pricing && (
               <div className="mt-4 rounded-xl border border-[rgba(221,151,74,0.5)] bg-[rgba(221,151,74,0.12)] p-5">
                 <div className="text-xs uppercase tracking-[0.2em] text-[#8a5f2b]">

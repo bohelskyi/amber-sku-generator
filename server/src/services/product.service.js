@@ -1,6 +1,7 @@
 const pool = require('../db/pool');
 const { calculatePricing } = require('./pricing.service');
 const { getAnswerChanges } = require('../utils/answer-changes');
+const { resolveCalibrationState } = require('../utils/calibration');
 const { roundUah } = require('../utils/money');
 const {
   appendSkuSuffix,
@@ -75,6 +76,18 @@ async function getQuestionsForCategory(categoryCode) {
   }
 
   return questions;
+}
+
+async function getCalibrationQuestionForCategory(categoryCode) {
+  const result = await pool.query(
+    `SELECT visible_if_json
+     FROM questions
+     WHERE category_code = $1 AND key = 'is_calibrated'
+     LIMIT 1`,
+    [categoryCode]
+  );
+
+  return result.rows[0] || null;
 }
 
 function buildAnswerMap(decodedAnswers) {
@@ -259,6 +272,7 @@ async function decodeSku(skuValue) {
   }
 
   const questions = await getQuestionsForCategory(category.code);
+  const calibrationQuestion = await getCalibrationQuestionForCategory(category.code);
   const skuWithoutCategory = baseFullSku.slice(category.code.length);
   const attempts = buildSkuSuffixDecodeAttempts(skuWithoutCategory);
   const productResult = await pool.query(
@@ -301,22 +315,30 @@ async function decodeSku(skuValue) {
       ...decodedAnswerMap,
       ...storedAnswers,
     };
+    const calibration = resolveCalibrationState({
+      question: calibrationQuestion,
+      answers: pricingAnswers,
+      storedValue: productDetails.isCalibrated,
+    });
     const pricingWeight =
       product?.weight !== null && product?.weight !== undefined && Number(product.weight) > 0
         ? Number(product.weight)
         : category.requires_weight === 1
           ? suffixValue
           : 0;
-    const pricing = await calculatePricing(
-      category.code,
-      pricingAnswers,
-      pricingWeight,
-      productDetails.isCalibrated ?? pricingAnswers.is_calibrated ?? null
-    );
+    const pricing = calibration.status === 'unknown'
+      ? null
+      : await calculatePricing(
+          category.code,
+          pricingAnswers,
+          pricingWeight,
+          calibration.value
+        );
 
     return {
       sku: normalizedSku,
       decodeSource: usesStoredHistory ? 'stored_history' : 'current_config',
+      calibration,
       category: {
         code: category.code,
         name: category.name,
@@ -334,13 +356,15 @@ async function decodeSku(skuValue) {
           : 'none',
         value: suffixValue,
       },
-      pricing: getDecodedPricingPayload({
-        decodedAnswers,
-        product,
-        pricing,
-        pricingAnswers,
-        suffixValue,
-      }),
+      pricing: pricing
+        ? getDecodedPricingPayload({
+            decodedAnswers,
+            product,
+            pricing,
+            pricingAnswers,
+            suffixValue,
+          })
+        : null,
       variation:
         variationNumber !== null
           ? {
