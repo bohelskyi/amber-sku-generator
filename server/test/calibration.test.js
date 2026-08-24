@@ -1,7 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { resolveCalibrationState } = require('../src/utils/calibration');
+const {
+  resolveCalibrationState,
+  shouldHidePriceForCalibration,
+} = require('../src/utils/calibration');
 
 const calibrationQuestion = {
   visible_if_json: { raw_type: 1 },
@@ -61,5 +64,18 @@ test('marks hidden calibration as not applicable', () => {
       value: null,
       source: null,
     }
+  );
+});
+
+test('only hides a price that actually depends on unknown calibration', () => {
+  const unknownCalibration = { status: 'unknown', value: null };
+
+  assert.equal(
+    shouldHidePriceForCalibration(unknownCalibration, ['extra', 'processing', 'weight']),
+    false
+  );
+  assert.equal(
+    shouldHidePriceForCalibration(unknownCalibration, ['quality', 'is_calibrated']),
+    true
   );
 });

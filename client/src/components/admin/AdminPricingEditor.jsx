@@ -30,19 +30,30 @@ const groupScenarios = (scenarios = []) => {
   return groups;
 };
 
-const getAxisQuestions = (questions = []) => {
+const defaultWeightBands = [
+  { label: 'До 10 г', min_weight: 0, max_weight: 10 },
+  { label: '10-15 г', min_weight: 10, max_weight: 15 },
+  { label: 'Від 15 г', min_weight: 15, max_weight: '' },
+];
+
+const getAxisQuestions = (questions = [], requiresWeight = false) => {
   const axisQuestions = questions.filter((question) =>
     (question.input_type || 'options') !== 'text' && (question.options || []).length > 0
   );
-  const weightQuestion = questions.find((question) => question.id === 'weight');
-
-  if (weightQuestion && !axisQuestions.some((question) => question.id === 'weight')) {
+  if (requiresWeight && !axisQuestions.some((question) => question.id === 'weight')) {
     axisQuestions.push({
-      ...weightQuestion,
       id: 'weight',
-      label: weightQuestion?.label || 'Вага',
+      label: 'Вага',
       input_type: 'text',
       options: [{ id: 0, label: 'Ціна за грам' }],
+    });
+  }
+  if (requiresWeight) {
+    axisQuestions.push({
+      id: 'weight_band',
+      label: 'Діапазон ваги',
+      input_type: 'options',
+      options: [],
     });
   }
 
@@ -68,6 +79,70 @@ function FieldControl({ children, hint, label }) {
       {children}
       {hint && <span className="mt-1 block text-[11px] text-slate-500">{hint}</span>}
     </label>
+  );
+}
+
+function WeightBandsEditor({ bands = [], onChange }) {
+  const updateBand = (index, key, value) => {
+    onChange(bands.map((band, bandIndex) => (
+      bandIndex === index ? { ...band, [key]: value } : band
+    )));
+  };
+
+  return (
+    <div className="mt-3 border border-slate-200 bg-slate-50 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs font-semibold text-slate-700">Вагові діапазони</div>
+        <button
+          type="button"
+          className="btn btn-outline px-2 py-1 text-xs"
+          onClick={() => onChange([...bands, { label: '', min_weight: '', max_weight: '' }])}
+        >
+          Додати діапазон
+        </button>
+      </div>
+      <div className="mt-3 space-y-2">
+        {bands.map((band, index) => (
+          <div key={band.id || index} className="grid gap-2 sm:grid-cols-[minmax(140px,1fr)_100px_100px_auto]">
+            <input
+              className="input-sm"
+              value={band.label}
+              placeholder="Назва"
+              onChange={(event) => updateBand(index, 'label', event.target.value)}
+            />
+            <input
+              className="input-sm"
+              type="number"
+              min="0"
+              step="0.1"
+              value={band.min_weight}
+              placeholder="Від, включно"
+              onChange={(event) => updateBand(index, 'min_weight', event.target.value)}
+              onWheel={handleNumberWheel}
+              onKeyDown={handleNumberKeyDown}
+            />
+            <input
+              className="input-sm"
+              type="number"
+              min="0"
+              step="0.1"
+              value={band.max_weight ?? ''}
+              placeholder="До, не включно"
+              onChange={(event) => updateBand(index, 'max_weight', event.target.value)}
+              onWheel={handleNumberWheel}
+              onKeyDown={handleNumberKeyDown}
+            />
+            <button
+              type="button"
+              className="btn btn-outline px-2 py-1 text-xs"
+              onClick={() => onChange(bands.filter((_, bandIndex) => bandIndex !== index))}
+            >
+              Видалити
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -131,10 +206,18 @@ function ScenarioForm({
   onCancel,
   onSave,
   scenario,
+  selectedCat,
   setScenario,
   title,
 }) {
-  const axisQuestions = getAxisQuestions(currentCatQuestions);
+  const axisQuestions = getAxisQuestions(
+    currentCatQuestions,
+    Number(selectedCat?.requires_weight || 0) === 1
+  );
+  const categoryRequiresWeight = Number(selectedCat?.requires_weight || 0) === 1;
+  const availableAxisQuestions = categoryRequiresWeight
+    ? axisQuestions
+    : getAxisQuestions(currentCatQuestions, false);
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3">
@@ -147,6 +230,50 @@ function ScenarioForm({
           <input className="input-sm" list="scenario-group-options" placeholder="Натур. Калібрований" value={scenario.group_name} onChange={(event) => setScenario({ ...scenario, group_name: event.target.value })} />
         </FieldControl>
       </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+        <FieldControl label="Статус">
+          <select
+            className="input-sm"
+            value={scenario.status || 'draft'}
+            onChange={(event) => setScenario({ ...scenario, status: event.target.value })}
+          >
+            <option value="draft">Чернетка</option>
+            <option value="active">Активна</option>
+            <option value="archived">Архівна</option>
+          </select>
+        </FieldControl>
+        <FieldControl label="Пріоритет" hint="Більше число має перевагу.">
+          <input
+            className="input-sm"
+            type="number"
+            value={scenario.priority ?? 0}
+            onChange={(event) => setScenario({ ...scenario, priority: event.target.value })}
+            onWheel={handleNumberWheel}
+            onKeyDown={handleNumberKeyDown}
+          />
+        </FieldControl>
+        <FieldControl label="Режим ціни">
+          <select
+            className="input-sm"
+            value={scenario.price_mode || 'category_default'}
+            onChange={(event) => setScenario({ ...scenario, price_mode: event.target.value })}
+          >
+            <option value="category_default">Як у категорії</option>
+            <option value="per_gram_usd">USD за грам</option>
+            <option value="fixed_uah">Фіксована сума UAH</option>
+          </select>
+        </FieldControl>
+      </div>
+
+      <label className="mt-3 flex items-center gap-2 text-sm text-slate-700">
+        <input
+          type="checkbox"
+          checked={scenario.apply_modifiers !== false}
+          onChange={(event) => setScenario({ ...scenario, apply_modifiers: event.target.checked })}
+        />
+        Застосовувати модифікатори після матриці
+      </label>
 
       <datalist id="scenario-group-options">
         {groupOptions.map((groupName) => (
@@ -167,19 +294,32 @@ function ScenarioForm({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <AxisSelector
           axisKey={scenario.axis_x_key}
-          axisQuestions={axisQuestions}
+          axisQuestions={availableAxisQuestions}
           label="Рядки матриці"
-          onChange={(nextValue) => setScenario({ ...scenario, axis_x_key: nextValue })}
+          onChange={(nextValue) => setScenario({
+            ...scenario,
+            axis_x_key: nextValue,
+            weight_bands: nextValue === 'weight_band' && !(scenario.weight_bands || []).length
+              ? defaultWeightBands
+              : scenario.weight_bands || [],
+          })}
         />
         <AxisSelector
           allowEmpty
           axisKey={scenario.axis_y_key}
-          axisQuestions={axisQuestions}
+          axisQuestions={availableAxisQuestions.filter((question) => question.id !== 'weight_band')}
           label="Колонки матриці"
           onChange={(nextValue) => setScenario({ ...scenario, axis_y_key: nextValue })}
           supportCombo
         />
       </div>
+
+      {scenario.axis_x_key === 'weight_band' && (
+        <WeightBandsEditor
+          bands={scenario.weight_bands || []}
+          onChange={(weightBands) => setScenario({ ...scenario, weight_bands: weightBands })}
+        />
+      )}
 
       <div className="mt-3 flex gap-2">
         <button onClick={onSave} className="btn btn-primary text-xs">{title?.includes('Редагувати') ? 'Зберегти сценарій' : 'Створити сценарій'}</button>
@@ -295,8 +435,18 @@ export function AdminPricingEditor({
               {isOpen && (
                 <div className="space-y-6 border-t border-slate-200 p-4">
                   {group.scenarios.map((scenario) => {
-                    const axisX = getPricingAxis(scenario.axis_x_key, currentCatQuestions, 'X');
-                    const axisY = getPricingAxis(scenario.axis_y_key, currentCatQuestions, 'Base');
+                    const axisX = getPricingAxis(
+                      scenario.axis_x_key,
+                      currentCatQuestions,
+                      'X',
+                      scenario.weight_bands || []
+                    );
+                    const axisY = getPricingAxis(
+                      scenario.axis_y_key,
+                      currentCatQuestions,
+                      'Base',
+                      scenario.weight_bands || []
+                    );
                     const optionsX = axisX.options;
                     const optionsY = axisY.options;
 
@@ -305,7 +455,29 @@ export function AdminPricingEditor({
                         <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
                           <div>
                             <h3 className="font-semibold text-lg text-slate-800">{scenario.name}</h3>
-                            <div className="mt-1 text-xs text-slate-500">Група: {getScenarioGroupName(scenario)}</div>
+                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                              <span>Група: {getScenarioGroupName(scenario)}</span>
+                              <span className="chip normal-case tracking-normal">
+                                {scenario.status === 'draft'
+                                  ? 'Чернетка'
+                                  : scenario.status === 'archived'
+                                    ? 'Архівна'
+                                    : 'Активна'}
+                              </span>
+                              {scenario.apply_modifiers === false && (
+                                <span className="chip normal-case tracking-normal">Без модифікаторів</span>
+                              )}
+                              <span className="chip normal-case tracking-normal">
+                                Пріоритет: {scenario.priority || 0}
+                              </span>
+                              <span className="chip normal-case tracking-normal">
+                                {scenario.price_mode === 'fixed_uah'
+                                  ? 'Фіксована UAH'
+                                  : scenario.price_mode === 'per_gram_usd'
+                                    ? 'USD за грам'
+                                    : 'Режим категорії'}
+                              </span>
+                            </div>
                           </div>
                           <div className="flex flex-wrap gap-2">
                             <button onClick={() => beginScenarioEdit(scenario)} className="btn btn-outline text-xs">Редагувати</button>
@@ -324,6 +496,7 @@ export function AdminPricingEditor({
                               onCancel={() => setEditScenario(null)}
                               onSave={updateScenario}
                               scenario={editScenario}
+                              selectedCat={selectedCat}
                               setScenario={setEditScenario}
                               title="Редагувати сценарій"
                             />
@@ -385,6 +558,7 @@ export function AdminPricingEditor({
           groupOptions={knownGroupNames}
           onSave={addScenario}
           scenario={newScenario}
+          selectedCat={selectedCat}
           setScenario={setNewScenario}
           title=""
         />

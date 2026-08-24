@@ -94,7 +94,9 @@ export function PreviewResult({
         </div>
       )}
 
-      {isWeightRequired && parseFloat(effectivePricePerGram) > 0 && (
+      {isWeightRequired
+        && previewData.priceMode !== 'fixed_uah'
+        && parseFloat(effectivePricePerGram) > 0 && (
         <div className="text-center mb-8 text-slate-600">
           <p>Ціна за грам: <strong>{formatUahPerGram(effectivePricePerGramUah)}</strong> <span className="text-sm">({formatUsd(effectivePricePerGram)})</span></p>
         </div>

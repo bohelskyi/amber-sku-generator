@@ -248,6 +248,7 @@ function DecodeWorkspace({
   onStartRecount,
 }) {
   const isCalibrationUnknown = decodeData.calibration?.status === 'unknown';
+  const isCalibrationBlockingPrice = isCalibrationUnknown && !decodeData.pricing;
   const pricingConditions = decodeData.pricing?.conditions?.filter(
     (condition) => !condition.isInSku
   ) || [];
@@ -341,7 +342,7 @@ function DecodeWorkspace({
         <aside className="space-y-4">
           <div>
             <h3 className="text-lg font-semibold text-slate-900">Розрахунок</h3>
-            {isCalibrationUnknown && (
+            {isCalibrationBlockingPrice && (
               <div className="mt-4 border-l-4 border-amber-500 bg-amber-50 px-4 py-3">
                 <div className="text-sm font-semibold text-slate-900">Ціну не визначено</div>
                 <div className="mt-1 text-sm leading-5 text-slate-600">
@@ -361,15 +362,19 @@ function DecodeWorkspace({
                 <div className="mt-3">
                   <span className="chip">{getPricingSourceLabel(decodeData.pricing.source)}</span>
                 </div>
-                {decodeData.pricing.isWeightBased && (
+                {(decodeData.pricing.isWeightBased || decodeData.pricing.usesWeight) && (
                   <div className="mt-4 grid gap-3 border-t border-[rgba(221,151,74,0.35)] pt-4 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
-                    <div>
-                      <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Ціна за грам</div>
-                      <div className="mt-1 text-sm font-semibold text-slate-900">
-                        {formatUahPerGram(decodeData.pricing.pricePerGramUah)} ({formatUsd(decodeData.pricing.pricePerGram)})
+                    {decodeData.pricing.isWeightBased && (
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Ціна за грам</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-900">
+                          {formatUahPerGram(decodeData.pricing.pricePerGramUah)} ({formatUsd(decodeData.pricing.pricePerGram)})
+                        </div>
                       </div>
-                    </div>
-                    {decodeData.pricing.weight !== null && decodeData.pricing.weight !== undefined && (
+                    )}
+                    {decodeData.pricing.usesWeight
+                      && decodeData.pricing.weight !== null
+                      && decodeData.pricing.weight !== undefined && (
                       <div>
                         <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Вага</div>
                         <div className="mt-1 text-sm font-semibold text-slate-900">
@@ -603,7 +608,7 @@ function RecountPanel({
                 </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-                {decodeData.pricing?.isWeightBased && (
+                {recountPreview.corrected.priceMode === 'per_gram_usd' && (
                   <div>
                     <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Ціна за грам</div>
                     <div className="mt-1 text-sm font-semibold text-slate-900">
@@ -703,7 +708,7 @@ function PreviousPricingSnapshot({ config, decodeData }) {
             {formatUah(pricing.totalPriceUah)}
           </div>
         </div>
-        {pricing.isWeightBased && pricing.weight !== null && pricing.weight !== undefined && (
+        {pricing.usesWeight && pricing.weight !== null && pricing.weight !== undefined && (
           <div>
             <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Вага</div>
             <div className="mt-1 text-sm font-semibold text-slate-900">{pricing.weight} г</div>

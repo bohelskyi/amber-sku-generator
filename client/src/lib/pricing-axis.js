@@ -7,7 +7,7 @@ export function parseComboAxisKey(axisKey) {
   return keys.length > 1 ? keys : null;
 }
 
-export function getPricingAxis(axisKey, questions, fallbackLabel) {
+export function getPricingAxis(axisKey, questions, fallbackLabel, weightBands = []) {
   if (!axisKey) {
     return {
       label: fallbackLabel,
@@ -18,6 +18,15 @@ export function getPricingAxis(axisKey, questions, fallbackLabel) {
   const comboKeys = parseComboAxisKey(axisKey);
   if (!comboKeys) {
     const question = questions.find((item) => item.id === axisKey);
+    if (axisKey === 'weight_band') {
+      return {
+        label: 'Діапазон ваги',
+        options: weightBands.map((band) => ({
+          id: Number(band.id),
+          label: band.label,
+        })),
+      };
+    }
     if (axisKey === 'weight') {
       return {
         label: question?.label || 'Вага',

@@ -1,6 +1,13 @@
 const pool = require('../db/pool');
 const { getUsdUahRate } = require('./currency.service');
 const { resolveAxisValue } = require('../utils/pricing-axis');
+const {
+  normalizePriceMode,
+  normalizeScenarioStatus,
+  resolveWeightBand,
+  sortScenariosByPrecedence,
+  validateWeightBands,
+} = require('../utils/pricing-scenarios');
 const { asRuleObject } = require('../utils/rules');
 const { roundUah } = require('../utils/money');
 
@@ -56,6 +63,10 @@ function getAxisKeys(axisKey) {
     .filter(Boolean);
 }
 
+function getAxisDependentKeys(axisKey) {
+  return getAxisKeys(axisKey).map((key) => (key === 'weight_band' ? 'weight' : key));
+}
+
 function getRuleKeys(ruleJson) {
   return Object.keys(asRuleObject(ruleJson));
 }
@@ -72,9 +83,25 @@ function getPricingWeight(answers = {}, weight) {
   return Number.isFinite(answerWeight) ? answerWeight : 0;
 }
 
+function getEffectivePriceMode(scenario, categoryRequiresWeight, scenarioUsesWeight) {
+  const configuredMode = normalizePriceMode(scenario?.price_mode);
+  if (configuredMode !== 'category_default') return configuredMode;
+  return categoryRequiresWeight || scenarioUsesWeight ? 'per_gram_usd' : 'fixed_uah';
+}
+
+function resolveScenarioAxisValue(axisKey, answers, weight, weightBands) {
+  if (axisKey === 'weight_band') {
+    return resolveWeightBand(weightBands, weight)?.id ?? null;
+  }
+
+  return resolveAxisValue(axisKey, answers);
+}
+
 async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated) {
   const scenarios = await pool.query(
-    'SELECT * FROM price_scenarios WHERE category_code = $1',
+    `SELECT *
+     FROM price_scenarios
+     WHERE category_code = $1 AND COALESCE(status, 'active') = 'active'`,
     [categoryCode]
   );
   const categoryResult = await pool.query(
@@ -82,7 +109,26 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
     [categoryCode]
   );
 
+  const scenarioIds = scenarios.rows.map((scenario) => Number(scenario.id));
+  const weightBandsResult = scenarioIds.length > 0
+    ? await pool.query(
+        `SELECT id, scenario_id, label, min_weight, max_weight, sort_order
+         FROM price_weight_bands
+         WHERE scenario_id = ANY($1::int[])
+         ORDER BY scenario_id, sort_order, min_weight`,
+        [scenarioIds]
+      )
+    : { rows: [] };
+  const weightBandsByScenario = new Map();
+  for (const band of weightBandsResult.rows) {
+    if (!weightBandsByScenario.has(Number(band.scenario_id))) {
+      weightBandsByScenario.set(Number(band.scenario_id), []);
+    }
+    weightBandsByScenario.get(Number(band.scenario_id)).push(band);
+  }
+
   let pricePerGram = 0;
+  let fixedPriceUah = null;
   let logMessage = 'Ціна не знайдена';
   const calibratedAnswer =
     answers.is_calibrated !== undefined &&
@@ -94,11 +140,7 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
   const weightVal = getPricingWeight(answers, weight);
   let pricingDetails = null;
 
-  const activeScenario = [...scenarios.rows].sort((a, b) => {
-    const aRuleCount = Object.keys(asRuleObject(a.match_json)).length;
-    const bRuleCount = Object.keys(asRuleObject(b.match_json)).length;
-    return bRuleCount - aRuleCount || Number(a.id) - Number(b.id);
-  }).find((scenario) => {
+  const activeScenario = sortScenariosByPrecedence(scenarios.rows).find((scenario) => {
     return isPricingRuleMatched(scenario.match_json, answers, normalizedCalibrated);
   });
   const categoryRequiresWeight =
@@ -108,31 +150,54 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
   const scenarioUsesWeight =
     activeScenario &&
     (axisUsesKey(activeScenario.axis_x_key, 'weight') ||
-      axisUsesKey(activeScenario.axis_y_key, 'weight'));
-  const isWeightBased = categoryRequiresWeight || scenarioUsesWeight;
+      axisUsesKey(activeScenario.axis_y_key, 'weight') ||
+      axisUsesKey(activeScenario.axis_x_key, 'weight_band') ||
+      axisUsesKey(activeScenario.axis_y_key, 'weight_band'));
+  const priceMode = getEffectivePriceMode(
+    activeScenario,
+    categoryRequiresWeight,
+    scenarioUsesWeight
+  );
+  const isWeightBased = priceMode === 'per_gram_usd';
+  const usesWeight = categoryRequiresWeight || scenarioUsesWeight;
 
   if (activeScenario) {
     const matrixAnswers = scenarioUsesWeight ? { ...answers, weight: 0 } : answers;
-    const xVal = resolveAxisValue(activeScenario.axis_x_key, matrixAnswers);
-    const yVal = resolveAxisValue(activeScenario.axis_y_key, matrixAnswers);
-
-    const priceRow = await pool.query(
-      `SELECT price
-       FROM price_matrix
-       WHERE scenario_id = $1 AND x_val = $2 AND y_val = $3`,
-      [activeScenario.id, xVal, yVal]
+    const weightBands = weightBandsByScenario.get(Number(activeScenario.id)) || [];
+    const xVal = resolveScenarioAxisValue(
+      activeScenario.axis_x_key,
+      matrixAnswers,
+      weightVal,
+      weightBands
     );
+    const yVal = resolveScenarioAxisValue(
+      activeScenario.axis_y_key,
+      matrixAnswers,
+      weightVal,
+      weightBands
+    );
+
+    const priceRow = xVal === null || yVal === null
+      ? { rows: [] }
+      : await pool.query(
+          `SELECT price
+           FROM price_matrix
+           WHERE scenario_id = $1 AND x_val = $2 AND y_val = $3`,
+          [activeScenario.id, xVal, yVal]
+        );
 
     if (priceRow.rows.length > 0) {
       const basePrice = Number(priceRow.rows[0].price);
       const matchedModifiers = [];
-      pricePerGram = Number(priceRow.rows[0].price);
-      logMessage = `${activeScenario.name} (Базова: ${isWeightBased ? `$${pricePerGram}` : `${pricePerGram} ₴`})`;
+      let calculatedPrice = basePrice;
+      logMessage = `${activeScenario.name} (Базова: ${isWeightBased ? `$${calculatedPrice}` : `${calculatedPrice} ₴`})`;
 
-      const modifiers = await pool.query(
-        'SELECT * FROM price_modifiers WHERE category_code = $1',
-        [categoryCode]
-      );
+      const modifiers = activeScenario.apply_modifiers === false
+        ? { rows: [] }
+        : await pool.query(
+            'SELECT * FROM price_modifiers WHERE category_code = $1',
+            [categoryCode]
+          );
 
       for (const modifier of modifiers.rows) {
         const modifierRule = Object.keys(asRuleObject(modifier.match_json)).length > 0
@@ -140,7 +205,7 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
           : { [modifier.trigger_key]: modifier.trigger_val };
 
         if (isPricingRuleMatched(modifierRule, answers, normalizedCalibrated)) {
-          pricePerGram *= Number(modifier.factor);
+          calculatedPrice *= Number(modifier.factor);
           matchedModifiers.push({
             id: modifier.id,
             factor: Number(modifier.factor),
@@ -151,8 +216,13 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
         }
       }
 
+      pricePerGram = isWeightBased ? calculatedPrice : 0;
+      fixedPriceUah = priceMode === 'fixed_uah' ? calculatedPrice : null;
+
       pricingDetails = {
         isWeightBased,
+        usesWeight,
+        priceMode,
         calibratedValue: normalizedCalibrated,
         scenario: {
           id: activeScenario.id,
@@ -161,26 +231,37 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
           match_json: asRuleObject(activeScenario.match_json),
           axis_x_key: activeScenario.axis_x_key,
           axis_y_key: activeScenario.axis_y_key,
+          priority: Number(activeScenario.priority || 0),
+          status: activeScenario.status || 'active',
+          price_mode: normalizePriceMode(activeScenario.price_mode),
+          apply_modifiers: activeScenario.apply_modifiers !== false,
         },
         matrix: {
           x: {
             key: activeScenario.axis_x_key,
             value: xVal,
-            dependentKeys: getAxisKeys(activeScenario.axis_x_key),
+            label: activeScenario.axis_x_key === 'weight_band'
+              ? weightBands.find((band) => Number(band.id) === Number(xVal))?.label || null
+              : null,
+            dependentKeys: getAxisDependentKeys(activeScenario.axis_x_key),
           },
           y: {
             key: activeScenario.axis_y_key,
             value: yVal,
-            dependentKeys: getAxisKeys(activeScenario.axis_y_key),
+            label: activeScenario.axis_y_key === 'weight_band'
+              ? weightBands.find((band) => Number(band.id) === Number(yVal))?.label || null
+              : null,
+            dependentKeys: getAxisDependentKeys(activeScenario.axis_y_key),
           },
         },
         basePrice,
-        finalPricePerGram: pricePerGram,
+        finalPricePerGram: isWeightBased ? pricePerGram : null,
+        finalFixedPriceUah: fixedPriceUah,
         matchedModifiers,
         dependentKeys: uniqueKeys([
           ...getRuleKeys(activeScenario.match_json),
-          ...getAxisKeys(activeScenario.axis_x_key),
-          ...getAxisKeys(activeScenario.axis_y_key),
+          ...getAxisDependentKeys(activeScenario.axis_x_key),
+          ...getAxisDependentKeys(activeScenario.axis_y_key),
           ...matchedModifiers.flatMap((modifier) => modifier.dependentKeys),
         ]),
       };
@@ -203,11 +284,11 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
         totalPriceUah: roundUah(Number(totalPrice) * uahRate),
       };
     } else {
-      totalPrice = uahRate > 0 ? (pricePerGram / uahRate).toFixed(2) : '0.00';
+      totalPrice = uahRate > 0 ? (Number(fixedPriceUah || 0) / uahRate).toFixed(2) : '0.00';
       currencyPayload = {
         uahRate,
         pricePerGramUah: null,
-        totalPriceUah: roundUah(pricePerGram),
+        totalPriceUah: roundUah(fixedPriceUah),
       };
     }
   } catch (err) {
@@ -216,7 +297,7 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
       currencyPayload = {
         uahRate: null,
         pricePerGramUah: null,
-        totalPriceUah: roundUah(pricePerGram),
+        totalPriceUah: roundUah(fixedPriceUah),
       };
     }
   }
@@ -224,11 +305,16 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
   return {
     weightVal,
     pricePerGram,
+    fixedPriceUah,
+    priceMode,
+    usesWeight,
     totalPrice,
     logMessage,
     currencyPayload,
     pricingDetails: pricingDetails || {
       isWeightBased,
+      usesWeight,
+      priceMode,
       calibratedValue: normalizedCalibrated,
       scenario: activeScenario
         ? {
@@ -238,17 +324,22 @@ async function calculatePricing(categoryCode, answers = {}, weight, isCalibrated
             match_json: asRuleObject(activeScenario.match_json),
             axis_x_key: activeScenario.axis_x_key,
             axis_y_key: activeScenario.axis_y_key,
+            priority: Number(activeScenario.priority || 0),
+            status: activeScenario.status || 'active',
+            price_mode: normalizePriceMode(activeScenario.price_mode),
+            apply_modifiers: activeScenario.apply_modifiers !== false,
           }
         : null,
       matrix: null,
       basePrice: null,
-      finalPricePerGram: pricePerGram,
+      finalPricePerGram: isWeightBased ? pricePerGram : null,
+      finalFixedPriceUah: fixedPriceUah,
       matchedModifiers: [],
       dependentKeys: activeScenario
         ? uniqueKeys([
             ...getRuleKeys(activeScenario.match_json),
-            ...getAxisKeys(activeScenario.axis_x_key),
-            ...getAxisKeys(activeScenario.axis_y_key),
+            ...getAxisDependentKeys(activeScenario.axis_x_key),
+            ...getAxisDependentKeys(activeScenario.axis_y_key),
           ])
         : [],
     },
@@ -270,12 +361,23 @@ async function getAdminPrices(catCode) {
 
   const scenarioIds = scenariosResult.rows.map((scenario) => scenario.id);
   let matrixRows = [];
+  let weightBandRows = [];
   if (scenarioIds.length > 0) {
-    const matrixResult = await pool.query(
-      'SELECT * FROM price_matrix WHERE scenario_id = ANY($1::int[]) ORDER BY scenario_id, x_val, y_val',
-      [scenarioIds]
-    );
+    const [matrixResult, weightBandsResult] = await Promise.all([
+      pool.query(
+        'SELECT * FROM price_matrix WHERE scenario_id = ANY($1::int[]) ORDER BY scenario_id, x_val, y_val',
+        [scenarioIds]
+      ),
+      pool.query(
+        `SELECT id, scenario_id, label, min_weight, max_weight, sort_order
+         FROM price_weight_bands
+         WHERE scenario_id = ANY($1::int[])
+         ORDER BY scenario_id, sort_order, min_weight`,
+        [scenarioIds]
+      ),
+    ]);
     matrixRows = matrixResult.rows;
+    weightBandRows = weightBandsResult.rows;
   }
 
   const matrixByScenario = new Map();
@@ -284,13 +386,108 @@ async function getAdminPrices(catCode) {
     matrixByScenario.get(row.scenario_id).push(row);
   }
 
+  const weightBandsByScenario = new Map();
+  for (const row of weightBandRows) {
+    if (!weightBandsByScenario.has(row.scenario_id)) {
+      weightBandsByScenario.set(row.scenario_id, []);
+    }
+    weightBandsByScenario.get(row.scenario_id).push({
+      ...row,
+      min_weight: Number(row.min_weight),
+      max_weight: row.max_weight === null ? null : Number(row.max_weight),
+    });
+  }
+
   return {
     scenarios: scenariosResult.rows.map((scenario) => ({
       ...scenario,
       matrix: matrixByScenario.get(scenario.id) || [],
+      weight_bands: weightBandsByScenario.get(scenario.id) || [],
     })),
     modifiers: modifiersResult.rows,
   };
+}
+
+function normalizeScenarioPayload(payload = {}, fallbackStatus = 'draft') {
+  const axisXKey = String(payload.axis_x_key || '').trim();
+  const axisYKey = String(payload.axis_y_key || '').trim();
+  if (axisYKey === 'weight_band') {
+    const err = new Error('Вагові діапазони підтримуються тільки в рядках матриці.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const weightBands = axisXKey === 'weight_band'
+    ? validateWeightBands(payload.weight_bands || [])
+    : [];
+
+  return {
+    priority: Number.isFinite(Number(payload.priority)) ? Number(payload.priority) : 0,
+    status: normalizeScenarioStatus(payload.status, fallbackStatus),
+    priceMode: normalizePriceMode(payload.price_mode),
+    applyModifiers: payload.apply_modifiers !== false,
+    axisXKey,
+    axisYKey,
+    weightBands,
+  };
+}
+
+async function syncScenarioWeightBands(client, scenarioId, weightBands, hadWeightBands) {
+  const existingResult = await client.query(
+    'SELECT id FROM price_weight_bands WHERE scenario_id = $1',
+    [Number(scenarioId)]
+  );
+  const existingIds = new Set(existingResult.rows.map((row) => Number(row.id)));
+
+  if (weightBands.length === 0) {
+    if (hadWeightBands || existingIds.size > 0) {
+      await client.query('DELETE FROM price_matrix WHERE scenario_id = $1', [Number(scenarioId)]);
+      await client.query('DELETE FROM price_weight_bands WHERE scenario_id = $1', [Number(scenarioId)]);
+    }
+    return;
+  }
+
+  const keptIds = new Set();
+  for (const band of weightBands) {
+    if (band.id !== null && existingIds.has(Number(band.id))) {
+      await client.query(
+        `UPDATE price_weight_bands
+         SET label = $1, min_weight = $2, max_weight = $3, sort_order = $4
+         WHERE id = $5 AND scenario_id = $6`,
+        [
+          band.label,
+          band.min_weight,
+          band.max_weight,
+          band.sort_order,
+          Number(band.id),
+          Number(scenarioId),
+        ]
+      );
+      keptIds.add(Number(band.id));
+      continue;
+    }
+
+    const inserted = await client.query(
+      `INSERT INTO price_weight_bands
+       (scenario_id, label, min_weight, max_weight, sort_order)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
+      [Number(scenarioId), band.label, band.min_weight, band.max_weight, band.sort_order]
+    );
+    keptIds.add(Number(inserted.rows[0].id));
+  }
+
+  const removedIds = [...existingIds].filter((id) => !keptIds.has(id));
+  if (removedIds.length > 0) {
+    await client.query(
+      'DELETE FROM price_matrix WHERE scenario_id = $1 AND x_val = ANY($2::int[])',
+      [Number(scenarioId), removedIds]
+    );
+    await client.query(
+      'DELETE FROM price_weight_bands WHERE scenario_id = $1 AND id = ANY($2::int[])',
+      [Number(scenarioId), removedIds]
+    );
+  }
 }
 
 async function upsertPriceCell({ scenario_id, x_val, y_val, price }) {
@@ -303,28 +500,139 @@ async function upsertPriceCell({ scenario_id, x_val, y_val, price }) {
   );
 }
 
-async function createScenario({ category_code, name, group_name, match_json, axis_x_key, axis_y_key }) {
+async function createScenario({
+  category_code,
+  name,
+  group_name,
+  match_json,
+  axis_x_key,
+  axis_y_key,
+  priority,
+  status,
+  price_mode,
+  apply_modifiers,
+  weight_bands,
+}) {
   const payload = typeof match_json === 'string' ? JSON.parse(match_json) : match_json || {};
   const scenarioGroup = normalizeScenarioGroup(group_name, name);
-  const result = await pool.query(
-    `INSERT INTO price_scenarios (category_code, name, group_name, match_json, axis_x_key, axis_y_key)
-     VALUES ($1, $2, $3, $4::jsonb, $5, $6)
-     RETURNING id`,
-    [category_code, name, scenarioGroup, JSON.stringify(payload), axis_x_key, axis_y_key]
-  );
+  const normalized = normalizeScenarioPayload({
+    axis_x_key,
+    axis_y_key,
+    priority,
+    status,
+    price_mode,
+    apply_modifiers,
+    weight_bands,
+  });
+  const client = await pool.connect();
 
-  return { id: result.rows[0].id };
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      `INSERT INTO price_scenarios
+       (category_code, name, group_name, match_json, axis_x_key, axis_y_key,
+        priority, status, price_mode, apply_modifiers)
+       VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10)
+       RETURNING id`,
+      [
+        category_code,
+        name,
+        scenarioGroup,
+        JSON.stringify(payload),
+        normalized.axisXKey,
+        normalized.axisYKey || null,
+        normalized.priority,
+        normalized.status,
+        normalized.priceMode,
+        normalized.applyModifiers,
+      ]
+    );
+    await syncScenarioWeightBands(
+      client,
+      Number(result.rows[0].id),
+      normalized.weightBands,
+      false
+    );
+    await client.query('COMMIT');
+    return { id: result.rows[0].id };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
-async function updateScenario({ id, name, group_name, match_json, axis_x_key, axis_y_key }) {
+async function updateScenario({
+  id,
+  name,
+  group_name,
+  match_json,
+  axis_x_key,
+  axis_y_key,
+  priority,
+  status,
+  price_mode,
+  apply_modifiers,
+  weight_bands,
+}) {
   const payload = typeof match_json === 'string' ? JSON.parse(match_json) : match_json || {};
   const scenarioGroup = normalizeScenarioGroup(group_name, name);
-  await pool.query(
-    `UPDATE price_scenarios
-     SET name = $1, group_name = $2, match_json = $3::jsonb, axis_x_key = $4, axis_y_key = $5
-     WHERE id = $6`,
-    [name, scenarioGroup, JSON.stringify(payload), axis_x_key, axis_y_key || null, Number(id)]
-  );
+  const normalized = normalizeScenarioPayload({
+    axis_x_key,
+    axis_y_key,
+    priority,
+    status,
+    price_mode,
+    apply_modifiers,
+    weight_bands,
+  }, 'active');
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+    const currentResult = await client.query(
+      'SELECT axis_x_key FROM price_scenarios WHERE id = $1 FOR UPDATE',
+      [Number(id)]
+    );
+    if (currentResult.rows.length === 0) {
+      const err = new Error('Сценарій не знайдено');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    await client.query(
+      `UPDATE price_scenarios
+       SET name = $1, group_name = $2, match_json = $3::jsonb,
+           axis_x_key = $4, axis_y_key = $5, priority = $6, status = $7,
+           price_mode = $8, apply_modifiers = $9
+       WHERE id = $10`,
+      [
+        name,
+        scenarioGroup,
+        JSON.stringify(payload),
+        normalized.axisXKey,
+        normalized.axisYKey || null,
+        normalized.priority,
+        normalized.status,
+        normalized.priceMode,
+        normalized.applyModifiers,
+        Number(id),
+      ]
+    );
+    await syncScenarioWeightBands(
+      client,
+      Number(id),
+      normalized.weightBands,
+      currentResult.rows[0].axis_x_key === 'weight_band'
+    );
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 async function duplicateScenario(id) {
@@ -344,8 +652,10 @@ async function duplicateScenario(id) {
 
     const source = sourceScenario.rows[0];
     const duplicatedScenario = await client.query(
-      `INSERT INTO price_scenarios (category_code, name, group_name, match_json, axis_x_key, axis_y_key)
-       VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+      `INSERT INTO price_scenarios
+       (category_code, name, group_name, match_json, axis_x_key, axis_y_key,
+        priority, status, price_mode, apply_modifiers)
+       VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, 'draft', $8, $9)
        RETURNING id`,
       [
         source.category_code,
@@ -354,17 +664,47 @@ async function duplicateScenario(id) {
         JSON.stringify(source.match_json || {}),
         source.axis_x_key,
         source.axis_y_key,
+        Number(source.priority || 0),
+        normalizePriceMode(source.price_mode),
+        source.apply_modifiers !== false,
       ]
     );
 
     const newScenarioId = duplicatedScenario.rows[0].id;
-    await client.query(
-      `INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
-       SELECT $1, x_val, y_val, price
-       FROM price_matrix
-       WHERE scenario_id = $2`,
-      [Number(newScenarioId), Number(id)]
+    const bandIdMap = new Map();
+    const sourceBands = await client.query(
+      `SELECT id, label, min_weight, max_weight, sort_order
+       FROM price_weight_bands
+       WHERE scenario_id = $1
+       ORDER BY sort_order, min_weight`,
+      [Number(id)]
     );
+    for (const band of sourceBands.rows) {
+      const insertedBand = await client.query(
+        `INSERT INTO price_weight_bands
+         (scenario_id, label, min_weight, max_weight, sort_order)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id`,
+        [newScenarioId, band.label, band.min_weight, band.max_weight, band.sort_order]
+      );
+      bandIdMap.set(Number(band.id), Number(insertedBand.rows[0].id));
+    }
+
+    const sourceMatrix = await client.query(
+      'SELECT x_val, y_val, price FROM price_matrix WHERE scenario_id = $1',
+      [Number(id)]
+    );
+    for (const cell of sourceMatrix.rows) {
+      const xVal = source.axis_x_key === 'weight_band'
+        ? bandIdMap.get(Number(cell.x_val))
+        : Number(cell.x_val);
+      if (xVal === undefined) continue;
+      await client.query(
+        `INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
+         VALUES ($1, $2, $3, $4)`,
+        [Number(newScenarioId), xVal, Number(cell.y_val), Number(cell.price)]
+      );
+    }
 
     await client.query('COMMIT');
     return { success: true, id: newScenarioId };

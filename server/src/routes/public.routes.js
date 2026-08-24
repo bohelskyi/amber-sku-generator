@@ -45,6 +45,9 @@ router.post('/price-preview', async (req, res) => {
     const pricing = await calculatePricing(categoryCode, answers, weight, isCalibrated);
     res.json({
       pricePerGram: pricing.pricePerGram.toFixed(2),
+      fixedPriceUah: pricing.fixedPriceUah,
+      priceMode: pricing.priceMode,
+      usesWeight: pricing.usesWeight,
       totalPrice: pricing.totalPrice,
       weightVal: pricing.weightVal,
       logMessage: pricing.logMessage,

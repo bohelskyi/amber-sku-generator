@@ -1,7 +1,10 @@
 const pool = require('../db/pool');
 const { calculatePricing } = require('./pricing.service');
 const { getAnswerChanges } = require('../utils/answer-changes');
-const { resolveCalibrationState } = require('../utils/calibration');
+const {
+  resolveCalibrationState,
+  shouldHidePriceForCalibration,
+} = require('../utils/calibration');
 const { roundUah } = require('../utils/money');
 const {
   appendSkuSuffix,
@@ -218,7 +221,7 @@ function getDecodedPricingPayload({
     || pricing.pricingDetails?.scenario?.name
     || null;
   const shouldShowCalibratedCondition =
-    Number(pricingAnswers.raw_type) === 1 ||
+    dependentKeys.includes('is_calibrated') ||
     pricingAnswers.is_calibrated !== undefined ||
     productDetails.isCalibrated !== undefined;
   const conditionKeys = uniqueValues([
@@ -229,6 +232,8 @@ function getDecodedPricingPayload({
   return {
     source: storedPricePerGram !== null ? 'stored' : 'calculated',
     isWeightBased: Boolean(pricing.pricingDetails?.isWeightBased),
+    usesWeight: Boolean(pricing.pricingDetails?.usesWeight),
+    priceMode: pricing.pricingDetails?.priceMode || pricing.priceMode || 'category_default',
     weight: storedWeight ?? pricing.weightVal ?? suffixValue ?? null,
     pricePerGram,
     pricePerGramUah,
@@ -326,14 +331,18 @@ async function decodeSku(skuValue) {
         : category.requires_weight === 1
           ? suffixValue
           : 0;
-    const pricing = calibration.status === 'unknown'
+    const calculatedPricing = await calculatePricing(
+      category.code,
+      pricingAnswers,
+      pricingWeight,
+      calibration.value
+    );
+    const pricing = shouldHidePriceForCalibration(
+      calibration,
+      calculatedPricing.pricingDetails?.dependentKeys || []
+    )
       ? null
-      : await calculatePricing(
-          category.code,
-          pricingAnswers,
-          pricingWeight,
-          calibration.value
-        );
+      : calculatedPricing;
 
     return {
       sku: normalizedSku,
@@ -499,6 +508,9 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
   const {
     weightVal,
     pricePerGram,
+    fixedPriceUah,
+    priceMode,
+    usesWeight,
     totalPrice,
     logMessage,
     currencyPayload,
@@ -539,6 +551,9 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
       fullProposedSku,
       prevFullSku,
       pricePerGram: pricePerGram.toFixed(2),
+      fixedPriceUah,
+      priceMode,
+      usesWeight,
       totalPrice,
       weightVal,
       logMessage,
@@ -569,6 +584,9 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
     fullProposedSku,
     existsInDb: existingProduct.rows.length > 0,
     pricePerGram: pricePerGram.toFixed(2),
+    fixedPriceUah,
+    priceMode,
+    usesWeight,
     totalPrice,
     weightVal,
     logMessage,
@@ -660,6 +678,9 @@ async function buildProductRecountPreview({ sourceSku, answers = {}, isCalibrate
       weight,
       pricePerGram: correctedPreview.pricePerGram,
       pricePerGramUah: correctedPreview.pricePerGramUah,
+      fixedPriceUah: correctedPreview.fixedPriceUah,
+      priceMode: correctedPreview.priceMode,
+      usesWeight: correctedPreview.usesWeight,
       totalPrice: correctedPreview.totalPrice,
       totalPriceUah: correctedPreview.totalPriceUah,
       uahRate: correctedPreview.uahRate,

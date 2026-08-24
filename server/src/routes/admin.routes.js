@@ -44,7 +44,7 @@ router.post('/admin/scenario', async (req, res) => {
     const result = await createScenario(req.body || {});
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
@@ -58,7 +58,7 @@ router.put('/admin/scenario', async (req, res) => {
     await updateScenario(req.body);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 

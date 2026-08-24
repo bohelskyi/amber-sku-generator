@@ -234,11 +234,19 @@ async function initDb() {
       group_name TEXT DEFAULT '',
       match_json JSONB,
       axis_x_key TEXT,
-      axis_y_key TEXT
+      axis_y_key TEXT,
+      priority INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'active',
+      price_mode TEXT NOT NULL DEFAULT 'category_default',
+      apply_modifiers BOOLEAN NOT NULL DEFAULT TRUE
     )
   `);
 
   await pool.query("ALTER TABLE price_scenarios ADD COLUMN IF NOT EXISTS group_name TEXT DEFAULT ''");
+  await pool.query('ALTER TABLE price_scenarios ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 0');
+  await pool.query("ALTER TABLE price_scenarios ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'");
+  await pool.query("ALTER TABLE price_scenarios ADD COLUMN IF NOT EXISTS price_mode TEXT NOT NULL DEFAULT 'category_default'");
+  await pool.query('ALTER TABLE price_scenarios ADD COLUMN IF NOT EXISTS apply_modifiers BOOLEAN NOT NULL DEFAULT TRUE');
   await pool.query(`
     UPDATE price_scenarios
     SET group_name = CASE
@@ -255,6 +263,19 @@ async function initDb() {
       y_val INTEGER NOT NULL DEFAULT 0,
       price REAL,
       PRIMARY KEY (scenario_id, x_val, y_val)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS price_weight_bands (
+      id SERIAL PRIMARY KEY,
+      scenario_id INTEGER NOT NULL REFERENCES price_scenarios(id) ON DELETE CASCADE,
+      label TEXT NOT NULL,
+      min_weight NUMERIC NOT NULL,
+      max_weight NUMERIC,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      CHECK (min_weight >= 0),
+      CHECK (max_weight IS NULL OR max_weight > min_weight)
     )
   `);
 

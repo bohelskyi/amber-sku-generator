@@ -6,7 +6,18 @@ const emptyEditOption = { id: null, value_id: '', label: '', visible_if_json: ''
 const emptyNewCategory = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false };
 const emptyNewQuestion = { key: '', label: '', display_order: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' };
 const emptyNewOption = { value_id: '', label: '', visible_if_json: '' };
-const emptyNewScenario = { name: '', group_name: '', match_json: '', axis_x_key: '', axis_y_key: '' };
+const emptyNewScenario = {
+  name: '',
+  group_name: '',
+  match_json: '',
+  axis_x_key: '',
+  axis_y_key: '',
+  priority: '0',
+  status: 'draft',
+  price_mode: 'category_default',
+  apply_modifiers: true,
+  weight_bands: [],
+};
 const emptyNewModifier = { match_json: '', factor: '' };
 
 const getNextDisplayOrder = (questions = []) => {
@@ -435,11 +446,14 @@ export function useAdminPanel() {
     api.post('/admin/scenario', {
       ...newScenario,
       match_json: parsedJson,
+      priority: Number(newScenario.priority || 0),
       category_code: selectedCat.code,
-    }).then(() => {
-      setNewScenario(emptyNewScenario);
-      fetchPrices();
-    });
+    })
+      .then(() => {
+        setNewScenario(emptyNewScenario);
+        fetchPrices();
+      })
+      .catch((err) => alert(`Помилка створення сценарію: ${err.response?.data?.error || err.message}`));
   };
 
   const beginScenarioEdit = (scenario) => {
@@ -450,6 +464,11 @@ export function useAdminPanel() {
       match_json: formatMatchJson(scenario.match_json),
       axis_x_key: scenario.axis_x_key || '',
       axis_y_key: scenario.axis_y_key || '',
+      priority: String(scenario.priority ?? 0),
+      status: scenario.status || 'active',
+      price_mode: scenario.price_mode || 'category_default',
+      apply_modifiers: scenario.apply_modifiers !== false,
+      weight_bands: scenario.weight_bands || [],
     });
   };
 
@@ -473,6 +492,11 @@ export function useAdminPanel() {
       match_json: parsedJson,
       axis_x_key: editScenario.axis_x_key,
       axis_y_key: editScenario.axis_y_key || null,
+      priority: Number(editScenario.priority || 0),
+      status: editScenario.status,
+      price_mode: editScenario.price_mode,
+      apply_modifiers: editScenario.apply_modifiers !== false,
+      weight_bands: editScenario.weight_bands || [],
     })
       .then(() => {
         setEditScenario(null);

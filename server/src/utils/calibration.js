@@ -41,6 +41,11 @@ function resolveCalibrationState({ question, answers = {}, storedValue }) {
   };
 }
 
+function shouldHidePriceForCalibration(calibration, dependentKeys = []) {
+  return calibration?.status === 'unknown' && dependentKeys.includes('is_calibrated');
+}
+
 module.exports = {
   resolveCalibrationState,
+  shouldHidePriceForCalibration,
 };
