@@ -439,13 +439,15 @@ export function AdminPricingEditor({
                       scenario.axis_x_key,
                       currentCatQuestions,
                       'X',
-                      scenario.weight_bands || []
+                      scenario.weight_bands || [],
+                      scenario.match_json
                     );
                     const axisY = getPricingAxis(
                       scenario.axis_y_key,
                       currentCatQuestions,
                       'Base',
-                      scenario.weight_bands || []
+                      scenario.weight_bands || [],
+                      scenario.match_json
                     );
                     const optionsX = axisX.options;
                     const optionsY = axisY.options;

@@ -7,7 +7,74 @@ export function parseComboAxisKey(axisKey) {
   return keys.length > 1 ? keys : null;
 }
 
-export function getPricingAxis(axisKey, questions, fallbackLabel, weightBands = []) {
+const asRuleObject = (value) => {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const normalizeRuleValue = (value) => {
+  if (value === null || value === undefined) return value;
+  const numericValue = Number(value);
+  return Number.isNaN(numericValue) ? String(value) : numericValue;
+};
+
+const asRuleValues = (value) => (
+  (Array.isArray(value) ? value : [value]).map(normalizeRuleValue)
+);
+
+const isRuleCompatibleWithContext = (ruleValue, contextValue) => {
+  const rule = asRuleObject(ruleValue);
+  const context = asRuleObject(contextValue);
+
+  return Object.entries(rule).every(([key, expected]) => {
+    if (!Object.hasOwn(context, key)) return true;
+
+    const expectedValues = asRuleValues(expected);
+    const contextValues = asRuleValues(context[key]);
+    return expectedValues.some((value) => contextValues.includes(value));
+  });
+};
+
+const getRuleSpecificity = (ruleValue, contextValue) => {
+  const rule = asRuleObject(ruleValue);
+  const context = asRuleObject(contextValue);
+
+  return Object.keys(rule).filter((key) => Object.hasOwn(context, key)).length;
+};
+
+const getContextualOptions = (options = [], context = {}) => {
+  const compatibleOptions = options.filter((option) => (
+    isRuleCompatibleWithContext(option.visible_if_json, context)
+  ));
+  const optionsByValue = new Map();
+
+  compatibleOptions.forEach((option) => {
+    const key = String(normalizeRuleValue(option.id));
+    const specificity = getRuleSpecificity(option.visible_if_json, context);
+    const current = optionsByValue.get(key);
+
+    if (!current || specificity > current.specificity) {
+      optionsByValue.set(key, { option, specificity });
+    }
+  });
+
+  return [...optionsByValue.values()].map(({ option }) => option);
+};
+
+export function getPricingAxis(
+  axisKey,
+  questions,
+  fallbackLabel,
+  weightBands = [],
+  scenarioContext = {}
+) {
   if (!axisKey) {
     return {
       label: fallbackLabel,
@@ -36,7 +103,7 @@ export function getPricingAxis(axisKey, questions, fallbackLabel, weightBands = 
 
     return {
       label: question?.label || axisKey,
-      options: question?.options || [],
+      options: getContextualOptions(question?.options, scenarioContext),
     };
   }
 
@@ -48,7 +115,7 @@ export function getPricingAxis(axisKey, questions, fallbackLabel, weightBands = 
       flagQuestion?.options?.find((option) => Number(option.id) === 1)?.label ||
       flagQuestion?.label ||
       flagKey;
-    const variantOptions = variantQuestion?.options || [];
+    const variantOptions = getContextualOptions(variantQuestion?.options, scenarioContext);
     const baseOptions = [
       { id: 1, label: 'Базова' },
       { id: 2, label: flagLabel },
