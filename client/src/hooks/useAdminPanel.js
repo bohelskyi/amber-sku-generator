@@ -3,10 +3,10 @@ import { api } from '../lib/api';
 import { getValidationIssues } from '../lib/admin-validation';
 import { normalizeDecimalInput } from '../lib/number-input';
 
-const emptyEditOption = { id: null, value_id: '', label: '', visible_if_json: '' };
+const emptyEditOption = { id: null, value_id: '', label: '', visible_if_json: '', hidden_if_json: '' };
 const emptyNewCategory = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false };
 const emptyNewQuestion = { key: '', label: '', display_order: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' };
-const emptyNewOption = { value_id: '', label: '', visible_if_json: '' };
+const emptyNewOption = { value_id: '', label: '', visible_if_json: '', hidden_if_json: '' };
 const emptyNewScenario = {
   name: '',
   group_name: '',
@@ -277,18 +277,17 @@ export function useAdminPanel() {
       return alert('Для текстового питання варіанти не потрібні');
     }
 
-    let parsedRule = null;
-    try {
-      parsedRule = newOpt.visible_if_json ? JSON.parse(newOpt.visible_if_json) : null;
-    } catch {
-      return alert('Помилка JSON в visible_if');
-    }
+    const parsedVisibleRule = parseVisibleRuleInput(newOpt.visible_if_json);
+    const parsedHiddenRule = parseVisibleRuleInput(newOpt.hidden_if_json);
+    if (!parsedVisibleRule.ok) return alert('Помилка в умові показу варіанта');
+    if (!parsedHiddenRule.ok) return alert('Помилка в умові приховування варіанта');
 
     api.post('/admin/option', {
       question_id: selectedQuestion.q_db_id,
       value_id: newOpt.value_id,
       label: newOpt.label,
-      visible_if_json: parsedRule,
+      visible_if_json: parsedVisibleRule.value,
+      hidden_if_json: parsedHiddenRule.value,
     }).then(() => {
       setNewOpt(emptyNewOption);
       fetchConfig();
@@ -301,24 +300,24 @@ export function useAdminPanel() {
       value_id: String(option.id),
       label: option.label,
       visible_if_json: option.visible_if_json ? formatMatchJson(option.visible_if_json) : '',
+      hidden_if_json: option.hidden_if_json ? formatMatchJson(option.hidden_if_json) : '',
     });
   };
 
   const updateOption = () => {
     if (!editOpt.id) return;
 
-    let parsedRule = null;
-    try {
-      parsedRule = editOpt.visible_if_json ? JSON.parse(editOpt.visible_if_json) : null;
-    } catch {
-      return alert('Помилка JSON в visible_if');
-    }
+    const parsedVisibleRule = parseVisibleRuleInput(editOpt.visible_if_json);
+    const parsedHiddenRule = parseVisibleRuleInput(editOpt.hidden_if_json);
+    if (!parsedVisibleRule.ok) return alert('Помилка в умові показу варіанта');
+    if (!parsedHiddenRule.ok) return alert('Помилка в умові приховування варіанта');
 
     api.put('/admin/option', {
       id: editOpt.id,
       value_id: editOpt.value_id,
       label: editOpt.label,
-      visible_if_json: parsedRule,
+      visible_if_json: parsedVisibleRule.value,
+      hidden_if_json: parsedHiddenRule.value,
     })
       .then(() => {
         setEditOpt(emptyEditOption);

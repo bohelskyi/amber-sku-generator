@@ -6,10 +6,22 @@ const normalizeRuleValue = (value) => {
   return Number.isNaN(numericValue) ? String(value) : numericValue;
 };
 
-export const isVisibilityRuleMatched = (rule, context) => {
-  if (!rule || typeof rule !== 'object') return true;
+const asRuleObject = (value) => {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
 
-  for (const [key, expected] of Object.entries(rule)) {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+export const isVisibilityRuleMatched = (rule, context) => {
+  const normalizedRule = asRuleObject(rule);
+
+  for (const [key, expected] of Object.entries(normalizedRule)) {
     const actual = context[key];
     const actualNormalized = normalizeRuleValue(actual);
 
@@ -62,7 +74,11 @@ export const getVisibleOptionsForQuestion = (
     is_calibrated: calibratedAnswer,
   };
 
-  return (question.options || []).filter((option) =>
-    isVisibilityRuleMatched(option.visible_if_json, context)
-  );
+  return (question.options || []).filter((option) => {
+    const hiddenRule = asRuleObject(option.hidden_if_json);
+    const isExplicitlyHidden = Object.keys(hiddenRule).length > 0
+      && isVisibilityRuleMatched(hiddenRule, context);
+
+    return isVisibilityRuleMatched(option.visible_if_json, context) && !isExplicitlyHidden;
+  });
 };

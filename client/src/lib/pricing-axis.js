@@ -42,6 +42,20 @@ const isRuleCompatibleWithContext = (ruleValue, contextValue) => {
   });
 };
 
+const isRuleGuaranteedByContext = (ruleValue, contextValue) => {
+  const rule = asRuleObject(ruleValue);
+  const context = asRuleObject(contextValue);
+  if (Object.keys(rule).length === 0) return false;
+
+  return Object.entries(rule).every(([key, expected]) => {
+    if (!Object.hasOwn(context, key)) return false;
+
+    const expectedValues = asRuleValues(expected);
+    const contextValues = asRuleValues(context[key]);
+    return contextValues.every((value) => expectedValues.includes(value));
+  });
+};
+
 const getRuleSpecificity = (ruleValue, contextValue) => {
   const rule = asRuleObject(ruleValue);
   const context = asRuleObject(contextValue);
@@ -52,6 +66,7 @@ const getRuleSpecificity = (ruleValue, contextValue) => {
 const getContextualOptions = (options = [], context = {}) => {
   const compatibleOptions = options.filter((option) => (
     isRuleCompatibleWithContext(option.visible_if_json, context)
+    && !isRuleGuaranteedByContext(option.hidden_if_json, context)
   ));
   const optionsByValue = new Map();
 

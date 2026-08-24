@@ -18,6 +18,14 @@ const {
   createModifier,
   updateModifier,
 } = require('../services/pricing.service');
+const {
+  applyRepricing,
+  buildRepricingPreview,
+  getRepricingBatchItems,
+  getRepricingBatches,
+  getRepricingScenarios,
+} = require('../services/repricing.service');
+const { buildCsv } = require('../utils/csv');
 
 const router = express.Router();
 
@@ -27,6 +35,69 @@ router.get('/admin/prices/:catCode', async (req, res) => {
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/admin/repricing/scenarios', async (req, res) => {
+  try {
+    const scenarios = await getRepricingScenarios();
+    res.json(scenarios);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.get('/admin/repricing/batches', async (req, res) => {
+  try {
+    const batches = await getRepricingBatches(req.query.limit);
+    res.json(batches);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.post('/admin/repricing/preview', async (req, res) => {
+  try {
+    const { scenarioId } = req.body || {};
+    if (!scenarioId) return res.status(400).json({ error: 'Оберіть цінову матрицю.' });
+
+    const preview = await buildRepricingPreview(scenarioId);
+    res.json(preview);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.post('/admin/repricing/apply', async (req, res) => {
+  try {
+    const result = await applyRepricing(req.body || {});
+    res.json(result);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.get('/admin/repricing/:batchId/csv', async (req, res) => {
+  try {
+    const data = await getRepricingBatchItems(req.params.batchId);
+    const csv = buildCsv([
+      ['sku', 'old_price_uah', 'new_price_uah', 'difference_uah'],
+      ...data.items.map((item) => [
+        item.sku,
+        item.old_price_uah ?? '',
+        item.new_price_uah,
+        item.price_delta_uah,
+      ]),
+    ]);
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="amber-repricing-${Number(req.params.batchId)}.csv"`
+    );
+    res.send(`\uFEFF${csv}`);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 

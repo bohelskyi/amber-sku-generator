@@ -366,7 +366,10 @@ export function AdminStructureEditor({
               <div>
                 <span className="text-sm text-slate-700">{option.label}</span>
                 <span className="text-[11px] text-slate-500 block">
-                  {formatConditionSummary(option.visible_if_json, currentCatQuestions, config)}
+                  Показувати: {formatConditionSummary(option.visible_if_json, currentCatQuestions, config)}
+                </span>
+                <span className="text-[11px] text-slate-500 block">
+                  Приховувати: {formatConditionSummary(option.hidden_if_json, currentCatQuestions, config, 'Ніколи')}
                 </span>
               </div>
               <div className="flex items-center gap-2">
@@ -381,7 +384,7 @@ export function AdminStructureEditor({
           <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-white/80">
             <div className="mb-2 flex items-center justify-between gap-2">
               <div className="text-xs text-slate-500">Редагувати опцію</div>
-              <button onClick={() => setEditOpt({ id: null, value_id: '', label: '', visible_if_json: '' })} className="btn btn-outline px-2 py-1 text-xs">Приховати</button>
+              <button onClick={() => setEditOpt({ id: null, value_id: '', label: '', visible_if_json: '', hidden_if_json: '' })} className="btn btn-outline px-2 py-1 text-xs">Приховати</button>
             </div>
             <input className="input-sm mb-2" type="number" placeholder="Value ID" value={editOpt.value_id} onChange={(event) => setEditOpt({ ...editOpt, value_id: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
             <input className="input-sm mb-2" placeholder="Label" value={editOpt.label} onChange={(event) => setEditOpt({ ...editOpt, label: event.target.value })} />
@@ -393,9 +396,17 @@ export function AdminStructureEditor({
               value={editOpt.visible_if_json}
               onChange={(nextValue) => setEditOpt({ ...editOpt, visible_if_json: nextValue })}
             />
+            <ConditionBuilder
+              config={config}
+              excludeQuestionId={selectedQuestion.id}
+              label="Приховувати варіант"
+              questions={currentCatQuestions}
+              value={editOpt.hidden_if_json}
+              onChange={(nextValue) => setEditOpt({ ...editOpt, hidden_if_json: nextValue })}
+            />
             <div className="flex gap-2">
               <button onClick={updateOption} className="btn btn-primary w-full">Зберегти</button>
-              <button onClick={() => setEditOpt({ id: null, value_id: '', label: '', visible_if_json: '' })} className="btn btn-outline w-full">Скасувати</button>
+              <button onClick={() => setEditOpt({ id: null, value_id: '', label: '', visible_if_json: '', hidden_if_json: '' })} className="btn btn-outline w-full">Скасувати</button>
             </div>
           </div>
         )}
@@ -418,6 +429,14 @@ export function AdminStructureEditor({
                   questions={currentCatQuestions}
                   value={newOpt.visible_if_json}
                   onChange={(nextValue) => setNewOpt({ ...newOpt, visible_if_json: nextValue })}
+                />
+                <ConditionBuilder
+                  config={config}
+                  excludeQuestionId={selectedQuestion.id}
+                  label="Приховувати варіант"
+                  questions={currentCatQuestions}
+                  value={newOpt.hidden_if_json}
+                  onChange={(nextValue) => setNewOpt({ ...newOpt, hidden_if_json: nextValue })}
                 />
                 <button onClick={addOption} className="btn btn-amber w-full">Зберегти варіант</button>
               </div>

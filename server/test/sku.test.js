@@ -61,6 +61,26 @@ test('treats a separated SKU with a trailing variation as a variation', () => {
   });
 });
 
+test('decoder keeps historical options that are hidden in the builder', () => {
+  const decoded = decodeSkuAnswers([
+    {
+      key: 'quality',
+      label: 'Quality',
+      sku_index: 1,
+      required: 1,
+      options: [
+        {
+          id: 3,
+          label: 'Grade 3',
+          hidden_if_json: { raw_type: 1, is_calibrated: 0 },
+        },
+      ],
+    },
+  ], '3');
+
+  assert.equal(decoded[0].value_id, 3);
+});
+
 test('decodes a SKU with question separators and a three digit suffix', () => {
   const result = decodeFirstMatchingAttempt(arQuestions, '12-3-001');
 

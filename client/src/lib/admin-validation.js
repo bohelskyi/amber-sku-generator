@@ -205,6 +205,14 @@ export function getValidationIssues(config) {
           ruleValue: option.visible_if_json,
           validationIssues,
         });
+        validateRule({
+          category,
+          ownerLabel: `умова приховування варіанта ${option.label || option.id} у питанні ${question.label || question.id}`,
+          ownerQuestionId: question.id,
+          questionMap,
+          ruleValue: option.hidden_if_json,
+          validationIssues,
+        });
       });
     });
 

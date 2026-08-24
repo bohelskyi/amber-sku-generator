@@ -68,12 +68,13 @@ function renameAxisKey(axisKey, oldKey, newKey) {
     .join('+');
 }
 
-async function renameVisibleRuleKey(client, tableName, idColumn, row, oldKey, newKey) {
-  const nextRule = renameJsonObjectKey(row.visible_if_json, oldKey, newKey);
-  if (nextRule === row.visible_if_json) return;
+async function renameRuleKey(client, tableName, idColumn, columnName, row, oldKey, newKey) {
+  const currentRule = row[columnName];
+  const nextRule = renameJsonObjectKey(currentRule, oldKey, newKey);
+  if (nextRule === currentRule) return;
 
   await client.query(
-    `UPDATE ${tableName} SET visible_if_json = $1::jsonb WHERE ${idColumn} = $2`,
+    `UPDATE ${tableName} SET ${columnName} = $1::jsonb WHERE ${idColumn} = $2`,
     [JSON.stringify(nextRule), row.id]
   );
 }
@@ -87,19 +88,20 @@ async function renameQuestionKeyReferences(client, categoryCode, oldKey, newKey)
     [categoryCode, oldKey]
   );
   for (const row of questionRules.rows) {
-    await renameVisibleRuleKey(client, 'questions', 'id', row, oldKey, newKey);
+    await renameRuleKey(client, 'questions', 'id', 'visible_if_json', row, oldKey, newKey);
   }
 
   const optionRules = await client.query(
-    `SELECT o.id, o.visible_if_json
+    `SELECT o.id, o.visible_if_json, o.hidden_if_json
      FROM options o
      JOIN questions q ON q.id = o.question_id
      WHERE q.category_code = $1
-       AND o.visible_if_json ? $2`,
+       AND (o.visible_if_json ? $2 OR o.hidden_if_json ? $2)`,
     [categoryCode, oldKey]
   );
   for (const row of optionRules.rows) {
-    await renameVisibleRuleKey(client, 'options', 'id', row, oldKey, newKey);
+    await renameRuleKey(client, 'options', 'id', 'visible_if_json', row, oldKey, newKey);
+    await renameRuleKey(client, 'options', 'id', 'hidden_if_json', row, oldKey, newKey);
   }
 
   const scenarios = await client.query(
@@ -182,7 +184,8 @@ async function getAppConfig() {
       o.id AS o_db_id,
       o.value_id,
       o.label AS o_label,
-      o.visible_if_json
+      o.visible_if_json,
+      o.hidden_if_json
     FROM questions q
     LEFT JOIN options o ON q.id = o.question_id
     ORDER BY q.category_code, COALESCE(q.display_order, q.sku_index), q.sku_index, o.value_id
@@ -213,6 +216,7 @@ async function getAppConfig() {
         id: row.value_id,
         label: row.o_label,
         visible_if_json: row.visible_if_json || null,
+        hidden_if_json: row.hidden_if_json || null,
       });
     }
   }
@@ -418,13 +422,17 @@ async function updateQuestion(payload) {
 
 async function createOption(payload) {
   const visibleRule = parseOptionalRule(payload.visible_if_json ?? payload.visible_if);
+  const hiddenRule = parseOptionalRule(payload.hidden_if_json ?? payload.hidden_if);
   const result = await pool.query(
-    'INSERT INTO options (question_id, value_id, label, visible_if_json) VALUES ($1, $2, $3, $4::jsonb) RETURNING id',
+    `INSERT INTO options (question_id, value_id, label, visible_if_json, hidden_if_json)
+     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
+     RETURNING id`,
     [
       Number(payload.question_id),
       Number(payload.value_id),
       payload.label,
       visibleRule ? JSON.stringify(visibleRule) : null,
+      hiddenRule ? JSON.stringify(hiddenRule) : null,
     ]
   );
 
@@ -433,14 +441,16 @@ async function createOption(payload) {
 
 async function updateOption(payload) {
   const visibleRule = parseOptionalRule(payload.visible_if_json ?? payload.visible_if);
+  const hiddenRule = parseOptionalRule(payload.hidden_if_json ?? payload.hidden_if);
   await pool.query(
     `UPDATE options
-     SET value_id = $1, label = $2, visible_if_json = $3::jsonb
-     WHERE id = $4`,
+     SET value_id = $1, label = $2, visible_if_json = $3::jsonb, hidden_if_json = $4::jsonb
+     WHERE id = $5`,
     [
       Number(payload.value_id),
       payload.label,
       visibleRule ? JSON.stringify(visibleRule) : null,
+      hiddenRule ? JSON.stringify(hiddenRule) : null,
       Number(payload.id),
     ]
   );

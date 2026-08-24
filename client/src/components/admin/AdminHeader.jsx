@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { RefreshCw } from 'lucide-react';
 
 export function AdminHeader() {
   return (
@@ -10,7 +11,13 @@ export function AdminHeader() {
           Керуйте структурою категорій, питаннями та прайсами в одному місці.
         </p>
       </div>
-      <Link to="/" className="btn btn-primary">Назад до калькулятора</Link>
+      <div className="flex flex-wrap gap-2">
+        <Link to="/admin/repricing" className="btn btn-outline gap-2">
+          <RefreshCw size={16} />
+          Переоцінка
+        </Link>
+        <Link to="/" className="btn btn-primary">Назад до калькулятора</Link>
+      </div>
     </header>
   );
 }
