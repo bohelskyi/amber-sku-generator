@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import { ConditionBuilder } from './ConditionBuilder';
-import { handleNumberKeyDown, handleNumberWheel } from '../../lib/number-input';
+import {
+  handleNumberKeyDown,
+  handleNumberWheel,
+  normalizeDecimalInput,
+} from '../../lib/number-input';
 import { getPricingAxis } from '../../lib/pricing-axis';
 import { formatConditionSummary } from '../../lib/admin-conditions';
 
@@ -522,16 +526,25 @@ export function AdminPricingEditor({
                                     return (
                                       <td key={yOption.id} className="border-l border-slate-100 p-0">
                                         <input
-                                          type="number"
-                                          min="0"
-                                          onKeyDown={(event) => { if (event.key === '-') event.preventDefault(); handleNumberKeyDown(event); }}
-                                          onWheel={handleNumberWheel}
+                                          type="text"
+                                          inputMode="decimal"
                                           className="w-full h-full p-2 text-center focus:bg-amber-50 outline-none min-w-[60px]"
                                           defaultValue={cell ? cell.price : ''}
                                           placeholder="-"
+                                          onChange={(event) => {
+                                            event.currentTarget.value = normalizeDecimalInput(event.currentTarget.value);
+                                          }}
                                           onBlur={(event) => {
-                                            if (event.target.value < 0) event.target.value = 0;
-                                            handlePriceChange(scenario.id, xOption.id, yOption.id, event.target.value);
+                                            const normalizedPrice = normalizeDecimalInput(event.currentTarget.value);
+                                            const parsedPrice = Number(normalizedPrice);
+
+                                            if (!normalizedPrice || !Number.isFinite(parsedPrice) || parsedPrice < 0) {
+                                              event.currentTarget.value = cell ? String(cell.price) : '';
+                                              return;
+                                            }
+
+                                            event.currentTarget.value = normalizedPrice;
+                                            handlePriceChange(scenario.id, xOption.id, yOption.id, normalizedPrice);
                                           }}
                                         />
                                       </td>

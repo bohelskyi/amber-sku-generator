@@ -35,7 +35,7 @@ router.post('/admin/price-cell', async (req, res) => {
     await upsertPriceCell(req.body || {});
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 

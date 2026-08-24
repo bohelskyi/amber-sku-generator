@@ -9,3 +9,5 @@ export const handleNumberKeyDown = (event) => {
     event.preventDefault();
   }
 };
+
+export const normalizeDecimalInput = (value) => String(value ?? '').replace(/,/g, '.');

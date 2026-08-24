@@ -10,6 +10,7 @@ const {
 } = require('../utils/pricing-scenarios');
 const { asRuleObject } = require('../utils/rules');
 const { roundUah } = require('../utils/money');
+const { parseNonNegativeDecimal } = require('../utils/numbers');
 
 function normalizeScenarioGroup(groupName, scenarioName = '') {
   const normalizedGroup = String(groupName || '').trim();
@@ -491,12 +492,14 @@ async function syncScenarioWeightBands(client, scenarioId, weightBands, hadWeigh
 }
 
 async function upsertPriceCell({ scenario_id, x_val, y_val, price }) {
+  const normalizedPrice = parseNonNegativeDecimal(price, 'Ціна');
+
   await pool.query(
     `INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
      VALUES ($1, $2, $3, $4)
      ON CONFLICT (scenario_id, x_val, y_val)
      DO UPDATE SET price = EXCLUDED.price`,
-    [Number(scenario_id), Number(x_val), Number(y_val || 0), Number(price)]
+    [Number(scenario_id), Number(x_val), Number(y_val || 0), normalizedPrice]
   );
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { getValidationIssues } from '../lib/admin-validation';
+import { normalizeDecimalInput } from '../lib/number-input';
 
 const emptyEditOption = { id: null, value_id: '', label: '', visible_if_json: '' };
 const emptyNewCategory = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false };
@@ -423,11 +424,15 @@ export function useAdminPanel() {
   };
 
   const handlePriceChange = (scenarioId, xVal, yVal, newPrice) => {
+    const normalizedPrice = normalizeDecimalInput(newPrice);
+    const parsedPrice = Number(normalizedPrice);
+    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) return;
+
     api.post('/admin/price-cell', {
       scenario_id: scenarioId,
       x_val: xVal,
       y_val: yVal,
-      price: parseFloat(newPrice),
+      price: parsedPrice,
     });
   };
 
