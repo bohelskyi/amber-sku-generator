@@ -81,7 +81,7 @@ function SortHeader({ align = 'left', children, column, onSort, sort }) {
   const Icon = active ? (sort.direction === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
   return (
     <th
-      className={`table-cell ${align === 'right' ? 'text-right' : 'text-left'}`}
+      className={`table-cell sticky top-0 z-20 border-b border-slate-200 bg-slate-100 shadow-[0_1px_0_rgba(148,163,184,0.35)] ${align === 'right' ? 'text-right' : 'text-left'}`}
       aria-sort={active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
     >
       <button
@@ -454,13 +454,13 @@ export default function RepricingPage() {
                 </label>
               </div>
 
-              <div className="max-h-[560px] overflow-auto">
+              <div className="relative isolate max-h-[560px] overflow-auto">
                 <table className="min-w-full bg-white">
-                  <thead className="sticky top-0 z-10">
+                  <thead>
                     <tr className="table-head">
                       <SortHeader column="sku" sort={sort} onSort={handleSort}>Артикул</SortHeader>
                       <SortHeader column="weight" sort={sort} onSort={handleSort}>Вага</SortHeader>
-                      <th className="table-cell text-left">Умова</th>
+                      <th className="table-cell sticky top-0 z-20 border-b border-slate-200 bg-slate-100 text-left shadow-[0_1px_0_rgba(148,163,184,0.35)]">Умова</th>
                       <SortHeader align="right" column="oldPriceUah" sort={sort} onSort={handleSort}>Стара ціна</SortHeader>
                       <SortHeader align="right" column="newPriceUah" sort={sort} onSort={handleSort}>Нова ціна</SortHeader>
                       <SortHeader align="right" column="priceDeltaUah" sort={sort} onSort={handleSort}>Різниця</SortHeader>
