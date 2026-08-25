@@ -16,6 +16,7 @@ const {
   diagnoseSkuAttempts,
   getOptionCode,
   getOptionValue,
+  isOptionalPlaceholderAnswer,
   parseVariationSku,
 } = require('../utils/sku');
 const { isRuleMatched } = require('../utils/rules');
@@ -558,7 +559,8 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
     const value = answers[question.key];
     const hasValue = value !== undefined && value !== null && value !== '';
     const option = hasValue ? getContextualOption(question, value, answers) : null;
-    if (hasValue && !option) {
+    const isPlaceholder = hasValue && isOptionalPlaceholderAnswer(question, value, option);
+    if (hasValue && !option && !isPlaceholder) {
       const err = new Error(
         `Значення «${value}» не належить активній SKU-схемі питання «${question.label}».`
       );

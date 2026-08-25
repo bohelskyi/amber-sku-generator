@@ -7,6 +7,7 @@ const {
   decodeStoredSkuAnswers,
   decodeVisibleSkuAnswers,
   diagnoseSkuAttempts,
+  isOptionalPlaceholderAnswer,
   parseVariationSku,
 } = require('../src/utils/sku');
 
@@ -145,6 +146,20 @@ test('decoder accepts a new optional question missing from a historical SKU', ()
   assert.deepEqual(
     visibleDecoded.map((answer) => [answer.key, answer.value_id]),
     [['style', 2], ['discount', null]]
+  );
+});
+
+test('optional zero answer is treated as an empty placeholder when no zero option exists', () => {
+  assert.equal(
+    isOptionalPlaceholderAnswer({ required: 0 }, 0, null),
+    true
+  );
+});
+
+test('optional zero answer keeps a configured zero option as a real value', () => {
+  assert.equal(
+    isOptionalPlaceholderAnswer({ required: 0 }, 0, { id: 0, sku_code: '0' }),
+    false
   );
 });
 

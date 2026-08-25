@@ -88,6 +88,12 @@ function getOptionValue(option) {
   return Number.isNaN(numericValue) ? value : numericValue;
 }
 
+function isOptionalPlaceholderAnswer(question, value, option = null) {
+  return Number(question?.required) !== 1
+    && !option
+    && String(value) === '0';
+}
+
 function decodeQuestionOption(question, option) {
   return {
     key: question.key,
@@ -688,6 +694,7 @@ module.exports = {
   diagnoseSkuAttempts,
   getOptionCode,
   getOptionValue,
+  isOptionalPlaceholderAnswer,
   normalizeSkuSeparator,
   stripSkuSeparators,
 };
