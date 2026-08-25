@@ -59,6 +59,114 @@ function getPreviewToken(scenario, changedItems) {
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
+function normalizeManualOverrides(manualOverrides = []) {
+  if (!Array.isArray(manualOverrides)) {
+    const error = new Error('Некоректний список ручних цін.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (manualOverrides.length > 10000) {
+    const error = new Error('Забагато ручних цін в одному запиті.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const normalized = [];
+  const productIds = new Set();
+  for (const override of manualOverrides) {
+    const productId = Number(override?.productId);
+    const rawPrice = String(override?.newPriceUah ?? '').trim().replace(',', '.');
+    const parsedPrice = Number(rawPrice);
+    const newPriceUah = roundUah(parsedPrice);
+    if (!Number.isInteger(productId) || productId <= 0 || newPriceUah === null || newPriceUah <= 0) {
+      const error = new Error('Ручна ціна повинна бути додатним числом, а товар має бути коректним.');
+      error.statusCode = 422;
+      throw error;
+    }
+    if (productIds.has(productId)) {
+      const error = new Error(`Ручну ціну для товару ${productId} передано більше одного разу.`);
+      error.statusCode = 422;
+      throw error;
+    }
+    productIds.add(productId);
+    normalized.push({ productId, newPriceUah });
+  }
+
+  return normalized.sort((first, second) => first.productId - second.productId);
+}
+
+function getApplicationToken(previewToken, manualOverrides = []) {
+  const normalizedOverrides = normalizeManualOverrides(manualOverrides);
+  if (normalizedOverrides.length === 0) return previewToken;
+  const payload = {
+    previewToken,
+    manualOverrides: normalizedOverrides,
+  };
+  return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+}
+
+function applyManualOverridesToPreview(preview, manualOverrides = []) {
+  const normalizedOverrides = normalizeManualOverrides(manualOverrides);
+  const overridesByProductId = new Map(
+    normalizedOverrides.map((override) => [override.productId, override.newPriceUah])
+  );
+  const itemsByProductId = new Map(
+    preview.items.map((item) => [Number(item.productId), item])
+  );
+
+  for (const override of normalizedOverrides) {
+    const item = itemsByProductId.get(override.productId);
+    if (!item) {
+      const error = new Error(`Товар ${override.productId} не належить до цього перегляду переоцінки.`);
+      error.statusCode = 422;
+      throw error;
+    }
+    if (item.status === 'error') {
+      const error = new Error(`Для товару ${item.sku} спочатку потрібно усунути помилку розрахунку.`);
+      error.statusCode = 422;
+      throw error;
+    }
+  }
+
+  const items = preview.items.map((item) => {
+    if (!overridesByProductId.has(Number(item.productId))) return item;
+
+    const newPriceUah = overridesByProductId.get(Number(item.productId));
+    const oldPriceUah = item.oldPriceUah === null ? null : Number(item.oldPriceUah);
+    const uahRate = Number(item.uahRate || 0);
+    const weight = Number(item.weight || 0);
+    const totalPrice = uahRate > 0
+      ? Number((newPriceUah / uahRate).toFixed(2))
+      : item.totalPrice;
+    const pricePerGram = uahRate > 0 && weight > 0
+      ? Number((newPriceUah / uahRate / weight).toFixed(2))
+      : item.pricePerGram;
+    const isChanged = oldPriceUah === null || oldPriceUah !== newPriceUah;
+
+    return {
+      ...item,
+      calculatedPriceUah: item.newPriceUah,
+      newPriceUah,
+      priceDeltaUah: newPriceUah - Number(oldPriceUah || 0),
+      totalPrice,
+      pricePerGram,
+      status: isChanged ? 'changed' : 'unchanged',
+      manualOverride: true,
+    };
+  });
+
+  return {
+    ...preview,
+    summary: {
+      ...preview.summary,
+      changedCount: items.filter((item) => item.status === 'changed').length,
+      unchangedCount: items.filter((item) => item.status === 'unchanged').length,
+      errorCount: items.filter((item) => item.status === 'error').length,
+    },
+    items,
+  };
+}
+
 async function getActiveScenario(scenarioId) {
   const result = await pool.query(
     `SELECT *
@@ -226,13 +334,15 @@ function getUpdatedDetails(details, item, batchId, appliedAt) {
   return {
     ...details,
     logMessage: item.logMessage,
-    autoPriceUah: String(item.newPriceUah),
+    autoPriceUah: String(item.calculatedPriceUah ?? item.newPriceUah),
     pricingScenario: item.pricingDetails?.scenario || null,
     repricing: {
       batchId,
       scenarioId: item.pricingDetails?.scenario?.id || null,
       oldPriceUah: item.oldPriceUah,
       newPriceUah: item.newPriceUah,
+      calculatedPriceUah: item.calculatedPriceUah ?? item.newPriceUah,
+      manualOverride: Boolean(item.manualOverride),
       appliedAt,
     },
   };
@@ -241,31 +351,35 @@ function getUpdatedDetails(details, item, batchId, appliedAt) {
 async function getBatchByPreviewToken(previewToken, client = pool) {
   const result = await client.query(
     `SELECT id, scenario_id, category_code, scenario_name, candidate_count, changed_count,
-            unchanged_count, skipped_count, error_count, status, created_at, applied_at
+            unchanged_count, skipped_count, error_count, status, created_at, applied_at,
+            rolled_back_at
      FROM repricing_batches
-     WHERE preview_token = $1
+     WHERE preview_token = $1 AND status = 'completed'
      LIMIT 1`,
     [previewToken]
   );
   return result.rows[0] || null;
 }
 
-async function applyRepricing({ scenarioId, previewToken }) {
+async function applyRepricing({ scenarioId, previewToken, manualOverrides = [] }) {
   if (!previewToken) {
     const error = new Error('Спочатку сформуйте попередній перегляд.');
     error.statusCode = 400;
     throw error;
   }
 
-  const existingBatch = await getBatchByPreviewToken(previewToken);
+  const normalizedOverrides = normalizeManualOverrides(manualOverrides);
+  const applicationToken = getApplicationToken(previewToken, normalizedOverrides);
+  const existingBatch = await getBatchByPreviewToken(applicationToken);
   if (existingBatch) return { success: true, alreadyApplied: true, batch: existingBatch };
 
-  const preview = await buildRepricingPreview(scenarioId);
-  if (preview.previewToken !== previewToken) {
+  const basePreview = await buildRepricingPreview(scenarioId);
+  if (basePreview.previewToken !== previewToken) {
     const error = new Error('Дані або ціни змінилися. Сформуйте попередній перегляд повторно.');
     error.statusCode = 409;
     throw error;
   }
+  const preview = applyManualOverridesToPreview(basePreview, normalizedOverrides);
   if (preview.summary.errorCount > 0) {
     const error = new Error('Переоцінку зупинено: у попередньому перегляді є помилки.');
     error.statusCode = 422;
@@ -286,14 +400,14 @@ async function applyRepricing({ scenarioId, previewToken }) {
        (scenario_id, category_code, scenario_name, scenario_snapshot, preview_token, status,
         candidate_count, changed_count, unchanged_count, skipped_count, error_count, applied_at)
        VALUES ($1, $2, $3, $4::jsonb, $5, 'completed', $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
-       ON CONFLICT (preview_token) DO NOTHING
+       ON CONFLICT (preview_token) WHERE status = 'completed' DO NOTHING
        RETURNING id, applied_at`,
       [
         preview.scenario.id,
         preview.scenario.categoryCode,
         preview.scenario.name,
         JSON.stringify(preview.scenario),
-        preview.previewToken,
+        applicationToken,
         preview.summary.candidateCount,
         preview.summary.changedCount,
         preview.summary.unchangedCount,
@@ -304,7 +418,7 @@ async function applyRepricing({ scenarioId, previewToken }) {
 
     if (batchResult.rows.length === 0) {
       await client.query('ROLLBACK');
-      const batch = await getBatchByPreviewToken(previewToken);
+      const batch = await getBatchByPreviewToken(applicationToken);
       return { success: true, alreadyApplied: true, batch };
     }
 
@@ -413,10 +527,26 @@ async function applyRepricing({ scenarioId, previewToken }) {
 async function getRepricingBatches(limit = 20) {
   const normalizedLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
   const result = await pool.query(
-    `SELECT id, scenario_id, category_code, scenario_name, status, candidate_count,
-            changed_count, unchanged_count, skipped_count, error_count, created_at, applied_at
-     FROM repricing_batches
-     ORDER BY id DESC
+    `SELECT b.id, b.scenario_id, b.category_code, b.scenario_name, b.status,
+            b.candidate_count, b.changed_count, b.unchanged_count, b.skipped_count,
+            b.error_count, b.created_at, b.applied_at, b.rolled_back_at,
+            (
+              b.status = 'completed'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM repricing_items ri
+                LEFT JOIN products p ON p.id = ri.product_id
+                WHERE ri.batch_id = b.id
+                  AND (
+                    p.id IS NULL
+                    OR COALESCE(p.status, 'active') <> 'active'
+                    OR p.details #>> '{repricing,batchId}' IS DISTINCT FROM b.id::text
+                    OR p.total_price_uah IS DISTINCT FROM ri.new_price_uah
+                  )
+              )
+            ) AS can_rollback
+     FROM repricing_batches b
+     ORDER BY b.id DESC
      LIMIT $1`,
     [normalizedLimit]
   );
@@ -430,7 +560,140 @@ async function getRepricingBatches(limit = 20) {
     unchanged_count: Number(batch.unchanged_count || 0),
     skipped_count: Number(batch.skipped_count || 0),
     error_count: Number(batch.error_count || 0),
+    can_rollback: Boolean(batch.can_rollback),
   }));
+}
+
+function areNullableNumbersEqual(first, second, tolerance = 0.01) {
+  if (first === null || first === undefined) return second === null || second === undefined;
+  if (second === null || second === undefined) return false;
+  return Math.abs(Number(first) - Number(second)) <= tolerance;
+}
+
+function doesProductMatchRepricingBatch(product, newPayload, batchId) {
+  return (
+    String(product.status || 'active') === 'active'
+    && Number(product.details?.repricing?.batchId || 0) === Number(batchId)
+    && areNullableNumbersEqual(product.total_price, newPayload.totalPrice)
+    && areNullableNumbersEqual(product.total_price_uah, newPayload.totalPriceUah)
+    && areNullableNumbersEqual(product.price_per_gram, newPayload.pricePerGram)
+    && areNullableNumbersEqual(product.uah_rate, newPayload.uahRate)
+  );
+}
+
+async function rollbackRepricing(batchId) {
+  const normalizedBatchId = Number(batchId);
+  if (!Number.isInteger(normalizedBatchId) || normalizedBatchId <= 0) {
+    const error = new Error('Некоректна партія переоцінки.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const batchResult = await client.query(
+      `SELECT id, scenario_id, category_code, scenario_name, status, changed_count,
+              applied_at, rolled_back_at
+       FROM repricing_batches
+       WHERE id = $1
+       FOR UPDATE`,
+      [normalizedBatchId]
+    );
+    if (batchResult.rows.length === 0) {
+      const error = new Error('Партію переоцінки не знайдено.');
+      error.statusCode = 404;
+      throw error;
+    }
+    const batch = batchResult.rows[0];
+    if (batch.status === 'rolled_back') {
+      await client.query('COMMIT');
+      return { success: true, alreadyRolledBack: true, batch };
+    }
+    if (batch.status !== 'completed') {
+      const error = new Error('Цю партію не можна відкотити в її поточному статусі.');
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const itemCountResult = await client.query(
+      'SELECT COUNT(*)::int AS count FROM repricing_items WHERE batch_id = $1',
+      [normalizedBatchId]
+    );
+    const itemsResult = await client.query(
+      `SELECT ri.product_id, ri.sku, ri.old_payload, ri.new_payload,
+              p.id, p.total_price, p.total_price_uah, p.price_per_gram, p.uah_rate,
+              p.details, p.status
+       FROM repricing_items ri
+       JOIN products p ON p.id = ri.product_id
+       WHERE ri.batch_id = $1
+       ORDER BY p.id
+       FOR UPDATE OF p`,
+      [normalizedBatchId]
+    );
+    if (itemsResult.rows.length !== Number(itemCountResult.rows[0].count)) {
+      const error = new Error('Один або кілька товарів цієї переоцінки більше не існують.');
+      error.statusCode = 409;
+      throw error;
+    }
+
+    for (const item of itemsResult.rows) {
+      const newPayload = item.new_payload || {};
+      const stillMatchesBatch = doesProductMatchRepricingBatch(
+        item,
+        newPayload,
+        normalizedBatchId
+      );
+      if (!stillMatchesBatch) {
+        const error = new Error(
+          `Товар ${item.sku} змінено після цієї переоцінки. Відкат зупинено без змін.`
+        );
+        error.statusCode = 409;
+        throw error;
+      }
+    }
+
+    for (const item of itemsResult.rows) {
+      const oldPayload = item.old_payload || {};
+      await client.query(
+        `UPDATE products
+         SET total_price = $1,
+             total_price_uah = $2,
+             price_per_gram = $3,
+             uah_rate = $4,
+             details = $5::jsonb
+         WHERE id = $6`,
+        [
+          oldPayload.totalPrice ?? null,
+          oldPayload.totalPriceUah ?? null,
+          oldPayload.pricePerGram ?? null,
+          oldPayload.uahRate ?? null,
+          JSON.stringify(oldPayload.details || {}),
+          Number(item.product_id),
+        ]
+      );
+    }
+
+    const rolledBackResult = await client.query(
+      `UPDATE repricing_batches
+       SET status = 'rolled_back', rolled_back_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING id, scenario_id, category_code, scenario_name, status, changed_count,
+                 applied_at, rolled_back_at`,
+      [normalizedBatchId]
+    );
+    await client.query('COMMIT');
+    return {
+      success: true,
+      alreadyRolledBack: false,
+      batch: rolledBackResult.rows[0],
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function getRepricingBatchItems(batchId) {
@@ -445,7 +708,9 @@ async function getRepricingBatchItems(batchId) {
   }
 
   const itemsResult = await pool.query(
-    `SELECT sku, old_price_uah, new_price_uah, price_delta_uah
+    `SELECT sku, old_price_uah, new_price_uah, price_delta_uah,
+            COALESCE((new_payload #>> '{details,repricing,manualOverride}')::boolean, FALSE)
+              AS manual_override
      FROM repricing_items
      WHERE batch_id = $1
      ORDER BY id`,
@@ -455,12 +720,34 @@ async function getRepricingBatchItems(batchId) {
   return { batch: batchResult.rows[0], items: itemsResult.rows };
 }
 
+async function getRepricingRollbackItems(batchId) {
+  const data = await getRepricingBatchItems(batchId);
+  return {
+    batch: data.batch,
+    items: data.items.map((item) => ({
+      sku: item.sku,
+      current_price_uah: item.new_price_uah,
+      restored_price_uah: item.old_price_uah,
+      difference_uah: item.old_price_uah === null
+        ? null
+        : Number(item.old_price_uah) - Number(item.new_price_uah),
+    })),
+  };
+}
+
 module.exports = {
   applyRepricing,
   buildRepricingPreview,
   getPreviewToken,
+  getApplicationToken,
   getRepricingBatchItems,
+  getRepricingRollbackItems,
   getRepricingBatches,
   getRepricingScenarios,
   hasManualPrice,
+  normalizeManualOverrides,
+  applyManualOverridesToPreview,
+  rollbackRepricing,
+  areNullableNumbersEqual,
+  doesProductMatchRepricingBatch,
 };

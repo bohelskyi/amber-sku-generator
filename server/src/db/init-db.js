@@ -340,7 +340,7 @@ async function initDb() {
       category_code TEXT,
       scenario_name TEXT NOT NULL,
       scenario_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
-      preview_token TEXT NOT NULL UNIQUE,
+      preview_token TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'completed',
       candidate_count INTEGER NOT NULL DEFAULT 0,
       changed_count INTEGER NOT NULL DEFAULT 0,
@@ -351,6 +351,8 @@ async function initDb() {
       applied_at TIMESTAMPTZ
     )
   `);
+
+  await pool.query('ALTER TABLE repricing_batches ADD COLUMN IF NOT EXISTS rolled_back_at TIMESTAMPTZ');
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS repricing_items (

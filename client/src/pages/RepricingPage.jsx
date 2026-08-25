@@ -1,8 +1,28 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ArrowLeft, CheckCircle2, Download, RefreshCw, Search } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowLeft,
+  ArrowUp,
+  ArrowUpDown,
+  CheckCircle2,
+  Download,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  Undo2,
+} from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { getPricingAxis } from '../lib/pricing-axis';
+import {
+  applyManualPrices,
+  getInvalidManualPriceIds,
+  getManualOverrides,
+  getRepricingSummary,
+  parseManualPrice,
+  sortRepricingItems,
+} from '../lib/repricing';
 
 const formatUah = (value) => {
   if (value === null || value === undefined || value === '') return '-';
@@ -56,7 +76,28 @@ function downloadBlob(blob, fileName) {
   URL.revokeObjectURL(url);
 }
 
-function ConfirmDialog({ changedCount, onCancel, onConfirm, pending }) {
+function SortHeader({ align = 'left', children, column, onSort, sort }) {
+  const active = sort.key === column;
+  const Icon = active ? (sort.direction === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <th
+      className={`table-cell ${align === 'right' ? 'text-right' : 'text-left'}`}
+      aria-sort={active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
+      <button
+        type="button"
+        className={`flex w-full items-center gap-1.5 ${align === 'right' ? 'justify-end' : 'justify-start'}`}
+        onClick={() => onSort(column)}
+        title={`Сортувати за колонкою «${children}»`}
+      >
+        <span>{children}</span>
+        <Icon size={13} className={active ? 'text-slate-800' : 'text-slate-400'} />
+      </button>
+    </th>
+  );
+}
+
+function ConfirmDialog({ changedCount, manualCount, onCancel, onConfirm, pending }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
       <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-2xl">
@@ -65,6 +106,11 @@ function ConfirmDialog({ changedCount, onCancel, onConfirm, pending }) {
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Застосувати переоцінку</h2>
             <p className="mt-2 text-sm text-slate-600">Буде оновлено ціну для {changedCount} товарів.</p>
+            {manualCount > 0 && (
+              <p className="mt-1 text-sm font-medium text-amber-700">
+                Ручних коригувань: {manualCount}.
+              </p>
+            )}
           </div>
         </div>
         <div className="mt-6 flex justify-end gap-2">
@@ -74,6 +120,36 @@ function ConfirmDialog({ changedCount, onCancel, onConfirm, pending }) {
           <button type="button" className="btn btn-primary gap-2" onClick={onConfirm} disabled={pending}>
             <RefreshCw size={16} className={pending ? 'animate-spin' : ''} />
             {pending ? 'Застосування...' : 'Застосувати'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RollbackDialog({ batch, onCancel, onConfirm, pending }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
+      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-2xl">
+        <div className="flex items-start gap-3">
+          <Undo2 className="mt-0.5 text-rose-600" size={22} />
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Відкотити переоцінку</h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Для {batch.changed_count} товарів буде повернуто ціни, які були до партії #{batch.id}.
+            </p>
+            <p className="mt-2 text-xs text-slate-500">
+              Якщо хоча б один товар пізніше змінювали, відкат не буде застосовано.
+            </p>
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end gap-2">
+          <button type="button" className="btn btn-outline" onClick={onCancel} disabled={pending}>
+            Скасувати
+          </button>
+          <button type="button" className="btn btn-primary gap-2" onClick={onConfirm} disabled={pending}>
+            <Undo2 size={16} />
+            {pending ? 'Відкат...' : 'Відкотити'}
           </button>
         </div>
       </div>
@@ -95,6 +171,11 @@ export default function RepricingPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [error, setError] = useState('');
   const [appliedBatch, setAppliedBatch] = useState(null);
+  const [manualPrices, setManualPrices] = useState({});
+  const [sort, setSort] = useState({ key: 'sku', direction: 'asc' });
+  const [rollbackTarget, setRollbackTarget] = useState(null);
+  const [rollingBack, setRollingBack] = useState(false);
+  const [rollbackResult, setRollbackResult] = useState(null);
 
   const loadBatches = () => api.get('/admin/repricing/batches').then((response) => {
     setBatches(response.data || []);
@@ -120,19 +201,53 @@ export default function RepricingPage() {
   }, []);
 
   const selectedScenario = scenarios.find((item) => Number(item.id) === Number(scenarioId));
+  const effectiveItems = useMemo(
+    () => applyManualPrices(preview?.items || [], manualPrices),
+    [manualPrices, preview]
+  );
+  const effectiveSummary = useMemo(
+    () => getRepricingSummary(preview?.summary || {}, effectiveItems),
+    [effectiveItems, preview]
+  );
+  const manualOverrides = useMemo(() => getManualOverrides(manualPrices), [manualPrices]);
+  const invalidManualPriceIds = useMemo(
+    () => new Set(getInvalidManualPriceIds(manualPrices)),
+    [manualPrices]
+  );
   const visibleItems = useMemo(() => {
     const normalizedSearch = search.trim().toUpperCase();
-    return (preview?.items || []).filter((item) => {
+    const filteredItems = effectiveItems.filter((item) => {
       if (filter !== 'all' && item.status !== filter) return false;
       return !normalizedSearch || String(item.sku || '').toUpperCase().includes(normalizedSearch);
     });
-  }, [filter, preview, search]);
+    return sortRepricingItems(filteredItems, sort);
+  }, [effectiveItems, filter, search, sort]);
+
+  const handleSort = (key) => {
+    setSort((currentSort) => ({
+      key,
+      direction: currentSort.key === key && currentSort.direction === 'asc' ? 'desc' : 'asc',
+    }));
+  };
+
+  const setManualPrice = (productId, value) => {
+    setManualPrices((currentPrices) => ({ ...currentPrices, [productId]: value }));
+  };
+
+  const resetManualPrice = (productId) => {
+    setManualPrices((currentPrices) => {
+      const nextPrices = { ...currentPrices };
+      delete nextPrices[productId];
+      return nextPrices;
+    });
+  };
 
   const buildPreview = () => {
     if (!scenarioId || previewing) return;
     setPreviewing(true);
     setError('');
     setAppliedBatch(null);
+    setManualPrices({});
     api.post('/admin/repricing/preview', { scenarioId: Number(scenarioId) })
       .then((response) => {
         setPreview(response.data);
@@ -149,10 +264,12 @@ export default function RepricingPage() {
     api.post('/admin/repricing/apply', {
       scenarioId: preview.scenario.id,
       previewToken: preview.previewToken,
+      manualOverrides,
     })
       .then((response) => {
         setAppliedBatch(response.data.batch);
         setPreview(null);
+        setManualPrices({});
         setConfirmOpen(false);
         return loadBatches();
       })
@@ -167,6 +284,30 @@ export default function RepricingPage() {
     api.get(`/admin/repricing/${batchId}/csv`, { responseType: 'blob' })
       .then((response) => downloadBlob(response.data, `amber-repricing-${batchId}.csv`))
       .catch((requestError) => setError(getApiError(requestError)));
+  };
+
+  const downloadRollbackBatch = (batchId) => {
+    api.get(`/admin/repricing/${batchId}/rollback-csv`, { responseType: 'blob' })
+      .then((response) => downloadBlob(response.data, `amber-repricing-rollback-${batchId}.csv`))
+      .catch((requestError) => setError(getApiError(requestError)));
+  };
+
+  const rollbackBatch = () => {
+    if (!rollbackTarget || rollingBack) return;
+    setRollingBack(true);
+    setError('');
+    api.post(`/admin/repricing/${rollbackTarget.id}/rollback`)
+      .then((response) => {
+        setRollbackResult(response.data.batch);
+        setRollbackTarget(null);
+        setAppliedBatch(null);
+        return loadBatches();
+      })
+      .catch((requestError) => {
+        setRollbackTarget(null);
+        setError(getApiError(requestError));
+      })
+      .finally(() => setRollingBack(false));
   };
 
   if (loading) {
@@ -211,6 +352,19 @@ export default function RepricingPage() {
           </div>
         )}
 
+        {rollbackResult && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+            <div className="flex items-center gap-3 text-sm text-amber-900">
+              <Undo2 size={19} />
+              <span>Переоцінку #{rollbackResult.id} відкочено. Старі ціни повернено.</span>
+            </div>
+            <button type="button" className="btn btn-outline gap-2" onClick={() => downloadRollbackBatch(rollbackResult.id)}>
+              <Download size={16} />
+              CSV відкату
+            </button>
+          </div>
+        )}
+
         <section className="card min-w-0 overflow-hidden">
           <div className="border-b border-slate-200 p-5 sm:p-6">
             <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(280px,1fr)_auto] lg:items-end">
@@ -223,6 +377,7 @@ export default function RepricingPage() {
                     setScenarioId(event.target.value);
                     setPreview(null);
                     setAppliedBatch(null);
+                    setManualPrices({});
                   }}
                 >
                   {scenarios.map((scenario) => (
@@ -258,10 +413,10 @@ export default function RepricingPage() {
               <div className="grid grid-cols-2 border-b border-slate-200 sm:grid-cols-5">
                 {[
                   ['Знайдено', preview.summary.candidateCount],
-                  ['Зміниться', preview.summary.changedCount],
-                  ['Без змін', preview.summary.unchangedCount],
+                  ['Зміниться', effectiveSummary.changedCount],
+                  ['Без змін', effectiveSummary.unchangedCount],
                   ['Пропущено', preview.summary.skippedCount],
-                  ['Помилки', preview.summary.errorCount],
+                  ['Помилки', effectiveSummary.errorCount],
                 ].map(([label, value]) => (
                   <div key={label} className="border-r border-slate-200 px-4 py-3 last:border-r-0">
                     <div className="text-xs text-slate-500">{label}</div>
@@ -303,12 +458,12 @@ export default function RepricingPage() {
                 <table className="min-w-full bg-white">
                   <thead className="sticky top-0 z-10">
                     <tr className="table-head">
-                      <th className="table-cell text-left">Артикул</th>
-                      <th className="table-cell text-left">Вага</th>
+                      <SortHeader column="sku" sort={sort} onSort={handleSort}>Артикул</SortHeader>
+                      <SortHeader column="weight" sort={sort} onSort={handleSort}>Вага</SortHeader>
                       <th className="table-cell text-left">Умова</th>
-                      <th className="table-cell text-right">Стара ціна</th>
-                      <th className="table-cell text-right">Нова ціна</th>
-                      <th className="table-cell text-right">Різниця</th>
+                      <SortHeader align="right" column="oldPriceUah" sort={sort} onSort={handleSort}>Стара ціна</SortHeader>
+                      <SortHeader align="right" column="newPriceUah" sort={sort} onSort={handleSort}>Нова ціна</SortHeader>
+                      <SortHeader align="right" column="priceDeltaUah" sort={sort} onSort={handleSort}>Різниця</SortHeader>
                     </tr>
                   </thead>
                   <tbody>
@@ -322,7 +477,49 @@ export default function RepricingPage() {
                             : getPricingBasis(config, preview.scenario.categoryCode, item)}
                         </td>
                         <td className="table-cell whitespace-nowrap text-right text-sm">{formatUah(item.oldPriceUah)}</td>
-                        <td className="table-cell whitespace-nowrap text-right text-sm font-semibold">{formatUah(item.newPriceUah)}</td>
+                        <td className="table-cell min-w-44 whitespace-nowrap text-right text-sm font-semibold">
+                          {item.status === 'error' ? '-' : (
+                            <div className="flex flex-col items-end gap-1">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <div className="relative">
+                                  <input
+                                    className={`input-sm w-28 pr-7 text-right font-semibold ${invalidManualPriceIds.has(item.productId) ? 'border-rose-400 focus:border-rose-500' : ''}`}
+                                    inputMode="decimal"
+                                    aria-label={`Нова ціна для ${item.sku}`}
+                                    value={Object.prototype.hasOwnProperty.call(manualPrices, item.productId)
+                                      ? manualPrices[item.productId]
+                                      : item.newPriceUah}
+                                    onChange={(event) => setManualPrice(item.productId, event.target.value)}
+                                    onBlur={(event) => {
+                                      const normalizedPrice = parseManualPrice(event.target.value);
+                                      if (normalizedPrice !== null) setManualPrice(item.productId, String(normalizedPrice));
+                                    }}
+                                  />
+                                  <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-normal text-slate-400">₴</span>
+                                </div>
+                                {Object.prototype.hasOwnProperty.call(manualPrices, item.productId) && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline flex h-8 w-8 shrink-0 items-center justify-center p-0"
+                                    onClick={() => resetManualPrice(item.productId)}
+                                    title="Повернути розраховану ціну"
+                                    aria-label={`Скинути ручну ціну для ${item.sku}`}
+                                  >
+                                    <RotateCcw size={14} />
+                                  </button>
+                                )}
+                              </div>
+                              {item.manualOverride && (
+                                <span className="text-[10px] font-semibold uppercase text-amber-700">
+                                  Вручну · матриця {formatUah(item.calculatedPriceUah)}
+                                </span>
+                              )}
+                              {invalidManualPriceIds.has(item.productId) && (
+                                <span className="text-[10px] font-medium text-rose-600">Вкажіть ціну більше нуля</span>
+                              )}
+                            </div>
+                          )}
+                        </td>
                         <td className={`table-cell whitespace-nowrap text-right text-sm font-semibold ${Number(item.priceDeltaUah) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
                           {item.status === 'error' ? '-' : formatUah(item.priceDeltaUah)}
                         </td>
@@ -336,11 +533,16 @@ export default function RepricingPage() {
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 p-4 sm:p-5">
-                <span className="text-sm text-slate-500">Рядків у перегляді: {visibleItems.length}</span>
+                <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
+                  <span>Рядків у перегляді: {visibleItems.length}</span>
+                  {manualOverrides.length > 0 && (
+                    <span className="font-medium text-amber-700">Ручних цін: {manualOverrides.length}</span>
+                  )}
+                </div>
                 <button
                   type="button"
                   className="btn btn-primary gap-2"
-                  disabled={preview.summary.changedCount === 0 || preview.summary.errorCount > 0}
+                  disabled={effectiveSummary.changedCount === 0 || effectiveSummary.errorCount > 0 || invalidManualPriceIds.size > 0}
                   onClick={() => setConfirmOpen(true)}
                 >
                   <CheckCircle2 size={16} />
@@ -361,8 +563,10 @@ export default function RepricingPage() {
                 <tr className="table-head">
                   <th className="table-cell text-left">Дата</th>
                   <th className="table-cell text-left">Матриця</th>
+                  <th className="table-cell text-left">Статус</th>
                   <th className="table-cell text-right">Оновлено</th>
                   <th className="table-cell text-right">CSV</th>
+                  <th className="table-cell text-right">Дія</th>
                 </tr>
               </thead>
               <tbody>
@@ -370,11 +574,45 @@ export default function RepricingPage() {
                   <tr key={batch.id} className="border-t border-slate-100">
                     <td className="table-cell whitespace-nowrap text-sm">{formatDate(batch.applied_at)}</td>
                     <td className="table-cell text-sm font-medium">{batch.category_code} — {batch.scenario_name}</td>
+                    <td className="table-cell text-sm">
+                      {batch.status === 'rolled_back' ? (
+                        <span className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">
+                          Відкочено
+                        </span>
+                      ) : (
+                        <span className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
+                          Застосовано
+                        </span>
+                      )}
+                    </td>
                     <td className="table-cell text-right text-sm">{batch.changed_count}</td>
                     <td className="table-cell text-right">
-                      <button type="button" className="btn btn-outline px-3 py-1.5" onClick={() => downloadBatch(batch.id)} title="Завантажити CSV">
-                        <Download size={16} />
-                      </button>
+                      <div className="flex justify-end gap-1.5">
+                        <button type="button" className="btn btn-outline flex h-8 w-8 items-center justify-center p-0" onClick={() => downloadBatch(batch.id)} title="CSV застосованих цін">
+                          <Download size={15} />
+                        </button>
+                        {batch.status === 'rolled_back' && (
+                          <button type="button" className="btn btn-outline flex h-8 w-8 items-center justify-center p-0" onClick={() => downloadRollbackBatch(batch.id)} title="CSV відновлених цін">
+                            <Undo2 size={15} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                    <td className="table-cell text-right">
+                      {batch.status === 'completed' && (
+                        <button
+                          type="button"
+                          className="btn btn-outline flex h-8 w-8 items-center justify-center p-0 ml-auto disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={() => setRollbackTarget(batch)}
+                          disabled={!batch.can_rollback}
+                          title={batch.can_rollback
+                            ? 'Відкотити переоцінку'
+                            : 'Після цієї партії товари вже змінювали'}
+                          aria-label={`Відкотити переоцінку ${batch.id}`}
+                        >
+                          <Undo2 size={15} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -387,10 +625,20 @@ export default function RepricingPage() {
 
       {confirmOpen && preview && (
         <ConfirmDialog
-          changedCount={preview.summary.changedCount}
+          changedCount={effectiveSummary.changedCount}
+          manualCount={manualOverrides.length}
           pending={applying}
           onCancel={() => setConfirmOpen(false)}
           onConfirm={applyPreview}
+        />
+      )}
+
+      {rollbackTarget && (
+        <RollbackDialog
+          batch={rollbackTarget}
+          pending={rollingBack}
+          onCancel={() => setRollbackTarget(null)}
+          onConfirm={rollbackBatch}
         />
       )}
     </div>

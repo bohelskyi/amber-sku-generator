@@ -28,8 +28,10 @@ const {
   applyRepricing,
   buildRepricingPreview,
   getRepricingBatchItems,
+  getRepricingRollbackItems,
   getRepricingBatches,
   getRepricingScenarios,
+  rollbackRepricing,
 } = require('../services/repricing.service');
 const { buildCsv } = require('../utils/csv');
 
@@ -107,16 +109,49 @@ router.post('/admin/repricing/apply', async (req, res) => {
   }
 });
 
+router.post('/admin/repricing/:batchId/rollback', async (req, res) => {
+  try {
+    res.json(await rollbackRepricing(req.params.batchId));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.get('/admin/repricing/:batchId/rollback-csv', async (req, res) => {
+  try {
+    const data = await getRepricingRollbackItems(req.params.batchId);
+    const csv = buildCsv([
+      ['sku', 'current_price_uah', 'restored_price_uah', 'difference_uah'],
+      ...data.items.map((item) => [
+        item.sku,
+        item.current_price_uah ?? '',
+        item.restored_price_uah ?? '',
+        item.difference_uah ?? '',
+      ]),
+    ]);
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="amber-repricing-rollback-${Number(req.params.batchId)}.csv"`
+    );
+    res.send(`\uFEFF${csv}`);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
 router.get('/admin/repricing/:batchId/csv', async (req, res) => {
   try {
     const data = await getRepricingBatchItems(req.params.batchId);
     const csv = buildCsv([
-      ['sku', 'old_price_uah', 'new_price_uah', 'difference_uah'],
+      ['sku', 'old_price_uah', 'new_price_uah', 'difference_uah', 'price_source'],
       ...data.items.map((item) => [
         item.sku,
         item.old_price_uah ?? '',
         item.new_price_uah,
         item.price_delta_uah,
+        item.manual_override ? 'manual' : 'matrix',
       ]),
     ]);
 
