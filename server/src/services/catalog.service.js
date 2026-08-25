@@ -52,10 +52,13 @@ function getNormalizedQuestionNumbers(payload, includeInSku) {
 
 function renameJsonObjectKey(value, oldKey, newKey) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-  if (!Object.prototype.hasOwnProperty.call(value, oldKey)) return value;
 
   return Object.entries(value).reduce((result, [key, item]) => {
-    result[key === oldKey ? newKey : key] = item;
+    const isLogicalOperator = key === '$or' || key === '$and';
+    const nextKey = !isLogicalOperator && key === oldKey ? newKey : key;
+    result[nextKey] = isLogicalOperator && Array.isArray(item)
+      ? item.map((branch) => renameJsonObjectKey(branch, oldKey, newKey))
+      : item;
     return result;
   }, {});
 }
@@ -71,7 +74,7 @@ function renameAxisKey(axisKey, oldKey, newKey) {
 async function renameRuleKey(client, tableName, idColumn, columnName, row, oldKey, newKey) {
   const currentRule = row[columnName];
   const nextRule = renameJsonObjectKey(currentRule, oldKey, newKey);
-  if (nextRule === currentRule) return;
+  if (JSON.stringify(nextRule) === JSON.stringify(currentRule)) return;
 
   await client.query(
     `UPDATE ${tableName} SET ${columnName} = $1::jsonb WHERE ${idColumn} = $2`,
@@ -84,8 +87,8 @@ async function renameQuestionKeyReferences(client, categoryCode, oldKey, newKey)
     `SELECT id, visible_if_json
      FROM questions
      WHERE category_code = $1
-       AND visible_if_json ? $2`,
-    [categoryCode, oldKey]
+       AND visible_if_json IS NOT NULL`,
+    [categoryCode]
   );
   for (const row of questionRules.rows) {
     await renameRuleKey(client, 'questions', 'id', 'visible_if_json', row, oldKey, newKey);
@@ -96,8 +99,8 @@ async function renameQuestionKeyReferences(client, categoryCode, oldKey, newKey)
      FROM options o
      JOIN questions q ON q.id = o.question_id
      WHERE q.category_code = $1
-       AND (o.visible_if_json ? $2 OR o.hidden_if_json ? $2)`,
-    [categoryCode, oldKey]
+       AND (o.visible_if_json IS NOT NULL OR o.hidden_if_json IS NOT NULL)`,
+    [categoryCode]
   );
   for (const row of optionRules.rows) {
     await renameRuleKey(client, 'options', 'id', 'visible_if_json', row, oldKey, newKey);
@@ -109,7 +112,7 @@ async function renameQuestionKeyReferences(client, categoryCode, oldKey, newKey)
      FROM price_scenarios
      WHERE category_code = $1
        AND (
-         match_json ? $2
+         match_json IS NOT NULL
          OR axis_x_key = $2
          OR axis_y_key = $2
          OR axis_x_key LIKE $3
@@ -132,6 +135,17 @@ async function renameQuestionKeyReferences(client, categoryCode, oldKey, newKey)
         row.id,
       ]
     );
+  }
+
+  const modifierRules = await client.query(
+    `SELECT id, match_json
+     FROM price_modifiers
+     WHERE category_code = $1
+       AND match_json IS NOT NULL`,
+    [categoryCode]
+  );
+  for (const row of modifierRules.rows) {
+    await renameRuleKey(client, 'price_modifiers', 'id', 'match_json', row, oldKey, newKey);
   }
 
   await client.query(

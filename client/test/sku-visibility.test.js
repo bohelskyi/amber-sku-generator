@@ -55,3 +55,57 @@ test('pricing axes respect hidden_if in a scenario context', () => {
 
   assert.deepEqual(axis.options.map((option) => option.label), ['Натура 1', 'Натура 2']);
 });
+
+test('hidden_if supports matching any configured condition', () => {
+  const question = {
+    id: 'quality',
+    options: [
+      {
+        id: 3,
+        label: '3 сорт',
+        hidden_if_json: {
+          $or: [
+            { style: 5 },
+            { is_calibrated: 0 },
+          ],
+        },
+      },
+    ],
+  };
+
+  assert.deepEqual(
+    getVisibleOptionsForQuestion(question, { style: 5, is_calibrated: 1 }, 1),
+    []
+  );
+  assert.deepEqual(
+    getVisibleOptionsForQuestion(question, { style: 1, is_calibrated: 0 }, 0),
+    []
+  );
+  assert.deepEqual(
+    getVisibleOptionsForQuestion(question, { style: 1, is_calibrated: 1 }, 1).map(
+      (option) => option.id
+    ),
+    [3]
+  );
+});
+
+test('pricing axes hide an option when any hidden condition is guaranteed', () => {
+  const question = {
+    id: 'quality',
+    label: 'Якість',
+    options: [
+      { id: 1, label: '1 сорт' },
+      {
+        id: 3,
+        label: '3 сорт',
+        hidden_if_json: { $or: [{ style: 5 }, { is_calibrated: 0 }] },
+      },
+    ],
+  };
+
+  const styleAxis = getPricingAxis('quality', [question], 'X', [], { style: 5 });
+  const calibratedAxis = getPricingAxis('quality', [question], 'X', [], { is_calibrated: 0 });
+
+  assert.deepEqual(styleAxis.options.map((option) => option.id), [1]);
+  assert.deepEqual(calibratedAxis.options.map((option) => option.id), [1]);
+});

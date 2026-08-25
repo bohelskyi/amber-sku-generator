@@ -4,23 +4,49 @@ const normalizeValue = (value) => {
 };
 
 export const parseConditionRows = (value) => {
-  if (!value) return { isValid: true, rows: [] };
+  if (!value) return { isValid: true, mode: 'all', rows: [] };
 
   try {
     const rule = typeof value === 'string' ? JSON.parse(value) : value;
     if (!rule || typeof rule !== 'object' || Array.isArray(rule)) {
-      return { isValid: false, rows: [] };
+      return { isValid: false, mode: 'all', rows: [] };
+    }
+
+    const isAnyMode = Object.hasOwn(rule, '$or');
+    if (isAnyMode) {
+      if (Object.keys(rule).length !== 1 || !Array.isArray(rule.$or)) {
+        return { isValid: false, mode: 'any', rows: [] };
+      }
+
+      const rows = [];
+      for (const branch of rule.$or) {
+        if (!branch || typeof branch !== 'object' || Array.isArray(branch)) {
+          return { isValid: false, mode: 'any', rows: [] };
+        }
+        const entries = Object.entries(branch);
+        if (entries.length !== 1 || entries[0][0].startsWith('$')) {
+          return { isValid: false, mode: 'any', rows: [] };
+        }
+        const [key, expected] = entries[0];
+        rows.push({
+          key,
+          values: Array.isArray(expected) ? expected.map(normalizeValue) : [normalizeValue(expected)],
+        });
+      }
+
+      return { isValid: true, mode: 'any', rows };
     }
 
     return {
       isValid: true,
+      mode: 'all',
       rows: Object.entries(rule).map(([key, expected]) => ({
         key,
         values: Array.isArray(expected) ? expected.map(normalizeValue) : [normalizeValue(expected)],
       })),
     };
   } catch {
-    return { isValid: false, rows: [] };
+    return { isValid: false, mode: 'all', rows: [] };
   }
 };
 
@@ -32,8 +58,9 @@ const toRuleValue = (value) => {
   return Number.isNaN(numericValue) ? trimmed : numericValue;
 };
 
-export const stringifyConditionRows = (rows) => {
+export const stringifyConditionRows = (rows, mode = 'all') => {
   const rule = {};
+  const branches = [];
 
   rows.forEach((row) => {
     if (!row.key) return;
@@ -43,10 +70,16 @@ export const stringifyConditionRows = (rows) => {
       .filter((value) => value !== '');
     if (values.length === 0) return;
 
-    rule[row.key] = values.length === 1 ? values[0] : values;
+    const expected = values.length === 1 ? values[0] : values;
+    rule[row.key] = expected;
+    branches.push({ [row.key]: expected });
   });
 
-  return Object.keys(rule).length > 0 ? JSON.stringify(rule) : '';
+  if (branches.length === 0) return '';
+  if (mode === 'any') {
+    return JSON.stringify({ $or: branches });
+  }
+  return JSON.stringify(rule);
 };
 
 export const getConditionSources = (questions, config, excludeQuestionId) => {
@@ -93,5 +126,5 @@ export const formatConditionSummary = (value, questions, config, fallback = 'З�
 
       return `${sourceLabel} = ${valueLabels.join(' або ')}`;
     })
-    .join('; ');
+    .join(parsed.mode === 'any' ? ' АБО ' : '; ');
 };

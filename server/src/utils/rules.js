@@ -23,9 +23,25 @@ function normalizeRuleValue(value) {
 }
 
 function isRuleMatched(rule, context = {}) {
-  if (!rule || typeof rule !== 'object') return true;
+  const normalizedRule = asRuleObject(rule);
+  if (!normalizedRule || typeof normalizedRule !== 'object' || Array.isArray(normalizedRule)) {
+    return true;
+  }
 
-  for (const [key, expected] of Object.entries(rule)) {
+  for (const [key, expected] of Object.entries(normalizedRule)) {
+    if (key === '$or') {
+      if (!Array.isArray(expected) || !expected.some((branch) => isRuleMatched(branch, context))) {
+        return false;
+      }
+      continue;
+    }
+    if (key === '$and') {
+      if (!Array.isArray(expected) || !expected.every((branch) => isRuleMatched(branch, context))) {
+        return false;
+      }
+      continue;
+    }
+
     const actual = normalizeRuleValue(context[key]);
 
     if (Array.isArray(expected)) {
@@ -39,8 +55,28 @@ function isRuleMatched(rule, context = {}) {
   return true;
 }
 
+function getRuleDependencies(rule) {
+  const normalizedRule = asRuleObject(rule);
+  if (!normalizedRule || typeof normalizedRule !== 'object' || Array.isArray(normalizedRule)) {
+    return [];
+  }
+
+  const dependencies = [];
+  for (const [key, expected] of Object.entries(normalizedRule)) {
+    if (key === '$or' || key === '$and') {
+      if (Array.isArray(expected)) {
+        expected.forEach((branch) => dependencies.push(...getRuleDependencies(branch)));
+      }
+    } else {
+      dependencies.push(key);
+    }
+  }
+  return Array.from(new Set(dependencies));
+}
+
 module.exports = {
   asRuleObject,
+  getRuleDependencies,
   isRuleMatched,
   parseOptionalRule,
 };

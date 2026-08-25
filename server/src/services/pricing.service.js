@@ -8,7 +8,7 @@ const {
   sortScenariosByPrecedence,
   validateWeightBands,
 } = require('../utils/pricing-scenarios');
-const { asRuleObject } = require('../utils/rules');
+const { asRuleObject, getRuleDependencies, isRuleMatched } = require('../utils/rules');
 const { roundUah } = require('../utils/money');
 const { parseNonNegativeDecimal } = require('../utils/numbers');
 
@@ -28,26 +28,17 @@ function getAnswerValue(answers, key) {
     : Number(answers[key]);
 }
 
-function isRuleValueMatched(actualValue, expectedValue) {
-  if (Array.isArray(expectedValue)) {
-    return expectedValue.map((value) => Number(value)).includes(Number(actualValue));
-  }
-
-  return Number(actualValue) === Number(expectedValue);
-}
-
-function getRuleAnswerValue(key, answers, normalizedCalibrated) {
-  return key === 'is_calibrated' ? normalizedCalibrated : getAnswerValue(answers, key);
-}
-
 function isPricingRuleMatched(ruleJson, answers, normalizedCalibrated) {
-  const rules = asRuleObject(ruleJson);
-  for (const [key, value] of Object.entries(rules)) {
-    if (!isRuleValueMatched(getRuleAnswerValue(key, answers, normalizedCalibrated), value)) {
-      return false;
+  const context = {
+    ...answers,
+    is_calibrated: normalizedCalibrated,
+  };
+  for (const key of getRuleDependencies(ruleJson)) {
+    if (context[key] === undefined || context[key] === null || context[key] === '') {
+      context[key] = getAnswerValue(answers, key);
     }
   }
-  return true;
+  return isRuleMatched(ruleJson, context);
 }
 
 function axisUsesKey(axisKey, targetKey) {
@@ -69,7 +60,7 @@ function getAxisDependentKeys(axisKey) {
 }
 
 function getRuleKeys(ruleJson) {
-  return Object.keys(asRuleObject(ruleJson));
+  return getRuleDependencies(ruleJson);
 }
 
 function uniqueKeys(keys) {
@@ -727,7 +718,22 @@ function normalizeModifierRule({ match_json, trigger_key, trigger_val }) {
 }
 
 function getLegacyModifierTrigger(rule) {
-  const [firstKey, firstValue] = Object.entries(rule)[0] || ['', 0];
+  let firstEntry = null;
+  for (const [key, value] of Object.entries(asRuleObject(rule))) {
+    if (key === '$or' || key === '$and') {
+      if (Array.isArray(value)) {
+        for (const branch of value) {
+          const nestedTrigger = getLegacyModifierTrigger(branch);
+          if (nestedTrigger.triggerKey) return nestedTrigger;
+        }
+      }
+      continue;
+    }
+    firstEntry = [key, value];
+    break;
+  }
+
+  const [firstKey, firstValue] = firstEntry || ['', 0];
   const normalizedValue = Array.isArray(firstValue) ? firstValue[0] : firstValue;
   return {
     triggerKey: firstKey || '',

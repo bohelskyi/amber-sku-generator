@@ -1,3 +1,11 @@
+import {
+  asRuleObject,
+  getRuleDependencies,
+  isRuleCompatibleWithContext,
+  isRuleGuaranteedByContext,
+  normalizeRuleValue,
+} from './rules.js';
+
 export function parseComboAxisKey(axisKey) {
   const keys = String(axisKey || '')
     .split('+')
@@ -7,60 +15,10 @@ export function parseComboAxisKey(axisKey) {
   return keys.length > 1 ? keys : null;
 }
 
-const asRuleObject = (value) => {
-  if (!value) return {};
-  if (typeof value === 'object' && !Array.isArray(value)) return value;
-
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-};
-
-const normalizeRuleValue = (value) => {
-  if (value === null || value === undefined) return value;
-  const numericValue = Number(value);
-  return Number.isNaN(numericValue) ? String(value) : numericValue;
-};
-
-const asRuleValues = (value) => (
-  (Array.isArray(value) ? value : [value]).map(normalizeRuleValue)
-);
-
-const isRuleCompatibleWithContext = (ruleValue, contextValue) => {
-  const rule = asRuleObject(ruleValue);
-  const context = asRuleObject(contextValue);
-
-  return Object.entries(rule).every(([key, expected]) => {
-    if (!Object.hasOwn(context, key)) return true;
-
-    const expectedValues = asRuleValues(expected);
-    const contextValues = asRuleValues(context[key]);
-    return expectedValues.some((value) => contextValues.includes(value));
-  });
-};
-
-const isRuleGuaranteedByContext = (ruleValue, contextValue) => {
-  const rule = asRuleObject(ruleValue);
-  const context = asRuleObject(contextValue);
-  if (Object.keys(rule).length === 0) return false;
-
-  return Object.entries(rule).every(([key, expected]) => {
-    if (!Object.hasOwn(context, key)) return false;
-
-    const expectedValues = asRuleValues(expected);
-    const contextValues = asRuleValues(context[key]);
-    return contextValues.every((value) => expectedValues.includes(value));
-  });
-};
-
 const getRuleSpecificity = (ruleValue, contextValue) => {
-  const rule = asRuleObject(ruleValue);
   const context = asRuleObject(contextValue);
 
-  return Object.keys(rule).filter((key) => Object.hasOwn(context, key)).length;
+  return getRuleDependencies(ruleValue).filter((key) => Object.hasOwn(context, key)).length;
 };
 
 const getContextualOptions = (options = [], context = {}) => {

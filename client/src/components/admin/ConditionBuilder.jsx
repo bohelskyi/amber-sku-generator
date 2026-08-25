@@ -24,16 +24,19 @@ export function ConditionBuilder({
     [questions, config, excludeQuestionId]
   );
   const [rows, setRows] = useState(parsedValue.rows);
+  const [logicMode, setLogicMode] = useState(parsedValue.mode);
 
   useEffect(() => {
     if (!parsedValue.isValid) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setRows(parsedValue.rows);
+    setLogicMode(parsedValue.mode);
   }, [parsedValue]);
 
-  const commitRows = (nextRows) => {
+  const commitRows = (nextRows, nextLogicMode = logicMode) => {
     setRows(nextRows);
-    onChange(stringifyConditionRows(nextRows));
+    setLogicMode(nextLogicMode);
+    onChange(stringifyConditionRows(nextRows, nextLogicMode));
   };
 
   const addCondition = () => {
@@ -70,6 +73,10 @@ export function ConditionBuilder({
     if (rows.length === 0) addCondition();
   };
 
+  const changeLogicMode = (nextLogicMode) => {
+    commitRows(rows, nextLogicMode);
+  };
+
   return (
     <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -92,6 +99,19 @@ export function ConditionBuilder({
 
       {rows.length > 0 && (
         <div className="space-y-3">
+          {rows.length > 1 && (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-500">Логіка</span>
+              <select
+                className="input-sm max-w-[180px]"
+                value={logicMode}
+                onChange={(event) => changeLogicMode(event.target.value)}
+              >
+                <option value="all">Усі умови</option>
+                <option value="any">Хоча б одна</option>
+              </select>
+            </div>
+          )}
           {rows.map((row, index) => {
             const source = sources.find((item) => item.key === row.key);
             const isTextSource = source && (source.input_type || 'options') === 'text';

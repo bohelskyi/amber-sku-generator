@@ -1,41 +1,8 @@
+import { hasRuleConditions, isRuleMatched } from './rules.js';
+
 export const isTextQuestion = (question) => (question?.input_type || 'options') === 'text';
 
-const normalizeRuleValue = (value) => {
-  if (value === null || value === undefined) return value;
-  const numericValue = Number(value);
-  return Number.isNaN(numericValue) ? String(value) : numericValue;
-};
-
-const asRuleObject = (value) => {
-  if (!value) return {};
-  if (typeof value === 'object' && !Array.isArray(value)) return value;
-
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-};
-
-export const isVisibilityRuleMatched = (rule, context) => {
-  const normalizedRule = asRuleObject(rule);
-
-  for (const [key, expected] of Object.entries(normalizedRule)) {
-    const actual = context[key];
-    const actualNormalized = normalizeRuleValue(actual);
-
-    if (Array.isArray(expected)) {
-      const expectedNormalized = expected.map((item) => normalizeRuleValue(item));
-      if (!expectedNormalized.includes(actualNormalized)) return false;
-    } else {
-      const expectedNormalized = normalizeRuleValue(expected);
-      if (actualNormalized !== expectedNormalized) return false;
-    }
-  }
-
-  return true;
-};
+export const isVisibilityRuleMatched = isRuleMatched;
 
 export const isQuestionVisible = (
   question,
@@ -75,8 +42,8 @@ export const getVisibleOptionsForQuestion = (
   };
 
   return (question.options || []).filter((option) => {
-    const hiddenRule = asRuleObject(option.hidden_if_json);
-    const isExplicitlyHidden = Object.keys(hiddenRule).length > 0
+    const hiddenRule = option.hidden_if_json;
+    const isExplicitlyHidden = hasRuleConditions(hiddenRule)
       && isVisibilityRuleMatched(hiddenRule, context);
 
     return isVisibilityRuleMatched(option.visible_if_json, context) && !isExplicitlyHidden;
