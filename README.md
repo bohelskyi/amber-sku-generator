@@ -44,6 +44,16 @@ docker compose exec server npm run audit:data -- --json
 
 Database migrations from `server/migrations` run automatically during server startup and are recorded in `schema_migrations`.
 
+### SKU schema versions
+
+- Existing articles without a marker are decoded by the immutable V1 snapshot.
+- Structural changes in the admin panel remain a draft until `Опублікувати V…` is pressed.
+- New published versions use a compact numeric marker, for example `BR2/...` or `BR52/...`.
+- `Внутрішнє значення` is used by pricing rules; `Код у SKU` is the encoded value and may be reused after the old option is archived.
+- Labels for natural and formed grades may share the same internal value and SKU code; their visibility conditions select the contextual label.
+
+Create a database backup before the first deployment of the versioning migration. On startup, the service automatically captures the current historical structure as V1 and links existing products to it.
+
 ### Data persistence
 
 - PostgreSQL data is stored in Docker volume `postgres_data`.

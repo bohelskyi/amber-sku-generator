@@ -5,6 +5,7 @@ const normalizeQuestionSeparator = (separator) => {
 
 const getSampleValue = (question) => {
   const firstOption = (question.options || [])[0];
+  if (firstOption?.sku_code !== undefined && firstOption?.sku_code !== null) return String(firstOption.sku_code);
   if (firstOption?.id !== undefined && firstOption?.id !== null) return String(firstOption.id);
   return '0';
 };
@@ -14,7 +15,7 @@ const getSkuQuestions = (questions) =>
     .filter((question) => question.include_in_sku === 1)
     .sort((a, b) => Number(a.sku_index) - Number(b.sku_index) || String(a.id).localeCompare(String(b.id)));
 
-export function SkuTemplatePreview({ category, questions }) {
+export function SkuTemplatePreview({ category, marker = '', questions }) {
   if (!category) return null;
 
   const skuQuestions = getSkuQuestions(questions);
@@ -34,7 +35,7 @@ export function SkuTemplatePreview({ category, questions }) {
 
   const suffixLabel = category.requires_weight === 1 ? '045' : '001';
   const suffixText = category.requires_weight === 1 ? 'вага' : 'номер';
-  const sampleSku = `${category.code}${parts.map((part) => part.token).join('')}${suffixLabel}`;
+  const sampleSku = `${category.code}${marker || ''}${parts.map((part) => part.token).join('')}${suffixLabel}`;
   const isBranchingSku = category.skip_hidden_sku_questions === 1;
 
   return (
@@ -64,6 +65,11 @@ export function SkuTemplatePreview({ category, questions }) {
           <span className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700">
             {category.code}
           </span>
+          {marker && (
+            <span className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 font-mono text-xs text-amber-800">
+              {marker}
+            </span>
+          )}
           {parts.map((part) => (
             <span
               key={part.id}

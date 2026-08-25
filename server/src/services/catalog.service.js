@@ -197,9 +197,11 @@ async function getAppConfig() {
       q.visible_if_json AS q_visible_if_json,
       o.id AS o_db_id,
       o.value_id,
+      o.sku_code,
       o.label AS o_label,
       o.visible_if_json,
-      o.hidden_if_json
+      o.hidden_if_json,
+      COALESCE(o.archived, FALSE) AS o_archived
     FROM questions q
     LEFT JOIN options o ON q.id = o.question_id
     ORDER BY q.category_code, COALESCE(q.display_order, q.sku_index), q.sku_index, o.value_id
@@ -228,9 +230,11 @@ async function getAppConfig() {
       tempQuestions.get(row.q_db_id).options.push({
         db_id: row.o_db_id,
         id: row.value_id,
+        sku_code: String(row.sku_code ?? row.value_id),
         label: row.o_label,
         visible_if_json: row.visible_if_json || null,
         hidden_if_json: row.hidden_if_json || null,
+        archived: row.o_archived ? 1 : 0,
       });
     }
   }
@@ -311,6 +315,7 @@ async function updateCategory({ code, next_code, name, requires_weight, skip_hid
     await client.query('UPDATE price_scenarios SET category_code = $1 WHERE category_code = $2', [nextCode, currentCode]);
     await client.query('UPDATE price_modifiers SET category_code = $1 WHERE category_code = $2', [nextCode, currentCode]);
     await client.query('UPDATE products SET category = $1 WHERE category = $2', [nextCode, currentCode]);
+    await client.query('UPDATE sku_schema_versions SET category_code = $1 WHERE category_code = $2', [nextCode, currentCode]);
     await client.query('DELETE FROM categories WHERE code = $1', [currentCode]);
 
     await client.query('COMMIT');
@@ -437,37 +442,104 @@ async function updateQuestion(payload) {
 async function createOption(payload) {
   const visibleRule = parseOptionalRule(payload.visible_if_json ?? payload.visible_if);
   const hiddenRule = parseOptionalRule(payload.hidden_if_json ?? payload.hidden_if);
+  const skuCode = String(payload.sku_code ?? payload.value_id ?? '').trim();
+  if (!/^\d+$/.test(skuCode)) {
+    const err = new Error('SKU-код варіанта має складатися лише з цифр.');
+    err.statusCode = 400;
+    throw err;
+  }
   const result = await pool.query(
-    `INSERT INTO options (question_id, value_id, label, visible_if_json, hidden_if_json)
-     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
+    `INSERT INTO options (question_id, value_id, sku_code, label, visible_if_json, hidden_if_json, archived)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
      RETURNING id`,
     [
       Number(payload.question_id),
       Number(payload.value_id),
+      skuCode,
       payload.label,
       visibleRule ? JSON.stringify(visibleRule) : null,
       hiddenRule ? JSON.stringify(hiddenRule) : null,
+      Boolean(payload.archived),
     ]
   );
 
   return { id: result.rows[0].id };
 }
 
+async function getOptionUsage(optionId, queryable = pool) {
+  const result = await queryable.query(
+    `SELECT o.value_id, q.key AS question_key, q.category_code,
+            (
+              SELECT COUNT(*)::int
+              FROM products p
+              WHERE p.category = q.category_code
+                AND p.details #>> ARRAY['answers', q.key] = o.value_id::text
+            ) AS product_count
+     FROM options o
+     JOIN questions q ON q.id = o.question_id
+     WHERE o.id = $1`,
+    [Number(optionId)]
+  );
+  return result.rows[0] || null;
+}
+
 async function updateOption(payload) {
   const visibleRule = parseOptionalRule(payload.visible_if_json ?? payload.visible_if);
   const hiddenRule = parseOptionalRule(payload.hidden_if_json ?? payload.hidden_if);
+  const skuCode = String(payload.sku_code ?? payload.value_id ?? '').trim();
+  if (!/^\d+$/.test(skuCode)) {
+    const err = new Error('SKU-код варіанта має складатися лише з цифр.');
+    err.statusCode = 400;
+    throw err;
+  }
+  const optionUsage = await getOptionUsage(payload.id);
+  if (!optionUsage) {
+    const err = new Error('Варіант не знайдено');
+    err.statusCode = 404;
+    throw err;
+  }
+  if (
+    Number(optionUsage.value_id) !== Number(payload.value_id)
+    && Number(optionUsage.product_count) > 0
+  ) {
+    const err = new Error(
+      `Код цього варіанта використовується у ${optionUsage.product_count} товарах і не може бути змінений.`
+    );
+    err.statusCode = 409;
+    throw err;
+  }
+
   await pool.query(
     `UPDATE options
-     SET value_id = $1, label = $2, visible_if_json = $3::jsonb, hidden_if_json = $4::jsonb
-     WHERE id = $5`,
+     SET value_id = $1, sku_code = $2, label = $3, visible_if_json = $4::jsonb,
+         hidden_if_json = $5::jsonb, archived = COALESCE($6, archived)
+     WHERE id = $7`,
     [
       Number(payload.value_id),
+      skuCode,
       payload.label,
       visibleRule ? JSON.stringify(visibleRule) : null,
       hiddenRule ? JSON.stringify(hiddenRule) : null,
+      payload.archived === undefined ? null : Boolean(payload.archived),
       Number(payload.id),
     ]
   );
+}
+
+async function setOptionArchived({ id, archived }) {
+  const result = await pool.query(
+    `UPDATE options
+     SET archived = $1
+     WHERE id = $2
+     RETURNING id`,
+    [Boolean(archived), Number(id)]
+  );
+
+  if (result.rows.length === 0) {
+    const err = new Error('Варіант не знайдено');
+    err.statusCode = 404;
+    throw err;
+  }
 }
 
 async function updateQuestionsOrder({ category_code, questions }) {
@@ -535,6 +607,14 @@ async function deleteCatalogItem(type, id) {
     return;
   }
   if (type === 'option') {
+    const option = await getOptionUsage(id);
+    if (option && Number(option.product_count) > 0) {
+      const err = new Error(
+        `Цей варіант використовується у ${option.product_count} товарах. Архівуйте його замість видалення.`
+      );
+      err.statusCode = 409;
+      throw err;
+    }
     await pool.query('DELETE FROM options WHERE id = $1', [Number(id)]);
     return;
   }
@@ -560,6 +640,7 @@ module.exports = {
   updateQuestion,
   createOption,
   updateOption,
+  setOptionArchived,
   updateQuestionsOrder,
   deleteCatalogItem,
 };

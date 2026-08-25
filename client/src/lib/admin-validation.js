@@ -176,8 +176,11 @@ export function getValidationIssues(config) {
         indexSet.add(question.sku_index);
       }
 
-      if ((question.input_type || 'options') !== 'text' && (!question.options || question.options.length === 0)) {
-        validationIssues.push(`Категорія ${category.code}: питання ${question.id} без варіантів`);
+      const activeOptions = (question.options || []).filter(
+        (option) => option.archived !== 1 && option.archived !== true
+      );
+      if ((question.input_type || 'options') !== 'text' && activeOptions.length === 0) {
+        validationIssues.push(`Категорія ${category.code}: питання ${question.id} без активних варіантів`);
       }
 
       validateRule({

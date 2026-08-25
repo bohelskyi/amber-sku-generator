@@ -103,7 +103,7 @@ export default function RepricingPage() {
 
   useEffect(() => {
     Promise.all([
-      api.get('/config'),
+      api.get('/admin/config'),
       api.get('/admin/repricing/scenarios'),
       api.get('/admin/repricing/batches'),
     ])

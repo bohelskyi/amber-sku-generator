@@ -30,6 +30,8 @@ export default function AdminPage() {
           currentCatQuestions={admin.currentCatQuestions}
           currentOptions={admin.currentOptions}
           selectedQuestionInputType={admin.selectedQuestionInputType}
+          schemaStatus={admin.schemaStatus}
+          schemaPublishState={admin.schemaPublishState}
           editCat={admin.editCat}
           setEditCat={admin.setEditCat}
           editQuestion={admin.editQuestion}
@@ -52,8 +54,10 @@ export default function AdminPage() {
           autoAssignSkuIndexes={admin.autoAssignSkuIndexes}
           fillNextNewQuestionSkuIndex={admin.fillNextNewQuestionSkuIndex}
           addOption={admin.addOption}
+          archiveOption={admin.archiveOption}
           beginOptionEdit={admin.beginOptionEdit}
           updateOption={admin.updateOption}
+          publishSkuSchema={admin.publishSkuSchema}
           deleteItem={admin.deleteItem}
           formatMatchJson={admin.formatMatchJson}
         />

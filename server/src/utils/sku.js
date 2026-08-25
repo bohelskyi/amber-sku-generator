@@ -78,12 +78,22 @@ function getQuestionSeparator(question) {
   return normalizeSkuSeparator(question?.sku_separator);
 }
 
+function getOptionCode(option) {
+  return String(option?.sku_code ?? option?.id ?? option?.value_id ?? '');
+}
+
+function getOptionValue(option) {
+  const value = option?.value_id ?? option?.id;
+  const numericValue = Number(value);
+  return Number.isNaN(numericValue) ? value : numericValue;
+}
+
 function decodeQuestionOption(question, option) {
   return {
     key: question.key,
     label: question.label,
     sku_index: question.sku_index,
-    value_id: option.id,
+    value_id: getOptionValue(option),
     value_label: option.label,
     is_placeholder: false,
   };
@@ -124,7 +134,7 @@ function decodeSkuAnswersWithQuestionSeparators(
     const remainingEncodedPart = encodedAfterOpeningSeparator.slice(
       closingSeparatorIndex + questionSeparator.length
     );
-    const option = question.options.find((item) => String(item.id) === optionCode);
+    const option = question.options.find((item) => getOptionCode(item) === optionCode);
 
     if (option) {
       return decodeSkuAnswersWithQuestionSeparators(
@@ -135,7 +145,7 @@ function decodeSkuAnswersWithQuestionSeparators(
       );
     }
 
-    const hasZeroOption = question.options.some((item) => Number(item.id) === 0);
+    const hasZeroOption = question.options.some((item) => getOptionCode(item) === '0');
     if (question.required !== 1 && !hasZeroOption && optionCode === '0') {
       return decodeSkuAnswersWithQuestionSeparators(
         questions,
@@ -149,11 +159,11 @@ function decodeSkuAnswersWithQuestionSeparators(
   }
 
   const options = [...question.options].sort(
-    (a, b) => String(b.id).length - String(a.id).length || a.id - b.id
+    (a, b) => getOptionCode(b).length - getOptionCode(a).length
   );
 
   for (const option of options) {
-    const optionCode = String(option.id);
+    const optionCode = getOptionCode(option);
     if (!encodedPart.startsWith(optionCode)) continue;
 
     const nextDecoded = decodeSkuAnswersWithQuestionSeparators(
@@ -169,9 +179,17 @@ function decodeSkuAnswersWithQuestionSeparators(
     if (nextDecoded) return nextDecoded;
   }
 
-  const hasZeroOption = question.options.some((option) => Number(option.id) === 0);
+  const hasZeroOption = question.options.some((option) => getOptionCode(option) === '0');
   if (question.required !== 1 && !hasZeroOption && encodedPart.startsWith('0')) {
-    return decodeSkuAnswersWithQuestionSeparators(questions, encodedPart.slice(1), index + 1, [
+    const decodedPlaceholder = decodeSkuAnswersWithQuestionSeparators(questions, encodedPart.slice(1), index + 1, [
+      ...decodedAnswers,
+      decodePlaceholder(question),
+    ]);
+    if (decodedPlaceholder) return decodedPlaceholder;
+  }
+
+  if (question.required !== 1) {
+    return decodeSkuAnswersWithQuestionSeparators(questions, encodedPart, index + 1, [
       ...decodedAnswers,
       decodePlaceholder(question),
     ]);
@@ -228,7 +246,7 @@ function decodeVisibleSkuAnswersWithQuestionSeparators(
     const remainingEncodedPart = encodedAfterOpeningSeparator.slice(
       closingSeparatorIndex + questionSeparator.length
     );
-    const option = question.options.find((item) => String(item.id) === optionCode);
+    const option = question.options.find((item) => getOptionCode(item) === optionCode);
 
     if (option) {
       return decodeVisibleSkuAnswersWithQuestionSeparators(
@@ -236,12 +254,12 @@ function decodeVisibleSkuAnswersWithQuestionSeparators(
         remainingEncodedPart,
         index + 1,
         [...decodedAnswers, decodeQuestionOption(question, option)],
-        { ...answerMap, [question.key]: option.id },
+        { ...answerMap, [question.key]: getOptionValue(option) },
         isCalibrated
       );
     }
 
-    const hasZeroOption = question.options.some((item) => Number(item.id) === 0);
+    const hasZeroOption = question.options.some((item) => getOptionCode(item) === '0');
     if (question.required !== 1 && !hasZeroOption && optionCode === '0') {
       return decodeVisibleSkuAnswersWithQuestionSeparators(
         questions,
@@ -257,11 +275,11 @@ function decodeVisibleSkuAnswersWithQuestionSeparators(
   }
 
   const options = [...question.options].sort(
-    (a, b) => String(b.id).length - String(a.id).length || a.id - b.id
+    (a, b) => getOptionCode(b).length - getOptionCode(a).length
   );
 
   for (const option of options) {
-    const optionCode = String(option.id);
+    const optionCode = getOptionCode(option);
     if (!encodedPart.startsWith(optionCode)) continue;
 
     const nextDecoded = decodeVisibleSkuAnswersWithQuestionSeparators(
@@ -269,18 +287,30 @@ function decodeVisibleSkuAnswersWithQuestionSeparators(
       encodedPart.slice(optionCode.length),
       index + 1,
       [...decodedAnswers, decodeQuestionOption(question, option)],
-      { ...answerMap, [question.key]: option.id },
+      { ...answerMap, [question.key]: getOptionValue(option) },
       isCalibrated
     );
 
     if (nextDecoded) return nextDecoded;
   }
 
-  const hasZeroOption = question.options.some((option) => Number(option.id) === 0);
+  const hasZeroOption = question.options.some((option) => getOptionCode(option) === '0');
   if (question.required !== 1 && !hasZeroOption && encodedPart.startsWith('0')) {
-    return decodeVisibleSkuAnswersWithQuestionSeparators(
+    const decodedPlaceholder = decodeVisibleSkuAnswersWithQuestionSeparators(
       questions,
       encodedPart.slice(1),
+      index + 1,
+      [...decodedAnswers, decodePlaceholder(question)],
+      { ...answerMap, [question.key]: 0 },
+      isCalibrated
+    );
+    if (decodedPlaceholder) return decodedPlaceholder;
+  }
+
+  if (question.required !== 1) {
+    return decodeVisibleSkuAnswersWithQuestionSeparators(
+      questions,
+      encodedPart,
       index + 1,
       [...decodedAnswers, decodePlaceholder(question)],
       { ...answerMap, [question.key]: 0 },
@@ -340,16 +370,16 @@ function decodeStoredSkuAnswers(questions, encodedPart, storedAnswers = {}) {
       && storedAnswers[question.key] !== '';
     const storedValue = hasStoredValue ? storedAnswers[question.key] : 0;
     const option = question.options.find(
-      (item) => String(item.id) === String(storedValue)
+      (item) => String(getOptionValue(item)) === String(storedValue)
     );
 
     if (option) {
       decodedAnswers.push(decodeQuestionOption(question, option));
-      answerCodes.push({ value: option.id, sku_separator: question.sku_separator });
+      answerCodes.push({ value: getOptionCode(option), sku_separator: question.sku_separator });
       continue;
     }
 
-    const hasZeroOption = question.options.some((item) => Number(item.id) === 0);
+    const hasZeroOption = question.options.some((item) => getOptionCode(item) === '0');
     if (Number(storedValue) !== 0 || hasZeroOption) return null;
 
     decodedAnswers.push(decodePlaceholder(question));
@@ -396,10 +426,10 @@ function decodeVisibleSkuAnswers(questions, encodedPart) {
 
 function getExpectedQuestionValues(question) {
   const expected = question.options.map((option) => ({
-    code: String(option.id),
+    code: getOptionCode(option),
     label: option.label,
   }));
-  const hasZeroOption = question.options.some((option) => Number(option.id) === 0);
+  const hasZeroOption = question.options.some((option) => getOptionCode(option) === '0');
 
   if (question.required !== 1 && !hasZeroOption) {
     expected.unshift({ code: '0', label: 'Не обрано' });
@@ -516,8 +546,8 @@ function diagnoseSkuPath(
       const optionCode = afterOpeningSeparator.slice(0, closingSeparatorIndex);
       const consumedLength = separator.length * 2 + optionCode.length;
       const nextRemaining = remaining.slice(consumedLength);
-      const option = question.options.find((item) => String(item.id) === optionCode);
-      const hasZeroOption = question.options.some((item) => Number(item.id) === 0);
+      const option = question.options.find((item) => getOptionCode(item) === optionCode);
+      const hasZeroOption = question.options.some((item) => getOptionCode(item) === '0');
       const isPlaceholder = question.required !== 1 && !hasZeroOption && optionCode === '0';
 
       if (!option && !isPlaceholder) {
@@ -534,7 +564,7 @@ function diagnoseSkuPath(
         };
       }
 
-      const value = option ? option.id : 0;
+      const value = option ? getOptionValue(option) : 0;
       return walk(
         questionIndex + 1,
         nextRemaining,
@@ -544,26 +574,26 @@ function diagnoseSkuPath(
     }
 
     const options = [...question.options].sort(
-      (a, b) => String(b.id).length - String(a.id).length || a.id - b.id
+      (a, b) => getOptionCode(b).length - getOptionCode(a).length
     );
     let bestFailure = null;
     let matchedPrefix = false;
 
     for (const option of options) {
-      const optionCode = String(option.id);
+      const optionCode = getOptionCode(option);
       if (!remaining.startsWith(optionCode)) continue;
       matchedPrefix = true;
       const result = walk(
         questionIndex + 1,
         remaining.slice(optionCode.length),
-        { ...answers, [question.key]: option.id },
+        { ...answers, [question.key]: getOptionValue(option) },
         offset + optionCode.length
       );
       if (result.success) return result;
       bestFailure = getMoreSpecificFailure(bestFailure, result.failure);
     }
 
-    const hasZeroOption = question.options.some((option) => Number(option.id) === 0);
+    const hasZeroOption = question.options.some((option) => getOptionCode(option) === '0');
     if (question.required !== 1 && !hasZeroOption && remaining.startsWith('0')) {
       matchedPrefix = true;
       const result = walk(
@@ -656,6 +686,8 @@ module.exports = {
   decodeVisibleSkuAnswers,
   diagnoseSkuAnswers,
   diagnoseSkuAttempts,
+  getOptionCode,
+  getOptionValue,
   normalizeSkuSeparator,
   stripSkuSeparators,
 };

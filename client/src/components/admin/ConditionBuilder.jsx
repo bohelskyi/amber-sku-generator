@@ -140,7 +140,13 @@ export function ConditionBuilder({
 
                 {source && !isTextSource && (
                   <div className="flex flex-wrap gap-2">
-                    {(source.options || []).map((option) => {
+                    {(source.options || []).filter((option) => (
+                      (
+                        option.archived !== 1
+                        && option.archived !== true
+                      )
+                      || row.values.includes(normalizeValue(option.id))
+                    )).map((option) => {
                       const optionValue = normalizeValue(option.id);
                       const isSelected = row.values.includes(optionValue);
 

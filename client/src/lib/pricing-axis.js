@@ -23,7 +23,9 @@ const getRuleSpecificity = (ruleValue, contextValue) => {
 
 const getContextualOptions = (options = [], context = {}) => {
   const compatibleOptions = options.filter((option) => (
-    isRuleCompatibleWithContext(option.visible_if_json, context)
+    option.archived !== 1
+    && option.archived !== true
+    && isRuleCompatibleWithContext(option.visible_if_json, context)
     && !isRuleGuaranteedByContext(option.hidden_if_json, context)
   ));
   const optionsByValue = new Map();

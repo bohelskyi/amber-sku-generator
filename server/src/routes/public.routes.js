@@ -1,7 +1,7 @@
 const express = require('express');
 const { buildCsv } = require('../utils/csv');
 const { roundUah } = require('../utils/money');
-const { getAppConfig } = require('../services/catalog.service');
+const { getPublicConfig } = require('../services/sku-schema.service');
 const { calculatePricing } = require('../services/pricing.service');
 const {
   decodeSku,
@@ -23,10 +23,10 @@ const router = express.Router();
 
 router.get('/config', async (req, res) => {
   try {
-    const config = await getAppConfig();
+    const config = await getPublicConfig();
     res.json(config);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
@@ -35,7 +35,7 @@ router.post('/preview', async (req, res) => {
     const preview = await buildProductPreview(req.body || {});
     res.json(preview);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 

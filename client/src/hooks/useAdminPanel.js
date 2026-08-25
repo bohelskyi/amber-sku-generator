@@ -3,10 +3,10 @@ import { api } from '../lib/api';
 import { getValidationIssues } from '../lib/admin-validation';
 import { normalizeDecimalInput } from '../lib/number-input';
 
-const emptyEditOption = { id: null, value_id: '', label: '', visible_if_json: '', hidden_if_json: '' };
+const emptyEditOption = { id: null, value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false };
 const emptyNewCategory = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false };
 const emptyNewQuestion = { key: '', label: '', display_order: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' };
-const emptyNewOption = { value_id: '', label: '', visible_if_json: '', hidden_if_json: '' };
+const emptyNewOption = { value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false };
 const emptyNewScenario = {
   name: '',
   group_name: '',
@@ -60,12 +60,25 @@ export function useAdminPanel() {
   const [editScenario, setEditScenario] = useState(null);
   const [newModifier, setNewModifier] = useState(emptyNewModifier);
   const [editModifier, setEditModifier] = useState(null);
+  const [schemaStatus, setSchemaStatus] = useState(null);
+  const [schemaPublishState, setSchemaPublishState] = useState({ loading: false, error: '' });
 
   const fetchConfig = () =>
-    api.get('/config').then((res) => {
+    api.get('/admin/config').then((res) => {
       setConfig(res.data);
       return res.data;
     });
+
+  const fetchSchemaStatus = (categoryCode) => {
+    if (!categoryCode) {
+      setSchemaStatus(null);
+      return Promise.resolve(null);
+    }
+    return api.get(`/admin/sku-schema/${categoryCode}`).then((res) => {
+      setSchemaStatus(res.data);
+      return res.data;
+    });
+  };
 
   const fetchPricesForCategory = (categoryCode) => {
     api.get(`/admin/prices/${categoryCode}`).then((res) => setPricesData(res.data));
@@ -115,6 +128,17 @@ export function useAdminPanel() {
     fetchConfig();
   }, []);
 
+  useEffect(() => {
+    if (!selectedCat?.code || !config) return undefined;
+    let cancelled = false;
+    api.get(`/admin/sku-schema/${selectedCat.code}`).then((res) => {
+      if (!cancelled) setSchemaStatus(res.data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [config, selectedCat?.code]);
+
   const formatMatchJson = (value) => {
     if (value === null || value === undefined) return '{}';
     if (typeof value === 'string') return value;
@@ -154,6 +178,7 @@ export function useAdminPanel() {
     setEditOpt(emptyEditOption);
     setNewQuest(buildNewQuestionDefaults(categoryQuestions));
     setPricesData(null);
+    setSchemaPublishState({ loading: false, error: '' });
     fetchPricesForCategory(category.code);
   };
 
@@ -285,6 +310,7 @@ export function useAdminPanel() {
     api.post('/admin/option', {
       question_id: selectedQuestion.q_db_id,
       value_id: newOpt.value_id,
+      sku_code: newOpt.sku_code || newOpt.value_id,
       label: newOpt.label,
       visible_if_json: parsedVisibleRule.value,
       hidden_if_json: parsedHiddenRule.value,
@@ -298,9 +324,11 @@ export function useAdminPanel() {
     setEditOpt({
       id: option.db_id,
       value_id: String(option.id),
+      sku_code: String(option.sku_code ?? option.id),
       label: option.label,
       visible_if_json: option.visible_if_json ? formatMatchJson(option.visible_if_json) : '',
       hidden_if_json: option.hidden_if_json ? formatMatchJson(option.hidden_if_json) : '',
+      archived: option.archived === 1 || option.archived === true,
     });
   };
 
@@ -315,15 +343,42 @@ export function useAdminPanel() {
     api.put('/admin/option', {
       id: editOpt.id,
       value_id: editOpt.value_id,
+      sku_code: editOpt.sku_code,
       label: editOpt.label,
       visible_if_json: parsedVisibleRule.value,
       hidden_if_json: parsedHiddenRule.value,
+      archived: editOpt.archived,
     })
       .then(() => {
         setEditOpt(emptyEditOption);
         fetchConfig();
       })
       .catch((err) => alert(`Помилка оновлення опції: ${err.response?.data?.error || err.message}`));
+  };
+
+  const archiveOption = (option, archived) => {
+    api.patch(`/admin/option/${option.db_id}/archive`, { archived })
+      .then(() => {
+        if (editOpt.id === option.db_id) setEditOpt(emptyEditOption);
+        return fetchConfig();
+      })
+      .catch((err) => alert(`Помилка архівування: ${err.response?.data?.error || err.message}`));
+  };
+
+  const publishSkuSchema = () => {
+    if (!selectedCat || !schemaStatus?.draftChanged || schemaPublishState.loading) return;
+    setSchemaPublishState({ loading: true, error: '' });
+    api.post(`/admin/sku-schema/${selectedCat.code}/publish`)
+      .then(() => Promise.all([fetchConfig(), fetchSchemaStatus(selectedCat.code)]))
+      .catch((err) => {
+        setSchemaPublishState({
+          loading: false,
+          error: err.response?.data?.error || err.message,
+        });
+      })
+      .finally(() => {
+        setSchemaPublishState((state) => ({ ...state, loading: false }));
+      });
   };
 
   const persistQuestionOrder = (orderedQuestions, { reindexSku = false } = {}) => {
@@ -419,7 +474,8 @@ export function useAdminPanel() {
           setEditOpt(emptyEditOption);
         }
         if (type === 'scenario' || type === 'modifier') fetchPrices();
-      });
+      })
+      .catch((err) => alert(`Помилка видалення: ${err.response?.data?.error || err.message}`));
   };
 
   const handlePriceChange = (scenarioId, xVal, yVal, newPrice) => {
@@ -594,6 +650,7 @@ export function useAdminPanel() {
     addOption,
     addQuestion,
     addScenario,
+    archiveOption,
     autoAssignSkuIndexes,
     beginModifierEdit,
     beginOptionEdit,
@@ -618,6 +675,9 @@ export function useAdminPanel() {
     newOpt,
     newQuest,
     pricesData,
+    publishSkuSchema,
+    schemaPublishState,
+    schemaStatus,
     selectedCat,
     selectedQuestion,
     selectedQuestionInputType,

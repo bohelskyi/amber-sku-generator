@@ -42,6 +42,8 @@ export const getVisibleOptionsForQuestion = (
   };
 
   return (question.options || []).filter((option) => {
+    if (option.archived === 1 || option.archived === true) return false;
+
     const hiddenRule = option.hidden_if_json;
     const isExplicitlyHidden = hasRuleConditions(hiddenRule)
       && isVisibilityRuleMatched(hiddenRule, context);

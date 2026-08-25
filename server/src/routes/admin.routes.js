@@ -1,14 +1,20 @@
 const express = require('express');
 const {
+  getAppConfig,
   createCategory,
   updateCategory,
   createQuestion,
   updateQuestion,
   createOption,
   updateOption,
+  setOptionArchived,
   updateQuestionsOrder,
   deleteCatalogItem,
 } = require('../services/catalog.service');
+const {
+  getSchemaStatus,
+  publishSkuSchema,
+} = require('../services/sku-schema.service');
 const {
   getAdminPrices,
   upsertPriceCell,
@@ -29,12 +35,36 @@ const { buildCsv } = require('../utils/csv');
 
 const router = express.Router();
 
+router.get('/admin/config', async (req, res) => {
+  try {
+    res.json(await getAppConfig());
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.get('/admin/sku-schema/:catCode', async (req, res) => {
+  try {
+    res.json(await getSchemaStatus(String(req.params.catCode || '').toUpperCase()));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.post('/admin/sku-schema/:catCode/publish', async (req, res) => {
+  try {
+    res.json(await publishSkuSchema(String(req.params.catCode || '').toUpperCase()));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
 router.get('/admin/prices/:catCode', async (req, res) => {
   try {
     const data = await getAdminPrices(req.params.catCode);
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
@@ -267,7 +297,19 @@ router.put('/admin/option', async (req, res) => {
     await updateOption(req.body);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.patch('/admin/option/:id/archive', async (req, res) => {
+  try {
+    await setOptionArchived({
+      id: req.params.id,
+      archived: req.body?.archived,
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 

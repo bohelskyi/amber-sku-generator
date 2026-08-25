@@ -339,6 +339,7 @@ export function useSkuManager() {
     api.post('/save', {
       fullSku: displaySku || previewData.fullProposedSku,
       baseSku: previewData.baseSku,
+      skuSchemaVersionId: previewData.skuSchemaVersionId,
       nextSeq: previewData.nextSeq,
       category: selectedCat,
       weight: isWeightRequired ? weight : previewData.weightVal || 0,
@@ -353,6 +354,7 @@ export function useSkuManager() {
         pricingScenario: previewData.pricingDetails?.scenario || null,
         variationNumber: variationData?.variationNumber || null,
         baseGeneratedSku: previewData.fullProposedSku,
+        skuSchemaVersion: previewData.skuSchemaVersion,
         manualPriceUah: hasManualPrice ? effectiveTotalPriceUah : null,
         autoPriceUah: previewData.totalPriceUah,
       },

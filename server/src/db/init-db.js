@@ -85,8 +85,8 @@ async function ensureCalibratedQuestions() {
 
     for (const option of calibratedConfig.options) {
       await pool.query(
-        'INSERT INTO options (question_id, value_id, label) VALUES ($1, $2, $3)',
-        [questionId, option.id, option.label]
+        'INSERT INTO options (question_id, value_id, sku_code, label) VALUES ($1, $2, $3, $4)',
+        [questionId, option.id, String(option.id), option.label]
       );
     }
   }
@@ -123,8 +123,8 @@ async function migrateData() {
 
         for (const option of question.options) {
           await client.query(
-            'INSERT INTO options (question_id, value_id, label) VALUES ($1, $2, $3)',
-            [questionId, option.id, option.label]
+            'INSERT INTO options (question_id, value_id, sku_code, label) VALUES ($1, $2, $3, $4)',
+            [questionId, option.id, String(option.id), option.label]
           );
         }
       }
@@ -219,14 +219,18 @@ async function initDb() {
       id SERIAL PRIMARY KEY,
       question_id INTEGER REFERENCES questions(id) ON DELETE CASCADE,
       value_id INTEGER,
+      sku_code TEXT,
       label TEXT,
       visible_if_json JSONB,
-      hidden_if_json JSONB
+      hidden_if_json JSONB,
+      archived BOOLEAN NOT NULL DEFAULT FALSE
     )
   `);
 
   await pool.query('ALTER TABLE options ADD COLUMN IF NOT EXISTS visible_if_json JSONB');
   await pool.query('ALTER TABLE options ADD COLUMN IF NOT EXISTS hidden_if_json JSONB');
+  await pool.query('ALTER TABLE options ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE');
+  await pool.query('ALTER TABLE options ADD COLUMN IF NOT EXISTS sku_code TEXT');
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS price_scenarios (

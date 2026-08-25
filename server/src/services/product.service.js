@@ -14,9 +14,16 @@ const {
   decodeStoredSkuAnswers,
   decodeVisibleSkuAnswers,
   diagnoseSkuAttempts,
+  getOptionCode,
+  getOptionValue,
   parseVariationSku,
 } = require('../utils/sku');
 const { isRuleMatched } = require('../utils/rules');
+const {
+  getActiveSchema,
+  getSchemaVersion,
+  parseVersionedSkuPart,
+} = require('./sku-schema.service');
 
 async function getAllCategories() {
   const result = await pool.query(
@@ -79,6 +86,37 @@ async function getQuestionsForCategory(categoryCode) {
   }
 
   return questions;
+}
+
+function getRuleSpecificity(rule) {
+  return rule && typeof rule === 'object' ? Object.keys(rule).length : 0;
+}
+
+function getContextualOption(question, value, answers) {
+  const candidates = (question.options || []).filter(
+    (option) => String(getOptionValue(option)) === String(value)
+  );
+  const eligible = candidates.filter((option) => (
+    isRuleMatched(option.visible_if_json, answers)
+    && !(option.hidden_if_json && isRuleMatched(option.hidden_if_json, answers))
+  ));
+  return [...(eligible.length ? eligible : candidates)].sort((first, second) => (
+    getRuleSpecificity(second.visible_if_json) - getRuleSpecificity(first.visible_if_json)
+  ))[0] || null;
+}
+
+function resolveContextualAnswerLabels(decodedAnswers, questions) {
+  const answers = buildAnswerMap(decodedAnswers);
+  const questionsByKey = new Map(questions.map((question) => [question.key, question]));
+  return decodedAnswers.map((answer) => {
+    if (answer.is_placeholder) return answer;
+    const option = getContextualOption(
+      questionsByKey.get(answer.key) || { options: [] },
+      answer.value_id,
+      answers
+    );
+    return option ? { ...answer, value_label: option.label } : answer;
+  });
 }
 
 async function getCalibrationQuestionForCategory(categoryCode) {
@@ -276,14 +314,11 @@ async function decodeSku(skuValue) {
     throw err;
   }
 
-  const questions = await getQuestionsForCategory(category.code);
-  const calibrationQuestion = await getCalibrationQuestionForCategory(category.code);
-  const skuWithoutCategory = baseFullSku.slice(category.code.length);
-  const attempts = buildSkuSuffixDecodeAttempts(skuWithoutCategory);
   const productResult = await pool.query(
     `SELECT id, full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah,
             price_per_gram, uah_rate, details, status, exclude_from_export,
-            corrected_from_product_id, corrected_to_product_id, correction_reason, created_at
+            corrected_from_product_id, corrected_to_product_id, correction_reason, created_at,
+            sku_schema_version_id
      FROM products
      WHERE full_sku = $1
      ORDER BY id ASC
@@ -291,6 +326,24 @@ async function decodeSku(skuValue) {
     [normalizedSku]
   );
   const product = productResult.rows[0] || null;
+  const parsedSchema = parseVersionedSkuPart(baseFullSku.slice(category.code.length));
+  const schema = await getSchemaVersion(category.code, parsedSchema.version);
+  if (!schema) {
+    const err = new Error(
+      `SKU-схему V${parsedSchema.version} для категорії ${category.code} не знайдено.`
+    );
+    err.statusCode = 422;
+    err.details = {
+      type: 'unknown_sku_schema',
+      category: { code: category.code, name: category.name },
+      version: parsedSchema.version,
+      marker: parsedSchema.marker,
+    };
+    throw err;
+  }
+  const questions = schema.questions;
+  const calibrationQuestion = await getCalibrationQuestionForCategory(category.code);
+  const attempts = buildSkuSuffixDecodeAttempts(parsedSchema.encodedWithSuffix);
   const productDetails = getProductDetails(product);
   const storedAnswers = getStoredAnswers(product);
 
@@ -306,10 +359,11 @@ async function decodeSku(skuValue) {
       storedDecodedAnswers
       && !haveSameDecodedAnswers(configuredDecodedAnswers, storedDecodedAnswers)
     );
-    const decodedAnswers = usesStoredHistory
+    const rawDecodedAnswers = usesStoredHistory
       ? storedDecodedAnswers
       : configuredDecodedAnswers || storedDecodedAnswers;
-    if (!decodedAnswers) continue;
+    if (!rawDecodedAnswers) continue;
+    const decodedAnswers = resolveContextualAnswerLabels(rawDecodedAnswers, questions);
 
     const suffixValue =
       attempt.suffixRaw !== null && /^\d+$/.test(attempt.suffixRaw)
@@ -346,7 +400,13 @@ async function decodeSku(skuValue) {
 
     return {
       sku: normalizedSku,
-      decodeSource: usesStoredHistory ? 'stored_history' : 'current_config',
+      decodeSource: usesStoredHistory ? 'stored_history' : 'versioned_schema',
+      skuSchema: {
+        id: Number(schema.id),
+        version: schema.version,
+        marker: schema.marker,
+        status: schema.status,
+      },
       calibration,
       category: {
         code: category.code,
@@ -354,7 +414,7 @@ async function decodeSku(skuValue) {
         requires_weight: category.requires_weight,
         skip_hidden_sku_questions: category.skip_hidden_sku_questions,
       },
-      baseSku: category.code + attempt.encodedPart,
+      baseSku: category.code + schema.marker + attempt.encodedPart,
       decodedAnswers,
       suffix: {
         raw: attempt.suffixRaw,
@@ -396,6 +456,7 @@ async function decodeSku(skuValue) {
   err.details = {
     type: 'sku_config_mismatch',
     category: { code: category.code, name: category.name },
+    skuSchema: { version: schema.version, marker: schema.marker },
     issue: diagnosis,
   };
   throw err;
@@ -472,18 +533,21 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
   );
   const skipHiddenSkuQuestions =
     Number(categoryResult.rows[0]?.skip_hidden_sku_questions || 0) === 1;
-
-  const questionRows = await pool.query(
-    `SELECT key, sku_index, COALESCE(sku_separator, '') AS sku_separator, visible_if_json
-     FROM questions
-     WHERE category_code = $1 AND COALESCE(include_in_sku, 1) = 1
-     ORDER BY sku_index ASC`,
-    [categoryCode]
-  );
+  if (categoryResult.rows.length === 0) {
+    const err = new Error(`Категорію ${categoryCode} не знайдено.`);
+    err.statusCode = 404;
+    throw err;
+  }
+  const schema = await getActiveSchema(categoryCode);
+  if (!schema) {
+    const err = new Error(`Для категорії ${categoryCode} немає активної SKU-схеми.`);
+    err.statusCode = 422;
+    throw err;
+  }
 
   const answerCodes = [];
   const answerCodeParts = [];
-  for (const question of questionRows.rows) {
+  for (const question of schema.questions) {
     if (
       skipHiddenSkuQuestions &&
       !isQuestionVisibleForSku(question, answers, isCalibrated)
@@ -492,18 +556,28 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
     }
 
     const value = answers[question.key];
-    const normalizedValue = value !== undefined && value !== null && value !== '' ? value : 0;
-    answerCodes.push(normalizedValue);
+    const hasValue = value !== undefined && value !== null && value !== '';
+    const option = hasValue ? getContextualOption(question, value, answers) : null;
+    if (hasValue && !option) {
+      const err = new Error(
+        `Значення «${value}» не належить активній SKU-схемі питання «${question.label}».`
+      );
+      err.statusCode = 422;
+      throw err;
+    }
+    const normalizedCode = option ? getOptionCode(option) : '0';
+    answerCodes.push(normalizedCode);
     answerCodeParts.push({
-      value: normalizedValue,
+      value: normalizedCode,
       sku_separator: question.sku_separator || '',
     });
   }
 
   const legacySkuSeparator = categoryResult.rows[0]?.legacy_sku_separator || '';
-  const baseSku = buildBaseSku(categoryCode, answerCodeParts);
-  const compactBaseSku = buildBaseSku(categoryCode, answerCodes);
-  const legacySeparatedBaseSku = buildBaseSku(categoryCode, answerCodes, legacySkuSeparator);
+  const schemaPrefix = `${categoryCode}${schema.marker}`;
+  const baseSku = buildBaseSku(schemaPrefix, answerCodeParts);
+  const compactBaseSku = buildBaseSku(schemaPrefix, answerCodes);
+  const legacySeparatedBaseSku = buildBaseSku(schemaPrefix, answerCodes, legacySkuSeparator);
   const pricing = await calculatePricing(categoryCode, answers, weight, isCalibrated);
   const {
     weightVal,
@@ -546,6 +620,9 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
 
     return {
       mode: 'sequence',
+      skuSchemaVersionId: Number(schema.id),
+      skuSchemaVersion: schema.version,
+      skuSchemaMarker: schema.marker,
       baseSku,
       nextSeq,
       fullProposedSku,
@@ -579,6 +656,9 @@ async function buildProductPreview({ categoryCode, answers = {}, weight, isCalib
 
   return {
     mode: 'weight',
+    skuSchemaVersionId: Number(schema.id),
+    skuSchemaVersion: schema.version,
+    skuSchemaMarker: schema.marker,
     baseSku,
     nextSeq: weightInt,
     fullProposedSku,
@@ -668,6 +748,9 @@ async function buildProductRecountPreview({ sourceSku, answers = {}, isCalibrate
     },
     corrected: {
       categoryCode,
+      skuSchemaVersionId: correctedPreview.skuSchemaVersionId,
+      skuSchemaVersion: correctedPreview.skuSchemaVersion,
+      skuSchemaMarker: correctedPreview.skuSchemaMarker,
       answers: nextAnswers,
       fullSku: correctionSku.fullSku,
       proposedFullSku: correctedPreview.fullProposedSku,
@@ -743,6 +826,7 @@ async function applyProductRecount(payload) {
         changes: preview.changes,
       },
       baseGeneratedSku: corrected.proposedFullSku,
+      skuSchemaVersion: corrected.skuSchemaVersion,
       variationNumber: corrected.variation?.variationNumber || null,
     };
 
@@ -750,8 +834,8 @@ async function applyProductRecount(payload) {
       `INSERT INTO products
        (full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah,
         price_per_gram, uah_rate, details, status, exclude_from_export, corrected_from_product_id,
-        correction_reason)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'correction', 1, $11, $12)
+        correction_reason, sku_schema_version_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'correction', 1, $11, $12, $13)
        RETURNING id`,
       [
         corrected.fullSku,
@@ -770,6 +854,7 @@ async function applyProductRecount(payload) {
         JSON.stringify(details),
         sourceProductId,
         preview.reason || null,
+        Number(corrected.skuSchemaVersionId),
       ]
     );
     const correctedProductId = Number(insertResult.rows[0].id);
@@ -824,10 +909,20 @@ async function saveProduct(payload) {
   try {
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [fullSku]);
+    const activeSchema = payload.skuSchemaVersionId
+      ? null
+      : await getActiveSchema(payload.category, client);
+    const schemaVersionId = Number(payload.skuSchemaVersionId || activeSchema?.id);
+    if (!schemaVersionId) {
+      const err = new Error('Не вдалося визначити версію SKU-схеми для товару.');
+      err.statusCode = 422;
+      throw err;
+    }
     const result = await client.query(
       `INSERT INTO products
-       (full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah, price_per_gram, uah_rate, details)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+       (full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah,
+        price_per_gram, uah_rate, details, sku_schema_version_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
        RETURNING id`,
       [
         fullSku,
@@ -842,6 +937,7 @@ async function saveProduct(payload) {
         Number(payload.pricePerGram || 0),
         payload.uahRate !== undefined && payload.uahRate !== null ? Number(payload.uahRate) : null,
         JSON.stringify(payload.details || {}),
+        schemaVersionId,
       ]
     );
     await client.query('COMMIT');

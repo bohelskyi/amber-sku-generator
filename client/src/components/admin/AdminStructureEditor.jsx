@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Archive, ArchiveRestore, ChevronDown, Pencil, Send, Trash2 } from 'lucide-react';
 import { ConditionBuilder } from './ConditionBuilder';
 import { SkuTemplatePreview } from './SkuTemplatePreview';
 import { handleNumberKeyDown, handleNumberWheel } from '../../lib/number-input';
@@ -14,6 +15,72 @@ function FieldControl({ children, hint, label }) {
   );
 }
 
+function OptionRow({
+  archived = false,
+  config,
+  currentCatQuestions,
+  onArchive,
+  onDelete,
+  onEdit,
+  option,
+}) {
+  return (
+    <div className={`flex items-center justify-between gap-3 rounded-lg border p-2 ${archived ? 'border-slate-200 bg-slate-50 text-slate-500' : 'border-slate-200 bg-white/80'}`}>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`text-sm ${archived ? 'text-slate-500' : 'text-slate-700'}`}>{option.label}</span>
+          {archived && (
+            <span className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-500">
+              Архівний
+            </span>
+          )}
+        </div>
+        <span className="block text-[11px] text-slate-500">
+          Показувати: {formatConditionSummary(option.visible_if_json, currentCatQuestions, config)}
+        </span>
+        <span className="block text-[11px] text-slate-500">
+          Приховувати: {formatConditionSummary(option.hidden_if_json, currentCatQuestions, config, 'Ніколи')}
+        </span>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        <span
+          className="rounded bg-slate-100 px-2 py-1 font-mono text-xs text-slate-600"
+          title={`Внутрішнє значення: ${option.id}`}
+        >
+          SKU {option.sku_code ?? option.id}
+        </span>
+        <button
+          type="button"
+          onClick={() => onEdit(option)}
+          className="btn btn-outline flex h-8 w-8 items-center justify-center p-0"
+          title="Редагувати"
+          aria-label={`Редагувати ${option.label}`}
+        >
+          <Pencil size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={() => onArchive(option, !archived)}
+          className="btn btn-outline flex h-8 w-8 items-center justify-center p-0"
+          title={archived ? 'Відновити з архіву' : 'Архівувати'}
+          aria-label={`${archived ? 'Відновити' : 'Архівувати'} ${option.label}`}
+        >
+          {archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}
+        </button>
+        <button
+          type="button"
+          onClick={() => onDelete('option', option.db_id)}
+          className="flex h-8 w-8 items-center justify-center text-rose-400 transition hover:text-rose-600"
+          title="Видалити"
+          aria-label={`Видалити ${option.label}`}
+        >
+          <Trash2 size={15} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function AdminStructureEditor({
   config,
   selectedCat,
@@ -21,6 +88,8 @@ export function AdminStructureEditor({
   currentCatQuestions,
   currentOptions,
   selectedQuestionInputType,
+  schemaStatus,
+  schemaPublishState,
   editCat,
   setEditCat,
   editQuestion,
@@ -43,8 +112,10 @@ export function AdminStructureEditor({
   autoAssignSkuIndexes,
   fillNextNewQuestionSkuIndex,
   addOption,
+  archiveOption,
   beginOptionEdit,
   updateOption,
+  publishSkuSchema,
   deleteItem,
 }) {
   const [isCategoryEditOpen, setIsCategoryEditOpen] = useState(false);
@@ -52,22 +123,31 @@ export function AdminStructureEditor({
   const [isQuestionEditOpen, setIsQuestionEditOpen] = useState(false);
   const [isNewQuestionOpen, setIsNewQuestionOpen] = useState(false);
   const [isNewOptionOpen, setIsNewOptionOpen] = useState(false);
+  const [isArchivedOptionsOpen, setIsArchivedOptionsOpen] = useState(false);
   const [draggedQuestionId, setDraggedQuestionId] = useState(null);
   const [questionDropTarget, setQuestionDropTarget] = useState({ id: null, position: null });
   const canEditQuestionSku = editQuestion.input_type !== 'text' && editQuestion.include_in_sku;
   const canNewQuestionSku = newQuest.input_type !== 'text' && newQuest.include_in_sku;
+  const activeOptions = currentOptions.filter(
+    (option) => option.archived !== 1 && option.archived !== true
+  );
+  const archivedOptions = currentOptions.filter(
+    (option) => option.archived === 1 || option.archived === true
+  );
 
   const selectCategory = (category) => {
     setIsCategoryEditOpen(false);
     setIsQuestionEditOpen(false);
     setIsNewQuestionOpen(false);
     setIsNewOptionOpen(false);
+    setIsArchivedOptionsOpen(false);
     onSelectCategory(category);
   };
 
   const selectQuestion = (question) => {
     setIsQuestionEditOpen(false);
     setIsNewOptionOpen(false);
+    setIsArchivedOptionsOpen(false);
     onSelectQuestion(question);
   };
 
@@ -197,7 +277,45 @@ export function AdminStructureEditor({
             </button>
           )}
         </div>
-        <SkuTemplatePreview category={selectedCat} questions={currentCatQuestions} />
+        {selectedCat && schemaStatus && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-700">
+                <span>
+                  {schemaStatus.active
+                    ? `Активна схема: V${schemaStatus.active.version}`
+                    : 'Активної схеми ще немає'}
+                </span>
+                {schemaStatus.draftChanged ? (
+                  <span className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-amber-800">
+                    Є зміни для V{schemaStatus.nextVersion}
+                  </span>
+                ) : (
+                  <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-emerald-700">
+                    Опубліковано
+                  </span>
+                )}
+              </div>
+              {schemaPublishState.error && (
+                <p className="mt-1 text-xs text-rose-600">{schemaPublishState.error}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={publishSkuSchema}
+              disabled={!schemaStatus.draftChanged || schemaPublishState.loading}
+              className="btn btn-primary flex items-center gap-2 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <Send size={14} />
+              {schemaPublishState.loading ? 'Публікуємо...' : `Опублікувати V${schemaStatus.nextVersion}`}
+            </button>
+          </div>
+        )}
+        <SkuTemplatePreview
+          category={selectedCat}
+          marker={schemaStatus?.draftChanged ? schemaStatus.nextMarker : schemaStatus?.active?.marker}
+          questions={currentCatQuestions}
+        />
         <div className="h-96 overflow-y-auto space-y-2 pr-2">
           {currentCatQuestions.map((question) => (
             <div
@@ -361,32 +479,70 @@ export function AdminStructureEditor({
               Для текстового питання варіанти не використовуються.
             </div>
           )}
-          {currentOptions.map((option) => (
-            <div key={option.db_id} className="p-2 border border-slate-200 rounded-xl flex justify-between bg-white/80 items-center">
-              <div>
-                <span className="text-sm text-slate-700">{option.label}</span>
-                <span className="text-[11px] text-slate-500 block">
-                  Показувати: {formatConditionSummary(option.visible_if_json, currentCatQuestions, config)}
-                </span>
-                <span className="text-[11px] text-slate-500 block">
-                  Приховувати: {formatConditionSummary(option.hidden_if_json, currentCatQuestions, config, 'Ніколи')}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="bg-slate-100 px-2 rounded text-xs text-slate-600">{option.id}</span>
-                <button onClick={() => beginOptionEdit(option)} className="btn btn-outline text-xs px-2 py-1">Редагувати</button>
-                <button onClick={() => deleteItem('option', option.db_id)} className="text-rose-400 hover:text-rose-600 font-bold px-2">×</button>
-              </div>
-            </div>
+          {activeOptions.map((option) => (
+            <OptionRow
+              key={option.db_id}
+              option={option}
+              config={config}
+              currentCatQuestions={currentCatQuestions}
+              onArchive={archiveOption}
+              onDelete={deleteItem}
+              onEdit={beginOptionEdit}
+            />
           ))}
+          {selectedQuestionInputType !== 'text' && activeOptions.length === 0 && (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 text-sm text-slate-500">
+              Активних варіантів немає.
+            </div>
+          )}
+          {archivedOptions.length > 0 && (
+            <div className="mt-3 border-t border-slate-200 pt-2">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between px-1 py-2 text-sm font-semibold text-slate-500 hover:text-slate-700"
+                onClick={() => setIsArchivedOptionsOpen((isOpen) => !isOpen)}
+              >
+                <span className="flex items-center gap-2">
+                  <Archive size={15} />
+                  Архівні
+                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">{archivedOptions.length}</span>
+                </span>
+                <ChevronDown
+                  size={16}
+                  className={`transition ${isArchivedOptionsOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+              {isArchivedOptionsOpen && (
+                <div className="mt-1 space-y-2">
+                  {archivedOptions.map((option) => (
+                    <OptionRow
+                      key={option.db_id}
+                      archived
+                      option={option}
+                      config={config}
+                      currentCatQuestions={currentCatQuestions}
+                      onArchive={archiveOption}
+                      onDelete={deleteItem}
+                      onEdit={beginOptionEdit}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         {editOpt.id && (
           <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-white/80">
             <div className="mb-2 flex items-center justify-between gap-2">
               <div className="text-xs text-slate-500">Редагувати опцію</div>
-              <button onClick={() => setEditOpt({ id: null, value_id: '', label: '', visible_if_json: '', hidden_if_json: '' })} className="btn btn-outline px-2 py-1 text-xs">Приховати</button>
+              <button onClick={() => setEditOpt({ id: null, value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false })} className="btn btn-outline px-2 py-1 text-xs">Приховати</button>
             </div>
-            <input className="input-sm mb-2" type="number" placeholder="Value ID" value={editOpt.value_id} onChange={(event) => setEditOpt({ ...editOpt, value_id: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
+            <FieldControl label="Внутрішнє значення" hint="Використовується у цінах, умовах і модифікаторах.">
+              <input className="input-sm" type="number" placeholder="6" value={editOpt.value_id} onChange={(event) => setEditOpt({ ...editOpt, value_id: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
+            </FieldControl>
+            <FieldControl label="Код у SKU" hint="Може повторно використовувати код з попередньої версії.">
+              <input className="input-sm font-mono" inputMode="numeric" placeholder="3" value={editOpt.sku_code} onChange={(event) => setEditOpt({ ...editOpt, sku_code: event.target.value.replace(/\D/g, '') })} />
+            </FieldControl>
             <input className="input-sm mb-2" placeholder="Label" value={editOpt.label} onChange={(event) => setEditOpt({ ...editOpt, label: event.target.value })} />
             <ConditionBuilder
               config={config}
@@ -406,7 +562,7 @@ export function AdminStructureEditor({
             />
             <div className="flex gap-2">
               <button onClick={updateOption} className="btn btn-primary w-full">Зберегти</button>
-              <button onClick={() => setEditOpt({ id: null, value_id: '', label: '', visible_if_json: '', hidden_if_json: '' })} className="btn btn-outline w-full">Скасувати</button>
+              <button onClick={() => setEditOpt({ id: null, value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false })} className="btn btn-outline w-full">Скасувати</button>
             </div>
           </div>
         )}
@@ -420,7 +576,12 @@ export function AdminStructureEditor({
             </button>
             {isNewOptionOpen && (
               <div className="mt-3 bg-slate-50/70 p-3 rounded-xl">
-                <input className="input-sm mb-2" type="number" placeholder="Value ID" value={newOpt.value_id} onChange={(event) => setNewOpt({ ...newOpt, value_id: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
+                <FieldControl label="Внутрішнє значення" hint="Нове унікальне значення для цін та умов.">
+                  <input className="input-sm" type="number" placeholder="6" value={newOpt.value_id} onChange={(event) => setNewOpt({ ...newOpt, value_id: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
+                </FieldControl>
+                <FieldControl label="Код у SKU" hint="Цифри, які потраплять в артикул після публікації версії.">
+                  <input className="input-sm font-mono" inputMode="numeric" placeholder="3" value={newOpt.sku_code} onChange={(event) => setNewOpt({ ...newOpt, sku_code: event.target.value.replace(/\D/g, '') })} />
+                </FieldControl>
                 <input className="input-sm mb-2" placeholder="Label" value={newOpt.label} onChange={(event) => setNewOpt({ ...newOpt, label: event.target.value })} />
                 <ConditionBuilder
                   config={config}

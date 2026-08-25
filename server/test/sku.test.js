@@ -5,6 +5,7 @@ const {
   buildSkuSuffixDecodeAttempts,
   decodeSkuAnswers,
   decodeStoredSkuAnswers,
+  decodeVisibleSkuAnswers,
   diagnoseSkuAttempts,
   parseVariationSku,
 } = require('../src/utils/sku');
@@ -79,6 +80,72 @@ test('decoder keeps historical options that are hidden in the builder', () => {
   ], '3');
 
   assert.equal(decoded[0].value_id, 3);
+});
+
+test('decoder keeps historical options marked as archived', () => {
+  const decoded = decodeSkuAnswers([
+    {
+      key: 'style',
+      label: 'Execution',
+      sku_index: 1,
+      required: 1,
+      options: [
+        { id: 2, label: 'Combined' },
+        { id: 3, label: 'Combined 20%', archived: 1 },
+      ],
+    },
+  ], '3');
+
+  assert.equal(decoded[0].value_id, 3);
+  assert.equal(decoded[0].value_label, 'Combined 20%');
+});
+
+test('decoder separates the encoded SKU code from the semantic option value', () => {
+  const decoded = decodeSkuAnswers([{
+    key: 'style',
+    label: 'Execution',
+    sku_index: 1,
+    required: 1,
+    options: [{ id: 6, value_id: 6, sku_code: '3', label: 'New style' }],
+  }], '3');
+
+  assert.equal(decoded[0].value_id, 6);
+  assert.equal(decoded[0].value_label, 'New style');
+});
+
+test('decoder accepts a new optional question missing from a historical SKU', () => {
+  const questions = [
+    {
+      key: 'style',
+      label: 'Execution',
+      sku_index: 1,
+      required: 1,
+      options: [{ id: 2, label: 'Combined' }],
+    },
+    {
+      key: 'discount',
+      label: 'Discount',
+      sku_index: 2,
+      required: 0,
+      visible_if_json: { style: 2 },
+      options: [
+        { id: 1, label: '20%' },
+        { id: 2, label: '50%' },
+      ],
+    },
+  ];
+
+  const configuredDecoded = decodeSkuAnswers(questions, '2');
+  const visibleDecoded = decodeVisibleSkuAnswers(questions, '2');
+
+  assert.deepEqual(
+    configuredDecoded.map((answer) => [answer.key, answer.value_id]),
+    [['style', 2], ['discount', null]]
+  );
+  assert.deepEqual(
+    visibleDecoded.map((answer) => [answer.key, answer.value_id]),
+    [['style', 2], ['discount', null]]
+  );
 });
 
 test('decodes a SKU with question separators and a three digit suffix', () => {
@@ -187,4 +254,17 @@ test('rejects stored answers that do not reproduce the SKU', () => {
     }),
     null
   );
+});
+
+test('stored semantic answers reproduce a SKU through sku_code', () => {
+  const decoded = decodeStoredSkuAnswers([{
+    key: 'style',
+    label: 'Execution',
+    sku_index: 1,
+    sku_separator: '',
+    required: 1,
+    options: [{ id: 6, value_id: 6, sku_code: '3', label: 'New style' }],
+  }], '3', { style: 6 });
+
+  assert.equal(decoded[0].value_id, 6);
 });

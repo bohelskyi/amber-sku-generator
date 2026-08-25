@@ -109,3 +109,23 @@ test('pricing axes hide an option when any hidden condition is guaranteed', () =
   assert.deepEqual(styleAxis.options.map((option) => option.id), [1]);
   assert.deepEqual(calibratedAxis.options.map((option) => option.id), [1]);
 });
+
+test('archived options are unavailable in builders and new pricing axes', () => {
+  const question = {
+    id: 'style',
+    label: 'Виконання',
+    options: [
+      { id: 2, label: 'Комбіновані' },
+      { id: 3, label: 'Комбіновані (знижка 20%)', archived: 1 },
+    ],
+  };
+
+  assert.deepEqual(
+    getVisibleOptionsForQuestion(question).map((option) => option.id),
+    [2]
+  );
+  assert.deepEqual(
+    getPricingAxis('style', [question], 'X').options.map((option) => option.id),
+    [2]
+  );
+});
