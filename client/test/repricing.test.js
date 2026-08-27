@@ -22,12 +22,36 @@ test('manual price changes the row status and delta', () => {
     newPriceUah: 500,
     priceDeltaUah: 100,
     status: 'changed',
+    pricingChange: {
+      reasonCodes: ['price_per_gram_changed'],
+      reasonLabels: ['Змінено ціну за грам'],
+    },
   }], { 7: '400' });
 
   assert.equal(item.newPriceUah, 400);
   assert.equal(item.priceDeltaUah, 0);
   assert.equal(item.status, 'unchanged');
   assert.equal(item.manualOverride, true);
+  assert.deepEqual(item.pricingChange.reasonCodes, [
+    'price_per_gram_changed',
+    'manual_override',
+  ]);
+});
+
+test('manual price replaces an exchange-rate-only explanation', () => {
+  const [item] = applyManualPrices([{
+    productId: 8,
+    oldPriceUah: 400,
+    newPriceUah: 410,
+    status: 'changed',
+    pricingChange: {
+      reasonCodes: ['exchange_rate_only'],
+      reasonLabels: ['Лише оновлення курсу'],
+    },
+  }], { 8: '450' });
+
+  assert.deepEqual(item.pricingChange.reasonCodes, ['manual_override']);
+  assert.deepEqual(item.pricingChange.reasonLabels, ['Ціну скориговано вручну']);
 });
 
 test('repricing rows sort naturally by SKU and numerically by price', () => {

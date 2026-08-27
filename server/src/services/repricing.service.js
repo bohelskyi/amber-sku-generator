@@ -28,6 +28,134 @@ function getPricingAnswers(product, details) {
   return answers;
 }
 
+function toNullableNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function getStoredMatrixName(details = {}) {
+  const structuredName = details?.pricingScenario?.name
+    || details?.repricing?.pricingChange?.newMatrixName;
+  if (structuredName) return String(structuredName);
+
+  const logMessage = String(details?.logMessage || '').trim();
+  if (!logMessage) return null;
+  const detailsStart = logMessage.indexOf(' (');
+  return detailsStart > 0 ? logMessage.slice(0, detailsStart) : logMessage;
+}
+
+function getStoredPriceMode(details = {}, pricePerGram = null, explicitMode = null) {
+  const storedMode = explicitMode
+    || details?.pricingScenario?.price_mode
+    || details?.pricingScenario?.priceMode
+    || details?.repricing?.pricingChange?.newPriceMode;
+  if (storedMode === 'fixed_uah' || storedMode === 'per_gram_usd') return storedMode;
+  return Number(pricePerGram || 0) > 0 ? 'per_gram_usd' : 'fixed_uah';
+}
+
+function buildPricingState({
+  details = {},
+  matrixName = null,
+  priceMode = null,
+  pricePerGram = null,
+  uahRate = null,
+  priceUah = null,
+} = {}) {
+  const normalizedPricePerGram = toNullableNumber(pricePerGram);
+  const normalizedMode = getStoredPriceMode(details, normalizedPricePerGram, priceMode);
+  return {
+    matrixName: matrixName || getStoredMatrixName(details),
+    priceMode: normalizedMode,
+    pricePerGram: normalizedMode === 'per_gram_usd' ? normalizedPricePerGram : null,
+    uahRate: toNullableNumber(uahRate),
+    fixedPriceUah: normalizedMode === 'fixed_uah' ? toNullableNumber(priceUah) : null,
+    priceUah: toNullableNumber(priceUah),
+  };
+}
+
+function numbersDiffer(first, second, tolerance = 0.0001) {
+  if (first === null || second === null) return false;
+  return Math.abs(Number(first) - Number(second)) >= tolerance;
+}
+
+function buildPricingChange(oldState, newState, { manualOverride = false } = {}) {
+  const reasons = [];
+  const priceChanged = numbersDiffer(oldState.priceUah, newState.priceUah, 0.005);
+  const exchangeRateChanged = oldState.priceMode === 'per_gram_usd'
+    && newState.priceMode === 'per_gram_usd'
+    && numbersDiffer(oldState.uahRate, newState.uahRate);
+  const addReason = (code, label) => {
+    if (!reasons.some((reason) => reason.code === code)) reasons.push({ code, label });
+  };
+
+  if (
+    oldState.matrixName
+    && newState.matrixName
+    && oldState.matrixName !== newState.matrixName
+  ) {
+    addReason('matrix_changed', 'Змінено цінову матрицю');
+  }
+  if (oldState.priceMode !== newState.priceMode) {
+    addReason('price_mode_changed', 'Змінено спосіб розрахунку');
+  }
+  if (
+    oldState.priceMode === 'per_gram_usd'
+    && newState.priceMode === 'per_gram_usd'
+    && numbersDiffer(oldState.pricePerGram, newState.pricePerGram)
+  ) {
+    addReason('price_per_gram_changed', 'Змінено ціну за грам');
+  }
+  if (
+    oldState.priceMode === 'fixed_uah'
+    && newState.priceMode === 'fixed_uah'
+    && numbersDiffer(oldState.fixedPriceUah, newState.fixedPriceUah, 0.005)
+  ) {
+    addReason('fixed_price_changed', 'Змінено фіксовану ціну');
+  }
+  if (manualOverride) addReason('manual_override', 'Ціну скориговано вручну');
+  if (reasons.length === 0 && priceChanged && exchangeRateChanged) {
+    addReason('exchange_rate_only', 'Лише оновлення курсу');
+  }
+
+  if (reasons.length === 0 && priceChanged) {
+    const difference = Math.abs(Number(oldState.priceUah) - Number(newState.priceUah));
+    addReason(
+      difference < 1 ? 'final_price_rounded' : 'final_price_recalculated',
+      difference < 1 ? 'Округлено кінцеву ціну' : 'Перераховано кінцеву ціну'
+    );
+  }
+
+  return {
+    oldMatrixName: oldState.matrixName,
+    newMatrixName: newState.matrixName,
+    oldPriceMode: oldState.priceMode,
+    newPriceMode: newState.priceMode,
+    oldPricePerGram: oldState.pricePerGram,
+    newPricePerGram: newState.pricePerGram,
+    oldUahRate: oldState.uahRate,
+    newUahRate: newState.uahRate,
+    oldFixedPriceUah: oldState.fixedPriceUah,
+    newFixedPriceUah: newState.fixedPriceUah,
+    reasonCodes: reasons.map((reason) => reason.code),
+    reasonLabels: reasons.map((reason) => reason.label),
+  };
+}
+
+function addManualOverrideReason(pricingChange = {}) {
+  const reasonCodes = (pricingChange.reasonCodes || [])
+    .filter((code) => code !== 'manual_override' && code !== 'exchange_rate_only');
+  const reasonLabels = (pricingChange.reasonLabels || [])
+    .filter((label) => (
+      label !== 'Ціну скориговано вручну' && label !== 'Лише оновлення курсу'
+    ));
+  return {
+    ...pricingChange,
+    reasonCodes: [...reasonCodes, 'manual_override'],
+    reasonLabels: [...reasonLabels, 'Ціну скориговано вручну'],
+  };
+}
+
 function hasManualPrice(details) {
   const value = details.manualPriceUah;
   return value !== null && value !== undefined && value !== '';
@@ -54,6 +182,7 @@ function getPreviewToken(scenario, changedItems) {
       productId: item.productId,
       oldPriceUah: item.oldPriceUah,
       newPriceUah: item.newPriceUah,
+      pricingChange: item.pricingChange || null,
     })),
   };
 
@@ -74,6 +203,7 @@ function getRepricingPreviewSnapshot(preview) {
         errorCode: item.errorCode || null,
         uahRate: item.uahRate ?? null,
         matrixName: item.matrixName || null,
+        pricingChange: item.pricingChange || null,
       }))
       .sort((first, second) => first.productId - second.productId),
   };
@@ -214,6 +344,7 @@ function applyManualOverridesToPreview(preview, manualOverrides = []) {
       pricePerGram,
       status: isChanged ? 'changed' : 'unchanged',
       manualOverride: true,
+      pricingChange: addManualOverrideReason(item.pricingChange),
     };
   });
 
@@ -344,6 +475,28 @@ async function buildRepricingPreview(scenarioId) {
         ? null
         : Number(product.total_price_uah);
       const isChanged = oldPriceUah === null || Math.abs(oldPriceUah - newPriceUah) >= 0.005;
+      const matrixName = pricing.pricingDetails.scenario?.name || scenario.name;
+      const priceMode = pricing.priceMode;
+      const pricePerGram = Number(pricing.pricePerGram || 0);
+      const uahRate = pricing.currencyPayload?.uahRate === null
+        ? null
+        : Number(pricing.currencyPayload?.uahRate);
+      const pricingChange = buildPricingChange(
+        buildPricingState({
+          details,
+          pricePerGram: product.price_per_gram,
+          uahRate: product.uah_rate,
+          priceUah: oldPriceUah,
+        }),
+        buildPricingState({
+          details: { pricingScenario: pricing.pricingDetails.scenario },
+          matrixName,
+          priceMode,
+          pricePerGram,
+          uahRate,
+          priceUah: newPriceUah,
+        })
+      );
       items.push({
         productId: Number(product.id),
         sku: product.full_sku,
@@ -353,15 +506,14 @@ async function buildRepricingPreview(scenarioId) {
         newPriceUah,
         priceDeltaUah: Number((newPriceUah - Number(oldPriceUah || 0)).toFixed(2)),
         status: isChanged ? 'changed' : 'unchanged',
-        matrixName: pricing.pricingDetails.scenario?.name || scenario.name,
-        priceMode: pricing.priceMode,
-        pricePerGram: Number(pricing.pricePerGram || 0),
+        matrixName,
+        priceMode,
+        pricePerGram,
         totalPrice: Number(pricing.totalPrice || 0),
-        uahRate: pricing.currencyPayload?.uahRate === null
-          ? null
-          : Number(pricing.currencyPayload?.uahRate),
+        uahRate,
         logMessage: pricing.logMessage,
         pricingDetails: pricing.pricingDetails,
+        pricingChange,
       });
     } catch (error) {
       items.push(buildErrorItem(
@@ -638,6 +790,7 @@ function getUpdatedDetails(details, item, batchId, appliedAt) {
       newPriceUah: item.newPriceUah,
       calculatedPriceUah: item.calculatedPriceUah ?? item.newPriceUah,
       manualOverride: Boolean(item.manualOverride),
+      pricingChange: item.pricingChange || null,
       appliedAt,
     },
   };
@@ -1073,7 +1226,7 @@ async function getRepricingBatchItems(batchId) {
   }
 
   const itemsResult = await pool.query(
-    `SELECT sku, old_price_uah, new_price_uah, price_delta_uah,
+    `SELECT sku, old_price_uah, new_price_uah, price_delta_uah, old_payload, new_payload,
             COALESCE((new_payload #>> '{details,repricing,manualOverride}')::boolean, FALSE)
               AS manual_override
      FROM repricing_items
@@ -1082,7 +1235,45 @@ async function getRepricingBatchItems(batchId) {
     [Number(batchId)]
   );
 
-  return { batch: batchResult.rows[0], items: itemsResult.rows };
+  const items = itemsResult.rows.map((item) => {
+    const oldPayload = item.old_payload || {};
+    const newPayload = item.new_payload || {};
+    const storedChange = newPayload?.details?.repricing?.pricingChange;
+    const pricingChange = storedChange || buildPricingChange(
+      buildPricingState({
+        details: oldPayload.details || {},
+        pricePerGram: oldPayload.pricePerGram,
+        uahRate: oldPayload.uahRate,
+        priceUah: oldPayload.totalPriceUah ?? item.old_price_uah,
+      }),
+      buildPricingState({
+        details: newPayload.details || {},
+        pricePerGram: newPayload.pricePerGram,
+        uahRate: newPayload.uahRate,
+        priceUah: newPayload.totalPriceUah ?? item.new_price_uah,
+      }),
+      { manualOverride: item.manual_override }
+    );
+
+    return {
+      sku: item.sku,
+      old_price_uah: item.old_price_uah,
+      new_price_uah: item.new_price_uah,
+      price_delta_uah: item.price_delta_uah,
+      manual_override: item.manual_override,
+      old_matrix_name: pricingChange.oldMatrixName,
+      new_matrix_name: pricingChange.newMatrixName,
+      old_price_mode: pricingChange.oldPriceMode,
+      new_price_mode: pricingChange.newPriceMode,
+      old_price_per_gram_usd: pricingChange.oldPricePerGram,
+      new_price_per_gram_usd: pricingChange.newPricePerGram,
+      old_uah_rate: pricingChange.oldUahRate,
+      new_uah_rate: pricingChange.newUahRate,
+      change_reason: (pricingChange.reasonLabels || []).join('; '),
+    };
+  });
+
+  return { batch: batchResult.rows[0], items };
 }
 
 async function getRepricingRollbackItems(batchId) {
@@ -1119,6 +1310,8 @@ module.exports = {
   hasManualPrice,
   normalizeManualOverrides,
   applyManualOverridesToPreview,
+  buildPricingChange,
+  buildPricingState,
   saveRepricingDraft,
   syncRepricingDraft,
   rollbackRepricing,

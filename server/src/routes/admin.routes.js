@@ -199,12 +199,36 @@ router.get('/admin/repricing/:batchId/csv', async (req, res) => {
   try {
     const data = await getRepricingBatchItems(req.params.batchId);
     const csv = buildCsv([
-      ['sku', 'old_price_uah', 'new_price_uah', 'difference_uah', 'price_source'],
+      [
+        'sku',
+        'old_matrix',
+        'new_matrix',
+        'old_price_mode',
+        'new_price_mode',
+        'old_price_per_gram_usd',
+        'new_price_per_gram_usd',
+        'old_uah_rate',
+        'new_uah_rate',
+        'old_price_uah',
+        'new_price_uah',
+        'difference_uah',
+        'change_reason',
+        'price_source',
+      ],
       ...data.items.map((item) => [
         item.sku,
+        item.old_matrix_name ?? '',
+        item.new_matrix_name ?? '',
+        item.old_price_mode ?? '',
+        item.new_price_mode ?? '',
+        item.old_price_per_gram_usd ?? '',
+        item.new_price_per_gram_usd ?? '',
+        item.old_uah_rate ?? '',
+        item.new_uah_rate ?? '',
         item.old_price_uah ?? '',
         item.new_price_uah,
         item.price_delta_uah,
+        item.change_reason,
         item.manual_override ? 'manual' : 'matrix',
       ]),
     ]);

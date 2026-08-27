@@ -28,6 +28,12 @@ export function applyManualPrices(items = [], manualPrices = {}) {
     const newPriceUah = parseManualPrice(manualPrices[item.productId]);
     if (newPriceUah === null || item.status === 'error') return item;
     const oldPriceUah = item.oldPriceUah === null ? null : Number(item.oldPriceUah);
+    const reasonCodes = (item.pricingChange?.reasonCodes || [])
+      .filter((code) => code !== 'manual_override' && code !== 'exchange_rate_only');
+    const reasonLabels = (item.pricingChange?.reasonLabels || [])
+      .filter((label) => (
+        label !== 'Ціну скориговано вручну' && label !== 'Лише оновлення курсу'
+      ));
     return {
       ...item,
       calculatedPriceUah: item.newPriceUah,
@@ -35,6 +41,11 @@ export function applyManualPrices(items = [], manualPrices = {}) {
       priceDeltaUah: newPriceUah - Number(oldPriceUah || 0),
       status: oldPriceUah === null || oldPriceUah !== newPriceUah ? 'changed' : 'unchanged',
       manualOverride: true,
+      pricingChange: {
+        ...(item.pricingChange || {}),
+        reasonCodes: [...reasonCodes, 'manual_override'],
+        reasonLabels: [...reasonLabels, 'Ціну скориговано вручну'],
+      },
     };
   });
 }

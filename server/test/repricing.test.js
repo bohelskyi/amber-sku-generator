@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 
 const {
   applyManualOverridesToPreview,
+  buildPricingChange,
+  buildPricingState,
   doesProductMatchRepricingBatch,
   getApplicationToken,
   getDraftSyncInfo,
@@ -98,6 +100,67 @@ test('repricing identifies an explicit manual price', () => {
   assert.equal(hasManualPrice({}), false);
 });
 
+test('pricing explanation prioritizes matrix and per-gram changes over exchange-rate noise', () => {
+  const change = buildPricingChange(
+    buildPricingState({
+      details: { logMessage: 'Стара матриця (Базова: $1.5)' },
+      pricePerGram: 1.5,
+      uahRate: 41.2,
+      priceUah: 618,
+    }),
+    buildPricingState({
+      matrixName: 'Нова матриця',
+      priceMode: 'per_gram_usd',
+      pricePerGram: 2,
+      uahRate: 42,
+      priceUah: 840,
+    })
+  );
+
+  assert.equal(change.oldMatrixName, 'Стара матриця');
+  assert.equal(change.newMatrixName, 'Нова матриця');
+  assert.equal(change.oldPricePerGram, 1.5);
+  assert.equal(change.newPricePerGram, 2);
+  assert.deepEqual(change.reasonCodes, [
+    'matrix_changed',
+    'price_per_gram_changed',
+  ]);
+});
+
+test('pricing explanation reports the exchange rate when it is the only cause', () => {
+  const change = buildPricingChange(
+    buildPricingState({
+      matrixName: 'Некалібровані - 1 сорт',
+      priceMode: 'per_gram_usd',
+      pricePerGram: 1.5,
+      uahRate: 41,
+      priceUah: 615,
+    }),
+    buildPricingState({
+      matrixName: 'Некалібровані - 1 сорт',
+      priceMode: 'per_gram_usd',
+      pricePerGram: 1.5,
+      uahRate: 42,
+      priceUah: 630,
+    })
+  );
+
+  assert.deepEqual(change.reasonCodes, ['exchange_rate_only']);
+  assert.deepEqual(change.reasonLabels, ['Лише оновлення курсу']);
+});
+
+test('pricing explanation distinguishes a fixed price and manual correction', () => {
+  const change = buildPricingChange(
+    buildPricingState({ priceMode: 'fixed_uah', priceUah: 400 }),
+    buildPricingState({ priceMode: 'fixed_uah', priceUah: 500 }),
+    { manualOverride: true }
+  );
+
+  assert.equal(change.oldPricePerGram, null);
+  assert.equal(change.newPricePerGram, null);
+  assert.deepEqual(change.reasonCodes, ['fixed_price_changed', 'manual_override']);
+});
+
 test('application token includes normalized manual overrides', () => {
   assert.equal(getApplicationToken('base-token', []), 'base-token');
   assert.equal(
@@ -126,6 +189,10 @@ test('manual overrides recalculate final UAH and derived USD prices', () => {
         pricePerGram: 1,
         uahRate: 50,
         status: 'changed',
+        pricingChange: {
+          reasonCodes: ['price_per_gram_changed'],
+          reasonLabels: ['Змінено ціну за грам'],
+        },
       },
       {
         productId: 2,
@@ -143,6 +210,10 @@ test('manual overrides recalculate final UAH and derived USD prices', () => {
   assert.equal(preview.items[0].totalPrice, 9);
   assert.equal(preview.items[0].pricePerGram, 0.9);
   assert.equal(preview.items[0].manualOverride, true);
+  assert.deepEqual(preview.items[0].pricingChange.reasonCodes, [
+    'price_per_gram_changed',
+    'manual_override',
+  ]);
   assert.equal(preview.summary.changedCount, 1);
 });
 
