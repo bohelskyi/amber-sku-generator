@@ -402,6 +402,11 @@ async function initDb() {
     ON repricing_drafts (status, updated_at DESC)
   `);
 
+  await pool.query(`
+    ALTER TABLE repricing_drafts
+    ADD COLUMN IF NOT EXISTS reviewed_product_ids JSONB NOT NULL DEFAULT '[]'::jsonb
+  `);
+
   await pool.query('ALTER TABLE questions ADD COLUMN IF NOT EXISTS required INTEGER DEFAULT 1');
   await pool.query('UPDATE questions SET required = 1 WHERE required IS NULL');
   await pool.query('ALTER TABLE questions ADD COLUMN IF NOT EXISTS include_in_sku INTEGER DEFAULT 1');

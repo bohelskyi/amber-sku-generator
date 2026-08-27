@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { useProductRecount } from './useProductRecount';
 import {
   getVisibleOptionsForQuestion,
   isQuestionVisible,
@@ -42,34 +43,6 @@ function pruneHiddenAnswers(categoryQuestions, answersMap) {
   return nextAnswers;
 }
 
-function getDecodedAnswerMap(decoded) {
-  const decodedMap = (decoded?.decodedAnswers || []).reduce((result, answer) => {
-    result[answer.key] = answer.value_id === null ? 0 : answer.value_id;
-    return result;
-  }, {});
-  const storedAnswers =
-    decoded?.product?.details?.answers && typeof decoded.product.details.answers === 'object'
-      ? decoded.product.details.answers
-      : {};
-  const nextAnswers = { ...decodedMap, ...storedAnswers };
-  const storedCalibrated = decoded?.product?.details?.isCalibrated;
-  if (storedCalibrated !== undefined && storedCalibrated !== null) {
-    nextAnswers.is_calibrated = storedCalibrated;
-  }
-  return nextAnswers;
-}
-
-function haveAnswersChanged(previousAnswers, nextAnswers) {
-  const keys = new Set([
-    ...Object.keys(previousAnswers || {}),
-    ...Object.keys(nextAnswers || {}),
-  ]);
-
-  return Array.from(keys).some(
-    (key) => String(previousAnswers?.[key] ?? '') !== String(nextAnswers?.[key] ?? '')
-  );
-}
-
 export function useSkuManager() {
   const [config, setConfig] = useState(null);
   const [selectedCat, setSelectedCat] = useState(null);
@@ -92,26 +65,9 @@ export function useSkuManager() {
   const [exportToSku, setExportToSku] = useState('');
   const [exportError, setExportError] = useState('');
   const [isExportLoading, setIsExportLoading] = useState(false);
-  const [skuToDecode, setSkuToDecode] = useState('');
-  const [decodeData, setDecodeData] = useState(null);
-  const [decodeError, setDecodeError] = useState('');
-  const [decodeErrorDetails, setDecodeErrorDetails] = useState(null);
-  const [isRecountOpen, setIsRecountOpen] = useState(false);
-  const [recountAnswers, setRecountAnswers] = useState({});
-  const [recountReason, setRecountReason] = useState('');
-  const [recountPreview, setRecountPreview] = useState(null);
-  const [recountError, setRecountError] = useState('');
-  const [recountSuccess, setRecountSuccess] = useState('');
-  const [isRecountLoading, setIsRecountLoading] = useState(false);
-  const [isRecountApplying, setIsRecountApplying] = useState(false);
-  const [isRecountConfirmOpen, setIsRecountConfirmOpen] = useState(false);
   const [copyMessage, setCopyMessage] = useState('');
   const [manualPriceUah, setManualPriceUah] = useState('');
   const [isManualPriceEditing, setIsManualPriceEditing] = useState(false);
-  const hasRecountChanges = Boolean(
-    decodeData && haveAnswersChanged(getDecodedAnswerMap(decodeData), recountAnswers)
-  );
-
   const fetchHistory = () => {
     api.get('/products').then((res) => setHistory(res.data));
   };
@@ -119,6 +75,40 @@ export function useSkuManager() {
   const fetchExportStatus = () => {
     api.get('/export/status').then((res) => setExportStatus(res.data));
   };
+
+  const {
+    decodeData,
+    decodeError,
+    decodeErrorDetails,
+    handleApplyRecount,
+    handleCancelRecount,
+    handleCancelRecountConfirmation,
+    handleConfirmRecount,
+    handleDecode,
+    handleDecodeInputChange,
+    handleRecountAnswer,
+    handleRecountPreview,
+    handleRecountTextAnswer,
+    handleStartRecount,
+    hasRecountChanges,
+    isRecountApplying,
+    isRecountConfirmOpen,
+    isRecountLoading,
+    isRecountOpen,
+    recountAnswers,
+    recountError,
+    recountPreview,
+    recountReason,
+    recountSuccess,
+    setRecountReason,
+    skuToDecode,
+  } = useProductRecount({
+    config,
+    onApplied: () => {
+      fetchHistory();
+      fetchExportStatus();
+    },
+  });
 
   useEffect(() => {
     api.get('/config').then((res) => setConfig(res.data));
@@ -463,189 +453,6 @@ export function useSkuManager() {
       })
       .catch((err) => {
         alert(`ПОМИЛКА: ${err.response?.data?.error || err.message}`);
-      });
-  };
-
-  const handleDecode = (skuValue = skuToDecode) => {
-    const normalizedSku = skuValue.trim().toUpperCase();
-    if (!normalizedSku) {
-      setDecodeData(null);
-      setDecodeError('Введіть артикул для розшифровки.');
-      setDecodeErrorDetails(null);
-      return;
-    }
-
-    api.post('/decode', { sku: normalizedSku })
-      .then((res) => {
-        setSkuToDecode(normalizedSku);
-        setDecodeData(res.data);
-        setDecodeError('');
-        setDecodeErrorDetails(null);
-        setIsRecountOpen(false);
-        setIsRecountConfirmOpen(false);
-        setRecountPreview(null);
-        setRecountError('');
-      })
-      .catch((err) => {
-        setDecodeData(null);
-        setDecodeError(err.response?.data?.error || err.message);
-        setDecodeErrorDetails(err.response?.data?.details || null);
-      });
-  };
-
-  const handleDecodeInputChange = (value) => {
-    setSkuToDecode(value.toUpperCase());
-    setDecodeData(null);
-    setDecodeError('');
-    setDecodeErrorDetails(null);
-    setIsRecountOpen(false);
-    setIsRecountConfirmOpen(false);
-    setRecountPreview(null);
-    setRecountError('');
-    setRecountSuccess('');
-  };
-
-  const handleStartRecount = () => {
-    if (!decodeData?.existsInDb) {
-      setRecountError('Переоблік доступний тільки для артикула, який є в базі.');
-      return;
-    }
-
-    setRecountAnswers(getDecodedAnswerMap(decodeData));
-    setRecountReason('');
-    setRecountPreview(null);
-    setRecountError('');
-    setRecountSuccess('');
-    setIsRecountConfirmOpen(false);
-    setIsRecountOpen(true);
-  };
-
-  const handleCancelRecount = () => {
-    setIsRecountOpen(false);
-    setIsRecountConfirmOpen(false);
-    setRecountPreview(null);
-    setRecountError('');
-  };
-
-  const handleRecountAnswer = (questionId, valueId) => {
-    const question = config?.questions?.[decodeData?.category?.code]?.find(
-      (item) => item.id === questionId
-    );
-    const selectedValue = Number(valueId);
-
-    setRecountAnswers((prevAnswers) => {
-      const shouldClear =
-        question?.required !== 1
-        && selectedValue !== 0
-        && Number(prevAnswers[questionId] || 0) === selectedValue;
-
-      return {
-        ...prevAnswers,
-        [questionId]: shouldClear ? 0 : selectedValue,
-      };
-    });
-    setIsRecountConfirmOpen(false);
-    setRecountPreview(null);
-    setRecountError('');
-  };
-
-  const handleRecountTextAnswer = (questionId, value) => {
-    const question = config?.questions?.[decodeData?.category?.code]?.find(
-      (item) => item.id === questionId
-    );
-
-    setRecountAnswers((prevAnswers) => {
-      const normalizedValue = String(value || '').trim();
-      if (!normalizedValue) {
-        const nextAnswers = { ...prevAnswers };
-        if (question?.required === 1) delete nextAnswers[questionId];
-        else nextAnswers[questionId] = 0;
-        return nextAnswers;
-      }
-      return { ...prevAnswers, [questionId]: normalizedValue };
-    });
-    setIsRecountConfirmOpen(false);
-    setRecountPreview(null);
-    setRecountError('');
-  };
-
-  const buildRecountPayload = () => ({
-    sourceSku: decodeData?.sku,
-    answers: recountAnswers,
-    isCalibrated: recountAnswers.is_calibrated ?? null,
-    reason: recountReason,
-  });
-
-  const requestRecountPreview = (openConfirmation = false) => {
-    if (!decodeData?.sku) return;
-    if (!hasRecountChanges) {
-      setRecountPreview(null);
-      setRecountError('Для переобліку змініть хоча б один параметр виробу.');
-      return;
-    }
-    setIsRecountLoading(true);
-    setIsRecountConfirmOpen(false);
-    setRecountError('');
-    setRecountSuccess('');
-
-    api.post('/recount/preview', buildRecountPayload())
-      .then((res) => {
-        setRecountPreview(res.data);
-        if (openConfirmation) setIsRecountConfirmOpen(true);
-      })
-      .catch((err) => {
-        setRecountPreview(null);
-        setRecountError(err.response?.data?.error || err.message);
-      })
-      .finally(() => {
-        setIsRecountLoading(false);
-      });
-  };
-
-  const handleRecountPreview = () => {
-    if (isRecountLoading) return;
-    requestRecountPreview(false);
-  };
-
-  const handleApplyRecount = () => {
-    if (!decodeData?.sku || !hasRecountChanges || isRecountLoading) return;
-    if (recountPreview) {
-      setIsRecountConfirmOpen(true);
-      return;
-    }
-
-    requestRecountPreview(true);
-  };
-
-  const handleCancelRecountConfirmation = () => {
-    if (isRecountApplying) return;
-    setIsRecountConfirmOpen(false);
-  };
-
-  const handleConfirmRecount = () => {
-    if (!decodeData?.sku || !recountPreview || !hasRecountChanges || isRecountApplying) return;
-
-    setIsRecountApplying(true);
-    setRecountError('');
-    setRecountSuccess('');
-
-    api.post('/recount/apply', buildRecountPayload())
-      .then((res) => {
-        const correctedSku = res.data.corrected.fullSku;
-        setIsRecountConfirmOpen(false);
-        setRecountSuccess(`Створено коригувальний артикул ${correctedSku}. Він не потрапить в експорт.`);
-        setIsRecountOpen(false);
-        setRecountPreview(null);
-        fetchHistory();
-        fetchExportStatus();
-        handleDecode(correctedSku);
-      })
-      .catch((err) => {
-        setIsRecountConfirmOpen(false);
-        setRecountError(err.response?.data?.error || err.message);
-      })
-      .finally(() => {
-        setIsRecountApplying(false);
       });
   };
 

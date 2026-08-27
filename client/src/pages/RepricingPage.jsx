@@ -13,11 +13,15 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  ScanSearch,
   Search,
+  Square,
+  SquareCheckBig,
   Trash2,
   Undo2,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { RepricingRecountDrawer } from '../components/app/RepricingRecountDrawer';
 import { api } from '../lib/api';
 import { getPricingAxis } from '../lib/pricing-axis';
 import {
@@ -287,6 +291,7 @@ export default function RepricingPage() {
   const [scenarioId, setScenarioId] = useState('');
   const [preview, setPreview] = useState(null);
   const [filter, setFilter] = useState('changed');
+  const [reviewFilter, setReviewFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [previewing, setPreviewing] = useState(false);
@@ -305,6 +310,8 @@ export default function RepricingPage() {
   const [draftSaveState, setDraftSaveState] = useState('idle');
   const [discardDraftOpen, setDiscardDraftOpen] = useState(false);
   const [discardingDraft, setDiscardingDraft] = useState(false);
+  const [reviewedProductIds, setReviewedProductIds] = useState([]);
+  const [recountTarget, setRecountTarget] = useState(null);
 
   const loadBatches = () => api.get('/admin/repricing/batches').then((response) => {
     setBatches(response.data || []);
@@ -360,14 +367,21 @@ export default function RepricingPage() {
     () => new Set(getInvalidManualPriceIds(manualPrices)),
     [manualPrices]
   );
+  const reviewedProductIdSet = useMemo(
+    () => new Set(reviewedProductIds.map(Number)),
+    [reviewedProductIds]
+  );
   const visibleItems = useMemo(() => {
     const normalizedSearch = search.trim().toUpperCase();
     const filteredItems = effectiveItems.filter((item) => {
       if (filter !== 'all' && item.status !== filter) return false;
+      const isReviewed = reviewedProductIdSet.has(Number(item.productId));
+      if (reviewFilter === 'pending' && isReviewed) return false;
+      if (reviewFilter === 'reviewed' && !isReviewed) return false;
       return !normalizedSearch || String(item.sku || '').toUpperCase().includes(normalizedSearch);
     });
     return sortRepricingItems(filteredItems, sort);
-  }, [effectiveItems, filter, search, sort]);
+  }, [effectiveItems, filter, reviewFilter, reviewedProductIdSet, search, sort]);
 
   const handleSort = (key) => {
     setSort((currentSort) => ({
@@ -388,7 +402,16 @@ export default function RepricingPage() {
     });
   };
 
-  const getDraftUiState = () => ({ filter, search, sort });
+  const toggleReviewed = (productId) => {
+    const normalizedProductId = Number(productId);
+    setReviewedProductIds((currentIds) => (
+      currentIds.includes(normalizedProductId)
+        ? currentIds.filter((item) => item !== normalizedProductId)
+        : [...currentIds, normalizedProductId].sort((first, second) => first - second)
+    ));
+  };
+
+  const getDraftUiState = () => ({ filter, reviewFilter, search, sort });
 
   const applyDraftPayload = (data) => {
     const nextManualPrices = Object.fromEntries(
@@ -400,9 +423,11 @@ export default function RepricingPage() {
     setActiveDraft(data.draft);
     if (data.preview) setPreview(data.preview);
     setManualPrices(nextManualPrices);
+    setReviewedProductIds(data.draft?.reviewedProductIds || []);
     setDraftSync(data.sync || null);
     setDraftConflicts(data.conflicts || []);
     setFilter(uiState.filter || (data.preview?.summary?.errorCount > 0 ? 'error' : 'changed'));
+    setReviewFilter(uiState.reviewFilter || 'all');
     setSearch(uiState.search || '');
     setSort(uiState.sort || { key: 'sku', direction: 'asc' });
     setDraftSaveState('saved');
@@ -425,6 +450,7 @@ export default function RepricingPage() {
     const payload = {
       scenarioId: preview.scenario.id,
       manualOverrides,
+      reviewedProductIds,
       uiState: getDraftUiState(),
     };
     const request = activeDraft
@@ -453,7 +479,9 @@ export default function RepricingPage() {
   useEffect(() => {
     if (!preview || invalidManualPriceIds.size > 0) return undefined;
     if (draftConflicts.length > 0) return undefined;
-    if (!activeDraft && manualOverrides.length === 0) return undefined;
+    if (!activeDraft && manualOverrides.length === 0 && reviewedProductIds.length === 0) {
+      return undefined;
+    }
 
     const timeoutId = window.setTimeout(() => {
       saveDraft({ automatic: true }).catch(() => {});
@@ -461,7 +489,16 @@ export default function RepricingPage() {
     return () => window.clearTimeout(timeoutId);
   // Saving depends on the editable state, while saveDraft itself intentionally stays local.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeDraft?.id, draftConflicts.length, filter, manualPrices, search, sort]);
+  }, [
+    activeDraft?.id,
+    draftConflicts.length,
+    filter,
+    manualPrices,
+    reviewFilter,
+    reviewedProductIds,
+    search,
+    sort,
+  ]);
 
   const buildPreview = () => {
     if (!scenarioId || previewing) return;
@@ -473,6 +510,8 @@ export default function RepricingPage() {
     setDraftConflicts([]);
     setDraftSaveState('idle');
     setManualPrices({});
+    setReviewedProductIds([]);
+    setReviewFilter('all');
     api.post('/admin/repricing/preview', { scenarioId: Number(scenarioId) })
       .then((response) => {
         setPreview(response.data);
@@ -519,6 +558,45 @@ export default function RepricingPage() {
     setDraftSaveState('saving');
   };
 
+  const handleRecountApplied = async ({ result }) => {
+    if (!preview || previewing) return;
+    const sourceProductId = Number(result?.source?.productId || recountTarget?.productId || 0);
+    const nextManualPrices = Object.fromEntries(
+      Object.entries(manualPrices)
+        .filter(([productId]) => Number(productId) !== sourceProductId)
+    );
+    const nextManualOverrides = getManualOverrides(nextManualPrices);
+    const nextReviewedProductIds = reviewedProductIds
+      .filter((productId) => Number(productId) !== sourceProductId);
+
+    setPreviewing(true);
+    setError('');
+    setManualPrices(nextManualPrices);
+    setReviewedProductIds(nextReviewedProductIds);
+    try {
+      if (activeDraft) {
+        await api.put(`/admin/repricing/drafts/${activeDraft.id}`, {
+          scenarioId: preview.scenario.id,
+          manualOverrides: nextManualOverrides,
+          reviewedProductIds: nextReviewedProductIds,
+          uiState: getDraftUiState(),
+        });
+        const response = await api.post(`/admin/repricing/drafts/${activeDraft.id}/sync`);
+        applyDraftPayload(response.data);
+        await loadDrafts();
+      } else {
+        const response = await api.post('/admin/repricing/preview', {
+          scenarioId: preview.scenario.id,
+        });
+        setPreview(response.data);
+      }
+    } catch (requestError) {
+      setError(`Переоблік виконано, але список не оновлено: ${getApiError(requestError)}`);
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
   const discardDraft = () => {
     if (!activeDraft || discardingDraft) return;
     setDiscardingDraft(true);
@@ -529,6 +607,8 @@ export default function RepricingPage() {
         setActiveDraft(null);
         setPreview(null);
         setManualPrices({});
+        setReviewedProductIds([]);
+        setReviewFilter('all');
         setDraftSync(null);
         setDraftConflicts([]);
         setDraftSaveState('idle');
@@ -554,6 +634,8 @@ export default function RepricingPage() {
       setAppliedBatch(response.data.batch);
       setPreview(null);
       setManualPrices({});
+      setReviewedProductIds([]);
+      setReviewFilter('all');
       setActiveDraft(null);
       setDraftSync(null);
       setDraftConflicts([]);
@@ -614,10 +696,20 @@ export default function RepricingPage() {
             <p className="eyebrow">Admin Workspace</p>
             <h1 className="page-title">Масова переоцінка</h1>
           </div>
-          <Link to="/admin" className="btn btn-outline gap-2 self-start lg:self-auto">
-            <ArrowLeft size={16} />
-            До адмін-панелі
-          </Link>
+          <div className="flex flex-wrap gap-2 self-start lg:self-auto">
+            <button
+              type="button"
+              className="btn btn-outline gap-2"
+              onClick={() => setRecountTarget({ productId: null, sku: '' })}
+            >
+              <ScanSearch size={16} />
+              Декодер
+            </button>
+            <Link to="/admin" className="btn btn-outline gap-2">
+              <ArrowLeft size={16} />
+              До адмін-панелі
+            </Link>
+          </div>
         </header>
 
         {error && (
@@ -666,6 +758,8 @@ export default function RepricingPage() {
                     setPreview(null);
                     setAppliedBatch(null);
                     setManualPrices({});
+                    setReviewedProductIds([]);
+                    setReviewFilter('all');
                     setActiveDraft(null);
                     setDraftSync(null);
                     setDraftConflicts([]);
@@ -816,25 +910,43 @@ export default function RepricingPage() {
                 </div>
               )}
 
-              <div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1">
-                  {[
-                    ['changed', 'Зміняться'],
-                    ['unchanged', 'Без змін'],
-                    ['error', 'Помилки'],
-                    ['all', 'Усі'],
-                  ].map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      className={`rounded-md px-3 py-1.5 text-xs font-semibold ${filter === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
-                      onClick={() => setFilter(value)}
-                    >
-                      {label}
-                    </button>
-                  ))}
+              <div className="flex flex-col gap-3 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1">
+                    {[
+                      ['changed', 'Зміняться'],
+                      ['unchanged', 'Без змін'],
+                      ['error', 'Помилки'],
+                      ['all', 'Усі'],
+                    ].map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={`rounded-md px-3 py-1.5 text-xs font-semibold ${filter === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+                        onClick={() => setFilter(value)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1">
+                    {[
+                      ['all', `Усі перевірки`],
+                      ['pending', 'Непереглянуті'],
+                      ['reviewed', `Переглянуті · ${reviewedProductIds.length}`],
+                    ].map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={`rounded-md px-3 py-1.5 text-xs font-semibold ${reviewFilter === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+                        onClick={() => setReviewFilter(value)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <label className="relative block w-full sm:w-72">
+                <label className="relative block w-full lg:w-72">
                   <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     className="input-sm pl-9"
@@ -858,9 +970,38 @@ export default function RepricingPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleItems.map((item) => (
-                      <tr key={item.productId} className="border-t border-slate-100">
-                        <td className="table-cell font-mono text-xs font-semibold text-slate-800">{item.sku}</td>
+                    {visibleItems.map((item) => {
+                      const isReviewed = reviewedProductIdSet.has(Number(item.productId));
+                      return (
+                      <tr
+                        key={item.productId}
+                        className={`border-t border-slate-100 ${isReviewed ? 'bg-emerald-50/45' : ''}`}
+                      >
+                        <td className="table-cell min-w-48 text-xs text-slate-800">
+                          <div className="font-mono font-semibold">{item.sku}</div>
+                          <div className="mt-2 flex items-center gap-3 font-sans">
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 hover:text-slate-900"
+                              onClick={() => setRecountTarget({
+                                productId: Number(item.productId),
+                                sku: item.sku,
+                              })}
+                            >
+                              <ScanSearch size={14} />
+                              Перевірити
+                            </button>
+                            <button
+                              type="button"
+                              className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${isReviewed ? 'text-emerald-700' : 'text-slate-500 hover:text-slate-900'}`}
+                              onClick={() => toggleReviewed(item.productId)}
+                              aria-pressed={isReviewed}
+                            >
+                              {isReviewed ? <SquareCheckBig size={14} /> : <Square size={14} />}
+                              {isReviewed ? 'Переглянуто' : 'Позначити'}
+                            </button>
+                          </div>
+                        </td>
                         <td className="table-cell whitespace-nowrap text-sm">{item.weight ?? '-'} г</td>
                         <td className="table-cell min-w-64 text-xs text-slate-600">
                           {item.status === 'error'
@@ -921,7 +1062,8 @@ export default function RepricingPage() {
                           {item.status === 'error' ? '-' : formatUah(item.priceDeltaUah)}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
                 {visibleItems.length === 0 && (
@@ -934,6 +1076,11 @@ export default function RepricingPage() {
                   <span>Рядків у перегляді: {visibleItems.length}</span>
                   {manualOverrides.length > 0 && (
                     <span className="font-medium text-amber-700">Ручних цін: {manualOverrides.length}</span>
+                  )}
+                  {reviewedProductIds.length > 0 && (
+                    <span className="font-medium text-emerald-700">
+                      Переглянуто: {reviewedProductIds.length}
+                    </span>
                   )}
                   {activeDraft && draftSaveState === 'saving' && (
                     <span className="font-medium text-slate-600">Зберігаємо чернетку...</span>
@@ -1051,6 +1198,15 @@ export default function RepricingPage() {
           pending={discardingDraft}
           onCancel={() => setDiscardDraftOpen(false)}
           onConfirm={discardDraft}
+        />
+      )}
+
+      {recountTarget && (
+        <RepricingRecountDrawer
+          config={config}
+          initialSku={recountTarget.sku}
+          onApplied={handleRecountApplied}
+          onClose={() => setRecountTarget(null)}
         />
       )}
     </div>

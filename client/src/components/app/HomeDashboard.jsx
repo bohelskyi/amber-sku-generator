@@ -32,7 +32,7 @@ function getPricingSourceLabel(source) {
   return source === 'stored' ? 'Збережена в базі' : 'Перерахована зараз';
 }
 
-function DecodeErrorPanel({ details, message }) {
+export function DecodeErrorPanel({ details, message }) {
   const issue = details?.issue;
 
   return (
@@ -227,7 +227,7 @@ export function HomeDashboard({
   );
 }
 
-function DecodeWorkspace({
+export function DecodeWorkspace({
   config,
   decodeData,
   hasRecountChanges,

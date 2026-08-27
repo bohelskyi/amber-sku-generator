@@ -13,6 +13,7 @@ const {
   getRepricingPreviewSnapshot,
   hasManualPrice,
   normalizeManualOverrides,
+  normalizeReviewedProductIds,
 } = require('../src/services/repricing.service');
 
 const scenario = {
@@ -173,6 +174,11 @@ test('application token includes normalized manual overrides', () => {
       { productId: 2, newPriceUah: 500 },
     ])
   );
+});
+
+test('reviewed repricing products are normalized for draft persistence', () => {
+  assert.deepEqual(normalizeReviewedProductIds([7, '3', 7, 0, -1, 'bad']), [3, 7]);
+  assert.throws(() => normalizeReviewedProductIds({ productId: 7 }), /Некоректний список/);
 });
 
 test('manual overrides recalculate final UAH and derived USD prices', () => {

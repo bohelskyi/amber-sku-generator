@@ -546,12 +546,16 @@ async function buildRepricingPreview(scenarioId) {
 
 function normalizeDraftUiState(uiState = {}) {
   const allowedFilters = new Set(['changed', 'unchanged', 'error', 'all']);
+  const allowedReviewFilters = new Set(['all', 'pending', 'reviewed']);
   const allowedSortKeys = new Set([
     'sku', 'weight', 'oldPriceUah', 'newPriceUah', 'priceDeltaUah',
   ]);
   const sortKey = allowedSortKeys.has(uiState?.sort?.key) ? uiState.sort.key : 'sku';
   return {
     filter: allowedFilters.has(uiState.filter) ? uiState.filter : 'changed',
+    reviewFilter: allowedReviewFilters.has(uiState.reviewFilter)
+      ? uiState.reviewFilter
+      : 'all',
     search: String(uiState.search || '').slice(0, 120),
     sort: {
       key: sortKey,
@@ -560,9 +564,22 @@ function normalizeDraftUiState(uiState = {}) {
   };
 }
 
+function normalizeReviewedProductIds(productIds = []) {
+  if (!Array.isArray(productIds) || productIds.length > 10000) {
+    const error = new Error('Некоректний список переглянутих товарів.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return [...new Set(productIds.map(Number))]
+    .filter((productId) => Number.isInteger(productId) && productId > 0)
+    .sort((first, second) => first - second);
+}
+
 function normalizeDraftRow(row) {
   if (!row) return null;
   const manualOverrides = normalizeManualOverrides(row.manual_overrides || []);
+  const reviewedProductIds = normalizeReviewedProductIds(row.reviewed_product_ids || []);
   return {
     id: Number(row.id),
     scenarioId: row.scenario_id === null ? null : Number(row.scenario_id),
@@ -571,6 +588,8 @@ function normalizeDraftRow(row) {
     status: row.status,
     manualOverrides,
     manualOverrideCount: manualOverrides.length,
+    reviewedProductIds,
+    reviewedProductCount: reviewedProductIds.length,
     uiState: normalizeDraftUiState(row.ui_state || {}),
     previewFingerprint: row.preview_fingerprint,
     createdAt: row.created_at,
@@ -652,9 +671,14 @@ async function getRepricingDraft(draftId) {
   const overrides = normalizeManualOverrides(row.manual_overrides || []);
   const previewIds = new Set(preview.items.map((item) => Number(item.productId)));
   const availableOverrides = overrides.filter((item) => previewIds.has(item.productId));
+  const reviewedProductIds = normalizeReviewedProductIds(row.reviewed_product_ids || [])
+    .filter((productId) => previewIds.has(productId));
+  const draft = normalizeDraftRow(row);
+  draft.reviewedProductIds = reviewedProductIds;
+  draft.reviewedProductCount = reviewedProductIds.length;
   const conflicts = await getDraftOverrideConflicts(overrides, preview);
   return {
-    draft: normalizeDraftRow(row),
+    draft,
     preview,
     manualOverrides: availableOverrides,
     conflicts,
@@ -662,7 +686,12 @@ async function getRepricingDraft(draftId) {
   };
 }
 
-async function createRepricingDraft({ scenarioId, manualOverrides = [], uiState = {} }) {
+async function createRepricingDraft({
+  scenarioId,
+  manualOverrides = [],
+  reviewedProductIds = [],
+  uiState = {},
+}) {
   const scenario = await getActiveScenario(scenarioId);
   const existing = await pool.query(
     `SELECT id FROM repricing_drafts
@@ -674,14 +703,15 @@ async function createRepricingDraft({ scenarioId, manualOverrides = [], uiState 
 
   const preview = await buildRepricingPreview(scenario.id);
   const normalizedOverrides = normalizeManualOverrides(manualOverrides);
+  const normalizedReviewedIds = normalizeReviewedProductIds(reviewedProductIds);
   applyManualOverridesToPreview(preview, normalizedOverrides);
   const snapshot = getRepricingPreviewSnapshot(preview);
   try {
     const result = await pool.query(
       `INSERT INTO repricing_drafts
        (scenario_id, category_code, scenario_name, scenario_snapshot,
-        preview_fingerprint, preview_snapshot, manual_overrides, ui_state)
-       VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7::jsonb, $8::jsonb)
+        preview_fingerprint, preview_snapshot, manual_overrides, reviewed_product_ids, ui_state)
+       VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb)
        RETURNING id`,
       [
         Number(scenario.id),
@@ -691,6 +721,7 @@ async function createRepricingDraft({ scenarioId, manualOverrides = [], uiState 
         getRepricingPreviewFingerprint(preview),
         JSON.stringify(snapshot),
         JSON.stringify(normalizedOverrides),
+        JSON.stringify(normalizedReviewedIds),
         JSON.stringify(normalizeDraftUiState(uiState)),
       ]
     );
@@ -706,17 +737,23 @@ async function createRepricingDraft({ scenarioId, manualOverrides = [], uiState 
   }
 }
 
-async function saveRepricingDraft(draftId, { manualOverrides = [], uiState = {} }) {
+async function saveRepricingDraft(
+  draftId,
+  { manualOverrides = [], reviewedProductIds = [], uiState = {} }
+) {
   const normalizedOverrides = normalizeManualOverrides(manualOverrides);
+  const normalizedReviewedIds = normalizeReviewedProductIds(reviewedProductIds);
   const result = await pool.query(
     `UPDATE repricing_drafts
      SET manual_overrides = $1::jsonb,
-         ui_state = $2::jsonb,
+         reviewed_product_ids = $2::jsonb,
+         ui_state = $3::jsonb,
          updated_at = CURRENT_TIMESTAMP
-     WHERE id = $3 AND status = 'draft'
+     WHERE id = $4 AND status = 'draft'
      RETURNING *`,
     [
       JSON.stringify(normalizedOverrides),
+      JSON.stringify(normalizedReviewedIds),
       JSON.stringify(normalizeDraftUiState(uiState)),
       Number(draftId),
     ]
@@ -737,18 +774,23 @@ async function syncRepricingDraft(draftId) {
     throw error;
   }
   const preview = await buildRepricingPreview(row.scenario_id);
+  const previewIds = new Set(preview.items.map((item) => Number(item.productId)));
+  const reviewedProductIds = normalizeReviewedProductIds(row.reviewed_product_ids || [])
+    .filter((productId) => previewIds.has(productId));
   const result = await pool.query(
     `UPDATE repricing_drafts
      SET scenario_snapshot = $1::jsonb,
          preview_fingerprint = $2,
          preview_snapshot = $3::jsonb,
+         reviewed_product_ids = $4::jsonb,
          updated_at = CURRENT_TIMESTAMP
-     WHERE id = $4 AND status = 'draft'
+     WHERE id = $5 AND status = 'draft'
      RETURNING id`,
     [
       JSON.stringify(preview.scenario),
       getRepricingPreviewFingerprint(preview),
       JSON.stringify(getRepricingPreviewSnapshot(preview)),
+      JSON.stringify(reviewedProductIds),
       Number(draftId),
     ]
   );
@@ -1309,6 +1351,7 @@ module.exports = {
   getRepricingScenarios,
   hasManualPrice,
   normalizeManualOverrides,
+  normalizeReviewedProductIds,
   applyManualOverridesToPreview,
   buildPricingChange,
   buildPricingState,
