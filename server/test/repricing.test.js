@@ -5,7 +5,10 @@ const {
   applyManualOverridesToPreview,
   doesProductMatchRepricingBatch,
   getApplicationToken,
+  getDraftSyncInfo,
   getPreviewToken,
+  getRepricingPreviewFingerprint,
+  getRepricingPreviewSnapshot,
   hasManualPrice,
   normalizeManualOverrides,
 } = require('../src/services/repricing.service');
@@ -30,6 +33,62 @@ test('repricing preview token is stable for the same changes', () => {
     getPreviewToken(scenario, items),
     getPreviewToken(scenario, [{ ...items[0], newPriceUah: 500 }])
   );
+});
+
+test('draft fingerprint includes unchanged candidates and calculation context', () => {
+  const preview = {
+    scenario: { id: 63, name: 'Children' },
+    summary: { candidateCount: 1, changedCount: 0, unchangedCount: 1, skippedCount: 0, errorCount: 0 },
+    items: [{
+      productId: 10,
+      sku: 'NM10',
+      oldPriceUah: 500,
+      newPriceUah: 500,
+      status: 'unchanged',
+      uahRate: 50,
+    }],
+  };
+
+  assert.notEqual(
+    getRepricingPreviewFingerprint(preview),
+    getRepricingPreviewFingerprint({
+      ...preview,
+      items: [...preview.items, {
+        productId: 11,
+        sku: 'NM11',
+        oldPriceUah: 600,
+        newPriceUah: 600,
+        status: 'unchanged',
+        uahRate: 50,
+      }],
+    })
+  );
+});
+
+test('draft synchronization reports added, removed, and recalculated products', () => {
+  const storedPreview = {
+    scenario: { id: 36, name: 'Old name' },
+    summary: { candidateCount: 2 },
+    items: [
+      { productId: 1, sku: 'NM1', oldPriceUah: 100, newPriceUah: 200, status: 'changed' },
+      { productId: 2, sku: 'NM2', oldPriceUah: 100, newPriceUah: 200, status: 'changed' },
+    ],
+  };
+  const currentPreview = {
+    scenario: { id: 36, name: 'New name' },
+    summary: { candidateCount: 2 },
+    items: [
+      { productId: 1, sku: 'NM1', oldPriceUah: 100, newPriceUah: 250, status: 'changed' },
+      { productId: 3, sku: 'NM3', oldPriceUah: 100, newPriceUah: 200, status: 'changed' },
+    ],
+  };
+  const sync = getDraftSyncInfo(getRepricingPreviewSnapshot(storedPreview), currentPreview);
+
+  assert.equal(sync.hasChanges, true);
+  assert.equal(sync.contextChanged, true);
+  assert.deepEqual(sync.added.map((item) => item.productId), [3]);
+  assert.deepEqual(sync.removed.map((item) => item.productId), [2]);
+  assert.deepEqual(sync.changed.map((item) => item.productId), [1]);
 });
 
 test('repricing identifies an explicit manual price', () => {

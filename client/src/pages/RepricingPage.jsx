@@ -7,9 +7,12 @@ import {
   ArrowUpDown,
   CheckCircle2,
   Download,
+  FilePenLine,
   RefreshCw,
   RotateCcw,
+  Save,
   Search,
+  Trash2,
   Undo2,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -157,10 +160,38 @@ function RollbackDialog({ batch, onCancel, onConfirm, pending }) {
   );
 }
 
+function DiscardDraftDialog({ onCancel, onConfirm, pending }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
+      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-2xl">
+        <div className="flex items-start gap-3">
+          <Trash2 className="mt-0.5 text-rose-600" size={22} />
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Відкинути чернетку?</h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Збережені ручні ціни буде видалено. Товари та матриця не зміняться.
+            </p>
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end gap-2">
+          <button type="button" className="btn btn-outline" onClick={onCancel} disabled={pending}>
+            Скасувати
+          </button>
+          <button type="button" className="btn btn-primary gap-2" onClick={onConfirm} disabled={pending}>
+            <Trash2 size={16} />
+            {pending ? 'Видаляємо...' : 'Відкинути'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function RepricingPage() {
   const [config, setConfig] = useState(null);
   const [scenarios, setScenarios] = useState([]);
   const [batches, setBatches] = useState([]);
+  const [drafts, setDrafts] = useState([]);
   const [scenarioId, setScenarioId] = useState('');
   const [preview, setPreview] = useState(null);
   const [filter, setFilter] = useState('changed');
@@ -176,9 +207,20 @@ export default function RepricingPage() {
   const [rollbackTarget, setRollbackTarget] = useState(null);
   const [rollingBack, setRollingBack] = useState(false);
   const [rollbackResult, setRollbackResult] = useState(null);
+  const [activeDraft, setActiveDraft] = useState(null);
+  const [draftSync, setDraftSync] = useState(null);
+  const [draftConflicts, setDraftConflicts] = useState([]);
+  const [draftSaveState, setDraftSaveState] = useState('idle');
+  const [discardDraftOpen, setDiscardDraftOpen] = useState(false);
+  const [discardingDraft, setDiscardingDraft] = useState(false);
 
   const loadBatches = () => api.get('/admin/repricing/batches').then((response) => {
     setBatches(response.data || []);
+    return response.data || [];
+  });
+
+  const loadDrafts = () => api.get('/admin/repricing/drafts').then((response) => {
+    setDrafts(response.data || []);
     return response.data || [];
   });
 
@@ -187,20 +229,24 @@ export default function RepricingPage() {
       api.get('/admin/config'),
       api.get('/admin/repricing/scenarios'),
       api.get('/admin/repricing/batches'),
+      api.get('/admin/repricing/drafts'),
     ])
-      .then(([configResponse, scenariosResponse, batchesResponse]) => {
+      .then(([configResponse, scenariosResponse, batchesResponse, draftsResponse]) => {
         const nextScenarios = scenariosResponse.data || [];
+        const nextDrafts = draftsResponse.data || [];
         setConfig(configResponse.data);
         setScenarios(nextScenarios);
         setBatches(batchesResponse.data || []);
+        setDrafts(nextDrafts);
         const preferredScenario = nextScenarios.find((item) => item.price_mode === 'fixed_uah');
-        setScenarioId(String(preferredScenario?.id || nextScenarios[0]?.id || ''));
+        setScenarioId(String(nextDrafts[0]?.scenarioId || preferredScenario?.id || nextScenarios[0]?.id || ''));
       })
       .catch((requestError) => setError(getApiError(requestError)))
       .finally(() => setLoading(false));
   }, []);
 
   const selectedScenario = scenarios.find((item) => Number(item.id) === Number(scenarioId));
+  const selectedDraft = drafts.find((item) => Number(item.scenarioId) === Number(scenarioId));
   const effectiveItems = useMemo(
     () => applyManualPrices(preview?.items || [], manualPrices),
     [manualPrices, preview]
@@ -242,11 +288,90 @@ export default function RepricingPage() {
     });
   };
 
+  const getDraftUiState = () => ({ filter, search, sort });
+
+  const applyDraftPayload = (data) => {
+    const nextManualPrices = Object.fromEntries(
+      (data.manualOverrides || data.draft?.manualOverrides || []).map((item) => (
+        [item.productId, String(item.newPriceUah)]
+      ))
+    );
+    const uiState = data.draft?.uiState || {};
+    setActiveDraft(data.draft);
+    if (data.preview) setPreview(data.preview);
+    setManualPrices(nextManualPrices);
+    setDraftSync(data.sync || null);
+    setDraftConflicts(data.conflicts || []);
+    setFilter(uiState.filter || (data.preview?.summary?.errorCount > 0 ? 'error' : 'changed'));
+    setSearch(uiState.search || '');
+    setSort(uiState.sort || { key: 'sku', direction: 'asc' });
+    setDraftSaveState('saved');
+  };
+
+  const openDraft = (draftId) => {
+    if (!draftId || previewing) return;
+    setPreviewing(true);
+    setError('');
+    setAppliedBatch(null);
+    api.get(`/admin/repricing/drafts/${draftId}`)
+      .then((response) => applyDraftPayload(response.data))
+      .catch((requestError) => setError(getApiError(requestError)))
+      .finally(() => setPreviewing(false));
+  };
+
+  const saveDraft = ({ automatic = false } = {}) => {
+    if (!preview || invalidManualPriceIds.size > 0) return Promise.resolve(null);
+    if (!automatic) setDraftSaveState('saving');
+    const payload = {
+      scenarioId: preview.scenario.id,
+      manualOverrides,
+      uiState: getDraftUiState(),
+    };
+    const request = activeDraft
+      ? api.put(`/admin/repricing/drafts/${activeDraft.id}`, payload)
+      : api.post('/admin/repricing/drafts', payload);
+
+    setDraftSaveState('saving');
+    return request
+      .then((response) => {
+        const nextDraft = response.data.draft;
+        setActiveDraft(nextDraft);
+        if (response.data.preview) {
+          setDraftSync(response.data.sync || null);
+          setDraftConflicts(response.data.conflicts || []);
+        }
+        setDraftSaveState('saved');
+        return loadDrafts().then(() => nextDraft);
+      })
+      .catch((requestError) => {
+        setDraftSaveState('error');
+        if (!automatic) setError(getApiError(requestError));
+        throw requestError;
+      });
+  };
+
+  useEffect(() => {
+    if (!preview || invalidManualPriceIds.size > 0) return undefined;
+    if (draftConflicts.length > 0) return undefined;
+    if (!activeDraft && manualOverrides.length === 0) return undefined;
+
+    const timeoutId = window.setTimeout(() => {
+      saveDraft({ automatic: true }).catch(() => {});
+    }, 800);
+    return () => window.clearTimeout(timeoutId);
+  // Saving depends on the editable state, while saveDraft itself intentionally stays local.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDraft?.id, draftConflicts.length, filter, manualPrices, search, sort]);
+
   const buildPreview = () => {
     if (!scenarioId || previewing) return;
     setPreviewing(true);
     setError('');
     setAppliedBatch(null);
+    setActiveDraft(null);
+    setDraftSync(null);
+    setDraftConflicts([]);
+    setDraftSaveState('idle');
     setManualPrices({});
     api.post('/admin/repricing/preview', { scenarioId: Number(scenarioId) })
       .then((response) => {
@@ -257,27 +382,90 @@ export default function RepricingPage() {
       .finally(() => setPreviewing(false));
   };
 
-  const applyPreview = () => {
+  const openSelectedRepricing = () => {
+    if (selectedDraft) openDraft(selectedDraft.id);
+    else buildPreview();
+  };
+
+  const syncDraft = async () => {
+    if (!activeDraft || previewing) return;
+    if (invalidManualPriceIds.size > 0) {
+      setError('Виправте некоректну ручну ціну перед оновленням чернетки.');
+      return;
+    }
+    if (draftConflicts.length > 0) {
+      setError('Спочатку вирішіть конфлікти ручних цін у чернетці.');
+      return;
+    }
+    setPreviewing(true);
+    setError('');
+    try {
+      await saveDraft();
+      const response = await api.post(`/admin/repricing/drafts/${activeDraft.id}/sync`);
+      applyDraftPayload(response.data);
+    } catch (requestError) {
+      setError(getApiError(requestError));
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  const removeDraftConflicts = () => {
+    const conflictIds = new Set(draftConflicts.map((item) => Number(item.productId)));
+    setManualPrices((currentPrices) => Object.fromEntries(
+      Object.entries(currentPrices).filter(([productId]) => !conflictIds.has(Number(productId)))
+    ));
+    setDraftConflicts([]);
+    setDraftSaveState('saving');
+  };
+
+  const discardDraft = () => {
+    if (!activeDraft || discardingDraft) return;
+    setDiscardingDraft(true);
+    setError('');
+    api.delete(`/admin/repricing/drafts/${activeDraft.id}`)
+      .then(() => {
+        setDiscardDraftOpen(false);
+        setActiveDraft(null);
+        setPreview(null);
+        setManualPrices({});
+        setDraftSync(null);
+        setDraftConflicts([]);
+        setDraftSaveState('idle');
+        return loadDrafts();
+      })
+      .catch((requestError) => setError(getApiError(requestError)))
+      .finally(() => setDiscardingDraft(false));
+  };
+
+  const applyPreview = async () => {
     if (!preview || applying) return;
     setApplying(true);
     setError('');
-    api.post('/admin/repricing/apply', {
-      scenarioId: preview.scenario.id,
-      previewToken: preview.previewToken,
-      manualOverrides,
-    })
-      .then((response) => {
-        setAppliedBatch(response.data.batch);
-        setPreview(null);
-        setManualPrices({});
-        setConfirmOpen(false);
-        return loadBatches();
-      })
-      .catch((requestError) => {
-        setConfirmOpen(false);
-        setError(getApiError(requestError));
-      })
-      .finally(() => setApplying(false));
+    try {
+      let draftForApply = activeDraft;
+      if (activeDraft) draftForApply = await saveDraft();
+      const response = await api.post('/admin/repricing/apply', {
+        scenarioId: preview.scenario.id,
+        previewToken: preview.previewToken,
+        manualOverrides,
+        draftId: draftForApply?.id || null,
+      });
+      setAppliedBatch(response.data.batch);
+      setPreview(null);
+      setManualPrices({});
+      setActiveDraft(null);
+      setDraftSync(null);
+      setDraftConflicts([]);
+      setDraftSaveState('idle');
+      setConfirmOpen(false);
+      await Promise.all([loadBatches(), loadDrafts()]);
+    } catch (requestError) {
+      setConfirmOpen(false);
+      setError(getApiError(requestError));
+    } finally {
+      setApplying(false);
+    }
   };
 
   const downloadBatch = (batchId) => {
@@ -378,11 +566,18 @@ export default function RepricingPage() {
                     setPreview(null);
                     setAppliedBatch(null);
                     setManualPrices({});
+                    setActiveDraft(null);
+                    setDraftSync(null);
+                    setDraftConflicts([]);
+                    setDraftSaveState('idle');
                   }}
                 >
                   {scenarios.map((scenario) => (
                     <option key={scenario.id} value={scenario.id}>
                       {scenario.category_code} — {scenario.name}
+                      {drafts.some((draft) => Number(draft.scenarioId) === Number(scenario.id))
+                        ? ' · чернетка'
+                        : ''}
                     </option>
                   ))}
                 </select>
@@ -390,11 +585,15 @@ export default function RepricingPage() {
               <button
                 type="button"
                 className="btn btn-primary gap-2 lg:min-w-56"
-                onClick={buildPreview}
+                onClick={openSelectedRepricing}
                 disabled={!scenarioId || previewing}
               >
-                <RefreshCw size={16} className={previewing ? 'animate-spin' : ''} />
-                {previewing ? 'Розрахунок...' : 'Попередній перегляд'}
+                {selectedDraft ? <FilePenLine size={16} /> : <RefreshCw size={16} className={previewing ? 'animate-spin' : ''} />}
+                {previewing
+                  ? 'Розрахунок...'
+                  : selectedDraft
+                    ? 'Продовжити чернетку'
+                    : 'Попередній перегляд'}
               </button>
             </div>
             {selectedScenario && (
@@ -410,6 +609,88 @@ export default function RepricingPage() {
 
           {preview && (
             <>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:px-5">
+                <div className="flex min-w-0 items-center gap-3 text-sm">
+                  <FilePenLine size={18} className={activeDraft ? 'text-amber-700' : 'text-slate-500'} />
+                  {activeDraft ? (
+                    <div className="min-w-0">
+                      <span className="font-semibold text-slate-800">Чернетка #{activeDraft.id}</span>
+                      <span className="ml-2 text-xs text-slate-500">
+                        {draftSaveState === 'saving'
+                          ? 'Зберігаємо...'
+                          : draftSaveState === 'error'
+                            ? 'Не вдалося зберегти'
+                            : `Збережено ${formatDate(activeDraft.updatedAt)}`}
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="text-slate-600">Перегляд ще не збережено</span>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {activeDraft ? (
+                    <>
+                      <button type="button" className="btn btn-outline gap-2" onClick={syncDraft} disabled={previewing || invalidManualPriceIds.size > 0}>
+                        <RefreshCw size={15} className={previewing ? 'animate-spin' : ''} />
+                        Оновити список
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-outline flex h-9 w-9 items-center justify-center p-0 text-rose-700"
+                        onClick={() => setDiscardDraftOpen(true)}
+                        title="Відкинути чернетку"
+                        aria-label="Відкинути чернетку"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-outline gap-2"
+                      onClick={() => saveDraft().catch(() => {})}
+                      disabled={invalidManualPriceIds.size > 0}
+                    >
+                      <Save size={15} />
+                      Зберегти чернетку
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {activeDraft && draftSync?.hasChanges && (
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:px-5">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+                    <span>
+                      Дані або розрахунок змінилися після збереження чернетки:
+                      {draftSync.contextChanged ? ' матрицю оновлено;' : ''}
+                      {' '}додано {draftSync.added.length}, прибрано {draftSync.removed.length},
+                      {' '}перераховано {draftSync.changed.length}.
+                    </span>
+                  </div>
+                  <button type="button" className="btn btn-outline gap-2" onClick={syncDraft} disabled={previewing || invalidManualPriceIds.size > 0}>
+                    <RefreshCw size={15} />
+                    Прийняти оновлення
+                  </button>
+                </div>
+              )}
+
+              {draftConflicts.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 sm:px-5">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+                    <span>
+                      {draftConflicts.length} ручних цін більше не належать цій переоцінці:
+                      {' '}{draftConflicts.map((item) => item.sku).join(', ')}.
+                    </span>
+                  </div>
+                  <button type="button" className="btn btn-outline" onClick={removeDraftConflicts}>
+                    Відкинути недоступні ціни
+                  </button>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 border-b border-slate-200 sm:grid-cols-5">
                 {[
                   ['Знайдено', preview.summary.candidateCount],
@@ -538,11 +819,18 @@ export default function RepricingPage() {
                   {manualOverrides.length > 0 && (
                     <span className="font-medium text-amber-700">Ручних цін: {manualOverrides.length}</span>
                   )}
+                  {activeDraft && draftSaveState === 'saving' && (
+                    <span className="font-medium text-slate-600">Зберігаємо чернетку...</span>
+                  )}
                 </div>
                 <button
                   type="button"
                   className="btn btn-primary gap-2"
-                  disabled={effectiveSummary.changedCount === 0 || effectiveSummary.errorCount > 0 || invalidManualPriceIds.size > 0}
+                  disabled={effectiveSummary.changedCount === 0
+                    || effectiveSummary.errorCount > 0
+                    || invalidManualPriceIds.size > 0
+                    || draftConflicts.length > 0
+                    || Boolean(activeDraft && draftSync?.hasChanges)}
                   onClick={() => setConfirmOpen(true)}
                 >
                   <CheckCircle2 size={16} />
@@ -639,6 +927,14 @@ export default function RepricingPage() {
           pending={rollingBack}
           onCancel={() => setRollbackTarget(null)}
           onConfirm={rollbackBatch}
+        />
+      )}
+
+      {discardDraftOpen && activeDraft && (
+        <DiscardDraftDialog
+          pending={discardingDraft}
+          onCancel={() => setDiscardDraftOpen(false)}
+          onConfirm={discardDraft}
         />
       )}
     </div>

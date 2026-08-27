@@ -27,11 +27,17 @@ const {
 const {
   applyRepricing,
   buildRepricingPreview,
+  createRepricingDraft,
+  discardRepricingDraft,
   getRepricingBatchItems,
   getRepricingRollbackItems,
   getRepricingBatches,
+  getRepricingDraft,
+  getRepricingDrafts,
   getRepricingScenarios,
   rollbackRepricing,
+  saveRepricingDraft,
+  syncRepricingDraft,
 } = require('../services/repricing.service');
 const { buildCsv } = require('../utils/csv');
 
@@ -83,6 +89,54 @@ router.get('/admin/repricing/batches', async (req, res) => {
   try {
     const batches = await getRepricingBatches(req.query.limit);
     res.json(batches);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.get('/admin/repricing/drafts', async (req, res) => {
+  try {
+    res.json(await getRepricingDrafts());
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.post('/admin/repricing/drafts', async (req, res) => {
+  try {
+    res.json(await createRepricingDraft(req.body || {}));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.get('/admin/repricing/drafts/:draftId', async (req, res) => {
+  try {
+    res.json(await getRepricingDraft(req.params.draftId));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.put('/admin/repricing/drafts/:draftId', async (req, res) => {
+  try {
+    res.json(await saveRepricingDraft(req.params.draftId, req.body || {}));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.post('/admin/repricing/drafts/:draftId/sync', async (req, res) => {
+  try {
+    res.json(await syncRepricingDraft(req.params.draftId));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.delete('/admin/repricing/drafts/:draftId', async (req, res) => {
+  try {
+    res.json(await discardRepricingDraft(req.params.draftId));
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }

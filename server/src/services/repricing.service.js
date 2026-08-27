@@ -1,4 +1,5 @@
 const crypto = require('node:crypto');
+const { isDeepStrictEqual } = require('node:util');
 const pool = require('../db/pool');
 const { calculatePricing } = require('./pricing.service');
 const { roundUah } = require('../utils/money');
@@ -57,6 +58,67 @@ function getPreviewToken(scenario, changedItems) {
   };
 
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+}
+
+function getRepricingPreviewSnapshot(preview) {
+  return {
+    scenario: preview.scenario,
+    summary: preview.summary,
+    items: [...(preview.items || [])]
+      .map((item) => ({
+        productId: Number(item.productId),
+        sku: item.sku,
+        oldPriceUah: item.oldPriceUah ?? null,
+        newPriceUah: item.newPriceUah ?? null,
+        status: item.status,
+        errorCode: item.errorCode || null,
+        uahRate: item.uahRate ?? null,
+        matrixName: item.matrixName || null,
+      }))
+      .sort((first, second) => first.productId - second.productId),
+  };
+}
+
+function getRepricingPreviewFingerprint(preview) {
+  return crypto.createHash('sha256')
+    .update(JSON.stringify(getRepricingPreviewSnapshot(preview)))
+    .digest('hex');
+}
+
+function getDraftSyncInfo(storedSnapshot = {}, currentPreview) {
+  const currentSnapshot = getRepricingPreviewSnapshot(currentPreview);
+  const storedItems = new Map(
+    (storedSnapshot.items || []).map((item) => [Number(item.productId), item])
+  );
+  const currentItems = new Map(
+    currentSnapshot.items.map((item) => [Number(item.productId), item])
+  );
+  const added = currentSnapshot.items.filter((item) => !storedItems.has(item.productId));
+  const removed = (storedSnapshot.items || []).filter(
+    (item) => !currentItems.has(Number(item.productId))
+  );
+  const changed = currentSnapshot.items.filter((item) => {
+    const stored = storedItems.get(item.productId);
+    return stored && !isDeepStrictEqual(stored, item);
+  });
+  const contextChanged = !isDeepStrictEqual(
+    storedSnapshot.scenario || {},
+    currentSnapshot.scenario || {}
+  );
+  const summaryChanged = !isDeepStrictEqual(
+    storedSnapshot.summary || {},
+    currentSnapshot.summary || {}
+  );
+
+  return {
+    hasChanges: contextChanged || summaryChanged || added.length > 0
+      || removed.length > 0 || changed.length > 0,
+    contextChanged,
+    summaryChanged,
+    added,
+    removed,
+    changed,
+  };
 }
 
 function normalizeManualOverrides(manualOverrides = []) {
@@ -330,6 +392,239 @@ async function buildRepricingPreview(scenarioId) {
   };
 }
 
+function normalizeDraftUiState(uiState = {}) {
+  const allowedFilters = new Set(['changed', 'unchanged', 'error', 'all']);
+  const allowedSortKeys = new Set([
+    'sku', 'weight', 'oldPriceUah', 'newPriceUah', 'priceDeltaUah',
+  ]);
+  const sortKey = allowedSortKeys.has(uiState?.sort?.key) ? uiState.sort.key : 'sku';
+  return {
+    filter: allowedFilters.has(uiState.filter) ? uiState.filter : 'changed',
+    search: String(uiState.search || '').slice(0, 120),
+    sort: {
+      key: sortKey,
+      direction: uiState?.sort?.direction === 'desc' ? 'desc' : 'asc',
+    },
+  };
+}
+
+function normalizeDraftRow(row) {
+  if (!row) return null;
+  const manualOverrides = normalizeManualOverrides(row.manual_overrides || []);
+  return {
+    id: Number(row.id),
+    scenarioId: row.scenario_id === null ? null : Number(row.scenario_id),
+    categoryCode: row.category_code,
+    scenarioName: row.scenario_name,
+    status: row.status,
+    manualOverrides,
+    manualOverrideCount: manualOverrides.length,
+    uiState: normalizeDraftUiState(row.ui_state || {}),
+    previewFingerprint: row.preview_fingerprint,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    appliedAt: row.applied_at,
+    discardedAt: row.discarded_at,
+    appliedBatchId: row.applied_batch_id === null ? null : Number(row.applied_batch_id),
+  };
+}
+
+async function getRepricingDraftRow(draftId, queryable = pool, lock = false) {
+  const normalizedDraftId = Number(draftId);
+  if (!Number.isInteger(normalizedDraftId) || normalizedDraftId <= 0) {
+    const error = new Error('Некоректна чернетка переоцінки.');
+    error.statusCode = 400;
+    throw error;
+  }
+  const result = await queryable.query(
+    `SELECT * FROM repricing_drafts WHERE id = $1 ${lock ? 'FOR UPDATE' : ''}`,
+    [normalizedDraftId]
+  );
+  if (result.rows.length === 0) {
+    const error = new Error('Чернетку переоцінки не знайдено.');
+    error.statusCode = 404;
+    throw error;
+  }
+  return result.rows[0];
+}
+
+async function getRepricingDrafts() {
+  const result = await pool.query(
+    `SELECT * FROM repricing_drafts
+     WHERE status = 'draft' AND scenario_id IS NOT NULL
+     ORDER BY updated_at DESC, id DESC`
+  );
+  return result.rows.map(normalizeDraftRow);
+}
+
+async function getDraftOverrideConflicts(overrides, preview) {
+  const previewIds = new Set((preview.items || []).map((item) => Number(item.productId)));
+  const unavailable = overrides.filter((item) => !previewIds.has(item.productId));
+  if (unavailable.length === 0) return [];
+
+  const productIds = unavailable.map((item) => item.productId);
+  const result = await pool.query(
+    `SELECT id, full_sku, status, total_price_uah
+     FROM products
+     WHERE id = ANY($1::int[])`,
+    [productIds]
+  );
+  const products = new Map(result.rows.map((row) => [Number(row.id), row]));
+  return unavailable.map((override) => {
+    const product = products.get(override.productId);
+    return {
+      ...override,
+      sku: product?.full_sku || `#${override.productId}`,
+      status: product?.status || 'missing',
+      currentPriceUah: product?.total_price_uah === null || product?.total_price_uah === undefined
+        ? null
+        : Number(product.total_price_uah),
+    };
+  });
+}
+
+async function getRepricingDraft(draftId) {
+  const row = await getRepricingDraftRow(draftId);
+  if (row.status !== 'draft') {
+    const error = new Error('Ця чернетка вже не є активною.');
+    error.statusCode = 409;
+    throw error;
+  }
+  if (!row.scenario_id) {
+    const error = new Error('Матриця цієї чернетки більше не існує.');
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const preview = await buildRepricingPreview(row.scenario_id);
+  const overrides = normalizeManualOverrides(row.manual_overrides || []);
+  const previewIds = new Set(preview.items.map((item) => Number(item.productId)));
+  const availableOverrides = overrides.filter((item) => previewIds.has(item.productId));
+  const conflicts = await getDraftOverrideConflicts(overrides, preview);
+  return {
+    draft: normalizeDraftRow(row),
+    preview,
+    manualOverrides: availableOverrides,
+    conflicts,
+    sync: getDraftSyncInfo(row.preview_snapshot || {}, preview),
+  };
+}
+
+async function createRepricingDraft({ scenarioId, manualOverrides = [], uiState = {} }) {
+  const scenario = await getActiveScenario(scenarioId);
+  const existing = await pool.query(
+    `SELECT id FROM repricing_drafts
+     WHERE scenario_id = $1 AND status = 'draft'
+     LIMIT 1`,
+    [Number(scenario.id)]
+  );
+  if (existing.rows.length > 0) return getRepricingDraft(existing.rows[0].id);
+
+  const preview = await buildRepricingPreview(scenario.id);
+  const normalizedOverrides = normalizeManualOverrides(manualOverrides);
+  applyManualOverridesToPreview(preview, normalizedOverrides);
+  const snapshot = getRepricingPreviewSnapshot(preview);
+  try {
+    const result = await pool.query(
+      `INSERT INTO repricing_drafts
+       (scenario_id, category_code, scenario_name, scenario_snapshot,
+        preview_fingerprint, preview_snapshot, manual_overrides, ui_state)
+       VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7::jsonb, $8::jsonb)
+       RETURNING id`,
+      [
+        Number(scenario.id),
+        scenario.category_code,
+        scenario.name,
+        JSON.stringify(getScenarioSnapshot(scenario)),
+        getRepricingPreviewFingerprint(preview),
+        JSON.stringify(snapshot),
+        JSON.stringify(normalizedOverrides),
+        JSON.stringify(normalizeDraftUiState(uiState)),
+      ]
+    );
+    return getRepricingDraft(result.rows[0].id);
+  } catch (error) {
+    if (error.code !== '23505') throw error;
+    const concurrent = await pool.query(
+      `SELECT id FROM repricing_drafts
+       WHERE scenario_id = $1 AND status = 'draft' LIMIT 1`,
+      [Number(scenario.id)]
+    );
+    return getRepricingDraft(concurrent.rows[0].id);
+  }
+}
+
+async function saveRepricingDraft(draftId, { manualOverrides = [], uiState = {} }) {
+  const normalizedOverrides = normalizeManualOverrides(manualOverrides);
+  const result = await pool.query(
+    `UPDATE repricing_drafts
+     SET manual_overrides = $1::jsonb,
+         ui_state = $2::jsonb,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $3 AND status = 'draft'
+     RETURNING *`,
+    [
+      JSON.stringify(normalizedOverrides),
+      JSON.stringify(normalizeDraftUiState(uiState)),
+      Number(draftId),
+    ]
+  );
+  if (result.rows.length === 0) {
+    const error = new Error('Активну чернетку переоцінки не знайдено.');
+    error.statusCode = 404;
+    throw error;
+  }
+  return { draft: normalizeDraftRow(result.rows[0]) };
+}
+
+async function syncRepricingDraft(draftId) {
+  const row = await getRepricingDraftRow(draftId);
+  if (row.status !== 'draft' || !row.scenario_id) {
+    const error = new Error('Цю чернетку неможливо синхронізувати.');
+    error.statusCode = 409;
+    throw error;
+  }
+  const preview = await buildRepricingPreview(row.scenario_id);
+  const result = await pool.query(
+    `UPDATE repricing_drafts
+     SET scenario_snapshot = $1::jsonb,
+         preview_fingerprint = $2,
+         preview_snapshot = $3::jsonb,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $4 AND status = 'draft'
+     RETURNING id`,
+    [
+      JSON.stringify(preview.scenario),
+      getRepricingPreviewFingerprint(preview),
+      JSON.stringify(getRepricingPreviewSnapshot(preview)),
+      Number(draftId),
+    ]
+  );
+  if (result.rows.length === 0) {
+    const error = new Error('Активну чернетку переоцінки не знайдено.');
+    error.statusCode = 404;
+    throw error;
+  }
+  return getRepricingDraft(draftId);
+}
+
+async function discardRepricingDraft(draftId) {
+  const result = await pool.query(
+    `UPDATE repricing_drafts
+     SET status = 'discarded', discarded_at = CURRENT_TIMESTAMP,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $1 AND status = 'draft'
+     RETURNING id`,
+    [Number(draftId)]
+  );
+  if (result.rows.length === 0) {
+    const error = new Error('Активну чернетку переоцінки не знайдено.');
+    error.statusCode = 404;
+    throw error;
+  }
+  return { success: true, id: Number(result.rows[0].id) };
+}
+
 function getUpdatedDetails(details, item, batchId, appliedAt) {
   return {
     ...details,
@@ -361,7 +656,7 @@ async function getBatchByPreviewToken(previewToken, client = pool) {
   return result.rows[0] || null;
 }
 
-async function applyRepricing({ scenarioId, previewToken, manualOverrides = [] }) {
+async function applyRepricing({ scenarioId, previewToken, manualOverrides = [], draftId = null }) {
   if (!previewToken) {
     const error = new Error('Спочатку сформуйте попередній перегляд.');
     error.statusCode = 400;
@@ -369,11 +664,42 @@ async function applyRepricing({ scenarioId, previewToken, manualOverrides = [] }
   }
 
   const normalizedOverrides = normalizeManualOverrides(manualOverrides);
+  let draft = null;
+  if (draftId !== null && draftId !== undefined && draftId !== '') {
+    draft = await getRepricingDraftRow(draftId);
+    if (draft.status !== 'draft' || Number(draft.scenario_id) !== Number(scenarioId)) {
+      const error = new Error('Чернетка не відповідає вибраній матриці або вже закрита.');
+      error.statusCode = 409;
+      throw error;
+    }
+    const storedOverrides = normalizeManualOverrides(draft.manual_overrides || []);
+    if (JSON.stringify(storedOverrides) !== JSON.stringify(normalizedOverrides)) {
+      const error = new Error('Ручні ціни ще не збережено в чернетці. Дочекайтеся автозбереження.');
+      error.statusCode = 409;
+      throw error;
+    }
+  }
   const applicationToken = getApplicationToken(previewToken, normalizedOverrides);
   const existingBatch = await getBatchByPreviewToken(applicationToken);
-  if (existingBatch) return { success: true, alreadyApplied: true, batch: existingBatch };
+  if (existingBatch) {
+    if (draft) {
+      await pool.query(
+        `UPDATE repricing_drafts
+         SET status = 'applied', applied_batch_id = $1, applied_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2 AND status = 'draft'`,
+        [Number(existingBatch.id), Number(draft.id)]
+      );
+    }
+    return { success: true, alreadyApplied: true, batch: existingBatch };
+  }
 
   const basePreview = await buildRepricingPreview(scenarioId);
+  if (draft && getRepricingPreviewFingerprint(basePreview) !== draft.preview_fingerprint) {
+    const error = new Error('Склад товарів або розрахунок змінився. Синхронізуйте чернетку.');
+    error.statusCode = 409;
+    throw error;
+  }
   if (basePreview.previewToken !== previewToken) {
     const error = new Error('Дані або ціни змінилися. Сформуйте попередній перегляд повторно.');
     error.statusCode = 409;
@@ -395,6 +721,20 @@ async function applyRepricing({ scenarioId, previewToken, manualOverrides = [] }
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    if (draft) {
+      const lockedDraft = await getRepricingDraftRow(draft.id, client, true);
+      const lockedOverrides = normalizeManualOverrides(lockedDraft.manual_overrides || []);
+      if (
+        lockedDraft.status !== 'draft'
+        || Number(lockedDraft.scenario_id) !== Number(scenarioId)
+        || lockedDraft.preview_fingerprint !== draft.preview_fingerprint
+        || JSON.stringify(lockedOverrides) !== JSON.stringify(normalizedOverrides)
+      ) {
+        const error = new Error('Чернетку змінили під час підготовки переоцінки. Оновіть її повторно.');
+        error.statusCode = 409;
+        throw error;
+      }
+    }
     const batchResult = await client.query(
       `INSERT INTO repricing_batches
        (scenario_id, category_code, scenario_name, scenario_snapshot, preview_token, status,
@@ -419,6 +759,15 @@ async function applyRepricing({ scenarioId, previewToken, manualOverrides = [] }
     if (batchResult.rows.length === 0) {
       await client.query('ROLLBACK');
       const batch = await getBatchByPreviewToken(applicationToken);
+      if (draft && batch) {
+        await pool.query(
+          `UPDATE repricing_drafts
+           SET status = 'applied', applied_batch_id = $1, applied_at = CURRENT_TIMESTAMP,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $2 AND status = 'draft'`,
+          [Number(batch.id), Number(draft.id)]
+        );
+      }
       return { success: true, alreadyApplied: true, batch };
     }
 
@@ -501,6 +850,22 @@ async function applyRepricing({ scenarioId, previewToken, manualOverrides = [] }
           JSON.stringify(newPayload),
         ]
       );
+    }
+
+    if (draft) {
+      const draftResult = await client.query(
+        `UPDATE repricing_drafts
+         SET status = 'applied', applied_batch_id = $1, applied_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2 AND status = 'draft'
+         RETURNING id`,
+        [batchId, Number(draft.id)]
+      );
+      if (draftResult.rows.length === 0) {
+        const error = new Error('Чернетку змінили або закрили під час застосування.');
+        error.statusCode = 409;
+        throw error;
+      }
     }
 
     await client.query('COMMIT');
@@ -738,7 +1103,14 @@ async function getRepricingRollbackItems(batchId) {
 module.exports = {
   applyRepricing,
   buildRepricingPreview,
+  createRepricingDraft,
+  discardRepricingDraft,
+  getDraftSyncInfo,
   getPreviewToken,
+  getRepricingDraft,
+  getRepricingDrafts,
+  getRepricingPreviewFingerprint,
+  getRepricingPreviewSnapshot,
   getApplicationToken,
   getRepricingBatchItems,
   getRepricingRollbackItems,
@@ -747,6 +1119,8 @@ module.exports = {
   hasManualPrice,
   normalizeManualOverrides,
   applyManualOverridesToPreview,
+  saveRepricingDraft,
+  syncRepricingDraft,
   rollbackRepricing,
   areNullableNumbersEqual,
   doesProductMatchRepricingBatch,
