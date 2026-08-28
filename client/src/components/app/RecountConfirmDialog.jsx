@@ -78,8 +78,19 @@ export function RecountConfirmDialog({
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Було</div>
-              <div className="mt-2 break-all font-mono text-sm font-semibold text-slate-900">
-                {preview.source.sku}
+              <div className="mt-2 flex min-w-0 items-start gap-2">
+                <div className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-slate-900">
+                  {preview.source.sku}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => copyPlainText(preview.source.sku)}
+                  className="btn btn-outline h-8 w-8 shrink-0 p-0"
+                  aria-label="Скопіювати старий артикул"
+                  title="Скопіювати артикул"
+                >
+                  <Copy size={15} aria-hidden="true" />
+                </button>
               </div>
               <div className="mt-1 text-sm text-slate-600">{formatUah(oldPrice)}</div>
             </div>
