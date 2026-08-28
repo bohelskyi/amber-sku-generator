@@ -414,6 +414,56 @@ function buildErrorItem(product, details, answers, code, message) {
   };
 }
 
+function getRepricingProductIds(previewOrItems = []) {
+  const items = Array.isArray(previewOrItems)
+    ? previewOrItems
+    : previewOrItems?.items || [];
+  return [...new Set(items
+    .map((item) => Number(item.productId))
+    .filter((productId) => Number.isInteger(productId) && productId > 0))]
+    .sort((first, second) => first - second);
+}
+
+function normalizeBlockingCorrectionRequest(row) {
+  return {
+    id: Number(row.id),
+    sourceProductId: Number(row.source_product_id),
+    sourceSku: row.source_sku,
+    proposedSku: row.proposed_sku,
+    status: row.status,
+  };
+}
+
+async function getBlockingCorrectionRequests(previewOrItems, queryable = pool) {
+  const productIds = getRepricingProductIds(previewOrItems);
+  if (productIds.length === 0) return [];
+
+  const result = await queryable.query(
+    `SELECT id, source_product_id, source_sku, proposed_sku, status
+     FROM correction_requests
+     WHERE source_product_id = ANY($1::int[])
+       AND status = ANY($2::text[])
+     ORDER BY updated_at, id`,
+    [productIds, ['pending', 'in_progress']]
+  );
+  return result.rows.map(normalizeBlockingCorrectionRequest);
+}
+
+function assertNoBlockingCorrectionRequests(requests = []) {
+  if (requests.length === 0) return;
+
+  const requestIds = requests.map((request) => `#${request.id}`);
+  const error = new Error(
+    `Переоцінку зупинено: спочатку опрацюйте активні запити ${requestIds.join(', ')}, що належать цій матриці.`
+  );
+  error.statusCode = 409;
+  error.details = {
+    type: 'active_correction_requests',
+    requests,
+  };
+  throw error;
+}
+
 async function buildRepricingPreview(scenarioId) {
   const scenario = await getActiveScenario(scenarioId);
   const scenarioRule = asRuleObject(scenario.match_json);
@@ -529,6 +579,7 @@ async function buildRepricingPreview(scenarioId) {
   const changedItems = items.filter((item) => item.status === 'changed');
   const unchangedItems = items.filter((item) => item.status === 'unchanged');
   const errorItems = items.filter((item) => item.status === 'error');
+  const blockingCorrectionRequests = await getBlockingCorrectionRequests(items);
 
   return {
     scenario: getScenarioSnapshot(scenario),
@@ -541,6 +592,7 @@ async function buildRepricingPreview(scenarioId) {
       errorCount: errorItems.length,
     },
     items,
+    blockingCorrectionRequests,
   };
 }
 
@@ -900,6 +952,7 @@ async function applyRepricing({ scenarioId, previewToken, manualOverrides = [], 
     error.statusCode = 409;
     throw error;
   }
+  assertNoBlockingCorrectionRequests(basePreview.blockingCorrectionRequests);
   const preview = applyManualOverridesToPreview(basePreview, normalizedOverrides);
   if (preview.summary.errorCount > 0) {
     const error = new Error('Переоцінку зупинено: у попередньому перегляді є помилки.');
@@ -1334,6 +1387,7 @@ async function getRepricingRollbackItems(batchId) {
 }
 
 module.exports = {
+  assertNoBlockingCorrectionRequests,
   applyRepricing,
   buildRepricingPreview,
   createRepricingDraft,
@@ -1344,6 +1398,7 @@ module.exports = {
   getRepricingDrafts,
   getRepricingPreviewFingerprint,
   getRepricingPreviewSnapshot,
+  getRepricingProductIds,
   getApplicationToken,
   getRepricingBatchItems,
   getRepricingRollbackItems,

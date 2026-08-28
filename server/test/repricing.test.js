@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  assertNoBlockingCorrectionRequests,
   applyManualOverridesToPreview,
   buildPricingChange,
   buildPricingState,
@@ -11,6 +12,7 @@ const {
   getPreviewToken,
   getRepricingPreviewFingerprint,
   getRepricingPreviewSnapshot,
+  getRepricingProductIds,
   hasManualPrice,
   normalizeManualOverrides,
   normalizeReviewedProductIds,
@@ -36,6 +38,33 @@ test('repricing preview token is stable for the same changes', () => {
     getPreviewToken(scenario, items),
     getPreviewToken(scenario, [{ ...items[0], newPriceUah: 500 }])
   );
+});
+
+test('repricing blocking checks use every unique candidate product', () => {
+  assert.deepEqual(getRepricingProductIds({
+    items: [
+      { productId: 7, status: 'changed' },
+      { productId: '3', status: 'unchanged' },
+      { productId: 7, status: 'error' },
+      { productId: 0 },
+      { productId: 'invalid' },
+    ],
+  }), [3, 7]);
+});
+
+test('active correction requests block repricing at the service boundary', () => {
+  const requests = [{ id: 12, sourceProductId: 7, sourceSku: 'NM7' }];
+
+  assert.throws(
+    () => assertNoBlockingCorrectionRequests(requests),
+    (error) => (
+      error.statusCode === 409
+      && error.details?.type === 'active_correction_requests'
+      && error.details.requests === requests
+      && error.message.includes('#12')
+    )
+  );
+  assert.doesNotThrow(() => assertNoBlockingCorrectionRequests([]));
 });
 
 test('draft fingerprint includes unchanged candidates and calculation context', () => {

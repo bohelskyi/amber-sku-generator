@@ -44,6 +44,7 @@ function AppPage() {
             recountPreview={sku.recountPreview}
             recountReason={sku.recountReason}
             recountSuccess={sku.recountSuccess}
+            recountMode="choice"
             onApplyRecount={sku.handleApplyRecount}
             onCancelRecount={sku.handleCancelRecount}
             onRecountAnswer={sku.handleRecountAnswer}
@@ -140,6 +141,8 @@ function AppPage() {
         isOpen={sku.isRecountConfirmOpen}
         preview={sku.recountPreview}
         reason={sku.recountReason}
+        mode="choice"
+        submittingMode={sku.recountSubmitMode}
         onCancel={sku.handleCancelRecountConfirmation}
         onConfirm={sku.handleConfirmRecount}
       />

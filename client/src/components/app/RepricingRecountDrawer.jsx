@@ -1,12 +1,25 @@
-import { useEffect, useRef } from 'react';
-import { ScanSearch, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ClipboardList, RefreshCw, ScanSearch, X } from 'lucide-react';
 import { DecodeErrorPanel, DecodeWorkspace } from './HomeDashboard';
 import { RecountConfirmDialog } from './RecountConfirmDialog';
 import { useProductRecount } from '../../hooks/useProductRecount';
 
-export function RepricingRecountDrawer({ config, initialSku = '', onApplied, onClose }) {
+export function RepricingRecountDrawer({
+  config,
+  initialMode = 'apply',
+  initialSku = '',
+  onApplied,
+  onClose,
+  onRequestCreated,
+}) {
   const initializedSkuRef = useRef('');
-  const recount = useProductRecount({ config, onApplied });
+  const [mode, setMode] = useState(initialMode);
+  const recount = useProductRecount({
+    config,
+    onApplied,
+    onRequestCreated,
+    submitMode: mode,
+  });
 
   useEffect(() => {
     const normalizedSku = String(initialSku || '').trim().toUpperCase();
@@ -37,6 +50,26 @@ export function RepricingRecountDrawer({ config, initialSku = '', onApplied, onC
             <div className="text-sm font-semibold text-slate-900">Декодер і переоблік</div>
             <div className="truncate text-xs text-slate-500">{recount.skuToDecode || 'Артикул не обрано'}</div>
           </div>
+          <div className="hidden rounded-md bg-slate-100 p-1 sm:flex">
+            <button
+              type="button"
+              className={`flex h-8 items-center gap-1.5 rounded px-3 text-xs font-semibold ${mode === 'request' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+              onClick={() => setMode('request')}
+              disabled={recount.isRecountApplying}
+            >
+              <ClipboardList size={14} />
+              Створити запит
+            </button>
+            <button
+              type="button"
+              className={`flex h-8 items-center gap-1.5 rounded px-3 text-xs font-semibold ${mode === 'apply' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+              onClick={() => setMode('apply')}
+              disabled={recount.isRecountApplying}
+            >
+              <RefreshCw size={14} />
+              Переоблік зараз
+            </button>
+          </div>
           <button
             type="button"
             className="btn btn-outline flex h-9 w-9 shrink-0 items-center justify-center p-0"
@@ -51,6 +84,24 @@ export function RepricingRecountDrawer({ config, initialSku = '', onApplied, onC
       </div>
 
       <main className="mx-auto max-w-7xl space-y-5 px-4 py-5 sm:px-6 sm:py-7">
+        <div className="grid grid-cols-2 rounded-md bg-slate-200/70 p-1 sm:hidden">
+          <button
+            type="button"
+            className={`rounded px-2 py-2 text-xs font-semibold ${mode === 'request' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+            onClick={() => setMode('request')}
+            disabled={recount.isRecountApplying}
+          >
+            Створити запит
+          </button>
+          <button
+            type="button"
+            className={`rounded px-2 py-2 text-xs font-semibold ${mode === 'apply' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+            onClick={() => setMode('apply')}
+            disabled={recount.isRecountApplying}
+          >
+            Переоблік зараз
+          </button>
+        </div>
         <section className="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row">
           <input
             type="text"
@@ -99,6 +150,7 @@ export function RepricingRecountDrawer({ config, initialSku = '', onApplied, onC
             onRecountReasonChange={recount.setRecountReason}
             onRecountTextAnswer={recount.handleRecountTextAnswer}
             onStartRecount={recount.handleStartRecount}
+            recountMode={mode}
           />
         )}
       </main>
@@ -108,6 +160,8 @@ export function RepricingRecountDrawer({ config, initialSku = '', onApplied, onC
         isOpen={recount.isRecountConfirmOpen}
         preview={recount.recountPreview}
         reason={recount.recountReason}
+        mode={mode}
+        submittingMode={recount.recountSubmitMode}
         onCancel={recount.handleCancelRecountConfirmation}
         onConfirm={recount.handleConfirmRecount}
       />

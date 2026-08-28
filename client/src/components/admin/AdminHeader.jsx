@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { RefreshCw } from 'lucide-react';
+import { ClipboardList, History, RefreshCw } from 'lucide-react';
 
 export function AdminHeader() {
   return (
@@ -12,6 +12,14 @@ export function AdminHeader() {
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
+        <Link to="/admin/corrections?from=admin" className="btn btn-outline gap-2">
+          <ClipboardList size={16} />
+          Виправлення
+        </Link>
+        <Link to="/admin/corrections/history?from=admin" className="btn btn-outline gap-2">
+          <History size={16} />
+          Журнал
+        </Link>
         <Link to="/admin/repricing" className="btn btn-outline gap-2">
           <RefreshCw size={16} />
           Переоцінка

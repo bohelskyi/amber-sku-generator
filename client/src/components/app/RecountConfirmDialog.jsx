@@ -1,34 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Copy } from 'lucide-react';
 import { formatUah } from '../../lib/formatters';
-
-async function copyPlainText(value) {
-  const text = String(value ?? '');
-  if (!text) return;
-
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return;
-    }
-  } catch {
-    // Fall back for internal HTTP deployments where Clipboard API may be unavailable.
-  }
-
-  const textArea = document.createElement('textarea');
-  textArea.value = text;
-  textArea.setAttribute('readonly', '');
-  textArea.style.position = 'fixed';
-  textArea.style.opacity = '0';
-  document.body.appendChild(textArea);
-  textArea.select();
-
-  try {
-    document.execCommand('copy');
-  } finally {
-    textArea.remove();
-  }
-}
+import { copyPlainText } from '../../lib/clipboard';
 
 export function RecountConfirmDialog({
   isApplying,
@@ -37,6 +10,8 @@ export function RecountConfirmDialog({
   onConfirm,
   preview,
   reason,
+  mode = 'apply',
+  submittingMode = null,
 }) {
   const confirmButtonRef = useRef(null);
 
@@ -66,6 +41,8 @@ export function RecountConfirmDialog({
     ? String(Math.round(Number(newPrice)))
     : '';
   const priceDelta = Number(preview.priceDeltaUah || 0);
+  const isChoiceMode = mode === 'choice';
+  const isRequestMode = mode === 'request';
 
   return (
     <div
@@ -81,9 +58,19 @@ export function RecountConfirmDialog({
         className="w-full max-w-xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.3)]"
       >
         <div className="border-b border-slate-200 px-5 py-5 sm:px-6">
-          <p className="eyebrow">Підтвердження переобліку</p>
+          <p className="eyebrow">
+            {isChoiceMode
+              ? 'Завершення переобліку'
+              : isRequestMode
+                ? 'Запит на виправлення'
+                : 'Підтвердження переобліку'}
+          </p>
           <h2 id="recount-confirm-title" className="mt-1 text-xl font-semibold text-slate-900 sm:text-2xl">
-            Створити коригувальний артикул?
+            {isChoiceMode
+              ? 'Що зробити з виправленням?'
+              : isRequestMode
+                ? 'Передати товар на виправлення?'
+                : 'Створити коригувальний артикул?'}
           </h2>
         </div>
 
@@ -142,11 +129,15 @@ export function RecountConfirmDialog({
           )}
 
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-slate-700">
-            Новий артикул буде збережено як коригувальний і виключено з майбутніх експортів.
+            {isChoiceMode
+              ? 'Запит збереже виправлення для подальшої обробки. Коригувальний артикул застосує переоблік одразу.'
+              : isRequestMode
+                ? 'Запит не змінить товар у базі. Переоблік буде виконано після ручного оновлення сайту.'
+                : 'Новий артикул буде активним товаром, але не потрапить у звичайний експорт.'}
           </div>
         </div>
 
-        <div className="grid gap-3 border-t border-slate-200 bg-slate-50/80 px-5 py-4 sm:grid-cols-2 sm:px-6">
+        <div className={`grid gap-3 border-t border-slate-200 bg-slate-50/80 px-5 py-4 sm:px-6 ${isChoiceMode ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
           <button
             type="button"
             onClick={onCancel}
@@ -155,14 +146,28 @@ export function RecountConfirmDialog({
           >
             Повернутися до параметрів
           </button>
+          {isChoiceMode && (
+            <button
+              type="button"
+              onClick={() => onConfirm('request')}
+              className="btn btn-outline order-1 sm:order-2"
+              disabled={isApplying}
+            >
+              {isApplying && submittingMode === 'request' ? 'Створюємо...' : 'Створити запит'}
+            </button>
+          )}
           <button
             ref={confirmButtonRef}
             type="button"
-            onClick={onConfirm}
-            className="btn btn-primary order-1 sm:order-2"
+            onClick={() => onConfirm(isRequestMode ? 'request' : 'apply')}
+            className={`btn btn-primary order-1 ${isChoiceMode ? 'sm:order-3' : 'sm:order-2'}`}
             disabled={isApplying}
           >
-            {isApplying ? 'Створюємо...' : 'Створити коригувальний артикул'}
+            {isApplying && submittingMode === (isRequestMode ? 'request' : 'apply')
+              ? 'Створюємо...'
+              : isRequestMode
+                ? 'Створити запит'
+                : 'Створити коригувальний артикул'}
           </button>
         </div>
       </div>

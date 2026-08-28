@@ -1,3 +1,6 @@
+import { ClipboardList, History } from 'lucide-react';
+import { Link } from 'react-router-dom';
+
 export function PageHeader({ config, selectedCat, historyCount }) {
   return (
     <header className="card-hero p-6 sm:p-8 fade-up">
@@ -16,9 +19,21 @@ export function PageHeader({ config, selectedCat, historyCount }) {
             <span className="chip">Історія: {historyCount}</span>
           </div>
         </div>
-        <div className="stat-tile max-w-xs">
-          <div className="stat-label">Категорій</div>
-          <div className="stat-value">{Object.keys(config.categories).length}</div>
+        <div className="flex w-full flex-col gap-3 lg:w-auto lg:items-end">
+          <div className="flex w-full flex-wrap gap-2 lg:justify-end">
+            <Link to="/admin/corrections?from=client" className="btn btn-outline flex-1 gap-2 sm:flex-none">
+              <ClipboardList size={16} />
+              Запити
+            </Link>
+            <Link to="/admin/corrections/history?from=client" className="btn btn-outline flex-1 gap-2 sm:flex-none">
+              <History size={16} />
+              Журнал
+            </Link>
+          </div>
+          <div className="stat-tile w-full lg:w-64">
+            <div className="stat-label">Категорій</div>
+            <div className="stat-value">{Object.keys(config.categories).length}</div>
+          </div>
         </div>
       </div>
     </header>

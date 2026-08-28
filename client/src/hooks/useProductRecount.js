@@ -2,7 +2,12 @@ import { useState } from 'react';
 import { api } from '../lib/api.js';
 import { getDecodedAnswerMap, haveAnswersChanged } from '../lib/product-recount.js';
 
-export function useProductRecount({ config, onApplied } = {}) {
+export function useProductRecount({
+  config,
+  onApplied,
+  onRequestCreated,
+  submitMode = 'apply',
+} = {}) {
   const [skuToDecode, setSkuToDecode] = useState('');
   const [decodeData, setDecodeData] = useState(null);
   const [decodeError, setDecodeError] = useState('');
@@ -15,6 +20,7 @@ export function useProductRecount({ config, onApplied } = {}) {
   const [recountSuccess, setRecountSuccess] = useState('');
   const [isRecountLoading, setIsRecountLoading] = useState(false);
   const [isRecountApplying, setIsRecountApplying] = useState(false);
+  const [recountSubmitMode, setRecountSubmitMode] = useState(null);
   const [isRecountConfirmOpen, setIsRecountConfirmOpen] = useState(false);
   const hasRecountChanges = Boolean(
     decodeData && haveAnswersChanged(getDecodedAnswerMap(decodeData), recountAnswers)
@@ -166,21 +172,35 @@ export function useProductRecount({ config, onApplied } = {}) {
     if (!isRecountApplying) setIsRecountConfirmOpen(false);
   };
 
-  const handleConfirmRecount = () => {
+  const handleConfirmRecount = (requestedMode = submitMode) => {
     if (!decodeData?.sku || !recountPreview || !hasRecountChanges || isRecountApplying) return;
 
     const sourceSku = decodeData.sku;
+    const effectiveSubmitMode = requestedMode === 'request' ? 'request' : 'apply';
     setIsRecountApplying(true);
+    setRecountSubmitMode(effectiveSubmitMode);
     setRecountError('');
     setRecountSuccess('');
 
-    api.post('/recount/apply', buildRecountPayload())
+    const isRequestMode = effectiveSubmitMode === 'request';
+    api.post(
+      isRequestMode ? '/admin/correction-requests' : '/recount/apply',
+      buildRecountPayload()
+    )
       .then((res) => {
-        const correctedSku = res.data.corrected.fullSku;
         setIsRecountConfirmOpen(false);
-        setRecountSuccess(`Створено коригувальний артикул ${correctedSku}. Він не потрапить в експорт.`);
         setIsRecountOpen(false);
         setRecountPreview(null);
+        if (isRequestMode) {
+          const request = res.data.request;
+          setRecountSuccess(`Створено запит на виправлення #${request.id}.`);
+          Promise.resolve(onRequestCreated?.({ request, sourceSku })).catch(() => {});
+          handleDecode(sourceSku);
+          return;
+        }
+
+        const correctedSku = res.data.corrected.fullSku;
+        setRecountSuccess(`Створено коригувальний артикул ${correctedSku}. Він не потрапить в експорт.`);
         Promise.resolve(onApplied?.({ result: res.data, sourceSku, correctedSku })).catch(() => {});
         handleDecode(correctedSku);
       })
@@ -188,7 +208,10 @@ export function useProductRecount({ config, onApplied } = {}) {
         setIsRecountConfirmOpen(false);
         setRecountError(err.response?.data?.error || err.message);
       })
-      .finally(() => setIsRecountApplying(false));
+      .finally(() => {
+        setIsRecountApplying(false);
+        setRecountSubmitMode(null);
+      });
   };
 
   return {
@@ -214,6 +237,7 @@ export function useProductRecount({ config, onApplied } = {}) {
     recountError,
     recountPreview,
     recountReason,
+    recountSubmitMode,
     recountSuccess,
     setRecountReason,
     skuToDecode,

@@ -8,6 +8,7 @@ import {
   ArrowUpDown,
   CheckCircle2,
   CircleDollarSign,
+  ClipboardList,
   Download,
   FilePenLine,
   RefreshCw,
@@ -312,6 +313,8 @@ export default function RepricingPage() {
   const [discardingDraft, setDiscardingDraft] = useState(false);
   const [reviewedProductIds, setReviewedProductIds] = useState([]);
   const [recountTarget, setRecountTarget] = useState(null);
+  const [correctionRequests, setCorrectionRequests] = useState([]);
+  const [createdCorrectionRequest, setCreatedCorrectionRequest] = useState(null);
 
   const loadBatches = () => api.get('/admin/repricing/batches').then((response) => {
     setBatches(response.data || []);
@@ -329,14 +332,22 @@ export default function RepricingPage() {
       api.get('/admin/repricing/scenarios'),
       api.get('/admin/repricing/batches'),
       api.get('/admin/repricing/drafts'),
+      api.get('/admin/correction-requests', { params: { status: 'active' } }),
     ])
-      .then(([configResponse, scenariosResponse, batchesResponse, draftsResponse]) => {
+      .then(([
+        configResponse,
+        scenariosResponse,
+        batchesResponse,
+        draftsResponse,
+        correctionRequestsResponse,
+      ]) => {
         const nextScenarios = scenariosResponse.data || [];
         const nextDrafts = draftsResponse.data || [];
         setConfig(configResponse.data);
         setScenarios(nextScenarios);
         setBatches(batchesResponse.data || []);
         setDrafts(nextDrafts);
+        setCorrectionRequests(correctionRequestsResponse.data.items || []);
         const preferredScenario = nextScenarios.find((item) => item.price_mode === 'fixed_uah');
         setScenarioId(String(nextDrafts[0]?.scenarioId || preferredScenario?.id || nextScenarios[0]?.id || ''));
       })
@@ -346,6 +357,26 @@ export default function RepricingPage() {
 
   const selectedScenario = scenarios.find((item) => Number(item.id) === Number(scenarioId));
   const selectedDraft = drafts.find((item) => Number(item.scenarioId) === Number(scenarioId));
+  const activeCorrectionRequestByProductId = useMemo(
+    () => new Map(correctionRequests.map((request) => [Number(request.sourceProductId), request])),
+    [correctionRequests]
+  );
+  const blockingCorrectionRequests = useMemo(() => {
+    if (!preview) return [];
+    const candidateProductIds = new Set(
+      (preview.items || []).map((item) => Number(item.productId))
+    );
+    const requestsById = new Map();
+    for (const request of preview.blockingCorrectionRequests || []) {
+      requestsById.set(Number(request.id), request);
+    }
+    for (const request of correctionRequests) {
+      if (candidateProductIds.has(Number(request.sourceProductId))) {
+        requestsById.set(Number(request.id), request);
+      }
+    }
+    return [...requestsById.values()].sort((first, second) => Number(first.id) - Number(second.id));
+  }, [correctionRequests, preview]);
   const effectiveItems = useMemo(
     () => applyManualPrices(preview?.items || [], manualPrices),
     [manualPrices, preview]
@@ -597,6 +628,20 @@ export default function RepricingPage() {
     }
   };
 
+  const handleCorrectionRequestCreated = ({ request }) => {
+    setCorrectionRequests((currentRequests) => [
+      request,
+      ...currentRequests.filter((item) => Number(item.id) !== Number(request.id)),
+    ]);
+    setReviewedProductIds((currentIds) => (
+      currentIds.includes(Number(request.sourceProductId))
+        ? currentIds
+        : [...currentIds, Number(request.sourceProductId)]
+    ));
+    setCreatedCorrectionRequest(request);
+    setRecountTarget(null);
+  };
+
   const discardDraft = () => {
     if (!activeDraft || discardingDraft) return;
     setDiscardingDraft(true);
@@ -700,11 +745,15 @@ export default function RepricingPage() {
             <button
               type="button"
               className="btn btn-outline gap-2"
-              onClick={() => setRecountTarget({ productId: null, sku: '' })}
+              onClick={() => setRecountTarget({ productId: null, sku: '', mode: 'apply' })}
             >
               <ScanSearch size={16} />
               Декодер
             </button>
+            <Link to="/admin/corrections?from=admin" className="btn btn-outline gap-2">
+              <ClipboardList size={16} />
+              Запити{correctionRequests.length > 0 ? ` · ${correctionRequests.length}` : ''}
+            </Link>
             <Link to="/admin" className="btn btn-outline gap-2">
               <ArrowLeft size={16} />
               До адмін-панелі
@@ -716,6 +765,49 @@ export default function RepricingPage() {
           <div className="flex items-start gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
             <AlertTriangle size={18} className="mt-0.5 shrink-0" />
             <span>{error}</span>
+          </div>
+        )}
+
+        {createdCorrectionRequest && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+            <span>Створено запит #{createdCorrectionRequest.id} для {createdCorrectionRequest.sourceSku}.</span>
+            <Link to={`/admin/corrections?request=${createdCorrectionRequest.id}&from=admin`} className="btn btn-outline gap-2">
+              <ClipboardList size={15} />
+              Відкрити запит
+            </Link>
+          </div>
+        )}
+
+        {preview && blockingCorrectionRequests.length > 0 && (
+          <div className="flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-700" />
+              <div>
+                <div className="font-semibold">Переоцінку тимчасово заблоковано</div>
+                <div className="mt-1 leading-6 text-amber-900">
+                  Спочатку опрацюйте {blockingCorrectionRequests.length}{' '}
+                  {blockingCorrectionRequests.length === 1 ? 'активний запит' : 'активні запити'},
+                  що належать цій матриці.
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 sm:justify-end">
+              {blockingCorrectionRequests.slice(0, 3).map((request) => (
+                <Link
+                  key={request.id}
+                  to={`/admin/corrections?request=${request.id}&from=admin`}
+                  className="btn btn-outline h-9 gap-2 bg-white"
+                >
+                  <ClipboardList size={14} />
+                  Запит #{request.id}
+                </Link>
+              ))}
+              {blockingCorrectionRequests.length > 3 && (
+                <Link to="/admin/corrections?from=admin" className="btn btn-outline h-9 bg-white">
+                  Ще {blockingCorrectionRequests.length - 3}
+                </Link>
+              )}
+            </div>
           </div>
         )}
 
@@ -972,6 +1064,7 @@ export default function RepricingPage() {
                   <tbody>
                     {visibleItems.map((item) => {
                       const isReviewed = reviewedProductIdSet.has(Number(item.productId));
+                      const correctionRequest = activeCorrectionRequestByProductId.get(Number(item.productId));
                       return (
                       <tr
                         key={item.productId}
@@ -986,11 +1079,21 @@ export default function RepricingPage() {
                               onClick={() => setRecountTarget({
                                 productId: Number(item.productId),
                                 sku: item.sku,
+                                mode: 'request',
                               })}
                             >
                               <ScanSearch size={14} />
                               Перевірити
                             </button>
+                            {correctionRequest && (
+                              <Link
+                                to={`/admin/corrections?request=${correctionRequest.id}&from=admin`}
+                                className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-sky-700 hover:text-sky-900"
+                              >
+                                <ClipboardList size={14} />
+                                Запит #{correctionRequest.id}
+                              </Link>
+                            )}
                             <button
                               type="button"
                               className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${isReviewed ? 'text-emerald-700' : 'text-slate-500 hover:text-slate-900'}`}
@@ -1093,6 +1196,7 @@ export default function RepricingPage() {
                     || effectiveSummary.errorCount > 0
                     || invalidManualPriceIds.size > 0
                     || draftConflicts.length > 0
+                    || blockingCorrectionRequests.length > 0
                     || Boolean(activeDraft && draftSync?.hasChanges)}
                   onClick={() => setConfirmOpen(true)}
                 >
@@ -1204,8 +1308,10 @@ export default function RepricingPage() {
       {recountTarget && (
         <RepricingRecountDrawer
           config={config}
+          initialMode={recountTarget.mode || 'apply'}
           initialSku={recountTarget.sku}
           onApplied={handleRecountApplied}
+          onRequestCreated={handleCorrectionRequestCreated}
           onClose={() => setRecountTarget(null)}
         />
       )}

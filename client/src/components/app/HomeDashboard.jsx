@@ -5,28 +5,12 @@ import {
   formatUahPerGram,
   formatUsd,
 } from '../../lib/formatters';
+import { getAnswerValueLabel, getQuestionLabel } from '../../lib/answer-labels';
 import {
   getVisibleOptionsForQuestion,
   isQuestionVisible,
   isTextQuestion,
 } from '../../lib/sku-visibility';
-
-function getQuestionLabel(config, categoryCode, key) {
-  const question = (config.questions?.[categoryCode] || []).find((item) => item.id === key);
-  return question?.label || key;
-}
-
-function getConditionValueLabel(config, categoryCode, key, value) {
-  const question = (config.questions?.[categoryCode] || []).find((item) => item.id === key);
-  const options = question?.options || config.extraConfig?.[key]?.options || [];
-  const option = options.find((item) => Number(item.id) === Number(value));
-  if (option) return option.label;
-  if (question?.required !== 1 && (value === null || value === undefined || value === '' || Number(value) === 0)) {
-    return 'Не обрано';
-  }
-  if (value === null || value === undefined || value === '') return 'Невідомо';
-  return String(value);
-}
 
 function getPricingSourceLabel(source) {
   return source === 'stored' ? 'Збережена в базі' : 'Перерахована зараз';
@@ -112,6 +96,7 @@ export function HomeDashboard({
   recountPreview,
   recountReason,
   recountSuccess,
+  recountMode = 'apply',
   onApplyRecount,
   onCancelRecount,
   onRecountAnswer,
@@ -214,6 +199,7 @@ export function HomeDashboard({
           recountPreview={recountPreview}
           recountReason={recountReason}
           recountSuccess={recountSuccess}
+          recountMode={recountMode}
           onApplyRecount={onApplyRecount}
           onCancelRecount={onCancelRecount}
           onRecountAnswer={onRecountAnswer}
@@ -246,6 +232,7 @@ export function DecodeWorkspace({
   onRecountReasonChange,
   onRecountTextAnswer,
   onStartRecount,
+  recountMode = 'apply',
 }) {
   const isCalibrationUnknown = decodeData.calibration?.status === 'unknown';
   const isCalibrationBlockingPrice = isCalibrationUnknown && !decodeData.pricing;
@@ -272,6 +259,7 @@ export function DecodeWorkspace({
           onRecountPreview={onRecountPreview}
           onRecountReasonChange={onRecountReasonChange}
           onRecountTextAnswer={onRecountTextAnswer}
+          recountMode={recountMode}
         />
       </section>
     );
@@ -441,7 +429,7 @@ export function DecodeWorkspace({
                 {pricingConditions.map((condition) => (
                   <span key={condition.key} className="chip">
                     {getQuestionLabel(config, decodeData.category.code, condition.key)}:{' '}
-                    {getConditionValueLabel(
+                    {getAnswerValueLabel(
                       config,
                       decodeData.category.code,
                       condition.key,
@@ -461,7 +449,7 @@ export function DecodeWorkspace({
 
           {decodeData.existsInDb && (
             <button onClick={onStartRecount} className="btn btn-outline w-full">
-              Переоблікувати
+              {recountMode === 'request' ? 'Підготувати запит' : 'Переоблікувати'}
             </button>
           )}
         </aside>
@@ -486,6 +474,7 @@ function RecountPanel({
   onRecountPreview,
   onRecountReasonChange,
   onRecountTextAnswer,
+  recountMode = 'apply',
 }) {
   const categoryCode = decodeData.category.code;
   const categoryQuestions = config.questions?.[categoryCode] || [];
@@ -498,7 +487,9 @@ function RecountPanel({
     <div>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="eyebrow">Переоблік товару</p>
+          <p className="eyebrow">
+            {recountMode === 'request' ? 'Запит на виправлення' : 'Переоблік товару'}
+          </p>
           <h3 className="mt-1 text-xl font-semibold text-slate-900">Виправлення параметрів</h3>
           <div className="mt-1 break-all font-mono text-sm text-slate-500">{decodeData.sku}</div>
         </div>
@@ -577,7 +568,9 @@ function RecountPanel({
           <PreviousPricingSnapshot config={config} decodeData={decodeData} />
 
           <div className="rounded-xl border border-slate-200 bg-white/80 p-4">
-            <label className="mb-2 block text-sm font-semibold text-slate-700">Причина переобліку</label>
+            <label className="mb-2 block text-sm font-semibold text-slate-700">
+              {recountMode === 'request' ? 'Коментар до запиту' : 'Причина переобліку'}
+            </label>
             <textarea
               className="input min-h-24 resize-y"
               value={recountReason}
@@ -594,7 +587,7 @@ function RecountPanel({
 
           {!hasRecountChanges && !recountError && (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-              Змініть хоча б один параметр виробу, щоб виконати переоблік.
+              Змініть хоча б один параметр виробу.
             </div>
           )}
 
@@ -637,8 +630,8 @@ function RecountPanel({
                   {recountPreview.changes.map((change) => (
                     <span key={change.key} className="chip">
                       {getQuestionLabel(config, categoryCode, change.key)}:{' '}
-                      {getConditionValueLabel(config, categoryCode, change.key, change.from)}{' -> '}
-                      {getConditionValueLabel(config, categoryCode, change.key, change.to)}
+                      {getAnswerValueLabel(config, categoryCode, change.key, change.from)}{' -> '}
+                      {getAnswerValueLabel(config, categoryCode, change.key, change.to)}
                     </span>
                   ))}
                 </div>
@@ -663,7 +656,11 @@ function RecountPanel({
                 ? 'Застосовуємо...'
                 : isRecountLoading
                   ? 'Готуємо...'
-                  : 'Застосувати переоблік'}
+                  : recountMode === 'request'
+                    ? 'Створити запит'
+                    : recountMode === 'choice'
+                      ? 'Продовжити'
+                      : 'Застосувати переоблік'}
             </button>
           </div>
         </aside>
@@ -736,7 +733,7 @@ function PreviousPricingSnapshot({ config, decodeData }) {
             {externalConditions.map((condition) => (
               <span key={condition.key} className="chip">
                 {getQuestionLabel(config, decodeData.category.code, condition.key)}:{' '}
-                {getConditionValueLabel(
+                {getAnswerValueLabel(
                   config,
                   decodeData.category.code,
                   condition.key,

@@ -40,6 +40,17 @@ const {
   syncRepricingDraft,
 } = require('../services/repricing.service');
 const { buildCsv } = require('../utils/csv');
+const {
+  completeCorrectionRequest,
+  createCorrectionRequest,
+  getCorrectionRequests,
+  refreshCorrectionRequest,
+  updateCorrectionRequestStatus,
+} = require('../services/correction-request.service');
+const {
+  getCorrectionChangesText,
+  getCorrectionHistory,
+} = require('../services/correction-history.service');
 
 const router = express.Router();
 
@@ -82,6 +93,115 @@ router.get('/admin/repricing/scenarios', async (req, res) => {
     res.json(scenarios);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.get('/admin/correction-requests', async (req, res) => {
+  try {
+    res.json(await getCorrectionRequests(req.query || {}));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.get('/admin/product-corrections', async (req, res) => {
+  try {
+    res.json(await getCorrectionHistory(req.query || {}));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.get('/admin/product-corrections/csv', async (req, res) => {
+  try {
+    const data = await getCorrectionHistory(req.query || {}, { forExport: true });
+    const csv = buildCsv([
+      [
+        'date',
+        'category',
+        'old_sku',
+        'new_sku',
+        'weight_g',
+        'old_price_uah',
+        'new_price_uah',
+        'difference_uah',
+        'old_price_per_gram_usd',
+        'new_price_per_gram_usd',
+        'old_matrix',
+        'new_matrix',
+        'changed_characteristics',
+        'reason',
+      ],
+      ...data.items.map((item) => [
+        item.createdAt ? new Date(item.createdAt).toISOString() : '',
+        item.categoryCode,
+        item.sourceSku,
+        item.correctedSku,
+        item.weight ?? '',
+        item.oldPriceUah ?? '',
+        item.newPriceUah ?? '',
+        item.priceDeltaUah ?? '',
+        item.oldPricePerGram ?? '',
+        item.newPricePerGram ?? '',
+        item.oldMatrixName ?? '',
+        item.newMatrixName ?? '',
+        getCorrectionChangesText(item),
+        item.reason,
+      ]),
+    ]);
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="amber-correction-history.csv"'
+    );
+    res.send(`\uFEFF${csv}`);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.post('/admin/correction-requests', async (req, res) => {
+  try {
+    res.json(await createCorrectionRequest(req.body || {}));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({
+      error: err.message,
+      ...(err.details ? { details: err.details } : {}),
+    });
+  }
+});
+
+router.post('/admin/correction-requests/:requestId/refresh', async (req, res) => {
+  try {
+    res.json(await refreshCorrectionRequest(req.params.requestId));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({
+      error: err.message,
+      ...(err.details ? { details: err.details } : {}),
+    });
+  }
+});
+
+router.patch('/admin/correction-requests/:requestId/status', async (req, res) => {
+  try {
+    res.json(await updateCorrectionRequestStatus(
+      req.params.requestId,
+      req.body?.status
+    ));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.post('/admin/correction-requests/:requestId/complete', async (req, res) => {
+  try {
+    res.json(await completeCorrectionRequest(req.params.requestId));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({
+      error: err.message,
+      ...(err.details ? { details: err.details } : {}),
+    });
   }
 });
 
@@ -159,7 +279,10 @@ router.post('/admin/repricing/apply', async (req, res) => {
     const result = await applyRepricing(req.body || {});
     res.json(result);
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({
+      error: err.message,
+      ...(err.details ? { details: err.details } : {}),
+    });
   }
 });
 

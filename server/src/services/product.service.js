@@ -700,6 +700,14 @@ async function buildProductRecountPreview({ sourceSku, answers = {}, isCalibrate
     err.statusCode = 404;
     throw err;
   }
+  if (
+    String(sourceDecoded.product.status || 'active') !== 'active'
+    || sourceDecoded.product.corrected_to_product_id
+  ) {
+    const err = new Error('Цей товар уже не є активним або був переоблікований. Відкрийте актуальний артикул.');
+    err.statusCode = 409;
+    throw err;
+  }
 
   const categoryCode = sourceDecoded.category.code;
   const previousAnswers = buildProductAnswerContext(sourceDecoded);
@@ -804,6 +812,24 @@ async function applyProductRecount(payload) {
       throw err;
     }
 
+    if (!payload.correctionRequestId) {
+      const activeRequestResult = await client.query(
+        `SELECT id
+         FROM correction_requests
+         WHERE source_product_id = $1
+           AND status IN ('pending', 'in_progress')
+         LIMIT 1`,
+        [sourceProductId]
+      );
+      if (activeRequestResult.rows.length > 0) {
+        const err = new Error(
+          `Для цього товару вже існує активний запит #${activeRequestResult.rows[0].id}. Завершіть його у черзі виправлень.`
+        );
+        err.statusCode = 409;
+        throw err;
+      }
+    }
+
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
       preview.corrected.proposedFullSku,
     ]);
@@ -837,7 +863,7 @@ async function applyProductRecount(payload) {
        (full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah,
         price_per_gram, uah_rate, details, status, exclude_from_export, corrected_from_product_id,
         correction_reason, sku_schema_version_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'correction', 1, $11, $12, $13)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'active', 1, $11, $12, $13)
        RETURNING id`,
       [
         corrected.fullSku,
@@ -887,6 +913,36 @@ async function applyProductRecount(payload) {
         Number(preview.priceDeltaUah || 0),
       ]
     );
+
+    if (payload.correctionRequestId) {
+      const requestResult = await client.query(
+        `UPDATE correction_requests
+         SET status = 'completed',
+             corrected_product_id = $1,
+             proposed_sku = $2,
+             final_payload = $3::jsonb,
+             completed_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $4
+           AND source_product_id = $5
+           AND preview_signature = $6
+           AND status IN ('pending', 'in_progress')
+         RETURNING id`,
+        [
+          correctedProductId,
+          corrected.fullSku,
+          JSON.stringify(corrected),
+          Number(payload.correctionRequestId),
+          sourceProductId,
+          String(payload.correctionRequestSignature || ''),
+        ]
+      );
+      if (requestResult.rows.length === 0) {
+        const err = new Error('Запит на виправлення змінив статус. Оновіть сторінку.');
+        err.statusCode = 409;
+        throw err;
+      }
+    }
 
     await client.query('COMMIT');
 
