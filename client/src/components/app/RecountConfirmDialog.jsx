@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Copy } from 'lucide-react';
 import { formatUah } from '../../lib/formatters';
 import { copyPlainText } from '../../lib/clipboard';
@@ -44,7 +45,7 @@ export function RecountConfirmDialog({
   const isChoiceMode = mode === 'choice';
   const isRequestMode = mode === 'request';
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm"
       onMouseDown={(event) => {
@@ -182,6 +183,7 @@ export function RecountConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
