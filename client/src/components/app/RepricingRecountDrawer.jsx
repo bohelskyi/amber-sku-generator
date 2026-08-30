@@ -160,6 +160,8 @@ export function RepricingRecountDrawer({
         isOpen={recount.isRecountConfirmOpen}
         preview={recount.recountPreview}
         reason={recount.recountReason}
+        manualPriceUah={recount.recountManualPriceUah}
+        onManualPriceChange={recount.setRecountManualPriceUah}
         mode={mode}
         submittingMode={recount.recountSubmitMode}
         onCancel={recount.handleCancelRecountConfirmation}

@@ -199,18 +199,24 @@ async function getStoredQuestionKeys(categoryCode, queryable = pool) {
 }
 
 async function ensureLegacySkuSchemas() {
-  const categories = await pool.query('SELECT code FROM categories ORDER BY code');
+  const client = await pool.connect();
+  try {
+    await client.query('SELECT pg_advisory_lock(hashtext($1))', ['amber_legacy_sku_schemas']);
+    const categories = await client.query('SELECT code FROM categories ORDER BY code');
 
-  for (const category of categories.rows) {
-    const existing = await pool.query(
-      'SELECT id FROM sku_schema_versions WHERE category_code = $1 LIMIT 1',
-      [category.code]
-    );
-    if (existing.rows.length > 0) continue;
-
-    const client = await pool.connect();
-    try {
+    for (const category of categories.rows) {
       await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `sku-schema:${category.code}`,
+      ]);
+      const existing = await client.query(
+        'SELECT id FROM sku_schema_versions WHERE category_code = $1 LIMIT 1',
+        [category.code]
+      );
+      if (existing.rows.length > 0) {
+        await client.query('COMMIT');
+        continue;
+      }
       const productCountResult = await client.query(
         'SELECT COUNT(*)::int AS count FROM products WHERE category = $1',
         [category.code]
@@ -244,12 +250,13 @@ async function ensureLegacySkuSchemas() {
         [schemaVersion.id, category.code]
       );
       await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
     }
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    await client.query('SELECT pg_advisory_unlock(hashtext($1))', ['amber_legacy_sku_schemas']);
+    client.release();
   }
 }
 
@@ -309,6 +316,21 @@ async function getSchemaVersion(categoryCode, version, queryable = pool) {
      WHERE category_code = $1 AND version = $2
      LIMIT 1`,
     [categoryCode, Number(version)]
+  );
+  if (result.rows.length === 0) return null;
+  return {
+    ...result.rows[0],
+    version: Number(result.rows[0].version),
+    questions: await getSchemaQuestions(result.rows[0].id, queryable),
+  };
+}
+
+async function getSchemaVersionById(schemaVersionId, queryable = pool) {
+  const result = await queryable.query(
+    `SELECT * FROM sku_schema_versions
+     WHERE id = $1
+     LIMIT 1`,
+    [Number(schemaVersionId)]
   );
   if (result.rows.length === 0) return null;
   return {
@@ -431,6 +453,7 @@ module.exports = {
   getPublicConfig,
   getSchemaStatus,
   getSchemaVersion,
+  getSchemaVersionById,
   getVersionMarker,
   hashSnapshot,
   parseVersionedSkuPart,

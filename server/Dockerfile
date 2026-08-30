@@ -13,4 +13,4 @@ ENV DATABASE_URL=postgresql://postgres:postgres@postgres:5432/amber
 
 EXPOSE 5000
 
-CMD ["npm", "start"]
+CMD ["node", "server.js"]

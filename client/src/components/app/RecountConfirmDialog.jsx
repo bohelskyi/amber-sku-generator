@@ -11,6 +11,8 @@ export function RecountConfirmDialog({
   onConfirm,
   preview,
   reason,
+  manualPriceUah,
+  onManualPriceChange,
   mode = 'apply',
   submittingMode = null,
 }) {
@@ -44,6 +46,8 @@ export function RecountConfirmDialog({
   const priceDelta = Number(preview.priceDeltaUah || 0);
   const isChoiceMode = mode === 'choice';
   const isRequestMode = mode === 'request';
+  const requiresManualPrice = !(Number(newPrice) > 0);
+  const hasManualPrice = Number(manualPriceUah) > 0;
 
   return createPortal(
     <div
@@ -133,6 +137,21 @@ export function RecountConfirmDialog({
             <span className="font-semibold text-slate-900">{formatUah(priceDelta)}</span>
           </div>
 
+          {requiresManualPrice && (
+            <div className="danger-panel p-4 text-sm">
+              <p>Автоматична ціна для цієї конфігурації відсутня. Вкажіть ціну вручну.</p>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                className="input mt-3"
+                value={manualPriceUah}
+                onChange={(event) => onManualPriceChange(event.target.value)}
+                placeholder="Ручна ціна, грн"
+              />
+            </div>
+          )}
+
           {reason && (
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Причина</div>
@@ -163,7 +182,7 @@ export function RecountConfirmDialog({
               type="button"
               onClick={() => onConfirm('request')}
               className="btn btn-outline order-1 sm:order-2"
-              disabled={isApplying}
+              disabled={isApplying || (requiresManualPrice && !hasManualPrice)}
             >
               {isApplying && submittingMode === 'request' ? 'Створюємо...' : 'Створити запит'}
             </button>
@@ -173,7 +192,7 @@ export function RecountConfirmDialog({
             type="button"
             onClick={() => onConfirm(isRequestMode ? 'request' : 'apply')}
             className={`btn btn-primary order-1 ${isChoiceMode ? 'sm:order-3' : 'sm:order-2'}`}
-            disabled={isApplying}
+            disabled={isApplying || (requiresManualPrice && !hasManualPrice)}
           >
             {isApplying && submittingMode === (isRequestMode ? 'request' : 'apply')
               ? 'Створюємо...'

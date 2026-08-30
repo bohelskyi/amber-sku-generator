@@ -1,7 +1,8 @@
 const crypto = require('node:crypto');
 const { isDeepStrictEqual } = require('node:util');
 const pool = require('../db/pool');
-const { calculatePricing } = require('./pricing.service');
+const { calculatePricing, loadPricingContext } = require('./pricing.service');
+const { getUsdUahRateInfo } = require('./currency.service');
 const { roundUah } = require('../utils/money');
 const { asRuleObject, isRuleMatched } = require('../utils/rules');
 
@@ -466,6 +467,21 @@ function assertNoBlockingCorrectionRequests(requests = []) {
 
 async function buildRepricingPreview(scenarioId) {
   const scenario = await getActiveScenario(scenarioId);
+  const pricingContext = await loadPricingContext(scenario.category_code);
+  let rateInfo = null;
+  try {
+    rateInfo = await getUsdUahRateInfo();
+  } catch (error) {
+    rateInfo = {
+      rate: null,
+      source: 'unavailable',
+      rateDate: null,
+      fetchedAt: null,
+      ageMs: null,
+      stale: false,
+      error: String(error.message || error),
+    };
+  }
   const scenarioRule = asRuleObject(scenario.match_json);
   const productsResult = await pool.query(
     `SELECT id, full_sku, category, weight, total_price, total_price_uah,
@@ -501,7 +517,8 @@ async function buildRepricingPreview(scenarioId) {
         product.category,
         answers,
         product.weight,
-        answers.is_calibrated
+        answers.is_calibrated,
+        { context: pricingContext, rateInfo }
       );
       const selectedScenarioId = Number(pricing.pricingDetails?.scenario?.id || 0);
       if (selectedScenarioId !== Number(scenario.id)) {
@@ -969,6 +986,20 @@ async function applyRepricing({ scenarioId, previewToken, manualOverrides = [], 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const lockedProductsResult = await client.query(
+      `SELECT id, full_sku, weight, total_price, total_price_uah, price_per_gram,
+              uah_rate, details, status, exclude_from_export
+       FROM products
+       WHERE id = ANY($1::int[])
+       ORDER BY id
+       FOR UPDATE`,
+      [changedItems.map((item) => item.productId)]
+    );
+    const lockedProducts = new Map(
+      lockedProductsResult.rows.map((product) => [Number(product.id), product])
+    );
+    const blockingRequests = await getBlockingCorrectionRequests(changedItems, client);
+    assertNoBlockingCorrectionRequests(blockingRequests);
     if (draft) {
       const lockedDraft = await getRepricingDraftRow(draft.id, client, true);
       const lockedOverrides = normalizeManualOverrides(lockedDraft.manual_overrides || []);
@@ -1023,15 +1054,7 @@ async function applyRepricing({ scenarioId, previewToken, manualOverrides = [], 
     const appliedAt = batchResult.rows[0].applied_at;
 
     for (const item of changedItems) {
-      const productResult = await client.query(
-        `SELECT id, full_sku, weight, total_price, total_price_uah, price_per_gram,
-                uah_rate, details, status, exclude_from_export
-         FROM products
-         WHERE id = $1
-         FOR UPDATE`,
-        [item.productId]
-      );
-      const product = productResult.rows[0];
+      const product = lockedProducts.get(Number(item.productId));
       if (!product || String(product.status || 'active') !== 'active') {
         const error = new Error(`Товар ${item.sku} змінив статус під час переоцінки.`);
         error.statusCode = 409;

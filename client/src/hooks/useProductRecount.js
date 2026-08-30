@@ -15,6 +15,7 @@ export function useProductRecount({
   const [isRecountOpen, setIsRecountOpen] = useState(false);
   const [recountAnswers, setRecountAnswers] = useState({});
   const [recountReason, setRecountReason] = useState('');
+  const [recountManualPriceUah, setRecountManualPriceUah] = useState('');
   const [recountPreview, setRecountPreview] = useState(null);
   const [recountError, setRecountError] = useState('');
   const [recountSuccess, setRecountSuccess] = useState('');
@@ -73,6 +74,7 @@ export function useProductRecount({
 
     setRecountAnswers(getDecodedAnswerMap(decodeData));
     setRecountReason('');
+    setRecountManualPriceUah('');
     setRecountPreview(null);
     setRecountError('');
     setRecountSuccess('');
@@ -129,6 +131,7 @@ export function useProductRecount({
     answers: recountAnswers,
     isCalibrated: recountAnswers.is_calibrated ?? null,
     reason: recountReason,
+    manualPriceUah: recountManualPriceUah === '' ? null : Number(recountManualPriceUah),
   });
 
   const requestRecountPreview = (openConfirmation = false) => {
@@ -174,6 +177,11 @@ export function useProductRecount({
 
   const handleConfirmRecount = (requestedMode = submitMode) => {
     if (!decodeData?.sku || !recountPreview || !hasRecountChanges || isRecountApplying) return;
+    const requiresManualPrice = !(Number(recountPreview.corrected?.totalPriceUah) > 0);
+    if (requiresManualPrice && !(Number(recountManualPriceUah) > 0)) {
+      setRecountError('Автоматична ціна для цієї конфігурації відсутня. Вкажіть ціну вручну.');
+      return;
+    }
 
     const sourceSku = decodeData.sku;
     const effectiveSubmitMode = requestedMode === 'request' ? 'request' : 'apply';
@@ -235,11 +243,13 @@ export function useProductRecount({
     isRecountOpen,
     recountAnswers,
     recountError,
+    recountManualPriceUah,
     recountPreview,
     recountReason,
     recountSubmitMode,
     recountSuccess,
     setRecountReason,
+    setRecountManualPriceUah,
     skuToDecode,
   };
 }

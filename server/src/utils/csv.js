@@ -1,6 +1,8 @@
 function escapeCsvValue(value) {
   if (value === null || value === undefined) return '';
-  const stringValue = String(value);
+  const stringValue = typeof value === 'string' && /^[=+\-@]/.test(value)
+    ? `'${value}`
+    : String(value);
   if (/[",\n]/.test(stringValue)) {
     return `"${stringValue.replace(/"/g, '""')}"`;
   }
@@ -15,4 +17,5 @@ function buildCsv(rows) {
 
 module.exports = {
   buildCsv,
+  escapeCsvValue,
 };

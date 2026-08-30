@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useProductRecount } from './useProductRecount';
 import {
+  isValidPositivePrice,
+  requiresManualPrice as needsManualPrice,
+} from '../lib/pricing-validation';
+import {
   getVisibleOptionsForQuestion,
   isQuestionVisible,
   isTextQuestion,
@@ -148,7 +152,8 @@ export function useSkuManager() {
   const manualPriceNumber =
     manualPriceUah.trim() === '' ? null : Number(manualPriceUah);
   const hasManualPrice =
-    manualPriceNumber !== null && Number.isFinite(manualPriceNumber) && manualPriceNumber >= 0;
+    manualPriceNumber !== null && isValidPositivePrice(manualPriceNumber);
+  const requiresManualPrice = needsManualPrice(previewData);
   const roundedManualPriceNumber = hasManualPrice ? Math.round(manualPriceNumber) : null;
   const effectiveTotalPriceUah = hasManualPrice
     ? roundedManualPriceNumber
@@ -323,32 +328,22 @@ export function useSkuManager() {
 
   const handleSave = () => {
     if (!previewData || isSaving) return;
+    if (requiresManualPrice && !hasManualPrice) {
+      setSaveError('Автоматична ціна для цієї конфігурації відсутня. Вкажіть ціну вручну.');
+      return;
+    }
 
     setIsSaving(true);
     setSaveError('');
 
     api.post('/save', {
-      fullSku: displaySku || previewData.fullProposedSku,
-      baseSku: previewData.baseSku,
       skuSchemaVersionId: previewData.skuSchemaVersionId,
-      nextSeq: previewData.nextSeq,
       category: selectedCat,
+      answers,
+      isCalibrated,
       weight: isWeightRequired ? weight : previewData.weightVal || 0,
-      totalPrice: effectiveTotalPrice,
-      totalPriceUah: effectiveTotalPriceUah,
-      pricePerGram: effectivePricePerGram,
-      uahRate: previewData.uahRate,
-      details: {
-        answers,
-        isCalibrated,
-        logMessage: previewData.logMessage,
-        pricingScenario: previewData.pricingDetails?.scenario || null,
-        variationNumber: variationData?.variationNumber || null,
-        baseGeneratedSku: previewData.fullProposedSku,
-        skuSchemaVersion: previewData.skuSchemaVersion,
-        manualPriceUah: hasManualPrice ? effectiveTotalPriceUah : null,
-        autoPriceUah: previewData.totalPriceUah,
-      },
+      manualPriceUah: hasManualPrice ? effectiveTotalPriceUah : null,
+      useVariation: Boolean(variationData),
     }).then(() => {
       fetchHistory();
       fetchExportStatus();
@@ -403,18 +398,23 @@ export function useSkuManager() {
     setExportError('');
 
     try {
-      const response = await api.get('/export/csv', {
-        params: {
-          fromSku,
-          ...(toSku ? { toSku } : {}),
-        },
+      const idempotencyKey = globalThis.crypto?.randomUUID?.()
+        || `export-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const snapshotResponse = await api.post('/export/snapshots', {
+        fromSku,
+        ...(toSku ? { toSku } : {}),
+      }, {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      });
+      const snapshot = snapshotResponse.data;
+      const response = await api.get(`/export/snapshots/${snapshot.id}/csv`, {
         responseType: 'blob',
       });
 
       const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
       const downloadUrl = window.URL.createObjectURL(blob);
       const fileNameMatch = response.headers['content-disposition']?.match(/filename="(.+)"/);
-      const fileName = fileNameMatch?.[1] || `amber-export-${fromSku}.csv`;
+      const fileName = fileNameMatch?.[1] || snapshot.fileName || `amber-export-${fromSku}.csv`;
 
       const link = document.createElement('a');
       link.href = downloadUrl;
@@ -423,6 +423,7 @@ export function useSkuManager() {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(downloadUrl);
+      await api.post(`/export/snapshots/${snapshot.id}/confirm`);
       fetchExportStatus();
     } catch (err) {
       if (err.response?.data instanceof Blob) {
@@ -464,7 +465,7 @@ export function useSkuManager() {
     }
 
     const numericValue = Number(value);
-    if (!Number.isFinite(numericValue) || numericValue < 0) return;
+    if (!Number.isFinite(numericValue) || numericValue <= 0) return;
     setManualPriceUah(value);
   };
 
@@ -559,6 +560,7 @@ export function useSkuManager() {
     previewData,
     progressPercent,
     requiredCount,
+    requiresManualPrice,
     recountAnswers,
     recountError,
     recountPreview,

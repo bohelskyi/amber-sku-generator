@@ -1,6 +1,4 @@
 const express = require('express');
-const { buildCsv } = require('../utils/csv');
-const { roundUah } = require('../utils/money');
 const { getPublicConfig } = require('../services/sku-schema.service');
 const { calculatePricing } = require('../services/pricing.service');
 const {
@@ -16,7 +14,10 @@ const {
 const {
   getExportRows,
   getExportStatus,
-  recordExportEvent,
+  buildExportCsv,
+  confirmExportSnapshot,
+  createExportSnapshot,
+  getExportSnapshot,
 } = require('../services/export.service');
 
 const router = express.Router();
@@ -142,30 +143,54 @@ router.get('/export/csv', async (req, res) => {
   try {
     const { fromSku, toSku } = req.query;
     const exportData = await getExportRows(fromSku, toSku);
-    const textHeaders = exportData.textColumns.map((column) => column.key);
-
-    const csv = buildCsv([
-      ['sku', 'price_uah', 'size', ...textHeaders],
-      ...exportData.rows.map((row) => [
-        row.full_sku,
-        row.total_price_uah !== null && row.total_price_uah !== undefined
-          ? roundUah(row.total_price_uah)
-          : '',
-        row.export_size || '',
-        ...exportData.textColumns.map((column) => row.export_text_values?.[column.key] || ''),
-      ]),
-    ]);
+    const csv = buildExportCsv(exportData);
 
     const suffixPart = exportData.range.toSku ? `-${exportData.range.toSku}` : '-to-latest';
     const fileName = `amber-export-${exportData.range.fromSku}${suffixPart}.csv`;
-
-    await recordExportEvent(exportData);
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     res.send(csv);
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/export/snapshots', async (req, res) => {
+  try {
+    const snapshot = await createExportSnapshot({
+      fromSku: req.body?.fromSku,
+      toSku: req.body?.toSku,
+      idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey,
+    });
+    res.status(201).json({
+      id: snapshot.id,
+      status: snapshot.status,
+      fileName: snapshot.file_name,
+      rowCount: Number(snapshot.row_count),
+      generatedAt: snapshot.generated_at,
+    });
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
+  }
+});
+
+router.get('/export/snapshots/:id/csv', async (req, res) => {
+  try {
+    const snapshot = await getExportSnapshot(req.params.id);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${snapshot.file_name}"`);
+    res.send(snapshot.csv_content);
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
+  }
+});
+
+router.post('/export/snapshots/:id/confirm', async (req, res) => {
+  try {
+    res.json(await confirmExportSnapshot(req.params.id));
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
   }
 });
 

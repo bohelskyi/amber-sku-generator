@@ -51,8 +51,8 @@ async function migratePricesToDb(client) {
   console.log('Prices migrated to DB');
 }
 
-async function ensureCalibratedQuestions() {
-  const categoryRows = await pool.query(`
+async function ensureCalibratedQuestions(queryable = pool) {
+  const categoryRows = await queryable.query(`
     SELECT q.category_code, q.sku_index, COALESCE(q.display_order, q.sku_index) AS display_order
     FROM questions q
     WHERE q.key = 'raw_type'
@@ -68,7 +68,7 @@ async function ensureCalibratedQuestions() {
   if (!calibratedConfig?.options?.length) return;
 
   for (const row of categoryRows.rows) {
-    const insertedQuestion = await pool.query(
+    const insertedQuestion = await queryable.query(
       `INSERT INTO questions
        (category_code, key, label, sku_index, display_order, required, include_in_sku, input_type, sku_separator, visible_if_json)
        VALUES ($1, 'is_calibrated', $2, $3, $4, 1, 0, 'options', '', $5::jsonb)
@@ -84,7 +84,7 @@ async function ensureCalibratedQuestions() {
     const questionId = insertedQuestion.rows[0].id;
 
     for (const option of calibratedConfig.options) {
-      await pool.query(
+      await queryable.query(
         'INSERT INTO options (question_id, value_id, sku_code, label) VALUES ($1, $2, $3, $4)',
         [questionId, option.id, String(option.id), option.label]
       );
@@ -92,8 +92,9 @@ async function ensureCalibratedQuestions() {
   }
 }
 
-async function migrateData() {
-  const client = await pool.connect();
+async function migrateData(existingClient = null) {
+  const client = existingClient || await pool.connect();
+  const ownsClient = !existingClient;
   try {
     await client.query('BEGIN');
 
@@ -136,11 +137,11 @@ async function migrateData() {
     await client.query('ROLLBACK');
     throw err;
   } finally {
-    client.release();
+    if (ownsClient) client.release();
   }
 }
 
-async function initDb() {
+async function legacyInitDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS products (
       id SERIAL PRIMARY KEY,
@@ -474,6 +475,28 @@ async function initDb() {
   await ensureCalibratedQuestions();
 }
 
+async function seedDefaultData() {
+  const client = await pool.connect();
+  try {
+    await client.query('SELECT pg_advisory_lock(hashtext($1))', ['amber_default_seed']);
+    const result = await client.query('SELECT count(*)::int AS count FROM categories');
+    if (Number(result.rows[0].count) === 0) {
+      console.log('Empty DB. Seeding default configuration and prices...');
+      await migrateData(client);
+    }
+    await ensureCalibratedQuestions(client);
+  } finally {
+    await client.query('SELECT pg_advisory_unlock(hashtext($1))', ['amber_default_seed']);
+    client.release();
+  }
+}
+
+async function initDb() {
+  return seedDefaultData();
+}
+
 module.exports = {
   initDb,
+  legacyInitDb,
+  seedDefaultData,
 };

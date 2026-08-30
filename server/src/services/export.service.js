@@ -1,5 +1,8 @@
 const pool = require('../db/pool');
+const crypto = require('node:crypto');
 const { getProductBySku } = require('./product.service');
+const { buildCsv } = require('../utils/csv');
+const { roundUah } = require('../utils/money');
 
 async function getNonSkuQuestionMaps(categoryCodes) {
   if (!categoryCodes || categoryCodes.length === 0) return new Map();
@@ -182,12 +185,145 @@ async function getExportRows(fromSku, toSku) {
   };
 }
 
+function buildExportCsv(exportData) {
+  const textHeaders = exportData.textColumns.map((column) => column.key);
+  return buildCsv([
+    ['sku', 'price_uah', 'size', ...textHeaders],
+    ...exportData.rows.map((row) => [
+      row.full_sku,
+      row.total_price_uah !== null && row.total_price_uah !== undefined
+        ? roundUah(row.total_price_uah)
+        : '',
+      row.export_size || '',
+      ...exportData.textColumns.map((column) => row.export_text_values?.[column.key] || ''),
+    ]),
+  ]);
+}
+
+async function createExportSnapshot({ fromSku, toSku, idempotencyKey }) {
+  const key = String(idempotencyKey || '').trim();
+  if (!key || key.length > 200) {
+    const error = new Error('Потрібен коректний Idempotency-Key для створення export snapshot.');
+    error.statusCode = 400;
+    throw error;
+  }
+  const existing = await pool.query(
+    'SELECT * FROM export_snapshots WHERE idempotency_key = $1',
+    [key]
+  );
+  if (existing.rows[0]) return existing.rows[0];
+
+  const exportData = await getExportRows(fromSku, toSku);
+  const suffixPart = exportData.range.toSku ? `-${exportData.range.toSku}` : '-to-latest';
+  const fileName = `amber-export-${exportData.range.fromSku}${suffixPart}.csv`;
+  const exportedToProductId = exportData.rows.length > 0
+    ? Number(exportData.rows[exportData.rows.length - 1].id)
+    : 0;
+  try {
+    const result = await pool.query(
+      `INSERT INTO export_snapshots
+       (id, idempotency_key, from_sku, to_sku, resolved_to_sku,
+        exported_to_product_id, row_count, file_name, csv_content)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [
+        crypto.randomUUID(),
+        key,
+        exportData.range.fromSku,
+        exportData.range.toSku,
+        exportData.range.resolvedToSku,
+        exportedToProductId,
+        exportData.rows.length,
+        fileName,
+        buildExportCsv(exportData),
+      ]
+    );
+    return result.rows[0];
+  } catch (error) {
+    if (error?.code !== '23505') throw error;
+    return (await pool.query(
+      'SELECT * FROM export_snapshots WHERE idempotency_key = $1',
+      [key]
+    )).rows[0];
+  }
+}
+
+async function getExportSnapshot(snapshotId) {
+  const result = await pool.query('SELECT * FROM export_snapshots WHERE id = $1', [snapshotId]);
+  if (!result.rows[0]) {
+    const error = new Error('Export snapshot не знайдено.');
+    error.statusCode = 404;
+    throw error;
+  }
+  return result.rows[0];
+}
+
+async function confirmExportSnapshot(snapshotId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const snapshotResult = await client.query(
+      'SELECT * FROM export_snapshots WHERE id = $1 FOR UPDATE',
+      [snapshotId]
+    );
+    const snapshot = snapshotResult.rows[0];
+    if (!snapshot) {
+      const error = new Error('Export snapshot не знайдено.');
+      error.statusCode = 404;
+      throw error;
+    }
+    await client.query(
+      `UPDATE export_snapshots
+       SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, CURRENT_TIMESTAMP)
+       WHERE id = $1`,
+      [snapshotId]
+    );
+    await client.query(
+      `INSERT INTO export_state
+       (singleton, exported_to_product_id, last_snapshot_id, updated_at)
+       VALUES (TRUE, $1, $2, CURRENT_TIMESTAMP)
+       ON CONFLICT (singleton) DO UPDATE
+       SET exported_to_product_id = GREATEST(
+             export_state.exported_to_product_id,
+             EXCLUDED.exported_to_product_id
+           ),
+           last_snapshot_id = CASE
+             WHEN EXCLUDED.exported_to_product_id >= export_state.exported_to_product_id
+             THEN EXCLUDED.last_snapshot_id
+             ELSE export_state.last_snapshot_id
+           END,
+           updated_at = CURRENT_TIMESTAMP`,
+      [Number(snapshot.exported_to_product_id), snapshotId]
+    );
+    await client.query('COMMIT');
+    return { success: true, snapshotId, status: 'confirmed' };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function getExportStatus() {
   const lastExportResult = await pool.query(
     `
-      SELECT id, from_sku, to_sku, resolved_to_sku, exported_to_product_id, row_count, created_at
-      FROM export_events
-      ORDER BY id DESC
+      SELECT COALESCE(s.id, 'legacy-' || e.id::text) AS id,
+             COALESCE(s.from_sku, e.from_sku) AS from_sku,
+             COALESCE(s.to_sku, e.to_sku) AS to_sku,
+             COALESCE(s.resolved_to_sku, e.resolved_to_sku) AS resolved_to_sku,
+             st.exported_to_product_id,
+             COALESCE(s.row_count, e.row_count, 0) AS row_count,
+             COALESCE(s.confirmed_at, e.created_at) AS created_at
+      FROM export_state st
+      LEFT JOIN export_snapshots s ON s.id = st.last_snapshot_id
+      LEFT JOIN LATERAL (
+        SELECT * FROM export_events
+        WHERE exported_to_product_id <= st.exported_to_product_id
+        ORDER BY exported_to_product_id DESC, id DESC
+        LIMIT 1
+      ) e ON TRUE
+      WHERE st.singleton = TRUE AND st.exported_to_product_id > 0
       LIMIT 1
     `
   );
@@ -231,7 +367,7 @@ async function getExportStatus() {
     latestProductId,
     latestExportableProductId,
     lastExport: {
-      id: Number(lastExport.id),
+      id: String(lastExport.id),
       fromSku: lastExport.from_sku,
       toSku: lastExport.to_sku,
       resolvedToSku: lastExport.resolved_to_sku,
@@ -262,6 +398,10 @@ async function recordExportEvent(exportData) {
 }
 
 module.exports = {
+  buildExportCsv,
+  confirmExportSnapshot,
+  createExportSnapshot,
+  getExportSnapshot,
   getExportRows,
   getExportStatus,
   recordExportEvent,

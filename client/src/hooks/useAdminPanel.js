@@ -172,6 +172,7 @@ export function useAdminPanel() {
       name: category.name,
       requires_weight: category.requires_weight === 1,
       skip_hidden_sku_questions: category.skip_hidden_sku_questions === 1,
+      code_mutable: category.code_mutable !== false,
     });
     setEditScenario(null);
     setEditModifier(null);
@@ -225,6 +226,7 @@ export function useAdminPanel() {
               name: nextCategory.name,
               requires_weight: nextCategory.requires_weight === 1,
               skip_hidden_sku_questions: nextCategory.skip_hidden_sku_questions === 1,
+              code_mutable: nextCategory.code_mutable !== false,
             });
             fetchPricesForCategory(nextCategory.code);
           } else {

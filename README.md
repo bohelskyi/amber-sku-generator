@@ -71,12 +71,21 @@ docker compose exec -T postgres pg_dump -U amber amber > amber-backup.sql
 cat amber-backup.sql | docker compose exec -T postgres psql -U amber -d amber
 ```
 
+For timestamped custom-format backups with archive verification:
+
+```bash
+sh ./scripts/postgres-backup.sh /secure/local/backup/path
+sh ./scripts/postgres-restore.sh /secure/local/backup/path/amber-YYYYMMDDTHHMMSSZ.dump --confirm
+```
+
+The restore command is intentionally explicit and replaces matching database objects. Test restores regularly in a disposable environment. Production deployments must additionally copy backups to a monitored off-host destination; that destination is infrastructure-specific and is not hardcoded here.
+
 ### Migrate config from old SQLite (optional)
 
 If you need to keep existing categories/questions/options and price settings from old `server/amber.db`, run:
 
 ```bash
-cd amber-app/server
+cd server
 npm install
 npm run migrate:config -- --sqlite=./amber.db --pg=postgresql://amber:amber_password@localhost:5432/amber
 ```
@@ -84,4 +93,6 @@ npm run migrate:config -- --sqlite=./amber.db --pg=postgresql://amber:amber_pass
 Notes:
 - This migrates only config/pricing tables.
 - Products history (`products`) is not copied.
-- The script replaces current config tables in PostgreSQL.
+- By default the script only imports into a database without configuration.
+- To explicitly replace configuration, add `--replace`. Replacement is refused when the target contains products.
+- The import creates V1 SKU schema snapshots and preserves/imports `sku_code` values.
