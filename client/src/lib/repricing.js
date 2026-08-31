@@ -3,7 +3,8 @@ export function parseManualPrice(value) {
   if (!normalized) return null;
   const parsed = Number(normalized);
   if (!Number.isFinite(parsed) || parsed <= 0) return null;
-  return Math.round(parsed);
+  const rounded = Math.round(parsed);
+  return rounded > 0 ? rounded : null;
 }
 
 export function getManualOverrides(manualPrices = {}) {
@@ -26,7 +27,9 @@ export function applyManualPrices(items = [], manualPrices = {}) {
   return items.map((item) => {
     if (!Object.prototype.hasOwnProperty.call(manualPrices, item.productId)) return item;
     const newPriceUah = parseManualPrice(manualPrices[item.productId]);
-    if (newPriceUah === null || item.status === 'error') return item;
+    const resolvesManualPrice = item.status === 'error'
+      && ['price_missing', 'manual_price'].includes(item.errorCode);
+    if (newPriceUah === null || (item.status === 'error' && !resolvesManualPrice)) return item;
     const oldPriceUah = item.oldPriceUah === null ? null : Number(item.oldPriceUah);
     const reasonCodes = (item.pricingChange?.reasonCodes || [])
       .filter((code) => code !== 'manual_override' && code !== 'exchange_rate_only');
@@ -36,11 +39,15 @@ export function applyManualPrices(items = [], manualPrices = {}) {
       ));
     return {
       ...item,
-      calculatedPriceUah: item.newPriceUah,
+      calculatedPriceUah: resolvesManualPrice ? null : item.newPriceUah,
       newPriceUah,
       priceDeltaUah: newPriceUah - Number(oldPriceUah || 0),
-      status: oldPriceUah === null || oldPriceUah !== newPriceUah ? 'changed' : 'unchanged',
+      status: resolvesManualPrice
+        ? 'changed'
+        : (oldPriceUah === null || oldPriceUah !== newPriceUah ? 'changed' : 'unchanged'),
       manualOverride: true,
+      resolvedManualPrice: resolvesManualPrice,
+      resolvedPriceMissing: resolvesManualPrice && item.errorCode === 'price_missing',
       pricingChange: {
         ...(item.pricingChange || {}),
         reasonCodes: [...reasonCodes, 'manual_override'],
@@ -84,4 +91,19 @@ export function getRepricingSummary(baseSummary, items = []) {
     unchangedCount: items.filter((item) => item.status === 'unchanged').length,
     errorCount: items.filter((item) => item.status === 'error').length,
   };
+}
+
+export function canApplyRepricing({
+  summary,
+  invalidManualPriceCount = 0,
+  draftConflictCount = 0,
+  blockingCorrectionRequestCount = 0,
+  isDraftStale = false,
+} = {}) {
+  return Number(summary?.changedCount || 0) > 0
+    && Number(summary?.errorCount || 0) === 0
+    && Number(invalidManualPriceCount || 0) === 0
+    && Number(draftConflictCount || 0) === 0
+    && Number(blockingCorrectionRequestCount || 0) === 0
+    && !isDraftStale;
 }

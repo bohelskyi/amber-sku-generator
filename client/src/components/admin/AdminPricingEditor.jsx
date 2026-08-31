@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ConditionBuilder } from './ConditionBuilder';
 import {
+  getMatrixPriceValidationError,
   handleNumberKeyDown,
   handleNumberWheel,
   normalizeDecimalInput,
@@ -399,6 +400,7 @@ export function AdminPricingEditor({
   addModifier,
 }) {
   const [openGroups, setOpenGroups] = useState({});
+  const [matrixValidationError, setMatrixValidationError] = useState('');
   if (!selectedCat || !pricesData) return null;
 
   const scenarioGroups = groupScenarios(pricesData.scenarios);
@@ -415,6 +417,12 @@ export function AdminPricingEditor({
           <h2 className="section-title-text">Управління цінами ({selectedCat.name})</h2>
         </div>
       </div>
+
+      {matrixValidationError && (
+        <div role="alert" className="danger-panel mb-6 p-4 text-sm">
+          {matrixValidationError}
+        </div>
+      )}
 
       <div className="space-y-4">
         {scenarioGroups.map((group, groupIndex) => {
@@ -536,20 +544,33 @@ export function AdminPricingEditor({
                                           }}
                                           onBlur={(event) => {
                                             const normalizedPrice = normalizeDecimalInput(event.currentTarget.value);
-                                            const parsedPrice = Number(normalizedPrice);
+                                            const validationError = getMatrixPriceValidationError(normalizedPrice);
 
                                             if (!normalizedPrice) {
-                                              handlePriceChange(scenario.id, xOption.id, yOption.id, null);
+                                              setMatrixValidationError('');
+                                              Promise.resolve(handlePriceChange(scenario.id, xOption.id, yOption.id, null))
+                                                .catch((error) => setMatrixValidationError(
+                                                  error.response?.data?.error || error.message
+                                                ));
                                               return;
                                             }
 
-                                            if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+                                            if (validationError) {
                                               event.currentTarget.value = cell ? String(cell.price) : '';
+                                              setMatrixValidationError(validationError);
                                               return;
                                             }
 
                                             event.currentTarget.value = normalizedPrice;
-                                            handlePriceChange(scenario.id, xOption.id, yOption.id, normalizedPrice);
+                                            setMatrixValidationError('');
+                                            Promise.resolve(handlePriceChange(
+                                              scenario.id,
+                                              xOption.id,
+                                              yOption.id,
+                                              normalizedPrice
+                                            )).catch((error) => setMatrixValidationError(
+                                              error.response?.data?.error || error.message
+                                            ));
                                           }}
                                         />
                                       </td>

@@ -156,6 +156,7 @@ export function RepricingRecountDrawer({
       </main>
 
       <RecountConfirmDialog
+        error={recount.recountError}
         isApplying={recount.isRecountApplying}
         isOpen={recount.isRecountConfirmOpen}
         preview={recount.recountPreview}

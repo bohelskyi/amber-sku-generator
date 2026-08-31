@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import { api } from '../lib/api.js';
-import { getDecodedAnswerMap, haveAnswersChanged } from '../lib/product-recount.js';
+import {
+  buildRecountPayload,
+  getDecodedAnswerMap,
+  haveAnswersChanged,
+} from '../lib/product-recount.js';
 
 export function useProductRecount({
   config,
@@ -126,12 +130,12 @@ export function useProductRecount({
     setRecountError('');
   };
 
-  const buildRecountPayload = () => ({
+  const getRecountPayload = () => buildRecountPayload({
     sourceSku: decodeData?.sku,
     answers: recountAnswers,
     isCalibrated: recountAnswers.is_calibrated ?? null,
     reason: recountReason,
-    manualPriceUah: recountManualPriceUah === '' ? null : Number(recountManualPriceUah),
+    manualPriceUah: recountManualPriceUah,
   });
 
   const requestRecountPreview = (openConfirmation = false) => {
@@ -146,7 +150,7 @@ export function useProductRecount({
     setRecountError('');
     setRecountSuccess('');
 
-    api.post('/recount/preview', buildRecountPayload())
+    api.post('/recount/preview', getRecountPayload())
       .then((res) => {
         setRecountPreview(res.data);
         if (openConfirmation) setIsRecountConfirmOpen(true);
@@ -193,7 +197,7 @@ export function useProductRecount({
     const isRequestMode = effectiveSubmitMode === 'request';
     api.post(
       isRequestMode ? '/admin/correction-requests' : '/recount/apply',
-      buildRecountPayload()
+      getRecountPayload()
     )
       .then((res) => {
         setIsRecountConfirmOpen(false);
@@ -213,7 +217,6 @@ export function useProductRecount({
         handleDecode(correctedSku);
       })
       .catch((err) => {
-        setIsRecountConfirmOpen(false);
         setRecountError(err.response?.data?.error || err.message);
       })
       .finally(() => {

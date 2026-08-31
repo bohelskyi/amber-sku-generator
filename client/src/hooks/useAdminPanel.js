@@ -483,18 +483,17 @@ export function useAdminPanel() {
   const handlePriceChange = (scenarioId, xVal, yVal, newPrice) => {
     const normalizedPrice = normalizeDecimalInput(newPrice);
     if (normalizedPrice.trim() === '') {
-      api.post('/admin/price-cell', {
+      return api.post('/admin/price-cell', {
         scenario_id: scenarioId,
         x_val: xVal,
         y_val: yVal,
         price: null,
       });
-      return;
     }
     const parsedPrice = Number(normalizedPrice);
-    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) return;
+    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) return Promise.resolve();
 
-    api.post('/admin/price-cell', {
+    return api.post('/admin/price-cell', {
       scenario_id: scenarioId,
       x_val: xVal,
       y_val: yVal,

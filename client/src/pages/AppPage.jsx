@@ -138,6 +138,7 @@ function AppPage() {
         )}
       </div>
       <RecountConfirmDialog
+        error={sku.recountError}
         isApplying={sku.isRecountApplying}
         isOpen={sku.isRecountConfirmOpen}
         preview={sku.recountPreview}

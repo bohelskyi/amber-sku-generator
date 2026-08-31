@@ -25,3 +25,19 @@ export function haveAnswersChanged(previousAnswers, nextAnswers) {
     (key) => String(previousAnswers?.[key] ?? '') !== String(nextAnswers?.[key] ?? '')
   );
 }
+
+export function buildRecountPayload({
+  sourceSku,
+  answers,
+  isCalibrated,
+  reason,
+  manualPriceUah,
+}) {
+  return {
+    sourceSku,
+    answers,
+    isCalibrated,
+    reason,
+    manualPriceUah: manualPriceUah === '' ? null : Number(manualPriceUah),
+  };
+}

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildRecountPayload,
   getDecodedAnswerMap,
   haveAnswersChanged,
 } from '../src/lib/product-recount.js';
@@ -31,4 +32,20 @@ test('recount detects changed, added, and cleared answers', () => {
   assert.equal(haveAnswersChanged({ quality: 1 }, { quality: 2 }), true);
   assert.equal(haveAnswersChanged({ quality: 1 }, { quality: 1, extra: 2 }), true);
   assert.equal(haveAnswersChanged({ quality: 1, extra: 2 }, { quality: 1 }), true);
+});
+
+test('correction payload forwards a valid manual UAH price', () => {
+  assert.deepEqual(buildRecountPayload({
+    sourceSku: 'ZZ1-1',
+    answers: { kind: 2 },
+    isCalibrated: 0,
+    reason: 'No matrix cell',
+    manualPriceUah: '725',
+  }), {
+    sourceSku: 'ZZ1-1',
+    answers: { kind: 2 },
+    isCalibrated: 0,
+    reason: 'No matrix cell',
+    manualPriceUah: 725,
+  });
 });

@@ -5,6 +5,7 @@ import { formatUah } from '../../lib/formatters';
 import { copyPlainText } from '../../lib/clipboard';
 
 export function RecountConfirmDialog({
+  error = '',
   isApplying,
   isOpen,
   onCancel,
@@ -19,11 +20,14 @@ export function RecountConfirmDialog({
   const confirmButtonRef = useRef(null);
 
   useEffect(() => {
+    if (isOpen) confirmButtonRef.current?.focus();
+  }, [isOpen]);
+
+  useEffect(() => {
     if (!isOpen) return undefined;
 
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    confirmButtonRef.current?.focus();
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape' && !isApplying) onCancel();
@@ -149,6 +153,12 @@ export function RecountConfirmDialog({
                 onChange={(event) => onManualPriceChange(event.target.value)}
                 placeholder="Ручна ціна, грн"
               />
+            </div>
+          )}
+
+          {error && (
+            <div role="alert" className="danger-panel p-4 text-sm">
+              {error}
             </div>
           )}
 

@@ -726,6 +726,64 @@ test('required answers, weight, schema ownership, and manual fallback fail close
   assert.equal(malformedManual.response.status, 422);
 });
 
+test('correction applies a manual price when the target configuration has no matrix cell', async () => {
+  const sourcePreview = await request('/api/preview', {
+    method: 'POST',
+    body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0, isCalibrated: 0 },
+  });
+  assert.equal(sourcePreview.response.status, 200, sourcePreview.text);
+  const source = await request('/api/save', {
+    method: 'POST',
+    body: {
+      category: 'ZZ',
+      answers: { kind: 1 },
+      weight: 0,
+      isCalibrated: 0,
+      skuSchemaVersionId: schemas.ZZ,
+      previewToken: sourcePreview.data.previewToken,
+    },
+  });
+  assert.equal(source.response.status, 200, source.text);
+
+  const removedCell = await pool.query(
+    'DELETE FROM price_matrix WHERE scenario_id = $1 AND x_val = 2 AND y_val = 0 RETURNING price',
+    [schemas.ZZScenario]
+  );
+  assert.equal(removedCell.rowCount, 1);
+  try {
+    const preview = await request('/api/recount/preview', {
+      method: 'POST',
+      body: { sourceSku: source.data.fullSku, answers: { kind: 2 }, reason: 'manual correction' },
+    });
+    assert.equal(preview.response.status, 200, preview.text);
+    assert.equal(preview.data.corrected.totalPriceUah, null);
+
+    const applied = await request('/api/recount/apply', {
+      method: 'POST',
+      body: {
+        sourceSku: source.data.fullSku,
+        answers: { kind: 2 },
+        reason: 'manual correction',
+        manualPriceUah: 725,
+      },
+    });
+    assert.equal(applied.response.status, 200, applied.text);
+    assert.equal(applied.data.corrected.manualPriceUah, 725);
+    const stored = await pool.query(
+      'SELECT total_price_uah FROM products WHERE id = $1',
+      [applied.data.correctedProductId]
+    );
+    assert.equal(Number(stored.rows[0].total_price_uah), 725);
+  } finally {
+    await pool.query(
+      `INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
+       VALUES ($1, 2, 0, $2)
+       ON CONFLICT (scenario_id, x_val, y_val) DO UPDATE SET price = EXCLUDED.price`,
+      [schemas.ZZScenario, removedCell.rows[0].price]
+    );
+  }
+});
+
 test('exchange-rate cache never lets an older replica overwrite a newer fetch', async () => {
   const olderFetchedAt = '2026-08-30T10:00:00.000Z';
   const newerFetchedAt = '2026-08-31T10:00:00.000Z';
@@ -957,6 +1015,211 @@ test('repricing preview/apply/rollback and correction blocking work', async () =
   lockClient.release();
   const raceResults = await Promise.all([correctionPromise, repricingPromise]);
   assert.deepEqual(raceResults.map((item) => item.response.status).sort(), [200, 409]);
+});
+
+test('repricing keeps manual-priced products editable across consecutive cycles', async () => {
+  const createProduct = async (kind) => {
+    const preview = await request('/api/preview', {
+      method: 'POST',
+      body: { categoryCode: 'ZZ', answers: { kind }, weight: 0, isCalibrated: 0 },
+    });
+    assert.equal(preview.response.status, 200, preview.text);
+    const saved = await request('/api/save', {
+      method: 'POST',
+      body: {
+        category: 'ZZ',
+        answers: { kind },
+        weight: 0,
+        isCalibrated: 0,
+        skuSchemaVersionId: schemas.ZZ,
+        previewToken: preview.data.previewToken,
+      },
+    });
+    assert.equal(saved.response.status, 200, saved.text);
+    return {
+      ...saved.data,
+      currentPriceUah: Number(preview.data.totalPriceUah),
+    };
+  };
+
+  const keepCurrentProduct = await createProduct(2);
+  const newManualProduct = await createProduct(2);
+  const automaticProduct = await createProduct(1);
+  const appliedBatchIds = [];
+
+  const removedCell = await pool.query(
+    `DELETE FROM price_matrix
+     WHERE scenario_id = $1 AND x_val = 2 AND y_val = 0
+     RETURNING price`,
+    [schemas.ZZScenario]
+  );
+  assert.equal(removedCell.rowCount, 1);
+  await pool.query(
+    'UPDATE price_matrix SET price = price + 100 WHERE scenario_id = $1 AND x_val = 1 AND y_val = 0',
+    [schemas.ZZScenario]
+  );
+
+  try {
+    const preview = await request('/api/admin/repricing/preview', {
+      method: 'POST', body: { scenarioId: schemas.ZZScenario },
+    });
+    assert.equal(preview.response.status, 200, preview.text);
+    const missingItems = preview.data.items.filter((item) => item.errorCode === 'price_missing');
+    const missingProductIds = new Set(missingItems.map((item) => Number(item.productId)));
+    assert.equal(missingProductIds.has(Number(keepCurrentProduct.id)), true);
+    assert.equal(missingProductIds.has(Number(newManualProduct.id)), true);
+    assert.equal(preview.data.summary.errorCount, missingItems.length);
+    assert.ok(preview.data.summary.changedCount > 0);
+
+    const unresolved = await request('/api/admin/repricing/apply', {
+      method: 'POST',
+      body: { scenarioId: schemas.ZZScenario, previewToken: preview.data.previewToken },
+    });
+    assert.equal(unresolved.response.status, 422, unresolved.text);
+
+    const manualOverrides = missingItems.map((item) => ({
+      productId: Number(item.productId),
+      newPriceUah: Number(item.productId) === Number(newManualProduct.id)
+        ? 1750
+        : Number(item.oldPriceUah),
+    }));
+    const invalidOverrides = manualOverrides.map((override) => (
+      Number(override.productId) === Number(keepCurrentProduct.id)
+        ? { ...override, newPriceUah: 0 }
+        : override
+    ));
+    const invalid = await request('/api/admin/repricing/apply', {
+      method: 'POST',
+      body: {
+        scenarioId: schemas.ZZScenario,
+        previewToken: preview.data.previewToken,
+        manualOverrides: invalidOverrides,
+      },
+    });
+    assert.equal(invalid.response.status, 422, invalid.text);
+
+    const draft = await request('/api/admin/repricing/drafts', {
+      method: 'POST',
+      body: {
+        scenarioId: schemas.ZZScenario,
+        manualOverrides,
+        reviewedProductIds: [],
+        uiState: {},
+      },
+    });
+    assert.equal(draft.response.status, 200, draft.text);
+    assert.deepEqual(draft.data.manualOverrides, manualOverrides);
+
+    const applied = await request('/api/admin/repricing/apply', {
+      method: 'POST',
+      body: {
+        scenarioId: schemas.ZZScenario,
+        previewToken: preview.data.previewToken,
+        manualOverrides,
+        draftId: draft.data.draft.id,
+      },
+    });
+    assert.equal(applied.response.status, 200, applied.text);
+    appliedBatchIds.push(Number(applied.data.batch.id));
+
+    const stored = await pool.query(
+      `SELECT id, total_price_uah, details
+       FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
+      [[keepCurrentProduct.id, newManualProduct.id, automaticProduct.id]]
+    );
+    const storedById = new Map(stored.rows.map((row) => [Number(row.id), row]));
+    const kept = storedById.get(Number(keepCurrentProduct.id));
+    const changed = storedById.get(Number(newManualProduct.id));
+    const automatic = storedById.get(Number(automaticProduct.id));
+    assert.equal(Number(kept.total_price_uah), keepCurrentProduct.currentPriceUah);
+    assert.equal(Number(kept.details.manualPriceUah), keepCurrentProduct.currentPriceUah);
+    assert.equal(kept.details.autoPriceUah, null);
+    assert.equal(kept.details.repricing.manualOverride, true);
+    assert.equal(kept.details.repricing.calculatedPriceUah, null);
+    assert.equal(Number(changed.total_price_uah), 1750);
+    assert.equal(Number(changed.details.manualPriceUah), 1750);
+    assert.equal(changed.details.autoPriceUah, null);
+    assert.equal(changed.details.repricing.manualOverride, true);
+    assert.equal(
+      Number(automatic.total_price_uah),
+      automaticProduct.currentPriceUah + 100
+    );
+    assert.equal(
+      Number(automatic.details.autoPriceUah),
+      automaticProduct.currentPriceUah + 100
+    );
+    assert.equal(automatic.details.manualPriceUah, null);
+    assert.equal(automatic.details.repricing.manualOverride, false);
+
+    const secondPreview = await request('/api/admin/repricing/preview', {
+      method: 'POST', body: { scenarioId: schemas.ZZScenario },
+    });
+    assert.equal(secondPreview.response.status, 200, secondPreview.text);
+    const manualItems = secondPreview.data.items.filter(
+      (item) => item.errorCode === 'manual_price'
+    );
+    const repeatedManualItem = manualItems.find(
+      (item) => Number(item.productId) === Number(newManualProduct.id)
+    );
+    assert.ok(repeatedManualItem, 'the manually-priced product must remain in the next preview');
+    assert.equal(Number(repeatedManualItem.oldPriceUah), 1750);
+
+    const secondManualOverrides = manualItems.map((item) => ({
+      productId: Number(item.productId),
+      newPriceUah: Number(item.productId) === Number(newManualProduct.id)
+        ? 1850
+        : Number(item.oldPriceUah),
+    }));
+    const secondDraft = await request('/api/admin/repricing/drafts', {
+      method: 'POST',
+      body: {
+        scenarioId: schemas.ZZScenario,
+        manualOverrides: secondManualOverrides,
+        reviewedProductIds: [],
+        uiState: {},
+      },
+    });
+    assert.equal(secondDraft.response.status, 200, secondDraft.text);
+
+    const secondApplied = await request('/api/admin/repricing/apply', {
+      method: 'POST',
+      body: {
+        scenarioId: schemas.ZZScenario,
+        previewToken: secondPreview.data.previewToken,
+        manualOverrides: secondManualOverrides,
+        draftId: secondDraft.data.draft.id,
+      },
+    });
+    assert.equal(secondApplied.response.status, 200, secondApplied.text);
+    appliedBatchIds.push(Number(secondApplied.data.batch.id));
+
+    const storedAfterSecondCycle = await pool.query(
+      `SELECT total_price_uah, details
+       FROM products WHERE id = $1`,
+      [newManualProduct.id]
+    );
+    assert.equal(Number(storedAfterSecondCycle.rows[0].total_price_uah), 1850);
+    assert.equal(Number(storedAfterSecondCycle.rows[0].details.manualPriceUah), 1850);
+    assert.equal(storedAfterSecondCycle.rows[0].details.autoPriceUah, null);
+    assert.equal(storedAfterSecondCycle.rows[0].details.repricing.manualOverride, true);
+  } finally {
+    for (const appliedBatchId of [...appliedBatchIds].reverse()) {
+      const rollback = await request(`/api/admin/repricing/${appliedBatchId}/rollback`, {
+        method: 'POST', body: {},
+      });
+      assert.equal(rollback.response.status, 200, rollback.text);
+    }
+    await pool.query(
+      `INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
+       VALUES ($1, 2, 0, $2)
+       ON CONFLICT (scenario_id, x_val, y_val) DO UPDATE SET price = EXCLUDED.price`,
+      [schemas.ZZScenario, removedCell.rows[0].price]
+    );
+    await pool.query(
+      'UPDATE price_matrix SET price = price - 100 WHERE scenario_id = $1 AND x_val = 1 AND y_val = 0',
+      [schemas.ZZScenario]
+    );
+  }
 });
 
 test('repricing rolls back every product and batch row after a mid-apply failure', async () => {
