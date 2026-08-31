@@ -10,7 +10,7 @@ const {
 } = require('../utils/pricing-scenarios');
 const { asRuleObject, getRuleDependencies, isRuleMatched } = require('../utils/rules');
 const { roundUah } = require('../utils/money');
-const { parseNonNegativeDecimal } = require('../utils/numbers');
+const { parsePositiveDecimal } = require('../utils/numbers');
 
 function normalizeScenarioGroup(groupName, scenarioName = '') {
   const normalizedGroup = String(groupName || '').trim();
@@ -536,14 +536,30 @@ async function syncScenarioWeightBands(client, scenarioId, weightBands, hadWeigh
 }
 
 async function upsertPriceCell({ scenario_id, x_val, y_val, price }) {
-  const normalizedPrice = parseNonNegativeDecimal(price, 'Ціна');
+  const normalizedScenarioId = Number(scenario_id);
+  const normalizedXVal = Number(x_val);
+  const normalizedYVal = Number(y_val || 0);
+  const hasPrice = price !== undefined
+    && price !== null
+    && !(typeof price === 'string' && price.trim() === '');
+
+  if (!hasPrice) {
+    await pool.query(
+      `DELETE FROM price_matrix
+       WHERE scenario_id = $1 AND x_val = $2 AND y_val = $3`,
+      [normalizedScenarioId, normalizedXVal, normalizedYVal]
+    );
+    return;
+  }
+
+  const normalizedPrice = parsePositiveDecimal(price, 'Ціна');
 
   await pool.query(
     `INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
      VALUES ($1, $2, $3, $4)
      ON CONFLICT (scenario_id, x_val, y_val)
      DO UPDATE SET price = EXCLUDED.price`,
-    [Number(scenario_id), Number(x_val), Number(y_val || 0), normalizedPrice]
+    [normalizedScenarioId, normalizedXVal, normalizedYVal, normalizedPrice]
   );
 }
 

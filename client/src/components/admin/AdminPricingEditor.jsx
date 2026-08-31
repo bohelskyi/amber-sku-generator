@@ -538,7 +538,12 @@ export function AdminPricingEditor({
                                             const normalizedPrice = normalizeDecimalInput(event.currentTarget.value);
                                             const parsedPrice = Number(normalizedPrice);
 
-                                            if (!normalizedPrice || !Number.isFinite(parsedPrice) || parsedPrice < 0) {
+                                            if (!normalizedPrice) {
+                                              handlePriceChange(scenario.id, xOption.id, yOption.id, null);
+                                              return;
+                                            }
+
+                                            if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
                                               event.currentTarget.value = cell ? String(cell.price) : '';
                                               return;
                                             }

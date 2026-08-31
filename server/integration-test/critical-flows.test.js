@@ -508,6 +508,60 @@ test('duplicate question invariant is atomic across independent transactions', a
   assert.equal(stored.rows[0].count, 1);
 });
 
+test('price-cell API stores only positive prices and treats empty or missing price as deletion', async () => {
+  const cell = {
+    scenario_id: schemas.ZZScenario,
+    x_val: 999,
+    y_val: 0,
+  };
+  const readCell = () => pool.query(
+    `SELECT price FROM price_matrix
+     WHERE scenario_id = $1 AND x_val = $2 AND y_val = $3`,
+    [cell.scenario_id, cell.x_val, cell.y_val]
+  );
+
+  try {
+    const created = await request('/api/admin/price-cell', {
+      method: 'POST',
+      body: { ...cell, price: '12.50' },
+    });
+    assert.equal(created.response.status, 200, created.text);
+    assert.equal(Number((await readCell()).rows[0].price), 12.5);
+
+    const zero = await request('/api/admin/price-cell', {
+      method: 'POST',
+      body: { ...cell, price: 0 },
+    });
+    assert.equal(zero.response.status, 400, zero.text);
+    assert.match(zero.data.error, /більшим за 0/);
+    assert.equal(Number((await readCell()).rows[0].price), 12.5);
+
+    const blank = await request('/api/admin/price-cell', {
+      method: 'POST',
+      body: { ...cell, price: '   ' },
+    });
+    assert.equal(blank.response.status, 200, blank.text);
+    assert.equal((await readCell()).rows.length, 0);
+
+    await request('/api/admin/price-cell', {
+      method: 'POST',
+      body: { ...cell, price: 8 },
+    });
+    const missing = await request('/api/admin/price-cell', {
+      method: 'POST',
+      body: cell,
+    });
+    assert.equal(missing.response.status, 200, missing.text);
+    assert.equal((await readCell()).rows.length, 0);
+  } finally {
+    await pool.query(
+      `DELETE FROM price_matrix
+       WHERE scenario_id = $1 AND x_val = $2 AND y_val = $3`,
+      [cell.scenario_id, cell.x_val, cell.y_val]
+    );
+  }
+});
+
 test('preview/save are authoritative and concurrent sequences are unique', async () => {
   const preview = await request('/api/preview', {
     method: 'POST',
