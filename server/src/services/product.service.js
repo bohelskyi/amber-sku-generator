@@ -577,7 +577,7 @@ function getProductPreviewToken(preview, categoryCode, answers, isCalibrated) {
   const payload = {
     categoryCode,
     answers: stableAnswers,
-    isCalibrated: answers.is_calibrated ?? isCalibrated ?? null,
+    isCalibrated: Number(answers.is_calibrated ?? isCalibrated ?? 0),
     weight: Number(preview.weightVal || 0),
     skuSchemaVersionId: Number(preview.skuSchemaVersionId),
     baseSku: preview.baseSku,

@@ -47,3 +47,12 @@ test('preview token changes when the effective price changes', () => {
   );
   assert.notEqual(changed, first);
 });
+
+test('preview token treats an unset calibration answer as false', () => {
+  const unset = getProductPreviewToken(preview(), 'ZZ', { kind: 1 }, null);
+  const explicitlyFalse = getProductPreviewToken(preview(), 'ZZ', { kind: 1 }, 0);
+  const explicitlyTrue = getProductPreviewToken(preview(), 'ZZ', { kind: 1 }, 1);
+
+  assert.equal(explicitlyFalse, unset);
+  assert.notEqual(explicitlyTrue, unset);
+});

@@ -609,7 +609,7 @@ test('preview/save are authoritative and concurrent sequences are unique', async
 test('save rejects a preview after authoritative pricing changes', async () => {
   const preview = await request('/api/preview', {
     method: 'POST',
-    body: { categoryCode: 'ZZ', answers: { kind: 2 }, weight: 0 },
+    body: { categoryCode: 'ZZ', answers: { kind: 2 }, weight: 0, isCalibrated: 0 },
   });
   assert.equal(preview.response.status, 200, preview.text);
   const countBefore = await pool.query(
@@ -617,16 +617,24 @@ test('save rejects a preview after authoritative pricing changes', async () => {
      WHERE category = 'ZZ' AND details->'answers'->>'kind' = '2'`
   );
   try {
-    await pool.query(
+    const changedMatrix = await pool.query(
       'UPDATE price_matrix SET price = price + 25 WHERE scenario_id = $1 AND x_val = 2',
       [schemas.ZZScenario]
     );
+    assert.equal(changedMatrix.rowCount, 1);
+    const changedPreview = await request('/api/preview', {
+      method: 'POST',
+      body: { categoryCode: 'ZZ', answers: { kind: 2 }, weight: 0, isCalibrated: 0 },
+    });
+    assert.equal(changedPreview.response.status, 200, changedPreview.text);
+    assert.notEqual(changedPreview.data.previewToken, preview.data.previewToken);
     const staleSave = await request('/api/save', {
       method: 'POST',
       body: {
         category: 'ZZ',
         answers: { kind: 2 },
         weight: 0,
+        isCalibrated: 0,
         skuSchemaVersionId: schemas.ZZ,
         previewToken: preview.data.previewToken,
       },
@@ -664,7 +672,10 @@ test('required answers, weight, schema ownership, and manual fallback fail close
   assert.equal(wrongSchema.response.status, 422);
 
   const noPricePreview = await request('/api/preview', {
-    method: 'POST', body: { categoryCode: 'MM', answers: { kind: 1 }, weight: 0 },
+    method: 'POST',
+    body: {
+      categoryCode: 'MM', answers: { kind: 1 }, weight: 0, isCalibrated: 0,
+    },
   });
   assert.equal(noPricePreview.response.status, 200, noPricePreview.text);
 
@@ -682,6 +693,7 @@ test('required answers, weight, schema ownership, and manual fallback fail close
     method: 'POST',
     body: {
       category: 'MM', answers: { kind: 1 }, weight: 0,
+      isCalibrated: null,
       skuSchemaVersionId: schemas.MM, previewToken: noPricePreview.data.previewToken,
     },
   });
@@ -691,6 +703,7 @@ test('required answers, weight, schema ownership, and manual fallback fail close
     method: 'POST',
     body: {
       category: 'MM', answers: { kind: 1 }, weight: 0,
+      isCalibrated: null,
       skuSchemaVersionId: schemas.MM, previewToken: noPricePreview.data.previewToken,
       manualPriceUah: 321,
     },
