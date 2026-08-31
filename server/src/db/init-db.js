@@ -484,7 +484,14 @@ async function seedDefaultData() {
       console.log('Empty DB. Seeding default configuration and prices...');
       await migrateData(client);
     }
-    await ensureCalibratedQuestions(client);
+    await client.query('BEGIN');
+    try {
+      await ensureCalibratedQuestions(client);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
   } finally {
     await client.query('SELECT pg_advisory_unlock(hashtext($1))', ['amber_default_seed']);
     client.release();

@@ -1,40 +1,60 @@
 const fs = require('fs/promises');
 const path = require('path');
 const crypto = require('node:crypto');
-const pool = require('./pool');
+const { Client } = require('pg');
+const { DATABASE_URL, useSsl } = require('../config/env');
 
 const MIGRATIONS_LOCK_KEY = 'amber_schema_migrations';
 const migrationsDirectory = path.resolve(__dirname, '../../migrations');
 
-async function runMigrations() {
-  const client = await pool.connect();
+function migrationQuery(client, text, values = []) {
+  return client.query({ text, values, query_timeout: 0 });
+}
+
+async function runMigrations({ directory = migrationsDirectory } = {}) {
+  const client = new Client({
+    connectionString: DATABASE_URL,
+    ssl: useSsl ? { rejectUnauthorized: false } : false,
+    connectionTimeoutMillis: Number(process.env.PG_CONNECT_TIMEOUT_MS || 5000),
+    query_timeout: 0,
+    statement_timeout: 0,
+  });
+  await client.connect();
 
   try {
-    await client.query('SELECT pg_advisory_lock(hashtext($1))', [MIGRATIONS_LOCK_KEY]);
-    await client.query(`
+    await migrationQuery(client, 'SET statement_timeout = 0');
+    await migrationQuery(client, 'SELECT pg_advisory_lock(hashtext($1))', [MIGRATIONS_LOCK_KEY]);
+    await migrationQuery(client, `
       CREATE TABLE IF NOT EXISTS schema_migrations (
         name TEXT PRIMARY KEY,
         checksum TEXT,
         applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    await client.query('ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum TEXT');
+    await migrationQuery(
+      client,
+      'ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum TEXT'
+    );
 
-    const migrationFiles = (await fs.readdir(migrationsDirectory))
+    const migrationFiles = (await fs.readdir(directory))
       .filter((fileName) => fileName.endsWith('.sql'))
       .sort();
-    const appliedResult = await client.query('SELECT name, checksum FROM schema_migrations');
+    const appliedResult = await migrationQuery(
+      client,
+      'SELECT name, checksum FROM schema_migrations'
+    );
     const appliedMigrations = new Map(
       appliedResult.rows.map((row) => [row.name, row.checksum])
     );
 
     for (const fileName of migrationFiles) {
-      const sql = await fs.readFile(path.join(migrationsDirectory, fileName), 'utf8');
+      const sql = await fs.readFile(path.join(directory, fileName), 'utf8');
       const checksum = crypto.createHash('sha256').update(sql).digest('hex');
       if (appliedMigrations.has(fileName)) {
         const appliedChecksum = appliedMigrations.get(fileName);
         if (!appliedChecksum) {
-          await client.query(
+          await migrationQuery(
+            client,
             'UPDATE schema_migrations SET checksum = $1 WHERE name = $2 AND checksum IS NULL',
             [checksum, fileName]
           );
@@ -44,23 +64,28 @@ async function runMigrations() {
         continue;
       }
 
-      await client.query('BEGIN');
+      await migrationQuery(client, 'BEGIN');
       try {
-        await client.query(sql);
-        await client.query(
+        await migrationQuery(client, sql);
+        await migrationQuery(
+          client,
           'INSERT INTO schema_migrations (name, checksum) VALUES ($1, $2)',
           [fileName, checksum]
         );
-        await client.query('COMMIT');
+        await migrationQuery(client, 'COMMIT');
         console.log(`Applied migration ${fileName}`);
       } catch (err) {
-        await client.query('ROLLBACK');
+        await migrationQuery(client, 'ROLLBACK');
         throw err;
       }
     }
   } finally {
-    await client.query('SELECT pg_advisory_unlock(hashtext($1))', [MIGRATIONS_LOCK_KEY]);
-    client.release();
+    await migrationQuery(
+      client,
+      'SELECT pg_advisory_unlock(hashtext($1))',
+      [MIGRATIONS_LOCK_KEY]
+    );
+    await client.end();
   }
 }
 

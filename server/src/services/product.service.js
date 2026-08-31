@@ -558,6 +558,48 @@ function validationError(message) {
   return error;
 }
 
+function parseManualPriceUah(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  if (typeof value !== 'number' && typeof value !== 'string') {
+    throw validationError('Ручна ціна повинна бути числом, більшим за 0.');
+  }
+  const rounded = roundUah(value);
+  if (!Number.isFinite(Number(value)) || rounded === null || rounded <= 0) {
+    throw validationError('Ручна ціна повинна бути більшою за 0.');
+  }
+  return rounded;
+}
+
+function getProductPreviewToken(preview, categoryCode, answers, isCalibrated) {
+  const stableAnswers = Object.entries(answers)
+    .map(([key, value]) => [key, value ?? null])
+    .sort(([firstKey], [secondKey]) => firstKey.localeCompare(secondKey));
+  const payload = {
+    categoryCode,
+    answers: stableAnswers,
+    isCalibrated: answers.is_calibrated ?? isCalibrated ?? null,
+    weight: Number(preview.weightVal || 0),
+    skuSchemaVersionId: Number(preview.skuSchemaVersionId),
+    baseSku: preview.baseSku,
+    mode: preview.mode,
+    priceMode: preview.priceMode,
+    pricePerGram: preview.pricePerGram,
+    fixedPriceUah: preview.fixedPriceUah ?? null,
+    totalPrice: preview.totalPrice,
+    totalPriceUah: preview.totalPriceUah ?? null,
+    uahRate: preview.uahRate ?? null,
+    uahRateDate: preview.uahRateDate ?? null,
+  };
+  return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+}
+
+function finalizeProductPreview(preview, categoryCode, answers, isCalibrated) {
+  return {
+    ...preview,
+    previewToken: getProductPreviewToken(preview, categoryCode, answers, isCalibrated),
+  };
+}
+
 async function validateNonSkuAnswers(categoryCode, answers, isCalibrated, queryable) {
   const result = await queryable.query(
     `SELECT q.id, q.key, q.label, q.required, q.input_type, q.visible_if_json,
@@ -744,7 +786,7 @@ async function buildProductPreview(
     const prevFullSku =
       lastSeq > 0 ? sequenceResult.rows[0].full_sku || appendSkuSuffix(baseSku, lastSeq) : 'Немає';
 
-    return {
+    return finalizeProductPreview({
       mode: 'sequence',
       skuSchemaVersionId: Number(schema.id),
       skuSchemaVersion: schema.version,
@@ -762,7 +804,7 @@ async function buildProductPreview(
       logMessage,
       pricingDetails,
       ...currencyPayload,
-    };
+    }, normalizedCategoryCode, normalizedAnswers, isCalibrated);
   }
 
   const weightInt = Math.round(weightVal);
@@ -780,7 +822,7 @@ async function buildProductPreview(
     ]
   );
 
-  return {
+  return finalizeProductPreview({
     mode: 'weight',
     skuSchemaVersionId: Number(schema.id),
     skuSchemaVersion: schema.version,
@@ -798,7 +840,7 @@ async function buildProductPreview(
     logMessage,
     pricingDetails,
     ...currencyPayload,
-  };
+  }, normalizedCategoryCode, normalizedAnswers, isCalibrated);
 }
 
 async function resolveCorrectionSku(proposedFullSku, queryable = pool) {
@@ -868,15 +910,7 @@ async function buildProductRecountPreview({
     isCalibrated: nextIsCalibrated,
   });
   const correctionSku = await resolveCorrectionSku(correctedPreview.fullProposedSku);
-  const previewManualPrice = manualPriceUah === undefined
-    || manualPriceUah === null
-    || String(manualPriceUah).trim() === ''
-    ? null
-    : roundUah(manualPriceUah);
-  if (previewManualPrice !== null
-      && (!Number.isFinite(Number(manualPriceUah)) || previewManualPrice <= 0)) {
-    throw validationError('Ручна ціна повинна бути більшою за 0.');
-  }
+  const previewManualPrice = parseManualPriceUah(manualPriceUah);
   if (previewManualPrice) {
     const previewRate = Number(correctedPreview.uahRate);
     correctedPreview.totalPriceUah = previewManualPrice;
@@ -985,15 +1019,7 @@ async function applyProductRecount(payload) {
       skuSchemaVersionId: preview.corrected.skuSchemaVersionId,
     }, { queryable: client, lockSequence: true });
     const correctionAutoPriceUah = roundUah(freshPreview.totalPriceUah);
-    const correctionManualPriceUah = payload.manualPriceUah === undefined
-      || payload.manualPriceUah === null
-      || String(payload.manualPriceUah).trim() === ''
-      ? null
-      : roundUah(payload.manualPriceUah);
-    if (correctionManualPriceUah !== null
-        && (!Number.isFinite(Number(payload.manualPriceUah)) || correctionManualPriceUah <= 0)) {
-      throw validationError('Ручна ціна повинна бути більшою за 0.');
-    }
+    const correctionManualPriceUah = parseManualPriceUah(payload.manualPriceUah);
     const correctionFinalPriceUah = correctionManualPriceUah
       || (correctionAutoPriceUah > 0 ? correctionAutoPriceUah : null);
     if (!correctionFinalPriceUah) {
@@ -1217,6 +1243,15 @@ async function saveProduct(payload) {
       skuSchemaVersionId: payload.skuSchemaVersionId,
     }, { queryable: client, lockSequence: true });
 
+    if (!payload.previewToken) {
+      throw validationError('Для збереження потрібен previewToken з актуального preview.');
+    }
+    if (String(payload.previewToken) !== preview.previewToken) {
+      const error = new Error('Ціна або параметри змінилися після preview. Оновіть preview перед збереженням.');
+      error.statusCode = 409;
+      throw error;
+    }
+
     fullSku = preview.fullProposedSku;
     if (payload.useVariation || payload.details?.variationNumber) {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
@@ -1226,13 +1261,7 @@ async function saveProduct(payload) {
     }
 
     const manualPriceRaw = payload.manualPriceUah ?? payload.details?.manualPriceUah;
-    const hasManualPrice = manualPriceRaw !== undefined
-      && manualPriceRaw !== null
-      && String(manualPriceRaw).trim() !== '';
-    const manualPriceUah = hasManualPrice ? roundUah(manualPriceRaw) : null;
-    if (hasManualPrice && (!Number.isFinite(Number(manualPriceRaw)) || manualPriceUah <= 0)) {
-      throw validationError('Ручна ціна повинна бути більшою за 0.');
-    }
+    const manualPriceUah = parseManualPriceUah(manualPriceRaw);
     const autoPriceUah = roundUah(preview.totalPriceUah);
     const totalPriceUah = manualPriceUah || (autoPriceUah > 0 ? autoPriceUah : null);
     if (!totalPriceUah) {
@@ -1348,4 +1377,5 @@ module.exports = {
   getRecentProducts,
   getProductBySku,
   getProductStateSignature,
+  getProductPreviewToken,
 };

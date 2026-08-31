@@ -12,9 +12,7 @@ const {
   getRecentProducts,
 } = require('../services/product.service');
 const {
-  getExportRows,
   getExportStatus,
-  buildExportCsv,
   confirmExportSnapshot,
   createExportSnapshot,
   getExportSnapshot,
@@ -140,20 +138,9 @@ router.get('/export/status', async (req, res) => {
 });
 
 router.get('/export/csv', async (req, res) => {
-  try {
-    const { fromSku, toSku } = req.query;
-    const exportData = await getExportRows(fromSku, toSku);
-    const csv = buildExportCsv(exportData);
-
-    const suffixPart = exportData.range.toSku ? `-${exportData.range.toSku}` : '-to-latest';
-    const fileName = `amber-export-${exportData.range.fromSku}${suffixPart}.csv`;
-
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-    res.send(csv);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
+  res.status(410).json({
+    error: 'Прямий CSV-експорт вимкнено. Створіть і підтвердьте immutable export snapshot.',
+  });
 });
 
 router.post('/export/snapshots', async (req, res) => {

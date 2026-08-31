@@ -19,11 +19,44 @@ const app = require('../src/app');
 const { runMigrations } = require('../src/db/run-migrations');
 const { seedDefaultData } = require('../src/db/init-db');
 const { ensureLegacySkuSchemas } = require('../src/services/sku-schema.service');
+const { saveLastKnownRate } = require('../src/services/currency.service');
 
 let server;
 let baseUrl;
 const schemas = {};
 let primarySku;
+const serverRoot = path.resolve(__dirname, '..');
+
+function databaseUrlFor(databaseName) {
+  if (!/^[a-z0-9_]+$/.test(databaseName)) {
+    throw new Error(`Unsafe test database name: ${databaseName}`);
+  }
+  const url = new URL(TEST_DATABASE_URL);
+  url.pathname = `/${databaseName}`;
+  return url.toString();
+}
+
+async function recreateTestDatabase(databaseName) {
+  await pool.query(`DROP DATABASE IF EXISTS ${databaseName} WITH (FORCE)`);
+  await pool.query(`CREATE DATABASE ${databaseName}`);
+  return databaseUrlFor(databaseName);
+}
+
+async function dropTestDatabase(databaseName) {
+  await pool.query(`DROP DATABASE IF EXISTS ${databaseName} WITH (FORCE)`);
+}
+
+async function runNodeInDatabase(databaseUrl, source, extraEnv = {}) {
+  return execFileAsync(process.execPath, ['-e', source], {
+    cwd: serverRoot,
+    env: {
+      ...process.env,
+      DATABASE_URL: databaseUrl,
+      NBU_RATE_OVERRIDE: '40',
+      ...extraEnv,
+    },
+  });
+}
 
 async function request(url, { method = 'GET', body, headers = {} } = {}) {
   const response = await fetch(`${baseUrl}${url}`, {
@@ -110,6 +143,371 @@ test('health endpoints report liveness and DB readiness', async () => {
   assert.equal((await request('/health/ready')).response.status, 200);
 });
 
+test('parallel replica bootstrap is idempotent through calibrated questions and SKU schemas', async () => {
+  const databaseName = 'amber_startup_race_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const bootstrapSource = `
+    const db = require('./src/db/pool');
+    const { seedDefaultData } = require('./src/db/init-db');
+    const { ensureLegacySkuSchemas } = require('./src/services/sku-schema.service');
+    (async () => {
+      try {
+        await seedDefaultData();
+        await ensureLegacySkuSchemas();
+      } finally {
+        await db.end();
+      }
+    })().catch((error) => { console.error(error); process.exitCode = 1; });
+  `;
+  try {
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations()
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+    await Promise.all(Array.from(
+      { length: 4 },
+      () => runNodeInDatabase(databaseUrl, bootstrapSource)
+    ));
+
+    const replicaPool = new Pool({ connectionString: databaseUrl });
+    try {
+      const [categoryResult, duplicateQuestions, calibratedQuestions, schemaCounts] =
+        await Promise.all([
+          replicaPool.query('SELECT count(*)::int AS count FROM categories'),
+          replicaPool.query(`
+            SELECT category_code, key, count(*)::int AS count
+            FROM questions
+            GROUP BY category_code, key
+            HAVING count(*) > 1
+          `),
+          replicaPool.query(`
+            SELECT raw.category_code
+            FROM questions raw
+            LEFT JOIN questions calibrated
+              ON calibrated.category_code = raw.category_code
+             AND calibrated.key = 'is_calibrated'
+            WHERE raw.key = 'raw_type'
+            GROUP BY raw.category_code
+            HAVING count(calibrated.id) <> 1
+          `),
+          replicaPool.query(`
+            SELECT category_code, count(*)::int AS count
+            FROM sku_schema_versions
+            GROUP BY category_code
+            HAVING count(*) <> 1
+          `),
+        ]);
+      assert.ok(Number(categoryResult.rows[0].count) > 0);
+      assert.deepEqual(duplicateQuestions.rows, []);
+      assert.deepEqual(calibratedQuestions.rows, []);
+      assert.deepEqual(schemaCounts.rows, []);
+    } finally {
+      await replicaPool.end();
+    }
+  } finally {
+    await dropTestDatabase(databaseName);
+  }
+});
+
+test('calibrated-question seeding rolls back a partial failure and succeeds on retry', async () => {
+  const databaseName = 'amber_seed_failure_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const seedPool = new Pool({ connectionString: databaseUrl });
+  try {
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations()
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+    const rawQuestion = await seedPool.query(
+      `INSERT INTO categories (code, name, requires_weight) VALUES ('QQ', 'Seed retry', 0);
+       INSERT INTO questions
+       (category_code, key, label, sku_index, display_order, required, include_in_sku, input_type)
+       VALUES ('QQ', 'raw_type', 'Raw type', 1, 1, 1, 1, 'options')
+       RETURNING id`
+    );
+    await seedPool.query(
+      `INSERT INTO options (question_id, value_id, sku_code, label)
+       VALUES ($1, 1, '1', 'Natural')`,
+      [rawQuestion[1].rows[0].id]
+    );
+    await seedPool.query(`
+      CREATE OR REPLACE FUNCTION fail_calibrated_option_seed()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM questions q
+          WHERE q.id = NEW.question_id
+            AND q.category_code = 'QQ'
+            AND q.key = 'is_calibrated'
+        ) THEN
+          RAISE EXCEPTION 'seed option failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER fail_calibrated_option_seed
+      BEFORE INSERT ON options
+      FOR EACH ROW EXECUTE FUNCTION fail_calibrated_option_seed();
+    `);
+    const seedSource = `
+      const db = require('./src/db/pool');
+      const { seedDefaultData } = require('./src/db/init-db');
+      seedDefaultData()
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `;
+    await assert.rejects(runNodeInDatabase(databaseUrl, seedSource));
+    const afterFailure = await seedPool.query(
+      `SELECT count(*)::int AS count FROM questions
+       WHERE category_code = 'QQ' AND key = 'is_calibrated'`
+    );
+    assert.equal(afterFailure.rows[0].count, 0);
+
+    await seedPool.query('DROP TRIGGER fail_calibrated_option_seed ON options');
+    await seedPool.query('DROP FUNCTION fail_calibrated_option_seed()');
+    await runNodeInDatabase(databaseUrl, seedSource);
+    const afterRetry = await seedPool.query(
+      `SELECT count(DISTINCT q.id)::int AS questions, count(o.id)::int AS options
+       FROM questions q
+       LEFT JOIN options o ON o.question_id = q.id
+       WHERE q.category_code = 'QQ' AND q.key = 'is_calibrated'`
+    );
+    assert.equal(afterRetry.rows[0].questions, 1);
+    assert.equal(afterRetry.rows[0].options, 3);
+  } finally {
+    await seedPool.end();
+    await dropTestDatabase(databaseName);
+  }
+});
+
+test('migrations ignore request query timeouts for legitimate long DDL', async () => {
+  const databaseName = 'amber_migration_timeout_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const migrationDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-migrations-'));
+  try {
+    await fs.writeFile(
+      path.join(migrationDirectory, '001_slow.sql'),
+      'SELECT pg_sleep(0.2); CREATE TABLE slow_migration_completed (id INTEGER PRIMARY KEY);\n'
+    );
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations({ directory: ${JSON.stringify(migrationDirectory)} })
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `, {
+      PG_QUERY_TIMEOUT_MS: '50',
+      PG_STATEMENT_TIMEOUT_MS: '50',
+    });
+    const migrationPool = new Pool({ connectionString: databaseUrl });
+    try {
+      const result = await migrationPool.query(
+        "SELECT to_regclass('public.slow_migration_completed') AS table_name"
+      );
+      assert.equal(result.rows[0].table_name, 'slow_migration_completed');
+    } finally {
+      await migrationPool.end();
+    }
+  } finally {
+    await fs.rm(migrationDirectory, { recursive: true, force: true });
+    await dropTestDatabase(databaseName);
+  }
+});
+
+test('migration failure rolls back only the failing file and leaves it unapplied', async () => {
+  const databaseName = 'amber_migration_failure_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const migrationDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-failing-migrations-'));
+  try {
+    await fs.writeFile(
+      path.join(migrationDirectory, '001_success.sql'),
+      'CREATE TABLE successful_migration (id INTEGER PRIMARY KEY);\n'
+    );
+    await fs.writeFile(
+      path.join(migrationDirectory, '002_failure.sql'),
+      'CREATE TABLE rolled_back_migration (id INTEGER); SELECT * FROM table_that_does_not_exist;\n'
+    );
+    await assert.rejects(runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations({ directory: ${JSON.stringify(migrationDirectory)} })
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `));
+
+    const migrationPool = new Pool({ connectionString: databaseUrl });
+    try {
+      const state = await migrationPool.query(`
+        SELECT to_regclass('public.successful_migration') AS successful,
+               to_regclass('public.rolled_back_migration') AS rolled_back,
+               array_agg(name ORDER BY name) AS applied
+        FROM schema_migrations
+      `);
+      assert.equal(state.rows[0].successful, 'successful_migration');
+      assert.equal(state.rows[0].rolled_back, null);
+      assert.deepEqual(state.rows[0].applied, ['001_success.sql']);
+    } finally {
+      await migrationPool.end();
+    }
+  } finally {
+    await fs.rm(migrationDirectory, { recursive: true, force: true });
+    await dropTestDatabase(databaseName);
+  }
+});
+
+test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent database topology', async () => {
+  const freshName = 'amber_fresh_schema_test';
+  const upgradeName = 'amber_upgrade_schema_test';
+  const checkpointName = 'amber_checkpoint_schema_test';
+  const freshUrl = await recreateTestDatabase(freshName);
+  const upgradeUrl = await recreateTestDatabase(upgradeName);
+  const checkpointUrl = await recreateTestDatabase(checkpointName);
+  const oldMigrationDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-old-migrations-'));
+  const checkpointMigrationDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'amber-checkpoint-migrations-')
+  );
+  try {
+    const allMigrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
+      .filter((fileName) => fileName.endsWith('.sql'));
+    const migrationFiles = allMigrationFiles
+      .filter((fileName) => /^(00[1-9]|010|011)_/.test(fileName));
+    await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
+      path.resolve(serverRoot, 'migrations', fileName),
+      path.resolve(oldMigrationDirectory, fileName)
+    )));
+    await Promise.all(allMigrationFiles
+      .filter((fileName) => !fileName.startsWith('015_'))
+      .map((fileName) => fs.copyFile(
+        path.resolve(serverRoot, 'migrations', fileName),
+        path.resolve(checkpointMigrationDirectory, fileName)
+      )));
+
+    await runNodeInDatabase(freshUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      (async () => {
+        await runMigrations();
+        await runMigrations();
+        await db.end();
+      })().catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+    await runNodeInDatabase(upgradeUrl, `
+      const db = require('./src/db/pool');
+      const { legacyInitDb } = require('./src/db/init-db');
+      const { runMigrations } = require('./src/db/run-migrations');
+      const { ensureLegacySkuSchemas } = require('./src/services/sku-schema.service');
+      (async () => {
+        await legacyInitDb();
+        await runMigrations({ directory: ${JSON.stringify(oldMigrationDirectory)} });
+        await db.query('UPDATE schema_migrations SET checksum = NULL');
+        await ensureLegacySkuSchemas();
+        await runMigrations();
+        await runMigrations();
+        await db.end();
+      })().catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+    await runNodeInDatabase(checkpointUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      (async () => {
+        await runMigrations({ directory: ${JSON.stringify(checkpointMigrationDirectory)} });
+        await runMigrations();
+        await runMigrations();
+        await db.end();
+      })().catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+
+    const topologyQueries = [
+      `SELECT table_name, column_name, data_type, udt_name, is_nullable, column_default,
+              numeric_precision, numeric_scale
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+       ORDER BY table_name, column_name`,
+      `SELECT c.conrelid::regclass::text AS table_name, c.conname,
+              pg_get_constraintdef(c.oid) AS definition, c.convalidated
+       FROM pg_constraint c
+       JOIN pg_namespace n ON n.oid = c.connamespace
+       WHERE n.nspname = 'public'
+       ORDER BY table_name, c.conname`,
+      `SELECT tablename, indexname, indexdef
+       FROM pg_indexes
+       WHERE schemaname = 'public'
+       ORDER BY tablename, indexname`,
+    ];
+    const freshPool = new Pool({ connectionString: freshUrl });
+    const upgradePool = new Pool({ connectionString: upgradeUrl });
+    const checkpointPool = new Pool({ connectionString: checkpointUrl });
+    try {
+      for (const query of topologyQueries) {
+        const [fresh, upgraded, checkpoint] = await Promise.all([
+          freshPool.query(query),
+          upgradePool.query(query),
+          checkpointPool.query(query),
+        ]);
+        assert.deepEqual(upgraded.rows, fresh.rows);
+        assert.deepEqual(checkpoint.rows, fresh.rows);
+      }
+      const checksums = await upgradePool.query(
+        'SELECT count(*)::int AS count FROM schema_migrations WHERE checksum IS NULL'
+      );
+      assert.equal(checksums.rows[0].count, 0);
+      const checkpointMigration = await checkpointPool.query(
+        "SELECT count(*)::int AS count FROM schema_migrations WHERE name LIKE '015_%'"
+      );
+      assert.equal(checkpointMigration.rows[0].count, 1);
+    } finally {
+      await freshPool.end();
+      await upgradePool.end();
+      await checkpointPool.end();
+    }
+  } finally {
+    await fs.rm(oldMigrationDirectory, { recursive: true, force: true });
+    await fs.rm(checkpointMigrationDirectory, { recursive: true, force: true });
+    await dropTestDatabase(freshName);
+    await dropTestDatabase(upgradeName);
+    await dropTestDatabase(checkpointName);
+  }
+});
+
+test('duplicate question invariant is atomic across independent transactions', async () => {
+  const questionKey = `concurrent_question_${Date.now()}`;
+  const worker = async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `INSERT INTO questions
+         (category_code, key, label, sku_index, display_order, required, include_in_sku, input_type)
+         VALUES ('ZZ', $1, 'Concurrent', 99, 99, 0, 0, 'text')`,
+        [questionKey]
+      );
+      await client.query('SELECT pg_sleep(0.15)');
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
+
+  const outcomes = await Promise.allSettled([worker(), worker()]);
+  assert.equal(outcomes.filter((outcome) => outcome.status === 'fulfilled').length, 1);
+  assert.equal(outcomes.filter((outcome) => outcome.status === 'rejected').length, 1);
+  assert.equal(outcomes.find((outcome) => outcome.status === 'rejected').reason.code, '23505');
+  const stored = await pool.query(
+    'SELECT count(*)::int AS count FROM questions WHERE category_code = $1 AND key = $2',
+    ['ZZ', questionKey]
+  );
+  assert.equal(stored.rows[0].count, 1);
+});
+
 test('preview/save are authoritative and concurrent sequences are unique', async () => {
   const preview = await request('/api/preview', {
     method: 'POST',
@@ -121,6 +519,7 @@ test('preview/save are authoritative and concurrent sequences are unique', async
     answers: { kind: 1 },
     weight: 0,
     skuSchemaVersionId: schemas.ZZ,
+    previewToken: preview.data.previewToken,
     fullSku: 'ATTACKER-SKU',
     totalPriceUah: 1,
     baseSku: 'WRONG',
@@ -142,6 +541,54 @@ test('preview/save are authoritative and concurrent sequences are unique', async
   ]);
   assert.deepEqual(concurrent.map((item) => item.response.status), [200, 200]);
   assert.equal(new Set(concurrent.map((item) => item.data.fullSku)).size, 2);
+  const concurrentStored = await pool.query(
+    `SELECT full_sku, sequence_number
+     FROM products
+     WHERE full_sku = ANY($1::text[])
+     ORDER BY sequence_number`,
+    [concurrent.map((item) => item.data.fullSku)]
+  );
+  assert.equal(concurrentStored.rows.length, 2);
+  assert.equal(new Set(concurrentStored.rows.map((row) => Number(row.sequence_number))).size, 2);
+});
+
+test('save rejects a preview after authoritative pricing changes', async () => {
+  const preview = await request('/api/preview', {
+    method: 'POST',
+    body: { categoryCode: 'ZZ', answers: { kind: 2 }, weight: 0 },
+  });
+  assert.equal(preview.response.status, 200, preview.text);
+  const countBefore = await pool.query(
+    `SELECT count(*)::int AS count FROM products
+     WHERE category = 'ZZ' AND details->'answers'->>'kind' = '2'`
+  );
+  try {
+    await pool.query(
+      'UPDATE price_matrix SET price = price + 25 WHERE scenario_id = $1 AND x_val = 2',
+      [schemas.ZZScenario]
+    );
+    const staleSave = await request('/api/save', {
+      method: 'POST',
+      body: {
+        category: 'ZZ',
+        answers: { kind: 2 },
+        weight: 0,
+        skuSchemaVersionId: schemas.ZZ,
+        previewToken: preview.data.previewToken,
+      },
+    });
+    assert.equal(staleSave.response.status, 409, staleSave.text);
+    const countAfter = await pool.query(
+      `SELECT count(*)::int AS count FROM products
+       WHERE category = 'ZZ' AND details->'answers'->>'kind' = '2'`
+    );
+    assert.equal(countAfter.rows[0].count, countBefore.rows[0].count);
+  } finally {
+    await pool.query(
+      'UPDATE price_matrix SET price = price - 25 WHERE scenario_id = $1 AND x_val = 2',
+      [schemas.ZZScenario]
+    );
+  }
 });
 
 test('required answers, weight, schema ownership, and manual fallback fail closed', async () => {
@@ -155,23 +602,103 @@ test('required answers, weight, schema ownership, and manual fallback fail close
   assert.equal(weight.response.status, 422);
   const wrongSchema = await request('/api/save', {
     method: 'POST',
-    body: { category: 'MM', answers: { kind: 1 }, weight: 0, skuSchemaVersionId: schemas.ZZ, manualPriceUah: 200 },
+    body: {
+      category: 'MM', answers: { kind: 1 }, weight: 0,
+      skuSchemaVersionId: schemas.ZZ, previewToken: 'wrong', manualPriceUah: 200,
+    },
   });
   assert.equal(wrongSchema.response.status, 422);
 
+  const noPricePreview = await request('/api/preview', {
+    method: 'POST', body: { categoryCode: 'MM', answers: { kind: 1 }, weight: 0 },
+  });
+  assert.equal(noPricePreview.response.status, 200, noPricePreview.text);
+
+  const legacyPayload = await request('/api/save', {
+    method: 'POST',
+    body: {
+      category: 'MM', answers: { kind: 1 }, weight: 0,
+      skuSchemaVersionId: schemas.MM, manualPriceUah: 321,
+    },
+  });
+  assert.equal(legacyPayload.response.status, 422);
+  assert.match(legacyPayload.data.error, /previewToken/);
+
   const noAuto = await request('/api/save', {
     method: 'POST',
-    body: { category: 'MM', answers: { kind: 1 }, weight: 0, skuSchemaVersionId: schemas.MM },
+    body: {
+      category: 'MM', answers: { kind: 1 }, weight: 0,
+      skuSchemaVersionId: schemas.MM, previewToken: noPricePreview.data.previewToken,
+    },
   });
   assert.equal(noAuto.response.status, 422);
   assert.match(noAuto.data.error, /Вкажіть ціну вручну/);
   const manual = await request('/api/save', {
     method: 'POST',
-    body: { category: 'MM', answers: { kind: 1 }, weight: 0, skuSchemaVersionId: schemas.MM, manualPriceUah: 321 },
+    body: {
+      category: 'MM', answers: { kind: 1 }, weight: 0,
+      skuSchemaVersionId: schemas.MM, previewToken: noPricePreview.data.previewToken,
+      manualPriceUah: 321,
+    },
   });
   assert.equal(manual.response.status, 200, manual.text);
   const stored = await pool.query('SELECT total_price_uah FROM products WHERE id = $1', [manual.data.id]);
   assert.equal(Number(stored.rows[0].total_price_uah), 321);
+
+  const malformedPreview = await request('/api/preview', {
+    method: 'POST', body: { categoryCode: 'MM', answers: { kind: 2 }, weight: 0 },
+  });
+  const malformedManual = await request('/api/save', {
+    method: 'POST',
+    body: {
+      category: 'MM', answers: { kind: 2 }, weight: 0,
+      skuSchemaVersionId: schemas.MM, previewToken: malformedPreview.data.previewToken,
+      manualPriceUah: true,
+    },
+  });
+  assert.equal(malformedManual.response.status, 422);
+});
+
+test('exchange-rate cache never lets an older replica overwrite a newer fetch', async () => {
+  const olderFetchedAt = '2026-08-30T10:00:00.000Z';
+  const newerFetchedAt = '2026-08-31T10:00:00.000Z';
+  await pool.query("DELETE FROM exchange_rate_cache WHERE currency_pair = 'USD_UAH'");
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION delay_older_exchange_rate_write()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF NEW.fetched_at = TIMESTAMPTZ '2026-08-30 10:00:00+00' THEN
+        PERFORM pg_sleep(0.2);
+      END IF;
+      RETURN NEW;
+    END;
+    $$;
+    CREATE TRIGGER delay_older_exchange_rate_write
+    BEFORE INSERT OR UPDATE ON exchange_rate_cache
+    FOR EACH ROW EXECUTE FUNCTION delay_older_exchange_rate_write();
+  `);
+  try {
+    const olderWrite = saveLastKnownRate({
+      rate: 40,
+      rateDate: '2026-08-30',
+      fetchedAt: olderFetchedAt,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const newerWrite = saveLastKnownRate({
+      rate: 41,
+      rateDate: '2026-08-31',
+      fetchedAt: newerFetchedAt,
+    });
+    await Promise.all([olderWrite, newerWrite]);
+    const stored = await pool.query(
+      "SELECT rate, fetched_at FROM exchange_rate_cache WHERE currency_pair = 'USD_UAH'"
+    );
+    assert.equal(Number(stored.rows[0].rate), 41);
+    assert.equal(new Date(stored.rows[0].fetched_at).toISOString(), newerFetchedAt);
+  } finally {
+    await pool.query('DROP TRIGGER delay_older_exchange_rate_write ON exchange_rate_cache');
+    await pool.query('DROP FUNCTION delay_older_exchange_rate_write()');
+  }
 });
 
 test('used category code is immutable while metadata remains editable', async () => {
@@ -196,6 +723,93 @@ test('concurrent correction only applies once after transactional revalidation',
     request('/api/recount/apply', { method: 'POST', body: correctionPayload }),
   ]);
   assert.deepEqual(results.map((item) => item.response.status).sort(), [200, 409]);
+  const sourceState = await pool.query(
+    `SELECT id, status, corrected_to_product_id
+     FROM products WHERE full_sku = $1`,
+    [primarySku]
+  );
+  assert.equal(sourceState.rows[0].status, 'corrected');
+  assert.ok(Number(sourceState.rows[0].corrected_to_product_id) > 0);
+  const correctionState = await pool.query(
+    `SELECT count(*)::int AS correction_count,
+            count(DISTINCT corrected_product_id)::int AS corrected_products
+     FROM product_corrections
+     WHERE source_product_id = $1`,
+    [sourceState.rows[0].id]
+  );
+  assert.deepEqual(correctionState.rows[0], {
+    correction_count: 1,
+    corrected_products: 1,
+  });
+});
+
+test('correction requests reject stale product state, refresh, and complete atomically', async () => {
+  const candidate = await pool.query(
+    `SELECT id, full_sku
+     FROM products
+     WHERE category = 'ZZ'
+       AND status = 'active'
+       AND details->'answers'->>'kind' = '1'
+     ORDER BY id
+     LIMIT 1`
+  );
+  assert.ok(candidate.rows[0]);
+  const created = await request('/api/admin/correction-requests', {
+    method: 'POST',
+    body: {
+      sourceSku: candidate.rows[0].full_sku,
+      answers: { kind: 2 },
+      reason: 'stale request integration',
+    },
+  });
+  assert.equal(created.response.status, 200, created.text);
+  const requestId = Number(created.data.request.id);
+
+  await pool.query(
+    'UPDATE products SET total_price_uah = total_price_uah + 1 WHERE id = $1',
+    [candidate.rows[0].id]
+  );
+  const staleCompletion = await request(
+    `/api/admin/correction-requests/${requestId}/complete`,
+    { method: 'POST', body: {} }
+  );
+  assert.equal(staleCompletion.response.status, 409);
+  const unchanged = await pool.query(
+    `SELECT status, corrected_to_product_id,
+            (SELECT status FROM correction_requests WHERE id = $1) AS request_status
+     FROM products WHERE id = $2`,
+    [requestId, candidate.rows[0].id]
+  );
+  assert.deepEqual(unchanged.rows[0], {
+    status: 'active',
+    corrected_to_product_id: null,
+    request_status: 'pending',
+  });
+
+  const refreshed = await request(
+    `/api/admin/correction-requests/${requestId}/refresh`,
+    { method: 'POST', body: {} }
+  );
+  assert.equal(refreshed.response.status, 200, refreshed.text);
+  const completed = await request(
+    `/api/admin/correction-requests/${requestId}/complete`,
+    { method: 'POST', body: {} }
+  );
+  assert.equal(completed.response.status, 200, completed.text);
+  const finalState = await pool.query(
+    `SELECT p.status, p.corrected_to_product_id, cr.status AS request_status,
+            cr.corrected_product_id
+     FROM products p
+     JOIN correction_requests cr ON cr.id = $1
+     WHERE p.id = $2`,
+    [requestId, candidate.rows[0].id]
+  );
+  assert.equal(finalState.rows[0].status, 'corrected');
+  assert.equal(finalState.rows[0].request_status, 'completed');
+  assert.equal(
+    Number(finalState.rows[0].corrected_to_product_id),
+    Number(finalState.rows[0].corrected_product_id)
+  );
 });
 
 test('repricing preview/apply/rollback and correction blocking work', async () => {
@@ -214,10 +828,37 @@ test('repricing preview/apply/rollback and correction blocking work', async () =
   });
   assert.equal(applied.response.status, 200, applied.text);
   const batchId = applied.data.batch?.id || applied.data.batchId;
+  const appliedItems = await pool.query(
+    `SELECT ri.product_id, ri.old_price_uah, ri.new_price_uah,
+            p.total_price_uah, p.details #>> '{repricing,batchId}' AS current_batch_id
+     FROM repricing_items ri
+     JOIN products p ON p.id = ri.product_id
+     WHERE ri.batch_id = $1
+     ORDER BY ri.product_id`,
+    [batchId]
+  );
+  assert.ok(appliedItems.rows.length > 0);
+  for (const item of appliedItems.rows) {
+    assert.equal(Number(item.total_price_uah), Number(item.new_price_uah));
+    assert.equal(Number(item.current_batch_id), Number(batchId));
+  }
   const rolledBack = await request(`/api/admin/repricing/${batchId}/rollback`, {
     method: 'POST', body: {},
   });
   assert.equal(rolledBack.response.status, 200, rolledBack.text);
+  const rolledBackItems = await pool.query(
+    `SELECT ri.product_id, ri.old_price_uah, p.total_price_uah,
+            p.details #>> '{repricing,batchId}' AS current_batch_id
+     FROM repricing_items ri
+     JOIN products p ON p.id = ri.product_id
+     WHERE ri.batch_id = $1
+     ORDER BY ri.product_id`,
+    [batchId]
+  );
+  for (const item of rolledBackItems.rows) {
+    assert.equal(Number(item.total_price_uah), Number(item.old_price_uah));
+    assert.notEqual(Number(item.current_batch_id || 0), Number(batchId));
+  }
 
   const candidate = await pool.query(
     `SELECT full_sku FROM products
@@ -251,7 +892,75 @@ test('repricing preview/apply/rollback and correction blocking work', async () =
   assert.deepEqual(raceResults.map((item) => item.response.status).sort(), [200, 409]);
 });
 
+test('repricing rolls back every product and batch row after a mid-apply failure', async () => {
+  await pool.query(
+    'UPDATE price_matrix SET price = price + 30 WHERE scenario_id = $1',
+    [schemas.ZZScenario]
+  );
+  try {
+    const preview = await request('/api/admin/repricing/preview', {
+      method: 'POST', body: { scenarioId: schemas.ZZScenario },
+    });
+    assert.equal(preview.response.status, 200, preview.text);
+    const changedItems = preview.data.items.filter((item) => item.status === 'changed');
+    assert.ok(changedItems.length >= 2);
+    const productIds = changedItems.map((item) => Number(item.productId));
+    const before = await pool.query(
+      `SELECT id, total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
+      [productIds]
+    );
+    const failureProductId = productIds[1];
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION fail_test_repricing_update()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.id = ${failureProductId}
+           AND NEW.details #>> '{repricing,batchId}'
+               IS DISTINCT FROM OLD.details #>> '{repricing,batchId}' THEN
+          RAISE EXCEPTION 'forced repricing failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER fail_test_repricing_update
+      BEFORE UPDATE ON products
+      FOR EACH ROW EXECUTE FUNCTION fail_test_repricing_update();
+    `);
+    try {
+      const failed = await request('/api/admin/repricing/apply', {
+        method: 'POST',
+        body: { scenarioId: schemas.ZZScenario, previewToken: preview.data.previewToken },
+      });
+      assert.equal(failed.response.status, 500);
+    } finally {
+      await pool.query('DROP TRIGGER fail_test_repricing_update ON products');
+      await pool.query('DROP FUNCTION fail_test_repricing_update()');
+    }
+    const after = await pool.query(
+      `SELECT id, total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
+      [productIds]
+    );
+    assert.deepEqual(after.rows, before.rows);
+    const persisted = await pool.query(
+      `SELECT count(*)::int AS batches
+       FROM repricing_batches
+       WHERE preview_token = $1 AND status = 'completed'`,
+      [preview.data.previewToken]
+    );
+    assert.equal(persisted.rows[0].batches, 0);
+  } finally {
+    await pool.query(
+      'UPDATE price_matrix SET price = price - 30 WHERE scenario_id = $1',
+      [schemas.ZZScenario]
+    );
+  }
+});
+
 test('export snapshot is immutable, idempotent, and cursor is monotonic', async () => {
+  const legacyBypass = await request(`/api/export/csv?fromSku=${encodeURIComponent(primarySku)}`);
+  assert.equal(legacyBypass.response.status, 410);
   const first = await request('/api/export/snapshots', {
     method: 'POST', body: { fromSku: primarySku }, headers: { 'Idempotency-Key': 'integration-export-1' },
   });
@@ -260,6 +969,12 @@ test('export snapshot is immutable, idempotent, and cursor is monotonic', async 
     method: 'POST', body: { fromSku: primarySku }, headers: { 'Idempotency-Key': 'integration-export-1' },
   });
   assert.equal(repeated.data.id, first.data.id);
+  const mismatched = await request('/api/export/snapshots', {
+    method: 'POST',
+    body: { fromSku: primarySku, toSku: primarySku },
+    headers: { 'Idempotency-Key': 'integration-export-1' },
+  });
+  assert.equal(mismatched.response.status, 409);
   const csv = await request(`/api/export/snapshots/${first.data.id}/csv`);
   assert.equal(csv.response.status, 200);
   assert.match(csv.text, /^sku,price_uah/);
@@ -274,10 +989,91 @@ test('export snapshot is immutable, idempotent, and cursor is monotonic', async 
   await request(`/api/export/snapshots/${historical.data.id}/confirm`, { method: 'POST', body: {} });
   const cursorAfter = Number((await pool.query('SELECT exported_to_product_id FROM export_state')).rows[0].exported_to_product_id);
   assert.equal(cursorAfter, cursorBefore);
+
+  await pool.query(
+    `UPDATE export_state
+     SET exported_to_product_id = 0, last_snapshot_id = NULL, updated_at = CURRENT_TIMESTAMP
+     WHERE singleton = TRUE`
+  );
+  const concurrentConfirmations = await Promise.all([
+    request(`/api/export/snapshots/${historical.data.id}/confirm`, { method: 'POST', body: {} }),
+    request(`/api/export/snapshots/${first.data.id}/confirm`, { method: 'POST', body: {} }),
+  ]);
+  assert.deepEqual(concurrentConfirmations.map((result) => result.response.status), [200, 200]);
+  const concurrentCursor = await pool.query(
+    `SELECT st.exported_to_product_id, st.last_snapshot_id,
+            GREATEST(old.exported_to_product_id, latest.exported_to_product_id) AS expected_cursor,
+            CASE
+              WHEN latest.exported_to_product_id >= old.exported_to_product_id THEN latest.id
+              ELSE old.id
+            END AS expected_snapshot_id
+     FROM export_state st
+     JOIN export_snapshots old ON old.id = $1
+     JOIN export_snapshots latest ON latest.id = $2
+     WHERE st.singleton = TRUE`,
+    [historical.data.id, first.data.id]
+  );
+  assert.equal(
+    Number(concurrentCursor.rows[0].exported_to_product_id),
+    Number(concurrentCursor.rows[0].expected_cursor)
+  );
+  assert.equal(
+    concurrentCursor.rows[0].last_snapshot_id,
+    concurrentCursor.rows[0].expected_snapshot_id
+  );
   await assert.rejects(
     pool.query("UPDATE export_snapshots SET csv_content = 'changed' WHERE id = $1", [first.data.id]),
     /immutable/
   );
+
+  const endpoints = (await pool.query(
+    `SELECT full_sku FROM products
+     WHERE full_sku IS NOT NULL
+     ORDER BY id
+     LIMIT 2`
+  )).rows.map((row) => row.full_sku);
+  assert.equal(endpoints.length, 2);
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION delay_test_export_snapshot_insert()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      PERFORM pg_sleep(0.2);
+      RETURN NEW;
+    END;
+    $$;
+    CREATE TRIGGER delay_test_export_snapshot_insert
+    BEFORE INSERT ON export_snapshots
+    FOR EACH ROW EXECUTE FUNCTION delay_test_export_snapshot_insert();
+  `);
+  try {
+    const concurrentKey = 'integration-export-conflict';
+    const concurrent = await Promise.all([
+      request('/api/export/snapshots', {
+        method: 'POST',
+        body: { fromSku: endpoints[0], toSku: endpoints[0] },
+        headers: { 'Idempotency-Key': concurrentKey },
+      }),
+      request('/api/export/snapshots', {
+        method: 'POST',
+        body: { fromSku: endpoints[1], toSku: endpoints[1] },
+        headers: { 'Idempotency-Key': concurrentKey },
+      }),
+    ]);
+    assert.deepEqual(
+      concurrent.map((result) => result.response.status).sort(),
+      [201, 409]
+    );
+    const storedConflict = await pool.query(
+      `SELECT count(*)::int AS count
+       FROM export_snapshots
+       WHERE idempotency_key = $1`,
+      [concurrentKey]
+    );
+    assert.equal(storedConflict.rows[0].count, 1);
+  } finally {
+    await pool.query('DROP TRIGGER delay_test_export_snapshot_insert ON export_snapshots');
+    await pool.query('DROP FUNCTION delay_test_export_snapshot_insert()');
+  }
 });
 
 function sqliteRun(db, sql) {

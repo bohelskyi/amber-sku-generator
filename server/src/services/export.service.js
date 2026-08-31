@@ -200,6 +200,21 @@ function buildExportCsv(exportData) {
   ]);
 }
 
+function assertSnapshotMatchesRequest(snapshot, fromSku, toSku) {
+  const normalizedFromSku = String(fromSku || '').trim().toUpperCase();
+  const normalizedToSku = String(toSku || '').trim().toUpperCase() || null;
+  const snapshotToSku = snapshot.to_sku ? String(snapshot.to_sku).trim().toUpperCase() : null;
+  if (String(snapshot.from_sku || '').trim().toUpperCase() !== normalizedFromSku
+      || snapshotToSku !== normalizedToSku) {
+    const error = new Error(
+      'Цей Idempotency-Key вже використано для іншого діапазону експорту.'
+    );
+    error.statusCode = 409;
+    throw error;
+  }
+  return snapshot;
+}
+
 async function createExportSnapshot({ fromSku, toSku, idempotencyKey }) {
   const key = String(idempotencyKey || '').trim();
   if (!key || key.length > 200) {
@@ -211,7 +226,9 @@ async function createExportSnapshot({ fromSku, toSku, idempotencyKey }) {
     'SELECT * FROM export_snapshots WHERE idempotency_key = $1',
     [key]
   );
-  if (existing.rows[0]) return existing.rows[0];
+  if (existing.rows[0]) {
+    return assertSnapshotMatchesRequest(existing.rows[0], fromSku, toSku);
+  }
 
   const exportData = await getExportRows(fromSku, toSku);
   const suffixPart = exportData.range.toSku ? `-${exportData.range.toSku}` : '-to-latest';
@@ -241,10 +258,12 @@ async function createExportSnapshot({ fromSku, toSku, idempotencyKey }) {
     return result.rows[0];
   } catch (error) {
     if (error?.code !== '23505') throw error;
-    return (await pool.query(
+    const conflictingSnapshot = (await pool.query(
       'SELECT * FROM export_snapshots WHERE idempotency_key = $1',
       [key]
     )).rows[0];
+    if (!conflictingSnapshot) throw error;
+    return assertSnapshotMatchesRequest(conflictingSnapshot, fromSku, toSku);
   }
 }
 

@@ -153,7 +153,8 @@ async function saveLastKnownRate(rateInfo) {
        ON CONFLICT (currency_pair)
        DO UPDATE SET rate = EXCLUDED.rate,
                      rate_date = EXCLUDED.rate_date,
-                     fetched_at = EXCLUDED.fetched_at`,
+                     fetched_at = EXCLUDED.fetched_at
+       WHERE exchange_rate_cache.fetched_at <= EXCLUDED.fetched_at`,
       [rateInfo.rate, rateInfo.rateDate, rateInfo.fetchedAt]
     );
   } catch (error) {
@@ -185,4 +186,5 @@ module.exports = {
   getUsdUahRateInfo,
   normalizeRateInfo,
   normalizeRateDate,
+  saveLastKnownRate,
 };

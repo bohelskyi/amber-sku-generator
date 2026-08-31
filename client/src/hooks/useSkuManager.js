@@ -338,6 +338,7 @@ export function useSkuManager() {
 
     api.post('/save', {
       skuSchemaVersionId: previewData.skuSchemaVersionId,
+      previewToken: previewData.previewToken,
       category: selectedCat,
       answers,
       isCalibrated,

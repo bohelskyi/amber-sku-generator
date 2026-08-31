@@ -1,6 +1,6 @@
 function escapeCsvValue(value) {
   if (value === null || value === undefined) return '';
-  const stringValue = typeof value === 'string' && /^[=+\-@]/.test(value)
+  const stringValue = typeof value === 'string' && /^[\t\r ]*[=+\-@]/.test(value)
     ? `'${value}`
     : String(value);
   if (/[",\n]/.test(stringValue)) {
