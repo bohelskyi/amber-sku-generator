@@ -382,7 +382,7 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
       path.resolve(oldMigrationDirectory, fileName)
     )));
     await Promise.all(allMigrationFiles
-      .filter((fileName) => !fileName.startsWith('015_'))
+      .filter((fileName) => !fileName.startsWith('015_') && !fileName.startsWith('016_'))
       .map((fileName) => fs.copyFile(
         path.resolve(serverRoot, 'migrations', fileName),
         path.resolve(checkpointMigrationDirectory, fileName)
@@ -458,9 +458,9 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
       );
       assert.equal(checksums.rows[0].count, 0);
       const checkpointMigration = await checkpointPool.query(
-        "SELECT count(*)::int AS count FROM schema_migrations WHERE name LIKE '015_%'"
+        "SELECT count(*)::int AS count FROM schema_migrations WHERE name ~ '^(015|016)_'"
       );
-      assert.equal(checkpointMigration.rows[0].count, 1);
+      assert.equal(checkpointMigration.rows[0].count, 2);
     } finally {
       await freshPool.end();
       await upgradePool.end();
@@ -472,6 +472,128 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
     await dropTestDatabase(freshName);
     await dropTestDatabase(upgradeName);
     await dropTestDatabase(checkpointName);
+  }
+});
+
+test('legacy zero prices upgrade without repricing products or blocking edits', async () => {
+  const databaseName = 'amber_legacy_zero_price_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const preCompatibilityDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'amber-pre-zero-compat-migrations-')
+  );
+  try {
+    const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
+      .filter((fileName) => fileName.endsWith('.sql') && !/^(014|015|016)_/.test(fileName));
+    await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
+      path.resolve(serverRoot, 'migrations', fileName),
+      path.resolve(preCompatibilityDirectory, fileName)
+    )));
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations({ directory: ${JSON.stringify(preCompatibilityDirectory)} })
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+
+    const legacyPool = new Pool({ connectionString: databaseUrl });
+    try {
+      await legacyPool.query(`
+        INSERT INTO categories (code, name, requires_weight)
+        VALUES ('LX', 'Legacy zero', 0);
+
+        WITH inserted_question AS (
+          INSERT INTO questions
+            (category_code, key, label, sku_index, display_order, required, include_in_sku, input_type)
+          VALUES ('LX', 'kind', 'Kind', 1, 1, 1, 1, 'options')
+          RETURNING id
+        )
+        INSERT INTO options (question_id, value_id, sku_code, label)
+        SELECT id, 1, '1', 'One' FROM inserted_question
+        UNION ALL
+        SELECT id, 2, '2', 'Two' FROM inserted_question;
+
+        WITH inserted_scenario AS (
+          INSERT INTO price_scenarios
+            (category_code, name, match_json, axis_x_key, axis_y_key, price_mode, status)
+          VALUES ('LX', 'Current automatic price', '{}'::jsonb, 'kind', NULL, 'fixed_uah', 'active')
+          RETURNING id
+        )
+        INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
+        SELECT id, 1, 0, 1000 FROM inserted_scenario
+        UNION ALL
+        SELECT id, 2, 0, 0 FROM inserted_scenario;
+
+        INSERT INTO products
+          (full_sku, base_sku, sequence_number, category, weight, total_price,
+           total_price_uah, price_per_gram, details)
+        VALUES
+          ('LX1001', 'LX1', 1, 'LX', 0, 0, 0, 0, '{"answers":{"kind":1}}'::jsonb);
+      `);
+    } finally {
+      await legacyPool.end();
+    }
+
+    await runNodeInDatabase(databaseUrl, `
+      const assert = require('node:assert/strict');
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      const { ensureLegacySkuSchemas } = require('./src/services/sku-schema.service');
+      const { applyProductRecount, decodeSku } = require('./src/services/product.service');
+      (async () => {
+        await runMigrations();
+        await ensureLegacySkuSchemas();
+
+        const decoded = await decodeSku('LX1001');
+        assert.equal(decoded.pricing.totalPriceUah, 0);
+
+        const correction = await applyProductRecount({
+          sourceSku: 'LX1001',
+          answers: { kind: 2 },
+          reason: 'still editable',
+          manualPriceUah: 500,
+        });
+        assert.equal(correction.success, true);
+        assert.equal(correction.corrected.totalPriceUah, 500);
+        await assert.rejects(
+          db.query(
+            "INSERT INTO products "
+              + "(full_sku, base_sku, sequence_number, category, total_price_uah, details) "
+              + "VALUES ('LX1999', 'LX1', 999, 'LX', 0, '{}'::jsonb)"
+          ),
+          (error) => error.code === '23514'
+        );
+      })()
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+
+    const verifiedPool = new Pool({ connectionString: databaseUrl });
+    try {
+      const state = await verifiedPool.query(`
+        SELECT p.total_price_uah, p.legacy_uah_price_unset,
+               p.correction_reason, p.sku_schema_version_id, p.corrected_to_product_id,
+               corrected.total_price_uah AS corrected_price_uah,
+               (SELECT count(*)::int FROM price_matrix WHERE price = 0) AS zero_matrix_rows,
+               (SELECT count(*)::int FROM price_matrix WHERE price = 1000) AS positive_matrix_rows
+        FROM products p
+        LEFT JOIN products corrected ON corrected.id = p.corrected_to_product_id
+        WHERE p.full_sku = 'LX1001'
+      `);
+      assert.equal(Number(state.rows[0].total_price_uah), 0);
+      assert.equal(state.rows[0].legacy_uah_price_unset, true);
+      assert.equal(state.rows[0].correction_reason, 'still editable');
+      assert.ok(Number(state.rows[0].sku_schema_version_id) > 0);
+      assert.ok(Number(state.rows[0].corrected_to_product_id) > 0);
+      assert.equal(Number(state.rows[0].corrected_price_uah), 500);
+      assert.equal(state.rows[0].zero_matrix_rows, 0);
+      assert.equal(state.rows[0].positive_matrix_rows, 1);
+    } finally {
+      await verifiedPool.end();
+    }
+  } finally {
+    await fs.rm(preCompatibilityDirectory, { recursive: true, force: true });
+    await dropTestDatabase(databaseName);
   }
 });
 
@@ -699,6 +821,17 @@ test('required answers, weight, schema ownership, and manual fallback fail close
   });
   assert.equal(noAuto.response.status, 422);
   assert.match(noAuto.data.error, /Вкажіть ціну вручну/);
+  const zeroManual = await request('/api/save', {
+    method: 'POST',
+    body: {
+      category: 'MM', answers: { kind: 1 }, weight: 0,
+      isCalibrated: null,
+      skuSchemaVersionId: schemas.MM, previewToken: noPricePreview.data.previewToken,
+      manualPriceUah: 0,
+    },
+  });
+  assert.equal(zeroManual.response.status, 422);
+  assert.match(zeroManual.data.error, /більшою за 0/);
   const manual = await request('/api/save', {
     method: 'POST',
     body: {
@@ -757,6 +890,18 @@ test('correction applies a manual price when the target configuration has no mat
     });
     assert.equal(preview.response.status, 200, preview.text);
     assert.equal(preview.data.corrected.totalPriceUah, null);
+
+    const zeroManual = await request('/api/recount/apply', {
+      method: 'POST',
+      body: {
+        sourceSku: source.data.fullSku,
+        answers: { kind: 2 },
+        reason: 'manual correction',
+        manualPriceUah: 0,
+      },
+    });
+    assert.equal(zeroManual.response.status, 422, zeroManual.text);
+    assert.match(zeroManual.data.error, /більшою за 0/);
 
     const applied = await request('/api/recount/apply', {
       method: 'POST',
