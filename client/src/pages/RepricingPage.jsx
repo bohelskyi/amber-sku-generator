@@ -24,6 +24,7 @@ import {
 import { Link } from 'react-router-dom';
 import { RepricingRecountDrawer } from '../components/app/RepricingRecountDrawer';
 import { api } from '../lib/api';
+import { formatDecimal, formatUah } from '../lib/formatters';
 import { getPricingAxis } from '../lib/pricing-axis';
 import {
   applyManualPrices,
@@ -35,26 +36,18 @@ import {
   sortRepricingItems,
 } from '../lib/repricing';
 
-const formatUah = (value) => {
-  if (value === null || value === undefined || value === '') return '-';
-  return `${new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 2 }).format(Number(value))} ₴`;
-};
-
 const formatDate = (value) => (
   value ? new Intl.DateTimeFormat('uk-UA', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : '-'
 );
 
 const formatUsdPerGram = (value) => {
   if (value === null || value === undefined || value === '') return null;
-  return `$${new Intl.NumberFormat('uk-UA', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
-  }).format(Number(value))}/г`;
+  return Number.isFinite(Number(value)) ? `$${formatDecimal(value)}/г` : null;
 };
 
 const formatRate = (value) => {
   if (value === null || value === undefined || value === '') return null;
-  return `${new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 4 }).format(Number(value))} ₴/$`;
+  return Number.isFinite(Number(value)) ? `${formatDecimal(value)} ₴/$` : null;
 };
 
 const getApiError = (error) => error.response?.data?.error || error.message || 'Невідома помилка';
@@ -455,7 +448,7 @@ export default function RepricingPage() {
   const applyDraftPayload = (data) => {
     const nextManualPrices = Object.fromEntries(
       (data.manualOverrides || data.draft?.manualOverrides || []).map((item) => (
-        [item.productId, String(item.newPriceUah)]
+        [item.productId, formatDecimal(item.newPriceUah)]
       ))
     );
     const uiState = data.draft?.uiState || {};
@@ -1120,7 +1113,7 @@ export default function RepricingPage() {
                             </button>
                           </div>
                         </td>
-                        <td className="table-cell whitespace-nowrap text-sm">{item.weight ?? '-'} г</td>
+                        <td className="table-cell whitespace-nowrap text-sm">{item.weight === null || item.weight === undefined ? '-' : formatDecimal(item.weight)} г</td>
                         <td className="table-cell min-w-64 text-xs text-slate-600">
                           {item.status === 'error' && !requiresManualPrice
                             ? <span className="text-rose-700">{item.message}</span>
@@ -1133,7 +1126,7 @@ export default function RepricingPage() {
                                   <button
                                     type="button"
                                     className="btn btn-outline h-8 px-3 text-xs"
-                                    onClick={() => setManualPrice(item.productId, String(item.oldPriceUah))}
+                                    onClick={() => setManualPrice(item.productId, formatDecimal(item.oldPriceUah))}
                                   >
                                     Залишити поточну ціну · {formatUah(item.oldPriceUah)}
                                   </button>
@@ -1159,7 +1152,7 @@ export default function RepricingPage() {
                                     aria-label={`Нова ціна для ${item.sku}`}
                                     value={hasManualOverride
                                       ? manualPrices[item.productId]
-                                      : (requiresManualPrice ? '' : item.newPriceUah)}
+                                      : (requiresManualPrice ? '' : formatDecimal(item.newPriceUah))}
                                     onChange={(event) => setManualPrice(item.productId, event.target.value)}
                                     onBlur={(event) => {
                                       const normalizedPrice = parseManualPrice(event.target.value);

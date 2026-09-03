@@ -12,7 +12,7 @@ import {
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { copyPlainText } from '../lib/clipboard';
-import { formatDateTime, formatUah } from '../lib/formatters';
+import { formatDateTime, formatDecimal, formatUah } from '../lib/formatters';
 
 function getApiError(error) {
   return error.response?.data?.error || error.message || 'Невідома помилка';
@@ -30,7 +30,7 @@ function useDebouncedValue(value, delay = 300) {
 function formatUsdPerGram(value) {
   if (value === null || value === undefined || value === '') return '---';
   const number = Number(value);
-  return Number.isFinite(number) ? `$${number.toFixed(2)}/г` : '---';
+  return Number.isFinite(number) ? `$${formatDecimal(value)}/г` : '---';
 }
 
 function formatSignedUah(value) {
@@ -318,7 +318,7 @@ export default function CorrectionHistoryPage() {
                       <span className="chip">{item.categoryCode}</span>
                       <span className="text-xs font-medium text-slate-500">#{item.id} · {formatDateTime(item.createdAt)}</span>
                       {item.weight !== null && item.weight !== undefined && (
-                        <span className="text-xs text-slate-500">{item.weight} г</span>
+                        <span className="text-xs text-slate-500">{formatDecimal(item.weight)} г</span>
                       )}
                     </div>
                     {item.reason && <span className="text-sm text-slate-600">{item.reason}</span>}

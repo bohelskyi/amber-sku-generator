@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Copy } from 'lucide-react';
-import { formatUah } from '../../lib/formatters';
+import { formatDecimal, formatUah } from '../../lib/formatters';
 import { copyPlainText } from '../../lib/clipboard';
 
 export function RecountConfirmDialog({
@@ -45,7 +45,7 @@ export function RecountConfirmDialog({
   const oldPrice = preview.source.totalPriceUah;
   const newPrice = preview.corrected.totalPriceUah;
   const plainNewPrice = Number.isFinite(Number(newPrice))
-    ? String(Math.round(Number(newPrice)))
+    ? formatDecimal(newPrice)
     : '';
   const priceDelta = Number(preview.priceDeltaUah || 0);
   const isChoiceMode = mode === 'choice';

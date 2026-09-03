@@ -1,4 +1,4 @@
-import { formatUah, formatUahPerGram, formatUsd } from '../../lib/formatters';
+import { formatDecimal, formatUah, formatUahPerGram, formatUsd } from '../../lib/formatters';
 
 export function PreviewResult({
   previewData,
@@ -152,7 +152,7 @@ function PriceActions({
   return (
     <>
       <button
-        onClick={() => effectiveTotalPriceUah && onCopyText(`${effectiveTotalPriceUah} ₴`, 'Ціну')}
+        onClick={() => effectiveTotalPriceUah && onCopyText(`${formatDecimal(effectiveTotalPriceUah)} ₴`, 'Ціну')}
         className="btn btn-outline text-xs px-3 py-1.5"
       >
         Копіювати ціну

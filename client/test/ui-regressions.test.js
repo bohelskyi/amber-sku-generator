@@ -59,6 +59,26 @@ test('repricing renders the same manual resolution control on later manual-price
 
   assert.match(source, /\['price_missing', 'manual_price'\]\.includes/);
   assert.match(source, /Залишити поточну ціну/);
-  assert.match(source, /setManualPrice\(item\.productId, String\(item\.oldPriceUah\)\)/);
+  assert.match(source, /setManualPrice\(item\.productId, formatDecimal\(item\.oldPriceUah\)\)/);
   assert.match(source, /disabled=\{!canApply\}/);
+});
+
+test('fixed-scale API decimals are compacted in editable pricing fields', () => {
+  const matrixSource = fs.readFileSync(
+    new URL('../src/components/admin/AdminPricingEditor.jsx', import.meta.url),
+    'utf8'
+  );
+  const adminHookSource = fs.readFileSync(
+    new URL('../src/hooks/useAdminPanel.js', import.meta.url),
+    'utf8'
+  );
+  const repricingSource = fs.readFileSync(
+    new URL('../src/pages/RepricingPage.jsx', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(matrixSource, /defaultValue=\{cell \? formatDecimal\(cell\.price\) : ''\}/);
+  assert.match(adminHookSource, /factor: formatDecimal\(modifier\.factor\)/);
+  assert.match(adminHookSource, /min_weight: formatDecimal\(band\.min_weight\)/);
+  assert.match(repricingSource, /formatDecimal\(item\.newPriceUah\)/);
 });

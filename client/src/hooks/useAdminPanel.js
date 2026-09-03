@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { formatDecimal } from '../lib/formatters';
 import { getValidationIssues } from '../lib/admin-validation';
 import { normalizeDecimalInput } from '../lib/number-input';
 
@@ -538,7 +539,11 @@ export function useAdminPanel() {
       status: scenario.status || 'active',
       price_mode: scenario.price_mode || 'category_default',
       apply_modifiers: scenario.apply_modifiers !== false,
-      weight_bands: scenario.weight_bands || [],
+      weight_bands: (scenario.weight_bands || []).map((band) => ({
+        ...band,
+        min_weight: formatDecimal(band.min_weight),
+        max_weight: formatDecimal(band.max_weight),
+      })),
     });
   };
 
@@ -610,7 +615,7 @@ export function useAdminPanel() {
       match_json: formatMatchJson(
         modifier.match_json || (modifier.trigger_key ? { [modifier.trigger_key]: modifier.trigger_val } : {})
       ),
-      factor: String(modifier.factor ?? ''),
+      factor: formatDecimal(modifier.factor),
     });
   };
 

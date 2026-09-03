@@ -8,6 +8,7 @@ import {
 } from '../../lib/number-input';
 import { getPricingAxis } from '../../lib/pricing-axis';
 import { formatConditionSummary } from '../../lib/admin-conditions';
+import { formatDecimal } from '../../lib/formatters';
 
 const getScenarioGroupName = (scenario) => {
   const groupName = String(scenario.group_name || '').trim();
@@ -537,7 +538,7 @@ export function AdminPricingEditor({
                                           type="text"
                                           inputMode="decimal"
                                           className="w-full h-full p-2 text-center focus:bg-amber-50 outline-none min-w-[60px]"
-                                          defaultValue={cell ? cell.price : ''}
+                                          defaultValue={cell ? formatDecimal(cell.price) : ''}
                                           placeholder="-"
                                           onChange={(event) => {
                                             event.currentTarget.value = normalizeDecimalInput(event.currentTarget.value);
@@ -556,7 +557,7 @@ export function AdminPricingEditor({
                                             }
 
                                             if (validationError) {
-                                              event.currentTarget.value = cell ? String(cell.price) : '';
+                                              event.currentTarget.value = cell ? formatDecimal(cell.price) : '';
                                               setMatrixValidationError(validationError);
                                               return;
                                             }
@@ -617,7 +618,7 @@ export function AdminPricingEditor({
                     <div className="text-sm font-semibold text-slate-800">
                       {formatConditionSummary(modifierRule, currentCatQuestions, config, 'Завжди')}
                     </div>
-                    <div className="text-xs text-slate-500">Множник: {modifier.factor}</div>
+                    <div className="text-xs text-slate-500">Множник: {formatDecimal(modifier.factor)}</div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button onClick={() => beginModifierEdit(modifier)} className="btn btn-outline text-xs">Редагувати</button>
