@@ -527,14 +527,9 @@ function isQuestionVisibleForSku(question, answers, isCalibrated) {
   });
 }
 
-function omitHiddenLegacyPlaceholders(answers, schemaQuestions, isCalibrated) {
+function omitHiddenRecountAnswers(answers, schemaQuestions, isCalibrated) {
   return (schemaQuestions || []).reduce((result, question) => {
-    const value = result[question.key];
-    const isLegacyPlaceholder = value === 0 || value === '0';
-    if (
-      isLegacyPlaceholder
-      && !isQuestionVisibleForSku(question, answers, isCalibrated)
-    ) {
+    if (!isQuestionVisibleForSku(question, answers, isCalibrated)) {
       delete result[question.key];
     }
     return result;
@@ -918,7 +913,7 @@ async function buildProductRecountPreview({
 
   const activeSchema = await getActiveSchema(categoryCode);
   const correctedAnswers = activeSchema
-    ? omitHiddenLegacyPlaceholders(nextAnswers, activeSchema.questions, nextIsCalibrated)
+    ? omitHiddenRecountAnswers(nextAnswers, activeSchema.questions, nextIsCalibrated)
     : nextAnswers;
   const weight = getCorrectionWeight(sourceDecoded);
   const correctedPreview = await buildProductPreview({
