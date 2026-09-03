@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { ConditionBuilder } from './ConditionBuilder';
 import {
+  getMatrixPriceValidationError,
   handleNumberKeyDown,
   handleNumberWheel,
   normalizeDecimalInput,
 } from '../../lib/number-input';
 import { getPricingAxis } from '../../lib/pricing-axis';
 import { formatConditionSummary } from '../../lib/admin-conditions';
+import { formatDecimal } from '../../lib/formatters';
 
 const getScenarioGroupName = (scenario) => {
   const groupName = String(scenario.group_name || '').trim();
@@ -399,6 +401,7 @@ export function AdminPricingEditor({
   addModifier,
 }) {
   const [openGroups, setOpenGroups] = useState({});
+  const [matrixValidationError, setMatrixValidationError] = useState('');
   if (!selectedCat || !pricesData) return null;
 
   const scenarioGroups = groupScenarios(pricesData.scenarios);
@@ -415,6 +418,12 @@ export function AdminPricingEditor({
           <h2 className="section-title-text">Управління цінами ({selectedCat.name})</h2>
         </div>
       </div>
+
+      {matrixValidationError && (
+        <div role="alert" className="danger-panel mb-6 p-4 text-sm">
+          {matrixValidationError}
+        </div>
+      )}
 
       <div className="space-y-4">
         {scenarioGroups.map((group, groupIndex) => {
@@ -529,22 +538,40 @@ export function AdminPricingEditor({
                                           type="text"
                                           inputMode="decimal"
                                           className="w-full h-full p-2 text-center focus:bg-amber-50 outline-none min-w-[60px]"
-                                          defaultValue={cell ? cell.price : ''}
+                                          defaultValue={cell ? formatDecimal(cell.price) : ''}
                                           placeholder="-"
                                           onChange={(event) => {
                                             event.currentTarget.value = normalizeDecimalInput(event.currentTarget.value);
                                           }}
                                           onBlur={(event) => {
                                             const normalizedPrice = normalizeDecimalInput(event.currentTarget.value);
-                                            const parsedPrice = Number(normalizedPrice);
+                                            const validationError = getMatrixPriceValidationError(normalizedPrice);
 
-                                            if (!normalizedPrice || !Number.isFinite(parsedPrice) || parsedPrice < 0) {
-                                              event.currentTarget.value = cell ? String(cell.price) : '';
+                                            if (!normalizedPrice) {
+                                              setMatrixValidationError('');
+                                              Promise.resolve(handlePriceChange(scenario.id, xOption.id, yOption.id, null))
+                                                .catch((error) => setMatrixValidationError(
+                                                  error.response?.data?.error || error.message
+                                                ));
+                                              return;
+                                            }
+
+                                            if (validationError) {
+                                              event.currentTarget.value = cell ? formatDecimal(cell.price) : '';
+                                              setMatrixValidationError(validationError);
                                               return;
                                             }
 
                                             event.currentTarget.value = normalizedPrice;
-                                            handlePriceChange(scenario.id, xOption.id, yOption.id, normalizedPrice);
+                                            setMatrixValidationError('');
+                                            Promise.resolve(handlePriceChange(
+                                              scenario.id,
+                                              xOption.id,
+                                              yOption.id,
+                                              normalizedPrice
+                                            )).catch((error) => setMatrixValidationError(
+                                              error.response?.data?.error || error.message
+                                            ));
                                           }}
                                         />
                                       </td>
@@ -591,7 +618,7 @@ export function AdminPricingEditor({
                     <div className="text-sm font-semibold text-slate-800">
                       {formatConditionSummary(modifierRule, currentCatQuestions, config, 'Завжди')}
                     </div>
-                    <div className="text-xs text-slate-500">Множник: {modifier.factor}</div>
+                    <div className="text-xs text-slate-500">Множник: {formatDecimal(modifier.factor)}</div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button onClick={() => beginModifierEdit(modifier)} className="btn btn-outline text-xs">Редагувати</button>

@@ -4,6 +4,7 @@ const pool = require('../db/pool');
 const {
   applyProductRecount,
   buildProductRecountPreview,
+  getProductStateSignature,
 } = require('./product.service');
 const { syncRepricingDraft } = require('./repricing.service');
 const { roundUah } = require('../utils/money');
@@ -149,9 +150,29 @@ async function getCorrectionRequests({ status, search, limit } = {}) {
 async function createCorrectionRequest(payload = {}) {
   const preview = await buildProductRecountPreview(payload);
   const signature = getCorrectionPreviewSignature(preview);
+  const client = await pool.connect();
 
   try {
-    const result = await pool.query(
+    await client.query('BEGIN');
+    const sourceResult = await client.query(
+      `SELECT id, full_sku, status, corrected_to_product_id, details, category, weight,
+              total_price, total_price_uah, price_per_gram, uah_rate, sku_schema_version_id
+       FROM products
+       WHERE id = $1
+       FOR UPDATE`,
+      [Number(preview.source.productId)]
+    );
+    const source = sourceResult.rows[0];
+    if (!source
+        || String(source.status || 'active') !== 'active'
+        || source.corrected_to_product_id
+        || source.full_sku !== preview.source.sku
+        || getProductStateSignature(source) !== preview.source.stateSignature) {
+      const error = new Error('Товар змінився після preview. Оновіть дані та повторіть запит.');
+      error.statusCode = 409;
+      throw error;
+    }
+    const result = await client.query(
       `INSERT INTO correction_requests
        (source_product_id, category_code, source_sku, proposed_sku, old_payload,
         proposed_payload, changes, comment, preview_signature)
@@ -169,13 +190,17 @@ async function createCorrectionRequest(payload = {}) {
         signature,
       ]
     );
+    await client.query('COMMIT');
     return { success: true, request: normalizeRequestRow(result.rows[0]) };
   } catch (error) {
+    await client.query('ROLLBACK');
     if (error?.code === '23505') {
       error.statusCode = 409;
       error.message = 'Для цього товару вже існує активний запит на виправлення.';
     }
     throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -192,6 +217,7 @@ async function refreshCorrectionRequest(requestId) {
     answers: row.proposed_payload?.answers || {},
     isCalibrated: row.proposed_payload?.answers?.is_calibrated ?? null,
     reason: row.comment || '',
+    manualPriceUah: row.proposed_payload?.manualPriceUah ?? null,
   });
   const result = await pool.query(
     `UPDATE correction_requests
@@ -302,6 +328,7 @@ async function completeCorrectionRequest(requestId) {
     answers: row.proposed_payload?.answers || {},
     isCalibrated: row.proposed_payload?.answers?.is_calibrated ?? null,
     reason: row.comment || '',
+    manualPriceUah: row.proposed_payload?.manualPriceUah ?? null,
   });
   if (getCorrectionPreviewSignature(preview) !== row.preview_signature) {
     const error = new Error('Товар або розрахунок змінилися після створення запиту. Оновіть запит і звірте дані на сайті.');
@@ -315,6 +342,7 @@ async function completeCorrectionRequest(requestId) {
     answers: row.proposed_payload?.answers || {},
     isCalibrated: row.proposed_payload?.answers?.is_calibrated ?? null,
     reason: row.comment || '',
+    manualPriceUah: row.proposed_payload?.manualPriceUah ?? null,
     correctionRequestId: Number(requestId),
     correctionRequestSignature: row.preview_signature,
   });

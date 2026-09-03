@@ -236,7 +236,17 @@ export function AdminStructureEditor({
         {selectedCat && isCategoryEditOpen && (
           <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-white/80">
             <div className="text-xs text-slate-500 mb-2">Редагувати категорію: {selectedCat.code}</div>
-            <input className="input-sm mb-2" placeholder="Code" value={editCat.code} onChange={(event) => setEditCat({ ...editCat, code: event.target.value.toUpperCase() })} />
+            <input
+              className="input-sm mb-2"
+              placeholder="Code"
+              value={editCat.code}
+              disabled={editCat.code_mutable === false}
+              title={editCat.code_mutable === false ? 'Код уже використано в SKU і його не можна змінити' : ''}
+              onChange={(event) => setEditCat({ ...editCat, code: event.target.value.toUpperCase() })}
+            />
+            {editCat.code_mutable === false && (
+              <p className="text-xs text-slate-500 mb-2">Код уже використано в SKU і його не можна змінити.</p>
+            )}
             <input className="input-sm mb-2" placeholder="Name" value={editCat.name} onChange={(event) => setEditCat({ ...editCat, name: event.target.value })} />
             <label className="flex items-center text-sm"><input type="checkbox" checked={editCat.requires_weight} onChange={(event) => setEditCat({ ...editCat, requires_weight: event.target.checked })} className="mr-2" /> Потрібна вага?</label>
             <label className="mt-2 flex items-start text-sm">

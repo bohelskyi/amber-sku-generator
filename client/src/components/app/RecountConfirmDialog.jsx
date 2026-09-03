@@ -1,27 +1,33 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Copy } from 'lucide-react';
-import { formatUah } from '../../lib/formatters';
+import { formatDecimal, formatUah } from '../../lib/formatters';
 import { copyPlainText } from '../../lib/clipboard';
 
 export function RecountConfirmDialog({
+  error = '',
   isApplying,
   isOpen,
   onCancel,
   onConfirm,
   preview,
   reason,
+  manualPriceUah,
+  onManualPriceChange,
   mode = 'apply',
   submittingMode = null,
 }) {
   const confirmButtonRef = useRef(null);
 
   useEffect(() => {
+    if (isOpen) confirmButtonRef.current?.focus();
+  }, [isOpen]);
+
+  useEffect(() => {
     if (!isOpen) return undefined;
 
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    confirmButtonRef.current?.focus();
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape' && !isApplying) onCancel();
@@ -39,11 +45,13 @@ export function RecountConfirmDialog({
   const oldPrice = preview.source.totalPriceUah;
   const newPrice = preview.corrected.totalPriceUah;
   const plainNewPrice = Number.isFinite(Number(newPrice))
-    ? String(Math.round(Number(newPrice)))
+    ? formatDecimal(newPrice)
     : '';
   const priceDelta = Number(preview.priceDeltaUah || 0);
   const isChoiceMode = mode === 'choice';
   const isRequestMode = mode === 'request';
+  const requiresManualPrice = !(Number(newPrice) > 0);
+  const hasManualPrice = Number(manualPriceUah) > 0;
 
   return createPortal(
     <div
@@ -133,6 +141,27 @@ export function RecountConfirmDialog({
             <span className="font-semibold text-slate-900">{formatUah(priceDelta)}</span>
           </div>
 
+          {requiresManualPrice && (
+            <div className="danger-panel p-4 text-sm">
+              <p>Автоматична ціна для цієї конфігурації відсутня. Вкажіть ціну вручну.</p>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                className="input mt-3"
+                value={manualPriceUah}
+                onChange={(event) => onManualPriceChange(event.target.value)}
+                placeholder="Ручна ціна, грн"
+              />
+            </div>
+          )}
+
+          {error && (
+            <div role="alert" className="danger-panel p-4 text-sm">
+              {error}
+            </div>
+          )}
+
           {reason && (
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Причина</div>
@@ -163,7 +192,7 @@ export function RecountConfirmDialog({
               type="button"
               onClick={() => onConfirm('request')}
               className="btn btn-outline order-1 sm:order-2"
-              disabled={isApplying}
+              disabled={isApplying || (requiresManualPrice && !hasManualPrice)}
             >
               {isApplying && submittingMode === 'request' ? 'Створюємо...' : 'Створити запит'}
             </button>
@@ -173,7 +202,7 @@ export function RecountConfirmDialog({
             type="button"
             onClick={() => onConfirm(isRequestMode ? 'request' : 'apply')}
             className={`btn btn-primary order-1 ${isChoiceMode ? 'sm:order-3' : 'sm:order-2'}`}
-            disabled={isApplying}
+            disabled={isApplying || (requiresManualPrice && !hasManualPrice)}
           >
             {isApplying && submittingMode === (isRequestMode ? 'request' : 'apply')
               ? 'Створюємо...'

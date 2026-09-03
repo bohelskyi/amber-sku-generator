@@ -1,5 +1,6 @@
 import {
   formatDateTime,
+  formatDecimal,
   formatDecodedSuffix,
   formatUah,
   formatUahPerGram,
@@ -366,7 +367,7 @@ export function DecodeWorkspace({
                       <div>
                         <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Вага</div>
                         <div className="mt-1 text-sm font-semibold text-slate-900">
-                          {decodeData.pricing.weight} г
+                          {formatDecimal(decodeData.pricing.weight)} г
                         </div>
                       </div>
                     )}
@@ -708,7 +709,7 @@ function PreviousPricingSnapshot({ config, decodeData }) {
         {pricing.usesWeight && pricing.weight !== null && pricing.weight !== undefined && (
           <div>
             <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Вага</div>
-            <div className="mt-1 text-sm font-semibold text-slate-900">{pricing.weight} г</div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">{formatDecimal(pricing.weight)} г</div>
           </div>
         )}
       </div>

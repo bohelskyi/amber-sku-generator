@@ -1,9 +1,11 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('node:crypto');
 const sqlite3 = require('sqlite3').verbose();
 const { Pool } = require('pg');
 
 const args = process.argv.slice(2);
+const replaceExisting = args.includes('--replace');
 
 function getArgValue(name, fallback) {
   const prefix = `--${name}=`;
@@ -19,6 +21,7 @@ Usage:
 Options:
   --sqlite=PATH   Path to old SQLite DB (default: ./amber.db)
   --pg=URL        PostgreSQL connection string (default: DATABASE_URL env var)
+  --replace       Explicitly replace existing config; refused when products exist
 `);
   process.exit(0);
 }
@@ -87,10 +90,14 @@ async function run() {
       sqliteDb,
       'SELECT id, category_code, key, label, sku_index, required FROM questions'
     );
-    const options = await sqliteAll(
-      sqliteDb,
-      'SELECT id, question_id, value_id, label FROM options'
+    const optionColumns = new Set(
+      (await sqliteAll(sqliteDb, 'PRAGMA table_info(options)')).map((column) => column.name)
     );
+    const options = await sqliteAll(sqliteDb, `
+      SELECT id, question_id, value_id, label,
+             ${optionColumns.has('sku_code') ? 'sku_code' : 'CAST(value_id AS TEXT)'} AS sku_code
+      FROM options
+    `);
     const scenarios = await sqliteAll(
       sqliteDb,
       'SELECT id, category_code, name, match_json, axis_x_key, axis_y_key FROM price_scenarios'
@@ -110,6 +117,24 @@ async function run() {
 
     await pgClient.query('BEGIN');
 
+    const targetState = await pgClient.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM categories) AS category_count,
+         (SELECT COUNT(*)::int FROM questions) AS question_count,
+         (SELECT COUNT(*)::int FROM products) AS product_count`
+    );
+    const state = targetState.rows[0];
+    const hasConfiguration = Number(state.category_count) > 0 || Number(state.question_count) > 0;
+    if (hasConfiguration && !replaceExisting) {
+      throw new Error(
+        'Target PostgreSQL already contains configuration. Re-run with --replace only after review.'
+      );
+    }
+    if (replaceExisting && Number(state.product_count) > 0) {
+      throw new Error('Refusing --replace because target PostgreSQL contains products.');
+    }
+
+    await pgClient.query('DELETE FROM sku_schema_versions');
     await pgClient.query('DELETE FROM price_matrix');
     await pgClient.query('DELETE FROM price_modifiers');
     await pgClient.query('DELETE FROM price_scenarios');
@@ -141,8 +166,15 @@ async function run() {
 
     for (const row of options) {
       await pgClient.query(
-        'INSERT INTO options (id, question_id, value_id, label) VALUES ($1, $2, $3, $4)',
-        [Number(row.id), Number(row.question_id), Number(row.value_id || 0), row.label]
+        `INSERT INTO options (id, question_id, value_id, sku_code, label)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          Number(row.id),
+          Number(row.question_id),
+          Number(row.value_id || 0),
+          String(row.sku_code ?? row.value_id),
+          row.label,
+        ]
       );
     }
 
@@ -182,10 +214,68 @@ async function run() {
       );
     }
 
+    for (const category of categories) {
+      const categoryQuestions = questions
+        .filter((question) => question.category_code === category.code)
+        .sort((a, b) => Number(a.sku_index) - Number(b.sku_index));
+      const snapshotHash = crypto.createHash('sha256').update(JSON.stringify({
+        category: category.code,
+        questions: categoryQuestions.map((question) => ({
+          key: question.key,
+          label: question.label,
+          skuIndex: Number(question.sku_index || 0),
+          required: Number(question.required || 0),
+          options: options
+            .filter((option) => Number(option.question_id) === Number(question.id))
+            .map((option) => ({ valueId: Number(option.value_id), skuCode: String(option.sku_code) })),
+        })),
+      })).digest('hex');
+      const schemaResult = await pgClient.query(
+        `INSERT INTO sku_schema_versions
+         (category_code, version, marker, status, config_hash)
+         VALUES ($1, 1, '', 'active', $2)
+         RETURNING id`,
+        [category.code, snapshotHash]
+      );
+      for (const question of categoryQuestions) {
+        const schemaQuestionResult = await pgClient.query(
+          `INSERT INTO sku_schema_questions
+           (schema_version_id, question_key, label, sku_index, required, display_order)
+           VALUES ($1, $2, $3, $4::integer, $5, $4::real)
+           RETURNING id`,
+          [
+            Number(schemaResult.rows[0].id),
+            question.key,
+            question.label,
+            Number(question.sku_index || 0),
+            Number(question.required || 0),
+          ]
+        );
+        for (const option of options.filter(
+          (item) => Number(item.question_id) === Number(question.id)
+        )) {
+          await pgClient.query(
+            `INSERT INTO sku_schema_options
+             (schema_question_id, value_id, sku_code, label)
+             VALUES ($1, $2, $3, $4)`,
+            [
+              Number(schemaQuestionResult.rows[0].id),
+              Number(option.value_id),
+              String(option.sku_code),
+              option.label,
+            ]
+          );
+        }
+      }
+    }
+
     await setSequence(pgClient, 'questions', 'id');
     await setSequence(pgClient, 'options', 'id');
     await setSequence(pgClient, 'price_scenarios', 'id');
     await setSequence(pgClient, 'price_modifiers', 'id');
+    await setSequence(pgClient, 'sku_schema_versions', 'id');
+    await setSequence(pgClient, 'sku_schema_questions', 'id');
+    await setSequence(pgClient, 'sku_schema_options', 'id');
 
     await pgClient.query('COMMIT');
 

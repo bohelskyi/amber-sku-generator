@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { formatDecimal } from '../lib/formatters';
 import { getValidationIssues } from '../lib/admin-validation';
 import { normalizeDecimalInput } from '../lib/number-input';
 
@@ -172,6 +173,7 @@ export function useAdminPanel() {
       name: category.name,
       requires_weight: category.requires_weight === 1,
       skip_hidden_sku_questions: category.skip_hidden_sku_questions === 1,
+      code_mutable: category.code_mutable !== false,
     });
     setEditScenario(null);
     setEditModifier(null);
@@ -225,6 +227,7 @@ export function useAdminPanel() {
               name: nextCategory.name,
               requires_weight: nextCategory.requires_weight === 1,
               skip_hidden_sku_questions: nextCategory.skip_hidden_sku_questions === 1,
+              code_mutable: nextCategory.code_mutable !== false,
             });
             fetchPricesForCategory(nextCategory.code);
           } else {
@@ -480,14 +483,22 @@ export function useAdminPanel() {
 
   const handlePriceChange = (scenarioId, xVal, yVal, newPrice) => {
     const normalizedPrice = normalizeDecimalInput(newPrice);
+    if (normalizedPrice.trim() === '') {
+      return api.post('/admin/price-cell', {
+        scenario_id: scenarioId,
+        x_val: xVal,
+        y_val: yVal,
+        price: null,
+      });
+    }
     const parsedPrice = Number(normalizedPrice);
-    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) return;
+    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) return Promise.resolve();
 
-    api.post('/admin/price-cell', {
+    return api.post('/admin/price-cell', {
       scenario_id: scenarioId,
       x_val: xVal,
       y_val: yVal,
-      price: parsedPrice,
+      price: normalizedPrice,
     });
   };
 
@@ -528,7 +539,11 @@ export function useAdminPanel() {
       status: scenario.status || 'active',
       price_mode: scenario.price_mode || 'category_default',
       apply_modifiers: scenario.apply_modifiers !== false,
-      weight_bands: scenario.weight_bands || [],
+      weight_bands: (scenario.weight_bands || []).map((band) => ({
+        ...band,
+        min_weight: formatDecimal(band.min_weight),
+        max_weight: formatDecimal(band.max_weight),
+      })),
     });
   };
 
@@ -600,7 +615,7 @@ export function useAdminPanel() {
       match_json: formatMatchJson(
         modifier.match_json || (modifier.trigger_key ? { [modifier.trigger_key]: modifier.trigger_val } : {})
       ),
-      factor: String(modifier.factor ?? ''),
+      factor: formatDecimal(modifier.factor),
     });
   };
 

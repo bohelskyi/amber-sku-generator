@@ -24,9 +24,11 @@ import {
 import { Link } from 'react-router-dom';
 import { RepricingRecountDrawer } from '../components/app/RepricingRecountDrawer';
 import { api } from '../lib/api';
+import { formatDecimal, formatUah } from '../lib/formatters';
 import { getPricingAxis } from '../lib/pricing-axis';
 import {
   applyManualPrices,
+  canApplyRepricing,
   getInvalidManualPriceIds,
   getManualOverrides,
   getRepricingSummary,
@@ -34,26 +36,18 @@ import {
   sortRepricingItems,
 } from '../lib/repricing';
 
-const formatUah = (value) => {
-  if (value === null || value === undefined || value === '') return '-';
-  return `${new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 2 }).format(Number(value))} ₴`;
-};
-
 const formatDate = (value) => (
   value ? new Intl.DateTimeFormat('uk-UA', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : '-'
 );
 
 const formatUsdPerGram = (value) => {
   if (value === null || value === undefined || value === '') return null;
-  return `$${new Intl.NumberFormat('uk-UA', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
-  }).format(Number(value))}/г`;
+  return Number.isFinite(Number(value)) ? `$${formatDecimal(value)}/г` : null;
 };
 
 const formatRate = (value) => {
   if (value === null || value === undefined || value === '') return null;
-  return `${new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 4 }).format(Number(value))} ₴/$`;
+  return Number.isFinite(Number(value)) ? `${formatDecimal(value)} ₴/$` : null;
 };
 
 const getApiError = (error) => error.response?.data?.error || error.message || 'Невідома помилка';
@@ -398,6 +392,13 @@ export default function RepricingPage() {
     () => new Set(getInvalidManualPriceIds(manualPrices)),
     [manualPrices]
   );
+  const canApply = canApplyRepricing({
+    summary: effectiveSummary,
+    invalidManualPriceCount: invalidManualPriceIds.size,
+    draftConflictCount: draftConflicts.length,
+    blockingCorrectionRequestCount: blockingCorrectionRequests.length,
+    isDraftStale: Boolean(activeDraft && draftSync?.hasChanges),
+  });
   const reviewedProductIdSet = useMemo(
     () => new Set(reviewedProductIds.map(Number)),
     [reviewedProductIds]
@@ -447,7 +448,7 @@ export default function RepricingPage() {
   const applyDraftPayload = (data) => {
     const nextManualPrices = Object.fromEntries(
       (data.manualOverrides || data.draft?.manualOverrides || []).map((item) => (
-        [item.productId, String(item.newPriceUah)]
+        [item.productId, formatDecimal(item.newPriceUah)]
       ))
     );
     const uiState = data.draft?.uiState || {};
@@ -1065,6 +1066,13 @@ export default function RepricingPage() {
                     {visibleItems.map((item) => {
                       const isReviewed = reviewedProductIdSet.has(Number(item.productId));
                       const correctionRequest = activeCorrectionRequestByProductId.get(Number(item.productId));
+                      const requiresManualPrice = ['price_missing', 'manual_price'].includes(
+                        item.errorCode
+                      );
+                      const hasManualOverride = Object.prototype.hasOwnProperty.call(
+                        manualPrices,
+                        item.productId
+                      );
                       return (
                       <tr
                         key={item.productId}
@@ -1105,10 +1113,25 @@ export default function RepricingPage() {
                             </button>
                           </div>
                         </td>
-                        <td className="table-cell whitespace-nowrap text-sm">{item.weight ?? '-'} г</td>
+                        <td className="table-cell whitespace-nowrap text-sm">{item.weight === null || item.weight === undefined ? '-' : formatDecimal(item.weight)} г</td>
                         <td className="table-cell min-w-64 text-xs text-slate-600">
-                          {item.status === 'error'
+                          {item.status === 'error' && !requiresManualPrice
                             ? <span className="text-rose-700">{item.message}</span>
+                            : requiresManualPrice
+                              ? (
+                                <div className="space-y-2">
+                                  <div className={item.manualOverride ? 'text-amber-800' : 'text-rose-700'}>
+                                    {item.message}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline h-8 px-3 text-xs"
+                                    onClick={() => setManualPrice(item.productId, formatDecimal(item.oldPriceUah))}
+                                  >
+                                    Залишити поточну ціну · {formatUah(item.oldPriceUah)}
+                                  </button>
+                                </div>
+                              )
                             : (
                               <PricingExplanation
                                 config={config}
@@ -1119,7 +1142,7 @@ export default function RepricingPage() {
                         </td>
                         <td className="table-cell whitespace-nowrap text-right text-sm">{formatUah(item.oldPriceUah)}</td>
                         <td className="table-cell min-w-44 whitespace-nowrap text-right text-sm font-semibold">
-                          {item.status === 'error' ? '-' : (
+                          {item.status === 'error' && !requiresManualPrice ? '-' : (
                             <div className="flex flex-col items-end gap-1">
                               <div className="flex items-center justify-end gap-1.5">
                                 <div className="relative">
@@ -1127,9 +1150,9 @@ export default function RepricingPage() {
                                     className={`input-sm w-28 pr-7 text-right font-semibold ${invalidManualPriceIds.has(item.productId) ? 'border-rose-400 focus:border-rose-500' : ''}`}
                                     inputMode="decimal"
                                     aria-label={`Нова ціна для ${item.sku}`}
-                                    value={Object.prototype.hasOwnProperty.call(manualPrices, item.productId)
+                                    value={hasManualOverride
                                       ? manualPrices[item.productId]
-                                      : item.newPriceUah}
+                                      : (requiresManualPrice ? '' : formatDecimal(item.newPriceUah))}
                                     onChange={(event) => setManualPrice(item.productId, event.target.value)}
                                     onBlur={(event) => {
                                       const normalizedPrice = parseManualPrice(event.target.value);
@@ -1138,7 +1161,7 @@ export default function RepricingPage() {
                                   />
                                   <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-normal text-slate-400">₴</span>
                                 </div>
-                                {Object.prototype.hasOwnProperty.call(manualPrices, item.productId) && (
+                                {hasManualOverride && (
                                   <button
                                     type="button"
                                     className="btn btn-outline flex h-8 w-8 shrink-0 items-center justify-center p-0"
@@ -1152,7 +1175,9 @@ export default function RepricingPage() {
                               </div>
                               {item.manualOverride && (
                                 <span className="text-[10px] font-semibold uppercase text-amber-700">
-                                  Вручну · матриця {formatUah(item.calculatedPriceUah)}
+                                  {item.resolvedManualPrice || item.resolvedPriceMissing
+                                    ? 'Ручну ціну підтверджено'
+                                    : `Вручну · матриця ${formatUah(item.calculatedPriceUah)}`}
                                 </span>
                               )}
                               {invalidManualPriceIds.has(item.productId) && (
@@ -1192,12 +1217,7 @@ export default function RepricingPage() {
                 <button
                   type="button"
                   className="btn btn-primary gap-2"
-                  disabled={effectiveSummary.changedCount === 0
-                    || effectiveSummary.errorCount > 0
-                    || invalidManualPriceIds.size > 0
-                    || draftConflicts.length > 0
-                    || blockingCorrectionRequests.length > 0
-                    || Boolean(activeDraft && draftSync?.hasChanges)}
+                  disabled={!canApply}
                   onClick={() => setConfirmOpen(true)}
                 >
                   <CheckCircle2 size={16} />

@@ -1,4 +1,4 @@
-import { formatUah, formatUahPerGram, formatUsd } from '../../lib/formatters';
+import { formatDecimal, formatUah, formatUahPerGram, formatUsd } from '../../lib/formatters';
 
 export function PreviewResult({
   previewData,
@@ -15,6 +15,7 @@ export function PreviewResult({
   isVariationLoading,
   isManualPriceEditing,
   isSaving,
+  requiresManualPrice,
   manualPriceUah,
   onCopyText,
   onBackToParameters,
@@ -114,12 +115,22 @@ export function PreviewResult({
         </div>
       )}
 
+      {requiresManualPrice && !hasManualPrice && (
+        <div className="danger-panel p-4 mb-6 text-sm">
+          Автоматична ціна для цієї конфігурації відсутня. Вкажіть ціну вручну.
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <button onClick={onBackToParameters} className="btn btn-outline py-3">Назад до параметрів</button>
         <button onClick={onAddVariation} className="btn btn-primary py-3" disabled={isVariationLoading}>
           {isVariationLoading ? 'Підбираємо...' : 'Додати варіацію'}
         </button>
-        <button onClick={onSave} className="btn btn-amber py-3" disabled={isSaving}>
+        <button
+          onClick={onSave}
+          className="btn btn-amber py-3"
+          disabled={isSaving || (requiresManualPrice && !hasManualPrice)}
+        >
           {isSaving ? 'Зберігаємо...' : 'Зберегти'}
         </button>
       </div>
@@ -141,7 +152,7 @@ function PriceActions({
   return (
     <>
       <button
-        onClick={() => effectiveTotalPriceUah && onCopyText(`${effectiveTotalPriceUah} ₴`, 'Ціну')}
+        onClick={() => effectiveTotalPriceUah && onCopyText(`${formatDecimal(effectiveTotalPriceUah)} ₴`, 'Ціну')}
         className="btn btn-outline text-xs px-3 py-1.5"
       >
         Копіювати ціну
@@ -164,7 +175,7 @@ function PriceActions({
           </label>
           <input
             type="number"
-            min="0"
+            min="1"
             step="1"
             value={manualPriceUah}
             onChange={(event) => onManualPriceChange(event.target.value)}

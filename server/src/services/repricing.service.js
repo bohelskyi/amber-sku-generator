@@ -1,7 +1,8 @@
 const crypto = require('node:crypto');
 const { isDeepStrictEqual } = require('node:util');
 const pool = require('../db/pool');
-const { calculatePricing } = require('./pricing.service');
+const { calculatePricing, loadPricingContext } = require('./pricing.service');
+const { getUsdUahRateInfo } = require('./currency.service');
 const { roundUah } = require('../utils/money');
 const { asRuleObject, isRuleMatched } = require('../utils/rules');
 
@@ -175,13 +176,18 @@ function getScenarioSnapshot(scenario) {
   };
 }
 
-function getPreviewToken(scenario, changedItems) {
+function getPreviewToken(scenario, applicableItems) {
   const payload = {
     scenario: getScenarioSnapshot(scenario),
-    changes: changedItems.map((item) => ({
+    changes: applicableItems.map((item) => ({
       productId: item.productId,
+      sku: item.sku,
+      weight: item.weight ?? null,
+      answers: item.answers || {},
       oldPriceUah: item.oldPriceUah,
-      newPriceUah: item.newPriceUah,
+      newPriceUah: item.newPriceUah ?? null,
+      status: item.status,
+      errorCode: item.errorCode || null,
       pricingChange: item.pricingChange || null,
     })),
   };
@@ -313,7 +319,9 @@ function applyManualOverridesToPreview(preview, manualOverrides = []) {
       error.statusCode = 422;
       throw error;
     }
-    if (item.status === 'error') {
+    const isResolvableManualPriceError = item.status === 'error'
+      && ['price_missing', 'manual_price'].includes(item.errorCode);
+    if (item.status === 'error' && !isResolvableManualPriceError) {
       const error = new Error(`Для товару ${item.sku} спочатку потрібно усунути помилку розрахунку.`);
       error.statusCode = 422;
       throw error;
@@ -324,6 +332,8 @@ function applyManualOverridesToPreview(preview, manualOverrides = []) {
     if (!overridesByProductId.has(Number(item.productId))) return item;
 
     const newPriceUah = overridesByProductId.get(Number(item.productId));
+    const resolvesManualPrice = item.status === 'error'
+      && ['price_missing', 'manual_price'].includes(item.errorCode);
     const oldPriceUah = item.oldPriceUah === null ? null : Number(item.oldPriceUah);
     const uahRate = Number(item.uahRate || 0);
     const weight = Number(item.weight || 0);
@@ -333,17 +343,20 @@ function applyManualOverridesToPreview(preview, manualOverrides = []) {
     const pricePerGram = uahRate > 0 && weight > 0
       ? Number((newPriceUah / uahRate / weight).toFixed(2))
       : item.pricePerGram;
-    const isChanged = oldPriceUah === null || oldPriceUah !== newPriceUah;
+    const isChanged = resolvesManualPrice || oldPriceUah === null || oldPriceUah !== newPriceUah;
 
     return {
       ...item,
-      calculatedPriceUah: item.newPriceUah,
+      calculatedPriceUah: resolvesManualPrice ? null : item.newPriceUah,
       newPriceUah,
       priceDeltaUah: newPriceUah - Number(oldPriceUah || 0),
       totalPrice,
       pricePerGram,
       status: isChanged ? 'changed' : 'unchanged',
       manualOverride: true,
+      resolvedManualPrice: resolvesManualPrice,
+      resolvedPriceMissing: resolvesManualPrice && item.errorCode === 'price_missing',
+      logMessage: resolvesManualPrice ? item.message : item.logMessage,
       pricingChange: addManualOverrideReason(item.pricingChange),
     };
   });
@@ -407,6 +420,9 @@ function buildErrorItem(product, details, answers, code, message) {
     weight: product.weight === null ? null : Number(product.weight),
     answers,
     oldPriceUah: product.total_price_uah === null ? null : Number(product.total_price_uah),
+    totalPrice: product.total_price === null ? null : Number(product.total_price),
+    pricePerGram: product.price_per_gram === null ? null : Number(product.price_per_gram),
+    uahRate: product.uah_rate === null ? null : Number(product.uah_rate),
     status: 'error',
     errorCode: code,
     message,
@@ -466,6 +482,21 @@ function assertNoBlockingCorrectionRequests(requests = []) {
 
 async function buildRepricingPreview(scenarioId) {
   const scenario = await getActiveScenario(scenarioId);
+  const pricingContext = await loadPricingContext(scenario.category_code);
+  let rateInfo = null;
+  try {
+    rateInfo = await getUsdUahRateInfo();
+  } catch (error) {
+    rateInfo = {
+      rate: null,
+      source: 'unavailable',
+      rateDate: null,
+      fetchedAt: null,
+      ageMs: null,
+      stale: false,
+      error: String(error.message || error),
+    };
+  }
   const scenarioRule = asRuleObject(scenario.match_json);
   const productsResult = await pool.query(
     `SELECT id, full_sku, category, weight, total_price, total_price_uah,
@@ -501,7 +532,8 @@ async function buildRepricingPreview(scenarioId) {
         product.category,
         answers,
         product.weight,
-        answers.is_calibrated
+        answers.is_calibrated,
+        { context: pricingContext, rateInfo }
       );
       const selectedScenarioId = Number(pricing.pricingDetails?.scenario?.id || 0);
       if (selectedScenarioId !== Number(scenario.id)) {
@@ -579,11 +611,14 @@ async function buildRepricingPreview(scenarioId) {
   const changedItems = items.filter((item) => item.status === 'changed');
   const unchangedItems = items.filter((item) => item.status === 'unchanged');
   const errorItems = items.filter((item) => item.status === 'error');
+  const applicableItems = items.filter((item) => (
+    item.status === 'changed' || ['price_missing', 'manual_price'].includes(item.errorCode)
+  ));
   const blockingCorrectionRequests = await getBlockingCorrectionRequests(items);
 
   return {
     scenario: getScenarioSnapshot(scenario),
-    previewToken: getPreviewToken(scenario, changedItems),
+    previewToken: getPreviewToken(scenario, applicableItems),
     summary: {
       candidateCount: items.length + skippedCount,
       changedCount: changedItems.length,
@@ -872,17 +907,23 @@ async function discardRepricingDraft(draftId) {
 }
 
 function getUpdatedDetails(details, item, batchId, appliedAt) {
+  const autoPriceUah = item.manualOverride
+    ? (item.calculatedPriceUah ?? null)
+    : (item.calculatedPriceUah ?? item.newPriceUah);
   return {
     ...details,
     logMessage: item.logMessage,
-    autoPriceUah: String(item.calculatedPriceUah ?? item.newPriceUah),
-    pricingScenario: item.pricingDetails?.scenario || null,
+    autoPriceUah,
+    manualPriceUah: item.manualOverride ? item.newPriceUah : (details.manualPriceUah ?? null),
+    pricingScenario: item.pricingDetails?.scenario || details.pricingScenario || null,
     repricing: {
       batchId,
-      scenarioId: item.pricingDetails?.scenario?.id || null,
+      scenarioId: item.pricingDetails?.scenario?.id || details.pricingScenario?.id || null,
       oldPriceUah: item.oldPriceUah,
       newPriceUah: item.newPriceUah,
-      calculatedPriceUah: item.calculatedPriceUah ?? item.newPriceUah,
+      calculatedPriceUah: item.manualOverride
+        ? (item.calculatedPriceUah ?? null)
+        : (item.calculatedPriceUah ?? item.newPriceUah),
       manualOverride: Boolean(item.manualOverride),
       pricingChange: item.pricingChange || null,
       appliedAt,
@@ -969,6 +1010,20 @@ async function applyRepricing({ scenarioId, previewToken, manualOverrides = [], 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const lockedProductsResult = await client.query(
+      `SELECT id, full_sku, weight, total_price, total_price_uah, price_per_gram,
+              uah_rate, details, status, exclude_from_export
+       FROM products
+       WHERE id = ANY($1::int[])
+       ORDER BY id
+       FOR UPDATE`,
+      [changedItems.map((item) => item.productId)]
+    );
+    const lockedProducts = new Map(
+      lockedProductsResult.rows.map((product) => [Number(product.id), product])
+    );
+    const blockingRequests = await getBlockingCorrectionRequests(changedItems, client);
+    assertNoBlockingCorrectionRequests(blockingRequests);
     if (draft) {
       const lockedDraft = await getRepricingDraftRow(draft.id, client, true);
       const lockedOverrides = normalizeManualOverrides(lockedDraft.manual_overrides || []);
@@ -1023,15 +1078,7 @@ async function applyRepricing({ scenarioId, previewToken, manualOverrides = [], 
     const appliedAt = batchResult.rows[0].applied_at;
 
     for (const item of changedItems) {
-      const productResult = await client.query(
-        `SELECT id, full_sku, weight, total_price, total_price_uah, price_per_gram,
-                uah_rate, details, status, exclude_from_export
-         FROM products
-         WHERE id = $1
-         FOR UPDATE`,
-        [item.productId]
-      );
-      const product = productResult.rows[0];
+      const product = lockedProducts.get(Number(item.productId));
       if (!product || String(product.status || 'active') !== 'active') {
         const error = new Error(`Товар ${item.sku} змінив статус під час переоцінки.`);
         error.statusCode = 409;

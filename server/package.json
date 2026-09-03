@@ -6,7 +6,8 @@
     "start": "node server.js",
     "audit:data": "node scripts/audit-data-integrity.js",
     "migrate:config": "node scripts/migrate-sqlite-config-to-postgres.js",
-    "test": "node --test"
+    "test": "node --test test/*.test.js",
+    "test:integration": "node --test integration-test/*.test.js"
   },
   "keywords": [],
   "author": "",

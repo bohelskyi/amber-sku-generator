@@ -156,10 +156,13 @@ export function RepricingRecountDrawer({
       </main>
 
       <RecountConfirmDialog
+        error={recount.recountError}
         isApplying={recount.isRecountApplying}
         isOpen={recount.isRecountConfirmOpen}
         preview={recount.recountPreview}
         reason={recount.recountReason}
+        manualPriceUah={recount.recountManualPriceUah}
+        onManualPriceChange={recount.setRecountManualPriceUah}
         mode={mode}
         submittingMode={recount.recountSubmitMode}
         onCancel={recount.handleCancelRecountConfirmation}

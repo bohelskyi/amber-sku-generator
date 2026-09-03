@@ -172,13 +172,32 @@ async function renameQuestionKeyReferences(client, categoryCode, oldKey, newKey)
 async function getAppConfig() {
   const config = { categories: {}, questions: {}, extraConfig: initialConfig.extraConfig };
 
-  const categories = await pool.query('SELECT * FROM categories');
+  const categories = await pool.query(
+    `SELECT c.*,
+            NOT (
+              EXISTS (SELECT 1 FROM products p WHERE p.category = c.code)
+              OR EXISTS (
+                SELECT 1
+                FROM sku_registry sr
+                LEFT JOIN products rp ON rp.id = sr.first_product_id
+                WHERE rp.category = c.code OR sr.full_sku LIKE c.code || '%'
+              )
+              OR EXISTS (
+                SELECT 1
+                FROM sku_schema_versions sv
+                JOIN products sp ON sp.sku_schema_version_id = sv.id
+                WHERE sv.category_code = c.code AND sv.published_at IS NOT NULL
+              )
+            ) AS code_mutable
+     FROM categories c`
+  );
   for (const row of categories.rows) {
     config.categories[row.code] = {
       name: row.name,
       code: row.code,
       requires_weight: row.requires_weight,
       skip_hidden_sku_questions: row.skip_hidden_sku_questions || 0,
+      code_mutable: Boolean(row.code_mutable),
     };
   }
 
@@ -294,6 +313,31 @@ async function updateCategory({ code, next_code, name, requires_weight, skip_hid
     if (currentResult.rows.length === 0) {
       const err = new Error('Категорію не знайдено');
       err.statusCode = 404;
+      throw err;
+    }
+
+    const usageResult = await client.query(
+      `SELECT
+         EXISTS (SELECT 1 FROM products WHERE category = $1)
+         OR EXISTS (
+           SELECT 1
+           FROM sku_registry sr
+           LEFT JOIN products p ON p.id = sr.first_product_id
+           WHERE p.category = $1 OR sr.full_sku LIKE $1 || '%'
+         )
+         OR EXISTS (
+           SELECT 1
+           FROM sku_schema_versions sv
+           JOIN products p ON p.sku_schema_version_id = sv.id
+           WHERE sv.category_code = $1 AND sv.published_at IS NOT NULL
+         ) AS used`,
+      [currentCode]
+    );
+    if (usageResult.rows[0]?.used) {
+      const err = new Error(
+        `Код категорії ${currentCode} не можна змінити, оскільки він уже використаний у SKU.`
+      );
+      err.statusCode = 409;
       throw err;
     }
 

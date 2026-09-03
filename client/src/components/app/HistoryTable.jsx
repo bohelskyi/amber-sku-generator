@@ -1,4 +1,4 @@
-import { formatUah } from '../../lib/formatters';
+import { formatDecimal, formatUah, formatUsd } from '../../lib/formatters';
 
 export function HistoryTable({ history, config, selectedCat, onCopyText, onDecode, onDelete }) {
   return (
@@ -32,9 +32,9 @@ export function HistoryTable({ history, config, selectedCat, onCopyText, onDecod
                   <tr key={item.id} className="hover:bg-slate-50">
                     <td className="table-cell whitespace-nowrap text-sm font-mono font-semibold text-slate-800">{item.full_sku}</td>
                     <td className="table-cell whitespace-nowrap text-sm text-slate-500">{config.categories[item.category]?.name}</td>
-                    <td className="table-cell whitespace-nowrap text-sm text-slate-500">{item.weight > 0 ? `${item.weight}г` : '-'}</td>
+                    <td className="table-cell whitespace-nowrap text-sm text-slate-500">{item.weight > 0 ? `${formatDecimal(item.weight)}г` : '-'}</td>
                     <td className="table-cell whitespace-nowrap text-sm text-slate-500">
-                      {item.total_price_uah ? formatUah(item.total_price_uah) : item.total_price ? `$${item.total_price}` : '-'}
+                      {item.total_price_uah ? formatUah(item.total_price_uah) : item.total_price ? formatUsd(item.total_price) : '-'}
                     </td>
                     <td className="table-cell whitespace-nowrap text-sm">
                       {!selectedCat && (
@@ -44,7 +44,7 @@ export function HistoryTable({ history, config, selectedCat, onCopyText, onDecod
                           <button
                             onClick={() => item.total_price_uah
                               ? onCopyText(formatUah(item.total_price_uah), 'Ціну')
-                              : item.total_price && onCopyText(`$${item.total_price}`, 'Ціну')}
+                              : item.total_price && onCopyText(formatUsd(item.total_price), 'Ціну')}
                             className="btn btn-outline text-xs px-2 py-1"
                           >
                             Копіювати ціну

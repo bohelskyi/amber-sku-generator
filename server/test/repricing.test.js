@@ -252,6 +252,138 @@ test('manual overrides recalculate final UAH and derived USD prices', () => {
   assert.equal(preview.summary.changedCount, 1);
 });
 
+test('price_missing remains an error until a manual price is explicitly supplied', () => {
+  const preview = applyManualOverridesToPreview({
+    summary: { changedCount: 0, unchangedCount: 0, errorCount: 1 },
+    items: [{
+      productId: 7,
+      sku: 'NM7',
+      weight: 10,
+      oldPriceUah: 400,
+      totalPrice: 8,
+      pricePerGram: 0.8,
+      uahRate: 50,
+      status: 'error',
+      errorCode: 'price_missing',
+      message: 'No matrix price',
+    }],
+  }, []);
+
+  assert.equal(preview.items[0].status, 'error');
+  assert.equal(preview.summary.errorCount, 1);
+  assert.equal(preview.summary.changedCount, 0);
+});
+
+test('price_missing accepts keeping the current price as an explicit manual resolution', () => {
+  const preview = applyManualOverridesToPreview({
+    summary: { changedCount: 0, unchangedCount: 0, errorCount: 1 },
+    items: [{
+      productId: 7,
+      sku: 'NM7',
+      weight: 10,
+      oldPriceUah: 400,
+      totalPrice: 8,
+      pricePerGram: 0.8,
+      uahRate: 50,
+      status: 'error',
+      errorCode: 'price_missing',
+    }],
+  }, [{ productId: 7, newPriceUah: 400 }]);
+
+  assert.equal(preview.items[0].status, 'changed');
+  assert.equal(preview.items[0].newPriceUah, 400);
+  assert.equal(preview.items[0].priceDeltaUah, 0);
+  assert.equal(preview.items[0].manualOverride, true);
+  assert.equal(preview.items[0].resolvedPriceMissing, true);
+  assert.equal(preview.summary.errorCount, 0);
+  assert.equal(preview.summary.changedCount, 1);
+});
+
+test('price_missing accepts a new positive manual price but other errors stay blocked', () => {
+  const resolved = applyManualOverridesToPreview({
+    summary: { changedCount: 0, unchangedCount: 0, errorCount: 1 },
+    items: [{
+      productId: 7,
+      sku: 'NM7',
+      weight: 10,
+      oldPriceUah: 400,
+      totalPrice: 8,
+      pricePerGram: 0.8,
+      uahRate: 50,
+      status: 'error',
+      errorCode: 'price_missing',
+    }],
+  }, [{ productId: 7, newPriceUah: 550 }]);
+
+  assert.equal(resolved.items[0].newPriceUah, 550);
+  assert.equal(resolved.items[0].totalPrice, 11);
+  assert.equal(resolved.items[0].pricePerGram, 1.1);
+  assert.equal(resolved.summary.errorCount, 0);
+
+  assert.throws(
+    () => applyManualOverridesToPreview({
+      summary: { errorCount: 1 },
+      items: [{ productId: 8, sku: 'NM8', status: 'error', errorCode: 'calculation_failed' }],
+    }, [{ productId: 8, newPriceUah: 550 }]),
+    /спочатку потрібно усунути помилку/
+  );
+});
+
+test('manual_price accepts keeping or changing the existing manual price', () => {
+  const preview = {
+    summary: { changedCount: 0, unchangedCount: 0, errorCount: 1 },
+    items: [{
+      productId: 9,
+      sku: 'NM9',
+      weight: 10,
+      oldPriceUah: 550,
+      totalPrice: 11,
+      pricePerGram: 1.1,
+      uahRate: 50,
+      status: 'error',
+      errorCode: 'manual_price',
+      message: 'Товар має ручну ціну.',
+    }],
+  };
+
+  const kept = applyManualOverridesToPreview(preview, [
+    { productId: 9, newPriceUah: 550 },
+  ]);
+  assert.equal(kept.items[0].status, 'changed');
+  assert.equal(kept.items[0].newPriceUah, 550);
+  assert.equal(kept.items[0].resolvedManualPrice, true);
+  assert.equal(kept.summary.errorCount, 0);
+
+  const changed = applyManualOverridesToPreview(preview, [
+    { productId: 9, newPriceUah: 675 },
+  ]);
+  assert.equal(changed.items[0].status, 'changed');
+  assert.equal(changed.items[0].newPriceUah, 675);
+  assert.equal(changed.items[0].priceDeltaUah, 125);
+  assert.equal(changed.summary.errorCount, 0);
+});
+
+test('repricing preview token binds resolvable price_missing product state', () => {
+  const item = {
+    productId: 7,
+    sku: 'NM7',
+    weight: 10,
+    answers: { extra: 2 },
+    oldPriceUah: 400,
+    status: 'error',
+    errorCode: 'price_missing',
+  };
+
+  assert.notEqual(
+    getPreviewToken(scenario, [item]),
+    getPreviewToken(scenario, [{ ...item, answers: { extra: 3 } }])
+  );
+  assert.notEqual(
+    getPreviewToken(scenario, [item]),
+    getPreviewToken(scenario, [{ ...item, oldPriceUah: 450 }])
+  );
+});
+
 test('manual overrides reject invalid and unrelated products', () => {
   assert.throws(
     () => normalizeManualOverrides([{ productId: 1, newPriceUah: 0 }]),

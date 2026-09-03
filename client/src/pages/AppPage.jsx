@@ -98,6 +98,7 @@ function AppPage() {
             isVariationLoading={sku.isVariationLoading}
             isManualPriceEditing={sku.isManualPriceEditing}
             isSaving={sku.isSaving}
+            requiresManualPrice={sku.requiresManualPrice}
             manualPriceUah={sku.manualPriceUah}
             onCopyText={sku.handleCopyText}
             onBackToParameters={sku.handleBackToParameters}
@@ -137,10 +138,13 @@ function AppPage() {
         )}
       </div>
       <RecountConfirmDialog
+        error={sku.recountError}
         isApplying={sku.isRecountApplying}
         isOpen={sku.isRecountConfirmOpen}
         preview={sku.recountPreview}
         reason={sku.recountReason}
+        manualPriceUah={sku.recountManualPriceUah}
+        onManualPriceChange={sku.setRecountManualPriceUah}
         mode="choice"
         submittingMode={sku.recountSubmitMode}
         onCancel={sku.handleCancelRecountConfirmation}

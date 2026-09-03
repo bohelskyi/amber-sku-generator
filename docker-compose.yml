@@ -29,6 +29,12 @@ services:
       DATABASE_URL: postgresql://amber:amber_password@postgres:5432/amber
     expose:
       - "5000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5000/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   client:
     build:
@@ -36,7 +42,8 @@ services:
       args:
         VITE_API_BASE_URL: /api
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     restart: unless-stopped
     ports:
       - "80:80"

@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import { api } from '../lib/api.js';
-import { getDecodedAnswerMap, haveAnswersChanged } from '../lib/product-recount.js';
+import {
+  buildRecountPayload,
+  getDecodedAnswerMap,
+  haveAnswersChanged,
+} from '../lib/product-recount.js';
 
 export function useProductRecount({
   config,
@@ -15,6 +19,7 @@ export function useProductRecount({
   const [isRecountOpen, setIsRecountOpen] = useState(false);
   const [recountAnswers, setRecountAnswers] = useState({});
   const [recountReason, setRecountReason] = useState('');
+  const [recountManualPriceUah, setRecountManualPriceUah] = useState('');
   const [recountPreview, setRecountPreview] = useState(null);
   const [recountError, setRecountError] = useState('');
   const [recountSuccess, setRecountSuccess] = useState('');
@@ -73,6 +78,7 @@ export function useProductRecount({
 
     setRecountAnswers(getDecodedAnswerMap(decodeData));
     setRecountReason('');
+    setRecountManualPriceUah('');
     setRecountPreview(null);
     setRecountError('');
     setRecountSuccess('');
@@ -124,11 +130,12 @@ export function useProductRecount({
     setRecountError('');
   };
 
-  const buildRecountPayload = () => ({
+  const getRecountPayload = () => buildRecountPayload({
     sourceSku: decodeData?.sku,
     answers: recountAnswers,
     isCalibrated: recountAnswers.is_calibrated ?? null,
     reason: recountReason,
+    manualPriceUah: recountManualPriceUah,
   });
 
   const requestRecountPreview = (openConfirmation = false) => {
@@ -143,7 +150,7 @@ export function useProductRecount({
     setRecountError('');
     setRecountSuccess('');
 
-    api.post('/recount/preview', buildRecountPayload())
+    api.post('/recount/preview', getRecountPayload())
       .then((res) => {
         setRecountPreview(res.data);
         if (openConfirmation) setIsRecountConfirmOpen(true);
@@ -174,6 +181,11 @@ export function useProductRecount({
 
   const handleConfirmRecount = (requestedMode = submitMode) => {
     if (!decodeData?.sku || !recountPreview || !hasRecountChanges || isRecountApplying) return;
+    const requiresManualPrice = !(Number(recountPreview.corrected?.totalPriceUah) > 0);
+    if (requiresManualPrice && !(Number(recountManualPriceUah) > 0)) {
+      setRecountError('Автоматична ціна для цієї конфігурації відсутня. Вкажіть ціну вручну.');
+      return;
+    }
 
     const sourceSku = decodeData.sku;
     const effectiveSubmitMode = requestedMode === 'request' ? 'request' : 'apply';
@@ -185,7 +197,7 @@ export function useProductRecount({
     const isRequestMode = effectiveSubmitMode === 'request';
     api.post(
       isRequestMode ? '/admin/correction-requests' : '/recount/apply',
-      buildRecountPayload()
+      getRecountPayload()
     )
       .then((res) => {
         setIsRecountConfirmOpen(false);
@@ -205,7 +217,6 @@ export function useProductRecount({
         handleDecode(correctedSku);
       })
       .catch((err) => {
-        setIsRecountConfirmOpen(false);
         setRecountError(err.response?.data?.error || err.message);
       })
       .finally(() => {
@@ -235,11 +246,13 @@ export function useProductRecount({
     isRecountOpen,
     recountAnswers,
     recountError,
+    recountManualPriceUah,
     recountPreview,
     recountReason,
     recountSubmitMode,
     recountSuccess,
     setRecountReason,
+    setRecountManualPriceUah,
     skuToDecode,
   };
 }
