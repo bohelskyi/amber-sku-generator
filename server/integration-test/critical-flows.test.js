@@ -105,6 +105,57 @@ async function createFixtureCategory(code, requiresWeight, withPrices) {
   return null;
 }
 
+async function createLegacySemiCalibratedNecklaceFixture() {
+  await pool.query(
+    `INSERT INTO categories (code, name, requires_weight, skip_hidden_sku_questions)
+     VALUES ('LN', 'Legacy necklace', 1, 0)`
+  );
+  const questions = await pool.query(`
+    INSERT INTO questions
+      (category_code, key, label, sku_index, display_order, required,
+       include_in_sku, input_type, visible_if_json)
+    VALUES
+      ('LN', 'raw_type', 'Тип сировини', 1, 1, 1, 1, 'options', NULL),
+      ('LN', 'size', 'Розмір', 2, 2, 1, 1, 'options', '{"is_calibrated":[0,1]}'::jsonb),
+      ('LN', 'shape', 'Форма', 3, 3, 1, 1, 'options', NULL),
+      ('LN', 'is_calibrated', 'Калібрування', 0, 4, 1, 0, 'options', NULL)
+    RETURNING id, key
+  `);
+  const questionIds = Object.fromEntries(
+    questions.rows.map((question) => [question.key, Number(question.id)])
+  );
+  await pool.query(
+    `INSERT INTO options (question_id, value_id, sku_code, label)
+     VALUES
+       ($1, 1, '1', 'Натуральне'),
+       ($2, 1, '1', '40 см'),
+       ($3, 6, '6', 'Кругла'),
+       ($3, 7, '7', 'Овальна'),
+       ($4, 0, '0', 'Некаліброване'),
+       ($4, 1, '1', 'Каліброване'),
+       ($4, 2, '2', 'Напівкаліброване')`,
+    [
+      questionIds.raw_type,
+      questionIds.size,
+      questionIds.shape,
+      questionIds.is_calibrated,
+    ]
+  );
+  const scenario = await pool.query(
+    `INSERT INTO price_scenarios
+       (category_code, name, match_json, axis_x_key, axis_y_key, price_mode, status)
+     VALUES
+       ('LN', 'Напівкаліброване намисто', '{"is_calibrated":2}'::jsonb,
+        'shape', NULL, 'per_gram_usd', 'active')
+     RETURNING id`
+  );
+  await pool.query(
+    `INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
+     VALUES ($1, 6, 0, 4.5), ($1, 7, 0, 5)`,
+    [scenario.rows[0].id]
+  );
+}
+
 test.before(async () => {
   const database = await pool.query('SELECT current_database() AS name');
   if (!String(database.rows[0].name).endsWith('_test')) {
@@ -117,14 +168,25 @@ test.before(async () => {
   schemas.ZZScenario = await createFixtureCategory('ZZ', false, true);
   await createFixtureCategory('MM', false, false);
   await createFixtureCategory('WW', true, false);
+  await createLegacySemiCalibratedNecklaceFixture();
   await ensureLegacySkuSchemas();
-  for (const code of ['ZZ', 'MM', 'WW']) {
+  for (const code of ['ZZ', 'MM', 'WW', 'LN']) {
     const result = await pool.query(
       `SELECT id FROM sku_schema_versions WHERE category_code = $1 AND status = 'active'`,
       [code]
     );
     schemas[code] = Number(result.rows[0].id);
   }
+  await pool.query(
+    `INSERT INTO products
+       (full_sku, base_sku, sequence_number, category, weight, total_price,
+        total_price_uah, price_per_gram, uah_rate, details, sku_schema_version_id)
+     VALUES
+       ('LN106020', 'LN106', 20, 'LN', 20.3, 91.35, 3654, 4.5, 40,
+        '{"answers":{"raw_type":1,"shape":6,"is_calibrated":2},"isCalibrated":2}'::jsonb,
+        $1)`,
+    [schemas.LN]
+  );
   await new Promise((resolve) => {
     server = app.listen(0, '127.0.0.1', () => {
       baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -141,6 +203,75 @@ test.after(async () => {
 test('health endpoints report liveness and DB readiness', async () => {
   assert.equal((await request('/health/live')).response.status, 200);
   assert.equal((await request('/health/ready')).response.status, 200);
+});
+
+test('legacy hidden size placeholder remains recountable without weakening new-product validation', async () => {
+  const decoded = await request('/api/decode', {
+    method: 'POST',
+    body: { sku: 'LN106020' },
+  });
+  assert.equal(decoded.response.status, 200, decoded.text);
+  assert.equal(decoded.data.existsInDb, true);
+  const decodedSize = decoded.data.decodedAnswers.find((answer) => answer.key === 'size');
+  assert.deepEqual(
+    { valueId: decodedSize.value_id, isPlaceholder: decodedSize.is_placeholder },
+    { valueId: null, isPlaceholder: true }
+  );
+
+  const correctionPayload = {
+    sourceSku: 'LN106020',
+    answers: { shape: 7 },
+    isCalibrated: 2,
+    reason: 'legacy hidden size compatibility',
+  };
+  const preview = await request('/api/recount/preview', {
+    method: 'POST',
+    body: correctionPayload,
+  });
+  assert.equal(preview.response.status, 200, preview.text);
+  assert.equal(preview.data.corrected.fullSku, 'LN107020');
+  assert.equal(Object.hasOwn(preview.data.corrected.answers, 'size'), false);
+
+  const applied = await request('/api/recount/apply', {
+    method: 'POST',
+    body: correctionPayload,
+  });
+  assert.equal(applied.response.status, 200, applied.text);
+  const correctedState = await pool.query(
+    `SELECT source.status AS source_status, corrected.full_sku,
+            corrected.total_price_uah, corrected.details->'answers' AS answers
+     FROM products source
+     JOIN products corrected ON corrected.id = source.corrected_to_product_id
+     WHERE source.full_sku = 'LN106020'`
+  );
+  assert.equal(correctedState.rows[0].source_status, 'corrected');
+  assert.equal(correctedState.rows[0].full_sku, 'LN107020');
+  assert.ok(Number(correctedState.rows[0].total_price_uah) > 0);
+  assert.equal(Object.hasOwn(correctedState.rows[0].answers, 'size'), false);
+
+  const hiddenZeroOnNewProduct = await request('/api/preview', {
+    method: 'POST',
+    body: {
+      categoryCode: 'LN',
+      answers: { raw_type: 1, size: 0, shape: 6, is_calibrated: 2 },
+      weight: 20.3,
+      isCalibrated: 2,
+    },
+  });
+  assert.equal(hiddenZeroOnNewProduct.response.status, 422, hiddenZeroOnNewProduct.text);
+  assert.match(hiddenZeroOnNewProduct.data.error, /Розмір/);
+
+  const visibleInvalid = await request('/api/preview', {
+    method: 'POST',
+    body: {
+      categoryCode: 'LN',
+      answers: { raw_type: 1, size: 0, shape: 6, is_calibrated: 1 },
+      weight: 20.3,
+      isCalibrated: 1,
+    },
+  });
+  assert.equal(visibleInvalid.response.status, 422, visibleInvalid.text);
+  assert.match(visibleInvalid.data.error, /Розмір/);
 });
 
 test('parallel replica bootstrap is idempotent through calibrated questions and SKU schemas', async () => {
@@ -361,6 +492,65 @@ test('migration failure rolls back only the failing file and leaves it unapplied
     } finally {
       await migrationPool.end();
     }
+  } finally {
+    await fs.rm(migrationDirectory, { recursive: true, force: true });
+    await dropTestDatabase(databaseName);
+  }
+});
+
+test('migration checksums are stable across LF and CRLF but reject SQL changes', async () => {
+  const databaseName = 'amber_migration_checksum_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const migrationDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'amber-checksum-migrations-')
+  );
+  const migrationPath = path.join(migrationDirectory, '001_checksum.sql');
+  const lfSql = 'CREATE TABLE migration_checksum_probe (\n  id INTEGER PRIMARY KEY\n);\n';
+  const runMigrationSource = `
+    const db = require('./src/db/pool');
+    const { runMigrations } = require('./src/db/run-migrations');
+    runMigrations({ directory: ${JSON.stringify(migrationDirectory)} })
+      .finally(() => db.end())
+      .catch((error) => { console.error(error); process.exitCode = 1; });
+  `;
+
+  try {
+    await fs.writeFile(migrationPath, lfSql);
+    await runNodeInDatabase(databaseUrl, runMigrationSource);
+
+    const checksumPool = new Pool({ connectionString: databaseUrl });
+    let linuxChecksum;
+    try {
+      const stored = await checksumPool.query(
+        "SELECT checksum FROM schema_migrations WHERE name = '001_checksum.sql'"
+      );
+      linuxChecksum = stored.rows[0].checksum;
+    } finally {
+      await checksumPool.end();
+    }
+
+    await fs.writeFile(migrationPath, lfSql.replace(/\n/g, '\r\n'));
+    await runNodeInDatabase(databaseUrl, runMigrationSource);
+
+    const verifiedPool = new Pool({ connectionString: databaseUrl });
+    try {
+      const stored = await verifiedPool.query(
+        "SELECT checksum FROM schema_migrations WHERE name = '001_checksum.sql'"
+      );
+      assert.equal(stored.rows[0].checksum, linuxChecksum);
+    } finally {
+      await verifiedPool.end();
+    }
+
+    const changedSql = lfSql.replace('INTEGER', 'BIGINT').replace(/\n/g, '\r\n');
+    await fs.writeFile(migrationPath, changedSql);
+    await assert.rejects(
+      runNodeInDatabase(databaseUrl, runMigrationSource),
+      (error) => {
+        assert.match(String(error.stderr || error.message), /Migration checksum mismatch: 001_checksum\.sql/);
+        return true;
+      }
+    );
   } finally {
     await fs.rm(migrationDirectory, { recursive: true, force: true });
     await dropTestDatabase(databaseName);

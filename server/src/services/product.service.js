@@ -527,6 +527,20 @@ function isQuestionVisibleForSku(question, answers, isCalibrated) {
   });
 }
 
+function omitHiddenLegacyPlaceholders(answers, schemaQuestions, isCalibrated) {
+  return (schemaQuestions || []).reduce((result, question) => {
+    const value = result[question.key];
+    const isLegacyPlaceholder = value === 0 || value === '0';
+    if (
+      isLegacyPlaceholder
+      && !isQuestionVisibleForSku(question, answers, isCalibrated)
+    ) {
+      delete result[question.key];
+    }
+    return result;
+  }, { ...answers });
+}
+
 function isOptionAvailable(option, answers) {
   return Boolean(option)
     && !option.archived
@@ -902,12 +916,17 @@ async function buildProductRecountPreview({
     throw err;
   }
 
+  const activeSchema = await getActiveSchema(categoryCode);
+  const correctedAnswers = activeSchema
+    ? omitHiddenLegacyPlaceholders(nextAnswers, activeSchema.questions, nextIsCalibrated)
+    : nextAnswers;
   const weight = getCorrectionWeight(sourceDecoded);
   const correctedPreview = await buildProductPreview({
     categoryCode,
-    answers: nextAnswers,
+    answers: correctedAnswers,
     weight,
     isCalibrated: nextIsCalibrated,
+    skuSchemaVersionId: activeSchema?.id,
   });
   const correctionSku = await resolveCorrectionSku(correctedPreview.fullProposedSku);
   const previewManualPrice = parseManualPriceUah(manualPriceUah);
@@ -950,7 +969,7 @@ async function buildProductRecountPreview({
       skuSchemaVersionId: correctedPreview.skuSchemaVersionId,
       skuSchemaVersion: correctedPreview.skuSchemaVersion,
       skuSchemaMarker: correctedPreview.skuSchemaMarker,
-      answers: nextAnswers,
+      answers: correctedAnswers,
       fullSku: correctionSku.fullSku,
       proposedFullSku: correctedPreview.fullProposedSku,
       baseSku: correctedPreview.baseSku,

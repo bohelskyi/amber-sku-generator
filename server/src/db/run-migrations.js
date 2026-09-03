@@ -11,6 +11,11 @@ function migrationQuery(client, text, values = []) {
   return client.query({ text, values, query_timeout: 0 });
 }
 
+function getMigrationChecksum(sql) {
+  const canonicalSql = String(sql).replace(/\r\n?/g, '\n');
+  return crypto.createHash('sha256').update(canonicalSql).digest('hex');
+}
+
 async function runMigrations({ directory = migrationsDirectory } = {}) {
   const client = new Client({
     connectionString: DATABASE_URL,
@@ -49,7 +54,7 @@ async function runMigrations({ directory = migrationsDirectory } = {}) {
 
     for (const fileName of migrationFiles) {
       const sql = await fs.readFile(path.join(directory, fileName), 'utf8');
-      const checksum = crypto.createHash('sha256').update(sql).digest('hex');
+      const checksum = getMigrationChecksum(sql);
       if (appliedMigrations.has(fileName)) {
         const appliedChecksum = appliedMigrations.get(fileName);
         if (!appliedChecksum) {
@@ -89,4 +94,4 @@ async function runMigrations({ directory = migrationsDirectory } = {}) {
   }
 }
 
-module.exports = { runMigrations };
+module.exports = { getMigrationChecksum, runMigrations };
