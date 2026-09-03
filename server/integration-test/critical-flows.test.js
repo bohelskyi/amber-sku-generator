@@ -43,7 +43,7 @@ async function recreateTestDatabase(databaseName) {
 }
 
 async function dropTestDatabase(databaseName) {
-  await pool.query(`DROP DATABASE IF EXISTS ${databaseName} WITH (FORCE)`);
+  await pool.query(`DROP DATABASE IF EXISTS ${databaseName}`);
 }
 
 async function runNodeInDatabase(databaseUrl, source, extraEnv = {}) {
@@ -167,10 +167,16 @@ test('parallel replica bootstrap is idempotent through calibrated questions and 
         .finally(() => db.end())
         .catch((error) => { console.error(error); process.exitCode = 1; });
     `);
-    await Promise.all(Array.from(
+    const bootstrapOutcomes = await Promise.allSettled(Array.from(
       { length: 4 },
       () => runNodeInDatabase(databaseUrl, bootstrapSource)
     ));
+    const bootstrapFailures = bootstrapOutcomes
+      .filter((outcome) => outcome.status === 'rejected')
+      .map((outcome) => outcome.reason);
+    if (bootstrapFailures.length > 0) {
+      throw new AggregateError(bootstrapFailures, 'One or more replica bootstraps failed');
+    }
 
     const replicaPool = new Pool({ connectionString: databaseUrl });
     try {
