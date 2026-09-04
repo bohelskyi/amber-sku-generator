@@ -2,7 +2,7 @@ const pool = require('../db/pool');
 const crypto = require('node:crypto');
 const { getProductBySku } = require('./product.service');
 const { buildCsv } = require('../utils/csv');
-const { roundUah } = require('../utils/money');
+const { toUahNumber } = require('../utils/money');
 
 async function getNonSkuQuestionMaps(categoryCodes) {
   if (!categoryCodes || categoryCodes.length === 0) return new Map();
@@ -192,7 +192,7 @@ function buildExportCsv(exportData) {
     ...exportData.rows.map((row) => [
       row.full_sku,
       row.total_price_uah !== null && row.total_price_uah !== undefined
-        ? roundUah(row.total_price_uah)
+        ? toUahNumber(row.total_price_uah)
         : '',
       row.export_size || '',
       ...exportData.textColumns.map((column) => row.export_text_values?.[column.key] || ''),

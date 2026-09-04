@@ -6,7 +6,7 @@ const {
   resolveCalibrationState,
   shouldHidePriceForCalibration,
 } = require('../utils/calibration');
-const { roundUah } = require('../utils/money');
+const { toUahNumber } = require('../utils/money');
 const {
   appendSkuSuffix,
   buildSkuSuffixDecodeAttempts,
@@ -240,6 +240,16 @@ function getDecodedPricingPayload({
   suffixValue,
 }) {
   const productDetails = getProductDetails(product);
+  const hasStoredProduct = Boolean(product);
+  const storedCalculatedPriceUah = toUahNumber(
+    productDetails.calculatedPriceUah ?? productDetails.autoPriceUah
+  );
+  const storedAutomaticPriceUah = toUahNumber(
+    productDetails.autoPriceUah
+      ?? (productDetails.manualPriceUah === null || productDetails.manualPriceUah === undefined
+        ? product?.total_price_uah
+        : null)
+  );
   const storedPricePerGram = product?.price_per_gram !== null && product?.price_per_gram !== undefined
     ? Number(product.price_per_gram)
     : null;
@@ -280,7 +290,13 @@ function getDecodedPricingPayload({
     pricePerGramUah,
     uahRate,
     totalPrice: product?.total_price ?? pricing.totalPrice,
-    totalPriceUah: roundUah(
+    calculatedPriceUah: hasStoredProduct
+      ? storedCalculatedPriceUah
+      : toUahNumber(pricing.currencyPayload?.calculatedPriceUah),
+    automaticPriceUah: hasStoredProduct
+      ? storedAutomaticPriceUah
+      : toUahNumber(pricing.currencyPayload?.totalPriceUah),
+    totalPriceUah: toUahNumber(
       product?.total_price_uah ?? pricing.currencyPayload?.totalPriceUah ?? null
     ),
     logMessage: productDetails.logMessage || pricing.logMessage,
@@ -572,11 +588,11 @@ function parseManualPriceUah(value) {
   if (typeof value !== 'number' && typeof value !== 'string') {
     throw validationError('Ручна ціна повинна бути числом, більшим за 0.');
   }
-  const rounded = roundUah(value);
-  if (!Number.isFinite(Number(value)) || rounded === null || rounded <= 0) {
+  const parsed = toUahNumber(typeof value === 'string' ? value.trim().replace(',', '.') : value);
+  if (parsed === null || parsed <= 0) {
     throw validationError('Ручна ціна повинна бути більшою за 0.');
   }
-  return rounded;
+  return parsed;
 }
 
 function getProductPreviewToken(preview, categoryCode, answers, isCalibrated) {
@@ -595,6 +611,7 @@ function getProductPreviewToken(preview, categoryCode, answers, isCalibrated) {
     pricePerGram: preview.pricePerGram,
     fixedPriceUah: preview.fixedPriceUah ?? null,
     totalPrice: preview.totalPrice,
+    calculatedPriceUah: preview.calculatedPriceUah ?? null,
     totalPriceUah: preview.totalPriceUah ?? null,
     uahRate: preview.uahRate ?? null,
     uahRateDate: preview.uahRateDate ?? null,
@@ -924,6 +941,8 @@ async function buildProductRecountPreview({
     skuSchemaVersionId: activeSchema?.id,
   });
   const correctionSku = await resolveCorrectionSku(correctedPreview.fullProposedSku);
+  const previewCalculatedPriceUah = toUahNumber(correctedPreview.calculatedPriceUah);
+  const previewAutoPriceUah = toUahNumber(correctedPreview.totalPriceUah);
   const previewManualPrice = parseManualPriceUah(manualPriceUah);
   if (previewManualPrice) {
     const previewRate = Number(correctedPreview.uahRate);
@@ -940,11 +959,11 @@ async function buildProductRecountPreview({
       ).toFixed(2);
     }
   }
-  const oldPriceUah = roundUah(sourceDecoded.product.total_price_uah !== null &&
+  const oldPriceUah = toUahNumber(sourceDecoded.product.total_price_uah !== null &&
     sourceDecoded.product.total_price_uah !== undefined
       ? Number(sourceDecoded.product.total_price_uah)
       : Number(sourceDecoded.pricing?.totalPriceUah || 0)) || 0;
-  const newPriceUah = roundUah(correctedPreview.totalPriceUah) || 0;
+  const newPriceUah = toUahNumber(correctedPreview.totalPriceUah) || 0;
 
   return {
     source: {
@@ -979,6 +998,8 @@ async function buildProductRecountPreview({
       usesWeight: correctedPreview.usesWeight,
       totalPrice: correctedPreview.totalPrice,
       totalPriceUah: correctedPreview.totalPriceUah,
+      calculatedPriceUah: previewCalculatedPriceUah,
+      autoPriceUah: previewAutoPriceUah,
       uahRate: correctedPreview.uahRate,
       logMessage: correctedPreview.logMessage,
       pricingDetails: correctedPreview.pricingDetails,
@@ -1032,7 +1053,8 @@ async function applyProductRecount(payload) {
       isCalibrated: preview.corrected.answers.is_calibrated,
       skuSchemaVersionId: preview.corrected.skuSchemaVersionId,
     }, { queryable: client, lockSequence: true });
-    const correctionAutoPriceUah = roundUah(freshPreview.totalPriceUah);
+    const correctionCalculatedPriceUah = toUahNumber(freshPreview.calculatedPriceUah);
+    const correctionAutoPriceUah = toUahNumber(freshPreview.totalPriceUah);
     const correctionManualPriceUah = parseManualPriceUah(payload.manualPriceUah);
     const correctionFinalPriceUah = correctionManualPriceUah
       || (correctionAutoPriceUah > 0 ? correctionAutoPriceUah : null);
@@ -1071,9 +1093,12 @@ async function applyProductRecount(payload) {
       usesWeight: freshPreview.usesWeight,
       totalPrice: freshPreview.totalPrice,
       totalPriceUah: freshPreview.totalPriceUah,
+      calculatedPriceUah: correctionCalculatedPriceUah,
+      autoPriceUah: correctionAutoPriceUah,
       uahRate: freshPreview.uahRate,
       logMessage: freshPreview.logMessage,
       pricingDetails: freshPreview.pricingDetails,
+      manualPriceUah: correctionManualPriceUah,
     });
     preview.priceDeltaUah = correctionFinalPriceUah - Number(preview.source.totalPriceUah || 0);
 
@@ -1112,6 +1137,15 @@ async function applyProductRecount(payload) {
       isCalibrated: corrected.answers.is_calibrated ?? null,
       logMessage: corrected.logMessage,
       pricingScenario: corrected.pricingDetails?.scenario || null,
+      calculatedPriceUah: corrected.calculatedPriceUah ?? null,
+      autoPriceUah: corrected.autoPriceUah ?? null,
+      manualPriceUah: corrected.manualPriceUah ?? null,
+      rateMetadata: {
+        source: freshPreview.uahRateSource || null,
+        date: freshPreview.uahRateDate || null,
+        fetchedAt: freshPreview.uahRateFetchedAt || null,
+        stale: Boolean(freshPreview.uahRateStale),
+      },
       correction: {
         sourceProductId,
         sourceSku: preview.source.sku,
@@ -1137,9 +1171,7 @@ async function applyProductRecount(payload) {
         corrected.categoryCode,
         Number(corrected.weight || 0),
         Number(corrected.totalPrice || 0),
-        corrected.totalPriceUah !== undefined && corrected.totalPriceUah !== null
-          ? roundUah(corrected.totalPriceUah)
-          : null,
+        toUahNumber(corrected.totalPriceUah),
         Number(corrected.pricePerGram || 0),
         corrected.uahRate !== undefined && corrected.uahRate !== null
           ? Number(corrected.uahRate)
@@ -1276,7 +1308,8 @@ async function saveProduct(payload) {
 
     const manualPriceRaw = payload.manualPriceUah ?? payload.details?.manualPriceUah;
     const manualPriceUah = parseManualPriceUah(manualPriceRaw);
-    const autoPriceUah = roundUah(preview.totalPriceUah);
+    const calculatedPriceUah = toUahNumber(preview.calculatedPriceUah);
+    const autoPriceUah = toUahNumber(preview.totalPriceUah);
     const totalPriceUah = manualPriceUah || (autoPriceUah > 0 ? autoPriceUah : null);
     if (!totalPriceUah) {
       throw validationError(
@@ -1306,6 +1339,7 @@ async function saveProduct(payload) {
       skuSchemaVersion: preview.skuSchemaVersion,
       manualPriceUah,
       autoPriceUah,
+      calculatedPriceUah,
       rateMetadata: {
         source: preview.uahRateSource || null,
         date: preview.uahRateDate || null,

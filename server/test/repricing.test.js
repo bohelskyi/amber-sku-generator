@@ -15,6 +15,7 @@ const {
   getRepricingPreviewSnapshot,
   getRepricingProductIds,
   hasManualPrice,
+  normalizeAutomaticProductIds,
   normalizeManualOverrides,
   normalizeReviewedProductIds,
 } = require('../src/services/repricing.service');
@@ -38,6 +39,10 @@ test('repricing preview token is stable for the same changes', () => {
   assert.notEqual(
     getPreviewToken(scenario, items),
     getPreviewToken(scenario, [{ ...items[0], newPriceUah: 500 }])
+  );
+  assert.notEqual(
+    getPreviewToken(scenario, [{ ...items[0], calculatedPriceUah: 413 }]),
+    getPreviewToken(scenario, [{ ...items[0], calculatedPriceUah: 414 }])
   );
 });
 
@@ -74,6 +79,14 @@ test('global repricing token binds configuration and every product exactly once'
   assert.notEqual(
     getGlobalPreviewToken('configuration-a', items),
     getGlobalPreviewToken('configuration-a', [items[0]])
+  );
+  assert.notEqual(
+    getGlobalPreviewToken('configuration-a', [
+      { ...items[0], calculatedPriceUah: 251, automaticPriceUah: 250 },
+    ]),
+    getGlobalPreviewToken('configuration-a', [
+      { ...items[0], calculatedPriceUah: 252, automaticPriceUah: 250 },
+    ])
   );
 });
 
@@ -236,9 +249,29 @@ test('application token includes normalized manual overrides', () => {
       { productId: 1, newPriceUah: '400,4' },
     ]),
     getApplicationToken('base-token', [
-      { productId: 1, newPriceUah: 400 },
+      { productId: 1, newPriceUah: 400.4 },
       { productId: 2, newPriceUah: 500 },
     ])
+  );
+  assert.notEqual(
+    getApplicationToken('base-token', [], [9]),
+    getApplicationToken('base-token', [])
+  );
+  assert.equal(
+    getApplicationToken('base-token', [], [9, 7, 9]),
+    getApplicationToken('base-token', [], [7, 9])
+  );
+});
+
+test('automatic resolution IDs are normalized and cannot conflict with manual overrides', () => {
+  assert.deepEqual(normalizeAutomaticProductIds([9, '7', 9]), [7, 9]);
+  assert.throws(
+    () => getApplicationToken(
+      'base-token',
+      [{ productId: 9, newPriceUah: 500 }],
+      [9]
+    ),
+    /лише один спосіб/
   );
 });
 
@@ -277,9 +310,9 @@ test('manual overrides recalculate final UAH and derived USD prices', () => {
     ],
   }, [{ productId: 1, newPriceUah: '450,4' }]);
 
-  assert.equal(preview.items[0].newPriceUah, 450);
+  assert.equal(preview.items[0].newPriceUah, 450.4);
   assert.equal(preview.items[0].calculatedPriceUah, 500);
-  assert.equal(preview.items[0].totalPrice, 9);
+  assert.equal(preview.items[0].totalPrice, 9.01);
   assert.equal(preview.items[0].pricePerGram, 0.9);
   assert.equal(preview.items[0].manualOverride, true);
   assert.deepEqual(preview.items[0].pricingChange.reasonCodes, [
@@ -409,7 +442,8 @@ test('manual resolution preserves the authoritative automatic price as an audit 
       weight: 10,
       oldPriceUah: 550,
       newPriceUah: 700,
-      calculatedPriceUah: 700,
+      calculatedPriceUah: 713,
+      automaticPriceUah: 700,
       totalPrice: 14,
       pricePerGram: 1.4,
       uahRate: 50,
@@ -420,7 +454,58 @@ test('manual resolution preserves the authoritative automatic price as an audit 
 
   assert.equal(preview.items[0].status, 'changed');
   assert.equal(preview.items[0].newPriceUah, 600);
-  assert.equal(preview.items[0].calculatedPriceUah, 700);
+  assert.equal(preview.items[0].calculatedPriceUah, 713);
+  assert.equal(preview.items[0].automaticPriceUah, 700);
+});
+
+test('global manual product can explicitly switch to its authoritative automatic price', () => {
+  const preview = applyManualOverridesToPreview({
+    scope: 'global',
+    summary: { changedCount: 0, unchangedCount: 0, errorCount: 1 },
+    items: [{
+      productId: 19,
+      sku: 'NM19',
+      oldPriceUah: 550,
+      newPriceUah: 600,
+      calculatedPriceUah: 613,
+      automaticPriceUah: 600,
+      totalPrice: 14,
+      pricePerGram: 1.4,
+      uahRate: 50,
+      status: 'error',
+      errorCode: 'manual_price',
+      pricingDetails: { matrix: { price: 1.4 }, scenario: { id: 4 } },
+      pricingChange: { reasonCodes: [], reasonLabels: [] },
+    }],
+  }, [], [19]);
+
+  assert.equal(preview.items[0].status, 'changed');
+  assert.equal(preview.items[0].newPriceUah, 600);
+  assert.equal(preview.items[0].calculatedPriceUah, 613);
+  assert.equal(preview.items[0].automaticPriceUah, 600);
+  assert.equal(preview.items[0].useAutomatic, true);
+  assert.equal(preview.items[0].manualOverride, false);
+  assert.equal(preview.items[0].pricingState, 'automatic');
+  assert.deepEqual(preview.items[0].pricingChange.reasonCodes, ['use_automatic']);
+  assert.equal(preview.summary.errorCount, 0);
+});
+
+test('automatic resolution is unavailable without an authoritative matrix price', () => {
+  assert.throws(
+    () => applyManualOverridesToPreview({
+      scope: 'global',
+      summary: { errorCount: 1 },
+      items: [{
+        productId: 19,
+        sku: 'NM19',
+        oldPriceUah: 550,
+        calculatedPriceUah: null,
+        status: 'error',
+        errorCode: 'manual_price',
+      }],
+    }, [], [19]),
+    /немає дійсної автоматичної ціни/
+  );
 });
 
 test('repricing preview token binds resolvable price_missing product state', () => {

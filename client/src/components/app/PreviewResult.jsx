@@ -69,6 +69,15 @@ export function PreviewResult({
             </div>
             <p className="mt-4 text-2xl font-semibold text-slate-800">{formatUah(effectiveTotalPriceUah)}</p>
             {hasManualPrice && <p className="text-xs font-semibold text-[#8a5f2b]">Ціну змінено вручну</p>}
+            {previewData.calculatedPriceUah !== null
+              && previewData.calculatedPriceUah !== undefined
+              && previewData.totalPriceUah !== null
+              && previewData.totalPriceUah !== undefined && (
+              <p className="text-xs text-slate-500">
+                До округлення: {formatUah(previewData.calculatedPriceUah)}
+                {' → '}автоматично: {formatUah(previewData.totalPriceUah)}
+              </p>
+            )}
             <p className="text-sm text-slate-600">{formatUsd(effectiveTotalPrice)}</p>
             {previewData.uahRate && <p className="text-xs text-slate-500">1 USD = {previewData.uahRate} ₴</p>}
           </div>
@@ -89,6 +98,15 @@ export function PreviewResult({
             </div>
             <p className="mt-4 text-2xl font-semibold text-slate-800">{formatUah(effectiveTotalPriceUah)}</p>
             {hasManualPrice && <p className="text-xs font-semibold text-[#8a5f2b]">Ціну змінено вручну</p>}
+            {previewData.calculatedPriceUah !== null
+              && previewData.calculatedPriceUah !== undefined
+              && previewData.totalPriceUah !== null
+              && previewData.totalPriceUah !== undefined && (
+              <p className="text-xs text-slate-500">
+                До округлення: {formatUah(previewData.calculatedPriceUah)}
+                {' → '}автоматично: {formatUah(previewData.totalPriceUah)}
+              </p>
+            )}
             <p className="text-sm text-slate-600">{formatUsd(effectiveTotalPrice)}</p>
             {previewData.uahRate && <p className="text-xs text-slate-500">1 USD = {previewData.uahRate} ₴</p>}
           </div>
@@ -175,8 +193,8 @@ function PriceActions({
           </label>
           <input
             type="number"
-            min="1"
-            step="1"
+            min="0.01"
+            step="0.01"
             value={manualPriceUah}
             onChange={(event) => onManualPriceChange(event.target.value)}
             className="input text-center"

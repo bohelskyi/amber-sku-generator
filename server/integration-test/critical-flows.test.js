@@ -833,6 +833,7 @@ test('legacy zero prices upgrade without repricing products or blocking edits', 
 
         const decoded = await decodeSku('LX1001');
         assert.equal(decoded.pricing.totalPriceUah, 0);
+        assert.equal(decoded.pricing.calculatedPriceUah, null);
 
         const correction = await applyProductRecount({
           sourceSku: 'LX1001',
@@ -1062,6 +1063,165 @@ test('save rejects a preview after authoritative pricing changes', async () => {
   }
 });
 
+test('automatic marketing rounding is persisted through save, decode, and recount while manual prices stay exact', async () => {
+  const originalCells = await pool.query(
+    `SELECT x_val, y_val, price
+     FROM price_matrix
+     WHERE scenario_id = $1 AND x_val = ANY($2::int[])
+     ORDER BY x_val`,
+    [schemas.ZZScenario, [1, 2]]
+  );
+  assert.equal(originalCells.rows.length, 2);
+  const createdProductIds = [];
+
+  try {
+    await pool.query(
+      `UPDATE price_matrix
+       SET price = CASE x_val WHEN 1 THEN 2556 ELSE 918 END
+       WHERE scenario_id = $1 AND x_val = ANY($2::int[])`,
+      [schemas.ZZScenario, [1, 2]]
+    );
+    const stalePreview = await request('/api/preview', {
+      method: 'POST',
+      body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0, isCalibrated: 0 },
+    });
+    assert.equal(stalePreview.response.status, 200, stalePreview.text);
+    assert.equal(stalePreview.data.calculatedPriceUah, 2556);
+    assert.equal(stalePreview.data.totalPriceUah, 2550);
+
+    await pool.query(
+      'UPDATE price_matrix SET price = 3943 WHERE scenario_id = $1 AND x_val = 1',
+      [schemas.ZZScenario]
+    );
+    const staleSave = await request('/api/save', {
+      method: 'POST',
+      body: {
+        category: 'ZZ',
+        answers: { kind: 1 },
+        weight: 0,
+        isCalibrated: 0,
+        skuSchemaVersionId: schemas.ZZ,
+        previewToken: stalePreview.data.previewToken,
+      },
+    });
+    assert.equal(staleSave.response.status, 409, staleSave.text);
+
+    const automaticPreview = await request('/api/preview', {
+      method: 'POST',
+      body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0, isCalibrated: 0 },
+    });
+    assert.equal(automaticPreview.data.calculatedPriceUah, 3943);
+    assert.equal(automaticPreview.data.totalPriceUah, 3950);
+    const automatic = await request('/api/save', {
+      method: 'POST',
+      body: {
+        category: 'ZZ',
+        answers: { kind: 1 },
+        weight: 0,
+        isCalibrated: 0,
+        skuSchemaVersionId: schemas.ZZ,
+        previewToken: automaticPreview.data.previewToken,
+      },
+    });
+    assert.equal(automatic.response.status, 200, automatic.text);
+    createdProductIds.push(Number(automatic.data.id));
+
+    await pool.query(
+      'UPDATE price_matrix SET price = 1536 WHERE scenario_id = $1 AND x_val = 1',
+      [schemas.ZZScenario]
+    );
+    const decodedAutomatic = await request('/api/decode', {
+      method: 'POST', body: { sku: automatic.data.fullSku },
+    });
+    assert.equal(decodedAutomatic.response.status, 200, decodedAutomatic.text);
+    assert.equal(decodedAutomatic.data.pricing.calculatedPriceUah, 3943);
+    assert.equal(decodedAutomatic.data.pricing.automaticPriceUah, 3950);
+    assert.equal(decodedAutomatic.data.pricing.totalPriceUah, 3950);
+
+    const manualPreview = await request('/api/preview', {
+      method: 'POST',
+      body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0, isCalibrated: 0 },
+    });
+    assert.equal(manualPreview.data.calculatedPriceUah, 1536);
+    assert.equal(manualPreview.data.totalPriceUah, 1550);
+    const manual = await request('/api/save', {
+      method: 'POST',
+      body: {
+        category: 'ZZ',
+        answers: { kind: 1 },
+        weight: 0,
+        isCalibrated: 0,
+        skuSchemaVersionId: schemas.ZZ,
+        previewToken: manualPreview.data.previewToken,
+        manualPriceUah: 613.25,
+      },
+    });
+    assert.equal(manual.response.status, 200, manual.text);
+    createdProductIds.push(Number(manual.data.id));
+    const storedManual = await pool.query(
+      'SELECT total_price_uah, details FROM products WHERE id = $1',
+      [manual.data.id]
+    );
+    assert.equal(Number(storedManual.rows[0].total_price_uah), 613.25);
+    assert.equal(Number(storedManual.rows[0].details.manualPriceUah), 613.25);
+    assert.equal(Number(storedManual.rows[0].details.calculatedPriceUah), 1536);
+    assert.equal(Number(storedManual.rows[0].details.autoPriceUah), 1550);
+    const decodedManual = await request('/api/decode', {
+      method: 'POST', body: { sku: manual.data.fullSku },
+    });
+    assert.equal(decodedManual.response.status, 200, decodedManual.text);
+    assert.equal(decodedManual.data.pricing.calculatedPriceUah, 1536);
+    assert.equal(decodedManual.data.pricing.automaticPriceUah, 1550);
+    assert.equal(decodedManual.data.pricing.totalPriceUah, 613.25);
+
+    const recountPreview = await request('/api/recount/preview', {
+      method: 'POST',
+      body: {
+        sourceSku: automatic.data.fullSku,
+        answers: { kind: 2 },
+        reason: 'marketing rounding integration',
+      },
+    });
+    assert.equal(recountPreview.response.status, 200, recountPreview.text);
+    assert.equal(recountPreview.data.corrected.calculatedPriceUah, 918);
+    assert.equal(recountPreview.data.corrected.autoPriceUah, 900);
+    assert.equal(recountPreview.data.corrected.totalPriceUah, 900);
+    const recounted = await request('/api/recount/apply', {
+      method: 'POST',
+      body: {
+        sourceSku: automatic.data.fullSku,
+        answers: { kind: 2 },
+        reason: 'marketing rounding integration',
+      },
+    });
+    assert.equal(recounted.response.status, 200, recounted.text);
+    createdProductIds.push(Number(recounted.data.correctedProductId));
+    const storedRecount = await pool.query(
+      'SELECT total_price_uah, details FROM products WHERE id = $1',
+      [recounted.data.correctedProductId]
+    );
+    assert.equal(Number(storedRecount.rows[0].total_price_uah), 900);
+    assert.equal(Number(storedRecount.rows[0].details.calculatedPriceUah), 918);
+    assert.equal(Number(storedRecount.rows[0].details.autoPriceUah), 900);
+    assert.equal(storedRecount.rows[0].details.manualPriceUah, null);
+  } finally {
+    for (const cell of originalCells.rows) {
+      await pool.query(
+        `UPDATE price_matrix SET price = $1
+         WHERE scenario_id = $2 AND x_val = $3 AND y_val = $4`,
+        [cell.price, schemas.ZZScenario, cell.x_val, cell.y_val]
+      );
+    }
+    if (createdProductIds.length > 0) {
+      await pool.query(
+        `UPDATE products SET status = 'archived', exclude_from_export = 1
+         WHERE id = ANY($1::int[])`,
+        [createdProductIds]
+      );
+    }
+  }
+});
+
 test('required answers, weight, schema ownership, and manual fallback fail closed', async () => {
   const missing = await request('/api/preview', {
     method: 'POST', body: { categoryCode: 'ZZ', answers: {}, weight: 0 },
@@ -1202,10 +1362,12 @@ test('correction applies a manual price when the target configuration has no mat
     assert.equal(applied.response.status, 200, applied.text);
     assert.equal(applied.data.corrected.manualPriceUah, 725);
     const stored = await pool.query(
-      'SELECT total_price_uah FROM products WHERE id = $1',
+      'SELECT total_price_uah, details FROM products WHERE id = $1',
       [applied.data.correctedProductId]
     );
     assert.equal(Number(stored.rows[0].total_price_uah), 725);
+    assert.equal(Number(stored.rows[0].details.manualPriceUah), 725);
+    assert.equal(stored.rows[0].details.autoPriceUah, null);
   } finally {
     await pool.query(
       `INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
@@ -1371,7 +1533,7 @@ test('correction requests reject stale product state, refresh, and complete atom
 
 test('repricing preview/apply/rollback and correction blocking work', async () => {
   await pool.query(
-    'UPDATE price_matrix SET price = price + 100 WHERE scenario_id = $1',
+    'UPDATE price_matrix SET price = price + 113 WHERE scenario_id = $1',
     [schemas.ZZScenario]
   );
   const preview = await request('/api/admin/repricing/preview', {
@@ -1379,9 +1541,24 @@ test('repricing preview/apply/rollback and correction blocking work', async () =
   });
   assert.equal(preview.response.status, 200, preview.text);
   assert.ok(preview.data.summary.changedCount > 0);
+  const marketingRoundedItem = preview.data.items.find((item) => (
+    item.status === 'changed' && Number(item.calculatedPriceUah) !== Number(item.newPriceUah)
+  ));
+  assert.ok(marketingRoundedItem);
+  assert.equal(Number(marketingRoundedItem.automaticPriceUah), Number(marketingRoundedItem.newPriceUah));
+  const manualOverrides = preview.data.items
+    .filter((item) => ['manual_price', 'price_missing'].includes(item.errorCode))
+    .map((item) => ({
+      productId: Number(item.productId),
+      newPriceUah: Number(item.oldPriceUah),
+    }));
   const applied = await request('/api/admin/repricing/apply', {
     method: 'POST',
-    body: { scenarioId: schemas.ZZScenario, previewToken: preview.data.previewToken },
+    body: {
+      scenarioId: schemas.ZZScenario,
+      previewToken: preview.data.previewToken,
+      manualOverrides,
+    },
   });
   assert.equal(applied.response.status, 200, applied.text);
   const batchId = applied.data.batch?.id || applied.data.batchId;
@@ -1429,6 +1606,12 @@ test('repricing preview/apply/rollback and correction blocking work', async () =
   const racePreview = await request('/api/admin/repricing/preview', {
     method: 'POST', body: { scenarioId: schemas.ZZScenario },
   });
+  const raceManualOverrides = racePreview.data.items
+    .filter((item) => ['manual_price', 'price_missing'].includes(item.errorCode))
+    .map((item) => ({
+      productId: Number(item.productId),
+      newPriceUah: Number(item.oldPriceUah),
+    }));
   const lockClient = await pool.connect();
   await lockClient.query('BEGIN');
   await lockClient.query('SELECT id FROM products WHERE full_sku = $1 FOR UPDATE', [
@@ -1440,7 +1623,11 @@ test('repricing preview/apply/rollback and correction blocking work', async () =
   });
   const repricingPromise = request('/api/admin/repricing/apply', {
       method: 'POST',
-      body: { scenarioId: schemas.ZZScenario, previewToken: racePreview.data.previewToken },
+      body: {
+        scenarioId: schemas.ZZScenario,
+        previewToken: racePreview.data.previewToken,
+        manualOverrides: raceManualOverrides,
+      },
   });
   await new Promise((resolve) => setTimeout(resolve, 50));
   await lockClient.query('COMMIT');
@@ -1497,10 +1684,13 @@ test('repricing keeps manual-priced products editable across consecutive cycles'
     });
     assert.equal(preview.response.status, 200, preview.text);
     const missingItems = preview.data.items.filter((item) => item.errorCode === 'price_missing');
+    const unresolvedItems = preview.data.items.filter(
+      (item) => ['manual_price', 'price_missing'].includes(item.errorCode)
+    );
     const missingProductIds = new Set(missingItems.map((item) => Number(item.productId)));
     assert.equal(missingProductIds.has(Number(keepCurrentProduct.id)), true);
     assert.equal(missingProductIds.has(Number(newManualProduct.id)), true);
-    assert.equal(preview.data.summary.errorCount, missingItems.length);
+    assert.equal(preview.data.summary.errorCount, unresolvedItems.length);
     assert.ok(preview.data.summary.changedCount > 0);
 
     const unresolved = await request('/api/admin/repricing/apply', {
@@ -1509,7 +1699,7 @@ test('repricing keeps manual-priced products editable across consecutive cycles'
     });
     assert.equal(unresolved.response.status, 422, unresolved.text);
 
-    const manualOverrides = missingItems.map((item) => ({
+    const manualOverrides = unresolvedItems.map((item) => ({
       productId: Number(item.productId),
       newPriceUah: Number(item.productId) === Number(newManualProduct.id)
         ? 1750
@@ -1665,6 +1855,12 @@ test('repricing rolls back every product and batch row after a mid-apply failure
     });
     assert.equal(preview.response.status, 200, preview.text);
     const changedItems = preview.data.items.filter((item) => item.status === 'changed');
+    const manualOverrides = preview.data.items
+      .filter((item) => ['manual_price', 'price_missing'].includes(item.errorCode))
+      .map((item) => ({
+        productId: Number(item.productId),
+        newPriceUah: Number(item.oldPriceUah),
+      }));
     assert.ok(changedItems.length >= 2);
     const productIds = changedItems.map((item) => Number(item.productId));
     const before = await pool.query(
@@ -1692,7 +1888,11 @@ test('repricing rolls back every product and batch row after a mid-apply failure
     try {
       const failed = await request('/api/admin/repricing/apply', {
         method: 'POST',
-        body: { scenarioId: schemas.ZZScenario, previewToken: preview.data.previewToken },
+        body: {
+          scenarioId: schemas.ZZScenario,
+          previewToken: preview.data.previewToken,
+          manualOverrides,
+        },
       });
       assert.equal(failed.response.status, 500);
     } finally {
@@ -1742,16 +1942,24 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
     assert.equal(saved.response.status, 200, saved.text);
     return saved.data;
   };
-  const overridesFor = (preview) => preview.items
-    .filter((item) => ['manual_price', 'price_missing'].includes(item.errorCode))
+  const overridesFor = (preview, excludedProductIds = []) => {
+    const excluded = new Set(excludedProductIds.map(Number));
+    return preview.items
+    .filter((item) => (
+      ['manual_price', 'price_missing'].includes(item.errorCode)
+      && !excluded.has(Number(item.productId))
+    ))
     .map((item) => ({
       productId: Number(item.productId),
       newPriceUah: Number(item.oldPriceUah) > 0 ? Number(item.oldPriceUah) : 500,
     }));
+  };
 
   const changedAutomatic = await createProduct('ZZ', 1);
   const unchangedAutomatic = await createProduct('ZZ', 2);
+  const automaticSwitchProduct = await createProduct('ZZ', 1, 700);
   const manualProduct = await createProduct('MM', 1, 700);
+  const changedManualProduct = await createProduct('MM', 1, 750);
   const missingProduct = await createProduct('MM', 2, 800);
   await pool.query(
     `UPDATE products
@@ -1801,7 +2009,7 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
     );
     await pool.query(
       `UPDATE price_matrix
-       SET price = CASE WHEN scenario_id = $1 THEN price + 17 ELSE price + 0.25 END
+       SET price = CASE WHEN scenario_id = $1 THEN price + 38 ELSE price + 0.25 END
        WHERE (scenario_id = $1 AND x_val = 1 AND y_val = 0)
           OR (scenario_id = $2 AND x_val = 6 AND y_val = 0)`,
       [schemas.ZZScenario, semiScenarioId]
@@ -1834,16 +2042,29 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
       Number(schemas.ZZScenario),
       'a product matching multiple scenarios must use normal authoritative precedence'
     );
-    assert.equal(
-      initial.data.items.find((item) => Number(item.productId) === Number(manualProduct.id))?.errorCode,
-      'manual_price'
+    const manualOnlyPreviewItem = initial.data.items.find((item) => (
+      Number(item.productId) === Number(manualProduct.id)
+    ));
+    assert.equal(manualOnlyPreviewItem?.errorCode, 'manual_price');
+    assert.equal(manualOnlyPreviewItem?.calculatedPriceUah, null);
+    const switchPreviewItem = initial.data.items.find((item) => (
+      Number(item.productId) === Number(automaticSwitchProduct.id)
+    ));
+    assert.equal(switchPreviewItem?.errorCode, 'manual_price');
+    assert.ok(Number(switchPreviewItem?.calculatedPriceUah) > 0);
+    assert.ok(Number(switchPreviewItem?.automaticPriceUah) > 0);
+    assert.notEqual(
+      Number(switchPreviewItem?.calculatedPriceUah),
+      Number(switchPreviewItem?.automaticPriceUah)
     );
+    assert.ok(switchPreviewItem?.pricingDetails?.matrix);
     assert.equal(
       initial.data.items.find((item) => Number(item.productId) === Number(missingProduct.id))?.errorCode,
       'price_missing'
     );
 
-    const initialOverrides = overridesFor(initial.data);
+    const automaticProductIds = [Number(automaticSwitchProduct.id)];
+    const initialOverrides = overridesFor(initial.data, automaticProductIds);
     assert.ok(initialOverrides.length >= 2);
     const invalidOverrides = initialOverrides.map((override) => (
       Number(override.productId) === Number(manualProduct.id)
@@ -1861,6 +2082,7 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
       body: {
         previewToken: initial.data.previewToken,
         manualOverrides: invalidOverrides,
+        automaticProductIds,
       },
     });
     assert.equal(invalid.response.status, 422, invalid.text);
@@ -1875,6 +2097,7 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
       body: {
         previewToken: initial.data.previewToken,
         manualOverrides: initialOverrides,
+        automaticProductIds,
       },
     });
     assert.equal(stalePricing.response.status, 409, stalePricing.text);
@@ -1945,7 +2168,12 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
       && !['manual_price', 'price_missing'].includes(item.errorCode)
     ));
     assert.deepEqual(nonResolvableErrors, []);
-    const manualOverrides = overridesFor(finalPreview.data);
+    const manualOverrides = overridesFor(finalPreview.data, automaticProductIds)
+      .map((override) => (
+        Number(override.productId) === Number(changedManualProduct.id)
+          ? { ...override, newPriceUah: Number(override.newPriceUah) + 25 }
+          : override
+      ));
     const keptManualOverride = manualOverrides.find((override) => (
       Number(override.productId) === Number(manualProduct.id)
     ));
@@ -1990,7 +2218,11 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
     try {
       const failed = await request('/api/admin/repricing/global/apply', {
         method: 'POST',
-        body: { previewToken: finalPreview.data.previewToken, manualOverrides },
+        body: {
+          previewToken: finalPreview.data.previewToken,
+          manualOverrides,
+          automaticProductIds,
+        },
       });
       assert.equal(failed.response.status, 500, failed.text);
     } finally {
@@ -2013,13 +2245,19 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
       body: {
         scope: 'global',
         manualOverrides,
-        reviewedProductIds: [changedAutomatic.id, manualProduct.id],
+        automaticProductIds,
+        reviewedProductIds: [
+          changedAutomatic.id,
+          manualProduct.id,
+          automaticSwitchProduct.id,
+        ],
         uiState: { filter: 'all', scenarioFilter: String(schemas.ZZScenario) },
       },
     });
     assert.equal(draft.response.status, 200, draft.text);
     assert.equal(draft.data.draft.scope, 'global');
     assert.equal(draft.data.draft.scenarioId, null);
+    assert.deepEqual(draft.data.draft.automaticProductIds, automaticProductIds);
     assert.equal(draft.data.draft.uiState.scenarioFilter, String(schemas.ZZScenario));
     assert.equal(
       draft.data.draft.manualOverrides.find((override) => (
@@ -2031,10 +2269,15 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
       draft.data.draft.reviewedProductIds.includes(Number(manualProduct.id)),
       true
     );
+    assert.equal(
+      draft.data.draft.reviewedProductIds.includes(Number(automaticSwitchProduct.id)),
+      true
+    );
     activeDraftId = Number(draft.data.draft.id);
 
     const reopenedDraft = await request(`/api/admin/repricing/drafts/${activeDraftId}`);
     assert.equal(reopenedDraft.response.status, 200, reopenedDraft.text);
+    assert.deepEqual(reopenedDraft.data.automaticProductIds, automaticProductIds);
     assert.equal(
       reopenedDraft.data.manualOverrides.find((override) => (
         Number(override.productId) === Number(manualProduct.id)
@@ -2051,6 +2294,7 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
       body: {
         previewToken: finalPreview.data.previewToken,
         manualOverrides,
+        automaticProductIds,
         draftId: activeDraftId,
       },
     });
@@ -2061,7 +2305,14 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
     const appliedItems = await pool.query(
       `SELECT ri.product_id, ri.new_price_uah, p.total_price_uah,
               p.details #>> '{repricing,batchId}' AS batch_id,
-              p.details #>> '{pricingScenario,id}' AS scenario_id
+              p.details #>> '{pricingScenario,id}' AS scenario_id,
+              p.details ->> 'calculatedPriceUah' AS calculated_price_uah,
+              p.details ->> 'autoPriceUah' AS auto_price_uah,
+              p.details ->> 'manualPriceUah' AS manual_price_uah,
+              p.details #>> '{repricing,calculatedPriceUah}' AS repricing_calculated_price_uah,
+              p.details #>> '{repricing,autoPriceUah}' AS repricing_auto_price_uah,
+              p.details #>> '{repricing,useAutomatic}' AS use_automatic,
+              p.details #>> '{repricing,manualOverride}' AS manual_override
        FROM repricing_items ri
        JOIN products p ON p.id = ri.product_id
        WHERE ri.batch_id = $1
@@ -2078,6 +2329,36 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
     );
     assert.equal(appliedScenarioIds.has(Number(schemas.ZZScenario)), true);
     assert.equal(appliedScenarioIds.has(semiScenarioId), true);
+    const switchedProduct = appliedItems.rows.find((item) => (
+      Number(item.product_id) === Number(automaticSwitchProduct.id)
+    ));
+    assert.equal(switchedProduct.manual_price_uah, null);
+    assert.equal(switchedProduct.use_automatic, 'true');
+    assert.equal(switchedProduct.manual_override, 'false');
+    assert.equal(
+      Number(switchedProduct.calculated_price_uah),
+      Number(switchedProduct.repricing_calculated_price_uah)
+    );
+    assert.equal(Number(switchedProduct.auto_price_uah), Number(switchedProduct.new_price_uah));
+    assert.equal(
+      Number(switchedProduct.repricing_auto_price_uah),
+      Number(switchedProduct.new_price_uah)
+    );
+    assert.equal(Number(switchedProduct.new_price_uah), Number(
+      finalPreview.data.items.find((item) => (
+        Number(item.productId) === Number(automaticSwitchProduct.id)
+      )).automaticPriceUah
+    ));
+    const keptManualProduct = appliedItems.rows.find((item) => (
+      Number(item.product_id) === Number(manualProduct.id)
+    ));
+    assert.equal(Number(keptManualProduct.manual_price_uah), 700);
+    assert.equal(keptManualProduct.manual_override, 'true');
+    const changedManual = appliedItems.rows.find((item) => (
+      Number(item.product_id) === Number(changedManualProduct.id)
+    ));
+    assert.equal(Number(changedManual.manual_price_uah), 775);
+    assert.equal(Number(changedManual.new_price_uah), 775);
 
     await pool.query(
       'UPDATE products SET total_price_uah = total_price_uah + 1 WHERE id = $1',

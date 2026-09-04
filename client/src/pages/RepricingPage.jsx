@@ -299,6 +299,7 @@ export default function RepricingPage() {
   const [error, setError] = useState('');
   const [appliedBatch, setAppliedBatch] = useState(null);
   const [manualPrices, setManualPrices] = useState({});
+  const [automaticProductIds, setAutomaticProductIds] = useState([]);
   const [sort, setSort] = useState({ key: 'sku', direction: 'asc' });
   const [rollbackTarget, setRollbackTarget] = useState(null);
   const [rollingBack, setRollingBack] = useState(false);
@@ -377,8 +378,8 @@ export default function RepricingPage() {
     return [...requestsById.values()].sort((first, second) => Number(first.id) - Number(second.id));
   }, [correctionRequests, preview]);
   const effectiveItems = useMemo(
-    () => applyManualPrices(preview?.items || [], manualPrices),
-    [manualPrices, preview]
+    () => applyManualPrices(preview?.items || [], manualPrices, automaticProductIds),
+    [automaticProductIds, manualPrices, preview]
   );
   const effectiveSummary = useMemo(
     () => getRepricingSummary(preview?.summary || {}, effectiveItems),
@@ -399,9 +400,13 @@ export default function RepricingPage() {
   );
   const unresolvedManualPriceItems = useMemo(() => (
     preview?.scope === 'global'
-      ? getUnresolvedManualPriceItems(preview.items || [], manualPrices)
+      ? getUnresolvedManualPriceItems(
+          preview.items || [],
+          manualPrices,
+          automaticProductIds
+        )
       : []
-  ), [manualPrices, preview]);
+  ), [automaticProductIds, manualPrices, preview]);
   const canApply = canApplyRepricing({
     summary: effectiveSummary,
     invalidManualPriceCount: invalidManualPriceIds.size,
@@ -456,6 +461,9 @@ export default function RepricingPage() {
 
   const setManualPrice = (productId, value) => {
     setManualPrices((currentPrices) => ({ ...currentPrices, [productId]: value }));
+    setAutomaticProductIds((currentIds) => (
+      currentIds.filter((item) => Number(item) !== Number(productId))
+    ));
   };
 
   const resetManualPrice = (productId) => {
@@ -464,6 +472,37 @@ export default function RepricingPage() {
       delete nextPrices[productId];
       return nextPrices;
     });
+    setAutomaticProductIds((currentIds) => (
+      currentIds.filter((item) => Number(item) !== Number(productId))
+    ));
+  };
+
+  const markReviewed = (productId) => {
+    const normalizedProductId = Number(productId);
+    setReviewedProductIds((currentIds) => (
+      currentIds.includes(normalizedProductId)
+        ? currentIds
+        : [...currentIds, normalizedProductId].sort((first, second) => first - second)
+    ));
+  };
+
+  const keepCurrentManualPrice = (productId, priceUah) => {
+    setManualPrice(productId, formatDecimal(priceUah));
+    markReviewed(productId);
+  };
+
+  const selectAutomaticPrice = (productId) => {
+    setManualPrices((currentPrices) => {
+      const nextPrices = { ...currentPrices };
+      delete nextPrices[productId];
+      return nextPrices;
+    });
+    setAutomaticProductIds((currentIds) => (
+      currentIds.includes(Number(productId))
+        ? currentIds
+        : [...currentIds, Number(productId)].sort((first, second) => first - second)
+    ));
+    markReviewed(productId);
   };
 
   const toggleReviewed = (productId) => {
@@ -487,6 +526,9 @@ export default function RepricingPage() {
     setActiveDraft(data.draft);
     if (data.preview) setPreview(data.preview);
     setManualPrices(nextManualPrices);
+    setAutomaticProductIds(
+      data.automaticProductIds || data.draft?.automaticProductIds || []
+    );
     setReviewedProductIds(data.draft?.reviewedProductIds || []);
     setDraftSync(data.sync || null);
     setDraftConflicts(data.conflicts || []);
@@ -516,6 +558,7 @@ export default function RepricingPage() {
       scope: preview.scope || 'scenario',
       scenarioId: preview.scenario?.id || null,
       manualOverrides,
+      automaticProductIds,
       reviewedProductIds,
       uiState: getDraftUiState(),
     };
@@ -545,7 +588,12 @@ export default function RepricingPage() {
   useEffect(() => {
     if (!preview || invalidManualPriceIds.size > 0) return undefined;
     if (draftConflicts.length > 0) return undefined;
-    if (!activeDraft && manualOverrides.length === 0 && reviewedProductIds.length === 0) {
+    if (
+      !activeDraft
+      && manualOverrides.length === 0
+      && automaticProductIds.length === 0
+      && reviewedProductIds.length === 0
+    ) {
       return undefined;
     }
 
@@ -557,6 +605,7 @@ export default function RepricingPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeDraft?.id,
+    automaticProductIds,
     draftConflicts.length,
     filter,
     manualPrices,
@@ -577,6 +626,7 @@ export default function RepricingPage() {
     setDraftConflicts([]);
     setDraftSaveState('idle');
     setManualPrices({});
+    setAutomaticProductIds([]);
     setReviewedProductIds([]);
     setReviewFilter('all');
     setScenarioFilter('all');
@@ -593,9 +643,11 @@ export default function RepricingPage() {
     const nextState = keepCurrentManualPrices(
       preview?.items || [],
       manualPrices,
-      reviewedProductIds
+      reviewedProductIds,
+      automaticProductIds
     );
     setManualPrices(nextState.manualPrices);
+    setAutomaticProductIds(nextState.automaticProductIds);
     setReviewedProductIds(nextState.reviewedProductIds);
   };
 
@@ -609,6 +661,7 @@ export default function RepricingPage() {
     setDraftConflicts([]);
     setDraftSaveState('idle');
     setManualPrices({});
+    setAutomaticProductIds([]);
     setReviewedProductIds([]);
     setReviewFilter('all');
     setScenarioFilter('all');
@@ -659,6 +712,9 @@ export default function RepricingPage() {
     setManualPrices((currentPrices) => Object.fromEntries(
       Object.entries(currentPrices).filter(([productId]) => !conflictIds.has(Number(productId)))
     ));
+    setAutomaticProductIds((currentIds) => (
+      currentIds.filter((productId) => !conflictIds.has(Number(productId)))
+    ));
     setDraftConflicts([]);
     setDraftSaveState('saving');
   };
@@ -671,12 +727,15 @@ export default function RepricingPage() {
         .filter(([productId]) => Number(productId) !== sourceProductId)
     );
     const nextManualOverrides = getManualOverrides(nextManualPrices);
+    const nextAutomaticProductIds = automaticProductIds
+      .filter((productId) => Number(productId) !== sourceProductId);
     const nextReviewedProductIds = reviewedProductIds
       .filter((productId) => Number(productId) !== sourceProductId);
 
     setPreviewing(true);
     setError('');
     setManualPrices(nextManualPrices);
+    setAutomaticProductIds(nextAutomaticProductIds);
     setReviewedProductIds(nextReviewedProductIds);
     try {
       if (activeDraft) {
@@ -684,6 +743,7 @@ export default function RepricingPage() {
           scope: preview.scope || 'scenario',
           scenarioId: preview.scenario?.id || null,
           manualOverrides: nextManualOverrides,
+          automaticProductIds: nextAutomaticProductIds,
           reviewedProductIds: nextReviewedProductIds,
           uiState: getDraftUiState(),
         });
@@ -729,6 +789,7 @@ export default function RepricingPage() {
         setActiveDraft(null);
         setPreview(null);
         setManualPrices({});
+        setAutomaticProductIds([]);
         setReviewedProductIds([]);
         setReviewFilter('all');
         setScenarioFilter('all');
@@ -755,11 +816,13 @@ export default function RepricingPage() {
         scenarioId: preview.scenario?.id || null,
         previewToken: preview.previewToken,
         manualOverrides,
+        automaticProductIds,
         draftId: draftForApply?.id || null,
       });
       setAppliedBatch(response.data.batch);
       setPreview(null);
       setManualPrices({});
+      setAutomaticProductIds([]);
       setReviewedProductIds([]);
       setReviewFilter('all');
       setScenarioFilter('all');
@@ -942,6 +1005,7 @@ export default function RepricingPage() {
                     setPreview(null);
                     setAppliedBatch(null);
                     setManualPrices({});
+                    setAutomaticProductIds([]);
                     setReviewedProductIds([]);
                     setReviewFilter('all');
                     setScenarioFilter('all');
@@ -1199,6 +1263,9 @@ export default function RepricingPage() {
                         manualPrices,
                         item.productId
                       );
+                      const hasAutomaticResolution = Boolean(item.useAutomatic);
+                      const canUseAutomaticPrice = item.errorCode === 'manual_price'
+                        && Number(item.automaticPriceUah ?? item.newPriceUah) > 0;
                       return (
                       <tr
                         key={item.productId}
@@ -1280,23 +1347,38 @@ export default function RepricingPage() {
                             : requiresManualPrice
                               ? (
                                 <div className="space-y-2">
-                                  <div className={item.manualOverride ? 'text-amber-800' : 'text-rose-700'}>
+                                  <div className={item.manualOverride || item.useAutomatic ? 'text-amber-800' : 'text-rose-700'}>
                                     {item.message}
                                   </div>
                                   <div className="text-slate-600">
                                     {item.categoryCode ? `${item.categoryCode} — ` : ''}
                                     {item.scenarioName || item.matrixName || 'Активну матрицю не визначено'}
-                                    {item.calculatedPriceUah > 0
-                                      ? ` · автоматично ${formatUah(item.calculatedPriceUah)}`
+                                    {item.automaticPriceUah > 0
+                                      ? ` · розраховано ${formatUah(item.calculatedPriceUah)} → автоматично ${formatUah(item.automaticPriceUah)}`
                                       : ''}
                                   </div>
-                                  <button
-                                    type="button"
-                                    className="btn btn-outline h-8 px-3 text-xs"
-                                    onClick={() => setManualPrice(item.productId, formatDecimal(item.oldPriceUah))}
-                                  >
-                                    Залишити поточну ціну · {formatUah(item.oldPriceUah)}
-                                  </button>
+                                  <div className="flex flex-wrap gap-2">
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline h-8 px-3 text-xs"
+                                      onClick={() => keepCurrentManualPrice(
+                                        item.productId,
+                                        item.oldPriceUah
+                                      )}
+                                    >
+                                      Залишити ручну ціну · {formatUah(item.oldPriceUah)}
+                                    </button>
+                                    {canUseAutomaticPrice && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-outline h-8 px-3 text-xs text-sky-800"
+                                        onClick={() => selectAutomaticPrice(item.productId)}
+                                      >
+                                        Застосувати автоматичну ціну ·{' '}
+                                        {formatUah(item.automaticPriceUah ?? item.newPriceUah)}
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
                               )
                             : (
@@ -1319,16 +1401,19 @@ export default function RepricingPage() {
                                     aria-label={`Нова ціна для ${item.sku}`}
                                     value={hasManualOverride
                                       ? manualPrices[item.productId]
-                                      : (requiresManualPrice ? '' : formatDecimal(item.newPriceUah))}
+                                      : (hasAutomaticResolution
+                                          ? formatDecimal(item.automaticPriceUah ?? item.newPriceUah)
+                                          : (requiresManualPrice ? '' : formatDecimal(item.newPriceUah)))}
                                     onChange={(event) => setManualPrice(item.productId, event.target.value)}
                                     onBlur={(event) => {
+                                      if (hasAutomaticResolution) return;
                                       const normalizedPrice = parseManualPrice(event.target.value);
                                       if (normalizedPrice !== null) setManualPrice(item.productId, String(normalizedPrice));
                                     }}
                                   />
                                   <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-normal text-slate-400">₴</span>
                                 </div>
-                                {hasManualOverride && (
+                                {(hasManualOverride || hasAutomaticResolution) && (
                                   <button
                                     type="button"
                                     className="btn btn-outline flex h-8 w-8 shrink-0 items-center justify-center p-0"
@@ -1344,7 +1429,12 @@ export default function RepricingPage() {
                                 <span className="text-[10px] font-semibold uppercase text-amber-700">
                                   {item.resolvedManualPrice || item.resolvedPriceMissing
                                     ? 'Ручну ціну підтверджено'
-                                    : `Вручну · матриця ${formatUah(item.calculatedPriceUah)}`}
+                                    : `Вручну · автоматично ${formatUah(item.automaticPriceUah)}`}
+                                </span>
+                              )}
+                              {item.useAutomatic && (
+                                <span className="text-[10px] font-semibold uppercase text-sky-700">
+                                  Автоматичну ціну підтверджено
                                 </span>
                               )}
                               {invalidManualPriceIds.has(item.productId) && (

@@ -13,6 +13,7 @@ function preview(overrides = {}) {
     pricePerGram: '2.50',
     fixedPriceUah: null,
     totalPrice: '25.00',
+    calculatedPriceUah: 1017,
     totalPriceUah: 1000,
     uahRate: 40,
     uahRateDate: '2026-08-31',
@@ -46,6 +47,15 @@ test('preview token changes when the effective price changes', () => {
     null
   );
   assert.notEqual(changed, first);
+  assert.notEqual(
+    getProductPreviewToken(preview(), 'ZZ', { kind: 1 }, null),
+    getProductPreviewToken(
+      preview({ calculatedPriceUah: 1018 }),
+      'ZZ',
+      { kind: 1 },
+      null
+    )
+  );
 });
 
 test('preview token treats an unset calibration answer as false', () => {

@@ -7,7 +7,7 @@ const {
   getProductStateSignature,
 } = require('./product.service');
 const { syncRepricingDraft } = require('./repricing.service');
-const { roundUah } = require('../utils/money');
+const { toUahNumber } = require('../utils/money');
 
 const REQUEST_STATUSES = new Set(['pending', 'in_progress', 'completed', 'rejected']);
 const ACTIVE_REQUEST_STATUSES = ['pending', 'in_progress'];
@@ -29,13 +29,15 @@ function getCorrectionPreviewSignature(preview) {
     source: {
       productId: Number(preview?.source?.productId || 0),
       sku: preview?.source?.sku || null,
-      totalPriceUah: roundUah(preview?.source?.totalPriceUah),
+      totalPriceUah: toUahNumber(preview?.source?.totalPriceUah),
       answers: stableAnswerEntries(preview?.source?.answers),
     },
     corrected: {
       sku: preview?.corrected?.fullSku || null,
       proposedSku: preview?.corrected?.proposedFullSku || null,
-      totalPriceUah: roundUah(preview?.corrected?.totalPriceUah),
+      calculatedPriceUah: toUahNumber(preview?.corrected?.calculatedPriceUah),
+      autoPriceUah: toUahNumber(preview?.corrected?.autoPriceUah),
+      totalPriceUah: toUahNumber(preview?.corrected?.totalPriceUah),
       answers: stableAnswerEntries(preview?.corrected?.answers),
     },
   };

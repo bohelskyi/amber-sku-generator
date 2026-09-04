@@ -40,6 +40,20 @@ test('reused pricing context avoids per-product SQL round trips', async () => {
     rateInfo: { rate: 40, source: 'test', fetchedAt: new Date().toISOString() },
   });
   assert.equal(queryCount, contextQueryCount);
+  assert.equal(first.currencyPayload.calculatedPriceUah, 1000);
   assert.equal(first.currencyPayload.totalPriceUah, 1000);
   assert.equal(second.currencyPayload.totalPriceUah, 1000);
+
+  context.matrixByCell.set('1:1:0', {
+    scenario_id: 1,
+    x_val: 1,
+    y_val: 0,
+    price: '2556.0000',
+  });
+  const marketingRounded = await calculatePricing('ZZ', { kind: 1 }, 0, 0, {
+    context,
+    rateInfo: { rate: 40, source: 'test', fetchedAt: new Date().toISOString() },
+  });
+  assert.equal(marketingRounded.currencyPayload.calculatedPriceUah, 2556);
+  assert.equal(marketingRounded.currencyPayload.totalPriceUah, 2550);
 });

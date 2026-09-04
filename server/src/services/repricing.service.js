@@ -3,7 +3,7 @@ const { isDeepStrictEqual } = require('node:util');
 const pool = require('../db/pool');
 const { calculatePricing, loadPricingContext } = require('./pricing.service');
 const { getUsdUahRateInfo } = require('./currency.service');
-const { roundUah } = require('../utils/money');
+const { toUahNumber } = require('../utils/money');
 const { asRuleObject, isRuleMatched } = require('../utils/rules');
 
 const REPRICING_SCOPE_SCENARIO = 'scenario';
@@ -275,6 +275,8 @@ function getGlobalPreviewToken(configurationToken, items) {
         productStateToken: item.productStateToken,
         scenarioId: item.scenarioId ?? null,
         oldPriceUah: item.oldPriceUah ?? null,
+        calculatedPriceUah: item.calculatedPriceUah ?? null,
+        automaticPriceUah: item.automaticPriceUah ?? null,
         newPriceUah: item.newPriceUah ?? null,
         status: item.status,
         errorCode: item.errorCode || null,
@@ -293,6 +295,8 @@ function getPreviewToken(scenario, applicableItems) {
       weight: item.weight ?? null,
       answers: item.answers || {},
       oldPriceUah: item.oldPriceUah,
+      calculatedPriceUah: item.calculatedPriceUah ?? null,
+      automaticPriceUah: item.automaticPriceUah ?? null,
       newPriceUah: item.newPriceUah ?? null,
       status: item.status,
       errorCode: item.errorCode || null,
@@ -318,6 +322,8 @@ function getRepricingPreviewSnapshot(preview) {
           productStateToken: item.productStateToken || null,
         } : {}),
         oldPriceUah: item.oldPriceUah ?? null,
+        calculatedPriceUah: item.calculatedPriceUah ?? null,
+        automaticPriceUah: item.automaticPriceUah ?? null,
         newPriceUah: item.newPriceUah ?? null,
         status: item.status,
         errorCode: item.errorCode || null,
@@ -411,7 +417,7 @@ function normalizeManualOverrides(manualOverrides = []) {
     const productId = Number(override?.productId);
     const rawPrice = String(override?.newPriceUah ?? '').trim().replace(',', '.');
     const parsedPrice = Number(rawPrice);
-    const newPriceUah = roundUah(parsedPrice);
+    const newPriceUah = toUahNumber(parsedPrice);
     if (!Number.isInteger(productId) || productId <= 0 || newPriceUah === null || newPriceUah <= 0) {
       const error = new Error('Ручна ціна повинна бути додатним числом, а товар має бути коректним.');
       error.statusCode = 422;
@@ -429,21 +435,100 @@ function normalizeManualOverrides(manualOverrides = []) {
   return normalized.sort((first, second) => first.productId - second.productId);
 }
 
-function getApplicationToken(previewToken, manualOverrides = []) {
+function normalizeAutomaticProductIds(productIds = []) {
+  if (!Array.isArray(productIds) || productIds.length > 10000) {
+    const error = new Error('Некоректний список автоматичних рішень.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const normalized = productIds.map(Number);
+  if (normalized.some((productId) => !Number.isInteger(productId) || productId <= 0)) {
+    const error = new Error('Товар для автоматичної ціни має бути коректним.');
+    error.statusCode = 422;
+    throw error;
+  }
+  return [...new Set(normalized)].sort((first, second) => first - second);
+}
+
+function assertDistinctPricingResolutions(manualOverrides, automaticProductIds) {
+  const manualProductIds = new Set(manualOverrides.map((item) => item.productId));
+  const duplicateProductId = automaticProductIds.find((productId) => manualProductIds.has(productId));
+  if (duplicateProductId) {
+    const error = new Error(`Для товару ${duplicateProductId} оберіть лише один спосіб визначення ціни.`);
+    error.statusCode = 422;
+    throw error;
+  }
+}
+
+function normalizeStoredPricingResolutions(payload) {
+  if (Array.isArray(payload) || payload === null || payload === undefined) {
+    return {
+      manualOverrides: normalizeManualOverrides(payload || []),
+      automaticProductIds: [],
+    };
+  }
+  if (!payload || typeof payload !== 'object') {
+    const error = new Error('Некоректні збережені рішення переоцінки.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const manualOverrides = normalizeManualOverrides(payload.manualOverrides || []);
+  const automaticProductIds = normalizeAutomaticProductIds(payload.automaticProductIds || []);
+  assertDistinctPricingResolutions(manualOverrides, automaticProductIds);
+  return { manualOverrides, automaticProductIds };
+}
+
+function serializePricingResolutions(manualOverrides, automaticProductIds) {
+  if (automaticProductIds.length === 0) return manualOverrides;
+  return { manualOverrides, automaticProductIds };
+}
+
+function getApplicationToken(previewToken, manualOverrides = [], automaticProductIds = []) {
   const normalizedOverrides = normalizeManualOverrides(manualOverrides);
-  if (normalizedOverrides.length === 0) return previewToken;
+  const normalizedAutomaticProductIds = normalizeAutomaticProductIds(automaticProductIds);
+  assertDistinctPricingResolutions(normalizedOverrides, normalizedAutomaticProductIds);
+  if (normalizedOverrides.length === 0 && normalizedAutomaticProductIds.length === 0) {
+    return previewToken;
+  }
   const payload = {
     previewToken,
     manualOverrides: normalizedOverrides,
+    ...(normalizedAutomaticProductIds.length > 0
+      ? { automaticProductIds: normalizedAutomaticProductIds }
+      : {}),
   };
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
-function applyManualOverridesToPreview(preview, manualOverrides = []) {
+function addAutomaticResolutionReason(pricingChange = {}) {
+  const reasonCodes = (pricingChange.reasonCodes || [])
+    .filter((code) => code !== 'manual_override' && code !== 'use_automatic');
+  const reasonLabels = (pricingChange.reasonLabels || [])
+    .filter((label) => (
+      label !== 'Ціну скориговано вручну'
+      && label !== 'Явно застосовано автоматичну ціну'
+    ));
+  return {
+    ...pricingChange,
+    reasonCodes: [...reasonCodes, 'use_automatic'],
+    reasonLabels: [...reasonLabels, 'Явно застосовано автоматичну ціну'],
+  };
+}
+
+function applyManualOverridesToPreview(
+  preview,
+  manualOverrides = [],
+  automaticProductIds = []
+) {
   const normalizedOverrides = normalizeManualOverrides(manualOverrides);
+  const normalizedAutomaticProductIds = normalizeAutomaticProductIds(automaticProductIds);
+  assertDistinctPricingResolutions(normalizedOverrides, normalizedAutomaticProductIds);
   const overridesByProductId = new Map(
     normalizedOverrides.map((override) => [override.productId, override.newPriceUah])
   );
+  const automaticProductIdSet = new Set(normalizedAutomaticProductIds);
   const itemsByProductId = new Map(
     preview.items.map((item) => [Number(item.productId), item])
   );
@@ -464,14 +549,47 @@ function applyManualOverridesToPreview(preview, manualOverrides = []) {
     }
   }
 
+  for (const productId of normalizedAutomaticProductIds) {
+    const item = itemsByProductId.get(productId);
+    if (!item) {
+      const error = new Error(`Товар ${productId} не належить до цього перегляду переоцінки.`);
+      error.statusCode = 422;
+      throw error;
+    }
+    const automaticPriceUah = toUahNumber(item.automaticPriceUah ?? item.newPriceUah);
+    const hasAutomaticPrice = preview.scope === REPRICING_SCOPE_GLOBAL
+      && item.errorCode === 'manual_price'
+      && item.pricingDetails?.matrix
+      && automaticPriceUah !== null
+      && automaticPriceUah > 0;
+    if (!hasAutomaticPrice) {
+      const error = new Error(`Для товару ${item.sku} зараз немає дійсної автоматичної ціни.`);
+      error.statusCode = 422;
+      throw error;
+    }
+  }
+
   const items = preview.items.map((item) => {
+    if (automaticProductIdSet.has(Number(item.productId))) {
+      const newPriceUah = toUahNumber(item.automaticPriceUah ?? item.newPriceUah);
+      return {
+        ...item,
+        newPriceUah,
+        priceDeltaUah: newPriceUah - Number(item.oldPriceUah || 0),
+        status: 'changed',
+        manualOverride: false,
+        useAutomatic: true,
+        resolvedManualPrice: true,
+        pricingState: 'automatic',
+        pricingChange: addAutomaticResolutionReason(item.pricingChange),
+      };
+    }
     if (!overridesByProductId.has(Number(item.productId))) return item;
 
     const newPriceUah = overridesByProductId.get(Number(item.productId));
     const resolvesManualPrice = item.status === 'error'
       && ['price_missing', 'manual_price'].includes(item.errorCode);
-    const calculatedPriceUah = item.calculatedPriceUah
-      ?? (item.errorCode === 'manual_price' ? item.newPriceUah : null);
+    const calculatedPriceUah = item.calculatedPriceUah ?? item.newPriceUah ?? null;
     const oldPriceUah = item.oldPriceUah === null ? null : Number(item.oldPriceUah);
     const uahRate = Number(item.uahRate || 0);
     const weight = Number(item.weight || 0);
@@ -485,7 +603,7 @@ function applyManualOverridesToPreview(preview, manualOverrides = []) {
 
     return {
       ...item,
-      calculatedPriceUah: resolvesManualPrice ? calculatedPriceUah : item.newPriceUah,
+      calculatedPriceUah,
       newPriceUah,
       priceDeltaUah: newPriceUah - Number(oldPriceUah || 0),
       totalPrice,
@@ -679,7 +797,8 @@ async function buildRepricingPreview(scenarioId) {
         continue;
       }
 
-      const newPriceUah = roundUah(pricing.currencyPayload?.totalPriceUah);
+      const calculatedPriceUah = toUahNumber(pricing.currencyPayload?.calculatedPriceUah);
+      const newPriceUah = toUahNumber(pricing.currencyPayload?.totalPriceUah);
       if (!pricing.pricingDetails?.matrix || newPriceUah === null || newPriceUah <= 0) {
         items.push(buildErrorItem(
           product,
@@ -723,6 +842,8 @@ async function buildRepricingPreview(scenarioId) {
         weight: product.weight === null ? null : Number(product.weight),
         answers,
         oldPriceUah,
+        calculatedPriceUah,
+        automaticPriceUah: newPriceUah,
         newPriceUah,
         priceDeltaUah: Number((newPriceUah - Number(oldPriceUah || 0)).toFixed(2)),
         status: isChanged ? 'changed' : 'unchanged',
@@ -837,7 +958,8 @@ async function buildGlobalRepricingPreview() {
       );
       const selectedScenario = pricing.pricingDetails?.scenario || null;
       const matrixName = selectedScenario?.name || null;
-      const newPriceUah = roundUah(pricing.currencyPayload?.totalPriceUah);
+      const calculatedPriceUah = toUahNumber(pricing.currencyPayload?.calculatedPriceUah);
+      const newPriceUah = toUahNumber(pricing.currencyPayload?.totalPriceUah);
       const priceMode = pricing.priceMode;
       const pricePerGram = Number(pricing.pricePerGram || 0);
       const uahRate = pricing.currencyPayload?.uahRate === null
@@ -868,7 +990,8 @@ async function buildGlobalRepricingPreview() {
         pricePerGram,
         totalPrice: Number(pricing.totalPrice || 0),
         newPriceUah,
-        calculatedPriceUah: newPriceUah,
+        calculatedPriceUah,
+        automaticPriceUah: newPriceUah,
         priceDeltaUah: newPriceUah === null
           ? null
           : Number((newPriceUah - Number(oldPriceUah || 0)).toFixed(2)),
@@ -977,7 +1100,9 @@ function normalizeReviewedProductIds(productIds = []) {
 
 function normalizeDraftRow(row) {
   if (!row) return null;
-  const manualOverrides = normalizeManualOverrides(row.manual_overrides || []);
+  const { manualOverrides, automaticProductIds } = normalizeStoredPricingResolutions(
+    row.manual_overrides
+  );
   const reviewedProductIds = normalizeReviewedProductIds(row.reviewed_product_ids || []);
   return {
     id: Number(row.id),
@@ -988,6 +1113,8 @@ function normalizeDraftRow(row) {
     status: row.status,
     manualOverrides,
     manualOverrideCount: manualOverrides.length,
+    automaticProductIds,
+    automaticResolutionCount: automaticProductIds.length,
     reviewedProductIds,
     reviewedProductCount: reviewedProductIds.length,
     uiState: normalizeDraftUiState(row.ui_state || {}),
@@ -1029,9 +1156,9 @@ async function getRepricingDrafts() {
   return result.rows.map(normalizeDraftRow);
 }
 
-async function getDraftOverrideConflicts(overrides, preview) {
+async function getDraftOverrideConflicts(resolutions, preview) {
   const previewIds = new Set((preview.items || []).map((item) => Number(item.productId)));
-  const unavailable = overrides.filter((item) => !previewIds.has(item.productId));
+  const unavailable = resolutions.filter((item) => !previewIds.has(item.productId));
   if (unavailable.length === 0) return [];
 
   const productIds = unavailable.map((item) => item.productId);
@@ -1072,19 +1199,28 @@ async function getRepricingDraft(draftId) {
   const preview = scope === REPRICING_SCOPE_GLOBAL
     ? await buildGlobalRepricingPreview()
     : await buildRepricingPreview(row.scenario_id);
-  const overrides = normalizeManualOverrides(row.manual_overrides || []);
+  const storedResolutions = normalizeStoredPricingResolutions(row.manual_overrides);
+  const overrides = storedResolutions.manualOverrides;
+  const automaticProductIds = storedResolutions.automaticProductIds;
   const previewIds = new Set(preview.items.map((item) => Number(item.productId)));
   const availableOverrides = overrides.filter((item) => previewIds.has(item.productId));
+  const availableAutomaticProductIds = automaticProductIds.filter((productId) => (
+    previewIds.has(productId)
+  ));
   const reviewedProductIds = normalizeReviewedProductIds(row.reviewed_product_ids || [])
     .filter((productId) => previewIds.has(productId));
   const draft = normalizeDraftRow(row);
   draft.reviewedProductIds = reviewedProductIds;
   draft.reviewedProductCount = reviewedProductIds.length;
-  const conflicts = await getDraftOverrideConflicts(overrides, preview);
+  const conflicts = await getDraftOverrideConflicts([
+    ...overrides,
+    ...automaticProductIds.map((productId) => ({ productId, useAutomatic: true })),
+  ], preview);
   return {
     draft,
     preview,
     manualOverrides: availableOverrides,
+    automaticProductIds: availableAutomaticProductIds,
     conflicts,
     sync: getDraftSyncInfo(row.preview_snapshot || {}, preview),
   };
@@ -1094,6 +1230,7 @@ async function createRepricingDraft({
   scope = REPRICING_SCOPE_SCENARIO,
   scenarioId,
   manualOverrides = [],
+  automaticProductIds = [],
   reviewedProductIds = [],
   uiState = {},
 }) {
@@ -1117,8 +1254,15 @@ async function createRepricingDraft({
     ? await buildGlobalRepricingPreview()
     : await buildRepricingPreview(scenario.id);
   const normalizedOverrides = normalizeManualOverrides(manualOverrides);
+  const normalizedAutomaticProductIds = normalizeAutomaticProductIds(automaticProductIds);
+  assertDistinctPricingResolutions(normalizedOverrides, normalizedAutomaticProductIds);
+  if (normalizedScope !== REPRICING_SCOPE_GLOBAL && normalizedAutomaticProductIds.length > 0) {
+    const error = new Error('Автоматичне рішення доступне лише для загальної переоцінки.');
+    error.statusCode = 422;
+    throw error;
+  }
   const normalizedReviewedIds = normalizeReviewedProductIds(reviewedProductIds);
-  applyManualOverridesToPreview(preview, normalizedOverrides);
+  applyManualOverridesToPreview(preview, normalizedOverrides, normalizedAutomaticProductIds);
   const snapshot = getRepricingPreviewSnapshot(preview);
   try {
     const result = await pool.query(
@@ -1139,7 +1283,10 @@ async function createRepricingDraft({
         } : getScenarioSnapshot(scenario)),
         getRepricingPreviewFingerprint(preview),
         JSON.stringify(snapshot),
-        JSON.stringify(normalizedOverrides),
+        JSON.stringify(serializePricingResolutions(
+          normalizedOverrides,
+          normalizedAutomaticProductIds
+        )),
         JSON.stringify(normalizedReviewedIds),
         JSON.stringify(normalizeDraftUiState(uiState)),
       ]
@@ -1162,9 +1309,24 @@ async function createRepricingDraft({
 
 async function saveRepricingDraft(
   draftId,
-  { manualOverrides = [], reviewedProductIds = [], uiState = {} }
+  {
+    manualOverrides = [],
+    automaticProductIds = [],
+    reviewedProductIds = [],
+    uiState = {},
+  }
 ) {
   const normalizedOverrides = normalizeManualOverrides(manualOverrides);
+  const normalizedAutomaticProductIds = normalizeAutomaticProductIds(automaticProductIds);
+  assertDistinctPricingResolutions(normalizedOverrides, normalizedAutomaticProductIds);
+  if (normalizedAutomaticProductIds.length > 0) {
+    const draft = await getRepricingDraftRow(draftId);
+    if ((draft.scope || REPRICING_SCOPE_SCENARIO) !== REPRICING_SCOPE_GLOBAL) {
+      const error = new Error('Автоматичне рішення доступне лише для загальної переоцінки.');
+      error.statusCode = 422;
+      throw error;
+    }
+  }
   const normalizedReviewedIds = normalizeReviewedProductIds(reviewedProductIds);
   const result = await pool.query(
     `UPDATE repricing_drafts
@@ -1175,7 +1337,10 @@ async function saveRepricingDraft(
      WHERE id = $4 AND status = 'draft'
      RETURNING *`,
     [
-      JSON.stringify(normalizedOverrides),
+      JSON.stringify(serializePricingResolutions(
+        normalizedOverrides,
+        normalizedAutomaticProductIds
+      )),
       JSON.stringify(normalizedReviewedIds),
       JSON.stringify(normalizeDraftUiState(uiState)),
       Number(draftId),
@@ -1253,24 +1418,27 @@ async function discardRepricingDraft(draftId) {
 }
 
 function getUpdatedDetails(details, item, batchId, appliedAt) {
-  const autoPriceUah = item.manualOverride
-    ? (item.calculatedPriceUah ?? null)
-    : (item.calculatedPriceUah ?? item.newPriceUah);
+  const calculatedPriceUah = item.calculatedPriceUah ?? null;
+  const autoPriceUah = item.automaticPriceUah
+    ?? (item.manualOverride ? null : item.newPriceUah);
   return {
     ...details,
     logMessage: item.logMessage,
+    calculatedPriceUah,
     autoPriceUah,
-    manualPriceUah: item.manualOverride ? item.newPriceUah : (details.manualPriceUah ?? null),
+    manualPriceUah: item.useAutomatic
+      ? null
+      : (item.manualOverride ? item.newPriceUah : (details.manualPriceUah ?? null)),
     pricingScenario: item.pricingDetails?.scenario || details.pricingScenario || null,
     repricing: {
       batchId,
       scenarioId: item.pricingDetails?.scenario?.id || details.pricingScenario?.id || null,
       oldPriceUah: item.oldPriceUah,
       newPriceUah: item.newPriceUah,
-      calculatedPriceUah: item.manualOverride
-        ? (item.calculatedPriceUah ?? null)
-        : (item.calculatedPriceUah ?? item.newPriceUah),
+      calculatedPriceUah,
+      autoPriceUah,
       manualOverride: Boolean(item.manualOverride),
+      useAutomatic: Boolean(item.useAutomatic),
       pricingChange: item.pricingChange || null,
       appliedAt,
     },
@@ -1295,6 +1463,7 @@ async function applyRepricingScope({
   scenarioId,
   previewToken,
   manualOverrides = [],
+  automaticProductIds = [],
   draftId = null,
 }) {
   if (!previewToken) {
@@ -1304,6 +1473,13 @@ async function applyRepricingScope({
   }
 
   const normalizedOverrides = normalizeManualOverrides(manualOverrides);
+  const normalizedAutomaticProductIds = normalizeAutomaticProductIds(automaticProductIds);
+  assertDistinctPricingResolutions(normalizedOverrides, normalizedAutomaticProductIds);
+  if (scope !== REPRICING_SCOPE_GLOBAL && normalizedAutomaticProductIds.length > 0) {
+    const error = new Error('Автоматичне рішення доступне лише для загальної переоцінки.');
+    error.statusCode = 422;
+    throw error;
+  }
   let draft = null;
   if (draftId !== null && draftId !== undefined && draftId !== '') {
     draft = await getRepricingDraftRow(draftId);
@@ -1315,14 +1491,22 @@ async function applyRepricingScope({
       error.statusCode = 409;
       throw error;
     }
-    const storedOverrides = normalizeManualOverrides(draft.manual_overrides || []);
-    if (JSON.stringify(storedOverrides) !== JSON.stringify(normalizedOverrides)) {
-      const error = new Error('Ручні ціни ще не збережено в чернетці. Дочекайтеся автозбереження.');
+    const storedResolutions = normalizeStoredPricingResolutions(draft.manual_overrides);
+    if (
+      JSON.stringify(storedResolutions.manualOverrides) !== JSON.stringify(normalizedOverrides)
+      || JSON.stringify(storedResolutions.automaticProductIds)
+        !== JSON.stringify(normalizedAutomaticProductIds)
+    ) {
+      const error = new Error('Рішення щодо цін ще не збережено в чернетці. Дочекайтеся автозбереження.');
       error.statusCode = 409;
       throw error;
     }
   }
-  const applicationToken = getApplicationToken(previewToken, normalizedOverrides);
+  const applicationToken = getApplicationToken(
+    previewToken,
+    normalizedOverrides,
+    normalizedAutomaticProductIds
+  );
   const existingBatch = await getBatchByPreviewToken(applicationToken);
   if (existingBatch) {
     if (draft) {
@@ -1351,7 +1535,11 @@ async function applyRepricingScope({
     throw error;
   }
   assertNoBlockingCorrectionRequests(basePreview.blockingCorrectionRequests);
-  const preview = applyManualOverridesToPreview(basePreview, normalizedOverrides);
+  const preview = applyManualOverridesToPreview(
+    basePreview,
+    normalizedOverrides,
+    normalizedAutomaticProductIds
+  );
   if (preview.summary.errorCount > 0) {
     const error = new Error('Переоцінку зупинено: у попередньому перегляді є помилки.');
     error.statusCode = 422;
@@ -1400,7 +1588,7 @@ async function applyRepricingScope({
     assertNoBlockingCorrectionRequests(blockingRequests);
     if (draft) {
       const lockedDraft = await getRepricingDraftRow(draft.id, client, true);
-      const lockedOverrides = normalizeManualOverrides(lockedDraft.manual_overrides || []);
+      const lockedResolutions = normalizeStoredPricingResolutions(lockedDraft.manual_overrides);
       if (
         lockedDraft.status !== 'draft'
         || (lockedDraft.scope || REPRICING_SCOPE_SCENARIO) !== scope
@@ -1409,7 +1597,9 @@ async function applyRepricingScope({
           && Number(lockedDraft.scenario_id) !== Number(scenarioId)
         )
         || lockedDraft.preview_fingerprint !== draft.preview_fingerprint
-        || JSON.stringify(lockedOverrides) !== JSON.stringify(normalizedOverrides)
+        || JSON.stringify(lockedResolutions.manualOverrides) !== JSON.stringify(normalizedOverrides)
+        || JSON.stringify(lockedResolutions.automaticProductIds)
+          !== JSON.stringify(normalizedAutomaticProductIds)
       ) {
         const error = new Error('Чернетку змінили під час підготовки переоцінки. Оновіть її повторно.');
         error.statusCode = 409;
@@ -1860,6 +2050,7 @@ module.exports = {
   getRepricingScenarios,
   getProductRepricingStateToken,
   hasManualPrice,
+  normalizeAutomaticProductIds,
   normalizeManualOverrides,
   normalizeReviewedProductIds,
   applyManualOverridesToPreview,

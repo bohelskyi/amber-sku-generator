@@ -348,6 +348,15 @@ export function DecodeWorkspace({
                 <div className="mt-1 text-xl font-semibold text-slate-900">
                   {formatUah(decodeData.pricing.totalPriceUah)}
                 </div>
+                {decodeData.pricing.calculatedPriceUah !== null
+                  && decodeData.pricing.calculatedPriceUah !== undefined
+                  && decodeData.pricing.automaticPriceUah !== null
+                  && decodeData.pricing.automaticPriceUah !== undefined && (
+                  <div className="mt-2 text-xs text-slate-600">
+                    Розраховано до округлення: {formatUah(decodeData.pricing.calculatedPriceUah)}
+                    {' → '}автоматична ціна: {formatUah(decodeData.pricing.automaticPriceUah)}
+                  </div>
+                )}
                 <div className="mt-3">
                   <span className="chip">{getPricingSourceLabel(decodeData.pricing.source)}</span>
                 </div>
@@ -615,6 +624,15 @@ function RecountPanel({
                   <div className="mt-1 text-sm font-semibold text-slate-900">
                     {formatUah(recountPreview.corrected.totalPriceUah)}
                   </div>
+                  {recountPreview.corrected.calculatedPriceUah !== null
+                    && recountPreview.corrected.calculatedPriceUah !== undefined
+                    && recountPreview.corrected.autoPriceUah !== null
+                    && recountPreview.corrected.autoPriceUah !== undefined && (
+                    <div className="mt-1 text-xs text-slate-500">
+                      До округлення: {formatUah(recountPreview.corrected.calculatedPriceUah)}
+                      {' → '}автоматично: {formatUah(recountPreview.corrected.autoPriceUah)}
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="border-t border-[rgba(221,151,74,0.35)] pt-3 text-sm text-slate-600">
@@ -705,6 +723,15 @@ function PreviousPricingSnapshot({ config, decodeData }) {
           <div className="mt-1 text-sm font-semibold text-slate-900">
             {formatUah(pricing.totalPriceUah)}
           </div>
+          {pricing.calculatedPriceUah !== null
+            && pricing.calculatedPriceUah !== undefined
+            && pricing.automaticPriceUah !== null
+            && pricing.automaticPriceUah !== undefined && (
+            <div className="mt-1 text-xs text-slate-500">
+              До округлення: {formatUah(pricing.calculatedPriceUah)}
+              {' → '}автоматично: {formatUah(pricing.automaticPriceUah)}
+            </div>
+          )}
         </div>
         {pricing.usesWeight && pricing.weight !== null && pricing.weight !== undefined && (
           <div>

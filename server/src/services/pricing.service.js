@@ -9,7 +9,7 @@ const {
   validateWeightBands,
 } = require('../utils/pricing-scenarios');
 const { asRuleObject, getRuleDependencies, isRuleMatched } = require('../utils/rules');
-const { roundUah } = require('../utils/money');
+const { roundAutomaticUah } = require('../utils/money');
 const { parsePositiveDecimal } = require('../utils/numbers');
 
 function normalizeScenarioGroup(groupName, scenarioName = '') {
@@ -301,7 +301,12 @@ async function calculatePricing(
 
   let totalPrice = isWeightBased ? (pricePerGram * weightVal).toFixed(2) : '0.00';
 
-  let currencyPayload = { uahRate: null, pricePerGramUah: null, totalPriceUah: null };
+  let currencyPayload = {
+    uahRate: null,
+    pricePerGramUah: null,
+    calculatedPriceUah: null,
+    totalPriceUah: null,
+  };
   try {
     const resolvedRateInfo = rateInfo || await getUsdUahRateInfo();
     const uahRate = Number(resolvedRateInfo.rate);
@@ -309,19 +314,25 @@ async function calculatePricing(
       throw new Error(resolvedRateInfo.error || 'USD/UAH rate is unavailable');
     }
     if (isWeightBased) {
+      const calculatedPriceUah = pricePerGram > 0
+        ? pricePerGram * weightVal * uahRate
+        : null;
       currencyPayload = {
         uahRate,
         pricePerGramUah: (pricePerGram * uahRate).toFixed(2),
-        totalPriceUah: pricePerGram > 0 ? roundUah(Number(totalPrice) * uahRate) : null,
+        calculatedPriceUah,
+        totalPriceUah: roundAutomaticUah(calculatedPriceUah),
       };
     } else {
       totalPrice = uahRate > 0 ? (Number(fixedPriceUah || 0) / uahRate).toFixed(2) : '0.00';
+      const calculatedPriceUah = fixedPriceUah !== null && Number(fixedPriceUah) > 0
+        ? Number(fixedPriceUah)
+        : null;
       currencyPayload = {
         uahRate,
         pricePerGramUah: null,
-        totalPriceUah: fixedPriceUah !== null && Number(fixedPriceUah) > 0
-          ? roundUah(fixedPriceUah)
-          : null,
+        calculatedPriceUah,
+        totalPriceUah: roundAutomaticUah(calculatedPriceUah),
       };
     }
     currencyPayload = {
@@ -338,7 +349,8 @@ async function calculatePricing(
       currencyPayload = {
         uahRate: null,
         pricePerGramUah: null,
-        totalPriceUah: roundUah(fixedPriceUah),
+        calculatedPriceUah: fixedPriceUah,
+        totalPriceUah: roundAutomaticUah(fixedPriceUah),
       };
     }
     currencyPayload = {

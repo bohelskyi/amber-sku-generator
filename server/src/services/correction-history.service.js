@@ -2,7 +2,7 @@ const pool = require('../db/pool');
 const { getAppConfig } = require('./catalog.service');
 const { getAnswerChanges } = require('../utils/answer-changes');
 const { asRuleObject, isRuleMatched } = require('../utils/rules');
-const { roundUah } = require('../utils/money');
+const { toUahNumber } = require('../utils/money');
 
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -87,8 +87,8 @@ function normalizeCorrectionRow(row, config) {
       toLabel: getOptionLabel(config, categoryCode, change.key, change.to, newAnswers),
     };
   });
-  const oldPriceUah = roundUah(oldPayload.totalPriceUah);
-  const newPriceUah = roundUah(newPayload.totalPriceUah);
+  const oldPriceUah = toUahNumber(oldPayload.totalPriceUah);
+  const newPriceUah = toUahNumber(newPayload.totalPriceUah);
   const storedDelta = Number(row.price_delta_uah);
 
   return {
@@ -104,7 +104,7 @@ function normalizeCorrectionRow(row, config) {
     oldPriceUah,
     newPriceUah,
     priceDeltaUah: Number.isFinite(storedDelta)
-      ? roundUah(storedDelta)
+      ? toUahNumber(storedDelta)
       : newPriceUah - oldPriceUah,
     oldPricePerGram: oldPayload.pricePerGram ?? oldPayload.pricing?.pricePerGram ?? null,
     newPricePerGram: newPayload.pricePerGram ?? newPayload.pricing?.pricePerGram ?? null,
@@ -237,7 +237,7 @@ async function getCorrectionHistory(filters = {}, options = {}) {
       increasedCount: Number(summary.increased_count || 0),
       decreasedCount: Number(summary.decreased_count || 0),
       unchangedCount: Number(summary.unchanged_count || 0),
-      netPriceDeltaUah: roundUah(summary.net_price_delta_uah) || 0,
+      netPriceDeltaUah: toUahNumber(summary.net_price_delta_uah) || 0,
       firstAt: summary.first_at,
       lastAt: summary.last_at,
     },

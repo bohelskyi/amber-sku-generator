@@ -49,6 +49,18 @@ test('correction request signature changes with SKU, price, or parameters', () =
     getCorrectionPreviewSignature(buildPreview({ corrected: { totalPriceUah: 700 } }))
   );
   assert.notEqual(
+    getCorrectionPreviewSignature(buildPreview({ corrected: { totalPriceUah: 99.4 } })),
+    getCorrectionPreviewSignature(buildPreview({ corrected: { totalPriceUah: 99.6 } }))
+  );
+  assert.notEqual(
+    getCorrectionPreviewSignature(buildPreview({
+      corrected: { calculatedPriceUah: 1113, autoPriceUah: 1100, totalPriceUah: 1100 },
+    })),
+    getCorrectionPreviewSignature(buildPreview({
+      corrected: { calculatedPriceUah: 1114, autoPriceUah: 1100, totalPriceUah: 1100 },
+    }))
+  );
+  assert.notEqual(
     signature,
     getCorrectionPreviewSignature(buildPreview({ corrected: { fullSku: 'NM211-1' } }))
   );

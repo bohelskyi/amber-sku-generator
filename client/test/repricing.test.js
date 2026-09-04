@@ -103,14 +103,69 @@ test('global manual resolution keeps the automatic calculation visible for audit
     sku: 'NM18',
     oldPriceUah: 550,
     newPriceUah: 700,
-    calculatedPriceUah: 700,
+    calculatedPriceUah: 713,
+    automaticPriceUah: 700,
     status: 'error',
     errorCode: 'manual_price',
   }], { 18: '600' });
 
   assert.equal(item.status, 'changed');
   assert.equal(item.newPriceUah, 600);
-  assert.equal(item.calculatedPriceUah, 700);
+  assert.equal(item.calculatedPriceUah, 713);
+  assert.equal(item.automaticPriceUah, 700);
+});
+
+test('manual-priced row can explicitly use a valid authoritative automatic price', () => {
+  const manualItem = {
+    productId: 18,
+    sku: 'NM18',
+    oldPriceUah: 550,
+    calculatedPriceUah: 613,
+    automaticPriceUah: 600,
+    newPriceUah: 600,
+    status: 'error',
+    errorCode: 'manual_price',
+    pricingState: 'manual',
+  };
+  const [automaticItem] = applyManualPrices([manualItem], {}, [18]);
+
+  assert.equal(automaticItem.status, 'changed');
+  assert.equal(automaticItem.newPriceUah, 600);
+  assert.equal(automaticItem.calculatedPriceUah, 613);
+  assert.equal(automaticItem.useAutomatic, true);
+  assert.equal(automaticItem.manualOverride, false);
+  assert.equal(automaticItem.pricingState, 'automatic');
+
+  const [editedItem] = applyManualPrices([manualItem], { 18: '625' }, []);
+  assert.equal(editedItem.newPriceUah, 625);
+  assert.equal(editedItem.manualOverride, true);
+  assert.equal(editedItem.useAutomatic, undefined);
+});
+
+test('manual-priced row cannot select automatic when no automatic price exists', () => {
+  const manualItem = {
+    productId: 18,
+    oldPriceUah: 550,
+    calculatedPriceUah: null,
+    status: 'error',
+    errorCode: 'manual_price',
+  };
+
+  assert.deepEqual(applyManualPrices([manualItem], {}, [18]), [manualItem]);
+});
+
+test('automatic resolution preserves an authoritative sub-100 decimal price', () => {
+  const [item] = applyManualPrices([{
+    productId: 18,
+    oldPriceUah: 80,
+    calculatedPriceUah: 99.5,
+    automaticPriceUah: 99.5,
+    newPriceUah: 99.5,
+    status: 'error',
+    errorCode: 'manual_price',
+  }], {}, [18]);
+
+  assert.equal(item.newPriceUah, 99.5);
 });
 
 test('bulk keep-current resolves only unresolved manual-priced rows and marks them reviewed', () => {
@@ -149,6 +204,20 @@ test('bulk keep-current preserves an existing individual manual resolution', () 
   assert.deepEqual(bulkState.affectedProductIds, [19]);
 });
 
+test('bulk keep-current leaves an explicit automatic resolution untouched', () => {
+  const items = [
+    { productId: 18, oldPriceUah: 550, status: 'error', errorCode: 'manual_price' },
+    { productId: 19, oldPriceUah: 675, status: 'error', errorCode: 'manual_price' },
+    { productId: 20, oldPriceUah: 700, status: 'error', errorCode: 'price_missing' },
+  ];
+  const bulkState = keepCurrentManualPrices(items, {}, [], [18]);
+
+  assert.deepEqual(bulkState.manualPrices, { 19: '675' });
+  assert.deepEqual(bulkState.automaticProductIds, [18]);
+  assert.deepEqual(bulkState.affectedProductIds, [19]);
+  assert.equal(Object.hasOwn(bulkState.manualPrices, 20), false);
+});
+
 test('bulk keep-current does not make an invalid stored manual price pass validation', () => {
   const bulkState = keepCurrentManualPrices([{
     productId: 22,
@@ -157,8 +226,9 @@ test('bulk keep-current does not make an invalid stored manual price pass valida
     errorCode: 'manual_price',
   }]);
 
-  assert.deepEqual(bulkState.manualPrices, { 22: '0' });
-  assert.deepEqual(getInvalidManualPriceIds(bulkState.manualPrices), [22]);
+  assert.deepEqual(bulkState.manualPrices, {});
+  assert.deepEqual(bulkState.affectedProductIds, []);
+  assert.deepEqual(getInvalidManualPriceIds(bulkState.manualPrices), []);
 });
 
 test('ordinary automatic repricing remains applicable when it has valid changes', () => {
@@ -169,11 +239,11 @@ test('ordinary automatic repricing remains applicable when it has valid changes'
   })), true);
 });
 
-test('manual prices accept comma decimals and round to whole hryvnias', () => {
+test('manual prices accept comma decimals without automatic rounding', () => {
   assert.deepEqual(getManualOverrides({ 7: '450,6' }), [
-    { productId: 7, newPriceUah: 451 },
+    { productId: 7, newPriceUah: 450.6 },
   ]);
-  assert.deepEqual(getInvalidManualPriceIds({ 7: '', 8: '-1', 9: '400', 10: '0.4' }), [7, 8, 10]);
+  assert.deepEqual(getInvalidManualPriceIds({ 7: '', 8: '-1', 9: '400', 10: '0.4' }), [7, 8]);
 });
 
 test('manual price changes the row status and delta', () => {

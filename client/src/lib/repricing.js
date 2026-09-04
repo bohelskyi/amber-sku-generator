@@ -3,8 +3,7 @@ export function parseManualPrice(value) {
   if (!normalized) return null;
   const parsed = Number(normalized);
   if (!Number.isFinite(parsed) || parsed <= 0) return null;
-  const rounded = Math.round(parsed);
-  return rounded > 0 ? rounded : null;
+  return parsed;
 }
 
 export function getManualOverrides(manualPrices = {}) {
@@ -23,19 +22,38 @@ export function getInvalidManualPriceIds(manualPrices = {}) {
     .map(([productId]) => Number(productId));
 }
 
-export function getUnresolvedManualPriceItems(items = [], manualPrices = {}) {
+function parseAutomaticPrice(value) {
+  const normalized = String(value ?? '').trim().replace(',', '.');
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function getUnresolvedManualPriceItems(
+  items = [],
+  manualPrices = {},
+  automaticProductIds = []
+) {
+  const automaticProductIdSet = new Set(automaticProductIds.map(Number));
   return items.filter((item) => (
     item.errorCode === 'manual_price'
+    && parseManualPrice(item.oldPriceUah) !== null
     && !Object.prototype.hasOwnProperty.call(manualPrices, item.productId)
+    && !automaticProductIdSet.has(Number(item.productId))
   ));
 }
 
 export function keepCurrentManualPrices(
   items = [],
   manualPrices = {},
-  reviewedProductIds = []
+  reviewedProductIds = [],
+  automaticProductIds = []
 ) {
-  const unresolvedItems = getUnresolvedManualPriceItems(items, manualPrices);
+  const unresolvedItems = getUnresolvedManualPriceItems(
+    items,
+    manualPrices,
+    automaticProductIds
+  );
   const nextManualPrices = { ...manualPrices };
   const nextReviewedProductIds = new Set(reviewedProductIds.map(Number));
 
@@ -48,20 +66,53 @@ export function keepCurrentManualPrices(
     manualPrices: nextManualPrices,
     reviewedProductIds: [...nextReviewedProductIds]
       .sort((first, second) => first - second),
+    automaticProductIds: [...new Set(automaticProductIds.map(Number))]
+      .sort((first, second) => first - second),
     affectedProductIds: unresolvedItems.map((item) => Number(item.productId)),
   };
 }
 
-export function applyManualPrices(items = [], manualPrices = {}) {
+export function applyManualPrices(items = [], manualPrices = {}, automaticProductIds = []) {
+  const automaticProductIdSet = new Set(automaticProductIds.map(Number));
   return items.map((item) => {
+    if (automaticProductIdSet.has(Number(item.productId))) {
+      const newPriceUah = parseAutomaticPrice(item.automaticPriceUah ?? item.newPriceUah);
+      const canUseAutomatic = item.errorCode === 'manual_price' && newPriceUah !== null;
+      if (!canUseAutomatic) return item;
+      const oldPriceUah = item.oldPriceUah === null ? null : Number(item.oldPriceUah);
+      const reasonCodes = (item.pricingChange?.reasonCodes || [])
+        .filter((code) => code !== 'manual_override' && code !== 'use_automatic');
+      const reasonLabels = (item.pricingChange?.reasonLabels || [])
+        .filter((label) => (
+          label !== 'Ціну скориговано вручну'
+          && label !== 'Явно застосовано автоматичну ціну'
+        ));
+      return {
+        ...item,
+        newPriceUah,
+        priceDeltaUah: newPriceUah - Number(oldPriceUah || 0),
+        status: 'changed',
+        manualOverride: false,
+        useAutomatic: true,
+        resolvedManualPrice: true,
+        pricingState: 'automatic',
+        pricingChange: {
+          ...(item.pricingChange || {}),
+          reasonCodes: [...reasonCodes, 'use_automatic'],
+          reasonLabels: [
+            ...reasonLabels,
+            'Явно застосовано автоматичну ціну',
+          ],
+        },
+      };
+    }
     if (!Object.prototype.hasOwnProperty.call(manualPrices, item.productId)) return item;
     const newPriceUah = parseManualPrice(manualPrices[item.productId]);
     const resolvesManualPrice = item.status === 'error'
       && ['price_missing', 'manual_price'].includes(item.errorCode);
     if (newPriceUah === null || (item.status === 'error' && !resolvesManualPrice)) return item;
     const oldPriceUah = item.oldPriceUah === null ? null : Number(item.oldPriceUah);
-    const calculatedPriceUah = item.calculatedPriceUah
-      ?? (item.errorCode === 'manual_price' ? item.newPriceUah : null);
+    const calculatedPriceUah = item.calculatedPriceUah ?? item.newPriceUah ?? null;
     const reasonCodes = (item.pricingChange?.reasonCodes || [])
       .filter((code) => code !== 'manual_override' && code !== 'exchange_rate_only');
     const reasonLabels = (item.pricingChange?.reasonLabels || [])
@@ -70,7 +121,7 @@ export function applyManualPrices(items = [], manualPrices = {}) {
       ));
     return {
       ...item,
-      calculatedPriceUah: resolvesManualPrice ? calculatedPriceUah : item.newPriceUah,
+      calculatedPriceUah,
       newPriceUah,
       priceDeltaUah: newPriceUah - Number(oldPriceUah || 0),
       status: resolvesManualPrice

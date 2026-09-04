@@ -156,22 +156,22 @@ export function useSkuManager() {
   const hasManualPrice =
     manualPriceNumber !== null && isValidPositivePrice(manualPriceNumber);
   const requiresManualPrice = needsManualPrice(previewData);
-  const roundedManualPriceNumber = hasManualPrice ? Math.round(manualPriceNumber) : null;
+  const effectiveManualPriceNumber = hasManualPrice ? manualPriceNumber : null;
   const effectiveTotalPriceUah = hasManualPrice
-    ? roundedManualPriceNumber
+    ? effectiveManualPriceNumber
     : previewData?.totalPriceUah;
   const effectiveTotalPrice =
     hasManualPrice && Number(previewData?.uahRate) > 0
-      ? (roundedManualPriceNumber / Number(previewData.uahRate)).toFixed(2)
+      ? (effectiveManualPriceNumber / Number(previewData.uahRate)).toFixed(2)
       : previewData?.totalPrice;
   const weightNumber = Number(weight || previewData?.weightVal || 0);
   const effectivePricePerGramUah =
     hasManualPrice && weightNumber > 0
-      ? (roundedManualPriceNumber / weightNumber).toFixed(2)
+      ? (effectiveManualPriceNumber / weightNumber).toFixed(2)
       : previewData?.pricePerGramUah;
   const effectivePricePerGram =
     hasManualPrice && Number(previewData?.uahRate) > 0 && weightNumber > 0
-      ? (roundedManualPriceNumber / Number(previewData.uahRate) / weightNumber).toFixed(2)
+      ? (effectiveManualPriceNumber / Number(previewData.uahRate) / weightNumber).toFixed(2)
       : previewData?.pricePerGram;
 
   const clearLivePrice = () => {
@@ -478,7 +478,7 @@ export function useSkuManager() {
   };
 
   const handleStopManualPriceEdit = () => {
-    if (hasManualPrice) setManualPriceUah(String(roundedManualPriceNumber));
+    if (hasManualPrice) setManualPriceUah(String(effectiveManualPriceNumber));
     setIsManualPriceEditing(false);
   };
 

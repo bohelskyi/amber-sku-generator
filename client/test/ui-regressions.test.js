@@ -58,8 +58,9 @@ test('repricing renders the same manual resolution control on later manual-price
   );
 
   assert.match(source, /\['price_missing', 'manual_price'\]\.includes/);
-  assert.match(source, /Залишити поточну ціну/);
-  assert.match(source, /setManualPrice\(item\.productId, formatDecimal\(item\.oldPriceUah\)\)/);
+  assert.match(source, /Залишити ручну ціну/);
+  assert.match(source, /keepCurrentManualPrice\(\s*item\.productId,\s*item\.oldPriceUah\s*\)/);
+  assert.match(source, /Застосувати автоматичну ціну/);
   assert.match(source, /disabled=\{!canApply\}/);
 });
 
@@ -74,6 +75,7 @@ test('repricing exposes a server-authoritative global catalog workflow', () => {
   assert.match(source, /\/admin\/repricing\/global\/apply/);
   assert.match(source, /scenarioFilter/);
   assert.match(source, /Залишити поточні ручні ціни для всіх/);
+  assert.match(source, /Застосувати автоматичну ціну/);
   assert.match(source, /keepCurrentManualPrices/);
   assert.doesNotMatch(source, /Promise\.all\([^)]*\/admin\/repricing\/preview/);
 });
@@ -96,4 +98,25 @@ test('fixed-scale API decimals are compacted in editable pricing fields', () => 
   assert.match(adminHookSource, /factor: formatDecimal\(modifier\.factor\)/);
   assert.match(adminHookSource, /min_weight: formatDecimal\(band\.min_weight\)/);
   assert.match(repricingSource, /formatDecimal\(item\.newPriceUah\)/);
+});
+
+test('automatic pricing views expose calculated and final marketing-rounded UAH values', () => {
+  const dashboardSource = fs.readFileSync(
+    new URL('../src/components/app/HomeDashboard.jsx', import.meta.url),
+    'utf8'
+  );
+  const previewSource = fs.readFileSync(
+    new URL('../src/components/app/PreviewResult.jsx', import.meta.url),
+    'utf8'
+  );
+  const recountSource = fs.readFileSync(
+    new URL('../src/components/app/RecountConfirmDialog.jsx', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(dashboardSource, /pricing\.calculatedPriceUah/);
+  assert.match(dashboardSource, /pricing\.automaticPriceUah/);
+  assert.match(previewSource, /previewData\.calculatedPriceUah/);
+  assert.match(recountSource, /preview\.corrected\.autoPriceUah/);
+  assert.match(dashboardSource, /Розраховано до округлення/);
 });

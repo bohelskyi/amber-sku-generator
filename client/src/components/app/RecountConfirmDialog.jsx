@@ -133,6 +133,15 @@ export function RecountConfirmDialog({
                   <Copy size={15} aria-hidden="true" />
                 </button>
               </div>
+              {preview.corrected.calculatedPriceUah !== null
+                && preview.corrected.calculatedPriceUah !== undefined
+                && preview.corrected.autoPriceUah !== null
+                && preview.corrected.autoPriceUah !== undefined && (
+                <div className="mt-1 text-xs text-slate-500">
+                  До округлення: {formatUah(preview.corrected.calculatedPriceUah)}
+                  {' → '}автоматично: {formatUah(preview.corrected.autoPriceUah)}
+                </div>
+              )}
             </div>
           </div>
 
@@ -146,8 +155,8 @@ export function RecountConfirmDialog({
               <p>Автоматична ціна для цієї конфігурації відсутня. Вкажіть ціну вручну.</p>
               <input
                 type="number"
-                min="1"
-                step="1"
+                min="0.01"
+                step="0.01"
                 className="input mt-3"
                 value={manualPriceUah}
                 onChange={(event) => onManualPriceChange(event.target.value)}
