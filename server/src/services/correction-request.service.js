@@ -17,6 +17,37 @@ const STATUS_TRANSITIONS = {
   rejected: new Set(['pending']),
   completed: new Set(),
 };
+const CLAIM_TOKEN_HEADER = 'X-Correction-Claim-Token';
+
+function getClaimTokenHash(claimToken) {
+  const normalizedToken = typeof claimToken === 'string' ? claimToken.trim() : '';
+  if (normalizedToken.length < 32 || normalizedToken.length > 512) return null;
+  return crypto.createHash('sha256').update(normalizedToken).digest('hex');
+}
+
+function getClaimFingerprint(claimTokenHash) {
+  return claimTokenHash ? String(claimTokenHash).slice(0, 16) : null;
+}
+
+function claimConflict(message = 'Цей запит уже взяв у роботу інший працівник.') {
+  const error = new Error(message);
+  error.statusCode = 409;
+  error.details = { type: 'correction_claim_conflict' };
+  return error;
+}
+
+function assertClaimOwnership(row, claimToken) {
+  const suppliedHash = getClaimTokenHash(claimToken);
+  if (
+    row.status !== 'in_progress'
+    || !row.claim_token_hash
+    || !suppliedHash
+    || suppliedHash !== row.claim_token_hash
+  ) {
+    throw claimConflict('Цей запит більше не належить цьому браузеру. Оновіть чергу.');
+  }
+  return suppliedHash;
+}
 
 function stableAnswerEntries(answers = {}) {
   return Object.entries(answers || {})
@@ -72,11 +103,89 @@ function normalizeRequestRow(row) {
     changes: Array.isArray(row.changes) ? row.changes : [],
     comment: row.comment || '',
     status: row.status,
+    claimedAt: row.claimed_at,
+    claimFingerprint: getClaimFingerprint(row.claim_token_hash),
+    hasUnownedLegacyClaim: row.status === 'in_progress' && !row.claim_token_hash,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
     rejectedAt: row.rejected_at,
   };
+}
+
+async function claimCorrectionRequest(requestId) {
+  const claimToken = crypto.randomBytes(32).toString('base64url');
+  const claimTokenHash = getClaimTokenHash(claimToken);
+  const result = await pool.query(
+    `UPDATE correction_requests
+     SET status = 'in_progress',
+         claim_token_hash = $1,
+         claimed_at = CURRENT_TIMESTAMP,
+         rejected_at = NULL,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $2
+       AND (
+         (status = 'pending' AND claim_token_hash IS NULL)
+         OR (status = 'in_progress' AND claim_token_hash IS NULL)
+       )
+     RETURNING *`,
+    [claimTokenHash, Number(requestId)]
+  );
+  if (result.rows.length === 0) {
+    const row = await getCorrectionRequestRow(requestId);
+    if (row.status === 'in_progress') throw claimConflict();
+    throw claimConflict(`Запит має статус «${row.status}» і не може бути взятий у роботу.`);
+  }
+  return {
+    success: true,
+    request: normalizeRequestRow(result.rows[0]),
+    claimToken,
+  };
+}
+
+async function releaseCorrectionRequest(requestId, claimToken) {
+  const claimTokenHash = getClaimTokenHash(claimToken);
+  if (!claimTokenHash) throw claimConflict('Не знайдено чинного права на цей запит.');
+  const result = await pool.query(
+    `UPDATE correction_requests
+     SET status = 'pending',
+         claim_token_hash = NULL,
+         claimed_at = NULL,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $1
+       AND status = 'in_progress'
+       AND claim_token_hash = $2
+     RETURNING *`,
+    [Number(requestId), claimTokenHash]
+  );
+  if (result.rows.length === 0) {
+    await getCorrectionRequestRow(requestId);
+    throw claimConflict('Цей запит змінився або більше не належить цьому браузеру.');
+  }
+  return { success: true, request: normalizeRequestRow(result.rows[0]) };
+}
+
+async function forceReleaseCorrectionRequest(requestId, confirmed = false) {
+  if (confirmed !== true) {
+    const error = new Error('Підтвердьте примусове повернення запиту в чергу.');
+    error.statusCode = 400;
+    throw error;
+  }
+  const result = await pool.query(
+    `UPDATE correction_requests
+     SET status = 'pending',
+         claim_token_hash = NULL,
+         claimed_at = NULL,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $1 AND status = 'in_progress'
+     RETURNING *`,
+    [Number(requestId)]
+  );
+  if (result.rows.length === 0) {
+    const row = await getCorrectionRequestRow(requestId);
+    throw claimConflict(`Запит має статус «${row.status}» і не перебуває в роботі.`);
+  }
+  return { success: true, request: normalizeRequestRow(result.rows[0]) };
 }
 
 async function getCorrectionRequestRow(requestId, queryable = pool) {
@@ -206,13 +315,9 @@ async function createCorrectionRequest(payload = {}) {
   }
 }
 
-async function refreshCorrectionRequest(requestId) {
+async function refreshCorrectionRequest(requestId, claimToken) {
   const row = await getCorrectionRequestRow(requestId);
-  if (!ACTIVE_REQUEST_STATUSES.includes(row.status)) {
-    const error = new Error('Оновити можна тільки активний запит.');
-    error.statusCode = 409;
-    throw error;
-  }
+  const claimTokenHash = assertClaimOwnership(row, claimToken);
 
   const preview = await buildProductRecountPreview({
     sourceSku: row.source_sku,
@@ -229,7 +334,9 @@ async function refreshCorrectionRequest(requestId) {
          changes = $4::jsonb,
          preview_signature = $5,
          updated_at = CURRENT_TIMESTAMP
-     WHERE id = $6 AND status = ANY($7::text[])
+     WHERE id = $6
+       AND status = 'in_progress'
+       AND claim_token_hash = $7
      RETURNING *`,
     [
       preview.corrected.fullSku,
@@ -238,7 +345,7 @@ async function refreshCorrectionRequest(requestId) {
       JSON.stringify(preview.changes || []),
       getCorrectionPreviewSignature(preview),
       Number(requestId),
-      ACTIVE_REQUEST_STATUSES,
+      claimTokenHash,
     ]
   );
   if (result.rows.length === 0) {
@@ -249,9 +356,13 @@ async function refreshCorrectionRequest(requestId) {
   return { success: true, request: normalizeRequestRow(result.rows[0]) };
 }
 
-async function updateCorrectionRequestStatus(requestId, nextStatus) {
+async function updateCorrectionRequestStatus(requestId, nextStatus, claimToken) {
   const normalizedStatus = String(nextStatus || '').trim().toLowerCase();
-  if (!REQUEST_STATUSES.has(normalizedStatus) || normalizedStatus === 'completed') {
+  if (
+    !REQUEST_STATUSES.has(normalizedStatus)
+    || normalizedStatus === 'completed'
+    || normalizedStatus === 'in_progress'
+  ) {
     const error = new Error('Некоректний статус запиту.');
     error.statusCode = 400;
     throw error;
@@ -279,10 +390,18 @@ async function updateCorrectionRequestStatus(requestId, nextStatus) {
       error.statusCode = 409;
       throw error;
     }
+    if (row.status === 'in_progress') {
+      if (normalizedStatus === 'pending') {
+        throw claimConflict('Поверніть запит у чергу через окрему дію звільнення.');
+      }
+      assertClaimOwnership(row, claimToken);
+    }
 
     const updateResult = await client.query(
       `UPDATE correction_requests
        SET status = $1,
+           claim_token_hash = NULL,
+           claimed_at = CASE WHEN $1 = 'pending' THEN NULL ELSE claimed_at END,
            rejected_at = CASE WHEN $1 = 'rejected' THEN CURRENT_TIMESTAMP ELSE NULL END,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $2
@@ -314,16 +433,12 @@ async function syncActiveRepricingDrafts() {
   return failures;
 }
 
-async function completeCorrectionRequest(requestId) {
+async function completeCorrectionRequest(requestId, claimToken) {
   const row = await getCorrectionRequestRow(requestId);
   if (row.status === 'completed') {
     return { success: true, alreadyCompleted: true, request: normalizeRequestRow(row) };
   }
-  if (!ACTIVE_REQUEST_STATUSES.includes(row.status)) {
-    const error = new Error('Виконати можна тільки активний запит.');
-    error.statusCode = 409;
-    throw error;
-  }
+  const claimTokenHash = assertClaimOwnership(row, claimToken);
 
   const preview = await buildProductRecountPreview({
     sourceSku: row.source_sku,
@@ -347,6 +462,7 @@ async function completeCorrectionRequest(requestId) {
     manualPriceUah: row.proposed_payload?.manualPriceUah ?? null,
     correctionRequestId: Number(requestId),
     correctionRequestSignature: row.preview_signature,
+    correctionRequestClaimHash: claimTokenHash,
   });
   const completedRow = await getCorrectionRequestRow(requestId);
   const draftSyncFailures = await syncActiveRepricingDrafts();
@@ -363,13 +479,17 @@ function haveSameRequestAnswers(firstAnswers, secondAnswers) {
 }
 
 module.exports = {
+  CLAIM_TOKEN_HEADER,
   canTransitionCorrectionRequest,
+  claimCorrectionRequest,
   completeCorrectionRequest,
   createCorrectionRequest,
+  forceReleaseCorrectionRequest,
   getCorrectionPreviewSignature,
   getCorrectionRequests,
   haveSameRequestAnswers,
   normalizeRequestStatusFilter,
+  releaseCorrectionRequest,
   refreshCorrectionRequest,
   updateCorrectionRequestStatus,
 };

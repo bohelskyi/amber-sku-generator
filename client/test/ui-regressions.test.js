@@ -120,3 +120,19 @@ test('automatic pricing views expose calculated and final marketing-rounded UAH 
   assert.match(recountSource, /preview\.corrected\.autoPriceUah/);
   assert.match(dashboardSource, /Розраховано до округлення/);
 });
+
+test('correction queue wires exclusive browser claims and shared polling into the UI', () => {
+  const source = fs.readFileSync(
+    new URL('../src/pages/CorrectionRequestsPage.jsx', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(source, /createVisibilityAwarePoller/);
+  assert.match(source, /createLatestRequestGate/);
+  assert.match(source, /\/correction-requests\/\$\{request\.id\}\/claim/);
+  assert.match(source, /X-Correction-Claim-Token/);
+  assert.match(source, /В роботі у вас/);
+  assert.match(source, /В роботі іншим працівником/);
+  assert.match(source, /Примусово повернути/);
+  assert.match(source, /window\.confirm/);
+});

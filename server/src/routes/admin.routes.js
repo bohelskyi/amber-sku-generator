@@ -43,10 +43,14 @@ const {
 } = require('../services/repricing.service');
 const { buildCsv } = require('../utils/csv');
 const {
+  CLAIM_TOKEN_HEADER,
+  claimCorrectionRequest,
   completeCorrectionRequest,
   createCorrectionRequest,
+  forceReleaseCorrectionRequest,
   getCorrectionRequests,
   refreshCorrectionRequest,
+  releaseCorrectionRequest,
   updateCorrectionRequestStatus,
 } = require('../services/correction-request.service');
 const {
@@ -174,9 +178,51 @@ router.post('/admin/correction-requests', async (req, res) => {
   }
 });
 
+router.post('/admin/correction-requests/:requestId/claim', async (req, res) => {
+  try {
+    res.json(await claimCorrectionRequest(req.params.requestId));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({
+      error: err.message,
+      ...(err.details ? { details: err.details } : {}),
+    });
+  }
+});
+
+router.post('/admin/correction-requests/:requestId/release', async (req, res) => {
+  try {
+    res.json(await releaseCorrectionRequest(
+      req.params.requestId,
+      req.get(CLAIM_TOKEN_HEADER)
+    ));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({
+      error: err.message,
+      ...(err.details ? { details: err.details } : {}),
+    });
+  }
+});
+
+router.post('/admin/correction-requests/:requestId/force-release', async (req, res) => {
+  try {
+    res.json(await forceReleaseCorrectionRequest(
+      req.params.requestId,
+      req.body?.confirm === true
+    ));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({
+      error: err.message,
+      ...(err.details ? { details: err.details } : {}),
+    });
+  }
+});
+
 router.post('/admin/correction-requests/:requestId/refresh', async (req, res) => {
   try {
-    res.json(await refreshCorrectionRequest(req.params.requestId));
+    res.json(await refreshCorrectionRequest(
+      req.params.requestId,
+      req.get(CLAIM_TOKEN_HEADER)
+    ));
   } catch (err) {
     res.status(err.statusCode || 500).json({
       error: err.message,
@@ -189,16 +235,23 @@ router.patch('/admin/correction-requests/:requestId/status', async (req, res) =>
   try {
     res.json(await updateCorrectionRequestStatus(
       req.params.requestId,
-      req.body?.status
+      req.body?.status,
+      req.get(CLAIM_TOKEN_HEADER)
     ));
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({
+      error: err.message,
+      ...(err.details ? { details: err.details } : {}),
+    });
   }
 });
 
 router.post('/admin/correction-requests/:requestId/complete', async (req, res) => {
   try {
-    res.json(await completeCorrectionRequest(req.params.requestId));
+    res.json(await completeCorrectionRequest(
+      req.params.requestId,
+      req.get(CLAIM_TOKEN_HEADER)
+    ));
   } catch (err) {
     res.status(err.statusCode || 500).json({
       error: err.message,

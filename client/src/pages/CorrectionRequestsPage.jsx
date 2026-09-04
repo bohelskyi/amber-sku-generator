@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -17,6 +17,16 @@ import { getAnswerValueLabel, getQuestionLabel } from '../lib/answer-labels';
 import { api } from '../lib/api';
 import { copyPlainText } from '../lib/clipboard';
 import { formatDateTime, formatUah } from '../lib/formatters';
+import {
+  createLatestRequestGate,
+  createVisibilityAwarePoller,
+  getCorrectionClaimOwnership,
+  readCorrectionClaims,
+  reconcileCorrectionClaims,
+  removeCorrectionClaim,
+  storeCorrectionClaim,
+  writeCorrectionClaims,
+} from '../lib/correction-queue';
 
 const STATUS_LABELS = {
   pending: 'Очікує',
@@ -154,30 +164,72 @@ export default function CorrectionRequestsPage() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
   const [completionTarget, setCompletionTarget] = useState(null);
+  const completionTargetRef = useRef(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [claims, setClaims] = useState(() => readCorrectionClaims());
+  const [queueRefreshFailed, setQueueRefreshFailed] = useState(false);
+  const requestGate = useRef(createLatestRequestGate());
+  const activeFilterRef = useRef('active');
 
-  const loadRequests = async (nextFilter = filter) => {
+  const persistClaims = useCallback((updater) => {
+    setClaims((currentClaims) => {
+      const nextClaims = typeof updater === 'function' ? updater(currentClaims) : updater;
+      writeCorrectionClaims(nextClaims);
+      return nextClaims;
+    });
+  }, []);
+
+  const loadRequests = useCallback(async (nextFilter) => {
+    const loadId = requestGate.current.next();
     const response = await api.get('/admin/correction-requests', {
       params: { status: nextFilter },
     });
-    setRequests(response.data.items || []);
+    if (
+      !requestGate.current.isLatest(loadId)
+      || nextFilter !== activeFilterRef.current
+    ) return false;
+    const nextRequests = response.data.items || [];
+    setRequests(nextRequests);
     setSummary(response.data.summary || {});
-  };
+    persistClaims((currentClaims) => reconcileCorrectionClaims(currentClaims, nextRequests));
+    const currentTarget = completionTargetRef.current;
+    if (currentTarget) {
+      const currentRequest = nextRequests.find(
+        (request) => Number(request.id) === Number(currentTarget.id)
+      );
+      if (
+        !currentRequest
+        || currentRequest.status !== 'in_progress'
+        || currentRequest.updatedAt !== currentTarget.updatedAt
+      ) {
+        completionTargetRef.current = null;
+        setCompletionTarget(null);
+        setSuccess(`Запит #${currentTarget.id} змінився в іншому вікні. Чергу оновлено.`);
+      }
+    }
+    return true;
+  }, [persistClaims]);
 
   useEffect(() => {
-    Promise.all([
-      api.get('/admin/config'),
-      api.get('/admin/correction-requests', { params: { status: 'active' } }),
-    ])
-      .then(([configResponse, requestResponse]) => {
+    Promise.all([api.get('/admin/config'), loadRequests('active')])
+      .then(([configResponse]) => {
         setConfig(configResponse.data);
-        setRequests(requestResponse.data.items || []);
-        setSummary(requestResponse.data.summary || {});
       })
       .catch((requestError) => setError(getApiError(requestError)))
       .finally(() => setLoading(false));
-  }, []);
+  }, [loadRequests]);
+
+  useEffect(() => createVisibilityAwarePoller({
+    poll: async () => {
+      try {
+        await loadRequests(filter);
+        setQueueRefreshFailed(false);
+      } catch {
+        setQueueRefreshFailed(true);
+      }
+    },
+  }), [filter, loadRequests]);
 
   useEffect(() => {
     if (!focusedRequestId || loading) return;
@@ -199,6 +251,7 @@ export default function CorrectionRequestsPage() {
 
   const changeFilter = (nextFilter) => {
     if (nextFilter === filter || loading) return;
+    activeFilterRef.current = nextFilter;
     setFilter(nextFilter);
     setLoading(true);
     setError('');
@@ -207,14 +260,107 @@ export default function CorrectionRequestsPage() {
       .finally(() => setLoading(false));
   };
 
+  const getClaimHeaders = (requestId) => {
+    const claimToken = claims[requestId]?.token;
+    return claimToken ? { 'X-Correction-Claim-Token': claimToken } : {};
+  };
+
+  const clearClaim = (requestId) => {
+    persistClaims((currentClaims) => removeCorrectionClaim(currentClaims, requestId));
+  };
+
+  const openCompletion = (request) => {
+    completionTargetRef.current = request;
+    setCompletionTarget(request);
+  };
+
+  const closeCompletion = () => {
+    completionTargetRef.current = null;
+    setCompletionTarget(null);
+  };
+
+  const claimRequest = async (request) => {
+    setBusyId(request.id);
+    setError('');
+    setSuccess('');
+    try {
+      const response = await api.post(`/admin/correction-requests/${request.id}/claim`);
+      persistClaims((currentClaims) => storeCorrectionClaim(
+        currentClaims,
+        response.data.request,
+        response.data.claimToken
+      ));
+      await loadRequests(filter);
+      setSuccess(`Запит #${request.id} взято в роботу.`);
+    } catch (requestError) {
+      if (requestError.response?.status === 409) clearClaim(request.id);
+      await loadRequests(filter).catch(() => {});
+      setError(getApiError(requestError));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const releaseRequest = async (request) => {
+    setBusyId(request.id);
+    setError('');
+    setSuccess('');
+    try {
+      await api.post(
+        `/admin/correction-requests/${request.id}/release`,
+        {},
+        { headers: getClaimHeaders(request.id) }
+      );
+      clearClaim(request.id);
+      await loadRequests(filter);
+      setSuccess(`Запит #${request.id} повернуто в чергу.`);
+    } catch (requestError) {
+      if (requestError.response?.status === 409) clearClaim(request.id);
+      await loadRequests(filter).catch(() => {});
+      setError(getApiError(requestError));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const forceReleaseRequest = async (request) => {
+    const confirmed = window.confirm(
+      `Примусово повернути запит #${request.id} в чергу? Переконайтеся, що інший працівник більше не працює з товаром.`
+    );
+    if (!confirmed) return;
+    setBusyId(request.id);
+    setError('');
+    setSuccess('');
+    try {
+      await api.post(`/admin/correction-requests/${request.id}/force-release`, { confirm: true });
+      clearClaim(request.id);
+      await loadRequests(filter);
+      setSuccess(`Запит #${request.id} примусово повернуто в чергу.`);
+    } catch (requestError) {
+      await loadRequests(filter).catch(() => {});
+      setError(getApiError(requestError));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const updateStatus = async (request, status) => {
     setBusyId(request.id);
     setError('');
     setSuccess('');
     try {
-      await api.patch(`/admin/correction-requests/${request.id}/status`, { status });
-      await loadRequests();
+      await api.patch(
+        `/admin/correction-requests/${request.id}/status`,
+        { status },
+        { headers: getClaimHeaders(request.id) }
+      );
+      if (request.status === 'in_progress') clearClaim(request.id);
+      await loadRequests(filter);
     } catch (requestError) {
+      if (request.status === 'in_progress' && requestError.response?.status === 409) {
+        clearClaim(request.id);
+      }
+      await loadRequests(filter).catch(() => {});
       setError(getApiError(requestError));
     } finally {
       setBusyId(null);
@@ -226,10 +372,16 @@ export default function CorrectionRequestsPage() {
     setError('');
     setSuccess('');
     try {
-      await api.post(`/admin/correction-requests/${request.id}/refresh`);
-      await loadRequests();
+      await api.post(
+        `/admin/correction-requests/${request.id}/refresh`,
+        {},
+        { headers: getClaimHeaders(request.id) }
+      );
+      await loadRequests(filter);
       setSuccess(`Запит #${request.id} оновлено. Повторно звірте SKU та ціну на сайті.`);
     } catch (requestError) {
+      if (requestError.response?.status === 409) clearClaim(request.id);
+      await loadRequests(filter).catch(() => {});
       setError(getApiError(requestError));
     } finally {
       setBusyId(null);
@@ -243,9 +395,14 @@ export default function CorrectionRequestsPage() {
     setError('');
     setSuccess('');
     try {
-      const response = await api.post(`/admin/correction-requests/${request.id}/complete`);
-      setCompletionTarget(null);
-      await loadRequests();
+      const response = await api.post(
+        `/admin/correction-requests/${request.id}/complete`,
+        {},
+        { headers: getClaimHeaders(request.id) }
+      );
+      clearClaim(request.id);
+      closeCompletion();
+      await loadRequests(filter);
       const syncFailures = response.data.draftSyncFailures || [];
       setSuccess(
         syncFailures.length > 0
@@ -253,7 +410,9 @@ export default function CorrectionRequestsPage() {
           : `Запит #${request.id} виконано, чернетки переоцінки синхронізовано.`
       );
     } catch (requestError) {
-      setCompletionTarget(null);
+      if (requestError.response?.status === 409) clearClaim(request.id);
+      closeCompletion();
+      await loadRequests(filter).catch(() => {});
       setError(getApiError(requestError));
     } finally {
       setBusyId(null);
@@ -301,6 +460,11 @@ export default function CorrectionRequestsPage() {
             <span>{success}</span>
           </div>
         )}
+        {queueRefreshFailed && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+            Не вдалося оновити спільну чергу. Показано останні отримані дані; повторна спроба буде автоматично.
+          </div>
+        )}
 
         <section className="w-full min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white/90">
           <div className="flex min-w-0 flex-col gap-3 border-b border-slate-200 p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between">
@@ -338,6 +502,8 @@ export default function CorrectionRequestsPage() {
               {visibleRequests.map((request) => {
                 const requestBusy = busyId === request.id;
                 const proposedPrice = request.proposedPayload?.totalPriceUah;
+                const claimOwnership = getCorrectionClaimOwnership(request, claims);
+                const isOwnedClaim = claimOwnership === 'owned';
                 return (
                   <article
                     id={`correction-request-${request.id}`}
@@ -386,12 +552,19 @@ export default function CorrectionRequestsPage() {
                       <div className="flex flex-col justify-between gap-4">
                         <div className="text-sm text-slate-500">
                           {request.completedAt && <>Виконано: {formatDateTime(request.completedAt)}</>}
-                          {request.status === 'in_progress' && <>Оновлено: {formatDateTime(request.updatedAt)}</>}
+                          {request.status === 'in_progress' && (
+                            <>
+                              <div className="font-medium text-sky-800">
+                                {isOwnedClaim ? 'В роботі у вас' : 'В роботі іншим працівником'}
+                              </div>
+                              <div>Взято: {formatDateTime(request.claimedAt || request.updatedAt)}</div>
+                            </>
+                          )}
                         </div>
                         <div className="flex flex-wrap justify-start gap-2 xl:justify-end">
                           {request.status === 'pending' && (
                             <>
-                              <button type="button" className="btn btn-outline gap-2" onClick={() => updateStatus(request, 'in_progress')} disabled={requestBusy}>
+                              <button type="button" className="btn btn-outline gap-2" onClick={() => claimRequest(request)} disabled={requestBusy}>
                                 <Play size={15} />
                                 Взяти в роботу
                               </button>
@@ -400,16 +573,33 @@ export default function CorrectionRequestsPage() {
                               </button>
                             </>
                           )}
-                          {request.status === 'in_progress' && (
+                          {request.status === 'in_progress' && isOwnedClaim && (
                             <>
                               <button type="button" className="btn btn-outline flex h-10 w-10 items-center justify-center p-0" onClick={() => refreshRequest(request)} disabled={requestBusy} title="Оновити розрахунок" aria-label="Оновити розрахунок">
                                 <RefreshCw size={16} className={requestBusy ? 'animate-spin' : ''} />
                               </button>
-                              <button type="button" className="btn btn-primary gap-2" onClick={() => setCompletionTarget(request)} disabled={requestBusy}>
+                              <button type="button" className="btn btn-outline gap-2" onClick={() => releaseRequest(request)} disabled={requestBusy}>
+                                <RotateCcw size={15} />
+                                Повернути в чергу
+                              </button>
+                              <button type="button" className="btn btn-outline flex h-10 w-10 items-center justify-center p-0 text-rose-700" onClick={() => updateStatus(request, 'rejected')} disabled={requestBusy} title="Відхилити" aria-label="Відхилити запит">
+                                <XCircle size={16} />
+                              </button>
+                              <button type="button" className="btn btn-primary gap-2" onClick={() => openCompletion(request)} disabled={requestBusy}>
                                 <CheckCircle2 size={16} />
                                 Підтвердити
                               </button>
                             </>
+                          )}
+                          {request.status === 'in_progress' && !isOwnedClaim && (
+                            <button
+                              type="button"
+                              className="btn btn-outline text-rose-700"
+                              onClick={() => forceReleaseRequest(request)}
+                              disabled={requestBusy}
+                            >
+                              Примусово повернути
+                            </button>
                           )}
                           {request.status === 'rejected' && (
                             <button type="button" className="btn btn-outline gap-2" onClick={() => updateStatus(request, 'pending')} disabled={requestBusy}>
@@ -431,7 +621,7 @@ export default function CorrectionRequestsPage() {
       <CompletionDialog
         busy={Boolean(completionTarget && busyId === completionTarget.id)}
         request={completionTarget}
-        onCancel={() => setCompletionTarget(null)}
+        onCancel={closeCompletion}
         onConfirm={completeRequest}
       />
     </div>
