@@ -4,7 +4,7 @@
 
 - `server/` — Node 20/CommonJS Express API and all authoritative business logic.
 - `server/src/services/` — product/SKU, schemas, pricing, recount/corrections, repricing, exports.
-- `server/migrations/` — ordered PostgreSQL schema source of truth (`000`–`016` currently).
+- `server/migrations/` — ordered PostgreSQL schema source of truth (`000`–`018` currently).
 - `server/test/` — unit tests; `server/integration-test/critical-flows.test.js` — real PostgreSQL tests.
 - `client/` — React 19/Vite UI; client orchestration is in `src/hooks`, reusable rules in `src/lib`.
 - `scripts/` — PostgreSQL backup/restore; `server/scripts/` — integrity audit and SQLite config import.
@@ -117,6 +117,9 @@ CI (`.github/workflows/ci.yml`) uses Node 20 and PostgreSQL 16 and runs server u
 - Matrix prices are strictly positive decimals. Blank/missing means delete the cell/no automatic price. Explicit zero is invalid and must never be silently converted.
 - Missing automatic price requires an independently validated positive manual UAH price for save/correction.
 - Manual price is user input and must not itself stale a preview; real matrix/scenario/modifier/schema/rate changes must still stale it.
+- Automatic UAH prices use marketing rounding based on the unrounded amount. Preserve the unrounded `calculatedPriceUah` separately from rounded `autoPriceUah`/final price so save, recount, repricing, audit data, and historical decode retain both meanings.
+- Manual UAH prices must not receive automatic marketing rounding; preserve their decimal amount subject only to validated storage precision.
+- Historical decode must prefer stored calculated/automatic/final price fields. Keep compatibility fallbacks for older products that lack the newer split fields; do not recalculate their history from current pricing.
 - New saves/corrections must reject zero final prices.
 - Preserve legacy `total_price_uah=0` plus `legacy_uah_price_unset=true`. Do not convert it to null: null can fall back to current automatic pricing. Legacy zero-price products must remain recountable/editable.
 - Keep NBU response validation, bounded retries/timeouts, stale-age limit, in-process request deduplication, and newer-fetch-wins persisted cache behavior.
@@ -126,13 +129,19 @@ CI (`.github/workflows/ci.yml`) uses Node 20 and PostgreSQL 16 and runs server u
 - Recount validates the **target** configuration. Before target validation/apply, remove every inherited answer for a SKU question hidden/inactive in the target, regardless of its old value. The current helper is scoped to published SKU-schema questions; do not claim it cleans hidden non-SKU metadata without adding that behavior and coverage in an explicitly scoped task.
 - If the question is visible in the target, require and validate it normally.
 - Apply target-hidden cleanup only to recount/correction transitions. Never weaken ordinary new-product validation or add legacy placeholders as normal active options.
+- Recount answer updates are patches: an explicit `null`/blank clears that answer, while an omitted key inherits the old value. Optional clearing is separate from target-hidden cleanup and must still pass target validation.
+- Numeric `0` is a real answer (including calibration state `0` and configured zero-valued options), not a global empty sentinel. Do not use truthiness-based answer clearing or normalization.
 - Corrected product details must not retain obsolete hidden answers.
 - Recount apply must lock/revalidate the source, rebuild current target pricing, and atomically insert/link audit records. Preserve correction-request blocking and stale signatures.
+- Correction-request claiming is an atomic compare-and-set: concurrent claim attempts must produce one owner. Owner-only refresh, reject, complete, and release require the capability token; confirmed force-release returns an in-progress request to pending without it.
+- Claim tokens do not expire automatically. The raw token is kept in browser-local storage and only its hash is stored in PostgreSQL; queue responses expose a short fingerprint. The queue polls every five seconds only while visible, refreshes immediately on focus/visibility return, and prevents overlapping/stale responses.
+- A correction claim represents control by one browser installation, not authenticated user identity. Preserve this distinction when adding future authentication.
 
 ### Repricing
 
-- Preview/drafts bind candidate and pricing state. Apply must re-preview/revalidate and remain all-or-nothing.
-- Manual-priced or missing-matrix rows require explicit manual resolution; do not silently overwrite them with automatic pricing.
+- Preserve both scenario-scoped repricing and global repricing. Global preview covers every active product once and uses normal authoritative scenario precedence across the current pricing configuration.
+- Preview/drafts bind scope, candidate/product state, pricing configuration, calculations, and normalized resolutions. Apply must re-preview/revalidate and remain all-or-nothing; one active global draft is allowed alongside per-scenario drafts.
+- Manual-priced and missing-automatic-price rows require explicit resolution. A positive manual override may keep the same manual price or set a new one. In global repricing only, a manual-priced row with a valid authoritative automatic result may explicitly switch to automatic; clear `manualPriceUah` only for that explicit choice. Missing-price rows cannot switch to a nonexistent automatic price.
 - Lock product rows in stable ID order. Rollback only when every product still exactly matches and is owned by the batch, and restore atomically.
 - Active correction requests block repricing of the same product.
 
