@@ -40,10 +40,12 @@ function AppPage() {
             isRecountLoading={sku.isRecountLoading}
             isRecountOpen={sku.isRecountOpen}
             recountAnswers={sku.recountAnswers}
+            recountBlockers={sku.recountBlockers}
             recountError={sku.recountError}
             recountPreview={sku.recountPreview}
             recountReason={sku.recountReason}
             recountSuccess={sku.recountSuccess}
+            recountValidationAttempt={sku.recountValidationAttempt}
             recountMode="choice"
             onApplyRecount={sku.handleApplyRecount}
             onCancelRecount={sku.handleCancelRecount}

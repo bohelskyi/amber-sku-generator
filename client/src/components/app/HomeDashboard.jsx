@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import {
   formatDateTime,
   formatDecimal,
@@ -12,6 +13,10 @@ import {
   isQuestionVisible,
   isTextQuestion,
 } from '../../lib/sku-visibility';
+import {
+  focusFirstRecountBlocker,
+  formatRecountBlockerSummary,
+} from '../../lib/recount-blockers';
 
 function getPricingSourceLabel(source) {
   return source === 'stored' ? 'Збережена в базі' : 'Перерахована зараз';
@@ -93,10 +98,12 @@ export function HomeDashboard({
   isRecountLoading,
   isRecountOpen,
   recountAnswers,
+  recountBlockers,
   recountError,
   recountPreview,
   recountReason,
   recountSuccess,
+  recountValidationAttempt,
   recountMode = 'apply',
   onApplyRecount,
   onCancelRecount,
@@ -196,9 +203,11 @@ export function HomeDashboard({
           isRecountLoading={isRecountLoading}
           isRecountOpen={isRecountOpen}
           recountAnswers={recountAnswers}
+          recountBlockers={recountBlockers}
           recountError={recountError}
           recountPreview={recountPreview}
           recountReason={recountReason}
+          recountValidationAttempt={recountValidationAttempt}
           recountSuccess={recountSuccess}
           recountMode={recountMode}
           onApplyRecount={onApplyRecount}
@@ -222,10 +231,12 @@ export function DecodeWorkspace({
   isRecountLoading,
   isRecountOpen,
   recountAnswers,
+  recountBlockers,
   recountError,
   recountPreview,
   recountReason,
   recountSuccess,
+  recountValidationAttempt,
   onApplyRecount,
   onCancelRecount,
   onRecountAnswer,
@@ -251,9 +262,11 @@ export function DecodeWorkspace({
           isRecountApplying={isRecountApplying}
           isRecountLoading={isRecountLoading}
           recountAnswers={recountAnswers}
+          recountBlockers={recountBlockers}
           recountError={recountError}
           recountPreview={recountPreview}
           recountReason={recountReason}
+          recountValidationAttempt={recountValidationAttempt}
           onApplyRecount={onApplyRecount}
           onCancelRecount={onCancelRecount}
           onRecountAnswer={onRecountAnswer}
@@ -475,9 +488,11 @@ function RecountPanel({
   isRecountApplying,
   isRecountLoading,
   recountAnswers,
+  recountBlockers = [],
   recountError,
   recountPreview,
   recountReason,
+  recountValidationAttempt = 0,
   onApplyRecount,
   onCancelRecount,
   onRecountAnswer,
@@ -486,15 +501,23 @@ function RecountPanel({
   onRecountTextAnswer,
   recountMode = 'apply',
 }) {
+  const panelRef = useRef(null);
   const categoryCode = decodeData.category.code;
   const categoryQuestions = config.questions?.[categoryCode] || [];
   const visibleQuestions = categoryQuestions.filter((question) =>
     isQuestionVisible(question, recountAnswers, recountAnswers.is_calibrated ?? null)
   );
   const priceDependentKeys = decodeData.pricing?.dependentKeys || [];
+  const blockerByQuestionId = new Map(
+    recountBlockers.map((blocker) => [blocker.questionId, blocker])
+  );
+
+  useEffect(() => {
+    if (recountValidationAttempt > 0) focusFirstRecountBlocker(panelRef.current);
+  }, [recountValidationAttempt]);
 
   return (
-    <div>
+    <div ref={panelRef}>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="eyebrow">
@@ -518,27 +541,42 @@ function RecountPanel({
               recountAnswers,
               recountAnswers.is_calibrated ?? null
             );
+            const blocker = blockerByQuestionId.get(question.id);
+            const blockerMessageId = `recount-blocker-${question.id}`;
 
             return (
               <div
                 key={question.id}
+                data-recount-blocker={blocker ? 'true' : undefined}
+                tabIndex={blocker ? -1 : undefined}
                 className={`rounded-xl border p-4 ${
-                  isPriceDriver
-                    ? 'border-[rgba(221,151,74,0.5)] bg-[rgba(221,151,74,0.12)]'
-                    : 'border-slate-200 bg-slate-50/70'
+                  blocker
+                    ? 'border-rose-400 bg-rose-50 ring-1 ring-rose-200'
+                    : isPriceDriver
+                      ? 'border-[rgba(221,151,74,0.5)] bg-[rgba(221,151,74,0.12)]'
+                      : 'border-slate-200 bg-slate-50/70'
                 }`}
               >
-                <div className="text-sm font-semibold text-slate-700">{question.label}</div>
+                <div className={`text-sm font-semibold ${blocker ? 'text-rose-800' : 'text-slate-700'}`}>
+                  {question.label}
+                </div>
                 {textQuestion ? (
                   <input
                     type="text"
-                    className="input mt-3"
+                    className={`input mt-3 ${blocker ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-200' : ''}`}
                     value={recountAnswers[question.id] || ''}
                     onChange={(event) => onRecountTextAnswer(question.id, event.target.value)}
                     disabled={isRecountLoading || isRecountApplying}
+                    aria-invalid={blocker ? 'true' : undefined}
+                    aria-describedby={blocker ? blockerMessageId : undefined}
                   />
                 ) : (
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div
+                    className="mt-3 flex flex-wrap gap-2"
+                    role="group"
+                    aria-invalid={blocker ? 'true' : undefined}
+                    aria-describedby={blocker ? blockerMessageId : undefined}
+                  >
                     {question.required !== 1
                       && !visibleOptions.some((option) => Number(option.id) === 0) && (
                       <button
@@ -569,6 +607,11 @@ function RecountPanel({
                     ))}
                   </div>
                 )}
+                {blocker && (
+                  <p id={blockerMessageId} className="mt-2 text-xs font-medium text-rose-700" role="alert">
+                    {blocker.message}
+                  </p>
+                )}
               </div>
             );
           })}
@@ -589,7 +632,7 @@ function RecountPanel({
             />
           </div>
 
-          {recountError && (
+          {recountError && recountBlockers.length === 0 && (
             <div className="danger-panel p-4 text-sm">
               {recountError}
             </div>
@@ -655,6 +698,12 @@ function RecountPanel({
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {recountBlockers.length > 0 && (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-800" role="alert">
+              {formatRecountBlockerSummary(recountBlockers.length)}
             </div>
           )}
 

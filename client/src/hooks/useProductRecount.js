@@ -5,6 +5,7 @@ import {
   getDecodedAnswerMap,
   haveAnswersChanged,
 } from '../lib/product-recount.js';
+import { getRecountFieldBlockers } from '../lib/recount-blockers.js';
 
 export function useProductRecount({
   config,
@@ -27,9 +28,36 @@ export function useProductRecount({
   const [isRecountApplying, setIsRecountApplying] = useState(false);
   const [recountSubmitMode, setRecountSubmitMode] = useState(null);
   const [isRecountConfirmOpen, setIsRecountConfirmOpen] = useState(false);
+  const [recountValidationActive, setRecountValidationActive] = useState(false);
+  const [recountValidationAttempt, setRecountValidationAttempt] = useState(0);
+  const [recountValidationMessage, setRecountValidationMessage] = useState('');
   const hasRecountChanges = Boolean(
     decodeData && haveAnswersChanged(getDecodedAnswerMap(decodeData), recountAnswers)
   );
+  const recountBlockers = recountValidationActive
+    ? getRecountFieldBlockers({
+      questions: config?.questions?.[decodeData?.category?.code] || [],
+      answers: recountAnswers,
+      serverMessage: recountValidationMessage,
+    })
+    : [];
+
+  const showRecountValidationFailure = (message = '') => {
+    const hasMatchingField = getRecountFieldBlockers({
+      questions: config?.questions?.[decodeData?.category?.code] || [],
+      answers: recountAnswers,
+      serverMessage: message,
+    }).some((blocker) => blocker.message === message);
+    if (!hasMatchingField) {
+      setRecountValidationActive(false);
+      setRecountValidationMessage('');
+      return;
+    }
+
+    setRecountValidationActive(true);
+    setRecountValidationMessage(message);
+    setRecountValidationAttempt((attempt) => attempt + 1);
+  };
 
   const handleDecode = (skuValue = skuToDecode) => {
     const normalizedSku = String(skuValue || '').trim().toUpperCase();
@@ -50,6 +78,8 @@ export function useProductRecount({
         setIsRecountConfirmOpen(false);
         setRecountPreview(null);
         setRecountError('');
+        setRecountValidationActive(false);
+        setRecountValidationMessage('');
       })
       .catch((err) => {
         setDecodeData(null);
@@ -68,6 +98,8 @@ export function useProductRecount({
     setRecountPreview(null);
     setRecountError('');
     setRecountSuccess('');
+    setRecountValidationActive(false);
+    setRecountValidationMessage('');
   };
 
   const handleStartRecount = () => {
@@ -84,6 +116,8 @@ export function useProductRecount({
     setRecountSuccess('');
     setIsRecountConfirmOpen(false);
     setIsRecountOpen(true);
+    setRecountValidationActive(false);
+    setRecountValidationMessage('');
   };
 
   const handleCancelRecount = () => {
@@ -91,6 +125,8 @@ export function useProductRecount({
     setIsRecountConfirmOpen(false);
     setRecountPreview(null);
     setRecountError('');
+    setRecountValidationActive(false);
+    setRecountValidationMessage('');
   };
 
   const handleRecountAnswer = (questionId, valueId) => {
@@ -108,6 +144,7 @@ export function useProductRecount({
     setIsRecountConfirmOpen(false);
     setRecountPreview(null);
     setRecountError('');
+    setRecountValidationMessage('');
   };
 
   const handleRecountTextAnswer = (questionId, value) => {
@@ -128,6 +165,7 @@ export function useProductRecount({
     setIsRecountConfirmOpen(false);
     setRecountPreview(null);
     setRecountError('');
+    setRecountValidationMessage('');
   };
 
   const getRecountPayload = () => buildRecountPayload({
@@ -142,7 +180,8 @@ export function useProductRecount({
     if (!decodeData?.sku) return;
     if (!hasRecountChanges) {
       setRecountPreview(null);
-      setRecountError('Для переобліку змініть хоча б один параметр виробу.');
+      const message = 'Для переобліку змініть хоча б один параметр виробу.';
+      setRecountError(message);
       return;
     }
     setIsRecountLoading(true);
@@ -153,11 +192,15 @@ export function useProductRecount({
     api.post('/recount/preview', getRecountPayload())
       .then((res) => {
         setRecountPreview(res.data);
+        setRecountValidationActive(false);
+        setRecountValidationMessage('');
         if (openConfirmation) setIsRecountConfirmOpen(true);
       })
       .catch((err) => {
+        const message = err.response?.data?.error || err.message;
         setRecountPreview(null);
-        setRecountError(err.response?.data?.error || err.message);
+        setRecountError(message);
+        showRecountValidationFailure(message);
       })
       .finally(() => setIsRecountLoading(false));
   };
@@ -245,12 +288,14 @@ export function useProductRecount({
     isRecountLoading,
     isRecountOpen,
     recountAnswers,
+    recountBlockers,
     recountError,
     recountManualPriceUah,
     recountPreview,
     recountReason,
     recountSubmitMode,
     recountSuccess,
+    recountValidationAttempt,
     setRecountReason,
     setRecountManualPriceUah,
     skuToDecode,

@@ -139,10 +139,12 @@ export function RepricingRecountDrawer({
             isRecountLoading={recount.isRecountLoading}
             isRecountOpen={recount.isRecountOpen}
             recountAnswers={recount.recountAnswers}
+            recountBlockers={recount.recountBlockers}
             recountError={recount.recountError}
             recountPreview={recount.recountPreview}
             recountReason={recount.recountReason}
             recountSuccess={recount.recountSuccess}
+            recountValidationAttempt={recount.recountValidationAttempt}
             onApplyRecount={recount.handleApplyRecount}
             onCancelRecount={recount.handleCancelRecount}
             onRecountAnswer={recount.handleRecountAnswer}
