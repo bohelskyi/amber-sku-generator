@@ -411,8 +411,8 @@ export function AdminPricingEditor({
   };
 
   return (
-    <div className="card p-6 sm:p-8 border-t-4 border-[rgba(20,32,59,0.4)] fade-up">
-      <div className="section-title mb-6">
+    <div className="card border-t-4 border-[rgba(20,32,59,0.4)] p-4 sm:p-5 fade-up">
+      <div className="section-title mb-4">
         <div>
           <p className="eyebrow">Ціни</p>
           <h2 className="section-title-text">Управління цінами ({selectedCat.name})</h2>

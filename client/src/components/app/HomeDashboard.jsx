@@ -118,60 +118,40 @@ export function HomeDashboard({
   onDecodeInputChange,
 }) {
   return (
-    <div className="space-y-6">
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.75fr)]">
-        <section className="card p-6 sm:p-8 fade-up stagger-1">
-          <div className="section-title mb-6">
+    <div className="space-y-5">
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.75fr)]">
+        <section className="card p-4 sm:p-5 fade-up stagger-1">
+          <div className="section-title mb-4">
             <div>
-              <h2 className="section-title-text">Категорії виробів</h2>
-              <p className="section-subtitle">Оберіть групу для старту розрахунку артикула.</p>
+              <p className="eyebrow">Створити SKU</p>
+              <h2 className="section-title-text">Оберіть категорію</h2>
             </div>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {Object.values(config.categories).map((category) => (
               <button
                 key={category.code}
                 onClick={() => onStart(category.code)}
                 className="category-card"
               >
-                <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{category.code}</div>
-                <div className="mt-2 text-lg font-semibold text-slate-900">{category.name}</div>
-                <div className="mt-3 text-xs text-slate-500">
-                  {category.requires_weight === 1 ? 'Потрібна вага' : 'Вага не потрібна'}
+                <div className="flex items-center gap-3">
+                  <span className="category-code">{category.code}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold text-slate-900">{category.name}</div>
+                    <div className="category-meta">
+                      {category.requires_weight === 1 ? 'Вага обов’язкова' : 'Без ваги'}
+                    </div>
+                  </div>
                 </div>
               </button>
             ))}
           </div>
         </section>
 
-        <div className="space-y-6 fade-up stagger-2">
-          <div className="card p-6">
-            <p className="eyebrow">Експорт</p>
-            <h3 className="mt-1 text-xl font-semibold text-slate-900">
-              {exportStatus
-                ? `Додано ${exportStatus.countSinceLastExport} артикулів`
-                : 'Завантаження статусу...'}
-            </h3>
-            <p className="section-subtitle mt-2">
-              {exportStatus
-                ? (exportStatus.hasExport
-                  ? `Останній експорт: ${formatDateTime(exportStatus.lastExport?.createdAt)}`
-                  : 'Експортів ще не було')
-                : 'Підтягуємо дані...'}
-            </p>
-            {exportStatus && (
-              <div className="mt-4 flex flex-wrap gap-2">
-                <span className="chip">Всього в базі: {exportStatus.totalProducts}</span>
-                {exportStatus.exportableProducts !== undefined && (
-                  <span className="chip">До експорту: {exportStatus.exportableProducts}</span>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="card p-6">
-            <p className="eyebrow">Decoder</p>
-            <h3 className="mt-1 text-xl font-semibold text-slate-900">Розшифрувати артикул</h3>
+        <div className="space-y-4 fade-up stagger-2">
+          <div className="card p-5">
+            <p className="eyebrow">Розшифрувати SKU</p>
+            <h2 className="mt-1 text-lg font-semibold text-slate-900">Знайти та перевірити товар</h2>
             <div className="mt-4 flex flex-col gap-3 sm:flex-row lg:flex-col">
               <input
                 type="text"
@@ -190,6 +170,30 @@ export function HomeDashboard({
 
             {decodeError && (
               <DecodeErrorPanel details={decodeErrorDetails} message={decodeError} />
+            )}
+          </div>
+
+          <div className="utility-strip">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold text-slate-700">Експорт</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {exportStatus
+                    ? (exportStatus.hasExport
+                      ? `Останній: ${formatDateTime(exportStatus.lastExport?.createdAt)}`
+                      : 'Експортів ще не було')
+                    : 'Завантаження статусу...'}
+                </p>
+              </div>
+              <span className="status-badge is-neutral">
+                {exportStatus ? `${exportStatus.countSinceLastExport} нових` : '...'}
+              </span>
+            </div>
+            {exportStatus && (
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                <span>У базі: {exportStatus.totalProducts}</span>
+                {exportStatus.exportableProducts !== undefined && <span>До експорту: {exportStatus.exportableProducts}</span>}
+              </div>
             )}
           </div>
         </div>
@@ -618,7 +622,7 @@ function RecountPanel({
           })}
         </div>
 
-        <aside className="space-y-4 xl:sticky xl:top-6">
+        <aside className="space-y-4 xl:sticky xl:top-20">
           <PreviousPricingSnapshot config={config} decodeData={decodeData} />
 
           <div className="rounded-xl border border-slate-200 bg-white/80 p-4">

@@ -36,10 +36,10 @@ const STATUS_LABELS = {
 };
 
 const STATUS_CLASSES = {
-  pending: 'border-amber-200 bg-amber-50 text-amber-800',
-  in_progress: 'border-sky-200 bg-sky-50 text-sky-800',
-  completed: 'border-emerald-200 bg-emerald-50 text-emerald-800',
-  rejected: 'border-slate-200 bg-slate-100 text-slate-600',
+  pending: 'is-pending',
+  in_progress: 'is-progress',
+  completed: 'is-completed',
+  rejected: 'is-rejected',
 };
 
 const FILTERS = [
@@ -71,7 +71,7 @@ function CopyButton({ label, value }) {
 
 function StatusBadge({ status }) {
   return (
-    <span className={`inline-flex rounded border px-2 py-1 text-xs font-semibold ${STATUS_CLASSES[status] || STATUS_CLASSES.pending}`}>
+    <span className={`status-badge ${STATUS_CLASSES[status] || STATUS_CLASSES.pending}`}>
       {STATUS_LABELS[status] || status}
     </span>
   );
@@ -117,9 +117,9 @@ function CompletionDialog({ busy, request, onCancel, onConfirm }) {
   if (!request) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl">
-        <div className="border-b border-slate-200 px-5 py-5 sm:px-6">
+    <div className="dialog-backdrop">
+      <div className="dialog-surface max-w-lg">
+        <div className="dialog-header">
           <p className="eyebrow">Завершення запиту #{request.id}</p>
           <h2 className="mt-1 text-xl font-semibold text-slate-900">Сайт уже оновлено?</h2>
         </div>
@@ -138,7 +138,7 @@ function CompletionDialog({ busy, request, onCancel, onConfirm }) {
             Після підтвердження SKU Manager виконає переоблік і закриє цей запит.
           </div>
         </div>
-        <div className="grid gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:grid-cols-2 sm:px-6">
+        <div className="dialog-footer grid gap-3 sm:grid-cols-2">
           <button type="button" className="btn btn-outline order-2 sm:order-1" onClick={onCancel} disabled={busy}>
             Повернутися
           </button>
@@ -421,19 +421,19 @@ export default function CorrectionRequestsPage() {
 
   if (loading && !config) {
     return (
-      <div className="min-h-screen app-bg flex items-center justify-center">
+      <div className="app-page flex items-center justify-center">
         <RefreshCw className="animate-spin text-slate-600" size={26} />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen app-bg">
-      <main className="mx-auto w-full min-w-0 max-w-7xl space-y-7 overflow-hidden px-4 py-8 pb-24 sm:px-6 sm:py-12">
-        <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+    <div className="app-page">
+      <main className="mx-auto w-full min-w-0 max-w-7xl space-y-5 overflow-hidden px-4 py-4 pb-20 sm:px-6 sm:py-6">
+        <header className="console-header">
           <div>
-            <p className="eyebrow">Admin Workspace</p>
-            <h1 className="page-title">Запити на виправлення</h1>
+            <h1 className="text-xl font-semibold tracking-tight text-slate-900">Запити на виправлення</h1>
+            <p className="mt-1 text-xs text-slate-500">Операційна черга, власність і завершення запитів.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             {isAdminView && (
@@ -466,14 +466,14 @@ export default function CorrectionRequestsPage() {
           </div>
         )}
 
-        <section className="w-full min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white/90">
-          <div className="flex min-w-0 flex-col gap-3 border-b border-slate-200 p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between">
+        <section className="card queue-workspace w-full min-w-0">
+          <div className="queue-toolbar flex min-w-0 flex-col gap-3 border-b border-slate-200 p-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex min-w-0 max-w-full gap-1 overflow-x-auto rounded-md bg-slate-100 p-1 lg:flex-1">
               {FILTERS.map(([value, label, countKey]) => (
                 <button
                   key={value}
                   type="button"
-                  className={`shrink-0 rounded px-3 py-2 text-xs font-semibold ${filter === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+                  className={`shrink-0 rounded-md border px-3 py-1.5 text-xs font-semibold ${filter === value ? 'border-amber-300 bg-amber-50 text-amber-950 shadow-sm' : 'border-transparent text-slate-600'}`}
                   onClick={() => changeFilter(value)}
                 >
                   {label} · {summary[countKey] || 0}
@@ -498,7 +498,7 @@ export default function CorrectionRequestsPage() {
           ) : visibleRequests.length === 0 ? (
             <div className="py-16 text-center text-sm text-slate-500">Запитів для цього фільтра немає.</div>
           ) : (
-            <div className="divide-y divide-slate-200">
+            <div className="correction-list divide-y divide-slate-200">
               {visibleRequests.map((request) => {
                 const requestBusy = busyId === request.id;
                 const proposedPrice = request.proposedPayload?.totalPriceUah;
@@ -508,15 +508,25 @@ export default function CorrectionRequestsPage() {
                   <article
                     id={`correction-request-${request.id}`}
                     key={request.id}
-                    className={`p-4 transition-colors sm:p-5 ${focusedRequestId === request.id ? 'bg-amber-50/70' : 'bg-white/40'}`}
+                    className={`p-3 transition-colors sm:p-4 ${focusedRequestId === request.id ? 'is-focused' : 'bg-white/40'}`}
                   >
-                    <div className="grid gap-5 xl:grid-cols-[minmax(220px,0.8fr)_minmax(320px,1.35fr)_minmax(230px,0.75fr)]">
-                      <div className="min-w-0">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusBadge status={request.status} />
+                        <span className="text-xs text-slate-500">#{request.id} · створено {formatDateTime(request.createdAt)}</span>
+                      </div>
+                      {request.status === 'in_progress' && (
                         <div className="flex flex-wrap items-center gap-2">
-                          <StatusBadge status={request.status} />
-                          <span className="text-xs text-slate-500">#{request.id} · {formatDateTime(request.createdAt)}</span>
+                          <div className={`claim-state mb-0 ${isOwnedClaim ? 'is-owned' : 'is-external'}`}>
+                            {isOwnedClaim ? 'В роботі у вас' : 'В роботі іншим працівником'}
+                          </div>
+                          <span className="text-xs text-slate-500">взято {formatDateTime(request.claimedAt || request.updatedAt)}</span>
                         </div>
-                        <div className="mt-4 space-y-3">
+                      )}
+                    </div>
+                    <div className="grid gap-4 border-t border-slate-100 pt-3 xl:grid-cols-[minmax(220px,0.8fr)_minmax(320px,1.35fr)_minmax(230px,0.75fr)]">
+                      <div className="min-w-0">
+                        <div className="space-y-2.5">
                           <div>
                             <div className="text-xs font-semibold uppercase text-slate-500">Було</div>
                             <div className="mt-1 flex min-w-0 items-center gap-2">
@@ -552,14 +562,6 @@ export default function CorrectionRequestsPage() {
                       <div className="flex flex-col justify-between gap-4">
                         <div className="text-sm text-slate-500">
                           {request.completedAt && <>Виконано: {formatDateTime(request.completedAt)}</>}
-                          {request.status === 'in_progress' && (
-                            <>
-                              <div className="font-medium text-sky-800">
-                                {isOwnedClaim ? 'В роботі у вас' : 'В роботі іншим працівником'}
-                              </div>
-                              <div>Взято: {formatDateTime(request.claimedAt || request.updatedAt)}</div>
-                            </>
-                          )}
                         </div>
                         <div className="flex flex-wrap justify-start gap-2 xl:justify-end">
                           {request.status === 'pending' && (

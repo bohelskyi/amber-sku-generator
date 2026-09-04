@@ -27,7 +27,7 @@ export function ExportTools({
         </summary>
 
         <div className="mt-4 space-y-6">
-          <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+          <div className="field-group">
             <div className="section-title mb-3">
               <div>
                 <h4 className="section-title-text text-lg">Експорт CSV</h4>
@@ -69,7 +69,7 @@ export function ExportTools({
             )}
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+          <div className="field-group">
             <div className="section-title mb-3">
               <div>
                 <h4 className="section-title-text text-lg">Архівування</h4>

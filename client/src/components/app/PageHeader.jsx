@@ -3,38 +3,27 @@ import { Link } from 'react-router-dom';
 
 export function PageHeader({ config, selectedCat, historyCount }) {
   return (
-    <header className="card-hero p-6 sm:p-8 fade-up">
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="eyebrow">Amber Studio</p>
-          <h1 className="page-title">Amber SKU Manager</h1>
-          <p className="mt-2 text-sm sm:text-base text-slate-600 max-w-2xl">
-            Створюйте артикули, перевіряйте унікальність і тримайте історію під рукою —
-            усе в одному робочому просторі.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <span className="chip">
-              {selectedCat ? `Категорія: ${config.categories[selectedCat]?.name}` : 'Оберіть категорію'}
-            </span>
-            <span className="chip">Історія: {historyCount}</span>
-          </div>
+    <header className="console-header fade-up">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900">Amber SKU Manager</h1>
+          <span className="chip normal-case tracking-normal">
+            {selectedCat ? config.categories[selectedCat]?.name : 'Операційна консоль'}
+          </span>
         </div>
-        <div className="flex w-full flex-col gap-3 lg:w-auto lg:items-end">
-          <div className="flex w-full flex-wrap gap-2 lg:justify-end">
-            <Link to="/admin/corrections?from=client" className="btn btn-outline flex-1 gap-2 sm:flex-none">
-              <ClipboardList size={16} />
-              Запити
-            </Link>
-            <Link to="/admin/corrections/history?from=client" className="btn btn-outline flex-1 gap-2 sm:flex-none">
-              <History size={16} />
-              Журнал
-            </Link>
-          </div>
-          <div className="stat-tile w-full lg:w-64">
-            <div className="stat-label">Категорій</div>
-            <div className="stat-value">{Object.keys(config.categories).length}</div>
-          </div>
-        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          {Object.keys(config.categories).length} категорій · {historyCount} останніх записів
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Link to="/admin/corrections?from=client" className="btn btn-outline h-9 min-h-9 gap-2 px-3">
+          <ClipboardList size={15} />
+          Запити
+        </Link>
+        <Link to="/admin/corrections/history?from=client" className="btn btn-outline h-9 min-h-9 gap-2 px-3">
+          <History size={15} />
+          Журнал
+        </Link>
       </div>
     </header>
   );

@@ -42,10 +42,10 @@ export function RepricingRecountDrawer({
   }, [onClose, recount.isRecountApplying]);
 
   return (
-    <div className="fixed inset-0 z-40 overflow-y-auto bg-slate-100/95 backdrop-blur-sm">
-      <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
+    <div className="fixed inset-0 z-40 overflow-y-auto bg-[#f4f5f7]/95 backdrop-blur-sm">
+      <div className="drawer-header sticky top-0 z-10 border-b border-white/10 bg-[#14203b] text-white shadow-md">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6">
-          <ScanSearch size={19} className="shrink-0 text-slate-600" />
+          <ScanSearch size={19} className="shrink-0 text-[#dd974a]" />
           <div className="min-w-0 flex-1">
             <div className="text-sm font-semibold text-slate-900">Декодер і переоблік</div>
             <div className="truncate text-xs text-slate-500">{recount.skuToDecode || 'Артикул не обрано'}</div>

@@ -23,9 +23,9 @@ export function ProductBuilder({
   onCancel,
 }) {
   return (
-    <div className="grid gap-6 lg:grid-cols-[1.2fr,0.8fr]">
-      <section className="card p-6 sm:p-8 fade-up">
-        <div className="section-title mb-6">
+    <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <section className="card p-5 sm:p-6 fade-up">
+        <div className="section-title mb-4">
           <div>
             <p className="eyebrow">Крок 1</p>
             <h2 className="section-title-text">{config.categories[selectedCat].name}</h2>
@@ -34,7 +34,7 @@ export function ProductBuilder({
           <button onClick={onCancel} className="btn btn-ghost">Скасувати</button>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-4">
           {config.questions[selectedCat]?.map((question) => {
             if (!isQuestionVisible(question, answers)) return null;
 
@@ -42,7 +42,7 @@ export function ProductBuilder({
             const textQuestion = isTextQuestion(question);
 
             return (
-              <div key={question.id} className="rounded-2xl border border-slate-200 bg-white/80 p-5">
+              <div key={question.id} className="field-group">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <label className="text-sm font-semibold text-slate-700">{question.label}</label>
                   {question.required === 1 && (textQuestion || visibleOptions.length > 0) && (
@@ -83,7 +83,7 @@ export function ProductBuilder({
           })}
 
           {isWeightRequired && (
-            <div className="rounded-2xl border border-slate-200 bg-white/80 p-5">
+            <div className="field-group">
               <label className="block text-sm font-semibold text-slate-700">Вага виробу (г)</label>
               <input
                 type="number"
@@ -106,17 +106,16 @@ export function ProductBuilder({
             </div>
           )}
 
-          <button onClick={onPreview} className="btn btn-primary w-full py-4 text-base sm:text-lg">
-            Перевірити артикул
-          </button>
         </div>
       </section>
 
-      <aside className="space-y-6 fade-up stagger-1">
-        <div className="card p-6 sm:p-8 lg:sticky lg:top-6">
+      <aside className="fade-up stagger-1 lg:sticky lg:top-20">
+        <div className="card overflow-hidden">
+          <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
           <p className="eyebrow">Підсумок</p>
-          <h3 className="section-title-text">{config.categories[selectedCat].name}</h3>
-          <div className="mt-4 space-y-3 text-sm text-slate-600">
+          <h3 className="text-base font-semibold text-slate-900">{config.categories[selectedCat].name}</h3>
+          </div>
+          <div className="space-y-3 p-4 text-sm text-slate-600">
             <div className="flex items-center justify-between">
               <span>Обов'язкові</span>
               <span className="font-semibold text-slate-800">{answeredRequiredCount}/{requiredCount}</span>
@@ -150,8 +149,17 @@ export function ProductBuilder({
               </div>
             )}
             {livePriceError && (
-              <div className="text-xs text-rose-600">{livePriceError}</div>
+              <div className="price-status-line is-error">
+                <span className="status-badge is-error shrink-0">Помилка</span>
+                <span>{livePriceError}</span>
+              </div>
             )}
+          </div>
+          <div className="border-t border-slate-200 bg-white p-4">
+            <button onClick={onPreview} className="btn btn-amber w-full">
+              Перевірити SKU та ціну
+            </button>
+            <p className="mt-2 text-center text-[11px] text-slate-500">Результат перевіряється сервером перед збереженням.</p>
           </div>
         </div>
       </aside>

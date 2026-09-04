@@ -1,31 +1,13 @@
 import { Link } from 'react-router-dom';
-import { ClipboardList, History, RefreshCw } from 'lucide-react';
 
 export function AdminHeader() {
   return (
-    <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between fade-up">
+    <header className="console-header fade-up">
       <div>
-        <p className="eyebrow">Admin Workspace</p>
-        <h1 className="page-title">Адмін-панель</h1>
-        <p className="mt-2 text-sm sm:text-base text-slate-600 max-w-2xl">
-          Керуйте структурою категорій, питаннями та прайсами в одному місці.
-        </p>
+        <h1 className="text-xl font-semibold tracking-tight text-slate-900">Каталог і ціни</h1>
+        <p className="mt-1 text-xs text-slate-500">Структура SKU, варіанти, матриці та модифікатори.</p>
       </div>
-      <div className="flex flex-wrap gap-2">
-        <Link to="/admin/corrections?from=admin" className="btn btn-outline gap-2">
-          <ClipboardList size={16} />
-          Виправлення
-        </Link>
-        <Link to="/admin/corrections/history?from=admin" className="btn btn-outline gap-2">
-          <History size={16} />
-          Журнал
-        </Link>
-        <Link to="/admin/repricing" className="btn btn-outline gap-2">
-          <RefreshCw size={16} />
-          Переоцінка
-        </Link>
-        <Link to="/" className="btn btn-primary">Назад до калькулятора</Link>
-      </div>
+      <Link to="/" className="btn btn-outline h-9 min-h-9 px-3">До робочої області</Link>
     </header>
   );
 }

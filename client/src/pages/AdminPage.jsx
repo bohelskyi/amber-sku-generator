@@ -9,7 +9,7 @@ export default function AdminPage() {
 
   if (!admin.config) {
     return (
-      <div className="min-h-screen app-bg flex items-center justify-center">
+      <div className="app-page flex items-center justify-center">
         <div className="card p-8 text-center">
           <div className="text-lg font-semibold text-slate-700">Завантаження...</div>
           <div className="mt-2 text-sm text-slate-500">Збираємо конфігурацію та цінові сценарії.</div>
@@ -19,12 +19,17 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="min-h-screen app-bg">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12 pb-28 space-y-8">
+    <div className="app-page">
+      <div className="mx-auto max-w-7xl space-y-5 px-4 py-4 pb-20 sm:px-6 sm:py-6">
         <AdminHeader />
         <ValidationIssues issues={admin.validationIssues} />
-        <AdminStructureEditor
-          config={admin.config}
+        <nav className="admin-section-nav" aria-label="Розділи налаштувань">
+          <a href="#catalog-structure">Структура каталогу</a>
+          <a href="#catalog-pricing">Матриці та модифікатори</a>
+        </nav>
+        <section id="catalog-structure" className="scroll-mt-20">
+          <AdminStructureEditor
+            config={admin.config}
           selectedCat={admin.selectedCat}
           selectedQuestion={admin.selectedQuestion}
           currentCatQuestions={admin.currentCatQuestions}
@@ -59,10 +64,12 @@ export default function AdminPage() {
           updateOption={admin.updateOption}
           publishSkuSchema={admin.publishSkuSchema}
           deleteItem={admin.deleteItem}
-          formatMatchJson={admin.formatMatchJson}
-        />
-        <AdminPricingEditor
-          config={admin.config}
+            formatMatchJson={admin.formatMatchJson}
+          />
+        </section>
+        <section id="catalog-pricing" className="scroll-mt-20">
+          <AdminPricingEditor
+            config={admin.config}
           selectedCat={admin.selectedCat}
           pricesData={admin.pricesData}
           currentCatQuestions={admin.currentCatQuestions}
@@ -84,8 +91,9 @@ export default function AdminPage() {
           addScenario={admin.addScenario}
           updateModifier={admin.updateModifier}
           saveModifierEdit={admin.saveModifierEdit}
-          addModifier={admin.addModifier}
-        />
+            addModifier={admin.addModifier}
+          />
+        </section>
       </div>
     </div>
   );
