@@ -1218,12 +1218,14 @@ async function applyProductRecount(payload) {
              corrected_product_id = $1,
              proposed_sku = $2,
              final_payload = $3::jsonb,
+             claim_token_hash = NULL,
              completed_at = CURRENT_TIMESTAMP,
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $4
-           AND source_product_id = $5
-           AND preview_signature = $6
-           AND status IN ('pending', 'in_progress')
+            AND source_product_id = $5
+            AND preview_signature = $6
+            AND status = 'in_progress'
+            AND claim_token_hash = $7
          RETURNING id`,
         [
           correctedProductId,
@@ -1232,6 +1234,7 @@ async function applyProductRecount(payload) {
           Number(payload.correctionRequestId),
           sourceProductId,
           String(payload.correctionRequestSignature || ''),
+          String(payload.correctionRequestClaimHash || ''),
         ]
       );
       if (requestResult.rows.length === 0) {

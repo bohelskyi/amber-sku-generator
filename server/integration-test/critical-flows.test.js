@@ -666,9 +666,10 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
     )));
     await Promise.all(allMigrationFiles
       .filter((fileName) => (
-        !fileName.startsWith('015_')
-        && !fileName.startsWith('016_')
-        && !fileName.startsWith('017_')
+         !fileName.startsWith('015_')
+         && !fileName.startsWith('016_')
+         && !fileName.startsWith('017_')
+         && !fileName.startsWith('018_')
       ))
       .map((fileName) => fs.copyFile(
         path.resolve(serverRoot, 'migrations', fileName),
@@ -745,9 +746,9 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
       );
       assert.equal(checksums.rows[0].count, 0);
       const checkpointMigration = await checkpointPool.query(
-        "SELECT count(*)::int AS count FROM schema_migrations WHERE name ~ '^(015|016|017)_'"
+        "SELECT count(*)::int AS count FROM schema_migrations WHERE name ~ '^(015|016|017|018)_'"
       );
-      assert.equal(checkpointMigration.rows[0].count, 3);
+      assert.equal(checkpointMigration.rows[0].count, 4);
     } finally {
       await freshPool.end();
       await upgradePool.end();
@@ -759,6 +760,112 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
     await dropTestDatabase(freshName);
     await dropTestDatabase(upgradeName);
     await dropTestDatabase(checkpointName);
+  }
+});
+
+test('legacy in-progress correction requests survive migration 018 and can be claimed once', async () => {
+  const databaseName = 'amber_legacy_claim_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const preClaimDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'amber-pre-claim-migrations-')
+  );
+  try {
+    const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
+      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('018_'));
+    await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
+      path.resolve(serverRoot, 'migrations', fileName),
+      path.resolve(preClaimDirectory, fileName)
+    )));
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations({ directory: ${JSON.stringify(preClaimDirectory)} })
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+
+    const legacyPool = new Pool({ connectionString: databaseUrl });
+    let legacyRequestId;
+    try {
+      await legacyPool.query(
+        "INSERT INTO categories (code, name, requires_weight) VALUES ('CL', 'Claim legacy', 0)"
+      );
+      const products = await legacyPool.query(`
+        INSERT INTO products
+          (full_sku, base_sku, sequence_number, category, weight, total_price,
+           total_price_uah, price_per_gram, details, status)
+        VALUES
+          ('CL1001', 'CL1', 1, 'CL', 0, 100, 100, 0, '{}'::jsonb, 'active'),
+          ('CL1002', 'CL1', 2, 'CL', 0, 100, 100, 0, '{}'::jsonb, 'active')
+        RETURNING id, full_sku
+      `);
+      const firstProduct = products.rows.find((row) => row.full_sku === 'CL1001');
+      const inserted = await legacyPool.query(
+        `INSERT INTO correction_requests
+          (source_product_id, category_code, source_sku, proposed_sku, old_payload,
+           proposed_payload, changes, status, preview_signature)
+         VALUES ($1, 'CL', 'CL1001', 'CL2001', '{}'::jsonb, '{}'::jsonb,
+                 '[]'::jsonb, 'in_progress', 'legacy-signature')
+         RETURNING id`,
+        [firstProduct.id]
+      );
+      legacyRequestId = Number(inserted.rows[0].id);
+    } finally {
+      await legacyPool.end();
+    }
+
+    await runNodeInDatabase(databaseUrl, `
+      const assert = require('node:assert/strict');
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      const { claimCorrectionRequest } = require('./src/services/correction-request.service');
+      (async () => {
+        await runMigrations();
+        const before = await db.query(
+          'SELECT status, claim_token_hash, claimed_at FROM correction_requests WHERE id = $1',
+          [${legacyRequestId}]
+        );
+        assert.deepEqual(before.rows[0], {
+          status: 'in_progress', claim_token_hash: null, claimed_at: null,
+        });
+        const claimed = await claimCorrectionRequest(${legacyRequestId});
+        assert.equal(claimed.request.status, 'in_progress');
+        assert.ok(claimed.claimToken);
+        await assert.rejects(claimCorrectionRequest(${legacyRequestId}), /інший працівник/);
+        await db.end();
+      })().catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+
+    const upgradedPool = new Pool({ connectionString: databaseUrl });
+    try {
+      const claimed = await upgradedPool.query(
+        `SELECT status, claim_token_hash, claimed_at
+         FROM correction_requests WHERE id = $1`,
+        [legacyRequestId]
+      );
+      assert.equal(claimed.rows[0].status, 'in_progress');
+      assert.ok(claimed.rows[0].claim_token_hash);
+      assert.ok(claimed.rows[0].claimed_at);
+      const secondProduct = await upgradedPool.query(
+        "SELECT id FROM products WHERE full_sku = 'CL1002'"
+      );
+      await assert.rejects(
+        upgradedPool.query(
+          `INSERT INTO correction_requests
+            (source_product_id, category_code, source_sku, proposed_sku, old_payload,
+             proposed_payload, changes, status, preview_signature)
+           VALUES ($1, 'CL', 'CL1002', 'CL2002', '{}'::jsonb, '{}'::jsonb,
+                   '[]'::jsonb, 'in_progress', 'new-invalid-signature')`,
+          [secondProduct.rows[0].id]
+        ),
+        (error) => error.code === '23514'
+      );
+    } finally {
+      await upgradedPool.end();
+    }
+  } finally {
+    await fs.rm(preClaimDirectory, { recursive: true, force: true });
+    await dropTestDatabase(databaseName);
   }
 });
 
@@ -1462,6 +1569,142 @@ test('concurrent correction only applies once after transactional revalidation',
   });
 });
 
+test('correction request claims are exclusive, persistent, and owner-authoritative', async () => {
+  const productPreview = await request('/api/preview', {
+    method: 'POST',
+    body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0, isCalibrated: 0 },
+  });
+  assert.equal(productPreview.response.status, 200, productPreview.text);
+  const product = await request('/api/save', {
+    method: 'POST',
+    body: {
+      category: 'ZZ',
+      answers: { kind: 1 },
+      weight: 0,
+      isCalibrated: 0,
+      skuSchemaVersionId: schemas.ZZ,
+      previewToken: productPreview.data.previewToken,
+    },
+  });
+  assert.equal(product.response.status, 200, product.text);
+  const created = await request('/api/admin/correction-requests', {
+    method: 'POST',
+    body: {
+      sourceSku: product.data.fullSku,
+      answers: { kind: 2 },
+      reason: 'exclusive claim integration',
+    },
+  });
+  assert.equal(created.response.status, 200, created.text);
+  const requestId = Number(created.data.request.id);
+  const genericClaim = await request(`/api/admin/correction-requests/${requestId}/status`, {
+    method: 'PATCH', body: { status: 'in_progress' },
+  });
+  assert.equal(genericClaim.response.status, 400, genericClaim.text);
+
+  const lockClient = await pool.connect();
+  await lockClient.query('BEGIN');
+  await lockClient.query('SELECT id FROM correction_requests WHERE id = $1 FOR UPDATE', [requestId]);
+  const competingClaims = [
+    request(`/api/admin/correction-requests/${requestId}/claim`, { method: 'POST', body: {} }),
+    request(`/api/admin/correction-requests/${requestId}/claim`, { method: 'POST', body: {} }),
+  ];
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await lockClient.query('COMMIT');
+  lockClient.release();
+
+  const claimResults = await Promise.all(competingClaims);
+  assert.deepEqual(claimResults.map((item) => item.response.status).sort(), [200, 409]);
+  const winningClaim = claimResults.find((item) => item.response.status === 200).data;
+  assert.ok(winningClaim.claimToken.length >= 32);
+  assert.ok(winningClaim.request.claimFingerprint);
+  const claimedState = await pool.query(
+    `SELECT status, claim_token_hash, claimed_at
+     FROM correction_requests WHERE id = $1`,
+    [requestId]
+  );
+  assert.equal(claimedState.rows[0].status, 'in_progress');
+  assert.ok(claimedState.rows[0].claim_token_hash);
+  assert.notEqual(claimedState.rows[0].claim_token_hash, winningClaim.claimToken);
+  assert.ok(claimedState.rows[0].claimed_at);
+  const listed = await request('/api/admin/correction-requests?status=active');
+  assert.equal(listed.response.status, 200, listed.text);
+  const listedClaim = listed.data.items.find((item) => Number(item.id) === requestId);
+  assert.equal(listedClaim.claimFingerprint, winningClaim.request.claimFingerprint);
+  assert.equal(Object.hasOwn(listedClaim, 'claimTokenHash'), false);
+
+  const wrongHeaders = { 'X-Correction-Claim-Token': 'x'.repeat(43) };
+  const wrongRelease = await request(
+    `/api/admin/correction-requests/${requestId}/release`,
+    { method: 'POST', body: {}, headers: wrongHeaders }
+  );
+  assert.equal(wrongRelease.response.status, 409, wrongRelease.text);
+  const wrongRefresh = await request(
+    `/api/admin/correction-requests/${requestId}/refresh`,
+    { method: 'POST', body: {}, headers: wrongHeaders }
+  );
+  assert.equal(wrongRefresh.response.status, 409, wrongRefresh.text);
+  const wrongComplete = await request(
+    `/api/admin/correction-requests/${requestId}/complete`,
+    { method: 'POST', body: {}, headers: wrongHeaders }
+  );
+  assert.equal(wrongComplete.response.status, 409, wrongComplete.text);
+  const wrongReject = await request(`/api/admin/correction-requests/${requestId}/status`, {
+    method: 'PATCH', body: { status: 'rejected' }, headers: wrongHeaders,
+  });
+  assert.equal(wrongReject.response.status, 409, wrongReject.text);
+
+  const ownerHeaders = { 'X-Correction-Claim-Token': winningClaim.claimToken };
+  const released = await request(
+    `/api/admin/correction-requests/${requestId}/release`,
+    { method: 'POST', body: {}, headers: ownerHeaders }
+  );
+  assert.equal(released.response.status, 200, released.text);
+  assert.equal(released.data.request.status, 'pending');
+  assert.equal(released.data.request.claimedAt, null);
+
+  const reclaimed = await request(`/api/admin/correction-requests/${requestId}/claim`, {
+    method: 'POST', body: {},
+  });
+  assert.equal(reclaimed.response.status, 200, reclaimed.text);
+  const unconfirmedForceRelease = await request(
+    `/api/admin/correction-requests/${requestId}/force-release`,
+    { method: 'POST', body: { confirm: false } }
+  );
+  assert.equal(unconfirmedForceRelease.response.status, 400, unconfirmedForceRelease.text);
+  const forceReleased = await request(
+    `/api/admin/correction-requests/${requestId}/force-release`,
+    { method: 'POST', body: { confirm: true } }
+  );
+  assert.equal(forceReleased.response.status, 200, forceReleased.text);
+  assert.equal(forceReleased.data.request.status, 'pending');
+
+  const finalClaim = await request(`/api/admin/correction-requests/${requestId}/claim`, {
+    method: 'POST', body: {},
+  });
+  assert.equal(finalClaim.response.status, 200, finalClaim.text);
+  const rejected = await request(`/api/admin/correction-requests/${requestId}/status`, {
+    method: 'PATCH',
+    body: { status: 'rejected' },
+    headers: { 'X-Correction-Claim-Token': finalClaim.data.claimToken },
+  });
+  assert.equal(rejected.response.status, 200, rejected.text);
+  const finalState = await pool.query(
+    `SELECT cr.status, cr.claim_token_hash, p.status AS product_status,
+            p.corrected_to_product_id
+     FROM correction_requests cr
+     JOIN products p ON p.id = cr.source_product_id
+     WHERE cr.id = $1`,
+    [requestId]
+  );
+  assert.deepEqual(finalState.rows[0], {
+    status: 'rejected',
+    claim_token_hash: null,
+    product_status: 'active',
+    corrected_to_product_id: null,
+  });
+});
+
 test('correction requests reject stale product state, refresh, and complete atomically', async () => {
   const candidate = await pool.query(
     `SELECT id, full_sku
@@ -1483,6 +1726,11 @@ test('correction requests reject stale product state, refresh, and complete atom
   });
   assert.equal(created.response.status, 200, created.text);
   const requestId = Number(created.data.request.id);
+  const claimed = await request(`/api/admin/correction-requests/${requestId}/claim`, {
+    method: 'POST', body: {},
+  });
+  assert.equal(claimed.response.status, 200, claimed.text);
+  const claimHeaders = { 'X-Correction-Claim-Token': claimed.data.claimToken };
 
   await pool.query(
     'UPDATE products SET total_price_uah = total_price_uah + 1 WHERE id = $1',
@@ -1490,7 +1738,7 @@ test('correction requests reject stale product state, refresh, and complete atom
   );
   const staleCompletion = await request(
     `/api/admin/correction-requests/${requestId}/complete`,
-    { method: 'POST', body: {} }
+    { method: 'POST', body: {}, headers: claimHeaders }
   );
   assert.equal(staleCompletion.response.status, 409);
   const unchanged = await pool.query(
@@ -1502,22 +1750,22 @@ test('correction requests reject stale product state, refresh, and complete atom
   assert.deepEqual(unchanged.rows[0], {
     status: 'active',
     corrected_to_product_id: null,
-    request_status: 'pending',
+    request_status: 'in_progress',
   });
 
   const refreshed = await request(
     `/api/admin/correction-requests/${requestId}/refresh`,
-    { method: 'POST', body: {} }
+    { method: 'POST', body: {}, headers: claimHeaders }
   );
   assert.equal(refreshed.response.status, 200, refreshed.text);
   const completed = await request(
     `/api/admin/correction-requests/${requestId}/complete`,
-    { method: 'POST', body: {} }
+    { method: 'POST', body: {}, headers: claimHeaders }
   );
   assert.equal(completed.response.status, 200, completed.text);
   const finalState = await pool.query(
     `SELECT p.status, p.corrected_to_product_id, cr.status AS request_status,
-            cr.corrected_product_id
+            cr.corrected_product_id, cr.claim_token_hash, cr.claimed_at
      FROM products p
      JOIN correction_requests cr ON cr.id = $1
      WHERE p.id = $2`,
@@ -1525,6 +1773,8 @@ test('correction requests reject stale product state, refresh, and complete atom
   );
   assert.equal(finalState.rows[0].status, 'corrected');
   assert.equal(finalState.rows[0].request_status, 'completed');
+  assert.equal(finalState.rows[0].claim_token_hash, null);
+  assert.ok(finalState.rows[0].claimed_at);
   assert.equal(
     Number(finalState.rows[0].corrected_to_product_id),
     Number(finalState.rows[0].corrected_product_id)
