@@ -9,6 +9,7 @@ const {
   doesProductMatchRepricingBatch,
   getApplicationToken,
   getDraftSyncInfo,
+  getGlobalPreviewToken,
   getPreviewToken,
   getRepricingPreviewFingerprint,
   getRepricingPreviewSnapshot,
@@ -37,6 +38,42 @@ test('repricing preview token is stable for the same changes', () => {
   assert.notEqual(
     getPreviewToken(scenario, items),
     getPreviewToken(scenario, [{ ...items[0], newPriceUah: 500 }])
+  );
+});
+
+test('global repricing token binds configuration and every product exactly once', () => {
+  const items = [
+    {
+      productId: 2,
+      productStateToken: 'product-2',
+      scenarioId: 22,
+      oldPriceUah: 200,
+      newPriceUah: 250,
+      status: 'changed',
+      pricingState: 'automatic',
+    },
+    {
+      productId: 1,
+      productStateToken: 'product-1',
+      scenarioId: 11,
+      oldPriceUah: 100,
+      newPriceUah: 100,
+      status: 'unchanged',
+      pricingState: 'automatic',
+    },
+  ];
+
+  assert.equal(
+    getGlobalPreviewToken('configuration-a', items),
+    getGlobalPreviewToken('configuration-a', [...items].reverse())
+  );
+  assert.notEqual(
+    getGlobalPreviewToken('configuration-a', items),
+    getGlobalPreviewToken('configuration-b', items)
+  );
+  assert.notEqual(
+    getGlobalPreviewToken('configuration-a', items),
+    getGlobalPreviewToken('configuration-a', [items[0]])
   );
 });
 
@@ -361,6 +398,29 @@ test('manual_price accepts keeping or changing the existing manual price', () =>
   assert.equal(changed.items[0].newPriceUah, 675);
   assert.equal(changed.items[0].priceDeltaUah, 125);
   assert.equal(changed.summary.errorCount, 0);
+});
+
+test('manual resolution preserves the authoritative automatic price as an audit reference', () => {
+  const preview = applyManualOverridesToPreview({
+    summary: { changedCount: 0, unchangedCount: 0, errorCount: 1 },
+    items: [{
+      productId: 19,
+      sku: 'NM19',
+      weight: 10,
+      oldPriceUah: 550,
+      newPriceUah: 700,
+      calculatedPriceUah: 700,
+      totalPrice: 14,
+      pricePerGram: 1.4,
+      uahRate: 50,
+      status: 'error',
+      errorCode: 'manual_price',
+    }],
+  }, [{ productId: 19, newPriceUah: 600 }]);
+
+  assert.equal(preview.items[0].status, 'changed');
+  assert.equal(preview.items[0].newPriceUah, 600);
+  assert.equal(preview.items[0].calculatedPriceUah, 700);
 });
 
 test('repricing preview token binds resolvable price_missing product state', () => {

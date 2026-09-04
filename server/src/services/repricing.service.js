@@ -6,6 +6,10 @@ const { getUsdUahRateInfo } = require('./currency.service');
 const { roundUah } = require('../utils/money');
 const { asRuleObject, isRuleMatched } = require('../utils/rules');
 
+const REPRICING_SCOPE_SCENARIO = 'scenario';
+const REPRICING_SCOPE_GLOBAL = 'global';
+const GLOBAL_REPRICING_NAME = 'Весь каталог';
+
 function getProductDetails(product) {
   if (!product?.details) return {};
   if (typeof product.details === 'object') return product.details;
@@ -176,6 +180,110 @@ function getScenarioSnapshot(scenario) {
   };
 }
 
+function sortJsonValue(value) {
+  if (Array.isArray(value)) return value.map(sortJsonValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.keys(value).sort().map((key) => [key, sortJsonValue(value[key])])
+  );
+}
+
+function hashPayload(value) {
+  return crypto.createHash('sha256')
+    .update(JSON.stringify(sortJsonValue(value)))
+    .digest('hex');
+}
+
+function getPricingContextSnapshot(context) {
+  const scenarios = [...(context.scenarios || [])]
+    .sort((first, second) => Number(first.id) - Number(second.id))
+    .map(getScenarioSnapshot);
+  const weightBands = [...(context.weightBandsByScenario || new Map()).entries()]
+    .flatMap(([scenarioId, bands]) => bands.map((band) => ({
+      scenarioId: Number(scenarioId),
+      id: Number(band.id),
+      label: band.label,
+      minWeight: Number(band.min_weight),
+      maxWeight: band.max_weight === null ? null : Number(band.max_weight),
+      sortOrder: Number(band.sort_order || 0),
+    })))
+    .sort((first, second) => (
+      first.scenarioId - second.scenarioId
+      || first.sortOrder - second.sortOrder
+      || first.id - second.id
+    ));
+  const matrix = [...(context.matrixByCell || new Map()).values()]
+    .map((cell) => ({
+      scenarioId: Number(cell.scenario_id),
+      xVal: Number(cell.x_val),
+      yVal: Number(cell.y_val),
+      price: Number(cell.price),
+    }))
+    .sort((first, second) => (
+      first.scenarioId - second.scenarioId
+      || first.xVal - second.xVal
+      || first.yVal - second.yVal
+    ));
+  const modifiers = [...(context.modifiers || [])]
+    .map((modifier) => ({
+      id: Number(modifier.id),
+      triggerKey: modifier.trigger_key || '',
+      triggerVal: modifier.trigger_val === null ? null : Number(modifier.trigger_val),
+      matchJson: asRuleObject(modifier.match_json),
+      factor: modifier.factor === null ? null : Number(modifier.factor),
+    }))
+    .sort((first, second) => first.id - second.id);
+
+  return {
+    categoryCode: context.categoryCode,
+    requiresWeight: Number(context.category?.requires_weight || 0),
+    scenarios,
+    weightBands,
+    matrix,
+    modifiers,
+  };
+}
+
+function getProductRepricingState(product) {
+  return {
+    id: Number(product.id),
+    sku: product.full_sku,
+    category: product.category,
+    weight: toNullableNumber(product.weight),
+    totalPrice: toNullableNumber(product.total_price),
+    totalPriceUah: toNullableNumber(product.total_price_uah),
+    pricePerGram: toNullableNumber(product.price_per_gram),
+    uahRate: toNullableNumber(product.uah_rate),
+    details: getProductDetails(product),
+    status: product.status || 'active',
+    excludeFromExport: Number(product.exclude_from_export || 0),
+  };
+}
+
+function getProductRepricingStateToken(product) {
+  return hashPayload(getProductRepricingState(product));
+}
+
+function getGlobalPreviewToken(configurationToken, items) {
+  return hashPayload({
+    scope: REPRICING_SCOPE_GLOBAL,
+    configurationToken,
+    items: [...items]
+      .sort((first, second) => Number(first.productId) - Number(second.productId))
+      .map((item) => ({
+        productId: Number(item.productId),
+        productStateToken: item.productStateToken,
+        scenarioId: item.scenarioId ?? null,
+        oldPriceUah: item.oldPriceUah ?? null,
+        newPriceUah: item.newPriceUah ?? null,
+        status: item.status,
+        errorCode: item.errorCode || null,
+        pricingState: item.pricingState,
+        pricingChange: item.pricingChange || null,
+      })),
+  });
+}
+
 function getPreviewToken(scenario, applicableItems) {
   const payload = {
     scenario: getScenarioSnapshot(scenario),
@@ -196,13 +304,19 @@ function getPreviewToken(scenario, applicableItems) {
 }
 
 function getRepricingPreviewSnapshot(preview) {
-  return {
-    scenario: preview.scenario,
+  const isGlobal = preview.scope === REPRICING_SCOPE_GLOBAL;
+  const snapshot = {
     summary: preview.summary,
     items: [...(preview.items || [])]
       .map((item) => ({
         productId: Number(item.productId),
         sku: item.sku,
+        ...(isGlobal ? {
+          categoryCode: item.categoryCode || null,
+          scenarioId: item.scenarioId ?? null,
+          scenarioName: item.scenarioName || null,
+          productStateToken: item.productStateToken || null,
+        } : {}),
         oldPriceUah: item.oldPriceUah ?? null,
         newPriceUah: item.newPriceUah ?? null,
         status: item.status,
@@ -213,6 +327,17 @@ function getRepricingPreviewSnapshot(preview) {
       }))
       .sort((first, second) => first.productId - second.productId),
   };
+
+  if (isGlobal) {
+    return {
+      scope: REPRICING_SCOPE_GLOBAL,
+      scenarios: preview.scenarios || [],
+      configurationToken: preview.configurationToken,
+      ...snapshot,
+    };
+  }
+
+  return { scenario: preview.scenario, ...snapshot };
 }
 
 function getRepricingPreviewFingerprint(preview) {
@@ -237,10 +362,21 @@ function getDraftSyncInfo(storedSnapshot = {}, currentPreview) {
     const stored = storedItems.get(item.productId);
     return stored && !isDeepStrictEqual(stored, item);
   });
-  const contextChanged = !isDeepStrictEqual(
-    storedSnapshot.scenario || {},
-    currentSnapshot.scenario || {}
-  );
+  const storedContext = storedSnapshot.scope === REPRICING_SCOPE_GLOBAL
+    ? {
+        scope: storedSnapshot.scope,
+        scenarios: storedSnapshot.scenarios || [],
+        configurationToken: storedSnapshot.configurationToken || null,
+      }
+    : storedSnapshot.scenario || {};
+  const currentContext = currentSnapshot.scope === REPRICING_SCOPE_GLOBAL
+    ? {
+        scope: currentSnapshot.scope,
+        scenarios: currentSnapshot.scenarios || [],
+        configurationToken: currentSnapshot.configurationToken || null,
+      }
+    : currentSnapshot.scenario || {};
+  const contextChanged = !isDeepStrictEqual(storedContext, currentContext);
   const summaryChanged = !isDeepStrictEqual(
     storedSnapshot.summary || {},
     currentSnapshot.summary || {}
@@ -334,6 +470,8 @@ function applyManualOverridesToPreview(preview, manualOverrides = []) {
     const newPriceUah = overridesByProductId.get(Number(item.productId));
     const resolvesManualPrice = item.status === 'error'
       && ['price_missing', 'manual_price'].includes(item.errorCode);
+    const calculatedPriceUah = item.calculatedPriceUah
+      ?? (item.errorCode === 'manual_price' ? item.newPriceUah : null);
     const oldPriceUah = item.oldPriceUah === null ? null : Number(item.oldPriceUah);
     const uahRate = Number(item.uahRate || 0);
     const weight = Number(item.weight || 0);
@@ -347,7 +485,7 @@ function applyManualOverridesToPreview(preview, manualOverrides = []) {
 
     return {
       ...item,
-      calculatedPriceUah: resolvesManualPrice ? null : item.newPriceUah,
+      calculatedPriceUah: resolvesManualPrice ? calculatedPriceUah : item.newPriceUah,
       newPriceUah,
       priceDeltaUah: newPriceUah - Number(oldPriceUah || 0),
       totalPrice,
@@ -631,8 +769,181 @@ async function buildRepricingPreview(scenarioId) {
   };
 }
 
+async function buildGlobalRepricingPreview() {
+  const productsResult = await pool.query(
+    `SELECT id, full_sku, category, weight, total_price, total_price_uah,
+            price_per_gram, uah_rate, details, status, exclude_from_export
+     FROM products
+     WHERE COALESCE(status, 'active') = 'active'
+     ORDER BY id`
+  );
+  const categoryCodes = [...new Set(productsResult.rows.map((product) => product.category))]
+    .filter(Boolean)
+    .sort();
+  const contexts = await Promise.all(
+    categoryCodes.map((categoryCode) => loadPricingContext(categoryCode))
+  );
+  const contextsByCategory = new Map(
+    contexts.map((context) => [context.categoryCode, context])
+  );
+  const configuration = contexts.map(getPricingContextSnapshot);
+  const configurationToken = hashPayload(configuration);
+  const scenarios = configuration.flatMap((context) => context.scenarios)
+    .sort((first, second) => (
+      String(first.categoryCode).localeCompare(String(second.categoryCode))
+      || Number(first.id) - Number(second.id)
+    ));
+  let rateInfo = null;
+  try {
+    rateInfo = await getUsdUahRateInfo();
+  } catch (error) {
+    rateInfo = {
+      rate: null,
+      source: 'unavailable',
+      rateDate: null,
+      fetchedAt: null,
+      ageMs: null,
+      stale: false,
+      error: String(error.message || error),
+    };
+  }
+
+  const items = [];
+  for (const product of productsResult.rows) {
+    const details = getProductDetails(product);
+    const answers = getPricingAnswers(product, details);
+    const oldPriceUah = toNullableNumber(product.total_price_uah);
+    const baseItem = {
+      productId: Number(product.id),
+      productStateToken: getProductRepricingStateToken(product),
+      sku: product.full_sku,
+      categoryCode: product.category,
+      weight: toNullableNumber(product.weight),
+      answers,
+      oldPriceUah,
+      totalPrice: toNullableNumber(product.total_price),
+      pricePerGram: toNullableNumber(product.price_per_gram),
+      uahRate: toNullableNumber(product.uah_rate),
+      hasManualPrice: hasManualPrice(details),
+    };
+
+    try {
+      const pricing = await calculatePricing(
+        product.category,
+        answers,
+        product.weight,
+        answers.is_calibrated,
+        { context: contextsByCategory.get(product.category), rateInfo }
+      );
+      const selectedScenario = pricing.pricingDetails?.scenario || null;
+      const matrixName = selectedScenario?.name || null;
+      const newPriceUah = roundUah(pricing.currencyPayload?.totalPriceUah);
+      const priceMode = pricing.priceMode;
+      const pricePerGram = Number(pricing.pricePerGram || 0);
+      const uahRate = pricing.currencyPayload?.uahRate === null
+        ? null
+        : Number(pricing.currencyPayload?.uahRate);
+      const pricingChange = buildPricingChange(
+        buildPricingState({
+          details,
+          pricePerGram: product.price_per_gram,
+          uahRate: product.uah_rate,
+          priceUah: oldPriceUah,
+        }),
+        buildPricingState({
+          details: { pricingScenario: selectedScenario },
+          matrixName,
+          priceMode,
+          pricePerGram,
+          uahRate,
+          priceUah: newPriceUah,
+        })
+      );
+      const calculated = {
+        ...baseItem,
+        scenarioId: selectedScenario ? Number(selectedScenario.id) : null,
+        scenarioName: selectedScenario?.name || null,
+        matrixName,
+        priceMode,
+        pricePerGram,
+        totalPrice: Number(pricing.totalPrice || 0),
+        newPriceUah,
+        calculatedPriceUah: newPriceUah,
+        priceDeltaUah: newPriceUah === null
+          ? null
+          : Number((newPriceUah - Number(oldPriceUah || 0)).toFixed(2)),
+        uahRate,
+        logMessage: pricing.logMessage,
+        pricingDetails: pricing.pricingDetails,
+        pricingChange,
+      };
+
+      if (hasManualPrice(details)) {
+        items.push({
+          ...calculated,
+          status: 'error',
+          errorCode: 'manual_price',
+          message: 'Товар має ручну ціну. Підтвердьте або змініть її явно.',
+          pricingState: 'manual',
+        });
+        continue;
+      }
+
+      if (!pricing.pricingDetails?.matrix || newPriceUah === null || newPriceUah <= 0) {
+        items.push({
+          ...calculated,
+          status: 'error',
+          errorCode: 'price_missing',
+          message: pricing.logMessage || 'Не вдалося розрахувати нову ціну.',
+          pricingState: 'missing',
+        });
+        continue;
+      }
+
+      const isChanged = oldPriceUah === null || Math.abs(oldPriceUah - newPriceUah) >= 0.005;
+      items.push({
+        ...calculated,
+        status: isChanged ? 'changed' : 'unchanged',
+        errorCode: null,
+        pricingState: 'automatic',
+      });
+    } catch (error) {
+      items.push({
+        ...baseItem,
+        scenarioId: null,
+        scenarioName: null,
+        matrixName: null,
+        newPriceUah: null,
+        calculatedPriceUah: null,
+        priceDeltaUah: null,
+        status: 'error',
+        errorCode: 'calculation_failed',
+        message: error.message || 'Помилка розрахунку ціни.',
+        pricingState: hasManualPrice(details) ? 'manual' : 'missing',
+      });
+    }
+  }
+
+  const blockingCorrectionRequests = await getBlockingCorrectionRequests(items);
+  return {
+    scope: REPRICING_SCOPE_GLOBAL,
+    scenarios,
+    configurationToken,
+    previewToken: getGlobalPreviewToken(configurationToken, items),
+    summary: {
+      candidateCount: items.length,
+      changedCount: items.filter((item) => item.status === 'changed').length,
+      unchangedCount: items.filter((item) => item.status === 'unchanged').length,
+      skippedCount: items.filter((item) => item.status === 'skipped').length,
+      errorCount: items.filter((item) => item.status === 'error').length,
+    },
+    items,
+    blockingCorrectionRequests,
+  };
+}
+
 function normalizeDraftUiState(uiState = {}) {
-  const allowedFilters = new Set(['changed', 'unchanged', 'error', 'all']);
+  const allowedFilters = new Set(['changed', 'unchanged', 'skipped', 'error', 'all']);
   const allowedReviewFilters = new Set(['all', 'pending', 'reviewed']);
   const allowedSortKeys = new Set([
     'sku', 'weight', 'oldPriceUah', 'newPriceUah', 'priceDeltaUah',
@@ -644,6 +955,7 @@ function normalizeDraftUiState(uiState = {}) {
       ? uiState.reviewFilter
       : 'all',
     search: String(uiState.search || '').slice(0, 120),
+    scenarioFilter: String(uiState.scenarioFilter || 'all').slice(0, 80),
     sort: {
       key: sortKey,
       direction: uiState?.sort?.direction === 'desc' ? 'desc' : 'asc',
@@ -669,6 +981,7 @@ function normalizeDraftRow(row) {
   const reviewedProductIds = normalizeReviewedProductIds(row.reviewed_product_ids || []);
   return {
     id: Number(row.id),
+    scope: row.scope || REPRICING_SCOPE_SCENARIO,
     scenarioId: row.scenario_id === null ? null : Number(row.scenario_id),
     categoryCode: row.category_code,
     scenarioName: row.scenario_name,
@@ -709,7 +1022,8 @@ async function getRepricingDraftRow(draftId, queryable = pool, lock = false) {
 async function getRepricingDrafts() {
   const result = await pool.query(
     `SELECT * FROM repricing_drafts
-     WHERE status = 'draft' AND scenario_id IS NOT NULL
+     WHERE status = 'draft'
+       AND (scope = 'global' OR scenario_id IS NOT NULL)
      ORDER BY updated_at DESC, id DESC`
   );
   return result.rows.map(normalizeDraftRow);
@@ -748,13 +1062,16 @@ async function getRepricingDraft(draftId) {
     error.statusCode = 409;
     throw error;
   }
-  if (!row.scenario_id) {
+  const scope = row.scope || REPRICING_SCOPE_SCENARIO;
+  if (scope === REPRICING_SCOPE_SCENARIO && !row.scenario_id) {
     const error = new Error('Матриця цієї чернетки більше не існує.');
     error.statusCode = 409;
     throw error;
   }
 
-  const preview = await buildRepricingPreview(row.scenario_id);
+  const preview = scope === REPRICING_SCOPE_GLOBAL
+    ? await buildGlobalRepricingPreview()
+    : await buildRepricingPreview(row.scenario_id);
   const overrides = normalizeManualOverrides(row.manual_overrides || []);
   const previewIds = new Set(preview.items.map((item) => Number(item.productId)));
   const availableOverrides = overrides.filter((item) => previewIds.has(item.productId));
@@ -774,21 +1091,31 @@ async function getRepricingDraft(draftId) {
 }
 
 async function createRepricingDraft({
+  scope = REPRICING_SCOPE_SCENARIO,
   scenarioId,
   manualOverrides = [],
   reviewedProductIds = [],
   uiState = {},
 }) {
-  const scenario = await getActiveScenario(scenarioId);
+  const normalizedScope = scope === REPRICING_SCOPE_GLOBAL
+    ? REPRICING_SCOPE_GLOBAL
+    : REPRICING_SCOPE_SCENARIO;
+  const scenario = normalizedScope === REPRICING_SCOPE_SCENARIO
+    ? await getActiveScenario(scenarioId)
+    : null;
   const existing = await pool.query(
     `SELECT id FROM repricing_drafts
-     WHERE scenario_id = $1 AND status = 'draft'
+     WHERE scope = $1
+       AND status = 'draft'
+       AND (($1 = 'global' AND scenario_id IS NULL) OR scenario_id = $2)
      LIMIT 1`,
-    [Number(scenario.id)]
+    [normalizedScope, scenario ? Number(scenario.id) : null]
   );
   if (existing.rows.length > 0) return getRepricingDraft(existing.rows[0].id);
 
-  const preview = await buildRepricingPreview(scenario.id);
+  const preview = normalizedScope === REPRICING_SCOPE_GLOBAL
+    ? await buildGlobalRepricingPreview()
+    : await buildRepricingPreview(scenario.id);
   const normalizedOverrides = normalizeManualOverrides(manualOverrides);
   const normalizedReviewedIds = normalizeReviewedProductIds(reviewedProductIds);
   applyManualOverridesToPreview(preview, normalizedOverrides);
@@ -796,15 +1123,20 @@ async function createRepricingDraft({
   try {
     const result = await pool.query(
       `INSERT INTO repricing_drafts
-       (scenario_id, category_code, scenario_name, scenario_snapshot,
+       (scope, scenario_id, category_code, scenario_name, scenario_snapshot,
         preview_fingerprint, preview_snapshot, manual_overrides, reviewed_product_ids, ui_state)
-       VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb)
        RETURNING id`,
       [
-        Number(scenario.id),
-        scenario.category_code,
-        scenario.name,
-        JSON.stringify(getScenarioSnapshot(scenario)),
+        normalizedScope,
+        scenario ? Number(scenario.id) : null,
+        scenario?.category_code || '*',
+        scenario?.name || GLOBAL_REPRICING_NAME,
+        JSON.stringify(normalizedScope === REPRICING_SCOPE_GLOBAL ? {
+          scope: REPRICING_SCOPE_GLOBAL,
+          scenarios: preview.scenarios,
+          configurationToken: preview.configurationToken,
+        } : getScenarioSnapshot(scenario)),
         getRepricingPreviewFingerprint(preview),
         JSON.stringify(snapshot),
         JSON.stringify(normalizedOverrides),
@@ -817,9 +1149,13 @@ async function createRepricingDraft({
     if (error.code !== '23505') throw error;
     const concurrent = await pool.query(
       `SELECT id FROM repricing_drafts
-       WHERE scenario_id = $1 AND status = 'draft' LIMIT 1`,
-      [Number(scenario.id)]
+       WHERE scope = $1
+         AND status = 'draft'
+         AND (($1 = 'global' AND scenario_id IS NULL) OR scenario_id = $2)
+       LIMIT 1`,
+      [normalizedScope, scenario ? Number(scenario.id) : null]
     );
+    if (!concurrent.rows[0]) throw error;
     return getRepricingDraft(concurrent.rows[0].id);
   }
 }
@@ -855,12 +1191,18 @@ async function saveRepricingDraft(
 
 async function syncRepricingDraft(draftId) {
   const row = await getRepricingDraftRow(draftId);
-  if (row.status !== 'draft' || !row.scenario_id) {
+  const scope = row.scope || REPRICING_SCOPE_SCENARIO;
+  if (
+    row.status !== 'draft'
+    || (scope === REPRICING_SCOPE_SCENARIO && !row.scenario_id)
+  ) {
     const error = new Error('Цю чернетку неможливо синхронізувати.');
     error.statusCode = 409;
     throw error;
   }
-  const preview = await buildRepricingPreview(row.scenario_id);
+  const preview = scope === REPRICING_SCOPE_GLOBAL
+    ? await buildGlobalRepricingPreview()
+    : await buildRepricingPreview(row.scenario_id);
   const previewIds = new Set(preview.items.map((item) => Number(item.productId)));
   const reviewedProductIds = normalizeReviewedProductIds(row.reviewed_product_ids || [])
     .filter((productId) => previewIds.has(productId));
@@ -874,7 +1216,11 @@ async function syncRepricingDraft(draftId) {
      WHERE id = $5 AND status = 'draft'
      RETURNING id`,
     [
-      JSON.stringify(preview.scenario),
+      JSON.stringify(scope === REPRICING_SCOPE_GLOBAL ? {
+        scope: REPRICING_SCOPE_GLOBAL,
+        scenarios: preview.scenarios,
+        configurationToken: preview.configurationToken,
+      } : preview.scenario),
       getRepricingPreviewFingerprint(preview),
       JSON.stringify(getRepricingPreviewSnapshot(preview)),
       JSON.stringify(reviewedProductIds),
@@ -933,7 +1279,7 @@ function getUpdatedDetails(details, item, batchId, appliedAt) {
 
 async function getBatchByPreviewToken(previewToken, client = pool) {
   const result = await client.query(
-    `SELECT id, scenario_id, category_code, scenario_name, candidate_count, changed_count,
+    `SELECT id, scope, scenario_id, category_code, scenario_name, candidate_count, changed_count,
             unchanged_count, skipped_count, error_count, status, created_at, applied_at,
             rolled_back_at
      FROM repricing_batches
@@ -944,7 +1290,13 @@ async function getBatchByPreviewToken(previewToken, client = pool) {
   return result.rows[0] || null;
 }
 
-async function applyRepricing({ scenarioId, previewToken, manualOverrides = [], draftId = null }) {
+async function applyRepricingScope({
+  scope,
+  scenarioId,
+  previewToken,
+  manualOverrides = [],
+  draftId = null,
+}) {
   if (!previewToken) {
     const error = new Error('Спочатку сформуйте попередній перегляд.');
     error.statusCode = 400;
@@ -955,8 +1307,11 @@ async function applyRepricing({ scenarioId, previewToken, manualOverrides = [], 
   let draft = null;
   if (draftId !== null && draftId !== undefined && draftId !== '') {
     draft = await getRepricingDraftRow(draftId);
-    if (draft.status !== 'draft' || Number(draft.scenario_id) !== Number(scenarioId)) {
-      const error = new Error('Чернетка не відповідає вибраній матриці або вже закрита.');
+    const draftScope = draft.scope || REPRICING_SCOPE_SCENARIO;
+    const scenarioMismatch = scope === REPRICING_SCOPE_SCENARIO
+      && Number(draft.scenario_id) !== Number(scenarioId);
+    if (draft.status !== 'draft' || draftScope !== scope || scenarioMismatch) {
+      const error = new Error('Чернетка не відповідає вибраній переоцінці або вже закрита.');
       error.statusCode = 409;
       throw error;
     }
@@ -982,7 +1337,9 @@ async function applyRepricing({ scenarioId, previewToken, manualOverrides = [], 
     return { success: true, alreadyApplied: true, batch: existingBatch };
   }
 
-  const basePreview = await buildRepricingPreview(scenarioId);
+  const basePreview = scope === REPRICING_SCOPE_GLOBAL
+    ? await buildGlobalRepricingPreview()
+    : await buildRepricingPreview(scenarioId);
   if (draft && getRepricingPreviewFingerprint(basePreview) !== draft.preview_fingerprint) {
     const error = new Error('Склад товарів або розрахунок змінився. Синхронізуйте чернетку.');
     error.statusCode = 409;
@@ -1007,11 +1364,28 @@ async function applyRepricing({ scenarioId, previewToken, manualOverrides = [], 
   }
 
   const changedItems = preview.items.filter((item) => item.status === 'changed');
+  const batchDescriptor = scope === REPRICING_SCOPE_GLOBAL
+    ? {
+        scenarioId: null,
+        categoryCode: null,
+        scenarioName: GLOBAL_REPRICING_NAME,
+        scenarioSnapshot: {
+          scope: REPRICING_SCOPE_GLOBAL,
+          scenarios: preview.scenarios,
+          configurationToken: preview.configurationToken,
+        },
+      }
+    : {
+        scenarioId: preview.scenario.id,
+        categoryCode: preview.scenario.categoryCode,
+        scenarioName: preview.scenario.name,
+        scenarioSnapshot: preview.scenario,
+      };
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const lockedProductsResult = await client.query(
-      `SELECT id, full_sku, weight, total_price, total_price_uah, price_per_gram,
+      `SELECT id, full_sku, category, weight, total_price, total_price_uah, price_per_gram,
               uah_rate, details, status, exclude_from_export
        FROM products
        WHERE id = ANY($1::int[])
@@ -1029,7 +1403,11 @@ async function applyRepricing({ scenarioId, previewToken, manualOverrides = [], 
       const lockedOverrides = normalizeManualOverrides(lockedDraft.manual_overrides || []);
       if (
         lockedDraft.status !== 'draft'
-        || Number(lockedDraft.scenario_id) !== Number(scenarioId)
+        || (lockedDraft.scope || REPRICING_SCOPE_SCENARIO) !== scope
+        || (
+          scope === REPRICING_SCOPE_SCENARIO
+          && Number(lockedDraft.scenario_id) !== Number(scenarioId)
+        )
         || lockedDraft.preview_fingerprint !== draft.preview_fingerprint
         || JSON.stringify(lockedOverrides) !== JSON.stringify(normalizedOverrides)
       ) {
@@ -1040,16 +1418,17 @@ async function applyRepricing({ scenarioId, previewToken, manualOverrides = [], 
     }
     const batchResult = await client.query(
       `INSERT INTO repricing_batches
-       (scenario_id, category_code, scenario_name, scenario_snapshot, preview_token, status,
+       (scope, scenario_id, category_code, scenario_name, scenario_snapshot, preview_token, status,
         candidate_count, changed_count, unchanged_count, skipped_count, error_count, applied_at)
-       VALUES ($1, $2, $3, $4::jsonb, $5, 'completed', $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'completed', $7, $8, $9, $10, $11, CURRENT_TIMESTAMP)
        ON CONFLICT (preview_token) WHERE status = 'completed' DO NOTHING
        RETURNING id, applied_at`,
       [
-        preview.scenario.id,
-        preview.scenario.categoryCode,
-        preview.scenario.name,
-        JSON.stringify(preview.scenario),
+        scope,
+        batchDescriptor.scenarioId,
+        batchDescriptor.categoryCode,
+        batchDescriptor.scenarioName,
+        JSON.stringify(batchDescriptor.scenarioSnapshot),
         applicationToken,
         preview.summary.candidateCount,
         preview.summary.changedCount,
@@ -1088,6 +1467,14 @@ async function applyRepricing({ scenarioId, previewToken, manualOverrides = [], 
       const currentPrice = product.total_price_uah === null
         ? null
         : Number(product.total_price_uah);
+      if (
+        item.productStateToken
+        && getProductRepricingStateToken(product) !== item.productStateToken
+      ) {
+        const error = new Error(`Товар ${item.sku} змінився під час підготовки переоцінки.`);
+        error.statusCode = 409;
+        throw error;
+      }
       if (currentPrice !== item.oldPriceUah) {
         const error = new Error(`Ціна товару ${item.sku} змінилася під час переоцінки.`);
         error.statusCode = 409;
@@ -1169,9 +1556,10 @@ async function applyRepricing({ scenarioId, previewToken, manualOverrides = [], 
       alreadyApplied: false,
       batch: {
         id: batchId,
-        scenario_id: preview.scenario.id,
-        scenario_name: preview.scenario.name,
-        category_code: preview.scenario.categoryCode,
+        scope,
+        scenario_id: batchDescriptor.scenarioId,
+        scenario_name: batchDescriptor.scenarioName,
+        category_code: batchDescriptor.categoryCode,
         ...preview.summary,
         applied_at: appliedAt,
       },
@@ -1184,10 +1572,25 @@ async function applyRepricing({ scenarioId, previewToken, manualOverrides = [], 
   }
 }
 
+async function applyRepricing(payload) {
+  return applyRepricingScope({
+    ...(payload || {}),
+    scope: REPRICING_SCOPE_SCENARIO,
+  });
+}
+
+async function applyGlobalRepricing(payload) {
+  return applyRepricingScope({
+    ...(payload || {}),
+    scenarioId: null,
+    scope: REPRICING_SCOPE_GLOBAL,
+  });
+}
+
 async function getRepricingBatches(limit = 20) {
   const normalizedLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
   const result = await pool.query(
-    `SELECT b.id, b.scenario_id, b.category_code, b.scenario_name, b.status,
+    `SELECT b.id, b.scope, b.scenario_id, b.category_code, b.scenario_name, b.status,
             b.candidate_count, b.changed_count, b.unchanged_count, b.skipped_count,
             b.error_count, b.created_at, b.applied_at, b.rolled_back_at,
             (
@@ -1214,6 +1617,7 @@ async function getRepricingBatches(limit = 20) {
   return result.rows.map((batch) => ({
     ...batch,
     id: Number(batch.id),
+    scope: batch.scope || REPRICING_SCOPE_SCENARIO,
     scenario_id: batch.scenario_id === null ? null : Number(batch.scenario_id),
     candidate_count: Number(batch.candidate_count || 0),
     changed_count: Number(batch.changed_count || 0),
@@ -1253,7 +1657,7 @@ async function rollbackRepricing(batchId) {
   try {
     await client.query('BEGIN');
     const batchResult = await client.query(
-      `SELECT id, scenario_id, category_code, scenario_name, status, changed_count,
+      `SELECT id, scope, scenario_id, category_code, scenario_name, status, changed_count,
               applied_at, rolled_back_at
        FROM repricing_batches
        WHERE id = $1
@@ -1338,7 +1742,7 @@ async function rollbackRepricing(batchId) {
       `UPDATE repricing_batches
        SET status = 'rolled_back', rolled_back_at = CURRENT_TIMESTAMP
        WHERE id = $1
-       RETURNING id, scenario_id, category_code, scenario_name, status, changed_count,
+       RETURNING id, scope, scenario_id, category_code, scenario_name, status, changed_count,
                  applied_at, rolled_back_at`,
       [normalizedBatchId]
     );
@@ -1435,7 +1839,9 @@ async function getRepricingRollbackItems(batchId) {
 
 module.exports = {
   assertNoBlockingCorrectionRequests,
+  applyGlobalRepricing,
   applyRepricing,
+  buildGlobalRepricingPreview,
   buildRepricingPreview,
   createRepricingDraft,
   discardRepricingDraft,
@@ -1447,10 +1853,12 @@ module.exports = {
   getRepricingPreviewSnapshot,
   getRepricingProductIds,
   getApplicationToken,
+  getGlobalPreviewToken,
   getRepricingBatchItems,
   getRepricingRollbackItems,
   getRepricingBatches,
   getRepricingScenarios,
+  getProductRepricingStateToken,
   hasManualPrice,
   normalizeManualOverrides,
   normalizeReviewedProductIds,

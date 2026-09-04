@@ -63,6 +63,21 @@ test('repricing renders the same manual resolution control on later manual-price
   assert.match(source, /disabled=\{!canApply\}/);
 });
 
+test('repricing exposes a server-authoritative global catalog workflow', () => {
+  const source = fs.readFileSync(
+    new URL('../src/pages/RepricingPage.jsx', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(source, /Переоцінити все/);
+  assert.match(source, /\/admin\/repricing\/global\/preview/);
+  assert.match(source, /\/admin\/repricing\/global\/apply/);
+  assert.match(source, /scenarioFilter/);
+  assert.match(source, /Залишити поточні ручні ціни для всіх/);
+  assert.match(source, /keepCurrentManualPrices/);
+  assert.doesNotMatch(source, /Promise\.all\([^)]*\/admin\/repricing\/preview/);
+});
+
 test('fixed-scale API decimals are compacted in editable pricing fields', () => {
   const matrixSource = fs.readFileSync(
     new URL('../src/components/admin/AdminPricingEditor.jsx', import.meta.url),

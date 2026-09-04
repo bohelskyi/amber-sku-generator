@@ -25,7 +25,9 @@ const {
   updateModifier,
 } = require('../services/pricing.service');
 const {
+  applyGlobalRepricing,
   applyRepricing,
+  buildGlobalRepricingPreview,
   buildRepricingPreview,
   createRepricingDraft,
   discardRepricingDraft,
@@ -274,10 +276,32 @@ router.post('/admin/repricing/preview', async (req, res) => {
   }
 });
 
+router.post('/admin/repricing/global/preview', async (_req, res) => {
+  try {
+    res.json(await buildGlobalRepricingPreview());
+  } catch (err) {
+    res.status(err.statusCode || 500).json({
+      error: err.message,
+      ...(err.details ? { details: err.details } : {}),
+    });
+  }
+});
+
 router.post('/admin/repricing/apply', async (req, res) => {
   try {
     const result = await applyRepricing(req.body || {});
     res.json(result);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({
+      error: err.message,
+      ...(err.details ? { details: err.details } : {}),
+    });
+  }
+});
+
+router.post('/admin/repricing/global/apply', async (req, res) => {
+  try {
+    res.json(await applyGlobalRepricing(req.body || {}));
   } catch (err) {
     res.status(err.statusCode || 500).json({
       error: err.message,

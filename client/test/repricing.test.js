@@ -4,9 +4,12 @@ import assert from 'node:assert/strict';
 import {
   applyManualPrices,
   canApplyRepricing,
+  filterRepricingItems,
   getInvalidManualPriceIds,
   getManualOverrides,
   getRepricingSummary,
+  getUnresolvedManualPriceItems,
+  keepCurrentManualPrices,
   sortRepricingItems,
 } from '../src/lib/repricing.js';
 
@@ -94,6 +97,70 @@ test('an already-manual product remains resolvable on every repricing cycle', ()
   )), false);
 });
 
+test('global manual resolution keeps the automatic calculation visible for audit', () => {
+  const [item] = applyManualPrices([{
+    productId: 18,
+    sku: 'NM18',
+    oldPriceUah: 550,
+    newPriceUah: 700,
+    calculatedPriceUah: 700,
+    status: 'error',
+    errorCode: 'manual_price',
+  }], { 18: '600' });
+
+  assert.equal(item.status, 'changed');
+  assert.equal(item.newPriceUah, 600);
+  assert.equal(item.calculatedPriceUah, 700);
+});
+
+test('bulk keep-current resolves only unresolved manual-priced rows and marks them reviewed', () => {
+  const items = [
+    { productId: 18, oldPriceUah: 550, status: 'error', errorCode: 'manual_price' },
+    { productId: 19, oldPriceUah: 675, status: 'error', errorCode: 'manual_price' },
+    { productId: 20, oldPriceUah: 700, status: 'error', errorCode: 'price_missing' },
+    { productId: 21, oldPriceUah: 800, status: 'error', errorCode: 'calculation_failed' },
+  ];
+
+  assert.deepEqual(getUnresolvedManualPriceItems(items, {}), [items[0], items[1]]);
+  const bulkState = keepCurrentManualPrices(items, {}, [21]);
+  assert.deepEqual(bulkState.manualPrices, { 18: '550', 19: '675' });
+  assert.deepEqual(bulkState.reviewedProductIds, [18, 19, 21]);
+  assert.deepEqual(bulkState.affectedProductIds, [18, 19]);
+  assert.equal(Object.hasOwn(bulkState.manualPrices, 20), false);
+  assert.equal(Object.hasOwn(bulkState.manualPrices, 21), false);
+
+  const editedPrices = { ...bulkState.manualPrices, 18: '625' };
+  const resolvedItems = applyManualPrices(items, editedPrices);
+  assert.equal(resolvedItems[0].newPriceUah, 625);
+  assert.equal(resolvedItems[1].newPriceUah, 675);
+  assert.equal(resolvedItems[2].status, 'error');
+  assert.equal(resolvedItems[3].status, 'error');
+  assert.deepEqual(getUnresolvedManualPriceItems(items, editedPrices), []);
+});
+
+test('bulk keep-current preserves an existing individual manual resolution', () => {
+  const items = [
+    { productId: 18, oldPriceUah: 550, status: 'error', errorCode: 'manual_price' },
+    { productId: 19, oldPriceUah: 675, status: 'error', errorCode: 'manual_price' },
+  ];
+  const bulkState = keepCurrentManualPrices(items, { 18: '625' }, []);
+
+  assert.deepEqual(bulkState.manualPrices, { 18: '625', 19: '675' });
+  assert.deepEqual(bulkState.affectedProductIds, [19]);
+});
+
+test('bulk keep-current does not make an invalid stored manual price pass validation', () => {
+  const bulkState = keepCurrentManualPrices([{
+    productId: 22,
+    oldPriceUah: 0,
+    status: 'error',
+    errorCode: 'manual_price',
+  }]);
+
+  assert.deepEqual(bulkState.manualPrices, { 22: '0' });
+  assert.deepEqual(getInvalidManualPriceIds(bulkState.manualPrices), [22]);
+});
+
 test('ordinary automatic repricing remains applicable when it has valid changes', () => {
   assert.equal(canApplyRepricing(applyState({
     changedCount: 2,
@@ -156,4 +223,23 @@ test('repricing rows sort naturally by SKU and numerically by price', () => {
 
   assert.deepEqual(sortRepricingItems(items, { key: 'sku', direction: 'asc' }).map((item) => item.sku), ['BR2', 'BR10']);
   assert.deepEqual(sortRepricingItems(items, { key: 'newPriceUah', direction: 'desc' }).map((item) => item.newPriceUah), [500, 300]);
+});
+
+test('combined repricing rows filter by scenario, status, review, and SKU', () => {
+  const items = [
+    { productId: 1, sku: 'BR1', scenarioId: 10, status: 'changed' },
+    { productId: 2, sku: 'NM2', scenarioId: 20, status: 'unchanged' },
+    { productId: 3, sku: 'NM3', scenarioId: null, status: 'error' },
+    { productId: 4, sku: 'ER4', scenarioId: 20, status: 'skipped' },
+  ];
+
+  assert.deepEqual(filterRepricingItems(items, { scenarioFilter: '20' }), [items[1], items[3]]);
+  assert.deepEqual(filterRepricingItems(items, { scenarioFilter: 'none' }), [items[2]]);
+  assert.deepEqual(filterRepricingItems(items, { status: 'skipped' }), [items[3]]);
+  assert.deepEqual(filterRepricingItems(items, {
+    status: 'changed',
+    search: 'br',
+    reviewFilter: 'reviewed',
+    reviewedProductIds: [1],
+  }), [items[0]]);
 });

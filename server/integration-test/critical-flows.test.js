@@ -665,7 +665,11 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
       path.resolve(oldMigrationDirectory, fileName)
     )));
     await Promise.all(allMigrationFiles
-      .filter((fileName) => !fileName.startsWith('015_') && !fileName.startsWith('016_'))
+      .filter((fileName) => (
+        !fileName.startsWith('015_')
+        && !fileName.startsWith('016_')
+        && !fileName.startsWith('017_')
+      ))
       .map((fileName) => fs.copyFile(
         path.resolve(serverRoot, 'migrations', fileName),
         path.resolve(checkpointMigrationDirectory, fileName)
@@ -741,9 +745,9 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
       );
       assert.equal(checksums.rows[0].count, 0);
       const checkpointMigration = await checkpointPool.query(
-        "SELECT count(*)::int AS count FROM schema_migrations WHERE name ~ '^(015|016)_'"
+        "SELECT count(*)::int AS count FROM schema_migrations WHERE name ~ '^(015|016|017)_'"
       );
-      assert.equal(checkpointMigration.rows[0].count, 2);
+      assert.equal(checkpointMigration.rows[0].count, 3);
     } finally {
       await freshPool.end();
       await upgradePool.end();
@@ -1713,6 +1717,421 @@ test('repricing rolls back every product and batch row after a mid-apply failure
       'UPDATE price_matrix SET price = price - 30 WHERE scenario_id = $1',
       [schemas.ZZScenario]
     );
+  }
+});
+
+test('global repricing is authoritative, atomic, unique per product, and fully rollbackable', async () => {
+  const createProduct = async (categoryCode, kind, manualPriceUah = null) => {
+    const preview = await request('/api/preview', {
+      method: 'POST',
+      body: { categoryCode, answers: { kind }, weight: 0, isCalibrated: 0 },
+    });
+    assert.equal(preview.response.status, 200, preview.text);
+    const saved = await request('/api/save', {
+      method: 'POST',
+      body: {
+        category: categoryCode,
+        answers: { kind },
+        weight: 0,
+        isCalibrated: 0,
+        skuSchemaVersionId: schemas[categoryCode],
+        previewToken: preview.data.previewToken,
+        manualPriceUah,
+      },
+    });
+    assert.equal(saved.response.status, 200, saved.text);
+    return saved.data;
+  };
+  const overridesFor = (preview) => preview.items
+    .filter((item) => ['manual_price', 'price_missing'].includes(item.errorCode))
+    .map((item) => ({
+      productId: Number(item.productId),
+      newPriceUah: Number(item.oldPriceUah) > 0 ? Number(item.oldPriceUah) : 500,
+    }));
+
+  const changedAutomatic = await createProduct('ZZ', 1);
+  const unchangedAutomatic = await createProduct('ZZ', 2);
+  const manualProduct = await createProduct('MM', 1, 700);
+  const missingProduct = await createProduct('MM', 2, 800);
+  await pool.query(
+    `UPDATE products
+     SET details = details - 'manualPriceUah'
+     WHERE id = $1`,
+    [missingProduct.id]
+  );
+
+  const semiScenario = await pool.query(
+    `SELECT id FROM price_scenarios
+     WHERE category_code = 'LN'
+       AND status = 'active'
+       AND match_json @> '{"is_calibrated":2}'::jsonb
+     ORDER BY priority DESC, id
+     LIMIT 1`
+  );
+  assert.equal(semiScenario.rows.length, 1);
+  const semiScenarioId = Number(semiScenario.rows[0].id);
+  const originalCells = await pool.query(
+    `SELECT scenario_id, x_val, y_val, price
+     FROM price_matrix
+     WHERE (scenario_id = $1 AND x_val = 1 AND y_val = 0)
+        OR (scenario_id = $2 AND x_val = 6 AND y_val = 0)
+     ORDER BY scenario_id, x_val, y_val`,
+    [schemas.ZZScenario, semiScenarioId]
+  );
+  assert.equal(originalCells.rows.length, 2);
+
+  let activeRequestId = null;
+  let appliedBatchId = null;
+  let activeDraftId = null;
+  let overlappingScenarioId = null;
+  try {
+    const overlappingScenario = await pool.query(
+      `INSERT INTO price_scenarios
+       (category_code, name, match_json, axis_x_key, axis_y_key, priority,
+        status, price_mode, apply_modifiers)
+       VALUES ('ZZ', 'Lower-priority overlap', '{}'::jsonb, 'kind', NULL, -100,
+               'active', 'fixed_uah', TRUE)
+       RETURNING id`
+    );
+    overlappingScenarioId = Number(overlappingScenario.rows[0].id);
+    await pool.query(
+      `INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
+       VALUES ($1, 1, 0, 9999), ($1, 2, 0, 9999)`,
+      [overlappingScenarioId]
+    );
+    await pool.query(
+      `UPDATE price_matrix
+       SET price = CASE WHEN scenario_id = $1 THEN price + 17 ELSE price + 0.25 END
+       WHERE (scenario_id = $1 AND x_val = 1 AND y_val = 0)
+          OR (scenario_id = $2 AND x_val = 6 AND y_val = 0)`,
+      [schemas.ZZScenario, semiScenarioId]
+    );
+
+    const initial = await request('/api/admin/repricing/global/preview', {
+      method: 'POST', body: {},
+    });
+    assert.equal(initial.response.status, 200, initial.text);
+    assert.equal(initial.data.scope, 'global');
+    assert.equal(initial.data.summary.candidateCount, initial.data.items.length);
+    assert.equal(
+      new Set(initial.data.items.map((item) => Number(item.productId))).size,
+      initial.data.items.length,
+      'every active product must occur at most once'
+    );
+    const changedScenarioIds = new Set(
+      initial.data.items
+        .filter((item) => item.status === 'changed')
+        .map((item) => Number(item.scenarioId))
+    );
+    assert.equal(changedScenarioIds.has(Number(schemas.ZZScenario)), true);
+    assert.equal(changedScenarioIds.has(semiScenarioId), true);
+    assert.equal(
+      initial.data.items.find((item) => Number(item.productId) === Number(unchangedAutomatic.id))?.status,
+      'unchanged'
+    );
+    assert.equal(
+      initial.data.items.find((item) => Number(item.productId) === Number(changedAutomatic.id))?.scenarioId,
+      Number(schemas.ZZScenario),
+      'a product matching multiple scenarios must use normal authoritative precedence'
+    );
+    assert.equal(
+      initial.data.items.find((item) => Number(item.productId) === Number(manualProduct.id))?.errorCode,
+      'manual_price'
+    );
+    assert.equal(
+      initial.data.items.find((item) => Number(item.productId) === Number(missingProduct.id))?.errorCode,
+      'price_missing'
+    );
+
+    const initialOverrides = overridesFor(initial.data);
+    assert.ok(initialOverrides.length >= 2);
+    const invalidOverrides = initialOverrides.map((override) => (
+      Number(override.productId) === Number(manualProduct.id)
+        ? { ...override, newPriceUah: 0 }
+        : override
+    ));
+    assert.equal(
+      invalidOverrides.find((override) => (
+        Number(override.productId) === Number(manualProduct.id)
+      ))?.newPriceUah,
+      0
+    );
+    const invalid = await request('/api/admin/repricing/global/apply', {
+      method: 'POST',
+      body: {
+        previewToken: initial.data.previewToken,
+        manualOverrides: invalidOverrides,
+      },
+    });
+    assert.equal(invalid.response.status, 422, invalid.text);
+
+    await pool.query(
+      `UPDATE price_matrix SET price = price + 1
+       WHERE scenario_id = $1 AND x_val = 1 AND y_val = 0`,
+      [schemas.ZZScenario]
+    );
+    const stalePricing = await request('/api/admin/repricing/global/apply', {
+      method: 'POST',
+      body: {
+        previewToken: initial.data.previewToken,
+        manualOverrides: initialOverrides,
+      },
+    });
+    assert.equal(stalePricing.response.status, 409, stalePricing.text);
+    await pool.query(
+      `UPDATE price_matrix SET price = price - 1
+       WHERE scenario_id = $1 AND x_val = 1 AND y_val = 0`,
+      [schemas.ZZScenario]
+    );
+
+    const beforeProductChange = await request('/api/admin/repricing/global/preview', {
+      method: 'POST', body: {},
+    });
+    const changedProductRow = await pool.query(
+      'SELECT details FROM products WHERE id = $1',
+      [changedAutomatic.id]
+    );
+    await pool.query(
+      `UPDATE products
+       SET details = jsonb_set(details, '{globalRepricingTest}', 'true'::jsonb)
+       WHERE id = $1`,
+      [changedAutomatic.id]
+    );
+    const staleProduct = await request('/api/admin/repricing/global/apply', {
+      method: 'POST',
+      body: {
+        previewToken: beforeProductChange.data.previewToken,
+        manualOverrides: overridesFor(beforeProductChange.data),
+      },
+    });
+    assert.equal(staleProduct.response.status, 409, staleProduct.text);
+    await pool.query('UPDATE products SET details = $1::jsonb WHERE id = $2', [
+      JSON.stringify(changedProductRow.rows[0].details),
+      changedAutomatic.id,
+    ]);
+
+    const beforeCorrectionRequest = await request('/api/admin/repricing/global/preview', {
+      method: 'POST', body: {},
+    });
+    const requestRow = await pool.query(
+      `INSERT INTO correction_requests
+       (source_product_id, category_code, source_sku, proposed_sku, old_payload,
+        proposed_payload, changes, status, preview_signature)
+       SELECT id, category, full_sku, full_sku || '-999', '{}'::jsonb,
+              '{}'::jsonb, '[]'::jsonb, 'pending', 'global-repricing-test'
+       FROM products WHERE id = $1
+       RETURNING id`,
+      [changedAutomatic.id]
+    );
+    activeRequestId = Number(requestRow.rows[0].id);
+    const blocked = await request('/api/admin/repricing/global/apply', {
+      method: 'POST',
+      body: {
+        previewToken: beforeCorrectionRequest.data.previewToken,
+        manualOverrides: overridesFor(beforeCorrectionRequest.data),
+      },
+    });
+    assert.equal(blocked.response.status, 409, blocked.text);
+    assert.equal(blocked.data.details?.type, 'active_correction_requests');
+    await pool.query('DELETE FROM correction_requests WHERE id = $1', [activeRequestId]);
+    activeRequestId = null;
+
+    const finalPreview = await request('/api/admin/repricing/global/preview', {
+      method: 'POST', body: {},
+    });
+    assert.equal(finalPreview.response.status, 200, finalPreview.text);
+    const nonResolvableErrors = finalPreview.data.items.filter((item) => (
+      item.status === 'error'
+      && !['manual_price', 'price_missing'].includes(item.errorCode)
+    ));
+    assert.deepEqual(nonResolvableErrors, []);
+    const manualOverrides = overridesFor(finalPreview.data);
+    const keptManualOverride = manualOverrides.find((override) => (
+      Number(override.productId) === Number(manualProduct.id)
+    ));
+    assert.equal(keptManualOverride?.newPriceUah, Number(
+      finalPreview.data.items.find((item) => (
+        Number(item.productId) === Number(manualProduct.id)
+      )).oldPriceUah
+    ));
+    const changedProductIds = finalPreview.data.items
+      .filter((item) => (
+        item.status === 'changed'
+        || ['manual_price', 'price_missing'].includes(item.errorCode)
+      ))
+      .map((item) => Number(item.productId))
+      .sort((first, second) => first - second);
+    assert.ok(changedProductIds.length >= 2);
+    const beforeApply = await pool.query(
+      `SELECT id, total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
+      [changedProductIds]
+    );
+    const batchesBeforeFailure = await pool.query(
+      "SELECT count(*)::int AS count FROM repricing_batches WHERE scope = 'global'"
+    );
+    const failureProductId = changedProductIds[1];
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION fail_test_global_repricing_update()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.id = ${failureProductId}
+           AND NEW.details #>> '{repricing,batchId}'
+               IS DISTINCT FROM OLD.details #>> '{repricing,batchId}' THEN
+          RAISE EXCEPTION 'forced global repricing failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER fail_test_global_repricing_update
+      BEFORE UPDATE ON products
+      FOR EACH ROW EXECUTE FUNCTION fail_test_global_repricing_update();
+    `);
+    try {
+      const failed = await request('/api/admin/repricing/global/apply', {
+        method: 'POST',
+        body: { previewToken: finalPreview.data.previewToken, manualOverrides },
+      });
+      assert.equal(failed.response.status, 500, failed.text);
+    } finally {
+      await pool.query('DROP TRIGGER fail_test_global_repricing_update ON products');
+      await pool.query('DROP FUNCTION fail_test_global_repricing_update()');
+    }
+    const afterFailure = await pool.query(
+      `SELECT id, total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
+      [changedProductIds]
+    );
+    assert.deepEqual(afterFailure.rows, beforeApply.rows);
+    const batchesAfterFailure = await pool.query(
+      "SELECT count(*)::int AS count FROM repricing_batches WHERE scope = 'global'"
+    );
+    assert.equal(batchesAfterFailure.rows[0].count, batchesBeforeFailure.rows[0].count);
+
+    const draft = await request('/api/admin/repricing/drafts', {
+      method: 'POST',
+      body: {
+        scope: 'global',
+        manualOverrides,
+        reviewedProductIds: [changedAutomatic.id, manualProduct.id],
+        uiState: { filter: 'all', scenarioFilter: String(schemas.ZZScenario) },
+      },
+    });
+    assert.equal(draft.response.status, 200, draft.text);
+    assert.equal(draft.data.draft.scope, 'global');
+    assert.equal(draft.data.draft.scenarioId, null);
+    assert.equal(draft.data.draft.uiState.scenarioFilter, String(schemas.ZZScenario));
+    assert.equal(
+      draft.data.draft.manualOverrides.find((override) => (
+        Number(override.productId) === Number(manualProduct.id)
+      ))?.newPriceUah,
+      keptManualOverride.newPriceUah
+    );
+    assert.equal(
+      draft.data.draft.reviewedProductIds.includes(Number(manualProduct.id)),
+      true
+    );
+    activeDraftId = Number(draft.data.draft.id);
+
+    const reopenedDraft = await request(`/api/admin/repricing/drafts/${activeDraftId}`);
+    assert.equal(reopenedDraft.response.status, 200, reopenedDraft.text);
+    assert.equal(
+      reopenedDraft.data.manualOverrides.find((override) => (
+        Number(override.productId) === Number(manualProduct.id)
+      ))?.newPriceUah,
+      keptManualOverride.newPriceUah
+    );
+    assert.equal(
+      reopenedDraft.data.draft.reviewedProductIds.includes(Number(manualProduct.id)),
+      true
+    );
+
+    const applied = await request('/api/admin/repricing/global/apply', {
+      method: 'POST',
+      body: {
+        previewToken: finalPreview.data.previewToken,
+        manualOverrides,
+        draftId: activeDraftId,
+      },
+    });
+    assert.equal(applied.response.status, 200, applied.text);
+    assert.equal(applied.data.batch.scope, 'global');
+    appliedBatchId = Number(applied.data.batch.id);
+    activeDraftId = null;
+    const appliedItems = await pool.query(
+      `SELECT ri.product_id, ri.new_price_uah, p.total_price_uah,
+              p.details #>> '{repricing,batchId}' AS batch_id,
+              p.details #>> '{pricingScenario,id}' AS scenario_id
+       FROM repricing_items ri
+       JOIN products p ON p.id = ri.product_id
+       WHERE ri.batch_id = $1
+       ORDER BY ri.product_id`,
+      [appliedBatchId]
+    );
+    assert.equal(appliedItems.rows.length, changedProductIds.length);
+    for (const item of appliedItems.rows) {
+      assert.equal(Number(item.total_price_uah), Number(item.new_price_uah));
+      assert.equal(Number(item.batch_id), appliedBatchId);
+    }
+    const appliedScenarioIds = new Set(
+      appliedItems.rows.map((item) => Number(item.scenario_id)).filter(Number.isFinite)
+    );
+    assert.equal(appliedScenarioIds.has(Number(schemas.ZZScenario)), true);
+    assert.equal(appliedScenarioIds.has(semiScenarioId), true);
+
+    await pool.query(
+      'UPDATE products SET total_price_uah = total_price_uah + 1 WHERE id = $1',
+      [changedProductIds[0]]
+    );
+    const unsafeRollback = await request(`/api/admin/repricing/${appliedBatchId}/rollback`, {
+      method: 'POST', body: {},
+    });
+    assert.equal(unsafeRollback.response.status, 409, unsafeRollback.text);
+    const expectedNewPrice = appliedItems.rows.find(
+      (item) => Number(item.product_id) === changedProductIds[0]
+    ).new_price_uah;
+    await pool.query('UPDATE products SET total_price_uah = $1 WHERE id = $2', [
+      expectedNewPrice,
+      changedProductIds[0],
+    ]);
+    const rolledBack = await request(`/api/admin/repricing/${appliedBatchId}/rollback`, {
+      method: 'POST', body: {},
+    });
+    assert.equal(rolledBack.response.status, 200, rolledBack.text);
+    const afterRollback = await pool.query(
+      `SELECT id, total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
+      [changedProductIds]
+    );
+    assert.deepEqual(afterRollback.rows, beforeApply.rows);
+    appliedBatchId = null;
+  } finally {
+    if (activeRequestId) {
+      await pool.query('DELETE FROM correction_requests WHERE id = $1', [activeRequestId]);
+    }
+    if (appliedBatchId) {
+      await request(`/api/admin/repricing/${appliedBatchId}/rollback`, {
+        method: 'POST', body: {},
+      });
+    }
+    if (activeDraftId) {
+      await pool.query(
+        `UPDATE repricing_drafts
+         SET status = 'discarded', discarded_at = CURRENT_TIMESTAMP
+         WHERE id = $1 AND status = 'draft'`,
+        [activeDraftId]
+      );
+    }
+    if (overlappingScenarioId) {
+      await pool.query('DELETE FROM price_scenarios WHERE id = $1', [overlappingScenarioId]);
+    }
+    for (const cell of originalCells.rows) {
+      await pool.query(
+        `UPDATE price_matrix SET price = $1
+         WHERE scenario_id = $2 AND x_val = $3 AND y_val = $4`,
+        [cell.price, cell.scenario_id, cell.x_val, cell.y_val]
+      );
+    }
   }
 });
 

@@ -23,6 +23,35 @@ export function getInvalidManualPriceIds(manualPrices = {}) {
     .map(([productId]) => Number(productId));
 }
 
+export function getUnresolvedManualPriceItems(items = [], manualPrices = {}) {
+  return items.filter((item) => (
+    item.errorCode === 'manual_price'
+    && !Object.prototype.hasOwnProperty.call(manualPrices, item.productId)
+  ));
+}
+
+export function keepCurrentManualPrices(
+  items = [],
+  manualPrices = {},
+  reviewedProductIds = []
+) {
+  const unresolvedItems = getUnresolvedManualPriceItems(items, manualPrices);
+  const nextManualPrices = { ...manualPrices };
+  const nextReviewedProductIds = new Set(reviewedProductIds.map(Number));
+
+  for (const item of unresolvedItems) {
+    nextManualPrices[item.productId] = String(item.oldPriceUah ?? '');
+    nextReviewedProductIds.add(Number(item.productId));
+  }
+
+  return {
+    manualPrices: nextManualPrices,
+    reviewedProductIds: [...nextReviewedProductIds]
+      .sort((first, second) => first - second),
+    affectedProductIds: unresolvedItems.map((item) => Number(item.productId)),
+  };
+}
+
 export function applyManualPrices(items = [], manualPrices = {}) {
   return items.map((item) => {
     if (!Object.prototype.hasOwnProperty.call(manualPrices, item.productId)) return item;
@@ -31,6 +60,8 @@ export function applyManualPrices(items = [], manualPrices = {}) {
       && ['price_missing', 'manual_price'].includes(item.errorCode);
     if (newPriceUah === null || (item.status === 'error' && !resolvesManualPrice)) return item;
     const oldPriceUah = item.oldPriceUah === null ? null : Number(item.oldPriceUah);
+    const calculatedPriceUah = item.calculatedPriceUah
+      ?? (item.errorCode === 'manual_price' ? item.newPriceUah : null);
     const reasonCodes = (item.pricingChange?.reasonCodes || [])
       .filter((code) => code !== 'manual_override' && code !== 'exchange_rate_only');
     const reasonLabels = (item.pricingChange?.reasonLabels || [])
@@ -39,7 +70,7 @@ export function applyManualPrices(items = [], manualPrices = {}) {
       ));
     return {
       ...item,
-      calculatedPriceUah: resolvesManualPrice ? null : item.newPriceUah,
+      calculatedPriceUah: resolvesManualPrice ? calculatedPriceUah : item.newPriceUah,
       newPriceUah,
       priceDeltaUah: newPriceUah - Number(oldPriceUah || 0),
       status: resolvesManualPrice
@@ -82,6 +113,28 @@ export function sortRepricingItems(items = [], sort = {}) {
     compareValues(first[key], second[key], direction)
     || Number(first.productId) - Number(second.productId)
   ));
+}
+
+export function filterRepricingItems(items = [], {
+  status = 'all',
+  scenarioFilter = 'all',
+  search = '',
+  reviewFilter = 'all',
+  reviewedProductIds = [],
+} = {}) {
+  const normalizedSearch = String(search || '').trim().toUpperCase();
+  const reviewedIds = new Set(reviewedProductIds.map(Number));
+  return items.filter((item) => {
+    if (status !== 'all' && item.status !== status) return false;
+    const itemScenario = item.scenarioId === null || item.scenarioId === undefined
+      ? 'none'
+      : String(item.scenarioId);
+    if (scenarioFilter !== 'all' && itemScenario !== String(scenarioFilter)) return false;
+    const isReviewed = reviewedIds.has(Number(item.productId));
+    if (reviewFilter === 'pending' && isReviewed) return false;
+    if (reviewFilter === 'reviewed' && !isReviewed) return false;
+    return !normalizedSearch || String(item.sku || '').toUpperCase().includes(normalizedSearch);
+  });
 }
 
 export function getRepricingSummary(baseSummary, items = []) {

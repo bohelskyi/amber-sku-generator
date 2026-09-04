@@ -29,9 +29,12 @@ import { getPricingAxis } from '../lib/pricing-axis';
 import {
   applyManualPrices,
   canApplyRepricing,
+  filterRepricingItems,
   getInvalidManualPriceIds,
   getManualOverrides,
   getRepricingSummary,
+  getUnresolvedManualPriceItems,
+  keepCurrentManualPrices,
   parseManualPrice,
   sortRepricingItems,
 } from '../lib/repricing';
@@ -286,6 +289,7 @@ export default function RepricingPage() {
   const [scenarioId, setScenarioId] = useState('');
   const [preview, setPreview] = useState(null);
   const [filter, setFilter] = useState('changed');
+  const [scenarioFilter, setScenarioFilter] = useState('all');
   const [reviewFilter, setReviewFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -351,6 +355,7 @@ export default function RepricingPage() {
 
   const selectedScenario = scenarios.find((item) => Number(item.id) === Number(scenarioId));
   const selectedDraft = drafts.find((item) => Number(item.scenarioId) === Number(scenarioId));
+  const globalDraft = drafts.find((item) => item.scope === 'global');
   const activeCorrectionRequestByProductId = useMemo(
     () => new Map(correctionRequests.map((request) => [Number(request.sourceProductId), request])),
     [correctionRequests]
@@ -392,6 +397,11 @@ export default function RepricingPage() {
     () => new Set(getInvalidManualPriceIds(manualPrices)),
     [manualPrices]
   );
+  const unresolvedManualPriceItems = useMemo(() => (
+    preview?.scope === 'global'
+      ? getUnresolvedManualPriceItems(preview.items || [], manualPrices)
+      : []
+  ), [manualPrices, preview]);
   const canApply = canApplyRepricing({
     summary: effectiveSummary,
     invalidManualPriceCount: invalidManualPriceIds.size,
@@ -404,16 +414,38 @@ export default function RepricingPage() {
     [reviewedProductIds]
   );
   const visibleItems = useMemo(() => {
-    const normalizedSearch = search.trim().toUpperCase();
-    const filteredItems = effectiveItems.filter((item) => {
-      if (filter !== 'all' && item.status !== filter) return false;
-      const isReviewed = reviewedProductIdSet.has(Number(item.productId));
-      if (reviewFilter === 'pending' && isReviewed) return false;
-      if (reviewFilter === 'reviewed' && !isReviewed) return false;
-      return !normalizedSearch || String(item.sku || '').toUpperCase().includes(normalizedSearch);
+    const filteredItems = filterRepricingItems(effectiveItems, {
+      status: filter,
+      scenarioFilter,
+      search,
+      reviewFilter,
+      reviewedProductIds,
     });
     return sortRepricingItems(filteredItems, sort);
-  }, [effectiveItems, filter, reviewFilter, reviewedProductIdSet, search, sort]);
+  }, [effectiveItems, filter, reviewFilter, reviewedProductIds, scenarioFilter, search, sort]);
+  const previewScenarios = useMemo(() => {
+    if (preview?.scope !== 'global') return [];
+    const byId = new Map();
+    let hasMissingScenario = false;
+    for (const item of preview.items || []) {
+      if (item.scenarioId === null || item.scenarioId === undefined) {
+        hasMissingScenario = true;
+      } else if (!byId.has(Number(item.scenarioId))) {
+        byId.set(Number(item.scenarioId), {
+          id: Number(item.scenarioId),
+          name: item.scenarioName || item.matrixName || `#${item.scenarioId}`,
+          categoryCode: item.categoryCode,
+        });
+      }
+    }
+    const values = [...byId.values()].sort((first, second) => (
+      String(first.categoryCode).localeCompare(String(second.categoryCode), 'uk')
+      || String(first.name).localeCompare(String(second.name), 'uk')
+    ));
+    return hasMissingScenario
+      ? [...values, { id: 'none', name: 'Без активної матриці', categoryCode: '' }]
+      : values;
+  }, [preview]);
 
   const handleSort = (key) => {
     setSort((currentSort) => ({
@@ -443,7 +475,7 @@ export default function RepricingPage() {
     ));
   };
 
-  const getDraftUiState = () => ({ filter, reviewFilter, search, sort });
+  const getDraftUiState = () => ({ filter, reviewFilter, scenarioFilter, search, sort });
 
   const applyDraftPayload = (data) => {
     const nextManualPrices = Object.fromEntries(
@@ -461,6 +493,7 @@ export default function RepricingPage() {
     setFilter(uiState.filter || (data.preview?.summary?.errorCount > 0 ? 'error' : 'changed'));
     setReviewFilter(uiState.reviewFilter || 'all');
     setSearch(uiState.search || '');
+    setScenarioFilter(uiState.scenarioFilter || 'all');
     setSort(uiState.sort || { key: 'sku', direction: 'asc' });
     setDraftSaveState('saved');
   };
@@ -480,7 +513,8 @@ export default function RepricingPage() {
     if (!preview || invalidManualPriceIds.size > 0) return Promise.resolve(null);
     if (!automatic) setDraftSaveState('saving');
     const payload = {
-      scenarioId: preview.scenario.id,
+      scope: preview.scope || 'scenario',
+      scenarioId: preview.scenario?.id || null,
       manualOverrides,
       reviewedProductIds,
       uiState: getDraftUiState(),
@@ -528,6 +562,7 @@ export default function RepricingPage() {
     manualPrices,
     reviewFilter,
     reviewedProductIds,
+    scenarioFilter,
     search,
     sort,
   ]);
@@ -544,7 +579,40 @@ export default function RepricingPage() {
     setManualPrices({});
     setReviewedProductIds([]);
     setReviewFilter('all');
+    setScenarioFilter('all');
     api.post('/admin/repricing/preview', { scenarioId: Number(scenarioId) })
+      .then((response) => {
+        setPreview(response.data);
+        setFilter(response.data.summary.errorCount > 0 ? 'error' : 'changed');
+      })
+      .catch((requestError) => setError(getApiError(requestError)))
+      .finally(() => setPreviewing(false));
+  };
+
+  const keepAllCurrentManualPrices = () => {
+    const nextState = keepCurrentManualPrices(
+      preview?.items || [],
+      manualPrices,
+      reviewedProductIds
+    );
+    setManualPrices(nextState.manualPrices);
+    setReviewedProductIds(nextState.reviewedProductIds);
+  };
+
+  const buildGlobalPreview = () => {
+    if (previewing) return;
+    setPreviewing(true);
+    setError('');
+    setAppliedBatch(null);
+    setActiveDraft(null);
+    setDraftSync(null);
+    setDraftConflicts([]);
+    setDraftSaveState('idle');
+    setManualPrices({});
+    setReviewedProductIds([]);
+    setReviewFilter('all');
+    setScenarioFilter('all');
+    api.post('/admin/repricing/global/preview')
       .then((response) => {
         setPreview(response.data);
         setFilter(response.data.summary.errorCount > 0 ? 'error' : 'changed');
@@ -556,6 +624,11 @@ export default function RepricingPage() {
   const openSelectedRepricing = () => {
     if (selectedDraft) openDraft(selectedDraft.id);
     else buildPreview();
+  };
+
+  const openGlobalRepricing = () => {
+    if (globalDraft) openDraft(globalDraft.id);
+    else buildGlobalPreview();
   };
 
   const syncDraft = async () => {
@@ -608,7 +681,8 @@ export default function RepricingPage() {
     try {
       if (activeDraft) {
         await api.put(`/admin/repricing/drafts/${activeDraft.id}`, {
-          scenarioId: preview.scenario.id,
+          scope: preview.scope || 'scenario',
+          scenarioId: preview.scenario?.id || null,
           manualOverrides: nextManualOverrides,
           reviewedProductIds: nextReviewedProductIds,
           uiState: getDraftUiState(),
@@ -617,9 +691,11 @@ export default function RepricingPage() {
         applyDraftPayload(response.data);
         await loadDrafts();
       } else {
-        const response = await api.post('/admin/repricing/preview', {
-          scenarioId: preview.scenario.id,
-        });
+        const response = preview.scope === 'global'
+          ? await api.post('/admin/repricing/global/preview')
+          : await api.post('/admin/repricing/preview', {
+              scenarioId: preview.scenario.id,
+            });
         setPreview(response.data);
       }
     } catch (requestError) {
@@ -655,6 +731,7 @@ export default function RepricingPage() {
         setManualPrices({});
         setReviewedProductIds([]);
         setReviewFilter('all');
+        setScenarioFilter('all');
         setDraftSync(null);
         setDraftConflicts([]);
         setDraftSaveState('idle');
@@ -671,8 +748,11 @@ export default function RepricingPage() {
     try {
       let draftForApply = activeDraft;
       if (activeDraft) draftForApply = await saveDraft();
-      const response = await api.post('/admin/repricing/apply', {
-        scenarioId: preview.scenario.id,
+      const applyUrl = preview.scope === 'global'
+        ? '/admin/repricing/global/apply'
+        : '/admin/repricing/apply';
+      const response = await api.post(applyUrl, {
+        scenarioId: preview.scenario?.id || null,
         previewToken: preview.previewToken,
         manualOverrides,
         draftId: draftForApply?.id || null,
@@ -682,6 +762,7 @@ export default function RepricingPage() {
       setManualPrices({});
       setReviewedProductIds([]);
       setReviewFilter('all');
+      setScenarioFilter('all');
       setActiveDraft(null);
       setDraftSync(null);
       setDraftConflicts([]);
@@ -745,6 +826,15 @@ export default function RepricingPage() {
           <div className="flex flex-wrap gap-2 self-start lg:self-auto">
             <button
               type="button"
+              className="btn btn-primary gap-2"
+              onClick={openGlobalRepricing}
+              disabled={previewing}
+            >
+              {globalDraft ? <FilePenLine size={16} /> : <CircleDollarSign size={16} />}
+              {globalDraft ? 'Продовжити загальну чернетку' : 'Переоцінити все'}
+            </button>
+            <button
+              type="button"
               className="btn btn-outline gap-2"
               onClick={() => setRecountTarget({ productId: null, sku: '', mode: 'apply' })}
             >
@@ -788,7 +878,7 @@ export default function RepricingPage() {
                 <div className="mt-1 leading-6 text-amber-900">
                   Спочатку опрацюйте {blockingCorrectionRequests.length}{' '}
                   {blockingCorrectionRequests.length === 1 ? 'активний запит' : 'активні запити'},
-                  що належать цій матриці.
+                  що {preview.scope === 'global' ? 'належать товарам у загальній переоцінці' : 'належать цій матриці'}.
                 </div>
               </div>
             </div>
@@ -840,6 +930,7 @@ export default function RepricingPage() {
 
         <section className="card min-w-0 overflow-hidden">
           <div className="border-b border-slate-200 p-5 sm:p-6">
+            <div className="mb-3 text-sm font-semibold text-slate-800">Переоцінка за окремою матрицею</div>
             <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(280px,1fr)_auto] lg:items-end">
               <label className="block min-w-0">
                 <span className="mb-1 block text-xs font-semibold text-slate-600">Цінова матриця</span>
@@ -853,6 +944,7 @@ export default function RepricingPage() {
                     setManualPrices({});
                     setReviewedProductIds([]);
                     setReviewFilter('all');
+                    setScenarioFilter('all');
                     setActiveDraft(null);
                     setDraftSync(null);
                     setDraftConflicts([]);
@@ -1003,12 +1095,29 @@ export default function RepricingPage() {
                 </div>
               )}
 
+              {preview.scope === 'global' && unresolvedManualPriceItems.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-3 sm:px-5">
+                  <div className="text-sm text-amber-900">
+                    Ручні ціни потребують явного підтвердження перед застосуванням.
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-outline gap-2 border-amber-300 bg-white text-amber-900"
+                    onClick={keepAllCurrentManualPrices}
+                  >
+                    <SquareCheckBig size={16} />
+                    Залишити поточні ручні ціни для всіх ({unresolvedManualPriceItems.length})
+                  </button>
+                </div>
+              )}
+
               <div className="flex flex-col gap-3 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex flex-wrap gap-2">
                   <div className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1">
                     {[
                       ['changed', 'Зміняться'],
                       ['unchanged', 'Без змін'],
+                      ...(preview.summary.skippedCount > 0 ? [['skipped', 'Пропущені']] : []),
                       ['error', 'Помилки'],
                       ['all', 'Усі'],
                     ].map(([value, label]) => (
@@ -1038,6 +1147,23 @@ export default function RepricingPage() {
                       </button>
                     ))}
                   </div>
+                  {preview.scope === 'global' && (
+                    <label className="flex items-center gap-2 rounded-lg bg-slate-100 px-2 text-xs font-semibold text-slate-600">
+                      <span>Матриця</span>
+                      <select
+                        className="h-8 max-w-64 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-800"
+                        value={scenarioFilter}
+                        onChange={(event) => setScenarioFilter(event.target.value)}
+                      >
+                        <option value="all">Усі матриці</option>
+                        {previewScenarios.map((scenario) => (
+                          <option key={scenario.id} value={scenario.id}>
+                            {scenario.categoryCode ? `${scenario.categoryCode} — ` : ''}{scenario.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                 </div>
                 <label className="relative block w-full lg:w-72">
                   <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -1080,6 +1206,40 @@ export default function RepricingPage() {
                       >
                         <td className="table-cell min-w-48 text-xs text-slate-800">
                           <div className="font-mono font-semibold">{item.sku}</div>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                              item.status === 'error'
+                                ? 'bg-rose-100 text-rose-700'
+                                : item.status === 'skipped'
+                                  ? 'bg-amber-100 text-amber-800'
+                                : item.status === 'unchanged'
+                                  ? 'bg-slate-100 text-slate-600'
+                                  : 'bg-emerald-100 text-emerald-700'
+                            }`}>
+                              {item.status === 'error'
+                                ? 'Помилка'
+                                : item.status === 'skipped'
+                                  ? 'Пропущено'
+                                : item.status === 'unchanged'
+                                  ? 'Без змін'
+                                  : 'Зміниться'}
+                            </span>
+                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                              item.pricingState === 'manual' || item.errorCode === 'manual_price' || item.manualOverride
+                                ? 'bg-amber-100 text-amber-800'
+                                : item.pricingState === 'missing' || item.errorCode === 'price_missing'
+                                  ? 'bg-rose-100 text-rose-700'
+                                  : 'bg-sky-100 text-sky-700'
+                            }`}>
+                              {item.manualOverride
+                                ? 'Ручна підтверджена'
+                                : item.pricingState === 'manual' || item.errorCode === 'manual_price'
+                                  ? 'Ручна'
+                                  : item.pricingState === 'missing' || item.errorCode === 'price_missing'
+                                    ? 'Ціна відсутня'
+                                    : 'Автоматична'}
+                            </span>
+                          </div>
                           <div className="mt-2 flex items-center gap-3 font-sans">
                             <button
                               type="button"
@@ -1123,6 +1283,13 @@ export default function RepricingPage() {
                                   <div className={item.manualOverride ? 'text-amber-800' : 'text-rose-700'}>
                                     {item.message}
                                   </div>
+                                  <div className="text-slate-600">
+                                    {item.categoryCode ? `${item.categoryCode} — ` : ''}
+                                    {item.scenarioName || item.matrixName || 'Активну матрицю не визначено'}
+                                    {item.calculatedPriceUah > 0
+                                      ? ` · автоматично ${formatUah(item.calculatedPriceUah)}`
+                                      : ''}
+                                  </div>
                                   <button
                                     type="button"
                                     className="btn btn-outline h-8 px-3 text-xs"
@@ -1135,7 +1302,7 @@ export default function RepricingPage() {
                             : (
                               <PricingExplanation
                                 config={config}
-                                categoryCode={preview.scenario.categoryCode}
+                                categoryCode={item.categoryCode || preview.scenario?.categoryCode}
                                 item={item}
                               />
                             )}
@@ -1248,7 +1415,11 @@ export default function RepricingPage() {
                 {batches.map((batch) => (
                   <tr key={batch.id} className="border-t border-slate-100">
                     <td className="table-cell whitespace-nowrap text-sm">{formatDate(batch.applied_at)}</td>
-                    <td className="table-cell text-sm font-medium">{batch.category_code} — {batch.scenario_name}</td>
+                    <td className="table-cell text-sm font-medium">
+                      {batch.scope === 'global'
+                        ? batch.scenario_name
+                        : `${batch.category_code} — ${batch.scenario_name}`}
+                    </td>
                     <td className="table-cell text-sm">
                       {batch.status === 'rolled_back' ? (
                         <span className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">
