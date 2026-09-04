@@ -55,7 +55,7 @@ export function RecountConfirmDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm"
+      className="dialog-backdrop"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !isApplying) onCancel();
       }}
@@ -64,9 +64,9 @@ export function RecountConfirmDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="recount-confirm-title"
-        className="w-full max-w-xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.3)]"
+        className="dialog-surface max-w-xl"
       >
-        <div className="border-b border-slate-200 px-5 py-5 sm:px-6">
+        <div className="dialog-header">
           <p className="eyebrow">
             {isChoiceMode
               ? 'Завершення переобліку'
@@ -178,7 +178,7 @@ export function RecountConfirmDialog({
           </div>
         </div>
 
-        <div className={`grid gap-3 border-t border-slate-200 bg-slate-50/80 px-5 py-4 sm:px-6 ${isChoiceMode ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+        <div className={`dialog-footer grid gap-3 ${isChoiceMode ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
           <button
             type="button"
             onClick={onCancel}

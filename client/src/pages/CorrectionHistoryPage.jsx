@@ -216,12 +216,13 @@ export default function CorrectionHistoryPage() {
   const hasFilters = Boolean(search || category || from || to);
 
   return (
-    <div className="min-h-screen app-bg">
-      <main className="mx-auto w-full min-w-0 max-w-7xl space-y-7 overflow-hidden px-4 py-8 pb-24 sm:px-6 sm:py-12">
-        <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+    <div className="app-page">
+      <main className="mx-auto w-full min-w-0 max-w-7xl space-y-7 overflow-hidden px-4 py-6 pb-24 sm:px-6 sm:py-8">
+        <header className="page-heading">
           <div>
             <p className="eyebrow">Admin Workspace</p>
             <h1 className="page-title">Історія переобліків</h1>
+            <p className="section-subtitle mt-1">Журнал змін SKU, характеристик і цін із фільтрами та експортом.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             {isAdminView && (
@@ -243,7 +244,7 @@ export default function CorrectionHistoryPage() {
           </div>
         )}
 
-        <section className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 bg-white/90 lg:grid-cols-5">
+        <section className="card grid grid-cols-2 overflow-hidden lg:grid-cols-5">
           {[
             ['Усього', summary.totalCount || 0, 'text-slate-900'],
             ['Ціна зросла', summary.increasedCount || 0, 'text-emerald-700'],
@@ -261,7 +262,7 @@ export default function CorrectionHistoryPage() {
           ))}
         </section>
 
-        <section className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white/90">
+        <section className="card min-w-0 overflow-hidden">
           <div className="grid gap-3 border-b border-slate-200 p-4 sm:p-5 lg:grid-cols-[minmax(220px,1fr)_180px_160px_160px_auto] lg:items-end">
             <label className="relative block min-w-0">
               <span className="mb-1.5 block text-xs font-semibold text-slate-600">Пошук</span>

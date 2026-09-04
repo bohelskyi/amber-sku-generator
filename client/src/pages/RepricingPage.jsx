@@ -196,8 +196,8 @@ function SortHeader({ align = 'left', children, column, onSort, sort }) {
 
 function ConfirmDialog({ changedCount, manualCount, onCancel, onConfirm, pending }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
-      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-2xl">
+    <div className="dialog-backdrop">
+      <div className="dialog-surface max-w-md p-6">
         <div className="flex items-start gap-3">
           <AlertTriangle className="mt-0.5 text-amber-600" size={22} />
           <div>
@@ -226,8 +226,8 @@ function ConfirmDialog({ changedCount, manualCount, onCancel, onConfirm, pending
 
 function RollbackDialog({ batch, onCancel, onConfirm, pending }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
-      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-2xl">
+    <div className="dialog-backdrop">
+      <div className="dialog-surface max-w-md p-6">
         <div className="flex items-start gap-3">
           <Undo2 className="mt-0.5 text-rose-600" size={22} />
           <div>
@@ -256,8 +256,8 @@ function RollbackDialog({ batch, onCancel, onConfirm, pending }) {
 
 function DiscardDraftDialog({ onCancel, onConfirm, pending }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
-      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-2xl">
+    <div className="dialog-backdrop">
+      <div className="dialog-surface max-w-md p-6">
         <div className="flex items-start gap-3">
           <Trash2 className="mt-0.5 text-rose-600" size={22} />
           <div>
@@ -872,24 +872,25 @@ export default function RepricingPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen app-bg flex items-center justify-center">
+      <div className="app-page flex items-center justify-center">
         <RefreshCw className="animate-spin text-slate-600" size={26} />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen app-bg">
-      <main className="mx-auto min-w-0 max-w-7xl space-y-8 overflow-hidden px-4 py-8 pb-24 sm:px-6 sm:py-12">
-        <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+    <div className="app-page">
+      <main className="mx-auto min-w-0 max-w-7xl space-y-7 overflow-hidden px-4 py-6 pb-24 sm:px-6 sm:py-8">
+        <header className="page-heading">
           <div>
             <p className="eyebrow">Admin Workspace</p>
             <h1 className="page-title">Масова переоцінка</h1>
+            <p className="section-subtitle mt-1">Перевіряйте зміни, вирішуйте ручні ціни та застосовуйте оновлення контрольовано.</p>
           </div>
           <div className="flex flex-wrap gap-2 self-start lg:self-auto">
             <button
               type="button"
-              className="btn btn-primary gap-2"
+              className="btn btn-amber gap-2"
               onClick={openGlobalRepricing}
               disabled={previewing}
             >
@@ -1485,7 +1486,7 @@ export default function RepricingPage() {
           )}
         </section>
 
-        <section className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white/85">
+        <section className="card min-w-0 overflow-hidden">
           <div className="border-b border-slate-200 px-5 py-4">
             <h2 className="text-lg font-semibold text-slate-900">Історія переоцінок</h2>
           </div>

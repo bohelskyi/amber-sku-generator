@@ -42,7 +42,7 @@ export function ProductBuilder({
             const textQuestion = isTextQuestion(question);
 
             return (
-              <div key={question.id} className="rounded-2xl border border-slate-200 bg-white/80 p-5">
+              <div key={question.id} className="field-group">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <label className="text-sm font-semibold text-slate-700">{question.label}</label>
                   {question.required === 1 && (textQuestion || visibleOptions.length > 0) && (
@@ -83,7 +83,7 @@ export function ProductBuilder({
           })}
 
           {isWeightRequired && (
-            <div className="rounded-2xl border border-slate-200 bg-white/80 p-5">
+            <div className="field-group">
               <label className="block text-sm font-semibold text-slate-700">Вага виробу (г)</label>
               <input
                 type="number"

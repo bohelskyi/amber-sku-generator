@@ -12,7 +12,7 @@ function AppPage() {
 
   if (!sku.config) {
     return (
-      <div className="min-h-screen app-bg flex items-center justify-center">
+      <div className="app-page flex items-center justify-center">
         <div className="card p-8 text-center">
           <div className="text-lg font-semibold text-slate-700">Завантаження...</div>
           <div className="mt-2 text-sm text-slate-500">Підтягуємо конфігурацію та історію.</div>
@@ -22,8 +22,8 @@ function AppPage() {
   }
 
   return (
-    <div className="min-h-screen app-bg">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-12 space-y-8">
+    <div className="app-page">
+      <div className="mx-auto max-w-7xl space-y-7 px-4 py-6 sm:px-6 sm:py-8">
         <PageHeader config={sku.config} selectedCat={sku.selectedCat} historyCount={sku.history.length} />
         <Toast message={sku.copyMessage} />
 

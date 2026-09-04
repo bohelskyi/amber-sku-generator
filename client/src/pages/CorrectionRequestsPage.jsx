@@ -117,9 +117,9 @@ function CompletionDialog({ busy, request, onCancel, onConfirm }) {
   if (!request) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl">
-        <div className="border-b border-slate-200 px-5 py-5 sm:px-6">
+    <div className="dialog-backdrop">
+      <div className="dialog-surface max-w-lg">
+        <div className="dialog-header">
           <p className="eyebrow">Завершення запиту #{request.id}</p>
           <h2 className="mt-1 text-xl font-semibold text-slate-900">Сайт уже оновлено?</h2>
         </div>
@@ -138,7 +138,7 @@ function CompletionDialog({ busy, request, onCancel, onConfirm }) {
             Після підтвердження SKU Manager виконає переоблік і закриє цей запит.
           </div>
         </div>
-        <div className="grid gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:grid-cols-2 sm:px-6">
+        <div className="dialog-footer grid gap-3 sm:grid-cols-2">
           <button type="button" className="btn btn-outline order-2 sm:order-1" onClick={onCancel} disabled={busy}>
             Повернутися
           </button>
@@ -421,19 +421,20 @@ export default function CorrectionRequestsPage() {
 
   if (loading && !config) {
     return (
-      <div className="min-h-screen app-bg flex items-center justify-center">
+      <div className="app-page flex items-center justify-center">
         <RefreshCw className="animate-spin text-slate-600" size={26} />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen app-bg">
-      <main className="mx-auto w-full min-w-0 max-w-7xl space-y-7 overflow-hidden px-4 py-8 pb-24 sm:px-6 sm:py-12">
-        <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+    <div className="app-page">
+      <main className="mx-auto w-full min-w-0 max-w-7xl space-y-7 overflow-hidden px-4 py-6 pb-24 sm:px-6 sm:py-8">
+        <header className="page-heading">
           <div>
             <p className="eyebrow">Admin Workspace</p>
             <h1 className="page-title">Запити на виправлення</h1>
+            <p className="section-subtitle mt-1">Спільна черга з чітким станом власності та завершення кожного запиту.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             {isAdminView && (
@@ -466,7 +467,7 @@ export default function CorrectionRequestsPage() {
           </div>
         )}
 
-        <section className="w-full min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white/90">
+        <section className="card w-full min-w-0 overflow-hidden">
           <div className="flex min-w-0 flex-col gap-3 border-b border-slate-200 p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex min-w-0 max-w-full gap-1 overflow-x-auto rounded-md bg-slate-100 p-1 lg:flex-1">
               {FILTERS.map(([value, label, countKey]) => (
@@ -554,7 +555,7 @@ export default function CorrectionRequestsPage() {
                           {request.completedAt && <>Виконано: {formatDateTime(request.completedAt)}</>}
                           {request.status === 'in_progress' && (
                             <>
-                              <div className="font-medium text-sky-800">
+                              <div className={`claim-state ${isOwnedClaim ? 'is-owned' : 'is-external'}`}>
                                 {isOwnedClaim ? 'В роботі у вас' : 'В роботі іншим працівником'}
                               </div>
                               <div>Взято: {formatDateTime(request.claimedAt || request.updatedAt)}</div>

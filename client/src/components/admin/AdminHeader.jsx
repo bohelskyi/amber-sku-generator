@@ -3,7 +3,7 @@ import { ClipboardList, History, RefreshCw } from 'lucide-react';
 
 export function AdminHeader() {
   return (
-    <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between fade-up">
+    <header className="page-heading fade-up">
       <div>
         <p className="eyebrow">Admin Workspace</p>
         <h1 className="page-title">Адмін-панель</h1>

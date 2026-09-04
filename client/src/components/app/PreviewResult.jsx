@@ -74,7 +74,9 @@ export function PreviewResult({
               {priceActions}
             </div>
             <p className="mt-4 text-2xl font-semibold text-slate-800">{formatUah(effectiveTotalPriceUah)}</p>
-            {hasManualPrice && <p className="text-xs font-semibold text-[#8a5f2b]">Ціну змінено вручну</p>}
+            <span className={`price-source-badge ${hasManualPrice ? 'is-manual' : 'is-automatic'}`}>
+              {hasManualPrice ? 'Ручна ціна' : 'Автоматична ціна'}
+            </span>
             {previewData.calculatedPriceUah !== null
               && previewData.calculatedPriceUah !== undefined
               && previewData.totalPriceUah !== null
@@ -103,7 +105,9 @@ export function PreviewResult({
               {priceActions}
             </div>
             <p className="mt-4 text-2xl font-semibold text-slate-800">{formatUah(effectiveTotalPriceUah)}</p>
-            {hasManualPrice && <p className="text-xs font-semibold text-[#8a5f2b]">Ціну змінено вручну</p>}
+            <span className={`price-source-badge ${hasManualPrice ? 'is-manual' : 'is-automatic'}`}>
+              {hasManualPrice ? 'Ручна ціна' : 'Автоматична ціна'}
+            </span>
             {previewData.calculatedPriceUah !== null
               && previewData.calculatedPriceUah !== undefined
               && previewData.totalPriceUah !== null

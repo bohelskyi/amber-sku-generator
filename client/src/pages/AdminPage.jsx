@@ -9,7 +9,7 @@ export default function AdminPage() {
 
   if (!admin.config) {
     return (
-      <div className="min-h-screen app-bg flex items-center justify-center">
+      <div className="app-page flex items-center justify-center">
         <div className="card p-8 text-center">
           <div className="text-lg font-semibold text-slate-700">Завантаження...</div>
           <div className="mt-2 text-sm text-slate-500">Збираємо конфігурацію та цінові сценарії.</div>
@@ -19,8 +19,8 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="min-h-screen app-bg">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12 pb-28 space-y-8">
+    <div className="app-page">
+      <div className="mx-auto max-w-7xl space-y-7 px-4 py-6 pb-24 sm:px-6 sm:py-8">
         <AdminHeader />
         <ValidationIssues issues={admin.validationIssues} />
         <AdminStructureEditor
