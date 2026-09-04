@@ -105,6 +105,63 @@ async function createFixtureCategory(code, requiresWeight, withPrices) {
   return null;
 }
 
+async function createOptionalRecountFixtureCategory() {
+  await pool.query(
+    `INSERT INTO categories (code, name, requires_weight, skip_hidden_sku_questions)
+     VALUES ('OC', 'Optional recount', 0, 0)`
+  );
+  const questions = await pool.query(`
+    INSERT INTO questions
+      (category_code, key, label, sku_index, display_order, required, include_in_sku, input_type)
+    VALUES
+      ('OC', 'kind', 'Kind', 1, 1, 1, 1, 'options'),
+      ('OC', 'discount', 'Знижка', 0, 2, 0, 0, 'options'),
+      ('OC', 'packaging', 'Пакування', 0, 3, 0, 0, 'options'),
+      ('OC', 'required_choice', 'Обов’язковий вибір', 0, 4, 1, 0, 'options'),
+      ('OC', 'zero_option', 'Нульове значення', 0, 5, 0, 0, 'options'),
+      ('OC', 'is_calibrated', 'Калібрування', 0, 6, 1, 0, 'options')
+    RETURNING id, key
+  `);
+  const questionIds = Object.fromEntries(
+    questions.rows.map((question) => [question.key, Number(question.id)])
+  );
+  await pool.query(
+    `INSERT INTO options (question_id, value_id, sku_code, label)
+     VALUES
+       ($1, 1, '1', 'One'),
+       ($1, 2, '2', 'Two'),
+       ($2, 1, '1', '10%'),
+       ($2, 2, '2', '20%'),
+       ($3, 1, '1', 'Box'),
+       ($3, 2, '2', 'Bag'),
+       ($4, 1, '1', 'Required'),
+       ($5, 0, '0', 'Real zero'),
+       ($5, 1, '1', 'One'),
+       ($6, 0, '0', 'Not calibrated'),
+       ($6, 1, '1', 'Calibrated'),
+       ($6, 2, '2', 'Semi-calibrated')`,
+    [
+      questionIds.kind,
+      questionIds.discount,
+      questionIds.packaging,
+      questionIds.required_choice,
+      questionIds.zero_option,
+      questionIds.is_calibrated,
+    ]
+  );
+  const scenario = await pool.query(
+    `INSERT INTO price_scenarios
+       (category_code, name, match_json, axis_x_key, axis_y_key, price_mode, status)
+     VALUES ('OC', 'Optional fixed', '{}'::jsonb, 'kind', NULL, 'fixed_uah', 'active')
+     RETURNING id`
+  );
+  await pool.query(
+    `INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
+     VALUES ($1, 1, 0, 1000), ($1, 2, 0, 1500)`,
+    [scenario.rows[0].id]
+  );
+}
+
 async function createLegacySemiCalibratedNecklaceFixture() {
   await pool.query(
     `INSERT INTO categories (code, name, requires_weight, skip_hidden_sku_questions)
@@ -182,9 +239,10 @@ test.before(async () => {
   schemas.ZZScenario = await createFixtureCategory('ZZ', false, true);
   await createFixtureCategory('MM', false, false);
   await createFixtureCategory('WW', true, false);
+  await createOptionalRecountFixtureCategory();
   await createLegacySemiCalibratedNecklaceFixture();
   await ensureLegacySkuSchemas();
-  for (const code of ['ZZ', 'MM', 'WW', 'LN']) {
+  for (const code of ['ZZ', 'MM', 'WW', 'OC', 'LN']) {
     const result = await pool.query(
       `SELECT id FROM sku_schema_versions WHERE category_code = $1 AND status = 'active'`,
       [code]
@@ -203,6 +261,19 @@ test.before(async () => {
         '{"answers":{"raw_type":1,"size":3,"shape":6,"is_calibrated":1},"isCalibrated":1}'::jsonb,
         $1)`,
     [schemas.LN]
+  );
+  await pool.query(
+    `INSERT INTO products
+       (full_sku, base_sku, sequence_number, category, weight, total_price,
+        total_price_uah, price_per_gram, uah_rate, details, sku_schema_version_id)
+     VALUES
+       ('OC1001', 'OC1', 1, 'OC', 0, 25, 1000, 0, 40,
+        '{"answers":{"kind":1,"discount":1,"packaging":1,"required_choice":1,"zero_option":0,"is_calibrated":0},"isCalibrated":0}'::jsonb,
+        $1),
+       ('OC1002', 'OC1', 2, 'OC', 0, 25, 1000, 0, 40,
+        '{"answers":{"kind":1,"discount":1,"packaging":1,"required_choice":1,"zero_option":0,"is_calibrated":0},"isCalibrated":0}'::jsonb,
+        $1)`,
+    [schemas.OC]
   );
   await new Promise((resolve) => {
     server = app.listen(0, '127.0.0.1', () => {
@@ -359,6 +430,63 @@ test('legacy hidden size placeholder remains recountable without weakening new-p
   });
   assert.equal(visibleInvalid.response.status, 422, visibleInvalid.text);
   assert.match(visibleInvalid.data.error, /Розмір/);
+});
+
+test('recount explicitly clears optional answers without weakening real zero or required values', async () => {
+  const correctionPayload = {
+    sourceSku: 'OC1001',
+    answers: { discount: null, packaging: 2, zero_option: 0, is_calibrated: 0 },
+    isCalibrated: 0,
+    reason: 'clear optional discount',
+  };
+  const preview = await request('/api/recount/preview', {
+    method: 'POST',
+    body: correctionPayload,
+  });
+  assert.equal(preview.response.status, 200, preview.text);
+  assert.equal(Object.hasOwn(preview.data.corrected.answers, 'discount'), false);
+  assert.equal(preview.data.corrected.answers.packaging, 2);
+  assert.equal(preview.data.corrected.answers.zero_option, 0);
+  assert.equal(preview.data.corrected.answers.is_calibrated, 0);
+
+  const applied = await request('/api/recount/apply', {
+    method: 'POST',
+    body: correctionPayload,
+  });
+  assert.equal(applied.response.status, 200, applied.text);
+  const corrected = await pool.query(
+    `SELECT corrected.details->'answers' AS answers
+     FROM products source
+     JOIN products corrected ON corrected.id = source.corrected_to_product_id
+     WHERE source.full_sku = 'OC1001'`
+  );
+  assert.equal(Object.hasOwn(corrected.rows[0].answers, 'discount'), false);
+  assert.equal(corrected.rows[0].answers.zero_option, 0);
+  assert.equal(corrected.rows[0].answers.is_calibrated, 0);
+
+  const anotherOptional = await request('/api/recount/preview', {
+    method: 'POST',
+    body: {
+      sourceSku: 'OC1002',
+      answers: { packaging: null },
+      isCalibrated: 0,
+      reason: 'clear another optional answer',
+    },
+  });
+  assert.equal(anotherOptional.response.status, 200, anotherOptional.text);
+  assert.equal(Object.hasOwn(anotherOptional.data.corrected.answers, 'packaging'), false);
+
+  const requiredCleared = await request('/api/recount/preview', {
+    method: 'POST',
+    body: {
+      sourceSku: 'OC1002',
+      answers: { required_choice: null, discount: 2 },
+      isCalibrated: 0,
+      reason: 'required must remain strict',
+    },
+  });
+  assert.equal(requiredCleared.response.status, 422, requiredCleared.text);
+  assert.match(requiredCleared.data.error, /Обов’язковий вибір/);
 });
 
 test('parallel replica bootstrap is idempotent through calibrated questions and SKU schemas', async () => {

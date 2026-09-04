@@ -4,6 +4,8 @@ import {
   buildRecountPayload,
   getDecodedAnswerMap,
   haveAnswersChanged,
+  updateRecountOptionAnswer,
+  updateRecountTextAnswer,
 } from '../lib/product-recount.js';
 import { getRecountFieldBlockers } from '../lib/recount-blockers.js';
 
@@ -133,14 +135,8 @@ export function useProductRecount({
     const question = config?.questions?.[decodeData?.category?.code]?.find(
       (item) => item.id === questionId
     );
-    const selectedValue = Number(valueId);
-
-    setRecountAnswers((previousAnswers) => {
-      const shouldClear = question?.required !== 1
-        && selectedValue !== 0
-        && Number(previousAnswers[questionId] || 0) === selectedValue;
-      return { ...previousAnswers, [questionId]: shouldClear ? 0 : selectedValue };
-    });
+    setRecountAnswers((previousAnswers) =>
+      updateRecountOptionAnswer(previousAnswers, question, valueId));
     setIsRecountConfirmOpen(false);
     setRecountPreview(null);
     setRecountError('');
@@ -152,16 +148,8 @@ export function useProductRecount({
       (item) => item.id === questionId
     );
 
-    setRecountAnswers((previousAnswers) => {
-      const normalizedValue = String(value || '').trim();
-      if (!normalizedValue) {
-        const nextAnswers = { ...previousAnswers };
-        if (question?.required === 1) delete nextAnswers[questionId];
-        else nextAnswers[questionId] = 0;
-        return nextAnswers;
-      }
-      return { ...previousAnswers, [questionId]: normalizedValue };
-    });
+    setRecountAnswers((previousAnswers) =>
+      updateRecountTextAnswer(previousAnswers, question, value));
     setIsRecountConfirmOpen(false);
     setRecountPreview(null);
     setRecountError('');

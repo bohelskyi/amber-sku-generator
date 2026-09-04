@@ -5,6 +5,7 @@ import {
   formatDecodedSuffix,
   formatUah,
   formatUahPerGram,
+  formatWholeUah,
   formatUsd,
 } from '../../lib/formatters';
 import { getAnswerValueLabel, getQuestionLabel } from '../../lib/answer-labels';
@@ -366,7 +367,7 @@ export function DecodeWorkspace({
                   && decodeData.pricing.automaticPriceUah !== null
                   && decodeData.pricing.automaticPriceUah !== undefined && (
                   <div className="mt-2 text-xs text-slate-600">
-                    Розраховано до округлення: {formatUah(decodeData.pricing.calculatedPriceUah)}
+                    Розраховано до округлення: {formatWholeUah(decodeData.pricing.calculatedPriceUah)}
                     {' → '}автоматична ціна: {formatUah(decodeData.pricing.automaticPriceUah)}
                   </div>
                 )}
@@ -580,7 +581,7 @@ function RecountPanel({
                     {question.required !== 1
                       && !visibleOptions.some((option) => Number(option.id) === 0) && (
                       <button
-                        onClick={() => onRecountAnswer(question.id, 0)}
+                        onClick={() => onRecountAnswer(question.id, null)}
                         disabled={isRecountLoading || isRecountApplying}
                         className={`option-pill ${
                           Number(recountAnswers[question.id] || 0) === 0
@@ -672,7 +673,7 @@ function RecountPanel({
                     && recountPreview.corrected.autoPriceUah !== null
                     && recountPreview.corrected.autoPriceUah !== undefined && (
                     <div className="mt-1 text-xs text-slate-500">
-                      До округлення: {formatUah(recountPreview.corrected.calculatedPriceUah)}
+                      До округлення: {formatWholeUah(recountPreview.corrected.calculatedPriceUah)}
                       {' → '}автоматично: {formatUah(recountPreview.corrected.autoPriceUah)}
                     </div>
                   )}
@@ -777,7 +778,7 @@ function PreviousPricingSnapshot({ config, decodeData }) {
             && pricing.automaticPriceUah !== null
             && pricing.automaticPriceUah !== undefined && (
             <div className="mt-1 text-xs text-slate-500">
-              До округлення: {formatUah(pricing.calculatedPriceUah)}
+              До округлення: {formatWholeUah(pricing.calculatedPriceUah)}
               {' → '}автоматично: {formatUah(pricing.automaticPriceUah)}
             </div>
           )}

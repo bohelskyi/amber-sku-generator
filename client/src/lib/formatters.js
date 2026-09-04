@@ -20,6 +20,10 @@ export const formatUah = (value) => (hasFiniteNumericValue(value)
   ? `${formatDecimal(value)} ₴`
   : '---');
 
+export const formatWholeUah = (value) => (hasFiniteNumericValue(value)
+  ? formatUah(Math.round(Number(value)))
+  : '---');
+
 export const formatUahPerGram = (value) => {
   return hasFiniteNumericValue(value)
     ? `${formatDecimal(value)} ₴`

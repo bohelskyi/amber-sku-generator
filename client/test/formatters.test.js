@@ -6,6 +6,7 @@ import {
   formatDecodedSuffix,
   formatUah,
   formatUahPerGram,
+  formatWholeUah,
   formatUsd,
 } from '../src/lib/formatters.js';
 
@@ -28,4 +29,9 @@ test('price and weight formatters consistently use compact decimals', () => {
   assert.equal(formatUahPerGram('1.2500'), '1.25 ₴');
   assert.equal(formatUsd('1.0000'), '$1');
   assert.equal(formatDecodedSuffix({ type: 'weight', value: '2.0000' }), '2 г');
+});
+
+test('pre-rounded UAH display is formatted as a whole hryvnia amount', () => {
+  assert.equal(formatWholeUah(736.1576319999999), '736 ₴');
+  assert.equal(formatWholeUah(750), '750 ₴');
 });

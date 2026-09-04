@@ -26,6 +26,34 @@ export function haveAnswersChanged(previousAnswers, nextAnswers) {
   );
 }
 
+export function updateRecountOptionAnswer(previousAnswers, question, valueId) {
+  const questionId = question?.id;
+  if (valueId === null || valueId === undefined || valueId === '') {
+    return { ...previousAnswers, [questionId]: null };
+  }
+
+  const selectedValue = Number(valueId);
+  const previousValue = previousAnswers?.[questionId];
+  const hadPreviousValue = previousValue !== undefined
+    && previousValue !== null
+    && String(previousValue).trim() !== '';
+  const shouldClear = question?.required !== 1
+    && hadPreviousValue
+    && Number(previousValue) === selectedValue;
+  return {
+    ...previousAnswers,
+    [questionId]: shouldClear ? null : selectedValue,
+  };
+}
+
+export function updateRecountTextAnswer(previousAnswers, question, value) {
+  const normalizedValue = String(value || '').trim();
+  return {
+    ...previousAnswers,
+    [question?.id]: normalizedValue || null,
+  };
+}
+
 export function buildRecountPayload({
   sourceSku,
   answers,

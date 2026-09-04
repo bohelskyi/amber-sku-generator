@@ -109,16 +109,31 @@ test('automatic pricing views expose calculated and final marketing-rounded UAH 
     new URL('../src/components/app/PreviewResult.jsx', import.meta.url),
     'utf8'
   );
-  const recountSource = fs.readFileSync(
+  assert.match(dashboardSource, /pricing\.calculatedPriceUah/);
+  assert.match(dashboardSource, /pricing\.automaticPriceUah/);
+  assert.match(previewSource, /previewData\.calculatedPriceUah/);
+  assert.match(dashboardSource, /Розраховано до округлення/);
+});
+
+test('product, decode, and normal preview pre-rounded UAH labels use whole-hryvnia formatting', () => {
+  const sources = [
+    '../src/components/app/HomeDashboard.jsx',
+    '../src/components/app/PreviewResult.jsx',
+  ].map((path) => fs.readFileSync(new URL(path, import.meta.url), 'utf8'));
+  const recountConfirmSource = fs.readFileSync(
     new URL('../src/components/app/RecountConfirmDialog.jsx', import.meta.url),
     'utf8'
   );
 
-  assert.match(dashboardSource, /pricing\.calculatedPriceUah/);
-  assert.match(dashboardSource, /pricing\.automaticPriceUah/);
-  assert.match(previewSource, /previewData\.calculatedPriceUah/);
-  assert.match(recountSource, /preview\.corrected\.autoPriceUah/);
-  assert.match(dashboardSource, /Розраховано до округлення/);
+  for (const source of sources) {
+    assert.doesNotMatch(source, /округлення: \{formatUah\(/i);
+  }
+  assert.ok(
+    sources.every((source) => /formatWholeUah/.test(source)),
+    'every product/decode pre-rounded price view must use the whole-UAH formatter'
+  );
+  assert.doesNotMatch(recountConfirmSource, /До округлення/);
+  assert.doesNotMatch(recountConfirmSource, /formatWholeUah/);
 });
 
 test('correction queue wires exclusive browser claims and shared polling into the UI', () => {

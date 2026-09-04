@@ -1,4 +1,10 @@
-import { formatDecimal, formatUah, formatUahPerGram, formatUsd } from '../../lib/formatters';
+import {
+  formatDecimal,
+  formatUah,
+  formatUahPerGram,
+  formatWholeUah,
+  formatUsd,
+} from '../../lib/formatters';
 
 export function PreviewResult({
   previewData,
@@ -74,7 +80,7 @@ export function PreviewResult({
               && previewData.totalPriceUah !== null
               && previewData.totalPriceUah !== undefined && (
               <p className="text-xs text-slate-500">
-                До округлення: {formatUah(previewData.calculatedPriceUah)}
+                До округлення: {formatWholeUah(previewData.calculatedPriceUah)}
                 {' → '}автоматично: {formatUah(previewData.totalPriceUah)}
               </p>
             )}
@@ -103,7 +109,7 @@ export function PreviewResult({
               && previewData.totalPriceUah !== null
               && previewData.totalPriceUah !== undefined && (
               <p className="text-xs text-slate-500">
-                До округлення: {formatUah(previewData.calculatedPriceUah)}
+                До округлення: {formatWholeUah(previewData.calculatedPriceUah)}
                 {' → '}автоматично: {formatUah(previewData.totalPriceUah)}
               </p>
             )}

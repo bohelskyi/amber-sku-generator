@@ -161,6 +161,24 @@ function normalizeAnswerMap(answers = {}) {
   }, {});
 }
 
+function mergeRecountAnswerPatch(previousAnswers, submittedAnswers) {
+  const answerPatch = submittedAnswers && typeof submittedAnswers === 'object'
+    ? submittedAnswers
+    : {};
+  const mergedAnswers = {
+    ...previousAnswers,
+    ...normalizeAnswerMap(answerPatch),
+  };
+
+  for (const [key, value] of Object.entries(answerPatch)) {
+    if (value === undefined || value === null || String(value).trim() === '') {
+      delete mergedAnswers[key];
+    }
+  }
+
+  return mergedAnswers;
+}
+
 function getProductDetails(product) {
   if (!product?.details || typeof product.details !== 'object') return {};
   return product.details;
@@ -909,16 +927,21 @@ async function buildProductRecountPreview({
 
   const categoryCode = sourceDecoded.category.code;
   const previousAnswers = buildProductAnswerContext(sourceDecoded);
-  const nextAnswers = {
-    ...previousAnswers,
-    ...normalizeAnswerMap(answers),
-  };
+  const submittedAnswers = answers && typeof answers === 'object' ? answers : {};
+  const nextAnswers = mergeRecountAnswerPatch(previousAnswers, submittedAnswers);
+  const hasSubmittedCalibration = Object.hasOwn(submittedAnswers, 'is_calibrated');
   const nextIsCalibrated =
     isCalibrated !== undefined && isCalibrated !== null && isCalibrated !== ''
       ? Number(isCalibrated)
-      : nextAnswers.is_calibrated ?? getProductDetails(sourceDecoded.product).isCalibrated ?? null;
+      : hasSubmittedCalibration
+        ? nextAnswers.is_calibrated ?? null
+        : nextAnswers.is_calibrated
+          ?? getProductDetails(sourceDecoded.product).isCalibrated
+          ?? null;
   if (nextIsCalibrated !== null && nextIsCalibrated !== undefined) {
     nextAnswers.is_calibrated = Number(nextIsCalibrated);
+  } else {
+    delete nextAnswers.is_calibrated;
   }
 
   const changes = getAnswerChanges(previousAnswers, nextAnswers);
