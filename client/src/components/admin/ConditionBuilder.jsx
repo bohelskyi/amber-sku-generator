@@ -154,7 +154,7 @@ export function ConditionBuilder({
                         <button
                           key={optionValue}
                           type="button"
-                          className={`rounded-lg border px-2 py-1 text-xs transition ${isSelected ? 'border-[rgba(20,32,59,0.45)] bg-[rgba(20,32,59,0.08)] text-slate-900' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                          className={`rounded-lg border px-2 py-1 text-xs transition ${isSelected ? 'is-selected-warm' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
                           onClick={() => {
                             const nextValues = isSelected
                               ? row.values.filter((item) => item !== optionValue)

@@ -23,7 +23,7 @@ function AppPage() {
 
   return (
     <div className="app-page">
-      <div className="mx-auto max-w-7xl space-y-7 px-4 py-6 sm:px-6 sm:py-8">
+      <div className="mx-auto max-w-7xl space-y-5 px-4 py-4 sm:px-6 sm:py-6">
         <PageHeader config={sku.config} selectedCat={sku.selectedCat} historyCount={sku.history.length} />
         <Toast message={sku.copyMessage} />
 

@@ -203,8 +203,8 @@ export function AdminStructureEditor({
   };
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start fade-up stagger-2">
-      <div className="card p-5 sm:p-6 flex flex-col">
+    <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-3 fade-up stagger-2">
+      <div className="card flex flex-col p-4">
         <div className="section-title mb-4">
           <h2 className="section-title-text">1. Категорії</h2>
         </div>
@@ -213,7 +213,7 @@ export function AdminStructureEditor({
             <div
               key={category.code}
               onClick={() => selectCategory(category)}
-              className={`p-3 rounded-xl cursor-pointer flex justify-between items-center border transition ${selectedCat?.code === category.code ? 'bg-[rgba(221,151,74,0.18)] border-[rgba(221,151,74,0.5)]' : 'border-slate-200 hover:bg-slate-50'}`}
+              className={`p-3 rounded-xl cursor-pointer flex justify-between items-center border transition ${selectedCat?.code === category.code ? 'is-selected-warm' : 'border-slate-200 hover:bg-slate-50'}`}
             >
               <div>
                 <span className="font-semibold text-slate-800">{category.name}</span>
@@ -278,7 +278,7 @@ export function AdminStructureEditor({
         </div>
       </div>
 
-      <div className="card p-5 sm:p-6 flex flex-col">
+      <div className="card flex flex-col p-4">
         <div className="section-title mb-4">
           <h2 className="section-title-text">2. Питання</h2>
           {selectedCat && (
@@ -344,7 +344,7 @@ export function AdminStructureEditor({
                 setDraggedQuestionId(null);
                 setQuestionDropTarget({ id: null, position: null });
               }}
-              className={`relative p-3 rounded-xl cursor-move flex justify-between items-center border transition ${draggedQuestionId === question.q_db_id ? 'opacity-60 border-[rgba(221,151,74,0.6)] bg-[rgba(221,151,74,0.10)]' : selectedQuestion?.id === question.id ? 'bg-[rgba(20,32,59,0.08)] border-[rgba(20,32,59,0.4)]' : 'border-slate-200 hover:bg-slate-50'}`}
+              className={`relative p-3 rounded-xl cursor-move flex justify-between items-center border transition ${draggedQuestionId === question.q_db_id ? 'opacity-60 border-[rgba(221,151,74,0.6)] bg-[rgba(221,151,74,0.10)]' : selectedQuestion?.id === question.id ? 'is-selected-warm' : 'border-slate-200 hover:bg-slate-50'}`}
             >
               {questionDropTarget.id === question.q_db_id && questionDropTarget.position === 'before' && (
                 <div className="pointer-events-none absolute -top-1 left-3 right-3 h-1 rounded-full bg-[rgba(221,151,74,0.95)]" />
@@ -479,7 +479,7 @@ export function AdminStructureEditor({
         )}
       </div>
 
-      <div className="card p-5 sm:p-6 flex flex-col">
+      <div className="card flex flex-col p-4">
         <div className="section-title mb-4">
           <h2 className="section-title-text">3. Варіанти</h2>
         </div>

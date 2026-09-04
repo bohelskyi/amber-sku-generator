@@ -880,12 +880,11 @@ export default function RepricingPage() {
 
   return (
     <div className="app-page">
-      <main className="mx-auto min-w-0 max-w-7xl space-y-7 overflow-hidden px-4 py-6 pb-24 sm:px-6 sm:py-8">
-        <header className="page-heading">
+      <main className="mx-auto min-w-0 max-w-7xl space-y-5 overflow-hidden px-4 py-4 pb-20 sm:px-6 sm:py-6">
+        <header className="console-header">
           <div>
-            <p className="eyebrow">Admin Workspace</p>
-            <h1 className="page-title">Масова переоцінка</h1>
-            <p className="section-subtitle mt-1">Перевіряйте зміни, вирішуйте ручні ціни та застосовуйте оновлення контрольовано.</p>
+            <h1 className="text-xl font-semibold tracking-tight text-slate-900">Масова переоцінка</h1>
+            <p className="mt-1 text-xs text-slate-500">Метрики, ручні рішення та контрольоване застосування.</p>
           </div>
           <div className="flex flex-wrap gap-2 self-start lg:self-auto">
             <button
@@ -992,7 +991,7 @@ export default function RepricingPage() {
           </div>
         )}
 
-        <section className="card min-w-0 overflow-hidden">
+        <section className="card repricing-workspace min-w-0">
           <div className="border-b border-slate-200 p-5 sm:p-6">
             <div className="mb-3 text-sm font-semibold text-slate-800">Переоцінка за окремою матрицею</div>
             <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(280px,1fr)_auto] lg:items-end">
@@ -1135,15 +1134,15 @@ export default function RepricingPage() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 border-b border-slate-200 sm:grid-cols-5">
+              <div className="repricing-metrics grid grid-cols-2 border-b border-slate-200 sm:grid-cols-5">
                 {[
-                  ['Знайдено', preview.summary.candidateCount],
-                  ['Зміниться', effectiveSummary.changedCount],
-                  ['Без змін', effectiveSummary.unchangedCount],
-                  ['Пропущено', preview.summary.skippedCount],
-                  ['Помилки', effectiveSummary.errorCount],
-                ].map(([label, value]) => (
-                  <div key={label} className="border-r border-slate-200 px-4 py-3 last:border-r-0">
+                  ['Знайдено', preview.summary.candidateCount, 'neutral'],
+                  ['Зміниться', effectiveSummary.changedCount, 'change'],
+                  ['Без змін', effectiveSummary.unchangedCount, 'neutral'],
+                  ['Пропущено', preview.summary.skippedCount, 'warning'],
+                  ['Помилки', effectiveSummary.errorCount, 'error'],
+                ].map(([label, value, tone]) => (
+                  <div key={label} className={`repricing-metric is-${tone} border-r border-slate-200 px-4 py-3 last:border-r-0`}>
                     <div className="text-xs text-slate-500">{label}</div>
                     <div className="mt-1 text-xl font-semibold text-slate-900">{value}</div>
                   </div>
@@ -1176,7 +1175,7 @@ export default function RepricingPage() {
                 </div>
               )}
 
-              <div className="flex flex-col gap-3 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="repricing-toolbar flex flex-col gap-3 border-b border-slate-200 p-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex flex-wrap gap-2">
                   <div className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1">
                     {[
@@ -1189,7 +1188,7 @@ export default function RepricingPage() {
                       <button
                         key={value}
                         type="button"
-                        className={`rounded-md px-3 py-1.5 text-xs font-semibold ${filter === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+                        className={`rounded-md border px-3 py-1.5 text-xs font-semibold ${filter === value ? 'border-amber-300 bg-amber-50 text-amber-950 shadow-sm' : 'border-transparent text-slate-600'}`}
                         onClick={() => setFilter(value)}
                       >
                         {label}
@@ -1205,7 +1204,7 @@ export default function RepricingPage() {
                       <button
                         key={value}
                         type="button"
-                        className={`rounded-md px-3 py-1.5 text-xs font-semibold ${reviewFilter === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+                        className={`rounded-md border px-3 py-1.5 text-xs font-semibold ${reviewFilter === value ? 'border-amber-300 bg-amber-50 text-amber-950 shadow-sm' : 'border-transparent text-slate-600'}`}
                         onClick={() => setReviewFilter(value)}
                       >
                         {label}
@@ -1242,7 +1241,7 @@ export default function RepricingPage() {
               </div>
 
               <div className="relative isolate max-h-[560px] overflow-auto">
-                <table className="min-w-full bg-white">
+                <table className="dense-table min-w-full bg-white">
                   <thead>
                     <tr className="table-head">
                       <SortHeader column="sku" sort={sort} onSort={handleSort}>Артикул</SortHeader>
@@ -1275,14 +1274,14 @@ export default function RepricingPage() {
                         <td className="table-cell min-w-48 text-xs text-slate-800">
                           <div className="font-mono font-semibold">{item.sku}</div>
                           <div className="mt-1 flex flex-wrap gap-1">
-                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                            <span className={`status-badge ${
                               item.status === 'error'
-                                ? 'bg-rose-100 text-rose-700'
+                                ? 'is-error'
                                 : item.status === 'skipped'
-                                  ? 'bg-amber-100 text-amber-800'
+                                  ? 'is-skipped'
                                 : item.status === 'unchanged'
-                                  ? 'bg-slate-100 text-slate-600'
-                                  : 'bg-emerald-100 text-emerald-700'
+                                  ? 'is-neutral'
+                                  : 'is-change'
                             }`}>
                               {item.status === 'error'
                                 ? 'Помилка'
@@ -1292,12 +1291,12 @@ export default function RepricingPage() {
                                   ? 'Без змін'
                                   : 'Зміниться'}
                             </span>
-                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                            <span className={`status-badge ${
                               item.pricingState === 'manual' || item.errorCode === 'manual_price' || item.manualOverride
-                                ? 'bg-amber-100 text-amber-800'
+                                ? 'is-manual'
                                 : item.pricingState === 'missing' || item.errorCode === 'price_missing'
-                                  ? 'bg-rose-100 text-rose-700'
-                                  : 'bg-sky-100 text-sky-700'
+                                  ? 'is-missing'
+                                  : 'is-automatic'
                             }`}>
                               {item.manualOverride
                                 ? 'Ручна підтверджена'
@@ -1457,7 +1456,7 @@ export default function RepricingPage() {
                 )}
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 p-4 sm:p-5">
+              <div className="action-summary-bar flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
                   <span>Рядків у перегляді: {visibleItems.length}</span>
                   {manualOverrides.length > 0 && (
@@ -1474,7 +1473,7 @@ export default function RepricingPage() {
                 </div>
                 <button
                   type="button"
-                  className="btn btn-primary gap-2"
+                  className="btn btn-amber gap-2"
                   disabled={!canApply}
                   onClick={() => setConfirmOpen(true)}
                 >
@@ -1491,7 +1490,7 @@ export default function RepricingPage() {
             <h2 className="text-lg font-semibold text-slate-900">Історія переоцінок</h2>
           </div>
           <div className="overflow-x-auto">
-            <table className="min-w-full">
+            <table className="dense-table min-w-full">
               <thead>
                 <tr className="table-head">
                   <th className="table-cell text-left">Дата</th>

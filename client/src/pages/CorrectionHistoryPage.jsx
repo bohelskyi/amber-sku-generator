@@ -217,12 +217,11 @@ export default function CorrectionHistoryPage() {
 
   return (
     <div className="app-page">
-      <main className="mx-auto w-full min-w-0 max-w-7xl space-y-7 overflow-hidden px-4 py-6 pb-24 sm:px-6 sm:py-8">
-        <header className="page-heading">
+      <main className="mx-auto w-full min-w-0 max-w-7xl space-y-5 overflow-hidden px-4 py-4 pb-20 sm:px-6 sm:py-6">
+        <header className="console-header">
           <div>
-            <p className="eyebrow">Admin Workspace</p>
-            <h1 className="page-title">Історія переобліків</h1>
-            <p className="section-subtitle mt-1">Журнал змін SKU, характеристик і цін із фільтрами та експортом.</p>
+            <h1 className="text-xl font-semibold tracking-tight text-slate-900">Історія переобліків</h1>
+            <p className="mt-1 text-xs text-slate-500">Зміни SKU, характеристик і цін.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             {isAdminView && (
