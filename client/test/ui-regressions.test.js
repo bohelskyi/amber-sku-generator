@@ -105,20 +105,98 @@ test('automatic pricing views expose calculated and final marketing-rounded UAH 
     new URL('../src/components/app/HomeDashboard.jsx', import.meta.url),
     'utf8'
   );
-  const previewSource = fs.readFileSync(
-    new URL('../src/components/app/PreviewResult.jsx', import.meta.url),
+  const builderSource = fs.readFileSync(
+    new URL('../src/components/app/ProductBuilder.jsx', import.meta.url),
+    'utf8'
+  );
+  const skuManagerSource = fs.readFileSync(
+    new URL('../src/hooks/useSkuManager.js', import.meta.url),
     'utf8'
   );
   assert.match(dashboardSource, /pricing\.calculatedPriceUah/);
   assert.match(dashboardSource, /pricing\.automaticPriceUah/);
-  assert.match(previewSource, /previewData\.calculatedPriceUah/);
+  assert.match(builderSource, /displayedPricing\?\.calculatedPriceUah/);
+  assert.match(skuManagerSource, /previewData\?\.totalPriceUah/);
+  assert.match(builderSource, /displayedPricing\?\.pricePerGramUah/);
+  assert.match(builderSource, /displayedPricing\?\.pricePerGram/);
   assert.match(dashboardSource, /Розраховано до округлення/);
+});
+
+test('product builder uses compact ordered rows and keeps operational status in the summary', () => {
+  const builderSource = fs.readFileSync(
+    new URL('../src/components/app/ProductBuilder.jsx', import.meta.url),
+    'utf8'
+  );
+  const appSource = fs.readFileSync(
+    new URL('../src/pages/AppPage.jsx', import.meta.url),
+    'utf8'
+  );
+  const stylesSource = fs.readFileSync(
+    new URL('../src/index.css', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(builderSource, /visibleQuestions\.map\(\(question\)/);
+  assert.match(builderSource, /builder-field-row/);
+  assert.match(builderSource, /className="required-marker"/);
+  assert.match(builderSource, /className="builder-blockers"/);
+  assert.match(builderSource, /label="Розрахункова"/);
+  assert.match(builderSource, /label="Фінальна"/);
+  assert.match(builderSource, /Змінити ціну/);
+  assert.match(builderSource, /label="SKU"/);
+  assert.match(builderSource, /verificationAttempt > 0/);
+  assert.match(builderSource, /validationVisible \? fieldBlockers : \[\]/);
+  assert.match(builderSource, /Не перевірено/);
+  assert.match(builderSource, /Потрібна увага/);
+  assert.match(builderSource, /data-builder-blocker/);
+  assert.match(builderSource, /scrollIntoView/);
+  assert.doesNotMatch(builderSource, /Крок 1/);
+  assert.doesNotMatch(builderSource, /Поля показуються за чинною конфігурацією/);
+  assert.doesNotMatch(builderSource, /className="field-group"/);
+  assert.doesNotMatch(appSource, /PreviewResult/);
+  assert.match(appSource, /\{sku\.selectedCat && \(/);
+  assert.doesNotMatch(stylesSource, /builder-field-row:focus-within/);
+  assert.match(builderSource, /getFinalPriceUsd\(displayedFinalPriceUah, displayedPricing\.uahRate\)/);
+});
+
+test('product builder live pricing refreshes after answer and weight edits without unlocking save', () => {
+  const builderSource = fs.readFileSync(
+    new URL('../src/components/app/ProductBuilder.jsx', import.meta.url),
+    'utf8'
+  );
+  const skuManagerSource = fs.readFileSync(
+    new URL('../src/hooks/useSkuManager.js', import.meta.url),
+    'utf8'
+  );
+  const appSource = fs.readFileSync(
+    new URL('../src/pages/AppPage.jsx', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(skuManagerSource, /api\.post\('\/price-preview'/);
+  assert.match(
+    skuManagerSource,
+    /\[selectedCat, config, answers, weight, isCalibrated, isWeightRequired\]/,
+    'live pricing must react to both answer and weight changes'
+  );
+  assert.match(skuManagerSource, /const handleAnswer[\s\S]*?beginLivePriceRefresh\(\);/);
+  assert.match(skuManagerSource, /const handleWeightChange[\s\S]*?beginLivePriceRefresh\(\);/);
+  assert.match(appSource, /livePriceData=\{sku\.livePriceData\}/);
+  assert.match(
+    builderSource,
+    /const displayedPricing = previewData \|\| \(fieldBlockers\.length === 0 \? livePriceData : null\)/
+  );
+  assert.match(builderSource, /displayedPricing\?\.totalPriceUah/);
+  assert.match(builderSource, /const isVerified = Boolean\(previewData\)/);
+  assert.match(builderSource, /\{isVerified \? \(/);
+  assert.match(builderSource, /verificationAttempt > 0 && !isVerified/);
+  assert.match(builderSource, /validationVisible \? fieldBlockers : \[\]/);
 });
 
 test('product, decode, and normal preview pre-rounded UAH labels use whole-hryvnia formatting', () => {
   const sources = [
     '../src/components/app/HomeDashboard.jsx',
-    '../src/components/app/PreviewResult.jsx',
+    '../src/components/app/ProductBuilder.jsx',
   ].map((path) => fs.readFileSync(new URL(path, import.meta.url), 'utf8'));
   const recountConfirmSource = fs.readFileSync(
     new URL('../src/components/app/RecountConfirmDialog.jsx', import.meta.url),

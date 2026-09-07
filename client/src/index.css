@@ -292,6 +292,156 @@
     box-shadow: 0 0 0 3px rgba(221, 151, 74, 0.11);
   }
 
+  .builder-workspace,
+  .builder-summary { border-radius: var(--radius-sm); }
+
+  .builder-workspace:hover,
+  .builder-summary:hover { border-color: var(--border); }
+
+  .builder-header {
+    @apply flex items-center justify-between gap-4 border-b px-5 py-3.5 sm:px-6;
+    border-color: var(--border);
+    background: var(--surface-muted);
+  }
+
+  .builder-field-list {
+    @apply divide-y divide-slate-200 px-5 sm:px-6;
+  }
+
+  .builder-field-row {
+    @apply grid gap-1.5 py-2.5 md:grid-cols-[180px_minmax(0,1fr)] md:gap-4;
+  }
+
+  .builder-field-row.is-accounting { background: var(--surface-muted); }
+
+  .builder-field-row.is-invalid {
+    background: var(--danger-bg);
+    box-shadow: inset 2px 0 0 var(--danger);
+  }
+
+  .builder-field-row.is-invalid .builder-field-label label { color: #912018; }
+
+  .builder-field-row.is-invalid .input { border-color: #e47870; }
+
+  .builder-field-label { @apply min-w-0 pt-1.5; }
+
+  .builder-field-label label { @apply text-[13px] font-medium text-slate-700; }
+
+  .required-marker {
+    @apply ml-1 text-[11px] font-semibold;
+    color: rgba(180, 35, 24, 0.78);
+  }
+
+  .builder-text-input { @apply w-full max-w-xl py-2; }
+
+  .builder-weight-input { @apply w-full max-w-[160px] py-2; }
+
+  .builder-option {
+    @apply min-h-8 rounded-md px-2.5 py-1 text-[13px];
+  }
+
+  .builder-option.option-pill-active { box-shadow: none; }
+
+  .builder-field-error {
+    @apply mt-1 text-xs font-medium;
+    color: var(--danger);
+  }
+
+  .builder-summary-header {
+    @apply flex items-center justify-between gap-3 border-b px-4 py-3;
+    border-color: var(--border);
+    background: var(--surface-muted);
+  }
+
+  .builder-summary-header h3 { @apply text-sm font-semibold text-slate-900; }
+
+  .builder-state {
+    @apply inline-flex items-center gap-1.5 text-xs font-medium;
+  }
+
+  .builder-state > span { @apply h-2 w-2 rounded-full; }
+
+  .builder-state.is-neutral { color: var(--text-muted); }
+
+  .builder-state.is-neutral > span { background: #98a2b3; }
+
+  .builder-state.is-error { color: var(--danger); }
+
+  .builder-state.is-error > span { background: var(--danger); }
+
+  .builder-state.is-success { color: var(--success); }
+
+  .builder-state.is-success > span { background: var(--success); }
+
+  .builder-summary-body { @apply space-y-3 p-4; }
+
+  .builder-summary-group {
+    @apply space-y-2.5 border-t border-slate-200 pt-3;
+  }
+
+  .builder-summary-group.first { @apply border-t-0 pt-0; }
+
+  .builder-summary-row {
+    @apply flex items-start justify-between gap-4 text-[13px] text-slate-600;
+  }
+
+  .builder-summary-row > span:last-child {
+    @apply text-right font-medium tabular-nums text-slate-800;
+  }
+
+  .builder-summary-row > span.is-strong { @apply font-semibold text-slate-950; }
+
+  .builder-summary-row > span.is-danger { color: var(--danger); }
+
+  .builder-summary-note {
+    @apply text-right text-xs text-slate-500;
+  }
+
+  .builder-summary-note.is-warning { color: var(--warning); }
+
+  .builder-summary-section-title {
+    @apply mb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500;
+  }
+
+  .builder-price-section {
+    @apply border-t border-slate-200 pt-3;
+  }
+
+  .builder-price-row {
+    @apply grid grid-cols-[minmax(0,1fr)_auto_auto] items-baseline gap-x-3 py-1 text-[13px];
+  }
+
+  .builder-price-row > span:first-child { @apply text-slate-600; }
+
+  .builder-price-row > span:not(:first-child) {
+    @apply min-w-[54px] text-right font-medium tabular-nums text-slate-800;
+  }
+
+  .builder-price-row.is-strong > span:not(:first-child) { @apply font-semibold text-slate-950; }
+
+  .builder-blockers {
+    @apply border-l-2 px-3 py-2 text-xs;
+    border-color: var(--danger);
+    color: #912018;
+    background: var(--danger-bg);
+  }
+
+  .builder-blockers p { @apply font-semibold; }
+
+  .builder-blockers ul { @apply mt-1 list-disc space-y-0.5 pl-4; }
+
+  .builder-operation-error {
+    @apply border-l-2 px-3 py-2 text-xs font-medium;
+    border-color: var(--danger);
+    color: #912018;
+    background: var(--danger-bg);
+  }
+
+  .builder-summary-actions {
+    @apply border-t bg-white p-4;
+    border-color: var(--border);
+  }
+
   .dialog-backdrop {
     @apply fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm;
     background: rgba(13, 21, 41, 0.64);

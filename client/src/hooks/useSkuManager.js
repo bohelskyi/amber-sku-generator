@@ -162,19 +162,6 @@ export function useSkuManager() {
   const effectiveTotalPriceUah = hasManualPrice
     ? effectiveManualPriceNumber
     : previewData?.totalPriceUah;
-  const effectiveTotalPrice =
-    hasManualPrice && Number(previewData?.uahRate) > 0
-      ? (effectiveManualPriceNumber / Number(previewData.uahRate)).toFixed(2)
-      : previewData?.totalPrice;
-  const weightNumber = Number(weight || previewData?.weightVal || 0);
-  const effectivePricePerGramUah =
-    hasManualPrice && weightNumber > 0
-      ? (effectiveManualPriceNumber / weightNumber).toFixed(2)
-      : previewData?.pricePerGramUah;
-  const effectivePricePerGram =
-    hasManualPrice && Number(previewData?.uahRate) > 0 && weightNumber > 0
-      ? (effectiveManualPriceNumber / Number(previewData.uahRate) / weightNumber).toFixed(2)
-      : previewData?.pricePerGram;
 
   const clearLivePrice = () => {
     setLivePriceData(null);
@@ -182,9 +169,24 @@ export function useSkuManager() {
     setIsLivePriceLoading(false);
   };
 
+  const beginLivePriceRefresh = () => {
+    setLivePriceError('');
+  };
+
   const normalizeAnswers = (answersMap) => {
     if (!selectedCat || !config) return answersMap;
     return pruneHiddenAnswers(config.questions?.[selectedCat] || [], answersMap);
+  };
+
+  const invalidateProductPreview = () => {
+    setPreviewData(null);
+    setSaveError('');
+    setDisplaySku('');
+    setVariationData(null);
+    setVariationError('');
+    setIsVariationLoading(false);
+    setManualPriceUah('');
+    setIsManualPriceEditing(false);
   };
 
   const resetProductFlow = (catCode) => {
@@ -204,6 +206,7 @@ export function useSkuManager() {
   };
 
   const handleAnswer = (questionId, valueId) => {
+    invalidateProductPreview();
     const selectedValue = Number.parseInt(valueId, 10);
     setAnswers((prevAnswers) => {
       const nextAnswers = { ...prevAnswers };
@@ -217,10 +220,11 @@ export function useSkuManager() {
 
       return normalizeAnswers(nextAnswers);
     });
-    clearLivePrice();
+    beginLivePriceRefresh();
   };
 
   const handleTextAnswer = (questionId, value) => {
+    invalidateProductPreview();
     setAnswers((prevAnswers) => {
       const normalizedValue = String(value || '').trim();
       if (!normalizedValue) {
@@ -230,12 +234,13 @@ export function useSkuManager() {
       }
       return normalizeAnswers({ ...prevAnswers, [questionId]: normalizedValue });
     });
-    clearLivePrice();
+    beginLivePriceRefresh();
   };
 
   const handleWeightChange = (value) => {
+    invalidateProductPreview();
     setWeight(value);
-    clearLivePrice();
+    beginLivePriceRefresh();
   };
 
   useEffect(() => {
@@ -260,7 +265,7 @@ export function useSkuManager() {
     }
 
     if (isWeightRequired) {
-      if (weight === '' || !Number.isFinite(Number(weight)) || Number(weight) < 0) {
+      if (weight === '' || !Number.isFinite(Number(weight)) || Number(weight) <= 0) {
         return;
       }
     }
@@ -313,7 +318,7 @@ export function useSkuManager() {
       return alert(`Будь ласка, заповніть обов'язкові питання: ${missingRequired.map((question) => question.label).join(', ')}`);
     }
 
-    api.post('/preview', {
+    return api.post('/preview', {
       categoryCode: selectedCat,
       answers,
       weight: isWeightRequired ? weight : 0,
@@ -358,17 +363,6 @@ export function useSkuManager() {
     }).finally(() => {
       setIsSaving(false);
     });
-  };
-
-  const handleBackToParameters = () => {
-    setPreviewData(null);
-    setSaveError('');
-    setDisplaySku('');
-    setVariationData(null);
-    setVariationError('');
-    setIsVariationLoading(false);
-    setManualPriceUah('');
-    setIsManualPriceEditing(false);
   };
 
   const handleAddVariation = () => {
@@ -513,9 +507,6 @@ export function useSkuManager() {
     exportFromSku,
     exportStatus,
     exportToSku,
-    effectivePricePerGram,
-    effectivePricePerGramUah,
-    effectiveTotalPrice,
     effectiveTotalPriceUah,
     finalSku,
     getVisibleOptions,
@@ -524,7 +515,6 @@ export function useSkuManager() {
     handleAddVariation,
     handleApplyRecount,
     handleAnswer,
-    handleBackToParameters,
     handleCancelRecount,
     handleCancelRecountConfirmation,
     handleConfirmRecount,
