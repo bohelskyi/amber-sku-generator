@@ -21,6 +21,8 @@ import {
   createLatestRequestGate,
   createVisibilityAwarePoller,
   getCorrectionClaimOwnership,
+  getCorrectionRequestsForView,
+  isCorrectionClaimConflict,
   readCorrectionClaims,
   reconcileCorrectionClaims,
   removeCorrectionClaim,
@@ -44,6 +46,7 @@ const STATUS_CLASSES = {
 
 const FILTERS = [
   ['active', 'Активні', 'active'],
+  ['workspace', 'Робоча область', null],
   ['pending', 'Очікують', 'pending'],
   ['in_progress', 'В роботі', 'inProgress'],
   ['completed', 'Виконані', 'completed'],
@@ -183,7 +186,7 @@ export default function CorrectionRequestsPage() {
   const loadRequests = useCallback(async (nextFilter) => {
     const loadId = requestGate.current.next();
     const response = await api.get('/admin/correction-requests', {
-      params: { status: nextFilter },
+      params: { status: nextFilter === 'workspace' ? 'active' : nextFilter },
     });
     if (
       !requestGate.current.isLatest(loadId)
@@ -240,14 +243,15 @@ export default function CorrectionRequestsPage() {
   }, [focusedRequestId, loading, requests]);
 
   const visibleRequests = useMemo(() => {
+    const orderedRequests = getCorrectionRequestsForView(requests, claims, filter);
     const normalizedSearch = search.trim().toUpperCase();
-    if (!normalizedSearch) return requests;
-    return requests.filter((request) => (
+    if (!normalizedSearch) return orderedRequests;
+    return orderedRequests.filter((request) => (
       request.sourceSku.includes(normalizedSearch)
       || request.proposedSku.includes(normalizedSearch)
       || request.comment.toUpperCase().includes(normalizedSearch)
     ));
-  }, [requests, search]);
+  }, [claims, filter, requests, search]);
 
   const changeFilter = (nextFilter) => {
     if (nextFilter === filter || loading) return;
@@ -293,7 +297,7 @@ export default function CorrectionRequestsPage() {
       await loadRequests(filter);
       setSuccess(`Запит #${request.id} взято в роботу.`);
     } catch (requestError) {
-      if (requestError.response?.status === 409) clearClaim(request.id);
+      if (isCorrectionClaimConflict(requestError)) clearClaim(request.id);
       await loadRequests(filter).catch(() => {});
       setError(getApiError(requestError));
     } finally {
@@ -315,7 +319,7 @@ export default function CorrectionRequestsPage() {
       await loadRequests(filter);
       setSuccess(`Запит #${request.id} повернуто в чергу.`);
     } catch (requestError) {
-      if (requestError.response?.status === 409) clearClaim(request.id);
+      if (isCorrectionClaimConflict(requestError)) clearClaim(request.id);
       await loadRequests(filter).catch(() => {});
       setError(getApiError(requestError));
     } finally {
@@ -357,7 +361,7 @@ export default function CorrectionRequestsPage() {
       if (request.status === 'in_progress') clearClaim(request.id);
       await loadRequests(filter);
     } catch (requestError) {
-      if (request.status === 'in_progress' && requestError.response?.status === 409) {
+      if (request.status === 'in_progress' && isCorrectionClaimConflict(requestError)) {
         clearClaim(request.id);
       }
       await loadRequests(filter).catch(() => {});
@@ -380,7 +384,7 @@ export default function CorrectionRequestsPage() {
       await loadRequests(filter);
       setSuccess(`Запит #${request.id} оновлено. Повторно звірте SKU та ціну на сайті.`);
     } catch (requestError) {
-      if (requestError.response?.status === 409) clearClaim(request.id);
+      if (isCorrectionClaimConflict(requestError)) clearClaim(request.id);
       await loadRequests(filter).catch(() => {});
       setError(getApiError(requestError));
     } finally {
@@ -410,7 +414,7 @@ export default function CorrectionRequestsPage() {
           : `Запит #${request.id} виконано, чернетки переоцінки синхронізовано.`
       );
     } catch (requestError) {
-      if (requestError.response?.status === 409) clearClaim(request.id);
+      if (isCorrectionClaimConflict(requestError)) clearClaim(request.id);
       closeCompletion();
       await loadRequests(filter).catch(() => {});
       setError(getApiError(requestError));
@@ -476,7 +480,7 @@ export default function CorrectionRequestsPage() {
                   className={`shrink-0 rounded-md border px-3 py-1.5 text-xs font-semibold ${filter === value ? 'border-amber-300 bg-amber-50 text-amber-950 shadow-sm' : 'border-transparent text-slate-600'}`}
                   onClick={() => changeFilter(value)}
                 >
-                  {label} · {summary[countKey] || 0}
+                  {label}{countKey ? ` · ${summary[countKey] || 0}` : ''}
                 </button>
               ))}
             </div>

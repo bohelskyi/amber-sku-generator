@@ -55,6 +55,32 @@ export function getCorrectionClaimOwnership(request, claims = {}) {
   return claim && claim.fingerprint === request.claimFingerprint ? 'owned' : 'other';
 }
 
+export function isCorrectionClaimConflict(error) {
+  return error?.response?.data?.details?.type === 'correction_claim_conflict';
+}
+
+export function orderActiveCorrectionRequests(requests = [], claims = {}) {
+  const ownedRequests = [];
+  const remainingRequests = [];
+  for (const request of requests) {
+    const target = getCorrectionClaimOwnership(request, claims) === 'owned'
+      ? ownedRequests
+      : remainingRequests;
+    target.push(request);
+  }
+  return [...ownedRequests, ...remainingRequests];
+}
+
+export function getCorrectionRequestsForView(requests = [], claims = {}, view = 'active') {
+  if (view === 'workspace') {
+    return orderActiveCorrectionRequests(requests, claims).filter((request) => (
+      request.status === 'pending'
+      || getCorrectionClaimOwnership(request, claims) === 'owned'
+    ));
+  }
+  return view === 'active' ? orderActiveCorrectionRequests(requests, claims) : requests;
+}
+
 export function reconcileCorrectionClaims(claims = {}, requests = []) {
   const nextClaims = { ...claims };
   for (const request of requests) {

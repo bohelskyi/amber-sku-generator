@@ -136,11 +136,29 @@ async function claimCorrectionRequest(requestId) {
     if (row.status === 'in_progress') throw claimConflict();
     throw claimConflict(`Запит має статус «${row.status}» і не може бути взятий у роботу.`);
   }
-  return {
-    success: true,
-    request: normalizeRequestRow(result.rows[0]),
-    claimToken,
-  };
+  // Refresh only after the atomic claim commits, then guard every write with that
+  // capability. This keeps preview reads out of the product/request lock order.
+  try {
+    const refreshedRow = await refreshClaimedCorrectionRequest(result.rows[0], claimTokenHash);
+    return {
+      success: true,
+      request: normalizeRequestRow(refreshedRow),
+      claimToken,
+    };
+  } catch (error) {
+    await pool.query(
+      `UPDATE correction_requests
+       SET status = 'pending',
+           claim_token_hash = NULL,
+           claimed_at = NULL,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+         AND status = 'in_progress'
+         AND claim_token_hash = $2`,
+      [Number(requestId), claimTokenHash]
+    );
+    throw error;
+  }
 }
 
 async function releaseCorrectionRequest(requestId, claimToken) {
@@ -227,8 +245,10 @@ async function getCorrectionRequests({ status, search, limit } = {}) {
        FROM correction_requests
        ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
        ORDER BY
-         CASE status WHEN 'in_progress' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
-         updated_at DESC,
+         CASE WHEN status IN ('pending', 'in_progress') THEN 0 ELSE 1 END,
+         CASE WHEN status IN ('pending', 'in_progress') THEN created_at END ASC NULLS LAST,
+         CASE WHEN status IN ('pending', 'in_progress') THEN id END ASC NULLS LAST,
+         COALESCE(completed_at, rejected_at, created_at) DESC,
          id DESC
        LIMIT $${values.length}`,
       values
@@ -315,10 +335,7 @@ async function createCorrectionRequest(payload = {}) {
   }
 }
 
-async function refreshCorrectionRequest(requestId, claimToken) {
-  const row = await getCorrectionRequestRow(requestId);
-  const claimTokenHash = assertClaimOwnership(row, claimToken);
-
+async function refreshClaimedCorrectionRequest(row, claimTokenHash) {
   const preview = await buildProductRecountPreview({
     sourceSku: row.source_sku,
     answers: row.proposed_payload?.answers || {},
@@ -344,16 +361,21 @@ async function refreshCorrectionRequest(requestId, claimToken) {
       JSON.stringify(preview.corrected),
       JSON.stringify(preview.changes || []),
       getCorrectionPreviewSignature(preview),
-      Number(requestId),
+      Number(row.id),
       claimTokenHash,
     ]
   );
   if (result.rows.length === 0) {
-    const error = new Error('Запит змінив статус. Оновіть сторінку.');
-    error.statusCode = 409;
-    throw error;
+    throw claimConflict('Запит змінив статус або більше не належить цьому браузеру.');
   }
-  return { success: true, request: normalizeRequestRow(result.rows[0]) };
+  return result.rows[0];
+}
+
+async function refreshCorrectionRequest(requestId, claimToken) {
+  const row = await getCorrectionRequestRow(requestId);
+  const claimTokenHash = assertClaimOwnership(row, claimToken);
+  const refreshedRow = await refreshClaimedCorrectionRequest(row, claimTokenHash);
+  return { success: true, request: normalizeRequestRow(refreshedRow) };
 }
 
 async function updateCorrectionRequestStatus(requestId, nextStatus, claimToken) {

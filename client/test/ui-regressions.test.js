@@ -144,6 +144,10 @@ test('correction queue wires exclusive browser claims and shared polling into th
 
   assert.match(source, /createVisibilityAwarePoller/);
   assert.match(source, /createLatestRequestGate/);
+  assert.match(source, /Робоча область/);
+  assert.match(source, /nextFilter === 'workspace' \? 'active'/);
+  assert.match(source, /getCorrectionRequestsForView/);
+  assert.match(source, /isCorrectionClaimConflict/);
   assert.match(source, /\/correction-requests\/\$\{request\.id\}\/claim/);
   assert.match(source, /X-Correction-Claim-Token/);
   assert.match(source, /В роботі у вас/);

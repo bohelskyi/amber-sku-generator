@@ -918,21 +918,54 @@ test('legacy in-progress correction requests survive migration 018 and can be cl
       await legacyPool.query(
         "INSERT INTO categories (code, name, requires_weight) VALUES ('CL', 'Claim legacy', 0)"
       );
+      const question = await legacyPool.query(`
+        INSERT INTO questions
+          (category_code, key, label, sku_index, display_order, required,
+           include_in_sku, input_type)
+        VALUES ('CL', 'kind', 'Kind', 1, 1, 1, 1, 'options')
+        RETURNING id
+      `);
+      await legacyPool.query(
+        `INSERT INTO options (question_id, value_id, sku_code, label)
+         VALUES ($1, 1, '1', 'One'), ($1, 2, '2', 'Two')`,
+        [question.rows[0].id]
+      );
+      const scenario = await legacyPool.query(`
+        INSERT INTO price_scenarios
+          (category_code, name, match_json, axis_x_key, price_mode, status)
+        VALUES ('CL', 'Claim prices', '{}'::jsonb, 'kind', 'fixed_uah', 'active')
+        RETURNING id
+      `);
+      await legacyPool.query(
+        `INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
+         VALUES ($1, 1, 0, 100), ($1, 2, 0, 200)`,
+        [scenario.rows[0].id]
+      );
       const products = await legacyPool.query(`
         INSERT INTO products
           (full_sku, base_sku, sequence_number, category, weight, total_price,
            total_price_uah, price_per_gram, details, status)
         VALUES
-          ('CL1001', 'CL1', 1, 'CL', 0, 100, 100, 0, '{}'::jsonb, 'active'),
-          ('CL1002', 'CL1', 2, 'CL', 0, 100, 100, 0, '{}'::jsonb, 'active')
+          ('CL1001', 'CL1', 1, 'CL', 0, 100, 100, 0,
+           '{"answers":{"kind":1},"isCalibrated":0}'::jsonb, 'active'),
+          ('CL1002', 'CL1', 2, 'CL', 0, 100, 100, 0,
+           '{"answers":{"kind":1},"isCalibrated":0}'::jsonb, 'active')
         RETURNING id, full_sku
+      `);
+      await runNodeInDatabase(databaseUrl, `
+        const db = require('./src/db/pool');
+        const { ensureLegacySkuSchemas } = require('./src/services/sku-schema.service');
+        ensureLegacySkuSchemas()
+          .finally(() => db.end())
+          .catch((error) => { console.error(error); process.exitCode = 1; });
       `);
       const firstProduct = products.rows.find((row) => row.full_sku === 'CL1001');
       const inserted = await legacyPool.query(
         `INSERT INTO correction_requests
           (source_product_id, category_code, source_sku, proposed_sku, old_payload,
            proposed_payload, changes, status, preview_signature)
-         VALUES ($1, 'CL', 'CL1001', 'CL2001', '{}'::jsonb, '{}'::jsonb,
+         VALUES ($1, 'CL', 'CL1001', 'CL2001', '{}'::jsonb,
+                 '{"answers":{"kind":2}}'::jsonb,
                  '[]'::jsonb, 'in_progress', 'legacy-signature')
          RETURNING id`,
         [firstProduct.id]
@@ -1697,6 +1730,68 @@ test('concurrent correction only applies once after transactional revalidation',
   });
 });
 
+test('active correction requests stay FIFO when another worker claims a newer request', async () => {
+  const skus = ['ZZQUEUE001', 'ZZQUEUE002', 'ZZQUEUE003', 'ZZQUEUE004'];
+  let productIds = [];
+  try {
+    const products = await pool.query(
+      `INSERT INTO products
+         (full_sku, base_sku, sequence_number, category, weight, total_price,
+          total_price_uah, price_per_gram, uah_rate, details, sku_schema_version_id)
+       VALUES
+         ($1, 'ZZQUEUE', 1, 'ZZ', 0, 25, 1000, 0, 40, '{"answers":{"kind":1}}'::jsonb, $5),
+         ($2, 'ZZQUEUE', 2, 'ZZ', 0, 25, 1000, 0, 40, '{"answers":{"kind":1}}'::jsonb, $5),
+         ($3, 'ZZQUEUE', 3, 'ZZ', 0, 25, 1000, 0, 40, '{"answers":{"kind":1}}'::jsonb, $5),
+         ($4, 'ZZQUEUE', 4, 'ZZ', 0, 25, 1000, 0, 40, '{"answers":{"kind":1}}'::jsonb, $5)
+       RETURNING id`,
+      [...skus, schemas.ZZ]
+    );
+    productIds = products.rows.map((row) => Number(row.id));
+    const inserted = await pool.query(
+      `INSERT INTO correction_requests
+         (source_product_id, category_code, source_sku, proposed_sku, old_payload,
+          proposed_payload, changes, comment, status, preview_signature,
+          claim_token_hash, claimed_at, created_at, updated_at)
+       VALUES
+         ($1, 'ZZ', $5, 'ZZQUEUE101', '{}'::jsonb, '{}'::jsonb, '[]'::jsonb,
+          'oldest pending', 'pending', 'queue-1', NULL, NULL,
+          '2026-01-01T10:00:00Z', '2026-01-01T10:00:00Z'),
+         ($2, 'ZZ', $6, 'ZZQUEUE102', '{}'::jsonb, '{}'::jsonb, '[]'::jsonb,
+          'same-time first', 'pending', 'queue-2', NULL, NULL,
+          '2026-01-02T10:00:00Z', '2026-01-02T10:00:00Z'),
+         ($3, 'ZZ', $7, 'ZZQUEUE103', '{}'::jsonb, '{}'::jsonb, '[]'::jsonb,
+          'same-time second', 'pending', 'queue-3', NULL, NULL,
+          '2026-01-02T10:00:00Z', '2026-01-02T10:00:00Z'),
+         ($4, 'ZZ', $8, 'ZZQUEUE104', '{}'::jsonb, '{}'::jsonb, '[]'::jsonb,
+          'newer external claim', 'in_progress', 'queue-4', repeat('a', 64),
+          '2026-09-01T10:00:00Z', '2026-01-03T10:00:00Z', '2026-09-01T10:00:00Z')
+       RETURNING id
+       `,
+      [...productIds, ...skus]
+    );
+    const requestIds = inserted.rows.map((row) => Number(row.id));
+
+    const active = await request('/api/admin/correction-requests?status=active');
+    assert.equal(active.response.status, 200, active.text);
+    const fixtureItems = active.data.items.filter((item) => requestIds.includes(Number(item.id)));
+    assert.deepEqual(
+      fixtureItems.map((item) => Number(item.id)),
+      requestIds,
+      'created_at ASC and id ASC must win over claim status and updated_at'
+    );
+    assert.deepEqual(
+      fixtureItems.map((item) => item.status),
+      ['pending', 'pending', 'pending', 'in_progress']
+    );
+  } finally {
+    if (productIds.length > 0) {
+      await pool.query('DELETE FROM correction_requests WHERE source_product_id = ANY($1::int[])', [productIds]);
+      await pool.query('DELETE FROM products WHERE id = ANY($1::int[])', [productIds]);
+      await pool.query('DELETE FROM sku_registry WHERE full_sku = ANY($1::text[])', [skus]);
+    }
+  }
+});
+
 test('correction request claims are exclusive, persistent, and owner-authoritative', async () => {
   const productPreview = await request('/api/preview', {
     method: 'POST',
@@ -1833,7 +1928,7 @@ test('correction request claims are exclusive, persistent, and owner-authoritati
   });
 });
 
-test('correction requests reject stale product state, refresh, and complete atomically', async () => {
+test('claim refreshes stale correction data and later changes still block completion', async () => {
   const candidate = await pool.query(
     `SELECT id, full_sku
      FROM products
@@ -1844,69 +1939,152 @@ test('correction requests reject stale product state, refresh, and complete atom
      LIMIT 1`
   );
   assert.ok(candidate.rows[0]);
-  const created = await request('/api/admin/correction-requests', {
-    method: 'POST',
-    body: {
-      sourceSku: candidate.rows[0].full_sku,
-      answers: { kind: 2 },
-      reason: 'stale request integration',
-    },
-  });
-  assert.equal(created.response.status, 200, created.text);
-  const requestId = Number(created.data.request.id);
-  const claimed = await request(`/api/admin/correction-requests/${requestId}/claim`, {
-    method: 'POST', body: {},
-  });
-  assert.equal(claimed.response.status, 200, claimed.text);
-  const claimHeaders = { 'X-Correction-Claim-Token': claimed.data.claimToken };
+  const originalPrice = await pool.query(
+    'SELECT price FROM price_matrix WHERE scenario_id = $1 AND x_val = 2 AND y_val = 0',
+    [schemas.ZZScenario]
+  );
+  try {
+    const created = await request('/api/admin/correction-requests', {
+      method: 'POST',
+      body: {
+        sourceSku: candidate.rows[0].full_sku,
+        answers: { kind: 2 },
+        reason: 'stale request integration',
+      },
+    });
+    assert.equal(created.response.status, 200, created.text);
+    const requestId = Number(created.data.request.id);
+    const originalCalculatedPrice = Number(created.data.request.proposedPayload.calculatedPriceUah);
 
-  await pool.query(
-    'UPDATE products SET total_price_uah = total_price_uah + 1 WHERE id = $1',
-    [candidate.rows[0].id]
-  );
-  const staleCompletion = await request(
-    `/api/admin/correction-requests/${requestId}/complete`,
-    { method: 'POST', body: {}, headers: claimHeaders }
-  );
-  assert.equal(staleCompletion.response.status, 409);
-  const unchanged = await pool.query(
-    `SELECT status, corrected_to_product_id,
-            (SELECT status FROM correction_requests WHERE id = $1) AS request_status
-     FROM products WHERE id = $2`,
-    [requestId, candidate.rows[0].id]
-  );
-  assert.deepEqual(unchanged.rows[0], {
-    status: 'active',
-    corrected_to_product_id: null,
-    request_status: 'in_progress',
-  });
+    const changedSource = await pool.query(
+      `UPDATE products
+       SET total_price_uah = total_price_uah + 1
+       WHERE id = $1
+       RETURNING total_price_uah`,
+      [candidate.rows[0].id]
+    );
+    const changedPrice = await pool.query(
+      `UPDATE price_matrix
+       SET price = price + 613
+       WHERE scenario_id = $1 AND x_val = 2 AND y_val = 0
+       RETURNING price`,
+      [schemas.ZZScenario]
+    );
 
-  const refreshed = await request(
-    `/api/admin/correction-requests/${requestId}/refresh`,
-    { method: 'POST', body: {}, headers: claimHeaders }
-  );
-  assert.equal(refreshed.response.status, 200, refreshed.text);
-  const completed = await request(
-    `/api/admin/correction-requests/${requestId}/complete`,
-    { method: 'POST', body: {}, headers: claimHeaders }
-  );
-  assert.equal(completed.response.status, 200, completed.text);
-  const finalState = await pool.query(
-    `SELECT p.status, p.corrected_to_product_id, cr.status AS request_status,
-            cr.corrected_product_id, cr.claim_token_hash, cr.claimed_at
-     FROM products p
-     JOIN correction_requests cr ON cr.id = $1
-     WHERE p.id = $2`,
-    [requestId, candidate.rows[0].id]
-  );
-  assert.equal(finalState.rows[0].status, 'corrected');
-  assert.equal(finalState.rows[0].request_status, 'completed');
-  assert.equal(finalState.rows[0].claim_token_hash, null);
-  assert.ok(finalState.rows[0].claimed_at);
-  assert.equal(
-    Number(finalState.rows[0].corrected_to_product_id),
-    Number(finalState.rows[0].corrected_product_id)
-  );
+    const claimed = await request(`/api/admin/correction-requests/${requestId}/claim`, {
+      method: 'POST', body: {},
+    });
+    assert.equal(claimed.response.status, 200, claimed.text);
+    assert.equal(
+      Number(claimed.data.request.oldPayload.totalPriceUah),
+      Number(changedSource.rows[0].total_price_uah)
+    );
+    assert.equal(
+      Number(claimed.data.request.proposedPayload.calculatedPriceUah),
+      Number(changedPrice.rows[0].price)
+    );
+    assert.notEqual(
+      Number(claimed.data.request.proposedPayload.calculatedPriceUah),
+      originalCalculatedPrice
+    );
+    const claimHeaders = { 'X-Correction-Claim-Token': claimed.data.claimToken };
+
+    await pool.query(
+      "UPDATE products SET status = 'archived' WHERE id = $1",
+      [candidate.rows[0].id]
+    );
+    const failedRefresh = await request(
+      `/api/admin/correction-requests/${requestId}/refresh`,
+      { method: 'POST', body: {}, headers: claimHeaders }
+    );
+    assert.equal(failedRefresh.response.status, 409);
+    const activeAfterRefreshError = await request(
+      '/api/admin/correction-requests?status=active'
+    );
+    const ownedAfterRefreshError = activeAfterRefreshError.data.items.find(
+      (item) => Number(item.id) === requestId
+    );
+    assert.equal(ownedAfterRefreshError.status, 'in_progress');
+    assert.equal(
+      ownedAfterRefreshError.claimFingerprint,
+      claimed.data.request.claimFingerprint,
+      'a failed refresh must preserve the existing owner capability'
+    );
+
+    const changedAfterClaim = await pool.query(
+      `UPDATE products
+       SET status = 'active',
+           total_price_uah = total_price_uah + 1
+       WHERE id = $1
+       RETURNING total_price_uah`,
+      [candidate.rows[0].id]
+    );
+    const staleCompletion = await request(
+      `/api/admin/correction-requests/${requestId}/complete`,
+      { method: 'POST', body: {}, headers: claimHeaders }
+    );
+    assert.equal(staleCompletion.response.status, 409);
+    assert.equal(staleCompletion.data.details?.type, 'stale_correction_request');
+
+    const activeAfterError = await request('/api/admin/correction-requests?status=active');
+    const ownedAfterError = activeAfterError.data.items.find(
+      (item) => Number(item.id) === requestId
+    );
+    assert.equal(ownedAfterError.status, 'in_progress');
+    assert.equal(
+      ownedAfterError.claimFingerprint,
+      claimed.data.request.claimFingerprint,
+      'a stale completion must not replace or clear claim ownership'
+    );
+
+    const released = await request(
+      `/api/admin/correction-requests/${requestId}/release`,
+      { method: 'POST', body: {}, headers: claimHeaders }
+    );
+    assert.equal(released.response.status, 200, released.text);
+    assert.equal(released.data.request.status, 'pending');
+
+    const reclaimed = await request(`/api/admin/correction-requests/${requestId}/claim`, {
+      method: 'POST', body: {},
+    });
+    assert.equal(reclaimed.response.status, 200, reclaimed.text);
+    assert.equal(
+      Number(reclaimed.data.request.oldPayload.totalPriceUah),
+      Number(changedAfterClaim.rows[0].total_price_uah)
+    );
+    const completed = await request(
+      `/api/admin/correction-requests/${requestId}/complete`,
+      {
+        method: 'POST',
+        body: {},
+        headers: { 'X-Correction-Claim-Token': reclaimed.data.claimToken },
+      }
+    );
+    assert.equal(completed.response.status, 200, completed.text);
+    const finalState = await pool.query(
+      `SELECT p.status, p.corrected_to_product_id, cr.status AS request_status,
+              cr.corrected_product_id, cr.claim_token_hash, cr.claimed_at
+       FROM products p
+       JOIN correction_requests cr ON cr.id = $1
+       WHERE p.id = $2`,
+      [requestId, candidate.rows[0].id]
+    );
+    assert.equal(finalState.rows[0].status, 'corrected');
+    assert.equal(finalState.rows[0].request_status, 'completed');
+    assert.equal(finalState.rows[0].claim_token_hash, null);
+    assert.ok(finalState.rows[0].claimed_at);
+    assert.equal(
+      Number(finalState.rows[0].corrected_to_product_id),
+      Number(finalState.rows[0].corrected_product_id)
+    );
+  } finally {
+    await pool.query(
+      `UPDATE price_matrix
+       SET price = $1
+       WHERE scenario_id = $2 AND x_val = 2 AND y_val = 0`,
+      [originalPrice.rows[0].price, schemas.ZZScenario]
+    );
+  }
 });
 
 test('repricing preview/apply/rollback and correction blocking work', async () => {
