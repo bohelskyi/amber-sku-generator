@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ClipboardList, RefreshCw, ScanSearch, X } from 'lucide-react';
 import { DecodeErrorPanel, DecodeWorkspace } from './HomeDashboard';
 import { RecountConfirmDialog } from './RecountConfirmDialog';
+import { useDialogAccessibility } from '../../hooks/useDialogAccessibility';
 import { useProductRecount } from '../../hooks/useProductRecount';
 
 export function RepricingRecountDrawer({
@@ -12,6 +13,8 @@ export function RepricingRecountDrawer({
   onClose,
   onRequestCreated,
 }) {
+  const drawerRef = useRef(null);
+  const closeButtonRef = useRef(null);
   const initializedSkuRef = useRef('');
   const [mode, setMode] = useState(initialMode);
   const recount = useProductRecount({
@@ -28,26 +31,29 @@ export function RepricingRecountDrawer({
     recount.handleDecode(normalizedSku);
   }, [initialSku, recount]);
 
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape' && !recount.isRecountApplying) onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [onClose, recount.isRecountApplying]);
+  useDialogAccessibility({
+    closeDisabled: recount.isRecountApplying,
+    containerRef: drawerRef,
+    initialFocusRef: closeButtonRef,
+    isInteractionEnabled: !recount.isRecountConfirmOpen,
+    isOpen: true,
+    onClose,
+  });
 
   return (
-    <div className="fixed inset-0 z-40 overflow-y-auto bg-[#f4f5f7]/95 backdrop-blur-sm">
+    <div
+      ref={drawerRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="repricing-recount-drawer-title"
+      tabIndex={-1}
+      className="fixed inset-0 z-40 overflow-y-auto bg-[#f4f5f7]/95 backdrop-blur-sm"
+    >
       <div className="drawer-header sticky top-0 z-10 border-b border-white/10 bg-[#14203b] text-white shadow-md">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6">
           <ScanSearch size={19} className="shrink-0 text-[#dd974a]" />
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-slate-900">Декодер і переоблік</div>
+            <div id="repricing-recount-drawer-title" className="text-sm font-semibold text-slate-900">Декодер і переоблік</div>
             <div className="truncate text-xs text-slate-500">{recount.skuToDecode || 'Артикул не обрано'}</div>
           </div>
           <div className="hidden rounded-md bg-slate-100 p-1 sm:flex">
@@ -71,8 +77,9 @@ export function RepricingRecountDrawer({
             </button>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
-            className="btn btn-outline flex h-9 w-9 shrink-0 items-center justify-center p-0"
+            className="btn btn-outline btn-icon-md"
             onClick={onClose}
             disabled={recount.isRecountApplying}
             title="Закрити"
@@ -112,6 +119,7 @@ export function RepricingRecountDrawer({
             }}
             className="input min-w-0 flex-1"
             placeholder="Введіть артикул"
+            aria-label="Артикул для розшифрування або переобліку"
           />
           <button
             type="button"

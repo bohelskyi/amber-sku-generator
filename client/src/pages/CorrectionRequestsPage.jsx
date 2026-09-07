@@ -13,6 +13,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useDialogAccessibility } from '../hooks/useDialogAccessibility';
 import { getAnswerValueLabel, getQuestionLabel } from '../lib/answer-labels';
 import { api } from '../lib/api';
 import { copyPlainText } from '../lib/clipboard';
@@ -62,7 +63,7 @@ function CopyButton({ label, value }) {
   return (
     <button
       type="button"
-      className="btn btn-outline flex h-8 w-8 shrink-0 items-center justify-center p-0"
+      className="btn btn-outline btn-icon"
       onClick={() => copyPlainText(value)}
       aria-label={label}
       title={label}
@@ -105,28 +106,34 @@ function RequestChanges({ config, request }) {
 }
 
 function CompletionDialog({ busy, request, onCancel, onConfirm }) {
+  const dialogRef = useRef(null);
   const confirmRef = useRef(null);
 
-  useEffect(() => {
-    if (!request) return undefined;
-    confirmRef.current?.focus();
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape' && !busy) onCancel();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [busy, onCancel, request]);
+  useDialogAccessibility({
+    closeDisabled: busy,
+    containerRef: dialogRef,
+    initialFocusRef: confirmRef,
+    isOpen: Boolean(request),
+    onClose: onCancel,
+  });
 
   if (!request) return null;
 
   return (
     <div className="dialog-backdrop">
-      <div className="dialog-surface max-w-lg">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="completion-dialog-title"
+        tabIndex={-1}
+        className="dialog-surface max-w-lg"
+      >
         <div className="dialog-header">
           <p className="eyebrow">Завершення запиту #{request.id}</p>
-          <h2 className="mt-1 text-xl font-semibold text-slate-900">Сайт уже оновлено?</h2>
+          <h2 id="completion-dialog-title" className="mt-1 text-xl font-semibold text-slate-900">Сайт уже оновлено?</h2>
         </div>
-        <div className="space-y-4 px-5 py-5 sm:px-6">
+        <div className="dialog-body space-y-4 px-5 py-5 sm:px-6">
           <div className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
             <div className="flex min-w-0 items-center gap-2">
               <span className="min-w-0 flex-1 break-all font-mono font-semibold">{request.sourceSku}</span>
@@ -490,6 +497,7 @@ export default function CorrectionRequestsPage() {
                 className="input-sm pl-9"
                 value={search}
                 placeholder="SKU або коментар"
+                aria-label="Пошук запитів за SKU або коментарем"
                 onChange={(event) => setSearch(event.target.value)}
               />
             </label>
@@ -522,7 +530,7 @@ export default function CorrectionRequestsPage() {
                       {request.status === 'in_progress' && (
                         <div className="flex flex-wrap items-center gap-2">
                           <div className={`claim-state mb-0 ${isOwnedClaim ? 'is-owned' : 'is-external'}`}>
-                            {isOwnedClaim ? 'В роботі у вас' : 'В роботі іншим працівником'}
+                            {isOwnedClaim ? 'В роботі у вас' : 'В роботі в іншому браузері'}
                           </div>
                           <span className="text-xs text-slate-500">взято {formatDateTime(request.claimedAt || request.updatedAt)}</span>
                         </div>

@@ -2,7 +2,6 @@ import { ExportTools } from '../components/app/ExportTools';
 import { HistoryTable } from '../components/app/HistoryTable';
 import { HomeDashboard } from '../components/app/HomeDashboard';
 import { PageHeader, Toast } from '../components/app/PageHeader';
-import { PreviewResult } from '../components/app/PreviewResult';
 import { ProductBuilder } from '../components/app/ProductBuilder';
 import { RecountConfirmDialog } from '../components/app/RecountConfirmDialog';
 import { useSkuManager } from '../hooks/useSkuManager';
@@ -60,7 +59,7 @@ function AppPage() {
           />
         )}
 
-        {sku.selectedCat && !sku.previewData && (
+        {sku.selectedCat && (
           <ProductBuilder
             config={sku.config}
             selectedCat={sku.selectedCat}
@@ -70,30 +69,12 @@ function AppPage() {
             isWeightRequired={sku.isWeightRequired}
             answeredRequiredCount={sku.answeredRequiredCount}
             requiredCount={sku.requiredCount}
-            progressPercent={sku.progressPercent}
-            livePriceData={sku.livePriceData}
-            livePriceError={sku.livePriceError}
-            isLivePriceLoading={sku.isLivePriceLoading}
-            getVisibleOptionsForQuestion={sku.getVisibleOptions}
-            isQuestionVisible={sku.getQuestionVisibility}
-            isTextQuestion={sku.isTextQuestion}
-            onAnswer={sku.handleAnswer}
-            onTextAnswer={sku.handleTextAnswer}
-            onPreview={sku.handlePreview}
-            onCancel={() => sku.setSelectedCat(null)}
-          />
-        )}
-
-        {sku.previewData && (
-          <PreviewResult
             previewData={sku.previewData}
+            livePriceData={sku.livePriceData}
+            isLivePriceLoading={sku.isLivePriceLoading}
             finalSku={sku.finalSku}
-            effectivePricePerGram={sku.effectivePricePerGram}
-            effectivePricePerGramUah={sku.effectivePricePerGramUah}
-            effectiveTotalPrice={sku.effectiveTotalPrice}
             effectiveTotalPriceUah={sku.effectiveTotalPriceUah}
             hasManualPrice={sku.hasManualPrice}
-            isWeightRequired={sku.isWeightRequired}
             isVariationActive={sku.isVariationActive}
             variationData={sku.variationData}
             variationError={sku.variationError}
@@ -102,15 +83,21 @@ function AppPage() {
             isSaving={sku.isSaving}
             requiresManualPrice={sku.requiresManualPrice}
             manualPriceUah={sku.manualPriceUah}
+            saveError={sku.saveError}
+            getVisibleOptionsForQuestion={sku.getVisibleOptions}
+            isQuestionVisible={sku.getQuestionVisibility}
+            isTextQuestion={sku.isTextQuestion}
+            onAnswer={sku.handleAnswer}
+            onTextAnswer={sku.handleTextAnswer}
+            onPreview={sku.handlePreview}
             onCopyText={sku.handleCopyText}
-            onBackToParameters={sku.handleBackToParameters}
             onAddVariation={sku.handleAddVariation}
             onManualPriceChange={sku.handleManualPriceChange}
             onResetManualPrice={sku.handleResetManualPrice}
             onSave={sku.handleSave}
             onStartManualPriceEdit={sku.handleStartManualPriceEdit}
             onStopManualPriceEdit={sku.handleStopManualPriceEdit}
-            saveError={sku.saveError}
+            onCancel={() => sku.setSelectedCat(null)}
           />
         )}
 

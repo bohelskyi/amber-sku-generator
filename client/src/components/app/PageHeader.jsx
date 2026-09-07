@@ -16,11 +16,11 @@ export function PageHeader({ config, selectedCat, historyCount }) {
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <Link to="/admin/corrections?from=client" className="btn btn-outline h-9 min-h-9 gap-2 px-3">
+        <Link to="/admin/corrections?from=client" className="btn btn-outline btn-compact-md gap-2">
           <ClipboardList size={15} />
           Запити
         </Link>
-        <Link to="/admin/corrections/history?from=client" className="btn btn-outline h-9 min-h-9 gap-2 px-3">
+        <Link to="/admin/corrections/history?from=client" className="btn btn-outline btn-compact-md gap-2">
           <History size={15} />
           Журнал
         </Link>
