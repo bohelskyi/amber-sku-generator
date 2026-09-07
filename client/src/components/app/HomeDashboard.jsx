@@ -18,6 +18,7 @@ import {
   focusFirstRecountBlocker,
   formatRecountBlockerSummary,
 } from '../../lib/recount-blockers';
+import { getDecodedAnswerMap } from '../../lib/product-recount';
 
 function getPricingSourceLabel(source) {
   return source === 'stored' ? 'Збережена в базі' : 'Перерахована зараз';
@@ -256,10 +257,30 @@ export function DecodeWorkspace({
   const pricingConditions = decodeData.pricing?.conditions?.filter(
     (condition) => !condition.isInSku
   ) || [];
+  const pricing = decodeData.pricing;
+  const productStatus = getDecodedProductStatus(decodeData);
+  const summaryStateClass = productStatus === 'Активний'
+    ? 'is-success'
+    : 'is-neutral';
+  const decodedWeight = pricing?.weight
+    ?? decodeData.product?.weight
+    ?? (decodeData.suffix.type === 'weight' ? decodeData.suffix.value : null);
+  const calculatedPriceUah = pricing?.calculatedPriceUah;
+  const automaticPriceUah = pricing?.automaticPriceUah;
+  const finalStoredPriceUah = decodeData.existsInDb ? pricing?.totalPriceUah : null;
+  const hasRoundingDifference = calculatedPriceUah !== null
+    && calculatedPriceUah !== undefined
+    && automaticPriceUah !== null
+    && automaticPriceUah !== undefined
+    && Number(calculatedPriceUah) !== Number(automaticPriceUah);
+  const storedPriceSource = getRecountPriceSource({
+    manualPriceUah: decodeData.product?.details?.manualPriceUah,
+    totalPriceUah: finalStoredPriceUah,
+  });
 
   if (isRecountOpen) {
     return (
-      <section className="card p-6 sm:p-8 fade-up stagger-3">
+      <section className="fade-up stagger-3">
         <RecountPanel
           config={config}
           decodeData={decodeData}
@@ -285,205 +306,226 @@ export function DecodeWorkspace({
   }
 
   return (
-    <section className="card p-6 sm:p-8 fade-up stagger-3">
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-6">
-        <div>
-          <p className="eyebrow">Результат декодування</p>
-          <h2 className="mt-1 break-all font-mono text-2xl font-semibold text-slate-900 sm:text-3xl">
-            {decodeData.sku}
-          </h2>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <span className="chip">{decodeData.category.code}</span>
-          <span className="chip">{decodeData.category.name}</span>
-          <span className="chip">
-            {decodeData.existsInDb ? 'Є в базі' : 'Не знайдено в базі'}
-          </span>
-          {decodeData.decodeSource === 'stored_history' && (
-            <span className="chip">Історичний формат</span>
-          )}
-          {isCalibrationUnknown && (
-            <span className="chip border-amber-300 bg-amber-50 text-amber-800">
-              Калібрування не визначено
+    <section className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px] fade-up stagger-3">
+      <div className="decode-workspace builder-workspace card overflow-hidden">
+        <header className="builder-header">
+          <div className="min-w-0">
+            <h2 className="section-title-text">{decodeData.category.name}</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Результат декодування
+              {decodeData.decodeSource === 'stored_history' ? ' · історична схема' : ''}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-3">
+            {pricing?.dependentKeys?.length > 0 && (
+              <span className="decode-price-key">
+                <span aria-hidden="true" />
+                Впливає на ціну
+              </span>
+            )}
+            <span className="font-mono text-xs font-semibold text-slate-500">
+              {decodeData.category.code}
             </span>
-          )}
+          </div>
+        </header>
+
+        <div className="builder-field-list">
+          {decodeData.decodedAnswers.map((item) => {
+            const isPriceDriver = decodeData.pricing?.dependentKeys?.includes(item.key);
+
+            return (
+              <div
+                key={item.key}
+                className={`decode-field-row builder-field-row ${isPriceDriver ? 'is-price-driver' : ''}`}
+              >
+                <div className="builder-field-label">
+                  <label>{item.label}</label>
+                </div>
+                <div className="decode-readonly-value">{item.value_label}</div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      {decodeData.decodeSource === 'stored_history' && (
-        <div className="mt-4 border-l-4 border-amber-500 bg-amber-50 px-4 py-3 text-sm text-slate-700">
-          Артикул створено за попередньою конфігурацією. Параметри відновлено зі
-          збереженого товару.
-        </div>
-      )}
-
-      <div className="grid gap-6 py-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(300px,0.65fr)]">
-        <div>
-          <h3 className="text-lg font-semibold text-slate-900">Параметри виробу</h3>
-          <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white/80">
-            {decodeData.decodedAnswers.map((item) => {
-              const isPriceDriver = decodeData.pricing?.dependentKeys?.includes(item.key);
-
-              return (
-                <div
-                  key={item.key}
-                  className={`grid grid-cols-[minmax(0,1fr)_minmax(120px,0.8fr)] gap-4 border-b px-4 py-3 last:border-b-0 sm:px-5 ${
-                    isPriceDriver
-                      ? 'border-[rgba(221,151,74,0.45)] bg-[rgba(221,151,74,0.12)]'
-                      : 'border-slate-200'
-                  }`}
-                >
-                  <div className="text-sm font-medium text-slate-700">{item.label}</div>
-                  <div className="min-w-0 text-right text-sm text-slate-900">
-                    <span className="break-words">{item.value_label}</span>
-                    {item.value_id !== null && (
-                      <span className="block font-mono text-xs text-slate-500">{item.value_id}</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+      <aside className="lg:sticky lg:top-20">
+        <div className="builder-summary card overflow-hidden">
+          <div className="builder-summary-header">
+            <h3>Підсумок</h3>
+            <span className={`builder-state ${summaryStateClass}`}>
+              <span aria-hidden="true" />
+              {productStatus}
+            </span>
           </div>
-        </div>
 
-        <aside className="space-y-4">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-900">Розрахунок</h3>
+          <div className="builder-summary-body">
+            <div className="builder-summary-group first">
+              <DecodeSummaryRow label="SKU" value={decodeData.sku} mono strong />
+              <DecodeSummaryRow label="Стан у базі" value={productStatus} />
+            </div>
+
             {isCalibrationBlockingPrice && (
-              <div className="mt-4 border-l-4 border-amber-500 bg-amber-50 px-4 py-3">
-                <div className="text-sm font-semibold text-slate-900">Ціну не визначено</div>
-                <div className="mt-1 text-sm leading-5 text-slate-600">
-                  Калібрування не закодоване в артикулі та відсутнє у збережених
-                  параметрах товару.
-                </div>
+              <div className="decode-warning">
+                <p>Ціну не визначено</p>
+                <span>Калібрування відсутнє у збережених параметрах товару.</span>
               </div>
             )}
-            {decodeData.pricing && (
-              <div className="mt-4 rounded-xl border border-[rgba(221,151,74,0.5)] bg-[rgba(221,151,74,0.12)] p-5">
-                <div className="text-xs uppercase tracking-[0.2em] text-[#8a5f2b]">
-                  Ціна виробу
-                </div>
-                <div className="mt-1 text-xl font-semibold text-slate-900">
-                  {formatUah(decodeData.pricing.totalPriceUah)}
-                </div>
-                {decodeData.pricing.calculatedPriceUah !== null
-                  && decodeData.pricing.calculatedPriceUah !== undefined
-                  && decodeData.pricing.automaticPriceUah !== null
-                  && decodeData.pricing.automaticPriceUah !== undefined && (
-                  <div className="mt-2 text-xs text-slate-600">
-                    Розраховано до округлення: {formatWholeUah(decodeData.pricing.calculatedPriceUah)}
-                    {' → '}автоматична ціна: {formatUah(decodeData.pricing.automaticPriceUah)}
-                  </div>
-                )}
-                <div className="mt-3">
-                  <span className="chip">{getPricingSourceLabel(decodeData.pricing.source)}</span>
-                </div>
-                {(decodeData.pricing.isWeightBased || decodeData.pricing.usesWeight) && (
-                  <div className="mt-4 grid gap-3 border-t border-[rgba(221,151,74,0.35)] pt-4 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
-                    {decodeData.pricing.isWeightBased && (
-                      <div>
-                        <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Ціна за грам</div>
-                        <div className="mt-1 text-sm font-semibold text-slate-900">
-                          {formatUahPerGram(decodeData.pricing.pricePerGramUah)} ({formatUsd(decodeData.pricing.pricePerGram)})
-                        </div>
-                      </div>
-                    )}
-                    {decodeData.pricing.usesWeight
-                      && decodeData.pricing.weight !== null
-                      && decodeData.pricing.weight !== undefined && (
-                      <div>
-                        <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Вага</div>
-                        <div className="mt-1 text-sm font-semibold text-slate-900">
-                          {formatDecimal(decodeData.pricing.weight)} г
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-                {decodeData.pricing.matrixName && (
-                  <div className="mt-3 text-sm text-slate-700">
-                    Матриця:{' '}
-                    <span className="font-bold text-slate-900">{decodeData.pricing.matrixName}</span>
-                  </div>
-                )}
-                {decodeData.pricing.logMessage && (
-                  <div className="mt-3 text-xs leading-5 text-slate-600">{decodeData.pricing.logMessage}</div>
-                )}
-              </div>
-            )}
-          </div>
 
-          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
-              <div>
-                <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Базовий SKU</div>
-                <div className="mt-1 break-all font-mono text-sm font-semibold text-slate-900">
-                  {decodeData.baseSku}
-                </div>
+            <div className="builder-summary-group">
+              <p className="builder-summary-section-title">Ціна виробу</p>
+              <DecodeSummaryRow
+                label="Розраховано до округлення"
+                value={formatOptionalValue(calculatedPriceUah, formatWholeUah)}
+              />
+              {hasRoundingDifference && (
+                <p className="decode-rounding-note">
+                  Округлення: {formatWholeUah(calculatedPriceUah)} → {formatUah(automaticPriceUah)}
+                  {' '}({formatSignedRoundedUah(Number(automaticPriceUah) - Number(calculatedPriceUah))})
+                </p>
+              )}
+              <DecodeSummaryRow
+                label="Фінальна збережена"
+                value={formatOptionalValue(finalStoredPriceUah, formatUah)}
+                strong
+              />
+            </div>
+
+            <div className="builder-price-section">
+              <p className="builder-summary-section-title">Розрахункова ціна за грам</p>
+              <div className="builder-price-row is-strong">
+                <span />
+                <span>{formatOptionalValue(pricing?.pricePerGramUah, formatUahPerGram)}</span>
+                <span>{formatOptionalValue(pricing?.pricePerGram, formatUsd)}</span>
               </div>
-              <div>
-                <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                  {decodeData.variation
+            </div>
+
+            <div className="builder-summary-group">
+              <DecodeSummaryRow label="Матриця" value={pricing?.matrixName || '—'} />
+              <DecodeSummaryRow
+                label="Вага"
+                value={decodedWeight !== null && decodedWeight !== undefined
+                  ? `${formatDecimal(decodedWeight)} г`
+                  : '—'}
+              />
+            </div>
+
+            <details className="decode-details">
+              <summary>Деталі розрахунку</summary>
+              <div className="decode-details-body">
+                <DecodeSummaryRow label="Базовий SKU" value={decodeData.baseSku} mono />
+                <DecodeSummaryRow
+                  label={decodeData.variation
                     ? 'Варіація'
                     : decodeData.suffix.type === 'weight'
-                      ? 'Вага'
+                      ? 'Суфікс ваги'
                       : decodeData.suffix.type === 'sequence'
                         ? 'Порядковий номер'
                         : 'Суфікс'}
-                </div>
-                <div className="mt-1 text-sm font-semibold text-slate-900">
-                  {decodeData.variation
+                  value={decodeData.variation
                     ? decodeData.variation.suffix
                     : formatDecodedSuffix(decodeData.suffix)}
-                </div>
+                />
+                {decodeData.variation && (
+                  <DecodeSummaryRow
+                    label="Основний артикул"
+                    value={`${decodeData.baseSku}${decodeData.suffix.raw || ''}`}
+                    mono
+                  />
+                )}
+                <DecodeSummaryRow
+                  label="Схема SKU"
+                  value={`V${decodeData.skuSchema.version}${decodeData.skuSchema.marker ? ` · ${decodeData.skuSchema.marker}` : ''}`}
+                />
+                <DecodeSummaryRow
+                  label="Джерело розрахунку"
+                  value={pricing ? getPricingSourceLabel(pricing.source) : '—'}
+                />
+                <DecodeSummaryRow
+                  label="Тип фінальної ціни"
+                  value={finalStoredPriceUah !== null && finalStoredPriceUah !== undefined
+                    ? storedPriceSource
+                    : '—'}
+                />
+
+                {pricingConditions.length > 0 && (
+                  <div className="decode-details-section">
+                    <p>Цінові умови</p>
+                    {pricingConditions.map((condition) => (
+                      <DecodeSummaryRow
+                        key={condition.key}
+                        label={getQuestionLabel(config, decodeData.category.code, condition.key)}
+                        value={getAnswerValueLabel(
+                          config,
+                          decodeData.category.code,
+                          condition.key,
+                          condition.value
+                        )}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {decodeData.decodedAnswers.some((item) => item.value_id !== null) && (
+                  <div className="decode-details-section">
+                    <p>Внутрішні значення</p>
+                    {decodeData.decodedAnswers
+                      .filter((item) => item.value_id !== null)
+                      .map((item) => (
+                        <DecodeSummaryRow
+                          key={item.key}
+                          label={item.label}
+                          value={item.value_id}
+                          mono
+                        />
+                      ))}
+                  </div>
+                )}
+
+                {pricing?.logMessage && (
+                  <div className="decode-details-section">
+                    <p>Діагностика ціни</p>
+                    <div className="text-xs leading-5 text-slate-600">{pricing.logMessage}</div>
+                  </div>
+                )}
               </div>
-            </div>
-            {decodeData.variation && (
-              <div className="mt-4 border-t border-slate-200 pt-4 text-sm text-slate-600">
-                Основний артикул:{' '}
-                <span className="break-all font-mono font-semibold text-slate-900">
-                  {decodeData.baseSku}{decodeData.suffix.raw || ''}
-                </span>
+            </details>
+
+            {recountSuccess && (
+              <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                {recountSuccess}
               </div>
             )}
           </div>
 
-          {pricingConditions.length > 0 && (
-            <div className="rounded-xl border border-slate-200 bg-white/70 p-4">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Цінові умови
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {pricingConditions.map((condition) => (
-                  <span key={condition.key} className="chip">
-                    {getQuestionLabel(config, decodeData.category.code, condition.key)}:{' '}
-                    {getAnswerValueLabel(
-                      config,
-                      decodeData.category.code,
-                      condition.key,
-                      condition.value
-                    )}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {recountSuccess && (
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-              {recountSuccess}
-            </div>
-          )}
-
           {decodeData.existsInDb && (
-            <button onClick={onStartRecount} className="btn btn-outline w-full">
-              {recountMode === 'request' ? 'Підготувати запит' : 'Переоблікувати'}
-            </button>
+            <div className="builder-summary-actions">
+              <button onClick={onStartRecount} className="btn btn-primary w-full">
+                {recountMode === 'request' ? 'Підготувати запит' : 'Переоблікувати'}
+              </button>
+            </div>
           )}
-        </aside>
-      </div>
+        </div>
+      </aside>
     </section>
   );
+}
+
+function DecodeSummaryRow({ label, mono = false, strong = false, value }) {
+  return (
+    <div className="builder-summary-row">
+      <span>{label}</span>
+      <span className={`${mono ? 'font-mono break-all' : ''} ${strong ? 'is-strong' : ''}`.trim()}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function getDecodedProductStatus(decodeData) {
+  if (!decodeData.existsInDb) return 'Не в базі';
+  if (decodeData.product?.status === 'archived') return 'Архівний';
+  if (decodeData.product?.status === 'corrected') return 'Переоблікований';
+  return 'Активний';
 }
 
 function RecountPanel({
@@ -509,42 +551,86 @@ function RecountPanel({
   const panelRef = useRef(null);
   const categoryCode = decodeData.category.code;
   const categoryQuestions = config.questions?.[categoryCode] || [];
+  const originalAnswers = getDecodedAnswerMap(decodeData);
   const visibleQuestions = categoryQuestions.filter((question) =>
     isQuestionVisible(question, recountAnswers, recountAnswers.is_calibrated ?? null)
   );
-  const priceDependentKeys = decodeData.pricing?.dependentKeys || [];
   const blockerByQuestionId = new Map(
     recountBlockers.map((blocker) => [blocker.questionId, blocker])
   );
+  const localChanges = visibleQuestions
+    .filter((question) => isRecountAnswerChanged(
+      originalAnswers[question.id],
+      recountAnswers[question.id]
+    ))
+    .map((question) => ({
+      key: question.id,
+      from: originalAnswers[question.id],
+      to: recountAnswers[question.id],
+    }));
+  const displayedChanges = recountPreview?.changes || localChanges;
+  const currentPricing = decodeData.pricing;
+  const correctedPricing = recountPreview?.corrected;
+  const currentMatrix = currentPricing?.matrixName || null;
+  const correctedMatrix = correctedPricing?.pricingDetails?.scenario?.name || null;
+  const currentPriceSource = getRecountPriceSource({
+    manualPriceUah: decodeData.product?.details?.manualPriceUah,
+    totalPriceUah: currentPricing?.totalPriceUah,
+  });
+  const correctedPriceSource = correctedPricing
+    ? getRecountPriceSource({
+      manualPriceUah: correctedPricing.manualPriceUah,
+      totalPriceUah: correctedPricing.totalPriceUah,
+    })
+    : null;
+  const needsAttention = recountBlockers.length > 0 || Boolean(recountError);
+  const summaryStateClass = needsAttention
+    ? 'is-error'
+    : recountPreview
+      ? 'is-success'
+      : 'is-neutral';
+  const summaryStateLabel = needsAttention
+    ? 'Потрібна увага'
+    : isRecountLoading
+      ? 'Перераховуємо…'
+      : recountPreview
+        ? 'Перераховано'
+        : hasRecountChanges
+          ? 'Потрібен перерахунок'
+          : 'Без змін';
 
   useEffect(() => {
     if (recountValidationAttempt > 0) focusFirstRecountBlocker(panelRef.current);
   }, [recountValidationAttempt]);
 
   return (
-    <div ref={panelRef}>
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="eyebrow">
-            {recountMode === 'request' ? 'Запит на виправлення' : 'Переоблік товару'}
-          </p>
-          <h3 className="mt-1 text-xl font-semibold text-slate-900">Виправлення параметрів</h3>
-          <div className="mt-1 break-all font-mono text-sm text-slate-500">{decodeData.sku}</div>
-        </div>
-        <button onClick={onCancelRecount} className="btn btn-outline">
-          Скасувати
-        </button>
-      </div>
+    <div ref={panelRef} className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+      <section className="recount-workspace builder-workspace card overflow-hidden">
+        <header className="builder-header">
+          <div className="min-w-0">
+            <h2 className="section-title-text">{decodeData.category.name}</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {recountMode === 'request' ? 'Запит на виправлення' : 'Переоблік товару'}
+            </p>
+          </div>
+          <button onClick={onCancelRecount} className="btn btn-ghost">
+            Скасувати
+          </button>
+        </header>
 
-      <div className="mt-6 grid items-start gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="builder-field-list">
           {visibleQuestions.map((question) => {
             const textQuestion = isTextQuestion(question);
-            const isPriceDriver = priceDependentKeys.includes(question.id);
             const visibleOptions = getVisibleOptionsForQuestion(
               question,
               recountAnswers,
               recountAnswers.is_calibrated ?? null
+            );
+            const isRequired = question.required === 1
+              && (textQuestion || visibleOptions.length > 0);
+            const isChanged = isRecountAnswerChanged(
+              originalAnswers[question.id],
+              recountAnswers[question.id]
             );
             const blocker = blockerByQuestionId.get(question.id);
             const blockerMessageId = `recount-blocker-${question.id}`;
@@ -554,282 +640,264 @@ function RecountPanel({
                 key={question.id}
                 data-recount-blocker={blocker ? 'true' : undefined}
                 tabIndex={blocker ? -1 : undefined}
-                className={`rounded-xl border p-4 ${
-                  blocker
-                    ? 'border-rose-400 bg-rose-50 ring-1 ring-rose-200'
-                    : isPriceDriver
-                      ? 'border-[rgba(221,151,74,0.5)] bg-[rgba(221,151,74,0.12)]'
-                      : 'border-slate-200 bg-slate-50/70'
-                }`}
+                className={`recount-field-row builder-field-row ${isChanged ? 'is-changed' : ''} ${blocker ? 'is-invalid' : ''}`}
               >
-                <div className={`text-sm font-semibold ${blocker ? 'text-rose-800' : 'text-slate-700'}`}>
-                  {question.label}
+                <div className="builder-field-label">
+                  <label htmlFor={textQuestion ? `recount-${question.id}` : undefined}>
+                    {question.label}
+                    {isRequired && (
+                      <span className="required-marker" aria-label="обов’язкове поле">*</span>
+                    )}
+                  </label>
                 </div>
-                {textQuestion ? (
-                  <input
-                    type="text"
-                    className={`input mt-3 ${blocker ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-200' : ''}`}
-                    value={recountAnswers[question.id] || ''}
-                    onChange={(event) => onRecountTextAnswer(question.id, event.target.value)}
-                    disabled={isRecountLoading || isRecountApplying}
-                    aria-invalid={blocker ? 'true' : undefined}
-                    aria-describedby={blocker ? blockerMessageId : undefined}
-                  />
-                ) : (
-                  <div
-                    className="mt-3 flex flex-wrap gap-2"
-                    role="group"
-                    aria-invalid={blocker ? 'true' : undefined}
-                    aria-describedby={blocker ? blockerMessageId : undefined}
-                  >
+                <div className="min-w-0">
+                  {textQuestion ? (
+                    <input
+                      id={`recount-${question.id}`}
+                      type="text"
+                      className="input builder-text-input"
+                      value={recountAnswers[question.id] || ''}
+                      onChange={(event) => onRecountTextAnswer(question.id, event.target.value)}
+                      disabled={isRecountLoading || isRecountApplying}
+                      aria-invalid={blocker ? 'true' : undefined}
+                      aria-describedby={blocker ? blockerMessageId : undefined}
+                    />
+                  ) : (
+                    <div
+                      className="flex flex-wrap gap-1.5"
+                      role="group"
+                      aria-label={question.label}
+                      aria-invalid={blocker ? 'true' : undefined}
+                      aria-describedby={blocker ? blockerMessageId : undefined}
+                    >
                     {question.required !== 1
                       && !visibleOptions.some((option) => Number(option.id) === 0) && (
                       <button
                         onClick={() => onRecountAnswer(question.id, null)}
                         disabled={isRecountLoading || isRecountApplying}
-                        className={`option-pill ${
+                        className={`option-pill builder-option ${
                           Number(recountAnswers[question.id] || 0) === 0
                             ? 'option-pill-active'
                             : 'option-pill-idle'
                         }`}
+                        aria-pressed={Number(recountAnswers[question.id] || 0) === 0}
                       >
                         Не обрано
                       </button>
                     )}
-                    {visibleOptions.map((option) => (
-                      <button
-                        key={option.id}
-                        onClick={() => onRecountAnswer(question.id, option.id)}
-                        disabled={isRecountLoading || isRecountApplying}
-                        className={`option-pill ${
-                          Number(recountAnswers[question.id]) === Number(option.id)
-                            ? 'option-pill-active'
-                            : 'option-pill-idle'
-                        }`}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {blocker && (
-                  <p id={blockerMessageId} className="mt-2 text-xs font-medium text-rose-700" role="alert">
-                    {blocker.message}
-                  </p>
-                )}
+                      {visibleOptions.map((option) => {
+                        const isSelected = Number(recountAnswers[question.id]) === Number(option.id);
+                        return (
+                          <button
+                            key={option.id}
+                            onClick={() => onRecountAnswer(question.id, option.id)}
+                            disabled={isRecountLoading || isRecountApplying}
+                            className={`option-pill builder-option ${isSelected ? 'option-pill-active' : 'option-pill-idle'}`}
+                            aria-pressed={isSelected}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {isChanged && (
+                    <div className="recount-inline-change">
+                      <span>{getAnswerValueLabel(config, categoryCode, question.id, originalAnswers[question.id])}</span>
+                      <span aria-hidden="true">→</span>
+                      <span>{getAnswerValueLabel(config, categoryCode, question.id, recountAnswers[question.id])}</span>
+                    </div>
+                  )}
+                  {blocker && (
+                    <p id={blockerMessageId} className="builder-field-error" role="alert">
+                      {blocker.message}
+                    </p>
+                  )}
+                </div>
               </div>
             );
           })}
         </div>
 
-        <aside className="space-y-4 xl:sticky xl:top-20">
-          <PreviousPricingSnapshot config={config} decodeData={decodeData} />
-
-          <div className="rounded-xl border border-slate-200 bg-white/80 p-4">
-            <label className="mb-2 block text-sm font-semibold text-slate-700">
+        <div className="border-t border-slate-200 px-5 py-4 sm:px-6">
+          <div className="grid gap-1.5 md:grid-cols-[180px_minmax(0,1fr)] md:gap-4">
+            <label htmlFor="recount-reason" className="pt-1.5 text-[13px] font-medium text-slate-700">
               {recountMode === 'request' ? 'Коментар до запиту' : 'Причина переобліку'}
             </label>
             <textarea
-              className="input min-h-24 resize-y"
+              id="recount-reason"
+              className="input min-h-20 resize-y"
               value={recountReason}
               onChange={(event) => onRecountReasonChange(event.target.value)}
               placeholder="Наприклад: виправлено сорт після перевірки"
             />
           </div>
+        </div>
+      </section>
 
-          {recountError && recountBlockers.length === 0 && (
-            <div className="danger-panel p-4 text-sm">
-              {recountError}
-            </div>
-          )}
+      <aside className="lg:sticky lg:top-20">
+        <div className="builder-summary card overflow-hidden">
+          <div className="builder-summary-header">
+            <h3>Порівняння</h3>
+            <span className={`builder-state ${summaryStateClass}`}>
+              <span aria-hidden="true" />
+              {summaryStateLabel}
+            </span>
+          </div>
 
-          {!hasRecountChanges && !recountError && (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-              Змініть хоча б один параметр виробу.
-            </div>
-          )}
-
-          {recountPreview && (
-            <div className="space-y-4 rounded-xl border border-[rgba(221,151,74,0.5)] bg-[rgba(221,151,74,0.1)] p-4">
-              <div className="text-sm font-semibold text-slate-900">Новий розрахунок</div>
-              <div>
-                <div className="text-xs uppercase tracking-[0.18em] text-[#8a5f2b]">Новий SKU</div>
-                <div className="mt-1 break-all font-mono text-sm font-semibold text-slate-900">
-                  {recountPreview.corrected.fullSku}
-                </div>
+          <div className="builder-summary-body">
+            <div className="recount-comparison">
+              <div className="recount-comparison-header" aria-hidden="true">
+                <span />
+                <span>Зараз</span>
+                <span>Після</span>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-                {recountPreview.corrected.priceMode === 'per_gram_usd' && (
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Ціна за грам</div>
-                    <div className="mt-1 text-sm font-semibold text-slate-900">
-                      {formatUahPerGram(recountPreview.corrected.pricePerGramUah)} ({formatUsd(recountPreview.corrected.pricePerGram)})
-                    </div>
-                  </div>
-                )}
-                <div>
-                  <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Ціна виробу</div>
-                  <div className="mt-1 text-sm font-semibold text-slate-900">
-                    {formatUah(recountPreview.corrected.totalPriceUah)}
-                  </div>
-                  {recountPreview.corrected.calculatedPriceUah !== null
-                    && recountPreview.corrected.calculatedPriceUah !== undefined
-                    && recountPreview.corrected.autoPriceUah !== null
-                    && recountPreview.corrected.autoPriceUah !== undefined && (
-                    <div className="mt-1 text-xs text-slate-500">
-                      До округлення: {formatWholeUah(recountPreview.corrected.calculatedPriceUah)}
-                      {' → '}автоматично: {formatUah(recountPreview.corrected.autoPriceUah)}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="border-t border-[rgba(221,151,74,0.35)] pt-3 text-sm text-slate-600">
-                Різниця:{' '}
-                <span className="font-semibold text-slate-900">
-                  {formatUah(recountPreview.priceDeltaUah)}
+              <RecountComparisonRow
+                label="SKU"
+                current={decodeData.sku}
+                next={correctedPricing?.fullSku}
+                mono
+              />
+              <RecountComparisonRow
+                label="Ціна виробу"
+                current={formatOptionalValue(currentPricing?.totalPriceUah, formatUah)}
+                next={formatOptionalValue(correctedPricing?.totalPriceUah, formatUah)}
+              />
+              <RecountComparisonRow
+                label="Ціна за грам"
+                current={formatOptionalValue(currentPricing?.pricePerGramUah, formatUahPerGram)}
+                next={formatOptionalValue(correctedPricing?.pricePerGramUah, formatUahPerGram)}
+              />
+              <RecountComparisonRow
+                label="Матриця"
+                current={currentMatrix}
+                next={correctedMatrix}
+              />
+              <RecountComparisonRow
+                label="Джерело"
+                current={currentPriceSource}
+                next={correctedPriceSource}
+              />
+            </div>
+
+            <div className="builder-summary-group">
+              <div className="builder-summary-row">
+                <span>Різниця в ціні</span>
+                <span className="is-strong">
+                  {recountPreview ? formatSignedUah(recountPreview.priceDeltaUah) : '—'}
                 </span>
-                {recountPreview.corrected.variation && (
-                  <span className="mt-1 block text-xs">Створиться варіація, бо базовий SKU вже існує.</span>
-                )}
               </div>
-              {recountPreview.changes.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {recountPreview.changes.map((change) => (
-                    <span key={change.key} className="chip">
-                      {getQuestionLabel(config, categoryCode, change.key)}:{' '}
-                      {getAnswerValueLabel(config, categoryCode, change.key, change.from)}{' -> '}
-                      {getAnswerValueLabel(config, categoryCode, change.key, change.to)}
-                    </span>
+            </div>
+
+            <div className="builder-summary-group">
+              <p className="builder-summary-section-title">Змінені атрибути</p>
+              {displayedChanges.length > 0 ? (
+                <div className="divide-y divide-slate-100">
+                  {displayedChanges.map((change) => (
+                    <div key={change.key} className="recount-change-row">
+                      <span>{getQuestionLabel(config, categoryCode, change.key)}</span>
+                      <span>
+                        <span>{getAnswerValueLabel(config, categoryCode, change.key, change.from)}</span>
+                        <span aria-hidden="true"> → </span>
+                        <strong>{getAnswerValueLabel(config, categoryCode, change.key, change.to)}</strong>
+                      </span>
+                    </div>
                   ))}
                 </div>
+              ) : (
+                <p className="text-xs text-slate-500">Змін немає.</p>
               )}
             </div>
-          )}
 
-          {recountBlockers.length > 0 && (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-800" role="alert">
-              {formatRecountBlockerSummary(recountBlockers.length)}
-            </div>
-          )}
+            {recountPreview?.corrected.variation && (
+              <p className="builder-summary-note is-warning">
+                Новий SKU буде варіацією наявного артикула.
+              </p>
+            )}
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-            <button
-              onClick={onRecountPreview}
-              className="btn btn-outline"
-              disabled={!hasRecountChanges || isRecountLoading}
-            >
-              {isRecountLoading ? 'Рахуємо...' : 'Перерахувати'}
-            </button>
-            <button
-              onClick={onApplyRecount}
-              className="btn btn-primary"
-              disabled={!hasRecountChanges || isRecountLoading || isRecountApplying}
-            >
-              {isRecountApplying
-                ? 'Застосовуємо...'
-                : isRecountLoading
-                  ? 'Готуємо...'
-                  : recountMode === 'request'
-                    ? 'Створити запит'
-                    : recountMode === 'choice'
-                      ? 'Продовжити'
-                      : 'Застосувати переоблік'}
-            </button>
+            {recountBlockers.length > 0 && (
+              <div className="builder-blockers" role="alert">
+                <p>{formatRecountBlockerSummary(recountBlockers.length)}</p>
+                <ul>
+                  {recountBlockers.map((blocker) => (
+                    <li key={blocker.questionId}>{blocker.message}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {recountError && recountBlockers.length === 0 && (
+              <div className="builder-operation-error" role="alert">
+                {recountError}
+              </div>
+            )}
           </div>
-        </aside>
-      </div>
+
+          <div className="builder-summary-actions">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
+              <button
+                onClick={onRecountPreview}
+                className="btn btn-outline"
+                disabled={!hasRecountChanges || isRecountLoading}
+              >
+                {isRecountLoading ? 'Рахуємо...' : 'Перерахувати'}
+              </button>
+              <button
+                onClick={onApplyRecount}
+                className="btn btn-primary"
+                disabled={!hasRecountChanges || isRecountLoading || isRecountApplying}
+              >
+                {isRecountApplying
+                  ? 'Застосовуємо...'
+                  : isRecountLoading
+                    ? 'Готуємо...'
+                    : recountMode === 'request'
+                      ? 'Створити запит'
+                      : recountMode === 'choice'
+                        ? 'Продовжити'
+                        : 'Застосувати переоблік'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </aside>
     </div>
   );
 }
 
-function PreviousPricingSnapshot({ config, decodeData }) {
-  const pricing = decodeData.pricing;
-  if (!pricing) return null;
-
-  const priceAnswers = decodeData.decodedAnswers.filter((answer) =>
-    pricing.dependentKeys?.includes(answer.key)
-  );
-  const externalConditions = (pricing.conditions || []).filter(
-    (condition) => !condition.isInSku
-  );
-
+function RecountComparisonRow({ current, label, mono = false, next }) {
   return (
-    <div className="rounded-xl border border-slate-300 bg-slate-50/90 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <div className="text-sm font-semibold text-slate-900">Попередній розрахунок</div>
-          <div className="mt-1 break-all font-mono text-xs text-slate-500">{decodeData.sku}</div>
-        </div>
-        <span className="chip">Зафіксовано</span>
-      </div>
-
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-        {pricing.isWeightBased && (
-          <div>
-            <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Ціна за грам</div>
-            <div className="mt-1 text-sm font-semibold text-slate-900">
-              {formatUahPerGram(pricing.pricePerGramUah)} ({formatUsd(pricing.pricePerGram)})
-            </div>
-          </div>
-        )}
-        <div>
-          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Ціна виробу</div>
-          <div className="mt-1 text-sm font-semibold text-slate-900">
-            {formatUah(pricing.totalPriceUah)}
-          </div>
-          {pricing.calculatedPriceUah !== null
-            && pricing.calculatedPriceUah !== undefined
-            && pricing.automaticPriceUah !== null
-            && pricing.automaticPriceUah !== undefined && (
-            <div className="mt-1 text-xs text-slate-500">
-              До округлення: {formatWholeUah(pricing.calculatedPriceUah)}
-              {' → '}автоматично: {formatUah(pricing.automaticPriceUah)}
-            </div>
-          )}
-        </div>
-        {pricing.usesWeight && pricing.weight !== null && pricing.weight !== undefined && (
-          <div>
-            <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Вага</div>
-            <div className="mt-1 text-sm font-semibold text-slate-900">{formatDecimal(pricing.weight)} г</div>
-          </div>
-        )}
-      </div>
-
-      {pricing.matrixName && (
-        <div className="mt-4 border-t border-slate-200 pt-4 text-sm text-slate-700">
-          Матриця: <span className="font-bold text-slate-900">{pricing.matrixName}</span>
-        </div>
-      )}
-
-      {(priceAnswers.length > 0 || externalConditions.length > 0) && (
-        <div className="mt-4 border-t border-slate-200 pt-4">
-          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-            Початкові цінові параметри
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {priceAnswers.map((answer) => (
-              <span key={answer.key} className="chip">
-                {answer.label}: {answer.value_label}
-              </span>
-            ))}
-            {externalConditions.map((condition) => (
-              <span key={condition.key} className="chip">
-                {getQuestionLabel(config, decodeData.category.code, condition.key)}:{' '}
-                {getAnswerValueLabel(
-                  config,
-                  decodeData.category.code,
-                  condition.key,
-                  condition.value
-                )}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {pricing.logMessage && (
-        <div className="mt-3 text-xs leading-5 text-slate-500">{pricing.logMessage}</div>
-      )}
+    <div className="recount-comparison-row">
+      <span>{label}</span>
+      <span className={mono ? 'font-mono' : ''}>{current ?? '—'}</span>
+      <span className={mono ? 'font-mono' : ''}>{next ?? '—'}</span>
     </div>
   );
+}
+
+function isRecountAnswerChanged(previousValue, nextValue) {
+  return String(previousValue ?? '') !== String(nextValue ?? '');
+}
+
+function getRecountPriceSource({ manualPriceUah, totalPriceUah }) {
+  if (Number(manualPriceUah) > 0) return 'Вручну';
+  if (Number(totalPriceUah) > 0) return 'Автоматично';
+  return 'Не визначено';
+}
+
+function formatOptionalValue(value, formatter) {
+  if (value === null || value === undefined || String(value).trim() === '') return '—';
+  return formatter(value);
+}
+
+function formatSignedUah(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return '—';
+  return `${amount > 0 ? '+' : ''}${formatUah(value)}`;
+}
+
+function formatSignedRoundedUah(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return '—';
+  return `${amount > 0 ? '+' : ''}${formatUah(amount.toFixed(2))}`;
 }

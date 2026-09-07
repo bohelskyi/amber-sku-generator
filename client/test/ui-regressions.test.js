@@ -113,8 +113,8 @@ test('automatic pricing views expose calculated and final marketing-rounded UAH 
     new URL('../src/hooks/useSkuManager.js', import.meta.url),
     'utf8'
   );
-  assert.match(dashboardSource, /pricing\.calculatedPriceUah/);
-  assert.match(dashboardSource, /pricing\.automaticPriceUah/);
+  assert.match(dashboardSource, /pricing\?\.calculatedPriceUah/);
+  assert.match(dashboardSource, /pricing\?\.automaticPriceUah/);
   assert.match(builderSource, /displayedPricing\?\.calculatedPriceUah/);
   assert.match(skuManagerSource, /previewData\?\.totalPriceUah/);
   assert.match(builderSource, /displayedPricing\?\.pricePerGramUah/);
@@ -212,6 +212,64 @@ test('product, decode, and normal preview pre-rounded UAH labels use whole-hryvn
   );
   assert.doesNotMatch(recountConfirmSource, /До округлення/);
   assert.doesNotMatch(recountConfirmSource, /formatWholeUah/);
+});
+
+test('decode result keeps authoritative pricing drivers highlighted in a compact operational workspace', () => {
+  const source = fs.readFileSync(
+    new URL('../src/components/app/HomeDashboard.jsx', import.meta.url),
+    'utf8'
+  );
+  const decodeSource = source.slice(
+    source.indexOf('export function DecodeWorkspace'),
+    source.indexOf('function RecountPanel')
+  );
+
+  assert.match(decodeSource, /decodeData\.pricing\?\.dependentKeys\?\.includes\(item\.key\)/);
+  assert.match(decodeSource, /decode-field-row builder-field-row/);
+  assert.match(decodeSource, /isPriceDriver \? 'is-price-driver' : ''/);
+  assert.match(decodeSource, /Впливає на ціну/);
+  assert.match(decodeSource, /decode-readonly-value/);
+  assert.match(decodeSource, /builder-summary/);
+  assert.match(decodeSource, /lg:sticky lg:top-20/);
+  assert.match(decodeSource, /label="SKU"/);
+  assert.match(decodeSource, /Стан у базі/);
+  assert.match(decodeSource, /Розраховано до округлення/);
+  assert.match(decodeSource, /Фінальна збережена/);
+  assert.match(decodeSource, /Розрахункова ціна за грам/);
+  assert.match(decodeSource, /label="Матриця"/);
+  assert.match(decodeSource, /label="Вага"/);
+  assert.match(decodeSource, /<details className="decode-details">/);
+  assert.match(decodeSource, /Деталі розрахунку/);
+  assert.ok(
+    decodeSource.indexOf('Деталі розрахунку') < decodeSource.indexOf('item.value_id'),
+    'internal option values must remain inside calculation details'
+  );
+  assert.match(decodeSource, /const pricing = decodeData\.pricing/);
+  assert.doesNotMatch(decodeSource, /api\.(get|post|put|delete)/);
+});
+
+test('recount uses a Builder-aligned editor with one authoritative comparison summary', () => {
+  const source = fs.readFileSync(
+    new URL('../src/components/app/HomeDashboard.jsx', import.meta.url),
+    'utf8'
+  );
+  const recountSource = source.slice(source.indexOf('function RecountPanel'));
+
+  assert.match(recountSource, /builder-workspace/);
+  assert.match(recountSource, /builder-field-list/);
+  assert.match(recountSource, /builder-field-row/);
+  assert.match(recountSource, /lg:sticky lg:top-20/);
+  assert.match(recountSource, /recount-comparison-header/);
+  assert.match(recountSource, /Зараз/);
+  assert.match(recountSource, /Після/);
+  assert.match(recountSource, /Різниця в ціні/);
+  assert.match(recountSource, /Змінені атрибути/);
+  assert.match(recountSource, /isChanged \? 'is-changed' : ''/);
+  assert.match(recountSource, /getAnswerValueLabel[\s\S]*?→[\s\S]*?getAnswerValueLabel/);
+  assert.doesNotMatch(recountSource, /PreviousPricingSnapshot/);
+  assert.doesNotMatch(recountSource, /Початкові цінові параметри/);
+  assert.doesNotMatch(recountSource, /pricing\.weight/);
+  assert.doesNotMatch(recountSource, /className="chip"/);
 });
 
 test('correction queue wires exclusive browser claims and shared polling into the UI', () => {

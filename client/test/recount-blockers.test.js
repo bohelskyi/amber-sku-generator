@@ -33,7 +33,8 @@ test('missing required recount field is exposed for red field presentation', () 
     message: 'Заповніть обов’язкове поле «Якість».',
   }]);
   assert.match(dashboardSource, /data-recount-blocker/);
-  assert.match(dashboardSource, /border-rose-400/);
+  assert.match(dashboardSource, /recount-field-row builder-field-row/);
+  assert.match(dashboardSource, /blocker \? 'is-invalid' : ''/);
 });
 
 test('multiple recount blockers produce the correct compact count', () => {
