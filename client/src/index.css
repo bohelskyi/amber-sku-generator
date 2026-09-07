@@ -789,6 +789,221 @@
   .catalog-detail-empty p,
   .catalog-no-category p { @apply mt-1 text-xs text-slate-500; }
 
+  .pricing-shell {
+    @apply overflow-hidden border bg-white;
+    border-color: var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .pricing-workspace-header {
+    @apply flex flex-wrap items-end justify-between gap-4 border-b px-4 py-3 sm:px-5;
+    border-color: var(--border);
+    background: var(--surface-muted);
+  }
+
+  .pricing-workspace-header h2 { @apply mt-0.5 text-base font-semibold text-slate-900; }
+
+  .pricing-mode-tabs,
+  .pricing-local-tabs {
+    @apply flex items-center gap-1;
+  }
+
+  .pricing-mode-tabs button,
+  .pricing-local-tabs button {
+    @apply rounded-md px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:bg-white hover:text-slate-900;
+  }
+
+  .pricing-mode-tabs button.is-active,
+  .pricing-local-tabs button.is-active {
+    color: #713b10;
+    background: var(--amber-50);
+    box-shadow: inset 0 -2px 0 var(--amber-500);
+  }
+
+  .pricing-workspace {
+    @apply grid items-stretch lg:grid-cols-[310px_minmax(0,1fr)];
+    min-height: 620px;
+  }
+
+  .pricing-master {
+    @apply min-w-0 border-b lg:border-b-0 lg:border-r;
+    border-color: var(--border);
+    background: #fbfcfd;
+  }
+
+  .pricing-master-header,
+  .pricing-detail-header,
+  .pricing-matrix-heading,
+  .pricing-weight-bands-header {
+    @apply flex items-start justify-between gap-3;
+  }
+
+  .pricing-master-header {
+    @apply border-b px-4 py-3;
+    border-color: var(--border);
+  }
+
+  .pricing-master-header h3,
+  .pricing-detail-header h3 { @apply text-sm font-semibold text-slate-900; }
+  .pricing-master-header p,
+  .pricing-detail-header p { @apply mt-0.5 text-[11px] leading-4 text-slate-500; }
+
+  .pricing-master-filters {
+    @apply grid grid-cols-[minmax(0,1fr)_108px] gap-2 border-b border-slate-200 p-3;
+  }
+
+  .pricing-search {
+    @apply flex min-w-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 text-slate-400 focus-within:border-amber-400;
+  }
+
+  .pricing-search.full-width { @apply col-span-full; }
+  .pricing-search input { @apply min-w-0 flex-1 bg-transparent py-2 text-xs text-slate-800 outline-none placeholder:text-slate-400; }
+  .pricing-master-filters > select { @apply min-w-0 rounded-md border border-slate-200 bg-white px-2 py-2 text-xs text-slate-600 outline-none focus:border-amber-400; }
+
+  .pricing-master-list { @apply max-h-[720px] overflow-y-auto; scrollbar-width: thin; }
+  .pricing-scenario-group { @apply border-b border-slate-200 last:border-b-0; }
+  .pricing-scenario-group-title { @apply flex items-center justify-between bg-slate-100/70 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500; }
+  .pricing-scenario-group-title small { @apply font-medium tabular-nums text-slate-400; }
+
+  .pricing-master-row {
+    @apply block w-full border-t border-slate-100 px-3 py-2.5 text-left transition first:border-t-0 hover:bg-white;
+  }
+
+  .pricing-master-row.is-selected { background: var(--amber-50); }
+  .pricing-master-row.is-selected strong { color: #713b10; }
+
+  .pricing-master-row-title { @apply flex min-w-0 items-center gap-2; }
+  .pricing-master-row-title i { @apply h-2 w-2 shrink-0 rounded-full bg-slate-400; }
+  .pricing-master-row-title i.is-active { background: var(--success); }
+  .pricing-master-row-title i.is-draft { background: var(--amber-500); }
+  .pricing-master-row-title i.is-archived { @apply bg-slate-400; }
+  .pricing-master-row-title strong,
+  .pricing-modifier-summary { @apply block min-w-0 truncate text-[13px] font-medium text-slate-800; }
+  .pricing-modifier-summary { @apply whitespace-normal leading-5; }
+
+  .pricing-master-row-meta { @apply mt-1.5 flex flex-wrap divide-x divide-slate-200 pl-4 text-[10px] text-slate-500; }
+  .pricing-master-row-meta span { @apply px-1.5 first:pl-0; }
+  .pricing-master-row > .pricing-master-row-meta { @apply pl-0; }
+
+  .pricing-detail { @apply min-w-0 bg-white; }
+  .pricing-detail-header { @apply border-b px-4 py-3 sm:px-5; border-color: var(--border); }
+  .pricing-detail-header p { @apply max-w-3xl; }
+  .pricing-detail-actions { @apply flex shrink-0 flex-wrap items-center gap-2; }
+
+  .pricing-icon-button {
+    @apply flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-slate-500 transition hover:border-slate-200 hover:bg-white hover:text-slate-900;
+  }
+
+  .pricing-icon-button.is-danger { @apply text-rose-400 hover:border-rose-100 hover:bg-rose-50 hover:text-rose-600; }
+
+  .pricing-meta-strip {
+    @apply grid divide-y divide-slate-200 border-b border-slate-200 bg-slate-50 sm:grid-cols-4 sm:divide-x sm:divide-y-0;
+  }
+
+  .pricing-meta-item { @apply flex items-baseline justify-between gap-3 px-3 py-2 text-xs sm:block sm:px-4; }
+  .pricing-meta-item > span { @apply text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500; }
+  .pricing-meta-item > strong { @apply block min-w-0 break-words text-right font-medium text-slate-800 sm:mt-0.5 sm:text-left; }
+
+  .pricing-local-tabs {
+    @apply border-b border-slate-200 px-4 py-2 sm:px-5;
+  }
+
+  .pricing-matrix-panel { @apply min-w-0 p-4 sm:p-5; }
+  .pricing-matrix-heading { @apply mb-3 items-end; }
+  .pricing-matrix-heading h4 { @apply text-sm font-semibold text-slate-900; }
+  .pricing-matrix-heading p { @apply mt-0.5 text-[11px] text-slate-500; }
+  .pricing-matrix-heading > span { @apply text-right text-[10px] text-slate-500; }
+
+  .pricing-matrix-error {
+    @apply mb-3 border-l-2 px-3 py-2 text-xs font-medium;
+    border-color: var(--danger);
+    color: #912018;
+    background: var(--danger-bg);
+  }
+
+  .pricing-matrix-scroll {
+    @apply max-h-[70vh] overflow-auto border border-slate-200;
+    scrollbar-width: thin;
+  }
+
+  .pricing-matrix-table {
+    @apply min-w-max border-separate border-spacing-0 bg-white text-xs;
+    width: 100%;
+  }
+
+  .pricing-matrix-table th {
+    @apply border-b border-r border-slate-200 bg-slate-100 px-2.5 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-600;
+  }
+
+  .pricing-matrix-table thead th {
+    @apply sticky top-0 z-20;
+    min-width: 76px;
+  }
+
+  .pricing-matrix-table thead th:first-child {
+    @apply left-0 z-30;
+    min-width: 150px;
+  }
+
+  .pricing-matrix-table tbody th {
+    @apply sticky left-0 z-10 max-w-[210px] normal-case tracking-normal;
+    background: #f8fafc;
+  }
+
+  .pricing-matrix-table td { @apply border-b border-r border-slate-100 p-0; }
+  .pricing-matrix-table tr:last-child > * { @apply border-b-0; }
+  .pricing-matrix-table tr > *:last-child { @apply border-r-0; }
+
+  .pricing-matrix-table input {
+    @apply block h-9 w-full min-w-[76px] bg-white px-2 text-center text-xs tabular-nums text-slate-800 outline-none transition placeholder:text-slate-300 hover:bg-slate-50 focus:bg-amber-50 focus:shadow-[inset_0_0_0_2px_rgba(221,151,74,0.45)];
+  }
+
+  .pricing-settings-form { @apply min-w-0; }
+  .pricing-settings-section { @apply border-b border-slate-200 px-4 py-4 sm:px-5; }
+  .pricing-settings-section > h4 { @apply mb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500; }
+  .pricing-settings-section > div { @apply min-w-0; }
+
+  .pricing-form-grid { @apply grid gap-x-5; }
+  .pricing-form-grid.two-columns { @apply md:grid-cols-2; }
+  .pricing-form-grid.three-columns { @apply md:grid-cols-3; }
+
+  .pricing-field-control {
+    @apply grid gap-1 py-1.5 text-xs sm:grid-cols-[145px_minmax(0,1fr)] sm:gap-3;
+  }
+
+  .pricing-field-control > span { @apply pt-2 font-medium text-slate-600; }
+  .pricing-field-control small { @apply mt-1 block text-[10px] leading-4 text-slate-500; }
+  .pricing-form-grid .pricing-field-control { @apply sm:block; }
+  .pricing-form-grid .pricing-field-control > span { @apply mb-1 block pt-0; }
+
+  .pricing-checkbox { @apply mt-2 flex items-center gap-2 text-xs font-medium text-slate-700; }
+  .pricing-checkbox input { @apply h-4 w-4 rounded border-slate-300; accent-color: var(--amber-500); }
+  .pricing-axis-combo { @apply grid gap-2; }
+
+  .pricing-settings-section .rounded-xl {
+    @apply mb-0 rounded-md bg-slate-50 p-3;
+    box-shadow: none;
+  }
+
+  .pricing-factor-input { @apply max-w-48; }
+  .pricing-form-actions { @apply flex flex-wrap justify-end gap-2 bg-slate-50 px-4 py-3 sm:px-5; }
+  .pricing-form-actions .btn { @apply min-w-32; }
+
+  .pricing-weight-bands { @apply mt-3 border-t border-slate-200 pt-3; }
+  .pricing-weight-bands-header { @apply items-center; }
+  .pricing-weight-bands-header strong { @apply text-xs font-semibold text-slate-700; }
+  .pricing-weight-band-list { @apply mt-2 divide-y divide-slate-200 border-y border-slate-200; }
+  .pricing-weight-band-row { @apply grid items-center gap-2 py-2 sm:grid-cols-[minmax(140px,1fr)_110px_110px_auto]; }
+
+  .pricing-modifier-overview .pricing-settings-section { @apply border-b-0; }
+  .pricing-modifier-overview .pricing-meta-item { @apply max-w-2xl border-t border-slate-100 px-0 first:border-t-0; }
+
+  .pricing-empty-state { @apply px-4 py-6 text-center text-xs text-slate-500; }
+  .pricing-detail-empty { @apply flex min-h-64 flex-col items-center justify-center px-5 py-10 text-center; }
+  .pricing-detail-empty h3 { @apply text-sm font-semibold text-slate-800; }
+  .pricing-detail-empty p { @apply mt-1 text-xs text-slate-500; }
+
   .dialog-backdrop {
     @apply fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm;
     background: rgba(13, 21, 41, 0.64);

@@ -305,6 +305,39 @@ test('catalog structure uses category tabs and a dense question master-detail wo
   assert.doesNotMatch(source, /1\. Категорії|2\. Питання|3\. Варіанти/);
 });
 
+test('pricing uses selected scenario and modifier master-detail editors', () => {
+  const source = fs.readFileSync(
+    new URL('../src/components/admin/AdminPricingEditor.jsx', import.meta.url),
+    'utf8'
+  );
+  const styles = fs.readFileSync(
+    new URL('../src/index.css', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(source, /pricing-workspace/);
+  assert.match(source, /pricing-master/);
+  assert.match(source, /pricing-detail/);
+  assert.match(source, /scenarioQuery/);
+  assert.match(source, /scenarioStatusFilter/);
+  assert.match(source, /groupScenarios\(filteredScenarios\)/);
+  assert.match(source, /scenario=\{selectedScenario\}/);
+  assert.match(source, />Матриця</);
+  assert.match(source, />Налаштування</);
+  assert.match(source, /isNewScenario/);
+  assert.match(source, /duplicateScenario\(selectedScenario\.id\)/);
+  assert.match(source, /workspaceMode === 'modifiers'/);
+  assert.match(source, /selectedModifier/);
+  assert.match(source, /isNewModifier/);
+  assert.match(source, /handlePriceChange\(scenario\.id, xOption\.id, yOption\.id, null\)/);
+  assert.match(source, /getMatrixPriceValidationError\(normalizedPrice\)/);
+  assert.match(source, /role="alert"/);
+  assert.match(styles, /\.pricing-matrix-table thead th[\s\S]*?sticky top-0/);
+  assert.match(styles, /\.pricing-matrix-table tbody th[\s\S]*?sticky left-0/);
+  assert.doesNotMatch(source, /space-y-6 border-t border-slate-200 p-4/);
+  assert.doesNotMatch(source, /Модифікатори \(Знижки \/ Націнки\)/);
+});
+
 test('correction queue wires exclusive browser claims and shared polling into the UI', () => {
   const source = fs.readFileSync(
     new URL('../src/pages/CorrectionRequestsPage.jsx', import.meta.url),
