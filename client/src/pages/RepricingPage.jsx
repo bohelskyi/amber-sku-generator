@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowDown,
@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { RepricingRecountDrawer } from '../components/app/RepricingRecountDrawer';
+import { useDialogAccessibility } from '../hooks/useDialogAccessibility';
 import { api } from '../lib/api';
 import { formatDecimal, formatUah } from '../lib/formatters';
 import { getPricingAxis } from '../lib/pricing-axis';
@@ -195,13 +196,31 @@ function SortHeader({ align = 'left', children, column, onSort, sort }) {
 }
 
 function ConfirmDialog({ changedCount, manualCount, onCancel, onConfirm, pending }) {
+  const dialogRef = useRef(null);
+  const confirmRef = useRef(null);
+
+  useDialogAccessibility({
+    closeDisabled: pending,
+    containerRef: dialogRef,
+    initialFocusRef: confirmRef,
+    isOpen: true,
+    onClose: onCancel,
+  });
+
   return (
     <div className="dialog-backdrop">
-      <div className="dialog-surface max-w-md p-6">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="repricing-confirm-title"
+        tabIndex={-1}
+        className="dialog-surface dialog-compact max-w-md p-6"
+      >
         <div className="flex items-start gap-3">
           <AlertTriangle className="mt-0.5 text-amber-600" size={22} />
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">Застосувати переоцінку</h2>
+            <h2 id="repricing-confirm-title" className="text-lg font-semibold text-slate-900">Застосувати переоцінку</h2>
             <p className="mt-2 text-sm text-slate-600">Буде оновлено ціну для {changedCount} товарів.</p>
             {manualCount > 0 && (
               <p className="mt-1 text-sm font-medium text-amber-700">
@@ -214,7 +233,7 @@ function ConfirmDialog({ changedCount, manualCount, onCancel, onConfirm, pending
           <button type="button" className="btn btn-outline" onClick={onCancel} disabled={pending}>
             Скасувати
           </button>
-          <button type="button" className="btn btn-primary gap-2" onClick={onConfirm} disabled={pending}>
+          <button ref={confirmRef} type="button" className="btn btn-primary gap-2" onClick={onConfirm} disabled={pending}>
             <RefreshCw size={16} className={pending ? 'animate-spin' : ''} />
             {pending ? 'Застосування...' : 'Застосувати'}
           </button>
@@ -225,13 +244,31 @@ function ConfirmDialog({ changedCount, manualCount, onCancel, onConfirm, pending
 }
 
 function RollbackDialog({ batch, onCancel, onConfirm, pending }) {
+  const dialogRef = useRef(null);
+  const confirmRef = useRef(null);
+
+  useDialogAccessibility({
+    closeDisabled: pending,
+    containerRef: dialogRef,
+    initialFocusRef: confirmRef,
+    isOpen: true,
+    onClose: onCancel,
+  });
+
   return (
     <div className="dialog-backdrop">
-      <div className="dialog-surface max-w-md p-6">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="repricing-rollback-title"
+        tabIndex={-1}
+        className="dialog-surface dialog-compact max-w-md p-6"
+      >
         <div className="flex items-start gap-3">
           <Undo2 className="mt-0.5 text-rose-600" size={22} />
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">Відкотити переоцінку</h2>
+            <h2 id="repricing-rollback-title" className="text-lg font-semibold text-slate-900">Відкотити переоцінку</h2>
             <p className="mt-2 text-sm text-slate-600">
               Для {batch.changed_count} товарів буде повернуто ціни, які були до партії #{batch.id}.
             </p>
@@ -244,7 +281,7 @@ function RollbackDialog({ batch, onCancel, onConfirm, pending }) {
           <button type="button" className="btn btn-outline" onClick={onCancel} disabled={pending}>
             Скасувати
           </button>
-          <button type="button" className="btn btn-primary gap-2" onClick={onConfirm} disabled={pending}>
+          <button ref={confirmRef} type="button" className="btn btn-primary gap-2" onClick={onConfirm} disabled={pending}>
             <Undo2 size={16} />
             {pending ? 'Відкат...' : 'Відкотити'}
           </button>
@@ -255,13 +292,31 @@ function RollbackDialog({ batch, onCancel, onConfirm, pending }) {
 }
 
 function DiscardDraftDialog({ onCancel, onConfirm, pending }) {
+  const dialogRef = useRef(null);
+  const confirmRef = useRef(null);
+
+  useDialogAccessibility({
+    closeDisabled: pending,
+    containerRef: dialogRef,
+    initialFocusRef: confirmRef,
+    isOpen: true,
+    onClose: onCancel,
+  });
+
   return (
     <div className="dialog-backdrop">
-      <div className="dialog-surface max-w-md p-6">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="repricing-discard-title"
+        tabIndex={-1}
+        className="dialog-surface dialog-compact max-w-md p-6"
+      >
         <div className="flex items-start gap-3">
           <Trash2 className="mt-0.5 text-rose-600" size={22} />
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">Відкинути чернетку?</h2>
+            <h2 id="repricing-discard-title" className="text-lg font-semibold text-slate-900">Відкинути чернетку?</h2>
             <p className="mt-2 text-sm text-slate-600">
               Збережені ручні ціни буде видалено. Товари та матриця не зміняться.
             </p>
@@ -271,7 +326,7 @@ function DiscardDraftDialog({ onCancel, onConfirm, pending }) {
           <button type="button" className="btn btn-outline" onClick={onCancel} disabled={pending}>
             Скасувати
           </button>
-          <button type="button" className="btn btn-primary gap-2" onClick={onConfirm} disabled={pending}>
+          <button ref={confirmRef} type="button" className="btn btn-primary gap-2" onClick={onConfirm} disabled={pending}>
             <Trash2 size={16} />
             {pending ? 'Видаляємо...' : 'Відкинути'}
           </button>
@@ -950,14 +1005,14 @@ export default function RepricingPage() {
                 <Link
                   key={request.id}
                   to={`/admin/corrections?request=${request.id}&from=admin`}
-                  className="btn btn-outline h-9 gap-2 bg-white"
+                  className="btn btn-outline btn-compact-md gap-2 bg-white"
                 >
                   <ClipboardList size={14} />
                   Запит #{request.id}
                 </Link>
               ))}
               {blockingCorrectionRequests.length > 3 && (
-                <Link to="/admin/corrections?from=admin" className="btn btn-outline h-9 bg-white">
+                <Link to="/admin/corrections?from=admin" className="btn btn-outline btn-compact-md bg-white">
                   Ще {blockingCorrectionRequests.length - 3}
                 </Link>
               )}
@@ -1079,7 +1134,7 @@ export default function RepricingPage() {
                       </button>
                       <button
                         type="button"
-                        className="btn btn-outline flex h-9 w-9 items-center justify-center p-0 text-rose-700"
+                        className="btn btn-outline btn-icon-md text-rose-700"
                         onClick={() => setDiscardDraftOpen(true)}
                         title="Відкинути чернетку"
                         aria-label="Відкинути чернетку"
@@ -1235,6 +1290,7 @@ export default function RepricingPage() {
                     className="input-sm pl-9"
                     value={search}
                     placeholder="Пошук SKU"
+                    aria-label="Пошук товарів за SKU"
                     onChange={(event) => setSearch(event.target.value)}
                   />
                 </label>
@@ -1360,7 +1416,7 @@ export default function RepricingPage() {
                                   <div className="flex flex-wrap gap-2">
                                     <button
                                       type="button"
-                                      className="btn btn-outline h-8 px-3 text-xs"
+                                      className="btn btn-outline btn-compact"
                                       onClick={() => keepCurrentManualPrice(
                                         item.productId,
                                         item.oldPriceUah
@@ -1371,7 +1427,7 @@ export default function RepricingPage() {
                                     {canUseAutomaticPrice && (
                                       <button
                                         type="button"
-                                        className="btn btn-outline h-8 px-3 text-xs text-sky-800"
+                                        className="btn btn-outline btn-compact text-sky-800"
                                         onClick={() => selectAutomaticPrice(item.productId)}
                                       >
                                         Застосувати автоматичну ціну ·{' '}
@@ -1416,7 +1472,7 @@ export default function RepricingPage() {
                                 {(hasManualOverride || hasAutomaticResolution) && (
                                   <button
                                     type="button"
-                                    className="btn btn-outline flex h-8 w-8 shrink-0 items-center justify-center p-0"
+                                    className="btn btn-outline btn-icon"
                                     onClick={() => resetManualPrice(item.productId)}
                                     title="Повернути розраховану ціну"
                                     aria-label={`Скинути ручну ціну для ${item.sku}`}
@@ -1524,11 +1580,11 @@ export default function RepricingPage() {
                     <td className="table-cell text-right text-sm">{batch.changed_count}</td>
                     <td className="table-cell text-right">
                       <div className="flex justify-end gap-1.5">
-                        <button type="button" className="btn btn-outline flex h-8 w-8 items-center justify-center p-0" onClick={() => downloadBatch(batch.id)} title="CSV застосованих цін">
+                        <button type="button" className="btn btn-outline btn-icon" onClick={() => downloadBatch(batch.id)} title="CSV застосованих цін" aria-label={`Завантажити CSV застосованих цін для партії ${batch.id}`}>
                           <Download size={15} />
                         </button>
                         {batch.status === 'rolled_back' && (
-                          <button type="button" className="btn btn-outline flex h-8 w-8 items-center justify-center p-0" onClick={() => downloadRollbackBatch(batch.id)} title="CSV відновлених цін">
+                          <button type="button" className="btn btn-outline btn-icon" onClick={() => downloadRollbackBatch(batch.id)} title="CSV відновлених цін" aria-label={`Завантажити CSV відновлених цін для партії ${batch.id}`}>
                             <Undo2 size={15} />
                           </button>
                         )}
@@ -1538,7 +1594,7 @@ export default function RepricingPage() {
                       {batch.status === 'completed' && (
                         <button
                           type="button"
-                          className="btn btn-outline flex h-8 w-8 items-center justify-center p-0 ml-auto disabled:cursor-not-allowed disabled:opacity-40"
+                          className="btn btn-outline btn-icon ml-auto disabled:cursor-not-allowed disabled:opacity-40"
                           onClick={() => setRollbackTarget(batch)}
                           disabled={!batch.can_rollback}
                           title={batch.can_rollback

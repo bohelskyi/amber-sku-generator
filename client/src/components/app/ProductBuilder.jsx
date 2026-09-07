@@ -279,8 +279,8 @@ export function ProductBuilder({
         </div>
       </section>
 
-      <aside className="fade-up stagger-1 lg:sticky lg:top-20">
-        <div className="builder-summary card overflow-hidden">
+      <aside className="sticky-summary-container fade-up stagger-1">
+        <div className="sticky-summary builder-summary card overflow-hidden">
           <div className="builder-summary-header">
             <h3>Підсумок</h3>
             <span className={`builder-state ${summaryStateClass}`}>
@@ -508,24 +508,24 @@ function VerifiedPriceActions({
   return (
     <div className="border-t border-slate-200 pt-3">
       <div className="flex flex-wrap gap-1.5">
-        <button onClick={() => onCopyText(finalSku, 'SKU')} className="btn btn-outline min-h-8 px-2.5 py-1 text-xs">
+        <button onClick={() => onCopyText(finalSku, 'SKU')} className="btn btn-outline btn-compact">
           Копіювати SKU
         </button>
         <button
           onClick={() => effectiveTotalPriceUah
             && onCopyText(`${formatDecimal(effectiveTotalPriceUah)} ₴`, 'Ціну')}
-          className="btn btn-outline min-h-8 px-2.5 py-1 text-xs"
+          className="btn btn-outline btn-compact"
         >
           Копіювати ціну
         </button>
         <button
           onClick={isManualPriceEditing ? onStopManualPriceEdit : onStartManualPriceEdit}
-          className="btn btn-outline min-h-8 px-2.5 py-1 text-xs"
+          className="btn btn-outline btn-compact"
         >
           {isManualPriceEditing ? 'Готово' : 'Змінити ціну'}
         </button>
         {hasManualPrice && (
-          <button onClick={onResetManualPrice} className="btn btn-outline min-h-8 px-2.5 py-1 text-xs">
+          <button onClick={onResetManualPrice} className="btn btn-outline btn-compact">
             Скинути ручну
           </button>
         )}

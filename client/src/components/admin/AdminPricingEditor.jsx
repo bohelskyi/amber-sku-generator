@@ -436,7 +436,7 @@ export function AdminPricingEditor({
             <aside className="pricing-master">
               <div className="pricing-master-header"><div><h3>Сценарії</h3><p>{scenarios.length} у категорії</p></div><button type="button" className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs" onClick={() => { setNewScenarioCategory(selectedCat.code); setEditScenario(null); }}><Plus size={14} />Додати</button></div>
               <div className="pricing-master-filters">
-                <label className="pricing-search"><Search size={14} /><input value={scenarioQuery} onChange={(event) => setScenarioQuery(event.target.value)} placeholder="Пошук сценарію" /></label>
+                <label className="pricing-search"><Search size={14} /><input value={scenarioQuery} onChange={(event) => setScenarioQuery(event.target.value)} placeholder="Пошук сценарію" aria-label="Пошук цінового сценарію" /></label>
                 <select value={scenarioStatusFilter} onChange={(event) => setScenarioStatusFilter(event.target.value)} aria-label="Фільтр статусу сценаріїв"><option value="all">Усі статуси</option><option value="active">Активні</option><option value="inactive">Неактивні</option></select>
               </div>
               <div className="pricing-master-list">
@@ -494,7 +494,7 @@ export function AdminPricingEditor({
           <>
             <aside className="pricing-master">
               <div className="pricing-master-header"><div><h3>Модифікатори</h3><p>{modifiers.length} у категорії</p></div><button type="button" className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs" onClick={() => { setNewModifierCategory(selectedCat.code); setEditModifier(null); }}><Plus size={14} />Додати</button></div>
-              <div className="pricing-master-filters"><label className="pricing-search full-width"><Search size={14} /><input value={modifierQuery} onChange={(event) => setModifierQuery(event.target.value)} placeholder="Пошук модифікатора" /></label></div>
+              <div className="pricing-master-filters"><label className="pricing-search full-width"><Search size={14} /><input value={modifierQuery} onChange={(event) => setModifierQuery(event.target.value)} placeholder="Пошук модифікатора" aria-label="Пошук цінового модифікатора" /></label></div>
               <div className="pricing-master-list">
                 {filteredModifiers.map((modifier) => {
                   const summary = formatConditionSummary(getModifierRule(modifier), currentCatQuestions, config, 'Завжди');

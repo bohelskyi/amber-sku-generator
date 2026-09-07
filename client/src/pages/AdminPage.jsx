@@ -27,7 +27,7 @@ export default function AdminPage() {
           <a href="#catalog-structure">Структура каталогу</a>
           <a href="#catalog-pricing">Матриці та модифікатори</a>
         </nav>
-        <section id="catalog-structure" className="scroll-mt-20">
+        <section id="catalog-structure" className="admin-anchor-section">
           <AdminStructureEditor
             config={admin.config}
           selectedCat={admin.selectedCat}
@@ -67,7 +67,7 @@ export default function AdminPage() {
             formatMatchJson={admin.formatMatchJson}
           />
         </section>
-        <section id="catalog-pricing" className="scroll-mt-20">
+        <section id="catalog-pricing" className="admin-anchor-section">
           <AdminPricingEditor
             config={admin.config}
           selectedCat={admin.selectedCat}

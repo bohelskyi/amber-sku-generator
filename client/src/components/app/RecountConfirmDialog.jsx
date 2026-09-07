@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Copy } from 'lucide-react';
 import { formatDecimal, formatUah } from '../../lib/formatters';
 import { copyPlainText } from '../../lib/clipboard';
+import { useDialogAccessibility } from '../../hooks/useDialogAccessibility';
 
 export function RecountConfirmDialog({
   error = '',
@@ -17,30 +18,19 @@ export function RecountConfirmDialog({
   mode = 'apply',
   submittingMode = null,
 }) {
+  const dialogRef = useRef(null);
   const confirmButtonRef = useRef(null);
+  const dialogOpen = Boolean(isOpen && preview);
 
-  useEffect(() => {
-    if (isOpen) confirmButtonRef.current?.focus();
-  }, [isOpen]);
+  useDialogAccessibility({
+    closeDisabled: isApplying,
+    containerRef: dialogRef,
+    initialFocusRef: confirmButtonRef,
+    isOpen: dialogOpen,
+    onClose: onCancel,
+  });
 
-  useEffect(() => {
-    if (!isOpen) return undefined;
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape' && !isApplying) onCancel();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isApplying, isOpen, onCancel]);
-
-  if (!isOpen || !preview) return null;
+  if (!dialogOpen) return null;
 
   const oldPrice = preview.source.totalPriceUah;
   const newPrice = preview.corrected.totalPriceUah;
@@ -61,9 +51,11 @@ export function RecountConfirmDialog({
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="recount-confirm-title"
+        tabIndex={-1}
         className="dialog-surface max-w-xl"
       >
         <div className="dialog-header">
@@ -83,7 +75,7 @@ export function RecountConfirmDialog({
           </h2>
         </div>
 
-        <div className="space-y-5 px-5 py-5 sm:px-6">
+        <div className="dialog-body space-y-5 px-5 py-5 sm:px-6">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Було</div>
@@ -94,7 +86,7 @@ export function RecountConfirmDialog({
                 <button
                   type="button"
                   onClick={() => copyPlainText(preview.source.sku)}
-                  className="btn btn-outline h-8 w-8 shrink-0 p-0"
+                  className="btn btn-outline btn-icon"
                   aria-label="Скопіювати старий артикул"
                   title="Скопіювати артикул"
                 >
@@ -112,7 +104,7 @@ export function RecountConfirmDialog({
                 <button
                   type="button"
                   onClick={() => copyPlainText(preview.corrected.fullSku)}
-                  className="btn btn-outline h-8 w-8 shrink-0 p-0"
+                  className="btn btn-outline btn-icon"
                   aria-label="Скопіювати новий артикул"
                   title="Скопіювати артикул"
                 >
@@ -126,7 +118,7 @@ export function RecountConfirmDialog({
                 <button
                   type="button"
                   onClick={() => copyPlainText(plainNewPrice)}
-                  className="btn btn-outline h-8 w-8 shrink-0 p-0"
+                  className="btn btn-outline btn-icon"
                   aria-label="Скопіювати нову ціну"
                   title="Скопіювати ціну"
                 >
@@ -152,6 +144,7 @@ export function RecountConfirmDialog({
                 value={manualPriceUah}
                 onChange={(event) => onManualPriceChange(event.target.value)}
                 placeholder="Ручна ціна, грн"
+                aria-label="Ручна ціна виправленого товару у гривнях"
               />
             </div>
           )}

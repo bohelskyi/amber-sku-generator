@@ -36,19 +36,100 @@ test('matrix and correction request errors have visible alert regions', () => {
   assert.match(dialogSource, /role="alert"/);
 });
 
-test('correction dialog only applies initial focus when it opens', () => {
+test('dialogs share focus trapping, Escape handling, and focus restoration', () => {
   const dialogSource = fs.readFileSync(
     new URL('../src/components/app/RecountConfirmDialog.jsx', import.meta.url),
     'utf8'
   );
-  const focusCalls = dialogSource.match(/confirmButtonRef\.current\?\.focus\(\)/g) || [];
-
-  assert.equal(focusCalls.length, 1, 'the dialog must not refocus after input state changes');
-  assert.match(
-    dialogSource,
-    /if \(isOpen\) confirmButtonRef\.current\?\.focus\(\);\s*}, \[isOpen\]\);/,
-    'initial focus must depend only on the dialog opening'
+  const hookSource = fs.readFileSync(
+    new URL('../src/hooks/useDialogAccessibility.js', import.meta.url),
+    'utf8'
   );
+  const repricingSource = fs.readFileSync(
+    new URL('../src/pages/RepricingPage.jsx', import.meta.url),
+    'utf8'
+  );
+  const correctionQueueSource = fs.readFileSync(
+    new URL('../src/pages/CorrectionRequestsPage.jsx', import.meta.url),
+    'utf8'
+  );
+  const drawerSource = fs.readFileSync(
+    new URL('../src/components/app/RepricingRecountDrawer.jsx', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(hookSource, /event\.key === 'Escape'/);
+  assert.match(hookSource, /event\.key !== 'Tab'/);
+  assert.match(hookSource, /previousActiveElement/);
+  assert.match(hookSource, /document\.body\.style\.overflow = 'hidden'/);
+  assert.match(dialogSource, /useDialogAccessibility/);
+  assert.match(repricingSource, /role="dialog"/);
+  assert.match(correctionQueueSource, /aria-modal="true"/);
+  assert.match(drawerSource, /role="dialog"/);
+});
+
+test('dialogs and sticky summaries remain bounded on short viewports', () => {
+  const stylesSource = fs.readFileSync(
+    new URL('../src/index.css', import.meta.url),
+    'utf8'
+  );
+  const builderSource = fs.readFileSync(
+    new URL('../src/components/app/ProductBuilder.jsx', import.meta.url),
+    'utf8'
+  );
+  const dashboardSource = fs.readFileSync(
+    new URL('../src/components/app/HomeDashboard.jsx', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(stylesSource, /max-height: calc\(100dvh - 2rem\)/);
+  assert.match(stylesSource, /\.dialog-body[\s\S]*?overflow-y-auto/);
+  assert.match(stylesSource, /\.sticky-summary[\s\S]*?max-height:/);
+  assert.match(builderSource, /sticky-summary/);
+  assert.ok((dashboardSource.match(/sticky-summary/g) || []).length >= 2);
+});
+
+test('compact buttons override the normal button minimum height without shrinking normal actions', () => {
+  const stylesSource = fs.readFileSync(
+    new URL('../src/index.css', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(stylesSource, /\.btn \{[\s\S]*?min-h-10/);
+  assert.match(stylesSource, /\.btn\.btn-icon[\s\S]*?min-height: 2rem/);
+  assert.match(stylesSource, /\.btn\.btn-compact[\s\S]*?min-height: 2rem/);
+});
+
+test('sticky navigation and admin anchors use shared responsive offsets', () => {
+  const stylesSource = fs.readFileSync(
+    new URL('../src/index.css', import.meta.url),
+    'utf8'
+  );
+  const adminSource = fs.readFileSync(
+    new URL('../src/pages/AdminPage.jsx', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(stylesSource, /--workspace-nav-height: 64px/);
+  assert.match(stylesSource, /--workspace-nav-height: 56px/);
+  assert.match(stylesSource, /\.admin-section-nav[\s\S]*?top: var\(--workspace-nav-height\)/);
+  assert.match(stylesSource, /\.admin-anchor-section[\s\S]*?scroll-margin-top:/);
+  assert.ok((adminSource.match(/admin-anchor-section/g) || []).length >= 2);
+});
+
+test('operational placeholder inputs have explicit accessible names', () => {
+  const sources = [
+    '../src/components/app/ExportTools.jsx',
+    '../src/components/app/HomeDashboard.jsx',
+    '../src/components/app/RepricingRecountDrawer.jsx',
+    '../src/components/app/RecountConfirmDialog.jsx',
+    '../src/pages/CorrectionRequestsPage.jsx',
+    '../src/pages/RepricingPage.jsx',
+  ].map((path) => fs.readFileSync(new URL(path, import.meta.url), 'utf8'));
+
+  for (const source of sources) {
+    assert.match(source, /aria-label=/);
+  }
 });
 
 test('repricing renders the same manual resolution control on later manual-price cycles', () => {
@@ -230,7 +311,7 @@ test('decode result keeps authoritative pricing drivers highlighted in a compact
   assert.match(decodeSource, /Впливає на ціну/);
   assert.match(decodeSource, /decode-readonly-value/);
   assert.match(decodeSource, /builder-summary/);
-  assert.match(decodeSource, /lg:sticky lg:top-20/);
+  assert.match(decodeSource, /sticky-summary-container/);
   assert.match(decodeSource, /label="SKU"/);
   assert.match(decodeSource, /Стан у базі/);
   assert.match(decodeSource, /Розраховано до округлення/);
@@ -258,7 +339,7 @@ test('recount uses a Builder-aligned editor with one authoritative comparison su
   assert.match(recountSource, /builder-workspace/);
   assert.match(recountSource, /builder-field-list/);
   assert.match(recountSource, /builder-field-row/);
-  assert.match(recountSource, /lg:sticky lg:top-20/);
+  assert.match(recountSource, /sticky-summary-container/);
   assert.match(recountSource, /recount-comparison-header/);
   assert.match(recountSource, /Зараз/);
   assert.match(recountSource, /Після/);
@@ -353,7 +434,8 @@ test('correction queue wires exclusive browser claims and shared polling into th
   assert.match(source, /\/correction-requests\/\$\{request\.id\}\/claim/);
   assert.match(source, /X-Correction-Claim-Token/);
   assert.match(source, /В роботі у вас/);
-  assert.match(source, /В роботі іншим працівником/);
+  assert.match(source, /В роботі в іншому браузері/);
+  assert.doesNotMatch(source, /В роботі іншим працівником/);
   assert.match(source, /Примусово повернути/);
   assert.match(source, /window\.confirm/);
 });

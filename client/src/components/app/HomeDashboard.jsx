@@ -162,6 +162,7 @@ export function HomeDashboard({
                   if (event.key === 'Enter') onDecode();
                 }}
                 placeholder="Наприклад, BN123456001"
+                aria-label="Артикул для розшифрування"
                 className="input min-w-0"
               />
               <button onClick={() => onDecode()} className="btn btn-primary shrink-0">
@@ -348,8 +349,8 @@ export function DecodeWorkspace({
         </div>
       </div>
 
-      <aside className="lg:sticky lg:top-20">
-        <div className="builder-summary card overflow-hidden">
+      <aside className="sticky-summary-container">
+        <div className="sticky-summary builder-summary card overflow-hidden">
           <div className="builder-summary-header">
             <h3>Підсумок</h3>
             <span className={`builder-state ${summaryStateClass}`}>
@@ -735,8 +736,8 @@ function RecountPanel({
         </div>
       </section>
 
-      <aside className="lg:sticky lg:top-20">
-        <div className="builder-summary card overflow-hidden">
+      <aside className="sticky-summary-container">
+        <div className="sticky-summary builder-summary card overflow-hidden">
           <div className="builder-summary-header">
             <h3>Порівняння</h3>
             <span className={`builder-state ${summaryStateClass}`}>

@@ -45,7 +45,7 @@ function CopyButton({ label, value }) {
   return (
     <button
       type="button"
-      className="btn btn-outline flex h-8 w-8 shrink-0 items-center justify-center p-0"
+      className="btn btn-outline btn-icon"
       onClick={() => copyPlainText(value)}
       title={label}
       aria-label={label}

@@ -43,6 +43,7 @@ export function ExportTools({
                   setExportError('');
                 }}
                 placeholder="З якого SKU"
+                aria-label="Початковий SKU для експорту"
                 className="input"
               />
               <input
@@ -53,6 +54,7 @@ export function ExportTools({
                   setExportError('');
                 }}
                 placeholder="По який SKU або пусто"
+                aria-label="Кінцевий SKU для експорту, необов’язково"
                 className="input"
               />
               <button onClick={onExportCsv} className="btn btn-primary px-6" disabled={isExportLoading}>
@@ -82,6 +84,7 @@ export function ExportTools({
                 value={skuToDelete}
                 onChange={(event) => setSkuToDelete(event.target.value)}
                 placeholder="Введіть повний артикул..."
+                aria-label="SKU товару для архівування"
                 className="input"
               />
               <button onClick={() => onDelete(skuToDelete)} className="btn btn-danger px-6">Архівувати</button>
