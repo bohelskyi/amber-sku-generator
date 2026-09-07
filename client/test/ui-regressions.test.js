@@ -272,6 +272,39 @@ test('recount uses a Builder-aligned editor with one authoritative comparison su
   assert.doesNotMatch(recountSource, /className="chip"/);
 });
 
+test('catalog structure uses category tabs and a dense question master-detail workspace', () => {
+  const source = fs.readFileSync(
+    new URL('../src/components/admin/AdminStructureEditor.jsx', import.meta.url),
+    'utf8'
+  );
+  const templateSource = fs.readFileSync(
+    new URL('../src/components/admin/SkuTemplatePreview.jsx', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(source, /role="tablist"/);
+  assert.match(source, /catalog-category-tab/);
+  assert.match(source, /catalog-workspace/);
+  assert.match(source, /catalog-master/);
+  assert.match(source, /catalog-detail/);
+  assert.match(source, /currentCatQuestions\.map\(\(question\)/);
+  assert.match(source, /draggable/);
+  assert.match(source, /reorderQuestions\(nextQuestions\)/);
+  assert.match(source, /Обовʼязкове/);
+  assert.match(source, /За умовою/);
+  assert.match(source, /Видимість та умови/);
+  assert.match(source, /Архівні варіанти/);
+  assert.match(source, /isArchivedOptionsOpen/);
+  assert.match(source, /publishSkuSchema/);
+  assert.ok(
+    source.indexOf('<SkuTemplatePreview') < source.indexOf('<section className="catalog-workspace">'),
+    'the SKU template must stay in category context above the question workspace'
+  );
+  assert.match(templateSource, /catalog-sku-template-details/);
+  assert.doesNotMatch(source, /xl:grid-cols-3/);
+  assert.doesNotMatch(source, /1\. Категорії|2\. Питання|3\. Варіанти/);
+});
+
 test('correction queue wires exclusive browser claims and shared polling into the UI', () => {
   const source = fs.readFileSync(
     new URL('../src/pages/CorrectionRequestsPage.jsx', import.meta.url),

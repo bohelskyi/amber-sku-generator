@@ -545,6 +545,250 @@
 
   .recount-change-row strong { @apply font-semibold text-slate-900; }
 
+  .catalog-category-context,
+  .catalog-workspace,
+  .catalog-no-category {
+    @apply overflow-hidden border bg-white;
+    border-color: var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .catalog-category-heading {
+    @apply flex items-center justify-between gap-4 border-b px-4 py-3 sm:px-5;
+    border-color: var(--border);
+    background: var(--surface-muted);
+  }
+
+  .catalog-category-heading h2 { @apply text-base font-semibold text-slate-900; }
+  .catalog-category-heading p { @apply mt-0.5 text-xs text-slate-500; }
+
+  .catalog-category-tabs {
+    @apply flex gap-1.5 overflow-x-auto border-b px-4 py-2.5 sm:px-5;
+    border-color: var(--border);
+    scrollbar-width: thin;
+  }
+
+  .catalog-category-tab {
+    @apply flex shrink-0 items-baseline gap-2 rounded-md border px-3 py-1.5 text-left text-xs font-medium text-slate-700 transition;
+    border-color: var(--border);
+    background: #fff;
+  }
+
+  .catalog-category-tab:hover { @apply bg-slate-50 text-slate-950; }
+
+  .catalog-category-tab.is-active {
+    border-color: #dfae71;
+    color: #713b10;
+    background: var(--amber-50);
+    box-shadow: inset 0 -2px 0 var(--amber-500);
+  }
+
+  .catalog-category-tab small { @apply font-mono text-[10px] text-slate-400; }
+  .catalog-category-tab.is-active small { color: #9a5a22; }
+
+  .catalog-category-bar {
+    @apply flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 sm:px-5;
+  }
+
+  .catalog-category-status,
+  .catalog-category-actions,
+  .catalog-row-actions {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .catalog-category-status strong { @apply text-sm font-semibold text-slate-900; }
+  .catalog-category-status > span:not(.catalog-schema-state) { @apply text-[11px] text-slate-400; }
+
+  .catalog-schema-state {
+    @apply inline-flex items-center gap-1.5 border-l border-slate-200 pl-2 text-[11px] font-medium text-slate-600;
+  }
+
+  .catalog-schema-state i { @apply h-1.5 w-1.5 rounded-full; }
+  .catalog-schema-state.is-draft { color: var(--warning); }
+  .catalog-schema-state.is-draft i { background: var(--amber-500); }
+  .catalog-schema-state.is-published { color: var(--success); }
+  .catalog-schema-state.is-published i { background: var(--success); }
+
+  .catalog-context-error {
+    @apply mx-4 border-l-2 px-3 py-2 text-xs font-medium sm:mx-5;
+    border-color: var(--danger);
+    color: #912018;
+    background: var(--danger-bg);
+  }
+
+  .catalog-sku-template {
+    @apply border-t px-4 py-2.5 sm:px-5;
+    border-color: var(--border);
+    background: #fbfcfd;
+  }
+
+  .catalog-sku-template-main { @apply flex flex-wrap items-center justify-between gap-3; }
+  .catalog-sku-template-label { @apply text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500; }
+  .catalog-sku-template-value { @apply mt-0.5 break-all font-mono text-sm font-semibold text-slate-900; }
+  .catalog-sku-template-mode { @apply text-[11px] text-slate-500; }
+  .catalog-sku-template-empty { @apply mt-2 text-xs text-slate-500; }
+
+  .catalog-sku-template-details { @apply mt-1.5; }
+  .catalog-sku-template-details > summary { @apply cursor-pointer text-[11px] font-medium text-slate-500 hover:text-slate-800; }
+  .catalog-sku-template-details > p { @apply mt-2 text-[11px] text-slate-500; }
+  .catalog-sku-template-details > div { @apply mt-2 flex flex-wrap gap-x-3 gap-y-1 border-t border-slate-100 pt-2 text-[11px] text-slate-600; }
+  .catalog-sku-template-details > div span { @apply border-r border-slate-200 pr-3 last:border-r-0; }
+  .catalog-sku-template-details b { @apply font-medium text-slate-800; }
+
+  .catalog-context-form {
+    @apply border-t px-4 py-4 sm:px-5;
+    border-color: var(--border);
+    background: var(--surface-muted);
+  }
+
+  .catalog-context-form-header,
+  .catalog-detail-form-title,
+  .catalog-option-form-header,
+  .catalog-pane-header,
+  .catalog-detail-header,
+  .catalog-variants-header {
+    @apply flex items-start justify-between gap-3;
+  }
+
+  .catalog-context-form-header { @apply mb-3; }
+  .catalog-context-form-header h3,
+  .catalog-detail-form-title h3,
+  .catalog-detail-header h3 { @apply text-sm font-semibold text-slate-900; }
+  .catalog-context-form-header p,
+  .catalog-detail-form-title p,
+  .catalog-detail-header p,
+  .catalog-pane-header p,
+  .catalog-variants-header p { @apply mt-0.5 text-[11px] text-slate-500; }
+
+  .catalog-compact-form-grid,
+  .catalog-option-form-grid { @apply grid gap-x-5 md:grid-cols-2; }
+
+  .catalog-field-control {
+    @apply grid gap-1 py-1.5 text-xs sm:grid-cols-[145px_minmax(0,1fr)] sm:gap-3;
+  }
+
+  .catalog-field-control > span { @apply pt-2 font-medium text-slate-600; }
+  .catalog-field-control small { @apply mt-1 block text-[10px] leading-4 text-slate-500; }
+
+  .catalog-checkbox-row { @apply flex flex-wrap gap-x-6 gap-y-2 py-2; }
+  .catalog-checkbox-row-compact { @apply py-1; }
+  .catalog-checkbox-row label { @apply flex items-center gap-2 text-xs font-medium text-slate-700; }
+  .catalog-checkbox-row input { @apply h-4 w-4 rounded border-slate-300; accent-color: var(--amber-500); }
+
+  .catalog-form-actions { @apply mt-3 flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-3; }
+  .catalog-form-actions .btn { @apply min-w-28; }
+
+  .catalog-workspace {
+    @apply grid items-stretch lg:grid-cols-[310px_minmax(0,1fr)];
+    min-height: 560px;
+  }
+
+  .catalog-master {
+    @apply border-b lg:border-b-0 lg:border-r;
+    border-color: var(--border);
+    background: #fbfcfd;
+  }
+
+  .catalog-pane-header {
+    @apply border-b px-4 py-3;
+    border-color: var(--border);
+  }
+
+  .catalog-pane-header h3 { @apply text-sm font-semibold text-slate-900; }
+  .catalog-master-utility { @apply w-full border-b border-slate-200 px-4 py-2 text-left text-[11px] font-medium text-slate-500 hover:bg-white hover:text-slate-800; }
+  .catalog-question-list { @apply divide-y divide-slate-200; }
+
+  .catalog-question-row {
+    @apply relative grid cursor-pointer grid-cols-[22px_minmax(0,1fr)] gap-2 px-3 py-2.5 outline-none transition;
+  }
+
+  .catalog-question-row:hover { @apply bg-white; }
+  .catalog-question-row:focus-visible { box-shadow: inset 0 0 0 2px rgba(221, 151, 74, 0.42); }
+  .catalog-question-row.is-selected { background: var(--amber-50); }
+  .catalog-question-row.is-selected strong { color: #713b10; }
+  .catalog-question-row.is-dragging { @apply opacity-60; background: var(--surface-warm); }
+  .catalog-question-row strong { @apply block truncate text-[13px] font-medium text-slate-800; }
+  .catalog-drag-handle { @apply mt-0.5 text-slate-300; }
+  .catalog-question-row:hover .catalog-drag-handle { @apply text-slate-500; }
+
+  .catalog-question-flags { @apply mt-1 flex flex-wrap divide-x divide-slate-200 text-[10px] text-slate-500; }
+  .catalog-question-flags span { @apply px-1.5 first:pl-0; }
+  .catalog-question-row.is-selected .catalog-question-flags { color: #8b5b2b; }
+
+  .catalog-drop-line { @apply pointer-events-none absolute left-3 right-3 z-10 h-0.5 bg-amber-500; }
+  .catalog-drop-line.is-before { @apply -top-px; }
+  .catalog-drop-line.is-after { @apply -bottom-px; }
+
+  .catalog-detail { @apply min-w-0 bg-white; }
+  .catalog-detail-header { @apply border-b px-4 py-3 sm:px-5; border-color: var(--border); }
+
+  .catalog-detail-form { @apply border-b border-slate-200; }
+  .catalog-detail-form-title { @apply px-4 py-3 sm:px-5; background: var(--surface-muted); }
+  .catalog-question-overview { @apply grid sm:grid-cols-3; }
+
+  .catalog-settings-section { @apply border-b border-slate-200 px-4 py-3 sm:px-5; }
+  .catalog-question-overview .catalog-settings-section { @apply border-r last:border-r-0; }
+  .catalog-settings-heading h4,
+  .catalog-variants-header h4,
+  .catalog-option-form-header h4 { @apply text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500; }
+  .catalog-settings-content { @apply mt-2; }
+
+  .catalog-meta-row { @apply flex items-start justify-between gap-4 border-t border-slate-100 py-1.5 text-xs first:border-t-0; }
+  .catalog-meta-row > span { @apply text-slate-500; }
+  .catalog-meta-row > strong { @apply min-w-0 break-words text-right font-medium text-slate-800; }
+
+  .catalog-settings-content > .catalog-field-control { @apply max-w-3xl; }
+  .catalog-settings-content > .mb-3,
+  .catalog-condition-grid > .mb-3 {
+    @apply mb-0 rounded-md bg-slate-50 p-3;
+    box-shadow: none;
+  }
+
+  .catalog-inline-control { @apply flex gap-2; }
+  .catalog-inline-control .input-sm { @apply min-w-0; }
+  .catalog-neutral-note { @apply py-1.5 text-xs text-slate-500; }
+
+  .catalog-technical-details { @apply mt-2 border-t border-slate-100 pt-1; }
+  .catalog-technical-details > summary { @apply cursor-pointer py-1.5 text-[11px] font-medium text-slate-500 hover:text-slate-800; }
+  .catalog-technical-details-body { @apply border-t border-slate-100 pt-2; }
+  .catalog-technical-overview { @apply col-span-full mx-4 mb-3 sm:mx-5; }
+  .catalog-technical-overview .catalog-technical-details-body { @apply grid gap-x-8 sm:grid-cols-2; }
+
+  .catalog-variants-section { @apply px-4 py-4 sm:px-5; }
+  .catalog-variants-header { @apply mb-3 items-center; }
+  .catalog-option-list { @apply divide-y divide-slate-200 border-y border-slate-200; }
+
+  .catalog-option-row { @apply flex items-center justify-between gap-3 px-2 py-2; }
+  .catalog-option-row:hover { @apply bg-slate-50; }
+  .catalog-option-row.is-archived { @apply text-slate-500; background: #fbfcfd; }
+  .catalog-option-name { @apply flex flex-wrap items-center gap-2 text-[13px] font-medium text-slate-800; }
+  .catalog-option-row.is-archived .catalog-option-name { @apply text-slate-500; }
+  .catalog-option-name small { @apply text-[9px] font-semibold uppercase tracking-wide text-slate-400; }
+  .catalog-option-meta { @apply mt-0.5 flex flex-wrap divide-x divide-slate-200 text-[10px] text-slate-500; }
+  .catalog-option-meta span { @apply px-1.5 first:pl-0; }
+
+  .catalog-icon-button { @apply flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-slate-500 transition hover:border-slate-200 hover:bg-white hover:text-slate-900; }
+  .catalog-icon-button.is-danger { @apply text-rose-400 hover:border-rose-100 hover:bg-rose-50 hover:text-rose-600; }
+
+  .catalog-option-form { @apply mb-4 border-y border-slate-200 bg-slate-50 px-3 py-3; }
+  .catalog-option-form-header { @apply mb-2 items-center; }
+  .catalog-option-form-grid { @apply xl:grid-cols-3; }
+  .catalog-condition-grid { @apply grid gap-3 xl:grid-cols-2; }
+
+  .catalog-archived-section { @apply mt-3 border-t border-slate-200 pt-1; }
+  .catalog-archived-section > button { @apply flex w-full items-center justify-between py-2 text-xs font-medium text-slate-500 hover:text-slate-800; }
+  .catalog-archived-section > button span { @apply flex items-center gap-1.5; }
+  .catalog-archived-section > button svg { @apply transition; }
+
+  .catalog-empty-state { @apply border-y border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-500; }
+  .catalog-detail-empty,
+  .catalog-no-category { @apply flex min-h-48 flex-col items-center justify-center px-5 py-10 text-center; }
+  .catalog-detail-empty h3,
+  .catalog-no-category h3 { @apply text-sm font-semibold text-slate-800; }
+  .catalog-detail-empty p,
+  .catalog-no-category p { @apply mt-1 text-xs text-slate-500; }
+
   .dialog-backdrop {
     @apply fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm;
     background: rgba(13, 21, 41, 0.64);

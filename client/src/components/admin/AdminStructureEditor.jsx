@@ -1,122 +1,207 @@
 import { useState } from 'react';
-import { Archive, ArchiveRestore, ChevronDown, Pencil, Send, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, ChevronDown, GripVertical, Pencil, Plus, Send, Trash2 } from 'lucide-react';
 import { ConditionBuilder } from './ConditionBuilder';
 import { SkuTemplatePreview } from './SkuTemplatePreview';
 import { handleNumberKeyDown, handleNumberWheel } from '../../lib/number-input';
 import { formatConditionSummary } from '../../lib/admin-conditions';
 
+const EMPTY_EDIT_OPTION = { id: null, value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false };
+const isEnabled = (value) => value === 1 || value === true;
+
 function FieldControl({ children, hint, label }) {
   return (
-    <label className="mb-2 block">
-      <span className="mb-1 block text-xs font-semibold text-slate-600">{label}</span>
-      {children}
-      {hint && <span className="mt-1 block text-[11px] text-slate-500">{hint}</span>}
+    <label className="catalog-field-control">
+      <span>{label}</span>
+      <div>{children}{hint && <small>{hint}</small>}</div>
     </label>
   );
 }
 
-function OptionRow({
-  archived = false,
-  config,
-  currentCatQuestions,
-  onArchive,
-  onDelete,
-  onEdit,
-  option,
-}) {
+function SettingsSection({ children, title }) {
   return (
-    <div className={`flex items-center justify-between gap-3 rounded-lg border p-2 ${archived ? 'border-slate-200 bg-slate-50 text-slate-500' : 'border-slate-200 bg-white/80'}`}>
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`text-sm ${archived ? 'text-slate-500' : 'text-slate-700'}`}>{option.label}</span>
-          {archived && (
-            <span className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-500">
-              Архівний
-            </span>
-          )}
+    <section className="catalog-settings-section">
+      <div className="catalog-settings-heading"><h4>{title}</h4></div>
+      <div className="catalog-settings-content">{children}</div>
+    </section>
+  );
+}
+
+function MetaRow({ label, value }) {
+  return <div className="catalog-meta-row"><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function CategoryForm({ category, isEdit = false, onCancel, onChange, onSave }) {
+  return (
+    <div className="catalog-context-form">
+      <div className="catalog-context-form-header">
+        <div>
+          <h3>{isEdit ? 'Налаштування категорії' : 'Нова категорія'}</h3>
+          <p>{isEdit ? 'Загальні правила для поточної категорії.' : 'Створіть категорію перед додаванням питань.'}</p>
         </div>
-        <span className="block text-[11px] text-slate-500">
-          Показувати: {formatConditionSummary(option.visible_if_json, currentCatQuestions, config)}
-        </span>
-        <span className="block text-[11px] text-slate-500">
-          Приховувати: {formatConditionSummary(option.hidden_if_json, currentCatQuestions, config, 'Ніколи')}
-        </span>
+        <button type="button" onClick={onCancel} className="btn btn-outline px-3 py-2 text-xs">Закрити</button>
       </div>
-      <div className="flex shrink-0 items-center gap-1.5">
-        <span
-          className="rounded bg-slate-100 px-2 py-1 font-mono text-xs text-slate-600"
-          title={`Внутрішнє значення: ${option.id}`}
-        >
-          SKU {option.sku_code ?? option.id}
-        </span>
-        <button
-          type="button"
-          onClick={() => onEdit(option)}
-          className="btn btn-outline flex h-8 w-8 items-center justify-center p-0"
-          title="Редагувати"
-          aria-label={`Редагувати ${option.label}`}
-        >
-          <Pencil size={14} />
-        </button>
-        <button
-          type="button"
-          onClick={() => onArchive(option, !archived)}
-          className="btn btn-outline flex h-8 w-8 items-center justify-center p-0"
-          title={archived ? 'Відновити з архіву' : 'Архівувати'}
-          aria-label={`${archived ? 'Відновити' : 'Архівувати'} ${option.label}`}
-        >
-          {archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}
-        </button>
-        <button
-          type="button"
-          onClick={() => onDelete('option', option.db_id)}
-          className="flex h-8 w-8 items-center justify-center text-rose-400 transition hover:text-rose-600"
-          title="Видалити"
-          aria-label={`Видалити ${option.label}`}
-        >
-          <Trash2 size={15} />
-        </button>
+      <div className="catalog-compact-form-grid">
+        <FieldControl label="Код" hint={category.code_mutable === false ? 'Код уже використано в SKU і його не можна змінити.' : undefined}>
+          <input
+            className="input-sm"
+            placeholder="CODE"
+            value={category.code}
+            disabled={category.code_mutable === false}
+            title={category.code_mutable === false ? 'Код уже використано в SKU і його не можна змінити' : ''}
+            onChange={(event) => onChange({ ...category, code: event.target.value.toUpperCase() })}
+          />
+        </FieldControl>
+        <FieldControl label="Назва">
+          <input className="input-sm" placeholder="Назва категорії" value={category.name} onChange={(event) => onChange({ ...category, name: event.target.value })} />
+        </FieldControl>
+      </div>
+      <div className="catalog-checkbox-row">
+        <label><input type="checkbox" checked={category.requires_weight} onChange={(event) => onChange({ ...category, requires_weight: event.target.checked })} />Потрібна вага</label>
+        <label><input type="checkbox" checked={category.skip_hidden_sku_questions} onChange={(event) => onChange({ ...category, skip_hidden_sku_questions: event.target.checked })} />Пропускати приховані питання в SKU</label>
+      </div>
+      <div className="catalog-form-actions">
+        <button type="button" onClick={onSave} className={`btn ${isEdit ? 'btn-primary' : 'btn-amber'}`}>{isEdit ? 'Зберегти зміни' : 'Зберегти категорію'}</button>
+        <button type="button" onClick={onCancel} className="btn btn-outline">Скасувати</button>
+      </div>
+    </div>
+  );
+}
+
+function QuestionForm({ config, currentCatQuestions, excludeQuestionId, fillNextSkuIndex, isNew = false, onCancel, onChange, onSave, question }) {
+  const canUseSkuSettings = question.input_type !== 'text' && question.include_in_sku;
+
+  return (
+    <div className="catalog-detail-form">
+      <div className="catalog-detail-form-title">
+        <div><h3>{isNew ? 'Нове питання' : 'Редагування питання'}</h3><p>{isNew ? 'Налаштуйте поле у контексті поточної категорії.' : question.label}</p></div>
+        <button type="button" onClick={onCancel} className="btn btn-outline px-3 py-2 text-xs">Закрити</button>
+      </div>
+      <SettingsSection title="Загальні">
+        <FieldControl label="Назва питання">
+          <input className="input-sm" placeholder="Розмір" value={question.label} onChange={(event) => onChange({ ...question, label: event.target.value })} />
+        </FieldControl>
+        <FieldControl label="Тип поля">
+          <select
+            className="input-sm"
+            value={question.input_type}
+            onChange={(event) => onChange({ ...question, input_type: event.target.value, include_in_sku: event.target.value === 'text' ? false : question.include_in_sku })}
+          >
+            <option value="options">Варіанти</option>
+            <option value="text">Текстове поле</option>
+          </select>
+        </FieldControl>
+        <div className="catalog-checkbox-row catalog-checkbox-row-compact">
+          <label><input type="checkbox" checked={question.required} onChange={(event) => onChange({ ...question, required: event.target.checked })} />Обовʼязкове</label>
+        </div>
+        <details className="catalog-technical-details">
+          <summary>Технічні параметри</summary>
+          <div className="catalog-technical-details-body">
+            <FieldControl label="Ключ">
+              <input className="input-sm font-mono" placeholder="size" value={question.key} onChange={(event) => onChange({ ...question, key: event.target.value })} />
+            </FieldControl>
+            <FieldControl label="Порядок у формі" hint="Підтримуються проміжні значення: 0.5, 1.5 тощо.">
+              <input className="input-sm" type="number" step="0.1" placeholder="0.5" value={question.display_order} onChange={(event) => onChange({ ...question, display_order: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
+            </FieldControl>
+          </div>
+        </details>
+      </SettingsSection>
+      <SettingsSection title="SKU">
+        <div className="catalog-checkbox-row catalog-checkbox-row-compact">
+          <label><input type="checkbox" checked={question.include_in_sku} disabled={question.input_type === 'text'} onChange={(event) => onChange({ ...question, include_in_sku: event.target.checked })} />Додавати значення в SKU</label>
+        </div>
+        {canUseSkuSettings ? (
+          <div className="catalog-compact-form-grid">
+            <FieldControl label="SKU index" hint="Позиція значення в артикулі.">
+              <div className="catalog-inline-control">
+                <input className="input-sm" type="number" placeholder="1" value={question.sku_index} onChange={(event) => onChange({ ...question, sku_index: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
+                {isNew && <button type="button" onClick={fillNextSkuIndex} className="btn btn-outline whitespace-nowrap px-3 py-2 text-xs">Наступний</button>}
+              </div>
+            </FieldControl>
+            <FieldControl label="Розділювач" hint="Доступні -, _, . або /.">
+              <input className="input-sm font-mono" placeholder="-" value={question.sku_separator} onChange={(event) => onChange({ ...question, sku_separator: event.target.value })} />
+            </FieldControl>
+          </div>
+        ) : <p className="catalog-neutral-note">SKU-параметри не застосовуються до цього питання.</p>}
+      </SettingsSection>
+      <SettingsSection title="Видимість та умови">
+        <ConditionBuilder
+          config={config}
+          excludeQuestionId={excludeQuestionId}
+          label="Показувати питання"
+          questions={currentCatQuestions}
+          value={question.visible_if_json}
+          onChange={(nextValue) => onChange({ ...question, visible_if_json: nextValue })}
+        />
+      </SettingsSection>
+      <div className="catalog-form-actions">
+        <button type="button" onClick={onSave} className={`btn ${isNew ? 'btn-amber' : 'btn-primary'}`}>{isNew ? 'Зберегти питання' : 'Зберегти зміни'}</button>
+        <button type="button" onClick={onCancel} className="btn btn-outline">Скасувати</button>
+      </div>
+    </div>
+  );
+}
+
+function OptionForm({ config, currentCatQuestions, excludeQuestionId, isNew = false, onCancel, onChange, onSave, option }) {
+  return (
+    <div className="catalog-option-form">
+      <div className="catalog-option-form-header">
+        <h4>{isNew ? 'Новий варіант' : 'Редагування варіанта'}</h4>
+        <button type="button" onClick={onCancel} className="btn btn-outline px-3 py-1.5 text-xs">Закрити</button>
+      </div>
+      <div className="catalog-option-form-grid">
+        <FieldControl label="Назва">
+          <input className="input-sm" placeholder="Назва варіанта" value={option.label} onChange={(event) => onChange({ ...option, label: event.target.value })} />
+        </FieldControl>
+        <FieldControl label="Внутрішнє значення" hint={isNew ? 'Нове унікальне значення для цін та умов.' : 'Використовується у цінах, умовах і модифікаторах.'}>
+          <input className="input-sm" type="number" placeholder="6" value={option.value_id} onChange={(event) => onChange({ ...option, value_id: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
+        </FieldControl>
+        <FieldControl label="Код у SKU" hint={isNew ? 'Цифри, які потраплять в артикул після публікації.' : 'Може повторно використовувати код з попередньої версії.'}>
+          <input className="input-sm font-mono" inputMode="numeric" placeholder="3" value={option.sku_code} onChange={(event) => onChange({ ...option, sku_code: event.target.value.replace(/\D/g, '') })} />
+        </FieldControl>
+      </div>
+      <div className="catalog-condition-grid">
+        <ConditionBuilder config={config} excludeQuestionId={excludeQuestionId} label="Показувати варіант" questions={currentCatQuestions} value={option.visible_if_json} onChange={(nextValue) => onChange({ ...option, visible_if_json: nextValue })} />
+        <ConditionBuilder config={config} excludeQuestionId={excludeQuestionId} label="Приховувати варіант" questions={currentCatQuestions} value={option.hidden_if_json} onChange={(nextValue) => onChange({ ...option, hidden_if_json: nextValue })} />
+      </div>
+      <div className="catalog-form-actions">
+        <button type="button" onClick={onSave} className={`btn ${isNew ? 'btn-amber' : 'btn-primary'}`}>{isNew ? 'Зберегти варіант' : 'Зберегти зміни'}</button>
+        <button type="button" onClick={onCancel} className="btn btn-outline">Скасувати</button>
+      </div>
+    </div>
+  );
+}
+
+function OptionRow({ archived = false, config, currentCatQuestions, onArchive, onDelete, onEdit, option }) {
+  const visibleSummary = formatConditionSummary(option.visible_if_json, currentCatQuestions, config);
+  const hiddenSummary = formatConditionSummary(option.hidden_if_json, currentCatQuestions, config, 'Ніколи');
+  const hasConditions = visibleSummary !== 'Завжди' || hiddenSummary !== 'Ніколи';
+
+  return (
+    <div className={`catalog-option-row ${archived ? 'is-archived' : ''}`}>
+      <div className="min-w-0">
+        <div className="catalog-option-name"><span>{option.label}</span>{archived && <small>Архівний</small>}</div>
+        <div className="catalog-option-meta">
+          <span className="font-mono">SKU {option.sku_code ?? option.id}</span>
+          {hasConditions && <span title={`Показувати: ${visibleSummary}. Приховувати: ${hiddenSummary}`}>За умовою</span>}
+        </div>
+      </div>
+      <div className="catalog-row-actions">
+        <button type="button" onClick={() => onEdit(option)} className="catalog-icon-button" title="Редагувати" aria-label={`Редагувати ${option.label}`}><Pencil size={14} /></button>
+        <button type="button" onClick={() => onArchive(option, !archived)} className="catalog-icon-button" title={archived ? 'Відновити з архіву' : 'Архівувати'} aria-label={`${archived ? 'Відновити' : 'Архівувати'} ${option.label}`}>{archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}</button>
+        <button type="button" onClick={() => onDelete('option', option.db_id)} className="catalog-icon-button is-danger" title="Видалити" aria-label={`Видалити ${option.label}`}><Trash2 size={15} /></button>
       </div>
     </div>
   );
 }
 
 export function AdminStructureEditor({
-  config,
-  selectedCat,
-  selectedQuestion,
-  currentCatQuestions,
-  currentOptions,
-  selectedQuestionInputType,
-  schemaStatus,
-  schemaPublishState,
-  editCat,
-  setEditCat,
-  editQuestion,
-  setEditQuestion,
-  newCat,
-  setNewCat,
-  newQuest,
-  setNewQuest,
-  newOpt,
-  setNewOpt,
-  editOpt,
-  setEditOpt,
-  onSelectCategory,
-  onSelectQuestion,
-  addCategory,
-  updateCategory,
-  addQuestion,
-  updateQuestion,
-  reorderQuestions,
-  autoAssignSkuIndexes,
-  fillNextNewQuestionSkuIndex,
-  addOption,
-  archiveOption,
-  beginOptionEdit,
-  updateOption,
-  publishSkuSchema,
-  deleteItem,
+  config, selectedCat, selectedQuestion, currentCatQuestions, currentOptions,
+  selectedQuestionInputType, schemaStatus, schemaPublishState, editCat, setEditCat,
+  editQuestion, setEditQuestion, newCat, setNewCat, newQuest, setNewQuest, newOpt,
+  setNewOpt, editOpt, setEditOpt, onSelectCategory, onSelectQuestion, addCategory,
+  updateCategory, addQuestion, updateQuestion, reorderQuestions, autoAssignSkuIndexes,
+  fillNextNewQuestionSkuIndex, addOption, archiveOption, beginOptionEdit, updateOption,
+  publishSkuSchema, deleteItem,
 }) {
   const [isCategoryEditOpen, setIsCategoryEditOpen] = useState(false);
   const [isNewCategoryOpen, setIsNewCategoryOpen] = useState(false);
@@ -126,29 +211,51 @@ export function AdminStructureEditor({
   const [isArchivedOptionsOpen, setIsArchivedOptionsOpen] = useState(false);
   const [draggedQuestionId, setDraggedQuestionId] = useState(null);
   const [questionDropTarget, setQuestionDropTarget] = useState({ id: null, position: null });
-  const canEditQuestionSku = editQuestion.input_type !== 'text' && editQuestion.include_in_sku;
-  const canNewQuestionSku = newQuest.input_type !== 'text' && newQuest.include_in_sku;
-  const activeOptions = currentOptions.filter(
-    (option) => option.archived !== 1 && option.archived !== true
-  );
-  const archivedOptions = currentOptions.filter(
-    (option) => option.archived === 1 || option.archived === true
-  );
+  const activeOptions = currentOptions.filter((option) => !isEnabled(option.archived));
+  const archivedOptions = currentOptions.filter((option) => isEnabled(option.archived));
+  const questionVisibilitySummary = selectedQuestion ? formatConditionSummary(selectedQuestion.visible_if_json, currentCatQuestions, config) : '';
 
-  const selectCategory = (category) => {
-    setIsCategoryEditOpen(false);
+  const resetOptionEdit = () => setEditOpt(EMPTY_EDIT_OPTION);
+  const closeDetailEditors = () => {
     setIsQuestionEditOpen(false);
     setIsNewQuestionOpen(false);
     setIsNewOptionOpen(false);
+    resetOptionEdit();
+  };
+  const selectCategory = (category) => {
+    setIsCategoryEditOpen(false);
+    setIsNewCategoryOpen(false);
     setIsArchivedOptionsOpen(false);
+    closeDetailEditors();
     onSelectCategory(category);
   };
-
   const selectQuestion = (question) => {
+    setIsArchivedOptionsOpen(false);
+    closeDetailEditors();
+    onSelectQuestion(question);
+  };
+  const openNewQuestion = () => {
     setIsQuestionEditOpen(false);
     setIsNewOptionOpen(false);
-    setIsArchivedOptionsOpen(false);
-    onSelectQuestion(question);
+    resetOptionEdit();
+    setIsNewQuestionOpen(true);
+  };
+  const openQuestionEdit = () => {
+    setIsNewQuestionOpen(false);
+    setIsNewOptionOpen(false);
+    resetOptionEdit();
+    setIsQuestionEditOpen(true);
+  };
+  const openNewOption = () => {
+    setIsQuestionEditOpen(false);
+    resetOptionEdit();
+    setIsNewOptionOpen(true);
+  };
+  const openOptionEdit = (option) => {
+    setIsQuestionEditOpen(false);
+    setIsNewQuestionOpen(false);
+    setIsNewOptionOpen(false);
+    beginOptionEdit(option);
   };
 
   const handleQuestionDragStart = (event, question) => {
@@ -157,12 +264,10 @@ export function AdminStructureEditor({
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', String(question.q_db_id));
   };
-
   const getDropPosition = (event) => {
     const rect = event.currentTarget.getBoundingClientRect();
     return event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
   };
-
   const handleQuestionDragOver = (event, question) => {
     event.preventDefault();
     const targetQuestionId = Number(question.q_db_id);
@@ -170,451 +275,178 @@ export function AdminStructureEditor({
       setQuestionDropTarget({ id: null, position: null });
       return;
     }
-
     event.dataTransfer.dropEffect = 'move';
-    setQuestionDropTarget({
-      id: targetQuestionId,
-      position: getDropPosition(event),
-    });
+    setQuestionDropTarget({ id: targetQuestionId, position: getDropPosition(event) });
   };
-
   const handleQuestionDrop = (event, targetQuestion) => {
     event.preventDefault();
     const sourceQuestionId = Number(event.dataTransfer.getData('text/plain') || draggedQuestionId);
     const targetQuestionId = Number(targetQuestion.q_db_id);
     setDraggedQuestionId(null);
     setQuestionDropTarget({ id: null, position: null });
-
     if (!sourceQuestionId || sourceQuestionId === targetQuestionId) return;
-
     const sourceIndex = currentCatQuestions.findIndex((question) => Number(question.q_db_id) === sourceQuestionId);
     if (sourceIndex < 0) return;
-
     const nextQuestions = [...currentCatQuestions];
     const [movedQuestion] = nextQuestions.splice(sourceIndex, 1);
     const targetIndexAfterRemoval = nextQuestions.findIndex((question) => Number(question.q_db_id) === targetQuestionId);
     if (targetIndexAfterRemoval < 0) return;
-
-    const insertionIndex = getDropPosition(event) === 'after'
-      ? targetIndexAfterRemoval + 1
-      : targetIndexAfterRemoval;
+    const insertionIndex = getDropPosition(event) === 'after' ? targetIndexAfterRemoval + 1 : targetIndexAfterRemoval;
     nextQuestions.splice(insertionIndex, 0, movedQuestion);
     reorderQuestions(nextQuestions);
   };
 
   return (
-    <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-3 fade-up stagger-2">
-      <div className="card flex flex-col p-4">
-        <div className="section-title mb-4">
-          <h2 className="section-title-text">1. Категорії</h2>
+    <div className="space-y-4 fade-up stagger-2">
+      <section className="catalog-category-context">
+        <div className="catalog-category-heading">
+          <div><h2>Структура каталогу</h2><p>Категорії, питання та варіанти</p></div>
+          <button type="button" onClick={() => { setIsCategoryEditOpen(false); setIsNewCategoryOpen((isOpen) => !isOpen); }} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Plus size={14} />Категорія</button>
         </div>
-        <div className="h-96 overflow-y-auto space-y-2 pr-2">
+        <div className="catalog-category-tabs" role="tablist" aria-label="Категорії каталогу">
           {Object.values(config.categories).map((category) => (
-            <div
-              key={category.code}
-              onClick={() => selectCategory(category)}
-              className={`p-3 rounded-xl cursor-pointer flex justify-between items-center border transition ${selectedCat?.code === category.code ? 'is-selected-warm' : 'border-slate-200 hover:bg-slate-50'}`}
-            >
-              <div>
-                <span className="font-semibold text-slate-800">{category.name}</span>
-                <span className="text-xs text-slate-500 block">Code: {category.code}</span>
-              </div>
-              <button onClick={(event) => { event.stopPropagation(); deleteItem('category', category.code); }} className="text-rose-400 hover:text-rose-600 px-2">×</button>
-            </div>
+            <button key={category.code} type="button" role="tab" aria-selected={selectedCat?.code === category.code} onClick={() => selectCategory(category)} className={`catalog-category-tab ${selectedCat?.code === category.code ? 'is-active' : ''}`}>
+              <span>{category.name}</span><small>{category.code}</small>
+            </button>
           ))}
         </div>
         {selectedCat && (
-          <div className="mt-4 flex gap-2">
-            <button
-              onClick={() => setIsCategoryEditOpen((isOpen) => !isOpen)}
-              className="btn btn-outline w-full text-xs"
-            >
-              {isCategoryEditOpen ? 'Приховати редагування' : 'Редагувати категорію'}
-            </button>
-          </div>
-        )}
-        {selectedCat && isCategoryEditOpen && (
-          <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-white/80">
-            <div className="text-xs text-slate-500 mb-2">Редагувати категорію: {selectedCat.code}</div>
-            <input
-              className="input-sm mb-2"
-              placeholder="Code"
-              value={editCat.code}
-              disabled={editCat.code_mutable === false}
-              title={editCat.code_mutable === false ? 'Код уже використано в SKU і його не можна змінити' : ''}
-              onChange={(event) => setEditCat({ ...editCat, code: event.target.value.toUpperCase() })}
-            />
-            {editCat.code_mutable === false && (
-              <p className="text-xs text-slate-500 mb-2">Код уже використано в SKU і його не можна змінити.</p>
-            )}
-            <input className="input-sm mb-2" placeholder="Name" value={editCat.name} onChange={(event) => setEditCat({ ...editCat, name: event.target.value })} />
-            <label className="flex items-center text-sm"><input type="checkbox" checked={editCat.requires_weight} onChange={(event) => setEditCat({ ...editCat, requires_weight: event.target.checked })} className="mr-2" /> Потрібна вага?</label>
-            <label className="mt-2 flex items-start text-sm">
-              <input type="checkbox" checked={editCat.skip_hidden_sku_questions} onChange={(event) => setEditCat({ ...editCat, skip_hidden_sku_questions: event.target.checked })} className="mr-2 mt-1" />
-              <span>Пропускати приховані питання в SKU</span>
-            </label>
-            <button onClick={updateCategory} className="btn btn-primary w-full mt-3">Зберегти</button>
-          </div>
-        )}
-        <div className="mt-4 pt-4 border-t border-slate-200">
-          <button
-            onClick={() => setIsNewCategoryOpen((isOpen) => !isOpen)}
-            className="btn btn-amber w-full"
-          >
-            {isNewCategoryOpen ? 'Приховати додавання' : 'Додати категорію'}
-          </button>
-          {isNewCategoryOpen && (
-            <div className="mt-3 bg-slate-50/70 p-3 rounded-xl">
-              <input className="input-sm mb-2" placeholder="Code" value={newCat.code} onChange={(event) => setNewCat({ ...newCat, code: event.target.value.toUpperCase() })} />
-              <input className="input-sm mb-2" placeholder="Name" value={newCat.name} onChange={(event) => setNewCat({ ...newCat, name: event.target.value })} />
-              <label className="flex items-center text-sm"><input type="checkbox" checked={newCat.requires_weight} onChange={(event) => setNewCat({ ...newCat, requires_weight: event.target.checked })} className="mr-2" /> Потрібна вага?</label>
-              <label className="mt-2 flex items-start text-sm">
-                <input type="checkbox" checked={newCat.skip_hidden_sku_questions} onChange={(event) => setNewCat({ ...newCat, skip_hidden_sku_questions: event.target.checked })} className="mr-2 mt-1" />
-                <span>Пропускати приховані питання в SKU</span>
-              </label>
-              <button onClick={addCategory} className="btn btn-amber w-full mt-3">Зберегти категорію</button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="card flex flex-col p-4">
-        <div className="section-title mb-4">
-          <h2 className="section-title-text">2. Питання</h2>
-          {selectedCat && (
-            <button onClick={autoAssignSkuIndexes} className="btn btn-outline text-xs px-3 py-2">
-              Переіндексувати SKU
-            </button>
-          )}
-        </div>
-        {selectedCat && schemaStatus && (
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-700">
-                <span>
-                  {schemaStatus.active
-                    ? `Активна схема: V${schemaStatus.active.version}`
-                    : 'Активної схеми ще немає'}
-                </span>
-                {schemaStatus.draftChanged ? (
-                  <span className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-amber-800">
-                    Є зміни для V{schemaStatus.nextVersion}
-                  </span>
-                ) : (
-                  <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-emerald-700">
-                    Опубліковано
+          <>
+            <div className="catalog-category-bar">
+              <div className="catalog-category-status">
+                <strong>{selectedCat.name}</strong><span className="font-mono">{selectedCat.code}</span>
+                {schemaStatus && (
+                  <span className={`catalog-schema-state ${schemaStatus.draftChanged ? 'is-draft' : 'is-published'}`}>
+                    <i />{schemaStatus.active ? `Схема V${schemaStatus.active.version}` : 'Без активної схеми'}{schemaStatus.draftChanged ? ` · зміни для V${schemaStatus.nextVersion}` : ' · опубліковано'}
                   </span>
                 )}
               </div>
-              {schemaPublishState.error && (
-                <p className="mt-1 text-xs text-rose-600">{schemaPublishState.error}</p>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={publishSkuSchema}
-              disabled={!schemaStatus.draftChanged || schemaPublishState.loading}
-              className="btn btn-primary flex items-center gap-2 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45"
-            >
-              <Send size={14} />
-              {schemaPublishState.loading ? 'Публікуємо...' : `Опублікувати V${schemaStatus.nextVersion}`}
-            </button>
-          </div>
-        )}
-        <SkuTemplatePreview
-          category={selectedCat}
-          marker={schemaStatus?.draftChanged ? schemaStatus.nextMarker : schemaStatus?.active?.marker}
-          questions={currentCatQuestions}
-        />
-        <div className="h-96 overflow-y-auto space-y-2 pr-2">
-          {currentCatQuestions.map((question) => (
-            <div
-              key={question.q_db_id}
-              draggable
-              onClick={() => selectQuestion(question)}
-              onDragStart={(event) => handleQuestionDragStart(event, question)}
-              onDragOver={(event) => handleQuestionDragOver(event, question)}
-              onDragLeave={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget)) {
-                  setQuestionDropTarget({ id: null, position: null });
-                }
-              }}
-              onDrop={(event) => handleQuestionDrop(event, question)}
-              onDragEnd={() => {
-                setDraggedQuestionId(null);
-                setQuestionDropTarget({ id: null, position: null });
-              }}
-              className={`relative p-3 rounded-xl cursor-move flex justify-between items-center border transition ${draggedQuestionId === question.q_db_id ? 'opacity-60 border-[rgba(221,151,74,0.6)] bg-[rgba(221,151,74,0.10)]' : selectedQuestion?.id === question.id ? 'is-selected-warm' : 'border-slate-200 hover:bg-slate-50'}`}
-            >
-              {questionDropTarget.id === question.q_db_id && questionDropTarget.position === 'before' && (
-                <div className="pointer-events-none absolute -top-1 left-3 right-3 h-1 rounded-full bg-[rgba(221,151,74,0.95)]" />
-              )}
-              {questionDropTarget.id === question.q_db_id && questionDropTarget.position === 'after' && (
-                <div className="pointer-events-none absolute -bottom-1 left-3 right-3 h-1 rounded-full bg-[rgba(221,151,74,0.95)]" />
-              )}
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="select-none rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-semibold text-slate-400" title="Перетягніть питання вище або нижче">::</span>
-                  <span className="font-semibold text-slate-800">{question.label}</span>
-                </div>
-                <span className="text-xs text-slate-500 block">Key: {question.id} | Порядок: {question.display_order ?? question.sku_index} | SKU index: {question.include_in_sku === 1 ? question.sku_index : 'немає'} | {question.required === 1 ? 'Обовʼязкове' : 'Необовʼязкове'} | {question.include_in_sku === 1 ? 'Йде в SKU' : 'Лише в БД'} | Тип: {(question.input_type || 'options') === 'text' ? 'Текст' : 'Варіанти'} | Розділювач: {question.include_in_sku === 1 ? question.sku_separator || 'немає' : 'немає'}</span>
-                <span className="text-[11px] text-slate-500 block">
-                  {formatConditionSummary(question.visible_if_json, currentCatQuestions, config)}
-                </span>
+              <div className="catalog-category-actions">
+                <button type="button" onClick={() => { setIsNewCategoryOpen(false); setIsCategoryEditOpen((isOpen) => !isOpen); }} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Pencil size={14} />Категорія</button>
+                <button type="button" onClick={publishSkuSchema} disabled={!schemaStatus?.draftChanged || schemaPublishState.loading} className="btn btn-primary flex items-center gap-1.5 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45">
+                  <Send size={14} />{schemaPublishState.loading ? 'Публікуємо...' : schemaStatus?.nextVersion ? `Опублікувати V${schemaStatus.nextVersion}` : 'Опублікувати'}
+                </button>
+                <button type="button" onClick={() => deleteItem('category', selectedCat.code)} className="catalog-icon-button is-danger" title="Видалити категорію" aria-label={`Видалити категорію ${selectedCat.name}`}><Trash2 size={15} /></button>
               </div>
-              <button onClick={(event) => { event.stopPropagation(); deleteItem('question', question.q_db_id); }} className="text-rose-400 hover:text-rose-600 px-2">×</button>
             </div>
-          ))}
-        </div>
-        {selectedQuestion && (
-          <div className="mt-4 flex gap-2">
-            <button
-              onClick={() => setIsQuestionEditOpen((isOpen) => !isOpen)}
-              className="btn btn-outline w-full text-xs"
-            >
-              {isQuestionEditOpen ? 'Приховати редагування' : 'Редагувати питання'}
-            </button>
-          </div>
+            {schemaPublishState.error && <p className="catalog-context-error" role="alert">{schemaPublishState.error}</p>}
+            <SkuTemplatePreview category={selectedCat} marker={schemaStatus?.draftChanged ? schemaStatus.nextMarker : schemaStatus?.active?.marker} questions={currentCatQuestions} />
+          </>
         )}
-        {selectedQuestion && isQuestionEditOpen && (
-          <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-white/80">
-            <div className="text-xs text-slate-500 mb-2">Редагувати питання</div>
-            <FieldControl label="Key">
-              <input className="input-sm" placeholder="size" value={editQuestion.key} onChange={(event) => setEditQuestion({ ...editQuestion, key: event.target.value })} />
-            </FieldControl>
-            <FieldControl label="Назва питання">
-              <input className="input-sm" placeholder="Розмір" value={editQuestion.label} onChange={(event) => setEditQuestion({ ...editQuestion, label: event.target.value })} />
-            </FieldControl>
-            <FieldControl label="Тип питання">
-              <select className="input-sm" value={editQuestion.input_type} onChange={(event) => setEditQuestion({ ...editQuestion, input_type: event.target.value, include_in_sku: event.target.value === 'text' ? false : editQuestion.include_in_sku })}>
-                <option value="options">Варіанти</option>
-                <option value="text">Текстове поле</option>
-              </select>
-            </FieldControl>
-            <FieldControl label="Порядок у формі" hint="Відповідає тільки за місце питання на екрані. Можна вводити 0.5, 1.5 тощо.">
-              <input className="input-sm" type="number" step="0.1" placeholder="0.5" value={editQuestion.display_order} onChange={(event) => setEditQuestion({ ...editQuestion, display_order: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
-            </FieldControl>
-            <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={editQuestion.required} onChange={(event) => setEditQuestion({ ...editQuestion, required: event.target.checked })} className="mr-2" /> Обовʼязкове</label>
-            <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={editQuestion.include_in_sku} disabled={editQuestion.input_type === 'text'} onChange={(event) => setEditQuestion({ ...editQuestion, include_in_sku: event.target.checked })} className="mr-2" /> Додавати в SKU</label>
-            {canEditQuestionSku ? (
+        {isCategoryEditOpen && selectedCat && <CategoryForm category={editCat} isEdit onCancel={() => setIsCategoryEditOpen(false)} onChange={setEditCat} onSave={updateCategory} />}
+        {isNewCategoryOpen && <CategoryForm category={newCat} onCancel={() => setIsNewCategoryOpen(false)} onChange={setNewCat} onSave={addCategory} />}
+      </section>
+
+      {selectedCat ? (
+        <section className="catalog-workspace">
+          <aside className="catalog-master">
+            <div className="catalog-pane-header">
+              <div><h3>Питання</h3><p>{currentCatQuestions.length} у поточній категорії</p></div>
+              <button type="button" onClick={openNewQuestion} className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs"><Plus size={14} />Додати</button>
+            </div>
+            <button type="button" onClick={autoAssignSkuIndexes} className="catalog-master-utility">Переіндексувати SKU</button>
+            <div className="catalog-question-list">
+              {currentCatQuestions.map((question) => {
+                const isConditional = formatConditionSummary(question.visible_if_json, currentCatQuestions, config) !== 'Завжди';
+                const isSelected = selectedQuestion?.id === question.id && !isNewQuestionOpen;
+                return (
+                  <div
+                    key={question.q_db_id}
+                    draggable
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={isSelected}
+                    onClick={() => selectQuestion(question)}
+                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') selectQuestion(question); }}
+                    onDragStart={(event) => handleQuestionDragStart(event, question)}
+                    onDragOver={(event) => handleQuestionDragOver(event, question)}
+                    onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setQuestionDropTarget({ id: null, position: null }); }}
+                    onDrop={(event) => handleQuestionDrop(event, question)}
+                    onDragEnd={() => { setDraggedQuestionId(null); setQuestionDropTarget({ id: null, position: null }); }}
+                    className={`catalog-question-row ${isSelected ? 'is-selected' : ''} ${draggedQuestionId === question.q_db_id ? 'is-dragging' : ''}`}
+                  >
+                    {questionDropTarget.id === question.q_db_id && questionDropTarget.position === 'before' && <span className="catalog-drop-line is-before" />}
+                    {questionDropTarget.id === question.q_db_id && questionDropTarget.position === 'after' && <span className="catalog-drop-line is-after" />}
+                    <GripVertical className="catalog-drag-handle" size={16} aria-hidden="true" />
+                    <div className="min-w-0">
+                      <strong>{question.label}</strong>
+                      <div className="catalog-question-flags">
+                        <span>{(question.input_type || 'options') === 'text' ? 'Текст' : 'Варіанти'}</span>
+                        {isEnabled(question.required) && <span>Обовʼязкове</span>}
+                        {isEnabled(question.include_in_sku) && <span>SKU</span>}
+                        {isConditional && <span>За умовою</span>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {currentCatQuestions.length === 0 && <p className="catalog-empty-state">У категорії ще немає питань.</p>}
+            </div>
+          </aside>
+
+          <div className="catalog-detail">
+            {isNewQuestionOpen ? (
+              <QuestionForm config={config} currentCatQuestions={currentCatQuestions} fillNextSkuIndex={fillNextNewQuestionSkuIndex} isNew onCancel={() => setIsNewQuestionOpen(false)} onChange={setNewQuest} onSave={addQuestion} question={newQuest} />
+            ) : selectedQuestion ? (
               <>
-                <FieldControl label="SKU index" hint="Відповідає за позицію значення в артикулі.">
-                  <input className="input-sm" type="number" placeholder="1" value={editQuestion.sku_index} onChange={(event) => setEditQuestion({ ...editQuestion, sku_index: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
-                </FieldControl>
-                <FieldControl label="Розділювач у SKU" hint="Можна використовувати тільки -, _, . або /.">
-                  <input className="input-sm" placeholder="-" value={editQuestion.sku_separator} onChange={(event) => setEditQuestion({ ...editQuestion, sku_separator: event.target.value })} />
-                </FieldControl>
+                <div className="catalog-detail-header">
+                  <div className="min-w-0"><h3>{selectedQuestion.label}</h3><p>{(selectedQuestion.input_type || 'options') === 'text' ? 'Текстове поле' : 'Поле з варіантами'}</p></div>
+                  <div className="catalog-row-actions">
+                    {!isQuestionEditOpen && <button type="button" onClick={openQuestionEdit} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Pencil size={14} />Редагувати</button>}
+                    <button type="button" onClick={() => deleteItem('question', selectedQuestion.q_db_id)} className="catalog-icon-button is-danger" title="Видалити питання" aria-label={`Видалити питання ${selectedQuestion.label}`}><Trash2 size={15} /></button>
+                  </div>
+                </div>
+                {isQuestionEditOpen ? (
+                  <QuestionForm config={config} currentCatQuestions={currentCatQuestions} excludeQuestionId={selectedQuestion.id} onCancel={() => setIsQuestionEditOpen(false)} onChange={setEditQuestion} onSave={updateQuestion} question={editQuestion} />
+                ) : (
+                  <div className="catalog-question-overview">
+                    <SettingsSection title="Загальні">
+                      <MetaRow label="Тип поля" value={(selectedQuestion.input_type || 'options') === 'text' ? 'Текстове поле' : 'Варіанти'} />
+                      <MetaRow label="Обовʼязкове" value={isEnabled(selectedQuestion.required) ? 'Так' : 'Ні'} />
+                    </SettingsSection>
+                    <SettingsSection title="SKU">
+                      <MetaRow label="Включено в SKU" value={isEnabled(selectedQuestion.include_in_sku) ? 'Так' : 'Ні'} />
+                    </SettingsSection>
+                    <SettingsSection title="Видимість та умови"><MetaRow label="Показувати" value={questionVisibilitySummary} /></SettingsSection>
+                    <details className="catalog-technical-details catalog-technical-overview">
+                      <summary>Технічні параметри</summary>
+                      <div className="catalog-technical-details-body">
+                        <MetaRow label="Ключ" value={selectedQuestion.id} />
+                        <MetaRow label="Порядок" value={selectedQuestion.display_order ?? selectedQuestion.sku_index ?? '—'} />
+                        {isEnabled(selectedQuestion.include_in_sku) && <MetaRow label="SKU index" value={selectedQuestion.sku_index ?? '—'} />}
+                        {isEnabled(selectedQuestion.include_in_sku) && <MetaRow label="Розділювач" value={selectedQuestion.sku_separator || 'Немає'} />}
+                      </div>
+                    </details>
+                  </div>
+                )}
+
+                <section className="catalog-variants-section">
+                  <div className="catalog-variants-header">
+                    <div><h4>Варіанти</h4><p>{activeOptions.length} активних{archivedOptions.length ? ` · ${archivedOptions.length} в архіві` : ''}</p></div>
+                    {selectedQuestionInputType !== 'text' && <button type="button" onClick={openNewOption} className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs"><Plus size={14} />Додати варіант</button>}
+                  </div>
+                  {editOpt.id && <OptionForm config={config} currentCatQuestions={currentCatQuestions} excludeQuestionId={selectedQuestion.id} onCancel={resetOptionEdit} onChange={setEditOpt} onSave={updateOption} option={editOpt} />}
+                  {isNewOptionOpen && selectedQuestionInputType !== 'text' && <OptionForm config={config} currentCatQuestions={currentCatQuestions} excludeQuestionId={selectedQuestion.id} isNew onCancel={() => setIsNewOptionOpen(false)} onChange={setNewOpt} onSave={addOption} option={newOpt} />}
+                  {selectedQuestionInputType === 'text' ? <p className="catalog-empty-state">Для текстового питання варіанти не використовуються.</p> : (
+                    <div className="catalog-option-list">
+                      {activeOptions.map((option) => <OptionRow key={option.db_id} option={option} config={config} currentCatQuestions={currentCatQuestions} onArchive={archiveOption} onDelete={deleteItem} onEdit={openOptionEdit} />)}
+                      {activeOptions.length === 0 && <p className="catalog-empty-state">Активних варіантів немає.</p>}
+                    </div>
+                  )}
+                  {archivedOptions.length > 0 && (
+                    <div className="catalog-archived-section">
+                      <button type="button" onClick={() => setIsArchivedOptionsOpen((isOpen) => !isOpen)}><span><Archive size={14} />Архівні варіанти ({archivedOptions.length})</span><ChevronDown size={16} className={isArchivedOptionsOpen ? 'rotate-180' : ''} /></button>
+                      {isArchivedOptionsOpen && <div className="catalog-option-list">{archivedOptions.map((option) => <OptionRow key={option.db_id} archived option={option} config={config} currentCatQuestions={currentCatQuestions} onArchive={archiveOption} onDelete={deleteItem} onEdit={openOptionEdit} />)}</div>}
+                    </div>
+                  )}
+                </section>
               </>
             ) : (
-              <p className="mb-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                SKU index не потрібен, бо це питання не додається в артикул.
-              </p>
-            )}
-            <ConditionBuilder
-              config={config}
-              excludeQuestionId={selectedQuestion.id}
-              label="Показувати питання"
-              questions={currentCatQuestions}
-              value={editQuestion.visible_if_json}
-              onChange={(nextValue) => setEditQuestion({ ...editQuestion, visible_if_json: nextValue })}
-            />
-            <button onClick={updateQuestion} className="btn btn-primary w-full">Зберегти</button>
-          </div>
-        )}
-        {selectedCat && (
-          <div className="mt-4 pt-4 border-t border-slate-200">
-            <button
-              onClick={() => setIsNewQuestionOpen((isOpen) => !isOpen)}
-              className="btn btn-amber w-full"
-            >
-              {isNewQuestionOpen ? 'Приховати додавання' : 'Додати питання'}
-            </button>
-            {isNewQuestionOpen && (
-              <div className="mt-3 bg-slate-50/70 p-3 rounded-xl">
-                <FieldControl label="Key">
-                  <input className="input-sm" placeholder="size" value={newQuest.key} onChange={(event) => setNewQuest({ ...newQuest, key: event.target.value })} />
-                </FieldControl>
-                <FieldControl label="Назва питання">
-                  <input className="input-sm" placeholder="Розмір" value={newQuest.label} onChange={(event) => setNewQuest({ ...newQuest, label: event.target.value })} />
-                </FieldControl>
-                <FieldControl label="Тип питання">
-                  <select className="input-sm" value={newQuest.input_type} onChange={(event) => setNewQuest({ ...newQuest, input_type: event.target.value, include_in_sku: event.target.value === 'text' ? false : newQuest.include_in_sku })}>
-                    <option value="options">Варіанти</option>
-                    <option value="text">Текстове поле</option>
-                  </select>
-                </FieldControl>
-                <FieldControl label="Порядок у формі" hint="Відповідає тільки за місце питання на екрані. Можна вводити 0.5, 1.5 тощо.">
-                  <input className="input-sm" type="number" step="0.1" placeholder="0.5" value={newQuest.display_order} onChange={(event) => setNewQuest({ ...newQuest, display_order: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
-                </FieldControl>
-                <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={newQuest.required} onChange={(event) => setNewQuest({ ...newQuest, required: event.target.checked })} className="mr-2" /> Обовʼязкове</label>
-                <label className="flex items-center text-sm mb-2"><input type="checkbox" checked={newQuest.include_in_sku} disabled={newQuest.input_type === 'text'} onChange={(event) => setNewQuest({ ...newQuest, include_in_sku: event.target.checked })} className="mr-2" /> Додавати в SKU</label>
-                {canNewQuestionSku ? (
-                  <>
-                    <FieldControl label="SKU index" hint="Відповідає за позицію значення в артикулі.">
-                      <input className="input-sm" type="number" placeholder="1" value={newQuest.sku_index} onChange={(event) => setNewQuest({ ...newQuest, sku_index: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
-                    </FieldControl>
-                    <button onClick={fillNextNewQuestionSkuIndex} className="btn btn-outline mb-2 w-full text-xs">
-                      Наступний SKU index
-                    </button>
-                    <FieldControl label="Розділювач у SKU" hint="Можна використовувати тільки -, _, . або /.">
-                      <input className="input-sm" placeholder="-" value={newQuest.sku_separator} onChange={(event) => setNewQuest({ ...newQuest, sku_separator: event.target.value })} />
-                    </FieldControl>
-                  </>
-                ) : (
-                  <p className="mb-2 rounded-lg bg-white/80 px-3 py-2 text-xs text-slate-500">
-                    SKU index не потрібен, бо це питання не додається в артикул.
-                  </p>
-                )}
-                <ConditionBuilder
-                  config={config}
-                  label="Показувати питання"
-                  questions={currentCatQuestions}
-                  value={newQuest.visible_if_json}
-                  onChange={(nextValue) => setNewQuest({ ...newQuest, visible_if_json: nextValue })}
-                />
-                <button onClick={addQuestion} className="btn btn-amber w-full">Зберегти питання</button>
-              </div>
+              <div className="catalog-detail-empty"><h3>Виберіть питання</h3><p>Налаштування та варіанти відкриються у цій панелі.</p></div>
             )}
           </div>
-        )}
-      </div>
-
-      <div className="card flex flex-col p-4">
-        <div className="section-title mb-4">
-          <h2 className="section-title-text">3. Варіанти</h2>
-        </div>
-        <div className="h-96 overflow-y-auto space-y-2 pr-2">
-          {selectedQuestionInputType === 'text' && (
-            <div className="p-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-600">
-              Для текстового питання варіанти не використовуються.
-            </div>
-          )}
-          {activeOptions.map((option) => (
-            <OptionRow
-              key={option.db_id}
-              option={option}
-              config={config}
-              currentCatQuestions={currentCatQuestions}
-              onArchive={archiveOption}
-              onDelete={deleteItem}
-              onEdit={beginOptionEdit}
-            />
-          ))}
-          {selectedQuestionInputType !== 'text' && activeOptions.length === 0 && (
-            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 text-sm text-slate-500">
-              Активних варіантів немає.
-            </div>
-          )}
-          {archivedOptions.length > 0 && (
-            <div className="mt-3 border-t border-slate-200 pt-2">
-              <button
-                type="button"
-                className="flex w-full items-center justify-between px-1 py-2 text-sm font-semibold text-slate-500 hover:text-slate-700"
-                onClick={() => setIsArchivedOptionsOpen((isOpen) => !isOpen)}
-              >
-                <span className="flex items-center gap-2">
-                  <Archive size={15} />
-                  Архівні
-                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">{archivedOptions.length}</span>
-                </span>
-                <ChevronDown
-                  size={16}
-                  className={`transition ${isArchivedOptionsOpen ? 'rotate-180' : ''}`}
-                />
-              </button>
-              {isArchivedOptionsOpen && (
-                <div className="mt-1 space-y-2">
-                  {archivedOptions.map((option) => (
-                    <OptionRow
-                      key={option.db_id}
-                      archived
-                      option={option}
-                      config={config}
-                      currentCatQuestions={currentCatQuestions}
-                      onArchive={archiveOption}
-                      onDelete={deleteItem}
-                      onEdit={beginOptionEdit}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        {editOpt.id && (
-          <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-white/80">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <div className="text-xs text-slate-500">Редагувати опцію</div>
-              <button onClick={() => setEditOpt({ id: null, value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false })} className="btn btn-outline px-2 py-1 text-xs">Приховати</button>
-            </div>
-            <FieldControl label="Внутрішнє значення" hint="Використовується у цінах, умовах і модифікаторах.">
-              <input className="input-sm" type="number" placeholder="6" value={editOpt.value_id} onChange={(event) => setEditOpt({ ...editOpt, value_id: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
-            </FieldControl>
-            <FieldControl label="Код у SKU" hint="Може повторно використовувати код з попередньої версії.">
-              <input className="input-sm font-mono" inputMode="numeric" placeholder="3" value={editOpt.sku_code} onChange={(event) => setEditOpt({ ...editOpt, sku_code: event.target.value.replace(/\D/g, '') })} />
-            </FieldControl>
-            <input className="input-sm mb-2" placeholder="Label" value={editOpt.label} onChange={(event) => setEditOpt({ ...editOpt, label: event.target.value })} />
-            <ConditionBuilder
-              config={config}
-              excludeQuestionId={selectedQuestion.id}
-              label="Показувати варіант"
-              questions={currentCatQuestions}
-              value={editOpt.visible_if_json}
-              onChange={(nextValue) => setEditOpt({ ...editOpt, visible_if_json: nextValue })}
-            />
-            <ConditionBuilder
-              config={config}
-              excludeQuestionId={selectedQuestion.id}
-              label="Приховувати варіант"
-              questions={currentCatQuestions}
-              value={editOpt.hidden_if_json}
-              onChange={(nextValue) => setEditOpt({ ...editOpt, hidden_if_json: nextValue })}
-            />
-            <div className="flex gap-2">
-              <button onClick={updateOption} className="btn btn-primary w-full">Зберегти</button>
-              <button onClick={() => setEditOpt({ id: null, value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false })} className="btn btn-outline w-full">Скасувати</button>
-            </div>
-          </div>
-        )}
-        {selectedQuestion && selectedQuestionInputType !== 'text' && (
-          <div className="mt-4 pt-4 border-t border-slate-200">
-            <button
-              onClick={() => setIsNewOptionOpen((isOpen) => !isOpen)}
-              className="btn btn-amber w-full"
-            >
-              {isNewOptionOpen ? 'Приховати додавання' : 'Додати варіант'}
-            </button>
-            {isNewOptionOpen && (
-              <div className="mt-3 bg-slate-50/70 p-3 rounded-xl">
-                <FieldControl label="Внутрішнє значення" hint="Нове унікальне значення для цін та умов.">
-                  <input className="input-sm" type="number" placeholder="6" value={newOpt.value_id} onChange={(event) => setNewOpt({ ...newOpt, value_id: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
-                </FieldControl>
-                <FieldControl label="Код у SKU" hint="Цифри, які потраплять в артикул після публікації версії.">
-                  <input className="input-sm font-mono" inputMode="numeric" placeholder="3" value={newOpt.sku_code} onChange={(event) => setNewOpt({ ...newOpt, sku_code: event.target.value.replace(/\D/g, '') })} />
-                </FieldControl>
-                <input className="input-sm mb-2" placeholder="Label" value={newOpt.label} onChange={(event) => setNewOpt({ ...newOpt, label: event.target.value })} />
-                <ConditionBuilder
-                  config={config}
-                  excludeQuestionId={selectedQuestion.id}
-                  label="Показувати варіант"
-                  questions={currentCatQuestions}
-                  value={newOpt.visible_if_json}
-                  onChange={(nextValue) => setNewOpt({ ...newOpt, visible_if_json: nextValue })}
-                />
-                <ConditionBuilder
-                  config={config}
-                  excludeQuestionId={selectedQuestion.id}
-                  label="Приховувати варіант"
-                  questions={currentCatQuestions}
-                  value={newOpt.hidden_if_json}
-                  onChange={(nextValue) => setNewOpt({ ...newOpt, hidden_if_json: nextValue })}
-                />
-                <button onClick={addOption} className="btn btn-amber w-full">Зберегти варіант</button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+        </section>
+      ) : <section className="catalog-no-category"><h3>Виберіть категорію</h3><p>Питання та схема SKU відкриються для вибраної категорії.</p></section>}
     </div>
   );
 }
