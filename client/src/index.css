@@ -36,7 +36,7 @@
     --radius-sm: 8px;
     --radius-md: 12px;
     --radius-lg: 16px;
-    --workspace-nav-height: 64px;
+    --workspace-nav-height: 70px;
     --admin-section-nav-height: 44px;
     --sticky-content-gap: 16px;
   }
@@ -142,27 +142,11 @@
   }
 
   .workspace-brand {
-    @apply flex shrink-0 items-center gap-2.5;
+    @apply flex shrink-0 items-center;
     color: white;
   }
 
-  .workspace-brand-mark {
-    @apply flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold;
-    color: var(--navy-950);
-    background: var(--amber-500);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
-  }
-
-  .workspace-brand-copy {
-    @apply hidden leading-tight sm:flex sm:flex-col;
-  }
-
-  .workspace-brand-copy strong { @apply text-sm font-semibold; }
-
-  .workspace-brand-copy span {
-    @apply text-[10px] uppercase tracking-[0.16em];
-    color: rgba(255, 255, 255, 0.58);
-  }
+  .workspace-brand-logo { @apply block h-9 w-auto sm:h-12; }
 
   .workspace-nav-links {
     @apply flex min-w-0 flex-1 items-center gap-1 overflow-x-auto;
@@ -194,7 +178,7 @@
     content: "";
     position: absolute;
     right: 12px;
-    bottom: -14px;
+    bottom: calc((var(--workspace-nav-height) - 36px) / -2);
     left: 12px;
     height: 3px;
     border-radius: 3px 3px 0 0;
@@ -238,6 +222,24 @@
     border-color: var(--border);
     box-shadow: var(--shadow-sm);
   }
+
+  .home-top-workspace,
+  .operational-split-layout {
+    @apply grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px];
+  }
+
+  .home-top-workspace { @apply items-stretch; }
+  .operational-split-layout { @apply items-start; }
+
+  .home-side-workspace {
+    @apply grid gap-4;
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .home-workspace-panel { border-radius: var(--radius-sm); }
+  .home-create-panel,
+  .home-decode-panel { @apply h-full; }
+  .home-export-panel { @apply px-4 py-3; }
 
   .admin-section-nav {
     @apply sticky z-30 flex gap-1 overflow-x-auto rounded-lg border p-1;
@@ -485,7 +487,7 @@
   .decode-warning span { @apply mt-0.5 block leading-5 text-slate-600; }
 
   .decode-rounding-note {
-    @apply text-right text-[11px] tabular-nums text-slate-500;
+    @apply text-right text-[11px] font-medium tabular-nums text-slate-500;
   }
 
   .decode-details {

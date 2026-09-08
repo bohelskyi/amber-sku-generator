@@ -6,6 +6,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
+import amberLogo from '../../assets/amber-logo-white-orange.png';
 
 const navigation = [
   { to: '/', label: 'Товари', icon: <Boxes size={16} aria-hidden="true" />, end: true },
@@ -20,11 +21,7 @@ export function WorkspaceNav() {
     <nav className="workspace-nav" aria-label="Основна навігація">
       <div className="workspace-nav-inner">
         <NavLink to="/" className="workspace-brand" aria-label="Amber SKU Manager">
-          <span className="workspace-brand-mark" aria-hidden="true">A</span>
-          <span className="workspace-brand-copy">
-            <strong>Amber</strong>
-            <span>SKU Manager</span>
-          </span>
+          <img src={amberLogo} alt="" className="workspace-brand-logo" />
         </NavLink>
 
         <div className="workspace-nav-links">

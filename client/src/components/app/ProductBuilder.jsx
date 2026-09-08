@@ -182,7 +182,7 @@ export function ProductBuilder({
   };
 
   return (
-    <div ref={workspaceRef} className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+    <div ref={workspaceRef} className="operational-split-layout">
       <section className="builder-workspace card overflow-hidden fade-up">
         <header className="builder-header">
           <h2 className="section-title-text">{category.name}</h2>

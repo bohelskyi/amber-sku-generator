@@ -120,8 +120,8 @@ export function HomeDashboard({
 }) {
   return (
     <div className="space-y-5">
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.75fr)]">
-        <section className="card p-4 sm:p-5 fade-up stagger-1">
+      <div className="home-top-workspace">
+        <section className="home-workspace-panel home-create-panel card p-4 sm:p-5 fade-up stagger-1">
           <div className="section-title mb-4">
             <div>
               <p className="eyebrow">Створити SKU</p>
@@ -149,8 +149,8 @@ export function HomeDashboard({
           </div>
         </section>
 
-        <div className="space-y-4 fade-up stagger-2">
-          <div className="card p-5">
+        <div className="home-side-workspace fade-up stagger-2">
+          <div className="home-workspace-panel home-decode-panel card p-4 sm:p-5">
             <p className="eyebrow">Розшифрувати SKU</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Знайти та перевірити товар</h2>
             <div className="mt-4 flex flex-col gap-3 sm:flex-row lg:flex-col">
@@ -175,7 +175,7 @@ export function HomeDashboard({
             )}
           </div>
 
-          <div className="utility-strip">
+          <div className="home-workspace-panel home-export-panel utility-strip">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold text-slate-700">Експорт</p>
@@ -269,6 +269,7 @@ export function DecodeWorkspace({
   const calculatedPriceUah = pricing?.calculatedPriceUah;
   const automaticPriceUah = pricing?.automaticPriceUah;
   const finalStoredPriceUah = decodeData.existsInDb ? pricing?.totalPriceUah : null;
+  const finalStoredPriceUsd = decodeData.existsInDb ? pricing?.totalPrice : null;
   const hasRoundingDifference = calculatedPriceUah !== null
     && calculatedPriceUah !== undefined
     && automaticPriceUah !== null
@@ -307,7 +308,7 @@ export function DecodeWorkspace({
   }
 
   return (
-    <section className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px] fade-up stagger-3">
+    <section className="operational-split-layout decode-result-workspace fade-up stagger-3">
       <div className="decode-workspace builder-workspace card overflow-hidden">
         <header className="builder-header">
           <div className="min-w-0">
@@ -378,17 +379,16 @@ export function DecodeWorkspace({
                 label="Розраховано до округлення"
                 value={formatOptionalValue(calculatedPriceUah, formatWholeUah)}
               />
+              <div className="builder-price-row is-strong">
+                <span>Фінальна збережена</span>
+                <span>{formatOptionalValue(finalStoredPriceUah, formatUah)}</span>
+                <span>{formatOptionalValue(finalStoredPriceUsd, formatUsd)}</span>
+              </div>
               {hasRoundingDifference && (
                 <p className="decode-rounding-note">
-                  Округлення: {formatWholeUah(calculatedPriceUah)} → {formatUah(automaticPriceUah)}
-                  {' '}({formatSignedRoundedUah(Number(automaticPriceUah) - Number(calculatedPriceUah))})
+                  {formatWholeUah(calculatedPriceUah)} → {formatUah(automaticPriceUah)}
                 </p>
               )}
-              <DecodeSummaryRow
-                label="Фінальна збережена"
-                value={formatOptionalValue(finalStoredPriceUah, formatUah)}
-                strong
-              />
             </div>
 
             <div className="builder-price-section">
@@ -605,7 +605,7 @@ function RecountPanel({
   }, [recountValidationAttempt]);
 
   return (
-    <div ref={panelRef} className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+    <div ref={panelRef} className="operational-split-layout">
       <section className="recount-workspace builder-workspace card overflow-hidden">
         <header className="builder-header">
           <div className="min-w-0">
@@ -895,10 +895,4 @@ function formatSignedUah(value) {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return '—';
   return `${amount > 0 ? '+' : ''}${formatUah(value)}`;
-}
-
-function formatSignedRoundedUah(value) {
-  const amount = Number(value);
-  if (!Number.isFinite(amount)) return '—';
-  return `${amount > 0 ? '+' : ''}${formatUah(amount.toFixed(2))}`;
 }

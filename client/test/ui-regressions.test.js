@@ -329,6 +329,47 @@ test('decode result keeps authoritative pricing drivers highlighted in a compact
   assert.doesNotMatch(decodeSource, /api\.(get|post|put|delete)/);
 });
 
+test('home and decode presentation share aligned columns and compact authoritative final pricing', () => {
+  const homeSource = fs.readFileSync(
+    new URL('../src/components/app/HomeDashboard.jsx', import.meta.url),
+    'utf8'
+  );
+  const headerSource = fs.readFileSync(
+    new URL('../src/components/app/PageHeader.jsx', import.meta.url),
+    'utf8'
+  );
+  const navSource = fs.readFileSync(
+    new URL('../src/components/app/WorkspaceNav.jsx', import.meta.url),
+    'utf8'
+  );
+  const builderSource = fs.readFileSync(
+    new URL('../src/components/app/ProductBuilder.jsx', import.meta.url),
+    'utf8'
+  );
+  const stylesSource = fs.readFileSync(
+    new URL('../src/index.css', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(homeSource, /home-top-workspace/);
+  assert.match(homeSource, /home-side-workspace/);
+  assert.match(homeSource, /decode-result-workspace/);
+  assert.equal((homeSource.match(/operational-split-layout/g) || []).length, 2, 'decode and recount must share the operational split');
+  assert.match(builderSource, /className="operational-split-layout"/);
+  assert.match(stylesSource, /\.home-top-workspace,[\s\S]*?\.operational-split-layout[\s\S]*?360px/);
+  assert.match(homeSource, /const finalStoredPriceUsd = decodeData\.existsInDb \? pricing\?\.totalPrice : null/);
+  assert.match(homeSource, /formatOptionalValue\(finalStoredPriceUsd, formatUsd\)/);
+  assert.match(homeSource, /formatWholeUah\(calculatedPriceUah\).*→.*formatUah\(automaticPriceUah\)/s);
+  assert.doesNotMatch(homeSource, /Округлення:/);
+  assert.doesNotMatch(homeSource, /formatSignedRoundedUah/);
+  assert.doesNotMatch(headerSource, /Операційна консоль|останніх записів|категорій/);
+  assert.match(navSource, /amber-logo-white-orange\.png/);
+  assert.match(navSource, /<img src=\{amberLogo\}/);
+  assert.doesNotMatch(navSource, /workspace-brand-mark|workspace-brand-copy/);
+  assert.match(stylesSource, /--workspace-nav-height: 70px/);
+  assert.match(stylesSource, /\.workspace-brand-logo \{ @apply block h-9 w-auto sm:h-12; \}/);
+});
+
 test('recount uses a Builder-aligned editor with one authoritative comparison summary', () => {
   const source = fs.readFileSync(
     new URL('../src/components/app/HomeDashboard.jsx', import.meta.url),
