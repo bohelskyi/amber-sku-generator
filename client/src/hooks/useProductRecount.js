@@ -8,6 +8,7 @@ import {
   getDecodedAnswerMap,
   getRecountSourceWeight,
   haveRecountTargetChanged,
+  normalizeRecountTargetState,
   updateRecountOptionAnswer,
   updateRecountTextAnswer,
 } from '../lib/product-recount.js';
@@ -24,7 +25,11 @@ export function useProductRecount({
   const [decodeError, setDecodeError] = useState('');
   const [decodeErrorDetails, setDecodeErrorDetails] = useState(null);
   const [isRecountOpen, setIsRecountOpen] = useState(false);
-  const [recountAnswers, setRecountAnswers] = useState({});
+  const [recountTarget, setRecountTarget] = useState({
+    answers: {},
+    retainedHiddenAnswers: {},
+  });
+  const recountAnswers = recountTarget.answers;
   const [recountWeight, setRecountWeight] = useState('');
   const [recountReason, setRecountReason] = useState('');
   const [recountManualPriceUah, setRecountManualPriceUah] = useState('');
@@ -138,7 +143,10 @@ export function useProductRecount({
       return;
     }
 
-    setRecountAnswers(getDecodedAnswerMap(decodeData));
+    setRecountTarget({
+      answers: getDecodedAnswerMap(decodeData),
+      retainedHiddenAnswers: {},
+    });
     setRecountWeight(String(getRecountSourceWeight(decodeData) || ''));
     setRecountReason('');
     setRecountManualPriceUah('');
@@ -168,11 +176,19 @@ export function useProductRecount({
   };
 
   const handleRecountAnswer = (questionId, valueId) => {
-    const question = config?.questions?.[decodeData?.category?.code]?.find(
+    const categoryQuestions = config?.questions?.[decodeData?.category?.code] || [];
+    const question = categoryQuestions.find(
       (item) => item.id === questionId
     );
-    setRecountAnswers((previousAnswers) =>
-      updateRecountOptionAnswer(previousAnswers, question, valueId));
+    setRecountTarget((previousTarget) => {
+      const retainedHiddenAnswers = { ...previousTarget.retainedHiddenAnswers };
+      delete retainedHiddenAnswers[questionId];
+      return normalizeRecountTargetState(
+        categoryQuestions,
+        updateRecountOptionAnswer(previousTarget.answers, question, valueId),
+        retainedHiddenAnswers
+      );
+    });
     previewRequestIdRef.current = previewRequestGateRef.current.invalidate();
     setIsRecountConfirmOpen(false);
     setIsRecountPreviewCurrent(false);
@@ -184,12 +200,20 @@ export function useProductRecount({
   };
 
   const handleRecountTextAnswer = (questionId, value) => {
-    const question = config?.questions?.[decodeData?.category?.code]?.find(
+    const categoryQuestions = config?.questions?.[decodeData?.category?.code] || [];
+    const question = categoryQuestions.find(
       (item) => item.id === questionId
     );
 
-    setRecountAnswers((previousAnswers) =>
-      updateRecountTextAnswer(previousAnswers, question, value));
+    setRecountTarget((previousTarget) => {
+      const retainedHiddenAnswers = { ...previousTarget.retainedHiddenAnswers };
+      delete retainedHiddenAnswers[questionId];
+      return normalizeRecountTargetState(
+        categoryQuestions,
+        updateRecountTextAnswer(previousTarget.answers, question, value),
+        retainedHiddenAnswers
+      );
+    });
     previewRequestIdRef.current = previewRequestGateRef.current.invalidate();
     setIsRecountConfirmOpen(false);
     setIsRecountPreviewCurrent(false);

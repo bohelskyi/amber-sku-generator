@@ -1,3 +1,13 @@
+import {
+  getVisibleOptionsForQuestion,
+  isQuestionVisible,
+  isTextQuestion,
+} from './sku-visibility.js';
+
+const hasRecountAnswerValue = (value) => (
+  value !== undefined && value !== null && String(value).trim() !== ''
+);
+
 export function getDecodedAnswerMap(decoded) {
   const decodedMap = (decoded?.decodedAnswers || []).reduce((result, answer) => {
     result[answer.key] = answer.value_id === null ? 0 : answer.value_id;
@@ -85,6 +95,152 @@ export function getRecountPricingDependencyState({
   }
 
   return normalizePricingDependencyState(currentPricing);
+}
+
+function getDistinctTargetOptions(question, answers) {
+  const distinctOptions = new Map();
+  for (const option of getVisibleOptionsForQuestion(
+    question,
+    answers,
+    answers.is_calibrated ?? null
+  )) {
+    if (option.id === undefined || option.id === null) continue;
+    const valueKey = String(option.id);
+    if (!distinctOptions.has(valueKey)) distinctOptions.set(valueKey, option);
+  }
+  return [...distinctOptions.values()];
+}
+
+function getRecountAnswerStateKey(answers) {
+  return JSON.stringify(
+    Object.keys(answers).sort().map((key) => [key, answers[key]])
+  );
+}
+
+export function normalizeRecountTargetState(
+  questions,
+  answers,
+  retainedHiddenAnswers = {}
+) {
+  const categoryQuestions = Array.isArray(questions) ? questions : [];
+  const nextAnswers = { ...(answers || {}) };
+  const nextRetainedHiddenAnswers = { ...(retainedHiddenAnswers || {}) };
+  const autoEligibleQuestionIds = new Set(
+    categoryQuestions
+      .filter((question) => !isTextQuestion(question))
+      .filter((question) => (
+        hasRecountAnswerValue(nextAnswers[question.id])
+        || hasRecountAnswerValue(nextRetainedHiddenAnswers[question.id])
+      ))
+      .map((question) => question.id)
+  );
+  const affectedQuestionIds = new Set();
+  const seenStates = new Set();
+  const optionCount = categoryQuestions.reduce(
+    (count, question) => count + (question.options?.length || 0),
+    0
+  );
+  const maxIterations = Math.max(4, categoryQuestions.length + optionCount + 1);
+  let allowAutoSelection = true;
+
+  for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+    let stateKey = getRecountAnswerStateKey(nextAnswers);
+    if (seenStates.has(stateKey)) {
+      if (!allowAutoSelection) {
+        return { answers: nextAnswers, retainedHiddenAnswers: nextRetainedHiddenAnswers };
+      }
+
+      allowAutoSelection = false;
+      seenStates.clear();
+      let resetAffectedAnswer = false;
+      for (const questionId of affectedQuestionIds) {
+        if (nextAnswers[questionId] !== null) {
+          nextAnswers[questionId] = null;
+          resetAffectedAnswer = true;
+        }
+      }
+      if (!resetAffectedAnswer) {
+        return { answers: nextAnswers, retainedHiddenAnswers: nextRetainedHiddenAnswers };
+      }
+      stateKey = getRecountAnswerStateKey(nextAnswers);
+    }
+    seenStates.add(stateKey);
+
+    let changed = false;
+    for (const question of categoryQuestions) {
+      const questionId = question.id;
+      const selectedValue = nextAnswers[questionId];
+      const hasSelectedValue = hasRecountAnswerValue(selectedValue);
+      const isVisible = isQuestionVisible(
+        question,
+        nextAnswers,
+        nextAnswers.is_calibrated ?? null
+      );
+
+      if (!isVisible) {
+        if (hasSelectedValue) {
+          nextRetainedHiddenAnswers[questionId] = selectedValue;
+          nextAnswers[questionId] = null;
+          affectedQuestionIds.add(questionId);
+          changed = true;
+        }
+        continue;
+      }
+
+      const retainedValue = nextRetainedHiddenAnswers[questionId];
+      const hasRetainedValue = hasRecountAnswerValue(retainedValue);
+
+      if (isTextQuestion(question)) continue;
+
+      const targetOptions = getDistinctTargetOptions(question, nextAnswers);
+      const retainedSelectionIsValid = hasRetainedValue && targetOptions.some(
+        (option) => String(option.id) === String(retainedValue)
+      );
+      const isCalibrationContext = questionId === 'is_calibrated'
+        || question.key === 'is_calibrated';
+      if (
+        isCalibrationContext
+        && !hasSelectedValue
+        && retainedSelectionIsValid
+      ) {
+        nextAnswers[questionId] = retainedValue;
+        affectedQuestionIds.add(questionId);
+        changed = true;
+        continue;
+      }
+
+      const selectionIsValid = hasSelectedValue && targetOptions.some(
+        (option) => String(option.id) === String(selectedValue)
+      );
+      if (selectionIsValid) continue;
+
+      if (hasSelectedValue) {
+        autoEligibleQuestionIds.add(questionId);
+        affectedQuestionIds.add(questionId);
+      }
+      if (!autoEligibleQuestionIds.has(questionId)) continue;
+
+      const normalizedValue = allowAutoSelection && targetOptions.length === 1
+        ? targetOptions[0].id
+        : null;
+      if (String(selectedValue ?? '') !== String(normalizedValue ?? '')) {
+        nextAnswers[questionId] = normalizedValue;
+        affectedQuestionIds.add(questionId);
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      return { answers: nextAnswers, retainedHiddenAnswers: nextRetainedHiddenAnswers };
+    }
+  }
+
+  for (const questionId of affectedQuestionIds) nextAnswers[questionId] = null;
+  return { answers: nextAnswers, retainedHiddenAnswers: nextRetainedHiddenAnswers };
+}
+
+export function normalizeRecountTargetAnswers(questions, answers) {
+  return normalizeRecountTargetState(questions, answers).answers;
 }
 
 export function updateRecountOptionAnswer(previousAnswers, question, valueId) {
