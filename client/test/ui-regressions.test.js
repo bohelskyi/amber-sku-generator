@@ -110,7 +110,7 @@ test('sticky navigation and admin anchors use shared responsive offsets', () => 
     'utf8'
   );
 
-  assert.match(stylesSource, /--workspace-nav-height: 64px/);
+  assert.match(stylesSource, /--workspace-nav-height: 70px/);
   assert.match(stylesSource, /--workspace-nav-height: 56px/);
   assert.match(stylesSource, /\.admin-section-nav[\s\S]*?top: var\(--workspace-nav-height\)/);
   assert.match(stylesSource, /\.admin-anchor-section[\s\S]*?scroll-margin-top:/);
@@ -170,6 +170,10 @@ test('fixed-scale API decimals are compacted in editable pricing fields', () => 
     new URL('../src/hooks/useAdminPanel.js', import.meta.url),
     'utf8'
   );
+  const adminPricingStateSource = fs.readFileSync(
+    new URL('../src/lib/admin-pricing-state.js', import.meta.url),
+    'utf8'
+  );
   const repricingSource = fs.readFileSync(
     new URL('../src/pages/RepricingPage.jsx', import.meta.url),
     'utf8'
@@ -177,7 +181,7 @@ test('fixed-scale API decimals are compacted in editable pricing fields', () => 
 
   assert.match(matrixSource, /defaultValue=\{cell \? formatDecimal\(cell\.price\) : ''\}/);
   assert.match(adminHookSource, /factor: formatDecimal\(modifier\.factor\)/);
-  assert.match(adminHookSource, /min_weight: formatDecimal\(band\.min_weight\)/);
+  assert.match(adminPricingStateSource, /min_weight: formatDecimal\(band\.min_weight\)/);
   assert.match(repricingSource, /formatDecimal\(item\.newPriceUah\)/);
 });
 

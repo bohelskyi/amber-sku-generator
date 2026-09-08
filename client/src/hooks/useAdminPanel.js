@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { formatDecimal } from '../lib/formatters';
 import { getValidationIssues } from '../lib/admin-validation';
 import { normalizeDecimalInput } from '../lib/number-input';
+import { buildScenarioEditorDraft, findScenarioById } from '../lib/admin-pricing-state';
 
 const emptyEditOption = { id: null, value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false };
 const emptyNewCategory = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false };
@@ -63,6 +64,7 @@ export function useAdminPanel() {
   const [editModifier, setEditModifier] = useState(null);
   const [schemaStatus, setSchemaStatus] = useState(null);
   const [schemaPublishState, setSchemaPublishState] = useState({ loading: false, error: '' });
+  const pricesRequestId = useRef(0);
 
   const fetchConfig = () =>
     api.get('/admin/config').then((res) => {
@@ -82,7 +84,11 @@ export function useAdminPanel() {
   };
 
   const fetchPricesForCategory = (categoryCode) => {
-    api.get(`/admin/prices/${categoryCode}`).then((res) => setPricesData(res.data));
+    const requestId = ++pricesRequestId.current;
+    return api.get(`/admin/prices/${categoryCode}`).then((res) => {
+      if (requestId === pricesRequestId.current) setPricesData(res.data);
+      return res.data;
+    });
   };
 
   const fetchPrices = () => {
@@ -482,24 +488,20 @@ export function useAdminPanel() {
   };
 
   const handlePriceChange = (scenarioId, xVal, yVal, newPrice) => {
+    const categoryCode = selectedCat?.code;
     const normalizedPrice = normalizeDecimalInput(newPrice);
-    if (normalizedPrice.trim() === '') {
-      return api.post('/admin/price-cell', {
-        scenario_id: scenarioId,
-        x_val: xVal,
-        y_val: yVal,
-        price: null,
-      });
+    const isBlank = normalizedPrice.trim() === '';
+    if (!isBlank) {
+      const parsedPrice = Number(normalizedPrice);
+      if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) return Promise.resolve();
     }
-    const parsedPrice = Number(normalizedPrice);
-    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) return Promise.resolve();
 
     return api.post('/admin/price-cell', {
       scenario_id: scenarioId,
       x_val: xVal,
       y_val: yVal,
-      price: normalizedPrice,
-    });
+      price: isBlank ? null : normalizedPrice,
+    }).then(() => fetchPricesForCategory(categoryCode));
   };
 
   const addScenario = () => {
@@ -528,23 +530,7 @@ export function useAdminPanel() {
   };
 
   const beginScenarioEdit = (scenario) => {
-    setEditScenario({
-      id: scenario.id,
-      name: scenario.name,
-      group_name: scenario.group_name || '',
-      match_json: formatMatchJson(scenario.match_json),
-      axis_x_key: scenario.axis_x_key || '',
-      axis_y_key: scenario.axis_y_key || '',
-      priority: String(scenario.priority ?? 0),
-      status: scenario.status || 'active',
-      price_mode: scenario.price_mode || 'category_default',
-      apply_modifiers: scenario.apply_modifiers !== false,
-      weight_bands: (scenario.weight_bands || []).map((band) => ({
-        ...band,
-        min_weight: formatDecimal(band.min_weight),
-        max_weight: formatDecimal(band.max_weight),
-      })),
-    });
+    setEditScenario(buildScenarioEditorDraft(scenario));
   };
 
   const updateScenario = () => {
@@ -560,8 +546,10 @@ export function useAdminPanel() {
       return alert('Помилка в JSON умови');
     }
 
-    api.put('/admin/scenario', {
-      id: editScenario.id,
+    const scenarioId = editScenario.id;
+    const categoryCode = selectedCat?.code;
+    return api.put('/admin/scenario', {
+      id: scenarioId,
       name: editScenario.name,
       group_name: editScenario.group_name,
       match_json: parsedJson,
@@ -573,11 +561,16 @@ export function useAdminPanel() {
       apply_modifiers: editScenario.apply_modifiers !== false,
       weight_bands: editScenario.weight_bands || [],
     })
-      .then(() => {
-        setEditScenario(null);
-        fetchPrices();
+      .then(() => fetchPricesForCategory(categoryCode))
+      .then((nextPricesData) => {
+        const savedScenario = findScenarioById(nextPricesData, scenarioId);
+        setEditScenario(buildScenarioEditorDraft(savedScenario));
+        return savedScenario;
       })
-      .catch((err) => alert(`Помилка оновлення сценарію: ${err.response?.data?.error || err.message}`));
+      .catch((err) => {
+        alert(`Помилка оновлення сценарію: ${err.response?.data?.error || err.message}`);
+        return null;
+      });
   };
 
   const duplicateScenario = (scenarioId) => {

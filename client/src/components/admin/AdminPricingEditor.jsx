@@ -10,6 +10,7 @@ import {
 import { getPricingAxis } from '../../lib/pricing-axis';
 import { formatConditionSummary } from '../../lib/admin-conditions';
 import { formatDecimal } from '../../lib/formatters';
+import { getScenarioMatrixCellKey } from '../../lib/admin-pricing-state';
 
 const getScenarioGroupName = (scenario) => {
   const groupName = String(scenario.group_name || '').trim();
@@ -290,6 +291,7 @@ function ScenarioMatrix({ currentCatQuestions, handlePriceChange, matrixValidati
                   return (
                     <td key={yOption.id}>
                       <input
+                        key={getScenarioMatrixCellKey(scenario.id, xOption.id, yOption.id, cell?.price)}
                         type="text"
                         inputMode="decimal"
                         defaultValue={cell ? formatDecimal(cell.price) : ''}
@@ -405,9 +407,16 @@ export function AdminPricingEditor({
 
   const openScenarioSettings = () => {
     if (!selectedScenario) return;
+    setScenarioSelection({ categoryCode: selectedCat.code, id: selectedScenario.id });
     if (editScenario?.id !== selectedScenario.id) beginScenarioEdit(selectedScenario);
     setScenarioTabState({ scenarioId: selectedScenario.id, tab: 'settings' });
   };
+
+  const saveScenarioSettings = () => Promise.resolve(updateScenario()).then((savedScenario) => {
+    if (!savedScenario) return;
+    setScenarioSelection({ categoryCode: selectedCat.code, id: savedScenario.id });
+    setScenarioTabState({ scenarioId: savedScenario.id, tab: 'settings' });
+  });
 
   const selectModifier = (modifier) => {
     setModifierSelection({ categoryCode: selectedCat.code, id: modifier.id });
@@ -484,7 +493,7 @@ export function AdminPricingEditor({
                   {scenarioTab === 'matrix' ? (
                     <ScenarioMatrix currentCatQuestions={currentCatQuestions} handlePriceChange={handlePriceChange} matrixValidationError={matrixValidationError} scenario={selectedScenario} setMatrixValidationError={(message) => setMatrixValidation({ scenarioId: selectedScenario.id, message })} />
                   ) : editScenario?.id === selectedScenario.id ? (
-                    <ScenarioForm config={config} currentCatQuestions={currentCatQuestions} groupOptions={knownGroupNames} onCancel={() => { setEditScenario(null); setScenarioTabState({ scenarioId: selectedScenario.id, tab: 'matrix' }); }} onSave={updateScenario} scenario={editScenario} selectedCat={selectedCat} setScenario={setEditScenario} />
+                    <ScenarioForm config={config} currentCatQuestions={currentCatQuestions} groupOptions={knownGroupNames} onCancel={() => { setEditScenario(null); setScenarioTabState({ scenarioId: selectedScenario.id, tab: 'matrix' }); }} onSave={saveScenarioSettings} scenario={editScenario} selectedCat={selectedCat} setScenario={setEditScenario} />
                   ) : null}
                 </>
               ) : <div className="pricing-detail-empty"><h3>Виберіть сценарій</h3><p>Матриця та налаштування відкриються у цій панелі.</p></div>}
