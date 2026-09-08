@@ -1,14 +1,22 @@
 const { Pool } = require('pg');
-const { DATABASE_URL, useSsl } = require('../config/env');
+const {
+  databaseOptions,
+  useSsl,
+  pgPoolMax,
+  pgIdleTimeoutMs,
+  pgConnectTimeoutMs,
+  pgQueryTimeoutMs,
+  pgStatementTimeoutMs,
+} = require('../config/env');
 
 const pool = new Pool({
-  connectionString: DATABASE_URL,
+  ...databaseOptions,
   ssl: useSsl ? { rejectUnauthorized: false } : false,
-  max: Number(process.env.PG_POOL_MAX || 10),
-  idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT_MS || 30000),
-  connectionTimeoutMillis: Number(process.env.PG_CONNECT_TIMEOUT_MS || 5000),
-  query_timeout: Number(process.env.PG_QUERY_TIMEOUT_MS || 30000),
-  statement_timeout: Number(process.env.PG_STATEMENT_TIMEOUT_MS || 30000),
+  max: pgPoolMax,
+  idleTimeoutMillis: pgIdleTimeoutMs,
+  connectionTimeoutMillis: pgConnectTimeoutMs,
+  query_timeout: pgQueryTimeoutMs,
+  statement_timeout: pgStatementTimeoutMs,
 });
 
 pool.on('error', (err) => {

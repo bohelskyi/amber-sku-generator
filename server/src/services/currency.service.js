@@ -1,5 +1,6 @@
 const pool = require('../db/pool');
 const { fetchJson } = require('../utils/http');
+const { nbuRateOverride, nbuMaxStaleMs } = require('../config/env');
 
 const NBU_USD_URL =
   'https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?valcode=USD&json';
@@ -112,9 +113,12 @@ function createUsdRateProvider({
 }
 
 async function fetchLiveUsdRate() {
-  const override = Number(process.env.NBU_RATE_OVERRIDE);
-  if (Number.isFinite(override) && override > 0) {
-    return { rate: override, rateDate: getKyivDateString(), fetchedAt: new Date().toISOString() };
+  if (nbuRateOverride !== null) {
+    return {
+      rate: nbuRateOverride,
+      rateDate: getKyivDateString(),
+      fetchedAt: new Date().toISOString(),
+    };
   }
   const data = await fetchJson(NBU_USD_URL);
   const rate = data && data[0] && data[0].rate ? Number(data[0].rate) : null;
@@ -166,7 +170,7 @@ const provider = createUsdRateProvider({
   fetchLive: fetchLiveUsdRate,
   loadLastKnown: loadLastKnownRate,
   saveLastKnown: saveLastKnownRate,
-  maxStaleMs: Number(process.env.NBU_MAX_STALE_MS || DEFAULT_MAX_STALE_MS),
+  maxStaleMs: nbuMaxStaleMs,
 });
 
 async function getUsdUahRateInfo() {

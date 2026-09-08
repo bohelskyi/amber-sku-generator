@@ -15,7 +15,10 @@ test('restore is explicit and atomic', () => {
   assert.match(script, /docker compose stop client server/);
   assert.match(script, /docker compose ps --status running --services/);
   assert.match(script, /restart_previously_running_services/);
+  assert.match(script, /\$POSTGRES_USER/);
+  assert.match(script, /\$POSTGRES_DB/);
   assert.doesNotMatch(script, /docker compose start server client/);
+  assert.doesNotMatch(script, /--username=amber/);
 });
 
 test('backup verifies a non-empty readable custom archive', () => {
@@ -27,4 +30,7 @@ test('backup verifies a non-empty readable custom archive', () => {
   assert.match(script, /test -s/);
   assert.match(script, /pg_restore --list/);
   assert.match(script, /trap .*rm -f/);
+  assert.match(script, /\$POSTGRES_USER/);
+  assert.match(script, /\$POSTGRES_DB/);
+  assert.doesNotMatch(script, /--username=amber/);
 });

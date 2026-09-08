@@ -6,7 +6,7 @@
     "start": "node server.js",
     "audit:data": "node scripts/audit-data-integrity.js",
     "migrate:config": "node scripts/migrate-sqlite-config-to-postgres.js",
-    "test": "node --test test/*.test.js",
+    "test": "node --require ./test/setup-env.js --test test/*.test.js",
     "test:integration": "node --test integration-test/*.test.js"
   },
   "keywords": [],
@@ -16,6 +16,7 @@
   "description": "",
   "dependencies": {
     "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
     "express": "^5.2.1",
     "pg": "^8.18.0"
   },

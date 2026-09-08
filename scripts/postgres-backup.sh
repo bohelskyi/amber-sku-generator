@@ -7,8 +7,8 @@ backup_file="${backup_dir}/amber-${timestamp}.dump"
 mkdir -p "$backup_dir"
 trap 'rm -f "$backup_file"' EXIT
 
-docker compose exec -T postgres pg_dump \
-  --username=amber --dbname=amber --format=custom --no-owner --no-acl \
+docker compose exec -T postgres sh -c \
+  'exec pg_dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --format=custom --no-owner --no-acl' \
   > "$backup_file"
 
 test -s "$backup_file"

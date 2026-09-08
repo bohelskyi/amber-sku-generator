@@ -39,12 +39,13 @@ Vite proxies `/api` to `http://localhost:5000`. Override the client API with `VI
 Docker build/run:
 
 ```text
+copy .env.example to .env and replace placeholder values
 docker compose up -d --build
 docker compose ps
 docker compose logs -f
 ```
 
-The checked-in Compose connection settings are development-style. Do not reuse them as production secret/network configuration.
+Compose requires PostgreSQL identity and credentials from the ignored project-level `.env` (or its process environment). Do not put real secrets in tracked files.
 
 ## Required verification
 

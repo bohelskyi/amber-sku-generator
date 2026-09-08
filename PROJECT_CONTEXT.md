@@ -290,7 +290,7 @@ Requests receive/return an `X-Request-ID`; completion and mutations are logged a
 
 SIGTERM/SIGINT stop accepting HTTP connections, wait for the HTTP server to close, close the PostgreSQL pool, and force-exit after ten seconds if shutdown stalls.
 
-Docker Compose builds PostgreSQL 16, the Node server, and an nginx-hosted production client. The checked-in Compose configuration is suitable as a development/single-host baseline, not a hardened security boundary: it exposes PostgreSQL and contains static development-style connection configuration. Production must supply protected credentials/networking externally.
+Docker Compose builds PostgreSQL 16, the Node server, and an nginx-hosted production client. The checked-in Compose configuration is suitable as a development/single-host baseline, not a hardened security boundary: it exposes PostgreSQL, while requiring credentials from the ignored project-level `.env` or process environment. Production must protect that configuration and its network boundary externally.
 
 `scripts/postgres-backup.sh` creates a timestamped PostgreSQL custom-format archive, removes an incomplete archive on failure, verifies it is non-empty, and checks its archive listing. `scripts/postgres-restore.sh` requires both an explicit path and `--confirm`, validates the archive, stops client/server if running, restores with `--clean --if-exists --single-transaction --exit-on-error`, performs basic product/migration table checks, and restarts only services that were previously running. Backups must be copied to a monitored off-host destination and restore-tested; that infrastructure is intentionally outside this repository.
 
@@ -325,7 +325,7 @@ CI uses Node 20 and a PostgreSQL 16 service, then runs server unit tests, Postgr
 
 ## Known limitations and deferred work
 
-- PostgreSQL exposure/static credentials and broader deployment secret management are intentionally deferred security issue #1. Do not copy checked-in development values into new documentation or production infrastructure.
+- PostgreSQL remains host-exposed by the single-host Compose baseline, and broader deployment secret management is outside the repository. Credentials are supplied through the ignored `.env` or process environment; production must protect those values and its network boundary externally.
 - Authentication, authorization, RBAC, and attributable actor IDs are intentionally deferred security issue #2. All public/admin API routes are currently reachable to any network client that can reach the server.
 - Live catalog contents and production data quality cannot be confirmed from the repository. Seed defaults describe only a newly initialized empty database.
 - The client README is generic template text.

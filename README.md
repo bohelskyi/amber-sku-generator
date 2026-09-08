@@ -10,12 +10,20 @@
 cd amber-app
 ```
 
-3. Build and run:
+3. Create local runtime configuration and replace the placeholder database password:
+```bash
+cp .env.example .env
+${EDITOR:-vi} .env
+```
+
+The `.env` file is ignored by Git. Keep production copies in protected deployment storage and do not commit them.
+
+4. Build and run:
 ```bash
 docker compose up -d --build
 ```
 
-4. Open app:
+5. Open app:
 ```text
 http://YOUR_SERVER_IP
 ```
@@ -57,19 +65,8 @@ Create a database backup before the first deployment of the versioning migration
 ### Data persistence
 
 - PostgreSQL data is stored in Docker volume `postgres_data`.
-- DB credentials in `docker-compose.yml`:
-  - DB: `amber`
-  - User: `amber`
-  - Password: `amber_password`
-- Backup:
-```bash
-docker compose exec -T postgres pg_dump -U amber amber > amber-backup.sql
-```
-
-- Restore:
-```bash
-cat amber-backup.sql | docker compose exec -T postgres psql -U amber -d amber
-```
+- PostgreSQL database, user, and password are required in the project-level `.env`; Compose passes the same values to PostgreSQL and the server.
+- Changing `.env` does not rewrite credentials in an already-initialized PostgreSQL volume. Coordinate credential rotation in PostgreSQL before changing deployed values.
 
 For timestamped custom-format backups with archive verification:
 
@@ -87,7 +84,8 @@ If you need to keep existing categories/questions/options and price settings fro
 ```bash
 cd server
 npm install
-npm run migrate:config -- --sqlite=./amber.db --pg=postgresql://amber:amber_password@localhost:5432/amber
+DATABASE_URL='postgresql://example_user:example_password@localhost:5432/amber' \
+  npm run migrate:config -- --sqlite=./amber.db
 ```
 
 Notes:
@@ -96,3 +94,9 @@ Notes:
 - By default the script only imports into a database without configuration.
 - To explicitly replace configuration, add `--replace`. Replacement is refused when the target contains products.
 - The import creates V1 SKU schema snapshots and preserves/imports `sku_code` values.
+
+### Runtime configuration
+
+See `.env.example` for all supported settings. `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` are required by Compose and are also used by a directly launched server when `DATABASE_URL` is absent. Standard `PG*` variables can override individual connection fields; startup fails clearly when credentials are absent or runtime values are invalid.
+
+`VITE_API_BASE_URL` is intentionally public configuration because Vite bundles it into the browser application. Never put a secret in a `VITE_*` variable.

@@ -3,6 +3,13 @@ const path = require('path');
 const crypto = require('node:crypto');
 const sqlite3 = require('sqlite3').verbose();
 const { Pool } = require('pg');
+const dotenv = require('dotenv');
+
+dotenv.config({
+  path: path.resolve(__dirname, '../../.env'),
+  override: false,
+  quiet: true,
+});
 
 const args = process.argv.slice(2);
 const replaceExisting = args.includes('--replace');

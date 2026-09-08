@@ -2,7 +2,7 @@ const fs = require('fs/promises');
 const path = require('path');
 const crypto = require('node:crypto');
 const { Client } = require('pg');
-const { DATABASE_URL, useSsl } = require('../config/env');
+const { databaseOptions, useSsl, pgConnectTimeoutMs } = require('../config/env');
 
 const MIGRATIONS_LOCK_KEY = 'amber_schema_migrations';
 const migrationsDirectory = path.resolve(__dirname, '../../migrations');
@@ -18,9 +18,9 @@ function getMigrationChecksum(sql) {
 
 async function runMigrations({ directory = migrationsDirectory } = {}) {
   const client = new Client({
-    connectionString: DATABASE_URL,
+    ...databaseOptions,
     ssl: useSsl ? { rejectUnauthorized: false } : false,
-    connectionTimeoutMillis: Number(process.env.PG_CONNECT_TIMEOUT_MS || 5000),
+    connectionTimeoutMillis: pgConnectTimeoutMs,
     query_timeout: 0,
     statement_timeout: 0,
   });

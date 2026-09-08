@@ -8,8 +8,6 @@ RUN npm ci --omit=dev
 COPY . .
 
 ENV NODE_ENV=production
-ENV PORT=5000
-ENV DATABASE_URL=postgresql://postgres:postgres@postgres:5432/amber
 
 EXPOSE 5000
 

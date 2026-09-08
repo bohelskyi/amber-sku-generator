@@ -27,12 +27,11 @@ restart_previously_running_services() {
 
 docker compose stop client server
 trap 'restart_previously_running_services >/dev/null 2>&1 || true' EXIT
-docker compose exec -T postgres pg_restore \
-  --username=amber --dbname=amber --clean --if-exists --no-owner --no-acl \
-  --single-transaction --exit-on-error \
+docker compose exec -T postgres sh -c \
+  'exec pg_restore --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --clean --if-exists --no-owner --no-acl --single-transaction --exit-on-error' \
   < "$backup_file"
-docker compose exec -T postgres psql --username=amber --dbname=amber \
-  --command="SELECT COUNT(*) AS products FROM products; SELECT COUNT(*) AS migrations FROM schema_migrations;"
+docker compose exec -T postgres sh -c \
+  'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --command="SELECT COUNT(*) AS products FROM products; SELECT COUNT(*) AS migrations FROM schema_migrations;"'
 restart_previously_running_services
 trap - EXIT
 printf '%s\n' "Restore completed and basic table verification passed."
