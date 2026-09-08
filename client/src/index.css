@@ -550,13 +550,45 @@
 
   .recount-comparison-row > .recount-comparison-next { @apply font-semibold text-slate-900; }
 
+  .recount-comparison-row.is-primary-price { @apply py-2.5; }
+
+  .recount-comparison-row.is-primary-price > .recount-comparison-current {
+    @apply text-slate-500;
+  }
+
+  .recount-comparison-row.is-primary-price > .recount-comparison-next {
+    @apply text-slate-950;
+  }
+
   .recount-money-value { @apply flex flex-col items-end leading-tight; }
 
   .recount-money-value > strong { @apply font-semibold; }
 
-  .recount-money-value > .recount-money-usd { @apply mt-1 text-xs font-semibold text-slate-500; }
+  .recount-money-value > .recount-money-usd { @apply mt-0.5 text-xs font-semibold text-slate-500; }
 
   .recount-comparison-current .recount-money-usd { @apply text-slate-400; }
+
+  .recount-comparison-row.is-primary-price .recount-comparison-current .recount-money-value > strong,
+  .recount-comparison-row.is-primary-price .recount-comparison-current .recount-money-usd {
+    @apply text-[13px] font-medium;
+  }
+
+  .recount-comparison-row.is-primary-price .recount-comparison-next .recount-money-value > strong,
+  .recount-comparison-row.is-primary-price .recount-comparison-next .recount-money-usd {
+    @apply text-[15px] font-bold;
+  }
+
+  .recount-comparison-row.is-primary-price .recount-comparison-next .recount-money-usd {
+    @apply text-slate-700;
+  }
+
+  .recount-comparison-row.is-contextual > span:not(:first-child) {
+    @apply text-[11px] font-normal text-slate-500;
+  }
+
+  .recount-comparison-row.is-contextual > .recount-comparison-next {
+    @apply font-medium text-slate-600;
+  }
 
   .recount-comparison-difference {
     @apply border-t border-slate-100 px-2 py-2 text-xs;
@@ -568,10 +600,10 @@
 
   .recount-price-delta { @apply flex flex-col items-end text-right tabular-nums; }
 
-  .recount-price-delta > strong { @apply text-sm font-semibold text-[#713b10]; }
+  .recount-price-delta > strong { @apply text-xs font-semibold text-[#713b10]; }
 
   .recount-price-delta > .recount-price-delta-usd {
-    @apply mt-0.5 text-sm font-semibold text-[#713b10];
+    @apply mt-0.5 text-xs font-semibold text-[#713b10];
   }
 
   .recount-change-row {

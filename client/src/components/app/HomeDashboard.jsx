@@ -816,16 +816,19 @@ function RecountPanel({
                 label="Ціна виробу"
                 current={<RecountMoneyValue uah={currentPricing?.totalPriceUah} usd={currentPricing?.totalPrice} />}
                 next={<RecountMoneyValue uah={correctedPricing?.totalPriceUah} usd={correctedPricing?.totalPrice} />}
+                primaryPrice
               />
               <RecountComparisonRow
                 label="Ціна за грам"
                 current={<RecountMoneyValue perGram uah={currentPricing?.pricePerGramUah} usd={currentPricing?.pricePerGram} />}
                 next={<RecountMoneyValue perGram uah={correctedPricing?.pricePerGramUah} usd={correctedPricing?.pricePerGram} />}
+                primaryPrice
               />
               <RecountComparisonRow
                 label="Матриця"
                 current={currentMatrix}
                 next={correctedMatrix}
+                contextual
               />
               <div className="recount-comparison-difference">
                 <span>Різниця в ціні</span>
@@ -909,9 +912,18 @@ function RecountPanel({
   );
 }
 
-function RecountComparisonRow({ current, label, mono = false, next }) {
+function RecountComparisonRow({
+  contextual = false,
+  current,
+  label,
+  mono = false,
+  next,
+  primaryPrice = false,
+}) {
   return (
-    <div className="recount-comparison-row">
+    <div
+      className={`recount-comparison-row ${primaryPrice ? 'is-primary-price' : ''} ${contextual ? 'is-contextual' : ''}`}
+    >
       <span>{label}</span>
       <span className={`recount-comparison-current ${mono ? 'font-mono' : ''}`}>{current ?? '—'}</span>
       <span className={`recount-comparison-next ${mono ? 'font-mono' : ''}`}>{next ?? '—'}</span>

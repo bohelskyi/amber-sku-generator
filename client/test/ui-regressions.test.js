@@ -413,8 +413,22 @@ test('recount uses a Builder-aligned editor with one authoritative comparison su
   assert.match(recountSource, /Math\.abs\(amount\)\.toFixed\(2\)/);
   assert.match(recountSource, /className="recount-money-usd"/);
   assert.match(recountSource, /className="recount-price-delta-usd"/);
-  assert.match(stylesSource, /\.recount-money-value > \.recount-money-usd \{ @apply mt-1 text-xs font-semibold text-slate-500; \}/);
-  assert.match(stylesSource, /\.recount-price-delta > \.recount-price-delta-usd \{[\s\S]*text-sm font-semibold text-\[#713b10\]/);
+  assert.match(
+    recountSource,
+    /label="Ціна виробу"[\s\S]*primaryPrice[\s\S]*label="Ціна за грам"[\s\S]*primaryPrice/
+  );
+  assert.match(recountSource, /label="Матриця"[\s\S]*contextual/);
+  assert.match(
+    stylesSource,
+    /\.recount-comparison-row\.is-primary-price \.recount-comparison-next \.recount-money-value > strong,[\s\S]*\.recount-money-usd \{[\s\S]*text-\[15px\] font-bold/
+  );
+  assert.match(
+    stylesSource,
+    /\.recount-comparison-row\.is-primary-price \.recount-comparison-current \.recount-money-value > strong,[\s\S]*\.recount-money-usd \{[\s\S]*text-\[13px\] font-medium/
+  );
+  assert.match(stylesSource, /\.recount-comparison-row\.is-contextual > span:not\(:first-child\)/);
+  assert.match(stylesSource, /\.recount-price-delta > strong \{ @apply text-xs font-semibold text-\[#713b10\]; \}/);
+  assert.match(stylesSource, /\.recount-price-delta > \.recount-price-delta-usd \{[\s\S]*text-xs font-semibold text-\[#713b10\]/);
 });
 
 test('catalog structure uses category tabs and a dense question master-detail workspace', () => {
