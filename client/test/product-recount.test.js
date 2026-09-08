@@ -52,6 +52,10 @@ test('correction payload forwards a valid manual UAH price', () => {
   });
 });
 
+test('correction payload forwards the edited target weight to authoritative recount', () => {
+  assert.equal(buildRecountPayload({ answers: {}, weight: '21.7' }).weight, '21.7');
+});
+
 test('optional recount option selection clears to an explicit missing answer', () => {
   const question = { id: 'discount', required: 0 };
   const selected = updateRecountOptionAnswer({}, question, 2);

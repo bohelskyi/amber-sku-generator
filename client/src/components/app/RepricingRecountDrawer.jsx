@@ -146,6 +146,8 @@ export function RepricingRecountDrawer({
             isRecountApplying={recount.isRecountApplying}
             isRecountLoading={recount.isRecountLoading}
             isRecountOpen={recount.isRecountOpen}
+            isRecountPreviewCurrent={recount.isRecountPreviewCurrent}
+            isRecountPreviewUnavailable={recount.isRecountPreviewUnavailable}
             recountAnswers={recount.recountAnswers}
             recountBlockers={recount.recountBlockers}
             recountError={recount.recountError}
@@ -153,12 +155,13 @@ export function RepricingRecountDrawer({
             recountReason={recount.recountReason}
             recountSuccess={recount.recountSuccess}
             recountValidationAttempt={recount.recountValidationAttempt}
+            recountWeight={recount.recountWeight}
             onApplyRecount={recount.handleApplyRecount}
             onCancelRecount={recount.handleCancelRecount}
             onRecountAnswer={recount.handleRecountAnswer}
-            onRecountPreview={recount.handleRecountPreview}
             onRecountReasonChange={recount.setRecountReason}
             onRecountTextAnswer={recount.handleRecountTextAnswer}
+            onRecountWeightChange={recount.handleRecountWeightChange}
             onStartRecount={recount.handleStartRecount}
             recountMode={mode}
           />

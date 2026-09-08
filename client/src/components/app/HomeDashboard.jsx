@@ -19,6 +19,7 @@ import {
   formatRecountBlockerSummary,
 } from '../../lib/recount-blockers';
 import { getDecodedAnswerMap } from '../../lib/product-recount';
+import { handleNumberKeyDown, handleNumberWheel } from '../../lib/number-input';
 
 function getPricingSourceLabel(source) {
   return source === 'stored' ? 'Збережена в базі' : 'Перерахована зараз';
@@ -99,6 +100,8 @@ export function HomeDashboard({
   isRecountApplying,
   isRecountLoading,
   isRecountOpen,
+  isRecountPreviewCurrent,
+  isRecountPreviewUnavailable,
   recountAnswers,
   recountBlockers,
   recountError,
@@ -106,13 +109,14 @@ export function HomeDashboard({
   recountReason,
   recountSuccess,
   recountValidationAttempt,
+  recountWeight,
   recountMode = 'apply',
   onApplyRecount,
   onCancelRecount,
   onRecountAnswer,
-  onRecountPreview,
   onRecountReasonChange,
   onRecountTextAnswer,
+  onRecountWeightChange,
   onStart,
   onStartRecount,
   onDecode,
@@ -209,20 +213,23 @@ export function HomeDashboard({
           isRecountApplying={isRecountApplying}
           isRecountLoading={isRecountLoading}
           isRecountOpen={isRecountOpen}
+          isRecountPreviewCurrent={isRecountPreviewCurrent}
+          isRecountPreviewUnavailable={isRecountPreviewUnavailable}
           recountAnswers={recountAnswers}
           recountBlockers={recountBlockers}
           recountError={recountError}
           recountPreview={recountPreview}
           recountReason={recountReason}
           recountValidationAttempt={recountValidationAttempt}
+          recountWeight={recountWeight}
           recountSuccess={recountSuccess}
           recountMode={recountMode}
           onApplyRecount={onApplyRecount}
           onCancelRecount={onCancelRecount}
           onRecountAnswer={onRecountAnswer}
-          onRecountPreview={onRecountPreview}
           onRecountReasonChange={onRecountReasonChange}
           onRecountTextAnswer={onRecountTextAnswer}
+          onRecountWeightChange={onRecountWeightChange}
           onStartRecount={onStartRecount}
         />
       )}
@@ -237,6 +244,8 @@ export function DecodeWorkspace({
   isRecountApplying,
   isRecountLoading,
   isRecountOpen,
+  isRecountPreviewCurrent,
+  isRecountPreviewUnavailable,
   recountAnswers,
   recountBlockers,
   recountError,
@@ -244,12 +253,13 @@ export function DecodeWorkspace({
   recountReason,
   recountSuccess,
   recountValidationAttempt,
+  recountWeight,
   onApplyRecount,
   onCancelRecount,
   onRecountAnswer,
-  onRecountPreview,
   onRecountReasonChange,
   onRecountTextAnswer,
+  onRecountWeightChange,
   onStartRecount,
   recountMode = 'apply',
 }) {
@@ -289,18 +299,21 @@ export function DecodeWorkspace({
           hasRecountChanges={hasRecountChanges}
           isRecountApplying={isRecountApplying}
           isRecountLoading={isRecountLoading}
+          isRecountPreviewCurrent={isRecountPreviewCurrent}
+          isRecountPreviewUnavailable={isRecountPreviewUnavailable}
           recountAnswers={recountAnswers}
           recountBlockers={recountBlockers}
           recountError={recountError}
           recountPreview={recountPreview}
           recountReason={recountReason}
           recountValidationAttempt={recountValidationAttempt}
+          recountWeight={recountWeight}
           onApplyRecount={onApplyRecount}
           onCancelRecount={onCancelRecount}
           onRecountAnswer={onRecountAnswer}
-          onRecountPreview={onRecountPreview}
           onRecountReasonChange={onRecountReasonChange}
           onRecountTextAnswer={onRecountTextAnswer}
+          onRecountWeightChange={onRecountWeightChange}
           recountMode={recountMode}
         />
       </section>
@@ -535,18 +548,21 @@ function RecountPanel({
   hasRecountChanges,
   isRecountApplying,
   isRecountLoading,
+  isRecountPreviewCurrent,
+  isRecountPreviewUnavailable,
   recountAnswers,
   recountBlockers = [],
   recountError,
   recountPreview,
   recountReason,
   recountValidationAttempt = 0,
+  recountWeight,
   onApplyRecount,
   onCancelRecount,
   onRecountAnswer,
-  onRecountPreview,
   onRecountReasonChange,
   onRecountTextAnswer,
+  onRecountWeightChange,
   recountMode = 'apply',
 }) {
   const panelRef = useRef(null);
@@ -569,9 +585,21 @@ function RecountPanel({
       from: originalAnswers[question.id],
       to: recountAnswers[question.id],
     }));
-  const displayedChanges = recountPreview?.changes || localChanges;
+  const displayedChanges = isRecountPreviewCurrent
+    ? recountPreview?.changes || localChanges
+    : localChanges;
   const currentPricing = decodeData.pricing;
   const correctedPricing = recountPreview?.corrected;
+  const pricingDependentKeys = new Set([
+    ...(currentPricing?.dependentKeys || []),
+    ...(correctedPricing?.pricingDetails?.dependentKeys || []),
+  ]);
+  const isWeightPriceDriver = Boolean(
+    currentPricing?.usesWeight
+    || correctedPricing?.usesWeight
+    || pricingDependentKeys.has('weight')
+    || pricingDependentKeys.has('weight_band')
+  );
   const currentMatrix = currentPricing?.matrixName || null;
   const correctedMatrix = correctedPricing?.pricingDetails?.scenario?.name || null;
   const currentPriceSource = getRecountPriceSource({
@@ -587,18 +615,21 @@ function RecountPanel({
   const needsAttention = recountBlockers.length > 0 || Boolean(recountError);
   const summaryStateClass = needsAttention
     ? 'is-error'
-    : recountPreview
+    : isRecountPreviewCurrent
       ? 'is-success'
       : 'is-neutral';
   const summaryStateLabel = needsAttention
     ? 'Потрібна увага'
     : isRecountLoading
       ? 'Перераховуємо…'
-      : recountPreview
+      : isRecountPreviewCurrent
         ? 'Перераховано'
+        : isRecountPreviewUnavailable
+          ? 'Ще не визначено'
         : hasRecountChanges
-          ? 'Потрібен перерахунок'
+          ? 'Очікує перевірки'
           : 'Без змін';
+  const weightBlocker = blockerByQuestionId.get('weight');
 
   useEffect(() => {
     if (recountValidationAttempt > 0) focusFirstRecountBlocker(panelRef.current);
@@ -614,12 +645,49 @@ function RecountPanel({
               {recountMode === 'request' ? 'Запит на виправлення' : 'Переоблік товару'}
             </p>
           </div>
-          <button onClick={onCancelRecount} className="btn btn-ghost">
-            Скасувати
-          </button>
+          <div className="flex shrink-0 items-center gap-3">
+            {pricingDependentKeys.size > 0 && (
+              <span className="decode-price-key"><span aria-hidden="true" />Впливає на ціну</span>
+            )}
+            <button onClick={onCancelRecount} className="btn btn-ghost">Скасувати</button>
+          </div>
         </header>
 
         <div className="builder-field-list">
+          {Number(decodeData.category.requires_weight) === 1 && (
+            <div
+              data-recount-blocker={weightBlocker ? 'true' : undefined}
+              tabIndex={weightBlocker ? -1 : undefined}
+              className={`recount-field-row builder-field-row is-accounting ${isWeightPriceDriver ? 'is-price-driver' : ''} ${weightBlocker ? 'is-invalid' : ''}`}
+            >
+              <div className="builder-field-label">
+                <label htmlFor="recount-weight">
+                  Вага виробу (г)
+                  <span className="required-marker" aria-label="обов’язкове поле">*</span>
+                </label>
+              </div>
+              <div>
+                <input
+                  id="recount-weight"
+                  type="number"
+                  min="0"
+                  value={recountWeight}
+                  disabled={isRecountApplying}
+                  onChange={(event) => onRecountWeightChange(event.target.value)}
+                  onKeyDown={handleNumberKeyDown}
+                  onWheel={handleNumberWheel}
+                  className="input builder-weight-input"
+                  aria-invalid={weightBlocker ? 'true' : undefined}
+                  aria-describedby={weightBlocker ? 'recount-blocker-weight' : undefined}
+                />
+                {weightBlocker && (
+                  <p id="recount-blocker-weight" className="builder-field-error" role="alert">
+                    {weightBlocker.message}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
           {visibleQuestions.map((question) => {
             const textQuestion = isTextQuestion(question);
             const visibleOptions = getVisibleOptionsForQuestion(
@@ -634,6 +702,7 @@ function RecountPanel({
               recountAnswers[question.id]
             );
             const blocker = blockerByQuestionId.get(question.id);
+            const isPriceDriver = pricingDependentKeys.has(question.id);
             const blockerMessageId = `recount-blocker-${question.id}`;
 
             return (
@@ -641,7 +710,7 @@ function RecountPanel({
                 key={question.id}
                 data-recount-blocker={blocker ? 'true' : undefined}
                 tabIndex={blocker ? -1 : undefined}
-                className={`recount-field-row builder-field-row ${isChanged ? 'is-changed' : ''} ${blocker ? 'is-invalid' : ''}`}
+                className={`recount-field-row builder-field-row ${isPriceDriver ? 'is-price-driver' : ''} ${isChanged ? 'is-changed' : ''} ${blocker ? 'is-invalid' : ''}`}
               >
                 <div className="builder-field-label">
                   <label htmlFor={textQuestion ? `recount-${question.id}` : undefined}>
@@ -659,7 +728,7 @@ function RecountPanel({
                       className="input builder-text-input"
                       value={recountAnswers[question.id] || ''}
                       onChange={(event) => onRecountTextAnswer(question.id, event.target.value)}
-                      disabled={isRecountLoading || isRecountApplying}
+                      disabled={isRecountApplying}
                       aria-invalid={blocker ? 'true' : undefined}
                       aria-describedby={blocker ? blockerMessageId : undefined}
                     />
@@ -675,7 +744,7 @@ function RecountPanel({
                       && !visibleOptions.some((option) => Number(option.id) === 0) && (
                       <button
                         onClick={() => onRecountAnswer(question.id, null)}
-                        disabled={isRecountLoading || isRecountApplying}
+                        disabled={isRecountApplying}
                         className={`option-pill builder-option ${
                           Number(recountAnswers[question.id] || 0) === 0
                             ? 'option-pill-active'
@@ -692,7 +761,7 @@ function RecountPanel({
                           <button
                             key={option.id}
                             onClick={() => onRecountAnswer(question.id, option.id)}
-                            disabled={isRecountLoading || isRecountApplying}
+                            disabled={isRecountApplying}
                             className={`option-pill builder-option ${isSelected ? 'option-pill-active' : 'option-pill-idle'}`}
                             aria-pressed={isSelected}
                           >
@@ -761,13 +830,13 @@ function RecountPanel({
               />
               <RecountComparisonRow
                 label="Ціна виробу"
-                current={formatOptionalValue(currentPricing?.totalPriceUah, formatUah)}
-                next={formatOptionalValue(correctedPricing?.totalPriceUah, formatUah)}
+                current={<RecountMoneyValue uah={currentPricing?.totalPriceUah} usd={currentPricing?.totalPrice} />}
+                next={<RecountMoneyValue uah={correctedPricing?.totalPriceUah} usd={correctedPricing?.totalPrice} />}
               />
               <RecountComparisonRow
                 label="Ціна за грам"
-                current={formatOptionalValue(currentPricing?.pricePerGramUah, formatUahPerGram)}
-                next={formatOptionalValue(correctedPricing?.pricePerGramUah, formatUahPerGram)}
+                current={<RecountMoneyValue perGram uah={currentPricing?.pricePerGramUah} usd={currentPricing?.pricePerGram} />}
+                next={<RecountMoneyValue perGram uah={correctedPricing?.pricePerGramUah} usd={correctedPricing?.pricePerGram} />}
               />
               <RecountComparisonRow
                 label="Матриця"
@@ -784,8 +853,9 @@ function RecountPanel({
             <div className="builder-summary-group">
               <div className="builder-summary-row">
                 <span>Різниця в ціні</span>
-                <span className="is-strong">
-                  {recountPreview ? formatSignedUah(recountPreview.priceDeltaUah) : '—'}
+                <span className="recount-price-delta">
+                  <strong>{isRecountPreviewCurrent ? formatSignedUah(recountPreview?.priceDeltaUah) : '—'}</strong>
+                  <small>{isRecountPreviewCurrent ? formatSignedUsd(recountPreview?.priceDeltaUsd) : '—'}</small>
                 </span>
               </div>
             </div>
@@ -796,11 +866,11 @@ function RecountPanel({
                 <div className="divide-y divide-slate-100">
                   {displayedChanges.map((change) => (
                     <div key={change.key} className="recount-change-row">
-                      <span>{getQuestionLabel(config, categoryCode, change.key)}</span>
+                      <span>{getRecountChangeLabel(config, categoryCode, change.key)}</span>
                       <span>
-                        <span>{getAnswerValueLabel(config, categoryCode, change.key, change.from)}</span>
+                        <span>{getRecountChangeValue(config, categoryCode, change.key, change.from)}</span>
                         <span aria-hidden="true"> → </span>
-                        <strong>{getAnswerValueLabel(config, categoryCode, change.key, change.to)}</strong>
+                        <strong>{getRecountChangeValue(config, categoryCode, change.key, change.to)}</strong>
                       </span>
                     </div>
                   ))}
@@ -810,9 +880,15 @@ function RecountPanel({
               )}
             </div>
 
-            {recountPreview?.corrected.variation && (
+            {isRecountPreviewCurrent && recountPreview?.corrected.variation && (
               <p className="builder-summary-note is-warning">
                 Новий SKU буде варіацією наявного артикула.
+              </p>
+            )}
+
+            {isRecountPreviewUnavailable && !needsAttention && (
+              <p className="builder-summary-note">
+                Нова ціна поки недоступна. Завершіть налаштування або натисніть «Продовжити», щоб перевірити поля.
               </p>
             )}
 
@@ -835,28 +911,17 @@ function RecountPanel({
           </div>
 
           <div className="builder-summary-actions">
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
-              <button
-                onClick={onRecountPreview}
-                className="btn btn-outline"
-                disabled={!hasRecountChanges || isRecountLoading}
-              >
-                {isRecountLoading ? 'Рахуємо...' : 'Перерахувати'}
-              </button>
+            <div>
               <button
                 onClick={onApplyRecount}
-                className="btn btn-primary"
+                className="btn btn-primary w-full"
                 disabled={!hasRecountChanges || isRecountLoading || isRecountApplying}
               >
                 {isRecountApplying
                   ? 'Застосовуємо...'
                   : isRecountLoading
                     ? 'Готуємо...'
-                    : recountMode === 'request'
-                      ? 'Створити запит'
-                      : recountMode === 'choice'
-                        ? 'Продовжити'
-                        : 'Застосувати переоблік'}
+                    : 'Продовжити'}
               </button>
             </div>
           </div>
@@ -870,9 +935,18 @@ function RecountComparisonRow({ current, label, mono = false, next }) {
   return (
     <div className="recount-comparison-row">
       <span>{label}</span>
-      <span className={mono ? 'font-mono' : ''}>{current ?? '—'}</span>
-      <span className={mono ? 'font-mono' : ''}>{next ?? '—'}</span>
+      <span className={`recount-comparison-current ${mono ? 'font-mono' : ''}`}>{current ?? '—'}</span>
+      <span className={`recount-comparison-next ${mono ? 'font-mono' : ''}`}>{next ?? '—'}</span>
     </div>
+  );
+}
+
+function RecountMoneyValue({ perGram = false, uah, usd }) {
+  return (
+    <span className="recount-money-value">
+      <strong>{formatOptionalValue(uah, perGram ? formatUahPerGram : formatUah)}</strong>
+      <small>{formatOptionalValue(usd, formatUsd)}</small>
+    </span>
   );
 }
 
@@ -892,7 +966,26 @@ function formatOptionalValue(value, formatter) {
 }
 
 function formatSignedUah(value) {
+  if (value === null || value === undefined || String(value).trim() === '') return '—';
   const amount = Number(value);
   if (!Number.isFinite(amount)) return '—';
   return `${amount > 0 ? '+' : ''}${formatUah(value)}`;
+}
+
+function formatSignedUsd(value) {
+  if (value === null || value === undefined || String(value).trim() === '') return '—';
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return '—';
+  return `${amount > 0 ? '+' : amount < 0 ? '−' : ''}$${formatDecimal(Math.abs(amount))}`;
+}
+
+function getRecountChangeLabel(config, categoryCode, key) {
+  return key === 'weight' ? 'Вага' : getQuestionLabel(config, categoryCode, key);
+}
+
+function getRecountChangeValue(config, categoryCode, key, value) {
+  if (key !== 'weight') return getAnswerValueLabel(config, categoryCode, key, value);
+  return value === null || value === undefined || String(value).trim() === ''
+    ? 'Не вказано'
+    : `${formatDecimal(value)} г`;
 }

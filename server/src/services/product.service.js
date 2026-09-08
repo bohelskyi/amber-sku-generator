@@ -907,6 +907,7 @@ async function buildProductRecountPreview({
   sourceSku,
   answers = {},
   isCalibrated,
+  weight,
   reason = '',
   manualPriceUah,
 }) {
@@ -944,7 +945,14 @@ async function buildProductRecountPreview({
     delete nextAnswers.is_calibrated;
   }
 
+  const sourceWeight = getCorrectionWeight(sourceDecoded);
+  const requiresWeight = Number(sourceDecoded.category.requires_weight) === 1;
+  const hasSubmittedWeight = weight !== undefined && weight !== null;
+  const correctedWeight = requiresWeight && hasSubmittedWeight ? Number(weight) : sourceWeight;
   const changes = getAnswerChanges(previousAnswers, nextAnswers);
+  if (requiresWeight && correctedWeight !== sourceWeight) {
+    changes.push({ key: 'weight', from: sourceWeight, to: correctedWeight });
+  }
   if (changes.length === 0) {
     const err = new Error('Для переобліку змініть хоча б один параметр виробу.');
     err.statusCode = 422;
@@ -955,11 +963,10 @@ async function buildProductRecountPreview({
   const correctedAnswers = activeSchema
     ? omitHiddenRecountAnswers(nextAnswers, activeSchema.questions, nextIsCalibrated)
     : nextAnswers;
-  const weight = getCorrectionWeight(sourceDecoded);
   const correctedPreview = await buildProductPreview({
     categoryCode,
     answers: correctedAnswers,
-    weight,
+    weight: correctedWeight,
     isCalibrated: nextIsCalibrated,
     skuSchemaVersionId: activeSchema?.id,
   });
@@ -987,6 +994,14 @@ async function buildProductRecountPreview({
       ? Number(sourceDecoded.product.total_price_uah)
       : Number(sourceDecoded.pricing?.totalPriceUah || 0)) || 0;
   const newPriceUah = toUahNumber(correctedPreview.totalPriceUah) || 0;
+  const oldPriceUsd = Number(
+    sourceDecoded.pricing?.totalPrice ?? sourceDecoded.product.total_price
+  );
+  const newPriceUsd = Number(correctedPreview.totalPrice);
+  const hasUsdDelta = Number.isFinite(oldPriceUsd)
+    && oldPriceUsd >= 0
+    && Number.isFinite(newPriceUsd)
+    && newPriceUsd > 0;
 
   return {
     source: {
@@ -994,10 +1009,11 @@ async function buildProductRecountPreview({
       productId: sourceDecoded.product.id,
       answers: previousAnswers,
       decodedAnswers: sourceDecoded.decodedAnswers,
+      totalPrice: Number.isFinite(oldPriceUsd) ? oldPriceUsd : null,
       totalPriceUah: oldPriceUah,
       pricePerGram: sourceDecoded.pricing?.pricePerGram ?? sourceDecoded.product.price_per_gram,
       pricePerGramUah: sourceDecoded.pricing?.pricePerGramUah ?? null,
-      weight,
+      weight: sourceWeight,
       pricing: sourceDecoded.pricing || null,
       stateSignature: getProductStateSignature(sourceDecoded.product),
     },
@@ -1013,7 +1029,7 @@ async function buildProductRecountPreview({
       nextSeq: correctedPreview.nextSeq,
       mode: correctedPreview.mode,
       variation: correctionSku.variation,
-      weight,
+      weight: correctedWeight,
       pricePerGram: correctedPreview.pricePerGram,
       pricePerGramUah: correctedPreview.pricePerGramUah,
       fixedPriceUah: correctedPreview.fixedPriceUah,
@@ -1029,7 +1045,10 @@ async function buildProductRecountPreview({
       manualPriceUah: previewManualPrice,
     },
     changes,
-    priceDeltaUah: newPriceUah - oldPriceUah,
+    priceDeltaUah: newPriceUah > 0 ? newPriceUah - oldPriceUah : null,
+    priceDeltaUsd: hasUsdDelta
+      ? Number((newPriceUsd - oldPriceUsd).toFixed(4))
+      : null,
     reason: String(reason || '').trim(),
   };
 }
@@ -1124,6 +1143,14 @@ async function applyProductRecount(payload) {
       manualPriceUah: correctionManualPriceUah,
     });
     preview.priceDeltaUah = correctionFinalPriceUah - Number(preview.source.totalPriceUah || 0);
+    const freshPriceUsd = Number(freshPreview.totalPrice);
+    const sourcePriceUsd = Number(preview.source.totalPrice);
+    preview.priceDeltaUsd = Number.isFinite(freshPriceUsd)
+      && freshPriceUsd > 0
+      && Number.isFinite(sourcePriceUsd)
+      && sourcePriceUsd >= 0
+      ? Number((freshPriceUsd - sourcePriceUsd).toFixed(4))
+      : null;
 
     if (!payload.correctionRequestId) {
       const activeRequestResult = await client.query(

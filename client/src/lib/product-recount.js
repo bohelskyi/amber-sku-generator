@@ -26,6 +26,41 @@ export function haveAnswersChanged(previousAnswers, nextAnswers) {
   );
 }
 
+export const RECOUNT_PREVIEW_DEBOUNCE_MS = 350;
+
+export function getRecountSourceWeight(decoded) {
+  const storedWeight = decoded?.product?.weight;
+  if (storedWeight !== null && storedWeight !== undefined && Number(storedWeight) > 0) {
+    return Number(storedWeight);
+  }
+  if (decoded?.suffix?.type === 'weight' && decoded.suffix.value !== null) {
+    return Number(decoded.suffix.value);
+  }
+  return 0;
+}
+
+export function haveRecountTargetChanged(decoded, answers, weight) {
+  if (!decoded) return false;
+  if (haveAnswersChanged(getDecodedAnswerMap(decoded), answers)) return true;
+  if (Number(decoded.category?.requires_weight) !== 1) return false;
+
+  const nextWeight = String(weight ?? '').trim();
+  return nextWeight === '' || Number(nextWeight) !== getRecountSourceWeight(decoded);
+}
+
+export function createRecountPreviewGate() {
+  let latestRequestId = 0;
+  return {
+    invalidate() {
+      latestRequestId += 1;
+      return latestRequestId;
+    },
+    isCurrent(requestId) {
+      return requestId === latestRequestId;
+    },
+  };
+}
+
 export function updateRecountOptionAnswer(previousAnswers, question, valueId) {
   const questionId = question?.id;
   if (valueId === null || valueId === undefined || valueId === '') {
@@ -58,14 +93,33 @@ export function buildRecountPayload({
   sourceSku,
   answers,
   isCalibrated,
+  weight,
   reason,
   manualPriceUah,
 }) {
+  const manualPriceText = String(manualPriceUah ?? '').trim();
   return {
     sourceSku,
     answers,
     isCalibrated,
+    ...(weight !== undefined ? { weight } : {}),
     reason,
-    manualPriceUah: manualPriceUah === '' ? null : Number(manualPriceUah),
+    manualPriceUah: manualPriceText === '' ? null : Number(manualPriceUah),
   };
+}
+
+export function buildRecountPreviewPayload({
+  sourceSku,
+  answers,
+  isCalibrated,
+  weight,
+}) {
+  return buildRecountPayload({
+    sourceSku,
+    answers,
+    isCalibrated,
+    weight,
+    reason: '',
+    manualPriceUah: null,
+  });
 }

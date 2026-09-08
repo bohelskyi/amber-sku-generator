@@ -1,9 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import {
+  RECOUNT_PREVIEW_DEBOUNCE_MS,
   buildRecountPayload,
+  buildRecountPreviewPayload,
+  createRecountPreviewGate,
   getDecodedAnswerMap,
-  haveAnswersChanged,
+  getRecountSourceWeight,
+  haveRecountTargetChanged,
   updateRecountOptionAnswer,
   updateRecountTextAnswer,
 } from '../lib/product-recount.js';
@@ -21,6 +25,7 @@ export function useProductRecount({
   const [decodeErrorDetails, setDecodeErrorDetails] = useState(null);
   const [isRecountOpen, setIsRecountOpen] = useState(false);
   const [recountAnswers, setRecountAnswers] = useState({});
+  const [recountWeight, setRecountWeight] = useState('');
   const [recountReason, setRecountReason] = useState('');
   const [recountManualPriceUah, setRecountManualPriceUah] = useState('');
   const [recountPreview, setRecountPreview] = useState(null);
@@ -33,14 +38,27 @@ export function useProductRecount({
   const [recountValidationActive, setRecountValidationActive] = useState(false);
   const [recountValidationAttempt, setRecountValidationAttempt] = useState(0);
   const [recountValidationMessage, setRecountValidationMessage] = useState('');
+  const [isRecountPreviewCurrent, setIsRecountPreviewCurrent] = useState(false);
+  const [isRecountPreviewUnavailable, setIsRecountPreviewUnavailable] = useState(false);
+  const previewRequestGateRef = useRef(createRecountPreviewGate());
+  const previewRequestIdRef = useRef(0);
   const hasRecountChanges = Boolean(
-    decodeData && haveAnswersChanged(getDecodedAnswerMap(decodeData), recountAnswers)
+    haveRecountTargetChanged(decodeData, recountAnswers, recountWeight)
   );
+  const recountPreviewPayload = useMemo(() => buildRecountPreviewPayload({
+    sourceSku: decodeData?.sku,
+    answers: recountAnswers,
+    isCalibrated: recountAnswers.is_calibrated ?? null,
+    weight: recountWeight,
+  }), [decodeData?.sku, recountAnswers, recountWeight]);
+  const requiresRecountWeight = Number(decodeData?.category?.requires_weight) === 1;
   const recountBlockers = recountValidationActive
     ? getRecountFieldBlockers({
       questions: config?.questions?.[decodeData?.category?.code] || [],
       answers: recountAnswers,
+      requiresWeight: requiresRecountWeight,
       serverMessage: recountValidationMessage,
+      weight: recountWeight,
     })
     : [];
 
@@ -48,7 +66,9 @@ export function useProductRecount({
     const hasMatchingField = getRecountFieldBlockers({
       questions: config?.questions?.[decodeData?.category?.code] || [],
       answers: recountAnswers,
+      requiresWeight: requiresRecountWeight,
       serverMessage: message,
+      weight: recountWeight,
     }).some((blocker) => blocker.message === message);
     if (!hasMatchingField) {
       setRecountValidationActive(false);
@@ -70,6 +90,7 @@ export function useProductRecount({
       return;
     }
 
+    previewRequestGateRef.current.invalidate();
     api.post('/decode', { sku: normalizedSku })
       .then((res) => {
         setSkuToDecode(normalizedSku);
@@ -79,6 +100,9 @@ export function useProductRecount({
         setIsRecountOpen(false);
         setIsRecountConfirmOpen(false);
         setRecountPreview(null);
+        setIsRecountPreviewCurrent(false);
+        setIsRecountPreviewUnavailable(false);
+        setIsRecountLoading(false);
         setRecountError('');
         setRecountValidationActive(false);
         setRecountValidationMessage('');
@@ -91,6 +115,7 @@ export function useProductRecount({
   };
 
   const handleDecodeInputChange = (value) => {
+    previewRequestGateRef.current.invalidate();
     setSkuToDecode(value.toUpperCase());
     setDecodeData(null);
     setDecodeError('');
@@ -98,6 +123,9 @@ export function useProductRecount({
     setIsRecountOpen(false);
     setIsRecountConfirmOpen(false);
     setRecountPreview(null);
+    setIsRecountPreviewCurrent(false);
+    setIsRecountPreviewUnavailable(false);
+    setIsRecountLoading(false);
     setRecountError('');
     setRecountSuccess('');
     setRecountValidationActive(false);
@@ -111,9 +139,13 @@ export function useProductRecount({
     }
 
     setRecountAnswers(getDecodedAnswerMap(decodeData));
+    setRecountWeight(String(getRecountSourceWeight(decodeData) || ''));
     setRecountReason('');
     setRecountManualPriceUah('');
     setRecountPreview(null);
+    setIsRecountPreviewCurrent(false);
+    setIsRecountPreviewUnavailable(false);
+    setIsRecountLoading(false);
     setRecountError('');
     setRecountSuccess('');
     setIsRecountConfirmOpen(false);
@@ -123,9 +155,13 @@ export function useProductRecount({
   };
 
   const handleCancelRecount = () => {
+    previewRequestGateRef.current.invalidate();
     setIsRecountOpen(false);
     setIsRecountConfirmOpen(false);
     setRecountPreview(null);
+    setIsRecountPreviewCurrent(false);
+    setIsRecountPreviewUnavailable(false);
+    setIsRecountLoading(false);
     setRecountError('');
     setRecountValidationActive(false);
     setRecountValidationMessage('');
@@ -137,9 +173,13 @@ export function useProductRecount({
     );
     setRecountAnswers((previousAnswers) =>
       updateRecountOptionAnswer(previousAnswers, question, valueId));
+    previewRequestIdRef.current = previewRequestGateRef.current.invalidate();
     setIsRecountConfirmOpen(false);
-    setRecountPreview(null);
+    setIsRecountPreviewCurrent(false);
+    setIsRecountPreviewUnavailable(false);
+    setIsRecountLoading(true);
     setRecountError('');
+    setRecountValidationActive(false);
     setRecountValidationMessage('');
   };
 
@@ -150,9 +190,25 @@ export function useProductRecount({
 
     setRecountAnswers((previousAnswers) =>
       updateRecountTextAnswer(previousAnswers, question, value));
+    previewRequestIdRef.current = previewRequestGateRef.current.invalidate();
     setIsRecountConfirmOpen(false);
-    setRecountPreview(null);
+    setIsRecountPreviewCurrent(false);
+    setIsRecountPreviewUnavailable(false);
+    setIsRecountLoading(true);
     setRecountError('');
+    setRecountValidationActive(false);
+    setRecountValidationMessage('');
+  };
+
+  const handleRecountWeightChange = (value) => {
+    setRecountWeight(value);
+    previewRequestIdRef.current = previewRequestGateRef.current.invalidate();
+    setIsRecountConfirmOpen(false);
+    setIsRecountPreviewCurrent(false);
+    setIsRecountPreviewUnavailable(false);
+    setIsRecountLoading(true);
+    setRecountError('');
+    setRecountValidationActive(false);
     setRecountValidationMessage('');
   };
 
@@ -160,14 +216,16 @@ export function useProductRecount({
     sourceSku: decodeData?.sku,
     answers: recountAnswers,
     isCalibrated: recountAnswers.is_calibrated ?? null,
+    weight: recountWeight,
     reason: recountReason,
     manualPriceUah: recountManualPriceUah,
   });
 
-  const requestRecountPreview = (openConfirmation = false) => {
+  const requestRecountPreview = ({ openConfirmation = false, surfaceValidation = false } = {}) => {
     if (!decodeData?.sku) return;
     if (!hasRecountChanges) {
       setRecountPreview(null);
+      setIsRecountPreviewCurrent(false);
       const message = 'Для переобліку змініть хоча б один параметр виробу.';
       setRecountError(message);
       return;
@@ -176,34 +234,97 @@ export function useProductRecount({
     setIsRecountConfirmOpen(false);
     setRecountError('');
     setRecountSuccess('');
+    setIsRecountPreviewCurrent(false);
+    setIsRecountPreviewUnavailable(false);
+    const requestId = previewRequestGateRef.current.invalidate();
+    previewRequestIdRef.current = requestId;
 
-    api.post('/recount/preview', getRecountPayload())
+    api.post('/recount/preview', recountPreviewPayload)
       .then((res) => {
+        if (requestId !== previewRequestIdRef.current
+            || !previewRequestGateRef.current.isCurrent(requestId)) return;
         setRecountPreview(res.data);
+        setIsRecountPreviewCurrent(true);
+        setIsRecountPreviewUnavailable(false);
         setRecountValidationActive(false);
         setRecountValidationMessage('');
         if (openConfirmation) setIsRecountConfirmOpen(true);
       })
       .catch((err) => {
+        if (requestId !== previewRequestIdRef.current
+            || !previewRequestGateRef.current.isCurrent(requestId)) return;
         const message = err.response?.data?.error || err.message;
         setRecountPreview(null);
-        setRecountError(message);
-        showRecountValidationFailure(message);
+        setIsRecountPreviewCurrent(false);
+        setIsRecountPreviewUnavailable(true);
+        if (surfaceValidation) {
+          setRecountError(message);
+          showRecountValidationFailure(message);
+        }
       })
-      .finally(() => setIsRecountLoading(false));
+      .finally(() => {
+        if (requestId === previewRequestIdRef.current
+            && previewRequestGateRef.current.isCurrent(requestId)) {
+          setIsRecountLoading(false);
+        }
+      });
   };
 
-  const handleRecountPreview = () => {
-    if (!isRecountLoading) requestRecountPreview(false);
-  };
+  useEffect(() => {
+    if (!isRecountOpen || !recountPreviewPayload.sourceSku) return undefined;
+    if (!hasRecountChanges) {
+      previewRequestIdRef.current = previewRequestGateRef.current.invalidate();
+      const resetTimerId = window.setTimeout(() => {
+        setRecountPreview(null);
+        setIsRecountPreviewCurrent(false);
+        setIsRecountPreviewUnavailable(false);
+        setIsRecountLoading(false);
+      }, 0);
+      return () => window.clearTimeout(resetTimerId);
+    }
+
+    const requestId = previewRequestGateRef.current.invalidate();
+    previewRequestIdRef.current = requestId;
+    const timerId = window.setTimeout(() => {
+      api.post('/recount/preview', recountPreviewPayload)
+        .then((res) => {
+          if (requestId !== previewRequestIdRef.current
+              || !previewRequestGateRef.current.isCurrent(requestId)) return;
+          setRecountPreview(res.data);
+          setIsRecountPreviewCurrent(true);
+          setIsRecountPreviewUnavailable(false);
+          setRecountValidationActive(false);
+          setRecountValidationMessage('');
+        })
+        .catch(() => {
+          if (requestId !== previewRequestIdRef.current
+              || !previewRequestGateRef.current.isCurrent(requestId)) return;
+          setRecountPreview(null);
+          setIsRecountPreviewCurrent(false);
+          setIsRecountPreviewUnavailable(true);
+        })
+        .finally(() => {
+          if (requestId === previewRequestIdRef.current
+              && previewRequestGateRef.current.isCurrent(requestId)) {
+            setIsRecountLoading(false);
+          }
+        });
+    }, RECOUNT_PREVIEW_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timerId);
+  }, [hasRecountChanges, isRecountOpen, recountPreviewPayload]);
+
+  useEffect(() => () => {
+    previewRequestGateRef.current.invalidate();
+  }, []);
 
   const handleApplyRecount = () => {
     if (!decodeData?.sku || !hasRecountChanges || isRecountLoading) return;
-    if (recountPreview) {
+    if (recountPreview && isRecountPreviewCurrent) {
       setIsRecountConfirmOpen(true);
       return;
     }
-    requestRecountPreview(true);
+    requestRecountPreview({ openConfirmation: true, surfaceValidation: true });
   };
 
   const handleCancelRecountConfirmation = () => {
@@ -211,7 +332,8 @@ export function useProductRecount({
   };
 
   const handleConfirmRecount = (requestedMode = submitMode) => {
-    if (!decodeData?.sku || !recountPreview || !hasRecountChanges || isRecountApplying) return;
+    if (!decodeData?.sku || !recountPreview || !isRecountPreviewCurrent
+        || !hasRecountChanges || isRecountApplying || isRecountLoading) return;
     const requiresManualPrice = !(Number(recountPreview.corrected?.totalPriceUah) > 0);
     if (requiresManualPrice && !(Number(recountManualPriceUah) > 0)) {
       setRecountError('Автоматична ціна для цієї конфігурації відсутня. Вкажіть ціну вручну.');
@@ -267,14 +389,16 @@ export function useProductRecount({
     handleDecode,
     handleDecodeInputChange,
     handleRecountAnswer,
-    handleRecountPreview,
     handleRecountTextAnswer,
+    handleRecountWeightChange,
     handleStartRecount,
     hasRecountChanges,
     isRecountApplying,
     isRecountConfirmOpen,
     isRecountLoading,
     isRecountOpen,
+    isRecountPreviewCurrent,
+    isRecountPreviewUnavailable,
     recountAnswers,
     recountBlockers,
     recountError,
@@ -284,6 +408,7 @@ export function useProductRecount({
     recountSubmitMode,
     recountSuccess,
     recountValidationAttempt,
+    recountWeight,
     setRecountReason,
     setRecountManualPriceUah,
     skuToDecode,

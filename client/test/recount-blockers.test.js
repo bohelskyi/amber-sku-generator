@@ -77,6 +77,20 @@ test('fixing a recount value immediately clears its blocker', () => {
   }), []);
 });
 
+test('explicit recount validation maps an invalid target weight to the weight field', () => {
+  const serverMessage = 'Для цієї категорії вага повинна бути більшою за 0.';
+
+  assert.deepEqual(getRecountFieldBlockers({
+    requiresWeight: true,
+    serverMessage,
+    weight: '',
+  }), [{ questionId: 'weight', message: serverMessage }]);
+  assert.deepEqual(getRecountFieldBlockers({
+    requiresWeight: true,
+    weight: '20.5',
+  }), []);
+});
+
 test('failed recount attempt scrolls and focuses the first blocker', () => {
   const calls = [];
   const firstBlocker = {

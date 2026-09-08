@@ -38,6 +38,8 @@ function AppPage() {
             isRecountApplying={sku.isRecountApplying}
             isRecountLoading={sku.isRecountLoading}
             isRecountOpen={sku.isRecountOpen}
+            isRecountPreviewCurrent={sku.isRecountPreviewCurrent}
+            isRecountPreviewUnavailable={sku.isRecountPreviewUnavailable}
             recountAnswers={sku.recountAnswers}
             recountBlockers={sku.recountBlockers}
             recountError={sku.recountError}
@@ -45,13 +47,14 @@ function AppPage() {
             recountReason={sku.recountReason}
             recountSuccess={sku.recountSuccess}
             recountValidationAttempt={sku.recountValidationAttempt}
+            recountWeight={sku.recountWeight}
             recountMode="choice"
             onApplyRecount={sku.handleApplyRecount}
             onCancelRecount={sku.handleCancelRecount}
             onRecountAnswer={sku.handleRecountAnswer}
-            onRecountPreview={sku.handleRecountPreview}
             onRecountReasonChange={sku.setRecountReason}
             onRecountTextAnswer={sku.handleRecountTextAnswer}
+            onRecountWeightChange={sku.handleRecountWeightChange}
             onStart={sku.resetProductFlow}
             onStartRecount={sku.handleStartRecount}
             onDecode={sku.handleDecode}

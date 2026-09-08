@@ -14,9 +14,18 @@ export function getRecountFieldBlockers({
   questions = [],
   answers = {},
   isCalibrated = answers.is_calibrated ?? null,
+  requiresWeight = false,
   serverMessage = '',
+  weight,
 } = {}) {
   const blockers = [];
+
+  if (requiresWeight && !(Number(weight) > 0)) {
+    blockers.push({
+      questionId: 'weight',
+      message: 'Вага виробу має бути більшою за 0.',
+    });
+  }
 
   for (const question of questions) {
     if (!isQuestionVisible(question, answers, isCalibrated)) continue;
@@ -54,6 +63,7 @@ export function getRecountFieldBlockers({
 
   if (!serverMessage) return blockers;
   const matchingIndex = blockers.findIndex((blocker) => {
+    if (blocker.questionId === 'weight') return /ваг/i.test(serverMessage);
     const question = questions.find((item) => item.id === blocker.questionId);
     return question?.label && serverMessage.includes(`«${question.label}»`);
   });

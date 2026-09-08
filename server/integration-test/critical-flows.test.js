@@ -293,6 +293,68 @@ test('health endpoints report liveness and DB readiness', async () => {
   assert.equal((await request('/health/ready')).response.status, 200);
 });
 
+test('recount preview authoritatively reprices a changed weight in UAH and USD', async () => {
+  const preview = await request('/api/recount/preview', {
+    method: 'POST',
+    body: {
+      sourceSku: 'LN136021',
+      answers: {},
+      weight: 22.2,
+      reason: '',
+    },
+  });
+
+  assert.equal(preview.response.status, 200, preview.text);
+  assert.equal(preview.data.source.totalPrice, 123.6);
+  assert.equal(preview.data.source.totalPriceUah, 4944);
+  assert.equal(preview.data.corrected.weight, 22.2);
+  assert.equal(Number(preview.data.corrected.totalPrice), 133.2);
+  assert.equal(preview.data.corrected.totalPriceUah, 5300);
+  assert.equal(preview.data.priceDeltaUsd, 9.6);
+  assert.equal(preview.data.priceDeltaUah, 356);
+  assert.deepEqual(
+    preview.data.changes.find((change) => change.key === 'weight'),
+    { key: 'weight', from: 20.6, to: 22.2 }
+  );
+
+  const invalid = await request('/api/recount/preview', {
+    method: 'POST',
+    body: { sourceSku: 'LN136021', answers: {}, weight: 0 },
+  });
+  assert.equal(invalid.response.status, 422, invalid.text);
+  assert.match(invalid.data.error, /вага/i);
+});
+
+test('complete Size target previews identically for blank and null manual prices', async () => {
+  const target = {
+    sourceSku: 'LN136021',
+    answers: {
+      raw_type: 1,
+      size: 1,
+      shape: 6,
+      is_calibrated: 1,
+    },
+    isCalibrated: 1,
+    weight: 20.6,
+    reason: '',
+  };
+  const livePreview = await request('/api/recount/preview', {
+    method: 'POST',
+    body: { ...target, manualPriceUah: null },
+  });
+  const continuePreview = await request('/api/recount/preview', {
+    method: 'POST',
+    body: { ...target, manualPriceUah: '' },
+  });
+
+  assert.equal(livePreview.response.status, 200, livePreview.text);
+  assert.equal(continuePreview.response.status, 200, continuePreview.text);
+  assert.deepEqual(livePreview.data.corrected, continuePreview.data.corrected);
+  assert.deepEqual(livePreview.data.changes, continuePreview.data.changes);
+  assert.equal(livePreview.data.priceDeltaUah, continuePreview.data.priceDeltaUah);
+  assert.equal(livePreview.data.priceDeltaUsd, continuePreview.data.priceDeltaUsd);
+});
+
 test('recount removes a valid inherited size when the target configuration hides it', async () => {
   const correctionPayload = {
     sourceSku: 'LN136021',

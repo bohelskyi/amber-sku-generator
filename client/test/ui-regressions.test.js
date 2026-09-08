@@ -320,6 +320,8 @@ test('decode result keeps authoritative pricing drivers highlighted in a compact
   assert.match(decodeSource, /Стан у базі/);
   assert.match(decodeSource, /Розраховано до округлення/);
   assert.match(decodeSource, /Фінальна збережена/);
+  assert.doesNotMatch(decodeSource, /decode-rounding-note/);
+  assert.doesNotMatch(decodeSource, /formatWholeUah\(calculatedPriceUah\)\s*→/);
   assert.match(decodeSource, /Розрахункова ціна за грам/);
   assert.match(decodeSource, /label="Матриця"/);
   assert.match(decodeSource, /label="Вага"/);
@@ -363,7 +365,8 @@ test('home and decode presentation share aligned columns and compact authoritati
   assert.match(stylesSource, /\.home-top-workspace,[\s\S]*?\.operational-split-layout[\s\S]*?360px/);
   assert.match(homeSource, /const finalStoredPriceUsd = decodeData\.existsInDb \? pricing\?\.totalPrice : null/);
   assert.match(homeSource, /formatOptionalValue\(finalStoredPriceUsd, formatUsd\)/);
-  assert.match(homeSource, /formatWholeUah\(calculatedPriceUah\).*→.*formatUah\(automaticPriceUah\)/s);
+  assert.doesNotMatch(homeSource, /decode-rounding-note/);
+  assert.doesNotMatch(homeSource, /formatWholeUah\(calculatedPriceUah\)\s*→/);
   assert.doesNotMatch(homeSource, /Округлення:/);
   assert.doesNotMatch(homeSource, /formatSignedRoundedUah/);
   assert.doesNotMatch(headerSource, /Операційна консоль|останніх записів|категорій/);
@@ -388,6 +391,11 @@ test('recount uses a Builder-aligned editor with one authoritative comparison su
   assert.match(recountSource, /recount-comparison-header/);
   assert.match(recountSource, /Зараз/);
   assert.match(recountSource, /Після/);
+  assert.match(
+    recountSource,
+    /label="SKU"[\s\S]*label="Ціна виробу"[\s\S]*label="Ціна за грам"[\s\S]*label="Матриця"[\s\S]*className="recount-comparison-difference"[\s\S]*Різниця в ціні/
+  );
+  assert.doesNotMatch(recountSource, /label="Джерело"/);
   assert.match(recountSource, /Різниця в ціні/);
   assert.match(recountSource, /Змінені атрибути/);
   assert.match(recountSource, /isChanged \? 'is-changed' : ''/);
