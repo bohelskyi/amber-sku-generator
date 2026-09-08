@@ -6,6 +6,7 @@ import {
   buildRecountPayload,
   buildRecountPreviewPayload,
   createRecountPreviewGate,
+  getRecountPricingDependencyState,
   haveRecountTargetChanged,
 } from '../src/lib/product-recount.js';
 
@@ -79,6 +80,76 @@ test('pricing-driving recount questions use authoritative dependency metadata', 
   assert.equal(recountSource.includes('dependentKeys'), true);
   assert.equal(recountSource.includes('pricingDependentKeys.has(question.id)'), true);
   assert.equal(recountSource.includes("isPriceDriver ? 'is-price-driver' : ''"), true);
+});
+
+test('resolved target dependencies replace rather than merge with original pricing dependencies', () => {
+  const recountSource = dashboardSource.slice(dashboardSource.indexOf('function RecountPanel'));
+  const currentPricing = {
+    dependentKeys: ['quality', 'size'],
+    matrixName: 'Некалібровані - 2 сорт',
+    usesWeight: true,
+  };
+  const matrixAPreview = {
+    corrected: {
+      pricingDetails: {
+        dependentKeys: ['quality', 'size'],
+        scenario: { name: 'Некалібровані - 2 сорт' },
+        usesWeight: true,
+      },
+    },
+  };
+  const matrixBPreview = {
+    corrected: {
+      pricingDetails: {
+        dependentKeys: ['execution', 'raw_type'],
+        scenario: { name: 'Шамбала - натур' },
+        usesWeight: false,
+      },
+    },
+  };
+
+  const initialState = getRecountPricingDependencyState({ currentPricing });
+  assert.deepEqual(initialState.dependentKeys, ['quality', 'size']);
+
+  const gate = createRecountPreviewGate();
+  const staleMatrixARequest = gate.invalidate();
+  const latestMatrixBRequest = gate.invalidate();
+  let acceptedPreview = null;
+  const acceptPreview = (requestId, preview) => {
+    if (gate.isCurrent(requestId)) acceptedPreview = preview;
+  };
+  acceptPreview(latestMatrixBRequest, matrixBPreview);
+  acceptPreview(staleMatrixARequest, matrixAPreview);
+
+  const targetState = getRecountPricingDependencyState({
+    currentPricing,
+    hasRecountChanges: true,
+    recountPreview: acceptedPreview,
+  });
+  assert.deepEqual(targetState.dependentKeys, ['execution', 'raw_type']);
+  assert.equal(targetState.dependentKeys.includes('quality'), false);
+  assert.equal(targetState.usesWeight, false);
+
+  assert.match(recountSource, /getRecountPricingDependencyState/);
+  assert.doesNotMatch(
+    recountSource,
+    /\.\.\.\(currentPricing\?\.dependentKeys[\s\S]*\.\.\.\(correctedPricing\?\.pricingDetails\?\.dependentKeys/
+  );
+});
+
+test('unavailable target pricing clears previously valid dependency highlighting', () => {
+  const state = getRecountPricingDependencyState({
+    currentPricing: { dependentKeys: ['quality'], usesWeight: true },
+    hasRecountChanges: true,
+    isRecountPreviewUnavailable: true,
+    recountPreview: {
+      corrected: {
+        pricingDetails: { dependentKeys: ['execution'], usesWeight: false },
+      },
+    },
+  });
+
+  assert.deepEqual(state, { dependentKeys: [], usesWeight: false });
 });
 
 test('recount comparison renders UAH and USD for totals and per-gram prices', () => {

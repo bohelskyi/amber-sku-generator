@@ -18,7 +18,10 @@ import {
   focusFirstRecountBlocker,
   formatRecountBlockerSummary,
 } from '../../lib/recount-blockers';
-import { getDecodedAnswerMap } from '../../lib/product-recount';
+import {
+  getDecodedAnswerMap,
+  getRecountPricingDependencyState,
+} from '../../lib/product-recount';
 import { handleNumberKeyDown, handleNumberWheel } from '../../lib/number-input';
 
 function getPricingSourceLabel(source) {
@@ -579,13 +582,15 @@ function RecountPanel({
     : localChanges;
   const currentPricing = decodeData.pricing;
   const correctedPricing = recountPreview?.corrected;
-  const pricingDependentKeys = new Set([
-    ...(currentPricing?.dependentKeys || []),
-    ...(correctedPricing?.pricingDetails?.dependentKeys || []),
-  ]);
+  const pricingDependencyState = getRecountPricingDependencyState({
+    currentPricing,
+    hasRecountChanges,
+    isRecountPreviewUnavailable,
+    recountPreview,
+  });
+  const pricingDependentKeys = new Set(pricingDependencyState.dependentKeys);
   const isWeightPriceDriver = Boolean(
-    currentPricing?.usesWeight
-    || correctedPricing?.usesWeight
+    pricingDependencyState.usesWeight
     || pricingDependentKeys.has('weight')
     || pricingDependentKeys.has('weight_band')
   );

@@ -61,6 +61,32 @@ export function createRecountPreviewGate() {
   };
 }
 
+function normalizePricingDependencyState(pricingDetails) {
+  return {
+    dependentKeys: Array.isArray(pricingDetails?.dependentKeys)
+      ? pricingDetails.dependentKeys
+      : [],
+    usesWeight: Boolean(pricingDetails?.usesWeight),
+  };
+}
+
+export function getRecountPricingDependencyState({
+  currentPricing,
+  hasRecountChanges = false,
+  isRecountPreviewUnavailable = false,
+  recountPreview,
+} = {}) {
+  if (isRecountPreviewUnavailable) {
+    return { dependentKeys: [], usesWeight: false };
+  }
+
+  if (hasRecountChanges && recountPreview) {
+    return normalizePricingDependencyState(recountPreview.corrected?.pricingDetails);
+  }
+
+  return normalizePricingDependencyState(currentPricing);
+}
+
 export function updateRecountOptionAnswer(previousAnswers, question, valueId) {
   const questionId = question?.id;
   if (valueId === null || valueId === undefined || valueId === '') {
