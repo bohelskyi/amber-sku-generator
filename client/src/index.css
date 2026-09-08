@@ -488,10 +488,6 @@
 
   .decode-warning span { @apply mt-0.5 block leading-5 text-slate-600; }
 
-  .decode-rounding-note {
-    @apply text-right text-[11px] font-medium tabular-nums text-slate-500;
-  }
-
   .decode-details {
     @apply border-t border-slate-200 pt-1;
   }
@@ -529,7 +525,8 @@
   .recount-comparison { @apply overflow-hidden border-y border-slate-200; }
 
   .recount-comparison-header,
-  .recount-comparison-row {
+  .recount-comparison-row,
+  .recount-comparison-difference {
     @apply grid grid-cols-[88px_minmax(0,1fr)_minmax(0,1fr)] gap-x-2;
   }
 
@@ -557,13 +554,25 @@
 
   .recount-money-value > strong { @apply font-semibold; }
 
-  .recount-money-value > small { @apply mt-1 text-[10px] font-medium text-slate-400; }
+  .recount-money-value > .recount-money-usd { @apply mt-1 text-xs font-semibold text-slate-500; }
+
+  .recount-comparison-current .recount-money-usd { @apply text-slate-400; }
+
+  .recount-comparison-difference {
+    @apply border-t border-slate-100 px-2 py-2 text-xs;
+  }
+
+  .recount-comparison-difference > span:first-child { @apply text-slate-500; }
+
+  .recount-comparison-difference > .recount-price-delta { grid-column: 2 / 4; }
 
   .recount-price-delta { @apply flex flex-col items-end text-right tabular-nums; }
 
   .recount-price-delta > strong { @apply text-sm font-semibold text-[#713b10]; }
 
-  .recount-price-delta > small { @apply mt-0.5 text-[10px] font-medium text-slate-500; }
+  .recount-price-delta > .recount-price-delta-usd {
+    @apply mt-0.5 text-sm font-semibold text-[#713b10];
+  }
 
   .recount-change-row {
     @apply grid grid-cols-[minmax(88px,0.75fr)_minmax(0,1.25fr)] gap-3 py-2 text-xs;

@@ -185,7 +185,7 @@ test('fixed-scale API decimals are compacted in editable pricing fields', () => 
   assert.match(repricingSource, /formatDecimal\(item\.newPriceUah\)/);
 });
 
-test('automatic pricing views expose calculated and final marketing-rounded UAH values', () => {
+test('pricing views expose calculated and authoritative final UAH values', () => {
   const dashboardSource = fs.readFileSync(
     new URL('../src/components/app/HomeDashboard.jsx', import.meta.url),
     'utf8'
@@ -199,7 +199,7 @@ test('automatic pricing views expose calculated and final marketing-rounded UAH 
     'utf8'
   );
   assert.match(dashboardSource, /pricing\?\.calculatedPriceUah/);
-  assert.match(dashboardSource, /pricing\?\.automaticPriceUah/);
+  assert.match(dashboardSource, /const finalStoredPriceUah = decodeData\.existsInDb \? pricing\?\.totalPriceUah : null/);
   assert.match(builderSource, /displayedPricing\?\.calculatedPriceUah/);
   assert.match(skuManagerSource, /previewData\?\.totalPriceUah/);
   assert.match(builderSource, /displayedPricing\?\.pricePerGramUah/);
@@ -382,6 +382,10 @@ test('recount uses a Builder-aligned editor with one authoritative comparison su
     new URL('../src/components/app/HomeDashboard.jsx', import.meta.url),
     'utf8'
   );
+  const stylesSource = fs.readFileSync(
+    new URL('../src/index.css', import.meta.url),
+    'utf8'
+  );
   const recountSource = source.slice(source.indexOf('function RecountPanel'));
 
   assert.match(recountSource, /builder-workspace/);
@@ -404,6 +408,13 @@ test('recount uses a Builder-aligned editor with one authoritative comparison su
   assert.doesNotMatch(recountSource, /Початкові цінові параметри/);
   assert.doesNotMatch(recountSource, /pricing\.weight/);
   assert.doesNotMatch(recountSource, /className="chip"/);
+  assert.match(recountSource, /formatOptionalValue\(usd, formatRecountUsd\)/);
+  assert.match(recountSource, /\$\{amount\.toFixed\(2\)\}/);
+  assert.match(recountSource, /Math\.abs\(amount\)\.toFixed\(2\)/);
+  assert.match(recountSource, /className="recount-money-usd"/);
+  assert.match(recountSource, /className="recount-price-delta-usd"/);
+  assert.match(stylesSource, /\.recount-money-value > \.recount-money-usd \{ @apply mt-1 text-xs font-semibold text-slate-500; \}/);
+  assert.match(stylesSource, /\.recount-price-delta > \.recount-price-delta-usd \{[\s\S]*text-sm font-semibold text-\[#713b10\]/);
 });
 
 test('catalog structure uses category tabs and a dense question master-detail workspace', () => {

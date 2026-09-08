@@ -277,14 +277,8 @@ export function DecodeWorkspace({
     ?? decodeData.product?.weight
     ?? (decodeData.suffix.type === 'weight' ? decodeData.suffix.value : null);
   const calculatedPriceUah = pricing?.calculatedPriceUah;
-  const automaticPriceUah = pricing?.automaticPriceUah;
   const finalStoredPriceUah = decodeData.existsInDb ? pricing?.totalPriceUah : null;
   const finalStoredPriceUsd = decodeData.existsInDb ? pricing?.totalPrice : null;
-  const hasRoundingDifference = calculatedPriceUah !== null
-    && calculatedPriceUah !== undefined
-    && automaticPriceUah !== null
-    && automaticPriceUah !== undefined
-    && Number(calculatedPriceUah) !== Number(automaticPriceUah);
   const storedPriceSource = getRecountPriceSource({
     manualPriceUah: decodeData.product?.details?.manualPriceUah,
     totalPriceUah: finalStoredPriceUah,
@@ -397,11 +391,6 @@ export function DecodeWorkspace({
                 <span>{formatOptionalValue(finalStoredPriceUah, formatUah)}</span>
                 <span>{formatOptionalValue(finalStoredPriceUsd, formatUsd)}</span>
               </div>
-              {hasRoundingDifference && (
-                <p className="decode-rounding-note">
-                  {formatWholeUah(calculatedPriceUah)} → {formatUah(automaticPriceUah)}
-                </p>
-              )}
             </div>
 
             <div className="builder-price-section">
@@ -602,16 +591,6 @@ function RecountPanel({
   );
   const currentMatrix = currentPricing?.matrixName || null;
   const correctedMatrix = correctedPricing?.pricingDetails?.scenario?.name || null;
-  const currentPriceSource = getRecountPriceSource({
-    manualPriceUah: decodeData.product?.details?.manualPriceUah,
-    totalPriceUah: currentPricing?.totalPriceUah,
-  });
-  const correctedPriceSource = correctedPricing
-    ? getRecountPriceSource({
-      manualPriceUah: correctedPricing.manualPriceUah,
-      totalPriceUah: correctedPricing.totalPriceUah,
-    })
-    : null;
   const needsAttention = recountBlockers.length > 0 || Boolean(recountError);
   const summaryStateClass = needsAttention
     ? 'is-error'
@@ -843,19 +822,13 @@ function RecountPanel({
                 current={currentMatrix}
                 next={correctedMatrix}
               />
-              <RecountComparisonRow
-                label="Джерело"
-                current={currentPriceSource}
-                next={correctedPriceSource}
-              />
-            </div>
-
-            <div className="builder-summary-group">
-              <div className="builder-summary-row">
+              <div className="recount-comparison-difference">
                 <span>Різниця в ціні</span>
                 <span className="recount-price-delta">
                   <strong>{isRecountPreviewCurrent ? formatSignedUah(recountPreview?.priceDeltaUah) : '—'}</strong>
-                  <small>{isRecountPreviewCurrent ? formatSignedUsd(recountPreview?.priceDeltaUsd) : '—'}</small>
+                  <span className="recount-price-delta-usd">
+                    {isRecountPreviewCurrent ? formatSignedUsd(recountPreview?.priceDeltaUsd) : '—'}
+                  </span>
                 </span>
               </div>
             </div>
@@ -945,7 +918,9 @@ function RecountMoneyValue({ perGram = false, uah, usd }) {
   return (
     <span className="recount-money-value">
       <strong>{formatOptionalValue(uah, perGram ? formatUahPerGram : formatUah)}</strong>
-      <small>{formatOptionalValue(usd, formatUsd)}</small>
+      <span className="recount-money-usd">
+        {formatOptionalValue(usd, formatRecountUsd)}
+      </span>
     </span>
   );
 }
@@ -976,7 +951,12 @@ function formatSignedUsd(value) {
   if (value === null || value === undefined || String(value).trim() === '') return '—';
   const amount = Number(value);
   if (!Number.isFinite(amount)) return '—';
-  return `${amount > 0 ? '+' : amount < 0 ? '−' : ''}$${formatDecimal(Math.abs(amount))}`;
+  return `${amount > 0 ? '+' : amount < 0 ? '−' : ''}$${Math.abs(amount).toFixed(2)}`;
+}
+
+function formatRecountUsd(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0 ? `$${amount.toFixed(2)}` : '---';
 }
 
 function getRecountChangeLabel(config, categoryCode, key) {
