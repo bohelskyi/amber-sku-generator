@@ -1,0 +1,339 @@
+import { useEffect } from 'react';
+import { MemoryRouter } from 'react-router-dom';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { AuthGate } from '../src/auth/AuthGate.jsx';
+import { AuthProvider } from '../src/auth/AuthProvider.jsx';
+import {
+  getCurrentReturnTo,
+  getIdentityDisplayName,
+  normalizeCurrentSession,
+} from '../src/auth/auth-model.js';
+import { WorkspaceNav } from '../src/components/app/WorkspaceNav.jsx';
+import { createApiClient } from '../src/lib/api.js';
+
+const identity = {
+  issuer: 'https://auth.example/realms/amber',
+  sub: 'immutable-subject',
+  preferred_username: 'amber.user',
+  name: 'Amber User',
+  given_name: 'Amber',
+  family_name: 'User',
+  email: 'amber.user@example.test',
+  authenticatedAt: '2026-09-09T10:00:00.000Z',
+};
+
+const currentSession = {
+  identity,
+  csrfToken: 'in-memory-csrf-token',
+};
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function response(data, config = {}) {
+  return {
+    data,
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config,
+  };
+}
+
+function locationStub(overrides = {}) {
+  return {
+    pathname: '/',
+    search: '',
+    hash: '',
+    assign: vi.fn(),
+    ...overrides,
+  };
+}
+
+function noOpBinding() {
+  return () => {};
+}
+
+function renderAuth({ apiClient, children, bindApiAuth = noOpBinding, locationObject }) {
+  return render(
+    <AuthProvider
+      apiClient={apiClient}
+      bindApiAuth={bindApiAuth}
+      locationObject={locationObject || locationStub()}
+    >
+      <AuthGate>{children || <div>Business application</div>}</AuthGate>
+    </AuthProvider>
+  );
+}
+
+afterEach(() => {
+  cleanup();
+});
+
+describe('authentication bootstrap and gate', () => {
+  it('shows a neutral loading state and does not mount business content before /me resolves', async () => {
+    const pending = deferred();
+    const apiClient = { get: vi.fn(() => pending.promise), post: vi.fn() };
+    let businessMounts = 0;
+    function BusinessApp() {
+      useEffect(() => { businessMounts += 1; }, []);
+      return <div>Protected business app</div>;
+    }
+
+    renderAuth({ apiClient, children: <BusinessApp /> });
+
+    expect(screen.getByText('Перевіряємо сеанс…')).toBeTruthy();
+    expect(screen.queryByText('Protected business app')).toBeNull();
+    expect(businessMounts).toBe(0);
+
+    pending.resolve(response(currentSession));
+    await screen.findByText('Protected business app');
+    expect(businessMounts).toBe(1);
+  });
+
+  it('bootstraps an authenticated session and retains only normalized identity fields', async () => {
+    const apiClient = {
+      get: vi.fn().mockResolvedValue(response({
+        ...currentSession,
+        identity: {
+          ...identity,
+          access_token: 'must-not-survive',
+          refresh_token: 'must-not-survive',
+          id_token: 'must-not-survive',
+          arbitrary_claim: 'must-not-survive',
+        },
+      })),
+      post: vi.fn(),
+    };
+
+    renderAuth({ apiClient });
+
+    await screen.findByText('Business application');
+    expect(apiClient.get).toHaveBeenCalledWith('/auth/me', { skipAuthHandling: true });
+    expect(normalizeCurrentSession((await apiClient.get.mock.results[0].value).data)).toEqual(currentSession);
+  });
+
+  it('treats the initial /me 401 as unauthenticated without retry or error loops', async () => {
+    const apiClient = {
+      get: vi.fn().mockRejectedValue({ response: { status: 401 } }),
+      post: vi.fn(),
+    };
+
+    renderAuth({ apiClient });
+
+    await screen.findByRole('button', { name: 'Увійти' });
+    expect(apiClient.get).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows a non-sensitive provider error and retries /me on demand', async () => {
+    const apiClient = {
+      get: vi.fn()
+        .mockRejectedValueOnce(new Error('internal upstream detail'))
+        .mockResolvedValueOnce(response(currentSession)),
+      post: vi.fn(),
+    };
+
+    renderAuth({ apiClient });
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Не вдалося перевірити сеанс');
+    expect(alert.textContent).not.toContain('internal upstream detail');
+    fireEvent.click(screen.getByRole('button', { name: 'Спробувати ще раз' }));
+    await screen.findByText('Business application');
+    expect(apiClient.get).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('login, identity, and logout UI', () => {
+  it('starts login through same-origin top-level navigation with the current SPA return path', async () => {
+    const apiClient = {
+      get: vi.fn().mockRejectedValue({ response: { status: 401 } }),
+      post: vi.fn(),
+    };
+    const locationObject = locationStub({
+      pathname: '/admin/repricing',
+      search: '?draft=12',
+      hash: '#items',
+    });
+
+    renderAuth({ apiClient, locationObject });
+    fireEvent.click(await screen.findByRole('button', { name: 'Увійти' }));
+
+    expect(locationObject.assign).toHaveBeenCalledWith(
+      '/api/auth/login?returnTo=%2Fadmin%2Frepricing%3Fdraft%3D12%23items'
+    );
+    expect(getCurrentReturnTo({ pathname: '//evil.test', search: '', hash: '' })).toBe('/');
+  });
+
+  it('displays name before username and logs out with in-memory CSRF before top-level navigation', async () => {
+    const requests = [];
+    const logoutUrl = 'https://auth.example/realms/amber/protocol/openid-connect/logout?client_id=amber-sku-manager';
+    const isolated = createApiClient();
+    isolated.client.defaults.adapter = async (config) => {
+      requests.push(config);
+      if (config.url === '/auth/me') return response(currentSession, config);
+      return response({ logoutUrl }, config);
+    };
+    const locationObject = locationStub();
+
+    renderAuth({
+      apiClient: isolated.client,
+      bindApiAuth: isolated.configureAuth,
+      locationObject,
+      children: (
+        <MemoryRouter>
+          <WorkspaceNav />
+        </MemoryRouter>
+      ),
+    });
+
+    await screen.findByText('Amber User');
+    expect(getIdentityDisplayName({ preferred_username: 'fallback.user' })).toBe('fallback.user');
+    fireEvent.click(screen.getByRole('button', { name: 'Вийти' }));
+    await waitFor(() => expect(locationObject.assign).toHaveBeenCalledWith(logoutUrl));
+
+    const logoutRequest = requests.find((request) => request.url === '/auth/logout');
+    expect(logoutRequest.method).toBe('post');
+    expect(logoutRequest.headers.get('X-CSRF-Token')).toBe(currentSession.csrfToken);
+    expect(logoutRequest.withCredentials).toBe(true);
+  });
+
+  it('falls back to the application root when logoutUrl is null', async () => {
+    const isolated = createApiClient();
+    isolated.client.defaults.adapter = async (config) => (
+      config.url === '/auth/me'
+        ? response(currentSession, config)
+        : response({ logoutUrl: null }, config)
+    );
+    const locationObject = locationStub();
+
+    renderAuth({
+      apiClient: isolated.client,
+      bindApiAuth: isolated.configureAuth,
+      locationObject,
+      children: (
+        <MemoryRouter>
+          <WorkspaceNav />
+        </MemoryRouter>
+      ),
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Вийти' }));
+    await waitFor(() => expect(locationObject.assign).toHaveBeenCalledWith('/'));
+  });
+});
+
+describe('Axios authentication integration', () => {
+  it('leaves requests usable before provider initialization and suppresses bootstrap 401 notifications', async () => {
+    const isolated = createApiClient();
+    const onUnauthorized = vi.fn();
+    const requests = [];
+    isolated.client.defaults.adapter = async (config) => {
+      requests.push(config);
+      if (config.url === '/auth/me') {
+        const error = new Error('Unauthorized');
+        error.config = config;
+        error.response = { status: 401 };
+        throw error;
+      }
+      return response({}, config);
+    };
+
+    await isolated.client.post('/before-provider');
+    expect(requests[0].headers.has('X-CSRF-Token')).toBe(false);
+
+    const removeAuth = isolated.configureAuth({
+      getCsrfToken: () => currentSession.csrfToken,
+      onUnauthorized,
+    });
+    await isolated.client.get('/auth/me', { skipAuthHandling: true }).catch(() => {});
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    removeAuth();
+  });
+
+  it('attaches CSRF only to unsafe methods while preserving same-origin credentials', async () => {
+    const requests = [];
+    const isolated = createApiClient();
+    const removeAuth = isolated.configureAuth({
+      getCsrfToken: () => currentSession.csrfToken,
+    });
+    isolated.client.defaults.adapter = async (config) => {
+      requests.push(config);
+      return response({}, config);
+    };
+
+    await isolated.client.get('/read');
+    await isolated.client.head('/head');
+    await isolated.client.post('/post');
+    await isolated.client.put('/put');
+    await isolated.client.patch('/patch');
+    await isolated.client.delete('/delete');
+    removeAuth();
+
+    for (const request of requests.filter(({ method }) => ['get', 'head'].includes(method))) {
+      expect(request.headers.has('X-CSRF-Token')).toBe(false);
+    }
+    for (const request of requests.filter(({ method }) => ['post', 'put', 'patch', 'delete'].includes(method))) {
+      expect(request.headers.get('X-CSRF-Token')).toBe(currentSession.csrfToken);
+      expect(request.withCredentials).toBe(true);
+    }
+  });
+
+  it('moves an authenticated provider to unauthenticated after a later centralized 401', async () => {
+    const isolated = createApiClient();
+    isolated.client.defaults.adapter = async (config) => {
+      if (config.url === '/auth/me') return response(currentSession, config);
+      const error = new Error('Unauthorized');
+      error.config = config;
+      error.response = { status: 401 };
+      throw error;
+    };
+
+    function ExpiredRequest() {
+      return (
+        <button type="button" onClick={() => { void isolated.client.get('/expired').catch(() => {}); }}>
+          Make expired request
+        </button>
+      );
+    }
+
+    renderAuth({
+      apiClient: isolated.client,
+      bindApiAuth: isolated.configureAuth,
+      children: <ExpiredRequest />,
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Make expired request' }));
+    await screen.findByRole('button', { name: 'Увійти' });
+  });
+
+  it('does not persist authentication identity or CSRF data in browser storage', async () => {
+    const localSet = vi.spyOn(Storage.prototype, 'setItem');
+    const sessionSet = vi.spyOn(window.sessionStorage, 'setItem');
+    const apiClient = {
+      get: vi.fn().mockResolvedValue(response(currentSession)),
+      post: vi.fn(),
+    };
+
+    renderAuth({ apiClient });
+    await screen.findByText('Business application');
+
+    expect(localSet).not.toHaveBeenCalled();
+    expect(sessionSet).not.toHaveBeenCalled();
+  });
+});

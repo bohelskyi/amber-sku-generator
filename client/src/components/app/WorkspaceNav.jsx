@@ -3,9 +3,12 @@ import {
   CircleDollarSign,
   ClipboardList,
   History,
+  LogOut,
   SlidersHorizontal,
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
+import { useAuth } from '../../auth/auth-context.js';
+import { getIdentityDisplayName } from '../../auth/auth-model.js';
 import amberLogo from '../../assets/amber-logo-white-orange.png';
 
 const navigation = [
@@ -17,6 +20,8 @@ const navigation = [
 ];
 
 export function WorkspaceNav() {
+  const auth = useAuth();
+
   return (
     <nav className="workspace-nav" aria-label="Основна навігація">
       <div className="workspace-nav-inner">
@@ -37,6 +42,20 @@ export function WorkspaceNav() {
               <span>{label}</span>
             </NavLink>
           ))}
+        </div>
+
+        <div className="workspace-user">
+          <span className="workspace-user-name" title={getIdentityDisplayName(auth.identity)}>
+            {getIdentityDisplayName(auth.identity)}
+          </span>
+          <button
+            type="button"
+            className="workspace-logout"
+            onClick={() => { void auth.logout(); }}
+          >
+            <LogOut size={15} aria-hidden="true" />
+            <span>Вийти</span>
+          </button>
         </div>
       </div>
     </nav>
