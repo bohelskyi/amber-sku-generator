@@ -4,7 +4,7 @@
 
 - `server/` — Node 20/CommonJS Express API and all authoritative business logic.
 - `server/src/services/` — product/SKU, schemas, pricing, recount/corrections, repricing, exports.
-- `server/migrations/` — ordered PostgreSQL schema source of truth (`000`–`018` currently).
+- `server/migrations/` — ordered PostgreSQL schema source of truth (`000`–`019` currently).
 - `server/test/` — unit tests; `server/integration-test/critical-flows.test.js` — real PostgreSQL tests.
 - `client/` — React 19/Vite UI; client orchestration is in `src/hooks`, reusable rules in `src/lib`.
 - `scripts/` — PostgreSQL backup/restore; `server/scripts/` — integrity audit and SQLite config import.
@@ -100,6 +100,19 @@ CI (`.github/workflows/ci.yml`) uses Node 20 and PostgreSQL 16 and runs server u
 - Use parameterized SQL for data. Validate any unavoidable dynamic database identifier against a strict allowlist/pattern first.
 - Respect existing transaction and lock ordering. Product, correction, repricing, schema, and export paths rely on row locks, advisory locks, unique indexes, and final-state revalidation together.
 
+## Authentication and security boundary
+
+- Never add `AUTH_DISABLED`, a production authentication bypass, or a test shortcut reachable through production configuration.
+- Never trust React authentication or authorization state as enforcement. Every business API route—including both historically named public and admin router trees—must remain server-side authenticated.
+- Unsafe authenticated business methods must retain synchronizer-token CSRF validation through `X-CSRF-Token`; `GET`, `HEAD`, and `OPTIONS` must not require that token.
+- Keep `/health/live` and `/health/ready` usable without an authenticated session. Do not place the OIDC login/callback entry points behind the business authentication boundary.
+- Keep the OIDC client secret and all OIDC access, refresh, and ID tokens out of React and browser storage. Authentication identity and CSRF state must not be persisted in `localStorage` or `sessionStorage`.
+- Treat OIDC `issuer` + `sub` as the immutable external identity. Never use mutable username or display claims as an identity key.
+- Do not write OIDC `sub` into existing `actorId` fields. Local application user IDs will own actor attribution after RBAC is implemented.
+- Preserve safe callback logging: authorization codes, state, provider errors, and other callback query secrets must not enter application or reverse-proxy logs.
+- Migration `019_postgres_session_store.sql` is applied architecture. Never edit it; any session-schema change requires a forward migration.
+- RBAC is the next application-owned authorization module. Add roles and permissions without weakening or relocating the server authentication and CSRF boundaries.
+
 ## Business invariants
 
 ### SKU and catalog
@@ -136,7 +149,7 @@ CI (`.github/workflows/ci.yml`) uses Node 20 and PostgreSQL 16 and runs server u
 - Recount apply must lock/revalidate the source, rebuild current target pricing, and atomically insert/link audit records. Preserve correction-request blocking and stale signatures.
 - Correction-request claiming is an atomic compare-and-set: concurrent claim attempts must produce one owner. Owner-only refresh, reject, complete, and release require the capability token; confirmed force-release returns an in-progress request to pending without it.
 - Claim tokens do not expire automatically. The raw token is kept in browser-local storage and only its hash is stored in PostgreSQL; queue responses expose a short fingerprint. The queue polls every five seconds only while visible, refreshes immediately on focus/visibility return, and prevents overlapping/stale responses.
-- A correction claim represents control by one browser installation, not authenticated user identity. Preserve this distinction when adding future authentication.
+- A correction claim represents control by one browser installation, not authenticated user identity. Preserve this distinction when adding local-user/RBAC actor attribution.
 
 ### Repricing
 
@@ -156,12 +169,12 @@ CI (`.github/workflows/ci.yml`) uses Node 20 and PostgreSQL 16 and runs server u
 
 ## Operations safety
 
-- `/health/live` is process liveness; `/health/ready` checks PostgreSQL and is served only after startup migration/seed/schema work completes.
+- `/health/live` is process liveness; `/health/ready` checks PostgreSQL and is served only after startup migration/seed/schema work completes. Both must remain unauthenticated.
 - Preserve graceful SIGTERM/SIGINT behavior and pool shutdown.
 - Use `scripts/postgres-backup.sh` for verified custom-format backups.
 - `scripts/postgres-restore.sh` is destructive: it requires `--confirm`, stops app services, and uses a single-transaction, exit-on-error restore. Use it only against the explicitly intended environment after validating the dump path and target.
 - Keep backups outside the repository and test restores in a disposable environment.
 
-## Deferred security scope
+## Pending authorization scope
 
-Database exposure/static credential hardening and authentication/authorization/RBAC are known, intentionally deferred issues. Do not claim admin routes are protected. Do not opportunistically implement or remove security behavior during unrelated fixes; address it only in an explicitly scoped task.
+Authentication and CSRF enforcement are implemented. Local users, application-owned RBAC, role assignments, and attributable local actor IDs remain pending; until then, authenticated users share the same business access and admin-named routes are not role-restricted. Database exposure and broader deployment secret hardening also remain operational concerns. Change these areas only in an explicitly scoped task.

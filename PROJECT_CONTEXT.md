@@ -9,9 +9,9 @@ The UI has two practical audiences:
 - operational staff use the main workspace to configure a product, preview and save it, decode an existing SKU, recount/correct a product, inspect history, and export data;
 - configuration administrators use the admin screens to maintain categories, questions, options, SKU schemas, pricing scenarios, correction requests, and repricing drafts/batches.
 
-These are UI responsibilities, not security roles. The application currently has no authentication, authorization, or RBAC, so the server does not enforce an operator/admin distinction.
+These are UI responsibilities, not security roles. Authentication is enforced for all business API access, but local users, authorization, and RBAC are not implemented, so the server does not yet enforce an operator/admin distinction.
 
-This document describes the current `feature/postgresql` checkout inspected on 2026-09-05. Runtime PostgreSQL configuration is authoritative; a deployed database was not inspected while this document was written.
+This document describes the current `feature/auth-rbac` checkout inspected on 2026-09-09. Runtime PostgreSQL configuration remains authoritative for application data.
 
 ## Architecture
 
@@ -23,13 +23,43 @@ The application is a small three-tier system:
 
 In Docker, nginx serves the built client, falls back to `index.html` for client routes, and proxies `/api/` to the server. The server does not listen until migrations, default-data seeding, and legacy SKU-schema capture have completed. PostgreSQL data lives in a named Docker volume.
 
-The client must not be treated as a trust boundary. Preview and save payloads are revalidated and recalculated by the server.
+The client must not be treated as a trust boundary. Authentication and CSRF are enforced by Express, and preview/save payloads are revalidated and recalculated by the server.
+
+### Authentication and access boundary
+
+Keycloak realm `amber` is the OpenID Provider, with issuer [https://auth.ambergalbin.space/realms/amber](https://auth.ambergalbin.space/realms/amber) and confidential client `amber-sku-manager`. Keycloak authenticates `amber.local` Active Directory users through LDAP federation over LDAPS. Express owns standards-based OIDC discovery and the Authorization Code flow with PKCE, state, and nonce; the client secret remains server-side.
+
+Application sessions are opaque, server-side, and PostgreSQL-backed. Migration `019_postgres_session_store.sql` owns the `session` table; runtime auto-DDL is disabled. The `amber.sid` cookie is host-only, `HttpOnly`, `SameSite=Lax`, scoped to `/api`, fixed/non-rolling, and uses the configurable `SESSION_MAX_AGE_MS` lifetime (eight hours by default). It is `Secure` for production HTTPS and non-`Secure` only for local HTTP development.
+
+The implemented endpoints are:
+
+- `GET /api/auth/login` — begins login and validates a relative application return path;
+- `GET /api/auth/callback` — validates and completes the OIDC transaction, regenerates the session, and stores normalized identity;
+- `GET /api/auth/me` — returns normalized identity plus the synchronizer CSRF token;
+- `POST /api/auth/logout` — requires authentication and CSRF, destroys the local session, and returns a server-generated Keycloak logout URL for top-level navigation.
+
+OIDC identity is keyed by immutable `issuer` + `sub`; optional display claims do not replace that key. The session stores normalized identity and a CSRF token, not OIDC access, refresh, or ID tokens. Local application users, roles, permissions, and actor attribution remain pending.
+
+The React `AuthProvider`/`AuthGate` bootstraps through `/api/auth/me` before mounting the business UI. Identity and CSRF state remain in React memory only; no authentication data is persisted in `localStorage` or `sessionStorage`. Login navigates through the Express endpoint. Logout posts with CSRF, receives `{ logoutUrl }`, then uses top-level browser navigation. All authenticated users currently see the same navigation because RBAC is not implemented.
+
+`/health/live`, `/health/ready`, and the login/callback entry points remain unauthenticated. All business routes—including the historically named `public.routes.js` and `admin.routes.js` trees—require an authenticated application session. Unauthenticated API requests receive JSON `401`, never an OIDC redirect. `GET`, `HEAD`, and `OPTIONS` require authentication but not CSRF; unsafe business methods require `X-CSRF-Token` and return JSON `403` on failure.
+
+### Authentication deployment
+
+- Production application: [https://skumanager.ambergalbin.space](https://skumanager.ambergalbin.space)
+- Production callback: [https://skumanager.ambergalbin.space/api/auth/callback](https://skumanager.ambergalbin.space/api/auth/callback)
+- Local SPA: [http://localhost:5173](http://localhost:5173)
+- Local callback: [http://localhost:5000/api/auth/callback](http://localhost:5000/api/auth/callback)
+
+In production the server remains internal behind the client nginx `/api` proxy path. The trusted-proxy setting is an exact hop count, and the proxy chain must preserve the original HTTPS scheme so Express emits secure cookies. Local Vite proxies browser-visible `/api` requests to port 5000; `docker-compose.local.yml` may expose that port for local development and is not a production Compose file.
+
+Live verification has confirmed real Keycloak + `amber.local` AD login, PostgreSQL application sessions, `/api/auth/me`, end-to-end provider logout, JSON `401` for unauthenticated business requests, and unchanged authenticated application workflows.
 
 ### Main HTTP surfaces
 
-`server/src/routes/public.routes.js` exposes configuration, SKU/price preview, save, decode, variation allocation, recount preview/apply, product history/archive, and export snapshot operations.
+`server/src/routes/public.routes.js` exposes configuration, SKU/price preview, save, decode, variation allocation, recount preview/apply, product history/archive, and export snapshot operations. Its historical name does not mean unauthenticated access.
 
-`server/src/routes/admin.routes.js` exposes catalog and pricing maintenance, SKU-schema publication, correction-request workflow, correction history, and mass repricing draft/preview/apply/rollback operations. Despite the path name, these routes are not currently access-controlled.
+`server/src/routes/admin.routes.js` exposes catalog and pricing maintenance, SKU-schema publication, correction-request workflow, correction history, and mass repricing draft/preview/apply/rollback operations. Both business router trees share the authentication and CSRF boundary; RBAC does not yet distinguish their users.
 
 The client routes are defined in `client/src/router.jsx`:
 
@@ -45,6 +75,7 @@ The client routes are defined in `client/src/router.jsx`:
 | --- | --- |
 | `server/server.js` | Startup ordering, HTTP listener, signal handling, graceful shutdown. |
 | `server/src/app.js` | Express middleware/routes, request IDs, structured request/audit logs, health endpoints, error responses. |
+| `server/src/auth/`, `server/src/routes/auth.routes.js` | OIDC adapter, PostgreSQL session configuration, identity/CSRF middleware, and authentication endpoints. |
 | `server/src/db/` | PostgreSQL pool, migration runner, default seed and legacy initialization compatibility. |
 | `server/migrations/` | Ordered PostgreSQL DDL/data migrations; the schema source of truth. |
 | `server/src/services/product.service.js` | Product preview/save, SKU decode, variation allocation, recount/apply, product lifecycle. |
@@ -61,6 +92,7 @@ The client routes are defined in `client/src/router.jsx`:
 | `server/integration-test/critical-flows.test.js` | Destructive, PostgreSQL-backed end-to-end service/API, migration, upgrade, and concurrency tests. |
 | `server/scripts/` | Data-integrity audit and optional SQLite configuration import. |
 | `client/src/hooks/` | Client orchestration for main, recount, and admin workflows. |
+| `client/src/auth/` | Memory-only authentication state, bootstrap, login/logout actions, and the UI authentication gate. |
 | `client/src/lib/` | Testable client rules, formatting, validation, and API helpers. |
 | `client/src/components/`, `client/src/pages/` | React UI. |
 | `client/test/` | Client behavior/regression tests using Node's built-in test runner. |
@@ -81,6 +113,7 @@ The important data groups are:
 - corrections: `product_corrections`, `correction_requests`;
 - repricing: `repricing_drafts`, `repricing_batches`, `repricing_items`;
 - export: `export_snapshots`, singleton `export_state`, and legacy `export_events`;
+- authentication session store: `session`;
 - migration ledger: `schema_migrations`.
 
 PostgreSQL `NUMERIC` columns make persisted weights, rates, and prices deterministic. Relevant scales include weight `(14,3)`, product USD/final values `(18,4)`, UAH `(18,2)`, exchange rates `(18,6)`, matrix prices `(18,4)`, and modifier factors `(12,6)`. The `pg` driver returns `NUMERIC` as strings; services convert values to JavaScript `Number` at calculation/API boundaries. The client compacts fixed-scale strings for display without changing stored values.
@@ -200,7 +233,7 @@ Both source and corrected records are excluded from the normal export queue by t
 
 Correction requests add a managed pending/in-progress/completed/rejected queue. Only one active request per source is allowed. Claiming uses one conditional database update, so concurrent attempts yield exactly one successful owner. The server returns a random capability token once, stores only its SHA-256 hash, and exposes only a short fingerprint in later queue responses. The browser keeps the raw token in local storage; matching it proves control by that browser installation, not the identity of a real user.
 
-Claims do not expire automatically. Refresh, reject, complete, and ordinary release of an in-progress request require the matching token. Owner release clears the claim and returns the request to pending; confirmed force-release does the same without the token. Because authentication/RBAC is absent, force-release is not currently an authorized administrator action in the security sense. A future auth layer must add real actor identity without treating these browser capability claims as user accounts.
+Claims do not expire automatically. Refresh, reject, complete, and ordinary release of an in-progress request require the matching token. Owner release clears the claim and returns the request to pending; confirmed force-release does the same without the token. Authentication now protects the endpoint, but without RBAC force-release is not restricted to an Administrator. The future local-user/RBAC layer must add actor identity without treating these browser capability claims as user accounts.
 
 The correction queue loads immediately, then polls every five seconds while the page is visible. Hidden tabs skip requests; focus or renewed visibility triggers an immediate refresh. Polls do not overlap, and older responses cannot overwrite newer queue state. Signatures detect stale source/proposed state; refresh recalculates; completion invokes the same transactional recount application and records the final payload. Active requests block competing direct correction and repricing. Completion also attempts to synchronize affected repricing drafts.
 
@@ -258,8 +291,9 @@ Never edit an already-applied migration. Add a new forward migration.
 | `016` | Deletes zero matrix cells as absent prices and grandfathers existing zero-price products without allowing new zero-priced products. |
 | `017` | Adds scenario/global scope to repricing drafts and batches and enforces one active global draft. |
 | `018` | Adds hashed capability claims and claim timestamps to correction requests, including compatibility for legacy unowned in-progress rows. |
+| `019` | Adds the PostgreSQL-backed Express session table matching the pinned `connect-pg-simple` contract; runtime session-table creation remains disabled. |
 
-The integration suite compares fresh, pre-checksum legacy, and checkpoint-upgrade topology and tests repeated startup, failed-file rollback, timeout independence, checksum normalization, legacy-zero compatibility, and migration of legacy unowned in-progress correction requests. This covers the repository's known upgrade shapes; it is not a guarantee for an arbitrary manually altered database.
+The integration suite compares fresh, pre-checksum legacy, and checkpoint-upgrade topology and tests repeated startup, failed-file rollback, timeout independence, checksum normalization, legacy-zero compatibility, migration of legacy unowned in-progress correction requests, and the session-store schema. This covers the repository's known upgrade shapes; it is not a guarantee for an arbitrary manually altered database.
 
 `server/src/db/init-db.js` still contains `legacyInitDb()` for compatibility/tests, but normal startup treats migrations as DDL source of truth, then seeds only an empty catalog and ensures calibration questions.
 
@@ -286,11 +320,11 @@ The ordinary request pool has configurable maximum size, idle/connect timeout, q
 
 `/health/live` reports that Express is running. `/health/ready` performs `SELECT 1`; because the listener starts only after migration/seed/schema bootstrap, readiness also implies those startup phases completed for that process. It does not perform a full business-data audit or verify NBU availability.
 
-Requests receive/return an `X-Request-ID`; completion and mutations are logged as structured JSON. Mutation audit entries currently have `actorId: null` because authentication is absent.
+Requests receive/return an `X-Request-ID`; completion and mutations are logged as structured JSON. Callback logging strips the query string so authorization codes, state, and provider error parameters do not enter application or nginx access logs. Mutation audit entries remain `actorId: null`: OIDC `sub` is not written into actor fields, and local-user attribution is pending RBAC.
 
 SIGTERM/SIGINT stop accepting HTTP connections, wait for the HTTP server to close, close the PostgreSQL pool, and force-exit after ten seconds if shutdown stalls.
 
-Docker Compose builds PostgreSQL 16, the Node server, and an nginx-hosted production client. The checked-in Compose configuration is suitable as a development/single-host baseline, not a hardened security boundary: it exposes PostgreSQL, while requiring credentials from the ignored project-level `.env` or process environment. Production must protect that configuration and its network boundary externally.
+Docker Compose builds PostgreSQL 16, the Node server, and an nginx-hosted production client. The checked-in base configuration is suitable as a development/single-host baseline, not a hardened security boundary: it exposes PostgreSQL, while the backend itself is reached through nginx in production. Credentials and OIDC/session secrets come from the ignored project-level `.env` or process environment and must be protected externally.
 
 `scripts/postgres-backup.sh` creates a timestamped PostgreSQL custom-format archive, removes an incomplete archive on failure, verifies it is non-empty, and checks its archive listing. `scripts/postgres-restore.sh` requires both an explicit path and `--confirm`, validates the archive, stops client/server if running, restores with `--clean --if-exists --single-transaction --exit-on-error`, performs basic product/migration table checks, and restarts only services that were previously running. Backups must be copied to a monitored off-host destination and restore-tested; that infrastructure is intentionally outside this repository.
 
@@ -298,17 +332,18 @@ The optional SQLite importer migrates configuration/pricing, not product history
 
 ## Tests and CI
 
-Server unit tests cover SKU parsing/history/placeholders, schema markers and code semantics, rule matching, calibration, preview-token behavior, pricing scenarios/context, marketing rounding, global/manual/automatic repricing resolutions, money/numeric validation, currency fallback/concurrency, HTTP retry limits, correction signatures/history, CSV injection safety, migration checksums, and backup/restore script safeguards. Semi-calibrated state `2` is exercised by PostgreSQL recount integration fixtures, but there is no dedicated unit assertion that directly compares preview tokens for `0`, `1`, and `2`.
+Server unit tests cover authentication configuration, session/cookie behavior, the injectable OIDC flow, identity and CSRF middleware, safe redirects/logging, SKU parsing/history/placeholders, schema markers and code semantics, rule matching, calibration, preview-token behavior, pricing scenarios/context, marketing rounding, global/manual/automatic repricing resolutions, money/numeric validation, currency fallback/concurrency, HTTP retry limits, correction signatures/history, CSV injection safety, migration checksums, and backup/restore script safeguards. Semi-calibrated state `2` is exercised by PostgreSQL recount integration fixtures, but there is no dedicated unit assertion that directly compares preview tokens for `0`, `1`, and `2`.
 
-Client tests cover visibility rules, answer labels, admin conditions, manual-price validation/payloads, matrix-zero UI behavior, numeric display formatting, explicit recount clearing/zero preservation, correction-claim persistence and visibility-aware polling, and global repricing resolutions.
+Client tests cover authentication bootstrap/gating, login/logout navigation, in-memory CSRF and centralized `401` handling, visibility rules, answer labels, admin conditions, manual-price validation/payloads, matrix-zero UI behavior, numeric display formatting, explicit recount clearing/zero preservation, correction-claim persistence and visibility-aware polling, and global repricing resolutions.
 
 `server/integration-test/critical-flows.test.js` uses real PostgreSQL and independent processes/connections where races require them. It verifies final database state as well as HTTP responses. Major cases include:
 
 - liveness/readiness;
+- public auth flow plus authenticated business-route and unsafe-method CSRF enforcement using an injected fake OIDC adapter;
 - calibrated-to-semi-calibrated recount with target-hidden answer removal, explicit optional clearing, real-zero preservation, legacy hidden zero, and visible-target rejection;
 - parallel replica seed/schema bootstrap and rollback/retry;
 - migration timeout isolation, failure rollback, checksum compatibility, and fresh/upgrade equivalence;
-- migrations 016–018 legacy-zero and correction-claim upgrade behavior;
+- migrations 016–019 legacy-zero, correction-claim, and PostgreSQL session-store upgrade behavior;
 - atomic duplicate-question enforcement;
 - positive-or-delete matrix cells;
 - authoritative preview/save, stale pricing rejection, fail-closed payload validation, and concurrent sequences;
@@ -326,7 +361,7 @@ CI uses Node 20 and a PostgreSQL 16 service, then runs server unit tests, Postgr
 ## Known limitations and deferred work
 
 - PostgreSQL remains host-exposed by the single-host Compose baseline, and broader deployment secret management is outside the repository. Credentials are supplied through the ignored `.env` or process environment; production must protect those values and its network boundary externally.
-- Authentication, authorization, RBAC, and attributable actor IDs are intentionally deferred security issue #2. All public/admin API routes are currently reachable to any network client that can reach the server.
+- Authentication is implemented. Application-owned local users, RBAC, role assignment, per-role authorization, and attributable local actor IDs remain pending; until then every authenticated user has the same business/API access.
 - Live catalog contents and production data quality cannot be confirmed from the repository. Seed defaults describe only a newly initialized empty database.
 - The client README is generic template text.
 - The repository provides backup/restore mechanics but not scheduling, retention, encryption, off-host transfer, monitoring, or disaster-recovery orchestration.
@@ -345,9 +380,9 @@ CI uses Node 20 and a PostgreSQL 16 service, then runs server unit tests, Postgr
 - Never reuse a SKU, mutate a historical schema snapshot, or reinterpret a used semantic option value.
 - Preserve migration checksums and line-ending canonicalization; use new forward migrations.
 - Keep scenario/global repricing apply/rollback atomic and require explicit keep/set-manual or eligible global manual-to-automatic resolutions.
-- Keep correction claims exclusive and capability-based until real authentication is deliberately added; do not present browser ownership as user identity.
+- Keep correction claims exclusive and capability-based until local-user/RBAC attribution deliberately replaces or augments them; do not present browser ownership as user identity.
 - Keep export CSV immutable after generation, idempotency range-bound, formula-safe, and cursor advancement monotonic.
 
 ## Current status
 
-The PostgreSQL architecture and workflow protections through migrations `000`–`018` are present on `feature/postgresql`, with focused unit/integration regression coverage and CI configuration. Authentication/security issues #1 and #2 remain deliberately unresolved, and actual production configuration/data must be checked operationally rather than inferred from this checkout.
+The PostgreSQL architecture and workflow protections through migration `019` are present on `feature/auth-rbac`, with focused unit/integration regression coverage and CI configuration. Server-owned OIDC authentication, PostgreSQL sessions, client authentication awareness, and authenticated/CSRF-protected business API boundaries are implemented and live-verified. Application-owned local users, RBAC, and actor attribution are the next security module; actual production business configuration/data must still be checked operationally rather than inferred from this checkout.
