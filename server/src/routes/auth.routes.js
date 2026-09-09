@@ -12,6 +12,7 @@ const {
   requireCsrfToken,
   tokensEqual,
 } = require('../auth/authentication');
+const defaultApplicationUserService = require('../auth/application-users');
 const logger = require('../utils/logger');
 
 const OIDC_TRANSACTION_TTL_MS = 10 * 60 * 1000;
@@ -95,6 +96,7 @@ function validateTransaction(transaction, receivedState, now, transactionTtlMs) 
 
 function createAuthRouter({
   oidcAdapter = createOidcAdapter(),
+  applicationUserService = defaultApplicationUserService,
   now = () => Date.now(),
   randomToken = randomBase64Url,
   transactionTtlMs = OIDC_TRANSACTION_TTL_MS,
@@ -161,6 +163,7 @@ function createAuthRouter({
         expectedIssuer: oidcAdapter.issuer,
         authenticatedAt: new Date(now()),
       });
+      await applicationUserService.resolveOrCreateApplicationUser(identity);
       await regenerateSession(req);
       req.session.identity = identity;
       req.session.csrfToken = randomToken(32);
@@ -178,11 +181,20 @@ function createAuthRouter({
   router.get('/me', requireAuthenticatedSession, async (req, res, next) => {
     res.set('Cache-Control', 'no-store');
     try {
+      const applicationAccess = await applicationUserService.getOrCreateApplicationAccess(
+        req.user
+      );
       if (typeof req.session.csrfToken !== 'string' || !req.session.csrfToken) {
         req.session.csrfToken = randomToken(32);
         await saveSession(req);
       }
-      return res.json({ identity: req.user, csrfToken: req.session.csrfToken });
+      return res.json({
+        identity: req.user,
+        csrfToken: req.session.csrfToken,
+        applicationUser: applicationAccess.applicationUser,
+        roles: applicationAccess.roles,
+        permissions: applicationAccess.permissions,
+      });
     } catch (error) {
       return next(error);
     }

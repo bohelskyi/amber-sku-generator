@@ -27,6 +27,11 @@ const { createApp } = require('../src/app');
 const express = require('express');
 const { createSessionMiddleware } = require('../src/auth/session');
 const { createAuthRouter } = require('../src/routes/auth.routes');
+const {
+  getApplicationAccess,
+  resolveOrCreateApplicationUser,
+} = require('../src/auth/application-users');
+const { bootstrapAdministrator } = require('../scripts/bootstrap-admin');
 const { runMigrations } = require('../src/db/run-migrations');
 const { seedDefaultData } = require('../src/db/init-db');
 const { ensureLegacySkuSchemas } = require('../src/services/sku-schema.service');
@@ -134,7 +139,36 @@ async function request(url, {
   return { response, data, text };
 }
 
-async function authenticateApplicationSession(returnTo = '/') {
+async function activateApplicationUserForTest(issuer, subject, roleKey = 'administrator') {
+  const result = await pool.query(
+    `WITH target_user AS (
+       SELECT u.id
+       FROM application_external_identities e
+       JOIN application_users u ON u.id = e.application_user_id
+       WHERE e.issuer = $1 AND e.subject = $2
+     ), target_role AS (
+       SELECT id FROM roles WHERE role_key = $3 AND status = 'active'
+     ), assigned AS (
+       INSERT INTO user_role_assignments (application_user_id, role_id)
+       SELECT target_user.id, target_role.id
+       FROM target_user CROSS JOIN target_role
+       ON CONFLICT (application_user_id, role_id) WHERE revoked_at IS NULL DO NOTHING
+     )
+     UPDATE application_users u
+     SET status = 'active',
+         activated_at = COALESCE(activated_at, CURRENT_TIMESTAMP),
+         deactivated_at = NULL,
+         updated_at = CURRENT_TIMESTAMP
+     FROM target_user
+     WHERE u.id = target_user.id
+     RETURNING u.id`,
+    [issuer, subject, roleKey]
+  );
+  assert.equal(result.rows.length, 1, `Could not activate ${issuer} ${subject}`);
+  return Number(result.rows[0].id);
+}
+
+async function authenticateApplicationSession(returnTo = '/', { activate = true } = {}) {
   const loginResponse = await fetch(
     `${baseUrl}/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`,
     { redirect: 'manual' }
@@ -159,15 +193,29 @@ async function authenticateApplicationSession(returnTo = '/') {
     redirect: 'manual',
   });
   assert.equal(meResponse.status, 200);
-  const me = await meResponse.json();
+  let me = await meResponse.json();
   assert.equal(me.identity.issuer, integrationOidcAdapter.issuer);
   assert.equal(me.identity.sub, 'critical-flows-subject');
+  assert.ok(['pending', 'active', 'disabled'].includes(me.applicationUser.status));
   assert.equal(typeof me.csrfToken, 'string');
   assert.doesNotMatch(
     JSON.stringify(me),
     /access_token|refresh_token|id_token|must-not-be-exposed|client-secret/
   );
-  return { cookie, csrfToken: me.csrfToken };
+  if (activate) {
+    await activateApplicationUserForTest(
+      integrationOidcAdapter.issuer,
+      'critical-flows-subject'
+    );
+    const activeMeResponse = await fetch(`${baseUrl}/api/auth/me`, {
+      headers: { Cookie: cookie },
+      redirect: 'manual',
+    });
+    assert.equal(activeMeResponse.status, 200);
+    me = await activeMeResponse.json();
+    assert.equal(me.applicationUser.status, 'active');
+  }
+  return { cookie, csrfToken: me.csrfToken, applicationUser: me.applicationUser };
 }
 
 async function createFixtureCategory(code, requiresWeight, withPrices) {
@@ -468,6 +516,210 @@ test('migration 019 matches the connect-pg-simple 10.0.0 table contract', async 
   ]);
 });
 
+test('migration 020 creates normalized RBAC schema and the approved built-in mappings', async () => {
+  const requiredTables = await pool.query(`
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = ANY($1::text[])
+    ORDER BY table_name
+  `, [[
+    'application_external_identities',
+    'application_users',
+    'permissions',
+    'role_permissions',
+    'roles',
+    'security_bootstrap_state',
+    'user_role_assignments',
+  ]]);
+  assert.deepEqual(requiredTables.rows.map((row) => row.table_name), [
+    'application_external_identities',
+    'application_users',
+    'permissions',
+    'role_permissions',
+    'roles',
+    'security_bootstrap_state',
+    'user_role_assignments',
+  ]);
+
+  const permissionKeys = [
+    'catalog.manage',
+    'catalog.view',
+    'corrections.claim',
+    'corrections.complete',
+    'corrections.create',
+    'corrections.force_release',
+    'corrections.reject',
+    'corrections.view',
+    'exports.create',
+    'history.view',
+    'pricing.manage',
+    'pricing.view',
+    'products.archive',
+    'products.create',
+    'products.decode',
+    'products.view',
+    'repricing.apply',
+    'repricing.prepare',
+    'repricing.rollback',
+    'repricing.view',
+    'roles.manage',
+    'sku_schemas.publish',
+    'users.manage',
+  ];
+  const permissions = await pool.query(
+    'SELECT permission_key FROM permissions ORDER BY permission_key'
+  );
+  assert.deepEqual(permissions.rows.map((row) => row.permission_key), permissionKeys);
+
+  const mappings = await pool.query(`
+    SELECT r.role_key, r.display_name, r.is_system, r.status,
+           ARRAY_AGG(rp.permission_key ORDER BY rp.permission_key) AS permission_keys
+    FROM roles r
+    JOIN role_permissions rp ON rp.role_id = r.id
+    GROUP BY r.id
+    ORDER BY r.role_key
+  `);
+  const byRole = Object.fromEntries(mappings.rows.map((row) => [row.role_key, row]));
+  assert.deepEqual(Object.keys(byRole), ['administrator', 'manager', 'storekeeper']);
+  for (const role of mappings.rows) {
+    assert.equal(role.is_system, true);
+    assert.equal(role.status, 'active');
+  }
+  assert.deepEqual(byRole.administrator.permission_keys, permissionKeys);
+  assert.deepEqual(byRole.manager.permission_keys, [
+    'corrections.claim',
+    'corrections.complete',
+    'corrections.create',
+    'corrections.reject',
+    'corrections.view',
+    'history.view',
+    'pricing.view',
+    'products.decode',
+    'products.view',
+    'repricing.prepare',
+    'repricing.view',
+  ]);
+  assert.deepEqual(byRole.storekeeper.permission_keys, [
+    'corrections.claim',
+    'corrections.complete',
+    'corrections.create',
+    'corrections.reject',
+    'corrections.view',
+    'history.view',
+    'products.create',
+    'products.decode',
+    'products.view',
+    'repricing.prepare',
+    'repricing.view',
+  ]);
+
+  assert.equal(
+    (await pool.query('SELECT count(*)::int AS count FROM user_role_assignments')).rows[0].count,
+    0
+  );
+  assert.deepEqual(
+    (await pool.query(
+      `SELECT completed_at, administrator_user_id
+       FROM security_bootstrap_state WHERE singleton = TRUE`
+    )).rows[0],
+    { completed_at: null, administrator_user_id: null }
+  );
+});
+
+test('OIDC identities resolve exactly, refresh mutable profiles, and provision concurrently once', async () => {
+  const baseIdentity = {
+    issuer: 'https://identity-a.example/realms/amber',
+    sub: 'concurrent-rbac-subject',
+    preferred_username: 'first.username',
+    name: 'First Display',
+    email: 'first@example.invalid',
+    authenticatedAt: '2026-09-09T10:00:00.000Z',
+  };
+  const results = await Promise.all(
+    Array.from({ length: 8 }, () => resolveOrCreateApplicationUser(baseIdentity))
+  );
+  assert.equal(new Set(results.map((user) => user.id)).size, 1);
+  assert.equal(results[0].status, 'pending');
+
+  const refreshed = await resolveOrCreateApplicationUser({
+    ...baseIdentity,
+    preferred_username: 'renamed.username',
+    name: 'Renamed Display',
+    email: 'renamed@example.invalid',
+    authenticatedAt: '2026-09-09T11:00:00.000Z',
+  });
+  assert.equal(refreshed.id, results[0].id);
+  assert.equal(refreshed.preferredUsername, 'renamed.username');
+  assert.equal(refreshed.displayName, 'Renamed Display');
+
+  const clearedOptionalProfile = await resolveOrCreateApplicationUser({
+    ...baseIdentity,
+    preferred_username: 'renamed.username',
+    name: 'Renamed Display',
+    email: undefined,
+    authenticatedAt: '2026-09-09T11:30:00.000Z',
+  });
+  assert.equal(clearedOptionalProfile.id, refreshed.id);
+  assert.equal(clearedOptionalProfile.email, null);
+
+  const otherIssuer = await resolveOrCreateApplicationUser({
+    ...baseIdentity,
+    issuer: 'https://identity-b.example/realms/amber',
+    preferred_username: 'same-sub-different-issuer',
+    authenticatedAt: '2026-09-09T12:00:00.000Z',
+  });
+  assert.notEqual(otherIssuer.id, refreshed.id);
+
+  const exactDifferentSubject = await resolveOrCreateApplicationUser({
+    ...baseIdentity,
+    sub: ` ${baseIdentity.sub}`,
+    preferred_username: 'exact-different-subject',
+    authenticatedAt: '2026-09-09T12:30:00.000Z',
+  });
+  assert.notEqual(exactDifferentSubject.id, refreshed.id);
+
+  const stored = await pool.query(
+    `SELECT u.id, u.status, u.preferred_username, u.display_name,
+            COUNT(a.id)::int AS assignment_count
+     FROM application_external_identities e
+     JOIN application_users u ON u.id = e.application_user_id
+     LEFT JOIN user_role_assignments a ON a.application_user_id = u.id
+     WHERE e.issuer = $1 AND e.subject = $2
+     GROUP BY u.id`,
+    [baseIdentity.issuer, baseIdentity.sub]
+  );
+  assert.equal(stored.rows.length, 1);
+  assert.equal(stored.rows[0].preferred_username, 'renamed.username');
+  assert.equal(stored.rows[0].display_name, 'Renamed Display');
+  assert.equal(stored.rows[0].assignment_count, 0);
+
+  const identityRow = await pool.query(
+    `SELECT id FROM application_external_identities
+     WHERE issuer = $1 AND subject = $2`,
+    [baseIdentity.issuer, baseIdentity.sub]
+  );
+  await pool.query(
+    `UPDATE application_external_identities
+     SET last_authenticated_at = last_authenticated_at
+     WHERE id = $1`,
+    [identityRow.rows[0].id]
+  );
+  await assert.rejects(
+    pool.query(
+      'UPDATE application_external_identities SET subject = $1 WHERE id = $2',
+      ['replacement-subject', identityRow.rows[0].id]
+    ),
+    /immutable/
+  );
+  await assert.rejects(
+    pool.query('DELETE FROM application_external_identities WHERE id = $1', [
+      identityRow.rows[0].id,
+    ]),
+    /cannot be deleted/
+  );
+});
+
 test('PostgreSQL session middleware persists a fixed non-secure local session', async () => {
   const sessionApp = express();
   sessionApp.use('/api', createSessionMiddleware());
@@ -619,6 +871,102 @@ test('fake OIDC flow persists, regenerates, exposes, and destroys PostgreSQL ses
   }
 });
 
+test('pending and disabled local access returns stable 403 while /me and logout remain available', async () => {
+  const calls = { authorization: [] };
+  const accessAdapter = {
+    issuer: 'https://access-state.example/realms/amber',
+    redirectUri: 'http://localhost:5000/api/auth/callback',
+    async buildAuthorizationRedirect(transaction) {
+      calls.authorization.push(transaction);
+      const url = new URL('https://auth.example.invalid/authorize');
+      url.searchParams.set('state', transaction.state);
+      return url;
+    },
+    async exchangeAuthorizationCode() {
+      return {
+        iss: this.issuer,
+        sub: 'phase-2a-access-user',
+        preferred_username: 'phase2a.user',
+        name: 'Phase 2A User',
+      };
+    },
+    async buildLogoutRedirect() {
+      return null;
+    },
+  };
+  const accessApp = createApp({ oidcAdapter: accessAdapter });
+  const accessServer = await new Promise((resolve) => {
+    const listening = accessApp.listen(0, '127.0.0.1', () => resolve(listening));
+  });
+  const accessBaseUrl = `http://127.0.0.1:${accessServer.address().port}`;
+  try {
+    const loginResponse = await fetch(`${accessBaseUrl}/api/auth/login`, { redirect: 'manual' });
+    const loginCookie = loginResponse.headers.get('set-cookie').split(';', 1)[0];
+    const callbackResponse = await fetch(
+      `${accessBaseUrl}/api/auth/callback?code=code&state=${calls.authorization[0].state}`,
+      { redirect: 'manual', headers: { Cookie: loginCookie } }
+    );
+    assert.equal(callbackResponse.status, 303);
+    const cookie = callbackResponse.headers.get('set-cookie').split(';', 1)[0];
+
+    let meResponse = await fetch(`${accessBaseUrl}/api/auth/me`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(meResponse.status, 200);
+    let me = await meResponse.json();
+    assert.equal(me.applicationUser.status, 'pending');
+    assert.deepEqual(me.roles, []);
+    assert.deepEqual(me.permissions, []);
+
+    let business = await fetch(`${accessBaseUrl}/api/config`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(business.status, 403);
+    assert.deepEqual(await business.json(), {
+      code: 'APP_ACCESS_PENDING',
+      error: 'Application access is pending approval',
+    });
+
+    await pool.query(
+      `UPDATE application_users u
+       SET status = 'disabled', deactivated_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       FROM application_external_identities e
+       WHERE e.application_user_id = u.id AND e.issuer = $1 AND e.subject = $2`,
+      [accessAdapter.issuer, 'phase-2a-access-user']
+    );
+
+    meResponse = await fetch(`${accessBaseUrl}/api/auth/me`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(meResponse.status, 200);
+    me = await meResponse.json();
+    assert.equal(me.applicationUser.status, 'disabled');
+    business = await fetch(`${accessBaseUrl}/api/config`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(business.status, 403);
+    assert.equal((await business.json()).code, 'APP_ACCESS_DISABLED');
+
+    const missingCsrfLogout = await fetch(`${accessBaseUrl}/api/auth/logout`, {
+      method: 'POST',
+      headers: { Cookie: cookie },
+    });
+    assert.equal(missingCsrfLogout.status, 403);
+    const logout = await fetch(`${accessBaseUrl}/api/auth/logout`, {
+      method: 'POST',
+      headers: { Cookie: cookie, 'X-CSRF-Token': me.csrfToken },
+    });
+    assert.equal(logout.status, 200);
+    const afterLogout = await fetch(`${accessBaseUrl}/api/auth/me`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(afterLogout.status, 401);
+  } finally {
+    await new Promise((resolve) => accessServer.close(resolve));
+  }
+});
+
 test('authenticated business boundary requires CSRF only for unsafe methods', async () => {
   authenticatedSession = await authenticateApplicationSession('/admin');
 
@@ -678,6 +1026,33 @@ test('authenticated business boundary requires CSRF only for unsafe methods', as
   });
   assert.equal(validCsrf.response.status, 200, validCsrf.text);
   assert.equal(typeof validCsrf.data.previewToken, 'string');
+});
+
+test('role revocation is reflected immediately without replacing the active session', async () => {
+  const userId = authenticatedSession.applicationUser.id;
+  await pool.query(
+    `UPDATE user_role_assignments
+     SET revoked_at = CURRENT_TIMESTAMP
+     WHERE application_user_id = $1 AND revoked_at IS NULL`,
+    [userId]
+  );
+  const meWithoutRole = await request('/api/auth/me');
+  assert.equal(meWithoutRole.response.status, 200, meWithoutRole.text);
+  assert.deepEqual(meWithoutRole.data.roles, []);
+  assert.deepEqual(meWithoutRole.data.permissions, []);
+  const stillActive = await request('/api/config');
+  assert.equal(stillActive.response.status, 200, stillActive.text);
+
+  const administratorRole = await pool.query(
+    "SELECT id FROM roles WHERE role_key = 'administrator'"
+  );
+  await pool.query(
+    `INSERT INTO user_role_assignments (application_user_id, role_id)
+     VALUES ($1, $2)`,
+    [userId, administratorRole.rows[0].id]
+  );
+  const restoredMe = await request('/api/auth/me');
+  assert.equal(restoredMe.data.permissions.length, 23);
 });
 
 test('an expired PostgreSQL application session returns JSON 401', async () => {
@@ -1262,6 +1637,7 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
          && !fileName.startsWith('017_')
          && !fileName.startsWith('018_')
          && !fileName.startsWith('019_')
+         && !fileName.startsWith('020_')
       ))
       .map((fileName) => fs.copyFile(
         path.resolve(serverRoot, 'migrations', fileName),
@@ -1338,9 +1714,9 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
       );
       assert.equal(checksums.rows[0].count, 0);
       const checkpointMigration = await checkpointPool.query(
-        "SELECT count(*)::int AS count FROM schema_migrations WHERE name ~ '^(015|016|017|018|019)_'"
+        "SELECT count(*)::int AS count FROM schema_migrations WHERE name ~ '^(015|016|017|018|019|020)_'"
       );
-      assert.equal(checkpointMigration.rows[0].count, 5);
+      assert.equal(checkpointMigration.rows[0].count, 6);
     } finally {
       await freshPool.end();
       await upgradePool.end();
@@ -1355,6 +1731,129 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
   }
 });
 
+test('migration 020 upgrades a database at migration 019 and repeated startup stays safe', async () => {
+  const databaseName = 'amber_rbac_upgrade_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const preRbacDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-pre-rbac-migrations-'));
+  try {
+    const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
+      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('020_'));
+    await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
+      path.resolve(serverRoot, 'migrations', fileName),
+      path.resolve(preRbacDirectory, fileName)
+    )));
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      (async () => {
+        await runMigrations({ directory: ${JSON.stringify(preRbacDirectory)} });
+        await db.end();
+      })().catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+    const upgradePool = new Pool({ connectionString: databaseUrl });
+    try {
+      assert.equal(
+        (await upgradePool.query("SELECT to_regclass('public.application_users') AS name"))
+          .rows[0].name,
+        null
+      );
+      assert.equal(
+        (await upgradePool.query(
+          "SELECT count(*)::int AS count FROM schema_migrations WHERE name = '019_postgres_session_store.sql'"
+        )).rows[0].count,
+        1
+      );
+    } finally {
+      await upgradePool.end();
+    }
+
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      (async () => {
+        await runMigrations();
+        await runMigrations();
+        const counts = await db.query(
+          'SELECT (SELECT count(*) FROM permissions)::int AS permissions, '
+            + '(SELECT count(*) FROM roles)::int AS roles, '
+            + '(SELECT count(*) FROM role_permissions)::int AS mappings'
+        );
+        if (counts.rows[0].permissions !== 23
+            || counts.rows[0].roles !== 3
+            || counts.rows[0].mappings !== 45) {
+          throw new Error('Unexpected RBAC seed counts: ' + JSON.stringify(counts.rows[0]));
+        }
+        await db.end();
+      })().catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+  } finally {
+    await fs.rm(preRbacDirectory, { recursive: true, force: true });
+    await dropTestDatabase(databaseName);
+  }
+});
+
+test('first-Administrator bootstrap is verified, transactional, concurrent-safe, and permanently one-use', async () => {
+  const databaseName = 'amber_bootstrap_admin_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  await runNodeInDatabase(databaseUrl, `
+    const db = require('./src/db/pool');
+    const { runMigrations } = require('./src/db/run-migrations');
+    runMigrations()
+      .finally(() => db.end())
+      .catch((error) => { console.error(error); process.exitCode = 1; });
+  `);
+  const bootstrapPool = new Pool({ connectionString: databaseUrl, max: 4 });
+  try {
+    const unlinked = await bootstrapPool.query(
+      "INSERT INTO application_users (status) VALUES ('pending') RETURNING id"
+    );
+    await assert.rejects(
+      bootstrapAdministrator(Number(unlinked.rows[0].id), { databasePool: bootstrapPool }),
+      /no verified external identity/
+    );
+
+    const pendingUser = await resolveOrCreateApplicationUser({
+      issuer: 'https://bootstrap.example/realms/amber',
+      sub: 'first-administrator',
+      preferred_username: 'first.admin',
+      name: 'First Administrator',
+      authenticatedAt: '2026-09-09T12:00:00.000Z',
+    }, { databasePool: bootstrapPool });
+    const attempts = await Promise.allSettled([
+      bootstrapAdministrator(pendingUser.id, { databasePool: bootstrapPool }),
+      bootstrapAdministrator(pendingUser.id, { databasePool: bootstrapPool }),
+    ]);
+    assert.equal(attempts.filter((attempt) => attempt.status === 'fulfilled').length, 1);
+    assert.equal(attempts.filter((attempt) => attempt.status === 'rejected').length, 1);
+    assert.match(
+      attempts.find((attempt) => attempt.status === 'rejected').reason.message,
+      /already been completed permanently/
+    );
+
+    const access = await getApplicationAccess({
+      issuer: 'https://bootstrap.example/realms/amber',
+      sub: 'first-administrator',
+      authenticatedAt: '2026-09-09T12:00:00.000Z',
+    }, { databasePool: bootstrapPool });
+    assert.equal(access.applicationUser.status, 'active');
+    assert.deepEqual(access.roles, [{ key: 'administrator', displayName: 'Administrator' }]);
+    assert.equal(access.permissions.length, 23);
+    const state = await bootstrapPool.query(
+      `SELECT administrator_user_id, completed_at IS NOT NULL AS completed
+       FROM security_bootstrap_state WHERE singleton = TRUE`
+    );
+    assert.equal(Number(state.rows[0].administrator_user_id), pendingUser.id);
+    assert.equal(state.rows[0].completed, true);
+    await assert.rejects(
+      bootstrapAdministrator(pendingUser.id, { databasePool: bootstrapPool }),
+      /already been completed permanently/
+    );
+  } finally {
+    await bootstrapPool.end();
+    await dropTestDatabase(databaseName);
+  }
+});
+
 test('legacy in-progress correction requests survive migration 018 and can be claimed once', async () => {
   const databaseName = 'amber_legacy_claim_test';
   const databaseUrl = await recreateTestDatabase(databaseName);
@@ -1363,7 +1862,11 @@ test('legacy in-progress correction requests survive migration 018 and can be cl
   );
   try {
     const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
-      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('018_'));
+      .filter((fileName) => (
+        fileName.endsWith('.sql')
+        && !fileName.startsWith('018_')
+        && !fileName.startsWith('020_')
+      ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
       path.resolve(preClaimDirectory, fileName)

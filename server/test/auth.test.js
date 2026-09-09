@@ -10,6 +10,7 @@ const {
   requireAuthenticatedSession,
   requireCsrfForUnsafeMethods,
 } = require('../src/auth/authentication');
+const { createRequireActiveApplicationUser } = require('../src/auth/authorization');
 const {
   OIDC_TRANSACTION_TTL_MS,
   createAuthRouter,
@@ -69,8 +70,39 @@ function createFakeAdapter(overrides = {}) {
   return { adapter, calls };
 }
 
+function createFakeApplicationUserService({ status = 'active' } = {}) {
+  const calls = { resolve: [], access: [] };
+  const buildAccess = (identity) => ({
+    applicationUser: {
+      id: 42,
+      status,
+      preferredUsername: identity.preferred_username || null,
+      displayName: identity.name || null,
+      givenName: identity.given_name || null,
+      familyName: identity.family_name || null,
+      email: identity.email || null,
+    },
+    roles: status === 'active'
+      ? [{ key: 'administrator', displayName: 'Administrator' }]
+      : [],
+    permissions: status === 'active' ? ['products.view'] : [],
+  });
+  return {
+    calls,
+    async resolveOrCreateApplicationUser(identity) {
+      calls.resolve.push(identity);
+      return buildAccess(identity).applicationUser;
+    },
+    async getOrCreateApplicationAccess(identity) {
+      calls.access.push(identity);
+      return buildAccess(identity);
+    },
+  };
+}
+
 async function startAuthServer({
   adapter,
+  applicationUserService = createFakeApplicationUserService(),
   now,
   secure = false,
   trustProxy = false,
@@ -88,11 +120,15 @@ async function startAuthServer({
   }));
   app.use('/api/auth', createAuthRouter({
     oidcAdapter: adapter,
+    applicationUserService,
     now,
     sessionCookieSecure: secure,
     applicationBaseUrl: 'https://app.example.invalid/',
   }));
   app.use('/api', requireAuthenticatedSession);
+  app.use('/api', createRequireActiveApplicationUser({
+    getOrCreateApplicationAccess: applicationUserService.getOrCreateApplicationAccess,
+  }));
   app.use('/api', requireCsrfForUnsafeMethods);
   app.get('/api/test-protected', requireAuthenticatedSession, (req, res) => {
     res.json({ issuer: req.user.issuer, sub: req.user.sub });
@@ -197,7 +233,7 @@ test('login persists random state, nonce, and PKCE S256 transaction before redir
   }
 });
 
-test('callback regenerates the session and exposes only normalized identity plus CSRF', async () => {
+test('callback regenerates the session and exposes normalized identity and local access', async () => {
   const { adapter, calls } = createFakeAdapter();
   const server = await startAuthServer({ adapter });
   try {
@@ -236,6 +272,17 @@ test('callback regenerates the session and exposes only normalized identity plus
     ]);
     assert.equal(body.identity.issuer, issuer);
     assert.equal(body.identity.sub, 'directory-subject-123');
+    assert.deepEqual(body.applicationUser, {
+      id: 42,
+      status: 'active',
+      preferredUsername: 'amber.user',
+      displayName: 'Amber User',
+      givenName: 'Amber',
+      familyName: 'User',
+      email: 'amber.user@example.invalid',
+    });
+    assert.deepEqual(body.roles, [{ key: 'administrator', displayName: 'Administrator' }]);
+    assert.deepEqual(body.permissions, ['products.view']);
     assert.equal(typeof body.csrfToken, 'string');
     assert.equal(body.csrfToken.length, 43);
     const serialized = JSON.stringify(body);
@@ -263,6 +310,43 @@ test('callback regenerates the session and exposes only normalized identity plus
     assert.equal(calls.exchange.length, 1);
   } finally {
     await server.close();
+  }
+});
+
+test('pending and disabled local users can inspect and end sessions but cannot use business APIs', async () => {
+  for (const expected of [
+    { status: 'pending', code: 'APP_ACCESS_PENDING' },
+    { status: 'disabled', code: 'APP_ACCESS_DISABLED' },
+  ]) {
+    const { adapter, calls } = createFakeAdapter();
+    const applicationUserService = createFakeApplicationUserService({ status: expected.status });
+    const server = await startAuthServer({ adapter, applicationUserService });
+    try {
+      const started = await login(server, calls);
+      const callback = await authFetch(
+        server,
+        `/api/auth/callback?code=code&state=${started.transaction.state}`,
+        { cookie: started.cookie }
+      );
+      const cookie = cookieFrom(callback);
+      const me = await authFetch(server, '/api/auth/me', { cookie });
+      assert.equal(me.status, 200);
+      const meBody = await me.json();
+      assert.equal(meBody.applicationUser.status, expected.status);
+
+      const business = await authFetch(server, '/api/business-boundary', { cookie });
+      assert.equal(business.status, 403);
+      assert.equal((await business.json()).code, expected.code);
+
+      const logout = await authFetch(server, '/api/auth/logout', {
+        cookie,
+        method: 'POST',
+        headers: { 'X-CSRF-Token': meBody.csrfToken },
+      });
+      assert.equal(logout.status, 200);
+    } finally {
+      await server.close();
+    }
   }
 });
 

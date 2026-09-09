@@ -10,6 +10,7 @@ import { AuthContext } from './auth-context.js';
 import {
   AUTH_STATUS,
   EMPTY_AUTH,
+  getApplicationAuthStatus,
   getCurrentReturnTo,
   normalizeCurrentSession,
 } from './auth-model.js';
@@ -30,6 +31,9 @@ export function AuthProvider({
     setAuth({
       status: AUTH_STATUS.UNAUTHENTICATED,
       identity: null,
+      applicationUser: null,
+      roles: [],
+      permissions: [],
       csrfToken: null,
       errorMessage: null,
     });
@@ -45,7 +49,7 @@ export function AuthProvider({
       if (!currentSession) throw new Error('Invalid current-session response');
       csrfTokenRef.current = currentSession.csrfToken;
       setAuth({
-        status: AUTH_STATUS.AUTHENTICATED,
+        status: getApplicationAuthStatus(currentSession.applicationUser),
         ...currentSession,
         errorMessage: null,
       });
@@ -59,6 +63,9 @@ export function AuthProvider({
       setAuth({
         status: AUTH_STATUS.ERROR,
         identity: null,
+        applicationUser: null,
+        roles: [],
+        permissions: [],
         csrfToken: null,
         errorMessage: 'Не вдалося перевірити сеанс. Спробуйте ще раз.',
       });
@@ -101,7 +108,11 @@ export function AuthProvider({
 
   const value = useMemo(() => ({
     ...auth,
-    authenticated: auth.status === AUTH_STATUS.AUTHENTICATED,
+    authenticated: [
+      AUTH_STATUS.AUTHENTICATED,
+      AUTH_STATUS.PENDING,
+      AUTH_STATUS.DISABLED,
+    ].includes(auth.status),
     login,
     logout,
     retry,

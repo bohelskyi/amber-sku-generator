@@ -10,12 +10,14 @@ const {
   requireAuthenticatedSession,
   requireCsrfForUnsafeMethods,
 } = require('./auth/authentication');
+const { createRequireActiveApplicationUser } = require('./auth/authorization');
 const logger = require('./utils/logger');
 const { getRequestLogPath } = require('./utils/request-log-path');
 
 function createApp({
   sessionMiddleware = createSessionMiddleware(),
   oidcAdapter,
+  applicationUserService,
 } = {}) {
   const app = express();
 
@@ -58,8 +60,14 @@ function createApp({
   });
 
   app.use('/api', sessionMiddleware);
-  app.use('/api/auth', createAuthRouter({ ...(oidcAdapter ? { oidcAdapter } : {}) }));
+  app.use('/api/auth', createAuthRouter({
+    ...(oidcAdapter ? { oidcAdapter } : {}),
+    ...(applicationUserService ? { applicationUserService } : {}),
+  }));
   app.use('/api', requireAuthenticatedSession);
+  app.use('/api', createRequireActiveApplicationUser({
+    getOrCreateApplicationAccess: applicationUserService?.getOrCreateApplicationAccess,
+  }));
   app.use('/api', requireCsrfForUnsafeMethods);
   app.use('/api', publicRoutes);
   app.use('/api', adminRoutes);

@@ -29,6 +29,46 @@ export function AuthGate({ children }) {
     );
   }
 
+  if (auth.status === AUTH_STATUS.PENDING) {
+    return (
+      <main className="auth-gate">
+        <div className="card auth-card">
+          <h1 className="text-xl font-semibold">Доступ очікує підтвердження</h1>
+          <p className="mt-2 text-sm text-slate-500">
+            Вхід виконано. Адміністратор має активувати ваш доступ до Amber SKU Manager.
+          </p>
+          <button
+            type="button"
+            className="btn btn-outline mt-5"
+            onClick={() => { void auth.logout(); }}
+          >
+            Вийти
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  if (auth.status === AUTH_STATUS.DISABLED) {
+    return (
+      <main className="auth-gate">
+        <div className="card auth-card">
+          <h1 className="text-xl font-semibold">Доступ вимкнено</h1>
+          <p className="mt-2 text-sm text-slate-500">
+            Ваш обліковий запис автентифіковано, але доступ до застосунку деактивовано.
+          </p>
+          <button
+            type="button"
+            className="btn btn-outline mt-5"
+            onClick={() => { void auth.logout(); }}
+          >
+            Вийти
+          </button>
+        </div>
+      </main>
+    );
+  }
+
   if (auth.status === AUTH_STATUS.ERROR) {
     return (
       <main className="auth-gate">

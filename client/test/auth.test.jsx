@@ -31,6 +31,17 @@ const identity = {
 
 const currentSession = {
   identity,
+  applicationUser: {
+    id: 42,
+    status: 'active',
+    preferredUsername: 'amber.user',
+    displayName: 'Amber User',
+    givenName: 'Amber',
+    familyName: 'User',
+    email: 'amber.user@example.test',
+  },
+  roles: [{ key: 'administrator', displayName: 'Administrator' }],
+  permissions: ['products.view', 'users.manage'],
   csrfToken: 'in-memory-csrf-token',
 };
 
@@ -138,6 +149,46 @@ describe('authentication bootstrap and gate', () => {
     await screen.findByRole('button', { name: 'Увійти' });
     expect(apiClient.get).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows pending approval without mounting business content and allows logout', async () => {
+    const apiClient = {
+      get: vi.fn().mockResolvedValue(response({
+        ...currentSession,
+        applicationUser: { ...currentSession.applicationUser, status: 'pending' },
+        roles: [],
+        permissions: [],
+      })),
+      post: vi.fn().mockResolvedValue(response({ logoutUrl: null })),
+    };
+    const locationObject = locationStub();
+
+    renderAuth({ apiClient, locationObject });
+
+    await screen.findByText('Доступ очікує підтвердження');
+    expect(screen.queryByText('Business application')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Вийти' }));
+    await waitFor(() => expect(apiClient.post).toHaveBeenCalledWith('/auth/logout'));
+    expect(locationObject.assign).toHaveBeenCalledWith('/');
+  });
+
+  it('shows disabled access without treating the session as unauthenticated', async () => {
+    const apiClient = {
+      get: vi.fn().mockResolvedValue(response({
+        ...currentSession,
+        applicationUser: { ...currentSession.applicationUser, status: 'disabled' },
+      })),
+      post: vi.fn().mockResolvedValue(response({ logoutUrl: null })),
+    };
+    const locationObject = locationStub();
+
+    renderAuth({ apiClient, locationObject });
+
+    await screen.findByText('Доступ вимкнено');
+    expect(screen.queryByRole('button', { name: 'Увійти' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Вийти' }));
+    await waitFor(() => expect(apiClient.post).toHaveBeenCalledWith('/auth/logout'));
+    expect(locationObject.assign).toHaveBeenCalledWith('/');
   });
 
   it('shows a non-sensitive provider error and retries /me on demand', async () => {
