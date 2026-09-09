@@ -57,10 +57,36 @@ const {
   getCorrectionChangesText,
   getCorrectionHistory,
 } = require('../services/correction-history.service');
+const { requirePermission } = require('../auth/authorization');
 
 const router = express.Router();
 
-router.get('/admin/config', async (req, res) => {
+const DELETE_ITEM_PERMISSION_BY_TYPE = Object.freeze({
+  category: 'catalog.manage',
+  question: 'catalog.manage',
+  option: 'catalog.manage',
+  modifier: 'pricing.manage',
+  scenario: 'pricing.manage',
+});
+
+const deleteItemPermissionMiddlewareByType = Object.freeze(
+  Object.fromEntries(
+    Object.entries(DELETE_ITEM_PERMISSION_BY_TYPE)
+      .map(([type, permissionKey]) => [type, requirePermission(permissionKey)])
+  )
+);
+
+function requireDeleteItemPermission(req, res, next) {
+  const type = typeof req.body?.type === 'string' ? req.body.type : '';
+  const middleware = Object.prototype.hasOwnProperty.call(
+    deleteItemPermissionMiddlewareByType,
+    type
+  ) ? deleteItemPermissionMiddlewareByType[type] : null;
+  if (!middleware) return res.status(400).json({ error: 'Invalid resource type' });
+  return middleware(req, res, next);
+}
+
+router.get('/admin/config', requirePermission('catalog.view'), async (req, res) => {
   try {
     res.json(await getAppConfig());
   } catch (err) {
@@ -68,7 +94,7 @@ router.get('/admin/config', async (req, res) => {
   }
 });
 
-router.get('/admin/sku-schema/:catCode', async (req, res) => {
+router.get('/admin/sku-schema/:catCode', requirePermission('catalog.view'), async (req, res) => {
   try {
     res.json(await getSchemaStatus(String(req.params.catCode || '').toUpperCase()));
   } catch (err) {
@@ -76,7 +102,7 @@ router.get('/admin/sku-schema/:catCode', async (req, res) => {
   }
 });
 
-router.post('/admin/sku-schema/:catCode/publish', async (req, res) => {
+router.post('/admin/sku-schema/:catCode/publish', requirePermission('sku_schemas.publish'), async (req, res) => {
   try {
     res.json(await publishSkuSchema(String(req.params.catCode || '').toUpperCase()));
   } catch (err) {
@@ -84,7 +110,7 @@ router.post('/admin/sku-schema/:catCode/publish', async (req, res) => {
   }
 });
 
-router.get('/admin/prices/:catCode', async (req, res) => {
+router.get('/admin/prices/:catCode', requirePermission('pricing.view'), async (req, res) => {
   try {
     const data = await getAdminPrices(req.params.catCode);
     res.json(data);
@@ -93,7 +119,7 @@ router.get('/admin/prices/:catCode', async (req, res) => {
   }
 });
 
-router.get('/admin/repricing/scenarios', async (req, res) => {
+router.get('/admin/repricing/scenarios', requirePermission('repricing.view'), async (req, res) => {
   try {
     const scenarios = await getRepricingScenarios();
     res.json(scenarios);
@@ -102,7 +128,7 @@ router.get('/admin/repricing/scenarios', async (req, res) => {
   }
 });
 
-router.get('/admin/correction-requests', async (req, res) => {
+router.get('/admin/correction-requests', requirePermission('corrections.view'), async (req, res) => {
   try {
     res.json(await getCorrectionRequests(req.query || {}));
   } catch (err) {
@@ -110,7 +136,7 @@ router.get('/admin/correction-requests', async (req, res) => {
   }
 });
 
-router.get('/admin/product-corrections', async (req, res) => {
+router.get('/admin/product-corrections', requirePermission('history.view'), async (req, res) => {
   try {
     res.json(await getCorrectionHistory(req.query || {}));
   } catch (err) {
@@ -118,7 +144,7 @@ router.get('/admin/product-corrections', async (req, res) => {
   }
 });
 
-router.get('/admin/product-corrections/csv', async (req, res) => {
+router.get('/admin/product-corrections/csv', requirePermission('history.view'), async (req, res) => {
   try {
     const data = await getCorrectionHistory(req.query || {}, { forExport: true });
     const csv = buildCsv([
@@ -167,7 +193,7 @@ router.get('/admin/product-corrections/csv', async (req, res) => {
   }
 });
 
-router.post('/admin/correction-requests', async (req, res) => {
+router.post('/admin/correction-requests', requirePermission('corrections.create'), async (req, res) => {
   try {
     res.json(await createCorrectionRequest(req.body || {}));
   } catch (err) {
@@ -178,7 +204,7 @@ router.post('/admin/correction-requests', async (req, res) => {
   }
 });
 
-router.post('/admin/correction-requests/:requestId/claim', async (req, res) => {
+router.post('/admin/correction-requests/:requestId/claim', requirePermission('corrections.claim'), async (req, res) => {
   try {
     res.json(await claimCorrectionRequest(req.params.requestId));
   } catch (err) {
@@ -189,7 +215,7 @@ router.post('/admin/correction-requests/:requestId/claim', async (req, res) => {
   }
 });
 
-router.post('/admin/correction-requests/:requestId/release', async (req, res) => {
+router.post('/admin/correction-requests/:requestId/release', requirePermission('corrections.claim'), async (req, res) => {
   try {
     res.json(await releaseCorrectionRequest(
       req.params.requestId,
@@ -203,7 +229,7 @@ router.post('/admin/correction-requests/:requestId/release', async (req, res) =>
   }
 });
 
-router.post('/admin/correction-requests/:requestId/force-release', async (req, res) => {
+router.post('/admin/correction-requests/:requestId/force-release', requirePermission('corrections.force_release'), async (req, res) => {
   try {
     res.json(await forceReleaseCorrectionRequest(
       req.params.requestId,
@@ -217,7 +243,7 @@ router.post('/admin/correction-requests/:requestId/force-release', async (req, r
   }
 });
 
-router.post('/admin/correction-requests/:requestId/refresh', async (req, res) => {
+router.post('/admin/correction-requests/:requestId/refresh', requirePermission('corrections.complete'), async (req, res) => {
   try {
     res.json(await refreshCorrectionRequest(
       req.params.requestId,
@@ -231,7 +257,7 @@ router.post('/admin/correction-requests/:requestId/refresh', async (req, res) =>
   }
 });
 
-router.patch('/admin/correction-requests/:requestId/status', async (req, res) => {
+router.patch('/admin/correction-requests/:requestId/status', requirePermission('corrections.reject'), async (req, res) => {
   try {
     res.json(await updateCorrectionRequestStatus(
       req.params.requestId,
@@ -246,7 +272,7 @@ router.patch('/admin/correction-requests/:requestId/status', async (req, res) =>
   }
 });
 
-router.post('/admin/correction-requests/:requestId/complete', async (req, res) => {
+router.post('/admin/correction-requests/:requestId/complete', requirePermission('corrections.complete'), async (req, res) => {
   try {
     res.json(await completeCorrectionRequest(
       req.params.requestId,
@@ -260,7 +286,7 @@ router.post('/admin/correction-requests/:requestId/complete', async (req, res) =
   }
 });
 
-router.get('/admin/repricing/batches', async (req, res) => {
+router.get('/admin/repricing/batches', requirePermission('repricing.view'), async (req, res) => {
   try {
     const batches = await getRepricingBatches(req.query.limit);
     res.json(batches);
@@ -269,7 +295,7 @@ router.get('/admin/repricing/batches', async (req, res) => {
   }
 });
 
-router.get('/admin/repricing/drafts', async (req, res) => {
+router.get('/admin/repricing/drafts', requirePermission('repricing.view'), async (req, res) => {
   try {
     res.json(await getRepricingDrafts());
   } catch (err) {
@@ -277,7 +303,7 @@ router.get('/admin/repricing/drafts', async (req, res) => {
   }
 });
 
-router.post('/admin/repricing/drafts', async (req, res) => {
+router.post('/admin/repricing/drafts', requirePermission('repricing.prepare'), async (req, res) => {
   try {
     res.json(await createRepricingDraft(req.body || {}));
   } catch (err) {
@@ -285,7 +311,7 @@ router.post('/admin/repricing/drafts', async (req, res) => {
   }
 });
 
-router.get('/admin/repricing/drafts/:draftId', async (req, res) => {
+router.get('/admin/repricing/drafts/:draftId', requirePermission('repricing.view'), async (req, res) => {
   try {
     res.json(await getRepricingDraft(req.params.draftId));
   } catch (err) {
@@ -293,7 +319,7 @@ router.get('/admin/repricing/drafts/:draftId', async (req, res) => {
   }
 });
 
-router.put('/admin/repricing/drafts/:draftId', async (req, res) => {
+router.put('/admin/repricing/drafts/:draftId', requirePermission('repricing.prepare'), async (req, res) => {
   try {
     res.json(await saveRepricingDraft(req.params.draftId, req.body || {}));
   } catch (err) {
@@ -301,7 +327,7 @@ router.put('/admin/repricing/drafts/:draftId', async (req, res) => {
   }
 });
 
-router.post('/admin/repricing/drafts/:draftId/sync', async (req, res) => {
+router.post('/admin/repricing/drafts/:draftId/sync', requirePermission('repricing.prepare'), async (req, res) => {
   try {
     res.json(await syncRepricingDraft(req.params.draftId));
   } catch (err) {
@@ -309,7 +335,7 @@ router.post('/admin/repricing/drafts/:draftId/sync', async (req, res) => {
   }
 });
 
-router.delete('/admin/repricing/drafts/:draftId', async (req, res) => {
+router.delete('/admin/repricing/drafts/:draftId', requirePermission('repricing.prepare'), async (req, res) => {
   try {
     res.json(await discardRepricingDraft(req.params.draftId));
   } catch (err) {
@@ -317,7 +343,7 @@ router.delete('/admin/repricing/drafts/:draftId', async (req, res) => {
   }
 });
 
-router.post('/admin/repricing/preview', async (req, res) => {
+router.post('/admin/repricing/preview', requirePermission('repricing.prepare'), async (req, res) => {
   try {
     const { scenarioId } = req.body || {};
     if (!scenarioId) return res.status(400).json({ error: 'Оберіть цінову матрицю.' });
@@ -329,7 +355,7 @@ router.post('/admin/repricing/preview', async (req, res) => {
   }
 });
 
-router.post('/admin/repricing/global/preview', async (_req, res) => {
+router.post('/admin/repricing/global/preview', requirePermission('repricing.prepare'), async (_req, res) => {
   try {
     res.json(await buildGlobalRepricingPreview());
   } catch (err) {
@@ -340,7 +366,7 @@ router.post('/admin/repricing/global/preview', async (_req, res) => {
   }
 });
 
-router.post('/admin/repricing/apply', async (req, res) => {
+router.post('/admin/repricing/apply', requirePermission('repricing.apply'), async (req, res) => {
   try {
     const result = await applyRepricing(req.body || {});
     res.json(result);
@@ -352,7 +378,7 @@ router.post('/admin/repricing/apply', async (req, res) => {
   }
 });
 
-router.post('/admin/repricing/global/apply', async (req, res) => {
+router.post('/admin/repricing/global/apply', requirePermission('repricing.apply'), async (req, res) => {
   try {
     res.json(await applyGlobalRepricing(req.body || {}));
   } catch (err) {
@@ -363,7 +389,7 @@ router.post('/admin/repricing/global/apply', async (req, res) => {
   }
 });
 
-router.post('/admin/repricing/:batchId/rollback', async (req, res) => {
+router.post('/admin/repricing/:batchId/rollback', requirePermission('repricing.rollback'), async (req, res) => {
   try {
     res.json(await rollbackRepricing(req.params.batchId));
   } catch (err) {
@@ -371,7 +397,7 @@ router.post('/admin/repricing/:batchId/rollback', async (req, res) => {
   }
 });
 
-router.get('/admin/repricing/:batchId/rollback-csv', async (req, res) => {
+router.get('/admin/repricing/:batchId/rollback-csv', requirePermission('repricing.view'), async (req, res) => {
   try {
     const data = await getRepricingRollbackItems(req.params.batchId);
     const csv = buildCsv([
@@ -395,7 +421,7 @@ router.get('/admin/repricing/:batchId/rollback-csv', async (req, res) => {
   }
 });
 
-router.get('/admin/repricing/:batchId/csv', async (req, res) => {
+router.get('/admin/repricing/:batchId/csv', requirePermission('repricing.view'), async (req, res) => {
   try {
     const data = await getRepricingBatchItems(req.params.batchId);
     const csv = buildCsv([
@@ -444,7 +470,7 @@ router.get('/admin/repricing/:batchId/csv', async (req, res) => {
   }
 });
 
-router.post('/admin/price-cell', async (req, res) => {
+router.post('/admin/price-cell', requirePermission('pricing.manage'), async (req, res) => {
   try {
     await upsertPriceCell(req.body || {});
     res.json({ success: true });
@@ -453,7 +479,7 @@ router.post('/admin/price-cell', async (req, res) => {
   }
 });
 
-router.post('/admin/scenario', async (req, res) => {
+router.post('/admin/scenario', requirePermission('pricing.manage'), async (req, res) => {
   try {
     const result = await createScenario(req.body || {});
     res.json(result);
@@ -462,7 +488,7 @@ router.post('/admin/scenario', async (req, res) => {
   }
 });
 
-router.put('/admin/scenario', async (req, res) => {
+router.put('/admin/scenario', requirePermission('pricing.manage'), async (req, res) => {
   try {
     const { id, name, axis_x_key } = req.body || {};
     if (!id || !name || !axis_x_key) {
@@ -476,7 +502,7 @@ router.put('/admin/scenario', async (req, res) => {
   }
 });
 
-router.post('/admin/scenario/duplicate', async (req, res) => {
+router.post('/admin/scenario/duplicate', requirePermission('pricing.manage'), async (req, res) => {
   try {
     const { id } = req.body || {};
     if (!id) return res.status(400).json({ error: 'Потрібен id сценарію' });
@@ -488,7 +514,7 @@ router.post('/admin/scenario/duplicate', async (req, res) => {
   }
 });
 
-router.post('/admin/modifier', async (req, res) => {
+router.post('/admin/modifier', requirePermission('pricing.manage'), async (req, res) => {
   try {
     const result = await createModifier(req.body || {});
     res.json(result);
@@ -497,7 +523,7 @@ router.post('/admin/modifier', async (req, res) => {
   }
 });
 
-router.put('/admin/modifier', async (req, res) => {
+router.put('/admin/modifier', requirePermission('pricing.manage'), async (req, res) => {
   try {
     await updateModifier(req.body || {});
     res.json({ success: true });
@@ -506,7 +532,7 @@ router.put('/admin/modifier', async (req, res) => {
   }
 });
 
-router.post('/admin/delete-item', async (req, res) => {
+router.post('/admin/delete-item', requireDeleteItemPermission, async (req, res) => {
   try {
     const { type, id } = req.body || {};
     await deleteCatalogItem(type, id);
@@ -516,7 +542,7 @@ router.post('/admin/delete-item', async (req, res) => {
   }
 });
 
-router.post('/admin/category', async (req, res) => {
+router.post('/admin/category', requirePermission('catalog.manage'), async (req, res) => {
   try {
     const { code, name } = req.body || {};
     if (!code || !name) return res.status(400).json({ error: 'Потрібні код і назва' });
@@ -528,7 +554,7 @@ router.post('/admin/category', async (req, res) => {
   }
 });
 
-router.put('/admin/category', async (req, res) => {
+router.put('/admin/category', requirePermission('catalog.manage'), async (req, res) => {
   try {
     const { code, name } = req.body || {};
     if (!code || !name) return res.status(400).json({ error: 'Потрібні код і назва' });
@@ -540,7 +566,7 @@ router.put('/admin/category', async (req, res) => {
   }
 });
 
-router.post('/admin/question', async (req, res) => {
+router.post('/admin/question', requirePermission('catalog.manage'), async (req, res) => {
   try {
     const { key, label } = req.body || {};
     if (!key || label === undefined) {
@@ -554,7 +580,7 @@ router.post('/admin/question', async (req, res) => {
   }
 });
 
-router.put('/admin/question', async (req, res) => {
+router.put('/admin/question', requirePermission('catalog.manage'), async (req, res) => {
   try {
     const { id, key, label } = req.body || {};
     if (!id || !key || label === undefined) {
@@ -568,7 +594,7 @@ router.put('/admin/question', async (req, res) => {
   }
 });
 
-router.post('/admin/question/update', async (req, res) => {
+router.post('/admin/question/update', requirePermission('catalog.manage'), async (req, res) => {
   try {
     const { id, key, label } = req.body || {};
     if (!id || !key || label === undefined) {
@@ -582,7 +608,7 @@ router.post('/admin/question/update', async (req, res) => {
   }
 });
 
-router.put('/admin/questions/order', async (req, res) => {
+router.put('/admin/questions/order', requirePermission('catalog.manage'), async (req, res) => {
   try {
     const result = await updateQuestionsOrder(req.body || {});
     res.json(result);
@@ -591,7 +617,7 @@ router.put('/admin/questions/order', async (req, res) => {
   }
 });
 
-router.post('/admin/option', async (req, res) => {
+router.post('/admin/option', requirePermission('catalog.manage'), async (req, res) => {
   try {
     const result = await createOption(req.body || {});
     res.json(result);
@@ -600,7 +626,7 @@ router.post('/admin/option', async (req, res) => {
   }
 });
 
-router.put('/admin/option', async (req, res) => {
+router.put('/admin/option', requirePermission('catalog.manage'), async (req, res) => {
   try {
     const { id, value_id, label } = req.body || {};
     if (!id || !label || value_id === undefined || value_id === null || value_id === '') {
@@ -614,7 +640,7 @@ router.put('/admin/option', async (req, res) => {
   }
 });
 
-router.patch('/admin/option/:id/archive', async (req, res) => {
+router.patch('/admin/option/:id/archive', requirePermission('catalog.manage'), async (req, res) => {
   try {
     await setOptionArchived({
       id: req.params.id,

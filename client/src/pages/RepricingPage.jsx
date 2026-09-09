@@ -382,7 +382,7 @@ export default function RepricingPage() {
 
   useEffect(() => {
     Promise.all([
-      api.get('/admin/config'),
+      api.get('/config'),
       api.get('/admin/repricing/scenarios'),
       api.get('/admin/repricing/batches'),
       api.get('/admin/repricing/drafts'),

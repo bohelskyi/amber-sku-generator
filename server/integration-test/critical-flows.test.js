@@ -168,6 +168,21 @@ async function activateApplicationUserForTest(issuer, subject, roleKey = 'admini
   return Number(result.rows[0].id);
 }
 
+async function replaceActiveRoleForTest(applicationUserId, roleKey) {
+  await pool.query(
+    `UPDATE user_role_assignments
+     SET revoked_at = CURRENT_TIMESTAMP
+     WHERE application_user_id = $1 AND revoked_at IS NULL`,
+    [applicationUserId]
+  );
+  if (!roleKey) return;
+  await pool.query(
+    `INSERT INTO user_role_assignments (application_user_id, role_id)
+     SELECT $1, id FROM roles WHERE role_key = $2 AND status = 'active'`,
+    [applicationUserId, roleKey]
+  );
+}
+
 async function authenticateApplicationSession(returnTo = '/', { activate = true } = {}) {
   const loginResponse = await fetch(
     `${baseUrl}/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`,
@@ -516,7 +531,7 @@ test('migration 019 matches the connect-pg-simple 10.0.0 table contract', async 
   ]);
 });
 
-test('migration 020 creates normalized RBAC schema and the approved built-in mappings', async () => {
+test('migrations 020-021 create normalized RBAC schema and the approved built-in mappings', async () => {
   const requiredTables = await pool.query(`
     SELECT table_name
     FROM information_schema.tables
@@ -552,12 +567,14 @@ test('migration 020 creates normalized RBAC schema and the approved built-in map
     'corrections.reject',
     'corrections.view',
     'exports.create',
+    'exports.view',
     'history.view',
     'pricing.manage',
     'pricing.view',
     'products.archive',
     'products.create',
     'products.decode',
+    'products.recount',
     'products.view',
     'repricing.apply',
     'repricing.prepare',
@@ -593,6 +610,7 @@ test('migration 020 creates normalized RBAC schema and the approved built-in map
     'corrections.create',
     'corrections.reject',
     'corrections.view',
+    'exports.view',
     'history.view',
     'pricing.view',
     'products.decode',
@@ -606,9 +624,12 @@ test('migration 020 creates normalized RBAC schema and the approved built-in map
     'corrections.create',
     'corrections.reject',
     'corrections.view',
+    'exports.view',
     'history.view',
+    'products.archive',
     'products.create',
     'products.decode',
+    'products.recount',
     'products.view',
     'repricing.prepare',
     'repricing.view',
@@ -1041,7 +1062,9 @@ test('role revocation is reflected immediately without replacing the active sess
   assert.deepEqual(meWithoutRole.data.roles, []);
   assert.deepEqual(meWithoutRole.data.permissions, []);
   const stillActive = await request('/api/config');
-  assert.equal(stillActive.response.status, 200, stillActive.text);
+  assert.equal(stillActive.response.status, 403, stillActive.text);
+  assert.equal(stillActive.data.code, 'INSUFFICIENT_PERMISSION');
+  assert.equal(stillActive.data.requiredPermission, 'products.view');
 
   const administratorRole = await pool.query(
     "SELECT id FROM roles WHERE role_key = 'administrator'"
@@ -1052,7 +1075,9 @@ test('role revocation is reflected immediately without replacing the active sess
     [userId, administratorRole.rows[0].id]
   );
   const restoredMe = await request('/api/auth/me');
-  assert.equal(restoredMe.data.permissions.length, 23);
+  assert.equal(restoredMe.data.permissions.length, 25);
+  const permittedAgain = await request('/api/config');
+  assert.equal(permittedAgain.response.status, 200, permittedAgain.text);
 });
 
 test('an expired PostgreSQL application session returns JSON 401', async () => {
@@ -1638,6 +1663,7 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
          && !fileName.startsWith('018_')
          && !fileName.startsWith('019_')
          && !fileName.startsWith('020_')
+         && !fileName.startsWith('021_')
       ))
       .map((fileName) => fs.copyFile(
         path.resolve(serverRoot, 'migrations', fileName),
@@ -1714,9 +1740,9 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
       );
       assert.equal(checksums.rows[0].count, 0);
       const checkpointMigration = await checkpointPool.query(
-        "SELECT count(*)::int AS count FROM schema_migrations WHERE name ~ '^(015|016|017|018|019|020)_'"
+        "SELECT count(*)::int AS count FROM schema_migrations WHERE name ~ '^(015|016|017|018|019|020|021)_'"
       );
-      assert.equal(checkpointMigration.rows[0].count, 6);
+      assert.equal(checkpointMigration.rows[0].count, 7);
     } finally {
       await freshPool.end();
       await upgradePool.end();
@@ -1731,13 +1757,17 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
   }
 });
 
-test('migration 020 upgrades a database at migration 019 and repeated startup stays safe', async () => {
+test('migrations 020-021 upgrade a database at migration 019 and repeated startup stays safe', async () => {
   const databaseName = 'amber_rbac_upgrade_test';
   const databaseUrl = await recreateTestDatabase(databaseName);
   const preRbacDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-pre-rbac-migrations-'));
   try {
     const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
-      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('020_'));
+      .filter((fileName) => (
+        fileName.endsWith('.sql')
+        && !fileName.startsWith('020_')
+        && !fileName.startsWith('021_')
+      ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
       path.resolve(preRbacDirectory, fileName)
@@ -1778,9 +1808,9 @@ test('migration 020 upgrades a database at migration 019 and repeated startup st
             + '(SELECT count(*) FROM roles)::int AS roles, '
             + '(SELECT count(*) FROM role_permissions)::int AS mappings'
         );
-        if (counts.rows[0].permissions !== 23
+        if (counts.rows[0].permissions !== 25
             || counts.rows[0].roles !== 3
-            || counts.rows[0].mappings !== 45) {
+            || counts.rows[0].mappings !== 51) {
           throw new Error('Unexpected RBAC seed counts: ' + JSON.stringify(counts.rows[0]));
         }
         await db.end();
@@ -1788,6 +1818,79 @@ test('migration 020 upgrades a database at migration 019 and repeated startup st
     `);
   } finally {
     await fs.rm(preRbacDirectory, { recursive: true, force: true });
+    await dropTestDatabase(databaseName);
+  }
+});
+
+test('migration 021 adds business capabilities and corrects built-in mappings on migration 020', async () => {
+  const databaseName = 'amber_permission_upgrade_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const prePermissionDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'amber-pre-permission-migrations-')
+  );
+  try {
+    const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
+      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('021_'));
+    await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
+      path.resolve(serverRoot, 'migrations', fileName),
+      path.resolve(prePermissionDirectory, fileName)
+    )));
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations({ directory: ${JSON.stringify(prePermissionDirectory)} })
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+
+    const upgradePool = new Pool({ connectionString: databaseUrl });
+    try {
+      const before = await upgradePool.query(`
+        SELECT r.role_key, rp.permission_key
+        FROM roles r
+        JOIN role_permissions rp ON rp.role_id = r.id
+        WHERE (r.role_key = 'storekeeper' AND rp.permission_key = 'products.archive')
+           OR rp.permission_key IN ('products.recount', 'exports.view')
+      `);
+      assert.deepEqual(before.rows, []);
+    } finally {
+      await upgradePool.end();
+    }
+
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      (async () => {
+        await runMigrations();
+        await runMigrations();
+        await db.end();
+      })().catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+
+    const verifiedPool = new Pool({ connectionString: databaseUrl });
+    try {
+      const after = await verifiedPool.query(`
+        SELECT r.role_key, ARRAY_AGG(rp.permission_key ORDER BY rp.permission_key) AS permission_keys
+        FROM roles r
+        JOIN role_permissions rp ON rp.role_id = r.id
+        WHERE r.role_key IN ('administrator', 'manager', 'storekeeper')
+        GROUP BY r.id
+        ORDER BY r.role_key
+      `);
+      const byRole = Object.fromEntries(after.rows.map((row) => [row.role_key, row.permission_keys]));
+      assert.equal(byRole.administrator.includes('exports.view'), true);
+      assert.equal(byRole.administrator.includes('products.recount'), true);
+      assert.equal(byRole.manager.includes('exports.view'), true);
+      assert.equal(byRole.manager.includes('products.archive'), false);
+      assert.equal(byRole.manager.includes('products.recount'), false);
+      assert.equal(byRole.storekeeper.includes('exports.view'), true);
+      assert.equal(byRole.storekeeper.includes('products.archive'), true);
+      assert.equal(byRole.storekeeper.includes('products.recount'), true);
+    } finally {
+      await verifiedPool.end();
+    }
+  } finally {
+    await fs.rm(prePermissionDirectory, { recursive: true, force: true });
     await dropTestDatabase(databaseName);
   }
 });
@@ -1837,7 +1940,7 @@ test('first-Administrator bootstrap is verified, transactional, concurrent-safe,
     }, { databasePool: bootstrapPool });
     assert.equal(access.applicationUser.status, 'active');
     assert.deepEqual(access.roles, [{ key: 'administrator', displayName: 'Administrator' }]);
-    assert.equal(access.permissions.length, 23);
+    assert.equal(access.permissions.length, 25);
     const state = await bootstrapPool.query(
       `SELECT administrator_user_id, completed_at IS NOT NULL AS completed
        FROM security_bootstrap_state WHERE singleton = TRUE`
@@ -1866,6 +1969,7 @@ test('legacy in-progress correction requests survive migration 018 and can be cl
         fileName.endsWith('.sql')
         && !fileName.startsWith('018_')
         && !fileName.startsWith('020_')
+        && !fileName.startsWith('021_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -4055,6 +4159,322 @@ test('export snapshot is immutable, idempotent, and cursor is monotonic', async 
     await pool.query('DROP TRIGGER delay_test_export_snapshot_insert ON export_snapshots');
     await pool.query('DROP FUNCTION delay_test_export_snapshot_insert()');
   }
+});
+
+test('export viewing is shared while snapshot creation and confirmation remain Administrator-only', async () => {
+  const userId = authenticatedSession.applicationUser.id;
+  const expectDenied = async (url, options) => {
+    const result = await request(url, options);
+    assert.equal(result.response.status, 403, result.text);
+    assert.deepEqual(result.data, {
+      code: 'INSUFFICIENT_PERMISSION',
+      error: 'Insufficient permission',
+      requiredPermission: 'exports.create',
+    });
+  };
+  const getExportMutationState = async (snapshotId) => ({
+    snapshotCount: Number((await pool.query(
+      'SELECT count(*) FROM export_snapshots'
+    )).rows[0].count),
+    snapshot: (await pool.query(
+      'SELECT confirmed_at FROM export_snapshots WHERE id = $1',
+      [snapshotId]
+    )).rows[0],
+    cursor: (await pool.query(
+      `SELECT exported_to_product_id, last_snapshot_id
+       FROM export_state
+       WHERE singleton = TRUE`
+    )).rows[0],
+  });
+
+  await replaceActiveRoleForTest(userId, 'administrator');
+  try {
+    assert.equal((await request('/api/export/status')).response.status, 200);
+    const administratorSnapshot = await request('/api/export/snapshots', {
+      method: 'POST',
+      body: { fromSku: primarySku, toSku: primarySku },
+      headers: { 'Idempotency-Key': 'rbac-export-administrator' },
+    });
+    assert.equal(administratorSnapshot.response.status, 201, administratorSnapshot.text);
+    const administratorDownload = await request(
+      `/api/export/snapshots/${administratorSnapshot.data.id}/csv`
+    );
+    assert.equal(administratorDownload.response.status, 200, administratorDownload.text);
+    assert.match(administratorDownload.text, /^sku,price_uah/);
+    assert.equal((await request(
+      `/api/export/snapshots/${administratorSnapshot.data.id}/confirm`,
+      { method: 'POST', body: {} }
+    )).response.status, 200);
+
+    const unconfirmedSnapshot = await request('/api/export/snapshots', {
+      method: 'POST',
+      body: { fromSku: primarySku, toSku: primarySku },
+      headers: { 'Idempotency-Key': 'rbac-export-denied-confirm' },
+    });
+    assert.equal(unconfirmedSnapshot.response.status, 201, unconfirmedSnapshot.text);
+    const protectedState = await getExportMutationState(unconfirmedSnapshot.data.id);
+    assert.equal(protectedState.snapshot.confirmed_at, null);
+
+    for (const roleKey of ['manager', 'storekeeper']) {
+      await replaceActiveRoleForTest(userId, roleKey);
+      const me = await request('/api/auth/me');
+      assert.equal(me.data.permissions.includes('exports.view'), true);
+      assert.equal(me.data.permissions.includes('exports.create'), false);
+      assert.equal((await request('/api/export/status')).response.status, 200);
+      assert.equal((await request(
+        `/api/export/snapshots/${administratorSnapshot.data.id}/csv`
+      )).response.status, 200);
+      assert.equal((await request('/api/export/csv')).response.status, 410);
+
+      await expectDenied('/api/export/snapshots', {
+        method: 'POST',
+        body: { fromSku: primarySku, toSku: primarySku },
+        headers: { 'Idempotency-Key': `rbac-export-${roleKey}-denied` },
+      });
+      await expectDenied(`/api/export/snapshots/${unconfirmedSnapshot.data.id}/confirm`, {
+        method: 'POST', body: {},
+      });
+      assert.deepEqual(
+        await getExportMutationState(unconfirmedSnapshot.data.id),
+        protectedState
+      );
+
+      // A permission denial must leave the existing authenticated session usable.
+      assert.equal((await request('/api/export/status')).response.status, 200);
+    }
+  } finally {
+    await replaceActiveRoleForTest(userId, 'administrator');
+  }
+});
+
+test('business endpoints enforce the Administrator, Storekeeper, and Manager capability matrix', async () => {
+  const userId = authenticatedSession.applicationUser.id;
+  const denied = async (url, options, requiredPermission) => {
+    const result = await request(url, options);
+    assert.equal(result.response.status, 403, result.text);
+    assert.deepEqual(result.data, {
+      code: 'INSUFFICIENT_PERMISSION',
+      error: 'Insufficient permission',
+      requiredPermission,
+    });
+    assert.equal(result.response.headers.get('location'), null);
+    return result;
+  };
+
+  await replaceActiveRoleForTest(userId, 'storekeeper');
+  const storekeeperMe = await request('/api/auth/me');
+  assert.equal(storekeeperMe.response.status, 200, storekeeperMe.text);
+  assert.equal(storekeeperMe.data.roles[0].key, 'storekeeper');
+  assert.equal(storekeeperMe.data.permissions.includes('products.archive'), true);
+  assert.equal(storekeeperMe.data.permissions.includes('products.recount'), true);
+
+  const firstPreview = await request('/api/preview', {
+    method: 'POST',
+    body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0, isCalibrated: 0 },
+  });
+  assert.equal(firstPreview.response.status, 200, firstPreview.text);
+  const firstProduct = await request('/api/save', {
+    method: 'POST',
+    body: {
+      category: 'ZZ',
+      answers: { kind: 1 },
+      weight: 0,
+      isCalibrated: 0,
+      skuSchemaVersionId: schemas.ZZ,
+      previewToken: firstPreview.data.previewToken,
+    },
+  });
+  assert.equal(firstProduct.response.status, 200, firstProduct.text);
+  const decoded = await request('/api/decode', {
+    method: 'POST', body: { sku: firstProduct.data.fullSku },
+  });
+  assert.equal(decoded.response.status, 200, decoded.text);
+
+  const correctionPreview = await request('/api/recount/preview', {
+    method: 'POST',
+    body: { sourceSku: firstProduct.data.fullSku, answers: { kind: 2 }, reason: 'RBAC workflow' },
+  });
+  assert.equal(correctionPreview.response.status, 200, correctionPreview.text);
+  const correction = await request('/api/admin/correction-requests', {
+    method: 'POST',
+    body: { sourceSku: firstProduct.data.fullSku, answers: { kind: 2 }, reason: 'RBAC workflow' },
+  });
+  assert.equal(correction.response.status, 200, correction.text);
+  const correctionId = Number(correction.data.request.id);
+  const claim = await request(`/api/admin/correction-requests/${correctionId}/claim`, {
+    method: 'POST', body: {},
+  });
+  assert.equal(claim.response.status, 200, claim.text);
+  const claimHeaders = { 'X-Correction-Claim-Token': claim.data.claimToken };
+  const refresh = await request(`/api/admin/correction-requests/${correctionId}/refresh`, {
+    method: 'POST', body: {}, headers: claimHeaders,
+  });
+  assert.equal(refresh.response.status, 200, refresh.text);
+  const completed = await request(`/api/admin/correction-requests/${correctionId}/complete`, {
+    method: 'POST', body: {}, headers: claimHeaders,
+  });
+  assert.equal(completed.response.status, 200, completed.text);
+  const correctedSku = completed.data.recount.corrected.fullSku;
+
+  const history = await request('/api/products');
+  assert.equal(history.response.status, 200, history.text);
+  assert.equal(history.data.some((product) => product.full_sku === correctedSku), true);
+  const storekeeperPrepare = await request('/api/admin/repricing/global/preview', {
+    method: 'POST', body: {},
+  });
+  assert.equal(storekeeperPrepare.response.status, 200, storekeeperPrepare.text);
+
+  const categoryCountBefore = Number((await pool.query(
+    "SELECT count(*) FROM categories WHERE code = 'RS'"
+  )).rows[0].count);
+  await denied('/api/admin/category', {
+    method: 'POST', body: { code: 'RS', name: 'Storekeeper denied category' },
+  }, 'catalog.manage');
+  assert.equal(Number((await pool.query(
+    "SELECT count(*) FROM categories WHERE code = 'RS'"
+  )).rows[0].count), categoryCountBefore);
+  await denied('/api/admin/prices/ZZ', {}, 'pricing.view');
+  await denied('/api/admin/repricing/apply', { method: 'POST', body: {} }, 'repricing.apply');
+  await denied('/api/admin/repricing/999999/rollback', { method: 'POST', body: {} }, 'repricing.rollback');
+  const exportCountBefore = Number((await pool.query('SELECT count(*) FROM export_snapshots')).rows[0].count);
+  await denied('/api/export/snapshots', {
+    method: 'POST', body: { fromSku: correctedSku, toSku: correctedSku },
+  }, 'exports.create');
+  assert.equal(Number((await pool.query('SELECT count(*) FROM export_snapshots')).rows[0].count), exportCountBefore);
+  await denied('/api/admin/correction-requests/999999/force-release', {
+    method: 'POST', body: { confirm: true },
+  }, 'corrections.force_release');
+
+  const archived = await request('/api/delete', {
+    method: 'POST', body: { skuToDelete: correctedSku },
+  });
+  assert.equal(archived.response.status, 200, archived.text);
+  assert.equal((await pool.query(
+    'SELECT status FROM products WHERE full_sku = $1', [correctedSku]
+  )).rows[0].status, 'archived');
+
+  const secondPreview = await request('/api/preview', {
+    method: 'POST',
+    body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0, isCalibrated: 0 },
+  });
+  assert.equal(secondPreview.response.status, 200, secondPreview.text);
+  const managerRequestSource = await request('/api/save', {
+    method: 'POST',
+    body: {
+      category: 'ZZ',
+      answers: { kind: 1 },
+      weight: 0,
+      isCalibrated: 0,
+      skuSchemaVersionId: schemas.ZZ,
+      previewToken: secondPreview.data.previewToken,
+    },
+  });
+  assert.equal(managerRequestSource.response.status, 200, managerRequestSource.text);
+
+  await replaceActiveRoleForTest(userId, 'manager');
+  const managerMe = await request('/api/auth/me');
+  assert.equal(managerMe.response.status, 200, managerMe.text);
+  assert.equal(managerMe.data.roles[0].key, 'manager');
+  assert.equal(managerMe.data.permissions.includes('products.archive'), false);
+  assert.equal(managerMe.data.permissions.includes('products.create'), false);
+
+  const managerDecode = await request('/api/decode', {
+    method: 'POST', body: { sku: managerRequestSource.data.fullSku },
+  });
+  assert.equal(managerDecode.response.status, 200, managerDecode.text);
+  const managerCorrectionPreview = await request('/api/recount/preview', {
+    method: 'POST',
+    body: {
+      sourceSku: managerRequestSource.data.fullSku,
+      answers: { kind: 2 },
+      reason: 'Manager correction request',
+    },
+  });
+  assert.equal(managerCorrectionPreview.response.status, 200, managerCorrectionPreview.text);
+  const managerCorrection = await request('/api/admin/correction-requests', {
+    method: 'POST',
+    body: {
+      sourceSku: managerRequestSource.data.fullSku,
+      answers: { kind: 2 },
+      reason: 'Manager correction request',
+    },
+  });
+  assert.equal(managerCorrection.response.status, 200, managerCorrection.text);
+  assert.equal((await request('/api/products')).response.status, 200);
+  assert.equal((await request('/api/admin/prices/ZZ')).response.status, 200);
+  assert.equal((await request('/api/admin/repricing/global/preview', {
+    method: 'POST', body: {},
+  })).response.status, 200);
+
+  const productCountBefore = Number((await pool.query('SELECT count(*) FROM products')).rows[0].count);
+  await denied('/api/save', { method: 'POST', body: {} }, 'products.create');
+  assert.equal(Number((await pool.query('SELECT count(*) FROM products')).rows[0].count), productCountBefore);
+  await denied('/api/delete', {
+    method: 'POST', body: { skuToDelete: managerRequestSource.data.fullSku },
+  }, 'products.archive');
+  assert.equal((await pool.query(
+    'SELECT status FROM products WHERE full_sku = $1', [managerRequestSource.data.fullSku]
+  )).rows[0].status, 'active');
+  await denied('/api/recount/apply', {
+    method: 'POST', body: { sourceSku: managerRequestSource.data.fullSku, answers: { kind: 2 } },
+  }, 'products.recount');
+  await denied('/api/admin/config', {}, 'catalog.view');
+  await denied('/api/admin/category', {
+    method: 'POST', body: { code: 'RM', name: 'Manager denied category' },
+  }, 'catalog.manage');
+
+  const priceCellBefore = await pool.query(
+    'SELECT price FROM price_matrix WHERE scenario_id = $1 AND x_val = 1 AND y_val = 0',
+    [schemas.ZZScenario]
+  );
+  await denied('/api/admin/price-cell', {
+    method: 'POST',
+    body: { scenario_id: schemas.ZZScenario, x_val: 1, y_val: 0, price: 999999 },
+  }, 'pricing.manage');
+  const priceCellAfter = await pool.query(
+    'SELECT price FROM price_matrix WHERE scenario_id = $1 AND x_val = 1 AND y_val = 0',
+    [schemas.ZZScenario]
+  );
+  assert.deepEqual(priceCellAfter.rows, priceCellBefore.rows);
+
+  const schemaCountBefore = Number((await pool.query(
+    "SELECT count(*) FROM sku_schema_versions WHERE category_code = 'ZZ'"
+  )).rows[0].count);
+  await denied('/api/admin/sku-schema/ZZ/publish', {
+    method: 'POST', body: {},
+  }, 'sku_schemas.publish');
+  assert.equal(Number((await pool.query(
+    "SELECT count(*) FROM sku_schema_versions WHERE category_code = 'ZZ'"
+  )).rows[0].count), schemaCountBefore);
+  await denied('/api/admin/repricing/apply', { method: 'POST', body: {} }, 'repricing.apply');
+  await denied('/api/admin/repricing/999999/rollback', { method: 'POST', body: {} }, 'repricing.rollback');
+  await denied('/api/export/snapshots', {
+    method: 'POST', body: { fromSku: managerRequestSource.data.fullSku },
+  }, 'exports.create');
+  await denied('/api/admin/correction-requests/999999/force-release', {
+    method: 'POST', body: { confirm: true },
+  }, 'corrections.force_release');
+
+  const stillLoggedIn = await request('/api/decode', {
+    method: 'POST', body: { sku: managerRequestSource.data.fullSku },
+  });
+  assert.equal(stillLoggedIn.response.status, 200, stillLoggedIn.text);
+
+  await replaceActiveRoleForTest(userId, null);
+  await denied('/api/decode', {
+    method: 'POST', body: { sku: managerRequestSource.data.fullSku },
+  }, 'products.decode');
+  await replaceActiveRoleForTest(userId, 'manager');
+  assert.equal((await request('/api/decode', {
+    method: 'POST', body: { sku: managerRequestSource.data.fullSku },
+  })).response.status, 200);
+
+  await replaceActiveRoleForTest(userId, 'administrator');
+  const invalidDeleteType = await request('/api/admin/delete-item', {
+    method: 'POST', body: { type: '__proto__', id: 1 },
+  });
+  assert.equal(invalidDeleteType.response.status, 400, invalidDeleteType.text);
+  assert.deepEqual(invalidDeleteType.data, { error: 'Invalid resource type' });
 });
 
 function sqliteRun(db, sql) {

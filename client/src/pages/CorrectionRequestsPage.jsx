@@ -222,7 +222,7 @@ export default function CorrectionRequestsPage() {
   }, [persistClaims]);
 
   useEffect(() => {
-    Promise.all([api.get('/admin/config'), loadRequests('active')])
+    Promise.all([api.get('/config'), loadRequests('active')])
       .then(([configResponse]) => {
         setConfig(configResponse.data);
       })

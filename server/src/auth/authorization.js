@@ -11,6 +11,9 @@ const ACCESS_ERROR_BY_STATUS = Object.freeze({
   },
 });
 
+const PERMISSION_KEY_PATTERN = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;
+const INSUFFICIENT_PERMISSION_ERROR = 'Insufficient permission';
+
 function createRequireActiveApplicationUser({
   getOrCreateApplicationAccess = applicationUserService.getOrCreateApplicationAccess,
 } = {}) {
@@ -37,8 +40,29 @@ function createRequireActiveApplicationUser({
 
 const requireActiveApplicationUser = createRequireActiveApplicationUser();
 
+function requirePermission(permissionKey) {
+  if (!PERMISSION_KEY_PATTERN.test(permissionKey)) {
+    throw new Error(`Invalid permission key: ${permissionKey}`);
+  }
+
+  return function requirePermissionMiddleware(req, res, next) {
+    if (Array.isArray(req.permissions) && req.permissions.includes(permissionKey)) {
+      return next();
+    }
+
+    res.set('Cache-Control', 'no-store');
+    return res.status(403).json({
+      code: 'INSUFFICIENT_PERMISSION',
+      error: INSUFFICIENT_PERMISSION_ERROR,
+      requiredPermission: permissionKey,
+    });
+  };
+}
+
 module.exports = {
   ACCESS_ERROR_BY_STATUS,
+  INSUFFICIENT_PERMISSION_ERROR,
   createRequireActiveApplicationUser,
   requireActiveApplicationUser,
+  requirePermission,
 };
