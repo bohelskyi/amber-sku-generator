@@ -15,9 +15,11 @@
   "type": "commonjs",
   "description": "",
   "dependencies": {
-    "cors": "^2.8.6",
+    "connect-pg-simple": "10.0.0",
     "dotenv": "^16.6.1",
     "express": "^5.2.1",
+    "express-session": "1.19.0",
+    "openid-client": "6.8.8",
     "pg": "^8.18.0"
   },
   "devDependencies": {

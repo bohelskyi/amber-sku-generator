@@ -13,9 +13,19 @@ const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 if (!TEST_DATABASE_URL) throw new Error('TEST_DATABASE_URL is required');
 process.env.DATABASE_URL = TEST_DATABASE_URL;
 process.env.NBU_RATE_OVERRIDE = '40';
+process.env.APP_BASE_URL = 'http://localhost:5173';
+process.env.OIDC_ISSUER_URL = 'https://auth.example.invalid/realms/amber';
+process.env.OIDC_CLIENT_ID = 'amber-sku-manager-integration-test';
+process.env.OIDC_CLIENT_SECRET = 'integration-test-client-secret';
+process.env.OIDC_REDIRECT_URI = 'http://localhost:5000/api/auth/callback';
+process.env.SESSION_SECRET = 'integration-test-session-secret-0123456789abcdef';
+process.env.SESSION_COOKIE_SECURE = 'false';
+process.env.TRUST_PROXY = 'false';
 
 const pool = require('../src/db/pool');
 const app = require('../src/app');
+const express = require('express');
+const { createSessionMiddleware } = require('../src/auth/session');
 const { runMigrations } = require('../src/db/run-migrations');
 const { seedDefaultData } = require('../src/db/init-db');
 const { ensureLegacySkuSchemas } = require('../src/services/sku-schema.service');
@@ -289,8 +299,86 @@ test.after(async () => {
 });
 
 test('health endpoints report liveness and DB readiness', async () => {
-  assert.equal((await request('/health/live')).response.status, 200);
-  assert.equal((await request('/health/ready')).response.status, 200);
+  const live = await request('/health/live');
+  const ready = await request('/health/ready');
+  assert.equal(live.response.status, 200);
+  assert.equal(ready.response.status, 200);
+  assert.deepEqual(live.data, { status: 'ok' });
+  assert.deepEqual(ready.data, { status: 'ready' });
+  assert.equal(live.response.headers.get('set-cookie'), null);
+  assert.equal(ready.response.headers.get('set-cookie'), null);
+});
+
+test('migration 019 matches the connect-pg-simple 10.0.0 table contract', async () => {
+  const columns = await pool.query(`
+    SELECT column_name, data_type, is_nullable, datetime_precision
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'session'
+    ORDER BY ordinal_position
+  `);
+  assert.deepEqual(columns.rows, [
+    { column_name: 'sid', data_type: 'character varying', is_nullable: 'NO', datetime_precision: null },
+    { column_name: 'sess', data_type: 'json', is_nullable: 'NO', datetime_precision: null },
+    { column_name: 'expire', data_type: 'timestamp without time zone', is_nullable: 'NO', datetime_precision: 6 },
+  ]);
+
+  const constraints = await pool.query(`
+    SELECT conname, pg_get_constraintdef(oid) AS definition
+    FROM pg_constraint
+    WHERE conrelid = 'public.session'::regclass
+    ORDER BY conname
+  `);
+  assert.deepEqual(constraints.rows, [
+    { conname: 'session_pkey', definition: 'PRIMARY KEY (sid)' },
+  ]);
+
+  const indexes = await pool.query(`
+    SELECT indexname
+    FROM pg_indexes
+    WHERE schemaname = 'public' AND tablename = 'session'
+    ORDER BY indexname
+  `);
+  assert.deepEqual(indexes.rows.map((row) => row.indexname), [
+    'IDX_session_expire',
+    'session_pkey',
+  ]);
+});
+
+test('PostgreSQL session middleware persists a fixed non-secure local session', async () => {
+  const sessionApp = express();
+  sessionApp.use('/api', createSessionMiddleware());
+  sessionApp.get('/api/session-foundation-test', (req, res) => {
+    req.session.visits = Number(req.session.visits || 0) + 1;
+    res.json({ visits: req.session.visits });
+  });
+
+  const sessionServer = await new Promise((resolve) => {
+    const listening = sessionApp.listen(0, '127.0.0.1', () => resolve(listening));
+  });
+  const sessionBaseUrl = `http://127.0.0.1:${sessionServer.address().port}`;
+  try {
+    const first = await fetch(`${sessionBaseUrl}/api/session-foundation-test`);
+    assert.deepEqual(await first.json(), { visits: 1 });
+    const setCookie = first.headers.get('set-cookie');
+    assert.match(setCookie, /^amber\.sid=/);
+    assert.match(setCookie, /Path=\/api/i);
+    assert.match(setCookie, /HttpOnly/i);
+    assert.match(setCookie, /SameSite=Lax/i);
+    assert.doesNotMatch(setCookie, /;\s*Secure/i);
+    assert.doesNotMatch(setCookie, /;\s*Domain=/i);
+
+    const cookie = setCookie.split(';', 1)[0];
+    const second = await fetch(`${sessionBaseUrl}/api/session-foundation-test`, {
+      headers: { Cookie: cookie },
+    });
+    assert.deepEqual(await second.json(), { visits: 2 });
+
+    const stored = await pool.query('SELECT sess FROM "session"');
+    assert.equal(stored.rows.some((row) => Number(row.sess?.visits) === 2), true);
+  } finally {
+    await new Promise((resolve) => sessionServer.close(resolve));
+    await pool.query('DELETE FROM "session"');
+  }
 });
 
 test('recount preview authoritatively reprices a changed weight in UAH and USD', async () => {
@@ -860,6 +948,7 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
          && !fileName.startsWith('016_')
          && !fileName.startsWith('017_')
          && !fileName.startsWith('018_')
+         && !fileName.startsWith('019_')
       ))
       .map((fileName) => fs.copyFile(
         path.resolve(serverRoot, 'migrations', fileName),
@@ -936,9 +1025,9 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
       );
       assert.equal(checksums.rows[0].count, 0);
       const checkpointMigration = await checkpointPool.query(
-        "SELECT count(*)::int AS count FROM schema_migrations WHERE name ~ '^(015|016|017|018)_'"
+        "SELECT count(*)::int AS count FROM schema_migrations WHERE name ~ '^(015|016|017|018|019)_'"
       );
-      assert.equal(checkpointMigration.rows[0].count, 4);
+      assert.equal(checkpointMigration.rows[0].count, 5);
     } finally {
       await freshPool.end();
       await upgradePool.end();

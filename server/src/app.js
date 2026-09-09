@@ -1,14 +1,15 @@
 const express = require('express');
-const cors = require('cors');
 const publicRoutes = require('./routes/public.routes');
 const adminRoutes = require('./routes/admin.routes');
 const crypto = require('node:crypto');
 const pool = require('./db/pool');
+const { trustProxy } = require('./config/env');
+const { createSessionMiddleware } = require('./auth/session');
 const logger = require('./utils/logger');
 
 const app = express();
 
-app.use(cors());
+app.set('trust proxy', trustProxy);
 app.use(express.json());
 app.use((req, res, next) => {
   const requestId = String(req.get('X-Request-ID') || crypto.randomUUID()).slice(0, 128);
@@ -46,6 +47,7 @@ app.get('/health/ready', async (req, res) => {
   }
 });
 
+app.use('/api', createSessionMiddleware());
 app.use('/api', publicRoutes);
 app.use('/api', adminRoutes);
 
