@@ -76,11 +76,17 @@ function requireCsrfToken(req, res, next) {
   return next();
 }
 
+function requireCsrfForUnsafeMethods(req, res, next) {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  return requireCsrfToken(req, res, next);
+}
+
 module.exports = {
   IDENTITY_OPTIONAL_FIELDS,
   normalizeIdentity,
   readSessionIdentity,
   requireAuthenticatedSession,
+  requireCsrfForUnsafeMethods,
   requireCsrfToken,
   tokensEqual,
 };

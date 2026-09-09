@@ -8,6 +8,7 @@ const { createSessionMiddleware } = require('../src/auth/session');
 const {
   normalizeIdentity,
   requireAuthenticatedSession,
+  requireCsrfForUnsafeMethods,
 } = require('../src/auth/authentication');
 const {
   OIDC_TRANSACTION_TTL_MS,
@@ -91,10 +92,17 @@ async function startAuthServer({
     sessionCookieSecure: secure,
     applicationBaseUrl: 'https://app.example.invalid/',
   }));
+  app.use('/api', requireAuthenticatedSession);
+  app.use('/api', requireCsrfForUnsafeMethods);
   app.get('/api/test-protected', requireAuthenticatedSession, (req, res) => {
     res.json({ issuer: req.user.issuer, sub: req.user.sub });
   });
-  app.get('/api/business-still-public', (_req, res) => res.json({ public: true }));
+  app.get('/api/business-boundary', (_req, res) => res.json({ authenticated: true }));
+  let mutationCount = 0;
+  app.all('/api/test-mutation', (req, res) => {
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) mutationCount += 1;
+    res.json({ mutationCount });
+  });
 
   const server = await new Promise((resolve) => {
     const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
@@ -102,6 +110,7 @@ async function startAuthServer({
   return {
     baseUrl: `http://127.0.0.1:${server.address().port}`,
     store,
+    getMutationCount: () => mutationCount,
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 }
@@ -239,9 +248,11 @@ test('callback regenerates the session and exposes only normalized identity plus
       issuer,
       sub: 'directory-subject-123',
     });
-    const publicResponse = await authFetch(server, '/api/business-still-public');
-    assert.equal(publicResponse.status, 200);
-    assert.deepEqual(await publicResponse.json(), { public: true });
+    const unauthenticatedBusinessResponse = await authFetch(server, '/api/business-boundary');
+    assert.equal(unauthenticatedBusinessResponse.status, 401);
+    assert.deepEqual(await unauthenticatedBusinessResponse.json(), {
+      error: 'Authentication required',
+    });
 
     const replay = await authFetch(
       server,
@@ -250,6 +261,69 @@ test('callback regenerates the session and exposes only normalized identity plus
     );
     assert.equal(replay.status, 400);
     assert.equal(calls.exchange.length, 1);
+  } finally {
+    await server.close();
+  }
+});
+
+test('business boundary authenticates before applying method-aware CSRF protection', async () => {
+  const { adapter, calls } = createFakeAdapter();
+  const server = await startAuthServer({ adapter });
+  try {
+    const unauthenticatedGet = await authFetch(server, '/api/business-boundary');
+    assert.equal(unauthenticatedGet.status, 401);
+    assert.equal(unauthenticatedGet.headers.get('location'), null);
+
+    const unauthenticatedPost = await authFetch(server, '/api/test-mutation', {
+      method: 'POST',
+    });
+    assert.equal(unauthenticatedPost.status, 401);
+    assert.deepEqual(await unauthenticatedPost.json(), { error: 'Authentication required' });
+    assert.equal(server.getMutationCount(), 0);
+
+    const started = await login(server, calls);
+    const callback = await authFetch(
+      server,
+      `/api/auth/callback?code=authorization-code&state=${started.transaction.state}`,
+      { cookie: started.cookie }
+    );
+    const cookie = cookieFrom(callback);
+    const me = await authFetch(server, '/api/auth/me', { cookie });
+    const { csrfToken } = await me.json();
+
+    const authenticatedGet = await authFetch(server, '/api/business-boundary', { cookie });
+    assert.equal(authenticatedGet.status, 200);
+    const authenticatedOptions = await authFetch(server, '/api/test-mutation', {
+      cookie,
+      method: 'OPTIONS',
+    });
+    assert.equal(authenticatedOptions.status, 200);
+
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      const missing = await authFetch(server, '/api/test-mutation', { cookie, method });
+      assert.equal(missing.status, 403);
+      assert.deepEqual(await missing.json(), { error: 'Invalid CSRF token' });
+    }
+    assert.equal(server.getMutationCount(), 0);
+
+    const wrong = await authFetch(server, '/api/test-mutation', {
+      cookie,
+      method: 'POST',
+      headers: { 'X-CSRF-Token': 'wrong-token' },
+    });
+    assert.equal(wrong.status, 403);
+    assert.equal(server.getMutationCount(), 0);
+
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      const accepted = await authFetch(server, '/api/test-mutation', {
+        cookie,
+        method,
+        headers: { 'X-CSRF-Token': csrfToken },
+      });
+      assert.equal(accepted.status, 200);
+      assert.equal(accepted.headers.get('location'), null);
+    }
+    assert.equal(server.getMutationCount(), 4);
   } finally {
     await server.close();
   }

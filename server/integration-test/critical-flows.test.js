@@ -23,7 +23,7 @@ process.env.SESSION_COOKIE_SECURE = 'false';
 process.env.TRUST_PROXY = 'false';
 
 const pool = require('../src/db/pool');
-const app = require('../src/app');
+const { createApp } = require('../src/app');
 const express = require('express');
 const { createSessionMiddleware } = require('../src/auth/session');
 const { createAuthRouter } = require('../src/routes/auth.routes');
@@ -34,9 +34,40 @@ const { saveLastKnownRate } = require('../src/services/currency.service');
 
 let server;
 let baseUrl;
+let authenticatedSession = null;
 const schemas = {};
 let primarySku;
 const serverRoot = path.resolve(__dirname, '..');
+
+const integrationAuthCalls = { authorization: [], exchange: [] };
+const integrationOidcAdapter = {
+  issuer: process.env.OIDC_ISSUER_URL,
+  redirectUri: process.env.OIDC_REDIRECT_URI,
+  async buildAuthorizationRedirect(transaction) {
+    integrationAuthCalls.authorization.push({ ...transaction });
+    const url = new URL('https://auth.example.invalid/authorize');
+    url.searchParams.set('state', transaction.state);
+    return url;
+  },
+  async exchangeAuthorizationCode(parameters) {
+    integrationAuthCalls.exchange.push(parameters);
+    return {
+      iss: this.issuer,
+      sub: 'critical-flows-subject',
+      preferred_username: 'critical.flows',
+      name: 'Critical Flows',
+      access_token: 'must-not-be-exposed',
+      refresh_token: 'must-not-be-exposed',
+      id_token: 'must-not-be-exposed',
+    };
+  },
+  async buildLogoutRedirect() {
+    return new URL(
+      'https://auth.example.invalid/logout?client_id=amber-sku-manager-integration-test&post_logout_redirect_uri=http%3A%2F%2Flocalhost%3A5173%2F'
+    );
+  },
+};
+const app = createApp({ oidcAdapter: integrationOidcAdapter });
 
 function databaseUrlFor(databaseName) {
   if (!/^[a-z0-9_]+$/.test(databaseName)) {
@@ -69,16 +100,74 @@ async function runNodeInDatabase(databaseUrl, source, extraEnv = {}) {
   });
 }
 
-async function request(url, { method = 'GET', body, headers = {} } = {}) {
+async function request(url, {
+  method = 'GET',
+  body,
+  headers = {},
+  authentication = authenticatedSession,
+  csrfToken,
+} = {}) {
+  const normalizedMethod = method.toUpperCase();
+  const authenticatedHeaders = authentication
+    ? { Cookie: authentication.cookie }
+    : {};
+  if (
+    authentication
+    && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(normalizedMethod)
+    && csrfToken !== null
+  ) {
+    authenticatedHeaders['X-CSRF-Token'] = csrfToken ?? authentication.csrfToken;
+  }
   const response = await fetch(`${baseUrl}${url}`, {
     method,
-    headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers },
+    headers: {
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...authenticatedHeaders,
+      ...headers,
+    },
     body: body ? JSON.stringify(body) : undefined,
+    redirect: 'manual',
   });
   const text = await response.text();
   let data = text;
   try { data = text ? JSON.parse(text) : null; } catch {}
   return { response, data, text };
+}
+
+async function authenticateApplicationSession(returnTo = '/') {
+  const loginResponse = await fetch(
+    `${baseUrl}/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`,
+    { redirect: 'manual' }
+  );
+  assert.equal(loginResponse.status, 302);
+  const loginCookie = loginResponse.headers.get('set-cookie')?.split(';', 1)[0];
+  assert.ok(loginCookie);
+  const transaction = integrationAuthCalls.authorization.at(-1);
+  assert.ok(transaction?.state);
+
+  const callbackResponse = await fetch(
+    `${baseUrl}/api/auth/callback?code=integration-code&state=${transaction.state}`,
+    { redirect: 'manual', headers: { Cookie: loginCookie } }
+  );
+  assert.equal(callbackResponse.status, 303);
+  assert.equal(callbackResponse.headers.get('location'), `http://localhost:5173${returnTo}`);
+  const cookie = callbackResponse.headers.get('set-cookie')?.split(';', 1)[0];
+  assert.ok(cookie);
+
+  const meResponse = await fetch(`${baseUrl}/api/auth/me`, {
+    headers: { Cookie: cookie },
+    redirect: 'manual',
+  });
+  assert.equal(meResponse.status, 200);
+  const me = await meResponse.json();
+  assert.equal(me.identity.issuer, integrationOidcAdapter.issuer);
+  assert.equal(me.identity.sub, 'critical-flows-subject');
+  assert.equal(typeof me.csrfToken, 'string');
+  assert.doesNotMatch(
+    JSON.stringify(me),
+    /access_token|refresh_token|id_token|must-not-be-exposed|client-secret/
+  );
+  return { cookie, csrfToken: me.csrfToken };
 }
 
 async function createFixtureCategory(code, requiresWeight, withPrices) {
@@ -310,12 +399,36 @@ test('health endpoints report liveness and DB readiness', async () => {
   assert.equal(ready.response.headers.get('set-cookie'), null);
 });
 
-test('Phase 1B leaves existing business routes unauthenticated', async () => {
-  const config = await request('/api/config');
-  assert.equal(config.response.status, 200);
-  assert.equal(config.response.headers.get('set-cookie'), null);
+test('Phase 1D leaves health and auth public while rejecting both business router trees', async () => {
+  const productCountBefore = await pool.query('SELECT count(*)::int AS count FROM products');
+  const checks = [
+    await request('/api/config', { authentication: null }),
+    await request('/api/preview', {
+      method: 'POST',
+      body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0 },
+      authentication: null,
+    }),
+    await request('/api/admin/config', { authentication: null }),
+    await request('/api/admin/category', {
+      method: 'POST',
+      body: { code: 'UA', name: 'Unauthorized category' },
+      authentication: null,
+    }),
+  ];
+  for (const check of checks) {
+    assert.equal(check.response.status, 401, check.text);
+    assert.deepEqual(check.data, { error: 'Authentication required' });
+    assert.equal(check.response.headers.get('location'), null);
+  }
+  const productCountAfter = await pool.query('SELECT count(*)::int AS count FROM products');
+  assert.equal(productCountAfter.rows[0].count, productCountBefore.rows[0].count);
+  assert.equal(
+    (await pool.query("SELECT count(*)::int AS count FROM categories WHERE code = 'UA'"))
+      .rows[0].count,
+    0
+  );
 
-  const me = await request('/api/auth/me');
+  const me = await request('/api/auth/me', { authentication: null });
   assert.equal(me.response.status, 401);
   assert.deepEqual(me.data, { error: 'Authentication required' });
 });
@@ -504,6 +617,81 @@ test('fake OIDC flow persists, regenerates, exposes, and destroys PostgreSQL ses
     await new Promise((resolve) => authServer.close(resolve));
     await pool.query('DELETE FROM "session"');
   }
+});
+
+test('authenticated business boundary requires CSRF only for unsafe methods', async () => {
+  authenticatedSession = await authenticateApplicationSession('/admin');
+
+  const config = await request('/api/config');
+  const adminConfig = await request('/api/admin/config');
+  const head = await request('/api/config', { method: 'HEAD' });
+  const options = await request('/api/config', { method: 'OPTIONS' });
+  assert.equal(config.response.status, 200, config.text);
+  assert.equal(adminConfig.response.status, 200, adminConfig.text);
+  assert.equal(head.response.status, 200, head.text);
+  assert.notEqual(options.response.status, 403, options.text);
+
+  const unauthenticatedOptions = await request('/api/config', {
+    method: 'OPTIONS',
+    authentication: null,
+  });
+  assert.equal(unauthenticatedOptions.response.status, 401);
+
+  const missingCsrfChecks = [
+    await request('/api/preview', {
+      method: 'POST',
+      body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0 },
+      csrfToken: null,
+    }),
+    await request('/api/admin/category', {
+      method: 'PUT',
+      body: { code: 'ZZ', next_code: 'ZZ', name: 'Test ZZ', requires_weight: 0 },
+      csrfToken: null,
+    }),
+    await request('/api/admin/option/999999/archive', {
+      method: 'PATCH',
+      body: { archived: true },
+      csrfToken: null,
+    }),
+    await request('/api/admin/repricing/drafts/999999', {
+      method: 'DELETE',
+      csrfToken: null,
+    }),
+  ];
+  for (const check of missingCsrfChecks) {
+    assert.equal(check.response.status, 403, check.text);
+    assert.deepEqual(check.data, { error: 'Invalid CSRF token' });
+    assert.equal(check.response.headers.get('location'), null);
+  }
+
+  const wrongCsrf = await request('/api/preview', {
+    method: 'POST',
+    body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0 },
+    csrfToken: 'wrong-csrf-token',
+  });
+  assert.equal(wrongCsrf.response.status, 403, wrongCsrf.text);
+  assert.deepEqual(wrongCsrf.data, { error: 'Invalid CSRF token' });
+
+  const validCsrf = await request('/api/preview', {
+    method: 'POST',
+    body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0 },
+  });
+  assert.equal(validCsrf.response.status, 200, validCsrf.text);
+  assert.equal(typeof validCsrf.data.previewToken, 'string');
+});
+
+test('an expired PostgreSQL application session returns JSON 401', async () => {
+  await pool.query(`
+    UPDATE "session"
+    SET expire = NOW() - INTERVAL '1 minute'
+    WHERE sess->'identity'->>'sub' = 'critical-flows-subject'
+  `);
+  const expired = await request('/api/config');
+  assert.equal(expired.response.status, 401, expired.text);
+  assert.deepEqual(expired.data, { error: 'Authentication required' });
+  assert.equal(expired.response.headers.get('location'), null);
+
+  authenticatedSession = await authenticateApplicationSession('/');
 });
 
 test('recount preview authoritatively reprices a changed weight in UAH and USD', async () => {
