@@ -426,7 +426,6 @@ test('fake OIDC flow persists, regenerates, exposes, and destroys PostgreSQL ses
   authApp.use('/api/auth', createAuthRouter({
     oidcAdapter: fakeOidcAdapter,
     applicationBaseUrl: 'http://localhost:5173/',
-    localLogoutRedirect: 'http://localhost:5173/',
   }));
   const authServer = await new Promise((resolve) => {
     const listening = authApp.listen(0, '127.0.0.1', () => resolve(listening));
@@ -491,7 +490,14 @@ test('fake OIDC flow persists, regenerates, exposes, and destroys PostgreSQL ses
         'X-CSRF-Token': me.csrfToken,
       },
     });
-    assert.equal(logoutResponse.status, 303);
+    assert.equal(logoutResponse.status, 200);
+    assert.equal(logoutResponse.headers.get('location'), null);
+    const logoutBody = await logoutResponse.json();
+    assert.equal(
+      logoutBody.logoutUrl,
+      'https://auth.example.invalid/logout?client_id=amber-sku-manager-integration-test&post_logout_redirect_uri=http%3A%2F%2Flocalhost%3A5173%2F'
+    );
+    assert.doesNotMatch(JSON.stringify(logoutBody), /access_token|refresh_token|id_token/);
     assert.match(logoutResponse.headers.get('set-cookie'), /Path=\/api/i);
     assert.equal((await pool.query('SELECT count(*)::int AS count FROM "session"')).rows[0].count, 0);
   } finally {

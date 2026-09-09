@@ -100,7 +100,6 @@ function createAuthRouter({
   transactionTtlMs = OIDC_TRANSACTION_TTL_MS,
   sessionCookieSecure = env.sessionCookieSecure,
   applicationBaseUrl = env.appBaseUrl,
-  localLogoutRedirect = env.appBaseUrl,
 } = {}) {
   const router = express.Router();
 
@@ -195,10 +194,9 @@ function createAuthRouter({
     requireCsrfToken,
     async (req, res, next) => {
       res.set('Cache-Control', 'no-store');
-      let logoutRedirect = localLogoutRedirect;
+      let logoutUrl = null;
       try {
-        logoutRedirect = (await oidcAdapter.buildLogoutRedirect())?.toString()
-          || localLogoutRedirect;
+        logoutUrl = (await oidcAdapter.buildLogoutRedirect())?.toString() || null;
       } catch (error) {
         logger.warn('auth.logout.provider_unavailable', {
           requestId: req.requestId,
@@ -212,7 +210,7 @@ function createAuthRouter({
           SESSION_COOKIE_NAME,
           buildCookieOptions({ secure: sessionCookieSecure })
         );
-        return res.redirect(303, logoutRedirect);
+        return res.status(200).json({ logoutUrl });
       } catch (error) {
         return next(error);
       }

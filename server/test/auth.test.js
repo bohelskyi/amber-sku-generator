@@ -90,7 +90,6 @@ async function startAuthServer({
     now,
     sessionCookieSecure: secure,
     applicationBaseUrl: 'https://app.example.invalid/',
-    localLogoutRedirect: 'https://app.example.invalid/',
   }));
   app.get('/api/test-protected', requireAuthenticatedSession, (req, res) => {
     res.json({ issuer: req.user.issuer, sub: req.user.sub });
@@ -350,19 +349,31 @@ test('/me requires authentication and logout requires CSRF, destroys session, an
     });
     assert.equal(wrongCsrf.status, 403);
 
-    const logout = await authFetch(server, '/api/auth/logout', {
-      method: 'POST',
-      cookie: authenticatedCookie,
-      headers: { 'X-CSRF-Token': csrfToken },
-    });
-    assert.equal(logout.status, 303);
+    const logout = await authFetch(
+      server,
+      '/api/auth/logout?logoutUrl=https%3A%2F%2Fevil.example%2F&returnTo=%2F%2Fevil.example',
+      {
+        method: 'POST',
+        cookie: authenticatedCookie,
+        headers: { 'X-CSRF-Token': csrfToken },
+      }
+    );
+    assert.equal(logout.status, 200);
+    assert.equal(logout.headers.get('location'), null);
+    assert.equal(logout.headers.get('cache-control'), 'no-store');
     assert.equal(calls.logout, 1);
-    const logoutLocation = new URL(logout.headers.get('location'));
+    const logoutBody = await logout.json();
+    assert.deepEqual(Object.keys(logoutBody), ['logoutUrl']);
+    const logoutLocation = new URL(logoutBody.logoutUrl);
     assert.equal(logoutLocation.origin, 'https://auth.example.invalid');
     assert.equal(logoutLocation.searchParams.get('client_id'), 'amber-sku-manager');
     assert.equal(
       logoutLocation.searchParams.get('post_logout_redirect_uri'),
       'https://app.example.invalid/'
+    );
+    assert.doesNotMatch(
+      JSON.stringify(logoutBody),
+      /evil\.example|access_token|refresh_token|id_token|server-only-secret/
     );
     const clearCookie = logout.headers.get('set-cookie');
     assert.match(clearCookie, /^amber\.sid=/);
@@ -374,6 +385,41 @@ test('/me requires authentication and logout requires CSRF, destroys session, an
 
     const afterLogout = await authFetch(server, '/api/auth/me', { cookie: authenticatedCookie });
     assert.equal(afterLogout.status, 401);
+  } finally {
+    await server.close();
+  }
+});
+
+test('logout still completes locally when provider logout discovery is unavailable', async () => {
+  const { adapter, calls } = createFakeAdapter({
+    buildLogoutRedirect: async () => {
+      calls.logout += 1;
+      throw new Error('provider unavailable');
+    },
+  });
+  const server = await startAuthServer({ adapter });
+  try {
+    const started = await login(server, calls);
+    const callback = await authFetch(
+      server,
+      `/api/auth/callback?code=code&state=${started.transaction.state}`,
+      { cookie: started.cookie }
+    );
+    const authenticatedCookie = cookieFrom(callback);
+    const me = await authFetch(server, '/api/auth/me', { cookie: authenticatedCookie });
+    const { csrfToken } = await me.json();
+
+    const logout = await authFetch(server, '/api/auth/logout', {
+      method: 'POST',
+      cookie: authenticatedCookie,
+      headers: { 'X-CSRF-Token': csrfToken },
+    });
+    assert.equal(logout.status, 200);
+    assert.deepEqual(await logout.json(), { logoutUrl: null });
+    assert.match(logout.headers.get('set-cookie'), /^amber\.sid=/);
+    assert.equal((await authFetch(server, '/api/auth/me', {
+      cookie: authenticatedCookie,
+    })).status, 401);
   } finally {
     await server.close();
   }
