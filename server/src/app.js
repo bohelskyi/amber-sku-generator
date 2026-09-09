@@ -5,7 +5,9 @@ const crypto = require('node:crypto');
 const pool = require('./db/pool');
 const { trustProxy } = require('./config/env');
 const { createSessionMiddleware } = require('./auth/session');
+const { createAuthRouter } = require('./routes/auth.routes');
 const logger = require('./utils/logger');
+const { getRequestLogPath } = require('./utils/request-log-path');
 
 const app = express();
 
@@ -20,7 +22,7 @@ app.use((req, res, next) => {
     const context = {
       requestId,
       method: req.method,
-      path: req.originalUrl,
+      path: getRequestLogPath(req),
       statusCode: res.statusCode,
       durationMs: Date.now() - startedAt,
     };
@@ -48,6 +50,7 @@ app.get('/health/ready', async (req, res) => {
 });
 
 app.use('/api', createSessionMiddleware());
+app.use('/api/auth', createAuthRouter());
 app.use('/api', publicRoutes);
 app.use('/api', adminRoutes);
 
@@ -55,7 +58,7 @@ app.use((error, req, res, _next) => {
   logger.error('http.request.unhandled_error', {
     requestId: req.requestId,
     method: req.method,
-    path: req.originalUrl,
+    path: getRequestLogPath(req),
     error: error.message,
     code: error.code,
   });

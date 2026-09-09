@@ -15,6 +15,17 @@ function getDefaultSessionConfig() {
   };
 }
 
+function buildCookieOptions({ secure, maxAgeMs } = {}) {
+  const options = {
+    httpOnly: true,
+    secure,
+    sameSite: 'lax',
+    path: '/api',
+  };
+  if (maxAgeMs !== undefined) options.maxAge = maxAgeMs;
+  return options;
+}
+
 function buildSessionOptions({ config, store }) {
   return {
     name: SESSION_COOKIE_NAME,
@@ -24,13 +35,7 @@ function buildSessionOptions({ config, store }) {
     saveUninitialized: false,
     rolling: false,
     unset: 'destroy',
-    cookie: {
-      httpOnly: true,
-      secure: config.secure,
-      sameSite: 'lax',
-      path: '/api',
-      maxAge: config.maxAgeMs,
-    },
+    cookie: buildCookieOptions({ secure: config.secure, maxAgeMs: config.maxAgeMs }),
   };
 }
 
@@ -74,6 +79,7 @@ function createSessionMiddleware({
 module.exports = {
   SESSION_COOKIE_NAME,
   SESSION_TABLE_NAME,
+  buildCookieOptions,
   buildSessionOptions,
   createPostgresSessionStore,
   createSessionMiddleware,

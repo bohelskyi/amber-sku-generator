@@ -4,6 +4,7 @@ const test = require('node:test');
 const {
   SESSION_COOKIE_NAME,
   SESSION_TABLE_NAME,
+  buildCookieOptions,
   buildSessionOptions,
   createPostgresSessionStore,
   createSessionMiddleware,
@@ -33,6 +34,12 @@ test('session options use a fixed opaque host-only API cookie', () => {
     maxAge: sessionConfig.maxAgeMs,
   });
   assert.equal(Object.hasOwn(options.cookie, 'domain'), false);
+  assert.deepEqual(buildCookieOptions({ secure: true }), {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'lax',
+    path: '/api',
+  });
 });
 
 test('PostgreSQL store uses the migrated table and never creates it at runtime', () => {

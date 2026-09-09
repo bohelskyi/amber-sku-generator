@@ -26,6 +26,7 @@ const pool = require('../src/db/pool');
 const app = require('../src/app');
 const express = require('express');
 const { createSessionMiddleware } = require('../src/auth/session');
+const { createAuthRouter } = require('../src/routes/auth.routes');
 const { runMigrations } = require('../src/db/run-migrations');
 const { seedDefaultData } = require('../src/db/init-db');
 const { ensureLegacySkuSchemas } = require('../src/services/sku-schema.service');
@@ -309,6 +310,16 @@ test('health endpoints report liveness and DB readiness', async () => {
   assert.equal(ready.response.headers.get('set-cookie'), null);
 });
 
+test('Phase 1B leaves existing business routes unauthenticated', async () => {
+  const config = await request('/api/config');
+  assert.equal(config.response.status, 200);
+  assert.equal(config.response.headers.get('set-cookie'), null);
+
+  const me = await request('/api/auth/me');
+  assert.equal(me.response.status, 401);
+  assert.deepEqual(me.data, { error: 'Authentication required' });
+});
+
 test('migration 019 matches the connect-pg-simple 10.0.0 table contract', async () => {
   const columns = await pool.query(`
     SELECT column_name, data_type, is_nullable, datetime_precision
@@ -377,6 +388,114 @@ test('PostgreSQL session middleware persists a fixed non-secure local session', 
     assert.equal(stored.rows.some((row) => Number(row.sess?.visits) === 2), true);
   } finally {
     await new Promise((resolve) => sessionServer.close(resolve));
+    await pool.query('DELETE FROM "session"');
+  }
+});
+
+test('fake OIDC flow persists, regenerates, exposes, and destroys PostgreSQL sessions', async () => {
+  const calls = { authorization: [], exchange: [] };
+  const fakeOidcAdapter = {
+    issuer: 'https://auth.example.invalid/realms/amber',
+    redirectUri: 'http://localhost:5000/api/auth/callback',
+    async buildAuthorizationRedirect(transaction) {
+      calls.authorization.push({ ...transaction });
+      const url = new URL('https://auth.example.invalid/authorize');
+      url.searchParams.set('state', transaction.state);
+      return url;
+    },
+    async exchangeAuthorizationCode(parameters) {
+      calls.exchange.push(parameters);
+      return {
+        iss: this.issuer,
+        sub: 'postgres-backed-subject',
+        preferred_username: 'postgres.user',
+        email: 'postgres.user@example.invalid',
+        access_token: 'must-not-be-stored',
+        refresh_token: 'must-not-be-stored',
+        id_token: 'must-not-be-stored',
+      };
+    },
+    async buildLogoutRedirect() {
+      return new URL(
+        'https://auth.example.invalid/logout?client_id=amber-sku-manager-integration-test&post_logout_redirect_uri=http%3A%2F%2Flocalhost%3A5173%2F'
+      );
+    },
+  };
+  const authApp = express();
+  authApp.use('/api', createSessionMiddleware());
+  authApp.use('/api/auth', createAuthRouter({
+    oidcAdapter: fakeOidcAdapter,
+    applicationBaseUrl: 'http://localhost:5173/',
+    localLogoutRedirect: 'http://localhost:5173/',
+  }));
+  const authServer = await new Promise((resolve) => {
+    const listening = authApp.listen(0, '127.0.0.1', () => resolve(listening));
+  });
+  const authBaseUrl = `http://127.0.0.1:${authServer.address().port}`;
+  try {
+    const loginResponse = await fetch(
+      `${authBaseUrl}/api/auth/login?returnTo=${encodeURIComponent('/admin')}`,
+      { redirect: 'manual' }
+    );
+    assert.equal(loginResponse.status, 302);
+    const loginCookie = loginResponse.headers.get('set-cookie').split(';', 1)[0];
+    const transaction = calls.authorization[0];
+    const storedTransaction = await pool.query('SELECT sess FROM "session"');
+    assert.equal(storedTransaction.rows.some(
+      (row) => row.sess?.oidcTransaction?.state === transaction.state
+    ), true);
+
+    const callbackResponse = await fetch(
+      `${authBaseUrl}/api/auth/callback?code=fake-code&state=${transaction.state}`,
+      { redirect: 'manual', headers: { Cookie: loginCookie } }
+    );
+    assert.equal(callbackResponse.status, 303);
+    assert.equal(callbackResponse.headers.get('location'), 'http://localhost:5173/admin');
+    const authenticatedCookie = callbackResponse.headers.get('set-cookie').split(';', 1)[0];
+    assert.notEqual(authenticatedCookie, loginCookie);
+    assert.equal(calls.exchange.length, 1);
+
+    const authenticatedRows = await pool.query('SELECT sess FROM "session"');
+    assert.equal(authenticatedRows.rowCount, 1);
+    assert.deepEqual(Object.keys(authenticatedRows.rows[0].sess).sort(), [
+      'cookie',
+      'csrfToken',
+      'identity',
+    ]);
+    assert.deepEqual(authenticatedRows.rows[0].sess.identity, {
+      issuer: fakeOidcAdapter.issuer,
+      sub: 'postgres-backed-subject',
+      preferred_username: 'postgres.user',
+      email: 'postgres.user@example.invalid',
+      authenticatedAt: authenticatedRows.rows[0].sess.identity.authenticatedAt,
+    });
+    assert.equal(typeof authenticatedRows.rows[0].sess.csrfToken, 'string');
+    assert.doesNotMatch(
+      JSON.stringify(authenticatedRows.rows[0].sess),
+      /access_token|refresh_token|id_token|must-not-be-stored/
+    );
+
+    const meResponse = await fetch(`${authBaseUrl}/api/auth/me`, {
+      headers: { Cookie: authenticatedCookie },
+    });
+    assert.equal(meResponse.status, 200);
+    const me = await meResponse.json();
+    assert.equal(me.identity.issuer, fakeOidcAdapter.issuer);
+    assert.equal(me.identity.sub, 'postgres-backed-subject');
+
+    const logoutResponse = await fetch(`${authBaseUrl}/api/auth/logout`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: {
+        Cookie: authenticatedCookie,
+        'X-CSRF-Token': me.csrfToken,
+      },
+    });
+    assert.equal(logoutResponse.status, 303);
+    assert.match(logoutResponse.headers.get('set-cookie'), /Path=\/api/i);
+    assert.equal((await pool.query('SELECT count(*)::int AS count FROM "session"')).rows[0].count, 0);
+  } finally {
+    await new Promise((resolve) => authServer.close(resolve));
     await pool.query('DELETE FROM "session"');
   }
 });
