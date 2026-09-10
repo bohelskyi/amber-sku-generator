@@ -359,10 +359,13 @@ test('home and decode presentation share aligned columns and compact authoritati
 
   assert.match(homeSource, /home-top-workspace/);
   assert.match(homeSource, /home-side-workspace/);
+  assert.match(homeSource, /canCreateProducts \? '' : ' is-decoder-only'/);
   assert.match(homeSource, /decode-result-workspace/);
   assert.equal((homeSource.match(/operational-split-layout/g) || []).length, 2, 'decode and recount must share the operational split');
   assert.match(builderSource, /className="operational-split-layout"/);
   assert.match(stylesSource, /\.home-top-workspace,[\s\S]*?\.operational-split-layout[\s\S]*?360px/);
+  assert.match(stylesSource, /\.home-top-workspace\.is-decoder-only[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(stylesSource, /\.home-top-workspace\.is-decoder-only \.home-side-workspace[\s\S]*?minmax\(0, 1fr\) 360px/);
   assert.match(homeSource, /const finalStoredPriceUsd = decodeData\.existsInDb \? pricing\?\.totalPrice : null/);
   assert.match(homeSource, /formatOptionalValue\(finalStoredPriceUsd, formatUsd\)/);
   assert.doesNotMatch(homeSource, /decode-rounding-note/);

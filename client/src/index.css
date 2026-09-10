@@ -261,6 +261,22 @@
     grid-template-rows: minmax(0, 1fr) auto;
   }
 
+  @media (min-width: 1024px) {
+    .home-top-workspace.is-decoder-only {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .home-top-workspace.is-decoder-only .home-side-workspace {
+      grid-template-columns: minmax(0, 1fr) 360px;
+      grid-template-rows: auto;
+      align-items: start;
+    }
+
+    .home-top-workspace.is-decoder-only .home-decode-actions {
+      flex-direction: row;
+    }
+  }
+
   .home-workspace-panel { border-radius: var(--radius-sm); }
   .home-create-panel,
   .home-decode-panel { @apply h-full; }

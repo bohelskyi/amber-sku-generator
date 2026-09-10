@@ -129,7 +129,7 @@ export function HomeDashboard({
 }) {
   return (
     <div className="space-y-5">
-      <div className="home-top-workspace">
+      <div className={`home-top-workspace${canCreateProducts ? '' : ' is-decoder-only'}`}>
         {canCreateProducts && <section className="home-workspace-panel home-create-panel card p-4 sm:p-5 fade-up stagger-1">
           <div className="section-title mb-4">
             <div>
@@ -162,7 +162,7 @@ export function HomeDashboard({
           <div className="home-workspace-panel home-decode-panel card p-4 sm:p-5">
             <p className="eyebrow">Розшифрувати SKU</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Знайти та перевірити товар</h2>
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row lg:flex-col">
+            <div className="home-decode-actions mt-4 flex flex-col gap-3 sm:flex-row lg:flex-col">
               <input
                 type="text"
                 value={skuToDecode}

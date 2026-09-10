@@ -750,6 +750,7 @@ describe('permission-aware business UI', () => {
       </>
     );
     expect(screen.queryByText('Оберіть категорію')).toBeNull();
+    expect(screen.getByText('Знайти та перевірити товар').closest('.home-top-workspace')?.classList.contains('is-decoder-only')).toBe(true);
     expect(screen.queryByRole('button', { name: 'Архівувати' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Експорт CSV' })).toBeNull();
 
@@ -761,6 +762,7 @@ describe('permission-aware business UI', () => {
       </>
     );
     expect(screen.getByText('Оберіть категорію')).toBeTruthy();
+    expect(screen.getByText('Знайти та перевірити товар').closest('.home-top-workspace')?.classList.contains('is-decoder-only')).toBe(false);
     expect(screen.getAllByRole('button', { name: 'Архівувати' }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Експорт CSV' })).toBeNull();
 
