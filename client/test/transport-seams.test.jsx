@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createCorrectionsApi } from '../src/api/corrections-api';
+import { createExportsApi } from '../src/api/exports-api';
+import { createProductsApi } from '../src/api/products-api';
 import { createRepricingApi } from '../src/api/repricing-api';
 import { downloadBlob } from '../src/lib/download';
 import { getApiError } from '../src/lib/http-error';
@@ -45,6 +47,38 @@ describe('domain API wrappers', () => {
     expect(client.get).toHaveBeenCalledWith('/admin/repricing/9/rollback-csv', {
       responseType: 'blob',
     });
+  });
+
+  it('preserves product builder and archive request contracts', () => {
+    const client = mockClient();
+    const domain = createProductsApi(client);
+    const payload = { categoryCode: 'BR', weight: '2.5' };
+
+    domain.previewPrice(payload);
+    domain.save(payload);
+    domain.archive('BR-001');
+
+    expect(client.post).toHaveBeenCalledWith('/price-preview', payload);
+    expect(client.post).toHaveBeenCalledWith('/save', payload);
+    expect(client.post).toHaveBeenCalledWith('/delete', { skuToDelete: 'BR-001' });
+  });
+
+  it('preserves export idempotency and blob request contracts', () => {
+    const client = mockClient();
+    const domain = createExportsApi(client);
+    const payload = { fromSku: 'BR-001', toSku: 'BR-010' };
+
+    domain.createSnapshot(payload, 'request-id');
+    domain.downloadSnapshot(14);
+    domain.confirmSnapshot(14);
+
+    expect(client.post).toHaveBeenCalledWith('/export/snapshots', payload, {
+      headers: { 'Idempotency-Key': 'request-id' },
+    });
+    expect(client.get).toHaveBeenCalledWith('/export/snapshots/14/csv', {
+      responseType: 'blob',
+    });
+    expect(client.post).toHaveBeenCalledWith('/export/snapshots/14/confirm');
   });
 });
 

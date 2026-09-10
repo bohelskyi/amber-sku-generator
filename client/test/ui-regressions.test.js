@@ -257,12 +257,17 @@ test('product builder live pricing refreshes after answer and weight edits witho
     new URL('../src/hooks/useSkuManager.js', import.meta.url),
     'utf8'
   );
+  const productsApiSource = fs.readFileSync(
+    new URL('../src/api/products-api.js', import.meta.url),
+    'utf8'
+  );
   const appSource = fs.readFileSync(
     new URL('../src/pages/AppPage.jsx', import.meta.url),
     'utf8'
   );
 
-  assert.match(skuManagerSource, /api\.post\('\/price-preview'/);
+  assert.match(productsApiSource, /client\.post\('\/price-preview'/);
+  assert.match(skuManagerSource, /productsApi\.previewPrice\(/);
   assert.match(
     skuManagerSource,
     /\[selectedCat, config, answers, weight, isCalibrated, isWeightRequired\]/,
