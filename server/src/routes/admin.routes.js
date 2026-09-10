@@ -586,7 +586,9 @@ router.get('/admin/repricing/:batchId/csv', requirePermission('repricing.view'),
 
 router.post('/admin/price-cell', requirePermission('pricing.manage'), async (req, res) => {
   try {
-    await upsertPriceCell(req.body || {});
+    await upsertPriceCell(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -595,7 +597,9 @@ router.post('/admin/price-cell', requirePermission('pricing.manage'), async (req
 
 router.post('/admin/scenario', requirePermission('pricing.manage'), async (req, res) => {
   try {
-    const result = await createScenario(req.body || {});
+    const result = await createScenario(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -609,7 +613,9 @@ router.put('/admin/scenario', requirePermission('pricing.manage'), async (req, r
       return res.status(400).json({ error: 'Потрібні id, назва та вісь X' });
     }
 
-    await updateScenario(req.body);
+    await updateScenario(req.body, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -621,7 +627,9 @@ router.post('/admin/scenario/duplicate', requirePermission('pricing.manage'), as
     const { id } = req.body || {};
     if (!id) return res.status(400).json({ error: 'Потрібен id сценарію' });
 
-    const result = await duplicateScenario(id);
+    const result = await duplicateScenario(id, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -630,7 +638,9 @@ router.post('/admin/scenario/duplicate', requirePermission('pricing.manage'), as
 
 router.post('/admin/modifier', requirePermission('pricing.manage'), async (req, res) => {
   try {
-    const result = await createModifier(req.body || {});
+    const result = await createModifier(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -639,7 +649,9 @@ router.post('/admin/modifier', requirePermission('pricing.manage'), async (req, 
 
 router.put('/admin/modifier', requirePermission('pricing.manage'), async (req, res) => {
   try {
-    await updateModifier(req.body || {});
+    await updateModifier(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -649,7 +661,9 @@ router.put('/admin/modifier', requirePermission('pricing.manage'), async (req, r
 router.post('/admin/delete-item', requireDeleteItemPermission, async (req, res) => {
   try {
     const { type, id } = req.body || {};
-    await deleteCatalogItem(type, id);
+    await deleteCatalogItem(type, id, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -661,7 +675,9 @@ router.post('/admin/category', requirePermission('catalog.manage'), async (req, 
     const { code, name } = req.body || {};
     if (!code || !name) return res.status(400).json({ error: 'Потрібні код і назва' });
 
-    const result = await createCategory(req.body);
+    const result = await createCategory(req.body, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -673,7 +689,9 @@ router.put('/admin/category', requirePermission('catalog.manage'), async (req, r
     const { code, name } = req.body || {};
     if (!code || !name) return res.status(400).json({ error: 'Потрібні код і назва' });
 
-    const result = await updateCategory(req.body);
+    const result = await updateCategory(req.body, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -687,7 +705,9 @@ router.post('/admin/question', requirePermission('catalog.manage'), async (req, 
       return res.status(400).json({ error: 'Потрібні key та назва' });
     }
 
-    const result = await createQuestion(req.body || {});
+    const result = await createQuestion(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -701,7 +721,9 @@ router.put('/admin/question', requirePermission('catalog.manage'), async (req, r
       return res.status(400).json({ error: 'Потрібні id, key та назва' });
     }
 
-    const result = await updateQuestion(req.body);
+    const result = await updateQuestion(req.body, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -715,7 +737,9 @@ router.post('/admin/question/update', requirePermission('catalog.manage'), async
       return res.status(400).json({ error: 'Потрібні id, key та назва' });
     }
 
-    const result = await updateQuestion(req.body);
+    const result = await updateQuestion(req.body, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -724,7 +748,9 @@ router.post('/admin/question/update', requirePermission('catalog.manage'), async
 
 router.put('/admin/questions/order', requirePermission('catalog.manage'), async (req, res) => {
   try {
-    const result = await updateQuestionsOrder(req.body || {});
+    const result = await updateQuestionsOrder(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -733,7 +759,9 @@ router.put('/admin/questions/order', requirePermission('catalog.manage'), async 
 
 router.post('/admin/option', requirePermission('catalog.manage'), async (req, res) => {
   try {
-    const result = await createOption(req.body || {});
+    const result = await createOption(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -747,7 +775,9 @@ router.put('/admin/option', requirePermission('catalog.manage'), async (req, res
       return res.status(400).json({ error: 'Потрібні id, label і value_id' });
     }
 
-    await updateOption(req.body);
+    await updateOption(req.body, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -756,10 +786,13 @@ router.put('/admin/option', requirePermission('catalog.manage'), async (req, res
 
 router.patch('/admin/option/:id/archive', requirePermission('catalog.manage'), async (req, res) => {
   try {
-    await setOptionArchived({
-      id: req.params.id,
-      archived: req.body?.archived,
-    });
+    await setOptionArchived(
+      {
+        id: req.params.id,
+        archived: req.body?.archived,
+      },
+      { mutationContext: getRequestMutationContext(req) }
+    );
     res.json({ success: true });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });

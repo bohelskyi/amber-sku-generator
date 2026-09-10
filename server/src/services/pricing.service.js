@@ -1,4 +1,6 @@
 const pool = require('../db/pool');
+const { writeAuditEvent } = require('../audit/audit-events');
+const { createMutationContext } = require('../audit/mutation-context');
 const { getUsdUahRateInfo } = require('./currency.service');
 const { resolveAxisValue } = require('../utils/pricing-axis');
 const {
@@ -11,6 +13,37 @@ const {
 const { asRuleObject, getRuleDependencies, isRuleMatched } = require('../utils/rules');
 const { roundAutomaticUah } = require('../utils/money');
 const { parsePositiveDecimal } = require('../utils/numbers');
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((result, key) => {
+        result[key] = stableValue(value[key]);
+        return result;
+      }, {});
+  }
+  return value;
+}
+
+function valuesEqual(left, right) {
+  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
+}
+
+function addAuditChange(changes, field, previousValue, nextValue, options = {}) {
+  if (valuesEqual(previousValue, nextValue)) return;
+  changes[field] = options.sensitive
+    ? { changed: true }
+    : { from: previousValue, to: nextValue };
+}
+
+function hasWeightBandChanges(summary) {
+  return summary.created > 0
+    || summary.updated > 0
+    || summary.deleted > 0
+    || summary.matrixCellsDeleted > 0;
+}
 
 function normalizeScenarioGroup(groupName, scenarioName = '') {
   const normalizedGroup = String(groupName || '').trim();
@@ -491,35 +524,60 @@ function normalizeScenarioPayload(payload = {}, fallbackStatus = 'draft') {
 
 async function syncScenarioWeightBands(client, scenarioId, weightBands, hadWeightBands) {
   const existingResult = await client.query(
-    'SELECT id FROM price_weight_bands WHERE scenario_id = $1',
+    `SELECT id, label, min_weight, max_weight, sort_order
+     FROM price_weight_bands
+     WHERE scenario_id = $1
+     ORDER BY id
+     FOR UPDATE`,
     [Number(scenarioId)]
   );
-  const existingIds = new Set(existingResult.rows.map((row) => Number(row.id)));
+  const existingById = new Map(
+    existingResult.rows.map((row) => [Number(row.id), row])
+  );
+  const existingIds = new Set(existingById.keys());
+  const summary = { created: 0, updated: 0, deleted: 0, matrixCellsDeleted: 0 };
 
   if (weightBands.length === 0) {
     if (hadWeightBands || existingIds.size > 0) {
-      await client.query('DELETE FROM price_matrix WHERE scenario_id = $1', [Number(scenarioId)]);
-      await client.query('DELETE FROM price_weight_bands WHERE scenario_id = $1', [Number(scenarioId)]);
+      const deletedMatrix = await client.query(
+        'DELETE FROM price_matrix WHERE scenario_id = $1',
+        [Number(scenarioId)]
+      );
+      const deletedBands = await client.query(
+        'DELETE FROM price_weight_bands WHERE scenario_id = $1',
+        [Number(scenarioId)]
+      );
+      summary.matrixCellsDeleted = deletedMatrix.rowCount;
+      summary.deleted = deletedBands.rowCount;
     }
-    return;
+    return summary;
   }
 
   const keptIds = new Set();
   for (const band of weightBands) {
     if (band.id !== null && existingIds.has(Number(band.id))) {
-      await client.query(
-        `UPDATE price_weight_bands
-         SET label = $1, min_weight = $2, max_weight = $3, sort_order = $4
-         WHERE id = $5 AND scenario_id = $6`,
-        [
-          band.label,
-          band.min_weight,
-          band.max_weight,
-          band.sort_order,
-          Number(band.id),
-          Number(scenarioId),
-        ]
-      );
+      const existing = existingById.get(Number(band.id));
+      const changed = existing.label !== band.label
+        || Number(existing.min_weight) !== Number(band.min_weight)
+        || (existing.max_weight === null ? null : Number(existing.max_weight))
+          !== (band.max_weight === null ? null : Number(band.max_weight))
+        || Number(existing.sort_order) !== Number(band.sort_order);
+      if (changed) {
+        await client.query(
+          `UPDATE price_weight_bands
+           SET label = $1, min_weight = $2, max_weight = $3, sort_order = $4
+           WHERE id = $5 AND scenario_id = $6`,
+          [
+            band.label,
+            band.min_weight,
+            band.max_weight,
+            band.sort_order,
+            Number(band.id),
+            Number(scenarioId),
+          ]
+        );
+        summary.updated += 1;
+      }
       keptIds.add(Number(band.id));
       continue;
     }
@@ -532,22 +590,27 @@ async function syncScenarioWeightBands(client, scenarioId, weightBands, hadWeigh
       [Number(scenarioId), band.label, band.min_weight, band.max_weight, band.sort_order]
     );
     keptIds.add(Number(inserted.rows[0].id));
+    summary.created += 1;
   }
 
   const removedIds = [...existingIds].filter((id) => !keptIds.has(id));
   if (removedIds.length > 0) {
-    await client.query(
+    const deletedMatrix = await client.query(
       'DELETE FROM price_matrix WHERE scenario_id = $1 AND x_val = ANY($2::int[])',
       [Number(scenarioId), removedIds]
     );
-    await client.query(
+    const deletedBands = await client.query(
       'DELETE FROM price_weight_bands WHERE scenario_id = $1 AND id = ANY($2::int[])',
       [Number(scenarioId), removedIds]
     );
+    summary.matrixCellsDeleted += deletedMatrix.rowCount;
+    summary.deleted += deletedBands.rowCount;
   }
+
+  return summary;
 }
 
-async function upsertPriceCell({ scenario_id, x_val, y_val, price }) {
+async function upsertPriceCell({ scenario_id, x_val, y_val, price }, options = {}) {
   const normalizedScenarioId = Number(scenario_id);
   const normalizedXVal = Number(x_val);
   const normalizedYVal = Number(y_val || 0);
@@ -555,24 +618,94 @@ async function upsertPriceCell({ scenario_id, x_val, y_val, price }) {
     && price !== null
     && !(typeof price === 'string' && price.trim() === '');
 
-  if (!hasPrice) {
-    await pool.query(
-      `DELETE FROM price_matrix
-       WHERE scenario_id = $1 AND x_val = $2 AND y_val = $3`,
+  const normalizedPrice = hasPrice ? parsePositiveDecimal(price, 'Ціна') : null;
+  const mutationContext = createMutationContext(options.mutationContext);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const scenarioResult = await client.query(
+      `SELECT id, category_code, name
+       FROM price_scenarios
+       WHERE id = $1
+       FOR KEY SHARE`,
+      [normalizedScenarioId]
+    );
+    const currentResult = await client.query(
+      `SELECT price
+       FROM price_matrix
+       WHERE scenario_id = $1 AND x_val = $2 AND y_val = $3
+       FOR UPDATE`,
       [normalizedScenarioId, normalizedXVal, normalizedYVal]
     );
-    return;
+    const currentPrice = currentResult.rows.length > 0
+      ? Number(currentResult.rows[0].price)
+      : null;
+
+    if (!hasPrice) {
+      if (currentPrice === null) {
+        await client.query('COMMIT');
+        return;
+      }
+      await client.query(
+        `DELETE FROM price_matrix
+         WHERE scenario_id = $1 AND x_val = $2 AND y_val = $3`,
+        [normalizedScenarioId, normalizedXVal, normalizedYVal]
+      );
+      const scenario = scenarioResult.rows[0];
+      await writeAuditEvent(client, {
+        mutationContext,
+        eventKey: 'pricing.matrix_cell.deleted',
+        subjectType: 'pricing_matrix_cell',
+        subjectId: `${normalizedScenarioId}:${normalizedXVal}:${normalizedYVal}`,
+        details: {
+          scenarioId: normalizedScenarioId,
+          scenarioName: scenario.name,
+          categoryCode: scenario.category_code,
+          xValue: normalizedXVal,
+          yValue: normalizedYVal,
+          oldPrice: currentPrice,
+          newPrice: null,
+        },
+      });
+      await client.query('COMMIT');
+      return;
+    }
+
+    if (currentPrice !== null && currentPrice === normalizedPrice) {
+      await client.query('COMMIT');
+      return;
+    }
+
+    await client.query(
+      `INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (scenario_id, x_val, y_val)
+       DO UPDATE SET price = EXCLUDED.price`,
+      [normalizedScenarioId, normalizedXVal, normalizedYVal, normalizedPrice]
+    );
+    const scenario = scenarioResult.rows[0];
+    await writeAuditEvent(client, {
+      mutationContext,
+      eventKey: 'pricing.matrix_cell.set',
+      subjectType: 'pricing_matrix_cell',
+      subjectId: `${normalizedScenarioId}:${normalizedXVal}:${normalizedYVal}`,
+      details: {
+        scenarioId: normalizedScenarioId,
+        scenarioName: scenario.name,
+        categoryCode: scenario.category_code,
+        xValue: normalizedXVal,
+        yValue: normalizedYVal,
+        oldPrice: currentPrice,
+        newPrice: normalizedPrice,
+      },
+    });
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
   }
-
-  const normalizedPrice = parsePositiveDecimal(price, 'Ціна');
-
-  await pool.query(
-    `INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (scenario_id, x_val, y_val)
-     DO UPDATE SET price = EXCLUDED.price`,
-    [normalizedScenarioId, normalizedXVal, normalizedYVal, normalizedPrice]
-  );
 }
 
 async function createScenario({
@@ -587,7 +720,7 @@ async function createScenario({
   price_mode,
   apply_modifiers,
   weight_bands,
-}) {
+}, options = {}) {
   const payload = typeof match_json === 'string' ? JSON.parse(match_json) : match_json || {};
   const scenarioGroup = normalizeScenarioGroup(group_name, name);
   const normalized = normalizeScenarioPayload({
@@ -599,6 +732,7 @@ async function createScenario({
     apply_modifiers,
     weight_bands,
   });
+  const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
 
   try {
@@ -622,14 +756,31 @@ async function createScenario({
         normalized.applyModifiers,
       ]
     );
+    const scenarioId = Number(result.rows[0].id);
     await syncScenarioWeightBands(
       client,
-      Number(result.rows[0].id),
+      scenarioId,
       normalized.weightBands,
       false
     );
+    await writeAuditEvent(client, {
+      mutationContext,
+      eventKey: 'pricing.scenario.created',
+      subjectType: 'pricing_scenario',
+      subjectId: scenarioId,
+      details: {
+        categoryCode: category_code,
+        name,
+        groupName: scenarioGroup,
+        axisXKey: normalized.axisXKey,
+        axisYKey: normalized.axisYKey || null,
+        status: normalized.status,
+        priceMode: normalized.priceMode,
+        weightBandCount: normalized.weightBands.length,
+      },
+    });
     await client.query('COMMIT');
-    return { id: result.rows[0].id };
+    return { id: scenarioId };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -650,7 +801,7 @@ async function updateScenario({
   price_mode,
   apply_modifiers,
   weight_bands,
-}) {
+}, options = {}) {
   const payload = typeof match_json === 'string' ? JSON.parse(match_json) : match_json || {};
   const scenarioGroup = normalizeScenarioGroup(group_name, name);
   const normalized = normalizeScenarioPayload({
@@ -662,12 +813,17 @@ async function updateScenario({
     apply_modifiers,
     weight_bands,
   }, 'active');
+  const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
     const currentResult = await client.query(
-      'SELECT axis_x_key FROM price_scenarios WHERE id = $1 FOR UPDATE',
+      `SELECT id, category_code, name, group_name, match_json, axis_x_key, axis_y_key,
+              priority, status, price_mode, apply_modifiers
+       FROM price_scenarios
+       WHERE id = $1
+       FOR UPDATE`,
       [Number(id)]
     );
     if (currentResult.rows.length === 0) {
@@ -676,31 +832,64 @@ async function updateScenario({
       throw err;
     }
 
-    await client.query(
-      `UPDATE price_scenarios
-       SET name = $1, group_name = $2, match_json = $3::jsonb,
-           axis_x_key = $4, axis_y_key = $5, priority = $6, status = $7,
-           price_mode = $8, apply_modifiers = $9
-       WHERE id = $10`,
-      [
-        name,
-        scenarioGroup,
-        JSON.stringify(payload),
-        normalized.axisXKey,
-        normalized.axisYKey || null,
-        normalized.priority,
-        normalized.status,
-        normalized.priceMode,
-        normalized.applyModifiers,
-        Number(id),
-      ]
+    const current = currentResult.rows[0];
+    const changes = {};
+    addAuditChange(changes, 'name', current.name, name);
+    addAuditChange(changes, 'groupName', current.group_name || '', scenarioGroup);
+    addAuditChange(changes, 'matchRule', current.match_json || {}, payload, { sensitive: true });
+    addAuditChange(changes, 'axisXKey', current.axis_x_key, normalized.axisXKey);
+    addAuditChange(changes, 'axisYKey', current.axis_y_key, normalized.axisYKey || null);
+    addAuditChange(changes, 'priority', Number(current.priority), normalized.priority);
+    addAuditChange(changes, 'status', current.status, normalized.status);
+    addAuditChange(changes, 'priceMode', current.price_mode, normalized.priceMode);
+    addAuditChange(
+      changes,
+      'applyModifiers',
+      Boolean(current.apply_modifiers),
+      normalized.applyModifiers
     );
-    await syncScenarioWeightBands(
+
+    if (Object.keys(changes).length > 0) {
+      await client.query(
+        `UPDATE price_scenarios
+         SET name = $1, group_name = $2, match_json = $3::jsonb,
+             axis_x_key = $4, axis_y_key = $5, priority = $6, status = $7,
+             price_mode = $8, apply_modifiers = $9
+         WHERE id = $10`,
+        [
+          name,
+          scenarioGroup,
+          JSON.stringify(payload),
+          normalized.axisXKey,
+          normalized.axisYKey || null,
+          normalized.priority,
+          normalized.status,
+          normalized.priceMode,
+          normalized.applyModifiers,
+          Number(id),
+        ]
+      );
+    }
+    const weightBandChanges = await syncScenarioWeightBands(
       client,
       Number(id),
       normalized.weightBands,
-      currentResult.rows[0].axis_x_key === 'weight_band'
+      current.axis_x_key === 'weight_band'
     );
+    if (Object.keys(changes).length > 0 || hasWeightBandChanges(weightBandChanges)) {
+      await writeAuditEvent(client, {
+        mutationContext,
+        eventKey: 'pricing.scenario.updated',
+        subjectType: 'pricing_scenario',
+        subjectId: Number(id),
+        details: {
+          categoryCode: current.category_code,
+          name,
+          changes,
+          ...(hasWeightBandChanges(weightBandChanges) ? { weightBandChanges } : {}),
+        },
+      });
+    }
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');
@@ -710,7 +899,8 @@ async function updateScenario({
   }
 }
 
-async function duplicateScenario(id) {
+async function duplicateScenario(id, options = {}) {
+  const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -769,6 +959,7 @@ async function duplicateScenario(id) {
       'SELECT x_val, y_val, price FROM price_matrix WHERE scenario_id = $1',
       [Number(id)]
     );
+    let copiedMatrixCellCount = 0;
     for (const cell of sourceMatrix.rows) {
       const xVal = source.axis_x_key === 'weight_band'
         ? bandIdMap.get(Number(cell.x_val))
@@ -779,7 +970,23 @@ async function duplicateScenario(id) {
          VALUES ($1, $2, $3, $4)`,
         [Number(newScenarioId), xVal, Number(cell.y_val), Number(cell.price)]
       );
+      copiedMatrixCellCount += 1;
     }
+
+    await writeAuditEvent(client, {
+      mutationContext,
+      eventKey: 'pricing.scenario.duplicated',
+      subjectType: 'pricing_scenario',
+      subjectId: Number(newScenarioId),
+      details: {
+        sourceScenarioId: Number(id),
+        categoryCode: source.category_code,
+        name: `${source.name} (копія)`,
+        status: 'draft',
+        copiedWeightBandCount: sourceBands.rows.length,
+        copiedMatrixCellCount,
+      },
+    });
 
     await client.query('COMMIT');
     return { success: true, id: newScenarioId };
@@ -824,48 +1031,138 @@ function getLegacyModifierTrigger(rule) {
   };
 }
 
-async function createModifier({ category_code, trigger_key, trigger_val, match_json, factor }) {
+async function createModifier(
+  { category_code, trigger_key, trigger_val, match_json, factor },
+  options = {}
+) {
   const payload = normalizeModifierRule({ match_json, trigger_key, trigger_val });
   const legacyTrigger = getLegacyModifierTrigger(payload);
-  const result = await pool.query(
-    `INSERT INTO price_modifiers (category_code, trigger_key, trigger_val, match_json, factor)
-     VALUES ($1, $2, $3, $4::jsonb, $5)
-     RETURNING id`,
-    [
-      category_code,
-      legacyTrigger.triggerKey,
-      legacyTrigger.triggerVal,
-      JSON.stringify(payload),
-      Number(factor),
-    ]
-  );
-
-  return { id: result.rows[0].id };
+  const normalizedFactor = Number(factor);
+  const mutationContext = createMutationContext(options.mutationContext);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      `INSERT INTO price_modifiers (category_code, trigger_key, trigger_val, match_json, factor)
+       VALUES ($1, $2, $3, $4::jsonb, $5)
+       RETURNING id`,
+      [
+        category_code,
+        legacyTrigger.triggerKey,
+        legacyTrigger.triggerVal,
+        JSON.stringify(payload),
+        normalizedFactor,
+      ]
+    );
+    const modifierId = Number(result.rows[0].id);
+    await writeAuditEvent(client, {
+      mutationContext,
+      eventKey: 'pricing.modifier.created',
+      subjectType: 'pricing_modifier',
+      subjectId: modifierId,
+      details: {
+        categoryCode: category_code,
+        triggerKey: legacyTrigger.triggerKey,
+        triggerValue: legacyTrigger.triggerVal,
+        factor: normalizedFactor,
+      },
+    });
+    await client.query('COMMIT');
+    return { id: modifierId };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
-async function updateModifier({ id, factor, match_json, trigger_key, trigger_val }) {
-  if (match_json === undefined && trigger_key === undefined && trigger_val === undefined) {
-    await pool.query('UPDATE price_modifiers SET factor = $1 WHERE id = $2', [
-      Number(factor),
-      Number(id),
-    ]);
-    return;
-  }
+async function updateModifier(
+  { id, factor, match_json, trigger_key, trigger_val },
+  options = {}
+) {
+  const factorOnly = match_json === undefined
+    && trigger_key === undefined
+    && trigger_val === undefined;
+  const normalizedFactor = Number(factor);
+  const mutationContext = createMutationContext(options.mutationContext);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const currentResult = await client.query(
+      `SELECT id, category_code, trigger_key, trigger_val, match_json, factor
+       FROM price_modifiers
+       WHERE id = $1
+       FOR UPDATE`,
+      [Number(id)]
+    );
+    const current = currentResult.rows[0];
+    if (!current) {
+      await client.query('COMMIT');
+      return;
+    }
 
-  const payload = normalizeModifierRule({ match_json, trigger_key, trigger_val });
-  const legacyTrigger = getLegacyModifierTrigger(payload);
-  await pool.query(
-    `UPDATE price_modifiers
-     SET trigger_key = $1, trigger_val = $2, match_json = $3::jsonb, factor = $4
-     WHERE id = $5`,
-    [
-      legacyTrigger.triggerKey,
-      legacyTrigger.triggerVal,
-      JSON.stringify(payload),
-      Number(factor),
-      Number(id),
-    ]
-  );
+    const payload = factorOnly
+      ? current.match_json || {}
+      : normalizeModifierRule({ match_json, trigger_key, trigger_val });
+    const legacyTrigger = factorOnly
+      ? {
+          triggerKey: current.trigger_key || '',
+          triggerVal: current.trigger_val === null ? 0 : Number(current.trigger_val),
+        }
+      : getLegacyModifierTrigger(payload);
+    const changes = {};
+    addAuditChange(changes, 'factor', Number(current.factor), normalizedFactor);
+    addAuditChange(changes, 'triggerKey', current.trigger_key || '', legacyTrigger.triggerKey);
+    addAuditChange(
+      changes,
+      'triggerValue',
+      current.trigger_val === null ? 0 : Number(current.trigger_val),
+      legacyTrigger.triggerVal
+    );
+    addAuditChange(changes, 'matchRule', current.match_json || {}, payload, { sensitive: true });
+
+    if (Object.keys(changes).length === 0) {
+      await client.query('COMMIT');
+      return;
+    }
+
+    if (factorOnly) {
+      await client.query('UPDATE price_modifiers SET factor = $1 WHERE id = $2', [
+        normalizedFactor,
+        Number(id),
+      ]);
+    } else {
+      await client.query(
+        `UPDATE price_modifiers
+         SET trigger_key = $1, trigger_val = $2, match_json = $3::jsonb, factor = $4
+         WHERE id = $5`,
+        [
+          legacyTrigger.triggerKey,
+          legacyTrigger.triggerVal,
+          JSON.stringify(payload),
+          normalizedFactor,
+          Number(id),
+        ]
+      );
+    }
+    await writeAuditEvent(client, {
+      mutationContext,
+      eventKey: 'pricing.modifier.updated',
+      subjectType: 'pricing_modifier',
+      subjectId: Number(id),
+      details: {
+        categoryCode: current.category_code,
+        changes,
+      },
+    });
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 module.exports = {

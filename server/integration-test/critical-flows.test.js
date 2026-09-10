@@ -3431,6 +3431,409 @@ test('price-cell API stores only positive prices and treats empty or missing pri
   }
 });
 
+test('catalog and pricing configuration mutations write concise semantic audit events', async () => {
+  if (!authenticatedSession) authenticatedSession = await authenticateApplicationSession('/admin');
+  const categoryCode = `A${Date.now().toString().slice(-8)}`;
+  const actorUserId = Number(authenticatedSession.applicationUser.id);
+  const mutationOptions = (requestId) => ({ headers: { 'X-Request-ID': requestId } });
+
+  const createdCategory = await request('/api/admin/category', {
+    method: 'POST',
+    body: {
+      code: categoryCode,
+      name: 'Audit category',
+      requires_weight: 0,
+      skip_hidden_sku_questions: 0,
+    },
+    ...mutationOptions('audit-category-created'),
+  });
+  assert.equal(createdCategory.response.status, 200, createdCategory.text);
+
+  const updatedCategory = await request('/api/admin/category', {
+    method: 'PUT',
+    body: {
+      code: categoryCode,
+      next_code: categoryCode,
+      name: 'Audited category',
+      requires_weight: 0,
+      skip_hidden_sku_questions: 0,
+    },
+    ...mutationOptions('audit-category-updated'),
+  });
+  assert.equal(updatedCategory.response.status, 200, updatedCategory.text);
+
+  const questionPayload = {
+    category_code: categoryCode,
+    key: 'audit_kind',
+    label: 'Audit kind',
+    sku_index: 1,
+    display_order: 1,
+    required: 1,
+    include_in_sku: 1,
+    input_type: 'options',
+    sku_separator: '',
+  };
+  const createdQuestion = await request('/api/admin/question', {
+    method: 'POST',
+    body: questionPayload,
+    ...mutationOptions('audit-question-created'),
+  });
+  assert.equal(createdQuestion.response.status, 200, createdQuestion.text);
+  const questionId = Number(createdQuestion.data.id);
+
+  const updatedQuestionPayload = {
+    ...questionPayload,
+    id: questionId,
+    label: 'Audited kind',
+  };
+  const updatedQuestion = await request('/api/admin/question', {
+    method: 'PUT',
+    body: updatedQuestionPayload,
+    ...mutationOptions('audit-question-updated'),
+  });
+  assert.equal(updatedQuestion.response.status, 200, updatedQuestion.text);
+  const noOpQuestion = await request('/api/admin/question', {
+    method: 'PUT',
+    body: updatedQuestionPayload,
+    ...mutationOptions('audit-question-no-op'),
+  });
+  assert.equal(noOpQuestion.response.status, 200, noOpQuestion.text);
+
+  const reordered = await request('/api/admin/questions/order', {
+    method: 'PUT',
+    body: {
+      category_code: categoryCode,
+      questions: [{ id: questionId, display_order: 2, sku_index: 1 }],
+    },
+    ...mutationOptions('audit-question-reordered'),
+  });
+  assert.equal(reordered.response.status, 200, reordered.text);
+  const noOpReorder = await request('/api/admin/questions/order', {
+    method: 'PUT',
+    body: {
+      category_code: categoryCode,
+      questions: [{ id: questionId, display_order: 2, sku_index: 1 }],
+    },
+    ...mutationOptions('audit-question-reorder-no-op'),
+  });
+  assert.equal(noOpReorder.response.status, 200, noOpReorder.text);
+
+  const createdOption = await request('/api/admin/option', {
+    method: 'POST',
+    body: {
+      question_id: questionId,
+      value_id: 1,
+      sku_code: '01',
+      label: 'Audit option',
+    },
+    ...mutationOptions('audit-option-created'),
+  });
+  assert.equal(createdOption.response.status, 200, createdOption.text);
+  const optionId = Number(createdOption.data.id);
+  const updatedOption = await request('/api/admin/option', {
+    method: 'PUT',
+    body: {
+      id: optionId,
+      value_id: 1,
+      sku_code: '01',
+      label: 'Audited option',
+    },
+    ...mutationOptions('audit-option-updated'),
+  });
+  assert.equal(updatedOption.response.status, 200, updatedOption.text);
+  const archivedOption = await request(`/api/admin/option/${optionId}/archive`, {
+    method: 'PATCH',
+    body: { archived: true },
+    ...mutationOptions('audit-option-archived'),
+  });
+  assert.equal(archivedOption.response.status, 200, archivedOption.text);
+  const noOpArchive = await request(`/api/admin/option/${optionId}/archive`, {
+    method: 'PATCH',
+    body: { archived: true },
+    ...mutationOptions('audit-option-archive-no-op'),
+  });
+  assert.equal(noOpArchive.response.status, 200, noOpArchive.text);
+
+  const scenarioPayload = {
+    category_code: categoryCode,
+    name: 'Audit scenario',
+    group_name: 'Audit group',
+    match_json: { audit_kind: 1 },
+    axis_x_key: 'weight_band',
+    axis_y_key: '',
+    priority: 0,
+    status: 'draft',
+    price_mode: 'fixed_uah',
+    apply_modifiers: true,
+    weight_bands: [
+      { label: 'Light', min_weight: 0, max_weight: 10 },
+      { label: 'Heavy', min_weight: 10, max_weight: null },
+    ],
+  };
+  const createdScenario = await request('/api/admin/scenario', {
+    method: 'POST',
+    body: scenarioPayload,
+    ...mutationOptions('audit-scenario-created'),
+  });
+  assert.equal(createdScenario.response.status, 200, createdScenario.text);
+  const scenarioId = Number(createdScenario.data.id);
+  const storedBands = await pool.query(
+    `SELECT id, label, min_weight, max_weight
+     FROM price_weight_bands
+     WHERE scenario_id = $1
+     ORDER BY sort_order`,
+    [scenarioId]
+  );
+  assert.equal(storedBands.rows.length, 2);
+
+  const updatedScenarioPayload = {
+    ...scenarioPayload,
+    id: scenarioId,
+    priority: 2,
+    weight_bands: storedBands.rows.map((band, index) => ({
+      id: Number(band.id),
+      label: index === 0 ? 'Small' : band.label,
+      min_weight: Number(band.min_weight),
+      max_weight: band.max_weight === null ? null : Number(band.max_weight),
+    })),
+  };
+  const updatedScenario = await request('/api/admin/scenario', {
+    method: 'PUT',
+    body: updatedScenarioPayload,
+    ...mutationOptions('audit-scenario-updated'),
+  });
+  assert.equal(updatedScenario.response.status, 200, updatedScenario.text);
+  const noOpScenario = await request('/api/admin/scenario', {
+    method: 'PUT',
+    body: updatedScenarioPayload,
+    ...mutationOptions('audit-scenario-no-op'),
+  });
+  assert.equal(noOpScenario.response.status, 200, noOpScenario.text);
+
+  const firstBandId = Number(storedBands.rows[0].id);
+  const cell = { scenario_id: scenarioId, x_val: firstBandId, y_val: 0 };
+  const setCell = await request('/api/admin/price-cell', {
+    method: 'POST',
+    body: { ...cell, price: 125.5 },
+    ...mutationOptions('audit-matrix-set'),
+  });
+  assert.equal(setCell.response.status, 200, setCell.text);
+  const noOpCell = await request('/api/admin/price-cell', {
+    method: 'POST',
+    body: { ...cell, price: 125.5 },
+    ...mutationOptions('audit-matrix-no-op'),
+  });
+  assert.equal(noOpCell.response.status, 200, noOpCell.text);
+  const invalidCell = await request('/api/admin/price-cell', {
+    method: 'POST',
+    body: { ...cell, price: 0 },
+    ...mutationOptions('audit-matrix-invalid'),
+  });
+  assert.equal(invalidCell.response.status, 400, invalidCell.text);
+  const deleteCell = await request('/api/admin/price-cell', {
+    method: 'POST',
+    body: cell,
+    ...mutationOptions('audit-matrix-deleted'),
+  });
+  assert.equal(deleteCell.response.status, 200, deleteCell.text);
+  const noOpDeleteCell = await request('/api/admin/price-cell', {
+    method: 'POST',
+    body: cell,
+    ...mutationOptions('audit-matrix-delete-no-op'),
+  });
+  assert.equal(noOpDeleteCell.response.status, 200, noOpDeleteCell.text);
+
+  const createdModifier = await request('/api/admin/modifier', {
+    method: 'POST',
+    body: {
+      category_code: categoryCode,
+      match_json: { audit_kind: 1 },
+      factor: 1.1,
+    },
+    ...mutationOptions('audit-modifier-created'),
+  });
+  assert.equal(createdModifier.response.status, 200, createdModifier.text);
+  const modifierId = Number(createdModifier.data.id);
+  const updatedModifier = await request('/api/admin/modifier', {
+    method: 'PUT',
+    body: { id: modifierId, factor: 1.2 },
+    ...mutationOptions('audit-modifier-updated'),
+  });
+  assert.equal(updatedModifier.response.status, 200, updatedModifier.text);
+  const noOpModifier = await request('/api/admin/modifier', {
+    method: 'PUT',
+    body: { id: modifierId, factor: 1.2 },
+    ...mutationOptions('audit-modifier-no-op'),
+  });
+  assert.equal(noOpModifier.response.status, 200, noOpModifier.text);
+
+  const duplicatedScenario = await request('/api/admin/scenario/duplicate', {
+    method: 'POST',
+    body: { id: scenarioId },
+    ...mutationOptions('audit-scenario-duplicated'),
+  });
+  assert.equal(duplicatedScenario.response.status, 200, duplicatedScenario.text);
+  const duplicateScenarioId = Number(duplicatedScenario.data.id);
+
+  const deletedModifier = await request('/api/admin/delete-item', {
+    method: 'POST', body: { type: 'modifier', id: modifierId },
+    ...mutationOptions('audit-modifier-deleted'),
+  });
+  assert.equal(deletedModifier.response.status, 200, deletedModifier.text);
+  for (const deletedScenarioId of [duplicateScenarioId, scenarioId]) {
+    const deletedScenario = await request('/api/admin/delete-item', {
+      method: 'POST', body: { type: 'scenario', id: deletedScenarioId },
+      ...mutationOptions(`audit-scenario-deleted-${deletedScenarioId}`),
+    });
+    assert.equal(deletedScenario.response.status, 200, deletedScenario.text);
+  }
+  for (const [type, id] of [['option', optionId], ['question', questionId], ['category', categoryCode]]) {
+    const deleted = await request('/api/admin/delete-item', {
+      method: 'POST', body: { type, id },
+      ...mutationOptions(`audit-${type}-deleted`),
+    });
+    assert.equal(deleted.response.status, 200, deleted.text);
+  }
+
+  const auditEvents = await pool.query(
+    `SELECT event_key, subject_type, subject_id, actor_user_id, request_id, details
+     FROM audit_events
+     WHERE details->>'categoryCode' = $1
+        OR (event_key LIKE 'catalog.category.%' AND subject_id = $1)
+     ORDER BY id`,
+    [categoryCode]
+  );
+  assert.deepEqual(
+    auditEvents.rows.map((event) => event.event_key),
+    [
+      'catalog.category.created',
+      'catalog.category.updated',
+      'catalog.question.created',
+      'catalog.question.updated',
+      'catalog.question.reordered',
+      'catalog.option.created',
+      'catalog.option.updated',
+      'catalog.option.archived',
+      'pricing.scenario.created',
+      'pricing.scenario.updated',
+      'pricing.matrix_cell.set',
+      'pricing.matrix_cell.deleted',
+      'pricing.modifier.created',
+      'pricing.modifier.updated',
+      'pricing.scenario.duplicated',
+      'pricing.modifier.deleted',
+      'pricing.scenario.deleted',
+      'pricing.scenario.deleted',
+      'catalog.option.deleted',
+      'catalog.question.deleted',
+      'catalog.category.deleted',
+    ]
+  );
+  assert.equal(
+    auditEvents.rows.every((event) => Number(event.actor_user_id) === actorUserId),
+    true
+  );
+  assert.equal(
+    auditEvents.rows.some((event) => /no-op|invalid/.test(event.request_id)),
+    false
+  );
+
+  const questionUpdateEvent = auditEvents.rows.find(
+    (event) => event.event_key === 'catalog.question.updated'
+  );
+  assert.deepEqual(questionUpdateEvent.details.changes, {
+    label: { from: 'Audit kind', to: 'Audited kind' },
+  });
+  const scenarioUpdateEvent = auditEvents.rows.find(
+    (event) => event.event_key === 'pricing.scenario.updated'
+  );
+  assert.deepEqual(scenarioUpdateEvent.details.changes, {
+    priority: { from: 0, to: 2 },
+  });
+  assert.deepEqual(scenarioUpdateEvent.details.weightBandChanges, {
+    created: 0,
+    updated: 1,
+    deleted: 0,
+    matrixCellsDeleted: 0,
+  });
+  assert.equal(JSON.stringify(scenarioUpdateEvent.details).includes('audit_kind'), false);
+
+  const matrixEvents = auditEvents.rows.filter(
+    (event) => event.subject_type === 'pricing_matrix_cell'
+  );
+  assert.deepEqual(matrixEvents.map((event) => ({
+    eventKey: event.event_key,
+    oldPrice: event.details.oldPrice,
+    newPrice: event.details.newPrice,
+    xValue: event.details.xValue,
+    yValue: event.details.yValue,
+  })), [
+    {
+      eventKey: 'pricing.matrix_cell.set',
+      oldPrice: null,
+      newPrice: 125.5,
+      xValue: firstBandId,
+      yValue: 0,
+    },
+    {
+      eventKey: 'pricing.matrix_cell.deleted',
+      oldPrice: 125.5,
+      newPrice: null,
+      xValue: firstBandId,
+      yValue: 0,
+    },
+  ]);
+});
+
+test('configuration audit failure rolls back catalog and pricing mutations', async () => {
+  if (!authenticatedSession) authenticatedSession = await authenticateApplicationSession('/admin');
+  const categoryCode = `F${Date.now().toString().slice(-8)}`;
+  const xValue = 987654;
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION fail_test_configuration_audit()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF NEW.event_key IN ('catalog.category.created', 'pricing.matrix_cell.set') THEN
+        RAISE EXCEPTION 'forced configuration audit failure';
+      END IF;
+      RETURN NEW;
+    END;
+    $$;
+    CREATE TRIGGER fail_test_configuration_audit
+    BEFORE INSERT ON audit_events
+    FOR EACH ROW EXECUTE FUNCTION fail_test_configuration_audit();
+  `);
+  try {
+    const category = await request('/api/admin/category', {
+      method: 'POST',
+      body: { code: categoryCode, name: 'Must roll back', requires_weight: 0 },
+    });
+    assert.equal(category.response.status, 500, category.text);
+    assert.equal(Number((await pool.query(
+      'SELECT count(*) FROM categories WHERE code = $1', [categoryCode]
+    )).rows[0].count), 0);
+
+    const matrix = await request('/api/admin/price-cell', {
+      method: 'POST',
+      body: { scenario_id: schemas.ZZScenario, x_val: xValue, y_val: 0, price: 777 },
+    });
+    assert.equal(matrix.response.status, 500, matrix.text);
+    assert.equal(Number((await pool.query(
+      `SELECT count(*) FROM price_matrix
+       WHERE scenario_id = $1 AND x_val = $2 AND y_val = 0`,
+      [schemas.ZZScenario, xValue]
+    )).rows[0].count), 0);
+  } finally {
+    await pool.query('DROP TRIGGER fail_test_configuration_audit ON audit_events');
+    await pool.query('DROP FUNCTION fail_test_configuration_audit()');
+    await pool.query('DELETE FROM categories WHERE code = $1', [categoryCode]);
+    await pool.query(
+      'DELETE FROM price_matrix WHERE scenario_id = $1 AND x_val = $2 AND y_val = 0',
+      [schemas.ZZScenario, xValue]
+    );
+  }
+});
+
 test('preview/save are authoritative and concurrent sequences are unique', async () => {
   const preview = await request('/api/preview', {
     method: 'POST',
