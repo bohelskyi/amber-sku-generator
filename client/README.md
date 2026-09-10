@@ -19,10 +19,11 @@ For direct local OIDC development, the repository documentation uses `http://loc
 
 ```bash
 npm test
+npm run test:coverage
 npm run lint
 npm run build
 ```
 
-`npm test` runs the Node-based pure behavior tests followed by the jsdom/Vitest rendered component and workflow tests. The production build is emitted to `dist/` and served by nginx in the checked-in container topology.
+`npm test` runs the Node-based pure behavior tests followed by the jsdom/Vitest rendered component and workflow tests. `npm run test:coverage` reports both layers without enforcing a percentage threshold. The production build is emitted to `dist/` and served by nginx in the checked-in container topology.
 
 See the root [`PROJECT_CONTEXT.md`](../PROJECT_CONTEXT.md), [`README.md`](../README.md), and domain documents under [`docs/`](../docs/) for architecture, permissions, deployment, and business invariants.

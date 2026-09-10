@@ -45,7 +45,7 @@ See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permi
 | `server/src/utils/` | SKU/rule/pricing helpers, numeric parsing, CSV safety, HTTP/logging utilities. |
 | `server/data_config.js` | Defaults for an empty catalog only; not deployed live configuration after seeding. |
 | `server/test/` | Server unit tests. |
-| `server/integration-test/critical-flows.test.js` | Destructive real-PostgreSQL API, migration, upgrade, and concurrency tests. |
+| `server/integration-test/` | One serialized destructive PostgreSQL entrypoint, ordered domain case modules, shared fixtures, API/migration/upgrade coverage, and real concurrency tests. |
 | `server/scripts/` | Administrator bootstrap, integrity audit, optional SQLite configuration import. |
 | `client/src/auth/` | Memory-only authentication state and AuthGate. |
 | `client/src/hooks/`, `client/src/lib/` | Client orchestration and testable presentation rules. |
@@ -80,6 +80,6 @@ See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permi
 
 ## Testing and operations summary
 
-CI runs server unit tests, destructive PostgreSQL integration tests, client tests, client lint, and the production client build. Integration tests refuse a database name that does not end in `_test`; use only a disposable database.
+CI validates Compose, runs scoped server static checks, server unit tests with non-blocking coverage visibility, the serialized destructive PostgreSQL integration suite, client tests with non-blocking coverage visibility, client lint, and the production client build. Integration tests refuse a database name that does not end in `_test`; use only a disposable database.
 
 The checked-in Compose setup is a development/single-host baseline, not a complete hardened infrastructure design. PostgreSQL is host-exposed by the base Compose file, secrets come from ignored environment configuration, and backup scheduling/retention/encryption/off-host monitoring remain external responsibilities. See [`docs/OPERATIONS.md`](docs/OPERATIONS.md).

@@ -33,11 +33,22 @@ jobs:
           cache-dependency-path: |
             server/package-lock.json
             client/package-lock.json
+      - name: Validate Compose configuration
+        env:
+          OIDC_CLIENT_SECRET: compose-validation-only
+          SESSION_SECRET: compose-validation-only-0123456789abcdef
+        run: docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.local.yml config --quiet
       - name: Server dependencies
         run: npm ci
         working-directory: server
+      - name: Server static checks
+        run: npm run lint
+        working-directory: server
       - name: Server unit tests
         run: npm test
+        working-directory: server
+      - name: Server unit coverage
+        run: npm run test:coverage
         working-directory: server
       - name: PostgreSQL integration tests
         run: npm run test:integration
@@ -47,6 +58,9 @@ jobs:
         working-directory: client
       - name: Client tests
         run: npm test
+        working-directory: client
+      - name: Client coverage
+        run: npm run test:coverage
         working-directory: client
       - name: Client lint
         run: npm run lint
