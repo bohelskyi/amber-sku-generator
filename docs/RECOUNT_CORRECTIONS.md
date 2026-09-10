@@ -23,10 +23,12 @@ Recount apply is one authoritative transaction that:
 3. validates automatic/manual final pricing;
 4. blocks apply when an active correction request owns the source;
 5. serializes and reserves the corrected SKU or next variation;
-6. inserts the new active product and correction audit record;
+6. inserts the new active product and detailed `product_corrections` history record;
 7. marks the source corrected and links both records.
 
 Both source and corrected products are excluded from the normal export queue by current recount apply behavior. Preserve the transaction, lock ordering, stale-signature protection, and export exclusion.
+
+Successful direct apply and correction-request completion use the authenticated local application user as `product_corrections.performed_by_user_id` and as the successor product's `products.created_by_user_id`. They append one semantic `product.recounted` durable audit event in the same transaction. Its concise details link the source and corrected product/SKU plus the detailed correction row and optional correction request; the existing old/new recount payload is not duplicated into `audit_events`. Historical product/correction rows remain `NULL` and no historical events are synthesized.
 
 Direct apply requires `products.recount`; correction preview/request creation requires `corrections.create`.
 
@@ -63,4 +65,4 @@ Server permission checks remain authoritative; client controls are hidden from e
 
 ## Deferred ownership work
 
-Actor attribution, `audit_events`, and user-based correction ownership are not implemented. Mutation audit actor fields remain null. Never label a capability claim as user ownership or derive actor identity from OIDC `sub`. Any replacement or augmentation of capability claims is a separately scoped authorization/data-migration change.
+Local-user attribution and durable `product.recounted` events are implemented for successful recount application. User-based correction-request ownership is not implemented; capability tokens retain their current behavior. Never label a capability claim as user ownership or derive actor identity from OIDC `sub`. Any replacement or augmentation of capability claims is a separately scoped authorization/data-migration change.

@@ -455,7 +455,7 @@ async function syncActiveRepricingDrafts() {
   return failures;
 }
 
-async function completeCorrectionRequest(requestId, claimToken) {
+async function completeCorrectionRequest(requestId, claimToken, options = {}) {
   const row = await getCorrectionRequestRow(requestId);
   if (row.status === 'completed') {
     return { success: true, alreadyCompleted: true, request: normalizeRequestRow(row) };
@@ -485,6 +485,8 @@ async function completeCorrectionRequest(requestId, claimToken) {
     correctionRequestId: Number(requestId),
     correctionRequestSignature: row.preview_signature,
     correctionRequestClaimHash: claimTokenHash,
+  }, {
+    mutationContext: options.mutationContext,
   });
   const completedRow = await getCorrectionRequestRow(requestId);
   const draftSyncFailures = await syncActiveRepricingDrafts();

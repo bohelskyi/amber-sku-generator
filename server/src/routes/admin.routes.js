@@ -358,7 +358,8 @@ router.post('/admin/correction-requests/:requestId/complete', requirePermission(
   try {
     res.json(await completeCorrectionRequest(
       req.params.requestId,
-      req.get(CLAIM_TOKEN_HEADER)
+      req.get(CLAIM_TOKEN_HEADER),
+      { mutationContext: getRequestMutationContext(req) }
     ));
   } catch (err) {
     res.status(err.statusCode || 500).json({

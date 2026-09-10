@@ -60,7 +60,9 @@ Decode reports calibration as known, stored, unknown, or not applicable. Price d
 
 Preview returns a `previewToken` binding normalized answers/calibration, weight, schema version, base SKU and mode, raw and rounded automatic prices, and effective exchange-rate context. Save requires the schema-version ID and token, then rebuilds preview inside its transaction. Any real answer, weight, schema, pricing, or rate change causes a stale-preview conflict.
 
-Save locks sequence allocation when required, validates a positive automatic or independently supplied manual final price, reserves the exact SKU, and stores answer/schema/pricing metadata. Stored details preserve pre-rounding `calculatedPriceUah`, rounded `autoPriceUah`, and optional exact `manualPriceUah`; `products.total_price_uah` is the chosen final price.
+Save locks sequence allocation when required, validates a positive automatic or independently supplied manual final price, reserves the exact SKU, and stores answer/schema/pricing metadata. Stored details preserve pre-rounding `calculatedPriceUah`, rounded `autoPriceUah`, and optional exact `manualPriceUah`; `products.total_price_uah` is the chosen final price. New products store the authenticated local user in nullable `created_by_user_id` and append one `product.created` audit event before that same transaction commits. Historical rows remain unattributed.
+
+Archiving retains the existing product row and permanent SKU reservation, sets nullable `archived_by_user_id`, excludes the product from export, and appends one `product.archived` event in the same transaction. A missing or already archived SKU remains a failed/no-op path and does not create a success event.
 
 ## Decode and legacy compatibility
 

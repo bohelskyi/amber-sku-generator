@@ -79,9 +79,9 @@ Operational HTTP mutation logs are separate, non-durable telemetry. Their `actor
 
 ## Deferred authorization work
 
-Application authentication, local users, built-in RBAC, user administration, its durable audit foundation, permission-aware UI, and live access-state handling are implemented. The following remain intentionally pending:
+Application authentication, local users, built-in RBAC, user administration, the durable audit foundation, product create/archive/recount attribution, permission-aware UI, and live access-state handling are implemented. The following remain intentionally pending:
 
-- durable audit coverage outside application-user administration and the Administrator-only audit viewer;
+- durable audit coverage outside application-user administration and product create/archive/recount, plus the Administrator-only audit viewer;
 - user-based correction ownership (claims are still browser capability tokens);
 - invitations and custom-role management.
 

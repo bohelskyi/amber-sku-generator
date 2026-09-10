@@ -18,6 +18,7 @@ const {
   getExportSnapshot,
 } = require('../services/export.service');
 const { requirePermission } = require('../auth/authorization');
+const { getRequestMutationContext } = require('../audit/mutation-context');
 
 const router = express.Router();
 
@@ -90,7 +91,9 @@ router.post('/recount/preview', requirePermission('corrections.create'), async (
 
 router.post('/recount/apply', requirePermission('products.recount'), async (req, res) => {
   try {
-    const result = await applyProductRecount(req.body || {});
+    const result = await applyProductRecount(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 400).json({ error: err.message });
@@ -99,7 +102,9 @@ router.post('/recount/apply', requirePermission('products.recount'), async (req,
 
 router.post('/save', requirePermission('products.create'), async (req, res) => {
   try {
-    const result = await saveProduct(req.body || {});
+    const result = await saveProduct(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -113,7 +118,9 @@ router.post('/delete', requirePermission('products.archive'), async (req, res) =
       return res.status(400).json({ error: 'Некоректний формат' });
     }
 
-    const result = await deleteProductBySku(skuToDelete);
+    const result = await deleteProductBySku(skuToDelete, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });

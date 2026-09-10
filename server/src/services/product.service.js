@@ -1,5 +1,7 @@
 const crypto = require('node:crypto');
 const pool = require('../db/pool');
+const { writeAuditEvent } = require('../audit/audit-events');
+const { createMutationContext } = require('../audit/mutation-context');
 const { calculatePricing } = require('./pricing.service');
 const { getAnswerChanges } = require('../utils/answer-changes');
 const {
@@ -1053,7 +1055,8 @@ async function buildProductRecountPreview({
   };
 }
 
-async function applyProductRecount(payload) {
+async function applyProductRecount(payload, options = {}) {
+  const mutationContext = createMutationContext(options.mutationContext);
   const preview = await buildProductRecountPreview(payload || {});
   const client = await pool.connect();
 
@@ -1211,8 +1214,8 @@ async function applyProductRecount(payload) {
       `INSERT INTO products
        (full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah,
         price_per_gram, uah_rate, details, status, exclude_from_export, corrected_from_product_id,
-        correction_reason, sku_schema_version_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'active', 1, $11, $12, $13)
+        correction_reason, sku_schema_version_id, created_by_user_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'active', 1, $11, $12, $13, $14)
        RETURNING id`,
       [
         corrected.fullSku,
@@ -1230,6 +1233,7 @@ async function applyProductRecount(payload) {
         sourceProductId,
         preview.reason || null,
         Number(corrected.skuSchemaVersionId),
+        mutationContext.actorUserId,
       ]
     );
     const correctedProductId = Number(insertResult.rows[0].id);
@@ -1244,11 +1248,12 @@ async function applyProductRecount(payload) {
       [correctedProductId, preview.reason || null, sourceProductId]
     );
 
-    await client.query(
+    const correctionResult = await client.query(
       `INSERT INTO product_corrections
        (source_product_id, corrected_product_id, source_sku, corrected_sku, old_payload,
-        new_payload, reason, price_delta_uah)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)`,
+        new_payload, reason, price_delta_uah, performed_by_user_id)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9)
+       RETURNING id`,
       [
         sourceProductId,
         correctedProductId,
@@ -1258,8 +1263,10 @@ async function applyProductRecount(payload) {
         JSON.stringify(corrected),
         preview.reason || null,
         Number(preview.priceDeltaUah || 0),
+        mutationContext.actorUserId,
       ]
     );
+    const productCorrectionId = Number(correctionResult.rows[0].id);
 
     if (payload.correctionRequestId) {
       const requestResult = await client.query(
@@ -1294,6 +1301,22 @@ async function applyProductRecount(payload) {
       }
     }
 
+    await writeAuditEvent(client, {
+      mutationContext,
+      eventKey: 'product.recounted',
+      subjectType: 'product',
+      subjectId: sourceProductId,
+      details: {
+        sourceSku: preview.source.sku,
+        correctedProductId,
+        correctedSku: corrected.fullSku,
+        productCorrectionId,
+        ...(payload.correctionRequestId
+          ? { correctionRequestId: Number(payload.correctionRequestId) }
+          : {}),
+      },
+    });
+
     await client.query('COMMIT');
 
     return {
@@ -1310,7 +1333,8 @@ async function applyProductRecount(payload) {
   }
 }
 
-async function saveProduct(payload) {
+async function saveProduct(payload, options = {}) {
+  const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   let fullSku = '';
 
@@ -1404,8 +1428,8 @@ async function saveProduct(payload) {
     const result = await client.query(
       `INSERT INTO products
        (full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah,
-        price_per_gram, uah_rate, details, sku_schema_version_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
+        price_per_gram, uah_rate, details, sku_schema_version_id, created_by_user_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12)
        RETURNING id`,
       [
         fullSku,
@@ -1419,8 +1443,20 @@ async function saveProduct(payload) {
         Number.isFinite(uahRate) && uahRate > 0 ? uahRate : null,
         JSON.stringify(details),
         Number(preview.skuSchemaVersionId || schemaVersionId),
+        mutationContext.actorUserId,
       ]
     );
+    const productId = Number(result.rows[0].id);
+    await writeAuditEvent(client, {
+      mutationContext,
+      eventKey: 'product.created',
+      subjectType: 'product',
+      subjectId: productId,
+      details: {
+        fullSku,
+        categoryCode,
+      },
+    });
     await client.query('COMMIT');
 
     return { success: true, id: result.rows[0].id, fullSku };
@@ -1432,26 +1468,45 @@ async function saveProduct(payload) {
   }
 }
 
-async function deleteProductBySku(skuToDelete) {
+async function deleteProductBySku(skuToDelete, options = {}) {
+  const mutationContext = createMutationContext(options.mutationContext);
   const normalizedSku = String(skuToDelete || '').trim().toUpperCase();
-  const result = await pool.query(
-    `UPDATE products
-     SET status = 'archived', exclude_from_export = 1
-     WHERE full_sku = $1 AND COALESCE(status, 'active') <> 'archived'
-     RETURNING id`,
-    [normalizedSku]
-  );
-  if (result.rowCount === 0) {
-    const err = new Error('Артикул не знайдено або вже архівовано.');
-    err.statusCode = 404;
-    throw err;
-  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE products
+       SET status = 'archived', exclude_from_export = 1, archived_by_user_id = $1
+       WHERE full_sku = $2 AND COALESCE(status, 'active') <> 'archived'
+       RETURNING id`,
+      [mutationContext.actorUserId, normalizedSku]
+    );
+    if (result.rowCount === 0) {
+      const err = new Error('Артикул не знайдено або вже архівовано.');
+      err.statusCode = 404;
+      throw err;
+    }
+    const productId = Number(result.rows[0].id);
+    await writeAuditEvent(client, {
+      mutationContext,
+      eventKey: 'product.archived',
+      subjectType: 'product',
+      subjectId: productId,
+      details: { fullSku: normalizedSku },
+    });
+    await client.query('COMMIT');
 
-  return {
-    success: true,
-    archivedCount: result.rowCount,
-    message: `Артикул ${normalizedSku} перенесено в архів.`,
-  };
+    return {
+      success: true,
+      archivedCount: result.rowCount,
+      message: `Артикул ${normalizedSku} перенесено в архів.`,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 async function getRecentProducts() {

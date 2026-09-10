@@ -594,7 +594,7 @@ test('migration 019 matches the connect-pg-simple 10.0.0 table contract', async 
   ]);
 });
 
-test('migrations 020-023 create RBAC and the immutable audit foundation', async () => {
+test('migrations 020-024 create RBAC and the immutable audit foundation', async () => {
   const requiredTables = await pool.query(`
     SELECT table_name
     FROM information_schema.tables
@@ -800,6 +800,144 @@ test('migration 023 constrains and makes durable audit records immutable', async
     pool.query('TRUNCATE audit_events'),
     /audit events are immutable/
   );
+});
+
+test('migration 024 preserves historical product attribution as null', async () => {
+  const databaseName = 'amber_product_actor_upgrade_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const preAttributionDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'amber-pre-product-attribution-migrations-')
+  );
+  try {
+    const migrationDirectory = path.resolve(serverRoot, 'migrations');
+    const migrationFiles = (await fs.readdir(migrationDirectory))
+      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('024_'));
+    await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
+      path.resolve(migrationDirectory, fileName),
+      path.resolve(preAttributionDirectory, fileName)
+    )));
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations({ directory: ${JSON.stringify(preAttributionDirectory)} })
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+
+    const migrationPool = new Pool({ connectionString: databaseUrl });
+    try {
+      await migrationPool.query(
+        "INSERT INTO categories (code, name, requires_weight) VALUES ('HA', 'Historical attribution', 0)"
+      );
+      const products = await migrationPool.query(`
+        INSERT INTO products
+          (full_sku, base_sku, sequence_number, category, weight, total_price,
+           total_price_uah, price_per_gram, details, status)
+        VALUES
+          ('HA1001', 'HA1', 1, 'HA', 0, 25, 1000, 0, '{}'::jsonb, 'corrected'),
+          ('HA2002', 'HA2', 2, 'HA', 0, 30, 1200, 0, '{}'::jsonb, 'active')
+        RETURNING id, full_sku
+      `);
+      const bySku = Object.fromEntries(products.rows.map((row) => [row.full_sku, Number(row.id)]));
+      await migrationPool.query(
+        `INSERT INTO product_corrections
+          (source_product_id, corrected_product_id, source_sku, corrected_sku,
+           old_payload, new_payload, reason, price_delta_uah)
+         VALUES ($1, $2, 'HA1001', 'HA2002', '{}'::jsonb, '{}'::jsonb, 'historical', 200)`,
+        [bySku.HA1001, bySku.HA2002]
+      );
+    } finally {
+      await migrationPool.end();
+    }
+
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations()
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+
+    const verifiedPool = new Pool({ connectionString: databaseUrl });
+    try {
+      const columns = await verifiedPool.query(`
+        SELECT table_name, column_name, is_nullable
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND (table_name, column_name) IN (
+            ('products', 'created_by_user_id'),
+            ('products', 'archived_by_user_id'),
+            ('product_corrections', 'performed_by_user_id')
+          )
+        ORDER BY table_name, column_name
+      `);
+      assert.deepEqual(columns.rows, [
+        { table_name: 'product_corrections', column_name: 'performed_by_user_id', is_nullable: 'YES' },
+        { table_name: 'products', column_name: 'archived_by_user_id', is_nullable: 'YES' },
+        { table_name: 'products', column_name: 'created_by_user_id', is_nullable: 'YES' },
+      ]);
+      const foreignKeys = await verifiedPool.query(`
+        SELECT tc.table_name, kcu.column_name, ccu.table_name AS referenced_table,
+               rc.delete_rule
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON kcu.constraint_schema = tc.constraint_schema
+         AND kcu.constraint_name = tc.constraint_name
+        JOIN information_schema.referential_constraints rc
+          ON rc.constraint_schema = tc.constraint_schema
+         AND rc.constraint_name = tc.constraint_name
+        JOIN information_schema.constraint_column_usage ccu
+          ON ccu.constraint_schema = rc.unique_constraint_schema
+         AND ccu.constraint_name = rc.unique_constraint_name
+        WHERE tc.constraint_schema = 'public'
+          AND tc.constraint_type = 'FOREIGN KEY'
+          AND kcu.column_name IN (
+            'created_by_user_id', 'archived_by_user_id', 'performed_by_user_id'
+          )
+        ORDER BY tc.table_name, kcu.column_name
+      `);
+      assert.deepEqual(foreignKeys.rows, [
+        {
+          table_name: 'product_corrections',
+          column_name: 'performed_by_user_id',
+          referenced_table: 'application_users',
+          delete_rule: 'RESTRICT',
+        },
+        {
+          table_name: 'products',
+          column_name: 'archived_by_user_id',
+          referenced_table: 'application_users',
+          delete_rule: 'RESTRICT',
+        },
+        {
+          table_name: 'products',
+          column_name: 'created_by_user_id',
+          referenced_table: 'application_users',
+          delete_rule: 'RESTRICT',
+        },
+      ]);
+      assert.deepEqual((await verifiedPool.query(`
+        SELECT created_by_user_id, archived_by_user_id
+        FROM products
+        WHERE full_sku IN ('HA1001', 'HA2002')
+        ORDER BY full_sku
+      `)).rows, [
+        { created_by_user_id: null, archived_by_user_id: null },
+        { created_by_user_id: null, archived_by_user_id: null },
+      ]);
+      assert.deepEqual((await verifiedPool.query(`
+        SELECT performed_by_user_id FROM product_corrections WHERE source_sku = 'HA1001'
+      `)).rows, [{ performed_by_user_id: null }]);
+      assert.equal(Number((await verifiedPool.query(
+        "SELECT count(*) FROM audit_events WHERE event_key LIKE 'product.%'"
+      )).rows[0].count), 0);
+    } finally {
+      await verifiedPool.end();
+    }
+  } finally {
+    await fs.rm(preAttributionDirectory, { recursive: true, force: true });
+    await dropTestDatabase(databaseName);
+  }
 });
 
 test('OIDC identities resolve exactly, refresh mutable profiles, and provision concurrently once', async () => {
@@ -1221,6 +1359,179 @@ test('operational mutation logs use the resolved local actor and are not durable
     assert.equal(entries.some((entry) => entry.event === 'audit.mutation'), false);
   } finally {
     logger.info = originalInfo;
+  }
+});
+
+test('product create, direct recount, and archive share local actor attribution and audit', async () => {
+  const actorUserId = authenticatedSession.applicationUser.id;
+  const preview = await request('/api/preview', {
+    method: 'POST',
+    body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0, isCalibrated: 0 },
+  });
+  assert.equal(preview.response.status, 200, preview.text);
+  const created = await request('/api/save', {
+    method: 'POST',
+    headers: { 'X-Request-ID': 'audit-product-created' },
+    body: {
+      category: 'ZZ',
+      answers: { kind: 1 },
+      weight: 0,
+      isCalibrated: 0,
+      skuSchemaVersionId: schemas.ZZ,
+      previewToken: preview.data.previewToken,
+    },
+  });
+  assert.equal(created.response.status, 200, created.text);
+  const sourceProductId = Number(created.data.id);
+  assert.equal(Number((await pool.query(
+    'SELECT created_by_user_id FROM products WHERE id = $1', [sourceProductId]
+  )).rows[0].created_by_user_id), actorUserId);
+  assert.deepEqual((await pool.query(
+    `SELECT event_key, actor_user_id, request_id, details
+     FROM audit_events WHERE subject_type = 'product' AND subject_id = $1 ORDER BY id`,
+    [String(sourceProductId)]
+  )).rows, [{
+    event_key: 'product.created',
+    actor_user_id: String(actorUserId),
+    request_id: 'audit-product-created',
+    details: { fullSku: created.data.fullSku, categoryCode: 'ZZ' },
+  }]);
+
+  const recountPayload = {
+    sourceSku: created.data.fullSku,
+    answers: { kind: 2 },
+    reason: 'actor attribution test',
+  };
+  const recountPreview = await request('/api/recount/preview', {
+    method: 'POST', body: recountPayload,
+  });
+  assert.equal(recountPreview.response.status, 200, recountPreview.text);
+  const recounted = await request('/api/recount/apply', {
+    method: 'POST',
+    headers: { 'X-Request-ID': 'audit-product-recounted' },
+    body: recountPayload,
+  });
+  assert.equal(recounted.response.status, 200, recounted.text);
+  const correctedProductId = Number(recounted.data.correctedProductId);
+  const recountState = await pool.query(
+    `SELECT source.status AS source_status,
+            source.exclude_from_export AS source_excluded,
+            corrected.created_by_user_id,
+            corrected.exclude_from_export AS corrected_excluded,
+            pc.id AS product_correction_id,
+            pc.performed_by_user_id
+     FROM products source
+     JOIN products corrected ON corrected.id = source.corrected_to_product_id
+     JOIN product_corrections pc
+       ON pc.source_product_id = source.id AND pc.corrected_product_id = corrected.id
+     WHERE source.id = $1`,
+    [sourceProductId]
+  );
+  assert.equal(recountState.rows[0].source_status, 'corrected');
+  assert.equal(Number(recountState.rows[0].source_excluded), 1);
+  assert.equal(Number(recountState.rows[0].corrected_excluded), 1);
+  assert.equal(Number(recountState.rows[0].created_by_user_id), actorUserId);
+  assert.equal(Number(recountState.rows[0].performed_by_user_id), actorUserId);
+  const productCorrectionId = Number(recountState.rows[0].product_correction_id);
+  assert.deepEqual((await pool.query(
+    `SELECT event_key, actor_user_id, request_id, details
+     FROM audit_events
+     WHERE event_key = 'product.recounted'
+       AND subject_type = 'product' AND subject_id = $1`,
+    [String(sourceProductId)]
+  )).rows, [{
+    event_key: 'product.recounted',
+    actor_user_id: String(actorUserId),
+    request_id: 'audit-product-recounted',
+    details: {
+      sourceSku: created.data.fullSku,
+      correctedProductId,
+      correctedSku: recounted.data.corrected.fullSku,
+      productCorrectionId,
+    },
+  }]);
+
+  const archived = await request('/api/delete', {
+    method: 'POST',
+    headers: { 'X-Request-ID': 'audit-product-archived' },
+    body: { skuToDelete: recounted.data.corrected.fullSku },
+  });
+  assert.equal(archived.response.status, 200, archived.text);
+  assert.deepEqual((await pool.query(
+    'SELECT status, archived_by_user_id FROM products WHERE id = $1', [correctedProductId]
+  )).rows, [{ status: 'archived', archived_by_user_id: String(actorUserId) }]);
+  assert.deepEqual((await pool.query(
+    `SELECT event_key, actor_user_id, request_id, details
+     FROM audit_events
+     WHERE event_key = 'product.archived'
+       AND subject_type = 'product' AND subject_id = $1`,
+    [String(correctedProductId)]
+  )).rows, [{
+    event_key: 'product.archived',
+    actor_user_id: String(actorUserId),
+    request_id: 'audit-product-archived',
+    details: { fullSku: recounted.data.corrected.fullSku },
+  }]);
+
+  const repeatedArchive = await request('/api/delete', {
+    method: 'POST',
+    headers: { 'X-Request-ID': 'audit-product-archive-no-op' },
+    body: { skuToDelete: recounted.data.corrected.fullSku },
+  });
+  assert.equal(repeatedArchive.response.status, 404, repeatedArchive.text);
+  assert.equal(Number((await pool.query(
+    `SELECT count(*) FROM audit_events
+     WHERE event_key = 'product.archived' AND subject_id = $1`,
+    [String(correctedProductId)]
+  )).rows[0].count), 1);
+});
+
+test('a failed product audit insert rolls back product creation and SKU reservation', async () => {
+  const preview = await request('/api/preview', {
+    method: 'POST',
+    body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0, isCalibrated: 0 },
+  });
+  assert.equal(preview.response.status, 200, preview.text);
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION fail_test_product_audit()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      RAISE EXCEPTION 'forced product audit failure';
+    END;
+    $$;
+    CREATE TRIGGER fail_test_product_audit
+    BEFORE INSERT ON audit_events
+    FOR EACH ROW
+    WHEN (NEW.event_key = 'product.created')
+    EXECUTE FUNCTION fail_test_product_audit();
+  `);
+  try {
+    const failed = await request('/api/save', {
+      method: 'POST',
+      headers: { 'X-Request-ID': 'audit-product-create-rollback' },
+      body: {
+        category: 'ZZ',
+        answers: { kind: 1 },
+        weight: 0,
+        isCalibrated: 0,
+        skuSchemaVersionId: schemas.ZZ,
+        previewToken: preview.data.previewToken,
+      },
+    });
+    assert.equal(failed.response.status, 500, failed.text);
+    assert.equal(Number((await pool.query(
+      'SELECT count(*) FROM products WHERE full_sku = $1', [preview.data.fullProposedSku]
+    )).rows[0].count), 0);
+    assert.equal(Number((await pool.query(
+      'SELECT count(*) FROM sku_registry WHERE full_sku = $1', [preview.data.fullProposedSku]
+    )).rows[0].count), 0);
+    assert.equal(Number((await pool.query(
+      `SELECT count(*) FROM audit_events
+       WHERE event_key = 'product.created' AND request_id = 'audit-product-create-rollback'`
+    )).rows[0].count), 0);
+  } finally {
+    await pool.query('DROP TRIGGER fail_test_product_audit ON audit_events');
+    await pool.query('DROP FUNCTION fail_test_product_audit()');
   }
 });
 
@@ -1763,7 +2074,11 @@ test('migration 023 rolls back its audit schema and permission grant together', 
   try {
     const migrationDirectory = path.resolve(serverRoot, 'migrations');
     const migrationFiles = (await fs.readdir(migrationDirectory))
-      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('023_'));
+      .filter((fileName) => (
+        fileName.endsWith('.sql')
+        && !fileName.startsWith('023_')
+        && !fileName.startsWith('024_')
+      ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
       path.resolve(preAuditDirectory, fileName)
@@ -1908,6 +2223,7 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
          && !fileName.startsWith('021_')
          && !fileName.startsWith('022_')
          && !fileName.startsWith('023_')
+         && !fileName.startsWith('024_')
       ))
       .map((fileName) => fs.copyFile(
         path.resolve(serverRoot, 'migrations', fileName),
@@ -1984,9 +2300,9 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
       );
       assert.equal(checksums.rows[0].count, 0);
       const checkpointMigration = await checkpointPool.query(
-        "SELECT count(*)::int AS count FROM schema_migrations WHERE name ~ '^(015|016|017|018|019|020|021|022|023)_'"
+        "SELECT count(*)::int AS count FROM schema_migrations WHERE name ~ '^(015|016|017|018|019|020|021|022|023|024)_'"
       );
-      assert.equal(checkpointMigration.rows[0].count, 9);
+      assert.equal(checkpointMigration.rows[0].count, 10);
     } finally {
       await freshPool.end();
       await upgradePool.end();
@@ -2001,7 +2317,7 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
   }
 });
 
-test('migrations 020-023 upgrade a database at migration 019 and repeated startup stays safe', async () => {
+test('migrations 020-024 upgrade a database at migration 019 and repeated startup stays safe', async () => {
   const databaseName = 'amber_rbac_upgrade_test';
   const databaseUrl = await recreateTestDatabase(databaseName);
   const preRbacDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-pre-rbac-migrations-'));
@@ -2013,6 +2329,7 @@ test('migrations 020-023 upgrade a database at migration 019 and repeated startu
         && !fileName.startsWith('021_')
         && !fileName.startsWith('022_')
         && !fileName.startsWith('023_')
+        && !fileName.startsWith('024_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -2081,6 +2398,7 @@ test('migration 021 adds business capabilities and corrects built-in mappings on
         && !fileName.startsWith('021_')
         && !fileName.startsWith('022_')
         && !fileName.startsWith('023_')
+        && !fileName.startsWith('024_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -2158,6 +2476,7 @@ test('migration 022 removes Manager correction processing without changing other
         fileName.endsWith('.sql')
         && !fileName.startsWith('022_')
         && !fileName.startsWith('023_')
+        && !fileName.startsWith('024_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -2305,6 +2624,7 @@ test('legacy in-progress correction requests survive migration 018 and can be cl
         && !fileName.startsWith('021_')
         && !fileName.startsWith('022_')
         && !fileName.startsWith('023_')
+        && !fileName.startsWith('024_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -2509,11 +2829,21 @@ test('legacy zero prices upgrade without repricing products or blocking edits', 
         assert.equal(decoded.pricing.totalPriceUah, 0);
         assert.equal(decoded.pricing.calculatedPriceUah, null);
 
+        const actor = await db.query(
+          "INSERT INTO application_users (status, display_name, preferred_username) "
+            + "VALUES ('active', 'Legacy Recount Actor', 'legacy.recount.actor') RETURNING id"
+        );
+
         const correction = await applyProductRecount({
           sourceSku: 'LX1001',
           answers: { kind: 2 },
           reason: 'still editable',
           manualPriceUah: 500,
+        }, {
+          mutationContext: {
+            actorUserId: Number(actor.rows[0].id),
+            requestId: 'legacy-zero-recount',
+          },
         });
         assert.equal(correction.success, true);
         assert.equal(correction.corrected.totalPriceUah, 500);
@@ -3134,6 +3464,12 @@ test('concurrent correction only applies once after transactional revalidation',
     correction_count: 1,
     corrected_products: 1,
   });
+  assert.equal(Number((await pool.query(
+    `SELECT count(*) FROM audit_events
+     WHERE event_key = 'product.recounted'
+       AND subject_type = 'product' AND subject_id = $1`,
+    [String(sourceState.rows[0].id)]
+  )).rows[0].count), 1, 'the failed concurrent recount must not create a success event');
 });
 
 test('active correction requests stay FIFO when another worker claims a newer request', async () => {
@@ -4650,6 +4986,34 @@ test('business endpoints enforce the Administrator, Storekeeper, and Manager cap
   });
   assert.equal(completed.response.status, 200, completed.text);
   const correctedSku = completed.data.recount.corrected.fullSku;
+  const queuedRecountAttribution = await pool.query(
+    `SELECT corrected.created_by_user_id, pc.performed_by_user_id,
+            ae.actor_user_id, ae.details
+     FROM product_corrections pc
+     JOIN products corrected ON corrected.id = pc.corrected_product_id
+     JOIN audit_events ae
+       ON ae.event_key = 'product.recounted'
+      AND ae.subject_type = 'product'
+      AND ae.subject_id = pc.source_product_id::text
+     WHERE pc.source_product_id = $1`,
+    [Number(firstProduct.data.id)]
+  );
+  assert.equal(Number(queuedRecountAttribution.rows[0].created_by_user_id), userId);
+  assert.equal(Number(queuedRecountAttribution.rows[0].performed_by_user_id), userId);
+  assert.equal(Number(queuedRecountAttribution.rows[0].actor_user_id), userId);
+  assert.equal(queuedRecountAttribution.rows[0].details.correctionRequestId, correctionId);
+  const repeatedCompletion = await request(
+    `/api/admin/correction-requests/${correctionId}/complete`,
+    { method: 'POST', body: {}, headers: claimHeaders }
+  );
+  assert.equal(repeatedCompletion.response.status, 200, repeatedCompletion.text);
+  assert.equal(repeatedCompletion.data.alreadyCompleted, true);
+  assert.equal(Number((await pool.query(
+    `SELECT count(*) FROM audit_events
+     WHERE event_key = 'product.recounted'
+       AND subject_type = 'product' AND subject_id = $1`,
+    [String(firstProduct.data.id)]
+  )).rows[0].count), 1);
 
   const history = await request('/api/products');
   assert.equal(history.response.status, 200, history.text);

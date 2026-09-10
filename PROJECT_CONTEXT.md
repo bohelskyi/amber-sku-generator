@@ -26,7 +26,7 @@ Stable capability keys guard every business endpoint after authentication, activ
 
 The three built-in roles are Administrator, Manager, and Storekeeper. Administrator has full access, `users.manage`, and the explicitly Administrator-only `audit.view`; Manager has read-only pricing, repricing preparation, and correction view/create/reject without claim/complete/force-release; Storekeeper retains product create/archive/direct recount and correction claim/complete processing without catalog/pricing or final administrative actions. All three can view existing exports; export creation/confirmation is Administrator-only.
 
-Administrators can approve pending users with exactly one built-in role, replace an assigned role while retaining assignment history, disable, and re-enable users. Those four durable operations write immutable audit events in the same transaction, attributed by local application-user ID and an event-time display-name/username snapshot. The one-use offline first-Administrator bootstrap and concurrency-safe last-Administrator protection are implemented. Audit coverage outside user administration, custom roles, invitations, and user-owned correction claims remain pending. Correction ownership is still browser capability-token based.
+Administrators can approve pending users with exactly one built-in role, replace an assigned role while retaining assignment history, disable, and re-enable users. Those four durable operations, product creation/archive, and product recount write immutable audit events in their business transaction, attributed by local application-user ID and an event-time display-name/username snapshot. Product and correction history also retain nullable local-user actor foreign keys. The one-use offline first-Administrator bootstrap and concurrency-safe last-Administrator protection are implemented. Further audit coverage, custom roles, invitations, and user-owned correction claims remain pending. Correction ownership is still browser capability-token based.
 
 See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permission model.
 
@@ -65,16 +65,16 @@ See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permi
 | Recount and corrections | Target-schema transitions, correction request queue, capability claims and completion | [`docs/RECOUNT_CORRECTIONS.md`](docs/RECOUNT_CORRECTIONS.md) |
 | Repricing | Scenario/global previews, drafts, explicit resolutions, atomic apply and rollback | [`docs/REPRICING.md`](docs/REPRICING.md) |
 | Exports | Immutable snapshots, range-bound idempotency, safe CSV, monotonic confirmation cursor | [`docs/EXPORTS.md`](docs/EXPORTS.md) |
-| Database | PostgreSQL schema, transactional/checksummed forward migrations `000`–`023`, upgrade/concurrency protections | [`docs/DATABASE_MIGRATIONS.md`](docs/DATABASE_MIGRATIONS.md) |
+| Database | PostgreSQL schema, transactional/checksummed forward migrations `000`–`024`, upgrade/concurrency protections | [`docs/DATABASE_MIGRATIONS.md`](docs/DATABASE_MIGRATIONS.md) |
 | Operations | Deployment topology, health/readiness, logs, shutdown, backup/restore, SQLite import | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) |
 
 ## Current status
 
-- PostgreSQL architecture and migrations `000`–`023` are implemented and immutable history.
+- PostgreSQL architecture and migrations `000`–`024` are implemented and immutable history.
 - Authoritative product preview/save/decode, catalog schema versioning, pricing, recount/corrections, scenario/global repricing, and export snapshots are implemented with focused unit and PostgreSQL integration coverage.
 - OIDC authentication, PostgreSQL sessions, active-user access gating, application-owned RBAC, user management, first-admin bootstrap, permission-aware UI, and live access-state transitions are implemented.
 - Server-side authorization and CSRF remain authoritative. `APP_ACCESS_PENDING`/`APP_ACCESS_DISABLED` move the client to the matching AuthGate state; `INSUFFICIENT_PERMISSION` preserves the active session.
-- Operational mutation logs use the resolved local `application_users.id` where available and remain distinct from durable audit events. Immutable, transaction-coupled `audit_events` currently cover application-user approval, role change, disable, and enable; audit coverage for other domains remains pending.
+- Operational mutation logs use the resolved local `application_users.id` where available and remain distinct from durable audit events. Immutable, transaction-coupled `audit_events` currently cover application-user approval, role change, disable, and enable plus product create, archive, and recount; audit coverage for other domains remains pending.
 - User-based correction ownership, custom roles, invitations, and an audit viewer are not implemented.
 - Live catalog contents and production data quality cannot be inferred from seed defaults or the repository and require operational verification.
 

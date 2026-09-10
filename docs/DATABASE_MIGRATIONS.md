@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Migrations `000`–`023` are applied/frozen history:
+Migrations `000`–`024` are applied/frozen history:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -44,6 +44,7 @@ Important database protections are layered:
 - repricing locks products in stable ID order and applies/rolls back atomically;
 - export idempotency, immutability, row-locked confirmation, and monotonic cursor protections work together.
 - durable user-administration audit inserts use the mutation's existing transaction, so an audit failure rolls back the domain mutation and no success event is emitted for a failure or no-op.
+- product create, archive, and recount actor writes and audit inserts share their existing business transaction; recount retains its established source/SKU lock order and final-state validation.
 
 New paths touching these resources must follow existing lock order and final-state revalidation. An isolated lock is not a substitute. Surface transaction/deadlock failure rather than continuing partially.
 
@@ -75,6 +76,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `021_business_permission_enforcement.sql` | Adds direct-recount/export-view permissions; grants Administrator/Storekeeper direct recount, Storekeeper archive, and all built-ins export view. |
 | `022_manager_correction_request_permissions.sql` | Removes Manager `corrections.claim` and `corrections.complete`, preserving view/create/reject and Administrator/Storekeeper processing. |
 | `023_audit_events.sql` | Immutable durable audit-event ledger with local-user actor snapshots and lookup indexes; adds Administrator-only `audit.view`. |
+| `024_product_actor_attribution.sql` | Nullable local-user attribution for product creation/archive and detailed product-correction history without historical backfill. |
 
 ## Test database safety
 
