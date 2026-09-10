@@ -4,6 +4,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "auth:bootstrap-admin": "node scripts/bootstrap-admin.js",
     "audit:data": "node scripts/audit-data-integrity.js",
     "migrate:config": "node scripts/migrate-sqlite-config-to-postgres.js",
     "test": "node --require ./test/setup-env.js --test test/*.test.js",
@@ -15,9 +16,11 @@
   "type": "commonjs",
   "description": "",
   "dependencies": {
-    "cors": "^2.8.6",
+    "connect-pg-simple": "10.0.0",
     "dotenv": "^16.6.1",
     "express": "^5.2.1",
+    "express-session": "1.19.0",
+    "openid-client": "6.8.8",
     "pg": "^8.18.0"
   },
   "devDependencies": {

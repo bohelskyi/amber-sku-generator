@@ -263,7 +263,7 @@ function ModifierForm({ config, currentCatQuestions, isNew = false, modifier, on
   );
 }
 
-function ScenarioMatrix({ currentCatQuestions, handlePriceChange, matrixValidationError, scenario, setMatrixValidationError }) {
+function ScenarioMatrix({ currentCatQuestions, handlePriceChange, matrixValidationError, readOnly, scenario, setMatrixValidationError }) {
   const axisX = getPricingAxis(scenario.axis_x_key, currentCatQuestions, 'X', scenario.weight_bands || [], scenario.match_json);
   const axisY = getPricingAxis(scenario.axis_y_key, currentCatQuestions, 'Base', scenario.weight_bands || [], scenario.match_json);
 
@@ -297,8 +297,10 @@ function ScenarioMatrix({ currentCatQuestions, handlePriceChange, matrixValidati
                         defaultValue={cell ? formatDecimal(cell.price) : ''}
                         placeholder="—"
                         aria-label={`${xOption.label}, ${yOption.label}`}
+                        readOnly={readOnly}
                         onChange={(event) => { event.currentTarget.value = normalizeDecimalInput(event.currentTarget.value); }}
                         onBlur={(event) => {
+                          if (readOnly) return;
                           const normalizedPrice = normalizeDecimalInput(event.currentTarget.value);
                           const validationError = getMatrixPriceValidationError(normalizedPrice);
                           if (!normalizedPrice) {
@@ -350,6 +352,7 @@ export function AdminPricingEditor({
   addScenario,
   saveModifierEdit,
   addModifier,
+  readOnly = false,
 }) {
   const [workspaceMode, setWorkspaceMode] = useState('scenarios');
   const [scenarioTabState, setScenarioTabState] = useState({ scenarioId: null, tab: 'matrix' });
@@ -443,7 +446,7 @@ export function AdminPricingEditor({
         {workspaceMode === 'scenarios' ? (
           <>
             <aside className="pricing-master">
-              <div className="pricing-master-header"><div><h3>Сценарії</h3><p>{scenarios.length} у категорії</p></div><button type="button" className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs" onClick={() => { setNewScenarioCategory(selectedCat.code); setEditScenario(null); }}><Plus size={14} />Додати</button></div>
+              <div className="pricing-master-header"><div><h3>Сценарії</h3><p>{scenarios.length} у категорії</p></div>{!readOnly && <button type="button" className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs" onClick={() => { setNewScenarioCategory(selectedCat.code); setEditScenario(null); }}><Plus size={14} />Додати</button>}</div>
               <div className="pricing-master-filters">
                 <label className="pricing-search"><Search size={14} /><input value={scenarioQuery} onChange={(event) => setScenarioQuery(event.target.value)} placeholder="Пошук сценарію" aria-label="Пошук цінового сценарію" /></label>
                 <select value={scenarioStatusFilter} onChange={(event) => setScenarioStatusFilter(event.target.value)} aria-label="Фільтр статусу сценаріїв"><option value="all">Усі статуси</option><option value="active">Активні</option><option value="inactive">Неактивні</option></select>
@@ -474,11 +477,11 @@ export function AdminPricingEditor({
                 <>
                   <div className="pricing-detail-header">
                     <div className="min-w-0"><h3>{selectedScenario.name}</h3><p>Умова: {formatConditionSummary(selectedScenario.match_json, currentCatQuestions, config, 'Завжди')}</p></div>
-                    <div className="pricing-detail-actions">
+                    {!readOnly && <div className="pricing-detail-actions">
                       <button type="button" className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs" onClick={openScenarioSettings}><Pencil size={14} />Редагувати</button>
                       <button type="button" className="pricing-icon-button" onClick={() => duplicateScenario(selectedScenario.id)} title="Дублювати сценарій" aria-label="Дублювати сценарій"><Copy size={15} /></button>
                       <button type="button" className="pricing-icon-button is-danger" onClick={() => deleteItem('scenario', selectedScenario.id)} title="Видалити сценарій" aria-label="Видалити сценарій"><Trash2 size={15} /></button>
-                    </div>
+                    </div>}
                   </div>
                   <div className="pricing-meta-strip">
                     <MetaItem label="Статус" value={getStatusLabel(selectedScenario.status)} />
@@ -488,10 +491,10 @@ export function AdminPricingEditor({
                   </div>
                   <div className="pricing-local-tabs" role="tablist" aria-label="Редактор сценарію">
                     <button type="button" role="tab" aria-selected={scenarioTab === 'matrix'} className={scenarioTab === 'matrix' ? 'is-active' : ''} onClick={() => setScenarioTabState({ scenarioId: selectedScenario.id, tab: 'matrix' })}>Матриця</button>
-                    <button type="button" role="tab" aria-selected={scenarioTab === 'settings'} className={scenarioTab === 'settings' ? 'is-active' : ''} onClick={openScenarioSettings}>Налаштування</button>
+                    {!readOnly && <button type="button" role="tab" aria-selected={scenarioTab === 'settings'} className={scenarioTab === 'settings' ? 'is-active' : ''} onClick={openScenarioSettings}>Налаштування</button>}
                   </div>
                   {scenarioTab === 'matrix' ? (
-                    <ScenarioMatrix currentCatQuestions={currentCatQuestions} handlePriceChange={handlePriceChange} matrixValidationError={matrixValidationError} scenario={selectedScenario} setMatrixValidationError={(message) => setMatrixValidation({ scenarioId: selectedScenario.id, message })} />
+                    <ScenarioMatrix currentCatQuestions={currentCatQuestions} handlePriceChange={handlePriceChange} matrixValidationError={matrixValidationError} readOnly={readOnly} scenario={selectedScenario} setMatrixValidationError={(message) => setMatrixValidation({ scenarioId: selectedScenario.id, message })} />
                   ) : editScenario?.id === selectedScenario.id ? (
                     <ScenarioForm config={config} currentCatQuestions={currentCatQuestions} groupOptions={knownGroupNames} onCancel={() => { setEditScenario(null); setScenarioTabState({ scenarioId: selectedScenario.id, tab: 'matrix' }); }} onSave={saveScenarioSettings} scenario={editScenario} selectedCat={selectedCat} setScenario={setEditScenario} />
                   ) : null}
@@ -502,7 +505,7 @@ export function AdminPricingEditor({
         ) : (
           <>
             <aside className="pricing-master">
-              <div className="pricing-master-header"><div><h3>Модифікатори</h3><p>{modifiers.length} у категорії</p></div><button type="button" className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs" onClick={() => { setNewModifierCategory(selectedCat.code); setEditModifier(null); }}><Plus size={14} />Додати</button></div>
+              <div className="pricing-master-header"><div><h3>Модифікатори</h3><p>{modifiers.length} у категорії</p></div>{!readOnly && <button type="button" className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs" onClick={() => { setNewModifierCategory(selectedCat.code); setEditModifier(null); }}><Plus size={14} />Додати</button>}</div>
               <div className="pricing-master-filters"><label className="pricing-search full-width"><Search size={14} /><input value={modifierQuery} onChange={(event) => setModifierQuery(event.target.value)} placeholder="Пошук модифікатора" aria-label="Пошук цінового модифікатора" /></label></div>
               <div className="pricing-master-list">
                 {filteredModifiers.map((modifier) => {
@@ -528,10 +531,10 @@ export function AdminPricingEditor({
                 <>
                   <div className="pricing-detail-header">
                     <div className="min-w-0"><h3>Модифікатор ×{formatDecimal(selectedModifier.factor)}</h3><p>{formatConditionSummary(getModifierRule(selectedModifier), currentCatQuestions, config, 'Завжди')}</p></div>
-                    <div className="pricing-detail-actions">
+                    {!readOnly && <div className="pricing-detail-actions">
                       {!editModifier && <button type="button" className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs" onClick={openModifierEdit}><Pencil size={14} />Редагувати</button>}
                       <button type="button" className="pricing-icon-button is-danger" onClick={() => deleteItem('modifier', selectedModifier.id)} title="Видалити модифікатор" aria-label="Видалити модифікатор"><Trash2 size={15} /></button>
-                    </div>
+                    </div>}
                   </div>
                   {editModifier?.id === selectedModifier.id ? (
                     <ModifierForm config={config} currentCatQuestions={currentCatQuestions} modifier={editModifier} onCancel={() => setEditModifier(null)} onSave={saveModifierEdit} setModifier={setEditModifier} />

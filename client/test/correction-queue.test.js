@@ -6,6 +6,7 @@ import {
   createLatestRequestGate,
   createVisibilityAwarePoller,
   getCorrectionClaimOwnership,
+  getCorrectionLegacyClaimToken,
   getCorrectionRequestsForView,
   isCorrectionClaimConflict,
   orderActiveCorrectionRequests,
@@ -40,7 +41,7 @@ function createEventTarget(initial = {}) {
   };
 }
 
-test('claim capability persists locally and identifies only the matching database claim', () => {
+test('legacy claim capability persists only while the request remains token-owned', () => {
   const storage = createStorage();
   const claimedRequest = {
     id: 17,
@@ -51,13 +52,31 @@ test('claim capability persists locally and identifies only the matching databas
   writeCorrectionClaims(claims, storage);
 
   assert.deepEqual(readCorrectionClaims(storage), claims);
-  assert.equal(getCorrectionClaimOwnership(claimedRequest, claims), 'owned');
+  assert.equal(getCorrectionClaimOwnership(claimedRequest, 7, claims), 'owned');
+  assert.equal(getCorrectionLegacyClaimToken(claimedRequest, claims), 'raw-secret-token');
   assert.equal(getCorrectionClaimOwnership({
     ...claimedRequest,
     claimFingerprint: 'replacement-claim',
-  }, claims), 'other');
-  assert.equal(getCorrectionClaimOwnership({ ...claimedRequest, status: 'pending' }, claims), 'none');
+  }, 7, claims), 'other');
+  assert.equal(getCorrectionClaimOwnership({ ...claimedRequest, status: 'pending' }, 7, claims), 'none');
   assert.deepEqual(removeCorrectionClaim(claims, 17), {});
+});
+
+test('application-user ownership works across browsers and supersedes retained tokens', () => {
+  const request = {
+    id: 17,
+    status: 'in_progress',
+    claimedByUser: { id: 7, displayName: 'Worker Seven' },
+    claimFingerprint: null,
+  };
+  const legacyClaims = {
+    17: { token: 'obsolete-token', fingerprint: 'obsolete-fingerprint' },
+  };
+
+  assert.equal(getCorrectionClaimOwnership(request, 7, {}), 'owned');
+  assert.equal(getCorrectionClaimOwnership(request, 8, legacyClaims), 'other');
+  assert.equal(getCorrectionLegacyClaimToken(request, legacyClaims), null);
+  assert.deepEqual(reconcileCorrectionClaims(legacyClaims, [request]), {});
 });
 
 test('queue reconciliation removes a local token after release or force-reclaim', () => {
@@ -96,7 +115,7 @@ test('refresh and stale completion errors preserve ownership until a real claim 
   assert.equal(isCorrectionClaimConflict(staleCompletionError), false);
   assert.equal(isCorrectionClaimConflict(ownershipError), true);
   assert.equal(refreshedClaims[17].token, 'raw-browser-token');
-  assert.equal(getCorrectionClaimOwnership(request, refreshedClaims), 'owned');
+  assert.equal(getCorrectionClaimOwnership(request, 7, refreshedClaims), 'owned');
 });
 
 test('latest-request gate prevents an older queue response replacing newer state', () => {
@@ -136,7 +155,7 @@ test('active queue pins this browser claims and keeps each group oldest-first', 
   };
 
   assert.deepEqual(
-    orderActiveCorrectionRequests(requests, claims).map((request) => request.id),
+    orderActiveCorrectionRequests(requests, 7, claims).map((request) => request.id),
     [11, 13, 10, 12, 14]
   );
 });
@@ -172,7 +191,7 @@ test('workspace shows own claims first, then pending FIFO, and excludes foreign 
   const claims = readCorrectionClaims(storage);
 
   assert.deepEqual(
-    getCorrectionRequestsForView(requests, claims, 'workspace').map((request) => request.id),
+    getCorrectionRequestsForView(requests, 7, claims, 'workspace').map((request) => request.id),
     [32, 34, 31]
   );
 });
@@ -256,7 +275,7 @@ test('polling, claim, release, completion, and foreign claims keep workspace cur
     setTimeoutFn,
     clearTimeoutFn,
     poll: async () => {
-      displayedIds = getCorrectionRequestsForView(responseItems, claims, 'workspace')
+      displayedIds = getCorrectionRequestsForView(responseItems, 7, claims, 'workspace')
         .map((request) => request.id);
     },
   });

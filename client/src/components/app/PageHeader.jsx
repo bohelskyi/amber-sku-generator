@@ -1,21 +1,24 @@
 import { ClipboardList, History } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { AppPageHeader } from './UiPrimitives.jsx';
 
 export function PageHeader() {
   return (
-    <header className="console-header fade-up">
-      <h1 className="text-xl font-semibold tracking-tight text-slate-900">Amber SKU Manager</h1>
-      <div className="flex flex-wrap gap-2">
+    <AppPageHeader
+      eyebrow="Робоча область"
+      title="Amber SKU Manager"
+      description="Створення, пошук і контроль товарів в одному робочому просторі."
+      actions={<>
         <Link to="/admin/corrections?from=client" className="btn btn-outline btn-compact-md gap-2">
-          <ClipboardList size={15} />
+          <ClipboardList size={15} aria-hidden="true" />
           Запити
         </Link>
         <Link to="/admin/corrections/history?from=client" className="btn btn-outline btn-compact-md gap-2">
-          <History size={15} />
+          <History size={15} aria-hidden="true" />
           Журнал
         </Link>
-      </div>
-    </header>
+      </>}
+    />
   );
 }
 

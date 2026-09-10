@@ -49,21 +49,30 @@ export function removeCorrectionClaim(claims, requestId) {
   return nextClaims;
 }
 
-export function getCorrectionClaimOwnership(request, claims = {}) {
+export function getCorrectionClaimOwnership(request, currentUserId, claims = {}) {
   if (request?.status !== 'in_progress') return 'none';
+  if (request.claimedByUser?.id) {
+    return Number(request.claimedByUser.id) === Number(currentUserId) ? 'owned' : 'other';
+  }
   const claim = normalizeClaimRecord(claims[request.id]);
   return claim && claim.fingerprint === request.claimFingerprint ? 'owned' : 'other';
+}
+
+export function getCorrectionLegacyClaimToken(request, claims = {}) {
+  if (request?.status !== 'in_progress' || request.claimedByUser) return null;
+  const claim = normalizeClaimRecord(claims[request.id]);
+  return claim && claim.fingerprint === request.claimFingerprint ? claim.token : null;
 }
 
 export function isCorrectionClaimConflict(error) {
   return error?.response?.data?.details?.type === 'correction_claim_conflict';
 }
 
-export function orderActiveCorrectionRequests(requests = [], claims = {}) {
+export function orderActiveCorrectionRequests(requests = [], currentUserId, claims = {}) {
   const ownedRequests = [];
   const remainingRequests = [];
   for (const request of requests) {
-    const target = getCorrectionClaimOwnership(request, claims) === 'owned'
+    const target = getCorrectionClaimOwnership(request, currentUserId, claims) === 'owned'
       ? ownedRequests
       : remainingRequests;
     target.push(request);
@@ -71,21 +80,31 @@ export function orderActiveCorrectionRequests(requests = [], claims = {}) {
   return [...ownedRequests, ...remainingRequests];
 }
 
-export function getCorrectionRequestsForView(requests = [], claims = {}, view = 'active') {
+export function getCorrectionRequestsForView(
+  requests = [],
+  currentUserId,
+  claims = {},
+  view = 'active'
+) {
   if (view === 'workspace') {
-    return orderActiveCorrectionRequests(requests, claims).filter((request) => (
+    return orderActiveCorrectionRequests(requests, currentUserId, claims).filter((request) => (
       request.status === 'pending'
-      || getCorrectionClaimOwnership(request, claims) === 'owned'
+      || getCorrectionClaimOwnership(request, currentUserId, claims) === 'owned'
     ));
   }
-  return view === 'active' ? orderActiveCorrectionRequests(requests, claims) : requests;
+  return view === 'active'
+    ? orderActiveCorrectionRequests(requests, currentUserId, claims)
+    : requests;
 }
 
 export function reconcileCorrectionClaims(claims = {}, requests = []) {
   const nextClaims = { ...claims };
   for (const request of requests) {
     if (!Object.prototype.hasOwnProperty.call(nextClaims, request.id)) continue;
-    if (getCorrectionClaimOwnership(request, nextClaims) !== 'owned') {
+    if (
+      request.claimedByUser
+      || !getCorrectionLegacyClaimToken(request, nextClaims)
+    ) {
       delete nextClaims[request.id];
     }
   }

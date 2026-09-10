@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle,
   ArrowRight,
   Copy,
   Download,
   House,
-  RefreshCw,
   RotateCcw,
   Search,
 } from 'lucide-react';
@@ -13,6 +11,8 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { copyPlainText } from '../lib/clipboard';
 import { formatDateTime, formatDecimal, formatUah } from '../lib/formatters';
+import { ProductTimeline } from '../components/app/ProductTimeline';
+import { AppPageHeader, EmptyState, LoadingState, Notice } from '../components/app/UiPrimitives.jsx';
 
 function getApiError(error) {
   return error.response?.data?.error || error.message || 'Невідома помилка';
@@ -129,7 +129,7 @@ function downloadBlob(blob, fileName) {
   URL.revokeObjectURL(url);
 }
 
-export default function CorrectionHistoryPage() {
+function CorrectionReport() {
   const [searchParams] = useSearchParams();
   const isAdminView = searchParams.get('from') === 'admin';
   const latestRequestId = useRef(0);
@@ -218,12 +218,14 @@ export default function CorrectionHistoryPage() {
   return (
     <div className="app-page">
       <main className="mx-auto w-full min-w-0 max-w-7xl space-y-5 overflow-hidden px-4 py-4 pb-20 sm:px-6 sm:py-6">
-        <header className="console-header">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight text-slate-900">Історія переобліків</h1>
-            <p className="mt-1 text-xs text-slate-500">Зміни SKU, характеристик і цін.</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
+        <AppPageHeader
+          eyebrow="Журнал"
+          title="Історія переобліків"
+          description="Зміни SKU, характеристик і цін із можливістю фільтрації та експорту."
+          actions={<>
+            <Link to="/admin/corrections/history" className="btn btn-outline">
+              Історія товару
+            </Link>
             {isAdminView && (
               <Link to="/admin" className="btn btn-outline">
                 Адмін-панель
@@ -233,15 +235,10 @@ export default function CorrectionHistoryPage() {
               <House size={16} />
               На головну
             </Link>
-          </div>
-        </header>
+          </>}
+        />
 
-        {error && (
-          <div className="flex items-start gap-3 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-            <AlertTriangle size={18} className="mt-0.5 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
+        {error && <Notice>{error}</Notice>}
 
         <section className="card grid grid-cols-2 overflow-hidden lg:grid-cols-5">
           {[
@@ -304,11 +301,9 @@ export default function CorrectionHistoryPage() {
           </div>
 
           {loading ? (
-            <div className="flex justify-center py-16">
-              <RefreshCw size={24} className="animate-spin text-slate-500" />
-            </div>
+            <LoadingState compact label="Завантажуємо історію переобліків…" />
           ) : items.length === 0 ? (
-            <div className="py-16 text-center text-sm text-slate-500">Переобліків за цими умовами не знайдено.</div>
+            <EmptyState compact>Переобліків за цими умовами не знайдено.</EmptyState>
           ) : (
             <div className="divide-y divide-slate-200">
               {items.map((item) => (
@@ -321,7 +316,10 @@ export default function CorrectionHistoryPage() {
                         <span className="text-xs text-slate-500">{formatDecimal(item.weight)} г</span>
                       )}
                     </div>
-                    {item.reason && <span className="text-sm text-slate-600">{item.reason}</span>}
+                    <div className="flex items-center gap-2">
+                      {item.reason && <span className="text-sm text-slate-600">{item.reason}</span>}
+                      <Link to={`/admin/corrections/history?sku=${encodeURIComponent(item.sourceSku)}`} className="btn btn-outline text-xs px-2 py-1">Історія товару</Link>
+                    </div>
                   </div>
 
                   <div className="grid gap-5 xl:grid-cols-[minmax(360px,1.1fr)_minmax(300px,1fr)_minmax(250px,0.7fr)]">
@@ -373,4 +371,11 @@ export default function CorrectionHistoryPage() {
       </main>
     </div>
   );
+}
+
+export default function CorrectionHistoryPage() {
+  const [searchParams] = useSearchParams();
+  return searchParams.get('mode') === 'report'
+    ? <CorrectionReport />
+    : <ProductTimeline key={searchParams.get('sku') || ''} />;
 }

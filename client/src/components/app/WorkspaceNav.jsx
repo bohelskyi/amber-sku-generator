@@ -3,20 +3,31 @@ import {
   CircleDollarSign,
   ClipboardList,
   History,
+  LogOut,
   SlidersHorizontal,
+  Shield,
+  ScrollText,
+  Users,
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
+import { useAuth } from '../../auth/auth-context.js';
+import { getIdentityDisplayName } from '../../auth/auth-model.js';
 import amberLogo from '../../assets/amber-logo-white-orange.png';
 
 const navigation = [
-  { to: '/', label: 'Товари', icon: <Boxes size={16} aria-hidden="true" />, end: true },
-  { to: '/admin', label: 'Каталог і ціни', icon: <SlidersHorizontal size={16} aria-hidden="true" />, end: true },
-  { to: '/admin/repricing', label: 'Переоцінка', icon: <CircleDollarSign size={16} aria-hidden="true" /> },
-  { to: '/admin/corrections', label: 'Виправлення', icon: <ClipboardList size={16} aria-hidden="true" />, end: true },
-  { to: '/admin/corrections/history', label: 'Журнал', icon: <History size={16} aria-hidden="true" /> },
+  { to: '/', label: 'Товари', icon: <Boxes size={16} aria-hidden="true" />, end: true, permissions: ['products.view'] },
+  { to: '/admin', label: 'Каталог і ціни', icon: <SlidersHorizontal size={16} aria-hidden="true" />, end: true, permissions: ['catalog.view', 'pricing.view'] },
+  { to: '/admin/repricing', label: 'Переоцінка', icon: <CircleDollarSign size={16} aria-hidden="true" />, permissions: ['repricing.view'] },
+  { to: '/admin/corrections', label: 'Виправлення', icon: <ClipboardList size={16} aria-hidden="true" />, end: true, permissions: ['corrections.view'] },
+  { to: '/admin/corrections/history', label: 'Журнал', icon: <History size={16} aria-hidden="true" />, permissions: ['history.view'] },
+  { to: '/admin/users', label: 'Користувачі', icon: <Users size={16} aria-hidden="true" />, permissions: ['users.manage'] },
+  { to: '/admin/roles', label: 'Ролі', icon: <Shield size={16} aria-hidden="true" />, permissions: ['roles.manage'] },
+  { to: '/admin/audit', label: 'Аудит', icon: <ScrollText size={16} aria-hidden="true" />, permissions: ['audit.view'] },
 ];
 
 export function WorkspaceNav() {
+  const auth = useAuth();
+
   return (
     <nav className="workspace-nav" aria-label="Основна навігація">
       <div className="workspace-nav-inner">
@@ -25,7 +36,9 @@ export function WorkspaceNav() {
         </NavLink>
 
         <div className="workspace-nav-links">
-          {navigation.map(({ to, label, icon, end }) => (
+          {navigation
+            .filter((item) => item.permissions.some((permission) => auth.permissions.includes(permission)))
+            .map(({ to, label, icon, end }) => (
             <NavLink
               key={to}
               to={to}
@@ -36,7 +49,21 @@ export function WorkspaceNav() {
               {icon}
               <span>{label}</span>
             </NavLink>
-          ))}
+            ))}
+        </div>
+
+        <div className="workspace-user">
+          <span className="workspace-user-name" title={getIdentityDisplayName(auth.identity)}>
+            {getIdentityDisplayName(auth.identity)}
+          </span>
+          <button
+            type="button"
+            className="workspace-logout"
+            onClick={() => { void auth.logout(); }}
+          >
+            <LogOut size={15} aria-hidden="true" />
+            <span>Вийти</span>
+          </button>
         </div>
       </div>
     </nav>

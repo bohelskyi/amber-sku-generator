@@ -1,6 +1,8 @@
 const crypto = require('crypto');
 const pool = require('../db/pool');
 const { getAppConfig } = require('./catalog.service');
+const { writeAuditEvent } = require('../audit/audit-events');
+const { createMutationContext } = require('../audit/mutation-context');
 
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
@@ -129,16 +131,24 @@ async function readCatalogSnapshot(categoryCode, {
   return questions;
 }
 
-async function insertSnapshot(client, categoryCode, version, questions) {
+async function insertSnapshot(client, categoryCode, version, questions, publishedByUserId = null) {
   const marker = getVersionMarker(version);
   const configHash = hashSnapshot(questions);
-  const versionResult = await client.query(
-    `INSERT INTO sku_schema_versions
-     (category_code, version, marker, status, config_hash)
-     VALUES ($1, $2, $3, 'active', $4)
-     RETURNING *`,
-    [categoryCode, version, marker, configHash]
-  );
+  const versionResult = publishedByUserId === null
+    ? await client.query(
+      `INSERT INTO sku_schema_versions
+       (category_code, version, marker, status, config_hash)
+       VALUES ($1, $2, $3, 'active', $4)
+       RETURNING *`,
+      [categoryCode, version, marker, configHash]
+    )
+    : await client.query(
+      `INSERT INTO sku_schema_versions
+       (category_code, version, marker, status, config_hash, published_by_user_id)
+       VALUES ($1, $2, $3, 'active', $4, $5)
+       RETURNING *`,
+      [categoryCode, version, marker, configHash, publishedByUserId]
+    );
   const schemaVersion = versionResult.rows[0];
 
   for (const question of questions) {
@@ -379,7 +389,8 @@ async function getSchemaStatus(categoryCode) {
   };
 }
 
-async function publishSkuSchema(categoryCode) {
+async function publishSkuSchema(categoryCode, options = {}) {
+  const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -414,7 +425,20 @@ async function publishSkuSchema(categoryCode) {
       );
     }
     const nextVersion = current ? Number(current.version) + 1 : 1;
-    const published = await insertSnapshot(client, categoryCode, nextVersion, questions);
+    const published = await insertSnapshot(
+      client,
+      categoryCode,
+      nextVersion,
+      questions,
+      mutationContext.actorUserId
+    );
+    await writeAuditEvent(client, {
+      mutationContext,
+      eventKey: 'sku_schema.published',
+      subjectType: 'sku_schema_version',
+      subjectId: published.id,
+      details: { categoryCode, version: nextVersion },
+    });
     await client.query('COMMIT');
     return {
       id: published.id,

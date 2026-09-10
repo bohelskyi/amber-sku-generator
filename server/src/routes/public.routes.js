@@ -17,10 +17,13 @@ const {
   createExportSnapshot,
   getExportSnapshot,
 } = require('../services/export.service');
+const { requirePermission } = require('../auth/authorization');
+const { getRequestMutationContext } = require('../audit/mutation-context');
+const { getProductTimeline } = require('../services/product-timeline.service');
 
 const router = express.Router();
 
-router.get('/config', async (req, res) => {
+router.get('/config', requirePermission('products.view'), async (req, res) => {
   try {
     const config = await getPublicConfig();
     res.json(config);
@@ -29,7 +32,7 @@ router.get('/config', async (req, res) => {
   }
 });
 
-router.post('/preview', async (req, res) => {
+router.post('/preview', requirePermission('products.create'), async (req, res) => {
   try {
     const preview = await buildProductPreview(req.body || {});
     res.json(preview);
@@ -38,7 +41,7 @@ router.post('/preview', async (req, res) => {
   }
 });
 
-router.post('/price-preview', async (req, res) => {
+router.post('/price-preview', requirePermission('products.create'), async (req, res) => {
   try {
     const { categoryCode, answers = {}, weight, isCalibrated } = req.body;
     const pricing = await calculatePricing(categoryCode, answers, weight, isCalibrated);
@@ -57,7 +60,7 @@ router.post('/price-preview', async (req, res) => {
   }
 });
 
-router.post('/decode', async (req, res) => {
+router.post('/decode', requirePermission('products.decode'), async (req, res) => {
   try {
     const decoded = await decodeSku(req.body?.sku);
     res.json(decoded);
@@ -69,7 +72,7 @@ router.post('/decode', async (req, res) => {
   }
 });
 
-router.post('/variation', async (req, res) => {
+router.post('/variation', requirePermission('products.create'), async (req, res) => {
   try {
     const variation = await getNextVariationSku(req.body?.sku);
     res.json(variation);
@@ -78,7 +81,7 @@ router.post('/variation', async (req, res) => {
   }
 });
 
-router.post('/recount/preview', async (req, res) => {
+router.post('/recount/preview', requirePermission('corrections.create'), async (req, res) => {
   try {
     const preview = await buildProductRecountPreview(req.body || {});
     res.json(preview);
@@ -87,39 +90,45 @@ router.post('/recount/preview', async (req, res) => {
   }
 });
 
-router.post('/recount/apply', async (req, res) => {
+router.post('/recount/apply', requirePermission('products.recount'), async (req, res) => {
   try {
-    const result = await applyProductRecount(req.body || {});
+    const result = await applyProductRecount(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 400).json({ error: err.message });
   }
 });
 
-router.post('/save', async (req, res) => {
+router.post('/save', requirePermission('products.create'), async (req, res) => {
   try {
-    const result = await saveProduct(req.body || {});
+    const result = await saveProduct(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.post('/delete', async (req, res) => {
+router.post('/delete', requirePermission('products.archive'), async (req, res) => {
   try {
     const { skuToDelete } = req.body || {};
     if (!skuToDelete || skuToDelete.length < 4) {
       return res.status(400).json({ error: 'Некоректний формат' });
     }
 
-    const result = await deleteProductBySku(skuToDelete);
+    const result = await deleteProductBySku(skuToDelete, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.get('/products', async (req, res) => {
+router.get('/products', requirePermission('history.view'), async (req, res) => {
   try {
     const products = await getRecentProducts();
     res.json(products);
@@ -128,7 +137,18 @@ router.get('/products', async (req, res) => {
   }
 });
 
-router.get('/export/status', async (req, res) => {
+router.get('/product-timeline', requirePermission('history.view'), async (req, res) => {
+  try {
+    res.json(await getProductTimeline(req.query?.sku));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({
+      error: err.message,
+      ...(err.code ? { code: err.code } : {}),
+    });
+  }
+});
+
+router.get('/export/status', requirePermission('exports.view'), async (req, res) => {
   try {
     const status = await getExportStatus();
     res.json(status);
@@ -137,19 +157,19 @@ router.get('/export/status', async (req, res) => {
   }
 });
 
-router.get('/export/csv', async (req, res) => {
+router.get('/export/csv', requirePermission('exports.view'), async (req, res) => {
   res.status(410).json({
     error: 'Прямий CSV-експорт вимкнено. Створіть і підтвердьте immutable export snapshot.',
   });
 });
 
-router.post('/export/snapshots', async (req, res) => {
+router.post('/export/snapshots', requirePermission('exports.create'), async (req, res) => {
   try {
     const snapshot = await createExportSnapshot({
       fromSku: req.body?.fromSku,
       toSku: req.body?.toSku,
       idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey,
-    });
+    }, { mutationContext: getRequestMutationContext(req) });
     res.status(201).json({
       id: snapshot.id,
       status: snapshot.status,
@@ -162,7 +182,7 @@ router.post('/export/snapshots', async (req, res) => {
   }
 });
 
-router.get('/export/snapshots/:id/csv', async (req, res) => {
+router.get('/export/snapshots/:id/csv', requirePermission('exports.view'), async (req, res) => {
   try {
     const snapshot = await getExportSnapshot(req.params.id);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -173,9 +193,11 @@ router.get('/export/snapshots/:id/csv', async (req, res) => {
   }
 });
 
-router.post('/export/snapshots/:id/confirm', async (req, res) => {
+router.post('/export/snapshots/:id/confirm', requirePermission('exports.create'), async (req, res) => {
   try {
-    res.json(await confirmExportSnapshot(req.params.id));
+    res.json(await confirmExportSnapshot(req.params.id, {
+      mutationContext: getRequestMutationContext(req),
+    }));
   } catch (err) {
     res.status(err.statusCode || 400).json({ error: err.message });
   }

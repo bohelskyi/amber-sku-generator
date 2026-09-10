@@ -2,6 +2,7 @@ import { AdminHeader } from '../components/admin/AdminHeader';
 import { AdminPricingEditor } from '../components/admin/AdminPricingEditor';
 import { AdminStructureEditor } from '../components/admin/AdminStructureEditor';
 import { ValidationIssues } from '../components/admin/ValidationIssues';
+import { LoadingState } from '../components/app/UiPrimitives.jsx';
 import { useAdminPanel } from '../hooks/useAdminPanel';
 
 export default function AdminPage() {
@@ -9,12 +10,7 @@ export default function AdminPage() {
 
   if (!admin.config) {
     return (
-      <div className="app-page flex items-center justify-center">
-        <div className="card p-8 text-center">
-          <div className="text-lg font-semibold text-slate-700">Завантаження...</div>
-          <div className="mt-2 text-sm text-slate-500">Збираємо конфігурацію та цінові сценарії.</div>
-        </div>
-      </div>
+      <div className="app-page"><LoadingState label="Збираємо конфігурацію та цінові сценарії…" /></div>
     );
   }
 
@@ -22,12 +18,33 @@ export default function AdminPage() {
     <div className="app-page">
       <div className="mx-auto max-w-7xl space-y-5 px-4 py-4 pb-20 sm:px-6 sm:py-6">
         <AdminHeader />
-        <ValidationIssues issues={admin.validationIssues} />
+        {admin.canViewCatalog && <ValidationIssues issues={admin.validationIssues} />}
         <nav className="admin-section-nav" aria-label="Розділи налаштувань">
-          <a href="#catalog-structure">Структура каталогу</a>
-          <a href="#catalog-pricing">Матриці та модифікатори</a>
+          {admin.canViewCatalog && <a href="#catalog-structure">Структура каталогу</a>}
+          {admin.canViewPricing && <a href="#catalog-pricing">Матриці та модифікатори</a>}
         </nav>
-        <section id="catalog-structure" className="admin-anchor-section">
+        {!admin.canViewCatalog && admin.canViewPricing && (
+          <section className="catalog-category-context" aria-label="Категорія для перегляду цін">
+            <div className="catalog-category-heading">
+              <div><h2>Категорія</h2><p>Оберіть матриці та модифікатори для перегляду</p></div>
+            </div>
+            <div className="catalog-category-tabs" role="tablist" aria-label="Категорії цін">
+              {Object.values(admin.config.categories).map((category) => (
+                <button
+                  key={category.code}
+                  type="button"
+                  role="tab"
+                  aria-selected={admin.selectedCat?.code === category.code}
+                  onClick={() => admin.handleSelectCategory(category)}
+                  className={`catalog-category-tab ${admin.selectedCat?.code === category.code ? 'is-active' : ''}`}
+                >
+                  <span>{category.name}</span><small>{category.code}</small>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+        {admin.canViewCatalog && <section id="catalog-structure" className="admin-anchor-section">
           <AdminStructureEditor
             config={admin.config}
           selectedCat={admin.selectedCat}
@@ -66,8 +83,8 @@ export default function AdminPage() {
           deleteItem={admin.deleteItem}
             formatMatchJson={admin.formatMatchJson}
           />
-        </section>
-        <section id="catalog-pricing" className="admin-anchor-section">
+        </section>}
+        {admin.canViewPricing && <section id="catalog-pricing" className="admin-anchor-section">
           <AdminPricingEditor
             config={admin.config}
           selectedCat={admin.selectedCat}
@@ -92,8 +109,9 @@ export default function AdminPage() {
           updateModifier={admin.updateModifier}
           saveModifierEdit={admin.saveModifierEdit}
             addModifier={admin.addModifier}
+            readOnly={!admin.canManagePricing}
           />
-        </section>
+        </section>}
       </div>
     </div>
   );

@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { formatDecimal } from '../lib/formatters';
 import { getValidationIssues } from '../lib/admin-validation';
 import { normalizeDecimalInput } from '../lib/number-input';
 import { buildScenarioEditorDraft, findScenarioById } from '../lib/admin-pricing-state';
+import { useAuth } from '../auth/auth-context.js';
+import { getPermissionUiState } from '../lib/permission-ui.js';
 
 const emptyEditOption = { id: null, value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false };
 const emptyNewCategory = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false };
@@ -48,6 +50,10 @@ const buildNewQuestionDefaults = (questions = []) => ({
 });
 
 export function useAdminPanel() {
+  const auth = useAuth();
+  const { canManagePricing, canViewCatalog, canViewPricing } = getPermissionUiState(
+    auth.permissions
+  );
   const [config, setConfig] = useState(null);
   const [selectedCat, setSelectedCat] = useState(null);
   const [selectedQuestion, setSelectedQuestion] = useState(null);
@@ -66,11 +72,11 @@ export function useAdminPanel() {
   const [schemaPublishState, setSchemaPublishState] = useState({ loading: false, error: '' });
   const pricesRequestId = useRef(0);
 
-  const fetchConfig = () =>
-    api.get('/admin/config').then((res) => {
+  const fetchConfig = useCallback(() =>
+    api.get(canViewCatalog ? '/admin/config' : '/config').then((res) => {
       setConfig(res.data);
       return res.data;
-    });
+    }), [canViewCatalog]);
 
   const fetchSchemaStatus = (categoryCode) => {
     if (!categoryCode) {
@@ -133,10 +139,10 @@ export function useAdminPanel() {
 
   useEffect(() => {
     fetchConfig();
-  }, []);
+  }, [fetchConfig]);
 
   useEffect(() => {
-    if (!selectedCat?.code || !config) return undefined;
+    if (!canViewCatalog || !selectedCat?.code || !config) return undefined;
     let cancelled = false;
     api.get(`/admin/sku-schema/${selectedCat.code}`).then((res) => {
       if (!cancelled) setSchemaStatus(res.data);
@@ -144,7 +150,7 @@ export function useAdminPanel() {
     return () => {
       cancelled = true;
     };
-  }, [config, selectedCat?.code]);
+  }, [canViewCatalog, config, selectedCat?.code]);
 
   const formatMatchJson = (value) => {
     if (value === null || value === undefined) return '{}';
@@ -187,7 +193,7 @@ export function useAdminPanel() {
     setNewQuest(buildNewQuestionDefaults(categoryQuestions));
     setPricesData(null);
     setSchemaPublishState({ loading: false, error: '' });
-    fetchPricesForCategory(category.code);
+    if (canViewPricing) fetchPricesForCategory(category.code);
   };
 
   const handleSelectQuestion = (question) => {
@@ -663,6 +669,9 @@ export function useAdminPanel() {
     beginModifierEdit,
     beginOptionEdit,
     beginScenarioEdit,
+    canManagePricing,
+    canViewCatalog,
+    canViewPricing,
     config,
     currentCatQuestions,
     currentOptions,

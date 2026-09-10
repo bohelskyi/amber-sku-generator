@@ -1,6 +1,7 @@
 import { formatDecimal, formatUah, formatUsd } from '../../lib/formatters';
+import { Link } from 'react-router-dom';
 
-export function HistoryTable({ history, config, selectedCat, onCopyText, onDecode, onDelete }) {
+export function HistoryTable({ history, config, selectedCat, onCopyText, onDecode, onDelete, canArchive = true }) {
   return (
     <section className="fade-up">
       <details className="collapsible">
@@ -41,6 +42,7 @@ export function HistoryTable({ history, config, selectedCat, onCopyText, onDecod
                         <div className="flex flex-wrap gap-2">
                           <button onClick={() => onCopyText(item.full_sku, 'SKU')} className="btn btn-outline text-xs px-2 py-1">Копіювати SKU</button>
                           <button onClick={() => onDecode(item.full_sku)} className="btn btn-outline text-xs px-2 py-1">Розшифрувати</button>
+                          <Link to={`/admin/corrections/history?sku=${encodeURIComponent(item.full_sku)}`} className="btn btn-outline text-xs px-2 py-1">Історія</Link>
                           <button
                             onClick={() => item.total_price_uah
                               ? onCopyText(formatUah(item.total_price_uah), 'Ціну')
@@ -49,7 +51,7 @@ export function HistoryTable({ history, config, selectedCat, onCopyText, onDecod
                           >
                             Копіювати ціну
                           </button>
-                          <button onClick={() => onDelete(item.full_sku)} className="btn btn-danger text-xs px-2 py-1">Архівувати</button>
+                          {canArchive && <button onClick={() => onDelete(item.full_sku)} className="btn btn-danger text-xs px-2 py-1">Архівувати</button>}
                         </div>
                       )}
                     </td>

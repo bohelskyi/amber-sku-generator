@@ -239,7 +239,7 @@ test('product builder uses compact ordered rows and keeps operational status in 
   assert.doesNotMatch(builderSource, /Поля показуються за чинною конфігурацією/);
   assert.doesNotMatch(builderSource, /className="field-group"/);
   assert.doesNotMatch(appSource, /PreviewResult/);
-  assert.match(appSource, /\{sku\.selectedCat && \(/);
+  assert.match(appSource, /\{canCreateProducts && sku\.selectedCat && \(/);
   assert.doesNotMatch(stylesSource, /builder-field-row:focus-within/);
   assert.match(builderSource, /getFinalPriceUsd\(displayedFinalPriceUah, displayedPricing\.uahRate\)/);
 });
@@ -359,10 +359,13 @@ test('home and decode presentation share aligned columns and compact authoritati
 
   assert.match(homeSource, /home-top-workspace/);
   assert.match(homeSource, /home-side-workspace/);
+  assert.match(homeSource, /canCreateProducts \? '' : ' is-decoder-only'/);
   assert.match(homeSource, /decode-result-workspace/);
   assert.equal((homeSource.match(/operational-split-layout/g) || []).length, 2, 'decode and recount must share the operational split');
   assert.match(builderSource, /className="operational-split-layout"/);
   assert.match(stylesSource, /\.home-top-workspace,[\s\S]*?\.operational-split-layout[\s\S]*?360px/);
+  assert.match(stylesSource, /\.home-top-workspace\.is-decoder-only[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(stylesSource, /\.home-top-workspace\.is-decoder-only \.home-side-workspace[\s\S]*?minmax\(0, 1fr\) 360px/);
   assert.match(homeSource, /const finalStoredPriceUsd = decodeData\.existsInDb \? pricing\?\.totalPrice : null/);
   assert.match(homeSource, /formatOptionalValue\(finalStoredPriceUsd, formatUsd\)/);
   assert.doesNotMatch(homeSource, /decode-rounding-note/);
@@ -497,7 +500,7 @@ test('pricing uses selected scenario and modifier master-detail editors', () => 
   assert.doesNotMatch(source, /Модифікатори \(Знижки \/ Націнки\)/);
 });
 
-test('correction queue wires exclusive browser claims and shared polling into the UI', () => {
+test('correction queue wires application-user claims and legacy compatibility into the UI', () => {
   const source = fs.readFileSync(
     new URL('../src/pages/CorrectionRequestsPage.jsx', import.meta.url),
     'utf8'
@@ -510,10 +513,12 @@ test('correction queue wires exclusive browser claims and shared polling into th
   assert.match(source, /getCorrectionRequestsForView/);
   assert.match(source, /isCorrectionClaimConflict/);
   assert.match(source, /\/correction-requests\/\$\{request\.id\}\/claim/);
-  assert.match(source, /X-Correction-Claim-Token/);
+  assert.match(source, /getCorrectionLegacyClaimToken/);
+  assert.match(source, /claimVersion: request\.claimVersion/);
   assert.match(source, /В роботі у вас/);
-  assert.match(source, /В роботі в іншому браузері/);
-  assert.doesNotMatch(source, /В роботі іншим працівником/);
+  assert.match(source, /getEmployeeLabel\(request\.claimedByUser\)/);
+  assert.doesNotMatch(source, /В роботі в іншому браузері/);
+  assert.doesNotMatch(source, /storeCorrectionClaim/);
   assert.match(source, /Примусово повернути/);
   assert.match(source, /window\.confirm/);
 });

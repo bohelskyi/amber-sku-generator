@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle,
   ArrowRight,
   CheckCircle2,
   ClipboardList,
@@ -13,21 +12,24 @@ import {
   XCircle,
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useAuth } from '../auth/auth-context.js';
+import { AppPageHeader, EmptyState, LoadingState, Notice } from '../components/app/UiPrimitives.jsx';
 import { useDialogAccessibility } from '../hooks/useDialogAccessibility';
 import { getAnswerValueLabel, getQuestionLabel } from '../lib/answer-labels';
 import { api } from '../lib/api';
 import { copyPlainText } from '../lib/clipboard';
 import { formatDateTime, formatUah } from '../lib/formatters';
+import { getPermissionUiState } from '../lib/permission-ui.js';
 import {
   createLatestRequestGate,
   createVisibilityAwarePoller,
   getCorrectionClaimOwnership,
+  getCorrectionLegacyClaimToken,
   getCorrectionRequestsForView,
   isCorrectionClaimConflict,
   readCorrectionClaims,
   reconcileCorrectionClaims,
   removeCorrectionClaim,
-  storeCorrectionClaim,
   writeCorrectionClaims,
 } from '../lib/correction-queue';
 
@@ -57,6 +59,10 @@ const FILTERS = [
 
 function getApiError(error) {
   return error.response?.data?.error || error.message || 'Невідома помилка';
+}
+
+function getEmployeeLabel(user) {
+  return user?.displayName || user?.preferredUsername || (user?.id ? `Працівник #${user.id}` : null);
 }
 
 function CopyButton({ label, value }) {
@@ -163,6 +169,14 @@ function CompletionDialog({ busy, request, onCancel, onConfirm }) {
 }
 
 export default function CorrectionRequestsPage() {
+  const auth = useAuth();
+  const currentUserId = auth.applicationUser?.id;
+  const permissionUi = getPermissionUiState(auth.permissions);
+  const canClaim = permissionUi.canClaimCorrections;
+  const canComplete = permissionUi.canCompleteCorrections;
+  const canForceRelease = permissionUi.canForceReleaseCorrections;
+  const canReject = permissionUi.canRejectCorrections;
+  const canViewCatalogOrPricing = permissionUi.canViewCatalog || permissionUi.canViewPricing;
   const [searchParams] = useSearchParams();
   const focusedRequestId = Number(searchParams.get('request') || 0);
   const isAdminView = searchParams.get('from') === 'admin';
@@ -222,7 +236,7 @@ export default function CorrectionRequestsPage() {
   }, [persistClaims]);
 
   useEffect(() => {
-    Promise.all([api.get('/admin/config'), loadRequests('active')])
+    Promise.all([api.get('/config'), loadRequests('active')])
       .then(([configResponse]) => {
         setConfig(configResponse.data);
       })
@@ -250,7 +264,12 @@ export default function CorrectionRequestsPage() {
   }, [focusedRequestId, loading, requests]);
 
   const visibleRequests = useMemo(() => {
-    const orderedRequests = getCorrectionRequestsForView(requests, claims, filter);
+    const orderedRequests = getCorrectionRequestsForView(
+      requests,
+      currentUserId,
+      claims,
+      filter
+    );
     const normalizedSearch = search.trim().toUpperCase();
     if (!normalizedSearch) return orderedRequests;
     return orderedRequests.filter((request) => (
@@ -258,7 +277,7 @@ export default function CorrectionRequestsPage() {
       || request.proposedSku.includes(normalizedSearch)
       || request.comment.toUpperCase().includes(normalizedSearch)
     ));
-  }, [claims, filter, requests, search]);
+  }, [claims, currentUserId, filter, requests, search]);
 
   const changeFilter = (nextFilter) => {
     if (nextFilter === filter || loading) return;
@@ -271,8 +290,8 @@ export default function CorrectionRequestsPage() {
       .finally(() => setLoading(false));
   };
 
-  const getClaimHeaders = (requestId) => {
-    const claimToken = claims[requestId]?.token;
+  const getClaimHeaders = (request) => {
+    const claimToken = getCorrectionLegacyClaimToken(request, claims);
     return claimToken ? { 'X-Correction-Claim-Token': claimToken } : {};
   };
 
@@ -295,12 +314,7 @@ export default function CorrectionRequestsPage() {
     setError('');
     setSuccess('');
     try {
-      const response = await api.post(`/admin/correction-requests/${request.id}/claim`);
-      persistClaims((currentClaims) => storeCorrectionClaim(
-        currentClaims,
-        response.data.request,
-        response.data.claimToken
-      ));
+      await api.post(`/admin/correction-requests/${request.id}/claim`);
       await loadRequests(filter);
       setSuccess(`Запит #${request.id} взято в роботу.`);
     } catch (requestError) {
@@ -319,8 +333,8 @@ export default function CorrectionRequestsPage() {
     try {
       await api.post(
         `/admin/correction-requests/${request.id}/release`,
-        {},
-        { headers: getClaimHeaders(request.id) }
+        { claimVersion: request.claimVersion },
+        { headers: getClaimHeaders(request) }
       );
       clearClaim(request.id);
       await loadRequests(filter);
@@ -343,7 +357,10 @@ export default function CorrectionRequestsPage() {
     setError('');
     setSuccess('');
     try {
-      await api.post(`/admin/correction-requests/${request.id}/force-release`, { confirm: true });
+      await api.post(`/admin/correction-requests/${request.id}/force-release`, {
+        confirm: true,
+        claimVersion: request.claimVersion,
+      });
       clearClaim(request.id);
       await loadRequests(filter);
       setSuccess(`Запит #${request.id} примусово повернуто в чергу.`);
@@ -362,8 +379,8 @@ export default function CorrectionRequestsPage() {
     try {
       await api.patch(
         `/admin/correction-requests/${request.id}/status`,
-        { status },
-        { headers: getClaimHeaders(request.id) }
+        { status, claimVersion: request.claimVersion },
+        { headers: getClaimHeaders(request) }
       );
       if (request.status === 'in_progress') clearClaim(request.id);
       await loadRequests(filter);
@@ -385,8 +402,8 @@ export default function CorrectionRequestsPage() {
     try {
       await api.post(
         `/admin/correction-requests/${request.id}/refresh`,
-        {},
-        { headers: getClaimHeaders(request.id) }
+        { claimVersion: request.claimVersion },
+        { headers: getClaimHeaders(request) }
       );
       await loadRequests(filter);
       setSuccess(`Запит #${request.id} оновлено. Повторно звірте SKU та ціну на сайті.`);
@@ -408,8 +425,8 @@ export default function CorrectionRequestsPage() {
     try {
       const response = await api.post(
         `/admin/correction-requests/${request.id}/complete`,
-        {},
-        { headers: getClaimHeaders(request.id) }
+        { claimVersion: request.claimVersion },
+        { headers: getClaimHeaders(request) }
       );
       clearClaim(request.id);
       closeCompletion();
@@ -432,22 +449,19 @@ export default function CorrectionRequestsPage() {
 
   if (loading && !config) {
     return (
-      <div className="app-page flex items-center justify-center">
-        <RefreshCw className="animate-spin text-slate-600" size={26} />
-      </div>
+      <div className="app-page"><LoadingState label="Завантажуємо чергу виправлень…" /></div>
     );
   }
 
   return (
     <div className="app-page">
       <main className="mx-auto w-full min-w-0 max-w-7xl space-y-5 overflow-hidden px-4 py-4 pb-20 sm:px-6 sm:py-6">
-        <header className="console-header">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight text-slate-900">Запити на виправлення</h1>
-            <p className="mt-1 text-xs text-slate-500">Операційна черга, власність і завершення запитів.</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {isAdminView && (
+        <AppPageHeader
+          eyebrow="Виправлення"
+          title="Запити на виправлення"
+          description="Операційна черга, відповідальні працівники та завершення запитів."
+          actions={<>
+            {isAdminView && canViewCatalogOrPricing && (
               <Link to="/admin" className="btn btn-outline">
                 Адмін-панель
               </Link>
@@ -456,25 +470,15 @@ export default function CorrectionRequestsPage() {
               <House size={16} />
               На головну
             </Link>
-          </div>
-        </header>
+          </>}
+        />
 
-        {error && (
-          <div className="flex items-start gap-3 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-            <AlertTriangle size={18} className="mt-0.5 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-        {success && (
-          <div className="flex items-start gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-            <CheckCircle2 size={18} className="mt-0.5 shrink-0" />
-            <span>{success}</span>
-          </div>
-        )}
+        {error && <Notice>{error}</Notice>}
+        {success && <Notice tone="success">{success}</Notice>}
         {queueRefreshFailed && (
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          <Notice tone="warning">
             Не вдалося оновити спільну чергу. Показано останні отримані дані; повторна спроба буде автоматично.
-          </div>
+          </Notice>
         )}
 
         <section className="card queue-workspace w-full min-w-0">
@@ -504,17 +508,19 @@ export default function CorrectionRequestsPage() {
           </div>
 
           {loading ? (
-            <div className="flex justify-center py-16">
-              <RefreshCw className="animate-spin text-slate-500" size={24} />
-            </div>
+            <LoadingState compact label="Оновлюємо чергу…" />
           ) : visibleRequests.length === 0 ? (
-            <div className="py-16 text-center text-sm text-slate-500">Запитів для цього фільтра немає.</div>
+            <EmptyState compact>Запитів для цього фільтра немає.</EmptyState>
           ) : (
             <div className="correction-list divide-y divide-slate-200">
               {visibleRequests.map((request) => {
                 const requestBusy = busyId === request.id;
                 const proposedPrice = request.proposedPayload?.totalPriceUah;
-                const claimOwnership = getCorrectionClaimOwnership(request, claims);
+                const claimOwnership = getCorrectionClaimOwnership(
+                  request,
+                  currentUserId,
+                  claims
+                );
                 const isOwnedClaim = claimOwnership === 'owned';
                 return (
                   <article
@@ -525,12 +531,24 @@ export default function CorrectionRequestsPage() {
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <StatusBadge status={request.status} />
-                        <span className="text-xs text-slate-500">#{request.id} · створено {formatDateTime(request.createdAt)}</span>
+                        <Link to={`/admin/corrections/history?sku=${encodeURIComponent(request.sourceSku)}`} className="btn btn-outline text-xs px-2 py-1">
+                          Історія товару
+                        </Link>
+                        <span className="text-xs text-slate-500">
+                          #{request.id} · створено {formatDateTime(request.createdAt)}
+                          {getEmployeeLabel(request.createdByUser)
+                            ? ` · ${getEmployeeLabel(request.createdByUser)}`
+                            : ''}
+                        </span>
                       </div>
                       {request.status === 'in_progress' && (
                         <div className="flex flex-wrap items-center gap-2">
                           <div className={`claim-state mb-0 ${isOwnedClaim ? 'is-owned' : 'is-external'}`}>
-                            {isOwnedClaim ? 'В роботі у вас' : 'В роботі в іншому браузері'}
+                            {isOwnedClaim
+                              ? 'В роботі у вас'
+                              : getEmployeeLabel(request.claimedByUser)
+                                ? `В роботі: ${getEmployeeLabel(request.claimedByUser)}`
+                                : 'В роботі: успадкований запит без визначеного працівника'}
                           </div>
                           <span className="text-xs text-slate-500">взято {formatDateTime(request.claimedAt || request.updatedAt)}</span>
                         </div>
@@ -576,36 +594,38 @@ export default function CorrectionRequestsPage() {
                           {request.completedAt && <>Виконано: {formatDateTime(request.completedAt)}</>}
                         </div>
                         <div className="flex flex-wrap justify-start gap-2 xl:justify-end">
-                          {request.status === 'pending' && (
-                            <>
+                          {(request.status === 'pending'
+                            || (request.hasUnownedLegacyClaim && !request.claimFingerprint))
+                            && canClaim && (
                               <button type="button" className="btn btn-outline gap-2" onClick={() => claimRequest(request)} disabled={requestBusy}>
                                 <Play size={15} />
                                 Взяти в роботу
                               </button>
+                          )}
+                          {request.status === 'pending' && canReject && (
                               <button type="button" className="btn btn-outline flex h-10 w-10 items-center justify-center p-0 text-rose-700" onClick={() => updateStatus(request, 'rejected')} disabled={requestBusy} title="Відхилити" aria-label="Відхилити запит">
                                 <XCircle size={16} />
                               </button>
-                            </>
                           )}
                           {request.status === 'in_progress' && isOwnedClaim && (
                             <>
-                              <button type="button" className="btn btn-outline flex h-10 w-10 items-center justify-center p-0" onClick={() => refreshRequest(request)} disabled={requestBusy} title="Оновити розрахунок" aria-label="Оновити розрахунок">
+                              {canComplete && <button type="button" className="btn btn-outline flex h-10 w-10 items-center justify-center p-0" onClick={() => refreshRequest(request)} disabled={requestBusy} title="Оновити розрахунок" aria-label="Оновити розрахунок">
                                 <RefreshCw size={16} className={requestBusy ? 'animate-spin' : ''} />
-                              </button>
-                              <button type="button" className="btn btn-outline gap-2" onClick={() => releaseRequest(request)} disabled={requestBusy}>
+                              </button>}
+                              {canClaim && <button type="button" className="btn btn-outline gap-2" onClick={() => releaseRequest(request)} disabled={requestBusy}>
                                 <RotateCcw size={15} />
                                 Повернути в чергу
-                              </button>
-                              <button type="button" className="btn btn-outline flex h-10 w-10 items-center justify-center p-0 text-rose-700" onClick={() => updateStatus(request, 'rejected')} disabled={requestBusy} title="Відхилити" aria-label="Відхилити запит">
+                              </button>}
+                              {canReject && <button type="button" className="btn btn-outline flex h-10 w-10 items-center justify-center p-0 text-rose-700" onClick={() => updateStatus(request, 'rejected')} disabled={requestBusy} title="Відхилити" aria-label="Відхилити запит">
                                 <XCircle size={16} />
-                              </button>
-                              <button type="button" className="btn btn-primary gap-2" onClick={() => openCompletion(request)} disabled={requestBusy}>
+                              </button>}
+                              {canComplete && <button type="button" className="btn btn-primary gap-2" onClick={() => openCompletion(request)} disabled={requestBusy}>
                                 <CheckCircle2 size={16} />
                                 Підтвердити
-                              </button>
+                              </button>}
                             </>
                           )}
-                          {request.status === 'in_progress' && !isOwnedClaim && (
+                          {request.status === 'in_progress' && !isOwnedClaim && canForceRelease && (
                             <button
                               type="button"
                               className="btn btn-outline text-rose-700"
@@ -615,7 +635,7 @@ export default function CorrectionRequestsPage() {
                               Примусово повернути
                             </button>
                           )}
-                          {request.status === 'rejected' && (
+                          {request.status === 'rejected' && canReject && (
                             <button type="button" className="btn btn-outline gap-2" onClick={() => updateStatus(request, 'pending')} disabled={requestBusy}>
                               <RotateCcw size={15} />
                               Повернути
@@ -632,12 +652,12 @@ export default function CorrectionRequestsPage() {
         </section>
       </main>
 
-      <CompletionDialog
+      {canComplete && <CompletionDialog
         busy={Boolean(completionTarget && busyId === completionTarget.id)}
         request={completionTarget}
         onCancel={closeCompletion}
         onConfirm={completeRequest}
-      />
+      />}
     </div>
   );
 }

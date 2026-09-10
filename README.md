@@ -10,13 +10,13 @@
 cd amber-app
 ```
 
-3. Create local runtime configuration and replace the placeholder database password:
+3. Create local runtime configuration and replace the placeholder database and server secrets:
 ```bash
 cp .env.example .env
 ${EDITOR:-vi} .env
 ```
 
-The `.env` file is ignored by Git. Keep production copies in protected deployment storage and do not commit them.
+The `.env` file is ignored by Git. Keep production copies in protected deployment storage and do not commit them. `OIDC_CLIENT_SECRET` is server-only. Generate `SESSION_SECRET` from at least 32 cryptographically random bytes; do not reuse the OIDC client secret.
 
 4. Build and run:
 ```bash
@@ -98,5 +98,11 @@ Notes:
 ### Runtime configuration
 
 See `.env.example` for all supported settings. `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` are required by Compose and are also used by a directly launched server when `DATABASE_URL` is absent. Standard `PG*` variables can override individual connection fields; startup fails clearly when credentials are absent or runtime values are invalid.
+
+The server requires the OIDC issuer/client/callback settings plus `APP_BASE_URL` and `SESSION_SECRET`. It exposes the server-owned Authorization Code + PKCE flow at `/api/auth/login` and `/api/auth/callback`, current identity at `/api/auth/me`, and CSRF-protected local/provider logout at `POST /api/auth/logout`. Successful logout returns a server-generated Keycloak `logoutUrl` for the browser to open as a top-level navigation; the API response itself does not redirect cross-origin. All business API routes require an authenticated application session, and unsafe methods also require the synchronizer CSRF token. The PostgreSQL-backed session cookie is host-only, `HttpOnly`, `SameSite=Lax`, scoped to `/api`, and has a fixed configurable lifetime (`SESSION_MAX_AGE_MS`, eight hours by default).
+
+For direct local development, use `APP_BASE_URL=http://localhost:5173`, the registered `http://localhost:5000/api/auth/callback`, `SESSION_COOKIE_SECURE=false`, and `TRUST_PROXY=false`. Use `localhost` consistently rather than mixing it with `127.0.0.1`.
+
+For production, use `APP_BASE_URL=https://skumanager.ambergalbin.space`, the registered HTTPS callback, `SESSION_COOKIE_SECURE=true`, and the exact trusted proxy-hop count (`TRUST_PROXY=1` for the checked-in nginx-to-server path). Register the same `APP_BASE_URL` as the Keycloak post-logout redirect URI. The outer TLS proxy must replace untrusted forwarding headers and pass the original HTTPS protocol to nginx. Never expose the server container directly when proxy trust is enabled.
 
 `VITE_API_BASE_URL` is intentionally public configuration because Vite bundles it into the browser application. Never put a secret in a `VITE_*` variable.

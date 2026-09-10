@@ -57,10 +57,222 @@ const {
   getCorrectionChangesText,
   getCorrectionHistory,
 } = require('../services/correction-history.service');
+const { requirePermission } = require('../auth/authorization');
+const { getRequestMutationContext } = require('../audit/mutation-context');
+const {
+  ApplicationUserAdminError,
+  approveApplicationUser,
+  changeApplicationUserRole,
+  disableApplicationUser,
+  enableApplicationUser,
+  listApplicationUsers,
+  listAssignableRoles,
+} = require('../services/application-user-admin.service');
+const {
+  RoleAdminError,
+  createRole,
+  deactivateRole,
+  listPermissions,
+  listRoles,
+  reactivateRole,
+  replaceRolePermissions,
+  updateRole,
+} = require('../services/role-admin.service');
+const {
+  AuditViewerError,
+  getAuditEvents,
+} = require('../services/audit-viewer.service');
 
 const router = express.Router();
 
-router.get('/admin/config', async (req, res) => {
+router.get('/admin/audit-events', requirePermission('audit.view'), async (req, res) => {
+  try {
+    res.json(await getAuditEvents(req.query || {}));
+  } catch (error) {
+    if (error instanceof AuditViewerError) {
+      return res.status(error.statusCode).json({ code: error.code, error: error.message });
+    }
+    console.error('Audit event listing failed:', error);
+    return res.status(500).json({ error: 'Audit event listing failed' });
+  }
+});
+
+const DELETE_ITEM_PERMISSION_BY_TYPE = Object.freeze({
+  category: 'catalog.manage',
+  question: 'catalog.manage',
+  option: 'catalog.manage',
+  modifier: 'pricing.manage',
+  scenario: 'pricing.manage',
+});
+
+const deleteItemPermissionMiddlewareByType = Object.freeze(
+  Object.fromEntries(
+    Object.entries(DELETE_ITEM_PERMISSION_BY_TYPE)
+      .map(([type, permissionKey]) => [type, requirePermission(permissionKey)])
+  )
+);
+
+function requireDeleteItemPermission(req, res, next) {
+  const type = typeof req.body?.type === 'string' ? req.body.type : '';
+  const middleware = Object.prototype.hasOwnProperty.call(
+    deleteItemPermissionMiddlewareByType,
+    type
+  ) ? deleteItemPermissionMiddlewareByType[type] : null;
+  if (!middleware) return res.status(400).json({ error: 'Invalid resource type' });
+  return middleware(req, res, next);
+}
+
+function sendApplicationUserAdminError(res, error) {
+  if (error instanceof ApplicationUserAdminError || error instanceof RoleAdminError) {
+    return res.status(error.statusCode).json({ code: error.code, error: error.message });
+  }
+  console.error('Application user administration failed:', error);
+  return res.status(500).json({ error: 'Application user administration failed' });
+}
+
+router.get('/admin/users', requirePermission('users.manage'), async (_req, res) => {
+  try {
+    res.json({ users: await listApplicationUsers() });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.get('/admin/users/roles', requirePermission('users.manage'), async (_req, res) => {
+  try {
+    res.json({ roles: await listAssignableRoles() });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.post('/admin/users/:userId/approve', requirePermission('users.manage'), async (req, res) => {
+  try {
+    res.json({
+      user: await approveApplicationUser(req.params.userId, req.body?.roleId, {
+        mutationContext: getRequestMutationContext(req),
+      }),
+    });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.put('/admin/users/:userId/role', requirePermission('users.manage'), async (req, res) => {
+  try {
+    res.json({
+      user: await changeApplicationUserRole(req.params.userId, req.body?.roleId, {
+        expectedAssignmentId: req.body?.expectedAssignmentId,
+        mutationContext: getRequestMutationContext(req),
+      }),
+    });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.post('/admin/users/:userId/disable', requirePermission('users.manage'), async (req, res) => {
+  try {
+    res.json({
+      user: await disableApplicationUser(req.params.userId, {
+        mutationContext: getRequestMutationContext(req),
+      }),
+    });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.post('/admin/users/:userId/enable', requirePermission('users.manage'), async (req, res) => {
+  try {
+    res.json({
+      user: await enableApplicationUser(req.params.userId, req.body?.roleId, {
+        expectedAssignmentId: req.body?.expectedAssignmentId,
+        mutationContext: getRequestMutationContext(req),
+      }),
+    });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.get('/admin/roles', requirePermission('roles.manage'), async (_req, res) => {
+  try {
+    res.json({ roles: await listRoles() });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.get('/admin/roles/permissions', requirePermission('roles.manage'), async (_req, res) => {
+  try {
+    res.json({ permissions: await listPermissions() });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.post('/admin/roles', requirePermission('roles.manage'), async (req, res) => {
+  try {
+    res.status(201).json({
+      role: await createRole(req.body || {}, {
+        mutationContext: getRequestMutationContext(req),
+      }),
+    });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.patch('/admin/roles/:roleId', requirePermission('roles.manage'), async (req, res) => {
+  try {
+    res.json({
+      role: await updateRole(req.params.roleId, req.body || {}, {
+        mutationContext: getRequestMutationContext(req),
+      }),
+    });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.put('/admin/roles/:roleId/permissions', requirePermission('roles.manage'), async (req, res) => {
+  try {
+    res.json({
+      role: await replaceRolePermissions(req.params.roleId, req.body || {}, {
+        mutationContext: getRequestMutationContext(req),
+      }),
+    });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.post('/admin/roles/:roleId/deactivate', requirePermission('roles.manage'), async (req, res) => {
+  try {
+    res.json({
+      role: await deactivateRole(req.params.roleId, req.body?.expectedVersion, {
+        mutationContext: getRequestMutationContext(req),
+      }),
+    });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.post('/admin/roles/:roleId/reactivate', requirePermission('roles.manage'), async (req, res) => {
+  try {
+    res.json({
+      role: await reactivateRole(req.params.roleId, req.body?.expectedVersion, {
+        mutationContext: getRequestMutationContext(req),
+      }),
+    });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.get('/admin/config', requirePermission('catalog.view'), async (req, res) => {
   try {
     res.json(await getAppConfig());
   } catch (err) {
@@ -68,7 +280,7 @@ router.get('/admin/config', async (req, res) => {
   }
 });
 
-router.get('/admin/sku-schema/:catCode', async (req, res) => {
+router.get('/admin/sku-schema/:catCode', requirePermission('catalog.view'), async (req, res) => {
   try {
     res.json(await getSchemaStatus(String(req.params.catCode || '').toUpperCase()));
   } catch (err) {
@@ -76,15 +288,17 @@ router.get('/admin/sku-schema/:catCode', async (req, res) => {
   }
 });
 
-router.post('/admin/sku-schema/:catCode/publish', async (req, res) => {
+router.post('/admin/sku-schema/:catCode/publish', requirePermission('sku_schemas.publish'), async (req, res) => {
   try {
-    res.json(await publishSkuSchema(String(req.params.catCode || '').toUpperCase()));
+    res.json(await publishSkuSchema(String(req.params.catCode || '').toUpperCase(), {
+      mutationContext: getRequestMutationContext(req),
+    }));
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.get('/admin/prices/:catCode', async (req, res) => {
+router.get('/admin/prices/:catCode', requirePermission('pricing.view'), async (req, res) => {
   try {
     const data = await getAdminPrices(req.params.catCode);
     res.json(data);
@@ -93,7 +307,7 @@ router.get('/admin/prices/:catCode', async (req, res) => {
   }
 });
 
-router.get('/admin/repricing/scenarios', async (req, res) => {
+router.get('/admin/repricing/scenarios', requirePermission('repricing.view'), async (req, res) => {
   try {
     const scenarios = await getRepricingScenarios();
     res.json(scenarios);
@@ -102,7 +316,7 @@ router.get('/admin/repricing/scenarios', async (req, res) => {
   }
 });
 
-router.get('/admin/correction-requests', async (req, res) => {
+router.get('/admin/correction-requests', requirePermission('corrections.view'), async (req, res) => {
   try {
     res.json(await getCorrectionRequests(req.query || {}));
   } catch (err) {
@@ -110,7 +324,7 @@ router.get('/admin/correction-requests', async (req, res) => {
   }
 });
 
-router.get('/admin/product-corrections', async (req, res) => {
+router.get('/admin/product-corrections', requirePermission('history.view'), async (req, res) => {
   try {
     res.json(await getCorrectionHistory(req.query || {}));
   } catch (err) {
@@ -118,7 +332,7 @@ router.get('/admin/product-corrections', async (req, res) => {
   }
 });
 
-router.get('/admin/product-corrections/csv', async (req, res) => {
+router.get('/admin/product-corrections/csv', requirePermission('history.view'), async (req, res) => {
   try {
     const data = await getCorrectionHistory(req.query || {}, { forExport: true });
     const csv = buildCsv([
@@ -167,9 +381,12 @@ router.get('/admin/product-corrections/csv', async (req, res) => {
   }
 });
 
-router.post('/admin/correction-requests', async (req, res) => {
+router.post('/admin/correction-requests', requirePermission('corrections.create'), async (req, res) => {
   try {
-    res.json(await createCorrectionRequest(req.body || {}));
+    res.json(await createCorrectionRequest(
+      req.body || {},
+      { mutationContext: getRequestMutationContext(req) }
+    ));
   } catch (err) {
     res.status(err.statusCode || 500).json({
       error: err.message,
@@ -178,9 +395,12 @@ router.post('/admin/correction-requests', async (req, res) => {
   }
 });
 
-router.post('/admin/correction-requests/:requestId/claim', async (req, res) => {
+router.post('/admin/correction-requests/:requestId/claim', requirePermission('corrections.claim'), async (req, res) => {
   try {
-    res.json(await claimCorrectionRequest(req.params.requestId));
+    res.json(await claimCorrectionRequest(
+      req.params.requestId,
+      { mutationContext: getRequestMutationContext(req) }
+    ));
   } catch (err) {
     res.status(err.statusCode || 500).json({
       error: err.message,
@@ -189,11 +409,13 @@ router.post('/admin/correction-requests/:requestId/claim', async (req, res) => {
   }
 });
 
-router.post('/admin/correction-requests/:requestId/release', async (req, res) => {
+router.post('/admin/correction-requests/:requestId/release', requirePermission('corrections.claim'), async (req, res) => {
   try {
     res.json(await releaseCorrectionRequest(
       req.params.requestId,
-      req.get(CLAIM_TOKEN_HEADER)
+      req.body?.claimVersion,
+      req.get(CLAIM_TOKEN_HEADER),
+      { mutationContext: getRequestMutationContext(req) }
     ));
   } catch (err) {
     res.status(err.statusCode || 500).json({
@@ -203,11 +425,13 @@ router.post('/admin/correction-requests/:requestId/release', async (req, res) =>
   }
 });
 
-router.post('/admin/correction-requests/:requestId/force-release', async (req, res) => {
+router.post('/admin/correction-requests/:requestId/force-release', requirePermission('corrections.force_release'), async (req, res) => {
   try {
     res.json(await forceReleaseCorrectionRequest(
       req.params.requestId,
-      req.body?.confirm === true
+      req.body?.claimVersion,
+      req.body?.confirm === true,
+      { mutationContext: getRequestMutationContext(req) }
     ));
   } catch (err) {
     res.status(err.statusCode || 500).json({
@@ -217,11 +441,13 @@ router.post('/admin/correction-requests/:requestId/force-release', async (req, r
   }
 });
 
-router.post('/admin/correction-requests/:requestId/refresh', async (req, res) => {
+router.post('/admin/correction-requests/:requestId/refresh', requirePermission('corrections.complete'), async (req, res) => {
   try {
     res.json(await refreshCorrectionRequest(
       req.params.requestId,
-      req.get(CLAIM_TOKEN_HEADER)
+      req.body?.claimVersion,
+      req.get(CLAIM_TOKEN_HEADER),
+      { mutationContext: getRequestMutationContext(req) }
     ));
   } catch (err) {
     res.status(err.statusCode || 500).json({
@@ -231,12 +457,14 @@ router.post('/admin/correction-requests/:requestId/refresh', async (req, res) =>
   }
 });
 
-router.patch('/admin/correction-requests/:requestId/status', async (req, res) => {
+router.patch('/admin/correction-requests/:requestId/status', requirePermission('corrections.reject'), async (req, res) => {
   try {
     res.json(await updateCorrectionRequestStatus(
       req.params.requestId,
       req.body?.status,
-      req.get(CLAIM_TOKEN_HEADER)
+      req.body?.claimVersion,
+      req.get(CLAIM_TOKEN_HEADER),
+      { mutationContext: getRequestMutationContext(req) }
     ));
   } catch (err) {
     res.status(err.statusCode || 500).json({
@@ -246,11 +474,13 @@ router.patch('/admin/correction-requests/:requestId/status', async (req, res) =>
   }
 });
 
-router.post('/admin/correction-requests/:requestId/complete', async (req, res) => {
+router.post('/admin/correction-requests/:requestId/complete', requirePermission('corrections.complete'), async (req, res) => {
   try {
     res.json(await completeCorrectionRequest(
       req.params.requestId,
-      req.get(CLAIM_TOKEN_HEADER)
+      req.body?.claimVersion,
+      req.get(CLAIM_TOKEN_HEADER),
+      { mutationContext: getRequestMutationContext(req) }
     ));
   } catch (err) {
     res.status(err.statusCode || 500).json({
@@ -260,7 +490,7 @@ router.post('/admin/correction-requests/:requestId/complete', async (req, res) =
   }
 });
 
-router.get('/admin/repricing/batches', async (req, res) => {
+router.get('/admin/repricing/batches', requirePermission('repricing.view'), async (req, res) => {
   try {
     const batches = await getRepricingBatches(req.query.limit);
     res.json(batches);
@@ -269,7 +499,7 @@ router.get('/admin/repricing/batches', async (req, res) => {
   }
 });
 
-router.get('/admin/repricing/drafts', async (req, res) => {
+router.get('/admin/repricing/drafts', requirePermission('repricing.view'), async (req, res) => {
   try {
     res.json(await getRepricingDrafts());
   } catch (err) {
@@ -277,15 +507,17 @@ router.get('/admin/repricing/drafts', async (req, res) => {
   }
 });
 
-router.post('/admin/repricing/drafts', async (req, res) => {
+router.post('/admin/repricing/drafts', requirePermission('repricing.prepare'), async (req, res) => {
   try {
-    res.json(await createRepricingDraft(req.body || {}));
+    res.json(await createRepricingDraft(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    }));
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.get('/admin/repricing/drafts/:draftId', async (req, res) => {
+router.get('/admin/repricing/drafts/:draftId', requirePermission('repricing.view'), async (req, res) => {
   try {
     res.json(await getRepricingDraft(req.params.draftId));
   } catch (err) {
@@ -293,31 +525,37 @@ router.get('/admin/repricing/drafts/:draftId', async (req, res) => {
   }
 });
 
-router.put('/admin/repricing/drafts/:draftId', async (req, res) => {
+router.put('/admin/repricing/drafts/:draftId', requirePermission('repricing.prepare'), async (req, res) => {
   try {
-    res.json(await saveRepricingDraft(req.params.draftId, req.body || {}));
+    res.json(await saveRepricingDraft(req.params.draftId, req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    }));
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.post('/admin/repricing/drafts/:draftId/sync', async (req, res) => {
+router.post('/admin/repricing/drafts/:draftId/sync', requirePermission('repricing.prepare'), async (req, res) => {
   try {
-    res.json(await syncRepricingDraft(req.params.draftId));
+    res.json(await syncRepricingDraft(req.params.draftId, {
+      mutationContext: getRequestMutationContext(req),
+    }));
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.delete('/admin/repricing/drafts/:draftId', async (req, res) => {
+router.delete('/admin/repricing/drafts/:draftId', requirePermission('repricing.prepare'), async (req, res) => {
   try {
-    res.json(await discardRepricingDraft(req.params.draftId));
+    res.json(await discardRepricingDraft(req.params.draftId, {
+      mutationContext: getRequestMutationContext(req),
+    }));
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.post('/admin/repricing/preview', async (req, res) => {
+router.post('/admin/repricing/preview', requirePermission('repricing.prepare'), async (req, res) => {
   try {
     const { scenarioId } = req.body || {};
     if (!scenarioId) return res.status(400).json({ error: 'Оберіть цінову матрицю.' });
@@ -329,7 +567,7 @@ router.post('/admin/repricing/preview', async (req, res) => {
   }
 });
 
-router.post('/admin/repricing/global/preview', async (_req, res) => {
+router.post('/admin/repricing/global/preview', requirePermission('repricing.prepare'), async (_req, res) => {
   try {
     res.json(await buildGlobalRepricingPreview());
   } catch (err) {
@@ -340,9 +578,11 @@ router.post('/admin/repricing/global/preview', async (_req, res) => {
   }
 });
 
-router.post('/admin/repricing/apply', async (req, res) => {
+router.post('/admin/repricing/apply', requirePermission('repricing.apply'), async (req, res) => {
   try {
-    const result = await applyRepricing(req.body || {});
+    const result = await applyRepricing(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({
@@ -352,9 +592,11 @@ router.post('/admin/repricing/apply', async (req, res) => {
   }
 });
 
-router.post('/admin/repricing/global/apply', async (req, res) => {
+router.post('/admin/repricing/global/apply', requirePermission('repricing.apply'), async (req, res) => {
   try {
-    res.json(await applyGlobalRepricing(req.body || {}));
+    res.json(await applyGlobalRepricing(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    }));
   } catch (err) {
     res.status(err.statusCode || 500).json({
       error: err.message,
@@ -363,15 +605,17 @@ router.post('/admin/repricing/global/apply', async (req, res) => {
   }
 });
 
-router.post('/admin/repricing/:batchId/rollback', async (req, res) => {
+router.post('/admin/repricing/:batchId/rollback', requirePermission('repricing.rollback'), async (req, res) => {
   try {
-    res.json(await rollbackRepricing(req.params.batchId));
+    res.json(await rollbackRepricing(req.params.batchId, {
+      mutationContext: getRequestMutationContext(req),
+    }));
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.get('/admin/repricing/:batchId/rollback-csv', async (req, res) => {
+router.get('/admin/repricing/:batchId/rollback-csv', requirePermission('repricing.view'), async (req, res) => {
   try {
     const data = await getRepricingRollbackItems(req.params.batchId);
     const csv = buildCsv([
@@ -395,7 +639,7 @@ router.get('/admin/repricing/:batchId/rollback-csv', async (req, res) => {
   }
 });
 
-router.get('/admin/repricing/:batchId/csv', async (req, res) => {
+router.get('/admin/repricing/:batchId/csv', requirePermission('repricing.view'), async (req, res) => {
   try {
     const data = await getRepricingBatchItems(req.params.batchId);
     const csv = buildCsv([
@@ -444,182 +688,215 @@ router.get('/admin/repricing/:batchId/csv', async (req, res) => {
   }
 });
 
-router.post('/admin/price-cell', async (req, res) => {
+router.post('/admin/price-cell', requirePermission('pricing.manage'), async (req, res) => {
   try {
-    await upsertPriceCell(req.body || {});
+    await upsertPriceCell(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.post('/admin/scenario', async (req, res) => {
+router.post('/admin/scenario', requirePermission('pricing.manage'), async (req, res) => {
   try {
-    const result = await createScenario(req.body || {});
+    const result = await createScenario(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.put('/admin/scenario', async (req, res) => {
+router.put('/admin/scenario', requirePermission('pricing.manage'), async (req, res) => {
   try {
     const { id, name, axis_x_key } = req.body || {};
     if (!id || !name || !axis_x_key) {
       return res.status(400).json({ error: 'Потрібні id, назва та вісь X' });
     }
 
-    await updateScenario(req.body);
+    await updateScenario(req.body, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.post('/admin/scenario/duplicate', async (req, res) => {
+router.post('/admin/scenario/duplicate', requirePermission('pricing.manage'), async (req, res) => {
   try {
     const { id } = req.body || {};
     if (!id) return res.status(400).json({ error: 'Потрібен id сценарію' });
 
-    const result = await duplicateScenario(id);
+    const result = await duplicateScenario(id, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.post('/admin/modifier', async (req, res) => {
+router.post('/admin/modifier', requirePermission('pricing.manage'), async (req, res) => {
   try {
-    const result = await createModifier(req.body || {});
+    const result = await createModifier(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.put('/admin/modifier', async (req, res) => {
+router.put('/admin/modifier', requirePermission('pricing.manage'), async (req, res) => {
   try {
-    await updateModifier(req.body || {});
+    await updateModifier(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.post('/admin/delete-item', async (req, res) => {
+router.post('/admin/delete-item', requireDeleteItemPermission, async (req, res) => {
   try {
     const { type, id } = req.body || {};
-    await deleteCatalogItem(type, id);
+    await deleteCatalogItem(type, id, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.post('/admin/category', async (req, res) => {
+router.post('/admin/category', requirePermission('catalog.manage'), async (req, res) => {
   try {
     const { code, name } = req.body || {};
     if (!code || !name) return res.status(400).json({ error: 'Потрібні код і назва' });
 
-    const result = await createCategory(req.body);
+    const result = await createCategory(req.body, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.put('/admin/category', async (req, res) => {
+router.put('/admin/category', requirePermission('catalog.manage'), async (req, res) => {
   try {
     const { code, name } = req.body || {};
     if (!code || !name) return res.status(400).json({ error: 'Потрібні код і назва' });
 
-    const result = await updateCategory(req.body);
+    const result = await updateCategory(req.body, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.post('/admin/question', async (req, res) => {
+router.post('/admin/question', requirePermission('catalog.manage'), async (req, res) => {
   try {
     const { key, label } = req.body || {};
     if (!key || label === undefined) {
       return res.status(400).json({ error: 'Потрібні key та назва' });
     }
 
-    const result = await createQuestion(req.body || {});
+    const result = await createQuestion(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.put('/admin/question', async (req, res) => {
+router.put('/admin/question', requirePermission('catalog.manage'), async (req, res) => {
   try {
     const { id, key, label } = req.body || {};
     if (!id || !key || label === undefined) {
       return res.status(400).json({ error: 'Потрібні id, key та назва' });
     }
 
-    const result = await updateQuestion(req.body);
+    const result = await updateQuestion(req.body, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.post('/admin/question/update', async (req, res) => {
+router.post('/admin/question/update', requirePermission('catalog.manage'), async (req, res) => {
   try {
     const { id, key, label } = req.body || {};
     if (!id || !key || label === undefined) {
       return res.status(400).json({ error: 'Потрібні id, key та назва' });
     }
 
-    const result = await updateQuestion(req.body);
+    const result = await updateQuestion(req.body, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.put('/admin/questions/order', async (req, res) => {
+router.put('/admin/questions/order', requirePermission('catalog.manage'), async (req, res) => {
   try {
-    const result = await updateQuestionsOrder(req.body || {});
+    const result = await updateQuestionsOrder(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.post('/admin/option', async (req, res) => {
+router.post('/admin/option', requirePermission('catalog.manage'), async (req, res) => {
   try {
-    const result = await createOption(req.body || {});
+    const result = await createOption(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.put('/admin/option', async (req, res) => {
+router.put('/admin/option', requirePermission('catalog.manage'), async (req, res) => {
   try {
     const { id, value_id, label } = req.body || {};
     if (!id || !label || value_id === undefined || value_id === null || value_id === '') {
       return res.status(400).json({ error: 'Потрібні id, label і value_id' });
     }
 
-    await updateOption(req.body);
+    await updateOption(req.body, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-router.patch('/admin/option/:id/archive', async (req, res) => {
+router.patch('/admin/option/:id/archive', requirePermission('catalog.manage'), async (req, res) => {
   try {
-    await setOptionArchived({
-      id: req.params.id,
-      archived: req.body?.archived,
-    });
+    await setOptionArchived(
+      {
+        id: req.params.id,
+        archived: req.body?.archived,
+      },
+      { mutationContext: getRequestMutationContext(req) }
+    );
     res.json({ success: true });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
