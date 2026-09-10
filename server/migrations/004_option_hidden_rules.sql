@@ -1,0 +1,2 @@
+ALTER TABLE options
+  ADD COLUMN IF NOT EXISTS hidden_if_json JSONB;

@@ -1,0 +1,78 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  server:
+    build:
+      context: ./server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: ${PORT:-5000}
+      DATABASE_URL: ${DATABASE_URL:-}
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      PGUSER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      PGSSL: ${PGSSL:-false}
+      PG_POOL_MAX: ${PG_POOL_MAX:-10}
+      PG_IDLE_TIMEOUT_MS: ${PG_IDLE_TIMEOUT_MS:-30000}
+      PG_CONNECT_TIMEOUT_MS: ${PG_CONNECT_TIMEOUT_MS:-5000}
+      PG_QUERY_TIMEOUT_MS: ${PG_QUERY_TIMEOUT_MS:-30000}
+      PG_STATEMENT_TIMEOUT_MS: ${PG_STATEMENT_TIMEOUT_MS:-30000}
+      NBU_MAX_STALE_MS: ${NBU_MAX_STALE_MS:-604800000}
+      NBU_RATE_OVERRIDE: ${NBU_RATE_OVERRIDE:-}
+      APP_BASE_URL: ${APP_BASE_URL:?Set APP_BASE_URL in .env}
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:?Set OIDC_ISSUER_URL in .env}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?Set OIDC_CLIENT_ID in .env}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?Set OIDC_CLIENT_SECRET in .env}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:?Set OIDC_REDIRECT_URI in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      SESSION_MAX_AGE_MS: ${SESSION_MAX_AGE_MS:-28800000}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+    expose:
+      - "${PORT:-5000}"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:' + process.env.PORT + '/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  client:
+    build:
+      context: ./client
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+    environment:
+      SERVER_HOST: server
+      SERVER_PORT: ${PORT:-5000}
+      NGINX_ENVSUBST_FILTER: ^SERVER_
+    ports:
+      - "${CLIENT_HTTP_PORT:-80}:80"
+
+volumes:
+  postgres_data:

@@ -1,0 +1,124 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const {
+  assertClaimOwnership,
+  canTransitionCorrectionRequest,
+  getClaimTokenHash,
+  getCorrectionPreviewSignature,
+  haveSameRequestAnswers,
+  normalizeRequestStatusFilter,
+} = require('../src/services/correction-request.service');
+
+function buildPreview(overrides = {}) {
+  return {
+    source: {
+      productId: 17,
+      sku: 'NM111',
+      totalPriceUah: 500,
+      answers: { quality: 1, processing: 2 },
+      ...overrides.source,
+    },
+    corrected: {
+      fullSku: 'NM211',
+      proposedFullSku: 'NM211',
+      totalPriceUah: 600,
+      answers: { quality: 2, processing: 2 },
+      ...overrides.corrected,
+    },
+  };
+}
+
+test('correction request signature is stable for reordered answers', () => {
+  const first = buildPreview();
+  const second = buildPreview({
+    source: { answers: { processing: 2, quality: 1 } },
+    corrected: { answers: { processing: 2, quality: 2 } },
+  });
+
+  assert.equal(getCorrectionPreviewSignature(first), getCorrectionPreviewSignature(second));
+  assert.equal(haveSameRequestAnswers(
+    { quality: 2, processing: 2 },
+    { processing: 2, quality: 2 }
+  ), true);
+});
+
+test('correction request signature changes with SKU, price, or parameters', () => {
+  const signature = getCorrectionPreviewSignature(buildPreview());
+
+  assert.notEqual(
+    signature,
+    getCorrectionPreviewSignature(buildPreview({ corrected: { totalPriceUah: 700 } }))
+  );
+  assert.notEqual(
+    getCorrectionPreviewSignature(buildPreview({ corrected: { totalPriceUah: 99.4 } })),
+    getCorrectionPreviewSignature(buildPreview({ corrected: { totalPriceUah: 99.6 } }))
+  );
+  assert.notEqual(
+    getCorrectionPreviewSignature(buildPreview({
+      corrected: { calculatedPriceUah: 1113, autoPriceUah: 1100, totalPriceUah: 1100 },
+    })),
+    getCorrectionPreviewSignature(buildPreview({
+      corrected: { calculatedPriceUah: 1114, autoPriceUah: 1100, totalPriceUah: 1100 },
+    }))
+  );
+  assert.notEqual(
+    signature,
+    getCorrectionPreviewSignature(buildPreview({ corrected: { fullSku: 'NM211-1' } }))
+  );
+  assert.notEqual(
+    signature,
+    getCorrectionPreviewSignature(buildPreview({ source: { answers: { quality: 3 } } }))
+  );
+});
+
+test('correction request status transitions protect completed requests', () => {
+  assert.equal(canTransitionCorrectionRequest('pending', 'in_progress'), true);
+  assert.equal(canTransitionCorrectionRequest('pending', 'rejected'), true);
+  assert.equal(canTransitionCorrectionRequest('in_progress', 'pending'), true);
+  assert.equal(canTransitionCorrectionRequest('rejected', 'pending'), true);
+  assert.equal(canTransitionCorrectionRequest('completed', 'pending'), false);
+  assert.equal(canTransitionCorrectionRequest('pending', 'completed'), false);
+});
+
+test('correction request status filter falls back to active requests', () => {
+  assert.equal(normalizeRequestStatusFilter('completed'), 'completed');
+  assert.equal(normalizeRequestStatusFilter('all'), 'all');
+  assert.equal(normalizeRequestStatusFilter('unexpected'), 'active');
+  assert.equal(normalizeRequestStatusFilter(), 'active');
+});
+
+test('application-user correction ownership ignores tokens but requires the current epoch', () => {
+  const row = {
+    status: 'in_progress',
+    claimed_by_user_id: '17',
+    claim_token_hash: getClaimTokenHash('x'.repeat(43)),
+    claim_version: '4',
+  };
+
+  assert.deepEqual(assertClaimOwnership(row, 17, 4, 'wrong-token'.repeat(4)), {
+    claimVersion: 4,
+    legacyTokenHash: null,
+    legacyAdopted: false,
+  });
+  assert.throws(() => assertClaimOwnership(row, 18, 4), /іншому працівнику/);
+  assert.throws(() => assertClaimOwnership(row, 17, 3), /Призначення.*змінилося/);
+  assert.throws(() => assertClaimOwnership(row, 17, undefined), /Версія призначення/);
+});
+
+test('only a matching capability can authorize one-time legacy claim adoption', () => {
+  const token = 'legacy-claim-token-'.repeat(3);
+  const row = {
+    status: 'in_progress',
+    claimed_by_user_id: null,
+    claim_token_hash: getClaimTokenHash(token),
+    claim_version: '0',
+  };
+
+  assert.deepEqual(assertClaimOwnership(row, 17, 0, token), {
+    claimVersion: 0,
+    legacyTokenHash: getClaimTokenHash(token),
+    legacyAdopted: true,
+  });
+  assert.throws(() => assertClaimOwnership(row, 17, 0, 'wrong-token'.repeat(4)), /іншому працівнику/);
+});
