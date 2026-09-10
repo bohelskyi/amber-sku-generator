@@ -1,30 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { formatDecimal } from '../lib/formatters';
 import { getValidationIssues } from '../lib/admin-validation';
-import { normalizeDecimalInput } from '../lib/number-input';
-import { buildScenarioEditorDraft, findScenarioById } from '../lib/admin-pricing-state';
 import { useAuth } from '../auth/auth-context.js';
 import { getPermissionUiState } from '../lib/permission-ui.js';
+import { useAdminPricingController } from './admin/useAdminPricingController';
+import { useAdminSchemaController } from './admin/useAdminSchemaController';
 
 const emptyEditOption = { id: null, value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false };
 const emptyNewCategory = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false };
 const emptyNewQuestion = { key: '', label: '', display_order: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' };
 const emptyNewOption = { value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false };
-const emptyNewScenario = {
-  name: '',
-  group_name: '',
-  match_json: '',
-  axis_x_key: '',
-  axis_y_key: '',
-  priority: '0',
-  status: 'draft',
-  price_mode: 'category_default',
-  apply_modifiers: true,
-  weight_bands: [],
-};
-const emptyNewModifier = { match_json: '', factor: '' };
-
 const getNextDisplayOrder = (questions = []) => {
   const maxOrder = questions.reduce((maxValue, question) => {
     const orderValue = Number(question.display_order ?? question.sku_index);
@@ -49,6 +34,16 @@ const buildNewQuestionDefaults = (questions = []) => ({
   sku_index: getNextSkuIndex(questions),
 });
 
+const formatMatchJson = (value) => {
+  if (value === null || value === undefined) return '{}';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
 export function useAdminPanel() {
   const auth = useAuth();
   const { canManagePricing, canViewCatalog, canViewPricing } = getPermissionUiState(
@@ -57,20 +52,12 @@ export function useAdminPanel() {
   const [config, setConfig] = useState(null);
   const [selectedCat, setSelectedCat] = useState(null);
   const [selectedQuestion, setSelectedQuestion] = useState(null);
-  const [pricesData, setPricesData] = useState(null);
   const [editCat, setEditCat] = useState({ code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false });
   const [editQuestion, setEditQuestion] = useState({ key: '', label: '', display_order: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' });
   const [newCat, setNewCat] = useState(emptyNewCategory);
   const [newQuest, setNewQuest] = useState(emptyNewQuestion);
   const [newOpt, setNewOpt] = useState(emptyNewOption);
   const [editOpt, setEditOpt] = useState(emptyEditOption);
-  const [newScenario, setNewScenario] = useState(emptyNewScenario);
-  const [editScenario, setEditScenario] = useState(null);
-  const [newModifier, setNewModifier] = useState(emptyNewModifier);
-  const [editModifier, setEditModifier] = useState(null);
-  const [schemaStatus, setSchemaStatus] = useState(null);
-  const [schemaPublishState, setSchemaPublishState] = useState({ loading: false, error: '' });
-  const pricesRequestId = useRef(0);
 
   const fetchConfig = useCallback(() =>
     api.get(canViewCatalog ? '/admin/config' : '/config').then((res) => {
@@ -78,29 +65,8 @@ export function useAdminPanel() {
       return res.data;
     }), [canViewCatalog]);
 
-  const fetchSchemaStatus = (categoryCode) => {
-    if (!categoryCode) {
-      setSchemaStatus(null);
-      return Promise.resolve(null);
-    }
-    return api.get(`/admin/sku-schema/${categoryCode}`).then((res) => {
-      setSchemaStatus(res.data);
-      return res.data;
-    });
-  };
-
-  const fetchPricesForCategory = (categoryCode) => {
-    const requestId = ++pricesRequestId.current;
-    return api.get(`/admin/prices/${categoryCode}`).then((res) => {
-      if (requestId === pricesRequestId.current) setPricesData(res.data);
-      return res.data;
-    });
-  };
-
-  const fetchPrices = () => {
-    if (!selectedCat) return;
-    fetchPricesForCategory(selectedCat.code);
-  };
+  const pricing = useAdminPricingController({ canViewPricing, formatMatchJson, selectedCat });
+  const schema = useAdminSchemaController({ canViewCatalog, config, fetchConfig, selectedCat });
 
   const updateSelectedQuestionState = (question) => {
     if (!question) return;
@@ -141,27 +107,6 @@ export function useAdminPanel() {
     fetchConfig();
   }, [fetchConfig]);
 
-  useEffect(() => {
-    if (!canViewCatalog || !selectedCat?.code || !config) return undefined;
-    let cancelled = false;
-    api.get(`/admin/sku-schema/${selectedCat.code}`).then((res) => {
-      if (!cancelled) setSchemaStatus(res.data);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [canViewCatalog, config, selectedCat?.code]);
-
-  const formatMatchJson = (value) => {
-    if (value === null || value === undefined) return '{}';
-    if (typeof value === 'string') return value;
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  };
-
   const parseVisibleRuleInput = (value) => {
     try {
       return {
@@ -187,13 +132,10 @@ export function useAdminPanel() {
       skip_hidden_sku_questions: category.skip_hidden_sku_questions === 1,
       code_mutable: category.code_mutable !== false,
     });
-    setEditScenario(null);
-    setEditModifier(null);
     setEditOpt(emptyEditOption);
     setNewQuest(buildNewQuestionDefaults(categoryQuestions));
-    setPricesData(null);
-    setSchemaPublishState({ loading: false, error: '' });
-    if (canViewPricing) fetchPricesForCategory(category.code);
+    schema.resetSchemaPublishState();
+    pricing.selectCategory(category);
   };
 
   const handleSelectQuestion = (question) => {
@@ -241,9 +183,9 @@ export function useAdminPanel() {
               skip_hidden_sku_questions: nextCategory.skip_hidden_sku_questions === 1,
               code_mutable: nextCategory.code_mutable !== false,
             });
-            fetchPricesForCategory(nextCategory.code);
+            pricing.fetchPricesForCategory(nextCategory.code);
           } else {
-            setPricesData(null);
+            pricing.clearCategory();
           }
         });
       })
@@ -380,22 +322,6 @@ export function useAdminPanel() {
       .catch((err) => alert(`Помилка архівування: ${err.response?.data?.error || err.message}`));
   };
 
-  const publishSkuSchema = () => {
-    if (!selectedCat || !schemaStatus?.draftChanged || schemaPublishState.loading) return;
-    setSchemaPublishState({ loading: true, error: '' });
-    api.post(`/admin/sku-schema/${selectedCat.code}/publish`)
-      .then(() => Promise.all([fetchConfig(), fetchSchemaStatus(selectedCat.code)]))
-      .catch((err) => {
-        setSchemaPublishState({
-          loading: false,
-          error: err.response?.data?.error || err.message,
-        });
-      })
-      .finally(() => {
-        setSchemaPublishState((state) => ({ ...state, loading: false }));
-      });
-  };
-
   const persistQuestionOrder = (orderedQuestions, { reindexSku = false } = {}) => {
     if (!selectedCat) return Promise.resolve();
 
@@ -483,172 +409,12 @@ export function useAdminPanel() {
         if (type === 'category') {
           setSelectedCat(null);
           setSelectedQuestion(null);
-          setPricesData(null);
-          setEditScenario(null);
-          setEditModifier(null);
+          pricing.clearCategory();
           setEditOpt(emptyEditOption);
         }
-        if (type === 'scenario' || type === 'modifier') fetchPrices();
+        if (type === 'scenario' || type === 'modifier') pricing.fetchPrices();
       })
       .catch((err) => alert(`Помилка видалення: ${err.response?.data?.error || err.message}`));
-  };
-
-  const handlePriceChange = (scenarioId, xVal, yVal, newPrice) => {
-    const categoryCode = selectedCat?.code;
-    const normalizedPrice = normalizeDecimalInput(newPrice);
-    const isBlank = normalizedPrice.trim() === '';
-    if (!isBlank) {
-      const parsedPrice = Number(normalizedPrice);
-      if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) return Promise.resolve();
-    }
-
-    return api.post('/admin/price-cell', {
-      scenario_id: scenarioId,
-      x_val: xVal,
-      y_val: yVal,
-      price: isBlank ? null : normalizedPrice,
-    }).then(() => fetchPricesForCategory(categoryCode));
-  };
-
-  const addScenario = () => {
-    if (!newScenario.name || !newScenario.axis_x_key) {
-      return alert('Заповніть назву та вісь рядків матриці');
-    }
-
-    let parsedJson;
-    try {
-      parsedJson = JSON.parse(newScenario.match_json || '{}');
-    } catch {
-      return alert('Помилка в умові сценарію');
-    }
-
-    api.post('/admin/scenario', {
-      ...newScenario,
-      match_json: parsedJson,
-      priority: Number(newScenario.priority || 0),
-      category_code: selectedCat.code,
-    })
-      .then(() => {
-        setNewScenario(emptyNewScenario);
-        fetchPrices();
-      })
-      .catch((err) => alert(`Помилка створення сценарію: ${err.response?.data?.error || err.message}`));
-  };
-
-  const beginScenarioEdit = (scenario) => {
-    setEditScenario(buildScenarioEditorDraft(scenario));
-  };
-
-  const updateScenario = () => {
-    if (!editScenario?.id) return;
-    if (!editScenario.name || !editScenario.axis_x_key) {
-      return alert('Потрібні назва сценарію та вісь X');
-    }
-
-    let parsedJson;
-    try {
-      parsedJson = JSON.parse(editScenario.match_json || '{}');
-    } catch {
-      return alert('Помилка в JSON умови');
-    }
-
-    const scenarioId = editScenario.id;
-    const categoryCode = selectedCat?.code;
-    return api.put('/admin/scenario', {
-      id: scenarioId,
-      name: editScenario.name,
-      group_name: editScenario.group_name,
-      match_json: parsedJson,
-      axis_x_key: editScenario.axis_x_key,
-      axis_y_key: editScenario.axis_y_key || null,
-      priority: Number(editScenario.priority || 0),
-      status: editScenario.status,
-      price_mode: editScenario.price_mode,
-      apply_modifiers: editScenario.apply_modifiers !== false,
-      weight_bands: editScenario.weight_bands || [],
-    })
-      .then(() => fetchPricesForCategory(categoryCode))
-      .then((nextPricesData) => {
-        const savedScenario = findScenarioById(nextPricesData, scenarioId);
-        setEditScenario(buildScenarioEditorDraft(savedScenario));
-        return savedScenario;
-      })
-      .catch((err) => {
-        alert(`Помилка оновлення сценарію: ${err.response?.data?.error || err.message}`);
-        return null;
-      });
-  };
-
-  const duplicateScenario = (scenarioId) => {
-    api.post('/admin/scenario/duplicate', { id: scenarioId })
-      .then(() => fetchPrices())
-      .catch((err) => alert(`Помилка дублювання: ${err.response?.data?.error || err.message}`));
-  };
-
-  const addModifier = () => {
-    if (!newModifier.match_json || !newModifier.factor) {
-      return alert('Заповніть умови модифікатора та множник');
-    }
-
-    let parsedJson;
-    try {
-      parsedJson = JSON.parse(newModifier.match_json || '{}');
-    } catch {
-      return alert('Помилка в умові модифікатора');
-    }
-
-    api.post('/admin/modifier', {
-      ...newModifier,
-      match_json: parsedJson,
-      category_code: selectedCat.code,
-    })
-      .then(() => {
-        setNewModifier(emptyNewModifier);
-        fetchPrices();
-      });
-  };
-
-  const beginModifierEdit = (modifier) => {
-    setEditModifier({
-      id: modifier.id,
-      match_json: formatMatchJson(
-        modifier.match_json || (modifier.trigger_key ? { [modifier.trigger_key]: modifier.trigger_val } : {})
-      ),
-      factor: formatDecimal(modifier.factor),
-    });
-  };
-
-  const updateModifier = (payloadOrId, newFactor) => {
-    const payload = typeof payloadOrId === 'object'
-      ? payloadOrId
-      : { id: payloadOrId, factor: parseFloat(newFactor) };
-
-    return api.put('/admin/modifier', payload)
-      .then(() => {
-        setEditModifier(null);
-        fetchPrices();
-      })
-      .catch((err) => alert(`Помилка оновлення модифікатора: ${err.response?.data?.error || err.message}`));
-  };
-
-  const saveModifierEdit = () => {
-    if (!editModifier?.id) return;
-    if (!editModifier.match_json || !editModifier.factor) {
-      return alert('Заповніть умови модифікатора та множник');
-    }
-
-    let parsedJson;
-    try {
-      parsedJson = JSON.parse(editModifier.match_json || '{}');
-    } catch {
-      return alert('Помилка в умові модифікатора');
-    }
-
-    return updateModifier({
-      id: editModifier.id,
-      match_json: parsedJson,
-      factor: parseFloat(editModifier.factor),
-    });
   };
 
   const currentCatQuestions = selectedCat ? (config?.questions[selectedCat.code] || []) : [];
@@ -659,16 +425,14 @@ export function useAdminPanel() {
   const validationIssues = getValidationIssues(config);
 
   return {
+    ...pricing,
+    ...schema,
     addCategory,
-    addModifier,
     addOption,
     addQuestion,
-    addScenario,
     archiveOption,
     autoAssignSkuIndexes,
-    beginModifierEdit,
     beginOptionEdit,
-    beginScenarioEdit,
     canManagePricing,
     canViewCatalog,
     canViewPricing,
@@ -676,46 +440,29 @@ export function useAdminPanel() {
     currentCatQuestions,
     currentOptions,
     deleteItem,
-    duplicateScenario,
     editCat,
-    editModifier,
     editOpt,
     editQuestion,
-    editScenario,
     fillNextNewQuestionSkuIndex,
     formatMatchJson,
-    handlePriceChange,
     handleSelectCategory,
     handleSelectQuestion,
     newCat,
-    newModifier,
     newOpt,
     newQuest,
-    pricesData,
-    publishSkuSchema,
-    schemaPublishState,
-    schemaStatus,
     selectedCat,
     selectedQuestion,
     selectedQuestionInputType,
-    saveModifierEdit,
     setEditCat,
-    setEditModifier,
     setEditOpt,
     setEditQuestion,
-    setEditScenario,
     setNewCat,
-    setNewModifier,
     setNewOpt,
     setNewQuest,
-    setNewScenario,
-    newScenario,
     reorderQuestions,
     updateCategory,
-    updateModifier,
     updateOption,
     updateQuestion,
-    updateScenario,
     validationIssues,
   };
 }

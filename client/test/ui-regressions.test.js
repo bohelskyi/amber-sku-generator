@@ -27,12 +27,16 @@ test('matrix and correction request errors have visible alert regions', () => {
     new URL('../src/components/admin/AdminPricingEditor.jsx', import.meta.url),
     'utf8'
   );
+  const matrixFormsSource = fs.readFileSync(
+    new URL('../src/components/admin/AdminPricingForms.jsx', import.meta.url),
+    'utf8'
+  );
   const dialogSource = fs.readFileSync(
     new URL('../src/components/app/RecountConfirmDialog.jsx', import.meta.url),
     'utf8'
   );
   assert.match(matrixSource, /matrixValidationError/);
-  assert.match(matrixSource, /role="alert"/);
+  assert.match(`${matrixSource}\n${matrixFormsSource}`, /role="alert"/);
   assert.match(dialogSource, /role="alert"/);
 });
 
@@ -162,12 +166,12 @@ test('repricing exposes a server-authoritative global catalog workflow', () => {
 });
 
 test('fixed-scale API decimals are compacted in editable pricing fields', () => {
-  const matrixSource = fs.readFileSync(
-    new URL('../src/components/admin/AdminPricingEditor.jsx', import.meta.url),
+  const matrixFormsSource = fs.readFileSync(
+    new URL('../src/components/admin/AdminPricingForms.jsx', import.meta.url),
     'utf8'
   );
   const adminHookSource = fs.readFileSync(
-    new URL('../src/hooks/useAdminPanel.js', import.meta.url),
+    new URL('../src/hooks/admin/useAdminPricingController.js', import.meta.url),
     'utf8'
   );
   const adminPricingStateSource = fs.readFileSync(
@@ -179,7 +183,7 @@ test('fixed-scale API decimals are compacted in editable pricing fields', () => 
     'utf8'
   );
 
-  assert.match(matrixSource, /defaultValue=\{cell \? formatDecimal\(cell\.price\) : ''\}/);
+  assert.match(matrixFormsSource, /defaultValue=\{cell \? formatDecimal\(cell\.price\) : ''\}/);
   assert.match(adminHookSource, /factor: formatDecimal\(modifier\.factor\)/);
   assert.match(adminPricingStateSource, /min_weight: formatDecimal\(band\.min_weight\)/);
   assert.match(repricingSource, /formatDecimal\(item\.newPriceUah\)/);
@@ -472,6 +476,10 @@ test('pricing uses selected scenario and modifier master-detail editors', () => 
     new URL('../src/components/admin/AdminPricingEditor.jsx', import.meta.url),
     'utf8'
   );
+  const formsSource = fs.readFileSync(
+    new URL('../src/components/admin/AdminPricingForms.jsx', import.meta.url),
+    'utf8'
+  );
   const styles = fs.readFileSync(
     new URL('../src/index.css', import.meta.url),
     'utf8'
@@ -491,9 +499,9 @@ test('pricing uses selected scenario and modifier master-detail editors', () => 
   assert.match(source, /workspaceMode === 'modifiers'/);
   assert.match(source, /selectedModifier/);
   assert.match(source, /isNewModifier/);
-  assert.match(source, /handlePriceChange\(scenario\.id, xOption\.id, yOption\.id, null\)/);
-  assert.match(source, /getMatrixPriceValidationError\(normalizedPrice\)/);
-  assert.match(source, /role="alert"/);
+  assert.match(formsSource, /handlePriceChange\(scenario\.id, xOption\.id, yOption\.id, null\)/);
+  assert.match(formsSource, /getMatrixPriceValidationError\(normalizedPrice\)/);
+  assert.match(formsSource, /role="alert"/);
   assert.match(styles, /\.pricing-matrix-table thead th[\s\S]*?sticky top-0/);
   assert.match(styles, /\.pricing-matrix-table tbody th[\s\S]*?sticky left-0/);
   assert.doesNotMatch(source, /space-y-6 border-t border-slate-200 p-4/);
