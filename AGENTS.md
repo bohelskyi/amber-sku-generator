@@ -34,7 +34,7 @@
 
 ## Migration rules
 
-- Migrations `000`–`024` are immutable history. Never edit an already-applied migration; add the next forward migration.
+- Migrations `000`–`025` are immutable history. Never edit an already-applied migration; add the next forward migration.
 - Preserve checksum and line-ending canonicalization. Never rewrite stored checksums to hide a mismatch.
 - Keep each migration transactional and safe for fresh, known upgrade/checkpoint, repeated-startup, and rollback paths as applicable.
 - Migration DDL uses a dedicated no-query-timeout connection. Runtime DDL is not a substitute for migrations.
@@ -48,7 +48,7 @@
 - Server preview/save/recount/repricing calculations remain authoritative and fail closed.
 - Never reuse a SKU, mutate a published SKU schema, reinterpret a used semantic option value, or boolean-normalize calibration state `2`.
 - Preserve positive-or-absent matrix pricing, separate calculated/automatic/manual price meanings, and legacy zero-price compatibility.
-- Preserve target-based recount validation, capability-token correction ownership, atomic repricing, and immutable/monotonic export behavior.
+- Preserve target-based recount validation, application-user correction ownership with legacy capability-token compatibility, atomic repricing, and immutable/monotonic export behavior.
 - Follow the relevant domain document before changing any of these invariants.
 
 ## Required verification

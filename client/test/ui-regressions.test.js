@@ -500,7 +500,7 @@ test('pricing uses selected scenario and modifier master-detail editors', () => 
   assert.doesNotMatch(source, /Модифікатори \(Знижки \/ Націнки\)/);
 });
 
-test('correction queue wires exclusive browser claims and shared polling into the UI', () => {
+test('correction queue wires application-user claims and legacy compatibility into the UI', () => {
   const source = fs.readFileSync(
     new URL('../src/pages/CorrectionRequestsPage.jsx', import.meta.url),
     'utf8'
@@ -513,10 +513,12 @@ test('correction queue wires exclusive browser claims and shared polling into th
   assert.match(source, /getCorrectionRequestsForView/);
   assert.match(source, /isCorrectionClaimConflict/);
   assert.match(source, /\/correction-requests\/\$\{request\.id\}\/claim/);
-  assert.match(source, /X-Correction-Claim-Token/);
+  assert.match(source, /getCorrectionLegacyClaimToken/);
+  assert.match(source, /claimVersion: request\.claimVersion/);
   assert.match(source, /В роботі у вас/);
-  assert.match(source, /В роботі в іншому браузері/);
-  assert.doesNotMatch(source, /В роботі іншим працівником/);
+  assert.match(source, /getEmployeeLabel\(request\.claimedByUser\)/);
+  assert.doesNotMatch(source, /В роботі в іншому браузері/);
+  assert.doesNotMatch(source, /storeCorrectionClaim/);
   assert.match(source, /Примусово повернути/);
   assert.match(source, /window\.confirm/);
 });

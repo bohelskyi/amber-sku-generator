@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Migrations `000`–`024` are applied/frozen history:
+Migrations `000`–`025` are applied/frozen history:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -77,6 +77,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `022_manager_correction_request_permissions.sql` | Removes Manager `corrections.claim` and `corrections.complete`, preserving view/create/reject and Administrator/Storekeeper processing. |
 | `023_audit_events.sql` | Immutable durable audit-event ledger with local-user actor snapshots and lookup indexes; adds Administrator-only `audit.view`. |
 | `024_product_actor_attribution.sql` | Nullable local-user attribution for product creation/archive and detailed product-correction history without historical backfill. |
+| `025_correction_request_user_ownership.sql` | Nullable correction creator/current-owner attribution, monotonic claim epochs, and legacy token-only/unowned in-progress compatibility without ownership backfill. |
 
 ## Test database safety
 

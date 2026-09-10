@@ -92,7 +92,7 @@ test('repricing and correction mutation controls are wired to effective permissi
 
   assert.match(repricingSource, /mayApplyRepricing && <button[\s\S]*?Застосувати переоцінку/);
   assert.match(repricingSource, /canRollbackRepricing && \([\s\S]*?setRollbackTarget/);
-  assert.match(correctionSource, /request\.status === 'pending' && canClaim/);
+  assert.match(correctionSource, /request\.status === 'pending'[\s\S]*?&& canClaim/);
   assert.match(correctionSource, /request\.status === 'in_progress' && !isOwnedClaim && canForceRelease/);
   assert.match(correctionSource, /canComplete && <button[\s\S]*?openCompletion/);
   assert.match(correctionSource, /request\.status === 'pending' && canReject/);

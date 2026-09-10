@@ -77,12 +77,17 @@ Successful approve, role-change, disable, and enable operations append one immut
 
 Operational HTTP mutation logs are separate, non-durable telemetry. Their `actorId` uses the resolved local application-user ID where available; neither operational nor durable attribution uses OIDC `sub` or username as the actor key. Migration `023` defines `audit.view`, but this foundation does not add an audit-view endpoint or client UI.
 
+## Correction ownership
+
+Correction requests use the local `application_users.id` as ordinary claim ownership. The authenticated owner may continue the same claim from another browser or workstation by submitting the current `claimVersion`; retained claim tokens are ignored once `claimed_by_user_id` is set. A legacy token-only in-progress claim may use its matching token once to atomically bind the claim to the authenticated user. Release, force-release, in-progress rejection, and completion advance the claim epoch so stale operations cannot act on a later claim.
+
+Administrator has no implicit bypass for another user's ordinary claim. Only the explicit, confirmed `corrections.force_release` operation bypasses ownership, and that operation is audited. Disabling or demoting an owner does not release the request automatically.
+
 ## Deferred authorization work
 
 Application authentication, local users, built-in RBAC, user administration, the durable audit foundation, product create/archive/recount attribution, permission-aware UI, and live access-state handling are implemented. The following remain intentionally pending:
 
-- durable audit coverage outside application-user administration and product create/archive/recount, plus the Administrator-only audit viewer;
-- user-based correction ownership (claims are still browser capability tokens);
+- durable audit coverage outside application-user administration, product create/archive/recount, and correction-request lifecycle events, plus the Administrator-only audit viewer;
 - invitations and custom-role management.
 
 Do not infer actor identity from OIDC `sub` or from a correction claim token. See [`RECOUNT_CORRECTIONS.md`](RECOUNT_CORRECTIONS.md) for current ownership semantics.

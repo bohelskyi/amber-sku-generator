@@ -38,18 +38,22 @@ Correction requests move through `pending`, `in_progress`, `completed`, and `rej
 
 Signatures bind source/proposed state. Refresh recalculates the proposed result. Completion uses the same transactional recount application, stores the final payload, and attempts to synchronize affected repricing drafts.
 
-## Capability-token claim workflow
+## Application-user claim workflow
 
-Claiming is an atomic conditional update; concurrent attempts yield one owner. On success, the server returns a random raw capability token once, stores only its SHA-256 hash, and exposes only a short fingerprint later. The browser keeps the raw token in local storage.
+Claiming is atomic; concurrent attempts yield one owner. New claims set `claimed_by_user_id` to the authenticated local application user and advance `claim_version`. They do not create or return a browser capability secret. The authenticated owner can therefore continue the request from another browser or workstation by using the current claim version.
 
-The token proves control by one browser installation, not an authenticated person. Claims do not expire automatically. Current token rules are:
+Claims do not expire automatically. Current ownership rules are:
 
 - claim and ordinary release require `corrections.claim`;
-- refresh and complete require `corrections.complete` plus the matching token;
-- reject/reopen require `corrections.reject`; rejecting an in-progress request also requires its matching token;
-- confirmed force-release requires `corrections.force_release`, deliberately bypasses token ownership, clears the claim, and returns the request to pending.
+- refresh and complete require `corrections.complete`, the matching authenticated owner, and the current claim version;
+- reject/reopen require `corrections.reject`; rejecting an in-progress request also requires the matching authenticated owner and current claim version;
+- Administrator receives no implicit ordinary-owner bypass;
+- confirmed force-release requires `corrections.force_release`, deliberately bypasses ownership, clears the owner, advances the claim version, and returns the request to pending;
+- disabling or demoting an owner does not release the request.
 
-Owner release also clears the claim and returns the request to pending. Stale or wrong tokens fail without transferring ownership.
+Owner release clears ownership, returns the request to pending, and advances the claim version. Completion and in-progress rejection also clear ownership and advance the version, so an operation from an earlier claim cannot succeed after release/reclaim.
+
+Migration `025` leaves existing token columns in place. A token is considered only for an in-progress row whose `claimed_by_user_id` is still null. Its matching legacy token may authorize one successful owner operation, atomically adopting the claim for the authenticated user; once user ownership exists, any retained token is ignored. Historical creator and owner columns remain null rather than being guessed, and pre-claim legacy in-progress rows with neither owner nor token remain claimable through the existing compatibility path.
 
 The client queue loads immediately, polls every five seconds only while visible, refreshes on focus/visibility return, prevents overlapping polls, and prevents an older response from replacing newer state.
 
@@ -63,6 +67,6 @@ The client queue loads immediately, polls every five seconds only while visible,
 
 Server permission checks remain authoritative; client controls are hidden from effective `/api/auth/me` permission keys only.
 
-## Deferred ownership work
+## Attribution and audit
 
-Local-user attribution and durable `product.recounted` events are implemented for successful recount application. User-based correction-request ownership is not implemented; capability tokens retain their current behavior. Never label a capability claim as user ownership or derive actor identity from OIDC `sub`. Any replacement or augmentation of capability claims is a separately scoped authorization/data-migration change.
+Correction requests record nullable `created_by_user_id` and current `claimed_by_user_id` references to local application users. Historical rows are not backfilled. Create, claim/adopt, release, force-release, reject, reopen, and complete write concise immutable audit events in the same transaction as the lifecycle mutation. Completion also retains the authoritative detailed recount record and semantic `product.recounted` event without copying its large payload into the correction lifecycle event.

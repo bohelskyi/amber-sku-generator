@@ -277,7 +277,10 @@ router.get('/admin/product-corrections/csv', requirePermission('history.view'), 
 
 router.post('/admin/correction-requests', requirePermission('corrections.create'), async (req, res) => {
   try {
-    res.json(await createCorrectionRequest(req.body || {}));
+    res.json(await createCorrectionRequest(
+      req.body || {},
+      { mutationContext: getRequestMutationContext(req) }
+    ));
   } catch (err) {
     res.status(err.statusCode || 500).json({
       error: err.message,
@@ -288,7 +291,10 @@ router.post('/admin/correction-requests', requirePermission('corrections.create'
 
 router.post('/admin/correction-requests/:requestId/claim', requirePermission('corrections.claim'), async (req, res) => {
   try {
-    res.json(await claimCorrectionRequest(req.params.requestId));
+    res.json(await claimCorrectionRequest(
+      req.params.requestId,
+      { mutationContext: getRequestMutationContext(req) }
+    ));
   } catch (err) {
     res.status(err.statusCode || 500).json({
       error: err.message,
@@ -301,7 +307,9 @@ router.post('/admin/correction-requests/:requestId/release', requirePermission('
   try {
     res.json(await releaseCorrectionRequest(
       req.params.requestId,
-      req.get(CLAIM_TOKEN_HEADER)
+      req.body?.claimVersion,
+      req.get(CLAIM_TOKEN_HEADER),
+      { mutationContext: getRequestMutationContext(req) }
     ));
   } catch (err) {
     res.status(err.statusCode || 500).json({
@@ -315,7 +323,9 @@ router.post('/admin/correction-requests/:requestId/force-release', requirePermis
   try {
     res.json(await forceReleaseCorrectionRequest(
       req.params.requestId,
-      req.body?.confirm === true
+      req.body?.claimVersion,
+      req.body?.confirm === true,
+      { mutationContext: getRequestMutationContext(req) }
     ));
   } catch (err) {
     res.status(err.statusCode || 500).json({
@@ -329,7 +339,9 @@ router.post('/admin/correction-requests/:requestId/refresh', requirePermission('
   try {
     res.json(await refreshCorrectionRequest(
       req.params.requestId,
-      req.get(CLAIM_TOKEN_HEADER)
+      req.body?.claimVersion,
+      req.get(CLAIM_TOKEN_HEADER),
+      { mutationContext: getRequestMutationContext(req) }
     ));
   } catch (err) {
     res.status(err.statusCode || 500).json({
@@ -344,7 +356,9 @@ router.patch('/admin/correction-requests/:requestId/status', requirePermission('
     res.json(await updateCorrectionRequestStatus(
       req.params.requestId,
       req.body?.status,
-      req.get(CLAIM_TOKEN_HEADER)
+      req.body?.claimVersion,
+      req.get(CLAIM_TOKEN_HEADER),
+      { mutationContext: getRequestMutationContext(req) }
     ));
   } catch (err) {
     res.status(err.statusCode || 500).json({
@@ -358,6 +372,7 @@ router.post('/admin/correction-requests/:requestId/complete', requirePermission(
   try {
     res.json(await completeCorrectionRequest(
       req.params.requestId,
+      req.body?.claimVersion,
       req.get(CLAIM_TOKEN_HEADER),
       { mutationContext: getRequestMutationContext(req) }
     ));

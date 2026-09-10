@@ -24,12 +24,12 @@ import {
   createLatestRequestGate,
   createVisibilityAwarePoller,
   getCorrectionClaimOwnership,
+  getCorrectionLegacyClaimToken,
   getCorrectionRequestsForView,
   isCorrectionClaimConflict,
   readCorrectionClaims,
   reconcileCorrectionClaims,
   removeCorrectionClaim,
-  storeCorrectionClaim,
   writeCorrectionClaims,
 } from '../lib/correction-queue';
 
@@ -59,6 +59,10 @@ const FILTERS = [
 
 function getApiError(error) {
   return error.response?.data?.error || error.message || 'Невідома помилка';
+}
+
+function getEmployeeLabel(user) {
+  return user?.displayName || user?.preferredUsername || (user?.id ? `Працівник #${user.id}` : null);
 }
 
 function CopyButton({ label, value }) {
@@ -166,6 +170,7 @@ function CompletionDialog({ busy, request, onCancel, onConfirm }) {
 
 export default function CorrectionRequestsPage() {
   const auth = useAuth();
+  const currentUserId = auth.applicationUser?.id;
   const permissionUi = getPermissionUiState(auth.permissions);
   const canClaim = permissionUi.canClaimCorrections;
   const canComplete = permissionUi.canCompleteCorrections;
@@ -259,7 +264,12 @@ export default function CorrectionRequestsPage() {
   }, [focusedRequestId, loading, requests]);
 
   const visibleRequests = useMemo(() => {
-    const orderedRequests = getCorrectionRequestsForView(requests, claims, filter);
+    const orderedRequests = getCorrectionRequestsForView(
+      requests,
+      currentUserId,
+      claims,
+      filter
+    );
     const normalizedSearch = search.trim().toUpperCase();
     if (!normalizedSearch) return orderedRequests;
     return orderedRequests.filter((request) => (
@@ -267,7 +277,7 @@ export default function CorrectionRequestsPage() {
       || request.proposedSku.includes(normalizedSearch)
       || request.comment.toUpperCase().includes(normalizedSearch)
     ));
-  }, [claims, filter, requests, search]);
+  }, [claims, currentUserId, filter, requests, search]);
 
   const changeFilter = (nextFilter) => {
     if (nextFilter === filter || loading) return;
@@ -280,8 +290,8 @@ export default function CorrectionRequestsPage() {
       .finally(() => setLoading(false));
   };
 
-  const getClaimHeaders = (requestId) => {
-    const claimToken = claims[requestId]?.token;
+  const getClaimHeaders = (request) => {
+    const claimToken = getCorrectionLegacyClaimToken(request, claims);
     return claimToken ? { 'X-Correction-Claim-Token': claimToken } : {};
   };
 
@@ -304,12 +314,7 @@ export default function CorrectionRequestsPage() {
     setError('');
     setSuccess('');
     try {
-      const response = await api.post(`/admin/correction-requests/${request.id}/claim`);
-      persistClaims((currentClaims) => storeCorrectionClaim(
-        currentClaims,
-        response.data.request,
-        response.data.claimToken
-      ));
+      await api.post(`/admin/correction-requests/${request.id}/claim`);
       await loadRequests(filter);
       setSuccess(`Запит #${request.id} взято в роботу.`);
     } catch (requestError) {
@@ -328,8 +333,8 @@ export default function CorrectionRequestsPage() {
     try {
       await api.post(
         `/admin/correction-requests/${request.id}/release`,
-        {},
-        { headers: getClaimHeaders(request.id) }
+        { claimVersion: request.claimVersion },
+        { headers: getClaimHeaders(request) }
       );
       clearClaim(request.id);
       await loadRequests(filter);
@@ -352,7 +357,10 @@ export default function CorrectionRequestsPage() {
     setError('');
     setSuccess('');
     try {
-      await api.post(`/admin/correction-requests/${request.id}/force-release`, { confirm: true });
+      await api.post(`/admin/correction-requests/${request.id}/force-release`, {
+        confirm: true,
+        claimVersion: request.claimVersion,
+      });
       clearClaim(request.id);
       await loadRequests(filter);
       setSuccess(`Запит #${request.id} примусово повернуто в чергу.`);
@@ -371,8 +379,8 @@ export default function CorrectionRequestsPage() {
     try {
       await api.patch(
         `/admin/correction-requests/${request.id}/status`,
-        { status },
-        { headers: getClaimHeaders(request.id) }
+        { status, claimVersion: request.claimVersion },
+        { headers: getClaimHeaders(request) }
       );
       if (request.status === 'in_progress') clearClaim(request.id);
       await loadRequests(filter);
@@ -394,8 +402,8 @@ export default function CorrectionRequestsPage() {
     try {
       await api.post(
         `/admin/correction-requests/${request.id}/refresh`,
-        {},
-        { headers: getClaimHeaders(request.id) }
+        { claimVersion: request.claimVersion },
+        { headers: getClaimHeaders(request) }
       );
       await loadRequests(filter);
       setSuccess(`Запит #${request.id} оновлено. Повторно звірте SKU та ціну на сайті.`);
@@ -417,8 +425,8 @@ export default function CorrectionRequestsPage() {
     try {
       const response = await api.post(
         `/admin/correction-requests/${request.id}/complete`,
-        {},
-        { headers: getClaimHeaders(request.id) }
+        { claimVersion: request.claimVersion },
+        { headers: getClaimHeaders(request) }
       );
       clearClaim(request.id);
       closeCompletion();
@@ -523,7 +531,11 @@ export default function CorrectionRequestsPage() {
               {visibleRequests.map((request) => {
                 const requestBusy = busyId === request.id;
                 const proposedPrice = request.proposedPayload?.totalPriceUah;
-                const claimOwnership = getCorrectionClaimOwnership(request, claims);
+                const claimOwnership = getCorrectionClaimOwnership(
+                  request,
+                  currentUserId,
+                  claims
+                );
                 const isOwnedClaim = claimOwnership === 'owned';
                 return (
                   <article
@@ -534,12 +546,21 @@ export default function CorrectionRequestsPage() {
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <StatusBadge status={request.status} />
-                        <span className="text-xs text-slate-500">#{request.id} · створено {formatDateTime(request.createdAt)}</span>
+                        <span className="text-xs text-slate-500">
+                          #{request.id} · створено {formatDateTime(request.createdAt)}
+                          {getEmployeeLabel(request.createdByUser)
+                            ? ` · ${getEmployeeLabel(request.createdByUser)}`
+                            : ''}
+                        </span>
                       </div>
                       {request.status === 'in_progress' && (
                         <div className="flex flex-wrap items-center gap-2">
                           <div className={`claim-state mb-0 ${isOwnedClaim ? 'is-owned' : 'is-external'}`}>
-                            {isOwnedClaim ? 'В роботі у вас' : 'В роботі в іншому браузері'}
+                            {isOwnedClaim
+                              ? 'В роботі у вас'
+                              : getEmployeeLabel(request.claimedByUser)
+                                ? `В роботі: ${getEmployeeLabel(request.claimedByUser)}`
+                                : 'В роботі: успадкований запит без визначеного працівника'}
                           </div>
                           <span className="text-xs text-slate-500">взято {formatDateTime(request.claimedAt || request.updatedAt)}</span>
                         </div>
@@ -585,7 +606,9 @@ export default function CorrectionRequestsPage() {
                           {request.completedAt && <>Виконано: {formatDateTime(request.completedAt)}</>}
                         </div>
                         <div className="flex flex-wrap justify-start gap-2 xl:justify-end">
-                          {request.status === 'pending' && canClaim && (
+                          {(request.status === 'pending'
+                            || (request.hasUnownedLegacyClaim && !request.claimFingerprint))
+                            && canClaim && (
                               <button type="button" className="btn btn-outline gap-2" onClick={() => claimRequest(request)} disabled={requestBusy}>
                                 <Play size={15} />
                                 Взяти в роботу

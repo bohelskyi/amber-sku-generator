@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const { execFile } = require('node:child_process');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -594,7 +595,7 @@ test('migration 019 matches the connect-pg-simple 10.0.0 table contract', async 
   ]);
 });
 
-test('migrations 020-024 create RBAC and the immutable audit foundation', async () => {
+test('migrations 020-025 create RBAC, audit, and correction ownership foundations', async () => {
   const requiredTables = await pool.query(`
     SELECT table_name
     FROM information_schema.tables
@@ -712,6 +713,69 @@ test('migrations 020-024 create RBAC and the immutable audit foundation', async 
   );
 });
 
+test('migration 025 adds nullable user attribution and a nonnegative correction claim epoch', async () => {
+  const columns = await pool.query(`
+    SELECT column_name, is_nullable, column_default
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'correction_requests'
+      AND column_name = ANY($1::text[])
+    ORDER BY column_name
+  `, [[
+    'claim_version',
+    'claimed_by_user_id',
+    'created_by_user_id',
+  ]]);
+  assert.deepEqual(columns.rows, [
+    { column_name: 'claim_version', is_nullable: 'NO', column_default: '0' },
+    { column_name: 'claimed_by_user_id', is_nullable: 'YES', column_default: null },
+    { column_name: 'created_by_user_id', is_nullable: 'YES', column_default: null },
+  ]);
+
+  const indexes = await pool.query(`
+    SELECT indexname
+    FROM pg_indexes
+    WHERE schemaname = 'public'
+      AND tablename = 'correction_requests'
+      AND indexname LIKE 'correction_requests_%_user_idx'
+    ORDER BY indexname
+  `);
+  assert.deepEqual(indexes.rows.map((row) => row.indexname), [
+    'correction_requests_claimed_by_user_idx',
+    'correction_requests_created_by_user_idx',
+  ]);
+  const foreignKeys = await pool.query(`
+    SELECT kcu.column_name, ccu.table_name AS referenced_table, rc.delete_rule
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON kcu.constraint_schema = tc.constraint_schema
+     AND kcu.constraint_name = tc.constraint_name
+    JOIN information_schema.referential_constraints rc
+      ON rc.constraint_schema = tc.constraint_schema
+     AND rc.constraint_name = tc.constraint_name
+    JOIN information_schema.constraint_column_usage ccu
+      ON ccu.constraint_schema = rc.unique_constraint_schema
+     AND ccu.constraint_name = rc.unique_constraint_name
+    WHERE tc.constraint_schema = 'public'
+      AND tc.table_name = 'correction_requests'
+      AND tc.constraint_type = 'FOREIGN KEY'
+      AND kcu.column_name IN ('created_by_user_id', 'claimed_by_user_id')
+    ORDER BY kcu.column_name
+  `);
+  assert.deepEqual(foreignKeys.rows, [
+    {
+      column_name: 'claimed_by_user_id',
+      referenced_table: 'application_users',
+      delete_rule: 'RESTRICT',
+    },
+    {
+      column_name: 'created_by_user_id',
+      referenced_table: 'application_users',
+      delete_rule: 'RESTRICT',
+    },
+  ]);
+});
+
 test('migration 023 constrains and makes durable audit records immutable', async () => {
   const columns = await pool.query(`
     SELECT column_name, is_nullable
@@ -811,7 +875,11 @@ test('migration 024 preserves historical product attribution as null', async () 
   try {
     const migrationDirectory = path.resolve(serverRoot, 'migrations');
     const migrationFiles = (await fs.readdir(migrationDirectory))
-      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('024_'));
+      .filter((fileName) => (
+        fileName.endsWith('.sql')
+        && !fileName.startsWith('024_')
+        && !fileName.startsWith('025_')
+      ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
       path.resolve(preAttributionDirectory, fileName)
@@ -891,6 +959,7 @@ test('migration 024 preserves historical product attribution as null', async () 
          AND ccu.constraint_name = rc.unique_constraint_name
         WHERE tc.constraint_schema = 'public'
           AND tc.constraint_type = 'FOREIGN KEY'
+          AND tc.table_name IN ('products', 'product_corrections')
           AND kcu.column_name IN (
             'created_by_user_id', 'archived_by_user_id', 'performed_by_user_id'
           )
@@ -2078,6 +2147,7 @@ test('migration 023 rolls back its audit schema and permission grant together', 
         fileName.endsWith('.sql')
         && !fileName.startsWith('023_')
         && !fileName.startsWith('024_')
+        && !fileName.startsWith('025_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -2224,6 +2294,7 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
          && !fileName.startsWith('022_')
          && !fileName.startsWith('023_')
          && !fileName.startsWith('024_')
+         && !fileName.startsWith('025_')
       ))
       .map((fileName) => fs.copyFile(
         path.resolve(serverRoot, 'migrations', fileName),
@@ -2330,6 +2401,7 @@ test('migrations 020-024 upgrade a database at migration 019 and repeated startu
         && !fileName.startsWith('022_')
         && !fileName.startsWith('023_')
         && !fileName.startsWith('024_')
+        && !fileName.startsWith('025_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -2399,6 +2471,7 @@ test('migration 021 adds business capabilities and corrects built-in mappings on
         && !fileName.startsWith('022_')
         && !fileName.startsWith('023_')
         && !fileName.startsWith('024_')
+        && !fileName.startsWith('025_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -2477,6 +2550,7 @@ test('migration 022 removes Manager correction processing without changing other
         && !fileName.startsWith('022_')
         && !fileName.startsWith('023_')
         && !fileName.startsWith('024_')
+        && !fileName.startsWith('025_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -2609,7 +2683,7 @@ test('first-Administrator bootstrap is verified, transactional, concurrent-safe,
   }
 });
 
-test('legacy in-progress correction requests survive migration 018 and can be claimed once', async () => {
+test('legacy in-progress correction requests survive through migration 025 without false ownership', async () => {
   const databaseName = 'amber_legacy_claim_test';
   const databaseUrl = await recreateTestDatabase(databaseName);
   const preClaimDirectory = await fs.mkdtemp(
@@ -2625,6 +2699,7 @@ test('legacy in-progress correction requests survive migration 018 and can be cl
         && !fileName.startsWith('022_')
         && !fileName.startsWith('023_')
         && !fileName.startsWith('024_')
+        && !fileName.startsWith('025_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -2708,17 +2783,32 @@ test('legacy in-progress correction requests survive migration 018 and can be cl
       const { claimCorrectionRequest } = require('./src/services/correction-request.service');
       (async () => {
         await runMigrations();
+        const actor = await db.query(
+          "INSERT INTO application_users (status, display_name, preferred_username) "
+            + "VALUES ('active', 'Legacy Claim Actor', 'legacy.claim.actor') RETURNING id"
+        );
+        const mutationContext = {
+          actorUserId: Number(actor.rows[0].id),
+          requestId: 'legacy-unowned-claim',
+        };
         const before = await db.query(
-          'SELECT status, claim_token_hash, claimed_at FROM correction_requests WHERE id = $1',
+          'SELECT status, claim_token_hash, claimed_at, created_by_user_id, '
+            + 'claimed_by_user_id, claim_version '
+            + 'FROM correction_requests WHERE id = $1',
           [${legacyRequestId}]
         );
         assert.deepEqual(before.rows[0], {
           status: 'in_progress', claim_token_hash: null, claimed_at: null,
+          created_by_user_id: null, claimed_by_user_id: null, claim_version: '0',
         });
-        const claimed = await claimCorrectionRequest(${legacyRequestId});
+        const claimed = await claimCorrectionRequest(${legacyRequestId}, { mutationContext });
         assert.equal(claimed.request.status, 'in_progress');
-        assert.ok(claimed.claimToken);
-        await assert.rejects(claimCorrectionRequest(${legacyRequestId}), /інший працівник/);
+        assert.equal(claimed.request.claimVersion, 1);
+        assert.equal(Object.hasOwn(claimed, 'claimToken'), false);
+        await assert.rejects(
+          claimCorrectionRequest(${legacyRequestId}, { mutationContext }),
+          /інший працівник/
+        );
         await db.end();
       })().catch((error) => { console.error(error); process.exitCode = 1; });
     `);
@@ -2726,12 +2816,14 @@ test('legacy in-progress correction requests survive migration 018 and can be cl
     const upgradedPool = new Pool({ connectionString: databaseUrl });
     try {
       const claimed = await upgradedPool.query(
-        `SELECT status, claim_token_hash, claimed_at
+        `SELECT status, claim_token_hash, claimed_at, claimed_by_user_id, claim_version
          FROM correction_requests WHERE id = $1`,
         [legacyRequestId]
       );
       assert.equal(claimed.rows[0].status, 'in_progress');
-      assert.ok(claimed.rows[0].claim_token_hash);
+      assert.equal(claimed.rows[0].claim_token_hash, null);
+      assert.ok(claimed.rows[0].claimed_by_user_id);
+      assert.equal(Number(claimed.rows[0].claim_version), 1);
       assert.ok(claimed.rows[0].claimed_at);
       const secondProduct = await upgradedPool.query(
         "SELECT id FROM products WHERE full_sku = 'CL1002'"
@@ -3534,7 +3626,25 @@ test('active correction requests stay FIFO when another worker claims a newer re
   }
 });
 
-test('correction request claims are exclusive, persistent, and owner-authoritative', async () => {
+test('correction request claims are user-owned, cross-browser, epoch-protected, and explicitly force-released', async () => {
+  const sameUserOtherBrowser = await authenticateIdentitySession({
+    issuer: integrationOidcAdapter.issuer,
+    subject: 'critical-flows-subject',
+    preferredUsername: 'critical.flows',
+    displayName: 'Critical Flows',
+  });
+  const secondUserIdentity = {
+    issuer: 'https://correction-owner.example/realms/amber',
+    subject: `correction-worker-${Date.now()}`,
+    preferredUsername: 'correction.worker.two',
+    displayName: 'Correction Worker Two',
+  };
+  const secondUser = await authenticateIdentitySession(secondUserIdentity);
+  await activateApplicationUserForTest(
+    secondUserIdentity.issuer,
+    secondUserIdentity.subject,
+    'storekeeper'
+  );
   const productPreview = await request('/api/preview', {
     method: 'POST',
     body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0, isCalibrated: 0 },
@@ -3562,6 +3672,10 @@ test('correction request claims are exclusive, persistent, and owner-authoritati
   });
   assert.equal(created.response.status, 200, created.text);
   const requestId = Number(created.data.request.id);
+  assert.equal(
+    Number(created.data.request.createdByUser.id),
+    authenticatedSession.applicationUser.id
+  );
   const genericClaim = await request(`/api/admin/correction-requests/${requestId}/status`, {
     method: 'PATCH', body: { status: 'in_progress' },
   });
@@ -3581,65 +3695,227 @@ test('correction request claims are exclusive, persistent, and owner-authoritati
   const claimResults = await Promise.all(competingClaims);
   assert.deepEqual(claimResults.map((item) => item.response.status).sort(), [200, 409]);
   const winningClaim = claimResults.find((item) => item.response.status === 200).data;
-  assert.ok(winningClaim.claimToken.length >= 32);
-  assert.ok(winningClaim.request.claimFingerprint);
+  assert.equal(Object.hasOwn(winningClaim, 'claimToken'), false);
+  assert.equal(winningClaim.request.claimFingerprint, null);
+  assert.equal(
+    Number(winningClaim.request.claimedByUser.id),
+    authenticatedSession.applicationUser.id
+  );
+  const firstClaimVersion = Number(winningClaim.request.claimVersion);
   const claimedState = await pool.query(
-    `SELECT status, claim_token_hash, claimed_at
+    `SELECT status, claim_token_hash, claimed_by_user_id, claim_version, claimed_at
      FROM correction_requests WHERE id = $1`,
     [requestId]
   );
   assert.equal(claimedState.rows[0].status, 'in_progress');
-  assert.ok(claimedState.rows[0].claim_token_hash);
-  assert.notEqual(claimedState.rows[0].claim_token_hash, winningClaim.claimToken);
+  assert.equal(claimedState.rows[0].claim_token_hash, null);
+  assert.equal(
+    Number(claimedState.rows[0].claimed_by_user_id),
+    authenticatedSession.applicationUser.id
+  );
+  assert.equal(Number(claimedState.rows[0].claim_version), firstClaimVersion);
   assert.ok(claimedState.rows[0].claimed_at);
   const listed = await request('/api/admin/correction-requests?status=active');
   assert.equal(listed.response.status, 200, listed.text);
   const listedClaim = listed.data.items.find((item) => Number(item.id) === requestId);
-  assert.equal(listedClaim.claimFingerprint, winningClaim.request.claimFingerprint);
+  assert.equal(listedClaim.claimFingerprint, null);
+  assert.equal(listedClaim.claimedByUser.displayName, 'Critical Flows');
   assert.equal(Object.hasOwn(listedClaim, 'claimTokenHash'), false);
 
   const wrongHeaders = { 'X-Correction-Claim-Token': 'x'.repeat(43) };
+  const sameUserRefresh = await request(
+    `/api/admin/correction-requests/${requestId}/refresh`,
+    {
+      method: 'POST',
+      body: { claimVersion: firstClaimVersion },
+      headers: wrongHeaders,
+      authentication: sameUserOtherBrowser,
+    }
+  );
+  assert.equal(sameUserRefresh.response.status, 200, sameUserRefresh.text);
+
   const wrongRelease = await request(
     `/api/admin/correction-requests/${requestId}/release`,
-    { method: 'POST', body: {}, headers: wrongHeaders }
+    {
+      method: 'POST',
+      body: { claimVersion: firstClaimVersion },
+      headers: wrongHeaders,
+      authentication: secondUser,
+    }
   );
   assert.equal(wrongRelease.response.status, 409, wrongRelease.text);
   const wrongRefresh = await request(
     `/api/admin/correction-requests/${requestId}/refresh`,
-    { method: 'POST', body: {}, headers: wrongHeaders }
+    {
+      method: 'POST',
+      body: { claimVersion: firstClaimVersion },
+      headers: wrongHeaders,
+      authentication: secondUser,
+    }
   );
   assert.equal(wrongRefresh.response.status, 409, wrongRefresh.text);
   const wrongComplete = await request(
     `/api/admin/correction-requests/${requestId}/complete`,
-    { method: 'POST', body: {}, headers: wrongHeaders }
+    {
+      method: 'POST',
+      body: { claimVersion: firstClaimVersion },
+      headers: wrongHeaders,
+      authentication: secondUser,
+    }
   );
   assert.equal(wrongComplete.response.status, 409, wrongComplete.text);
   const wrongReject = await request(`/api/admin/correction-requests/${requestId}/status`, {
-    method: 'PATCH', body: { status: 'rejected' }, headers: wrongHeaders,
+    method: 'PATCH',
+    body: { status: 'rejected', claimVersion: firstClaimVersion },
+    headers: wrongHeaders,
+    authentication: secondUser,
   });
   assert.equal(wrongReject.response.status, 409, wrongReject.text);
 
-  const ownerHeaders = { 'X-Correction-Claim-Token': winningClaim.claimToken };
-  const released = await request(
-    `/api/admin/correction-requests/${requestId}/release`,
-    { method: 'POST', body: {}, headers: ownerHeaders }
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION fail_test_correction_release_audit()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF NEW.event_key = 'correction_request.released' THEN
+        RAISE EXCEPTION 'forced correction release audit failure';
+      END IF;
+      RETURN NEW;
+    END;
+    $$;
+    CREATE TRIGGER fail_test_correction_release_audit
+    BEFORE INSERT ON audit_events
+    FOR EACH ROW EXECUTE FUNCTION fail_test_correction_release_audit();
+  `);
+  try {
+    const failedAuditedRelease = await request(
+      `/api/admin/correction-requests/${requestId}/release`,
+      { method: 'POST', body: { claimVersion: firstClaimVersion } }
+    );
+    assert.equal(failedAuditedRelease.response.status, 500, failedAuditedRelease.text);
+    const stateAfterAuditFailure = await pool.query(
+      `SELECT status, claimed_by_user_id, claim_version
+       FROM correction_requests WHERE id = $1`,
+      [requestId]
+    );
+    assert.equal(stateAfterAuditFailure.rows[0].status, 'in_progress');
+    assert.equal(
+      Number(stateAfterAuditFailure.rows[0].claimed_by_user_id),
+      authenticatedSession.applicationUser.id
+    );
+    assert.equal(Number(stateAfterAuditFailure.rows[0].claim_version), firstClaimVersion);
+  } finally {
+    await pool.query('DROP TRIGGER fail_test_correction_release_audit ON audit_events');
+    await pool.query('DROP FUNCTION fail_test_correction_release_audit()');
+  }
+
+  const releaseLock = await pool.connect();
+  await releaseLock.query('BEGIN');
+  await releaseLock.query(
+    'SELECT id FROM correction_requests WHERE id = $1 FOR UPDATE',
+    [requestId]
   );
-  assert.equal(released.response.status, 200, released.text);
-  assert.equal(released.data.request.status, 'pending');
-  assert.equal(released.data.request.claimedAt, null);
+  const competingReleases = [
+    request(`/api/admin/correction-requests/${requestId}/release`, {
+      method: 'POST',
+      body: { claimVersion: firstClaimVersion },
+    }),
+    request(`/api/admin/correction-requests/${requestId}/release`, {
+      method: 'POST',
+      body: { claimVersion: firstClaimVersion },
+      headers: wrongHeaders,
+      authentication: sameUserOtherBrowser,
+    }),
+  ];
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await releaseLock.query('COMMIT');
+  releaseLock.release();
+  const releaseResults = await Promise.all(competingReleases);
+  assert.deepEqual(releaseResults.map((item) => item.response.status).sort(), [200, 409]);
+  const released = releaseResults.find((item) => item.response.status === 200).data;
+  assert.equal(released.request.status, 'pending');
+  assert.equal(released.request.claimedAt, null);
+  assert.equal(Number(released.request.claimVersion), firstClaimVersion + 1);
 
   const reclaimed = await request(`/api/admin/correction-requests/${requestId}/claim`, {
     method: 'POST', body: {},
   });
   assert.equal(reclaimed.response.status, 200, reclaimed.text);
+  const reclaimedVersion = Number(reclaimed.data.request.claimVersion);
+  assert.equal(reclaimedVersion, firstClaimVersion + 2);
+  const staleRelease = await request(
+    `/api/admin/correction-requests/${requestId}/release`,
+    {
+      method: 'POST',
+      body: { claimVersion: firstClaimVersion },
+      authentication: sameUserOtherBrowser,
+    }
+  );
+  assert.equal(staleRelease.response.status, 409, staleRelease.text);
+  const staleCompletion = await request(
+    `/api/admin/correction-requests/${requestId}/complete`,
+    {
+      method: 'POST',
+      body: { claimVersion: firstClaimVersion },
+      authentication: sameUserOtherBrowser,
+    }
+  );
+  assert.equal(staleCompletion.response.status, 409, staleCompletion.text);
+
+  const ownerRelease = await request(
+    `/api/admin/correction-requests/${requestId}/release`,
+    { method: 'POST', body: { claimVersion: reclaimedVersion } }
+  );
+  assert.equal(ownerRelease.response.status, 200, ownerRelease.text);
+  const secondUserClaim = await request(
+    `/api/admin/correction-requests/${requestId}/claim`,
+    { method: 'POST', body: {}, authentication: secondUser }
+  );
+  assert.equal(secondUserClaim.response.status, 200, secondUserClaim.text);
+  assert.equal(
+    Number(secondUserClaim.data.request.claimedByUser.id),
+    secondUser.applicationUser.id
+  );
+  const secondUserClaimVersion = Number(secondUserClaim.data.request.claimVersion);
+  const demotedOwner = await request(
+    `/api/admin/users/${secondUser.applicationUser.id}/role`,
+    { method: 'PUT', body: { roleKey: 'manager' } }
+  );
+  assert.equal(demotedOwner.response.status, 200, demotedOwner.text);
+  let retainedOwner = await pool.query(
+    `SELECT status, claimed_by_user_id, claim_version
+     FROM correction_requests WHERE id = $1`,
+    [requestId]
+  );
+  assert.equal(retainedOwner.rows[0].status, 'in_progress');
+  assert.equal(Number(retainedOwner.rows[0].claimed_by_user_id), secondUser.applicationUser.id);
+  assert.equal(Number(retainedOwner.rows[0].claim_version), secondUserClaimVersion);
+  const disabledOwner = await request(
+    `/api/admin/users/${secondUser.applicationUser.id}/disable`,
+    { method: 'POST', body: {} }
+  );
+  assert.equal(disabledOwner.response.status, 200, disabledOwner.text);
+  retainedOwner = await pool.query(
+    `SELECT status, claimed_by_user_id, claim_version
+     FROM correction_requests WHERE id = $1`,
+    [requestId]
+  );
+  assert.equal(retainedOwner.rows[0].status, 'in_progress');
+  assert.equal(Number(retainedOwner.rows[0].claimed_by_user_id), secondUser.applicationUser.id);
+  assert.equal(Number(retainedOwner.rows[0].claim_version), secondUserClaimVersion);
+
+  const administratorOrdinaryBypass = await request(
+    `/api/admin/correction-requests/${requestId}/refresh`,
+    { method: 'POST', body: { claimVersion: secondUserClaimVersion } }
+  );
+  assert.equal(administratorOrdinaryBypass.response.status, 409, administratorOrdinaryBypass.text);
   const unconfirmedForceRelease = await request(
     `/api/admin/correction-requests/${requestId}/force-release`,
-    { method: 'POST', body: { confirm: false } }
+    { method: 'POST', body: { confirm: false, claimVersion: secondUserClaimVersion } }
   );
   assert.equal(unconfirmedForceRelease.response.status, 400, unconfirmedForceRelease.text);
   const forceReleased = await request(
     `/api/admin/correction-requests/${requestId}/force-release`,
-    { method: 'POST', body: { confirm: true } }
+    { method: 'POST', body: { confirm: true, claimVersion: secondUserClaimVersion } }
   );
   assert.equal(forceReleased.response.status, 200, forceReleased.text);
   assert.equal(forceReleased.data.request.status, 'pending');
@@ -3650,12 +3926,14 @@ test('correction request claims are exclusive, persistent, and owner-authoritati
   assert.equal(finalClaim.response.status, 200, finalClaim.text);
   const rejected = await request(`/api/admin/correction-requests/${requestId}/status`, {
     method: 'PATCH',
-    body: { status: 'rejected' },
-    headers: { 'X-Correction-Claim-Token': finalClaim.data.claimToken },
+    body: {
+      status: 'rejected',
+      claimVersion: finalClaim.data.request.claimVersion,
+    },
   });
   assert.equal(rejected.response.status, 200, rejected.text);
   const finalState = await pool.query(
-    `SELECT cr.status, cr.claim_token_hash, p.status AS product_status,
+    `SELECT cr.status, cr.claim_token_hash, cr.claimed_by_user_id, p.status AS product_status,
             p.corrected_to_product_id
      FROM correction_requests cr
      JOIN products p ON p.id = cr.source_product_id
@@ -3665,9 +3943,140 @@ test('correction request claims are exclusive, persistent, and owner-authoritati
   assert.deepEqual(finalState.rows[0], {
     status: 'rejected',
     claim_token_hash: null,
+    claimed_by_user_id: null,
     product_status: 'active',
     corrected_to_product_id: null,
   });
+  const lifecycle = await pool.query(
+    `SELECT event_key, actor_user_id, details
+     FROM audit_events
+     WHERE subject_type = 'correction_request' AND subject_id = $1
+     ORDER BY id`,
+    [String(requestId)]
+  );
+  assert.deepEqual(lifecycle.rows.map((row) => row.event_key), [
+    'correction_request.created',
+    'correction_request.claimed',
+    'correction_request.released',
+    'correction_request.claimed',
+    'correction_request.released',
+    'correction_request.claimed',
+    'correction_request.force_released',
+    'correction_request.claimed',
+    'correction_request.rejected',
+  ]);
+  const forceReleaseAudit = lifecycle.rows.find(
+    (row) => row.event_key === 'correction_request.force_released'
+  );
+  assert.equal(
+    Number(forceReleaseAudit.actor_user_id),
+    authenticatedSession.applicationUser.id
+  );
+  assert.equal(
+    Number(forceReleaseAudit.details.previousOwnerUserId),
+    secondUser.applicationUser.id
+  );
+});
+
+test('a legacy token-only claim is adopted once and then follows user ownership', async () => {
+  const preview = await request('/api/preview', {
+    method: 'POST',
+    body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0, isCalibrated: 0 },
+  });
+  const product = await request('/api/save', {
+    method: 'POST',
+    body: {
+      category: 'ZZ',
+      answers: { kind: 1 },
+      weight: 0,
+      isCalibrated: 0,
+      skuSchemaVersionId: schemas.ZZ,
+      previewToken: preview.data.previewToken,
+    },
+  });
+  const created = await request('/api/admin/correction-requests', {
+    method: 'POST',
+    body: {
+      sourceSku: product.data.fullSku,
+      answers: { kind: 2 },
+      reason: 'legacy token adoption',
+    },
+  });
+  assert.equal(created.response.status, 200, created.text);
+  const requestId = Number(created.data.request.id);
+  const legacyToken = crypto.randomBytes(32).toString('base64url');
+  const legacyHash = crypto.createHash('sha256').update(legacyToken).digest('hex');
+  await pool.query(
+    `UPDATE correction_requests
+     SET status = 'in_progress', claim_token_hash = $1, claimed_at = CURRENT_TIMESTAMP
+     WHERE id = $2`,
+    [legacyHash, requestId]
+  );
+
+  const wrongToken = await request(`/api/admin/correction-requests/${requestId}/refresh`, {
+    method: 'POST',
+    body: { claimVersion: 0 },
+    headers: { 'X-Correction-Claim-Token': 'x'.repeat(43) },
+  });
+  assert.equal(wrongToken.response.status, 409, wrongToken.text);
+  const stillLegacy = await pool.query(
+    `SELECT claimed_by_user_id, claim_token_hash, claim_version
+     FROM correction_requests WHERE id = $1`,
+    [requestId]
+  );
+  assert.equal(stillLegacy.rows[0].claimed_by_user_id, null);
+  assert.equal(stillLegacy.rows[0].claim_token_hash, legacyHash);
+  assert.equal(Number(stillLegacy.rows[0].claim_version), 0);
+
+  const adopted = await request(`/api/admin/correction-requests/${requestId}/refresh`, {
+    method: 'POST',
+    body: { claimVersion: 0 },
+    headers: { 'X-Correction-Claim-Token': legacyToken },
+  });
+  assert.equal(adopted.response.status, 200, adopted.text);
+  assert.equal(
+    Number(adopted.data.request.claimedByUser.id),
+    authenticatedSession.applicationUser.id
+  );
+  assert.equal(adopted.data.request.claimFingerprint, null);
+  assert.equal(Number(adopted.data.request.claimVersion), 0);
+
+  const sameUserOtherBrowser = await authenticateIdentitySession({
+    issuer: integrationOidcAdapter.issuer,
+    subject: 'critical-flows-subject',
+    preferredUsername: 'critical.flows',
+    displayName: 'Critical Flows',
+  });
+  const released = await request(`/api/admin/correction-requests/${requestId}/release`, {
+    method: 'POST',
+    body: { claimVersion: 0 },
+    authentication: sameUserOtherBrowser,
+  });
+  assert.equal(released.response.status, 200, released.text);
+  assert.equal(Number(released.data.request.claimVersion), 1);
+  const rejected = await request(`/api/admin/correction-requests/${requestId}/status`, {
+    method: 'PATCH',
+    body: { status: 'rejected' },
+  });
+  assert.equal(rejected.response.status, 200, rejected.text);
+
+  const audit = await pool.query(
+    `SELECT event_key, actor_user_id, details
+     FROM audit_events
+     WHERE subject_type = 'correction_request' AND subject_id = $1
+       AND event_key IN ('correction_request.claimed', 'correction_request.released')
+     ORDER BY id`,
+    [String(requestId)]
+  );
+  assert.deepEqual(audit.rows.map((row) => row.event_key), [
+    'correction_request.claimed',
+    'correction_request.released',
+  ]);
+  assert.equal(audit.rows[0].details.legacyClaimAdopted, true);
+  assert.equal(
+    audit.rows.every((row) => Number(row.actor_user_id) === authenticatedSession.applicationUser.id),
+    true
+  );
 });
 
 test('claim refreshes stale correction data and later changes still block completion', async () => {
@@ -3729,7 +4138,7 @@ test('claim refreshes stale correction data and later changes still block comple
       Number(claimed.data.request.proposedPayload.calculatedPriceUah),
       originalCalculatedPrice
     );
-    const claimHeaders = { 'X-Correction-Claim-Token': claimed.data.claimToken };
+    const claimVersion = Number(claimed.data.request.claimVersion);
 
     await pool.query(
       "UPDATE products SET status = 'archived' WHERE id = $1",
@@ -3737,7 +4146,7 @@ test('claim refreshes stale correction data and later changes still block comple
     );
     const failedRefresh = await request(
       `/api/admin/correction-requests/${requestId}/refresh`,
-      { method: 'POST', body: {}, headers: claimHeaders }
+      { method: 'POST', body: { claimVersion } }
     );
     assert.equal(failedRefresh.response.status, 409);
     const activeAfterRefreshError = await request(
@@ -3748,9 +4157,9 @@ test('claim refreshes stale correction data and later changes still block comple
     );
     assert.equal(ownedAfterRefreshError.status, 'in_progress');
     assert.equal(
-      ownedAfterRefreshError.claimFingerprint,
-      claimed.data.request.claimFingerprint,
-      'a failed refresh must preserve the existing owner capability'
+      Number(ownedAfterRefreshError.claimedByUser.id),
+      authenticatedSession.applicationUser.id,
+      'a failed refresh must preserve the existing application-user owner'
     );
 
     const changedAfterClaim = await pool.query(
@@ -3763,7 +4172,7 @@ test('claim refreshes stale correction data and later changes still block comple
     );
     const staleCompletion = await request(
       `/api/admin/correction-requests/${requestId}/complete`,
-      { method: 'POST', body: {}, headers: claimHeaders }
+      { method: 'POST', body: { claimVersion } }
     );
     assert.equal(staleCompletion.response.status, 409);
     assert.equal(staleCompletion.data.details?.type, 'stale_correction_request');
@@ -3773,15 +4182,12 @@ test('claim refreshes stale correction data and later changes still block comple
       (item) => Number(item.id) === requestId
     );
     assert.equal(ownedAfterError.status, 'in_progress');
-    assert.equal(
-      ownedAfterError.claimFingerprint,
-      claimed.data.request.claimFingerprint,
-      'a stale completion must not replace or clear claim ownership'
-    );
+    assert.equal(Number(ownedAfterError.claimedByUser.id), authenticatedSession.applicationUser.id);
+    assert.equal(Number(ownedAfterError.claimVersion), claimVersion);
 
     const released = await request(
       `/api/admin/correction-requests/${requestId}/release`,
-      { method: 'POST', body: {}, headers: claimHeaders }
+      { method: 'POST', body: { claimVersion } }
     );
     assert.equal(released.response.status, 200, released.text);
     assert.equal(released.data.request.status, 'pending');
@@ -3798,14 +4204,14 @@ test('claim refreshes stale correction data and later changes still block comple
       `/api/admin/correction-requests/${requestId}/complete`,
       {
         method: 'POST',
-        body: {},
-        headers: { 'X-Correction-Claim-Token': reclaimed.data.claimToken },
+        body: { claimVersion: reclaimed.data.request.claimVersion },
       }
     );
     assert.equal(completed.response.status, 200, completed.text);
     const finalState = await pool.query(
       `SELECT p.status, p.corrected_to_product_id, cr.status AS request_status,
-              cr.corrected_product_id, cr.claim_token_hash, cr.claimed_at
+              cr.corrected_product_id, cr.claim_token_hash, cr.claimed_by_user_id,
+              cr.claim_version, cr.claimed_at
        FROM products p
        JOIN correction_requests cr ON cr.id = $1
        WHERE p.id = $2`,
@@ -3814,6 +4220,11 @@ test('claim refreshes stale correction data and later changes still block comple
     assert.equal(finalState.rows[0].status, 'corrected');
     assert.equal(finalState.rows[0].request_status, 'completed');
     assert.equal(finalState.rows[0].claim_token_hash, null);
+    assert.equal(finalState.rows[0].claimed_by_user_id, null);
+    assert.equal(
+      Number(finalState.rows[0].claim_version),
+      Number(reclaimed.data.request.claimVersion) + 1
+    );
     assert.ok(finalState.rows[0].claimed_at);
     assert.equal(
       Number(finalState.rows[0].corrected_to_product_id),
@@ -4976,13 +5387,12 @@ test('business endpoints enforce the Administrator, Storekeeper, and Manager cap
     method: 'POST', body: {},
   });
   assert.equal(claim.response.status, 200, claim.text);
-  const claimHeaders = { 'X-Correction-Claim-Token': claim.data.claimToken };
   const refresh = await request(`/api/admin/correction-requests/${correctionId}/refresh`, {
-    method: 'POST', body: {}, headers: claimHeaders,
+    method: 'POST', body: { claimVersion: claim.data.request.claimVersion },
   });
   assert.equal(refresh.response.status, 200, refresh.text);
   const completed = await request(`/api/admin/correction-requests/${correctionId}/complete`, {
-    method: 'POST', body: {}, headers: claimHeaders,
+    method: 'POST', body: { claimVersion: claim.data.request.claimVersion },
   });
   assert.equal(completed.response.status, 200, completed.text);
   const correctedSku = completed.data.recount.corrected.fullSku;
@@ -5004,16 +5414,32 @@ test('business endpoints enforce the Administrator, Storekeeper, and Manager cap
   assert.equal(queuedRecountAttribution.rows[0].details.correctionRequestId, correctionId);
   const repeatedCompletion = await request(
     `/api/admin/correction-requests/${correctionId}/complete`,
-    { method: 'POST', body: {}, headers: claimHeaders }
+    { method: 'POST', body: { claimVersion: claim.data.request.claimVersion } }
   );
   assert.equal(repeatedCompletion.response.status, 200, repeatedCompletion.text);
   assert.equal(repeatedCompletion.data.alreadyCompleted, true);
-  assert.equal(Number((await pool.query(
-    `SELECT count(*) FROM audit_events
-     WHERE event_key = 'product.recounted'
-       AND subject_type = 'product' AND subject_id = $1`,
-    [String(firstProduct.data.id)]
-  )).rows[0].count), 1);
+  const completionAudit = await pool.query(
+    `SELECT event_key, actor_user_id, details
+     FROM audit_events
+     WHERE (event_key = 'product.recounted'
+            AND subject_type = 'product' AND subject_id = $1)
+        OR (event_key = 'correction_request.completed'
+            AND subject_type = 'correction_request' AND subject_id = $2)
+     ORDER BY id`,
+    [String(firstProduct.data.id), String(correctionId)]
+  );
+  assert.deepEqual(completionAudit.rows.map((row) => row.event_key), [
+    'correction_request.completed',
+    'product.recounted',
+  ]);
+  assert.equal(completionAudit.rows.every((row) => Number(row.actor_user_id) === userId), true);
+  assert.deepEqual(completionAudit.rows[0].details, {
+    claimVersion: Number(claim.data.request.claimVersion),
+    nextClaimVersion: Number(claim.data.request.claimVersion) + 1,
+    sourceProductId: Number(firstProduct.data.id),
+    correctedProductId: Number(completed.data.recount.correctedProductId),
+    productCorrectionId: Number(queuedRecountAttribution.rows[0].details.productCorrectionId),
+  });
 
   const history = await request('/api/products');
   assert.equal(history.response.status, 200, history.text);

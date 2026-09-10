@@ -2,7 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  assertClaimOwnership,
   canTransitionCorrectionRequest,
+  getClaimTokenHash,
   getCorrectionPreviewSignature,
   haveSameRequestAnswers,
   normalizeRequestStatusFilter,
@@ -84,4 +86,39 @@ test('correction request status filter falls back to active requests', () => {
   assert.equal(normalizeRequestStatusFilter('all'), 'all');
   assert.equal(normalizeRequestStatusFilter('unexpected'), 'active');
   assert.equal(normalizeRequestStatusFilter(), 'active');
+});
+
+test('application-user correction ownership ignores tokens but requires the current epoch', () => {
+  const row = {
+    status: 'in_progress',
+    claimed_by_user_id: '17',
+    claim_token_hash: getClaimTokenHash('x'.repeat(43)),
+    claim_version: '4',
+  };
+
+  assert.deepEqual(assertClaimOwnership(row, 17, 4, 'wrong-token'.repeat(4)), {
+    claimVersion: 4,
+    legacyTokenHash: null,
+    legacyAdopted: false,
+  });
+  assert.throws(() => assertClaimOwnership(row, 18, 4), /іншому працівнику/);
+  assert.throws(() => assertClaimOwnership(row, 17, 3), /Призначення.*змінилося/);
+  assert.throws(() => assertClaimOwnership(row, 17, undefined), /Версія призначення/);
+});
+
+test('only a matching capability can authorize one-time legacy claim adoption', () => {
+  const token = 'legacy-claim-token-'.repeat(3);
+  const row = {
+    status: 'in_progress',
+    claimed_by_user_id: null,
+    claim_token_hash: getClaimTokenHash(token),
+    claim_version: '0',
+  };
+
+  assert.deepEqual(assertClaimOwnership(row, 17, 0, token), {
+    claimVersion: 0,
+    legacyTokenHash: getClaimTokenHash(token),
+    legacyAdopted: true,
+  });
+  assert.throws(() => assertClaimOwnership(row, 17, 0, 'wrong-token'.repeat(4)), /іншому працівнику/);
 });

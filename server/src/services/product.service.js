@@ -1275,15 +1275,24 @@ async function applyProductRecount(payload, options = {}) {
              corrected_product_id = $1,
              proposed_sku = $2,
              final_payload = $3::jsonb,
+             claimed_by_user_id = NULL,
              claim_token_hash = NULL,
+             claim_version = claim_version + 1,
              completed_at = CURRENT_TIMESTAMP,
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $4
             AND source_product_id = $5
             AND preview_signature = $6
             AND status = 'in_progress'
-            AND claim_token_hash = $7
-         RETURNING id`,
+            AND claim_version = $7
+            AND (
+              claimed_by_user_id = $8
+              OR (
+                claimed_by_user_id IS NULL
+                AND claim_token_hash = $9
+              )
+            )
+         RETURNING id, claim_version`,
         [
           correctedProductId,
           corrected.fullSku,
@@ -1291,7 +1300,9 @@ async function applyProductRecount(payload, options = {}) {
           Number(payload.correctionRequestId),
           sourceProductId,
           String(payload.correctionRequestSignature || ''),
-          String(payload.correctionRequestClaimHash || ''),
+          Number(payload.correctionRequestClaimVersion),
+          mutationContext.actorUserId,
+          payload.correctionRequestLegacyClaimHash || null,
         ]
       );
       if (requestResult.rows.length === 0) {
@@ -1299,6 +1310,22 @@ async function applyProductRecount(payload, options = {}) {
         err.statusCode = 409;
         throw err;
       }
+      await writeAuditEvent(client, {
+        mutationContext,
+        eventKey: 'correction_request.completed',
+        subjectType: 'correction_request',
+        subjectId: payload.correctionRequestId,
+        details: {
+          claimVersion: Number(payload.correctionRequestClaimVersion),
+          nextClaimVersion: Number(requestResult.rows[0].claim_version),
+          sourceProductId,
+          correctedProductId,
+          productCorrectionId,
+          ...(payload.correctionRequestLegacyAdopted
+            ? { legacyClaimAdopted: true }
+            : {}),
+        },
+      });
     }
 
     await writeAuditEvent(client, {
