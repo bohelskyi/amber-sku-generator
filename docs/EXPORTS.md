@@ -18,7 +18,9 @@ CSV contains the SKU, stored final UAH price (including exact manual decimals), 
 
 ## Immutable snapshots and idempotency
 
-Snapshot payload and CSV content are written once and protected from mutation by a database trigger. Never regenerate or modify a stored snapshot after creation.
+Snapshot payload and CSV content are written once and protected from mutation by a database trigger. Creator provenance is immutable, and confirmer provenance cannot change once set. Never regenerate or modify a stored snapshot after creation.
+
+Creation stores the authenticated local application user in nullable `created_by_user_id` and appends one transactional `export_snapshot.created` event referencing the immutable snapshot with only its range and row count. Historical snapshots remain unattributed. Idempotent reuse returns the original snapshot without changing its creator or writing another event.
 
 A required `Idempotency-Key` is bound to the normalized `fromSku`/`toSku` range:
 
@@ -28,7 +30,7 @@ A required `Idempotency-Key` is bound to the normalized `fromSku`/`toSku` range:
 
 ## Confirmation and cursor
 
-Confirmation is idempotent and row-locks the snapshot. The singleton export cursor advances with `GREATEST(exported_to_product_id)`, so concurrent or out-of-order confirmations can never move it backward. `last_snapshot_id` follows the non-regressing cursor. Legacy `export_events` remain only for status compatibility.
+Confirmation is idempotent and row-locks the snapshot. The first confirmation stores the authenticated local application user in nullable `confirmed_by_user_id` and appends one transactional `export_snapshot.confirmed` event referencing the snapshot's exported-to product cursor. Repeated confirmation preserves the original confirmer and emits no duplicate event while retaining the cursor-repair upsert. The singleton export cursor advances with `GREATEST(exported_to_product_id)`, so concurrent or out-of-order confirmations can never move it backward. `last_snapshot_id` follows the non-regressing cursor. Legacy `export_events` remain only for status compatibility.
 
 ## CSV safety
 

@@ -186,7 +186,9 @@ router.get('/admin/sku-schema/:catCode', requirePermission('catalog.view'), asyn
 
 router.post('/admin/sku-schema/:catCode/publish', requirePermission('sku_schemas.publish'), async (req, res) => {
   try {
-    res.json(await publishSkuSchema(String(req.params.catCode || '').toUpperCase()));
+    res.json(await publishSkuSchema(String(req.params.catCode || '').toUpperCase(), {
+      mutationContext: getRequestMutationContext(req),
+    }));
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }

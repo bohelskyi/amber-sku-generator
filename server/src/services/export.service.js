@@ -3,6 +3,8 @@ const crypto = require('node:crypto');
 const { getProductBySku } = require('./product.service');
 const { buildCsv } = require('../utils/csv');
 const { toUahNumber } = require('../utils/money');
+const { writeAuditEvent } = require('../audit/audit-events');
+const { createMutationContext } = require('../audit/mutation-context');
 
 async function getNonSkuQuestionMaps(categoryCodes) {
   if (!categoryCodes || categoryCodes.length === 0) return new Map();
@@ -215,7 +217,8 @@ function assertSnapshotMatchesRequest(snapshot, fromSku, toSku) {
   return snapshot;
 }
 
-async function createExportSnapshot({ fromSku, toSku, idempotencyKey }) {
+async function createExportSnapshot({ fromSku, toSku, idempotencyKey }, options = {}) {
+  const mutationContext = createMutationContext(options.mutationContext);
   const key = String(idempotencyKey || '').trim();
   if (!key || key.length > 200) {
     const error = new Error('Потрібен коректний Idempotency-Key для створення export snapshot.');
@@ -236,12 +239,14 @@ async function createExportSnapshot({ fromSku, toSku, idempotencyKey }) {
   const exportedToProductId = exportData.rows.length > 0
     ? Number(exportData.rows[exportData.rows.length - 1].id)
     : 0;
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query('BEGIN');
+    const result = await client.query(
       `INSERT INTO export_snapshots
        (id, idempotency_key, from_sku, to_sku, resolved_to_sku,
-        exported_to_product_id, row_count, file_name, csv_content)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        exported_to_product_id, row_count, file_name, csv_content, created_by_user_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
       [
         crypto.randomUUID(),
@@ -253,10 +258,25 @@ async function createExportSnapshot({ fromSku, toSku, idempotencyKey }) {
         exportData.rows.length,
         fileName,
         buildExportCsv(exportData),
+        mutationContext.actorUserId,
       ]
     );
-    return result.rows[0];
+    const snapshot = result.rows[0];
+    await writeAuditEvent(client, {
+      mutationContext,
+      eventKey: 'export_snapshot.created',
+      subjectType: 'export_snapshot',
+      subjectId: snapshot.id,
+      details: {
+        fromSku: snapshot.from_sku,
+        toSku: snapshot.to_sku,
+        rowCount: Number(snapshot.row_count),
+      },
+    });
+    await client.query('COMMIT');
+    return snapshot;
   } catch (error) {
+    await client.query('ROLLBACK');
     if (error?.code !== '23505') throw error;
     const conflictingSnapshot = (await pool.query(
       'SELECT * FROM export_snapshots WHERE idempotency_key = $1',
@@ -264,6 +284,8 @@ async function createExportSnapshot({ fromSku, toSku, idempotencyKey }) {
     )).rows[0];
     if (!conflictingSnapshot) throw error;
     return assertSnapshotMatchesRequest(conflictingSnapshot, fromSku, toSku);
+  } finally {
+    client.release();
   }
 }
 
@@ -277,7 +299,8 @@ async function getExportSnapshot(snapshotId) {
   return result.rows[0];
 }
 
-async function confirmExportSnapshot(snapshotId) {
+async function confirmExportSnapshot(snapshotId, options = {}) {
+  const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -291,12 +314,22 @@ async function confirmExportSnapshot(snapshotId) {
       error.statusCode = 404;
       throw error;
     }
-    await client.query(
-      `UPDATE export_snapshots
-       SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, CURRENT_TIMESTAMP)
-       WHERE id = $1`,
-      [snapshotId]
-    );
+    if (snapshot.status !== 'confirmed') {
+      await client.query(
+        `UPDATE export_snapshots
+         SET status = 'confirmed', confirmed_at = CURRENT_TIMESTAMP,
+             confirmed_by_user_id = $2
+         WHERE id = $1`,
+        [snapshotId, mutationContext.actorUserId]
+      );
+      await writeAuditEvent(client, {
+        mutationContext,
+        eventKey: 'export_snapshot.confirmed',
+        subjectType: 'export_snapshot',
+        subjectId: snapshotId,
+        details: { exportedToProductId: Number(snapshot.exported_to_product_id) },
+      });
+    }
     await client.query(
       `INSERT INTO export_state
        (singleton, exported_to_product_id, last_snapshot_id, updated_at)

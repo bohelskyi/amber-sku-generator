@@ -157,7 +157,7 @@ router.post('/export/snapshots', requirePermission('exports.create'), async (req
       fromSku: req.body?.fromSku,
       toSku: req.body?.toSku,
       idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey,
-    });
+    }, { mutationContext: getRequestMutationContext(req) });
     res.status(201).json({
       id: snapshot.id,
       status: snapshot.status,
@@ -183,7 +183,9 @@ router.get('/export/snapshots/:id/csv', requirePermission('exports.view'), async
 
 router.post('/export/snapshots/:id/confirm', requirePermission('exports.create'), async (req, res) => {
   try {
-    res.json(await confirmExportSnapshot(req.params.id));
+    res.json(await confirmExportSnapshot(req.params.id, {
+      mutationContext: getRequestMutationContext(req),
+    }));
   } catch (err) {
     res.status(err.statusCode || 400).json({ error: err.message });
   }

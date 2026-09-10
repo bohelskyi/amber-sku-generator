@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Migrations `000`–`026` are applied/frozen history:
+Migrations `000`–`027` are applied/frozen history:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -46,6 +46,8 @@ Important database protections are layered:
 - durable user-administration audit inserts use the mutation's existing transaction, so an audit failure rolls back the domain mutation and no success event is emitted for a failure or no-op.
 - product create, archive, and recount actor writes and audit inserts share their existing business transaction; recount retains its established source/SKU lock order and final-state validation.
 - repricing apply/rollback actor writes and durable audit inserts share the existing financial transaction; draft creation/discard audit shares the corresponding draft transaction, while routine draft writes use last-modifier attribution only.
+- export snapshot create/first-confirm actor writes and audit inserts share their existing mutation transactions; idempotent reuse or repeat confirmation preserves the original actors and emits no duplicate event while confirmation still repairs the monotonic cursor.
+- SKU schema publication actor and audit writes share the existing per-category advisory-lock transaction and therefore roll back together with active-version rotation and immutable snapshot creation.
 
 New paths touching these resources must follow existing lock order and final-state revalidation. An isolated lock is not a substitute. Surface transaction/deadlock failure rather than continuing partially.
 
@@ -80,6 +82,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `024_product_actor_attribution.sql` | Nullable local-user attribution for product creation/archive and detailed product-correction history without historical backfill. |
 | `025_correction_request_user_ownership.sql` | Nullable correction creator/current-owner attribution, monotonic claim epochs, and legacy token-only/unowned in-progress compatibility without ownership backfill. |
 | `026_repricing_actor_attribution.sql` | Nullable local-user attribution for repricing draft create/modify/discard and batch apply/rollback without historical backfill or synthesized audit events. |
+| `027_export_and_sku_schema_actor_attribution.sql` | Nullable local-user attribution for export snapshot create/confirm and SKU schema publication, plus export provenance immutability, without historical backfill or synthesized audit events. |
 
 ## Test database safety
 

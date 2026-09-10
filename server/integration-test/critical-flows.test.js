@@ -595,7 +595,7 @@ test('migration 019 matches the connect-pg-simple 10.0.0 table contract', async 
   ]);
 });
 
-test('migrations 020-026 create RBAC, audit, correction ownership, and repricing attribution', async () => {
+test('migrations 020-027 create RBAC, audit, and business actor attribution', async () => {
   const requiredTables = await pool.query(`
     SELECT table_name
     FROM information_schema.tables
@@ -880,6 +880,82 @@ test('migration 026 adds only nullable repricing actor references with restricte
   ]);
 });
 
+test('migration 027 adds only nullable export and SKU publication actor references', async () => {
+  const columns = await pool.query(`
+    SELECT table_name, column_name, is_nullable, column_default
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND (table_name, column_name) IN (
+        ('export_snapshots', 'created_by_user_id'),
+        ('export_snapshots', 'confirmed_by_user_id'),
+        ('sku_schema_versions', 'published_by_user_id')
+      )
+    ORDER BY table_name, column_name
+  `);
+  assert.deepEqual(columns.rows, [
+    {
+      table_name: 'export_snapshots',
+      column_name: 'confirmed_by_user_id',
+      is_nullable: 'YES',
+      column_default: null,
+    },
+    {
+      table_name: 'export_snapshots',
+      column_name: 'created_by_user_id',
+      is_nullable: 'YES',
+      column_default: null,
+    },
+    {
+      table_name: 'sku_schema_versions',
+      column_name: 'published_by_user_id',
+      is_nullable: 'YES',
+      column_default: null,
+    },
+  ]);
+
+  const foreignKeys = await pool.query(`
+    SELECT tc.table_name, kcu.column_name, ccu.table_name AS referenced_table, rc.delete_rule
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON kcu.constraint_schema = tc.constraint_schema
+     AND kcu.constraint_name = tc.constraint_name
+    JOIN information_schema.referential_constraints rc
+      ON rc.constraint_schema = tc.constraint_schema
+     AND rc.constraint_name = tc.constraint_name
+    JOIN information_schema.constraint_column_usage ccu
+      ON ccu.constraint_schema = rc.unique_constraint_schema
+     AND ccu.constraint_name = rc.unique_constraint_name
+    WHERE tc.constraint_schema = 'public'
+      AND tc.constraint_type = 'FOREIGN KEY'
+      AND (tc.table_name, kcu.column_name) IN (
+        ('export_snapshots', 'created_by_user_id'),
+        ('export_snapshots', 'confirmed_by_user_id'),
+        ('sku_schema_versions', 'published_by_user_id')
+      )
+    ORDER BY tc.table_name, kcu.column_name
+  `);
+  assert.deepEqual(foreignKeys.rows, [
+    {
+      table_name: 'export_snapshots',
+      column_name: 'confirmed_by_user_id',
+      referenced_table: 'application_users',
+      delete_rule: 'RESTRICT',
+    },
+    {
+      table_name: 'export_snapshots',
+      column_name: 'created_by_user_id',
+      referenced_table: 'application_users',
+      delete_rule: 'RESTRICT',
+    },
+    {
+      table_name: 'sku_schema_versions',
+      column_name: 'published_by_user_id',
+      referenced_table: 'application_users',
+      delete_rule: 'RESTRICT',
+    },
+  ]);
+});
+
 test('migration 023 constrains and makes durable audit records immutable', async () => {
   const columns = await pool.query(`
     SELECT column_name, is_nullable
@@ -984,6 +1060,8 @@ test('migration 024 preserves historical product attribution as null', async () 
         && !fileName.startsWith('024_')
         && !fileName.startsWith('025_')
         && !fileName.startsWith('026_')
+        && !fileName.startsWith('027_')
+        && !fileName.startsWith('027_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -1123,7 +1201,11 @@ test('migration 026 preserves historical repricing attribution as null without a
   try {
     const migrationDirectory = path.resolve(serverRoot, 'migrations');
     const migrationFiles = (await fs.readdir(migrationDirectory))
-      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('026_'));
+      .filter((fileName) => (
+        fileName.endsWith('.sql')
+        && !fileName.startsWith('026_')
+        && !fileName.startsWith('027_')
+      ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
       path.resolve(preAttributionDirectory, fileName)
@@ -1188,6 +1270,87 @@ test('migration 026 preserves historical repricing attribution as null without a
       assert.equal(Number((await verifiedPool.query(
         "SELECT count(*) FROM audit_events WHERE event_key LIKE 'repricing.%' OR event_key LIKE 'repricing_draft.%'"
       )).rows[0].count), 0);
+    } finally {
+      await verifiedPool.end();
+    }
+  } finally {
+    await fs.rm(preAttributionDirectory, { recursive: true, force: true });
+    await dropTestDatabase(databaseName);
+  }
+});
+
+test('migration 027 preserves historical export and publication attribution as null', async () => {
+  const databaseName = 'amber_export_schema_actor_upgrade_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const preAttributionDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'amber-pre-export-schema-attribution-migrations-')
+  );
+  try {
+    const migrationDirectory = path.resolve(serverRoot, 'migrations');
+    const migrationFiles = (await fs.readdir(migrationDirectory))
+      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('027_'));
+    await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
+      path.resolve(migrationDirectory, fileName),
+      path.resolve(preAttributionDirectory, fileName)
+    )));
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations({ directory: ${JSON.stringify(preAttributionDirectory)} })
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+
+    const migrationPool = new Pool({ connectionString: databaseUrl });
+    let snapshotId;
+    let schemaVersionId;
+    try {
+      snapshotId = 'historical-export-snapshot';
+      await migrationPool.query(`
+        INSERT INTO export_snapshots
+          (id, idempotency_key, from_sku, resolved_to_sku, exported_to_product_id,
+           row_count, file_name, csv_content, status, confirmed_at)
+        VALUES ($1, 'historical-export-key', 'HX1001', 'HX1001', 0,
+                0, 'historical.csv', 'sku,price_uah', 'confirmed', CURRENT_TIMESTAMP)
+      `, [snapshotId]);
+      await migrationPool.query(
+        "INSERT INTO categories (code, name, requires_weight) VALUES ('HX', 'Historical schema', 0)"
+      );
+      const schemaVersion = await migrationPool.query(`
+        INSERT INTO sku_schema_versions
+          (category_code, version, marker, status, config_hash)
+        VALUES ('HX', 1, '', 'active', 'historical-schema-hash')
+        RETURNING id
+      `);
+      schemaVersionId = Number(schemaVersion.rows[0].id);
+    } finally {
+      await migrationPool.end();
+    }
+
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations()
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+
+    const verifiedPool = new Pool({ connectionString: databaseUrl });
+    try {
+      assert.deepEqual((await verifiedPool.query(`
+        SELECT created_by_user_id, confirmed_by_user_id
+        FROM export_snapshots WHERE id = $1
+      `, [snapshotId])).rows, [{
+        created_by_user_id: null,
+        confirmed_by_user_id: null,
+      }]);
+      assert.deepEqual((await verifiedPool.query(`
+        SELECT published_by_user_id FROM sku_schema_versions WHERE id = $1
+      `, [schemaVersionId])).rows, [{ published_by_user_id: null }]);
+      assert.equal(Number((await verifiedPool.query(`
+        SELECT count(*) FROM audit_events
+        WHERE event_key LIKE 'export_snapshot.%' OR event_key LIKE 'sku_schema.%'
+      `)).rows[0].count), 0);
     } finally {
       await verifiedPool.end();
     }
@@ -2337,6 +2500,7 @@ test('migration 023 rolls back its audit schema and permission grant together', 
         && !fileName.startsWith('024_')
         && !fileName.startsWith('025_')
         && !fileName.startsWith('026_')
+        && !fileName.startsWith('027_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -2485,6 +2649,7 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
          && !fileName.startsWith('024_')
          && !fileName.startsWith('025_')
          && !fileName.startsWith('026_')
+         && !fileName.startsWith('027_')
       ))
       .map((fileName) => fs.copyFile(
         path.resolve(serverRoot, 'migrations', fileName),
@@ -2593,6 +2758,7 @@ test('migrations 020-024 upgrade a database at migration 019 and repeated startu
         && !fileName.startsWith('024_')
         && !fileName.startsWith('025_')
         && !fileName.startsWith('026_')
+        && !fileName.startsWith('027_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -2664,6 +2830,7 @@ test('migration 021 adds business capabilities and corrects built-in mappings on
         && !fileName.startsWith('024_')
         && !fileName.startsWith('025_')
         && !fileName.startsWith('026_')
+        && !fileName.startsWith('027_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -2744,6 +2911,7 @@ test('migration 022 removes Manager correction processing without changing other
         && !fileName.startsWith('024_')
         && !fileName.startsWith('025_')
         && !fileName.startsWith('026_')
+        && !fileName.startsWith('027_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -2894,6 +3062,7 @@ test('legacy in-progress correction requests survive through migration 025 witho
         && !fileName.startsWith('024_')
         && !fileName.startsWith('025_')
         && !fileName.startsWith('026_')
+        && !fileName.startsWith('027_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -5746,6 +5915,318 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
         [cell.price, cell.scenario_id, cell.x_val, cell.y_val]
       );
     }
+  }
+});
+
+test('export snapshot creation and confirmation are attributed, audited, and idempotent', async () => {
+  const exportSku = (await pool.query(
+    `SELECT full_sku FROM products
+     WHERE COALESCE(exclude_from_export, 0) = 0
+     ORDER BY id DESC LIMIT 1`
+  )).rows[0].full_sku;
+  const creatorUserId = Number(authenticatedSession.applicationUser.id);
+  const confirmerSession = await authenticateIdentitySession({
+    issuer: 'https://export-attribution.example/realms/amber',
+    subject: 'export-confirmer',
+    preferredUsername: 'export.confirmer',
+    displayName: 'Export Confirmer',
+  });
+  const confirmerUserId = await activateApplicationUserForTest(
+    'https://export-attribution.example/realms/amber',
+    'export-confirmer',
+    'administrator'
+  );
+  try {
+    const idempotencyKey = 'integration-export-attribution';
+  const created = await request('/api/export/snapshots', {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'X-Request-ID': 'export-snapshot-created',
+    },
+    body: { fromSku: exportSku, toSku: exportSku },
+  });
+  assert.equal(created.response.status, 201, created.text);
+  const snapshotId = created.data.id;
+  assert.deepEqual((await pool.query(
+    `SELECT created_by_user_id, confirmed_by_user_id, status
+     FROM export_snapshots WHERE id = $1`,
+    [snapshotId]
+  )).rows, [{
+    created_by_user_id: String(creatorUserId),
+    confirmed_by_user_id: null,
+    status: 'generated',
+  }]);
+  const createdAudit = await pool.query(
+    `SELECT event_key, actor_user_id, request_id, subject_type, subject_id, details
+     FROM audit_events
+     WHERE event_key = 'export_snapshot.created' AND subject_id = $1`,
+    [snapshotId]
+  );
+  assert.deepEqual(createdAudit.rows, [{
+    event_key: 'export_snapshot.created',
+    actor_user_id: String(creatorUserId),
+    request_id: 'export-snapshot-created',
+    subject_type: 'export_snapshot',
+    subject_id: snapshotId,
+    details: { fromSku: exportSku, toSku: exportSku, rowCount: 1 },
+  }]);
+
+  const reused = await request('/api/export/snapshots', {
+    method: 'POST',
+    authentication: confirmerSession,
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'X-Request-ID': 'export-snapshot-reused',
+    },
+    body: { fromSku: exportSku, toSku: exportSku },
+  });
+  assert.equal(reused.response.status, 201, reused.text);
+  assert.equal(reused.data.id, snapshotId);
+  assert.equal(Number((await pool.query(
+    'SELECT created_by_user_id FROM export_snapshots WHERE id = $1',
+    [snapshotId]
+  )).rows[0].created_by_user_id), creatorUserId);
+  assert.equal(Number((await pool.query(
+    `SELECT count(*) FROM audit_events
+     WHERE event_key = 'export_snapshot.created' AND subject_id = $1`,
+    [snapshotId]
+  )).rows[0].count), 1);
+
+  const confirmed = await request(`/api/export/snapshots/${snapshotId}/confirm`, {
+    method: 'POST',
+    authentication: confirmerSession,
+    headers: { 'X-Request-ID': 'export-snapshot-confirmed' },
+    body: {},
+  });
+  assert.equal(confirmed.response.status, 200, confirmed.text);
+  assert.equal(Number((await pool.query(
+    'SELECT confirmed_by_user_id FROM export_snapshots WHERE id = $1',
+    [snapshotId]
+  )).rows[0].confirmed_by_user_id), confirmerUserId);
+  const confirmedAudit = await pool.query(
+    `SELECT event_key, actor_user_id, request_id, subject_type, subject_id, details
+     FROM audit_events
+     WHERE event_key = 'export_snapshot.confirmed' AND subject_id = $1`,
+    [snapshotId]
+  );
+  assert.equal(confirmedAudit.rows.length, 1);
+  assert.deepEqual(confirmedAudit.rows[0], {
+    event_key: 'export_snapshot.confirmed',
+    actor_user_id: String(confirmerUserId),
+    request_id: 'export-snapshot-confirmed',
+    subject_type: 'export_snapshot',
+    subject_id: snapshotId,
+    details: {
+      exportedToProductId: Number((await pool.query(
+        'SELECT exported_to_product_id FROM export_snapshots WHERE id = $1',
+        [snapshotId]
+      )).rows[0].exported_to_product_id),
+    },
+  });
+
+  const repeatedConfirmation = await request(`/api/export/snapshots/${snapshotId}/confirm`, {
+    method: 'POST',
+    headers: { 'X-Request-ID': 'export-snapshot-confirmed-again' },
+    body: {},
+  });
+  assert.equal(repeatedConfirmation.response.status, 200, repeatedConfirmation.text);
+  assert.equal(Number((await pool.query(
+    'SELECT confirmed_by_user_id FROM export_snapshots WHERE id = $1',
+    [snapshotId]
+  )).rows[0].confirmed_by_user_id), confirmerUserId);
+  assert.equal(Number((await pool.query(
+    `SELECT count(*) FROM audit_events
+     WHERE event_key = 'export_snapshot.confirmed' AND subject_id = $1`,
+    [snapshotId]
+  )).rows[0].count), 1);
+
+  await assert.rejects(
+    pool.query('UPDATE export_snapshots SET created_by_user_id = $1 WHERE id = $2', [
+      confirmerUserId,
+      snapshotId,
+    ]),
+    /immutable/
+  );
+  await assert.rejects(
+    pool.query('UPDATE export_snapshots SET confirmed_by_user_id = $1 WHERE id = $2', [
+      creatorUserId,
+      snapshotId,
+    ]),
+    /immutable/
+  );
+  } finally {
+    await replaceActiveRoleForTest(confirmerUserId, 'manager');
+  }
+});
+
+test('export audit failures roll back snapshot creation and first confirmation', async () => {
+  const exportSku = (await pool.query(
+    `SELECT full_sku FROM products
+     WHERE COALESCE(exclude_from_export, 0) = 0
+     ORDER BY id DESC LIMIT 1`
+  )).rows[0].full_sku;
+  const failedCreationKey = 'integration-export-created-audit-failure';
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION fail_test_export_created_audit()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      RAISE EXCEPTION 'forced export created audit failure';
+    END;
+    $$;
+    CREATE TRIGGER fail_test_export_created_audit
+    BEFORE INSERT ON audit_events
+    FOR EACH ROW
+    WHEN (NEW.event_key = 'export_snapshot.created')
+    EXECUTE FUNCTION fail_test_export_created_audit();
+  `);
+  try {
+    const failedCreation = await request('/api/export/snapshots', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': failedCreationKey },
+      body: { fromSku: exportSku, toSku: exportSku },
+    });
+    assert.equal(failedCreation.response.status, 400, failedCreation.text);
+  } finally {
+    await pool.query('DROP TRIGGER fail_test_export_created_audit ON audit_events');
+    await pool.query('DROP FUNCTION fail_test_export_created_audit()');
+  }
+  assert.equal(Number((await pool.query(
+    'SELECT count(*) FROM export_snapshots WHERE idempotency_key = $1',
+    [failedCreationKey]
+  )).rows[0].count), 0);
+
+  const created = await request('/api/export/snapshots', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': 'integration-export-confirmed-audit-failure' },
+    body: { fromSku: exportSku, toSku: exportSku },
+  });
+  assert.equal(created.response.status, 201, created.text);
+  const cursorBefore = (await pool.query(
+    `SELECT exported_to_product_id, last_snapshot_id FROM export_state WHERE singleton = TRUE`
+  )).rows[0];
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION fail_test_export_confirmed_audit()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      RAISE EXCEPTION 'forced export confirmed audit failure';
+    END;
+    $$;
+    CREATE TRIGGER fail_test_export_confirmed_audit
+    BEFORE INSERT ON audit_events
+    FOR EACH ROW
+    WHEN (NEW.event_key = 'export_snapshot.confirmed')
+    EXECUTE FUNCTION fail_test_export_confirmed_audit();
+  `);
+  try {
+    const failedConfirmation = await request(
+      `/api/export/snapshots/${created.data.id}/confirm`,
+      { method: 'POST', body: {} }
+    );
+    assert.equal(failedConfirmation.response.status, 400, failedConfirmation.text);
+  } finally {
+    await pool.query('DROP TRIGGER fail_test_export_confirmed_audit ON audit_events');
+    await pool.query('DROP FUNCTION fail_test_export_confirmed_audit()');
+  }
+  assert.deepEqual((await pool.query(
+    `SELECT status, confirmed_at, confirmed_by_user_id
+     FROM export_snapshots WHERE id = $1`,
+    [created.data.id]
+  )).rows, [{ status: 'generated', confirmed_at: null, confirmed_by_user_id: null }]);
+  assert.deepEqual((await pool.query(
+    `SELECT exported_to_product_id, last_snapshot_id FROM export_state WHERE singleton = TRUE`
+  )).rows[0], cursorBefore);
+  assert.equal(Number((await pool.query(
+    `SELECT count(*) FROM audit_events
+     WHERE event_key = 'export_snapshot.confirmed' AND subject_id = $1`,
+    [created.data.id]
+  )).rows[0].count), 0);
+});
+
+test('SKU schema publication attribution and audit share the publication transaction', async () => {
+  const actorUserId = Number(authenticatedSession.applicationUser.id);
+  const originalMmLabel = (await pool.query(
+    "SELECT label FROM questions WHERE category_code = 'MM' AND key = 'kind'"
+  )).rows[0].label;
+  const originalWwLabel = (await pool.query(
+    "SELECT label FROM questions WHERE category_code = 'WW' AND key = 'kind'"
+  )).rows[0].label;
+  try {
+    await pool.query(
+      "UPDATE questions SET label = label || ' published' WHERE category_code = 'MM' AND key = 'kind'"
+    );
+    const published = await request('/api/admin/sku-schema/MM/publish', {
+      method: 'POST',
+      headers: { 'X-Request-ID': 'sku-schema-published' },
+      body: {},
+    });
+    assert.equal(published.response.status, 200, published.text);
+    assert.equal(published.data.categoryCode, 'MM');
+    assert.equal(published.data.version, 2);
+    assert.equal(Number((await pool.query(
+      'SELECT published_by_user_id FROM sku_schema_versions WHERE id = $1',
+      [published.data.id]
+    )).rows[0].published_by_user_id), actorUserId);
+    assert.deepEqual((await pool.query(
+      `SELECT event_key, actor_user_id, request_id, subject_type, subject_id, details
+       FROM audit_events
+       WHERE event_key = 'sku_schema.published' AND subject_id = $1`,
+      [String(published.data.id)]
+    )).rows, [{
+      event_key: 'sku_schema.published',
+      actor_user_id: String(actorUserId),
+      request_id: 'sku-schema-published',
+      subject_type: 'sku_schema_version',
+      subject_id: String(published.data.id),
+      details: { categoryCode: 'MM', version: 2 },
+    }]);
+
+    await pool.query(
+      "UPDATE questions SET label = label || ' failing' WHERE category_code = 'WW' AND key = 'kind'"
+    );
+    const beforeFailure = await pool.query(
+      `SELECT id, version, status, published_by_user_id
+       FROM sku_schema_versions WHERE category_code = 'WW' ORDER BY version`
+    );
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION fail_test_sku_schema_audit()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION 'forced SKU schema audit failure';
+      END;
+      $$;
+      CREATE TRIGGER fail_test_sku_schema_audit
+      BEFORE INSERT ON audit_events
+      FOR EACH ROW
+      WHEN (NEW.event_key = 'sku_schema.published')
+      EXECUTE FUNCTION fail_test_sku_schema_audit();
+    `);
+    try {
+      const failedPublication = await request('/api/admin/sku-schema/WW/publish', {
+        method: 'POST', body: {},
+      });
+      assert.equal(failedPublication.response.status, 500, failedPublication.text);
+    } finally {
+      await pool.query('DROP TRIGGER fail_test_sku_schema_audit ON audit_events');
+      await pool.query('DROP FUNCTION fail_test_sku_schema_audit()');
+    }
+    assert.deepEqual((await pool.query(
+      `SELECT id, version, status, published_by_user_id
+       FROM sku_schema_versions WHERE category_code = 'WW' ORDER BY version`
+    )).rows, beforeFailure.rows);
+    assert.equal(Number((await pool.query(
+      `SELECT count(*) FROM audit_events
+       WHERE event_key = 'sku_schema.published' AND details ->> 'categoryCode' = 'WW'`
+    )).rows[0].count), 0);
+  } finally {
+    await pool.query(
+      "UPDATE questions SET label = $1 WHERE category_code = 'MM' AND key = 'kind'",
+      [originalMmLabel]
+    );
+    await pool.query(
+      "UPDATE questions SET label = $1 WHERE category_code = 'WW' AND key = 'kind'",
+      [originalWwLabel]
+    );
   }
 });
 

@@ -28,6 +28,8 @@ Never conflate `value_id` with `sku_code`. Contextual labels may share a value/c
 
 `publishSkuSchema()` captures an immutable snapshot in `sku_schema_versions`, `sku_schema_questions`, and `sku_schema_options`, then makes it the one active schema for the category.
 
+Successful publication stores the authenticated local application user in nullable `published_by_user_id` and appends one `sku_schema.published` audit event for the created schema-version record in the same advisory-lock transaction. Event details contain only category code and version; historical and startup-captured V1 schemas remain unattributed and do not receive synthesized events.
+
 - V1 has no marker, preserving pre-versioning SKUs.
 - V2+ uses a compact marker such as `BR2/`.
 - Decode also recognizes the short-lived historical `Vn-` marker.
