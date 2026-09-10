@@ -1,4 +1,6 @@
 const pool = require('../db/pool');
+const { writeAuditEvent } = require('../audit/audit-events');
+const { createMutationContext } = require('../audit/mutation-context');
 
 const APPLICATION_USER_ADMIN_LOCK_KEY = 'amber_application_user_admin_active_administrators';
 const ASSIGNABLE_ROLE_KEYS = Object.freeze([
@@ -7,6 +9,12 @@ const ASSIGNABLE_ROLE_KEYS = Object.freeze([
   'storekeeper',
 ]);
 const ASSIGNABLE_ROLE_KEY_SET = new Set(ASSIGNABLE_ROLE_KEYS);
+const USER_ADMIN_AUDIT_EVENTS = Object.freeze({
+  APPROVED: 'application_user.approved',
+  ROLE_CHANGED: 'application_user.role_changed',
+  DISABLED: 'application_user.disabled',
+  ENABLED: 'application_user.enabled',
+});
 
 class ApplicationUserAdminError extends Error {
   constructor(statusCode, code, message) {
@@ -213,7 +221,7 @@ async function replaceActiveBuiltInRole(client, userId, role, actorUserId, assig
     && assignments[0].role_key === role.role_key
     && assignments[0].role_status === 'active'
   ) {
-    return;
+    return false;
   }
 
   if (assignments.length > 0) {
@@ -231,6 +239,7 @@ async function replaceActiveBuiltInRole(client, userId, role, actorUserId, assig
      VALUES ($1, $2, $3)`,
     [userId, role.id, actorUserId]
   );
+  return true;
 }
 
 async function runUserMutation(databasePool, operation) {
@@ -252,16 +261,36 @@ async function runUserMutation(databasePool, operation) {
 }
 
 function normalizeMutationOptions(options = {}) {
+  const contextInput = options.mutationContext || options;
+  const actorUserId = parseApplicationUserId(contextInput.actorUserId);
   return {
-    actorUserId: parseApplicationUserId(options.actorUserId),
+    actorUserId,
+    mutationContext: createMutationContext({
+      actorUserId,
+      requestId: contextInput.requestId,
+    }),
     databasePool: options.databasePool || pool,
   };
+}
+
+function getAssignmentRoleKeys(assignments) {
+  return assignments.map((assignment) => assignment.role_key).sort();
+}
+
+async function writeUserAdminAuditEvent(client, mutationContext, eventKey, userId, details) {
+  return writeAuditEvent(client, {
+    mutationContext,
+    eventKey,
+    subjectType: 'application_user',
+    subjectId: userId,
+    details,
+  });
 }
 
 async function approveApplicationUser(userIdValue, roleKeyValue, options = {}) {
   const userId = parseApplicationUserId(userIdValue);
   const roleKey = assertAssignableRoleKey(roleKeyValue);
-  const { actorUserId, databasePool } = normalizeMutationOptions(options);
+  const { actorUserId, mutationContext, databasePool } = normalizeMutationOptions(options);
   return runUserMutation(databasePool, async (client) => {
     const user = await lockApplicationUser(client, userId);
     if (user.status !== 'pending') {
@@ -283,14 +312,26 @@ async function approveApplicationUser(userIdValue, roleKeyValue, options = {}) {
        WHERE id = $1`,
       [userId]
     );
-    return getManagedApplicationUser(userId, client);
+    const managedUser = await getManagedApplicationUser(userId, client);
+    await writeUserAdminAuditEvent(
+      client,
+      mutationContext,
+      USER_ADMIN_AUDIT_EVENTS.APPROVED,
+      userId,
+      {
+        previousStatus: 'pending',
+        newStatus: 'active',
+        roleKey: managedUser.roleKey,
+      }
+    );
+    return managedUser;
   });
 }
 
 async function changeApplicationUserRole(userIdValue, roleKeyValue, options = {}) {
   const userId = parseApplicationUserId(userIdValue);
   const roleKey = assertAssignableRoleKey(roleKeyValue);
-  const { actorUserId, databasePool } = normalizeMutationOptions(options);
+  const { actorUserId, mutationContext, databasePool } = normalizeMutationOptions(options);
   return runUserMutation(databasePool, async (client) => {
     const user = await lockApplicationUser(client, userId);
     if (!['active', 'disabled'].includes(user.status)) {
@@ -306,14 +347,34 @@ async function changeApplicationUserRole(userIdValue, roleKeyValue, options = {}
       && roleKey !== 'administrator'
       && assignments.some((assignment) => assignment.role_key === 'administrator');
     if (removesActiveAdministrator) await assertAdministratorCanBeRemoved(client);
-    await replaceActiveBuiltInRole(client, userId, role, actorUserId, assignments);
-    return getManagedApplicationUser(userId, client);
+    const changed = await replaceActiveBuiltInRole(
+      client,
+      userId,
+      role,
+      actorUserId,
+      assignments
+    );
+    const managedUser = await getManagedApplicationUser(userId, client);
+    if (changed) {
+      await writeUserAdminAuditEvent(
+        client,
+        mutationContext,
+        USER_ADMIN_AUDIT_EVENTS.ROLE_CHANGED,
+        userId,
+        {
+          userStatus: user.status,
+          previousRoleKeys: getAssignmentRoleKeys(assignments),
+          newRoleKey: managedUser.roleKey,
+        }
+      );
+    }
+    return managedUser;
   });
 }
 
 async function disableApplicationUser(userIdValue, options = {}) {
   const userId = parseApplicationUserId(userIdValue);
-  const { actorUserId, databasePool } = normalizeMutationOptions(options);
+  const { actorUserId, mutationContext, databasePool } = normalizeMutationOptions(options);
   return runUserMutation(databasePool, async (client) => {
     const user = await lockApplicationUser(client, userId);
     if (user.status !== 'active') {
@@ -335,7 +396,19 @@ async function disableApplicationUser(userIdValue, options = {}) {
        WHERE id = $1`,
       [userId]
     );
-    return getManagedApplicationUser(userId, client);
+    const managedUser = await getManagedApplicationUser(userId, client);
+    await writeUserAdminAuditEvent(
+      client,
+      mutationContext,
+      USER_ADMIN_AUDIT_EVENTS.DISABLED,
+      userId,
+      {
+        previousStatus: 'active',
+        newStatus: 'disabled',
+        roleKey: managedUser.roleKey,
+      }
+    );
+    return managedUser;
   });
 }
 
@@ -344,7 +417,7 @@ async function enableApplicationUser(userIdValue, roleKeyValue, options = {}) {
   const roleKey = roleKeyValue === undefined
     ? null
     : assertAssignableRoleKey(roleKeyValue);
-  const { actorUserId, databasePool } = normalizeMutationOptions(options);
+  const { actorUserId, mutationContext, databasePool } = normalizeMutationOptions(options);
   return runUserMutation(databasePool, async (client) => {
     const user = await lockApplicationUser(client, userId);
     if (user.status !== 'disabled') {
@@ -378,7 +451,20 @@ async function enableApplicationUser(userIdValue, roleKeyValue, options = {}) {
        WHERE id = $1`,
       [userId]
     );
-    return getManagedApplicationUser(userId, client);
+    const managedUser = await getManagedApplicationUser(userId, client);
+    await writeUserAdminAuditEvent(
+      client,
+      mutationContext,
+      USER_ADMIN_AUDIT_EVENTS.ENABLED,
+      userId,
+      {
+        previousStatus: 'disabled',
+        newStatus: 'active',
+        previousRoleKeys: getAssignmentRoleKeys(assignments),
+        roleKey: managedUser.roleKey,
+      }
+    );
+    return managedUser;
   });
 }
 
@@ -386,6 +472,7 @@ module.exports = {
   APPLICATION_USER_ADMIN_LOCK_KEY,
   ASSIGNABLE_ROLE_KEYS,
   ApplicationUserAdminError,
+  USER_ADMIN_AUDIT_EVENTS,
   approveApplicationUser,
   assertAssignableRoleKey,
   changeApplicationUserRole,

@@ -83,3 +83,26 @@ CI uses Node 20 and PostgreSQL 16 and runs server unit/integration tests plus cl
 - `scripts/postgres-restore.sh` is destructive: verify the dump and exact target, and use its explicit `--confirm` flow.
 - Keep backups outside the repository and restore-test them in a disposable environment.
 - Preserve graceful SIGTERM/SIGINT shutdown and PostgreSQL pool closure.
+
+## Windows PostgreSQL integration testing:
+- Do not assume host port 5432 belongs to the Docker Compose PostgreSQL service.
+- Prefer a dedicated disposable PostgreSQL 16 test instance on a non-conflicting loopback port.
+- Use fixed throwaway credentials and a database ending in _test.
+- Never derive test connectivity by guessing from a running developer/prod-like PostgreSQL volume.
+- If the canonical disposable test instance cannot start, stop and report the infrastructure failure instead of trying multiple alternative database environments.
+
+Canonical Windows integration-test environment:
+
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d postgres-test
+
+TEST_DATABASE_URL:
+postgresql://amber_test:amber_test_local_only@127.0.0.1:55432/amber_test
+
+Run from server/:
+npm run test:integration
+
+Afterward:
+docker compose -f docker-compose.yml -f docker-compose.local.yml stop postgres-test
+
+Do not fall back to another PostgreSQL instance if this environment fails.
+Report the infrastructure failure instead.

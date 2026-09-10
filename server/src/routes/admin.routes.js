@@ -58,6 +58,7 @@ const {
   getCorrectionHistory,
 } = require('../services/correction-history.service');
 const { requirePermission } = require('../auth/authorization');
+const { getRequestMutationContext } = require('../audit/mutation-context');
 const {
   ApplicationUserAdminError,
   approveApplicationUser,
@@ -123,7 +124,7 @@ router.post('/admin/users/:userId/approve', requirePermission('users.manage'), a
   try {
     res.json({
       user: await approveApplicationUser(req.params.userId, req.body?.roleKey, {
-        actorUserId: req.applicationUser.id,
+        mutationContext: getRequestMutationContext(req),
       }),
     });
   } catch (error) {
@@ -135,7 +136,7 @@ router.put('/admin/users/:userId/role', requirePermission('users.manage'), async
   try {
     res.json({
       user: await changeApplicationUserRole(req.params.userId, req.body?.roleKey, {
-        actorUserId: req.applicationUser.id,
+        mutationContext: getRequestMutationContext(req),
       }),
     });
   } catch (error) {
@@ -147,7 +148,7 @@ router.post('/admin/users/:userId/disable', requirePermission('users.manage'), a
   try {
     res.json({
       user: await disableApplicationUser(req.params.userId, {
-        actorUserId: req.applicationUser.id,
+        mutationContext: getRequestMutationContext(req),
       }),
     });
   } catch (error) {
@@ -159,7 +160,7 @@ router.post('/admin/users/:userId/enable', requirePermission('users.manage'), as
   try {
     res.json({
       user: await enableApplicationUser(req.params.userId, req.body?.roleKey, {
-        actorUserId: req.applicationUser.id,
+        mutationContext: getRequestMutationContext(req),
       }),
     });
   } catch (error) {

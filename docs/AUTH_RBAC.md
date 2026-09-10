@@ -45,12 +45,13 @@ Permission keys are stable capabilities stored in `permissions` and mapped to ro
 | Exports | `exports.view`, `exports.create` |
 | Catalog/pricing | `catalog.view`, `catalog.manage`, `sku_schemas.publish`, `pricing.view`, `pricing.manage` |
 | Access administration | `users.manage`, `roles.manage` |
+| Audit | `audit.view` |
 
-Current built-in mappings after migration `022`:
+Current built-in mappings after migration `023`:
 
 | Role | Effective scope |
 | --- | --- |
-| Administrator | Every defined permission. Full product, catalog, pricing, correction, repricing, export, user, and role-management access. |
+| Administrator | Every defined permission, including the explicitly Administrator-only `audit.view`. Full product, catalog, pricing, correction, repricing, export, user, role-management, and future audit-view access. |
 | Manager | Product view/decode, history, correction view/create/reject, repricing view/prepare, pricing view, and export view. No product creation/archive/direct recount, correction claim/complete/force-release, catalog access, pricing edits, repricing apply/rollback, export create/confirm, or user/role administration. |
 | Storekeeper | Product view/decode/create/archive/direct recount, history, correction view/create/claim/complete/reject, repricing view/prepare, and export view. No catalog/pricing access, correction force-release, repricing apply/rollback, export create/confirm, or user/role administration. |
 
@@ -72,11 +73,15 @@ All `/api/admin/users` operations require `users.manage`. Administrators can lis
 
 Issuer and subject are neither edited nor returned by these administration endpoints. Mutations use one transaction-scoped advisory lock. Disabling or demoting an Administrator rechecks active Administrator count under that lock and returns `409 LAST_ADMINISTRATOR_REQUIRED` if none would remain, including concurrent or self-removal attempts.
 
+Successful approve, role-change, disable, and enable operations append one immutable `audit_events` row inside the same database transaction. Attribution uses `application_users.id`, the request ID, and a minimal event-time snapshot containing display name and preferred username; historical rendering must not depend on the actor's current OIDC-synchronized profile. Existing `user_role_assignments.assigned_by` and `revoked_by` history is preserved. Failed operations and same-role no-ops do not write success events, and an audit insert failure rolls back the user mutation.
+
+Operational HTTP mutation logs are separate, non-durable telemetry. Their `actorId` uses the resolved local application-user ID where available; neither operational nor durable attribution uses OIDC `sub` or username as the actor key. Migration `023` defines `audit.view`, but this foundation does not add an audit-view endpoint or client UI.
+
 ## Deferred authorization work
 
-Application authentication, local users, built-in RBAC, user administration, permission-aware UI, and live access-state handling are implemented. The following remain intentionally pending:
+Application authentication, local users, built-in RBAC, user administration, its durable audit foundation, permission-aware UI, and live access-state handling are implemented. The following remain intentionally pending:
 
-- actor attribution and `audit_events`;
+- durable audit coverage outside application-user administration and the Administrator-only audit viewer;
 - user-based correction ownership (claims are still browser capability tokens);
 - invitations and custom-role management.
 

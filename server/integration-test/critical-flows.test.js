@@ -36,6 +36,7 @@ const { runMigrations } = require('../src/db/run-migrations');
 const { seedDefaultData } = require('../src/db/init-db');
 const { ensureLegacySkuSchemas } = require('../src/services/sku-schema.service');
 const { saveLastKnownRate } = require('../src/services/currency.service');
+const logger = require('../src/utils/logger');
 const {
   approveApplicationUser,
   changeApplicationUserRole,
@@ -593,7 +594,7 @@ test('migration 019 matches the connect-pg-simple 10.0.0 table contract', async 
   ]);
 });
 
-test('migrations 020-022 create normalized RBAC schema and the approved built-in mappings', async () => {
+test('migrations 020-023 create RBAC and the immutable audit foundation', async () => {
   const requiredTables = await pool.query(`
     SELECT table_name
     FROM information_schema.tables
@@ -603,6 +604,7 @@ test('migrations 020-022 create normalized RBAC schema and the approved built-in
   `, [[
     'application_external_identities',
     'application_users',
+    'audit_events',
     'permissions',
     'role_permissions',
     'roles',
@@ -612,6 +614,7 @@ test('migrations 020-022 create normalized RBAC schema and the approved built-in
   assert.deepEqual(requiredTables.rows.map((row) => row.table_name), [
     'application_external_identities',
     'application_users',
+    'audit_events',
     'permissions',
     'role_permissions',
     'roles',
@@ -620,6 +623,7 @@ test('migrations 020-022 create normalized RBAC schema and the approved built-in
   ]);
 
   const permissionKeys = [
+    'audit.view',
     'catalog.manage',
     'catalog.view',
     'corrections.claim',
@@ -705,6 +709,96 @@ test('migrations 020-022 create normalized RBAC schema and the approved built-in
        FROM security_bootstrap_state WHERE singleton = TRUE`
     )).rows[0],
     { completed_at: null, administrator_user_id: null }
+  );
+});
+
+test('migration 023 constrains and makes durable audit records immutable', async () => {
+  const columns = await pool.query(`
+    SELECT column_name, is_nullable
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'audit_events'
+    ORDER BY ordinal_position
+  `);
+  assert.deepEqual(columns.rows, [
+    { column_name: 'id', is_nullable: 'NO' },
+    { column_name: 'event_key', is_nullable: 'NO' },
+    { column_name: 'actor_user_id', is_nullable: 'NO' },
+    { column_name: 'actor_snapshot', is_nullable: 'NO' },
+    { column_name: 'subject_type', is_nullable: 'NO' },
+    { column_name: 'subject_id', is_nullable: 'NO' },
+    { column_name: 'request_id', is_nullable: 'YES' },
+    { column_name: 'details', is_nullable: 'NO' },
+    { column_name: 'occurred_at', is_nullable: 'NO' },
+  ]);
+
+  const indexes = await pool.query(`
+    SELECT indexname
+    FROM pg_indexes
+    WHERE schemaname = 'public' AND tablename = 'audit_events'
+    ORDER BY indexname
+  `);
+  assert.deepEqual(indexes.rows.map((row) => row.indexname), [
+    'audit_events_actor_idx',
+    'audit_events_event_key_idx',
+    'audit_events_occurred_idx',
+    'audit_events_pkey',
+    'audit_events_subject_idx',
+  ]);
+
+  const grants = await pool.query(`
+    SELECT r.role_key
+    FROM roles r
+    JOIN role_permissions rp ON rp.role_id = r.id
+    WHERE rp.permission_key = 'audit.view'
+    ORDER BY r.role_key
+  `);
+  assert.deepEqual(grants.rows, [{ role_key: 'administrator' }]);
+  assert.equal(
+    Number((await pool.query('SELECT count(*) FROM audit_events')).rows[0].count),
+    0,
+    'migration must not synthesize historical events'
+  );
+
+  const actor = await pool.query(
+    `INSERT INTO application_users (status, display_name, preferred_username)
+     VALUES ('pending', 'Migration Actor', 'migration.actor')
+     RETURNING id`
+  );
+  const actorUserId = Number(actor.rows[0].id);
+  await assert.rejects(
+    pool.query(
+      `INSERT INTO audit_events
+       (event_key, actor_user_id, actor_snapshot, subject_type, subject_id)
+       VALUES ('application_user.tested', $1,
+               '{"displayName":"Migration Actor","preferredUsername":"migration.actor","email":"forbidden"}'::jsonb,
+               'application_user', $2)`,
+      [actorUserId, String(actorUserId)]
+    ),
+    (error) => error.code === '23514'
+  );
+  const event = await pool.query(
+    `INSERT INTO audit_events
+     (event_key, actor_user_id, actor_snapshot, subject_type, subject_id, request_id)
+     VALUES ('application_user.tested', $1,
+             '{"displayName":"Migration Actor","preferredUsername":"migration.actor"}'::jsonb,
+             'application_user', $2, 'migration-023-test')
+     RETURNING id`,
+    [actorUserId, String(actorUserId)]
+  );
+  await assert.rejects(
+    pool.query('UPDATE audit_events SET details = $1::jsonb WHERE id = $2', [
+      JSON.stringify({ changed: true }),
+      event.rows[0].id,
+    ]),
+    /audit events are immutable/
+  );
+  await assert.rejects(
+    pool.query('DELETE FROM audit_events WHERE id = $1', [event.rows[0].id]),
+    /audit events are immutable/
+  );
+  await assert.rejects(
+    pool.query('TRUNCATE audit_events'),
+    /audit events are immutable/
   );
 });
 
@@ -1109,6 +1203,27 @@ test('authenticated business boundary requires CSRF only for unsafe methods', as
   assert.equal(typeof validCsrf.data.previewToken, 'string');
 });
 
+test('operational mutation logs use the resolved local actor and are not durable audit events', async () => {
+  const entries = [];
+  const originalInfo = logger.info;
+  logger.info = (event, context) => entries.push({ event, context });
+  try {
+    const response = await request('/api/preview', {
+      method: 'POST',
+      headers: { 'X-Request-ID': 'operational-actor-test' },
+      body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0, isCalibrated: 0 },
+    });
+    assert.equal(response.response.status, 200, response.text);
+    const mutationLog = entries.find((entry) => entry.event === 'http.mutation.completed');
+    assert.ok(mutationLog);
+    assert.equal(mutationLog.context.requestId, 'operational-actor-test');
+    assert.equal(mutationLog.context.actorId, authenticatedSession.applicationUser.id);
+    assert.equal(entries.some((entry) => entry.event === 'audit.mutation'), false);
+  } finally {
+    logger.info = originalInfo;
+  }
+});
+
 test('role revocation is reflected immediately without replacing the active session', async () => {
   const userId = authenticatedSession.applicationUser.id;
   await pool.query(
@@ -1135,7 +1250,7 @@ test('role revocation is reflected immediately without replacing the active sess
     [userId, administratorRole.rows[0].id]
   );
   const restoredMe = await request('/api/auth/me');
-  assert.equal(restoredMe.data.permissions.length, 25);
+  assert.equal(restoredMe.data.permissions.length, 26);
   const permittedAgain = await request('/api/config');
   assert.equal(permittedAgain.response.status, 200, permittedAgain.text);
 });
@@ -1636,6 +1751,73 @@ test('migration failure rolls back only the failing file and leaves it unapplied
   }
 });
 
+test('migration 023 rolls back its audit schema and permission grant together', async () => {
+  const databaseName = 'amber_audit_migration_rollback_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const preAuditDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'amber-pre-audit-migrations-')
+  );
+  const failingAuditDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'amber-failing-audit-migration-')
+  );
+  try {
+    const migrationDirectory = path.resolve(serverRoot, 'migrations');
+    const migrationFiles = (await fs.readdir(migrationDirectory))
+      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('023_'));
+    await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
+      path.resolve(migrationDirectory, fileName),
+      path.resolve(preAuditDirectory, fileName)
+    )));
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations({ directory: ${JSON.stringify(preAuditDirectory)} })
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+
+    const auditSql = await fs.readFile(
+      path.resolve(migrationDirectory, '023_audit_events.sql'),
+      'utf8'
+    );
+    await fs.writeFile(
+      path.resolve(failingAuditDirectory, '023_audit_events.sql'),
+      `${auditSql}\nSELECT * FROM forced_missing_audit_migration_table;\n`
+    );
+    await assert.rejects(runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations({ directory: ${JSON.stringify(failingAuditDirectory)} })
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `));
+
+    const migrationPool = new Pool({ connectionString: databaseUrl });
+    try {
+      const state = await migrationPool.query(`
+        SELECT to_regclass('public.audit_events') AS audit_events,
+               to_regprocedure('public.protect_audit_event_immutability()') AS audit_function,
+               (SELECT count(*)::int FROM permissions WHERE permission_key = 'audit.view')
+                 AS permission_count,
+               (SELECT count(*)::int FROM schema_migrations
+                WHERE name = '023_audit_events.sql') AS migration_count
+      `);
+      assert.deepEqual(state.rows, [{
+        audit_events: null,
+        audit_function: null,
+        permission_count: 0,
+        migration_count: 0,
+      }]);
+    } finally {
+      await migrationPool.end();
+    }
+  } finally {
+    await fs.rm(preAuditDirectory, { recursive: true, force: true });
+    await fs.rm(failingAuditDirectory, { recursive: true, force: true });
+    await dropTestDatabase(databaseName);
+  }
+});
+
 test('migration checksums are stable across LF and CRLF but reject SQL changes', async () => {
   const databaseName = 'amber_migration_checksum_test';
   const databaseUrl = await recreateTestDatabase(databaseName);
@@ -1725,6 +1907,7 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
          && !fileName.startsWith('020_')
          && !fileName.startsWith('021_')
          && !fileName.startsWith('022_')
+         && !fileName.startsWith('023_')
       ))
       .map((fileName) => fs.copyFile(
         path.resolve(serverRoot, 'migrations', fileName),
@@ -1801,9 +1984,9 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
       );
       assert.equal(checksums.rows[0].count, 0);
       const checkpointMigration = await checkpointPool.query(
-        "SELECT count(*)::int AS count FROM schema_migrations WHERE name ~ '^(015|016|017|018|019|020|021|022)_'"
+        "SELECT count(*)::int AS count FROM schema_migrations WHERE name ~ '^(015|016|017|018|019|020|021|022|023)_'"
       );
-      assert.equal(checkpointMigration.rows[0].count, 8);
+      assert.equal(checkpointMigration.rows[0].count, 9);
     } finally {
       await freshPool.end();
       await upgradePool.end();
@@ -1818,7 +2001,7 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
   }
 });
 
-test('migrations 020-022 upgrade a database at migration 019 and repeated startup stays safe', async () => {
+test('migrations 020-023 upgrade a database at migration 019 and repeated startup stays safe', async () => {
   const databaseName = 'amber_rbac_upgrade_test';
   const databaseUrl = await recreateTestDatabase(databaseName);
   const preRbacDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-pre-rbac-migrations-'));
@@ -1829,6 +2012,7 @@ test('migrations 020-022 upgrade a database at migration 019 and repeated startu
         && !fileName.startsWith('020_')
         && !fileName.startsWith('021_')
         && !fileName.startsWith('022_')
+        && !fileName.startsWith('023_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -1870,9 +2054,9 @@ test('migrations 020-022 upgrade a database at migration 019 and repeated startu
             + '(SELECT count(*) FROM roles)::int AS roles, '
             + '(SELECT count(*) FROM role_permissions)::int AS mappings'
         );
-        if (counts.rows[0].permissions !== 25
+        if (counts.rows[0].permissions !== 26
             || counts.rows[0].roles !== 3
-            || counts.rows[0].mappings !== 49) {
+            || counts.rows[0].mappings !== 50) {
           throw new Error('Unexpected RBAC seed counts: ' + JSON.stringify(counts.rows[0]));
         }
         await db.end();
@@ -1896,6 +2080,7 @@ test('migration 021 adds business capabilities and corrects built-in mappings on
         fileName.endsWith('.sql')
         && !fileName.startsWith('021_')
         && !fileName.startsWith('022_')
+        && !fileName.startsWith('023_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -1969,7 +2154,11 @@ test('migration 022 removes Manager correction processing without changing other
   );
   try {
     const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
-      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('022_'));
+      .filter((fileName) => (
+        fileName.endsWith('.sql')
+        && !fileName.startsWith('022_')
+        && !fileName.startsWith('023_')
+      ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
       path.resolve(preManagerPermissionDirectory, fileName)
@@ -2084,7 +2273,7 @@ test('first-Administrator bootstrap is verified, transactional, concurrent-safe,
     }, { databasePool: bootstrapPool });
     assert.equal(access.applicationUser.status, 'active');
     assert.deepEqual(access.roles, [{ key: 'administrator', displayName: 'Administrator' }]);
-    assert.equal(access.permissions.length, 25);
+    assert.equal(access.permissions.length, 26);
     const state = await bootstrapPool.query(
       `SELECT administrator_user_id, completed_at IS NOT NULL AS completed
        FROM security_bootstrap_state WHERE singleton = TRUE`
@@ -2115,6 +2304,7 @@ test('legacy in-progress correction requests survive migration 018 and can be cl
         && !fileName.startsWith('020_')
         && !fileName.startsWith('021_')
         && !fileName.startsWith('022_')
+        && !fileName.startsWith('023_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -4690,6 +4880,11 @@ test('users.manage API administers one built-in role and updates existing sessio
     assert.equal(lastAdministratorConflict.response.status, 409, lastAdministratorConflict.text);
     assert.equal(lastAdministratorConflict.data.code, 'LAST_ADMINISTRATOR_REQUIRED');
   }
+  assert.equal(Number((await pool.query(
+    `SELECT count(*) FROM audit_events
+     WHERE subject_type = 'application_user' AND subject_id = $1`,
+    [String(administratorUserId)]
+  )).rows[0].count), 0, 'failed user-management mutations must not be audited as successes');
   const administratorAfterConflicts = await request('/api/auth/me');
   assert.equal(administratorAfterConflicts.response.status, 200);
   assert.deepEqual(
@@ -4812,7 +5007,9 @@ test('users.manage API administers one built-in role and updates existing sessio
   });
   const liveUserId = liveSession.applicationUser.id;
   const approvedLive = await request(`/api/admin/users/${liveUserId}/approve`, {
-    method: 'POST', body: { roleKey: 'storekeeper' },
+    method: 'POST',
+    body: { roleKey: 'storekeeper' },
+    headers: { 'X-Request-ID': 'audit-user-approved' },
   });
   assert.equal(approvedLive.response.status, 200, approvedLive.text);
   assert.equal((await request('/api/config', { authentication: liveSession })).response.status, 200);
@@ -4821,7 +5018,9 @@ test('users.manage API administers one built-in role and updates existing sessio
   })).response.status, 403);
 
   const liveRoleChange = await request(`/api/admin/users/${liveUserId}/role`, {
-    method: 'PUT', body: { roleKey: 'manager' },
+    method: 'PUT',
+    body: { roleKey: 'manager' },
+    headers: { 'X-Request-ID': 'audit-user-role-manager' },
   });
   assert.equal(liveRoleChange.response.status, 200, liveRoleChange.text);
   const liveMe = await request('/api/auth/me', { authentication: liveSession });
@@ -4830,8 +5029,17 @@ test('users.manage API administers one built-in role and updates existing sessio
     authentication: liveSession,
   })).response.status, 200);
 
+  const noOpRoleChange = await request(`/api/admin/users/${liveUserId}/role`, {
+    method: 'PUT',
+    body: { roleKey: 'manager' },
+    headers: { 'X-Request-ID': 'audit-user-role-no-op' },
+  });
+  assert.equal(noOpRoleChange.response.status, 200, noOpRoleChange.text);
+
   const disabled = await request(`/api/admin/users/${liveUserId}/disable`, {
-    method: 'POST', body: {},
+    method: 'POST',
+    body: {},
+    headers: { 'X-Request-ID': 'audit-user-disabled' },
   });
   assert.equal(disabled.response.status, 200, disabled.text);
   assert.equal(disabled.data.user.status, 'disabled');
@@ -4847,13 +5055,17 @@ test('users.manage API administers one built-in role and updates existing sessio
   assert.equal(disabledLogout.response.status, 200, disabledLogout.text);
 
   const disabledRoleChange = await request(`/api/admin/users/${liveUserId}/role`, {
-    method: 'PUT', body: { roleKey: 'storekeeper' },
+    method: 'PUT',
+    body: { roleKey: 'storekeeper' },
+    headers: { 'X-Request-ID': 'audit-user-role-storekeeper' },
   });
   assert.equal(disabledRoleChange.response.status, 200, disabledRoleChange.text);
   assert.equal(disabledRoleChange.data.user.status, 'disabled');
   assert.equal(disabledRoleChange.data.user.roleKey, 'storekeeper');
   const enabled = await request(`/api/admin/users/${liveUserId}/enable`, {
-    method: 'POST', body: {},
+    method: 'POST',
+    body: {},
+    headers: { 'X-Request-ID': 'audit-user-enabled' },
   });
   assert.equal(enabled.response.status, 200, enabled.text);
   assert.equal(enabled.data.user.status, 'active');
@@ -4878,6 +5090,138 @@ test('users.manage API administers one built-in role and updates existing sessio
   ]);
   assert.equal(listedLiveUser.identityLinked, true);
   assert.doesNotMatch(JSON.stringify(listedLiveUser), /issuer|subject|email|existing-session-role-change/);
+
+  const auditEvents = await pool.query(
+    `SELECT event_key, actor_user_id, actor_snapshot, request_id, details
+     FROM audit_events
+     WHERE subject_type = 'application_user' AND subject_id = $1
+     ORDER BY id`,
+    [String(liveUserId)]
+  );
+  assert.deepEqual(auditEvents.rows.map((row) => row.event_key), [
+    'application_user.approved',
+    'application_user.role_changed',
+    'application_user.disabled',
+    'application_user.role_changed',
+    'application_user.enabled',
+  ]);
+  assert.deepEqual(auditEvents.rows.map((row) => row.request_id), [
+    'audit-user-approved',
+    'audit-user-role-manager',
+    'audit-user-disabled',
+    'audit-user-role-storekeeper',
+    'audit-user-enabled',
+  ]);
+  assert.equal(auditEvents.rows.every(
+    (row) => Number(row.actor_user_id) === administratorUserId
+  ), true);
+  assert.equal(auditEvents.rows.every((row) => (
+    JSON.stringify(row.actor_snapshot) === JSON.stringify({
+      displayName: 'Critical Flows',
+      preferredUsername: 'critical.flows',
+    })
+  )), true);
+  assert.equal(auditEvents.rows.some((row) => row.request_id === 'audit-user-role-no-op'), false);
+  assert.deepEqual(auditEvents.rows[1].details, {
+    userStatus: 'active',
+    newRoleKey: 'manager',
+    previousRoleKeys: ['storekeeper'],
+  });
+
+  await pool.query(
+    `UPDATE application_users
+     SET display_name = 'Changed Later', preferred_username = 'changed.later'
+     WHERE id = $1`,
+    [administratorUserId]
+  );
+  const historicalSnapshots = await pool.query(
+    `SELECT actor_snapshot FROM audit_events
+     WHERE subject_type = 'application_user' AND subject_id = $1
+     ORDER BY id`,
+    [String(liveUserId)]
+  );
+  assert.equal(historicalSnapshots.rows.every((row) => (
+    JSON.stringify(row.actor_snapshot) === JSON.stringify({
+      displayName: 'Critical Flows',
+      preferredUsername: 'critical.flows',
+    })
+  )), true, 'historical actor snapshots must not follow mutable user profiles');
+  await pool.query(
+    `UPDATE application_users
+     SET display_name = 'Critical Flows', preferred_username = 'critical.flows'
+     WHERE id = $1`,
+    [administratorUserId]
+  );
+});
+
+test('a failed audit insert rolls back the entire user-administration mutation', async () => {
+  const databaseName = 'amber_user_admin_audit_rollback_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const auditPool = new Pool({ connectionString: databaseUrl });
+  try {
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations()
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+    const administrator = await resolveOrCreateApplicationUser({
+      issuer: 'https://audit-rollback.example/realms/amber',
+      sub: 'audit-rollback-administrator',
+      preferred_username: 'audit.rollback.admin',
+      name: 'Audit Rollback Administrator',
+      authenticatedAt: '2026-09-10T10:00:00.000Z',
+    }, { databasePool: auditPool });
+    await bootstrapAdministrator(administrator.id, { databasePool: auditPool });
+    const pending = await resolveOrCreateApplicationUser({
+      issuer: 'https://audit-rollback.example/realms/amber',
+      sub: 'audit-rollback-pending',
+      preferred_username: 'audit.rollback.pending',
+      name: 'Audit Rollback Pending',
+      authenticatedAt: '2026-09-10T10:01:00.000Z',
+    }, { databasePool: auditPool });
+
+    await auditPool.query(`
+      CREATE OR REPLACE FUNCTION fail_test_user_admin_audit()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION 'forced audit failure';
+      END;
+      $$;
+      CREATE TRIGGER fail_test_user_admin_audit
+      BEFORE INSERT ON audit_events
+      FOR EACH ROW EXECUTE FUNCTION fail_test_user_admin_audit();
+    `);
+
+    await assert.rejects(
+      approveApplicationUser(pending.id, 'manager', {
+        actorUserId: administrator.id,
+        requestId: 'audit-rollback-request',
+        databasePool: auditPool,
+      }),
+      /forced audit failure/
+    );
+    const state = await auditPool.query(
+      `SELECT u.status,
+              (SELECT count(*)::int FROM user_role_assignments a
+               WHERE a.application_user_id = u.id) AS assignment_count,
+              (SELECT count(*)::int FROM audit_events e
+               WHERE e.subject_type = 'application_user' AND e.subject_id = u.id::text)
+                AS audit_count
+       FROM application_users u
+       WHERE u.id = $1`,
+      [pending.id]
+    );
+    assert.deepEqual(state.rows, [{
+      status: 'pending',
+      assignment_count: 0,
+      audit_count: 0,
+    }]);
+  } finally {
+    await auditPool.end();
+    await dropTestDatabase(databaseName);
+  }
 });
 
 test('last-Administrator protection is transactional and concurrency-safe', async () => {

@@ -12,7 +12,7 @@ The application is a three-tier system:
 
 1. React 19/Vite single-page client calling JSON and CSV endpoints under `/api`.
 2. Node 20/CommonJS Express 5 server owning all authentication boundaries and business decisions.
-3. PostgreSQL 16 storing catalog configuration, immutable SKU schemas, products, sessions/RBAC, workflows, exchange-rate cache data, and export snapshots.
+3. PostgreSQL 16 storing catalog configuration, immutable SKU schemas, products, sessions/RBAC, durable audit events, workflows, exchange-rate cache data, and export snapshots.
 
 In Docker, nginx serves the client, provides SPA fallback, and proxies `/api/` to the server. Startup runs migrations, seeds only an empty catalog, captures missing legacy V1 schemas, and begins listening only after those phases complete. The client is never a trust boundary.
 
@@ -24,9 +24,9 @@ Local application users and exact immutable `issuer` + `sub` identity links are 
 
 Stable capability keys guard every business endpoint after authentication, active-user resolution, and method-aware CSRF enforcement. `/api/auth/me` returns safe identity/user data, roles, effective permission keys, and the in-memory synchronizer CSRF token. React navigation and controls use only those effective keys; server-side `403` enforcement remains authoritative.
 
-The three built-in roles are Administrator, Manager, and Storekeeper. Administrator has full access and `users.manage`; Manager has read-only pricing, repricing preparation, and correction view/create/reject without claim/complete/force-release; Storekeeper retains product create/archive/direct recount and correction claim/complete processing without catalog/pricing or final administrative actions. All three can view existing exports; export creation/confirmation is Administrator-only.
+The three built-in roles are Administrator, Manager, and Storekeeper. Administrator has full access, `users.manage`, and the explicitly Administrator-only `audit.view`; Manager has read-only pricing, repricing preparation, and correction view/create/reject without claim/complete/force-release; Storekeeper retains product create/archive/direct recount and correction claim/complete processing without catalog/pricing or final administrative actions. All three can view existing exports; export creation/confirmation is Administrator-only.
 
-Administrators can approve pending users with exactly one built-in role, replace an assigned role while retaining assignment history, disable, and re-enable users. The one-use offline first-Administrator bootstrap and concurrency-safe last-Administrator protection are implemented. Custom roles, invitations, actor attribution/audit events, and user-owned correction claims remain pending. Correction ownership is still browser capability-token based.
+Administrators can approve pending users with exactly one built-in role, replace an assigned role while retaining assignment history, disable, and re-enable users. Those four durable operations write immutable audit events in the same transaction, attributed by local application-user ID and an event-time display-name/username snapshot. The one-use offline first-Administrator bootstrap and concurrency-safe last-Administrator protection are implemented. Audit coverage outside user administration, custom roles, invitations, and user-owned correction claims remain pending. Correction ownership is still browser capability-token based.
 
 See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permission model.
 
@@ -37,6 +37,7 @@ See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permi
 | `server/server.js` | Startup ordering, listener, signals, graceful shutdown. |
 | `server/src/app.js` | Express middleware/routes, health, request IDs, structured logging, errors. |
 | `server/src/auth/`, `server/src/routes/auth.routes.js` | OIDC, sessions, local-user resolution, access/permission/CSRF middleware, auth endpoints. |
+| `server/src/audit/` | Local-user mutation context and transaction-scoped durable audit writer. |
 | `server/src/routes/public.routes.js` | Authenticated product, recount, history, and export APIs; the historical name does not mean unauthenticated. |
 | `server/src/routes/admin.routes.js` | Catalog, pricing, corrections, repricing, and user-administration APIs. |
 | `server/src/services/` | Authoritative domain services. |
@@ -64,16 +65,17 @@ See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permi
 | Recount and corrections | Target-schema transitions, correction request queue, capability claims and completion | [`docs/RECOUNT_CORRECTIONS.md`](docs/RECOUNT_CORRECTIONS.md) |
 | Repricing | Scenario/global previews, drafts, explicit resolutions, atomic apply and rollback | [`docs/REPRICING.md`](docs/REPRICING.md) |
 | Exports | Immutable snapshots, range-bound idempotency, safe CSV, monotonic confirmation cursor | [`docs/EXPORTS.md`](docs/EXPORTS.md) |
-| Database | PostgreSQL schema, transactional/checksummed forward migrations `000`–`022`, upgrade/concurrency protections | [`docs/DATABASE_MIGRATIONS.md`](docs/DATABASE_MIGRATIONS.md) |
+| Database | PostgreSQL schema, transactional/checksummed forward migrations `000`–`023`, upgrade/concurrency protections | [`docs/DATABASE_MIGRATIONS.md`](docs/DATABASE_MIGRATIONS.md) |
 | Operations | Deployment topology, health/readiness, logs, shutdown, backup/restore, SQLite import | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) |
 
 ## Current status
 
-- PostgreSQL architecture and migrations `000`–`022` are implemented and immutable history.
+- PostgreSQL architecture and migrations `000`–`023` are implemented and immutable history.
 - Authoritative product preview/save/decode, catalog schema versioning, pricing, recount/corrections, scenario/global repricing, and export snapshots are implemented with focused unit and PostgreSQL integration coverage.
 - OIDC authentication, PostgreSQL sessions, active-user access gating, application-owned RBAC, user management, first-admin bootstrap, permission-aware UI, and live access-state transitions are implemented.
 - Server-side authorization and CSRF remain authoritative. `APP_ACCESS_PENDING`/`APP_ACCESS_DISABLED` move the client to the matching AuthGate state; `INSUFFICIENT_PERMISSION` preserves the active session.
-- Actor attribution remains unset (`actorId: null`); `audit_events`, user-based correction ownership, custom roles, and invitations are not implemented.
+- Operational mutation logs use the resolved local `application_users.id` where available and remain distinct from durable audit events. Immutable, transaction-coupled `audit_events` currently cover application-user approval, role change, disable, and enable; audit coverage for other domains remains pending.
+- User-based correction ownership, custom roles, invitations, and an audit viewer are not implemented.
 - Live catalog contents and production data quality cannot be inferred from seed defaults or the repository and require operational verification.
 
 ## Testing and operations summary

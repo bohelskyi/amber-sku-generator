@@ -38,7 +38,10 @@ function createApp({
       };
       logger.info('http.request.completed', context);
       if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
-        logger.info('audit.mutation', { ...context, actorId: null });
+        logger.info('http.mutation.completed', {
+          ...context,
+          actorId: req.applicationUser?.id ?? null,
+        });
       }
     });
     next();

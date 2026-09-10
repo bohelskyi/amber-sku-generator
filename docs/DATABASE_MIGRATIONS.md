@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Migrations `000`–`022` are applied/frozen history:
+Migrations `000`–`023` are applied/frozen history:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -22,7 +22,7 @@ Migrations `000`–`022` are applied/frozen history:
 
 ## Fresh and upgrade compatibility
 
-The integration suite compares fresh, pre-checksum legacy, and checkpoint upgrade topology. It also verifies timeout independence, checksum normalization, failed-file rollback, repeated startup, legacy-zero compatibility, legacy unowned correction claims, session schema, and RBAC/permission upgrade mappings.
+The integration suite compares fresh, pre-checksum legacy, and checkpoint upgrade topology. It also verifies timeout independence, checksum normalization, failed-file rollback, repeated startup, legacy-zero compatibility, legacy unowned correction claims, session schema, RBAC/permission upgrade mappings, and the immutable audit-event schema and migration rollback boundary.
 
 This covers known repository upgrade paths, not an arbitrary manually altered database. `CREATE TABLE IF NOT EXISTS` in migration `000` does not retrofit every possible partial legacy table; later migrations define the supported upgrades.
 
@@ -43,6 +43,7 @@ Important database protections are layered:
 - correction claims use conditional atomic updates and token-hash comparison;
 - repricing locks products in stable ID order and applies/rolls back atomically;
 - export idempotency, immutability, row-locked confirmation, and monotonic cursor protections work together.
+- durable user-administration audit inserts use the mutation's existing transaction, so an audit failure rolls back the domain mutation and no success event is emitted for a failure or no-op.
 
 New paths touching these resources must follow existing lock order and final-state revalidation. An isolated lock is not a substitute. Surface transaction/deadlock failure rather than continuing partially.
 
@@ -73,6 +74,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `020_application_users_rbac.sql` | Local users, immutable external identities, permissions/roles, assignment history, built-in mappings, first-admin marker. |
 | `021_business_permission_enforcement.sql` | Adds direct-recount/export-view permissions; grants Administrator/Storekeeper direct recount, Storekeeper archive, and all built-ins export view. |
 | `022_manager_correction_request_permissions.sql` | Removes Manager `corrections.claim` and `corrections.complete`, preserving view/create/reject and Administrator/Storekeeper processing. |
+| `023_audit_events.sql` | Immutable durable audit-event ledger with local-user actor snapshots and lookup indexes; adds Administrator-only `audit.view`. |
 
 ## Test database safety
 
