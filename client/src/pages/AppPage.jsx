@@ -4,10 +4,20 @@ import { HomeDashboard } from '../components/app/HomeDashboard';
 import { PageHeader, Toast } from '../components/app/PageHeader';
 import { ProductBuilder } from '../components/app/ProductBuilder';
 import { RecountConfirmDialog } from '../components/app/RecountConfirmDialog';
+import { useAuth } from '../auth/auth-context.js';
 import { useSkuManager } from '../hooks/useSkuManager';
+import { getPermissionUiState, getRecountUiMode } from '../lib/permission-ui.js';
 
 function AppPage() {
+  const auth = useAuth();
   const sku = useSkuManager();
+  const permissionUi = getPermissionUiState(auth.permissions);
+  const recountMode = getRecountUiMode(permissionUi);
+  const {
+    canArchiveProducts,
+    canCreateExports,
+    canCreateProducts,
+  } = permissionUi;
 
   if (!sku.config) {
     return (
@@ -48,7 +58,9 @@ function AppPage() {
             recountSuccess={sku.recountSuccess}
             recountValidationAttempt={sku.recountValidationAttempt}
             recountWeight={sku.recountWeight}
-            recountMode="choice"
+            canCreateProducts={canCreateProducts}
+            canStartRecount={Boolean(recountMode)}
+            recountMode={recountMode || 'apply'}
             onApplyRecount={sku.handleApplyRecount}
             onCancelRecount={sku.handleCancelRecount}
             onRecountAnswer={sku.handleRecountAnswer}
@@ -62,7 +74,7 @@ function AppPage() {
           />
         )}
 
-        {sku.selectedCat && (
+        {canCreateProducts && sku.selectedCat && (
           <ProductBuilder
             config={sku.config}
             selectedCat={sku.selectedCat}
@@ -111,9 +123,10 @@ function AppPage() {
           onCopyText={sku.handleCopyText}
           onDecode={sku.handleDecode}
           onDelete={sku.handleDelete}
+          canArchive={canArchiveProducts}
         />
 
-        {!sku.selectedCat && (
+        {!sku.selectedCat && (canCreateExports || canArchiveProducts) && (
           <ExportTools
             exportFromSku={sku.exportFromSku}
             setExportFromSku={sku.setExportFromSku}
@@ -126,6 +139,8 @@ function AppPage() {
             setSkuToDelete={sku.setSkuToDelete}
             onExportCsv={sku.handleExportCsv}
             onDelete={sku.handleDelete}
+            canArchive={canArchiveProducts}
+            canCreateExport={canCreateExports}
           />
         )}
       </div>
@@ -137,7 +152,7 @@ function AppPage() {
         reason={sku.recountReason}
         manualPriceUah={sku.recountManualPriceUah}
         onManualPriceChange={sku.setRecountManualPriceUah}
-        mode="choice"
+        mode={recountMode || 'apply'}
         submittingMode={sku.recountSubmitMode}
         onCancel={sku.handleCancelRecountConfirmation}
         onConfirm={sku.handleConfirmRecount}

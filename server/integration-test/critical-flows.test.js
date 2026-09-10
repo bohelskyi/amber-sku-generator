@@ -593,7 +593,7 @@ test('migration 019 matches the connect-pg-simple 10.0.0 table contract', async 
   ]);
 });
 
-test('migrations 020-021 create normalized RBAC schema and the approved built-in mappings', async () => {
+test('migrations 020-022 create normalized RBAC schema and the approved built-in mappings', async () => {
   const requiredTables = await pool.query(`
     SELECT table_name
     FROM information_schema.tables
@@ -667,8 +667,6 @@ test('migrations 020-021 create normalized RBAC schema and the approved built-in
   }
   assert.deepEqual(byRole.administrator.permission_keys, permissionKeys);
   assert.deepEqual(byRole.manager.permission_keys, [
-    'corrections.claim',
-    'corrections.complete',
     'corrections.create',
     'corrections.reject',
     'corrections.view',
@@ -1726,6 +1724,7 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
          && !fileName.startsWith('019_')
          && !fileName.startsWith('020_')
          && !fileName.startsWith('021_')
+         && !fileName.startsWith('022_')
       ))
       .map((fileName) => fs.copyFile(
         path.resolve(serverRoot, 'migrations', fileName),
@@ -1802,9 +1801,9 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
       );
       assert.equal(checksums.rows[0].count, 0);
       const checkpointMigration = await checkpointPool.query(
-        "SELECT count(*)::int AS count FROM schema_migrations WHERE name ~ '^(015|016|017|018|019|020|021)_'"
+        "SELECT count(*)::int AS count FROM schema_migrations WHERE name ~ '^(015|016|017|018|019|020|021|022)_'"
       );
-      assert.equal(checkpointMigration.rows[0].count, 7);
+      assert.equal(checkpointMigration.rows[0].count, 8);
     } finally {
       await freshPool.end();
       await upgradePool.end();
@@ -1819,7 +1818,7 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
   }
 });
 
-test('migrations 020-021 upgrade a database at migration 019 and repeated startup stays safe', async () => {
+test('migrations 020-022 upgrade a database at migration 019 and repeated startup stays safe', async () => {
   const databaseName = 'amber_rbac_upgrade_test';
   const databaseUrl = await recreateTestDatabase(databaseName);
   const preRbacDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-pre-rbac-migrations-'));
@@ -1829,6 +1828,7 @@ test('migrations 020-021 upgrade a database at migration 019 and repeated startu
         fileName.endsWith('.sql')
         && !fileName.startsWith('020_')
         && !fileName.startsWith('021_')
+        && !fileName.startsWith('022_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -1872,7 +1872,7 @@ test('migrations 020-021 upgrade a database at migration 019 and repeated startu
         );
         if (counts.rows[0].permissions !== 25
             || counts.rows[0].roles !== 3
-            || counts.rows[0].mappings !== 51) {
+            || counts.rows[0].mappings !== 49) {
           throw new Error('Unexpected RBAC seed counts: ' + JSON.stringify(counts.rows[0]));
         }
         await db.end();
@@ -1892,7 +1892,11 @@ test('migration 021 adds business capabilities and corrects built-in mappings on
   );
   try {
     const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
-      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('021_'));
+      .filter((fileName) => (
+        fileName.endsWith('.sql')
+        && !fileName.startsWith('021_')
+        && !fileName.startsWith('022_')
+      ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
       path.resolve(prePermissionDirectory, fileName)
@@ -1953,6 +1957,84 @@ test('migration 021 adds business capabilities and corrects built-in mappings on
     }
   } finally {
     await fs.rm(prePermissionDirectory, { recursive: true, force: true });
+    await dropTestDatabase(databaseName);
+  }
+});
+
+test('migration 022 removes Manager correction processing without changing other built-in roles', async () => {
+  const databaseName = 'amber_manager_correction_permissions_upgrade_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const preManagerPermissionDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'amber-pre-manager-permission-migrations-')
+  );
+  try {
+    const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
+      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('022_'));
+    await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
+      path.resolve(serverRoot, 'migrations', fileName),
+      path.resolve(preManagerPermissionDirectory, fileName)
+    )));
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations({ directory: ${JSON.stringify(preManagerPermissionDirectory)} })
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+
+    const upgradePool = new Pool({ connectionString: databaseUrl });
+    try {
+      const before = await upgradePool.query(`
+        SELECT r.role_key, ARRAY_AGG(rp.permission_key ORDER BY rp.permission_key) AS permission_keys
+        FROM roles r
+        JOIN role_permissions rp ON rp.role_id = r.id
+        WHERE r.role_key IN ('administrator', 'manager', 'storekeeper')
+        GROUP BY r.id
+        ORDER BY r.role_key
+      `);
+      const byRole = Object.fromEntries(before.rows.map((row) => [row.role_key, row.permission_keys]));
+      assert.equal(byRole.manager.includes('corrections.claim'), true);
+      assert.equal(byRole.manager.includes('corrections.complete'), true);
+      assert.equal(byRole.administrator.includes('corrections.claim'), true);
+      assert.equal(byRole.storekeeper.includes('corrections.complete'), true);
+    } finally {
+      await upgradePool.end();
+    }
+
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      (async () => {
+        await runMigrations();
+        await runMigrations();
+        await db.end();
+      })().catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+
+    const verifiedPool = new Pool({ connectionString: databaseUrl });
+    try {
+      const after = await verifiedPool.query(`
+        SELECT r.role_key, ARRAY_AGG(rp.permission_key ORDER BY rp.permission_key) AS permission_keys
+        FROM roles r
+        JOIN role_permissions rp ON rp.role_id = r.id
+        WHERE r.role_key IN ('administrator', 'manager', 'storekeeper')
+        GROUP BY r.id
+        ORDER BY r.role_key
+      `);
+      const byRole = Object.fromEntries(after.rows.map((row) => [row.role_key, row.permission_keys]));
+      assert.equal(byRole.manager.includes('corrections.claim'), false);
+      assert.equal(byRole.manager.includes('corrections.complete'), false);
+      assert.equal(byRole.manager.includes('corrections.create'), true);
+      assert.equal(byRole.manager.includes('corrections.reject'), true);
+      assert.equal(byRole.administrator.includes('corrections.claim'), true);
+      assert.equal(byRole.administrator.includes('corrections.complete'), true);
+      assert.equal(byRole.storekeeper.includes('corrections.claim'), true);
+      assert.equal(byRole.storekeeper.includes('corrections.complete'), true);
+    } finally {
+      await verifiedPool.end();
+    }
+  } finally {
+    await fs.rm(preManagerPermissionDirectory, { recursive: true, force: true });
     await dropTestDatabase(databaseName);
   }
 });
@@ -2032,6 +2114,7 @@ test('legacy in-progress correction requests survive migration 018 and can be cl
         && !fileName.startsWith('018_')
         && !fileName.startsWith('020_')
         && !fileName.startsWith('021_')
+        && !fileName.startsWith('022_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -4439,6 +4522,9 @@ test('business endpoints enforce the Administrator, Storekeeper, and Manager cap
   assert.equal(managerMe.data.roles[0].key, 'manager');
   assert.equal(managerMe.data.permissions.includes('products.archive'), false);
   assert.equal(managerMe.data.permissions.includes('products.create'), false);
+  assert.equal(managerMe.data.permissions.includes('corrections.claim'), false);
+  assert.equal(managerMe.data.permissions.includes('corrections.complete'), false);
+  assert.equal(managerMe.data.permissions.includes('corrections.reject'), true);
 
   const managerDecode = await request('/api/decode', {
     method: 'POST', body: { sku: managerRequestSource.data.fullSku },
@@ -4462,8 +4548,31 @@ test('business endpoints enforce the Administrator, Storekeeper, and Manager cap
     },
   });
   assert.equal(managerCorrection.response.status, 200, managerCorrection.text);
+  const managerCorrectionId = Number(managerCorrection.data.request.id);
+  const managerCorrectionList = await request('/api/admin/correction-requests');
+  assert.equal(managerCorrectionList.response.status, 200, managerCorrectionList.text);
+  assert.equal(
+    managerCorrectionList.data.items.some((item) => Number(item.id) === managerCorrectionId),
+    true
+  );
+  await denied(`/api/admin/correction-requests/${managerCorrectionId}/claim`, {
+    method: 'POST', body: {},
+  }, 'corrections.claim');
+  await denied(`/api/admin/correction-requests/${managerCorrectionId}/complete`, {
+    method: 'POST', body: {},
+  }, 'corrections.complete');
+  const managerRejected = await request(
+    `/api/admin/correction-requests/${managerCorrectionId}/status`,
+    { method: 'PATCH', body: { status: 'rejected' } }
+  );
+  assert.equal(managerRejected.response.status, 200, managerRejected.text);
+  assert.equal(managerRejected.data.request.status, 'rejected');
   assert.equal((await request('/api/products')).response.status, 200);
-  assert.equal((await request('/api/admin/prices/ZZ')).response.status, 200);
+  const managerPrices = await request('/api/admin/prices/ZZ');
+  assert.equal(managerPrices.response.status, 200, managerPrices.text);
+  assert.equal(managerPrices.data.scenarios.length > 0, true);
+  assert.equal(managerPrices.data.scenarios[0].matrix.length > 0, true);
+  assert.ok(Array.isArray(managerPrices.data.modifiers));
   assert.equal((await request('/api/admin/repricing/global/preview', {
     method: 'POST', body: {},
   })).response.status, 200);

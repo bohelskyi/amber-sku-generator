@@ -239,7 +239,7 @@ test('product builder uses compact ordered rows and keeps operational status in 
   assert.doesNotMatch(builderSource, /Поля показуються за чинною конфігурацією/);
   assert.doesNotMatch(builderSource, /className="field-group"/);
   assert.doesNotMatch(appSource, /PreviewResult/);
-  assert.match(appSource, /\{sku\.selectedCat && \(/);
+  assert.match(appSource, /\{canCreateProducts && sku\.selectedCat && \(/);
   assert.doesNotMatch(stylesSource, /builder-field-row:focus-within/);
   assert.match(builderSource, /getFinalPriceUsd\(displayedFinalPriceUah, displayedPricing\.uahRate\)/);
 });

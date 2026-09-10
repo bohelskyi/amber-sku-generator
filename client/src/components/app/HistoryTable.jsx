@@ -1,6 +1,6 @@
 import { formatDecimal, formatUah, formatUsd } from '../../lib/formatters';
 
-export function HistoryTable({ history, config, selectedCat, onCopyText, onDecode, onDelete }) {
+export function HistoryTable({ history, config, selectedCat, onCopyText, onDecode, onDelete, canArchive = true }) {
   return (
     <section className="fade-up">
       <details className="collapsible">
@@ -49,7 +49,7 @@ export function HistoryTable({ history, config, selectedCat, onCopyText, onDecod
                           >
                             Копіювати ціну
                           </button>
-                          <button onClick={() => onDelete(item.full_sku)} className="btn btn-danger text-xs px-2 py-1">Архівувати</button>
+                          {canArchive && <button onClick={() => onDelete(item.full_sku)} className="btn btn-danger text-xs px-2 py-1">Архівувати</button>}
                         </div>
                       )}
                     </td>

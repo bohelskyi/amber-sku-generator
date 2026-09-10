@@ -5,6 +5,7 @@ import { getValidationIssues } from '../lib/admin-validation';
 import { normalizeDecimalInput } from '../lib/number-input';
 import { buildScenarioEditorDraft, findScenarioById } from '../lib/admin-pricing-state';
 import { useAuth } from '../auth/auth-context.js';
+import { getPermissionUiState } from '../lib/permission-ui.js';
 
 const emptyEditOption = { id: null, value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false };
 const emptyNewCategory = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false };
@@ -50,9 +51,9 @@ const buildNewQuestionDefaults = (questions = []) => ({
 
 export function useAdminPanel() {
   const auth = useAuth();
-  const canViewCatalog = auth.permissions.includes('catalog.view');
-  const canViewPricing = auth.permissions.includes('pricing.view');
-  const canManagePricing = auth.permissions.includes('pricing.manage');
+  const { canManagePricing, canViewCatalog, canViewPricing } = getPermissionUiState(
+    auth.permissions
+  );
   const [config, setConfig] = useState(null);
   const [selectedCat, setSelectedCat] = useState(null);
   const [selectedQuestion, setSelectedQuestion] = useState(null);

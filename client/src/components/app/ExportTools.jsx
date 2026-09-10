@@ -10,6 +10,8 @@ export function ExportTools({
   setSkuToDelete,
   onExportCsv,
   onDelete,
+  canArchive = true,
+  canCreateExport = true,
 }) {
   return (
     <section className="fade-up stagger-2">
@@ -27,7 +29,7 @@ export function ExportTools({
         </summary>
 
         <div className="mt-4 space-y-6">
-          <div className="field-group">
+          {canCreateExport && <div className="field-group">
             <div className="section-title mb-3">
               <div>
                 <h4 className="section-title-text text-lg">Експорт CSV</h4>
@@ -69,9 +71,9 @@ export function ExportTools({
                 {exportError}
               </div>
             )}
-          </div>
+          </div>}
 
-          <div className="field-group">
+          {canArchive && <div className="field-group">
             <div className="section-title mb-3">
               <div>
                 <h4 className="section-title-text text-lg">Архівування</h4>
@@ -89,7 +91,7 @@ export function ExportTools({
               />
               <button onClick={() => onDelete(skuToDelete)} className="btn btn-danger px-6">Архівувати</button>
             </div>
-          </div>
+          </div>}
         </div>
       </details>
     </section>

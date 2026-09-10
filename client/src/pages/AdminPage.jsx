@@ -27,6 +27,27 @@ export default function AdminPage() {
           {admin.canViewCatalog && <a href="#catalog-structure">Структура каталогу</a>}
           {admin.canViewPricing && <a href="#catalog-pricing">Матриці та модифікатори</a>}
         </nav>
+        {!admin.canViewCatalog && admin.canViewPricing && (
+          <section className="catalog-category-context" aria-label="Категорія для перегляду цін">
+            <div className="catalog-category-heading">
+              <div><h2>Категорія</h2><p>Оберіть матриці та модифікатори для перегляду</p></div>
+            </div>
+            <div className="catalog-category-tabs" role="tablist" aria-label="Категорії цін">
+              {Object.values(admin.config.categories).map((category) => (
+                <button
+                  key={category.code}
+                  type="button"
+                  role="tab"
+                  aria-selected={admin.selectedCat?.code === category.code}
+                  onClick={() => admin.handleSelectCategory(category)}
+                  className={`catalog-category-tab ${admin.selectedCat?.code === category.code ? 'is-active' : ''}`}
+                >
+                  <span>{category.name}</span><small>{category.code}</small>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
         {admin.canViewCatalog && <section id="catalog-structure" className="admin-anchor-section">
           <AdminStructureEditor
             config={admin.config}

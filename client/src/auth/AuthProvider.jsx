@@ -39,6 +39,27 @@ export function AuthProvider({
     });
   }, []);
 
+  const markAccessStatus = useCallback((applicationUserStatus) => {
+    if (!['pending', 'disabled'].includes(applicationUserStatus)) return;
+    latestRequestRef.current += 1;
+    setAuth((currentAuth) => {
+      if (!currentAuth.identity || !currentAuth.applicationUser) return currentAuth;
+      return {
+        ...currentAuth,
+        status: applicationUserStatus === 'pending'
+          ? AUTH_STATUS.PENDING
+          : AUTH_STATUS.DISABLED,
+        applicationUser: {
+          ...currentAuth.applicationUser,
+          status: applicationUserStatus,
+        },
+        roles: [],
+        permissions: [],
+        errorMessage: null,
+      };
+    });
+  }, []);
+
   const loadCurrentSession = useCallback(async () => {
     const requestId = latestRequestRef.current + 1;
     latestRequestRef.current = requestId;
@@ -75,6 +96,7 @@ export function AuthProvider({
   useEffect(() => {
     const removeApiAuth = bindApiAuth({
       getCsrfToken: () => csrfTokenRef.current,
+      onAccessStatusChange: markAccessStatus,
       onUnauthorized: markUnauthenticated,
     });
     const bootstrapTimer = globalThis.setTimeout(() => {
@@ -85,7 +107,7 @@ export function AuthProvider({
       latestRequestRef.current += 1;
       removeApiAuth();
     };
-  }, [bindApiAuth, loadCurrentSession, markUnauthenticated]);
+  }, [bindApiAuth, loadCurrentSession, markAccessStatus, markUnauthenticated]);
 
   const retry = useCallback(() => {
     setAuth(EMPTY_AUTH);

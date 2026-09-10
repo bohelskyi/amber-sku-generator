@@ -22,11 +22,13 @@ import {
   Undo2,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../auth/auth-context.js';
 import { RepricingRecountDrawer } from '../components/app/RepricingRecountDrawer';
 import { useDialogAccessibility } from '../hooks/useDialogAccessibility';
 import { api } from '../lib/api';
 import { formatDecimal, formatUah } from '../lib/formatters';
 import { getPricingAxis } from '../lib/pricing-axis';
+import { getPermissionUiState } from '../lib/permission-ui.js';
 import {
   applyManualPrices,
   canApplyRepricing,
@@ -337,6 +339,16 @@ function DiscardDraftDialog({ onCancel, onConfirm, pending }) {
 }
 
 export default function RepricingPage() {
+  const auth = useAuth();
+  const permissionUi = getPermissionUiState(auth.permissions);
+  const {
+    canApplyDirectRecount,
+    canApplyRepricing: mayApplyRepricing,
+    canCreateCorrectionRequest,
+    canRollbackRepricing,
+  } = permissionUi;
+  const canViewCatalogOrPricing = permissionUi.canViewCatalog || permissionUi.canViewPricing;
+  const defaultRecountMode = canApplyDirectRecount ? 'apply' : 'request';
   const [config, setConfig] = useState(null);
   const [scenarios, setScenarios] = useState([]);
   const [batches, setBatches] = useState([]);
@@ -951,22 +963,22 @@ export default function RepricingPage() {
               {globalDraft ? <FilePenLine size={16} /> : <CircleDollarSign size={16} />}
               {globalDraft ? 'Продовжити загальну чернетку' : 'Переоцінити все'}
             </button>
-            <button
+            {(canApplyDirectRecount || canCreateCorrectionRequest) && <button
               type="button"
               className="btn btn-outline gap-2"
-              onClick={() => setRecountTarget({ productId: null, sku: '', mode: 'apply' })}
+              onClick={() => setRecountTarget({ productId: null, sku: '', mode: defaultRecountMode })}
             >
               <ScanSearch size={16} />
               Декодер
-            </button>
+            </button>}
             <Link to="/admin/corrections?from=admin" className="btn btn-outline gap-2">
               <ClipboardList size={16} />
               Запити{correctionRequests.length > 0 ? ` · ${correctionRequests.length}` : ''}
             </Link>
-            <Link to="/admin" className="btn btn-outline gap-2">
+            {canViewCatalogOrPricing && <Link to="/admin" className="btn btn-outline gap-2">
               <ArrowLeft size={16} />
               До адмін-панелі
-            </Link>
+            </Link>}
           </div>
         </header>
 
@@ -1364,7 +1376,7 @@ export default function RepricingPage() {
                             </span>
                           </div>
                           <div className="mt-2 flex items-center gap-3 font-sans">
-                            <button
+                            {(canApplyDirectRecount || canCreateCorrectionRequest) && <button
                               type="button"
                               className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 hover:text-slate-900"
                               onClick={() => setRecountTarget({
@@ -1375,7 +1387,7 @@ export default function RepricingPage() {
                             >
                               <ScanSearch size={14} />
                               Перевірити
-                            </button>
+                            </button>}
                             {correctionRequest && (
                               <Link
                                 to={`/admin/corrections?request=${correctionRequest.id}&from=admin`}
@@ -1527,7 +1539,7 @@ export default function RepricingPage() {
                     <span className="font-medium text-slate-600">Зберігаємо чернетку...</span>
                   )}
                 </div>
-                <button
+                {mayApplyRepricing && <button
                   type="button"
                   className="btn btn-amber gap-2"
                   disabled={!canApply}
@@ -1535,7 +1547,7 @@ export default function RepricingPage() {
                 >
                   <CheckCircle2 size={16} />
                   Застосувати переоцінку
-                </button>
+                </button>}
               </div>
             </>
           )}
@@ -1591,7 +1603,7 @@ export default function RepricingPage() {
                       </div>
                     </td>
                     <td className="table-cell text-right">
-                      {batch.status === 'completed' && (
+                      {batch.status === 'completed' && canRollbackRepricing && (
                         <button
                           type="button"
                           className="btn btn-outline btn-icon ml-auto disabled:cursor-not-allowed disabled:opacity-40"
@@ -1615,7 +1627,7 @@ export default function RepricingPage() {
         </section>
       </main>
 
-      {confirmOpen && preview && (
+      {mayApplyRepricing && confirmOpen && preview && (
         <ConfirmDialog
           changedCount={effectiveSummary.changedCount}
           manualCount={manualOverrides.length}
@@ -1625,7 +1637,7 @@ export default function RepricingPage() {
         />
       )}
 
-      {rollbackTarget && (
+      {canRollbackRepricing && rollbackTarget && (
         <RollbackDialog
           batch={rollbackTarget}
           pending={rollingBack}
@@ -1644,6 +1656,8 @@ export default function RepricingPage() {
 
       {recountTarget && (
         <RepricingRecountDrawer
+          canApplyRecount={canApplyDirectRecount}
+          canCreateRequest={canCreateCorrectionRequest}
           config={config}
           initialMode={recountTarget.mode || 'apply'}
           initialSku={recountTarget.sku}

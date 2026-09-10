@@ -17,6 +17,13 @@ import {
   normalizeCurrentSession,
 } from '../src/auth/auth-model.js';
 import { WorkspaceNav } from '../src/components/app/WorkspaceNav.jsx';
+import { ExportTools } from '../src/components/app/ExportTools.jsx';
+import { HistoryTable } from '../src/components/app/HistoryTable.jsx';
+import { HomeDashboard } from '../src/components/app/HomeDashboard.jsx';
+import { RecountConfirmDialog } from '../src/components/app/RecountConfirmDialog.jsx';
+import { getPermissionUiState, getRecountUiMode } from '../src/lib/permission-ui.js';
+import AdminPage from '../src/pages/AdminPage.jsx';
+import CorrectionRequestsPage from '../src/pages/CorrectionRequestsPage.jsx';
 import { api, createApiClient } from '../src/lib/api.js';
 import {
   APPLICATION_USER_STATUS_LABELS,
@@ -379,10 +386,79 @@ describe('Axios authentication integration', () => {
     await screen.findByRole('button', { name: 'Увійти' });
   });
 
+  it.each([
+    ['APP_ACCESS_DISABLED', 'disabled', 'Доступ вимкнено'],
+    ['APP_ACCESS_PENDING', 'pending', 'Доступ очікує підтвердження'],
+  ])('moves an active session to the AuthGate for %s without a refresh', async (
+    errorCode,
+    _accessStatus,
+    expectedHeading
+  ) => {
+    const isolated = createApiClient();
+    isolated.client.defaults.adapter = async (config) => {
+      if (config.url === '/auth/me') return response(currentSession, config);
+      const error = new Error('Forbidden');
+      error.config = config;
+      error.response = { status: 403, data: { code: errorCode } };
+      throw error;
+    };
+
+    function AccessChangedRequest() {
+      return (
+        <button type="button" onClick={() => { void isolated.client.get('/business').catch(() => {}); }}>
+          Check changed access
+        </button>
+      );
+    }
+
+    renderAuth({
+      apiClient: isolated.client,
+      bindApiAuth: isolated.configureAuth,
+      children: <AccessChangedRequest />,
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Check changed access' }));
+    await screen.findByText(expectedHeading);
+    expect(screen.queryByRole('button', { name: 'Check changed access' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Увійти' })).toBeNull();
+  });
+
+  it('keeps the active AuthGate session after INSUFFICIENT_PERMISSION', async () => {
+    const isolated = createApiClient();
+    isolated.client.defaults.adapter = async (config) => {
+      if (config.url === '/auth/me') return response(currentSession, config);
+      const error = new Error('Forbidden');
+      error.config = config;
+      error.response = { status: 403, data: { code: 'INSUFFICIENT_PERMISSION' } };
+      throw error;
+    };
+
+    function PermissionDeniedRequest() {
+      return (
+        <button type="button" onClick={() => { void isolated.client.post('/forbidden').catch(() => {}); }}>
+          Make forbidden request
+        </button>
+      );
+    }
+
+    renderAuth({
+      apiClient: isolated.client,
+      bindApiAuth: isolated.configureAuth,
+      children: <PermissionDeniedRequest />,
+    });
+
+    const button = await screen.findByRole('button', { name: 'Make forbidden request' });
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Make forbidden request' })).toBeTruthy());
+    expect(screen.queryByText('Доступ вимкнено')).toBeNull();
+    expect(screen.queryByText('Доступ очікує підтвердження')).toBeNull();
+  });
+
   it('does not clear authentication after a centralized 403 response', async () => {
     const isolated = createApiClient();
     const onUnauthorized = vi.fn();
-    isolated.configureAuth({ onUnauthorized });
+    const onAccessStatusChange = vi.fn();
+    isolated.configureAuth({ onAccessStatusChange, onUnauthorized });
     isolated.client.defaults.adapter = async (config) => {
       const error = new Error('Forbidden');
       error.config = config;
@@ -392,6 +468,7 @@ describe('Axios authentication integration', () => {
 
     await isolated.client.post('/forbidden').catch(() => {});
     expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(onAccessStatusChange).not.toHaveBeenCalled();
   });
 
   it('does not persist authentication identity or CSRF data in browser storage', async () => {
@@ -570,5 +647,232 @@ describe('application-user administration UI', () => {
     ));
     await waitFor(() => expect(auth.refresh).toHaveBeenCalledTimes(1));
     expect(api.get).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('permission-aware business UI', () => {
+  const config = {
+    categories: {
+      BR: { code: 'BR', name: 'Браслети', requires_weight: 1 },
+    },
+    questions: {
+      BR: [{
+        q_db_id: 10,
+        id: 'kind',
+        label: 'Тип',
+        display_order: 1,
+        sku_index: 1,
+        include_in_sku: 1,
+        input_type: 'options',
+        options: [{ db_id: 11, id: 1, sku_code: '1', label: 'Круглий', archived: 0 }],
+      }],
+    },
+    extraConfig: {},
+  };
+  const pricing = {
+    scenarios: [{
+      id: 21,
+      name: 'Базова матриця',
+      group_name: 'Базова',
+      match_json: {},
+      axis_x_key: 'kind',
+      axis_y_key: null,
+      priority: 1,
+      status: 'active',
+      price_mode: 'fixed_uah',
+      weight_bands: [],
+      matrix: [{ x_val: 1, y_val: 0, price: '1250.0000' }],
+    }],
+    modifiers: [{ id: 31, match_json: { kind: 1 }, factor: '1.200000' }],
+  };
+  const authValue = (permissions) => ({
+    identity,
+    applicationUser: { id: 42, status: 'active' },
+    permissions,
+    roles: [],
+    logout: vi.fn(),
+  });
+
+  const operationalProps = {
+    config,
+    exportStatus: null,
+    skuToDecode: '',
+    decodeData: null,
+    decodeError: '',
+    decodeErrorDetails: null,
+    onStart: vi.fn(),
+    onDecode: vi.fn(),
+    onDecodeInputChange: vi.fn(),
+  };
+
+  it('hides Manager product/archive/export/direct-apply controls and keeps Storekeeper product workflows', () => {
+    const managerUi = getPermissionUiState([
+      'products.view',
+      'products.decode',
+      'corrections.create',
+      'exports.view',
+    ]);
+    const storekeeperUi = getPermissionUiState([
+      'products.view',
+      'products.decode',
+      'products.create',
+      'products.archive',
+      'products.recount',
+      'corrections.create',
+      'exports.view',
+    ]);
+    const history = [{
+      id: 1,
+      full_sku: 'BR1001',
+      category: 'BR',
+      weight: 10,
+      total_price_uah: 1250,
+    }];
+    const commonActions = {
+      exportFromSku: '',
+      setExportFromSku: vi.fn(),
+      exportToSku: '',
+      setExportToSku: vi.fn(),
+      exportError: '',
+      setExportError: vi.fn(),
+      isExportLoading: false,
+      skuToDelete: '',
+      setSkuToDelete: vi.fn(),
+      onExportCsv: vi.fn(),
+      onDelete: vi.fn(),
+    };
+
+    const { rerender } = render(
+      <>
+        <HomeDashboard {...operationalProps} canCreateProducts={managerUi.canCreateProducts} />
+        <HistoryTable history={history} config={config} selectedCat={null} canArchive={managerUi.canArchiveProducts} onCopyText={vi.fn()} onDecode={vi.fn()} onDelete={vi.fn()} />
+        <ExportTools {...commonActions} canArchive={managerUi.canArchiveProducts} canCreateExport={managerUi.canCreateExports} />
+      </>
+    );
+    expect(screen.queryByText('Оберіть категорію')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Архівувати' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Експорт CSV' })).toBeNull();
+
+    rerender(
+      <>
+        <HomeDashboard {...operationalProps} canCreateProducts={storekeeperUi.canCreateProducts} />
+        <HistoryTable history={history} config={config} selectedCat={null} canArchive={storekeeperUi.canArchiveProducts} onCopyText={vi.fn()} onDecode={vi.fn()} onDelete={vi.fn()} />
+        <ExportTools {...commonActions} canArchive={storekeeperUi.canArchiveProducts} canCreateExport={storekeeperUi.canCreateExports} />
+      </>
+    );
+    expect(screen.getByText('Оберіть категорію')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Архівувати' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Експорт CSV' })).toBeNull();
+
+    expect(getRecountUiMode(managerUi)).toBe('request');
+    expect(getRecountUiMode(storekeeperUi)).toBe('choice');
+  });
+
+  it('renders only the correction-request confirmation for Manager recounts', () => {
+    const preview = {
+      source: { sku: 'BR1001', totalPriceUah: 1000 },
+      corrected: { fullSku: 'BR1002', totalPriceUah: 1250 },
+      priceDeltaUah: 250,
+    };
+    render(
+      <RecountConfirmDialog
+        isOpen
+        isApplying={false}
+        preview={preview}
+        reason=""
+        manualPriceUah=""
+        onManualPriceChange={vi.fn()}
+        mode="request"
+        onCancel={vi.fn()}
+        onConfirm={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Створити запит' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Створити коригувальний артикул' })).toBeNull();
+  });
+
+  it('renders Manager price matrices and modifiers read-only without catalog.view', async () => {
+    const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/config') return response(config);
+      if (url === '/admin/prices/BR') return response(pricing);
+      throw new Error(`Unexpected GET ${url}`);
+    });
+
+    render(
+      <AuthContext.Provider value={authValue(['pricing.view'])}>
+        <MemoryRouter><AdminPage /></MemoryRouter>
+      </AuthContext.Provider>
+    );
+
+    const category = await screen.findByRole('tab', { name: /Браслети/ });
+    expect(screen.queryByText('Структура каталогу')).toBeNull();
+    fireEvent.click(category);
+
+    const matrixCell = await screen.findByRole('textbox', { name: 'Круглий, Base' });
+    expect(matrixCell.readOnly).toBe(true);
+    expect(matrixCell.value).toBe('1250');
+    expect(get).toHaveBeenCalledWith('/admin/prices/BR');
+    expect(screen.queryByRole('button', { name: 'Дублювати сценарій' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Модифікатори' }));
+    expect(await screen.findByText('Модифікатор ×1.2')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Редагувати/ })).toBeNull();
+  });
+
+  it.each([
+    ['Manager', ['corrections.view', 'corrections.reject']],
+    ['Storekeeper', [
+      'corrections.view',
+      'corrections.claim',
+      'corrections.complete',
+      'corrections.reject',
+    ]],
+  ])('hides unavailable correction-processing controls for %s', async (label, permissions) => {
+    const requests = [{
+      id: 71,
+      status: 'pending',
+      sourceSku: 'BR1001',
+      proposedSku: 'BR1002',
+      categoryCode: 'BR',
+      comment: '',
+      changes: [],
+      proposedPayload: { totalPriceUah: 1250 },
+      createdAt: '2026-09-10T10:00:00.000Z',
+      updatedAt: '2026-09-10T10:00:00.000Z',
+    }, {
+      id: 72,
+      status: 'in_progress',
+      sourceSku: 'BR2001',
+      proposedSku: 'BR2002',
+      categoryCode: 'BR',
+      comment: '',
+      changes: [],
+      proposedPayload: { totalPriceUah: 1350 },
+      claimFingerprint: 'other-browser',
+      createdAt: '2026-09-10T10:00:00.000Z',
+      updatedAt: '2026-09-10T10:00:00.000Z',
+    }];
+    vi.spyOn(api, 'get').mockImplementation(async (url) => (
+      url === '/config'
+        ? response(config)
+        : response({ items: requests, summary: { active: 2, pending: 1, inProgress: 1 } })
+    ));
+
+    render(
+      <AuthContext.Provider value={authValue(permissions)}>
+        <MemoryRouter><CorrectionRequestsPage /></MemoryRouter>
+      </AuthContext.Provider>
+    );
+
+    await screen.findByText('BR1001');
+    expect(screen.getByRole('button', { name: 'Відхилити запит' })).toBeTruthy();
+    expect(screen.queryByText('Примусово повернути')).toBeNull();
+    if (label === 'Manager') {
+      expect(screen.queryByText('Взяти в роботу')).toBeNull();
+      expect(screen.queryByText('Підтвердити')).toBeNull();
+    } else {
+      expect(screen.getByText('Взяти в роботу')).toBeTruthy();
+    }
   });
 });

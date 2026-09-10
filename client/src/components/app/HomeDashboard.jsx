@@ -93,6 +93,8 @@ export function DecodeErrorPanel({ details, message }) {
 }
 
 export function HomeDashboard({
+  canCreateProducts = true,
+  canStartRecount = true,
   config,
   exportStatus,
   skuToDecode,
@@ -128,7 +130,7 @@ export function HomeDashboard({
   return (
     <div className="space-y-5">
       <div className="home-top-workspace">
-        <section className="home-workspace-panel home-create-panel card p-4 sm:p-5 fade-up stagger-1">
+        {canCreateProducts && <section className="home-workspace-panel home-create-panel card p-4 sm:p-5 fade-up stagger-1">
           <div className="section-title mb-4">
             <div>
               <p className="eyebrow">Створити SKU</p>
@@ -154,7 +156,7 @@ export function HomeDashboard({
               </button>
             ))}
           </div>
-        </section>
+        </section>}
 
         <div className="home-side-workspace fade-up stagger-2">
           <div className="home-workspace-panel home-decode-panel card p-4 sm:p-5">
@@ -227,6 +229,7 @@ export function HomeDashboard({
           recountWeight={recountWeight}
           recountSuccess={recountSuccess}
           recountMode={recountMode}
+          canStartRecount={canStartRecount}
           onApplyRecount={onApplyRecount}
           onCancelRecount={onCancelRecount}
           onRecountAnswer={onRecountAnswer}
@@ -241,6 +244,7 @@ export function HomeDashboard({
 }
 
 export function DecodeWorkspace({
+  canStartRecount = true,
   config,
   decodeData,
   hasRecountChanges,
@@ -503,7 +507,7 @@ export function DecodeWorkspace({
             )}
           </div>
 
-          {decodeData.existsInDb && (
+          {canStartRecount && decodeData.existsInDb && (
             <div className="builder-summary-actions">
               <button onClick={onStartRecount} className="btn btn-primary w-full">
                 {recountMode === 'request' ? 'Підготувати запит' : 'Переоблікувати'}

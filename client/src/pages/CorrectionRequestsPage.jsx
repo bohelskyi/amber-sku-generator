@@ -13,11 +13,13 @@ import {
   XCircle,
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useAuth } from '../auth/auth-context.js';
 import { useDialogAccessibility } from '../hooks/useDialogAccessibility';
 import { getAnswerValueLabel, getQuestionLabel } from '../lib/answer-labels';
 import { api } from '../lib/api';
 import { copyPlainText } from '../lib/clipboard';
 import { formatDateTime, formatUah } from '../lib/formatters';
+import { getPermissionUiState } from '../lib/permission-ui.js';
 import {
   createLatestRequestGate,
   createVisibilityAwarePoller,
@@ -163,6 +165,13 @@ function CompletionDialog({ busy, request, onCancel, onConfirm }) {
 }
 
 export default function CorrectionRequestsPage() {
+  const auth = useAuth();
+  const permissionUi = getPermissionUiState(auth.permissions);
+  const canClaim = permissionUi.canClaimCorrections;
+  const canComplete = permissionUi.canCompleteCorrections;
+  const canForceRelease = permissionUi.canForceReleaseCorrections;
+  const canReject = permissionUi.canRejectCorrections;
+  const canViewCatalogOrPricing = permissionUi.canViewCatalog || permissionUi.canViewPricing;
   const [searchParams] = useSearchParams();
   const focusedRequestId = Number(searchParams.get('request') || 0);
   const isAdminView = searchParams.get('from') === 'admin';
@@ -447,7 +456,7 @@ export default function CorrectionRequestsPage() {
             <p className="mt-1 text-xs text-slate-500">Операційна черга, власність і завершення запитів.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {isAdminView && (
+            {isAdminView && canViewCatalogOrPricing && (
               <Link to="/admin" className="btn btn-outline">
                 Адмін-панель
               </Link>
@@ -576,36 +585,36 @@ export default function CorrectionRequestsPage() {
                           {request.completedAt && <>Виконано: {formatDateTime(request.completedAt)}</>}
                         </div>
                         <div className="flex flex-wrap justify-start gap-2 xl:justify-end">
-                          {request.status === 'pending' && (
-                            <>
+                          {request.status === 'pending' && canClaim && (
                               <button type="button" className="btn btn-outline gap-2" onClick={() => claimRequest(request)} disabled={requestBusy}>
                                 <Play size={15} />
                                 Взяти в роботу
                               </button>
+                          )}
+                          {request.status === 'pending' && canReject && (
                               <button type="button" className="btn btn-outline flex h-10 w-10 items-center justify-center p-0 text-rose-700" onClick={() => updateStatus(request, 'rejected')} disabled={requestBusy} title="Відхилити" aria-label="Відхилити запит">
                                 <XCircle size={16} />
                               </button>
-                            </>
                           )}
                           {request.status === 'in_progress' && isOwnedClaim && (
                             <>
-                              <button type="button" className="btn btn-outline flex h-10 w-10 items-center justify-center p-0" onClick={() => refreshRequest(request)} disabled={requestBusy} title="Оновити розрахунок" aria-label="Оновити розрахунок">
+                              {canComplete && <button type="button" className="btn btn-outline flex h-10 w-10 items-center justify-center p-0" onClick={() => refreshRequest(request)} disabled={requestBusy} title="Оновити розрахунок" aria-label="Оновити розрахунок">
                                 <RefreshCw size={16} className={requestBusy ? 'animate-spin' : ''} />
-                              </button>
-                              <button type="button" className="btn btn-outline gap-2" onClick={() => releaseRequest(request)} disabled={requestBusy}>
+                              </button>}
+                              {canClaim && <button type="button" className="btn btn-outline gap-2" onClick={() => releaseRequest(request)} disabled={requestBusy}>
                                 <RotateCcw size={15} />
                                 Повернути в чергу
-                              </button>
-                              <button type="button" className="btn btn-outline flex h-10 w-10 items-center justify-center p-0 text-rose-700" onClick={() => updateStatus(request, 'rejected')} disabled={requestBusy} title="Відхилити" aria-label="Відхилити запит">
+                              </button>}
+                              {canReject && <button type="button" className="btn btn-outline flex h-10 w-10 items-center justify-center p-0 text-rose-700" onClick={() => updateStatus(request, 'rejected')} disabled={requestBusy} title="Відхилити" aria-label="Відхилити запит">
                                 <XCircle size={16} />
-                              </button>
-                              <button type="button" className="btn btn-primary gap-2" onClick={() => openCompletion(request)} disabled={requestBusy}>
+                              </button>}
+                              {canComplete && <button type="button" className="btn btn-primary gap-2" onClick={() => openCompletion(request)} disabled={requestBusy}>
                                 <CheckCircle2 size={16} />
                                 Підтвердити
-                              </button>
+                              </button>}
                             </>
                           )}
-                          {request.status === 'in_progress' && !isOwnedClaim && (
+                          {request.status === 'in_progress' && !isOwnedClaim && canForceRelease && (
                             <button
                               type="button"
                               className="btn btn-outline text-rose-700"
@@ -615,7 +624,7 @@ export default function CorrectionRequestsPage() {
                               Примусово повернути
                             </button>
                           )}
-                          {request.status === 'rejected' && (
+                          {request.status === 'rejected' && canReject && (
                             <button type="button" className="btn btn-outline gap-2" onClick={() => updateStatus(request, 'pending')} disabled={requestBusy}>
                               <RotateCcw size={15} />
                               Повернути
@@ -632,12 +641,12 @@ export default function CorrectionRequestsPage() {
         </section>
       </main>
 
-      <CompletionDialog
+      {canComplete && <CompletionDialog
         busy={Boolean(completionTarget && busyId === completionTarget.id)}
         request={completionTarget}
         onCancel={closeCompletion}
         onConfirm={completeRequest}
-      />
+      />}
     </div>
   );
 }
