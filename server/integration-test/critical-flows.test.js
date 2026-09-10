@@ -44,7 +44,6 @@ const {
   disableApplicationUser,
   enableApplicationUser,
 } = require('../src/services/application-user-admin.service');
-
 let server;
 let baseUrl;
 let authenticatedSession = null;
@@ -189,6 +188,25 @@ async function replaceActiveRoleForTest(applicationUserId, roleKey) {
      SELECT $1, id FROM roles WHERE role_key = $2 AND status = 'active'`,
     [applicationUserId, roleKey]
   );
+}
+
+async function roleIdForKey(roleKey, databasePool = pool) {
+  const result = await databasePool.query(
+    'SELECT id FROM roles WHERE role_key = $1',
+    [roleKey]
+  );
+  assert.equal(result.rows.length, 1, `Role ${roleKey} was not found`);
+  return Number(result.rows[0].id);
+}
+
+async function currentAssignmentIdForUser(applicationUserId, databasePool = pool) {
+  const result = await databasePool.query(
+    `SELECT id FROM user_role_assignments
+     WHERE application_user_id = $1 AND revoked_at IS NULL`,
+    [applicationUserId]
+  );
+  assert.equal(result.rows.length, 1, `Current assignment for user ${applicationUserId} was not found`);
+  return Number(result.rows[0].id);
 }
 
 async function authenticateApplicationSession(returnTo = '/', { activate = true } = {}) {
@@ -595,7 +613,7 @@ test('migration 019 matches the connect-pg-simple 10.0.0 table contract', async 
   ]);
 });
 
-test('migrations 020-027 create RBAC, audit, and business actor attribution', async () => {
+test('migrations 020-028 create constrained RBAC, audit, and business actor attribution', async () => {
   const requiredTables = await pool.query(`
     SELECT table_name
     FROM information_schema.tables
@@ -711,6 +729,227 @@ test('migrations 020-027 create RBAC, audit, and business actor attribution', as
     )).rows[0],
     { completed_at: null, administrator_user_id: null }
   );
+
+  const roleVersion = await pool.query(
+    `SELECT column_name, is_nullable, column_default
+     FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = 'roles' AND column_name = 'version'`
+  );
+  assert.deepEqual(roleVersion.rows, [{
+    column_name: 'version',
+    is_nullable: 'NO',
+    column_default: '1',
+  }]);
+  const customRoleIndexes = await pool.query(
+    `SELECT indexname FROM pg_indexes
+     WHERE schemaname = 'public' AND indexname = ANY($1::text[])
+     ORDER BY indexname`,
+    [[
+      'roles_display_name_case_insensitive_idx',
+      'user_role_assignments_one_current_role_per_user_idx',
+    ]]
+  );
+  assert.deepEqual(customRoleIndexes.rows.map((row) => row.indexname), [
+    'roles_display_name_case_insensitive_idx',
+    'user_role_assignments_one_current_role_per_user_idx',
+  ]);
+
+  const constraintClient = await pool.connect();
+  try {
+    await constraintClient.query('BEGIN');
+    const probeUser = await constraintClient.query(
+      `INSERT INTO application_users (status, display_name)
+       VALUES ('disabled', 'Role constraint probe') RETURNING id`
+    );
+    const managerId = await roleIdForKey('manager', constraintClient);
+    const storekeeperId = await roleIdForKey('storekeeper', constraintClient);
+    await constraintClient.query(
+      `INSERT INTO user_role_assignments (application_user_id, role_id) VALUES ($1, $2)`,
+      [probeUser.rows[0].id, managerId]
+    );
+    await constraintClient.query('SAVEPOINT duplicate_assignment');
+    await assert.rejects(
+      constraintClient.query(
+        `INSERT INTO user_role_assignments (application_user_id, role_id) VALUES ($1, $2)`,
+        [probeUser.rows[0].id, storekeeperId]
+      ),
+      (error) => error.code === '23505'
+    );
+    await constraintClient.query('ROLLBACK TO SAVEPOINT duplicate_assignment');
+
+    await constraintClient.query('SAVEPOINT reserved_grant');
+    await assert.rejects(
+      constraintClient.query(
+        `INSERT INTO role_permissions (role_id, permission_key)
+         VALUES ($1, 'users.manage')`,
+        [managerId]
+      ),
+      /reserved for the built-in Administrator role/
+    );
+    await constraintClient.query('ROLLBACK TO SAVEPOINT reserved_grant');
+
+    await constraintClient.query('SAVEPOINT role_delete');
+    await assert.rejects(
+      constraintClient.query('DELETE FROM roles WHERE id = $1', [managerId]),
+      /deactivate a role instead of deleting it/
+    );
+    await constraintClient.query('ROLLBACK TO SAVEPOINT role_delete');
+
+    await constraintClient.query('SAVEPOINT role_truncate');
+    await assert.rejects(
+      constraintClient.query('TRUNCATE roles CASCADE'),
+      /roles cannot be truncated/
+    );
+    await constraintClient.query('ROLLBACK TO SAVEPOINT role_truncate');
+
+    await constraintClient.query('SAVEPOINT role_permissions_truncate');
+    await assert.rejects(
+      constraintClient.query('TRUNCATE role_permissions'),
+      /role_permissions cannot be truncated/
+    );
+    await constraintClient.query('ROLLBACK TO SAVEPOINT role_permissions_truncate');
+
+    await constraintClient.query('SAVEPOINT role_key_mutation');
+    await assert.rejects(
+      constraintClient.query(
+        `UPDATE roles SET role_key = 'renamed_manager_key' WHERE id = $1`,
+        [managerId]
+      ),
+      /role_key and is_system are immutable/
+    );
+    await constraintClient.query('ROLLBACK TO SAVEPOINT role_key_mutation');
+
+    await constraintClient.query('SAVEPOINT role_system_mutation');
+    await assert.rejects(
+      constraintClient.query('UPDATE roles SET is_system = FALSE WHERE id = $1', [managerId]),
+      /role_key and is_system are immutable/
+    );
+    await constraintClient.query('ROLLBACK TO SAVEPOINT role_system_mutation');
+
+    await constraintClient.query('SAVEPOINT administrator_mutation');
+    await assert.rejects(
+      constraintClient.query(
+        `UPDATE roles SET status = 'disabled'
+         WHERE role_key = 'administrator' AND is_system = TRUE`
+      ),
+      /built-in Administrator role is immutable/
+    );
+    await constraintClient.query('ROLLBACK TO SAVEPOINT administrator_mutation');
+
+    await constraintClient.query('SAVEPOINT administrator_permission_removal');
+    await assert.rejects(
+      constraintClient.query(
+        `DELETE FROM role_permissions mapping
+         USING roles role
+         WHERE mapping.role_id = role.id
+           AND role.role_key = 'administrator'
+           AND mapping.permission_key = 'products.view'`
+      ),
+      /Administrator permissions cannot be removed/
+    );
+    await constraintClient.query('ROLLBACK TO SAVEPOINT administrator_permission_removal');
+
+    await constraintClient.query(
+      `INSERT INTO permissions (permission_key, description)
+       VALUES ('integration.future_permission', 'Future permission probe')`
+    );
+    assert.equal(Number((await constraintClient.query(
+      `SELECT COUNT(*) FROM role_permissions mapping
+       JOIN roles role ON role.id = mapping.role_id
+       WHERE role.role_key = 'administrator'
+         AND mapping.permission_key = 'integration.future_permission'`
+    )).rows[0].count), 1);
+    await constraintClient.query('ROLLBACK');
+  } finally {
+    constraintClient.release();
+  }
+});
+
+test('migration 028 aborts without changing unsafe existing RBAC state', async () => {
+  const databaseName = 'amber_custom_role_conflict_upgrade_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const preCustomRoleDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'amber-pre-custom-role-migrations-')
+  );
+  try {
+    const migrationDirectory = path.resolve(serverRoot, 'migrations');
+    const migrationFiles = (await fs.readdir(migrationDirectory))
+      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('028_'));
+    await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
+      path.resolve(migrationDirectory, fileName),
+      path.resolve(preCustomRoleDirectory, fileName)
+    )));
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations({ directory: ${JSON.stringify(preCustomRoleDirectory)} })
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+    const conflictPool = new Pool({ connectionString: databaseUrl });
+    try {
+      const user = await conflictPool.query(
+        `INSERT INTO application_users (status, display_name)
+         VALUES ('disabled', 'Ambiguous role user') RETURNING id`
+      );
+      await conflictPool.query(
+        `INSERT INTO user_role_assignments (application_user_id, role_id)
+         SELECT $1, id FROM roles WHERE role_key IN ('manager', 'storekeeper')`,
+        [user.rows[0].id]
+      );
+      await assert.rejects(
+        runNodeInDatabase(databaseUrl, `
+          const db = require('./src/db/pool');
+          const { runMigrations } = require('./src/db/run-migrations');
+          runMigrations()
+            .finally(() => db.end())
+            .catch((error) => { console.error(error); process.exitCode = 1; });
+        `),
+        /cannot enforce one current role/
+      );
+      assert.equal(Number((await conflictPool.query(
+        `SELECT COUNT(*) FROM user_role_assignments
+         WHERE application_user_id = $1 AND revoked_at IS NULL`,
+        [user.rows[0].id]
+      )).rows[0].count), 2);
+      assert.equal((await conflictPool.query(
+        `SELECT COUNT(*)::int AS count FROM schema_migrations
+         WHERE name = '028_custom_roles.sql'`
+      )).rows[0].count, 0);
+
+      await conflictPool.query(
+        `UPDATE user_role_assignments
+         SET revoked_at = CURRENT_TIMESTAMP
+         WHERE application_user_id = $1
+           AND role_id = (SELECT id FROM roles WHERE role_key = 'storekeeper')`,
+        [user.rows[0].id]
+      );
+      await conflictPool.query(
+        `INSERT INTO role_permissions (role_id, permission_key)
+         SELECT id, 'users.manage' FROM roles WHERE role_key = 'manager'`
+      );
+      await assert.rejects(
+        runNodeInDatabase(databaseUrl, `
+          const db = require('./src/db/pool');
+          const { runMigrations } = require('./src/db/run-migrations');
+          runMigrations()
+            .finally(() => db.end())
+            .catch((error) => { console.error(error); process.exitCode = 1; });
+        `),
+        /cannot preserve reserved permissions/
+      );
+      assert.equal(Number((await conflictPool.query(
+        `SELECT COUNT(*) FROM role_permissions mapping
+         JOIN roles role ON role.id = mapping.role_id
+         WHERE role.role_key = 'manager' AND mapping.permission_key = 'users.manage'`
+      )).rows[0].count), 1, 'failed migration must not silently revoke reserved mappings');
+    } finally {
+      await conflictPool.end();
+    }
+  } finally {
+    await fs.rm(preCustomRoleDirectory, { recursive: true, force: true });
+    await dropTestDatabase(databaseName);
+  }
 });
 
 test('migration 025 adds nullable user attribution and a nonnegative correction claim epoch', async () => {
@@ -1061,7 +1300,7 @@ test('migration 024 preserves historical product attribution as null', async () 
         && !fileName.startsWith('025_')
         && !fileName.startsWith('026_')
         && !fileName.startsWith('027_')
-        && !fileName.startsWith('027_')
+        && !fileName.startsWith('028_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -1205,6 +1444,7 @@ test('migration 026 preserves historical repricing attribution as null without a
         fileName.endsWith('.sql')
         && !fileName.startsWith('026_')
         && !fileName.startsWith('027_')
+        && !fileName.startsWith('028_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -1288,7 +1528,11 @@ test('migration 027 preserves historical export and publication attribution as n
   try {
     const migrationDirectory = path.resolve(serverRoot, 'migrations');
     const migrationFiles = (await fs.readdir(migrationDirectory))
-      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('027_'));
+      .filter((fileName) => (
+        fileName.endsWith('.sql')
+        && !fileName.startsWith('027_')
+        && !fileName.startsWith('028_')
+      ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
       path.resolve(preAttributionDirectory, fileName)
@@ -2501,6 +2745,7 @@ test('migration 023 rolls back its audit schema and permission grant together', 
         && !fileName.startsWith('025_')
         && !fileName.startsWith('026_')
         && !fileName.startsWith('027_')
+        && !fileName.startsWith('028_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -2650,6 +2895,7 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
          && !fileName.startsWith('025_')
          && !fileName.startsWith('026_')
          && !fileName.startsWith('027_')
+         && !fileName.startsWith('028_')
       ))
       .map((fileName) => fs.copyFile(
         path.resolve(serverRoot, 'migrations', fileName),
@@ -2759,6 +3005,7 @@ test('migrations 020-024 upgrade a database at migration 019 and repeated startu
         && !fileName.startsWith('025_')
         && !fileName.startsWith('026_')
         && !fileName.startsWith('027_')
+        && !fileName.startsWith('028_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -2831,6 +3078,7 @@ test('migration 021 adds business capabilities and corrects built-in mappings on
         && !fileName.startsWith('025_')
         && !fileName.startsWith('026_')
         && !fileName.startsWith('027_')
+        && !fileName.startsWith('028_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -2912,6 +3160,7 @@ test('migration 022 removes Manager correction processing without changing other
         && !fileName.startsWith('025_')
         && !fileName.startsWith('026_')
         && !fileName.startsWith('027_')
+        && !fileName.startsWith('028_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -3026,7 +3275,10 @@ test('first-Administrator bootstrap is verified, transactional, concurrent-safe,
       authenticatedAt: '2026-09-09T12:00:00.000Z',
     }, { databasePool: bootstrapPool });
     assert.equal(access.applicationUser.status, 'active');
-    assert.deepEqual(access.roles, [{ key: 'administrator', displayName: 'Administrator' }]);
+    assert.equal(access.roles.length, 1);
+    assert.equal(access.roles[0].key, 'administrator');
+    assert.equal(access.roles[0].displayName, 'Administrator');
+    assert.equal(Number.isSafeInteger(access.roles[0].id), true);
     assert.equal(access.permissions.length, 26);
     const state = await bootstrapPool.query(
       `SELECT administrator_user_id, completed_at IS NOT NULL AS completed
@@ -3063,6 +3315,7 @@ test('legacy in-progress correction requests survive through migration 025 witho
         && !fileName.startsWith('025_')
         && !fileName.startsWith('026_')
         && !fileName.startsWith('027_')
+        && !fileName.startsWith('028_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -4642,9 +4895,16 @@ test('correction request claims are user-owned, cross-browser, epoch-protected, 
     secondUser.applicationUser.id
   );
   const secondUserClaimVersion = Number(secondUserClaim.data.request.claimVersion);
+  const secondUserAssignmentId = await currentAssignmentIdForUser(secondUser.applicationUser.id);
   const demotedOwner = await request(
     `/api/admin/users/${secondUser.applicationUser.id}/role`,
-    { method: 'PUT', body: { roleKey: 'manager' } }
+    {
+      method: 'PUT',
+      body: {
+        roleId: await roleIdForKey('manager'),
+        expectedAssignmentId: secondUserAssignmentId,
+      },
+    }
   );
   assert.equal(demotedOwner.response.status, 200, demotedOwner.text);
   let retainedOwner = await pool.query(
@@ -7078,6 +7338,7 @@ test('business endpoints enforce the Administrator, Storekeeper, and Manager cap
     method: 'POST', body: { sourceSku: managerRequestSource.data.fullSku, answers: { kind: 2 } },
   }, 'products.recount');
   await denied('/api/admin/config', {}, 'catalog.view');
+  await denied('/api/admin/roles', {}, 'roles.manage');
   await denied('/api/admin/category', {
     method: 'POST', body: { code: 'RM', name: 'Manager denied category' },
   }, 'catalog.manage');
@@ -7136,9 +7397,13 @@ test('business endpoints enforce the Administrator, Storekeeper, and Manager cap
   assert.deepEqual(invalidDeleteType.data, { error: 'Invalid resource type' });
 });
 
-test('users.manage API administers one built-in role and updates existing sessions immediately', async () => {
+test('users.manage API administers one current application role and updates existing sessions immediately', async () => {
+  if (!authenticatedSession) authenticatedSession = await authenticateApplicationSession('/admin');
   const administratorUserId = authenticatedSession.applicationUser.id;
   await replaceActiveRoleForTest(administratorUserId, 'administrator');
+  const administratorRoleId = await roleIdForKey('administrator');
+  const managerRoleId = await roleIdForKey('manager');
+  const storekeeperRoleId = await roleIdForKey('storekeeper');
 
   const createPendingUser = (suffix) => resolveOrCreateApplicationUser({
     issuer: 'https://user-admin-api.example/realms/amber',
@@ -7164,15 +7429,20 @@ test('users.manage API administers one built-in role and updates existing sessio
 
   const rolesResponse = await request('/api/admin/users/roles');
   assert.equal(rolesResponse.response.status, 200, rolesResponse.text);
-  assert.deepEqual(rolesResponse.data.roles, [
-    { key: 'administrator' },
-    { key: 'manager' },
-    { key: 'storekeeper' },
+  assert.deepEqual(rolesResponse.data.roles.map((role) => role.id), [
+    administratorRoleId, managerRoleId, storekeeperRoleId,
   ]);
+  assert.equal(rolesResponse.data.roles.every((role) => (
+    Number.isSafeInteger(role.id) && role.displayName && role.status === 'active'
+  )), true);
 
+  const administratorAssignmentId = await currentAssignmentIdForUser(administratorUserId);
   for (const [path, method, body] of [
     [`/api/admin/users/${administratorUserId}/disable`, 'POST', {}],
-    [`/api/admin/users/${administratorUserId}/role`, 'PUT', { roleKey: 'manager' }],
+    [`/api/admin/users/${administratorUserId}/role`, 'PUT', {
+      roleId: managerRoleId,
+      expectedAssignmentId: administratorAssignmentId,
+    }],
   ]) {
     const lastAdministratorConflict = await request(path, { method, body });
     assert.equal(lastAdministratorConflict.response.status, 409, lastAdministratorConflict.text);
@@ -7192,17 +7462,22 @@ test('users.manage API administers one built-in role and updates existing sessio
   assert.equal(administratorAfterConflicts.data.permissions.includes('users.manage'), true);
 
   const rejectedUser = await createPendingUser('rejected');
-  await pool.query(
+  const customRole = await pool.query(
     `INSERT INTO roles (role_key, display_name, description, is_system)
-     VALUES ('integration_custom_role', 'Integration custom role', 'Must not be assignable', FALSE)`
+     VALUES ('integration_custom_role', 'Integration custom role', 'Assignable custom role', FALSE)
+     RETURNING id`
   );
-  for (const roleBody of [{}, { roleKey: 'integration_custom_role' }, { roleKey: 'Administrator' }]) {
+  for (const [roleBody, expectedCode] of [
+    [{}, 'INVALID_ROLE_ID'],
+    [{ roleId: 'integration_custom_role' }, 'INVALID_ROLE_ID'],
+    [{ roleId: 99999999 }, 'ROLE_NOT_ASSIGNABLE'],
+  ]) {
     const rejected = await request(`/api/admin/users/${rejectedUser.id}/approve`, {
       method: 'POST',
       body: roleBody,
     });
     assert.equal(rejected.response.status, 400, rejected.text);
-    assert.equal(rejected.data.code, 'ROLE_NOT_ASSIGNABLE');
+    assert.equal(rejected.data.code, expectedCode);
     assert.deepEqual(await assignmentState(rejectedUser.id), [{
       status: 'pending',
       role_key: null,
@@ -7213,12 +7488,18 @@ test('users.manage API administers one built-in role and updates existing sessio
   }
   const missingCsrf = await request(`/api/admin/users/${rejectedUser.id}/approve`, {
     method: 'POST',
-    body: { roleKey: 'manager' },
+    body: { roleId: managerRoleId },
     csrfToken: null,
   });
   assert.equal(missingCsrf.response.status, 403, missingCsrf.text);
   assert.deepEqual(missingCsrf.data, { error: 'Invalid CSRF token' });
   assert.equal((await assignmentState(rejectedUser.id))[0].status, 'pending');
+  const customApproval = await request(`/api/admin/users/${rejectedUser.id}/approve`, {
+    method: 'POST',
+    body: { roleId: Number(customRole.rows[0].id) },
+  });
+  assert.equal(customApproval.response.status, 200, customApproval.text);
+  assert.equal(customApproval.data.user.role.key, 'integration_custom_role');
 
   const deniedUser = await createPendingUser('denied');
   for (const roleKey of ['manager', 'storekeeper']) {
@@ -7229,7 +7510,7 @@ test('users.manage API administers one built-in role and updates existing sessio
     assert.equal(listDenied.data.requiredPermission, 'users.manage');
     const mutationDenied = await request(`/api/admin/users/${deniedUser.id}/approve`, {
       method: 'POST',
-      body: { roleKey: 'storekeeper' },
+      body: { roleId: storekeeperRoleId },
     });
     assert.equal(mutationDenied.response.status, 403, mutationDenied.text);
     assert.equal(mutationDenied.data.code, 'INSUFFICIENT_PERMISSION');
@@ -7247,18 +7528,18 @@ test('users.manage API administers one built-in role and updates existing sessio
   const pendingStorekeeper = await createPendingUser('storekeeper');
   const pendingManager = await createPendingUser('manager');
   const pendingAdministrator = await createPendingUser('administrator');
-  for (const [user, roleKey] of [
-    [pendingStorekeeper, 'storekeeper'],
-    [pendingManager, 'manager'],
-    [pendingAdministrator, 'administrator'],
+  for (const [user, roleKey, roleId] of [
+    [pendingStorekeeper, 'storekeeper', storekeeperRoleId],
+    [pendingManager, 'manager', managerRoleId],
+    [pendingAdministrator, 'administrator', administratorRoleId],
   ]) {
     const approved = await request(`/api/admin/users/${user.id}/approve`, {
       method: 'POST',
-      body: { roleKey },
+      body: { roleId },
     });
     assert.equal(approved.response.status, 200, approved.text);
     assert.equal(approved.data.user.status, 'active');
-    assert.equal(approved.data.user.roleKey, roleKey);
+    assert.equal(approved.data.user.role.key, roleKey);
     const activeAssignments = (await assignmentState(user.id))
       .filter((row) => row.revoked_at === null && row.role_key !== null);
     assert.equal(activeAssignments.length, 1);
@@ -7266,16 +7547,18 @@ test('users.manage API administers one built-in role and updates existing sessio
     assert.equal(Number(activeAssignments[0].assigned_by_user_id), administratorUserId);
   }
 
+  let expectedAssignmentId = await currentAssignmentIdForUser(pendingStorekeeper.id);
   let changed = await request(`/api/admin/users/${pendingStorekeeper.id}/role`, {
-    method: 'PUT', body: { roleKey: 'manager' },
+    method: 'PUT', body: { roleId: managerRoleId, expectedAssignmentId },
   });
   assert.equal(changed.response.status, 200, changed.text);
-  assert.equal(changed.data.user.roleKey, 'manager');
+  assert.equal(changed.data.user.role.key, 'manager');
+  expectedAssignmentId = changed.data.user.currentAssignmentId;
   changed = await request(`/api/admin/users/${pendingStorekeeper.id}/role`, {
-    method: 'PUT', body: { roleKey: 'storekeeper' },
+    method: 'PUT', body: { roleId: storekeeperRoleId, expectedAssignmentId },
   });
   assert.equal(changed.response.status, 200, changed.text);
-  assert.equal(changed.data.user.roleKey, 'storekeeper');
+  assert.equal(changed.data.user.role.key, 'storekeeper');
   const storekeeperHistory = await assignmentState(pendingStorekeeper.id);
   assert.equal(storekeeperHistory.length, 3);
   assert.equal(storekeeperHistory.filter((row) => row.revoked_at === null).length, 1);
@@ -7284,11 +7567,12 @@ test('users.manage API administers one built-in role and updates existing sessio
     (row) => Number(row.revoked_by_user_id) === administratorUserId
   ).length, 2);
 
+  expectedAssignmentId = await currentAssignmentIdForUser(pendingManager.id);
   changed = await request(`/api/admin/users/${pendingManager.id}/role`, {
-    method: 'PUT', body: { roleKey: 'storekeeper' },
+    method: 'PUT', body: { roleId: storekeeperRoleId, expectedAssignmentId },
   });
   assert.equal(changed.response.status, 200, changed.text);
-  assert.equal(changed.data.user.roleKey, 'storekeeper');
+  assert.equal(changed.data.user.role.key, 'storekeeper');
   assert.equal((await assignmentState(pendingManager.id)).filter(
     (row) => row.revoked_at === null
   ).length, 1);
@@ -7306,7 +7590,7 @@ test('users.manage API administers one built-in role and updates existing sessio
   const liveUserId = liveSession.applicationUser.id;
   const approvedLive = await request(`/api/admin/users/${liveUserId}/approve`, {
     method: 'POST',
-    body: { roleKey: 'storekeeper' },
+    body: { roleId: storekeeperRoleId },
     headers: { 'X-Request-ID': 'audit-user-approved' },
   });
   assert.equal(approvedLive.response.status, 200, approvedLive.text);
@@ -7317,7 +7601,10 @@ test('users.manage API administers one built-in role and updates existing sessio
 
   const liveRoleChange = await request(`/api/admin/users/${liveUserId}/role`, {
     method: 'PUT',
-    body: { roleKey: 'manager' },
+    body: {
+      roleId: managerRoleId,
+      expectedAssignmentId: approvedLive.data.user.currentAssignmentId,
+    },
     headers: { 'X-Request-ID': 'audit-user-role-manager' },
   });
   assert.equal(liveRoleChange.response.status, 200, liveRoleChange.text);
@@ -7329,7 +7616,10 @@ test('users.manage API administers one built-in role and updates existing sessio
 
   const noOpRoleChange = await request(`/api/admin/users/${liveUserId}/role`, {
     method: 'PUT',
-    body: { roleKey: 'manager' },
+    body: {
+      roleId: managerRoleId,
+      expectedAssignmentId: liveRoleChange.data.user.currentAssignmentId,
+    },
     headers: { 'X-Request-ID': 'audit-user-role-no-op' },
   });
   assert.equal(noOpRoleChange.response.status, 200, noOpRoleChange.text);
@@ -7354,12 +7644,15 @@ test('users.manage API administers one built-in role and updates existing sessio
 
   const disabledRoleChange = await request(`/api/admin/users/${liveUserId}/role`, {
     method: 'PUT',
-    body: { roleKey: 'storekeeper' },
+    body: {
+      roleId: storekeeperRoleId,
+      expectedAssignmentId: disabled.data.user.currentAssignmentId,
+    },
     headers: { 'X-Request-ID': 'audit-user-role-storekeeper' },
   });
   assert.equal(disabledRoleChange.response.status, 200, disabledRoleChange.text);
   assert.equal(disabledRoleChange.data.user.status, 'disabled');
-  assert.equal(disabledRoleChange.data.user.roleKey, 'storekeeper');
+  assert.equal(disabledRoleChange.data.user.role.key, 'storekeeper');
   const enabled = await request(`/api/admin/users/${liveUserId}/enable`, {
     method: 'POST',
     body: {},
@@ -7367,7 +7660,7 @@ test('users.manage API administers one built-in role and updates existing sessio
   });
   assert.equal(enabled.response.status, 200, enabled.text);
   assert.equal(enabled.data.user.status, 'active');
-  assert.equal(enabled.data.user.roleKey, 'storekeeper');
+  assert.equal(enabled.data.user.role.key, 'storekeeper');
   assert.equal((await request('/api/config', { authentication: liveSession })).response.status, 200);
   assert.equal((await request('/api/admin/prices/ZZ', {
     authentication: liveSession,
@@ -7377,13 +7670,13 @@ test('users.manage API administers one built-in role and updates existing sessio
   assert.equal(list.response.status, 200, list.text);
   const listedLiveUser = list.data.users.find((user) => user.id === liveUserId);
   assert.deepEqual(Object.keys(listedLiveUser).sort(), [
+    'currentAssignmentId',
     'displayName',
-    'hasMultipleBuiltInRoles',
     'id',
     'identityLinked',
     'lastAuthenticatedAt',
     'preferredUsername',
-    'roleKey',
+    'role',
     'status',
   ]);
   assert.equal(listedLiveUser.identityLinked, true);
@@ -7422,8 +7715,16 @@ test('users.manage API administers one built-in role and updates existing sessio
   assert.equal(auditEvents.rows.some((row) => row.request_id === 'audit-user-role-no-op'), false);
   assert.deepEqual(auditEvents.rows[1].details, {
     userStatus: 'active',
-    newRoleKey: 'manager',
-    previousRoleKeys: ['storekeeper'],
+    previousRole: {
+      id: storekeeperRoleId,
+      key: 'storekeeper',
+      displayName: 'Storekeeper',
+    },
+    newRole: {
+      id: managerRoleId,
+      key: 'manager',
+      displayName: 'Manager',
+    },
   });
 
   await pool.query(
@@ -7450,6 +7751,298 @@ test('users.manage API administers one built-in role and updates existing sessio
      WHERE id = $1`,
     [administratorUserId]
   );
+});
+
+test('roles.manage API provides protected Administrator and editable versioned roles', async () => {
+  if (!authenticatedSession) authenticatedSession = await authenticateApplicationSession('/admin/roles');
+  await replaceActiveRoleForTest(authenticatedSession.applicationUser.id, 'administrator');
+
+  const permissionsResponse = await request('/api/admin/roles/permissions');
+  assert.equal(permissionsResponse.response.status, 200, permissionsResponse.text);
+  assert.deepEqual(
+    permissionsResponse.data.permissions
+      .filter((permission) => permission.reserved)
+      .map((permission) => permission.key),
+    ['audit.view', 'roles.manage', 'users.manage']
+  );
+
+  let rolesResponse = await request('/api/admin/roles');
+  assert.equal(rolesResponse.response.status, 200, rolesResponse.text);
+  const administrator = rolesResponse.data.roles.find((role) => role.key === 'administrator');
+  let manager = rolesResponse.data.roles.find((role) => role.key === 'manager');
+  const storekeeper = rolesResponse.data.roles.find((role) => role.key === 'storekeeper');
+  assert.equal(administrator.isProtected, true);
+  assert.equal(manager.isProtected, false);
+  assert.equal(manager.isSystem, true);
+
+  const updatedStorekeeper = await request(`/api/admin/roles/${storekeeper.id}`, {
+    method: 'PATCH',
+    body: {
+      displayName: storekeeper.displayName,
+      description: `${storekeeper.description} (editable)`,
+      expectedVersion: storekeeper.version,
+    },
+  });
+  assert.equal(updatedStorekeeper.response.status, 200, updatedStorekeeper.text);
+  assert.equal(updatedStorekeeper.data.role.version, storekeeper.version + 1);
+
+  for (const [path, method, body] of [
+    [`/api/admin/roles/${administrator.id}`, 'PATCH', {
+      displayName: 'Changed Administrator',
+      description: administrator.description,
+      expectedVersion: administrator.version,
+    }],
+    [`/api/admin/roles/${administrator.id}/permissions`, 'PUT', {
+      permissionKeys: administrator.permissionKeys.filter((key) => key !== 'products.view'),
+      expectedVersion: administrator.version,
+      expectedActiveAssignedUserCount: administrator.activeAssignedUserCount,
+    }],
+    [`/api/admin/roles/${administrator.id}/deactivate`, 'POST', {
+      expectedVersion: administrator.version,
+    }],
+  ]) {
+    const protectedResponse = await request(path, { method, body });
+    assert.equal(protectedResponse.response.status, 409, protectedResponse.text);
+    assert.equal(protectedResponse.data.code, 'ADMINISTRATOR_ROLE_PROTECTED');
+  }
+
+  const managerOriginal = {
+    displayName: manager.displayName,
+    description: manager.description,
+    permissionKeys: manager.permissionKeys,
+  };
+  const concurrentManagerEdits = await Promise.all([
+    request(`/api/admin/roles/${manager.id}`, {
+      method: 'PATCH',
+      body: {
+        displayName: 'Manager concurrent A',
+        description: manager.description,
+        expectedVersion: manager.version,
+      },
+    }),
+    request(`/api/admin/roles/${manager.id}`, {
+      method: 'PATCH',
+      body: {
+        displayName: 'Manager concurrent B',
+        description: manager.description,
+        expectedVersion: manager.version,
+      },
+    }),
+  ]);
+  assert.deepEqual(
+    concurrentManagerEdits.map((result) => result.response.status).sort(),
+    [200, 409]
+  );
+  assert.equal(
+    concurrentManagerEdits.find((result) => result.response.status === 409).data.code,
+    'ROLE_VERSION_CONFLICT'
+  );
+  manager = concurrentManagerEdits.find((result) => result.response.status === 200).data.role;
+
+  const noOpAuditBefore = Number((await pool.query(
+    `SELECT COUNT(*) FROM audit_events
+     WHERE subject_type = 'role' AND subject_id = $1 AND event_key = 'role.updated'`,
+    [String(manager.id)]
+  )).rows[0].count);
+  const managerNoOp = await request(`/api/admin/roles/${manager.id}`, {
+    method: 'PATCH',
+    body: {
+      displayName: manager.displayName,
+      description: manager.description,
+      expectedVersion: manager.version,
+    },
+    headers: { 'X-Request-ID': 'role-update-no-op' },
+  });
+  assert.equal(managerNoOp.response.status, 200, managerNoOp.text);
+  assert.equal(Number((await pool.query(
+    `SELECT COUNT(*) FROM audit_events
+     WHERE subject_type = 'role' AND subject_id = $1 AND event_key = 'role.updated'`,
+    [String(manager.id)]
+  )).rows[0].count), noOpAuditBefore);
+
+  const restoredManager = await request(`/api/admin/roles/${manager.id}`, {
+    method: 'PATCH',
+    body: {
+      displayName: managerOriginal.displayName,
+      description: `${managerOriginal.description} (editable)`,
+      expectedVersion: manager.version,
+    },
+  });
+  assert.equal(restoredManager.response.status, 200, restoredManager.text);
+  manager = restoredManager.data.role;
+  const reservedManagerGrant = await request(`/api/admin/roles/${manager.id}/permissions`, {
+    method: 'PUT',
+    body: {
+      permissionKeys: [...manager.permissionKeys, 'roles.manage'],
+      expectedVersion: manager.version,
+      expectedActiveAssignedUserCount: manager.activeAssignedUserCount,
+    },
+  });
+  assert.equal(reservedManagerGrant.response.status, 400, reservedManagerGrant.text);
+  assert.equal(reservedManagerGrant.data.code, 'RESERVED_PERMISSION');
+
+  const changedManagerPermissions = await request(`/api/admin/roles/${manager.id}/permissions`, {
+    method: 'PUT',
+    body: {
+      permissionKeys: [...manager.permissionKeys, 'corrections.claim'],
+      expectedVersion: manager.version,
+      expectedActiveAssignedUserCount: manager.activeAssignedUserCount,
+    },
+  });
+  assert.equal(changedManagerPermissions.response.status, 200, changedManagerPermissions.text);
+  assert.equal(changedManagerPermissions.data.role.permissionKeys.includes('corrections.claim'), true);
+  manager = changedManagerPermissions.data.role;
+  const restoredManagerPermissions = await request(`/api/admin/roles/${manager.id}/permissions`, {
+    method: 'PUT',
+    body: {
+      permissionKeys: managerOriginal.permissionKeys,
+      expectedVersion: manager.version,
+      expectedActiveAssignedUserCount: manager.activeAssignedUserCount,
+    },
+  });
+  assert.equal(restoredManagerPermissions.response.status, 200, restoredManagerPermissions.text);
+
+  const reservedCreate = await request('/api/admin/roles', {
+    method: 'POST',
+    body: {
+      displayName: 'Forbidden security role',
+      description: 'Must fail',
+      permissionKeys: ['products.view', 'users.manage'],
+    },
+  });
+  assert.equal(reservedCreate.response.status, 400, reservedCreate.text);
+  assert.equal(reservedCreate.data.code, 'RESERVED_PERMISSION');
+
+  const created = await request('/api/admin/roles', {
+    method: 'POST',
+    body: {
+      displayName: 'Custom live access',
+      description: 'Integration custom role',
+      permissionKeys: ['products.view', 'products.decode'],
+    },
+    headers: { 'X-Request-ID': 'role-created' },
+  });
+  assert.equal(created.response.status, 201, created.text);
+  let customRole = created.data.role;
+  assert.equal(customRole.isSystem, false);
+  assert.equal(customRole.isProtected, false);
+
+  const duplicateName = await request('/api/admin/roles', {
+    method: 'POST',
+    body: {
+      displayName: '  CUSTOM LIVE ACCESS  ',
+      description: 'Case-insensitive duplicate',
+      permissionKeys: [],
+    },
+  });
+  assert.equal(duplicateName.response.status, 409, duplicateName.text);
+  assert.equal(duplicateName.data.code, 'ROLE_DISPLAY_NAME_CONFLICT');
+
+  const liveSession = await authenticateIdentitySession({
+    subject: 'custom-role-live-permissions',
+    preferredUsername: 'custom.role.live',
+    displayName: 'Custom Role Live',
+  });
+  const approved = await request(`/api/admin/users/${liveSession.applicationUser.id}/approve`, {
+    method: 'POST',
+    body: { roleId: customRole.id },
+  });
+  assert.equal(approved.response.status, 200, approved.text);
+  assert.equal((await request('/api/config', { authentication: liveSession })).response.status, 200);
+
+  const permissionChange = await request(`/api/admin/roles/${customRole.id}/permissions`, {
+    method: 'PUT',
+    body: {
+      permissionKeys: ['products.decode'],
+      expectedVersion: customRole.version,
+      expectedActiveAssignedUserCount: 1,
+    },
+    headers: { 'X-Request-ID': 'role-permissions-changed' },
+  });
+  assert.equal(permissionChange.response.status, 200, permissionChange.text);
+  customRole = permissionChange.data.role;
+  const permissionRevoked = await request('/api/config', { authentication: liveSession });
+  assert.equal(permissionRevoked.response.status, 403, permissionRevoked.text);
+  assert.equal(permissionRevoked.data.requiredPermission, 'products.view');
+
+  const assignedDeactivation = await request(`/api/admin/roles/${customRole.id}/deactivate`, {
+    method: 'POST', body: { expectedVersion: customRole.version },
+  });
+  assert.equal(assignedDeactivation.response.status, 409, assignedDeactivation.text);
+  assert.equal(assignedDeactivation.data.code, 'ROLE_HAS_CURRENT_ASSIGNMENTS');
+  const disabledUser = await request(`/api/admin/users/${liveSession.applicationUser.id}/disable`, {
+    method: 'POST', body: {},
+  });
+  assert.equal(disabledUser.response.status, 200, disabledUser.text);
+  const disabledAssignedDeactivation = await request(`/api/admin/roles/${customRole.id}/deactivate`, {
+    method: 'POST', body: { expectedVersion: customRole.version },
+  });
+  assert.equal(disabledAssignedDeactivation.response.status, 409, disabledAssignedDeactivation.text);
+
+  const reassigned = await request(`/api/admin/users/${liveSession.applicationUser.id}/role`, {
+    method: 'PUT',
+    body: {
+      roleId: await roleIdForKey('storekeeper'),
+      expectedAssignmentId: disabledUser.data.user.currentAssignmentId,
+    },
+  });
+  assert.equal(reassigned.response.status, 200, reassigned.text);
+  const deactivated = await request(`/api/admin/roles/${customRole.id}/deactivate`, {
+    method: 'POST', body: { expectedVersion: customRole.version },
+    headers: { 'X-Request-ID': 'role-deactivated' },
+  });
+  assert.equal(deactivated.response.status, 200, deactivated.text);
+  const reactivated = await request(`/api/admin/roles/${customRole.id}/reactivate`, {
+    method: 'POST', body: { expectedVersion: deactivated.data.role.version },
+    headers: { 'X-Request-ID': 'role-reactivated' },
+  });
+  assert.equal(reactivated.response.status, 200, reactivated.text);
+  customRole = reactivated.data.role;
+
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION fail_test_role_audit()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      RAISE EXCEPTION 'forced role audit failure';
+    END;
+    $$;
+    CREATE TRIGGER fail_test_role_audit
+    BEFORE INSERT ON audit_events
+    FOR EACH ROW EXECUTE FUNCTION fail_test_role_audit();
+  `);
+  const failedUpdate = await request(`/api/admin/roles/${customRole.id}`, {
+    method: 'PATCH',
+    body: {
+      displayName: 'Must roll back',
+      description: customRole.description,
+      expectedVersion: customRole.version,
+    },
+  });
+  assert.equal(failedUpdate.response.status, 500, failedUpdate.text);
+  await pool.query('DROP TRIGGER fail_test_role_audit ON audit_events');
+  const afterFailedUpdate = await pool.query(
+    'SELECT display_name, version FROM roles WHERE id = $1',
+    [customRole.id]
+  );
+  assert.deepEqual(afterFailedUpdate.rows, [{
+    display_name: customRole.displayName,
+    version: String(customRole.version),
+  }]);
+
+  const roleAudit = await pool.query(
+    `SELECT event_key, request_id, details
+     FROM audit_events WHERE subject_type = 'role' AND subject_id = $1
+     ORDER BY id`,
+    [String(customRole.id)]
+  );
+  assert.deepEqual(roleAudit.rows.map((row) => row.event_key), [
+    'role.created',
+    'role.permissions_changed',
+    'role.deactivated',
+    'role.reactivated',
+  ]);
+  assert.equal(roleAudit.rows[1].details.removedPermissionKeys[0], 'products.view');
+  assert.equal(roleAudit.rows.some((row) => row.request_id === 'role-update-no-op'), false);
 });
 
 test('a failed audit insert rolls back the entire user-administration mutation', async () => {
@@ -7493,7 +8086,7 @@ test('a failed audit insert rolls back the entire user-administration mutation',
     `);
 
     await assert.rejects(
-      approveApplicationUser(pending.id, 'manager', {
+      approveApplicationUser(pending.id, await roleIdForKey('manager', auditPool), {
         actorUserId: administrator.id,
         requestId: 'audit-rollback-request',
         databasePool: auditPool,
@@ -7538,16 +8131,22 @@ test('last-Administrator protection is transactional and concurrency-safe', asyn
       authenticatedAt: '2026-09-09T10:00:00.000Z',
     }, { databasePool: safetyPool });
     await bootstrapAdministrator(first.id, { databasePool: safetyPool });
+    const administratorRoleId = await roleIdForKey('administrator', safetyPool);
+    const managerRoleId = await roleIdForKey('manager', safetyPool);
+    const storekeeperRoleId = await roleIdForKey('storekeeper', safetyPool);
+    const firstAssignmentId = await currentAssignmentIdForUser(first.id, safetyPool);
 
     for (const operation of [
       () => disableApplicationUser(first.id, {
         actorUserId: first.id, databasePool: safetyPool,
       }),
-      () => changeApplicationUserRole(first.id, 'manager', {
+      () => changeApplicationUserRole(first.id, managerRoleId, {
         actorUserId: first.id, databasePool: safetyPool,
+        expectedAssignmentId: firstAssignmentId,
       }),
-      () => changeApplicationUserRole(first.id, 'storekeeper', {
+      () => changeApplicationUserRole(first.id, storekeeperRoleId, {
         actorUserId: first.id, databasePool: safetyPool,
+        expectedAssignmentId: firstAssignmentId,
       }),
     ]) {
       await assert.rejects(operation, (error) => (
@@ -7571,16 +8170,18 @@ test('last-Administrator protection is transactional and concurrency-safe', asyn
       preferred_username: 'second.administrator',
       authenticatedAt: '2026-09-09T10:01:00.000Z',
     }, { databasePool: safetyPool });
-    await approveApplicationUser(second.id, 'administrator', {
+    await approveApplicationUser(second.id, administratorRoleId, {
       actorUserId: first.id, databasePool: safetyPool,
     });
 
-    const selfDemoted = await changeApplicationUserRole(first.id, 'manager', {
+    const selfDemoted = await changeApplicationUserRole(first.id, managerRoleId, {
       actorUserId: first.id, databasePool: safetyPool,
+      expectedAssignmentId: firstAssignmentId,
     });
-    assert.equal(selfDemoted.roleKey, 'manager');
-    await changeApplicationUserRole(first.id, 'administrator', {
+    assert.equal(selfDemoted.role.key, 'manager');
+    await changeApplicationUserRole(first.id, administratorRoleId, {
       actorUserId: second.id, databasePool: safetyPool,
+      expectedAssignmentId: selfDemoted.currentAssignmentId,
     });
     const selfDisabled = await disableApplicationUser(second.id, {
       actorUserId: second.id, databasePool: safetyPool,
@@ -7589,6 +8190,53 @@ test('last-Administrator protection is transactional and concurrency-safe', asyn
     await enableApplicationUser(second.id, undefined, {
       actorUserId: first.id, databasePool: safetyPool,
     });
+
+    const assignmentRaceUser = await resolveOrCreateApplicationUser({
+      issuer: 'https://user-admin-safety.example/realms/amber',
+      sub: 'assignment-race-user',
+      preferred_username: 'assignment.race',
+      authenticatedAt: '2026-09-09T10:02:00.000Z',
+    }, { databasePool: safetyPool });
+    await approveApplicationUser(assignmentRaceUser.id, managerRoleId, {
+      actorUserId: first.id, databasePool: safetyPool,
+    });
+    const assignmentRaceExpected = await currentAssignmentIdForUser(
+      assignmentRaceUser.id,
+      safetyPool
+    );
+    const assignmentRace = await Promise.allSettled([
+      changeApplicationUserRole(assignmentRaceUser.id, storekeeperRoleId, {
+        actorUserId: first.id,
+        databasePool: safetyPool,
+        expectedAssignmentId: assignmentRaceExpected,
+      }),
+      changeApplicationUserRole(assignmentRaceUser.id, administratorRoleId, {
+        actorUserId: first.id,
+        databasePool: safetyPool,
+        expectedAssignmentId: assignmentRaceExpected,
+      }),
+    ]);
+    assert.deepEqual(
+      assignmentRace.map((result) => result.status).sort(),
+      ['fulfilled', 'rejected']
+    );
+    assert.equal(
+      assignmentRace.find((result) => result.status === 'rejected').reason.code,
+      'APPLICATION_USER_ASSIGNMENT_CONFLICT'
+    );
+    assert.equal(Number((await safetyPool.query(
+      `SELECT COUNT(*) FROM user_role_assignments
+       WHERE application_user_id = $1 AND revoked_at IS NULL`,
+      [assignmentRaceUser.id]
+    )).rows[0].count), 1);
+    const raceWinner = assignmentRace.find((result) => result.status === 'fulfilled').value;
+    if (raceWinner.role.key === 'administrator') {
+      await changeApplicationUserRole(assignmentRaceUser.id, managerRoleId, {
+        actorUserId: first.id,
+        databasePool: safetyPool,
+        expectedAssignmentId: raceWinner.currentAssignmentId,
+      });
+    }
 
     await safetyPool.query(`
       CREATE OR REPLACE FUNCTION delay_test_application_user_disable()

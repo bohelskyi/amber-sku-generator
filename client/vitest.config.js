@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: 'jsdom',
-    include: ['test/auth.test.jsx'],
+    include: ['test/*.test.jsx'],
     restoreMocks: true,
   },
 });

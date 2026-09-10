@@ -24,9 +24,9 @@ Local application users and exact immutable `issuer` + `sub` identity links are 
 
 Stable capability keys guard every business endpoint after authentication, active-user resolution, and method-aware CSRF enforcement. `/api/auth/me` returns safe identity/user data, roles, effective permission keys, and the in-memory synchronizer CSRF token. React navigation and controls use only those effective keys; server-side `403` enforcement remains authoritative.
 
-The three built-in roles are Administrator, Manager, and Storekeeper. Administrator has full access, `users.manage`, and the explicitly Administrator-only `audit.view`; Manager has read-only pricing, repricing preparation, and correction view/create/reject without claim/complete/force-release; Storekeeper retains product create/archive/direct recount and correction claim/complete processing without catalog/pricing or final administrative actions. All three can view existing exports; export creation/confirmation is Administrator-only.
+The three system roles are Administrator, Manager, and Storekeeper. Administrator is permanent, immutable, and always receives every defined permission. Manager and Storekeeper retain their initial mappings but are editable through role administration like custom roles. `users.manage`, `roles.manage`, and `audit.view` are reserved to Administrator. Exactly one current role may be assigned to each user.
 
-Administrators can approve pending users with exactly one built-in role, replace an assigned role while retaining assignment history, disable, and re-enable users. Those four durable operations, product creation/archive/recount, correction-request lifecycle mutations, repricing lifecycle boundaries, export snapshot creation/confirmation, and SKU schema publication write immutable audit events in their business transaction, attributed by local application-user ID and an event-time display-name/username snapshot. Product, correction, repricing, export, and schema-publication records retain the applicable nullable local-user actor foreign keys. Correction requests record their creator and use local application-user ownership plus a monotonic claim epoch; retained browser capability tokens authorize only one-time adoption of legacy token-only claims. The one-use offline first-Administrator bootstrap and concurrency-safe last-Administrator protection are implemented. Custom roles, invitations, and the audit viewer remain pending.
+Administrators can create and edit custom roles, edit Manager and Storekeeper, assign any active role, and approve, disable, or re-enable users while retaining assignment history. Role and user mutations share one advisory-lock boundary, optimistic role/assignment conflict detection, last-Administrator protection, and transaction-coupled durable audit. Product, correction, repricing, export, and schema-publication records retain the applicable nullable local-user actor foreign keys. Correction requests record their creator and use local application-user ownership plus a monotonic claim epoch; retained browser capability tokens authorize only one-time adoption of legacy token-only claims. The one-use offline first-Administrator bootstrap remains implemented. Invitations and the audit viewer remain pending.
 
 See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permission model.
 
@@ -59,23 +59,23 @@ See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permi
 
 | Domain | Current module responsibility | Detail |
 | --- | --- | --- |
-| Authentication and access | OIDC identity, PostgreSQL sessions, local users, built-in roles, permissions, AuthGate states, user administration | [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) |
+| Authentication and access | OIDC identity, PostgreSQL sessions, local users, system/custom roles, permissions, AuthGate states, user and role administration | [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) |
 | SKU and catalog | Draft catalog, immutable schema publication, SKU encoding/decoding, permanent reservation, product preview/save | [`docs/SKU_CATALOG.md`](docs/SKU_CATALOG.md) |
 | Pricing | Scenario selection, matrices, modifiers, manual pricing, marketing rounding, NBU cache | [`docs/PRICING.md`](docs/PRICING.md) |
 | Recount and corrections | Target-schema transitions, correction request queue, application-user claims, legacy-token adoption, and completion | [`docs/RECOUNT_CORRECTIONS.md`](docs/RECOUNT_CORRECTIONS.md) |
 | Repricing | Scenario/global previews, drafts, explicit resolutions, atomic apply and rollback | [`docs/REPRICING.md`](docs/REPRICING.md) |
 | Exports | Immutable snapshots, range-bound idempotency, safe CSV, monotonic confirmation cursor | [`docs/EXPORTS.md`](docs/EXPORTS.md) |
-| Database | PostgreSQL schema, transactional/checksummed forward migrations `000`–`027`, upgrade/concurrency protections | [`docs/DATABASE_MIGRATIONS.md`](docs/DATABASE_MIGRATIONS.md) |
+| Database | PostgreSQL schema, transactional/checksummed forward migrations `000`–`028`, upgrade/concurrency protections | [`docs/DATABASE_MIGRATIONS.md`](docs/DATABASE_MIGRATIONS.md) |
 | Operations | Deployment topology, health/readiness, logs, shutdown, backup/restore, SQLite import | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) |
 
 ## Current status
 
-- PostgreSQL architecture and migrations `000`–`027` are implemented and immutable history.
+- PostgreSQL architecture and migrations `000`–`028` are implemented and immutable history.
 - Authoritative product preview/save/decode, catalog schema versioning, pricing, recount/corrections, scenario/global repricing, and export snapshots are implemented with focused unit and PostgreSQL integration coverage.
 - OIDC authentication, PostgreSQL sessions, active-user access gating, application-owned RBAC, user management, first-admin bootstrap, permission-aware UI, and live access-state transitions are implemented.
 - Server-side authorization and CSRF remain authoritative. `APP_ACCESS_PENDING`/`APP_ACCESS_DISABLED` move the client to the matching AuthGate state; `INSUFFICIENT_PERMISSION` preserves the active session.
 - Operational mutation logs use the resolved local `application_users.id` where available and remain distinct from durable audit events. Immutable, transaction-coupled `audit_events` cover application-user administration, product create/archive/recount, correction-request lifecycle changes, repricing draft creation/discard plus apply/rollback, export snapshot creation/confirmation, and SKU schema publication. Repricing drafts/batches, export snapshots, and published schema versions retain nullable local-user actor attribution; audit coverage for other domains remains pending.
-- Custom roles, invitations, and an audit viewer are not implemented.
+- Custom-role and role-permission administration are implemented. Invitations and an audit viewer are not implemented.
 - Live catalog contents and production data quality cannot be inferred from seed defaults or the repository and require operational verification.
 
 ## Testing and operations summary

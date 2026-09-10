@@ -132,7 +132,8 @@ async function getApplicationAccess(identity, { databasePool = pool } = {}) {
   assertExternalIdentity(identity);
   const result = await databasePool.query(
     `SELECT u.id, u.status, u.preferred_username, u.display_name, u.given_name,
-            u.family_name, u.email, r.role_key, r.display_name AS role_display_name,
+            u.family_name, u.email, r.id AS role_id, r.role_key,
+            r.display_name AS role_display_name,
             p.permission_key
      FROM application_external_identities e
      JOIN application_users u ON u.id = e.application_user_id
@@ -153,6 +154,7 @@ async function getApplicationAccess(identity, { databasePool = pool } = {}) {
   for (const row of result.rows) {
     if (row.role_key && !rolesByKey.has(row.role_key)) {
       rolesByKey.set(row.role_key, {
+        id: Number(row.role_id),
         key: row.role_key,
         displayName: row.role_display_name,
       });

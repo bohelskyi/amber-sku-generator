@@ -35,7 +35,7 @@ Roles, permissions, and status are resolved from PostgreSQL on every business re
 
 ## Permission model
 
-Permission keys are stable capabilities stored in `permissions` and mapped to roles through `role_permissions`. Every application user has at most one active assignment per built-in role; current administration maintains exactly one active built-in role for managed users and revokes rather than deletes assignment history.
+Permission keys are stable capabilities stored in `permissions` and mapped to roles through `role_permissions`. Every application user has at most one unrevoked role assignment across all roles. Administration revokes rather than deletes assignment history.
 
 | Area | Permission keys |
 | --- | --- |
@@ -47,13 +47,15 @@ Permission keys are stable capabilities stored in `permissions` and mapped to ro
 | Access administration | `users.manage`, `roles.manage` |
 | Audit | `audit.view` |
 
-Current built-in mappings after migration `023`:
+Initial system-role mappings after migration `023`:
 
 | Role | Effective scope |
 | --- | --- |
 | Administrator | Every defined permission, including the explicitly Administrator-only `audit.view`. Full product, catalog, pricing, correction, repricing, export, user, role-management, and future audit-view access. |
-| Manager | Product view/decode, history, correction view/create/reject, repricing view/prepare, pricing view, and export view. No product creation/archive/direct recount, correction claim/complete/force-release, catalog access, pricing edits, repricing apply/rollback, export create/confirm, or user/role administration. |
-| Storekeeper | Product view/decode/create/archive/direct recount, history, correction view/create/claim/complete/reject, repricing view/prepare, and export view. No catalog/pricing access, correction force-release, repricing apply/rollback, export create/confirm, or user/role administration. |
+| Manager | Initially product view/decode, history, correction view/create/reject, repricing view/prepare, pricing view, and export view. Its name, description, permissions, and status are Administrator-editable. |
+| Storekeeper | Initially product view/decode/create/archive/direct recount, history, correction view/create/claim/complete/reject, repricing view/prepare, and export view. Its name, description, permissions, and status are Administrator-editable. |
+
+The built-in Administrator role is permanent and immutable and automatically receives every permission inserted into `permissions`. It cannot be renamed, disabled, deleted, or permission-edited. Manager, Storekeeper, and custom roles retain immutable `role_key` and `is_system` identity fields but otherwise use the same editable lifecycle. Roles are never hard-deleted. `users.manage`, `roles.manage`, and `audit.view` are reserved to Administrator and database constraints reject mappings to any other role.
 
 The permission-aware client uses only the effective keys from `/api/auth/me`, never role-name checks, to hide unavailable controls. Manager pricing uses the published product catalog projection to select a category and the category pricing endpoint to render matrices/modifiers read-only; this does not grant `catalog.view`.
 
@@ -69,9 +71,15 @@ There is no HTTP bootstrap route, automatic Administrator assignment, or reopeni
 
 ## User administration
 
-All `/api/admin/users` operations require `users.manage`. Administrators can list safe OIDC-synchronized profile/status fields and assignable built-in roles, approve a pending user with one role, replace an active or disabled user's role, disable an active user, and re-enable a disabled user with its retained or selected role.
+All `/api/admin/users` operations require `users.manage`. Administrators can list safe OIDC-synchronized profile/status fields and active assignable roles, approve a pending user with one numeric role ID, replace an active or disabled user's role, disable an active user, and re-enable a disabled user with its retained or selected role. Replacements require the expected current assignment ID and preserve revoked assignment history. Disabled users retain their role.
 
-Issuer and subject are neither edited nor returned by these administration endpoints. Mutations use one transaction-scoped advisory lock. Disabling or demoting an Administrator rechecks active Administrator count under that lock and returns `409 LAST_ADMINISTRATOR_REQUIRED` if none would remain, including concurrent or self-removal attempts.
+Issuer and subject are neither edited nor returned by these administration endpoints. Mutations use one transaction-scoped advisory lock and revalidate the actor's active state and permission after acquiring it. Disabling or demoting an Administrator rechecks active Administrator count under that lock and returns `409 LAST_ADMINISTRATOR_REQUIRED` if none would remain, including concurrent or self-removal attempts. Stale role replacement returns a stable assignment conflict.
+
+## Role administration
+
+All role-definition operations require `roles.manage`, which is reserved to Administrator. Administrators can list roles and the fixed permission catalog, create custom roles, edit Manager/Storekeeper/custom role metadata and permission sets, and deactivate/reactivate unassigned editable roles. Role updates require `expectedVersion`; stale concurrent changes return `409 ROLE_VERSION_CONFLICT`. A role with any current assignment, including a disabled user's retained assignment, cannot be deactivated.
+
+Permission replacement is atomic and affects assigned active users on their next business request because effective permissions are always re-read from PostgreSQL. Role create/update/permission/deactivate/reactivate successes are durably audited in the same transaction. Failures and no-ops do not emit success events.
 
 Successful approve, role-change, disable, and enable operations append one immutable `audit_events` row inside the same database transaction. Attribution uses `application_users.id`, the request ID, and a minimal event-time snapshot containing display name and preferred username; historical rendering must not depend on the actor's current OIDC-synchronized profile. Existing `user_role_assignments.assigned_by` and `revoked_by` history is preserved. Failed operations and same-role no-ops do not write success events, and an audit insert failure rolls back the user mutation.
 
@@ -88,6 +96,6 @@ Administrator has no implicit bypass for another user's ordinary claim. Only the
 Application authentication, local users, built-in RBAC, user administration, the durable audit foundation, product create/archive/recount, repricing, export snapshot, and SKU schema publication attribution, permission-aware UI, and live access-state handling are implemented. The following remain intentionally pending:
 
 - durable audit coverage outside application-user administration, product create/archive/recount, correction-request lifecycle events, repricing draft creation/discard plus apply/rollback, export snapshot creation/confirmation, and SKU schema publication, plus the Administrator-only audit viewer;
-- invitations and custom-role management.
+- invitations.
 
 Do not infer actor identity from OIDC `sub` or from a correction claim token. See [`RECOUNT_CORRECTIONS.md`](RECOUNT_CORRECTIONS.md) for current ownership semantics.

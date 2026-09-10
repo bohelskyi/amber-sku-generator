@@ -8,7 +8,7 @@ The legacy direct CSV endpoint remains disabled with `410`. The supported workfl
 2. download its stored CSV;
 3. explicitly confirm it.
 
-`exports.view` permits export status and existing snapshot download. `exports.create` controls both snapshot creation and confirmation. All built-in roles currently have view; only Administrator has create/confirm.
+`exports.view` permits export status and existing snapshot download. `exports.create` controls both snapshot creation and confirmation. Initial system-role mappings give all three roles view access and only Administrator create/confirm access; Manager and Storekeeper permissions can later be changed through role administration.
 
 ## Range and row semantics
 

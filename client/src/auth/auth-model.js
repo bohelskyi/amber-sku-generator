@@ -68,9 +68,12 @@ export function normalizeCurrentSession(data) {
 
   const roles = Array.isArray(data.roles)
     ? data.roles.flatMap((role) => {
+        const id = Number(role?.id);
         const key = optionalString(role?.key);
         const displayName = optionalString(role?.displayName);
-        return key && displayName ? [{ key, displayName }] : [];
+        return Number.isSafeInteger(id) && id > 0 && key && displayName
+          ? [{ id, key, displayName }]
+          : [];
       })
     : [];
   const permissions = Array.isArray(data.permissions)

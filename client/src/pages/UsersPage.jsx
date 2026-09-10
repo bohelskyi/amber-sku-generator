@@ -50,14 +50,14 @@ export default function UsersPage() {
     const nextRoles = Array.isArray(rolesResponse.data?.roles)
       ? rolesResponse.data.roles
       : [];
-    const availableRoleKeys = new Set(nextRoles.map((role) => role.key));
+    const availableRoleIds = new Set(nextRoles.map((role) => String(role.id)));
     setUsers(nextUsers);
     setRoles(nextRoles);
     setRoleSelections((current) => Object.fromEntries(nextUsers.map((user) => {
       const currentRole = current[user.id];
-      const selectedRole = availableRoleKeys.has(currentRole)
+      const selectedRole = availableRoleIds.has(currentRole)
         ? currentRole
-        : (availableRoleKeys.has(user.roleKey) ? user.roleKey : '');
+        : (availableRoleIds.has(String(user.role?.id)) ? String(user.role.id) : '');
       return [user.id, selectedRole];
     })));
   }, []);
@@ -116,7 +116,7 @@ export default function UsersPage() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-700">Доступ</p>
             <h1 className="mt-1 text-2xl font-semibold text-slate-900">Користувачі застосунку</h1>
-            <p className="mt-1 text-sm text-slate-500">Підтвердження доступу та призначення вбудованих ролей.</p>
+            <p className="mt-1 text-sm text-slate-500">Підтвердження доступу та призначення активних ролей.</p>
           </div>
           <UserRoundCog size={32} className="text-amber-600" aria-hidden="true" />
         </header>
@@ -179,12 +179,9 @@ export default function UsersPage() {
                           >
                             <option value="" disabled>Оберіть роль</option>
                             {roles.map((role) => (
-                              <option key={role.key} value={role.key}>{getUserRoleLabel(role.key)}</option>
+                              <option key={role.id} value={role.id}>{getUserRoleLabel(role)}</option>
                             ))}
                           </select>
-                          {user.hasMultipleBuiltInRoles && (
-                            <div className="mt-1 text-xs text-rose-700">Призначено кілька ролей — виберіть одну.</div>
-                          )}
                         </td>
                         <td className="table-cell">
                           <div className="flex flex-wrap justify-end gap-2">
@@ -196,14 +193,14 @@ export default function UsersPage() {
                                 disabled={busy || !selectedRole}
                                 onClick={() => void runAction(
                                   user,
-                                  () => api.post(`/admin/users/${user.id}/approve`, { roleKey: selectedRole }),
+                                  () => api.post(`/admin/users/${user.id}/approve`, { roleId: Number(selectedRole) }),
                                   `Доступ для ${name} підтверджено.`
                                 )}
                               >
                                 <UserCheck size={15} aria-hidden="true" />Підтвердити
                               </button>
                             )}
-                            {user.status !== 'pending' && selectedRole !== user.roleKey && (
+                            {user.status !== 'pending' && Number(selectedRole) !== user.role?.id && (
                               <button
                                 type="button"
                                 className="btn btn-outline btn-compact-md gap-2"
@@ -211,7 +208,10 @@ export default function UsersPage() {
                                 disabled={busy || !selectedRole}
                                 onClick={() => void runAction(
                                   user,
-                                  () => api.put(`/admin/users/${user.id}/role`, { roleKey: selectedRole }),
+                                  () => api.put(`/admin/users/${user.id}/role`, {
+                                    roleId: Number(selectedRole),
+                                    expectedAssignmentId: user.currentAssignmentId,
+                                  }),
                                   `Роль для ${name} оновлено.`
                                 )}
                               >
@@ -241,7 +241,10 @@ export default function UsersPage() {
                                 disabled={busy || !selectedRole}
                                 onClick={() => void runAction(
                                   user,
-                                  () => api.post(`/admin/users/${user.id}/enable`, { roleKey: selectedRole }),
+                                  () => api.post(`/admin/users/${user.id}/enable`, {
+                                    roleId: Number(selectedRole),
+                                    expectedAssignmentId: user.currentAssignmentId,
+                                  }),
                                   `Доступ для ${name} увімкнено.`
                                 )}
                               >

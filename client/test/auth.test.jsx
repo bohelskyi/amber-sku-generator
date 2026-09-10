@@ -27,7 +27,6 @@ import CorrectionRequestsPage from '../src/pages/CorrectionRequestsPage.jsx';
 import { api, createApiClient } from '../src/lib/api.js';
 import {
   APPLICATION_USER_STATUS_LABELS,
-  USER_ROLE_LABELS,
 } from '../src/lib/user-management.js';
 import UsersPage from '../src/pages/UsersPage.jsx';
 
@@ -53,7 +52,7 @@ const currentSession = {
     familyName: 'User',
     email: 'amber.user@example.test',
   },
-  roles: [{ key: 'administrator', displayName: 'Administrator' }],
+  roles: [{ id: 1, key: 'administrator', displayName: 'Administrator' }],
   permissions: ['products.view', 'users.manage'],
   csrfToken: 'in-memory-csrf-token',
 };
@@ -495,8 +494,8 @@ describe('application-user administration UI', () => {
       displayName: 'Pending User',
       preferredUsername: 'pending.user',
       lastAuthenticatedAt: null,
-      roleKey: null,
-      hasMultipleBuiltInRoles: false,
+      currentAssignmentId: null,
+      role: null,
     },
     {
       id: 102,
@@ -504,8 +503,8 @@ describe('application-user administration UI', () => {
       displayName: 'Active User',
       preferredUsername: 'active.user',
       lastAuthenticatedAt: '2026-09-09T10:00:00.000Z',
-      roleKey: 'storekeeper',
-      hasMultipleBuiltInRoles: false,
+      currentAssignmentId: 202,
+      role: { id: 3, key: 'storekeeper', displayName: 'Комірниця', isSystem: true, status: 'active' },
     },
     {
       id: 103,
@@ -513,14 +512,15 @@ describe('application-user administration UI', () => {
       displayName: 'Disabled User',
       preferredUsername: 'disabled.user',
       lastAuthenticatedAt: '2026-09-08T10:00:00.000Z',
-      roleKey: 'manager',
-      hasMultipleBuiltInRoles: false,
+      currentAssignmentId: 203,
+      role: { id: 2, key: 'manager', displayName: 'Керівник', isSystem: true, status: 'active' },
     },
   ];
   const roles = [
-    { key: 'administrator' },
-    { key: 'manager' },
-    { key: 'storekeeper' },
+    { id: 1, key: 'administrator', displayName: 'Адміністратор', isSystem: true, status: 'active' },
+    { id: 2, key: 'manager', displayName: 'Керівник', isSystem: true, status: 'active' },
+    { id: 3, key: 'storekeeper', displayName: 'Комірниця', isSystem: true, status: 'active' },
+    { id: 4, key: 'custom_sales', displayName: 'Продажі', isSystem: false, status: 'active' },
   ];
 
   function authValue(permissions = ['users.manage']) {
@@ -578,38 +578,38 @@ describe('application-user administration UI', () => {
     for (const label of Object.values(APPLICATION_USER_STATUS_LABELS)) {
       expect(screen.getByText(label)).toBeTruthy();
     }
-    for (const label of Object.values(USER_ROLE_LABELS)) {
+    for (const label of roles.map((role) => role.displayName)) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Роль для Pending User' }), {
-      target: { value: 'manager' },
+      target: { value: '2' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Підтвердити Pending User' }));
     await waitFor(() => expect(post).toHaveBeenCalledWith(
       '/admin/users/101/approve',
-      { roleKey: 'manager' }
+      { roleId: 2 }
     ));
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Роль для Active User' }), {
-      target: { value: 'manager' },
+      target: { value: '2' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Змінити роль для Active User' }));
     await waitFor(() => expect(put).toHaveBeenCalledWith(
       '/admin/users/102/role',
-      { roleKey: 'manager' }
+      { roleId: 2, expectedAssignmentId: 202 }
     ));
 
     fireEvent.click(screen.getByRole('button', { name: 'Вимкнути доступ для Active User' }));
     await waitFor(() => expect(post).toHaveBeenCalledWith('/admin/users/102/disable', {}));
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Роль для Disabled User' }), {
-      target: { value: 'storekeeper' },
+      target: { value: '3' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Увімкнути доступ для Disabled User' }));
     await waitFor(() => expect(post).toHaveBeenCalledWith(
       '/admin/users/103/enable',
-      { roleKey: 'storekeeper' }
+      { roleId: 3, expectedAssignmentId: 203 }
     ));
   });
 
@@ -619,7 +619,8 @@ describe('application-user administration UI', () => {
       id: 42,
       displayName: 'Current Administrator',
       preferredUsername: 'current.admin',
-      roleKey: 'administrator',
+      currentAssignmentId: 242,
+      role: { id: 1, key: 'administrator', displayName: 'Адміністратор', isSystem: true, status: 'active' },
     };
     vi.spyOn(api, 'get').mockImplementation(async (url) => response(
       url === '/admin/users' ? { users: [selfUser] } : { roles }
@@ -635,7 +636,7 @@ describe('application-user administration UI', () => {
 
     await screen.findByText('Current Administrator');
     fireEvent.change(screen.getByRole('combobox', { name: 'Роль для Current Administrator' }), {
-      target: { value: 'manager' },
+      target: { value: '2' },
     });
     fireEvent.click(screen.getByRole('button', {
       name: 'Змінити роль для Current Administrator',
@@ -643,7 +644,7 @@ describe('application-user administration UI', () => {
 
     await waitFor(() => expect(put).toHaveBeenCalledWith(
       '/admin/users/42/role',
-      { roleKey: 'manager' }
+      { roleId: 2, expectedAssignmentId: 242 }
     ));
     await waitFor(() => expect(auth.refresh).toHaveBeenCalledTimes(1));
     expect(api.get).toHaveBeenCalledTimes(2);
