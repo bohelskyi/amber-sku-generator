@@ -65,16 +65,16 @@ See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permi
 | Recount and corrections | Target-schema transitions, correction request queue, application-user claims, legacy-token adoption, and completion | [`docs/RECOUNT_CORRECTIONS.md`](docs/RECOUNT_CORRECTIONS.md) |
 | Repricing | Scenario/global previews, drafts, explicit resolutions, atomic apply and rollback | [`docs/REPRICING.md`](docs/REPRICING.md) |
 | Exports | Immutable snapshots, range-bound idempotency, safe CSV, monotonic confirmation cursor | [`docs/EXPORTS.md`](docs/EXPORTS.md) |
-| Database | PostgreSQL schema, transactional/checksummed forward migrations `000`–`025`, upgrade/concurrency protections | [`docs/DATABASE_MIGRATIONS.md`](docs/DATABASE_MIGRATIONS.md) |
+| Database | PostgreSQL schema, transactional/checksummed forward migrations `000`–`026`, upgrade/concurrency protections | [`docs/DATABASE_MIGRATIONS.md`](docs/DATABASE_MIGRATIONS.md) |
 | Operations | Deployment topology, health/readiness, logs, shutdown, backup/restore, SQLite import | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) |
 
 ## Current status
 
-- PostgreSQL architecture and migrations `000`–`025` are implemented and immutable history.
+- PostgreSQL architecture and migrations `000`–`026` are implemented and immutable history.
 - Authoritative product preview/save/decode, catalog schema versioning, pricing, recount/corrections, scenario/global repricing, and export snapshots are implemented with focused unit and PostgreSQL integration coverage.
 - OIDC authentication, PostgreSQL sessions, active-user access gating, application-owned RBAC, user management, first-admin bootstrap, permission-aware UI, and live access-state transitions are implemented.
 - Server-side authorization and CSRF remain authoritative. `APP_ACCESS_PENDING`/`APP_ACCESS_DISABLED` move the client to the matching AuthGate state; `INSUFFICIENT_PERMISSION` preserves the active session.
-- Operational mutation logs use the resolved local `application_users.id` where available and remain distinct from durable audit events. Immutable, transaction-coupled `audit_events` cover application-user administration, product create/archive/recount, and correction-request create/claim/release/force-release/reject/reopen/complete lifecycle changes; audit coverage for other domains remains pending.
+- Operational mutation logs use the resolved local `application_users.id` where available and remain distinct from durable audit events. Immutable, transaction-coupled `audit_events` cover application-user administration, product create/archive/recount, correction-request lifecycle changes, and repricing draft creation/discard plus apply/rollback. Repricing drafts and batches retain nullable local-user actor attribution; audit coverage for other domains remains pending.
 - Custom roles, invitations, and an audit viewer are not implemented.
 - Live catalog contents and production data quality cannot be inferred from seed defaults or the repository and require operational verification.
 

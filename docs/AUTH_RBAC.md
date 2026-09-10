@@ -85,9 +85,9 @@ Administrator has no implicit bypass for another user's ordinary claim. Only the
 
 ## Deferred authorization work
 
-Application authentication, local users, built-in RBAC, user administration, the durable audit foundation, product create/archive/recount attribution, permission-aware UI, and live access-state handling are implemented. The following remain intentionally pending:
+Application authentication, local users, built-in RBAC, user administration, the durable audit foundation, product create/archive/recount and repricing attribution, permission-aware UI, and live access-state handling are implemented. The following remain intentionally pending:
 
-- durable audit coverage outside application-user administration, product create/archive/recount, and correction-request lifecycle events, plus the Administrator-only audit viewer;
+- durable audit coverage outside application-user administration, product create/archive/recount, correction-request lifecycle events, and repricing draft creation/discard plus apply/rollback, plus the Administrator-only audit viewer;
 - invitations and custom-role management.
 
 Do not infer actor identity from OIDC `sub` or from a correction claim token. See [`RECOUNT_CORRECTIONS.md`](RECOUNT_CORRECTIONS.md) for current ownership semantics.

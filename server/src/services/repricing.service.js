@@ -1,6 +1,8 @@
 const crypto = require('node:crypto');
 const { isDeepStrictEqual } = require('node:util');
 const pool = require('../db/pool');
+const { writeAuditEvent } = require('../audit/audit-events');
+const { createMutationContext } = require('../audit/mutation-context');
 const { calculatePricing, loadPricingContext } = require('./pricing.service');
 const { getUsdUahRateInfo } = require('./currency.service');
 const { toUahNumber } = require('../utils/money');
@@ -1233,7 +1235,8 @@ async function createRepricingDraft({
   automaticProductIds = [],
   reviewedProductIds = [],
   uiState = {},
-}) {
+}, options = {}) {
+  const mutationContext = createMutationContext(options.mutationContext);
   const normalizedScope = scope === REPRICING_SCOPE_GLOBAL
     ? REPRICING_SCOPE_GLOBAL
     : REPRICING_SCOPE_SCENARIO;
@@ -1264,12 +1267,16 @@ async function createRepricingDraft({
   const normalizedReviewedIds = normalizeReviewedProductIds(reviewedProductIds);
   applyManualOverridesToPreview(preview, normalizedOverrides, normalizedAutomaticProductIds);
   const snapshot = getRepricingPreviewSnapshot(preview);
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query('BEGIN');
+    const result = await client.query(
       `INSERT INTO repricing_drafts
        (scope, scenario_id, category_code, scenario_name, scenario_snapshot,
-        preview_fingerprint, preview_snapshot, manual_overrides, reviewed_product_ids, ui_state)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb)
+        preview_fingerprint, preview_snapshot, manual_overrides, reviewed_product_ids, ui_state,
+        created_by_user_id, last_modified_by_user_id)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb,
+               $11, $11)
        RETURNING id`,
       [
         normalizedScope,
@@ -1289,10 +1296,20 @@ async function createRepricingDraft({
         )),
         JSON.stringify(normalizedReviewedIds),
         JSON.stringify(normalizeDraftUiState(uiState)),
+        mutationContext.actorUserId,
       ]
     );
+    await writeAuditEvent(client, {
+      mutationContext,
+      eventKey: 'repricing_draft.created',
+      subjectType: 'repricing_draft',
+      subjectId: result.rows[0].id,
+      details: { scope: normalizedScope },
+    });
+    await client.query('COMMIT');
     return getRepricingDraft(result.rows[0].id);
   } catch (error) {
+    await client.query('ROLLBACK');
     if (error.code !== '23505') throw error;
     const concurrent = await pool.query(
       `SELECT id FROM repricing_drafts
@@ -1304,6 +1321,8 @@ async function createRepricingDraft({
     );
     if (!concurrent.rows[0]) throw error;
     return getRepricingDraft(concurrent.rows[0].id);
+  } finally {
+    client.release();
   }
 }
 
@@ -1314,8 +1333,10 @@ async function saveRepricingDraft(
     automaticProductIds = [],
     reviewedProductIds = [],
     uiState = {},
-  }
+  },
+  options = {}
 ) {
+  const mutationContext = createMutationContext(options.mutationContext);
   const normalizedOverrides = normalizeManualOverrides(manualOverrides);
   const normalizedAutomaticProductIds = normalizeAutomaticProductIds(automaticProductIds);
   assertDistinctPricingResolutions(normalizedOverrides, normalizedAutomaticProductIds);
@@ -1329,12 +1350,13 @@ async function saveRepricingDraft(
   }
   const normalizedReviewedIds = normalizeReviewedProductIds(reviewedProductIds);
   const result = await pool.query(
-    `UPDATE repricing_drafts
-     SET manual_overrides = $1::jsonb,
+     `UPDATE repricing_drafts
+      SET manual_overrides = $1::jsonb,
          reviewed_product_ids = $2::jsonb,
          ui_state = $3::jsonb,
+         last_modified_by_user_id = $4,
          updated_at = CURRENT_TIMESTAMP
-     WHERE id = $4 AND status = 'draft'
+     WHERE id = $5 AND status = 'draft'
      RETURNING *`,
     [
       JSON.stringify(serializePricingResolutions(
@@ -1343,6 +1365,7 @@ async function saveRepricingDraft(
       )),
       JSON.stringify(normalizedReviewedIds),
       JSON.stringify(normalizeDraftUiState(uiState)),
+      mutationContext.actorUserId,
       Number(draftId),
     ]
   );
@@ -1354,7 +1377,8 @@ async function saveRepricingDraft(
   return { draft: normalizeDraftRow(result.rows[0]) };
 }
 
-async function syncRepricingDraft(draftId) {
+async function syncRepricingDraft(draftId, options = {}) {
+  const mutationContext = createMutationContext(options.mutationContext);
   const row = await getRepricingDraftRow(draftId);
   const scope = row.scope || REPRICING_SCOPE_SCENARIO;
   if (
@@ -1372,13 +1396,14 @@ async function syncRepricingDraft(draftId) {
   const reviewedProductIds = normalizeReviewedProductIds(row.reviewed_product_ids || [])
     .filter((productId) => previewIds.has(productId));
   const result = await pool.query(
-    `UPDATE repricing_drafts
-     SET scenario_snapshot = $1::jsonb,
-         preview_fingerprint = $2,
+     `UPDATE repricing_drafts
+      SET scenario_snapshot = $1::jsonb,
+          preview_fingerprint = $2,
          preview_snapshot = $3::jsonb,
          reviewed_product_ids = $4::jsonb,
+         last_modified_by_user_id = $5,
          updated_at = CURRENT_TIMESTAMP
-     WHERE id = $5 AND status = 'draft'
+     WHERE id = $6 AND status = 'draft'
      RETURNING id`,
     [
       JSON.stringify(scope === REPRICING_SCOPE_GLOBAL ? {
@@ -1389,6 +1414,7 @@ async function syncRepricingDraft(draftId) {
       getRepricingPreviewFingerprint(preview),
       JSON.stringify(getRepricingPreviewSnapshot(preview)),
       JSON.stringify(reviewedProductIds),
+      mutationContext.actorUserId,
       Number(draftId),
     ]
   );
@@ -1400,21 +1426,40 @@ async function syncRepricingDraft(draftId) {
   return getRepricingDraft(draftId);
 }
 
-async function discardRepricingDraft(draftId) {
-  const result = await pool.query(
-    `UPDATE repricing_drafts
-     SET status = 'discarded', discarded_at = CURRENT_TIMESTAMP,
-         updated_at = CURRENT_TIMESTAMP
-     WHERE id = $1 AND status = 'draft'
-     RETURNING id`,
-    [Number(draftId)]
-  );
-  if (result.rows.length === 0) {
-    const error = new Error('Активну чернетку переоцінки не знайдено.');
-    error.statusCode = 404;
+async function discardRepricingDraft(draftId, options = {}) {
+  const mutationContext = createMutationContext(options.mutationContext);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE repricing_drafts
+       SET status = 'discarded', discarded_at = CURRENT_TIMESTAMP,
+           discarded_by_user_id = $2, last_modified_by_user_id = $2,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1 AND status = 'draft'
+       RETURNING id, scope`,
+      [Number(draftId), mutationContext.actorUserId]
+    );
+    if (result.rows.length === 0) {
+      const error = new Error('Активну чернетку переоцінки не знайдено.');
+      error.statusCode = 404;
+      throw error;
+    }
+    await writeAuditEvent(client, {
+      mutationContext,
+      eventKey: 'repricing_draft.discarded',
+      subjectType: 'repricing_draft',
+      subjectId: result.rows[0].id,
+      details: { scope: result.rows[0].scope || REPRICING_SCOPE_SCENARIO },
+    });
+    await client.query('COMMIT');
+    return { success: true, id: Number(result.rows[0].id) };
+  } catch (error) {
+    await client.query('ROLLBACK');
     throw error;
+  } finally {
+    client.release();
   }
-  return { success: true, id: Number(result.rows[0].id) };
 }
 
 function getUpdatedDetails(details, item, batchId, appliedAt) {
@@ -1465,7 +1510,8 @@ async function applyRepricingScope({
   manualOverrides = [],
   automaticProductIds = [],
   draftId = null,
-}) {
+}, options = {}) {
+  const mutationContext = createMutationContext(options.mutationContext);
   if (!previewToken) {
     const error = new Error('Спочатку сформуйте попередній перегляд.');
     error.statusCode = 400;
@@ -1511,11 +1557,11 @@ async function applyRepricingScope({
   if (existingBatch) {
     if (draft) {
       await pool.query(
-        `UPDATE repricing_drafts
-         SET status = 'applied', applied_batch_id = $1, applied_at = CURRENT_TIMESTAMP,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2 AND status = 'draft'`,
-        [Number(existingBatch.id), Number(draft.id)]
+         `UPDATE repricing_drafts
+          SET status = 'applied', applied_batch_id = $1, applied_at = CURRENT_TIMESTAMP,
+             last_modified_by_user_id = $2, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3 AND status = 'draft'`,
+        [Number(existingBatch.id), mutationContext.actorUserId, Number(draft.id)]
       );
     }
     return { success: true, alreadyApplied: true, batch: existingBatch };
@@ -1609,8 +1655,10 @@ async function applyRepricingScope({
     const batchResult = await client.query(
       `INSERT INTO repricing_batches
        (scope, scenario_id, category_code, scenario_name, scenario_snapshot, preview_token, status,
-        candidate_count, changed_count, unchanged_count, skipped_count, error_count, applied_at)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'completed', $7, $8, $9, $10, $11, CURRENT_TIMESTAMP)
+        candidate_count, changed_count, unchanged_count, skipped_count, error_count, applied_at,
+        applied_by_user_id)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'completed', $7, $8, $9, $10, $11,
+               CURRENT_TIMESTAMP, $12)
        ON CONFLICT (preview_token) WHERE status = 'completed' DO NOTHING
        RETURNING id, applied_at`,
       [
@@ -1625,6 +1673,7 @@ async function applyRepricingScope({
         preview.summary.unchangedCount,
         preview.summary.skippedCount,
         preview.summary.errorCount,
+        mutationContext.actorUserId,
       ]
     );
 
@@ -1635,9 +1684,9 @@ async function applyRepricingScope({
         await pool.query(
           `UPDATE repricing_drafts
            SET status = 'applied', applied_batch_id = $1, applied_at = CURRENT_TIMESTAMP,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $2 AND status = 'draft'`,
-          [Number(batch.id), Number(draft.id)]
+              last_modified_by_user_id = $2, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $3 AND status = 'draft'`,
+          [Number(batch.id), mutationContext.actorUserId, Number(draft.id)]
         );
       }
       return { success: true, alreadyApplied: true, batch };
@@ -1728,10 +1777,10 @@ async function applyRepricingScope({
       const draftResult = await client.query(
         `UPDATE repricing_drafts
          SET status = 'applied', applied_batch_id = $1, applied_at = CURRENT_TIMESTAMP,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2 AND status = 'draft'
+             last_modified_by_user_id = $2, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3 AND status = 'draft'
          RETURNING id`,
-        [batchId, Number(draft.id)]
+        [batchId, mutationContext.actorUserId, Number(draft.id)]
       );
       if (draftResult.rows.length === 0) {
         const error = new Error('Чернетку змінили або закрили під час застосування.');
@@ -1740,6 +1789,13 @@ async function applyRepricingScope({
       }
     }
 
+    await writeAuditEvent(client, {
+      mutationContext,
+      eventKey: 'repricing.applied',
+      subjectType: 'repricing_batch',
+      subjectId: batchId,
+      details: draft ? { draftId: Number(draft.id) } : {},
+    });
     await client.query('COMMIT');
     return {
       success: true,
@@ -1762,19 +1818,19 @@ async function applyRepricingScope({
   }
 }
 
-async function applyRepricing(payload) {
+async function applyRepricing(payload, options = {}) {
   return applyRepricingScope({
     ...(payload || {}),
     scope: REPRICING_SCOPE_SCENARIO,
-  });
+  }, options);
 }
 
-async function applyGlobalRepricing(payload) {
+async function applyGlobalRepricing(payload, options = {}) {
   return applyRepricingScope({
     ...(payload || {}),
     scenarioId: null,
     scope: REPRICING_SCOPE_GLOBAL,
-  });
+  }, options);
 }
 
 async function getRepricingBatches(limit = 20) {
@@ -1835,7 +1891,8 @@ function doesProductMatchRepricingBatch(product, newPayload, batchId) {
   );
 }
 
-async function rollbackRepricing(batchId) {
+async function rollbackRepricing(batchId, options = {}) {
+  const mutationContext = createMutationContext(options.mutationContext);
   const normalizedBatchId = Number(batchId);
   if (!Number.isInteger(normalizedBatchId) || normalizedBatchId <= 0) {
     const error = new Error('Некоректна партія переоцінки.');
@@ -1930,12 +1987,20 @@ async function rollbackRepricing(batchId) {
 
     const rolledBackResult = await client.query(
       `UPDATE repricing_batches
-       SET status = 'rolled_back', rolled_back_at = CURRENT_TIMESTAMP
+       SET status = 'rolled_back', rolled_back_at = CURRENT_TIMESTAMP,
+           rolled_back_by_user_id = $2
        WHERE id = $1
        RETURNING id, scope, scenario_id, category_code, scenario_name, status, changed_count,
                  applied_at, rolled_back_at`,
-      [normalizedBatchId]
+      [normalizedBatchId, mutationContext.actorUserId]
     );
+    await writeAuditEvent(client, {
+      mutationContext,
+      eventKey: 'repricing.rolled_back',
+      subjectType: 'repricing_batch',
+      subjectId: normalizedBatchId,
+      details: {},
+    });
     await client.query('COMMIT');
     return {
       success: true,

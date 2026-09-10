@@ -403,7 +403,9 @@ router.get('/admin/repricing/drafts', requirePermission('repricing.view'), async
 
 router.post('/admin/repricing/drafts', requirePermission('repricing.prepare'), async (req, res) => {
   try {
-    res.json(await createRepricingDraft(req.body || {}));
+    res.json(await createRepricingDraft(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    }));
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
@@ -419,7 +421,9 @@ router.get('/admin/repricing/drafts/:draftId', requirePermission('repricing.view
 
 router.put('/admin/repricing/drafts/:draftId', requirePermission('repricing.prepare'), async (req, res) => {
   try {
-    res.json(await saveRepricingDraft(req.params.draftId, req.body || {}));
+    res.json(await saveRepricingDraft(req.params.draftId, req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    }));
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
@@ -427,7 +431,9 @@ router.put('/admin/repricing/drafts/:draftId', requirePermission('repricing.prep
 
 router.post('/admin/repricing/drafts/:draftId/sync', requirePermission('repricing.prepare'), async (req, res) => {
   try {
-    res.json(await syncRepricingDraft(req.params.draftId));
+    res.json(await syncRepricingDraft(req.params.draftId, {
+      mutationContext: getRequestMutationContext(req),
+    }));
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
@@ -435,7 +441,9 @@ router.post('/admin/repricing/drafts/:draftId/sync', requirePermission('repricin
 
 router.delete('/admin/repricing/drafts/:draftId', requirePermission('repricing.prepare'), async (req, res) => {
   try {
-    res.json(await discardRepricingDraft(req.params.draftId));
+    res.json(await discardRepricingDraft(req.params.draftId, {
+      mutationContext: getRequestMutationContext(req),
+    }));
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
@@ -466,7 +474,9 @@ router.post('/admin/repricing/global/preview', requirePermission('repricing.prep
 
 router.post('/admin/repricing/apply', requirePermission('repricing.apply'), async (req, res) => {
   try {
-    const result = await applyRepricing(req.body || {});
+    const result = await applyRepricing(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({
@@ -478,7 +488,9 @@ router.post('/admin/repricing/apply', requirePermission('repricing.apply'), asyn
 
 router.post('/admin/repricing/global/apply', requirePermission('repricing.apply'), async (req, res) => {
   try {
-    res.json(await applyGlobalRepricing(req.body || {}));
+    res.json(await applyGlobalRepricing(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    }));
   } catch (err) {
     res.status(err.statusCode || 500).json({
       error: err.message,
@@ -489,7 +501,9 @@ router.post('/admin/repricing/global/apply', requirePermission('repricing.apply'
 
 router.post('/admin/repricing/:batchId/rollback', requirePermission('repricing.rollback'), async (req, res) => {
   try {
-    res.json(await rollbackRepricing(req.params.batchId));
+    res.json(await rollbackRepricing(req.params.batchId, {
+      mutationContext: getRequestMutationContext(req),
+    }));
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }

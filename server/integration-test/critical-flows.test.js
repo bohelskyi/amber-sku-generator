@@ -595,7 +595,7 @@ test('migration 019 matches the connect-pg-simple 10.0.0 table contract', async 
   ]);
 });
 
-test('migrations 020-025 create RBAC, audit, and correction ownership foundations', async () => {
+test('migrations 020-026 create RBAC, audit, correction ownership, and repricing attribution', async () => {
   const requiredTables = await pool.query(`
     SELECT table_name
     FROM information_schema.tables
@@ -776,6 +776,110 @@ test('migration 025 adds nullable user attribution and a nonnegative correction 
   ]);
 });
 
+test('migration 026 adds only nullable repricing actor references with restricted deletion', async () => {
+  const columns = await pool.query(`
+    SELECT table_name, column_name, is_nullable, column_default
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND (table_name, column_name) IN (
+        ('repricing_drafts', 'created_by_user_id'),
+        ('repricing_drafts', 'last_modified_by_user_id'),
+        ('repricing_drafts', 'discarded_by_user_id'),
+        ('repricing_batches', 'applied_by_user_id'),
+        ('repricing_batches', 'rolled_back_by_user_id')
+      )
+    ORDER BY table_name, column_name
+  `);
+  assert.deepEqual(columns.rows, [
+    {
+      table_name: 'repricing_batches',
+      column_name: 'applied_by_user_id',
+      is_nullable: 'YES',
+      column_default: null,
+    },
+    {
+      table_name: 'repricing_batches',
+      column_name: 'rolled_back_by_user_id',
+      is_nullable: 'YES',
+      column_default: null,
+    },
+    {
+      table_name: 'repricing_drafts',
+      column_name: 'created_by_user_id',
+      is_nullable: 'YES',
+      column_default: null,
+    },
+    {
+      table_name: 'repricing_drafts',
+      column_name: 'discarded_by_user_id',
+      is_nullable: 'YES',
+      column_default: null,
+    },
+    {
+      table_name: 'repricing_drafts',
+      column_name: 'last_modified_by_user_id',
+      is_nullable: 'YES',
+      column_default: null,
+    },
+  ]);
+
+  const foreignKeys = await pool.query(`
+    SELECT tc.table_name, kcu.column_name, ccu.table_name AS referenced_table, rc.delete_rule
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON kcu.constraint_schema = tc.constraint_schema
+     AND kcu.constraint_name = tc.constraint_name
+    JOIN information_schema.referential_constraints rc
+      ON rc.constraint_schema = tc.constraint_schema
+     AND rc.constraint_name = tc.constraint_name
+    JOIN information_schema.constraint_column_usage ccu
+      ON ccu.constraint_schema = rc.unique_constraint_schema
+     AND ccu.constraint_name = rc.unique_constraint_name
+    WHERE tc.constraint_schema = 'public'
+      AND tc.constraint_type = 'FOREIGN KEY'
+      AND (tc.table_name, kcu.column_name) IN (
+        ('repricing_drafts', 'created_by_user_id'),
+        ('repricing_drafts', 'last_modified_by_user_id'),
+        ('repricing_drafts', 'discarded_by_user_id'),
+        ('repricing_batches', 'applied_by_user_id'),
+        ('repricing_batches', 'rolled_back_by_user_id')
+      )
+    ORDER BY tc.table_name, kcu.column_name
+  `);
+  assert.deepEqual(foreignKeys.rows, [
+    {
+      table_name: 'repricing_batches',
+      column_name: 'applied_by_user_id',
+      referenced_table: 'application_users',
+      delete_rule: 'RESTRICT',
+    },
+    {
+      table_name: 'repricing_batches',
+      column_name: 'rolled_back_by_user_id',
+      referenced_table: 'application_users',
+      delete_rule: 'RESTRICT',
+    },
+    {
+      table_name: 'repricing_drafts',
+      column_name: 'created_by_user_id',
+      referenced_table: 'application_users',
+      delete_rule: 'RESTRICT',
+    },
+    {
+      table_name: 'repricing_drafts',
+      column_name: 'discarded_by_user_id',
+      referenced_table: 'application_users',
+      delete_rule: 'RESTRICT',
+    },
+    {
+      table_name: 'repricing_drafts',
+      column_name: 'last_modified_by_user_id',
+      referenced_table: 'application_users',
+      delete_rule: 'RESTRICT',
+    },
+  ]);
+});
+
 test('migration 023 constrains and makes durable audit records immutable', async () => {
   const columns = await pool.query(`
     SELECT column_name, is_nullable
@@ -879,6 +983,7 @@ test('migration 024 preserves historical product attribution as null', async () 
         fileName.endsWith('.sql')
         && !fileName.startsWith('024_')
         && !fileName.startsWith('025_')
+        && !fileName.startsWith('026_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -999,6 +1104,89 @@ test('migration 024 preserves historical product attribution as null', async () 
       `)).rows, [{ performed_by_user_id: null }]);
       assert.equal(Number((await verifiedPool.query(
         "SELECT count(*) FROM audit_events WHERE event_key LIKE 'product.%'"
+      )).rows[0].count), 0);
+    } finally {
+      await verifiedPool.end();
+    }
+  } finally {
+    await fs.rm(preAttributionDirectory, { recursive: true, force: true });
+    await dropTestDatabase(databaseName);
+  }
+});
+
+test('migration 026 preserves historical repricing attribution as null without audit synthesis', async () => {
+  const databaseName = 'amber_repricing_actor_upgrade_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const preAttributionDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'amber-pre-repricing-attribution-migrations-')
+  );
+  try {
+    const migrationDirectory = path.resolve(serverRoot, 'migrations');
+    const migrationFiles = (await fs.readdir(migrationDirectory))
+      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('026_'));
+    await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
+      path.resolve(migrationDirectory, fileName),
+      path.resolve(preAttributionDirectory, fileName)
+    )));
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations({ directory: ${JSON.stringify(preAttributionDirectory)} })
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+
+    const migrationPool = new Pool({ connectionString: databaseUrl });
+    let batchId;
+    let draftId;
+    try {
+      const batch = await migrationPool.query(`
+        INSERT INTO repricing_batches
+          (scenario_name, preview_token, status, applied_at)
+        VALUES ('Historical batch', 'historical-batch-token', 'completed', CURRENT_TIMESTAMP)
+        RETURNING id
+      `);
+      batchId = Number(batch.rows[0].id);
+      const draft = await migrationPool.query(`
+        INSERT INTO repricing_drafts
+          (category_code, scenario_name, preview_fingerprint, status, applied_batch_id,
+           applied_at)
+        VALUES ('HX', 'Historical draft', 'historical-draft-fingerprint', 'applied', $1,
+                CURRENT_TIMESTAMP)
+        RETURNING id
+      `, [batchId]);
+      draftId = Number(draft.rows[0].id);
+    } finally {
+      await migrationPool.end();
+    }
+
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations()
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+
+    const verifiedPool = new Pool({ connectionString: databaseUrl });
+    try {
+      assert.deepEqual((await verifiedPool.query(`
+        SELECT created_by_user_id, last_modified_by_user_id, discarded_by_user_id
+        FROM repricing_drafts WHERE id = $1
+      `, [draftId])).rows, [{
+        created_by_user_id: null,
+        last_modified_by_user_id: null,
+        discarded_by_user_id: null,
+      }]);
+      assert.deepEqual((await verifiedPool.query(`
+        SELECT applied_by_user_id, rolled_back_by_user_id
+        FROM repricing_batches WHERE id = $1
+      `, [batchId])).rows, [{
+        applied_by_user_id: null,
+        rolled_back_by_user_id: null,
+      }]);
+      assert.equal(Number((await verifiedPool.query(
+        "SELECT count(*) FROM audit_events WHERE event_key LIKE 'repricing.%' OR event_key LIKE 'repricing_draft.%'"
       )).rows[0].count), 0);
     } finally {
       await verifiedPool.end();
@@ -2148,6 +2336,7 @@ test('migration 023 rolls back its audit schema and permission grant together', 
         && !fileName.startsWith('023_')
         && !fileName.startsWith('024_')
         && !fileName.startsWith('025_')
+        && !fileName.startsWith('026_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -2295,6 +2484,7 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
          && !fileName.startsWith('023_')
          && !fileName.startsWith('024_')
          && !fileName.startsWith('025_')
+         && !fileName.startsWith('026_')
       ))
       .map((fileName) => fs.copyFile(
         path.resolve(serverRoot, 'migrations', fileName),
@@ -2402,6 +2592,7 @@ test('migrations 020-024 upgrade a database at migration 019 and repeated startu
         && !fileName.startsWith('023_')
         && !fileName.startsWith('024_')
         && !fileName.startsWith('025_')
+        && !fileName.startsWith('026_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -2472,6 +2663,7 @@ test('migration 021 adds business capabilities and corrects built-in mappings on
         && !fileName.startsWith('023_')
         && !fileName.startsWith('024_')
         && !fileName.startsWith('025_')
+        && !fileName.startsWith('026_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -2551,6 +2743,7 @@ test('migration 022 removes Manager correction processing without changing other
         && !fileName.startsWith('023_')
         && !fileName.startsWith('024_')
         && !fileName.startsWith('025_')
+        && !fileName.startsWith('026_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -2700,6 +2893,7 @@ test('legacy in-progress correction requests survive through migration 025 witho
         && !fileName.startsWith('023_')
         && !fileName.startsWith('024_')
         && !fileName.startsWith('025_')
+        && !fileName.startsWith('026_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -4236,6 +4430,436 @@ test('claim refreshes stale correction data and later changes still block comple
        SET price = $1
        WHERE scenario_id = $2 AND x_val = 2 AND y_val = 0`,
       [originalPrice.rows[0].price, schemas.ZZScenario]
+    );
+  }
+});
+
+test('repricing drafts attribute creator, modifier, and discard without routine audit spam', async () => {
+  const creatorUserId = Number(authenticatedSession.applicationUser.id);
+  const modifierSession = await authenticateIdentitySession({
+    issuer: 'https://repricing-draft-actor.example/realms/amber',
+    subject: 'repricing-draft-modifier',
+    preferredUsername: 'repricing.draft.modifier',
+    displayName: 'Repricing Draft Modifier',
+  });
+  const modifierUserId = await activateApplicationUserForTest(
+    'https://repricing-draft-actor.example/realms/amber',
+    'repricing-draft-modifier',
+    'manager'
+  );
+  let draftId;
+  try {
+    const created = await request('/api/admin/repricing/drafts', {
+      method: 'POST',
+      headers: { 'X-Request-ID': 'repricing-draft-created' },
+      body: { scope: 'global', uiState: { filter: 'changed' } },
+    });
+    assert.equal(created.response.status, 200, created.text);
+    draftId = Number(created.data.draft.id);
+    assert.deepEqual((await pool.query(
+      `SELECT created_by_user_id, last_modified_by_user_id, discarded_by_user_id
+       FROM repricing_drafts WHERE id = $1`,
+      [draftId]
+    )).rows, [{
+      created_by_user_id: String(creatorUserId),
+      last_modified_by_user_id: String(creatorUserId),
+      discarded_by_user_id: null,
+    }]);
+
+    const saved = await request(`/api/admin/repricing/drafts/${draftId}`, {
+      method: 'PUT',
+      headers: { 'X-Request-ID': 'repricing-draft-autosave' },
+      authentication: modifierSession,
+      body: {
+        manualOverrides: created.data.manualOverrides,
+        automaticProductIds: created.data.automaticProductIds,
+        reviewedProductIds: created.data.draft.reviewedProductIds,
+        uiState: created.data.draft.uiState,
+      },
+    });
+    assert.equal(saved.response.status, 200, saved.text);
+    assert.equal(Number((await pool.query(
+      'SELECT last_modified_by_user_id FROM repricing_drafts WHERE id = $1',
+      [draftId]
+    )).rows[0].last_modified_by_user_id), modifierUserId);
+
+    const synchronized = await request(`/api/admin/repricing/drafts/${draftId}/sync`, {
+      method: 'POST',
+      headers: { 'X-Request-ID': 'repricing-draft-routine-sync' },
+      authentication: modifierSession,
+      body: {},
+    });
+    assert.equal(synchronized.response.status, 200, synchronized.text);
+    assert.equal(Number((await pool.query(
+      'SELECT last_modified_by_user_id FROM repricing_drafts WHERE id = $1',
+      [draftId]
+    )).rows[0].last_modified_by_user_id), modifierUserId);
+    assert.equal(Number((await pool.query(
+      `SELECT count(*) FROM audit_events
+       WHERE subject_type = 'repricing_draft' AND subject_id = $1`,
+      [String(draftId)]
+    )).rows[0].count), 1, 'autosave and synchronization must not emit audit events');
+
+    const discarded = await request(`/api/admin/repricing/drafts/${draftId}`, {
+      method: 'DELETE',
+      headers: { 'X-Request-ID': 'repricing-draft-discarded' },
+      authentication: modifierSession,
+    });
+    assert.equal(discarded.response.status, 200, discarded.text);
+    const state = await pool.query(
+      `SELECT status, created_by_user_id, last_modified_by_user_id, discarded_by_user_id
+       FROM repricing_drafts WHERE id = $1`,
+      [draftId]
+    );
+    assert.deepEqual(state.rows, [{
+      status: 'discarded',
+      created_by_user_id: String(creatorUserId),
+      last_modified_by_user_id: String(modifierUserId),
+      discarded_by_user_id: String(modifierUserId),
+    }]);
+    const audit = await pool.query(
+      `SELECT event_key, actor_user_id, request_id, details
+       FROM audit_events
+       WHERE subject_type = 'repricing_draft' AND subject_id = $1
+       ORDER BY id`,
+      [String(draftId)]
+    );
+    assert.deepEqual(audit.rows, [
+      {
+        event_key: 'repricing_draft.created',
+        actor_user_id: String(creatorUserId),
+        request_id: 'repricing-draft-created',
+        details: { scope: 'global' },
+      },
+      {
+        event_key: 'repricing_draft.discarded',
+        actor_user_id: String(modifierUserId),
+        request_id: 'repricing-draft-discarded',
+        details: { scope: 'global' },
+      },
+    ]);
+    draftId = null;
+  } finally {
+    if (draftId) {
+      await pool.query(
+        `UPDATE repricing_drafts
+         SET status = 'discarded', discarded_at = CURRENT_TIMESTAMP
+         WHERE id = $1 AND status = 'draft'`,
+        [draftId]
+      );
+    }
+  }
+});
+
+test('correction completion causally attributes successful draft sync and remains best effort', async () => {
+  const draftCreatorSession = await authenticateIdentitySession({
+    issuer: 'https://correction-draft-sync.example/realms/amber',
+    subject: 'correction-draft-creator',
+    preferredUsername: 'correction.draft.creator',
+    displayName: 'Correction Draft Creator',
+  });
+  const draftCreatorUserId = await activateApplicationUserForTest(
+    'https://correction-draft-sync.example/realms/amber',
+    'correction-draft-creator',
+    'manager'
+  );
+  const causalActorUserId = Number(authenticatedSession.applicationUser.id);
+  let draftId;
+  let unsynchronizableDraftId;
+  try {
+    const productPreview = await request('/api/preview', {
+      method: 'POST',
+      body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0, isCalibrated: 0 },
+    });
+    const product = await request('/api/save', {
+      method: 'POST',
+      body: {
+        category: 'ZZ',
+        answers: { kind: 1 },
+        weight: 0,
+        isCalibrated: 0,
+        skuSchemaVersionId: schemas.ZZ,
+        previewToken: productPreview.data.previewToken,
+      },
+    });
+    assert.equal(product.response.status, 200, product.text);
+
+    const draft = await request('/api/admin/repricing/drafts', {
+      method: 'POST',
+      headers: { 'X-Request-ID': 'correction-sync-draft-created' },
+      authentication: draftCreatorSession,
+      body: { scope: 'global' },
+    });
+    assert.equal(draft.response.status, 200, draft.text);
+    draftId = Number(draft.data.draft.id);
+    assert.equal(Number((await pool.query(
+      'SELECT created_by_user_id FROM repricing_drafts WHERE id = $1',
+      [draftId]
+    )).rows[0].created_by_user_id), draftCreatorUserId);
+
+    const unsynchronizableDraft = await pool.query(`
+      INSERT INTO repricing_drafts
+        (scope, scenario_id, category_code, scenario_name, preview_fingerprint, status)
+      VALUES ('scenario', NULL, 'IX', 'Unsynchronizable historical draft',
+              'unsynchronizable-fingerprint', 'draft')
+      RETURNING id
+    `);
+    unsynchronizableDraftId = Number(unsynchronizableDraft.rows[0].id);
+
+    const correction = await request('/api/admin/correction-requests', {
+      method: 'POST',
+      body: {
+        sourceSku: product.data.fullSku,
+        answers: { kind: 2 },
+        reason: 'causal draft synchronization',
+      },
+    });
+    assert.equal(correction.response.status, 200, correction.text);
+    const correctionId = Number(correction.data.request.id);
+    const claim = await request(`/api/admin/correction-requests/${correctionId}/claim`, {
+      method: 'POST', body: {},
+    });
+    assert.equal(claim.response.status, 200, claim.text);
+    const completed = await request(`/api/admin/correction-requests/${correctionId}/complete`, {
+      method: 'POST',
+      headers: { 'X-Request-ID': 'correction-caused-draft-sync' },
+      body: { claimVersion: claim.data.request.claimVersion },
+    });
+    assert.equal(completed.response.status, 200, completed.text);
+    assert.deepEqual(completed.data.draftSyncFailures, [{
+      draftId: unsynchronizableDraftId,
+      message: 'Цю чернетку неможливо синхронізувати.',
+    }]);
+    assert.equal(Number((await pool.query(
+      'SELECT last_modified_by_user_id FROM repricing_drafts WHERE id = $1',
+      [draftId]
+    )).rows[0].last_modified_by_user_id), causalActorUserId);
+    assert.equal(Number((await pool.query(
+      `SELECT count(*) FROM audit_events
+       WHERE subject_type = 'repricing_draft' AND subject_id = $1`,
+      [String(draftId)]
+    )).rows[0].count), 1, 'correction-caused synchronization must not emit repricing audit');
+    assert.deepEqual((await pool.query(
+      'SELECT status, last_modified_by_user_id FROM repricing_drafts WHERE id = $1',
+      [unsynchronizableDraftId]
+    )).rows, [{ status: 'draft', last_modified_by_user_id: null }]);
+    assert.equal((await pool.query(
+      'SELECT status FROM correction_requests WHERE id = $1',
+      [correctionId]
+    )).rows[0].status, 'completed');
+  } finally {
+    const cleanupIds = [draftId, unsynchronizableDraftId].filter(Boolean);
+    if (cleanupIds.length > 0) {
+      await pool.query(
+        `UPDATE repricing_drafts
+         SET status = 'discarded', discarded_at = CURRENT_TIMESTAMP
+         WHERE id = ANY($1::int[]) AND status = 'draft'`,
+        [cleanupIds]
+      );
+    }
+  }
+});
+
+test('repricing financial audit is atomic, attributed, and idempotent', async () => {
+  const actorUserId = Number(authenticatedSession.applicationUser.id);
+  await pool.query(
+    'UPDATE price_matrix SET price = price + 37 WHERE scenario_id = $1',
+    [schemas.ZZScenario]
+  );
+  let batchId;
+  let applied = false;
+  try {
+    const preview = await request('/api/admin/repricing/preview', {
+      method: 'POST', body: { scenarioId: schemas.ZZScenario },
+    });
+    assert.equal(preview.response.status, 200, preview.text);
+    const manualOverrides = preview.data.items
+      .filter((item) => ['manual_price', 'price_missing'].includes(item.errorCode))
+      .map((item) => ({
+        productId: Number(item.productId),
+        newPriceUah: Number(item.oldPriceUah),
+      }));
+    const payload = {
+      scenarioId: schemas.ZZScenario,
+      previewToken: preview.data.previewToken,
+      manualOverrides,
+    };
+    const changedProductIds = preview.data.items
+      .filter((item) => item.status === 'changed')
+      .map((item) => Number(item.productId));
+    assert.ok(changedProductIds.length > 0);
+    const beforeApply = await pool.query(
+      `SELECT id, total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
+      [changedProductIds]
+    );
+    const batchCountBefore = Number((await pool.query(
+      'SELECT count(*) FROM repricing_batches'
+    )).rows[0].count);
+
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION fail_test_repricing_applied_audit()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION 'forced repricing applied audit failure';
+      END;
+      $$;
+      CREATE TRIGGER fail_test_repricing_applied_audit
+      BEFORE INSERT ON audit_events
+      FOR EACH ROW
+      WHEN (NEW.event_key = 'repricing.applied')
+      EXECUTE FUNCTION fail_test_repricing_applied_audit();
+    `);
+    try {
+      const failedApply = await request('/api/admin/repricing/apply', {
+        method: 'POST',
+        headers: { 'X-Request-ID': 'repricing-apply-audit-failure' },
+        body: payload,
+      });
+      assert.equal(failedApply.response.status, 500, failedApply.text);
+    } finally {
+      await pool.query('DROP TRIGGER fail_test_repricing_applied_audit ON audit_events');
+      await pool.query('DROP FUNCTION fail_test_repricing_applied_audit()');
+    }
+    assert.deepEqual((await pool.query(
+      `SELECT id, total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
+      [changedProductIds]
+    )).rows, beforeApply.rows);
+    assert.equal(Number((await pool.query(
+      'SELECT count(*) FROM repricing_batches'
+    )).rows[0].count), batchCountBefore);
+
+    const successfulApply = await request('/api/admin/repricing/apply', {
+      method: 'POST',
+      headers: { 'X-Request-ID': 'repricing-applied' },
+      body: payload,
+    });
+    assert.equal(successfulApply.response.status, 200, successfulApply.text);
+    batchId = Number(successfulApply.data.batch.id);
+    applied = true;
+    const afterApply = await pool.query(
+      `SELECT id, total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
+      [changedProductIds]
+    );
+    assert.equal(Number((await pool.query(
+      'SELECT applied_by_user_id FROM repricing_batches WHERE id = $1', [batchId]
+    )).rows[0].applied_by_user_id), actorUserId);
+    assert.deepEqual((await pool.query(
+      `SELECT event_key, actor_user_id, request_id, details
+       FROM audit_events
+       WHERE subject_type = 'repricing_batch' AND subject_id = $1
+       ORDER BY id`,
+      [String(batchId)]
+    )).rows, [{
+      event_key: 'repricing.applied',
+      actor_user_id: String(actorUserId),
+      request_id: 'repricing-applied',
+      details: {},
+    }]);
+
+    const repeatedApply = await request('/api/admin/repricing/apply', {
+      method: 'POST',
+      headers: { 'X-Request-ID': 'repricing-applied-retry' },
+      body: payload,
+    });
+    assert.equal(repeatedApply.response.status, 200, repeatedApply.text);
+    assert.equal(repeatedApply.data.alreadyApplied, true);
+    assert.equal(Number((await pool.query(
+      `SELECT count(*) FROM audit_events
+       WHERE event_key = 'repricing.applied' AND subject_id = $1`,
+      [String(batchId)]
+    )).rows[0].count), 1);
+
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION fail_test_repricing_rollback_audit()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION 'forced repricing rollback audit failure';
+      END;
+      $$;
+      CREATE TRIGGER fail_test_repricing_rollback_audit
+      BEFORE INSERT ON audit_events
+      FOR EACH ROW
+      WHEN (NEW.event_key = 'repricing.rolled_back')
+      EXECUTE FUNCTION fail_test_repricing_rollback_audit();
+    `);
+    try {
+      const failedRollback = await request(`/api/admin/repricing/${batchId}/rollback`, {
+        method: 'POST',
+        headers: { 'X-Request-ID': 'repricing-rollback-audit-failure' },
+        body: {},
+      });
+      assert.equal(failedRollback.response.status, 500, failedRollback.text);
+    } finally {
+      await pool.query('DROP TRIGGER fail_test_repricing_rollback_audit ON audit_events');
+      await pool.query('DROP FUNCTION fail_test_repricing_rollback_audit()');
+    }
+    assert.deepEqual((await pool.query(
+      `SELECT id, total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
+      [changedProductIds]
+    )).rows, afterApply.rows);
+    assert.deepEqual((await pool.query(
+      'SELECT status, rolled_back_by_user_id FROM repricing_batches WHERE id = $1',
+      [batchId]
+    )).rows, [{ status: 'completed', rolled_back_by_user_id: null }]);
+
+    const successfulRollback = await request(`/api/admin/repricing/${batchId}/rollback`, {
+      method: 'POST',
+      headers: { 'X-Request-ID': 'repricing-rolled-back' },
+      body: {},
+    });
+    assert.equal(successfulRollback.response.status, 200, successfulRollback.text);
+    applied = false;
+    assert.deepEqual((await pool.query(
+      'SELECT status, applied_by_user_id, rolled_back_by_user_id FROM repricing_batches WHERE id = $1',
+      [batchId]
+    )).rows, [{
+      status: 'rolled_back',
+      applied_by_user_id: String(actorUserId),
+      rolled_back_by_user_id: String(actorUserId),
+    }]);
+    assert.deepEqual((await pool.query(
+      `SELECT event_key, actor_user_id, request_id, details
+       FROM audit_events
+       WHERE subject_type = 'repricing_batch' AND subject_id = $1
+       ORDER BY id`,
+      [String(batchId)]
+    )).rows, [
+      {
+        event_key: 'repricing.applied',
+        actor_user_id: String(actorUserId),
+        request_id: 'repricing-applied',
+        details: {},
+      },
+      {
+        event_key: 'repricing.rolled_back',
+        actor_user_id: String(actorUserId),
+        request_id: 'repricing-rolled-back',
+        details: {},
+      },
+    ]);
+    const repeatedRollback = await request(`/api/admin/repricing/${batchId}/rollback`, {
+      method: 'POST',
+      headers: { 'X-Request-ID': 'repricing-rolled-back-retry' },
+      body: {},
+    });
+    assert.equal(repeatedRollback.response.status, 200, repeatedRollback.text);
+    assert.equal(repeatedRollback.data.alreadyRolledBack, true);
+    assert.equal(Number((await pool.query(
+      `SELECT count(*) FROM audit_events
+       WHERE event_key = 'repricing.rolled_back' AND subject_id = $1`,
+      [String(batchId)]
+    )).rows[0].count), 1);
+  } finally {
+    if (applied && batchId) {
+      await request(`/api/admin/repricing/${batchId}/rollback`, { method: 'POST', body: {} });
+    }
+    await pool.query(
+      'UPDATE price_matrix SET price = price - 37 WHERE scenario_id = $1',
+      [schemas.ZZScenario]
     );
   }
 });

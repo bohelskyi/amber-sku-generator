@@ -682,14 +682,14 @@ async function updateCorrectionRequestStatus(
   }
 }
 
-async function syncActiveRepricingDrafts() {
+async function syncActiveRepricingDrafts(mutationContext) {
   const result = await pool.query(
     "SELECT id FROM repricing_drafts WHERE status = 'draft' ORDER BY id"
   );
   const failures = [];
   for (const row of result.rows) {
     try {
-      await syncRepricingDraft(row.id);
+      await syncRepricingDraft(row.id, { mutationContext });
     } catch (error) {
       failures.push({ draftId: Number(row.id), message: error.message });
     }
@@ -768,7 +768,7 @@ async function completeCorrectionRequest(
     mutationContext,
   });
   const completedRow = await getCorrectionRequestRow(requestId);
-  const draftSyncFailures = await syncActiveRepricingDrafts();
+  const draftSyncFailures = await syncActiveRepricingDrafts(mutationContext);
   return {
     success: true,
     request: normalizeRequestRow(completedRow),

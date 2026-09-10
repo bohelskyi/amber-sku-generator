@@ -34,7 +34,7 @@
 
 ## Migration rules
 
-- Migrations `000`–`025` are immutable history. Never edit an already-applied migration; add the next forward migration.
+- Migrations `000`–`026` are immutable history. Never edit an already-applied migration; add the next forward migration.
 - Preserve checksum and line-ending canonicalization. Never rewrite stored checksums to hide a mismatch.
 - Keep each migration transactional and safe for fresh, known upgrade/checkpoint, repeated-startup, and rollback paths as applicable.
 - Migration DDL uses a dedicated no-query-timeout connection. Runtime DDL is not a substitute for migrations.
