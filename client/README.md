@@ -1,16 +1,28 @@
-# React + Vite
+# Amber SKU Manager client
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This directory contains the React 19/Vite client for Amber SKU Manager. The Express server remains authoritative for authentication, permissions, SKU generation, validation, pricing, and workflow state; client permission checks only control presentation.
 
-Currently, two official plugins are available:
+## Local development
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Install the locked dependencies and start Vite:
 
-## React Compiler
+```bash
+npm ci
+npm run dev
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Use `VITE_API_BASE_URL` only for the public API origin when it differs from `/api`. Never place credentials or other secrets in a `VITE_*` variable because Vite includes those values in the browser bundle.
 
-## Expanding the ESLint configuration
+For direct local OIDC development, the repository documentation uses `http://localhost:5173` for the client and `http://localhost:5000/api/auth/callback` for the server callback. Use `localhost` consistently.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Verification
+
+```bash
+npm test
+npm run lint
+npm run build
+```
+
+`npm test` runs the Node-based pure behavior tests followed by the jsdom/Vitest rendered component and workflow tests. The production build is emitted to `dist/` and served by nginx in the checked-in container topology.
+
+See the root [`PROJECT_CONTEXT.md`](../PROJECT_CONTEXT.md), [`README.md`](../README.md), and domain documents under [`docs/`](../docs/) for architecture, permissions, deployment, and business invariants.

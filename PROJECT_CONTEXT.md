@@ -4,7 +4,7 @@
 
 Amber SKU Manager is an internal application for defining amber-product classifications, generating authoritative SKUs and prices, saving and decoding inventory records, recounting/correcting products, controlled mass repricing, and immutable CSV exports.
 
-This document summarizes the current `feature/auth-rbac` checkout. Runtime PostgreSQL data and the current code/migrations remain authoritative. Detailed invariants live in the linked domain documents.
+This document summarizes the current `refactor/codebase-cleanup` checkout based on the approved `b5617ace75b2617a3454768341bc6a6182e5ab3e` production baseline. Runtime PostgreSQL data and the current code/migrations remain authoritative. Detailed invariants live in the linked domain documents.
 
 ## Current architecture
 
@@ -26,7 +26,7 @@ Stable capability keys guard every business endpoint after authentication, activ
 
 The three system roles are Administrator, Manager, and Storekeeper. Administrator is permanent, immutable, and always receives every defined permission. Manager and Storekeeper retain their initial mappings but are editable through role administration like custom roles. `users.manage`, `roles.manage`, and `audit.view` are reserved to Administrator. Exactly one current role may be assigned to each user.
 
-Administrators can create and edit custom roles, edit Manager and Storekeeper, assign any active role, and approve, disable, or re-enable users while retaining assignment history. Role and user mutations share one advisory-lock boundary, optimistic role/assignment conflict detection, last-Administrator protection, and transaction-coupled durable audit. Product, correction, repricing, export, and schema-publication records retain the applicable nullable local-user actor foreign keys. Correction requests record their creator and use local application-user ownership plus a monotonic claim epoch; retained browser capability tokens authorize only one-time adoption of legacy token-only claims. The one-use offline first-Administrator bootstrap remains implemented. Invitations and the audit viewer remain pending.
+Administrators can create and edit custom roles, edit Manager and Storekeeper, assign any active role, and approve, disable, or re-enable users while retaining assignment history. Role and user mutations share one advisory-lock boundary, optimistic role/assignment conflict detection, last-Administrator protection, and transaction-coupled durable audit. Product, correction, repricing, export, and schema-publication records retain the applicable nullable local-user actor foreign keys. Correction requests record their creator and use local application-user ownership plus a monotonic claim epoch; retained browser capability tokens authorize only one-time adoption of legacy token-only claims. The one-use offline first-Administrator bootstrap and Administrator-only global audit viewer are implemented. Invitations remain pending.
 
 See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permission model.
 
@@ -74,8 +74,8 @@ See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permi
 - Authoritative product preview/save/decode, catalog schema versioning, pricing, recount/corrections, scenario/global repricing, and export snapshots are implemented with focused unit and PostgreSQL integration coverage.
 - OIDC authentication, PostgreSQL sessions, active-user access gating, application-owned RBAC, user management, first-admin bootstrap, permission-aware UI, and live access-state transitions are implemented.
 - Server-side authorization and CSRF remain authoritative. `APP_ACCESS_PENDING`/`APP_ACCESS_DISABLED` move the client to the matching AuthGate state; `INSUFFICIENT_PERMISSION` preserves the active session.
-- Operational mutation logs use the resolved local `application_users.id` where available and remain distinct from durable audit events. Immutable, transaction-coupled `audit_events` cover application-user administration, product create/archive/recount, correction-request lifecycle changes, repricing draft creation/discard plus apply/rollback, export snapshot creation/confirmation, and SKU schema publication. Repricing drafts/batches, export snapshots, and published schema versions retain nullable local-user actor attribution; audit coverage for other domains remains pending.
-- Custom-role and role-permission administration are implemented. Invitations and an audit viewer are not implemented.
+- Operational mutation logs use the resolved local `application_users.id` where available and remain distinct from durable audit events. Immutable, transaction-coupled `audit_events` cover application-user and role administration; catalog category/question/option changes; pricing scenario/matrix/modifier changes; product create/archive/recount; correction-request lifecycle changes; repricing draft creation/discard plus apply/rollback; export snapshot creation/confirmation; and SKU schema publication. Repricing drafts/batches, export snapshots, and published schema versions retain nullable local-user actor attribution. The Administrator-only global audit viewer supports filtered keyset pagination over these events.
+- Custom-role and role-permission administration and the Administrator-only audit viewer are implemented. Invitations are not implemented.
 - Live catalog contents and production data quality cannot be inferred from seed defaults or the repository and require operational verification.
 
 ## Testing and operations summary

@@ -1,30 +1,25 @@
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const { execFile } = require('node:child_process');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { promisify } = require('node:util');
 const test = require('node:test');
 const sqlite3 = require('sqlite3').verbose();
-const { Pool } = require('pg');
-
-const execFileAsync = promisify(execFile);
-const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
-if (!TEST_DATABASE_URL) throw new Error('TEST_DATABASE_URL is required');
-process.env.DATABASE_URL = TEST_DATABASE_URL;
-process.env.NBU_RATE_OVERRIDE = '40';
-process.env.APP_BASE_URL = 'http://localhost:5173';
-process.env.OIDC_ISSUER_URL = 'https://auth.example.invalid/realms/amber';
-process.env.OIDC_CLIENT_ID = 'amber-sku-manager-integration-test';
-process.env.OIDC_CLIENT_SECRET = 'integration-test-client-secret';
-process.env.OIDC_REDIRECT_URI = 'http://localhost:5000/api/auth/callback';
-process.env.SESSION_SECRET = 'integration-test-session-secret-0123456789abcdef';
-process.env.SESSION_COOKIE_SECURE = 'false';
-process.env.TRUST_PROXY = 'false';
-
-const pool = require('../src/db/pool');
-const { createApp } = require('../src/app');
+const {
+  Pool,
+  TEST_DATABASE_URL,
+  assertDisposableTestDatabase,
+  closeServer,
+  createApp,
+  createHttpRequester,
+  dropTestDatabase,
+  execFileAsync,
+  listen,
+  pool,
+  recreateTestDatabase,
+  runNodeInDatabase,
+  serverRoot,
+} = require('./harness');
 const express = require('express');
 const { createSessionMiddleware } = require('../src/auth/session');
 const { createAuthRouter } = require('../src/routes/auth.routes');
@@ -49,7 +44,6 @@ let baseUrl;
 let authenticatedSession = null;
 const schemas = {};
 let primarySku;
-const serverRoot = path.resolve(__dirname, '..');
 
 const integrationAuthCalls = { authorization: [], exchange: [] };
 const integrationOidcAdapter = {
@@ -81,70 +75,10 @@ const integrationOidcAdapter = {
 };
 const app = createApp({ oidcAdapter: integrationOidcAdapter });
 
-function databaseUrlFor(databaseName) {
-  if (!/^[a-z0-9_]+$/.test(databaseName)) {
-    throw new Error(`Unsafe test database name: ${databaseName}`);
-  }
-  const url = new URL(TEST_DATABASE_URL);
-  url.pathname = `/${databaseName}`;
-  return url.toString();
-}
-
-async function recreateTestDatabase(databaseName) {
-  await pool.query(`DROP DATABASE IF EXISTS ${databaseName} WITH (FORCE)`);
-  await pool.query(`CREATE DATABASE ${databaseName}`);
-  return databaseUrlFor(databaseName);
-}
-
-async function dropTestDatabase(databaseName) {
-  await pool.query(`DROP DATABASE IF EXISTS ${databaseName}`);
-}
-
-async function runNodeInDatabase(databaseUrl, source, extraEnv = {}) {
-  return execFileAsync(process.execPath, ['-e', source], {
-    cwd: serverRoot,
-    env: {
-      ...process.env,
-      DATABASE_URL: databaseUrl,
-      NBU_RATE_OVERRIDE: '40',
-      ...extraEnv,
-    },
-  });
-}
-
-async function request(url, {
-  method = 'GET',
-  body,
-  headers = {},
-  authentication = authenticatedSession,
-  csrfToken,
-} = {}) {
-  const normalizedMethod = method.toUpperCase();
-  const authenticatedHeaders = authentication
-    ? { Cookie: authentication.cookie }
-    : {};
-  if (
-    authentication
-    && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(normalizedMethod)
-    && csrfToken !== null
-  ) {
-    authenticatedHeaders['X-CSRF-Token'] = csrfToken ?? authentication.csrfToken;
-  }
-  const response = await fetch(`${baseUrl}${url}`, {
-    method,
-    headers: {
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...authenticatedHeaders,
-      ...headers,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-    redirect: 'manual',
-  });
-  const text = await response.text();
-  let data = text;
-  try { data = text ? JSON.parse(text) : null; } catch {}
-  return { response, data, text };
-}
+const request = createHttpRequester({
+  getBaseUrl: () => baseUrl,
+  getDefaultAuthentication: () => authenticatedSession,
+});
 
 async function activateApplicationUserForTest(issuer, subject, roleKey = 'administrator') {
   const result = await pool.query(
@@ -473,10 +407,7 @@ async function createLegacySemiCalibratedNecklaceFixture() {
 }
 
 test.before(async () => {
-  const database = await pool.query('SELECT current_database() AS name');
-  if (!String(database.rows[0].name).endsWith('_test')) {
-    throw new Error(`Refusing destructive integration setup for ${database.rows[0].name}`);
-  }
+  await assertDisposableTestDatabase();
   await pool.query('DROP SCHEMA public CASCADE');
   await pool.query('CREATE SCHEMA public');
   await runMigrations();
@@ -520,16 +451,11 @@ test.before(async () => {
         $1)`,
     [schemas.OC]
   );
-  await new Promise((resolve) => {
-    server = app.listen(0, '127.0.0.1', () => {
-      baseUrl = `http://127.0.0.1:${server.address().port}`;
-      resolve();
-    });
-  });
+  ({ server, baseUrl } = await listen(app));
 });
 
 test.after(async () => {
-  if (server) await new Promise((resolve) => server.close(resolve));
+  await closeServer(server);
   await pool.end();
 });
 
@@ -3747,6 +3673,237 @@ test('duplicate question invariant is atomic across independent transactions', a
     ['ZZ', questionKey]
   );
   assert.equal(stored.rows[0].count, 1);
+});
+
+test('question-key updates rewrite every live reference while published schemas stay immutable', async () => {
+  if (!authenticatedSession) authenticatedSession = await authenticateApplicationSession('/admin');
+  const categoryCode = 'KR';
+  const oldKey = 'old_key';
+  const newKey = 'renamed_key';
+  await pool.query(
+    `INSERT INTO categories (code, name, requires_weight, skip_hidden_sku_questions)
+     VALUES ($1, 'Key rewrite', 0, 0)`,
+    [categoryCode]
+  );
+  const questions = await pool.query(
+    `INSERT INTO questions
+       (category_code, key, label, sku_index, display_order, required,
+        include_in_sku, input_type, visible_if_json)
+     VALUES
+       ($1, $2, 'Original key', 1, 1, 1, 1, 'options', NULL),
+       ($1, 'other_key', 'Other key', 2, 2, 1, 1, 'options', NULL),
+       ($1, 'dependent_key', 'Dependent', 0, 3, 0, 0, 'text',
+        '{"$and":[{"old_key":1},{"$or":[{"old_key":[1,2]},{"other_key":2}]}]}'::jsonb)
+     RETURNING id, key`,
+    [categoryCode, oldKey]
+  );
+  const questionIds = Object.fromEntries(
+    questions.rows.map((question) => [question.key, Number(question.id)])
+  );
+  const options = await pool.query(
+    `INSERT INTO options
+       (question_id, value_id, sku_code, label, visible_if_json, hidden_if_json)
+     VALUES
+       ($1, 1, '1', 'Original one', NULL, NULL),
+       ($2, 2, '2', 'Other two',
+        '{"$or":[{"old_key":1},{"other_key":2}]}'::jsonb,
+        '{"$and":[{"old_key":[2]},{"other_key":1}]}'::jsonb)
+     RETURNING id, question_id`,
+    [questionIds[oldKey], questionIds.other_key]
+  );
+  const dependentOptionId = Number(
+    options.rows.find((option) => Number(option.question_id) === questionIds.other_key).id
+  );
+  const scenario = await pool.query(
+    `INSERT INTO price_scenarios
+       (category_code, name, match_json, axis_x_key, axis_y_key, price_mode, status)
+     VALUES
+       ($1, 'Rewrite scenario',
+        '{"$or":[{"old_key":1},{"$and":[{"other_key":2},{"old_key":[1,2]}]}]}'::jsonb,
+        'old_key+other_key', 'other_key+old_key', 'fixed_uah', 'active')
+     RETURNING id`,
+    [categoryCode]
+  );
+  const modifier = await pool.query(
+    `INSERT INTO price_modifiers
+       (category_code, trigger_key, trigger_val, match_json, factor)
+     VALUES
+       ($1, $2, 1,
+        '{"$and":[{"old_key":1},{"$or":[{"other_key":2},{"old_key":2}]}]}'::jsonb,
+        1.1)
+     RETURNING id`,
+    [categoryCode, oldKey]
+  );
+
+  const publication = await request(`/api/admin/sku-schema/${categoryCode}/publish`, {
+    method: 'POST',
+  });
+  assert.equal(publication.response.status, 200, publication.text);
+  const schemaVersionId = Number(publication.data.id);
+  const publishedBefore = await pool.query(
+    `SELECT sq.question_key, sq.visible_if_json, so.value_id, so.sku_code,
+            so.visible_if_json AS option_visible_if_json,
+            so.hidden_if_json AS option_hidden_if_json
+     FROM sku_schema_questions sq
+     LEFT JOIN sku_schema_options so ON so.schema_question_id = sq.id
+     WHERE sq.schema_version_id = $1
+     ORDER BY sq.question_key, so.value_id`,
+    [schemaVersionId]
+  );
+  await pool.query(
+    `INSERT INTO products
+       (full_sku, base_sku, sequence_number, category, weight, total_price,
+        total_price_uah, price_per_gram, uah_rate, details, sku_schema_version_id)
+     VALUES
+       ('KR12001', 'KR12', 1, $1, 0, 25, 1000, 0, 40,
+        '{"answers":{"old_key":1,"other_key":2},"isCalibrated":0}'::jsonb, $2)`,
+    [categoryCode, schemaVersionId]
+  );
+
+  const renamed = await request('/api/admin/question/update', {
+    method: 'POST',
+    body: {
+      id: questionIds[oldKey],
+      key: newKey,
+      label: 'Original key',
+      sku_index: 1,
+      display_order: 1,
+      required: 1,
+      include_in_sku: 1,
+      input_type: 'options',
+      sku_separator: '',
+      visible_if_json: null,
+    },
+  });
+  assert.equal(renamed.response.status, 200, renamed.text);
+  assert.deepEqual(renamed.data, { success: true, key: newKey });
+
+  const rewritten = await pool.query(
+    `SELECT
+       (SELECT visible_if_json FROM questions WHERE id = $1) AS question_rule,
+       (SELECT visible_if_json FROM options WHERE id = $2) AS option_visible_rule,
+       (SELECT hidden_if_json FROM options WHERE id = $2) AS option_hidden_rule,
+       (SELECT match_json FROM price_scenarios WHERE id = $3) AS scenario_rule,
+       (SELECT axis_x_key FROM price_scenarios WHERE id = $3) AS axis_x_key,
+       (SELECT axis_y_key FROM price_scenarios WHERE id = $3) AS axis_y_key,
+       (SELECT match_json FROM price_modifiers WHERE id = $4) AS modifier_rule,
+       (SELECT trigger_key FROM price_modifiers WHERE id = $4) AS trigger_key,
+       (SELECT details->'answers' FROM products WHERE full_sku = 'KR12001') AS product_answers`,
+    [
+      questionIds.dependent_key,
+      dependentOptionId,
+      Number(scenario.rows[0].id),
+      Number(modifier.rows[0].id),
+    ]
+  );
+  assert.deepEqual(rewritten.rows[0], {
+    question_rule: {
+      $and: [
+        { [newKey]: 1 },
+        { $or: [{ [newKey]: [1, 2] }, { other_key: 2 }] },
+      ],
+    },
+    option_visible_rule: { $or: [{ [newKey]: 1 }, { other_key: 2 }] },
+    option_hidden_rule: { $and: [{ [newKey]: [2] }, { other_key: 1 }] },
+    scenario_rule: {
+      $or: [
+        { [newKey]: 1 },
+        { $and: [{ other_key: 2 }, { [newKey]: [1, 2] }] },
+      ],
+    },
+    axis_x_key: `${newKey}+other_key`,
+    axis_y_key: `other_key+${newKey}`,
+    modifier_rule: {
+      $and: [
+        { [newKey]: 1 },
+        { $or: [{ other_key: 2 }, { [newKey]: 2 }] },
+      ],
+    },
+    trigger_key: newKey,
+    product_answers: { [newKey]: 1, other_key: 2 },
+  });
+
+  const publishedAfter = await pool.query(
+    `SELECT sq.question_key, sq.visible_if_json, so.value_id, so.sku_code,
+            so.visible_if_json AS option_visible_if_json,
+            so.hidden_if_json AS option_hidden_if_json
+     FROM sku_schema_questions sq
+     LEFT JOIN sku_schema_options so ON so.schema_question_id = sq.id
+     WHERE sq.schema_version_id = $1
+     ORDER BY sq.question_key, so.value_id`,
+    [schemaVersionId]
+  );
+  assert.deepEqual(publishedAfter.rows, publishedBefore.rows);
+  assert.ok(publishedAfter.rows.some((row) => row.question_key === oldKey));
+  assert.ok(!publishedAfter.rows.some((row) => row.question_key === newKey));
+});
+
+test('used option semantic values are rejected without partially changing the option', async () => {
+  if (!authenticatedSession) authenticatedSession = await authenticateApplicationSession('/admin');
+  const categoryCode = 'UV';
+  await pool.query(
+    `INSERT INTO categories (code, name, requires_weight, skip_hidden_sku_questions)
+     VALUES ($1, 'Used values', 0, 0)`,
+    [categoryCode]
+  );
+  const question = await pool.query(
+    `INSERT INTO questions
+       (category_code, key, label, sku_index, display_order, required, include_in_sku, input_type)
+     VALUES ($1, 'kind', 'Kind', 1, 1, 1, 1, 'options')
+     RETURNING id`,
+    [categoryCode]
+  );
+  const option = await pool.query(
+    `INSERT INTO options (question_id, value_id, sku_code, label)
+     VALUES ($1, 1, '1', 'Original meaning') RETURNING id`,
+    [question.rows[0].id]
+  );
+  const publication = await request(`/api/admin/sku-schema/${categoryCode}/publish`, {
+    method: 'POST',
+  });
+  assert.equal(publication.response.status, 200, publication.text);
+  await pool.query(
+    `INSERT INTO products
+       (full_sku, base_sku, sequence_number, category, weight, total_price,
+        total_price_uah, price_per_gram, uah_rate, details, sku_schema_version_id)
+     VALUES
+       ('UV1001', 'UV1', 1, $1, 0, 25, 1000, 0, 40,
+        '{"answers":{"kind":1},"isCalibrated":0}'::jsonb, $2)`,
+    [categoryCode, Number(publication.data.id)]
+  );
+
+  const rejected = await request('/api/admin/option', {
+    method: 'PUT',
+    body: {
+      id: Number(option.rows[0].id),
+      value_id: 9,
+      sku_code: '9',
+      label: 'Reinterpreted meaning',
+      visible_if_json: null,
+      hidden_if_json: null,
+      archived: false,
+    },
+  });
+  assert.equal(rejected.response.status, 409, rejected.text);
+  assert.match(rejected.data.error, /використовується у 1 товарах і не може бути змінений/);
+
+  const stored = await pool.query(
+    `SELECT value_id, sku_code, label, visible_if_json, hidden_if_json, archived
+     FROM options WHERE id = $1`,
+    [Number(option.rows[0].id)]
+  );
+  assert.deepEqual(stored.rows[0], {
+    value_id: 1,
+    sku_code: '1',
+    label: 'Original meaning',
+    visible_if_json: null,
+    hidden_if_json: null,
+    archived: false,
+  });
+  const product = await pool.query(
+    `SELECT details->'answers' AS answers FROM products WHERE full_sku = 'UV1001'`
+  );
+  assert.deepEqual(product.rows[0].answers, { kind: 1 });
 });
 
 test('price-cell API stores only positive prices and treats empty or missing price as deletion', async () => {
