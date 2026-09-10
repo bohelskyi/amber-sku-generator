@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ClipboardX, ListFilter, RefreshCw, RotateCcw, ScrollText } from 'lucide-react';
+import { ListFilter, RotateCcw } from 'lucide-react';
 import { useAuth } from '../auth/auth-context.js';
+import { AppPageHeader, EmptyState, LoadingState, Notice, StatusBadge } from '../components/app/UiPrimitives.jsx';
 import { api } from '../lib/api.js';
 import {
   AUDIT_DOMAINS,
@@ -43,11 +44,11 @@ function AuditDetails({ details }) {
   const entries = Object.entries(details || {});
   if (!entries.length) return null;
   return (
-    <details className="mt-3 border-t border-slate-100 pt-3">
+    <details className="mt-4 border-t border-slate-100 pt-3">
       <summary className="cursor-pointer text-sm font-semibold text-[#8a5f2b]">Деталі</summary>
-      <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-[minmax(160px,0.5fr)_minmax(0,1fr)]">
+      <dl className="mt-2 text-sm">
         {entries.map(([key, value]) => (
-          <div key={key} className="contents">
+          <div key={key} className="audit-detail-row">
             <dt className="font-medium text-slate-500">{getAuditDetailLabel(key)}</dt>
             <dd className="break-words text-slate-800">{formatAuditDetailValue(value)}</dd>
           </div>
@@ -59,16 +60,19 @@ function AuditDetails({ details }) {
 
 function AuditEventCard({ event }) {
   return (
-    <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <article className="audit-card">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h2 className="font-semibold text-slate-900">{getAuditEventLabel(event.eventKey)}</h2>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <StatusBadge>{AUDIT_DOMAINS.find(([value]) => value === event.domain)?.[1] || event.domain}</StatusBadge>
+            <span className="text-xs text-slate-500">{getAuditSubjectLabel(event.subject)}</span>
+          </div>
+          <h2 className="text-base font-semibold text-slate-900">{getAuditEventLabel(event.eventKey)}</h2>
           <p className="mt-1 break-all font-mono text-xs text-slate-500">{event.eventKey}</p>
-          <p className="mt-2 text-sm text-slate-700">{getAuditSubjectLabel(event.subject)}</p>
         </div>
-        <div className="shrink-0 text-left text-xs leading-5 text-slate-500 sm:text-right">
-          <div>{event.occurredAt ? formatDateTime(event.occurredAt) : 'Час не записано'}</div>
-          <div>{getAuditActorLabel(event.actor)}</div>
+        <div className="shrink-0 border-t border-slate-100 pt-2 text-left text-xs leading-5 text-slate-500 sm:max-w-56 sm:border-0 sm:pt-0 sm:text-right">
+          <time dateTime={event.occurredAt || undefined}>{event.occurredAt ? formatDateTime(event.occurredAt) : 'Час не записано'}</time>
+          <div className="font-medium text-slate-600">{getAuditActorLabel(event.actor)}</div>
         </div>
       </div>
       <AuditDetails details={event.details} />
@@ -114,9 +118,10 @@ export default function AuditPage() {
     () => JSON.stringify(draftFilters) !== JSON.stringify(filters),
     [draftFilters, filters]
   );
+  const activeFilterCount = Object.values(filters).filter(Boolean).length;
 
   if (!canViewAudit) {
-    return <main className="app-page"><div className="mx-auto max-w-4xl px-4 py-8 sm:px-6"><div className="card" role="alert">Недостатньо прав для перегляду аудиту.</div></div></main>;
+    return <main className="app-page"><div className="mx-auto max-w-4xl px-4 py-8 sm:px-6"><div className="card p-5" role="alert">Недостатньо прав для перегляду аудиту.</div></div></main>;
   }
 
   const updateDraft = (key) => (event) => setDraftFilters((current) => ({
@@ -142,17 +147,17 @@ export default function AuditPage() {
   return (
     <main className="app-page">
       <div className="mx-auto w-full max-w-6xl space-y-5 px-4 py-5 pb-20 sm:px-6">
-        <header className="card flex items-center justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-700">Адміністрування</p>
-            <h1 className="mt-1 text-2xl font-semibold text-slate-900">Глобальний аудит</h1>
-            <p className="mt-1 text-sm text-slate-500">Незмінний журнал безпеки та бізнес-дій.</p>
-          </div>
-          <ScrollText size={32} className="text-amber-600" aria-hidden="true" />
-        </header>
+        <AppPageHeader
+          eyebrow="Адміністрування"
+          title="Глобальний аудит"
+          description="Незмінний журнал безпеки та бізнес-дій з точним виконавцем і об’єктом."
+        />
 
-        <form className="card space-y-4" onSubmit={applyFilters}>
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-700"><ListFilter size={16} />Фільтри</div>
+        <form className="card space-y-4 p-4 sm:p-5" onSubmit={applyFilters}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-700"><ListFilter size={16} aria-hidden="true" />Фільтри</div>
+            {activeFilterCount > 0 && <StatusBadge tone="info">Активних: {activeFilterCount}</StatusBadge>}
+          </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <label className="text-xs font-medium text-slate-600">Від<input aria-label="Від" className="input-sm mt-1" type="datetime-local" value={draftFilters.from} onChange={updateDraft('from')} /></label>
             <label className="text-xs font-medium text-slate-600">До<input aria-label="До" className="input-sm mt-1" type="datetime-local" value={draftFilters.to} onChange={updateDraft('to')} /></label>
@@ -168,11 +173,11 @@ export default function AuditPage() {
           </div>
         </form>
 
-        {error && <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">{error}</div>}
+        {error && <Notice>{error}</Notice>}
         {loading ? (
-          <div className="flex justify-center py-16" role="status"><RefreshCw size={24} className="animate-spin text-slate-500" /><span className="sr-only">Завантаження аудиту</span></div>
+          <LoadingState label="Завантаження аудиту" />
         ) : items.length === 0 && !error ? (
-          <div className="card flex flex-col items-center gap-2 py-12 text-center text-sm text-slate-500"><ClipboardX size={28} /><span>Подій за вибраними фільтрами не знайдено.</span></div>
+          <div className="card p-0"><EmptyState>Подій за вибраними фільтрами не знайдено.</EmptyState></div>
         ) : (
           <section className="space-y-3" aria-label="Події аудиту">
             {items.map((event, index) => <AuditEventCard key={`${event.occurredAt}:${event.eventKey}:${event.subject?.type}:${event.subject?.id}:${index}`} event={event} />)}

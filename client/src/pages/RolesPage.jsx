@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { LockKeyhole, Plus, Shield, ShieldCheck } from 'lucide-react';
+import { LockKeyhole, Plus, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../auth/auth-context.js';
+import { AppPageHeader, LoadingState, Notice, StatusBadge } from '../components/app/UiPrimitives.jsx';
 import { api } from '../lib/api.js';
 import {
+  getPermissionPresentation,
   getRoleManagementErrorMessage,
   groupPermissions,
 } from '../lib/role-management.js';
@@ -35,6 +37,7 @@ export default function RolesPage() {
 
   const selectedRole = roles.find((role) => role.id === selectedRoleId) || null;
   const permissionGroups = useMemo(() => groupPermissions(permissions), [permissions]);
+  const selectedPermissionCount = form.permissionKeys.length;
 
   const loadData = useCallback(async (preferredRoleId) => {
     const [rolesResponse, permissionsResponse] = await Promise.all([
@@ -188,55 +191,62 @@ export default function RolesPage() {
   };
 
   if (!canManageRoles) {
-    return <main className="app-page"><div className="mx-auto max-w-4xl px-4 py-8"><div className="card" role="alert">Недостатньо прав для керування ролями.</div></div></main>;
+    return <main className="app-page"><div className="mx-auto max-w-4xl px-4 py-8"><div className="card p-5" role="alert">Недостатньо прав для керування ролями.</div></div></main>;
   }
 
   return (
     <main className="app-page">
       <div className="mx-auto max-w-7xl space-y-5 px-4 py-5 pb-20 sm:px-6">
-        <header className="card flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-700">Доступ</p><h1 className="mt-1 text-2xl font-semibold text-slate-900">Ролі та дозволи</h1><p className="mt-1 text-sm text-slate-500">Дозволи діють на наступний запит користувача.</p></div>
-          <Shield size={32} className="text-amber-600" aria-hidden="true" />
-        </header>
+        <AppPageHeader
+          eyebrow="Доступ"
+          title="Ролі та дозволи"
+          description="Налаштуйте можливості ролей. Зміни діють з наступного запиту користувача."
+        />
 
-        {error && <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">{error}</div>}
-        {notice && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800" role="status">{notice}</div>}
+        {error && <Notice>{error}</Notice>}
+        {notice && <Notice tone="success">{notice}</Notice>}
 
-        {loading ? <div className="card text-sm text-slate-500">Завантажуємо ролі…</div> : (
+        {loading ? <LoadingState label="Завантажуємо ролі…" /> : (
           <div className="grid gap-5 lg:grid-cols-[360px_minmax(0,1fr)]">
-            <section className="card space-y-3">
+            <section className="card h-fit space-y-3 p-4 sm:p-5 lg:sticky lg:top-[calc(var(--workspace-nav-height)+1rem)]">
               <button type="button" className="btn btn-primary w-full gap-2" onClick={startCreate}><Plus size={16} aria-hidden="true" />Створити роль</button>
-              <div className="space-y-2">
+              <div className="space-y-2" aria-label="Ролі">
                 {roles.map((role) => (
-                  <button key={role.id} type="button" onClick={() => selectRole(role)} className={`w-full rounded-xl border p-3 text-left ${selectedRoleId === role.id ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-white'}`}>
-                    <div className="flex items-start justify-between gap-2"><span className="font-semibold text-slate-900">{role.displayName}</span>{role.isProtected && <LockKeyhole size={16} className="text-amber-700" aria-label="Захищена роль" />}</div>
-                    <div className="mt-1 text-xs text-slate-500">{roleTypeLabel(role)} · {role.status === 'active' ? 'Активна' : 'Деактивована'}</div>
-                    <div className="mt-2 text-xs text-slate-600">Дозволів: {role.permissionCount} · Користувачів: {role.assignedUserCount}</div>
+                  <button key={role.id} type="button" aria-pressed={selectedRoleId === role.id} onClick={() => selectRole(role)} className={`role-list-item ${selectedRoleId === role.id ? 'is-selected' : ''}`}>
+                    <div className="flex items-start justify-between gap-2"><span className="font-semibold text-slate-900">{role.displayName}</span>{role.isProtected && <LockKeyhole size={16} className="shrink-0 text-amber-700" aria-label="Захищена роль" />}</div>
+                    <div className="mt-1 flex flex-wrap gap-1.5"><StatusBadge tone={role.status === 'active' ? 'success' : 'neutral'}>{role.status === 'active' ? 'Активна' : 'Деактивована'}</StatusBadge><StatusBadge>{roleTypeLabel(role)}</StatusBadge></div>
+                    <div className="mt-2 text-xs text-slate-600">{role.permissionCount} дозволів · {role.assignedUserCount} користувачів</div>
                   </button>
                 ))}
               </div>
             </section>
 
-            <section className="card space-y-5">
+            <section className="card space-y-5 p-4 sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div><h2 className="text-xl font-semibold text-slate-900">{selectedRole ? selectedRole.displayName : 'Нова роль'}</h2>{selectedRole && <p className="mt-1 text-sm text-slate-500">Активних: {selectedRole.activeAssignedUserCount}; вимкнених: {selectedRole.disabledAssignedUserCount}</p>}</div>
-                {selectedRole?.isProtected && <span className="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900"><ShieldCheck size={15} />Захищена</span>}
+                <div><h2 className="text-xl font-semibold text-slate-900">{selectedRole ? selectedRole.displayName : 'Нова роль'}</h2>{selectedRole && <p className="mt-1 text-sm text-slate-500">Активних користувачів: {selectedRole.activeAssignedUserCount} · вимкнених: {selectedRole.disabledAssignedUserCount}</p>}</div>
+                <div className="flex flex-wrap items-center gap-2"><StatusBadge tone="info">Обрано дозволів: {selectedPermissionCount}</StatusBadge>{selectedRole?.isProtected && <StatusBadge tone="warning"><ShieldCheck size={14} className="mr-1" aria-hidden="true" />Захищена</StatusBadge>}</div>
               </div>
-              {selectedRole?.isProtected && <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">Адміністратор є постійною захищеною роллю з усіма дозволами.</div>}
+              {selectedRole?.isProtected && <Notice tone="warning">Адміністратор — постійна захищена роль. Вона автоматично має всі наявні та майбутні дозволи.</Notice>}
 
               <div className="grid gap-4 sm:grid-cols-2">
-                <label className="text-sm font-medium text-slate-700">Назва<input className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" value={form.displayName} disabled={busy || selectedRole?.isProtected} onChange={(event) => setForm((current) => ({ ...current, displayName: event.target.value }))} /></label>
-                <label className="text-sm font-medium text-slate-700">Опис<input className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" value={form.description} disabled={busy || selectedRole?.isProtected} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /></label>
+                <label className="text-sm font-medium text-slate-700">Назва<input className="input-sm mt-1" value={form.displayName} disabled={busy || selectedRole?.isProtected} onChange={(event) => setForm((current) => ({ ...current, displayName: event.target.value }))} /></label>
+                <label className="text-sm font-medium text-slate-700">Опис<input className="input-sm mt-1" value={form.description} disabled={busy || selectedRole?.isProtected} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /></label>
               </div>
 
               <div className="space-y-4">
                 {permissionGroups.map((group) => (
-                  <fieldset key={group.key} className="rounded-xl border border-slate-200 p-4" disabled={busy || selectedRole?.isProtected}>
-                    <legend className="px-2 text-sm font-semibold text-slate-900">{group.label}</legend>
-                    <div className="grid gap-3 sm:grid-cols-2">
+                  <fieldset key={group.key} className="permission-group" disabled={busy || selectedRole?.isProtected}>
+                    <legend className="sr-only">{group.label}</legend>
+                    <div className="permission-group-header flex flex-wrap items-start justify-between gap-2">
+                      <div><h3 className="text-sm font-semibold text-slate-900">{group.label}</h3><p className="mt-0.5 text-xs text-slate-500">{group.description}</p></div>
+                      <span className="text-xs font-medium tabular-nums text-slate-500">{group.permissions.filter((permission) => form.permissionKeys.includes(permission.key)).length} / {group.permissions.length}</span>
+                    </div>
+                    <div className="grid gap-px bg-slate-200 sm:grid-cols-2">
                       {group.permissions.map((permission) => {
                         const locked = permission.reserved && !selectedRole?.isProtected;
-                        return <label key={permission.key} className={`flex gap-3 rounded-lg p-2 ${locked ? 'bg-slate-100 text-slate-500' : 'hover:bg-slate-50'}`}><input type="checkbox" checked={form.permissionKeys.includes(permission.key)} disabled={busy || selectedRole?.isProtected || locked} onChange={() => togglePermission(permission)} /><span><span className="block text-sm font-medium">{permission.key}{locked ? ' · лише Адміністратор' : ''}</span><span className="block text-xs text-slate-500">{permission.description}</span></span></label>;
+                        const presentation = getPermissionPresentation(permission);
+                        const readOnly = Boolean(selectedRole?.isProtected || locked);
+                        return <label key={permission.key} className={`permission-option ${readOnly ? 'is-locked' : ''}`}><input type="checkbox" checked={form.permissionKeys.includes(permission.key)} disabled={busy || readOnly} onChange={() => togglePermission(permission)} /><span className="min-w-0"><span className="flex flex-wrap items-center gap-2"><span className="text-sm font-semibold text-slate-800">{presentation.label}</span>{permission.reserved && <StatusBadge tone="warning">Лише Адміністратор</StatusBadge>}</span><span className="mt-0.5 block text-xs leading-5 text-slate-500">{presentation.description}</span><span className="permission-key">{permission.key}</span></span></label>;
                       })}
                     </div>
                   </fieldset>

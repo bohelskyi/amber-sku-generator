@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ShieldCheck, UserCheck, UserRoundCog, UserX } from 'lucide-react';
+import { ShieldCheck, UserCheck, UserX } from 'lucide-react';
 import { useAuth } from '../auth/auth-context.js';
+import { AppPageHeader, EmptyState, LoadingState, Notice, StatusBadge } from '../components/app/UiPrimitives.jsx';
 import { api } from '../lib/api.js';
 import {
   getApplicationUserStatusLabel,
@@ -8,10 +9,10 @@ import {
   getUserRoleLabel,
 } from '../lib/user-management.js';
 
-const STATUS_CLASSES = Object.freeze({
-  pending: 'bg-amber-50 text-amber-800 ring-amber-200',
-  active: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
-  disabled: 'bg-rose-50 text-rose-800 ring-rose-200',
+const STATUS_TONES = Object.freeze({
+  pending: 'warning',
+  active: 'success',
+  disabled: 'danger',
 });
 
 function getUserName(user) {
@@ -38,6 +39,10 @@ export default function UsersPage() {
   const [busyUserId, setBusyUserId] = useState(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const statusCounts = users.reduce((counts, user) => ({
+    ...counts,
+    [user.status]: (counts[user.status] || 0) + 1,
+  }), {});
 
   const loadUsers = useCallback(async () => {
     const [usersResponse, rolesResponse] = await Promise.all([
@@ -103,7 +108,7 @@ export default function UsersPage() {
     return (
       <main className="app-page">
         <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
-          <div className="card" role="alert">Недостатньо прав для керування користувачами.</div>
+          <div className="card p-5" role="alert">Недостатньо прав для керування користувачами.</div>
         </div>
       </main>
     );
@@ -112,34 +117,40 @@ export default function UsersPage() {
   return (
     <main className="app-page">
       <div className="mx-auto max-w-7xl space-y-5 px-4 py-5 pb-20 sm:px-6">
-        <header className="card flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-700">Доступ</p>
-            <h1 className="mt-1 text-2xl font-semibold text-slate-900">Користувачі застосунку</h1>
-            <p className="mt-1 text-sm text-slate-500">Підтвердження доступу та призначення активних ролей.</p>
-          </div>
-          <UserRoundCog size={32} className="text-amber-600" aria-hidden="true" />
-        </header>
+        <AppPageHeader
+          eyebrow="Доступ"
+          title="Користувачі застосунку"
+          description="Підтверджуйте доступ, призначайте роль і контролюйте стан облікових записів."
+        />
 
-        {error && (
-          <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">
-            {error}
-          </div>
-        )}
-        {notice && (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800" role="status">
-            {notice}
-          </div>
+        {error && <Notice>{error}</Notice>}
+        {notice && <Notice tone="success">{notice}</Notice>}
+
+        {!loading && users.length > 0 && (
+          <section className="card metric-strip grid-cols-1 sm:grid-cols-3" aria-label="Стани користувачів">
+            {[
+              ['Очікують підтвердження', statusCounts.pending || 0, 'text-amber-700'],
+              ['Активні', statusCounts.active || 0, 'text-emerald-700'],
+              ['Вимкнені', statusCounts.disabled || 0, 'text-rose-700'],
+            ].map(([label, value, valueClass]) => (
+              <div className="metric-strip-item last:border-b-0 sm:border-b-0" key={label}>
+                <div className="metric-strip-label">{label}</div>
+                <div className={`metric-strip-value ${valueClass}`}>{value}</div>
+              </div>
+            ))}
+          </section>
         )}
 
         <section className="card overflow-hidden p-0">
           {loading ? (
-            <div className="p-6 text-sm text-slate-500">Завантажуємо користувачів…</div>
+            <LoadingState compact label="Завантажуємо користувачів…" />
+          ) : users.length === 0 ? (
+            <EmptyState compact>Користувачів не знайдено.</EmptyState>
           ) : (
             <div className="overflow-x-auto">
-              <table className="dense-table w-full min-w-[920px] border-collapse text-left">
+              <table className="dense-table w-full min-w-[880px] border-collapse text-left">
                 <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr className="table-head border-b border-slate-200">
                     <th className="table-cell">Користувач</th>
                     <th className="table-cell">Стан</th>
                     <th className="table-cell">Останній вхід</th>
@@ -153,22 +164,22 @@ export default function UsersPage() {
                     const selectedRole = roleSelections[user.id] || '';
                     const busy = busyUserId === user.id;
                     return (
-                      <tr key={user.id} className="border-b border-slate-100 align-top last:border-0">
+                      <tr key={user.id} className="border-b border-slate-100 align-top last:border-0" aria-busy={busy || undefined}>
                         <td className="table-cell">
                           <div className="font-semibold text-slate-900">{name}</div>
                           <div className="mt-0.5 text-xs text-slate-500">{user.preferredUsername || 'Без імені входу'}</div>
                         </td>
                         <td className="table-cell">
-                          <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${STATUS_CLASSES[user.status] || 'bg-slate-50 text-slate-700 ring-slate-200'}`}>
+                          <StatusBadge tone={STATUS_TONES[user.status] || 'neutral'}>
                             {getApplicationUserStatusLabel(user.status)}
-                          </span>
+                          </StatusBadge>
                         </td>
                         <td className="table-cell text-sm text-slate-600">
                           {formatLastAuthenticated(user.lastAuthenticatedAt)}
                         </td>
                         <td className="table-cell">
                           <select
-                            className="min-h-10 min-w-44 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                            className="input-sm min-w-44"
                             aria-label={`Роль для ${name}`}
                             value={selectedRole}
                             onChange={(event) => setRoleSelections((current) => ({
@@ -182,6 +193,11 @@ export default function UsersPage() {
                               <option key={role.id} value={role.id}>{getUserRoleLabel(role)}</option>
                             ))}
                           </select>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {user.status === 'pending'
+                              ? 'Буде призначена після підтвердження'
+                              : `Поточна: ${user.role ? getUserRoleLabel(user.role) : 'не призначена'}`}
+                          </div>
                         </td>
                         <td className="table-cell">
                           <div className="flex flex-wrap justify-end gap-2">
@@ -256,9 +272,6 @@ export default function UsersPage() {
                       </tr>
                     );
                   })}
-                  {users.length === 0 && (
-                    <tr><td className="table-cell text-slate-500" colSpan={5}>Користувачів не знайдено.</td></tr>
-                  )}
                 </tbody>
               </table>
             </div>

@@ -27,7 +27,9 @@ const timeline = {
     {
       id: 'timeline-2', type: 'correction_request.completed', occurredAt: '2026-01-02T10:00:00Z',
       timestampStatus: 'recorded', actor: { status: 'recorded', displayName: 'Worker' }, sku: 'SKU-B',
-      details: {}, changes: [], groupKey: 'business-action-1',
+      details: {
+        latestProposal: { sourceSku: 'SKU-B', proposedSku: 'SKU-C', changes: [] },
+      }, changes: [], groupKey: 'business-action-1',
     },
     {
       id: 'timeline-3', type: 'product.corrected', occurredAt: '2026-01-02T10:00:00Z',
@@ -38,8 +40,17 @@ const timeline = {
         price: { beforeUah: 1000, afterUah: 1500 },
       },
       changes: [{
-        kind: 'answer', fieldKey: 'is_calibrated', fieldLabel: null,
-        before: { value: 0, label: null }, after: { value: 2, label: null },
+        kind: 'answer', fieldKey: 'discount', fieldLabel: 'Знижка',
+        before: { value: 3, label: '50%' }, after: { value: 0, label: 'Не вказано' },
+      }, {
+        kind: 'answer', fieldKey: 'material', fieldLabel: 'Матеріал',
+        before: { value: 7, label: 'Бурштин' }, after: { value: 8, label: null },
+      }, {
+        kind: 'answer', fieldKey: 'is_calibrated', fieldLabel: 'Калібрування',
+        before: { value: 0, label: 'Некалібрована' }, after: { value: 2, label: 'Напівкалібрована' },
+      }, {
+        kind: 'answer', fieldKey: 'future_field', fieldLabel: null,
+        before: { value: 9, label: null }, after: { value: 10, label: null },
       }],
     },
     {
@@ -62,9 +73,24 @@ describe('product timeline', () => {
     expect(screen.queryByText('Запит виконано')).toBeNull();
     expect(screen.getAllByText('Виконавця не записано').length).toBeGreaterThan(0);
     expect(screen.getByText('Час не записано')).toBeTruthy();
-    expect(screen.getByText('0')).toBeTruthy();
-    expect(screen.getByText('2')).toBeTruthy();
+    expect(screen.getByText('Калібрування')).toBeTruthy();
+    expect(screen.getByText('50%')).toBeTruthy();
+    expect(screen.getByText('Не вказано')).toBeTruthy();
+    expect(screen.getByText('Бурштин')).toBeTruthy();
+    expect(screen.getByText('8')).toBeTruthy();
+    expect(screen.getByText('Некалібрована')).toBeTruthy();
+    expect(screen.getByText('Напівкалібрована')).toBeTruthy();
+    expect(screen.getByText('future_field')).toBeTruthy();
+    expect(screen.getByText('9')).toBeTruthy();
     expect(screen.getByText('останній')).toBeTruthy();
+    const transitions = screen.getAllByTestId('sku-transition');
+    expect(transitions).toHaveLength(2);
+    for (const transition of transitions) {
+      expect(transition.textContent).toBe('SKU-BSKU-C');
+      expect(transition.className).toContain('justify-start');
+      expect(transition.querySelectorAll('.flex-1')).toHaveLength(0);
+      expect(transition.querySelectorAll('.text-right')).toHaveLength(0);
+    }
   });
 
   it('normalizes exact SKU searches into the URL-driven request', async () => {

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle,
   ArrowRight,
   CheckCircle2,
   ClipboardList,
@@ -14,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/auth-context.js';
+import { AppPageHeader, EmptyState, LoadingState, Notice } from '../components/app/UiPrimitives.jsx';
 import { useDialogAccessibility } from '../hooks/useDialogAccessibility';
 import { getAnswerValueLabel, getQuestionLabel } from '../lib/answer-labels';
 import { api } from '../lib/api';
@@ -449,21 +449,18 @@ export default function CorrectionRequestsPage() {
 
   if (loading && !config) {
     return (
-      <div className="app-page flex items-center justify-center">
-        <RefreshCw className="animate-spin text-slate-600" size={26} />
-      </div>
+      <div className="app-page"><LoadingState label="Завантажуємо чергу виправлень…" /></div>
     );
   }
 
   return (
     <div className="app-page">
       <main className="mx-auto w-full min-w-0 max-w-7xl space-y-5 overflow-hidden px-4 py-4 pb-20 sm:px-6 sm:py-6">
-        <header className="console-header">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight text-slate-900">Запити на виправлення</h1>
-            <p className="mt-1 text-xs text-slate-500">Операційна черга, власність і завершення запитів.</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
+        <AppPageHeader
+          eyebrow="Виправлення"
+          title="Запити на виправлення"
+          description="Операційна черга, відповідальні працівники та завершення запитів."
+          actions={<>
             {isAdminView && canViewCatalogOrPricing && (
               <Link to="/admin" className="btn btn-outline">
                 Адмін-панель
@@ -473,25 +470,15 @@ export default function CorrectionRequestsPage() {
               <House size={16} />
               На головну
             </Link>
-          </div>
-        </header>
+          </>}
+        />
 
-        {error && (
-          <div className="flex items-start gap-3 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-            <AlertTriangle size={18} className="mt-0.5 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-        {success && (
-          <div className="flex items-start gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-            <CheckCircle2 size={18} className="mt-0.5 shrink-0" />
-            <span>{success}</span>
-          </div>
-        )}
+        {error && <Notice>{error}</Notice>}
+        {success && <Notice tone="success">{success}</Notice>}
         {queueRefreshFailed && (
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          <Notice tone="warning">
             Не вдалося оновити спільну чергу. Показано останні отримані дані; повторна спроба буде автоматично.
-          </div>
+          </Notice>
         )}
 
         <section className="card queue-workspace w-full min-w-0">
@@ -521,11 +508,9 @@ export default function CorrectionRequestsPage() {
           </div>
 
           {loading ? (
-            <div className="flex justify-center py-16">
-              <RefreshCw className="animate-spin text-slate-500" size={24} />
-            </div>
+            <LoadingState compact label="Оновлюємо чергу…" />
           ) : visibleRequests.length === 0 ? (
-            <div className="py-16 text-center text-sm text-slate-500">Запитів для цього фільтра немає.</div>
+            <EmptyState compact>Запитів для цього фільтра немає.</EmptyState>
           ) : (
             <div className="correction-list divide-y divide-slate-200">
               {visibleRequests.map((request) => {

@@ -4,7 +4,11 @@ import { MemoryRouter } from 'react-router-dom';
 import { AuthContext } from '../src/auth/auth-context.js';
 import { WorkspaceNav } from '../src/components/app/WorkspaceNav.jsx';
 import { api } from '../src/lib/api.js';
-import { getPermissionDomain, groupPermissions } from '../src/lib/role-management.js';
+import {
+  getPermissionDomain,
+  getPermissionPresentation,
+  groupPermissions,
+} from '../src/lib/role-management.js';
 import RolesPage from '../src/pages/RolesPage.jsx';
 
 const permissions = [
@@ -70,6 +74,17 @@ describe('role-management UI', () => {
     ]);
   });
 
+  it('keeps stable permission keys while presenting Ukrainian names and descriptions', () => {
+    expect(getPermissionPresentation({ key: 'products.view', description: 'View products' })).toEqual({
+      label: 'Перегляд товарів',
+      description: 'Перегляд списку та основних даних товарів.',
+    });
+    expect(getPermissionPresentation({ key: 'future.permission', description: 'Future permission' })).toEqual({
+      label: 'future.permission',
+      description: 'Future permission',
+    });
+  });
+
   it('shows navigation and loads roles only through roles.manage', async () => {
     const get = vi.spyOn(api, 'get').mockImplementation(async (url) => response(
       url === '/admin/roles' ? { roles } : { permissions }
@@ -111,6 +126,7 @@ describe('role-management UI', () => {
     );
 
     fireEvent.click(await screen.findByRole('button', { name: /Manager/ }));
+    expect(screen.getByText('Перегляд товарів')).toBeTruthy();
     const reserved = screen.getByRole('checkbox', { name: /users\.manage/ });
     expect(reserved.disabled).toBe(true);
     const productsView = screen.getByRole('checkbox', { name: /products\.view/ });

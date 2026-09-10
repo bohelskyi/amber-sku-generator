@@ -2,6 +2,7 @@ import { AdminHeader } from '../components/admin/AdminHeader';
 import { AdminPricingEditor } from '../components/admin/AdminPricingEditor';
 import { AdminStructureEditor } from '../components/admin/AdminStructureEditor';
 import { ValidationIssues } from '../components/admin/ValidationIssues';
+import { LoadingState } from '../components/app/UiPrimitives.jsx';
 import { useAdminPanel } from '../hooks/useAdminPanel';
 
 export default function AdminPage() {
@@ -9,12 +10,7 @@ export default function AdminPage() {
 
   if (!admin.config) {
     return (
-      <div className="app-page flex items-center justify-center">
-        <div className="card p-8 text-center">
-          <div className="text-lg font-semibold text-slate-700">Завантаження...</div>
-          <div className="mt-2 text-sm text-slate-500">Збираємо конфігурацію та цінові сценарії.</div>
-        </div>
-      </div>
+      <div className="app-page"><LoadingState label="Збираємо конфігурацію та цінові сценарії…" /></div>
     );
   }
 

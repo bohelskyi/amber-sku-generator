@@ -4,6 +4,11 @@ const { asRuleObject, isRuleMatched } = require('../utils/rules');
 const { toUahNumber } = require('../utils/money');
 
 const MAX_SKU_LENGTH = 256;
+const CALIBRATION_STATES = new Map([
+  [0, 'Некалібрована'],
+  [1, 'Калібрована'],
+  [2, 'Напівкалібрована'],
+]);
 
 function timelineError(message, statusCode, code) {
   const error = new Error(message);
@@ -93,7 +98,17 @@ function normalizeValue(value, payload, schema, key) {
   }
   const answers = asObject(payload?.answers);
   const option = findSchemaOption(schema?.get(key), value, answers);
-  return { value, label: option?.label || null };
+  if (option?.label) return { value, label: option.label };
+  if (key === 'is_calibrated' && CALIBRATION_STATES.has(Number(value))) {
+    return { value, label: CALIBRATION_STATES.get(Number(value)) };
+  }
+  if (Number(value) === 0) return { value, label: 'Не вказано' };
+  return { value, label: null };
+}
+
+function getPayloadSchema(schemas, payload, fallbackSchemaId) {
+  const payloadSchemaId = nullableNumber(payload?.skuSchemaVersionId);
+  return schemas.get(payloadSchemaId) || schemas.get(nullableNumber(fallbackSchemaId));
 }
 
 function normalizeStoredChanges({
@@ -111,14 +126,17 @@ function normalizeStoredChanges({
   const changes = answerChanges.map((change) => {
     const key = String(change.key);
     const historical = getDecodedAnswer(oldPayload, key, change.from);
-    const question = newSchema?.get(key) || oldSchema?.get(key);
+    const question = oldSchema?.get(key) || newSchema?.get(key);
+    const fieldLabel = question?.label || (key === 'is_calibrated' ? 'Калібрування' : null);
     return {
       kind: 'answer',
       fieldKey: key,
-      fieldLabel: historical?.label || question?.label || null,
+      fieldLabel: historical?.label || fieldLabel,
       before: normalizeValue(change.from, oldPayload, oldSchema, key),
       after: normalizeValue(change.to, newPayload, newSchema, key),
-      labelStatus: historical?.label || question?.label ? 'historical_schema' : 'not_recorded',
+      labelStatus: historical?.label || question?.label
+        ? 'historical_schema'
+        : fieldLabel ? 'stable_domain' : 'not_recorded',
     };
   });
   const storedWeight = Array.isArray(storedChanges)
@@ -471,8 +489,12 @@ async function getProductTimeline(skuValue) {
   const requestGroups = new Map();
   for (const request of requests) {
     const sourceProduct = productById.get(Number(request.source_product_id));
-    const oldSchema = schemas.get(Number(sourceProduct?.sku_schema_version_id));
-    const newSchema = schemas.get(Number(request.proposed_payload?.skuSchemaVersionId));
+    const oldSchema = getPayloadSchema(
+      schemas,
+      request.old_payload,
+      sourceProduct?.sku_schema_version_id
+    );
+    const newSchema = getPayloadSchema(schemas, request.proposed_payload, null);
     const latestProposal = {
       label: 'latest_stored_proposal',
       sourceSku: request.source_sku,
@@ -564,9 +586,12 @@ async function getProductTimeline(skuValue) {
     const requestId = nullableNumber(audit?.details?.correctionRequestId)
       || nullableNumber(requestsByCorrectedProduct.get(Number(corrected.id))?.id);
     const request = requestId ? requests.find((item) => Number(item.id) === requestId) : null;
-    const oldSchema = schemas.get(Number(source.sku_schema_version_id));
-    const newSchema = schemas.get(Number(corrected.sku_schema_version_id))
-      || schemas.get(Number(correction.new_payload?.skuSchemaVersionId));
+    const oldSchema = getPayloadSchema(schemas, correction.old_payload, source.sku_schema_version_id);
+    const newSchema = getPayloadSchema(
+      schemas,
+      correction.new_payload,
+      corrected.sku_schema_version_id
+    );
     const oldPrice = toUahNumber(correction.old_payload?.totalPriceUah);
     const newPrice = toUahNumber(correction.new_payload?.totalPriceUah);
     pushEvent({
@@ -696,6 +721,7 @@ async function getProductTimeline(skuValue) {
 module.exports = {
   analyzeLineage,
   buildSchemaMap,
+  getPayloadSchema,
   getProductTimeline,
   normalizeStoredChanges,
   normalizeTimelineSku,

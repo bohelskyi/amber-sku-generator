@@ -7,13 +7,13 @@ import {
   ClipboardList,
   History,
   PackagePlus,
-  RefreshCw,
   Search,
   Undo2,
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { formatDateTime, formatDecimal, formatUah } from '../../lib/formatters';
+import { AppPageHeader, EmptyState, LoadingState, Notice, StatusBadge } from './UiPrimitives.jsx';
 
 const EVENT_META = {
   'product.created': { label: 'Товар створено', icon: PackagePlus, toneClass: 'text-emerald-700' },
@@ -85,6 +85,17 @@ function PriceChange({ price }) {
   );
 }
 
+function SkuTransition({ sourceSku, targetSku, className = '', strong = false }) {
+  const skuClassName = `break-all font-mono ${strong ? 'font-semibold' : ''}`;
+  return (
+    <div data-testid="sku-transition" className={`flex min-w-0 flex-wrap items-center justify-start gap-2 ${className}`}>
+      <span className={skuClassName}>{sourceSku}</span>
+      <ArrowRight size={strong ? 14 : 13} className="shrink-0 text-slate-400" />
+      <span className={skuClassName}>{targetSku}</span>
+    </div>
+  );
+}
+
 function TimelineCard({ events }) {
   const correction = events.find((event) => event.type === 'product.corrected');
   const event = correction || events[events.length - 1];
@@ -98,8 +109,8 @@ function TimelineCard({ events }) {
     : meta.label;
 
   return (
-    <article className="relative rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-      <span className={`absolute -left-[2.15rem] top-5 flex h-8 w-8 items-center justify-center rounded-full border bg-white ${meta.toneClass}`}>
+    <article className="timeline-card">
+      <span className={`timeline-marker ${meta.toneClass}`}>
         <Icon size={16} aria-hidden="true" />
       </span>
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -115,11 +126,12 @@ function TimelineCard({ events }) {
 
       {correctionDetails && (
         <div className="mt-4 space-y-3">
-          <div className="flex min-w-0 items-center gap-2 rounded-md border border-slate-200 px-3 py-2">
-            <span className="min-w-0 flex-1 break-all font-mono text-sm font-semibold">{event.details.sourceSku}</span>
-            <ArrowRight size={14} className="shrink-0 text-slate-400" />
-            <span className="min-w-0 flex-1 break-all text-right font-mono text-sm font-semibold">{event.details.correctedSku}</span>
-          </div>
+          <SkuTransition
+            sourceSku={event.details.sourceSku}
+            targetSku={event.details.correctedSku}
+            className="rounded-md border border-slate-200 px-3 py-2 text-sm"
+            strong
+          />
           <PriceChange price={event.details.price} />
           {event.details.reason && <p className="text-sm text-slate-600">Причина: {event.details.reason}</p>}
         </div>
@@ -138,11 +150,7 @@ function TimelineCard({ events }) {
             {proposal && (
               <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50/60 p-3">
                 <div className="text-xs font-semibold uppercase text-amber-800">Остання збережена пропозиція</div>
-                <div className="flex min-w-0 items-center gap-2 text-sm">
-                  <span className="min-w-0 flex-1 break-all font-mono">{proposal.sourceSku}</span>
-                  <ArrowRight size={13} className="shrink-0" />
-                  <span className="min-w-0 flex-1 break-all text-right font-mono">{proposal.proposedSku}</span>
-                </div>
+                <SkuTransition sourceSku={proposal.sourceSku} targetSku={proposal.proposedSku} className="text-sm" />
                 {proposal.comment && <p className="text-sm text-slate-600">{proposal.comment}</p>}
                 <TimelineChanges changes={proposal.changes} />
               </div>
@@ -218,13 +226,12 @@ export function ProductTimeline() {
   return (
     <div className="app-page">
       <main className="mx-auto w-full max-w-5xl space-y-5 px-4 py-4 pb-20 sm:px-6 sm:py-6">
-        <header className="console-header">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight text-slate-900">Журнал · Історія товару</h1>
-            <p className="mt-1 text-xs text-slate-500">Повна бізнес-історія за поточним або історичним SKU.</p>
-          </div>
-          <Link to="/admin/corrections/history?mode=report" className="btn btn-outline">Звіт про виправлення</Link>
-        </header>
+        <AppPageHeader
+          eyebrow="Журнал"
+          title="Історія товару"
+          description="Повна бізнес-історія за поточним або історичним SKU."
+          actions={<Link to="/admin/corrections/history?mode=report" className="btn btn-outline">Звіт про виправлення</Link>}
+        />
 
         <form className="card flex flex-col gap-3 p-4 sm:flex-row" onSubmit={submit}>
           <label className="relative min-w-0 flex-1">
@@ -235,38 +242,43 @@ export function ProductTimeline() {
           <button type="submit" className="btn btn-primary" disabled={loading}>Показати історію</button>
         </form>
 
-        {error && <div role="alert" className="flex items-start gap-3 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"><AlertTriangle size={18} /><span>{error}</span></div>}
-        {loading && <div className="flex justify-center py-16"><RefreshCw size={24} className="animate-spin text-slate-500" /></div>}
+        {error && <Notice>{error}</Notice>}
+        {loading && <LoadingState label="Завантажуємо історію товару…" />}
+        {!loading && !requestedSku && (
+          <div className="card p-0"><EmptyState>Введіть точний SKU, щоб переглянути весь ланцюжок товару.</EmptyState></div>
+        )}
 
         {!loading && requestedSku && data && (
           <>
             {data.lineage.integrity === 'warning' && (
-              <section className="sticky top-16 z-20 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 shadow-sm">
-                <div className="flex items-start gap-3 text-sm text-amber-900">
-                  <AlertTriangle size={18} className="mt-0.5 shrink-0" />
-                  <div><strong>У збереженому ланцюжку є неузгодженості.</strong><ul className="mt-1 list-disc pl-5">{data.lineage.warnings.map((warning) => <li key={warning.code}>{warning.message}</li>)}</ul></div>
-                </div>
-              </section>
+              <div className="sticky top-[calc(var(--workspace-nav-height)+0.5rem)] z-20">
+                <Notice tone="warning"><strong>У збереженому ланцюжку є неузгодженості.</strong><ul className="mt-1 list-disc pl-5">{data.lineage.warnings.map((warning) => <li key={warning.code}>{warning.message}</li>)}</ul></Notice>
+              </div>
             )}
 
             <section className="card p-4 sm:p-5">
-              <div className="mb-3 text-xs font-semibold uppercase text-slate-500">Ланцюжок SKU</div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ланцюжок SKU</div>
+                <StatusBadge>{data.lineage.products.length} версій · {groups.length} подій</StatusBadge>
+              </div>
+              <div className="lineage-scroll" tabIndex={data.lineage.products.length > 3 ? 0 : undefined} aria-label="Ланцюжок версій SKU">
+                <div className="lineage-track">
                 {data.lineage.products.map((product, index) => (
-                  <div key={product.sku} className="flex items-center gap-2">
+                  <div key={product.sku} className="lineage-node">
                     {index > 0 && <ArrowRight size={15} className="text-slate-400" />}
-                    <span className={`rounded-md border px-3 py-2 font-mono text-sm font-semibold ${product.sku === data.querySku ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-slate-200 bg-white text-slate-700'}`}>
-                      {product.sku}
-                      {product.sku === data.lineage.currentSku && <span className="ml-2 font-sans text-[10px] uppercase text-emerald-700">{product.status === 'active' ? 'актуальний' : 'останній'}</span>}
+                    <span className={`lineage-sku ${product.sku === data.querySku ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-slate-200 bg-white text-slate-700'}`}>
+                      <span className="break-all">{product.sku}</span>
+                      {product.sku === data.lineage.currentSku && <span className="mt-1 font-sans text-[10px] uppercase text-emerald-700">{product.status === 'active' ? 'актуальний' : 'останній'}</span>}
                     </span>
                   </div>
                 ))}
+                </div>
               </div>
             </section>
 
-            <section className="ml-6 space-y-4 border-l-2 border-slate-200 pl-8">
+            <section className="timeline-list" aria-label="Хронологія подій">
               {groups.map((group) => <TimelineCard key={group.key} events={group.events} />)}
-              {groups.length === 0 && <div className="py-10 text-sm text-slate-500">Історичні події не знайдено.</div>}
+              {groups.length === 0 && <EmptyState compact>Історичні події не знайдено.</EmptyState>}
             </section>
           </>
         )}

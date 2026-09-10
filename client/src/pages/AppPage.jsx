@@ -4,6 +4,7 @@ import { HomeDashboard } from '../components/app/HomeDashboard';
 import { PageHeader, Toast } from '../components/app/PageHeader';
 import { ProductBuilder } from '../components/app/ProductBuilder';
 import { RecountConfirmDialog } from '../components/app/RecountConfirmDialog';
+import { LoadingState } from '../components/app/UiPrimitives.jsx';
 import { useAuth } from '../auth/auth-context.js';
 import { useSkuManager } from '../hooks/useSkuManager';
 import { getPermissionUiState, getRecountUiMode } from '../lib/permission-ui.js';
@@ -21,12 +22,7 @@ function AppPage() {
 
   if (!sku.config) {
     return (
-      <div className="app-page flex items-center justify-center">
-        <div className="card p-8 text-center">
-          <div className="text-lg font-semibold text-slate-700">Завантаження...</div>
-          <div className="mt-2 text-sm text-slate-500">Підтягуємо конфігурацію та історію.</div>
-        </div>
-      </div>
+      <div className="app-page"><LoadingState label="Підтягуємо конфігурацію та історію…" /></div>
     );
   }
 
