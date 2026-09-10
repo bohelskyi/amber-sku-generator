@@ -8420,6 +8420,134 @@ function sqliteRun(db, sql) {
   return new Promise((resolve, reject) => db.exec(sql, (error) => error ? reject(error) : resolve()));
 }
 
+test('global audit viewer enforces audit.view and returns safe deterministic filtered pages', async () => {
+  const suffix = Date.now();
+  const adminIdentity = {
+    issuer: 'https://audit-viewer.example/realms/amber',
+    subject: `audit-admin-${suffix}`,
+    preferredUsername: 'audit.admin.current',
+    displayName: 'Current Audit Admin',
+  };
+  const adminSession = await authenticateIdentitySession(adminIdentity);
+  const actorUserId = await activateApplicationUserForTest(
+    adminIdentity.issuer, adminIdentity.subject, 'administrator'
+  );
+  const managerIdentity = {
+    issuer: adminIdentity.issuer,
+    subject: `audit-manager-${suffix}`,
+    preferredUsername: 'audit.manager',
+    displayName: 'Audit Manager',
+  };
+  const managerSession = await authenticateIdentitySession(managerIdentity);
+  await activateApplicationUserForTest(managerIdentity.issuer, managerIdentity.subject, 'manager');
+  const pendingSession = await authenticateIdentitySession({
+    issuer: adminIdentity.issuer,
+    subject: `audit-pending-${suffix}`,
+    preferredUsername: 'audit.pending',
+    displayName: 'Audit Pending',
+  });
+  const disabledIdentity = {
+    issuer: adminIdentity.issuer,
+    subject: `audit-disabled-${suffix}`,
+    preferredUsername: 'audit.disabled',
+    displayName: 'Audit Disabled',
+  };
+  const disabledSession = await authenticateIdentitySession(disabledIdentity);
+  const disabledUserId = await activateApplicationUserForTest(
+    disabledIdentity.issuer, disabledIdentity.subject, 'manager'
+  );
+  await pool.query(
+    `UPDATE application_users SET status = 'disabled', deactivated_at = CURRENT_TIMESTAMP
+     WHERE id = $1`,
+    [disabledUserId]
+  );
+
+  assert.equal((await request('/api/admin/audit-events', { authentication: null })).response.status, 401);
+  assert.equal((await request('/api/admin/audit-events', { authentication: pendingSession })).data.code, 'APP_ACCESS_PENDING');
+  assert.equal((await request('/api/admin/audit-events', { authentication: disabledSession })).data.code, 'APP_ACCESS_DISABLED');
+  const denied = await request('/api/admin/audit-events', { authentication: managerSession });
+  assert.equal(denied.response.status, 403, denied.text);
+  assert.equal(denied.data.code, 'INSUFFICIENT_PERMISSION');
+
+  const occurredAt = '2099-01-01T12:00:00.000Z';
+  const fixtures = [
+    ['application_user.role_changed', 'application_user', '501', { previousRole: { displayName: 'Manager' }, newRole: { displayName: 'Storekeeper' } }],
+    ['role.permissions_changed', 'role', '502', { addedPermissionKeys: ['products.view'], removedPermissionKeys: ['pricing.view'] }],
+    ['catalog.category.updated', 'catalog_category', 'AU', { code: 'AU', changes: { name: { before: 'Old', after: 'New' } } }],
+    ['pricing.matrix_cell.set', 'pricing_matrix_cell', '9:1:0', { categoryCode: 'AU', oldPrice: 10.25, newPrice: 11.5 }],
+    ['product.created', 'product', '503', { fullSku: 'AU-EXACT-503', requestId: 'never-return', sessionData: 'never-return' }],
+    ['product.recounted', 'product', '504', { sourceSku: 'AU-OLD', correctedSku: 'AU-NEW', correctionRequestId: 600 }],
+    ['product.archived', 'product', '509', { fullSku: 'AU-ARCHIVED-509' }],
+    ['correction_request.force_released', 'correction_request', '505', { previousOwnerUserId: 77, claimToken: 'never-return', claimVersion: 4 }],
+    ['repricing.applied', 'repricing_batch', '506', { draftId: 700 }],
+    ['repricing.rolled_back', 'repricing_batch', '510', {}],
+    ['export_snapshot.created', 'export_snapshot', '511', { fromSku: 'AU-1', toSku: 'AU-9', rowCount: 9 }],
+    ['export_snapshot.confirmed', 'export_snapshot', '507', { exportedToProductId: 503 }],
+    ['sku_schema.published', 'sku_schema_version', '508', { categoryCode: 'AU', version: 3 }],
+    ['future_domain.future_action', 'future_subject', 'future-id', { name: 'not-allowlisted-for-unknown-events' }],
+  ];
+  for (const [eventKey, subjectType, subjectId, details] of fixtures) {
+    await pool.query(
+      `INSERT INTO audit_events
+       (event_key, actor_user_id, actor_snapshot, subject_type, subject_id, details, occurred_at)
+       VALUES ($1, $2, $3::jsonb, $4, $5, $6::jsonb, $7::timestamptz)`,
+      [eventKey, actorUserId, JSON.stringify({
+        displayName: eventKey === 'future_domain.future_action' ? null : 'Historical Audit Admin',
+        preferredUsername: eventKey === 'future_domain.future_action' ? null : 'audit.admin.historical',
+      }), subjectType, subjectId, JSON.stringify(details), occurredAt]
+    );
+  }
+  await pool.query(
+    `UPDATE application_users
+     SET display_name = 'Mutated Current Name', preferred_username = 'mutated.current'
+     WHERE id = $1`,
+    [actorUserId]
+  );
+
+  const baseQuery = 'from=2099-01-01T00%3A00%3A00Z&to=2099-01-02T00%3A00%3A00Z';
+  const first = await request(`/api/admin/audit-events?${baseQuery}&limit=4`, { authentication: adminSession });
+  assert.equal(first.response.status, 200, first.text);
+  assert.equal(first.data.items.length, 4);
+  assert.equal(first.data.page.hasMore, true);
+  assert.ok(first.data.page.nextCursor);
+  const allItems = [...first.data.items];
+  let currentPage = first.data.page;
+  while (currentPage.hasMore) {
+    const next = await request(
+      `/api/admin/audit-events?${baseQuery}&limit=4&cursor=${encodeURIComponent(currentPage.nextCursor)}`,
+      { authentication: adminSession }
+    );
+    assert.equal(next.response.status, 200, next.text);
+    allItems.push(...next.data.items);
+    currentPage = next.data.page;
+  }
+  assert.equal(allItems.length, fixtures.length);
+  assert.equal(new Set(allItems.map((event) => `${event.eventKey}:${event.subject.id}`)).size, fixtures.length);
+  assert.equal(allItems.every((event) => !Object.hasOwn(event, 'id')), true);
+  assert.equal(allItems.every((event) => event.actor.displayName !== 'Mutated Current Name'), true);
+  assert.equal(allItems.find((event) => event.eventKey === 'product.created').actor.displayName, 'Historical Audit Admin');
+  assert.equal(allItems.find((event) => event.eventKey === 'future_domain.future_action').actor.status, 'recorded_reference');
+  assert.deepEqual(allItems.find((event) => event.eventKey === 'future_domain.future_action').details, {});
+  assert.deepEqual(allItems.find((event) => event.eventKey === 'product.created').details, { fullSku: 'AU-EXACT-503' });
+  assert.doesNotMatch(JSON.stringify(allItems), /never-return|requestId|claimToken|sessionData|draftId|claimVersion/);
+
+  const catalog = await request(`/api/admin/audit-events?${baseQuery}&domain=catalog`, { authentication: adminSession });
+  assert.deepEqual(catalog.data.items.map((event) => event.eventKey), ['catalog.category.updated']);
+  const actor = await request(`/api/admin/audit-events?${baseQuery}&actorId=${actorUserId}`, { authentication: adminSession });
+  assert.equal(actor.data.items.length, fixtures.length);
+  const subject = await request(`/api/admin/audit-events?${baseQuery}&subjectType=product&subjectId=503`, { authentication: adminSession });
+  assert.deepEqual(subject.data.items.map((event) => event.eventKey), ['product.created']);
+  const exact = await request(`/api/admin/audit-events?${baseQuery}&eventKey=sku_schema.published`, { authentication: adminSession });
+  assert.deepEqual(exact.data.items[0].details, { categoryCode: 'AU', version: 3 });
+
+  const reusedCursor = await request(
+    `/api/admin/audit-events?${baseQuery}&domain=role&cursor=${encodeURIComponent(first.data.page.nextCursor)}`,
+    { authentication: adminSession }
+  );
+  assert.equal(reusedCursor.response.status, 400);
+  assert.equal(reusedCursor.data.code, 'INVALID_CURSOR');
+});
+
 test('SQLite import targets current schema and refuses implicit replacement', async () => {
   const importDbName = 'amber_import_test';
   const adminUrl = new URL(TEST_DATABASE_URL);

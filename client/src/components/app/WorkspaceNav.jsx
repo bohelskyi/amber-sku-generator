@@ -6,6 +6,7 @@ import {
   LogOut,
   SlidersHorizontal,
   Shield,
+  ScrollText,
   Users,
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
@@ -21,6 +22,7 @@ const navigation = [
   { to: '/admin/corrections/history', label: 'Журнал', icon: <History size={16} aria-hidden="true" />, permissions: ['history.view'] },
   { to: '/admin/users', label: 'Користувачі', icon: <Users size={16} aria-hidden="true" />, permissions: ['users.manage'] },
   { to: '/admin/roles', label: 'Ролі', icon: <Shield size={16} aria-hidden="true" />, permissions: ['roles.manage'] },
+  { to: '/admin/audit', label: 'Аудит', icon: <ScrollText size={16} aria-hidden="true" />, permissions: ['audit.view'] },
 ];
 
 export function WorkspaceNav() {

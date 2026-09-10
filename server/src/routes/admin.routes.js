@@ -78,8 +78,24 @@ const {
   replaceRolePermissions,
   updateRole,
 } = require('../services/role-admin.service');
+const {
+  AuditViewerError,
+  getAuditEvents,
+} = require('../services/audit-viewer.service');
 
 const router = express.Router();
+
+router.get('/admin/audit-events', requirePermission('audit.view'), async (req, res) => {
+  try {
+    res.json(await getAuditEvents(req.query || {}));
+  } catch (error) {
+    if (error instanceof AuditViewerError) {
+      return res.status(error.statusCode).json({ code: error.code, error: error.message });
+    }
+    console.error('Audit event listing failed:', error);
+    return res.status(500).json({ error: 'Audit event listing failed' });
+  }
+});
 
 const DELETE_ITEM_PERMISSION_BY_TYPE = Object.freeze({
   category: 'catalog.manage',
