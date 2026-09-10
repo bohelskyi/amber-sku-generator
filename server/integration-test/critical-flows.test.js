@@ -36,6 +36,12 @@ const { runMigrations } = require('../src/db/run-migrations');
 const { seedDefaultData } = require('../src/db/init-db');
 const { ensureLegacySkuSchemas } = require('../src/services/sku-schema.service');
 const { saveLastKnownRate } = require('../src/services/currency.service');
+const {
+  approveApplicationUser,
+  changeApplicationUserRole,
+  disableApplicationUser,
+  enableApplicationUser,
+} = require('../src/services/application-user-admin.service');
 
 let server;
 let baseUrl;
@@ -231,6 +237,62 @@ async function authenticateApplicationSession(returnTo = '/', { activate = true 
     assert.equal(me.applicationUser.status, 'active');
   }
   return { cookie, csrfToken: me.csrfToken, applicationUser: me.applicationUser };
+}
+
+async function authenticateIdentitySession({
+  issuer = 'https://user-admin.example/realms/amber',
+  subject,
+  preferredUsername,
+  displayName,
+}) {
+  const calls = [];
+  const oidcAdapter = {
+    issuer,
+    redirectUri: 'http://localhost:5000/api/auth/callback',
+    async buildAuthorizationRedirect(transaction) {
+      calls.push({ ...transaction });
+      const url = new URL('https://auth.example.invalid/authorize');
+      url.searchParams.set('state', transaction.state);
+      return url;
+    },
+    async exchangeAuthorizationCode() {
+      return {
+        iss: issuer,
+        sub: subject,
+        preferred_username: preferredUsername,
+        name: displayName,
+      };
+    },
+    async buildLogoutRedirect() {
+      return null;
+    },
+  };
+  const identityApp = createApp({ oidcAdapter });
+  const identityServer = await new Promise((resolve) => {
+    const listening = identityApp.listen(0, '127.0.0.1', () => resolve(listening));
+  });
+  const identityBaseUrl = `http://127.0.0.1:${identityServer.address().port}`;
+  try {
+    const login = await fetch(`${identityBaseUrl}/api/auth/login`, { redirect: 'manual' });
+    assert.equal(login.status, 302);
+    const loginCookie = login.headers.get('set-cookie')?.split(';', 1)[0];
+    assert.ok(loginCookie);
+    const callback = await fetch(
+      `${identityBaseUrl}/api/auth/callback?code=user-admin-code&state=${calls[0].state}`,
+      { redirect: 'manual', headers: { Cookie: loginCookie } }
+    );
+    assert.equal(callback.status, 303);
+    const cookie = callback.headers.get('set-cookie')?.split(';', 1)[0];
+    assert.ok(cookie);
+    const meResponse = await fetch(`${identityBaseUrl}/api/auth/me`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(meResponse.status, 200);
+    const me = await meResponse.json();
+    return { cookie, csrfToken: me.csrfToken, applicationUser: me.applicationUser };
+  } finally {
+    await new Promise((resolve) => identityServer.close(resolve));
+  }
 }
 
 async function createFixtureCategory(code, requiresWeight, withPrices) {
@@ -4475,6 +4537,365 @@ test('business endpoints enforce the Administrator, Storekeeper, and Manager cap
   });
   assert.equal(invalidDeleteType.response.status, 400, invalidDeleteType.text);
   assert.deepEqual(invalidDeleteType.data, { error: 'Invalid resource type' });
+});
+
+test('users.manage API administers one built-in role and updates existing sessions immediately', async () => {
+  const administratorUserId = authenticatedSession.applicationUser.id;
+  await replaceActiveRoleForTest(administratorUserId, 'administrator');
+
+  const createPendingUser = (suffix) => resolveOrCreateApplicationUser({
+    issuer: 'https://user-admin-api.example/realms/amber',
+    sub: `user-admin-${suffix}`,
+    preferred_username: `user.admin.${suffix}`,
+    name: `User Admin ${suffix}`,
+    email: `${suffix}@example.invalid`,
+    authenticatedAt: '2026-09-09T12:00:00.000Z',
+  });
+  const assignmentState = async (userId) => {
+    const result = await pool.query(
+      `SELECT u.status, r.role_key, a.revoked_at, a.assigned_by_user_id,
+              a.revoked_by_user_id
+       FROM application_users u
+       LEFT JOIN user_role_assignments a ON a.application_user_id = u.id
+       LEFT JOIN roles r ON r.id = a.role_id
+       WHERE u.id = $1
+       ORDER BY a.id`,
+      [userId]
+    );
+    return result.rows;
+  };
+
+  const rolesResponse = await request('/api/admin/users/roles');
+  assert.equal(rolesResponse.response.status, 200, rolesResponse.text);
+  assert.deepEqual(rolesResponse.data.roles, [
+    { key: 'administrator' },
+    { key: 'manager' },
+    { key: 'storekeeper' },
+  ]);
+
+  for (const [path, method, body] of [
+    [`/api/admin/users/${administratorUserId}/disable`, 'POST', {}],
+    [`/api/admin/users/${administratorUserId}/role`, 'PUT', { roleKey: 'manager' }],
+  ]) {
+    const lastAdministratorConflict = await request(path, { method, body });
+    assert.equal(lastAdministratorConflict.response.status, 409, lastAdministratorConflict.text);
+    assert.equal(lastAdministratorConflict.data.code, 'LAST_ADMINISTRATOR_REQUIRED');
+  }
+  const administratorAfterConflicts = await request('/api/auth/me');
+  assert.equal(administratorAfterConflicts.response.status, 200);
+  assert.deepEqual(
+    administratorAfterConflicts.data.roles.map((role) => role.key),
+    ['administrator']
+  );
+  assert.equal(administratorAfterConflicts.data.permissions.includes('users.manage'), true);
+
+  const rejectedUser = await createPendingUser('rejected');
+  await pool.query(
+    `INSERT INTO roles (role_key, display_name, description, is_system)
+     VALUES ('integration_custom_role', 'Integration custom role', 'Must not be assignable', FALSE)`
+  );
+  for (const roleBody of [{}, { roleKey: 'integration_custom_role' }, { roleKey: 'Administrator' }]) {
+    const rejected = await request(`/api/admin/users/${rejectedUser.id}/approve`, {
+      method: 'POST',
+      body: roleBody,
+    });
+    assert.equal(rejected.response.status, 400, rejected.text);
+    assert.equal(rejected.data.code, 'ROLE_NOT_ASSIGNABLE');
+    assert.deepEqual(await assignmentState(rejectedUser.id), [{
+      status: 'pending',
+      role_key: null,
+      revoked_at: null,
+      assigned_by_user_id: null,
+      revoked_by_user_id: null,
+    }]);
+  }
+  const missingCsrf = await request(`/api/admin/users/${rejectedUser.id}/approve`, {
+    method: 'POST',
+    body: { roleKey: 'manager' },
+    csrfToken: null,
+  });
+  assert.equal(missingCsrf.response.status, 403, missingCsrf.text);
+  assert.deepEqual(missingCsrf.data, { error: 'Invalid CSRF token' });
+  assert.equal((await assignmentState(rejectedUser.id))[0].status, 'pending');
+
+  const deniedUser = await createPendingUser('denied');
+  for (const roleKey of ['manager', 'storekeeper']) {
+    await replaceActiveRoleForTest(administratorUserId, roleKey);
+    const listDenied = await request('/api/admin/users');
+    assert.equal(listDenied.response.status, 403, listDenied.text);
+    assert.equal(listDenied.data.code, 'INSUFFICIENT_PERMISSION');
+    assert.equal(listDenied.data.requiredPermission, 'users.manage');
+    const mutationDenied = await request(`/api/admin/users/${deniedUser.id}/approve`, {
+      method: 'POST',
+      body: { roleKey: 'storekeeper' },
+    });
+    assert.equal(mutationDenied.response.status, 403, mutationDenied.text);
+    assert.equal(mutationDenied.data.code, 'INSUFFICIENT_PERMISSION');
+    assert.deepEqual(await assignmentState(deniedUser.id), [{
+      status: 'pending',
+      role_key: null,
+      revoked_at: null,
+      assigned_by_user_id: null,
+      revoked_by_user_id: null,
+    }]);
+    assert.equal((await request('/api/config')).response.status, 200);
+  }
+  await replaceActiveRoleForTest(administratorUserId, 'administrator');
+
+  const pendingStorekeeper = await createPendingUser('storekeeper');
+  const pendingManager = await createPendingUser('manager');
+  const pendingAdministrator = await createPendingUser('administrator');
+  for (const [user, roleKey] of [
+    [pendingStorekeeper, 'storekeeper'],
+    [pendingManager, 'manager'],
+    [pendingAdministrator, 'administrator'],
+  ]) {
+    const approved = await request(`/api/admin/users/${user.id}/approve`, {
+      method: 'POST',
+      body: { roleKey },
+    });
+    assert.equal(approved.response.status, 200, approved.text);
+    assert.equal(approved.data.user.status, 'active');
+    assert.equal(approved.data.user.roleKey, roleKey);
+    const activeAssignments = (await assignmentState(user.id))
+      .filter((row) => row.revoked_at === null && row.role_key !== null);
+    assert.equal(activeAssignments.length, 1);
+    assert.equal(activeAssignments[0].role_key, roleKey);
+    assert.equal(Number(activeAssignments[0].assigned_by_user_id), administratorUserId);
+  }
+
+  let changed = await request(`/api/admin/users/${pendingStorekeeper.id}/role`, {
+    method: 'PUT', body: { roleKey: 'manager' },
+  });
+  assert.equal(changed.response.status, 200, changed.text);
+  assert.equal(changed.data.user.roleKey, 'manager');
+  changed = await request(`/api/admin/users/${pendingStorekeeper.id}/role`, {
+    method: 'PUT', body: { roleKey: 'storekeeper' },
+  });
+  assert.equal(changed.response.status, 200, changed.text);
+  assert.equal(changed.data.user.roleKey, 'storekeeper');
+  const storekeeperHistory = await assignmentState(pendingStorekeeper.id);
+  assert.equal(storekeeperHistory.length, 3);
+  assert.equal(storekeeperHistory.filter((row) => row.revoked_at === null).length, 1);
+  assert.equal(storekeeperHistory.filter((row) => row.revoked_at !== null).length, 2);
+  assert.equal(storekeeperHistory.filter(
+    (row) => Number(row.revoked_by_user_id) === administratorUserId
+  ).length, 2);
+
+  changed = await request(`/api/admin/users/${pendingManager.id}/role`, {
+    method: 'PUT', body: { roleKey: 'storekeeper' },
+  });
+  assert.equal(changed.response.status, 200, changed.text);
+  assert.equal(changed.data.user.roleKey, 'storekeeper');
+  assert.equal((await assignmentState(pendingManager.id)).filter(
+    (row) => row.revoked_at === null
+  ).length, 1);
+
+  const liveSession = await authenticateIdentitySession({
+    subject: 'existing-session-role-change',
+    preferredUsername: 'existing.session',
+    displayName: 'Existing Session',
+  });
+  const secondLiveSession = await authenticateIdentitySession({
+    subject: 'existing-session-role-change',
+    preferredUsername: 'existing.session',
+    displayName: 'Existing Session',
+  });
+  const liveUserId = liveSession.applicationUser.id;
+  const approvedLive = await request(`/api/admin/users/${liveUserId}/approve`, {
+    method: 'POST', body: { roleKey: 'storekeeper' },
+  });
+  assert.equal(approvedLive.response.status, 200, approvedLive.text);
+  assert.equal((await request('/api/config', { authentication: liveSession })).response.status, 200);
+  assert.equal((await request('/api/admin/prices/ZZ', {
+    authentication: liveSession,
+  })).response.status, 403);
+
+  const liveRoleChange = await request(`/api/admin/users/${liveUserId}/role`, {
+    method: 'PUT', body: { roleKey: 'manager' },
+  });
+  assert.equal(liveRoleChange.response.status, 200, liveRoleChange.text);
+  const liveMe = await request('/api/auth/me', { authentication: liveSession });
+  assert.deepEqual(liveMe.data.roles.map((role) => role.key), ['manager']);
+  assert.equal((await request('/api/admin/prices/ZZ', {
+    authentication: liveSession,
+  })).response.status, 200);
+
+  const disabled = await request(`/api/admin/users/${liveUserId}/disable`, {
+    method: 'POST', body: {},
+  });
+  assert.equal(disabled.response.status, 200, disabled.text);
+  assert.equal(disabled.data.user.status, 'disabled');
+  const disabledBusiness = await request('/api/config', { authentication: liveSession });
+  assert.equal(disabledBusiness.response.status, 403, disabledBusiness.text);
+  assert.equal(disabledBusiness.data.code, 'APP_ACCESS_DISABLED');
+  const disabledMe = await request('/api/auth/me', { authentication: liveSession });
+  assert.equal(disabledMe.response.status, 200, disabledMe.text);
+  assert.equal(disabledMe.data.applicationUser.status, 'disabled');
+  const disabledLogout = await request('/api/auth/logout', {
+    method: 'POST', body: {}, authentication: secondLiveSession,
+  });
+  assert.equal(disabledLogout.response.status, 200, disabledLogout.text);
+
+  const disabledRoleChange = await request(`/api/admin/users/${liveUserId}/role`, {
+    method: 'PUT', body: { roleKey: 'storekeeper' },
+  });
+  assert.equal(disabledRoleChange.response.status, 200, disabledRoleChange.text);
+  assert.equal(disabledRoleChange.data.user.status, 'disabled');
+  assert.equal(disabledRoleChange.data.user.roleKey, 'storekeeper');
+  const enabled = await request(`/api/admin/users/${liveUserId}/enable`, {
+    method: 'POST', body: {},
+  });
+  assert.equal(enabled.response.status, 200, enabled.text);
+  assert.equal(enabled.data.user.status, 'active');
+  assert.equal(enabled.data.user.roleKey, 'storekeeper');
+  assert.equal((await request('/api/config', { authentication: liveSession })).response.status, 200);
+  assert.equal((await request('/api/admin/prices/ZZ', {
+    authentication: liveSession,
+  })).response.status, 403);
+
+  const list = await request('/api/admin/users');
+  assert.equal(list.response.status, 200, list.text);
+  const listedLiveUser = list.data.users.find((user) => user.id === liveUserId);
+  assert.deepEqual(Object.keys(listedLiveUser).sort(), [
+    'displayName',
+    'hasMultipleBuiltInRoles',
+    'id',
+    'identityLinked',
+    'lastAuthenticatedAt',
+    'preferredUsername',
+    'roleKey',
+    'status',
+  ]);
+  assert.equal(listedLiveUser.identityLinked, true);
+  assert.doesNotMatch(JSON.stringify(listedLiveUser), /issuer|subject|email|existing-session-role-change/);
+});
+
+test('last-Administrator protection is transactional and concurrency-safe', async () => {
+  const databaseName = 'amber_user_admin_safety_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const safetyPool = new Pool({ connectionString: databaseUrl, max: 8 });
+  try {
+    await runNodeInDatabase(databaseUrl, `
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations().catch((error) => { console.error(error); process.exit(1); });
+    `);
+    const first = await resolveOrCreateApplicationUser({
+      issuer: 'https://user-admin-safety.example/realms/amber',
+      sub: 'first-administrator',
+      preferred_username: 'first.administrator',
+      authenticatedAt: '2026-09-09T10:00:00.000Z',
+    }, { databasePool: safetyPool });
+    await bootstrapAdministrator(first.id, { databasePool: safetyPool });
+
+    for (const operation of [
+      () => disableApplicationUser(first.id, {
+        actorUserId: first.id, databasePool: safetyPool,
+      }),
+      () => changeApplicationUserRole(first.id, 'manager', {
+        actorUserId: first.id, databasePool: safetyPool,
+      }),
+      () => changeApplicationUserRole(first.id, 'storekeeper', {
+        actorUserId: first.id, databasePool: safetyPool,
+      }),
+    ]) {
+      await assert.rejects(operation, (error) => (
+        error.statusCode === 409 && error.code === 'LAST_ADMINISTRATOR_REQUIRED'
+      ));
+      const unchanged = await safetyPool.query(
+        `SELECT u.status, r.role_key
+         FROM application_users u
+         JOIN user_role_assignments a
+           ON a.application_user_id = u.id AND a.revoked_at IS NULL
+         JOIN roles r ON r.id = a.role_id
+         WHERE u.id = $1`,
+        [first.id]
+      );
+      assert.deepEqual(unchanged.rows, [{ status: 'active', role_key: 'administrator' }]);
+    }
+
+    const second = await resolveOrCreateApplicationUser({
+      issuer: 'https://user-admin-safety.example/realms/amber',
+      sub: 'second-administrator',
+      preferred_username: 'second.administrator',
+      authenticatedAt: '2026-09-09T10:01:00.000Z',
+    }, { databasePool: safetyPool });
+    await approveApplicationUser(second.id, 'administrator', {
+      actorUserId: first.id, databasePool: safetyPool,
+    });
+
+    const selfDemoted = await changeApplicationUserRole(first.id, 'manager', {
+      actorUserId: first.id, databasePool: safetyPool,
+    });
+    assert.equal(selfDemoted.roleKey, 'manager');
+    await changeApplicationUserRole(first.id, 'administrator', {
+      actorUserId: second.id, databasePool: safetyPool,
+    });
+    const selfDisabled = await disableApplicationUser(second.id, {
+      actorUserId: second.id, databasePool: safetyPool,
+    });
+    assert.equal(selfDisabled.status, 'disabled');
+    await enableApplicationUser(second.id, undefined, {
+      actorUserId: first.id, databasePool: safetyPool,
+    });
+
+    await safetyPool.query(`
+      CREATE OR REPLACE FUNCTION delay_test_application_user_disable()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        PERFORM pg_sleep(0.2);
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER delay_test_application_user_disable
+      BEFORE UPDATE OF status ON application_users
+      FOR EACH ROW
+      WHEN (OLD.status = 'active' AND NEW.status = 'disabled')
+      EXECUTE FUNCTION delay_test_application_user_disable();
+    `);
+    const concurrent = await Promise.allSettled([
+      disableApplicationUser(first.id, {
+        actorUserId: first.id, databasePool: safetyPool,
+      }),
+      disableApplicationUser(second.id, {
+        actorUserId: second.id, databasePool: safetyPool,
+      }),
+    ]);
+    assert.deepEqual(
+      concurrent.map((result) => result.status).sort(),
+      ['fulfilled', 'rejected']
+    );
+    const conflict = concurrent.find((result) => result.status === 'rejected').reason;
+    assert.equal(conflict.code, 'LAST_ADMINISTRATOR_REQUIRED');
+    const activeAdministrators = await safetyPool.query(
+      `SELECT u.id
+       FROM application_users u
+       JOIN user_role_assignments a
+         ON a.application_user_id = u.id AND a.revoked_at IS NULL
+       JOIN roles r ON r.id = a.role_id
+       WHERE u.status = 'active'
+         AND r.role_key = 'administrator'
+         AND r.is_system = TRUE
+         AND r.status = 'active'`
+    );
+    assert.equal(activeAdministrators.rows.length, 1);
+    const safetyState = await safetyPool.query(
+      `SELECT u.status, r.role_key, a.revoked_at
+       FROM application_users u
+       JOIN user_role_assignments a
+         ON a.application_user_id = u.id AND a.revoked_at IS NULL
+       JOIN roles r ON r.id = a.role_id
+       WHERE u.id = ANY($1::bigint[])
+       ORDER BY u.id`,
+      [[first.id, second.id]]
+    );
+    assert.equal(safetyState.rows.length, 2);
+    assert.equal(safetyState.rows.filter((row) => row.status === 'active').length, 1);
+    assert.equal(safetyState.rows.every((row) => row.role_key === 'administrator'), true);
+  } finally {
+    await safetyPool.end();
+    await dropTestDatabase(databaseName);
+  }
 });
 
 function sqliteRun(db, sql) {

@@ -58,6 +58,15 @@ const {
   getCorrectionHistory,
 } = require('../services/correction-history.service');
 const { requirePermission } = require('../auth/authorization');
+const {
+  ApplicationUserAdminError,
+  approveApplicationUser,
+  changeApplicationUserRole,
+  disableApplicationUser,
+  enableApplicationUser,
+  listApplicationUsers,
+  listAssignableBuiltInRoles,
+} = require('../services/application-user-admin.service');
 
 const router = express.Router();
 
@@ -85,6 +94,78 @@ function requireDeleteItemPermission(req, res, next) {
   if (!middleware) return res.status(400).json({ error: 'Invalid resource type' });
   return middleware(req, res, next);
 }
+
+function sendApplicationUserAdminError(res, error) {
+  if (error instanceof ApplicationUserAdminError) {
+    return res.status(error.statusCode).json({ code: error.code, error: error.message });
+  }
+  console.error('Application user administration failed:', error);
+  return res.status(500).json({ error: 'Application user administration failed' });
+}
+
+router.get('/admin/users', requirePermission('users.manage'), async (_req, res) => {
+  try {
+    res.json({ users: await listApplicationUsers() });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.get('/admin/users/roles', requirePermission('users.manage'), async (_req, res) => {
+  try {
+    res.json({ roles: await listAssignableBuiltInRoles() });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.post('/admin/users/:userId/approve', requirePermission('users.manage'), async (req, res) => {
+  try {
+    res.json({
+      user: await approveApplicationUser(req.params.userId, req.body?.roleKey, {
+        actorUserId: req.applicationUser.id,
+      }),
+    });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.put('/admin/users/:userId/role', requirePermission('users.manage'), async (req, res) => {
+  try {
+    res.json({
+      user: await changeApplicationUserRole(req.params.userId, req.body?.roleKey, {
+        actorUserId: req.applicationUser.id,
+      }),
+    });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.post('/admin/users/:userId/disable', requirePermission('users.manage'), async (req, res) => {
+  try {
+    res.json({
+      user: await disableApplicationUser(req.params.userId, {
+        actorUserId: req.applicationUser.id,
+      }),
+    });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
+
+router.post('/admin/users/:userId/enable', requirePermission('users.manage'), async (req, res) => {
+  try {
+    res.json({
+      user: await enableApplicationUser(req.params.userId, req.body?.roleKey, {
+        actorUserId: req.applicationUser.id,
+      }),
+    });
+  } catch (error) {
+    sendApplicationUserAdminError(res, error);
+  }
+});
 
 router.get('/admin/config', requirePermission('catalog.view'), async (req, res) => {
   try {

@@ -5,6 +5,7 @@ import {
   History,
   LogOut,
   SlidersHorizontal,
+  Users,
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../auth/auth-context.js';
@@ -17,6 +18,7 @@ const navigation = [
   { to: '/admin/repricing', label: 'Переоцінка', icon: <CircleDollarSign size={16} aria-hidden="true" />, permissions: ['repricing.view'] },
   { to: '/admin/corrections', label: 'Виправлення', icon: <ClipboardList size={16} aria-hidden="true" />, end: true, permissions: ['corrections.view'] },
   { to: '/admin/corrections/history', label: 'Журнал', icon: <History size={16} aria-hidden="true" />, permissions: ['history.view'] },
+  { to: '/admin/users', label: 'Користувачі', icon: <Users size={16} aria-hidden="true" />, permissions: ['users.manage'] },
 ];
 
 export function WorkspaceNav() {

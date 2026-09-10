@@ -115,9 +115,10 @@ export function AuthProvider({
     ].includes(auth.status),
     login,
     logout,
+    refresh: loadCurrentSession,
     retry,
     markUnauthenticated,
-  }), [auth, login, logout, markUnauthenticated, retry]);
+  }), [auth, loadCurrentSession, login, logout, markUnauthenticated, retry]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

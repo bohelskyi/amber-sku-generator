@@ -9,9 +9,9 @@ The UI has two practical audiences:
 - operational staff use the main workspace to configure a product, preview and save it, decode an existing SKU, recount/correct a product, inspect history, and export data;
 - configuration administrators use the admin screens to maintain categories, questions, options, SKU schemas, pricing scenarios, correction requests, and repricing drafts/batches.
 
-Application-owned local identities and the Administrator, Manager, and Storekeeper RBAC foundation are implemented. Business routes enforce stable database permissions after authentication, active-user resolution, and unsafe-method CSRF validation. Navigation and the catalog/pricing screen use the effective permissions returned by `/api/auth/me`; server authorization remains authoritative.
+Application-owned local identities and the Administrator, Manager, and Storekeeper RBAC foundation are implemented. Business routes enforce stable database permissions after authentication, active-user resolution, and unsafe-method CSRF validation. Administrators with `users.manage` can approve, assign one built-in role, disable, and re-enable local users through the application. Navigation and the catalog/pricing screen use the effective permissions returned by `/api/auth/me`; server authorization remains authoritative.
 
-This document describes the current `feature/auth-rbac` checkout inspected on 2026-09-09. Runtime PostgreSQL configuration remains authoritative for application data.
+This document describes the current `feature/auth-rbac` checkout inspected on 2026-09-10. Runtime PostgreSQL configuration remains authoritative for application data.
 
 ## Architecture
 
@@ -46,6 +46,8 @@ The React `AuthProvider`/`AuthGate` bootstraps through `/api/auth/me` before mou
 
 The permanent first-Administrator bootstrap is offline-only. The intended Administrator logs in normally to create a verified pending local user; an operator then runs `npm run auth:bootstrap-admin -- --user-id <id>` from `server/`. The command uses one transaction plus an advisory lock, verifies the local user has an external identity, assigns the built-in Administrator role, activates the user, and permanently completes the singleton bootstrap marker. There is no HTTP bootstrap path or automatic reopening.
 
+Application-user administration is exposed under `/api/admin/users` and requires `users.manage` for every operation. The API lists safe OIDC-synchronized profile fields, status, last-authentication time, and the current built-in role; it never edits or returns the immutable OIDC issuer/subject. It can list the three assignable active system roles, atomically approve a pending user with one role, replace an active or disabled user's built-in role while revoking rather than deleting assignment history, disable an active user, and re-enable a disabled user with its retained or selected role. All mutations share a PostgreSQL transaction-scoped advisory lock. Disabling or demoting an active Administrator rechecks the active-Administrator count under that lock and returns `409 LAST_ADMINISTRATOR_REQUIRED` if the operation would leave none, including concurrent and self-removal attempts.
+
 ### Authentication deployment
 
 - Production application: [https://skumanager.ambergalbin.space](https://skumanager.ambergalbin.space)
@@ -61,7 +63,7 @@ Live verification has confirmed real Keycloak + `amber.local` AD login, PostgreS
 
 `server/src/routes/public.routes.js` exposes configuration, SKU/price preview, save, decode, variation allocation, recount preview/apply, product history/archive, and export snapshot operations. Its historical name does not mean unauthenticated access.
 
-`server/src/routes/admin.routes.js` exposes catalog and pricing maintenance, SKU-schema publication, correction-request workflow, correction history, and mass repricing draft/preview/apply/rollback operations. Both business router trees share the authentication, active-local-user, and CSRF boundaries, then enforce stable capability keys with reusable permission middleware. Permission lookup is database-derived on every business request, so role or permission revocation affects an existing session immediately.
+`server/src/routes/admin.routes.js` exposes catalog and pricing maintenance, SKU-schema publication, correction-request workflow, correction history, mass repricing draft/preview/apply/rollback operations, and application-user administration. Both business router trees share the authentication, active-local-user, and CSRF boundaries, then enforce stable capability keys with reusable permission middleware. Permission lookup is database-derived on every business request, so role or permission revocation affects an existing session immediately.
 
 The client routes are defined in `client/src/router.jsx`:
 
@@ -69,7 +71,8 @@ The client routes are defined in `client/src/router.jsx`:
 - `/admin` — structure and pricing configuration;
 - `/admin/repricing` — repricing drafts and batches;
 - `/admin/corrections` — correction-request queue;
-- `/admin/corrections/history` — completed correction history.
+- `/admin/corrections/history` — completed correction history;
+- `/admin/users` — Administrator-only pending approval, built-in role assignment, disablement, and re-enablement.
 
 ## Repository map
 
@@ -235,7 +238,7 @@ Both source and corrected records are excluded from the normal export queue by t
 
 Correction requests add a managed pending/in-progress/completed/rejected queue. Only one active request per source is allowed. Claiming uses one conditional database update, so concurrent attempts yield exactly one successful owner. The server returns a random capability token once, stores only its SHA-256 hash, and exposes only a short fingerprint in later queue responses. The browser keeps the raw token in local storage; matching it proves control by that browser installation, not the identity of a real user.
 
-Claims do not expire automatically. Refresh, reject, complete, and ordinary release of an in-progress request require the matching token. Owner release clears the claim and returns the request to pending; confirmed force-release does the same without the token. Authentication now protects the endpoint, but without RBAC force-release is not restricted to an Administrator. The future local-user/RBAC layer must add actor identity without treating these browser capability claims as user accounts.
+Claims do not expire automatically. Refresh, reject, complete, and ordinary release of an in-progress request require the matching token. Owner release clears the claim and returns the request to pending; confirmed force-release does the same without the token and requires the Administrator-only `corrections.force_release` permission. Future actor attribution must not treat these browser capability claims as user accounts.
 
 The correction queue loads immediately, then polls every five seconds while the page is visible. Hidden tabs skip requests; focus or renewed visibility triggers an immediate refresh. Polls do not overlap, and older responses cannot overwrite newer queue state. Signatures detect stale source/proposed state; refresh recalculates; completion invokes the same transactional recount application and records the final payload. Active requests block competing direct correction and repricing. Completion also attempts to synchronize affected repricing drafts.
 
@@ -338,17 +341,17 @@ The optional SQLite importer migrates configuration/pricing, not product history
 
 Server unit tests cover authentication configuration, session/cookie behavior, the injectable OIDC flow, local application-access states, bootstrap CLI parsing, identity/CSRF middleware, safe redirects/logging, SKU parsing/history/placeholders, schema markers and code semantics, rule matching, calibration, preview-token behavior, pricing scenarios/context, marketing rounding, global/manual/automatic repricing resolutions, money/numeric validation, currency fallback/concurrency, HTTP retry limits, correction signatures/history, CSV injection safety, migration checksums, and backup/restore script safeguards. Semi-calibrated state `2` is exercised by PostgreSQL recount integration fixtures, but there is no dedicated unit assertion that directly compares preview tokens for `0`, `1`, and `2`.
 
-Client tests cover authentication bootstrap/gating, pending/disabled access screens and logout, login/logout navigation, memory-only auth/RBAC state, in-memory CSRF and centralized `401` handling, visibility rules, answer labels, admin conditions, manual-price validation/payloads, matrix-zero UI behavior, numeric display formatting, explicit recount clearing/zero preservation, correction-claim persistence and visibility-aware polling, and global repricing resolutions.
+Client tests cover authentication bootstrap/gating, pending/disabled access screens and logout, login/logout navigation, memory-only auth/RBAC state, in-memory CSRF and centralized `401`/`403` handling, permission-filtered user-management navigation, user lifecycle/role labels and actions, visibility rules, answer labels, admin conditions, manual-price validation/payloads, matrix-zero UI behavior, numeric display formatting, explicit recount clearing/zero preservation, correction-claim persistence and visibility-aware polling, and global repricing resolutions.
 
 `server/integration-test/critical-flows.test.js` uses real PostgreSQL and independent processes/connections where races require them. It verifies final database state as well as HTTP responses. Major cases include:
 
 - liveness/readiness;
 - public auth flow plus authenticated/active-local-user business-route and unsafe-method CSRF enforcement using an injected fake OIDC adapter;
-- exact and concurrent OIDC-to-local-user provisioning, live role revocation, pending/disabled access, approved seed mappings, and permanent concurrent-safe Administrator bootstrap;
+- exact and concurrent OIDC-to-local-user provisioning, live role revocation, pending/disabled access, approved seed mappings, permanent concurrent-safe Administrator bootstrap, transactional built-in-role administration, and concurrent last-Administrator protection;
 - calibrated-to-semi-calibrated recount with target-hidden answer removal, explicit optional clearing, real-zero preservation, legacy hidden zero, and visible-target rejection;
 - parallel replica seed/schema bootstrap and rollback/retry;
 - migration timeout isolation, failure rollback, checksum compatibility, and fresh/upgrade equivalence;
-- migrations 016–020 legacy-zero, correction-claim, PostgreSQL session-store, and local-user/RBAC upgrade behavior;
+- migrations 016–021 legacy-zero, correction-claim, PostgreSQL session-store, local-user/RBAC, and permission-mapping upgrade behavior;
 - atomic duplicate-question enforcement;
 - positive-or-delete matrix cells;
 - authoritative preview/save, stale pricing rejection, fail-closed payload validation, and concurrent sequences;
@@ -366,7 +369,7 @@ CI uses Node 20 and a PostgreSQL 16 service, then runs server unit tests, Postgr
 ## Known limitations and deferred work
 
 - PostgreSQL remains host-exposed by the single-host Compose baseline, and broader deployment secret management is outside the repository. Credentials are supplied through the ignored `.env` or process environment; production must protect those values and its network boundary externally.
-- Application-owned local identities, built-in roles/permissions, historical assignments, active-user access gating, per-route permission enforcement, and one-use Administrator bootstrap are implemented. User/role management APIs and UI, invitations, and attributable local actor IDs remain pending.
+- Application-owned local identities, built-in roles/permissions, historical assignments, active-user access gating, per-route permission enforcement, one-use Administrator bootstrap, and administration of users with exactly one active built-in role are implemented. Custom-role management, invitations, and attributable local actor IDs remain pending.
 - Live catalog contents and production data quality cannot be confirmed from the repository. Seed defaults describe only a newly initialized empty database.
 - The client README is generic template text.
 - The repository provides backup/restore mechanics but not scheduling, retention, encryption, off-host transfer, monitoring, or disaster-recovery orchestration.
@@ -390,4 +393,4 @@ CI uses Node 20 and a PostgreSQL 16 service, then runs server unit tests, Postgr
 
 ## Current status
 
-The PostgreSQL architecture and workflow protections through migration `021` are present on `feature/auth-rbac`, with focused unit/integration regression coverage and CI configuration. Server-owned OIDC authentication, PostgreSQL sessions, CSRF ordering, null actor attribution, and browser capability-token correction ownership remain unchanged. Stable permission keys now guard every business endpoint, Storekeeper can archive and directly recount products, Manager has read-only matrix access and repricing preparation, all built-in roles can view existing exports, and final repricing/export creation or confirmation/force-release operations remain Administrator-only. User-management APIs/UI and later actor/correction ownership remain deferred; actual production business configuration/data must still be checked operationally rather than inferred from this checkout.
+The PostgreSQL architecture and workflow protections through migration `021` are present on `feature/auth-rbac`, with focused unit/integration regression coverage and CI configuration. Server-owned OIDC authentication, PostgreSQL sessions, CSRF ordering, null actor attribution, and browser capability-token correction ownership remain unchanged. Stable permission keys guard every business endpoint. Administrators can manage pending, active, and disabled local users and exactly one built-in role per user, with historical assignment preservation and concurrency-safe last-Administrator protection. Storekeeper can archive and directly recount products, Manager has read-only matrix access and repricing preparation, all built-in roles can view existing exports, and final repricing/export creation or confirmation/force-release operations remain Administrator-only. Custom roles and later actor/correction ownership remain deferred; actual production business configuration/data must still be checked operationally rather than inferred from this checkout.

@@ -4,6 +4,7 @@ import AdminPage from './pages/AdminPage.jsx';
 import RepricingPage from './pages/RepricingPage.jsx';
 import CorrectionRequestsPage from './pages/CorrectionRequestsPage.jsx';
 import CorrectionHistoryPage from './pages/CorrectionHistoryPage.jsx';
+import UsersPage from './pages/UsersPage.jsx';
 import { WorkspaceNav } from './components/app/WorkspaceNav.jsx';
 
 export default function AppRouter() {
@@ -17,6 +18,7 @@ export default function AppRouter() {
           <Route path="/admin/repricing" element={<RepricingPage />} />
           <Route path="/admin/corrections" element={<CorrectionRequestsPage />} />
           <Route path="/admin/corrections/history" element={<CorrectionHistoryPage />} />
+          <Route path="/admin/users" element={<UsersPage />} />
         </Routes>
       </div>
     </BrowserRouter>

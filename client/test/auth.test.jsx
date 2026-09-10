@@ -10,13 +10,19 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthGate } from '../src/auth/AuthGate.jsx';
 import { AuthProvider } from '../src/auth/AuthProvider.jsx';
+import { AuthContext } from '../src/auth/auth-context.js';
 import {
   getCurrentReturnTo,
   getIdentityDisplayName,
   normalizeCurrentSession,
 } from '../src/auth/auth-model.js';
 import { WorkspaceNav } from '../src/components/app/WorkspaceNav.jsx';
-import { createApiClient } from '../src/lib/api.js';
+import { api, createApiClient } from '../src/lib/api.js';
+import {
+  APPLICATION_USER_STATUS_LABELS,
+  USER_ROLE_LABELS,
+} from '../src/lib/user-management.js';
+import UsersPage from '../src/pages/UsersPage.jsx';
 
 const identity = {
   issuer: 'https://auth.example/realms/amber',
@@ -373,6 +379,21 @@ describe('Axios authentication integration', () => {
     await screen.findByRole('button', { name: 'Увійти' });
   });
 
+  it('does not clear authentication after a centralized 403 response', async () => {
+    const isolated = createApiClient();
+    const onUnauthorized = vi.fn();
+    isolated.configureAuth({ onUnauthorized });
+    isolated.client.defaults.adapter = async (config) => {
+      const error = new Error('Forbidden');
+      error.config = config;
+      error.response = { status: 403 };
+      throw error;
+    };
+
+    await isolated.client.post('/forbidden').catch(() => {});
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
   it('does not persist authentication identity or CSRF data in browser storage', async () => {
     const localSet = vi.spyOn(Storage.prototype, 'setItem');
     const sessionSet = vi.spyOn(window.sessionStorage, 'setItem');
@@ -386,5 +407,168 @@ describe('Axios authentication integration', () => {
 
     expect(localSet).not.toHaveBeenCalled();
     expect(sessionSet).not.toHaveBeenCalled();
+  });
+});
+
+describe('application-user administration UI', () => {
+  const managedUsers = [
+    {
+      id: 101,
+      status: 'pending',
+      displayName: 'Pending User',
+      preferredUsername: 'pending.user',
+      lastAuthenticatedAt: null,
+      roleKey: null,
+      hasMultipleBuiltInRoles: false,
+    },
+    {
+      id: 102,
+      status: 'active',
+      displayName: 'Active User',
+      preferredUsername: 'active.user',
+      lastAuthenticatedAt: '2026-09-09T10:00:00.000Z',
+      roleKey: 'storekeeper',
+      hasMultipleBuiltInRoles: false,
+    },
+    {
+      id: 103,
+      status: 'disabled',
+      displayName: 'Disabled User',
+      preferredUsername: 'disabled.user',
+      lastAuthenticatedAt: '2026-09-08T10:00:00.000Z',
+      roleKey: 'manager',
+      hasMultipleBuiltInRoles: false,
+    },
+  ];
+  const roles = [
+    { key: 'administrator' },
+    { key: 'manager' },
+    { key: 'storekeeper' },
+  ];
+
+  function authValue(permissions = ['users.manage']) {
+    return {
+      identity,
+      applicationUser: { id: 42, status: 'active' },
+      permissions,
+      logout: vi.fn(),
+      refresh: vi.fn().mockResolvedValue(undefined),
+    };
+  }
+
+  it('shows the navigation entry only when users.manage is effective', () => {
+    const { rerender } = render(
+      <AuthContext.Provider value={authValue()}>
+        <MemoryRouter><WorkspaceNav /></MemoryRouter>
+      </AuthContext.Provider>
+    );
+    expect(screen.getByRole('link', { name: /Користувачі/ })).toBeTruthy();
+
+    rerender(
+      <AuthContext.Provider value={authValue(['products.view'])}>
+        <MemoryRouter><WorkspaceNav /></MemoryRouter>
+      </AuthContext.Provider>
+    );
+    expect(screen.queryByRole('link', { name: /Користувачі/ })).toBeNull();
+  });
+
+  it('does not load the user-management page without users.manage', () => {
+    const get = vi.spyOn(api, 'get');
+    render(
+      <AuthContext.Provider value={authValue(['products.view'])}>
+        <UsersPage />
+      </AuthContext.Provider>
+    );
+
+    expect(screen.getByRole('alert').textContent).toContain('Недостатньо прав');
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('renders lifecycle states and performs approval, role, disable, and enable requests', async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (url) => response(
+      url === '/admin/users' ? { users: managedUsers } : { roles }
+    ));
+    const post = vi.spyOn(api, 'post').mockResolvedValue(response({}));
+    const put = vi.spyOn(api, 'put').mockResolvedValue(response({}));
+
+    render(
+      <AuthContext.Provider value={authValue()}>
+        <UsersPage />
+      </AuthContext.Provider>
+    );
+
+    await screen.findByText('Pending User');
+    for (const label of Object.values(APPLICATION_USER_STATUS_LABELS)) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
+    for (const label of Object.values(USER_ROLE_LABELS)) {
+      expect(screen.getAllByText(label).length).toBeGreaterThan(0);
+    }
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Роль для Pending User' }), {
+      target: { value: 'manager' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Підтвердити Pending User' }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith(
+      '/admin/users/101/approve',
+      { roleKey: 'manager' }
+    ));
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Роль для Active User' }), {
+      target: { value: 'manager' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Змінити роль для Active User' }));
+    await waitFor(() => expect(put).toHaveBeenCalledWith(
+      '/admin/users/102/role',
+      { roleKey: 'manager' }
+    ));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Вимкнути доступ для Active User' }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/admin/users/102/disable', {}));
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Роль для Disabled User' }), {
+      target: { value: 'storekeeper' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Увімкнути доступ для Disabled User' }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith(
+      '/admin/users/103/enable',
+      { roleKey: 'storekeeper' }
+    ));
+  });
+
+  it('refreshes auth immediately after a self-role change without requiring another admin request', async () => {
+    const selfUser = {
+      ...managedUsers[1],
+      id: 42,
+      displayName: 'Current Administrator',
+      preferredUsername: 'current.admin',
+      roleKey: 'administrator',
+    };
+    vi.spyOn(api, 'get').mockImplementation(async (url) => response(
+      url === '/admin/users' ? { users: [selfUser] } : { roles }
+    ));
+    const put = vi.spyOn(api, 'put').mockResolvedValue(response({}));
+    const auth = authValue();
+
+    render(
+      <AuthContext.Provider value={auth}>
+        <UsersPage />
+      </AuthContext.Provider>
+    );
+
+    await screen.findByText('Current Administrator');
+    fireEvent.change(screen.getByRole('combobox', { name: 'Роль для Current Administrator' }), {
+      target: { value: 'manager' },
+    });
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Змінити роль для Current Administrator',
+    }));
+
+    await waitFor(() => expect(put).toHaveBeenCalledWith(
+      '/admin/users/42/role',
+      { roleKey: 'manager' }
+    ));
+    await waitFor(() => expect(auth.refresh).toHaveBeenCalledTimes(1));
+    expect(api.get).toHaveBeenCalledTimes(2);
   });
 });
