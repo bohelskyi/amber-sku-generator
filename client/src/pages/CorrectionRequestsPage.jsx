@@ -3,7 +3,6 @@ import {
   ArrowRight,
   CheckCircle2,
   ClipboardList,
-  Copy,
   House,
   Play,
   RefreshCw,
@@ -13,12 +12,13 @@ import {
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/auth-context.js';
+import { correctionsApi } from '../api/corrections-api';
 import { AppPageHeader, EmptyState, LoadingState, Notice } from '../components/app/UiPrimitives.jsx';
+import { CopyButton } from '../components/shared/CopyButton';
 import { useDialogAccessibility } from '../hooks/useDialogAccessibility';
 import { getAnswerValueLabel, getQuestionLabel } from '../lib/answer-labels';
-import { api } from '../lib/api';
-import { copyPlainText } from '../lib/clipboard';
 import { formatDateTime, formatUah } from '../lib/formatters';
+import { getApiError } from '../lib/http-error';
 import { getPermissionUiState } from '../lib/permission-ui.js';
 import {
   createLatestRequestGate,
@@ -57,26 +57,8 @@ const FILTERS = [
   ['all', 'Усі', 'all'],
 ];
 
-function getApiError(error) {
-  return error.response?.data?.error || error.message || 'Невідома помилка';
-}
-
 function getEmployeeLabel(user) {
   return user?.displayName || user?.preferredUsername || (user?.id ? `Працівник #${user.id}` : null);
-}
-
-function CopyButton({ label, value }) {
-  return (
-    <button
-      type="button"
-      className="btn btn-outline btn-icon"
-      onClick={() => copyPlainText(value)}
-      aria-label={label}
-      title={label}
-    >
-      <Copy size={14} />
-    </button>
-  );
 }
 
 function StatusBadge({ status }) {
@@ -206,9 +188,9 @@ export default function CorrectionRequestsPage() {
 
   const loadRequests = useCallback(async (nextFilter) => {
     const loadId = requestGate.current.next();
-    const response = await api.get('/admin/correction-requests', {
-      params: { status: nextFilter === 'workspace' ? 'active' : nextFilter },
-    });
+    const response = await correctionsApi.listRequests(
+      nextFilter === 'workspace' ? 'active' : nextFilter
+    );
     if (
       !requestGate.current.isLatest(loadId)
       || nextFilter !== activeFilterRef.current
@@ -236,7 +218,7 @@ export default function CorrectionRequestsPage() {
   }, [persistClaims]);
 
   useEffect(() => {
-    Promise.all([api.get('/config'), loadRequests('active')])
+    Promise.all([correctionsApi.getPublicConfig(), loadRequests('active')])
       .then(([configResponse]) => {
         setConfig(configResponse.data);
       })
@@ -314,7 +296,7 @@ export default function CorrectionRequestsPage() {
     setError('');
     setSuccess('');
     try {
-      await api.post(`/admin/correction-requests/${request.id}/claim`);
+      await correctionsApi.claimRequest(request.id);
       await loadRequests(filter);
       setSuccess(`Запит #${request.id} взято в роботу.`);
     } catch (requestError) {
@@ -331,10 +313,10 @@ export default function CorrectionRequestsPage() {
     setError('');
     setSuccess('');
     try {
-      await api.post(
-        `/admin/correction-requests/${request.id}/release`,
-        { claimVersion: request.claimVersion },
-        { headers: getClaimHeaders(request) }
+      await correctionsApi.releaseRequest(
+        request.id,
+        request.claimVersion,
+        getClaimHeaders(request)
       );
       clearClaim(request.id);
       await loadRequests(filter);
@@ -357,10 +339,7 @@ export default function CorrectionRequestsPage() {
     setError('');
     setSuccess('');
     try {
-      await api.post(`/admin/correction-requests/${request.id}/force-release`, {
-        confirm: true,
-        claimVersion: request.claimVersion,
-      });
+      await correctionsApi.forceReleaseRequest(request.id, request.claimVersion);
       clearClaim(request.id);
       await loadRequests(filter);
       setSuccess(`Запит #${request.id} примусово повернуто в чергу.`);
@@ -377,10 +356,11 @@ export default function CorrectionRequestsPage() {
     setError('');
     setSuccess('');
     try {
-      await api.patch(
-        `/admin/correction-requests/${request.id}/status`,
-        { status, claimVersion: request.claimVersion },
-        { headers: getClaimHeaders(request) }
+      await correctionsApi.updateRequestStatus(
+        request.id,
+        status,
+        request.claimVersion,
+        getClaimHeaders(request)
       );
       if (request.status === 'in_progress') clearClaim(request.id);
       await loadRequests(filter);
@@ -400,10 +380,10 @@ export default function CorrectionRequestsPage() {
     setError('');
     setSuccess('');
     try {
-      await api.post(
-        `/admin/correction-requests/${request.id}/refresh`,
-        { claimVersion: request.claimVersion },
-        { headers: getClaimHeaders(request) }
+      await correctionsApi.refreshRequest(
+        request.id,
+        request.claimVersion,
+        getClaimHeaders(request)
       );
       await loadRequests(filter);
       setSuccess(`Запит #${request.id} оновлено. Повторно звірте SKU та ціну на сайті.`);
@@ -423,10 +403,10 @@ export default function CorrectionRequestsPage() {
     setError('');
     setSuccess('');
     try {
-      const response = await api.post(
-        `/admin/correction-requests/${request.id}/complete`,
-        { claimVersion: request.claimVersion },
-        { headers: getClaimHeaders(request) }
+      const response = await correctionsApi.completeRequest(
+        request.id,
+        request.claimVersion,
+        getClaimHeaders(request)
       );
       clearClaim(request.id);
       closeCompletion();

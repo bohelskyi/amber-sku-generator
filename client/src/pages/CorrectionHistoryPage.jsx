@@ -1,22 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight,
-  Copy,
   Download,
   House,
   RotateCcw,
   Search,
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { api } from '../lib/api';
-import { copyPlainText } from '../lib/clipboard';
+import { correctionsApi } from '../api/corrections-api';
+import { CopyButton } from '../components/shared/CopyButton';
+import { downloadBlob } from '../lib/download';
 import { formatDateTime, formatDecimal, formatUah } from '../lib/formatters';
+import { getApiError } from '../lib/http-error';
 import { ProductTimeline } from '../components/app/ProductTimeline';
 import { AppPageHeader, EmptyState, LoadingState, Notice } from '../components/app/UiPrimitives.jsx';
-
-function getApiError(error) {
-  return error.response?.data?.error || error.message || 'Невідома помилка';
-}
 
 function useDebouncedValue(value, delay = 300) {
   const [debouncedValue, setDebouncedValue] = useState(value);
@@ -39,20 +36,6 @@ function formatSignedUah(value) {
   if (number > 0) return `+${formatted}`;
   if (number < 0) return `-${formatted}`;
   return formatted;
-}
-
-function CopyButton({ label, value }) {
-  return (
-    <button
-      type="button"
-      className="btn btn-outline btn-icon"
-      onClick={() => copyPlainText(value)}
-      title={label}
-      aria-label={label}
-    >
-      <Copy size={14} />
-    </button>
-  );
 }
 
 function SkuTransition({ item }) {
@@ -118,17 +101,6 @@ function PriceTransition({ item }) {
   );
 }
 
-function downloadBlob(blob, fileName) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
-
 function CorrectionReport() {
   const [searchParams] = useSearchParams();
   const isAdminView = searchParams.get('from') === 'admin';
@@ -155,7 +127,7 @@ function CorrectionReport() {
   useEffect(() => {
     const requestId = latestRequestId.current + 1;
     latestRequestId.current = requestId;
-    api.get('/admin/product-corrections', { params })
+    correctionsApi.listHistory(params)
       .then((response) => {
         if (latestRequestId.current !== requestId) return;
         setError('');
@@ -184,9 +156,7 @@ function CorrectionReport() {
     setLoadingMore(true);
     setError('');
     try {
-      const response = await api.get('/admin/product-corrections', {
-        params: { ...params, offset: items.length },
-      });
+      const response = await correctionsApi.listHistory({ ...params, offset: items.length });
       if (latestRequestId.current !== requestId) return;
       setItems((currentItems) => [...currentItems, ...(response.data.items || [])]);
     } catch (requestError) {
@@ -201,10 +171,7 @@ function CorrectionReport() {
     setExporting(true);
     setError('');
     try {
-      const response = await api.get('/admin/product-corrections/csv', {
-        params,
-        responseType: 'blob',
-      });
+      const response = await correctionsApi.exportHistory(params);
       downloadBlob(response.data, 'amber-correction-history.csv');
     } catch (requestError) {
       setError(getApiError(requestError));

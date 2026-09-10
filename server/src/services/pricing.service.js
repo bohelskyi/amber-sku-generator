@@ -1,5 +1,6 @@
 const pool = require('../db/pool');
 const { writeAuditEvent } = require('../audit/audit-events');
+const { addAuditChange } = require('../audit/change-set');
 const { createMutationContext } = require('../audit/mutation-context');
 const { getUsdUahRateInfo } = require('./currency.service');
 const { resolveAxisValue } = require('../utils/pricing-axis');
@@ -13,30 +14,6 @@ const {
 const { asRuleObject, getRuleDependencies, isRuleMatched } = require('../utils/rules');
 const { roundAutomaticUah } = require('../utils/money');
 const { parsePositiveDecimal } = require('../utils/numbers');
-
-function stableValue(value) {
-  if (Array.isArray(value)) return value.map(stableValue);
-  if (value && typeof value === 'object') {
-    return Object.keys(value)
-      .sort()
-      .reduce((result, key) => {
-        result[key] = stableValue(value[key]);
-        return result;
-      }, {});
-  }
-  return value;
-}
-
-function valuesEqual(left, right) {
-  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
-}
-
-function addAuditChange(changes, field, previousValue, nextValue, options = {}) {
-  if (valuesEqual(previousValue, nextValue)) return;
-  changes[field] = options.sensitive
-    ? { changed: true }
-    : { from: previousValue, to: nextValue };
-}
 
 function hasWeightBandChanges(summary) {
   return summary.created > 0

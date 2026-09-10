@@ -3,17 +3,7 @@ const pool = require('../db/pool');
 const { getAppConfig } = require('./catalog.service');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
-
-function stableValue(value) {
-  if (Array.isArray(value)) return value.map(stableValue);
-  if (!value || typeof value !== 'object') return value;
-  return Object.keys(value)
-    .sort()
-    .reduce((result, key) => {
-      result[key] = stableValue(value[key]);
-      return result;
-    }, {});
-}
+const { stableValue } = require('../audit/change-set');
 
 function hashSnapshot(snapshot) {
   return crypto

@@ -2,6 +2,7 @@ const express = require('express');
 const publicRoutes = require('./routes/public.routes');
 const adminRoutes = require('./routes/admin.routes');
 const crypto = require('node:crypto');
+const { sendHttpError } = require('./http/errors');
 const pool = require('./db/pool');
 const { trustProxy } = require('./config/env');
 const { createSessionMiddleware } = require('./auth/session');
@@ -83,7 +84,7 @@ function createApp({
       error: error.message,
       code: error.code,
     });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Internal server error' });
+    sendHttpError(res, error);
   });
 
   return app;

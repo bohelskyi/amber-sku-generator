@@ -1,33 +1,10 @@
 const initialConfig = require('../../data_config');
 const pool = require('../db/pool');
 const { writeAuditEvent } = require('../audit/audit-events');
+const { addAuditChange } = require('../audit/change-set');
 const { createMutationContext } = require('../audit/mutation-context');
 const { parseOptionalRule } = require('../utils/rules');
 const { normalizeSkuSeparator } = require('../utils/sku');
-
-function stableValue(value) {
-  if (Array.isArray(value)) return value.map(stableValue);
-  if (value && typeof value === 'object') {
-    return Object.keys(value)
-      .sort()
-      .reduce((result, key) => {
-        result[key] = stableValue(value[key]);
-        return result;
-      }, {});
-  }
-  return value;
-}
-
-function valuesEqual(left, right) {
-  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
-}
-
-function addAuditChange(changes, field, previousValue, nextValue, options = {}) {
-  if (valuesEqual(previousValue, nextValue)) return;
-  changes[field] = options.sensitive
-    ? { changed: true }
-    : { from: previousValue, to: nextValue };
-}
 
 function normalizeInputType(inputType) {
   return String(inputType || 'options').trim().toLowerCase() === 'text' ? 'text' : 'options';

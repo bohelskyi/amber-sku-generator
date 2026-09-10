@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Copy, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { FormSection } from '../shared/FormSection';
 import { ConditionBuilder } from './ConditionBuilder';
 import {
   getMatrixPriceValidationError,
@@ -97,15 +98,6 @@ function FieldControl({ children, hint, label }) {
   );
 }
 
-function SettingsSection({ children, title }) {
-  return (
-    <section className="pricing-settings-section">
-      <h4>{title}</h4>
-      <div>{children}</div>
-    </section>
-  );
-}
-
 function MetaItem({ label, value }) {
   return <div className="pricing-meta-item"><span>{label}</span><strong>{value}</strong></div>;
 }
@@ -180,7 +172,7 @@ function ScenarioForm({ config, currentCatQuestions, groupOptions, isNew = false
 
   return (
     <div className="pricing-settings-form">
-      <SettingsSection title="Загальні">
+      <FormSection title="Загальні">
         <div className="pricing-form-grid two-columns">
           <FieldControl label="Назва сценарію">
             <input className="input-sm" placeholder="Натур. Калібрований - 1 сорт" value={scenario.name} onChange={(event) => setScenario({ ...scenario, name: event.target.value })} />
@@ -206,13 +198,13 @@ function ScenarioForm({ config, currentCatQuestions, groupOptions, isNew = false
         </div>
         <label className="pricing-checkbox"><input type="checkbox" checked={scenario.apply_modifiers !== false} onChange={(event) => setScenario({ ...scenario, apply_modifiers: event.target.checked })} />Застосовувати модифікатори після матриці</label>
         <datalist id="scenario-group-options">{groupOptions.map((groupName) => <option key={groupName} value={groupName} />)}</datalist>
-      </SettingsSection>
+      </FormSection>
 
-      <SettingsSection title="Умови">
+      <FormSection title="Умови">
         <ConditionBuilder config={config} label="Коли використовувати цей сценарій" questions={currentCatQuestions} value={scenario.match_json} onChange={(nextValue) => setScenario({ ...scenario, match_json: nextValue })} />
-      </SettingsSection>
+      </FormSection>
 
-      <SettingsSection title="Структура матриці">
+      <FormSection title="Структура матриці">
         <div className="pricing-form-grid two-columns">
           <AxisSelector
             axisKey={scenario.axis_x_key}
@@ -227,7 +219,7 @@ function ScenarioForm({ config, currentCatQuestions, groupOptions, isNew = false
           <AxisSelector allowEmpty axisKey={scenario.axis_y_key} axisQuestions={availableAxisQuestions.filter((question) => question.id !== 'weight_band')} label="Колонки матриці" onChange={(nextValue) => setScenario({ ...scenario, axis_y_key: nextValue })} supportCombo />
         </div>
         {scenario.axis_x_key === 'weight_band' && <WeightBandsEditor bands={scenario.weight_bands || []} onChange={(weightBands) => setScenario({ ...scenario, weight_bands: weightBands })} />}
-      </SettingsSection>
+      </FormSection>
 
       <div className="pricing-form-actions">
         <button type="button" onClick={onSave} className="btn btn-primary">{isNew ? 'Створити сценарій' : 'Зберегти сценарій'}</button>
@@ -240,7 +232,7 @@ function ScenarioForm({ config, currentCatQuestions, groupOptions, isNew = false
 function ModifierForm({ config, currentCatQuestions, isNew = false, modifier, onCancel, onSave, setModifier }) {
   return (
     <div className="pricing-settings-form">
-      <SettingsSection title="Правило модифікатора">
+      <FormSection title="Правило модифікатора">
         <FieldControl label="Множник" hint="0.7 = знижка 30%, 1.15 = націнка 15%.">
           <input
             className="input-sm pricing-factor-input"
@@ -254,7 +246,7 @@ function ModifierForm({ config, currentCatQuestions, isNew = false, modifier, on
           />
         </FieldControl>
         <ConditionBuilder config={config} label="Коли застосовувати модифікатор" questions={currentCatQuestions} value={modifier.match_json} onChange={(nextValue) => setModifier({ ...modifier, match_json: nextValue })} />
-      </SettingsSection>
+      </FormSection>
       <div className="pricing-form-actions">
         <button type="button" onClick={onSave} className="btn btn-primary">{isNew ? 'Додати модифікатор' : 'Зберегти модифікатор'}</button>
         {onCancel && <button type="button" onClick={onCancel} className="btn btn-outline">Скасувати</button>}
@@ -540,7 +532,7 @@ export function AdminPricingEditor({
                     <ModifierForm config={config} currentCatQuestions={currentCatQuestions} modifier={editModifier} onCancel={() => setEditModifier(null)} onSave={saveModifierEdit} setModifier={setEditModifier} />
                   ) : (
                     <div className="pricing-modifier-overview">
-                      <SettingsSection title="Правило"><MetaItem label="Умова" value={formatConditionSummary(getModifierRule(selectedModifier), currentCatQuestions, config, 'Завжди')} /><MetaItem label="Множник" value={formatDecimal(selectedModifier.factor)} /></SettingsSection>
+                      <FormSection title="Правило"><MetaItem label="Умова" value={formatConditionSummary(getModifierRule(selectedModifier), currentCatQuestions, config, 'Завжди')} /><MetaItem label="Множник" value={formatDecimal(selectedModifier.factor)} /></FormSection>
                     </div>
                   )}
                 </>

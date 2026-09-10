@@ -505,6 +505,10 @@ test('correction queue wires application-user claims and legacy compatibility in
     new URL('../src/pages/CorrectionRequestsPage.jsx', import.meta.url),
     'utf8'
   );
+  const apiSource = fs.readFileSync(
+    new URL('../src/api/corrections-api.js', import.meta.url),
+    'utf8'
+  );
 
   assert.match(source, /createVisibilityAwarePoller/);
   assert.match(source, /createLatestRequestGate/);
@@ -512,9 +516,11 @@ test('correction queue wires application-user claims and legacy compatibility in
   assert.match(source, /nextFilter === 'workspace' \? 'active'/);
   assert.match(source, /getCorrectionRequestsForView/);
   assert.match(source, /isCorrectionClaimConflict/);
-  assert.match(source, /\/correction-requests\/\$\{request\.id\}\/claim/);
+  assert.match(source, /correctionsApi\.claimRequest\(request\.id\)/);
+  assert.match(apiSource, /\/correction-requests\/\$\{requestId\}\/claim/);
   assert.match(source, /getCorrectionLegacyClaimToken/);
-  assert.match(source, /claimVersion: request\.claimVersion/);
+  assert.match(source, /correctionsApi\.releaseRequest\([\s\S]*?request\.claimVersion/);
+  assert.match(apiSource, /\{ claimVersion \}/);
   assert.match(source, /В роботі у вас/);
   assert.match(source, /getEmployeeLabel\(request\.claimedByUser\)/);
   assert.doesNotMatch(source, /В роботі в іншому браузері/);

@@ -4,6 +4,7 @@ import { ConditionBuilder } from './ConditionBuilder';
 import { SkuTemplatePreview } from './SkuTemplatePreview';
 import { handleNumberKeyDown, handleNumberWheel } from '../../lib/number-input';
 import { formatConditionSummary } from '../../lib/admin-conditions';
+import { FormSection } from '../shared/FormSection';
 
 const EMPTY_EDIT_OPTION = { id: null, value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false };
 const isEnabled = (value) => value === 1 || value === true;
@@ -14,15 +15,6 @@ function FieldControl({ children, hint, label }) {
       <span>{label}</span>
       <div>{children}{hint && <small>{hint}</small>}</div>
     </label>
-  );
-}
-
-function SettingsSection({ children, title }) {
-  return (
-    <section className="catalog-settings-section">
-      <div className="catalog-settings-heading"><h4>{title}</h4></div>
-      <div className="catalog-settings-content">{children}</div>
-    </section>
   );
 }
 
@@ -76,7 +68,7 @@ function QuestionForm({ config, currentCatQuestions, excludeQuestionId, fillNext
         <div><h3>{isNew ? 'Нове питання' : 'Редагування питання'}</h3><p>{isNew ? 'Налаштуйте поле у контексті поточної категорії.' : question.label}</p></div>
         <button type="button" onClick={onCancel} className="btn btn-outline px-3 py-2 text-xs">Закрити</button>
       </div>
-      <SettingsSection title="Загальні">
+      <FormSection title="Загальні" variant="catalog">
         <FieldControl label="Назва питання">
           <input className="input-sm" placeholder="Розмір" value={question.label} onChange={(event) => onChange({ ...question, label: event.target.value })} />
         </FieldControl>
@@ -104,8 +96,8 @@ function QuestionForm({ config, currentCatQuestions, excludeQuestionId, fillNext
             </FieldControl>
           </div>
         </details>
-      </SettingsSection>
-      <SettingsSection title="SKU">
+      </FormSection>
+      <FormSection title="SKU" variant="catalog">
         <div className="catalog-checkbox-row catalog-checkbox-row-compact">
           <label><input type="checkbox" checked={question.include_in_sku} disabled={question.input_type === 'text'} onChange={(event) => onChange({ ...question, include_in_sku: event.target.checked })} />Додавати значення в SKU</label>
         </div>
@@ -122,8 +114,8 @@ function QuestionForm({ config, currentCatQuestions, excludeQuestionId, fillNext
             </FieldControl>
           </div>
         ) : <p className="catalog-neutral-note">SKU-параметри не застосовуються до цього питання.</p>}
-      </SettingsSection>
-      <SettingsSection title="Видимість та умови">
+      </FormSection>
+      <FormSection title="Видимість та умови" variant="catalog">
         <ConditionBuilder
           config={config}
           excludeQuestionId={excludeQuestionId}
@@ -132,7 +124,7 @@ function QuestionForm({ config, currentCatQuestions, excludeQuestionId, fillNext
           value={question.visible_if_json}
           onChange={(nextValue) => onChange({ ...question, visible_if_json: nextValue })}
         />
-      </SettingsSection>
+      </FormSection>
       <div className="catalog-form-actions">
         <button type="button" onClick={onSave} className={`btn ${isNew ? 'btn-amber' : 'btn-primary'}`}>{isNew ? 'Зберегти питання' : 'Зберегти зміни'}</button>
         <button type="button" onClick={onCancel} className="btn btn-outline">Скасувати</button>
@@ -400,14 +392,14 @@ export function AdminStructureEditor({
                   <QuestionForm config={config} currentCatQuestions={currentCatQuestions} excludeQuestionId={selectedQuestion.id} onCancel={() => setIsQuestionEditOpen(false)} onChange={setEditQuestion} onSave={updateQuestion} question={editQuestion} />
                 ) : (
                   <div className="catalog-question-overview">
-                    <SettingsSection title="Загальні">
+                    <FormSection title="Загальні" variant="catalog">
                       <MetaRow label="Тип поля" value={(selectedQuestion.input_type || 'options') === 'text' ? 'Текстове поле' : 'Варіанти'} />
                       <MetaRow label="Обовʼязкове" value={isEnabled(selectedQuestion.required) ? 'Так' : 'Ні'} />
-                    </SettingsSection>
-                    <SettingsSection title="SKU">
+                    </FormSection>
+                    <FormSection title="SKU" variant="catalog">
                       <MetaRow label="Включено в SKU" value={isEnabled(selectedQuestion.include_in_sku) ? 'Так' : 'Ні'} />
-                    </SettingsSection>
-                    <SettingsSection title="Видимість та умови"><MetaRow label="Показувати" value={questionVisibilitySummary} /></SettingsSection>
+                    </FormSection>
+                    <FormSection title="Видимість та умови" variant="catalog"><MetaRow label="Показувати" value={questionVisibilitySummary} /></FormSection>
                     <details className="catalog-technical-details catalog-technical-overview">
                       <summary>Технічні параметри</summary>
                       <div className="catalog-technical-details-body">
