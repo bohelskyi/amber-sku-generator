@@ -13,6 +13,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { copyPlainText } from '../lib/clipboard';
 import { formatDateTime, formatDecimal, formatUah } from '../lib/formatters';
+import { ProductTimeline } from '../components/app/ProductTimeline';
 
 function getApiError(error) {
   return error.response?.data?.error || error.message || 'Невідома помилка';
@@ -129,7 +130,7 @@ function downloadBlob(blob, fileName) {
   URL.revokeObjectURL(url);
 }
 
-export default function CorrectionHistoryPage() {
+function CorrectionReport() {
   const [searchParams] = useSearchParams();
   const isAdminView = searchParams.get('from') === 'admin';
   const latestRequestId = useRef(0);
@@ -224,6 +225,9 @@ export default function CorrectionHistoryPage() {
             <p className="mt-1 text-xs text-slate-500">Зміни SKU, характеристик і цін.</p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Link to="/admin/corrections/history" className="btn btn-outline">
+              Історія товару
+            </Link>
             {isAdminView && (
               <Link to="/admin" className="btn btn-outline">
                 Адмін-панель
@@ -321,7 +325,10 @@ export default function CorrectionHistoryPage() {
                         <span className="text-xs text-slate-500">{formatDecimal(item.weight)} г</span>
                       )}
                     </div>
-                    {item.reason && <span className="text-sm text-slate-600">{item.reason}</span>}
+                    <div className="flex items-center gap-2">
+                      {item.reason && <span className="text-sm text-slate-600">{item.reason}</span>}
+                      <Link to={`/admin/corrections/history?sku=${encodeURIComponent(item.sourceSku)}`} className="btn btn-outline text-xs px-2 py-1">Історія товару</Link>
+                    </div>
                   </div>
 
                   <div className="grid gap-5 xl:grid-cols-[minmax(360px,1.1fr)_minmax(300px,1fr)_minmax(250px,0.7fr)]">
@@ -373,4 +380,11 @@ export default function CorrectionHistoryPage() {
       </main>
     </div>
   );
+}
+
+export default function CorrectionHistoryPage() {
+  const [searchParams] = useSearchParams();
+  return searchParams.get('mode') === 'report'
+    ? <CorrectionReport />
+    : <ProductTimeline key={searchParams.get('sku') || ''} />;
 }

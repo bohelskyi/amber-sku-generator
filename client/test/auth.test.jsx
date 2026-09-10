@@ -744,11 +744,13 @@ describe('permission-aware business UI', () => {
     };
 
     const { rerender } = render(
+      <MemoryRouter>
       <>
         <HomeDashboard {...operationalProps} canCreateProducts={managerUi.canCreateProducts} />
         <HistoryTable history={history} config={config} selectedCat={null} canArchive={managerUi.canArchiveProducts} onCopyText={vi.fn()} onDecode={vi.fn()} onDelete={vi.fn()} />
         <ExportTools {...commonActions} canArchive={managerUi.canArchiveProducts} canCreateExport={managerUi.canCreateExports} />
       </>
+      </MemoryRouter>
     );
     expect(screen.queryByText('Оберіть категорію')).toBeNull();
     expect(screen.getByText('Знайти та перевірити товар').closest('.home-top-workspace')?.classList.contains('is-decoder-only')).toBe(true);
@@ -756,11 +758,13 @@ describe('permission-aware business UI', () => {
     expect(screen.queryByRole('button', { name: 'Експорт CSV' })).toBeNull();
 
     rerender(
+      <MemoryRouter>
       <>
         <HomeDashboard {...operationalProps} canCreateProducts={storekeeperUi.canCreateProducts} />
         <HistoryTable history={history} config={config} selectedCat={null} canArchive={storekeeperUi.canArchiveProducts} onCopyText={vi.fn()} onDecode={vi.fn()} onDelete={vi.fn()} />
         <ExportTools {...commonActions} canArchive={storekeeperUi.canArchiveProducts} canCreateExport={storekeeperUi.canCreateExports} />
       </>
+      </MemoryRouter>
     );
     expect(screen.getByText('Оберіть категорію')).toBeTruthy();
     expect(screen.getByText('Знайти та перевірити товар').closest('.home-top-workspace')?.classList.contains('is-decoder-only')).toBe(false);

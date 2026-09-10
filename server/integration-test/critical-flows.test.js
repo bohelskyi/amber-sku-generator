@@ -2150,6 +2150,125 @@ test('product create, direct recount, and archive share local actor attribution 
   )).rows[0].count), 1);
 });
 
+test('product timeline resolves every actual SKU across corrections and combines business history', async () => {
+  const actorUserId = Number(authenticatedSession.applicationUser.id);
+  const preview = await request('/api/preview', {
+    method: 'POST',
+    body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0, isCalibrated: 0 },
+  });
+  assert.equal(preview.response.status, 200, preview.text);
+  const created = await request('/api/save', {
+    method: 'POST',
+    body: {
+      category: 'ZZ', answers: { kind: 1 }, weight: 0, isCalibrated: 0,
+      skuSchemaVersionId: schemas.ZZ, previewToken: preview.data.previewToken,
+    },
+  });
+  assert.equal(created.response.status, 200, created.text);
+  const skuA = created.data.fullSku;
+
+  const direct = await request('/api/recount/apply', {
+    method: 'POST',
+    body: { sourceSku: skuA, answers: { kind: 2 }, reason: 'timeline direct correction' },
+  });
+  assert.equal(direct.response.status, 200, direct.text);
+  const skuB = direct.data.corrected.fullSku;
+
+  const correctionRequest = await request('/api/admin/correction-requests', {
+    method: 'POST',
+    body: { sourceSku: skuB, answers: { kind: 1 }, reason: 'timeline requested correction' },
+  });
+  assert.equal(correctionRequest.response.status, 200, correctionRequest.text);
+  const correctionRequestId = Number(correctionRequest.data.request.id);
+  const claim = await request(`/api/admin/correction-requests/${correctionRequestId}/claim`, {
+    method: 'POST', body: {},
+  });
+  assert.equal(claim.response.status, 200, claim.text);
+  const completed = await request(`/api/admin/correction-requests/${correctionRequestId}/complete`, {
+    method: 'POST', body: { claimVersion: claim.data.request.claimVersion },
+  });
+  assert.equal(completed.response.status, 200, completed.text);
+  const skuC = completed.data.request.finalPayload.fullSku;
+  const currentProduct = await pool.query(
+    'SELECT id, total_price_uah, details FROM products WHERE full_sku = $1', [skuC]
+  );
+  const currentProductId = Number(currentProduct.rows[0].id);
+  const oldPrice = Number(currentProduct.rows[0].total_price_uah);
+  const newPrice = oldPrice + 125;
+  const batch = await pool.query(
+    `INSERT INTO repricing_batches
+       (scope, scenario_name, scenario_snapshot, preview_token, status, candidate_count,
+        changed_count, applied_at, rolled_back_at, applied_by_user_id, rolled_back_by_user_id)
+     VALUES ('global', 'Timeline fixture', '{}'::jsonb, $1, 'rolled_back', 1, 1,
+             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '1 second', $2, $2)
+     RETURNING id`,
+    [`timeline-${Date.now()}`, actorUserId]
+  );
+  const batchId = Number(batch.rows[0].id);
+  await pool.query(
+    `INSERT INTO repricing_items
+       (batch_id, product_id, sku, old_price_uah, new_price_uah, price_delta_uah,
+        old_payload, new_payload)
+     VALUES ($1, $2, $3, $4::numeric, $5::numeric, $6::numeric,
+       jsonb_build_object('totalPriceUah', $4::numeric, 'details', $7::jsonb),
+       jsonb_build_object('totalPriceUah', $5::numeric, 'details', $7::jsonb))`,
+    [batchId, currentProductId, skuC, oldPrice, newPrice, 125, JSON.stringify(currentProduct.rows[0].details || {})]
+  );
+  const actorSnapshot = JSON.stringify({ displayName: 'Critical Flows', preferredUsername: 'critical.flows' });
+  await pool.query(
+    `INSERT INTO audit_events
+       (event_key, actor_user_id, actor_snapshot, subject_type, subject_id, details, occurred_at)
+     VALUES
+       ('repricing.applied', $1, $2::jsonb, 'repricing_batch', $3, '{}'::jsonb, CURRENT_TIMESTAMP),
+       ('repricing.rolled_back', $1, $2::jsonb, 'repricing_batch', $3, '{}'::jsonb,
+        CURRENT_TIMESTAMP + INTERVAL '1 second')`,
+    [actorUserId, actorSnapshot, String(batchId)]
+  );
+  const archived = await request('/api/delete', {
+    method: 'POST', body: { skuToDelete: skuC },
+  });
+  assert.equal(archived.response.status, 200, archived.text);
+
+  const timelines = await Promise.all([skuA, skuB, skuC].map((sku) => (
+    request(`/api/product-timeline?sku=${encodeURIComponent(sku)}`)
+  )));
+  for (const timeline of timelines) assert.equal(timeline.response.status, 200, timeline.text);
+  const expectedSkus = [skuA, skuB, skuC];
+  for (const timeline of timelines) {
+    assert.deepEqual(timeline.data.lineage.products.map((product) => product.sku), expectedSkus);
+    assert.equal(timeline.data.lineage.currentSku, skuC);
+    assert.equal(timeline.data.lineage.integrity, 'ok');
+    const types = timeline.data.events.map((event) => event.type);
+    assert.ok(types.includes('product.created'));
+    assert.equal(types.filter((type) => type === 'product.corrected').length, 2);
+    assert.ok(types.includes('correction_request.created'));
+    assert.ok(types.includes('correction_request.claimed'));
+    assert.ok(types.includes('correction_request.completed'));
+    assert.ok(types.includes('repricing.applied'));
+    assert.ok(types.includes('repricing.rolled_back'));
+    assert.ok(types.includes('product.archived'));
+    const requestCompletion = timeline.data.events.find((event) => event.type === 'correction_request.completed');
+    const requestedCorrection = timeline.data.events.find((event) => (
+      event.type === 'product.corrected' && event.details.applicationMode === 'request'
+    ));
+    assert.equal(requestCompletion.groupKey, requestedCorrection.groupKey);
+    assert.equal(JSON.stringify(timeline.data).includes('correctionRequestId'), false);
+    assert.equal(JSON.stringify(timeline.data).includes('claimVersion'), false);
+    assert.equal(Object.hasOwn(timeline.data.events[0], 'evidence'), false);
+  }
+  assert.deepEqual(
+    timelines[0].data.events.map((event) => event.type),
+    timelines[2].data.events.map((event) => event.type)
+  );
+
+  const missing = await request('/api/product-timeline?sku=ZZ-NOT-A-PRODUCT');
+  assert.equal(missing.response.status, 404, missing.text);
+  assert.equal(missing.data.code, 'SKU_HISTORY_NOT_FOUND');
+  const invalid = await request('/api/product-timeline?sku=');
+  assert.equal(invalid.response.status, 400, invalid.text);
+  assert.equal(invalid.data.code, 'INVALID_SKU');
+});
+
 test('a failed product audit insert rolls back product creation and SKU reservation', async () => {
   const preview = await request('/api/preview', {
     method: 'POST',

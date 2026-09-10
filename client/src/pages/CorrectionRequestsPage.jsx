@@ -546,6 +546,9 @@ export default function CorrectionRequestsPage() {
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <StatusBadge status={request.status} />
+                        <Link to={`/admin/corrections/history?sku=${encodeURIComponent(request.sourceSku)}`} className="btn btn-outline text-xs px-2 py-1">
+                          Історія товару
+                        </Link>
                         <span className="text-xs text-slate-500">
                           #{request.id} · створено {formatDateTime(request.createdAt)}
                           {getEmployeeLabel(request.createdByUser)

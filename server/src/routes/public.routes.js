@@ -19,6 +19,7 @@ const {
 } = require('../services/export.service');
 const { requirePermission } = require('../auth/authorization');
 const { getRequestMutationContext } = require('../audit/mutation-context');
+const { getProductTimeline } = require('../services/product-timeline.service');
 
 const router = express.Router();
 
@@ -133,6 +134,17 @@ router.get('/products', requirePermission('history.view'), async (req, res) => {
     res.json(products);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/product-timeline', requirePermission('history.view'), async (req, res) => {
+  try {
+    res.json(await getProductTimeline(req.query?.sku));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({
+      error: err.message,
+      ...(err.code ? { code: err.code } : {}),
+    });
   }
 });
 
