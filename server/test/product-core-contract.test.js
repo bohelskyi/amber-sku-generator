@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const productService = require('../src/services/product.service');
+const productSignatures = require('../src/services/product/product-signatures');
 const {
   getCorrectionPreviewSignature,
 } = require('../src/services/correction-request.service');
@@ -79,4 +80,19 @@ test('correction preview signature preserves its public re-export and snapshot',
       answers: { quality: 2, processing: 2 },
     },
   }), '4bddf740391be82c8be27d07166698a6adf3863f8adb2e7add25482d516d34a5');
+});
+
+test('signature facades resolve to the leaf module without a circular fallback', () => {
+  assert.equal(
+    productService.getProductStateSignature,
+    productSignatures.getProductStateSignature
+  );
+  assert.equal(
+    productService.getProductPreviewToken,
+    productSignatures.getProductPreviewToken
+  );
+  assert.equal(
+    getCorrectionPreviewSignature,
+    productSignatures.getCorrectionPreviewSignature
+  );
 });
