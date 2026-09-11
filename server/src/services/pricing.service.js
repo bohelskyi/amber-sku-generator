@@ -15,6 +15,7 @@ const {
   finalizePricing,
 } = require('./pricing/pricing-calculator');
 const { loadPricingContext } = require('./pricing/pricing-context');
+const { getAdminPrices } = require('./pricing/pricing-read-model');
 
 function hasWeightBandChanges(summary) {
   return summary.created > 0
@@ -61,68 +62,6 @@ async function calculatePricing(
     rateInfo: resolvedRateInfo,
     rateError,
   });
-}
-
-async function getAdminPrices(catCode) {
-  const scenariosResult = await pool.query(
-    `SELECT *
-     FROM price_scenarios
-     WHERE category_code = $1
-     ORDER BY COALESCE(NULLIF(group_name, ''), name), id`,
-    [catCode]
-  );
-  const modifiersResult = await pool.query(
-    'SELECT * FROM price_modifiers WHERE category_code = $1 ORDER BY id',
-    [catCode]
-  );
-
-  const scenarioIds = scenariosResult.rows.map((scenario) => scenario.id);
-  let matrixRows = [];
-  let weightBandRows = [];
-  if (scenarioIds.length > 0) {
-    const [matrixResult, weightBandsResult] = await Promise.all([
-      pool.query(
-        'SELECT * FROM price_matrix WHERE scenario_id = ANY($1::int[]) ORDER BY scenario_id, x_val, y_val',
-        [scenarioIds]
-      ),
-      pool.query(
-        `SELECT id, scenario_id, label, min_weight, max_weight, sort_order
-         FROM price_weight_bands
-         WHERE scenario_id = ANY($1::int[])
-         ORDER BY scenario_id, sort_order, min_weight`,
-        [scenarioIds]
-      ),
-    ]);
-    matrixRows = matrixResult.rows;
-    weightBandRows = weightBandsResult.rows;
-  }
-
-  const matrixByScenario = new Map();
-  for (const row of matrixRows) {
-    if (!matrixByScenario.has(row.scenario_id)) matrixByScenario.set(row.scenario_id, []);
-    matrixByScenario.get(row.scenario_id).push(row);
-  }
-
-  const weightBandsByScenario = new Map();
-  for (const row of weightBandRows) {
-    if (!weightBandsByScenario.has(row.scenario_id)) {
-      weightBandsByScenario.set(row.scenario_id, []);
-    }
-    weightBandsByScenario.get(row.scenario_id).push({
-      ...row,
-      min_weight: Number(row.min_weight),
-      max_weight: row.max_weight === null ? null : Number(row.max_weight),
-    });
-  }
-
-  return {
-    scenarios: scenariosResult.rows.map((scenario) => ({
-      ...scenario,
-      matrix: matrixByScenario.get(scenario.id) || [],
-      weight_bands: weightBandsByScenario.get(scenario.id) || [],
-    })),
-    modifiers: modifiersResult.rows,
-  };
 }
 
 function normalizeScenarioPayload(payload = {}, fallbackStatus = 'draft') {
