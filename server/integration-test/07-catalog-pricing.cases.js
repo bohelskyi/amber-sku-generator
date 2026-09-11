@@ -7,6 +7,219 @@ const {
   authenticateApplicationSession,
   schemas,
 } = suite;
+const { calculatePricing } = require('../src/services/pricing.service');
+const {
+  loadPricingContext,
+  loadPricingContexts,
+} = require('../src/services/pricing/pricing-context');
+const { getAdminPrices } = require('../src/services/pricing/pricing-read-model');
+
+async function replaceSnapshotConfiguration(client, configurations) {
+  await client.query('BEGIN');
+  try {
+    for (const configuration of configurations) {
+      await client.query(
+        'UPDATE price_scenarios SET axis_x_key = $1 WHERE id = $2',
+        [configuration.axisKey, configuration.scenarioId]
+      );
+      await client.query('DELETE FROM price_matrix WHERE scenario_id = $1', [
+        configuration.scenarioId,
+      ]);
+      await client.query(
+        `INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
+         VALUES ($1, $2, 0, $3)`,
+        [configuration.scenarioId, configuration.xValue, configuration.price]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  }
+}
+
+test('pricing context is one committed PostgreSQL statement snapshot', async () => {
+  const categoryCode = `S${Date.now().toString().slice(-8)}`;
+  const reader = await pool.connect();
+  const writer = await pool.connect();
+  try {
+    await pool.query(
+      'INSERT INTO categories (code, name, requires_weight) VALUES ($1, $2, 0)',
+      [categoryCode, 'Snapshot context']
+    );
+    const scenarioResult = await pool.query(
+      `INSERT INTO price_scenarios
+       (category_code, name, match_json, axis_x_key, priority, status, price_mode)
+       VALUES ($1, 'Snapshot', '{}'::jsonb, 'kind', 0, 'active', 'fixed_uah')
+       RETURNING id`,
+      [categoryCode]
+    );
+    const scenarioId = Number(scenarioResult.rows[0].id);
+    await pool.query(
+      'INSERT INTO price_matrix (scenario_id, x_val, y_val, price) VALUES ($1, 1, 0, 100)',
+      [scenarioId]
+    );
+
+    let queryCount = 0;
+    const controlledReader = {
+      async query(sql, values) {
+        queryCount += 1;
+        const result = await reader.query(sql, values);
+        await replaceSnapshotConfiguration(writer, [{
+          scenarioId,
+          axisKey: 'tone',
+          xValue: 2,
+          price: 200,
+        }]);
+        return result;
+      },
+    };
+    const context = await loadPricingContext(categoryCode, controlledReader);
+    const pricing = await calculatePricing(
+      categoryCode,
+      { kind: 1, tone: 2 },
+      0,
+      0,
+      { context, rateInfo: { rate: 40 } }
+    );
+    assert.equal(queryCount, 1);
+    assert.ok([100, 200].includes(pricing.fixedPriceUah));
+
+    const committedContext = await loadPricingContext(categoryCode, reader);
+    const committedPricing = await calculatePricing(
+      categoryCode,
+      { kind: 1, tone: 2 },
+      0,
+      0,
+      { context: committedContext, rateInfo: { rate: 40 } }
+    );
+    assert.equal(committedPricing.fixedPriceUah, 200);
+  } finally {
+    reader.release();
+    writer.release();
+    await pool.query('DELETE FROM categories WHERE code = $1', [categoryCode]);
+  }
+});
+
+test('bulk pricing contexts share one cross-category statement snapshot', async () => {
+  const suffix = Date.now().toString().slice(-7);
+  const categoryCodes = [`A${suffix}`, `B${suffix}`];
+  const reader = await pool.connect();
+  const writer = await pool.connect();
+  try {
+    const scenarios = [];
+    for (const [index, categoryCode] of categoryCodes.entries()) {
+      await pool.query(
+        'INSERT INTO categories (code, name, requires_weight) VALUES ($1, $2, 0)',
+        [categoryCode, `Bulk snapshot ${index}`]
+      );
+      const scenarioResult = await pool.query(
+        `INSERT INTO price_scenarios
+         (category_code, name, match_json, axis_x_key, priority, status, price_mode)
+         VALUES ($1, 'Snapshot', '{}'::jsonb, 'kind', 0, 'active', 'fixed_uah')
+         RETURNING id`,
+        [categoryCode]
+      );
+      const scenarioId = Number(scenarioResult.rows[0].id);
+      const oldPrice = index === 0 ? 100 : 300;
+      await pool.query(
+        'INSERT INTO price_matrix (scenario_id, x_val, y_val, price) VALUES ($1, 1, 0, $2)',
+        [scenarioId, oldPrice]
+      );
+      scenarios.push({ scenarioId, oldPrice, newPrice: oldPrice + 100 });
+    }
+
+    let queryCount = 0;
+    const controlledReader = {
+      async query(sql, values) {
+        queryCount += 1;
+        const result = await reader.query(sql, values);
+        await replaceSnapshotConfiguration(writer, scenarios.map((scenario) => ({
+          scenarioId: scenario.scenarioId,
+          axisKey: 'tone',
+          xValue: 2,
+          price: scenario.newPrice,
+        })));
+        return result;
+      },
+    };
+    const contexts = await loadPricingContexts(categoryCodes, controlledReader);
+    const prices = [];
+    for (const categoryCode of categoryCodes) {
+      const pricing = await calculatePricing(
+        categoryCode,
+        { kind: 1, tone: 2 },
+        0,
+        0,
+        { context: contexts.get(categoryCode), rateInfo: { rate: 40 } }
+      );
+      prices.push(pricing.fixedPriceUah);
+    }
+    assert.equal(queryCount, 1);
+    assert.ok(
+      JSON.stringify(prices) === JSON.stringify([100, 300])
+      || JSON.stringify(prices) === JSON.stringify([200, 400])
+    );
+  } finally {
+    reader.release();
+    writer.release();
+    await pool.query('DELETE FROM categories WHERE code = ANY($1::text[])', [categoryCodes]);
+  }
+});
+
+test('Admin pricing read model is one committed PostgreSQL statement snapshot', async () => {
+  const categoryCode = `R${Date.now().toString().slice(-8)}`;
+  const reader = await pool.connect();
+  const writer = await pool.connect();
+  try {
+    await pool.query(
+      'INSERT INTO categories (code, name, requires_weight) VALUES ($1, $2, 0)',
+      [categoryCode, 'Snapshot read model']
+    );
+    const scenarioResult = await pool.query(
+      `INSERT INTO price_scenarios
+       (category_code, name, match_json, axis_x_key, priority, status, price_mode)
+       VALUES ($1, 'Snapshot', '{}'::jsonb, 'kind', 0, 'active', 'fixed_uah')
+       RETURNING id`,
+      [categoryCode]
+    );
+    const scenarioId = Number(scenarioResult.rows[0].id);
+    await pool.query(
+      'INSERT INTO price_matrix (scenario_id, x_val, y_val, price) VALUES ($1, 1, 0, 100)',
+      [scenarioId]
+    );
+
+    let queryCount = 0;
+    const controlledReader = {
+      async query(sql, values) {
+        queryCount += 1;
+        const result = await reader.query(sql, values);
+        await replaceSnapshotConfiguration(writer, [{
+          scenarioId,
+          axisKey: 'tone',
+          xValue: 2,
+          price: 200,
+        }]);
+        return result;
+      },
+    };
+    const readModel = await getAdminPrices(categoryCode, controlledReader);
+    assert.equal(queryCount, 1);
+    const state = {
+      axisKey: readModel.scenarios[0].axis_x_key,
+      xValue: readModel.scenarios[0].matrix[0].x_val,
+      price: readModel.scenarios[0].matrix[0].price,
+    };
+    assert.ok([
+      JSON.stringify({ axisKey: 'kind', xValue: 1, price: '100.0000' }),
+      JSON.stringify({ axisKey: 'tone', xValue: 2, price: '200.0000' }),
+    ].includes(JSON.stringify(state)));
+  } finally {
+    reader.release();
+    writer.release();
+    await pool.query('DELETE FROM categories WHERE code = $1', [categoryCode]);
+  }
+});
 
 test('duplicate question invariant is atomic across independent transactions', async () => {
   const questionKey = `concurrent_question_${Date.now()}`;

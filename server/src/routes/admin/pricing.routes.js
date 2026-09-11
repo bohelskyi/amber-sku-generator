@@ -1,6 +1,13 @@
 const express = require('express');
 const { getAdminPrices } = require('../../services/pricing/pricing-read-model');
-const { upsertPriceCell, createScenario, updateScenario, duplicateScenario, createModifier, updateModifier } = require('../../services/pricing.service');
+const {
+  upsertPriceCell,
+  createScenario,
+  updateScenario,
+  duplicateScenario,
+  createModifier,
+  updateModifier,
+} = require('../../services/pricing/pricing-admin-commands');
 const { getRequestMutationContext } = require('../../audit/mutation-context');
 const { requirePermission } = require('../../auth/authorization');
 

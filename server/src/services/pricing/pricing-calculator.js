@@ -102,7 +102,7 @@ function calculatePricingBase({
 
   let pricePerGram = 0;
   let fixedPriceUah = null;
-  let logMessage = 'Ціна не знайдена';
+  let logMessage;
   const calibratedAnswer =
     answers.is_calibrated !== undefined &&
     answers.is_calibrated !== null &&
@@ -321,7 +321,8 @@ function finalizePricing(baseCalculation, { rateInfo = null, rateError = null } 
     };
   }
 
-  const { isWeightBased: _isWeightBased, ...publicCalculation } = baseCalculation;
+  const publicCalculation = { ...baseCalculation };
+  delete publicCalculation.isWeightBased;
   return {
     ...publicCalculation,
     totalPrice,
