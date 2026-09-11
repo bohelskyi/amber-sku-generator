@@ -3,7 +3,11 @@ const { isDeepStrictEqual } = require('node:util');
 const pool = require('../db/pool');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
-const { calculatePricing, loadPricingContext } = require('./pricing.service');
+const { calculatePricing } = require('./pricing.service');
+const {
+  loadPricingContexts,
+  loadScenarioPricingContext,
+} = require('./pricing/pricing-context');
 const { getUsdUahRateInfo } = require('./currency.service');
 const { toUahNumber } = require('../utils/money');
 const { asRuleObject, isRuleMatched } = require('../utils/rules');
@@ -739,8 +743,13 @@ function assertNoBlockingCorrectionRequests(requests = []) {
 }
 
 async function buildRepricingPreview(scenarioId) {
-  const scenario = await getActiveScenario(scenarioId);
-  const pricingContext = await loadPricingContext(scenario.category_code);
+  const loadedPricing = await loadScenarioPricingContext(scenarioId);
+  if (!loadedPricing) {
+    const error = new Error('Активну цінову матрицю не знайдено.');
+    error.statusCode = 404;
+    throw error;
+  }
+  const { scenario, context: pricingContext } = loadedPricing;
   let rateInfo = null;
   try {
     rateInfo = await getUsdUahRateInfo();
@@ -903,12 +912,8 @@ async function buildGlobalRepricingPreview() {
   const categoryCodes = [...new Set(productsResult.rows.map((product) => product.category))]
     .filter(Boolean)
     .sort();
-  const contexts = await Promise.all(
-    categoryCodes.map((categoryCode) => loadPricingContext(categoryCode))
-  );
-  const contextsByCategory = new Map(
-    contexts.map((context) => [context.categoryCode, context])
-  );
+  const contextsByCategory = await loadPricingContexts(categoryCodes);
+  const contexts = categoryCodes.map((categoryCode) => contextsByCategory.get(categoryCode));
   const configuration = contexts.map(getPricingContextSnapshot);
   const configurationToken = hashPayload(configuration);
   const scenarios = configuration.flatMap((context) => context.scenarios)

@@ -14,6 +14,7 @@ const {
   calculatePricingBase,
   finalizePricing,
 } = require('./pricing/pricing-calculator');
+const { loadPricingContext } = require('./pricing/pricing-context');
 
 function hasWeightBandChanges(summary) {
   return summary.created > 0
@@ -30,62 +31,6 @@ function normalizeScenarioGroup(groupName, scenarioName = '') {
   if (!normalizedName) return 'Без групи';
   if (normalizedName.includes(' - ')) return normalizedName.split(' - ')[0].trim() || 'Без групи';
   return normalizedName;
-}
-
-async function loadPricingContext(categoryCode, queryable = pool) {
-  const scenarios = await queryable.query(
-    `SELECT *
-     FROM price_scenarios
-     WHERE category_code = $1 AND COALESCE(status, 'active') = 'active'`,
-    [categoryCode]
-  );
-  const categoryResult = await queryable.query(
-    'SELECT requires_weight FROM categories WHERE code = $1 LIMIT 1',
-    [categoryCode]
-  );
-
-  const scenarioIds = scenarios.rows.map((scenario) => Number(scenario.id));
-  const weightBandsResult = scenarioIds.length > 0
-    ? await queryable.query(
-        `SELECT id, scenario_id, label, min_weight, max_weight, sort_order
-         FROM price_weight_bands
-         WHERE scenario_id = ANY($1::int[])
-         ORDER BY scenario_id, sort_order, min_weight`,
-        [scenarioIds]
-      )
-    : { rows: [] };
-  const [matrixResult, modifiersResult] = await Promise.all([
-    scenarioIds.length > 0
-      ? queryable.query(
-          `SELECT scenario_id, x_val, y_val, price
-           FROM price_matrix
-           WHERE scenario_id = ANY($1::int[])`,
-          [scenarioIds]
-        )
-      : Promise.resolve({ rows: [] }),
-    queryable.query('SELECT * FROM price_modifiers WHERE category_code = $1', [categoryCode]),
-  ]);
-  const weightBandsByScenario = new Map();
-  for (const band of weightBandsResult.rows) {
-    if (!weightBandsByScenario.has(Number(band.scenario_id))) {
-      weightBandsByScenario.set(Number(band.scenario_id), []);
-    }
-    weightBandsByScenario.get(Number(band.scenario_id)).push(band);
-  }
-
-  const matrixByCell = new Map();
-  for (const row of matrixResult.rows) {
-    matrixByCell.set(`${Number(row.scenario_id)}:${Number(row.x_val)}:${Number(row.y_val)}`, row);
-  }
-
-  return {
-    categoryCode,
-    category: categoryResult.rows[0] || null,
-    scenarios: scenarios.rows,
-    weightBandsByScenario,
-    matrixByCell,
-    modifiers: modifiersResult.rows,
-  };
 }
 
 async function calculatePricing(
