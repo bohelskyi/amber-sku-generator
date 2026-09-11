@@ -49,6 +49,24 @@ describe('domain API wrappers', () => {
     });
   });
 
+  it('preserves scenario and global repricing preview/apply contracts', () => {
+    const client = mockClient();
+    const repricing = createRepricingApi(client);
+    const payload = { previewToken: 'preview-token', automaticProductIds: [5] };
+
+    repricing.previewScenario(12);
+    repricing.previewGlobal();
+    repricing.applyScenario(payload);
+    repricing.applyGlobal(payload);
+
+    expect(client.post).toHaveBeenCalledWith('/admin/repricing/preview', {
+      scenarioId: 12,
+    });
+    expect(client.post).toHaveBeenCalledWith('/admin/repricing/global/preview');
+    expect(client.post).toHaveBeenCalledWith('/admin/repricing/apply', payload);
+    expect(client.post).toHaveBeenCalledWith('/admin/repricing/global/apply', payload);
+  });
+
   it('preserves product builder and archive request contracts', () => {
     const client = mockClient();
     const domain = createProductsApi(client);

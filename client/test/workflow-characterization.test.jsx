@@ -169,14 +169,14 @@ const repricingPreview = {
   }],
 };
 
-function renderRepricing() {
+function renderRepricing(permissions = [
+  'repricing.view',
+  'repricing.prepare',
+  'repricing.apply',
+  'repricing.rollback',
+]) {
   return render(
-    <AuthContext.Provider value={authValue([
-      'repricing.view',
-      'repricing.prepare',
-      'repricing.apply',
-      'repricing.rollback',
-    ])}>
+    <AuthContext.Provider value={authValue(permissions)}>
       <MemoryRouter><RepricingPage /></MemoryRouter>
     </AuthContext.Provider>
   );
@@ -280,6 +280,397 @@ describe('Repricing workflow', () => {
     expect(await screen.findByText(/Дані або розрахунок змінилися після збереження чернетки/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Прийняти оновлення' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Застосувати переоцінку' }).disabled).toBe(true);
+  });
+
+  it('serializes overlapping autosaves and persists the newest resolution last', async () => {
+    const firstSave = deferred();
+    const secondSave = deferred();
+    let savedDraft = null;
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/config') return response(repricingConfig);
+      if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
+      if (url === '/admin/repricing/batches') return response([]);
+      if (url === '/admin/repricing/drafts') return response(savedDraft ? [savedDraft] : []);
+      if (url === '/admin/correction-requests') return response({ items: [] });
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    const post = vi.spyOn(api, 'post').mockImplementation((url) => {
+      if (url === '/admin/repricing/preview') return Promise.resolve(response(repricingPreview));
+      if (url === '/admin/repricing/drafts') return firstSave.promise;
+      throw new Error(`Unexpected POST ${url}`);
+    });
+    const put = vi.spyOn(api, 'put').mockImplementation((url) => {
+      if (url === '/admin/repricing/drafts/77') return secondSave.promise;
+      throw new Error(`Unexpected PUT ${url}`);
+    });
+
+    renderRepricing();
+    fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
+    const priceInput = await screen.findByRole(
+      'textbox',
+      { name: 'Нова ціна для BR1001' },
+      { timeout: 3000 }
+    );
+    vi.useFakeTimers();
+
+    fireEvent.change(priceInput, { target: { value: '1300' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect(post).toHaveBeenCalledWith('/admin/repricing/drafts', expect.objectContaining({
+      manualOverrides: [{ productId: 501, newPriceUah: 1300 }],
+    }));
+
+    fireEvent.change(priceInput, { target: { value: '1400' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect(put).not.toHaveBeenCalled();
+
+    await act(async () => {
+      savedDraft = {
+        id: 77,
+        scope: 'scenario',
+        scenarioId: 21,
+        updatedAt: '2026-09-11T09:00:00.000Z',
+      };
+      firstSave.resolve(response({ draft: savedDraft }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(put).toHaveBeenCalledWith('/admin/repricing/drafts/77', expect.objectContaining({
+      manualOverrides: [{ productId: 501, newPriceUah: 1400 }],
+    }));
+
+    await act(async () => {
+      savedDraft = { ...savedDraft, updatedAt: '2026-09-11T09:05:00.000Z' };
+      secondSave.resolve(response({ draft: savedDraft }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText('Чернетка #77')).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Нова ціна для BR1001' }).value).toBe('1400');
+  });
+
+  it('does not attach a late autosave response to a newer scenario workflow', async () => {
+    const oldDraftSave = deferred();
+    const secondScenario = {
+      ...repricingScenario,
+      id: 22,
+      category_code: 'NM',
+      name: 'New matrix',
+    };
+    const newestPreview = {
+      ...repricingPreview,
+      scenario: { id: 22, categoryCode: 'NM', name: 'New matrix' },
+      previewToken: 'newest-preview-token',
+      items: [{
+        ...repricingPreview.items[0],
+        productId: 502,
+        sku: 'NM2002',
+        categoryCode: 'NM',
+        scenarioId: 22,
+        scenarioName: 'New matrix',
+      }],
+    };
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/config') return response(repricingConfig);
+      if (url === '/admin/repricing/scenarios') {
+        return response([repricingScenario, secondScenario]);
+      }
+      if (url === '/admin/repricing/batches') return response([]);
+      if (url === '/admin/repricing/drafts') return response([]);
+      if (url === '/admin/correction-requests') return response({ items: [] });
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    let draftSaveCount = 0;
+    const post = vi.spyOn(api, 'post').mockImplementation((url, body) => {
+      if (url === '/admin/repricing/preview') {
+        return Promise.resolve(response(
+          Number(body.scenarioId) === 22 ? newestPreview : repricingPreview
+        ));
+      }
+      if (url === '/admin/repricing/drafts') {
+        draftSaveCount += 1;
+        if (draftSaveCount === 1) return oldDraftSave.promise;
+        return Promise.resolve(response({
+          draft: {
+            id: 88,
+            scope: 'scenario',
+            scenarioId: 22,
+            updatedAt: '2026-09-11T10:00:00.000Z',
+          },
+        }));
+      }
+      throw new Error(`Unexpected POST ${url}`);
+    });
+    const put = vi.spyOn(api, 'put');
+
+    renderRepricing();
+    fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
+    const firstInput = await screen.findByRole('textbox', { name: 'Нова ціна для BR1001' });
+    vi.useFakeTimers();
+    fireEvent.change(firstInput, { target: { value: '1300' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect(draftSaveCount).toBe(1);
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Цінова матриця' }), {
+      target: { value: '22' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Попередній перегляд' }));
+    await act(async () => { await Promise.resolve(); });
+    const secondInput = screen.getByRole('textbox', { name: 'Нова ціна для NM2002' });
+    fireEvent.change(secondInput, { target: { value: '1500' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect(draftSaveCount).toBe(1);
+
+    await act(async () => {
+      oldDraftSave.resolve(response({
+        draft: {
+          id: 77,
+          scope: 'scenario',
+          scenarioId: 21,
+          updatedAt: '2026-09-11T09:00:00.000Z',
+        },
+      }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const draftCalls = post.mock.calls.filter(([url]) => url === '/admin/repricing/drafts');
+    expect(draftCalls).toHaveLength(2);
+    expect(draftCalls[1][1]).toEqual(expect.objectContaining({
+      scenarioId: 22,
+      manualOverrides: [{ productId: 502, newPriceUah: 1500 }],
+    }));
+    expect(put).not.toHaveBeenCalled();
+    expect(screen.getByText('Чернетка #88')).toBeTruthy();
+    expect(screen.queryByText('Чернетка #77')).toBeNull();
+  });
+
+  it('ignores a preview response after the user switches to a newer scenario', async () => {
+    const firstPreview = deferred();
+    const secondPreview = deferred();
+    const secondScenario = {
+      ...repricingScenario,
+      id: 22,
+      category_code: 'NM',
+      name: 'New matrix',
+    };
+    const newestPreview = {
+      ...repricingPreview,
+      scenario: { id: 22, categoryCode: 'NM', name: 'New matrix' },
+      previewToken: 'newest-preview-token',
+      items: [{
+        ...repricingPreview.items[0],
+        productId: 502,
+        sku: 'NM2002',
+        categoryCode: 'NM',
+        scenarioId: 22,
+        scenarioName: 'New matrix',
+      }],
+    };
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/config') return response(repricingConfig);
+      if (url === '/admin/repricing/scenarios') {
+        return response([repricingScenario, secondScenario]);
+      }
+      if (url === '/admin/repricing/batches') return response([]);
+      if (url === '/admin/repricing/drafts') return response([]);
+      if (url === '/admin/correction-requests') return response({ items: [] });
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    let previewRequestCount = 0;
+    vi.spyOn(api, 'post').mockImplementation((url) => {
+      if (url !== '/admin/repricing/preview') throw new Error(`Unexpected POST ${url}`);
+      previewRequestCount += 1;
+      return previewRequestCount === 1 ? firstPreview.promise : secondPreview.promise;
+    });
+
+    renderRepricing();
+    fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Цінова матриця' }), {
+      target: { value: '22' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Попередній перегляд' }));
+
+    await act(async () => {
+      secondPreview.resolve(response(newestPreview));
+      await Promise.resolve();
+    });
+    expect(await screen.findByText('NM2002')).toBeTruthy();
+
+    await act(async () => {
+      firstPreview.resolve(response(repricingPreview));
+      await Promise.resolve();
+    });
+    expect(screen.queryByText('BR1001')).toBeNull();
+    expect(screen.getByText('NM2002')).toBeTruthy();
+  });
+
+  it('keeps correction blockers authoritative and submits apply only once', async () => {
+    const applyRequest = deferred();
+    const blocker = {
+      id: 91,
+      sourceProductId: 501,
+      sourceSku: 'BR1001',
+      status: 'pending',
+    };
+    let activeRequests = [blocker];
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/config') return response(repricingConfig);
+      if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
+      if (url === '/admin/repricing/batches') return response([]);
+      if (url === '/admin/repricing/drafts') return response([]);
+      if (url === '/admin/correction-requests') return response({ items: activeRequests });
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    const post = vi.spyOn(api, 'post').mockImplementation((url) => {
+      if (url === '/admin/repricing/preview') return Promise.resolve(response(repricingPreview));
+      if (url === '/admin/repricing/apply') return applyRequest.promise;
+      throw new Error(`Unexpected POST ${url}`);
+    });
+
+    const firstRender = renderRepricing();
+    fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
+    expect(await screen.findByText('Переоцінку тимчасово заблоковано')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Застосувати переоцінку' }).disabled).toBe(true);
+
+    firstRender.unmount();
+    activeRequests = [];
+    renderRepricing();
+    fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Застосувати переоцінку' }));
+    const confirmButton = screen.getByRole('button', { name: 'Застосувати' });
+    fireEvent.click(confirmButton);
+    fireEvent.click(confirmButton);
+    expect(post.mock.calls.filter(([url]) => url === '/admin/repricing/apply')).toHaveLength(1);
+
+    await act(async () => {
+      applyRequest.resolve(response({
+        batch: { id: 92, changedCount: 1, changed_count: 1 },
+      }));
+      await Promise.resolve();
+    });
+    expect(await screen.findByText('Оновлено товарів: 1')).toBeTruthy();
+  });
+
+  it('keeps apply and rollback controls hidden without their effective permissions', async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/config') return response(repricingConfig);
+      if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
+      if (url === '/admin/repricing/batches') {
+        return response([{
+          id: 31,
+          applied_at: '2026-09-11T08:00:00.000Z',
+          category_code: 'BR',
+          scenario_name: 'Base matrix',
+          status: 'completed',
+          changed_count: 1,
+          can_rollback: true,
+        }]);
+      }
+      if (url === '/admin/repricing/drafts') return response([]);
+      if (url === '/admin/correction-requests') return response({ items: [] });
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    vi.spyOn(api, 'post').mockImplementation(async (url) => {
+      if (url === '/admin/repricing/preview') return response(repricingPreview);
+      throw new Error(`Unexpected POST ${url}`);
+    });
+
+    renderRepricing(['repricing.view', 'repricing.prepare']);
+    await screen.findByRole('button', { name: 'Попередній перегляд' });
+    expect(screen.queryByRole('button', { name: 'Відкотити переоцінку 31' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Попередній перегляд' }));
+    await screen.findByText('BR1001');
+    expect(screen.queryByRole('button', { name: 'Застосувати переоцінку' })).toBeNull();
+  });
+
+  it('surfaces rollback conflicts without changing the rendered batch history', async () => {
+    const batch = {
+      id: 31,
+      applied_at: '2026-09-11T08:00:00.000Z',
+      category_code: 'BR',
+      scenario_name: 'Base matrix',
+      status: 'completed',
+      changed_count: 1,
+      can_rollback: true,
+    };
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/config') return response(repricingConfig);
+      if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
+      if (url === '/admin/repricing/batches') return response([batch]);
+      if (url === '/admin/repricing/drafts') return response([]);
+      if (url === '/admin/correction-requests') return response({ items: [] });
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+      if (url === '/admin/repricing/31/rollback') {
+        const conflict = new Error('Rollback conflict');
+        conflict.response = { data: { error: 'Товар змінився після переоцінки.' } };
+        throw conflict;
+      }
+      throw new Error(`Unexpected POST ${url}`);
+    });
+
+    renderRepricing();
+    fireEvent.click(await screen.findByRole('button', { name: 'Відкотити переоцінку 31' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Відкотити' }));
+
+    expect(await screen.findByText('Товар змінився після переоцінки.')).toBeTruthy();
+    expect(post).toHaveBeenCalledWith('/admin/repricing/31/rollback');
+    expect(screen.queryByRole('dialog', { name: 'Відкотити переоцінку' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Відкотити переоцінку 31' })).toBeTruthy();
+  });
+
+  it('preserves explicit automatic and manual resolution cycles in a global draft', async () => {
+    const manualPreview = {
+      ...repricingPreview,
+      scope: 'global',
+      scenario: null,
+      summary: { ...repricingPreview.summary, changedCount: 0, errorCount: 1 },
+      items: [{
+        ...repricingPreview.items[0],
+        oldPriceUah: 1000,
+        newPriceUah: 1200,
+        automaticPriceUah: 1200,
+        status: 'error',
+        errorCode: 'manual_price',
+        pricingState: 'manual',
+        message: 'Товар має ручну ціну.',
+      }],
+    };
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/config') return response(repricingConfig);
+      if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
+      if (url === '/admin/repricing/batches') return response([]);
+      if (url === '/admin/repricing/drafts') return response([]);
+      if (url === '/admin/correction-requests') return response({ items: [] });
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    vi.spyOn(api, 'post').mockImplementation(async (url) => {
+      if (url === '/admin/repricing/global/preview') return response(manualPreview);
+      throw new Error(`Unexpected POST ${url}`);
+    });
+
+    renderRepricing();
+    fireEvent.click(await screen.findByRole('button', { name: 'Переоцінити все' }));
+    const applyButton = await screen.findByRole('button', { name: 'Застосувати переоцінку' });
+    expect(applyButton.disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Усі' }));
+    fireEvent.click(screen.getByRole('button', { name: /Застосувати автоматичну ціну/ }));
+    expect(screen.getByText('Автоматичну ціну підтверджено')).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Нова ціна для BR1001' }).value).toBe('1200');
+    expect(applyButton.disabled).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Скинути ручну ціну для BR1001' }));
+    expect(screen.queryByText('Автоматичну ціну підтверджено')).toBeNull();
+    expect(applyButton.disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: /Залишити ручну ціну/ }));
+    expect(screen.getByText('Ручну ціну підтверджено')).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Нова ціна для BR1001' }).value).toBe('1000');
+    expect(applyButton.disabled).toBe(false);
   });
 });
 

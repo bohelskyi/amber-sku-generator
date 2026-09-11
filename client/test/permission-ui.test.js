@@ -80,18 +80,12 @@ test('Administrator effective permissions expose every guarded UI action', () =>
   assert.equal(getRecountUiMode(ui), 'choice');
 });
 
-test('repricing and correction mutation controls are wired to effective permission flags', () => {
-  const repricingSource = fs.readFileSync(
-    new URL('../src/pages/RepricingPage.jsx', import.meta.url),
-    'utf8'
-  );
+test('correction mutation controls are wired to effective permission flags', () => {
   const correctionSource = fs.readFileSync(
     new URL('../src/pages/CorrectionRequestsPage.jsx', import.meta.url),
     'utf8'
   );
 
-  assert.match(repricingSource, /mayApplyRepricing && <button[\s\S]*?Застосувати переоцінку/);
-  assert.match(repricingSource, /canRollbackRepricing && \([\s\S]*?setRollbackTarget/);
   assert.match(correctionSource, /request\.status === 'pending'[\s\S]*?&& canClaim/);
   assert.match(correctionSource, /request\.status === 'in_progress' && !isOwnedClaim && canForceRelease/);
   assert.match(correctionSource, /canComplete && <button[\s\S]*?openCompletion/);

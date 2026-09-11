@@ -128,46 +128,13 @@ test('operational placeholder inputs have explicit accessible names', () => {
     '../src/components/app/HomeDashboard.jsx',
     '../src/components/app/RepricingRecountDrawer.jsx',
     '../src/components/app/RecountConfirmDialog.jsx',
+    '../src/components/repricing/RepricingTable.jsx',
     '../src/pages/CorrectionRequestsPage.jsx',
-    '../src/pages/RepricingPage.jsx',
   ].map((path) => fs.readFileSync(new URL(path, import.meta.url), 'utf8'));
 
   for (const source of sources) {
     assert.match(source, /aria-label=/);
   }
-});
-
-test('repricing renders the same manual resolution control on later manual-price cycles', () => {
-  const source = fs.readFileSync(
-    new URL('../src/pages/RepricingPage.jsx', import.meta.url),
-    'utf8'
-  );
-
-  assert.match(source, /\['price_missing', 'manual_price'\]\.includes/);
-  assert.match(source, /Залишити ручну ціну/);
-  assert.match(source, /keepCurrentManualPrice\(\s*item\.productId,\s*item\.oldPriceUah\s*\)/);
-  assert.match(source, /Застосувати автоматичну ціну/);
-  assert.match(source, /disabled=\{!canApply\}/);
-});
-
-test('repricing exposes a server-authoritative global catalog workflow', () => {
-  const source = fs.readFileSync(
-    new URL('../src/pages/RepricingPage.jsx', import.meta.url),
-    'utf8'
-  );
-  const apiSource = fs.readFileSync(
-    new URL('../src/api/repricing-api.js', import.meta.url),
-    'utf8'
-  );
-
-  assert.match(source, /Переоцінити все/);
-  assert.match(apiSource, /\/admin\/repricing\/global\/preview/);
-  assert.match(apiSource, /\/admin\/repricing\/global\/apply/);
-  assert.match(source, /scenarioFilter/);
-  assert.match(source, /Залишити поточні ручні ціни для всіх/);
-  assert.match(source, /Застосувати автоматичну ціну/);
-  assert.match(source, /keepCurrentManualPrices/);
-  assert.doesNotMatch(source, /Promise\.all\([^)]*\/admin\/repricing\/preview/);
 });
 
 test('fixed-scale API decimals are compacted in editable pricing fields', () => {
@@ -184,7 +151,7 @@ test('fixed-scale API decimals are compacted in editable pricing fields', () => 
     'utf8'
   );
   const repricingSource = fs.readFileSync(
-    new URL('../src/pages/RepricingPage.jsx', import.meta.url),
+    new URL('../src/components/repricing/RepricingTable.jsx', import.meta.url),
     'utf8'
   );
 
