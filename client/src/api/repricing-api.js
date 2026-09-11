@@ -2,6 +2,8 @@ import { api } from '../lib/api';
 
 export function createRepricingApi(client = api) {
   return Object.freeze({
+    getPublicConfig: () => client.get('/config'),
+    listScenarios: () => client.get('/admin/repricing/scenarios'),
     listBatches: () => client.get('/admin/repricing/batches'),
     listDrafts: () => client.get('/admin/repricing/drafts'),
     getDraft: (draftId) => client.get(`/admin/repricing/drafts/${draftId}`),

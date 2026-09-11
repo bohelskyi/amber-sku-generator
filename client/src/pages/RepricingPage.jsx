@@ -1,11 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
-  ArrowDown,
   ArrowLeft,
-  ArrowRight,
-  ArrowUp,
-  ArrowUpDown,
   CheckCircle2,
   CircleDollarSign,
   ClipboardList,
@@ -22,13 +18,24 @@ import {
   Undo2,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { correctionsApi } from '../api/corrections-api';
+import { repricingApi } from '../api/repricing-api';
 import { useAuth } from '../auth/auth-context.js';
 import { RepricingRecountDrawer } from '../components/app/RepricingRecountDrawer';
 import { AppPageHeader, LoadingState, Notice } from '../components/app/UiPrimitives.jsx';
-import { useDialogAccessibility } from '../hooks/useDialogAccessibility';
-import { api } from '../lib/api';
+import {
+  ConfirmDialog,
+  DiscardDraftDialog,
+  RollbackDialog,
+} from '../components/repricing/RepricingDialogs';
+import {
+  PricingExplanation,
+  SortHeader,
+} from '../components/repricing/RepricingTablePrimitives';
+import { useRepricingControllerState } from '../hooks/repricing/useRepricingControllerState';
+import { downloadBlob } from '../lib/download';
 import { formatDecimal, formatUah } from '../lib/formatters';
-import { getPricingAxis } from '../lib/pricing-axis';
+import { getApiError } from '../lib/http-error';
 import { getPermissionUiState } from '../lib/permission-ui.js';
 import {
   applyManualPrices,
@@ -47,297 +54,10 @@ const formatDate = (value) => (
   value ? new Intl.DateTimeFormat('uk-UA', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : '-'
 );
 
-const formatUsdPerGram = (value) => {
-  if (value === null || value === undefined || value === '') return null;
-  return Number.isFinite(Number(value)) ? `$${formatDecimal(value)}/г` : null;
-};
-
 const formatRate = (value) => {
   if (value === null || value === undefined || value === '') return null;
   return Number.isFinite(Number(value)) ? `${formatDecimal(value)} ₴/$` : null;
 };
-
-const getApiError = (error) => error.response?.data?.error || error.message || 'Невідома помилка';
-
-function getOptionLabel(config, categoryCode, key, value, context) {
-  const questions = config?.questions?.[categoryCode] || [];
-  const axis = getPricingAxis(key, questions, key, [], context);
-  const option = axis.options.find((item) => Number(item.id) === Number(value));
-  return option?.label || String(value ?? '-');
-}
-
-function getPricingBasis(config, categoryCode, item) {
-  const matrix = item.pricingDetails?.matrix;
-  if (!matrix) return '-';
-  const scenarioContext = item.pricingDetails?.scenario?.match_json || {};
-
-  const parts = [];
-  if (matrix.x?.label) {
-    parts.push(matrix.x.label);
-  } else if (matrix.x?.key && matrix.x.key !== 'weight') {
-    parts.push(getOptionLabel(config, categoryCode, matrix.x.key, matrix.x.value, scenarioContext));
-  }
-  if (matrix.y?.key) {
-    parts.push(matrix.y.label || getOptionLabel(
-      config,
-      categoryCode,
-      matrix.y.key,
-      matrix.y.value,
-      scenarioContext
-    ));
-  }
-  return parts.join(' / ') || '-';
-}
-
-function getPriceBasisLabel(mode, pricePerGram, fixedPriceUah) {
-  if (mode === 'per_gram_usd') return formatUsdPerGram(pricePerGram);
-  if (mode === 'fixed_uah') {
-    return fixedPriceUah === null || fixedPriceUah === undefined
-      ? null
-      : `${formatUah(fixedPriceUah)} фікс.`;
-  }
-  return null;
-}
-
-function ValueTransition({ oldValue, newValue }) {
-  if (!oldValue && !newValue) return null;
-  if (!oldValue || oldValue === newValue) {
-    return <span className="font-semibold text-slate-800">{newValue || oldValue}</span>;
-  }
-  return (
-    <span className="inline-flex flex-wrap items-center gap-1.5">
-      <span className="text-slate-500">{oldValue}</span>
-      <ArrowRight size={12} className="shrink-0 text-slate-400" />
-      <span className="font-semibold text-slate-800">{newValue}</span>
-    </span>
-  );
-}
-
-function PricingExplanation({ config, categoryCode, item }) {
-  const change = item.pricingChange || {};
-  const oldBasis = getPriceBasisLabel(
-    change.oldPriceMode,
-    change.oldPricePerGram,
-    change.oldFixedPriceUah
-  );
-  const newBasis = getPriceBasisLabel(
-    change.newPriceMode,
-    change.newPricePerGram,
-    change.newFixedPriceUah
-  );
-  const showRateChange = (change.reasonCodes || []).includes('exchange_rate_only');
-  const matrixChanged = change.oldMatrixName
-    && change.newMatrixName
-    && change.oldMatrixName !== change.newMatrixName;
-
-  return (
-    <div className="min-w-64 max-w-80 space-y-1">
-      <div className="text-xs">
-        {matrixChanged ? (
-          <ValueTransition oldValue={change.oldMatrixName} newValue={change.newMatrixName} />
-        ) : (
-          <strong className="font-semibold text-slate-800">
-            {change.newMatrixName || item.matrixName || change.oldMatrixName || 'Матрицю не визначено'}
-          </strong>
-        )}
-      </div>
-      <div className="text-slate-600">{getPricingBasis(config, categoryCode, item)}</div>
-      {(oldBasis || newBasis) && (
-        <div className="text-slate-700">
-          <span className="mr-1 text-slate-500">Розрахунок:</span>
-          <ValueTransition oldValue={oldBasis} newValue={newBasis} />
-        </div>
-      )}
-      {showRateChange && (
-        <div className="text-slate-700">
-          <span className="mr-1 text-slate-500">Курс:</span>
-          <ValueTransition
-            oldValue={formatRate(change.oldUahRate)}
-            newValue={formatRate(change.newUahRate)}
-          />
-        </div>
-      )}
-      {(change.reasonLabels || []).length > 0 && (
-        <div className="font-medium text-amber-800">
-          {change.reasonLabels.join(' · ')}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function downloadBlob(blob, fileName) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
-
-function SortHeader({ align = 'left', children, column, onSort, sort }) {
-  const active = sort.key === column;
-  const Icon = active ? (sort.direction === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
-  return (
-    <th
-      className={`table-cell sticky top-0 z-20 border-b border-slate-200 bg-slate-100 shadow-[0_1px_0_rgba(148,163,184,0.35)] ${align === 'right' ? 'text-right' : 'text-left'}`}
-      aria-sort={active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
-    >
-      <button
-        type="button"
-        className={`flex w-full items-center gap-1.5 ${align === 'right' ? 'justify-end' : 'justify-start'}`}
-        onClick={() => onSort(column)}
-        title={`Сортувати за колонкою «${children}»`}
-      >
-        <span>{children}</span>
-        <Icon size={13} className={active ? 'text-slate-800' : 'text-slate-400'} />
-      </button>
-    </th>
-  );
-}
-
-function ConfirmDialog({ changedCount, manualCount, onCancel, onConfirm, pending }) {
-  const dialogRef = useRef(null);
-  const confirmRef = useRef(null);
-
-  useDialogAccessibility({
-    closeDisabled: pending,
-    containerRef: dialogRef,
-    initialFocusRef: confirmRef,
-    isOpen: true,
-    onClose: onCancel,
-  });
-
-  return (
-    <div className="dialog-backdrop">
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="repricing-confirm-title"
-        tabIndex={-1}
-        className="dialog-surface dialog-compact max-w-md p-6"
-      >
-        <div className="flex items-start gap-3">
-          <AlertTriangle className="mt-0.5 text-amber-600" size={22} />
-          <div>
-            <h2 id="repricing-confirm-title" className="text-lg font-semibold text-slate-900">Застосувати переоцінку</h2>
-            <p className="mt-2 text-sm text-slate-600">Буде оновлено ціну для {changedCount} товарів.</p>
-            {manualCount > 0 && (
-              <p className="mt-1 text-sm font-medium text-amber-700">
-                Ручних коригувань: {manualCount}.
-              </p>
-            )}
-          </div>
-        </div>
-        <div className="mt-6 flex justify-end gap-2">
-          <button type="button" className="btn btn-outline" onClick={onCancel} disabled={pending}>
-            Скасувати
-          </button>
-          <button ref={confirmRef} type="button" className="btn btn-primary gap-2" onClick={onConfirm} disabled={pending}>
-            <RefreshCw size={16} className={pending ? 'animate-spin' : ''} />
-            {pending ? 'Застосування...' : 'Застосувати'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RollbackDialog({ batch, onCancel, onConfirm, pending }) {
-  const dialogRef = useRef(null);
-  const confirmRef = useRef(null);
-
-  useDialogAccessibility({
-    closeDisabled: pending,
-    containerRef: dialogRef,
-    initialFocusRef: confirmRef,
-    isOpen: true,
-    onClose: onCancel,
-  });
-
-  return (
-    <div className="dialog-backdrop">
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="repricing-rollback-title"
-        tabIndex={-1}
-        className="dialog-surface dialog-compact max-w-md p-6"
-      >
-        <div className="flex items-start gap-3">
-          <Undo2 className="mt-0.5 text-rose-600" size={22} />
-          <div>
-            <h2 id="repricing-rollback-title" className="text-lg font-semibold text-slate-900">Відкотити переоцінку</h2>
-            <p className="mt-2 text-sm text-slate-600">
-              Для {batch.changed_count} товарів буде повернуто ціни, які були до партії #{batch.id}.
-            </p>
-            <p className="mt-2 text-xs text-slate-500">
-              Якщо хоча б один товар пізніше змінювали, відкат не буде застосовано.
-            </p>
-          </div>
-        </div>
-        <div className="mt-6 flex justify-end gap-2">
-          <button type="button" className="btn btn-outline" onClick={onCancel} disabled={pending}>
-            Скасувати
-          </button>
-          <button ref={confirmRef} type="button" className="btn btn-primary gap-2" onClick={onConfirm} disabled={pending}>
-            <Undo2 size={16} />
-            {pending ? 'Відкат...' : 'Відкотити'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DiscardDraftDialog({ onCancel, onConfirm, pending }) {
-  const dialogRef = useRef(null);
-  const confirmRef = useRef(null);
-
-  useDialogAccessibility({
-    closeDisabled: pending,
-    containerRef: dialogRef,
-    initialFocusRef: confirmRef,
-    isOpen: true,
-    onClose: onCancel,
-  });
-
-  return (
-    <div className="dialog-backdrop">
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="repricing-discard-title"
-        tabIndex={-1}
-        className="dialog-surface dialog-compact max-w-md p-6"
-      >
-        <div className="flex items-start gap-3">
-          <Trash2 className="mt-0.5 text-rose-600" size={22} />
-          <div>
-            <h2 id="repricing-discard-title" className="text-lg font-semibold text-slate-900">Відкинути чернетку?</h2>
-            <p className="mt-2 text-sm text-slate-600">
-              Збережені ручні ціни буде видалено. Товари та матриця не зміняться.
-            </p>
-          </div>
-        </div>
-        <div className="mt-6 flex justify-end gap-2">
-          <button type="button" className="btn btn-outline" onClick={onCancel} disabled={pending}>
-            Скасувати
-          </button>
-          <button ref={confirmRef} type="button" className="btn btn-primary gap-2" onClick={onConfirm} disabled={pending}>
-            <Trash2 size={16} />
-            {pending ? 'Видаляємо...' : 'Відкинути'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function RepricingPage() {
   const auth = useAuth();
@@ -355,51 +75,66 @@ export default function RepricingPage() {
   const [batches, setBatches] = useState([]);
   const [drafts, setDrafts] = useState([]);
   const [scenarioId, setScenarioId] = useState('');
-  const [preview, setPreview] = useState(null);
-  const [filter, setFilter] = useState('changed');
-  const [scenarioFilter, setScenarioFilter] = useState('all');
-  const [reviewFilter, setReviewFilter] = useState('all');
-  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [previewing, setPreviewing] = useState(false);
   const [applying, setApplying] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [error, setError] = useState('');
   const [appliedBatch, setAppliedBatch] = useState(null);
-  const [manualPrices, setManualPrices] = useState({});
-  const [automaticProductIds, setAutomaticProductIds] = useState([]);
-  const [sort, setSort] = useState({ key: 'sku', direction: 'asc' });
   const [rollbackTarget, setRollbackTarget] = useState(null);
   const [rollingBack, setRollingBack] = useState(false);
   const [rollbackResult, setRollbackResult] = useState(null);
-  const [activeDraft, setActiveDraft] = useState(null);
-  const [draftSync, setDraftSync] = useState(null);
-  const [draftConflicts, setDraftConflicts] = useState([]);
-  const [draftSaveState, setDraftSaveState] = useState('idle');
   const [discardDraftOpen, setDiscardDraftOpen] = useState(false);
   const [discardingDraft, setDiscardingDraft] = useState(false);
-  const [reviewedProductIds, setReviewedProductIds] = useState([]);
   const [recountTarget, setRecountTarget] = useState(null);
   const [correctionRequests, setCorrectionRequests] = useState([]);
   const [createdCorrectionRequest, setCreatedCorrectionRequest] = useState(null);
+  const {
+    activeDraft,
+    automaticProductIds,
+    draftConflicts,
+    draftSaveState,
+    draftSync,
+    filter,
+    manualPrices,
+    preview,
+    reviewFilter,
+    reviewedProductIds,
+    scenarioFilter,
+    search,
+    setActiveDraft,
+    setAutomaticProductIds,
+    setDraftConflicts,
+    setDraftSaveState,
+    setDraftSync,
+    setFilter,
+    setManualPrices,
+    setPreview,
+    setReviewFilter,
+    setReviewedProductIds,
+    setScenarioFilter,
+    setSearch,
+    setSort,
+    sort,
+  } = useRepricingControllerState();
 
-  const loadBatches = () => api.get('/admin/repricing/batches').then((response) => {
+  const loadBatches = () => repricingApi.listBatches().then((response) => {
     setBatches(response.data || []);
     return response.data || [];
   });
 
-  const loadDrafts = () => api.get('/admin/repricing/drafts').then((response) => {
+  const loadDrafts = () => repricingApi.listDrafts().then((response) => {
     setDrafts(response.data || []);
     return response.data || [];
   });
 
   useEffect(() => {
     Promise.all([
-      api.get('/config'),
-      api.get('/admin/repricing/scenarios'),
-      api.get('/admin/repricing/batches'),
-      api.get('/admin/repricing/drafts'),
-      api.get('/admin/correction-requests', { params: { status: 'active' } }),
+      repricingApi.getPublicConfig(),
+      repricingApi.listScenarios(),
+      repricingApi.listBatches(),
+      repricingApi.listDrafts(),
+      correctionsApi.listRequests('active'),
     ])
       .then(([
         configResponse,
@@ -613,7 +348,7 @@ export default function RepricingPage() {
     setPreviewing(true);
     setError('');
     setAppliedBatch(null);
-    api.get(`/admin/repricing/drafts/${draftId}`)
+    repricingApi.getDraft(draftId)
       .then((response) => applyDraftPayload(response.data))
       .catch((requestError) => setError(getApiError(requestError)))
       .finally(() => setPreviewing(false));
@@ -631,8 +366,8 @@ export default function RepricingPage() {
       uiState: getDraftUiState(),
     };
     const request = activeDraft
-      ? api.put(`/admin/repricing/drafts/${activeDraft.id}`, payload)
-      : api.post('/admin/repricing/drafts', payload);
+      ? repricingApi.saveDraft(activeDraft.id, payload)
+      : repricingApi.createDraft(payload);
 
     setDraftSaveState('saving');
     return request
@@ -698,7 +433,7 @@ export default function RepricingPage() {
     setReviewedProductIds([]);
     setReviewFilter('all');
     setScenarioFilter('all');
-    api.post('/admin/repricing/preview', { scenarioId: Number(scenarioId) })
+    repricingApi.previewScenario(Number(scenarioId))
       .then((response) => {
         setPreview(response.data);
         setFilter(response.data.summary.errorCount > 0 ? 'error' : 'changed');
@@ -733,7 +468,7 @@ export default function RepricingPage() {
     setReviewedProductIds([]);
     setReviewFilter('all');
     setScenarioFilter('all');
-    api.post('/admin/repricing/global/preview')
+    repricingApi.previewGlobal()
       .then((response) => {
         setPreview(response.data);
         setFilter(response.data.summary.errorCount > 0 ? 'error' : 'changed');
@@ -766,7 +501,7 @@ export default function RepricingPage() {
     setError('');
     try {
       await saveDraft();
-      const response = await api.post(`/admin/repricing/drafts/${activeDraft.id}/sync`);
+      const response = await repricingApi.syncDraft(activeDraft.id);
       applyDraftPayload(response.data);
     } catch (requestError) {
       setError(getApiError(requestError));
@@ -807,7 +542,7 @@ export default function RepricingPage() {
     setReviewedProductIds(nextReviewedProductIds);
     try {
       if (activeDraft) {
-        await api.put(`/admin/repricing/drafts/${activeDraft.id}`, {
+        await repricingApi.saveDraft(activeDraft.id, {
           scope: preview.scope || 'scenario',
           scenarioId: preview.scenario?.id || null,
           manualOverrides: nextManualOverrides,
@@ -815,15 +550,13 @@ export default function RepricingPage() {
           reviewedProductIds: nextReviewedProductIds,
           uiState: getDraftUiState(),
         });
-        const response = await api.post(`/admin/repricing/drafts/${activeDraft.id}/sync`);
+        const response = await repricingApi.syncDraft(activeDraft.id);
         applyDraftPayload(response.data);
         await loadDrafts();
       } else {
         const response = preview.scope === 'global'
-          ? await api.post('/admin/repricing/global/preview')
-          : await api.post('/admin/repricing/preview', {
-              scenarioId: preview.scenario.id,
-            });
+          ? await repricingApi.previewGlobal()
+          : await repricingApi.previewScenario(preview.scenario.id);
         setPreview(response.data);
       }
     } catch (requestError) {
@@ -851,7 +584,7 @@ export default function RepricingPage() {
     if (!activeDraft || discardingDraft) return;
     setDiscardingDraft(true);
     setError('');
-    api.delete(`/admin/repricing/drafts/${activeDraft.id}`)
+    repricingApi.discardDraft(activeDraft.id)
       .then(() => {
         setDiscardDraftOpen(false);
         setActiveDraft(null);
@@ -877,10 +610,10 @@ export default function RepricingPage() {
     try {
       let draftForApply = activeDraft;
       if (activeDraft) draftForApply = await saveDraft();
-      const applyUrl = preview.scope === 'global'
-        ? '/admin/repricing/global/apply'
-        : '/admin/repricing/apply';
-      const response = await api.post(applyUrl, {
+      const applyRequest = preview.scope === 'global'
+        ? repricingApi.applyGlobal
+        : repricingApi.applyScenario;
+      const response = await applyRequest({
         scenarioId: preview.scenario?.id || null,
         previewToken: preview.previewToken,
         manualOverrides,
@@ -909,13 +642,13 @@ export default function RepricingPage() {
   };
 
   const downloadBatch = (batchId) => {
-    api.get(`/admin/repricing/${batchId}/csv`, { responseType: 'blob' })
+    repricingApi.downloadBatch(batchId)
       .then((response) => downloadBlob(response.data, `amber-repricing-${batchId}.csv`))
       .catch((requestError) => setError(getApiError(requestError)));
   };
 
   const downloadRollbackBatch = (batchId) => {
-    api.get(`/admin/repricing/${batchId}/rollback-csv`, { responseType: 'blob' })
+    repricingApi.downloadRollback(batchId)
       .then((response) => downloadBlob(response.data, `amber-repricing-rollback-${batchId}.csv`))
       .catch((requestError) => setError(getApiError(requestError)));
   };
@@ -924,7 +657,7 @@ export default function RepricingPage() {
     if (!rollbackTarget || rollingBack) return;
     setRollingBack(true);
     setError('');
-    api.post(`/admin/repricing/${rollbackTarget.id}/rollback`)
+    repricingApi.rollback(rollbackTarget.id)
       .then((response) => {
         setRollbackResult(response.data.batch);
         setRollbackTarget(null);

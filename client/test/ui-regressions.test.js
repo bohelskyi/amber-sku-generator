@@ -49,8 +49,8 @@ test('dialogs share focus trapping, Escape handling, and focus restoration', () 
     new URL('../src/hooks/useDialogAccessibility.js', import.meta.url),
     'utf8'
   );
-  const repricingSource = fs.readFileSync(
-    new URL('../src/pages/RepricingPage.jsx', import.meta.url),
+  const repricingDialogsSource = fs.readFileSync(
+    new URL('../src/components/repricing/RepricingDialogs.jsx', import.meta.url),
     'utf8'
   );
   const correctionQueueSource = fs.readFileSync(
@@ -67,7 +67,8 @@ test('dialogs share focus trapping, Escape handling, and focus restoration', () 
   assert.match(hookSource, /previousActiveElement/);
   assert.match(hookSource, /document\.body\.style\.overflow = 'hidden'/);
   assert.match(dialogSource, /useDialogAccessibility/);
-  assert.match(repricingSource, /role="dialog"/);
+  assert.match(repricingDialogsSource, /role="dialog"/);
+  assert.match(repricingDialogsSource, /useDialogAccessibility/);
   assert.match(correctionQueueSource, /aria-modal="true"/);
   assert.match(drawerSource, /role="dialog"/);
 });
@@ -154,10 +155,14 @@ test('repricing exposes a server-authoritative global catalog workflow', () => {
     new URL('../src/pages/RepricingPage.jsx', import.meta.url),
     'utf8'
   );
+  const apiSource = fs.readFileSync(
+    new URL('../src/api/repricing-api.js', import.meta.url),
+    'utf8'
+  );
 
   assert.match(source, /Переоцінити все/);
-  assert.match(source, /\/admin\/repricing\/global\/preview/);
-  assert.match(source, /\/admin\/repricing\/global\/apply/);
+  assert.match(apiSource, /\/admin\/repricing\/global\/preview/);
+  assert.match(apiSource, /\/admin\/repricing\/global\/apply/);
   assert.match(source, /scenarioFilter/);
   assert.match(source, /Залишити поточні ручні ціни для всіх/);
   assert.match(source, /Застосувати автоматичну ціну/);
