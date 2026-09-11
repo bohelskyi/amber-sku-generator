@@ -17,11 +17,8 @@ const {
   decodeVisibleSkuAnswers,
   diagnoseSkuAttempts,
   getOptionCode,
-  getOptionValue,
-  isOptionalPlaceholderAnswer,
   parseVariationSku,
 } = require('../utils/sku');
-const { isRuleMatched } = require('../utils/rules');
 const {
   getActiveSchema,
   getSchemaVersion,
@@ -39,11 +36,15 @@ const {
   getProductDetails,
   getStoredAnswers,
   haveSameDecodedAnswers,
-  isQuestionVisibleForSku,
   mergeRecountAnswerPatch,
   normalizeAnswerMap,
   omitHiddenRecountAnswers,
 } = require('./product/product-answers');
+const {
+  getContextualOption,
+  inspectNonSkuAnswer,
+  inspectSkuAnswer,
+} = require('./product/product-validation');
 
 async function getAllCategories() {
   const result = await pool.query(
@@ -106,23 +107,6 @@ async function getQuestionsForCategory(categoryCode) {
   }
 
   return questions;
-}
-
-function getRuleSpecificity(rule) {
-  return rule && typeof rule === 'object' ? Object.keys(rule).length : 0;
-}
-
-function getContextualOption(question, value, answers) {
-  const candidates = (question.options || []).filter(
-    (option) => String(getOptionValue(option)) === String(value)
-  );
-  const eligible = candidates.filter((option) => (
-    isRuleMatched(option.visible_if_json, answers)
-    && !(option.hidden_if_json && isRuleMatched(option.hidden_if_json, answers))
-  ));
-  return [...(eligible.length ? eligible : candidates)].sort((first, second) => (
-    getRuleSpecificity(second.visible_if_json) - getRuleSpecificity(first.visible_if_json)
-  ))[0] || null;
 }
 
 function resolveContextualAnswerLabels(decodedAnswers, questions) {
@@ -478,13 +462,6 @@ async function isSkuReserved(fullSku, queryable = pool) {
   return result.rows.length > 0;
 }
 
-function isOptionAvailable(option, answers) {
-  return Boolean(option)
-    && !option.archived
-    && isRuleMatched(option.visible_if_json, answers)
-    && !(option.hidden_if_json && isRuleMatched(option.hidden_if_json, answers));
-}
-
 function validationError(message) {
   const error = new Error(message);
   error.statusCode = 422;
@@ -544,16 +521,15 @@ async function validateNonSkuAnswers(categoryCode, answers, isCalibrated, querya
   }
 
   for (const question of questions.values()) {
-    if (!isQuestionVisibleForSku(question, answers, isCalibrated)) continue;
-    const value = answers[question.key];
-    const hasValue = value !== undefined && value !== null && String(value).trim() !== '';
-    if (question.required === 1 && !hasValue) {
+    const validation = inspectNonSkuAnswer(question, answers, isCalibrated);
+    if (!validation.visible) continue;
+    if (validation.issue === 'required') {
       throw validationError(`Заповніть обов'язкове поле «${question.label}».`);
     }
-    if (!hasValue || question.input_type === 'text') continue;
-    const option = getContextualOption(question, value, answers);
-    if (!isOptionAvailable(option, answers)) {
-      throw validationError(`Значення «${value}» недоступне для поля «${question.label}».`);
+    if (validation.issue === 'unavailable') {
+      throw validationError(
+        `Значення «${validation.value}» недоступне для поля «${question.label}».`
+      );
     }
   }
 }
@@ -611,26 +587,22 @@ async function buildProductPreview(
   const answerCodes = [];
   const answerCodeParts = [];
   for (const question of schema.questions) {
+    const validation = inspectSkuAnswer(question, normalizedAnswers, isCalibrated);
     if (
       skipHiddenSkuQuestions &&
-      !isQuestionVisibleForSku(question, normalizedAnswers, isCalibrated)
+      !validation.visible
     ) {
       continue;
     }
 
-    const value = normalizedAnswers[question.key];
-    const hasValue = value !== undefined && value !== null && value !== '';
-    if (Number(question.required) === 1
-        && isQuestionVisibleForSku(question, normalizedAnswers, isCalibrated)
-        && !hasValue) {
+    const { issue, option, value } = validation;
+    if (issue === 'required') {
       throw validationError(`Заповніть обов'язкове поле «${question.label}».`);
     }
-    const option = hasValue ? getContextualOption(question, value, normalizedAnswers) : null;
-    const isPlaceholder = hasValue && isOptionalPlaceholderAnswer(question, value, option);
-    if (hasValue && option && !isOptionAvailable(option, normalizedAnswers)) {
+    if (issue === 'unavailable') {
       throw validationError(`Значення «${value}» недоступне для поля «${question.label}».`);
     }
-    if (hasValue && !option && !isPlaceholder) {
+    if (issue === 'unknown') {
       const err = new Error(
         `Значення «${value}» не належить активній SKU-схемі питання «${question.label}».`
       );
