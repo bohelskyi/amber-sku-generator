@@ -45,6 +45,10 @@ const {
   inspectNonSkuAnswer,
   inspectSkuAnswer,
 } = require('./product/product-validation');
+const {
+  getProductBySku: queryProductBySku,
+  getRecentProducts: queryRecentProducts,
+} = require('./product/product-queries');
 
 async function getAllCategories() {
   const result = await pool.query(
@@ -446,12 +450,7 @@ async function getNextVariationSku(skuValue, queryable = pool) {
 }
 
 async function getProductBySku(fullSku) {
-  const result = await pool.query(
-    'SELECT id, full_sku, created_at FROM products WHERE full_sku = $1 ORDER BY id ASC LIMIT 1',
-    [String(fullSku || '').trim().toUpperCase()]
-  );
-
-  return result.rows[0] || null;
+  return queryProductBySku(pool, fullSku);
 }
 
 async function isSkuReserved(fullSku, queryable = pool) {
@@ -1373,16 +1372,7 @@ async function deleteProductBySku(skuToDelete, options = {}) {
 }
 
 async function getRecentProducts() {
-  const result = await pool.query(
-    `SELECT *
-     FROM products
-     WHERE COALESCE(status, 'active') <> 'archived'
-     ORDER BY created_at DESC
-     LIMIT 15`,
-    []
-  );
-
-  return result.rows;
+  return queryRecentProducts(pool);
 }
 
 module.exports = {
