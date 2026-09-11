@@ -8,6 +8,7 @@ const {
   normalizeStoredChanges,
   normalizeTimelineSku,
 } = require('../src/services/product-timeline.service');
+const { presentProductTimeline } = require('../src/presenters/product-timeline');
 
 test('timeline SKU lookup normalizes exact product identifiers and rejects invalid input', () => {
   assert.equal(normalizeTimelineSku(' br2/123-001 '), 'BR2/123-001');
@@ -47,6 +48,63 @@ test('lineage analysis returns proven non-linear history with integrity warnings
   assert.equal(result.ordered.length, 3);
   assert.ok(result.warnings.some((warning) => warning.code === 'MULTIPLE_SUCCESSORS'));
   assert.ok(result.warnings.some((warning) => warning.code === 'NON_LINEAR_ENDPOINTS'));
+});
+
+test('lineage analysis preserves explicit gaps when link and correction evidence disagree', () => {
+  const products = [
+    { id: 1, full_sku: 'A', corrected_from_product_id: null, corrected_to_product_id: 2, created_at: '2026-01-01' },
+    { id: 2, full_sku: 'B', corrected_from_product_id: 1, corrected_to_product_id: null, created_at: '2026-01-02' },
+    { id: 3, full_sku: 'C', corrected_from_product_id: null, corrected_to_product_id: null, created_at: '2026-01-03' },
+  ];
+  const corrections = [
+    { id: 11, source_product_id: 2, corrected_product_id: 3, source_sku: 'B', corrected_sku: 'C' },
+  ];
+
+  const result = analyzeLineage(products, corrections);
+
+  assert.deepEqual(result.ordered.map((product) => product.full_sku), ['A', 'B', 'C']);
+  assert.deepEqual(result.warnings.map((warning) => warning.code), [
+    'MISSING_PRODUCT_LINK',
+    'MISSING_CORRECTION_HISTORY',
+  ]);
+});
+
+test('lineage analysis preserves ambiguous SKU evidence as a non-linear history', () => {
+  const products = [
+    { id: 1, full_sku: 'DUPLICATE', created_at: '2026-01-01' },
+    { id: 2, full_sku: 'DUPLICATE', created_at: '2026-01-02' },
+    { id: 3, full_sku: 'TARGET', created_at: '2026-01-03' },
+  ];
+  const corrections = [
+    { id: 12, source_product_id: null, corrected_product_id: null, source_sku: 'DUPLICATE', corrected_sku: 'TARGET' },
+  ];
+
+  const result = analyzeLineage(products, corrections);
+
+  assert.deepEqual(result.ordered.map((product) => product.id), [1, 2, 3]);
+  assert.deepEqual(result.warnings.map((warning) => warning.code), [
+    'NON_LINEAR_ROOTS',
+    'NON_LINEAR_ENDPOINTS',
+  ]);
+});
+
+test('lineage analysis preserves cycle and disconnected evidence warnings', () => {
+  const products = [
+    { id: 1, full_sku: 'A', corrected_to_product_id: 2, created_at: '2026-01-01' },
+    { id: 2, full_sku: 'B', corrected_from_product_id: 1, created_at: '2026-01-02' },
+    { id: 3, full_sku: 'C', corrected_to_product_id: 4, corrected_from_product_id: 4, created_at: '2026-01-03' },
+    { id: 4, full_sku: 'D', corrected_to_product_id: 3, corrected_from_product_id: 3, created_at: '2026-01-04' },
+  ];
+  const corrections = [
+    { id: 13, source_product_id: 1, corrected_product_id: 2, source_sku: 'A', corrected_sku: 'B' },
+    { id: 14, source_product_id: 3, corrected_product_id: 4, source_sku: 'C', corrected_sku: 'D' },
+    { id: 15, source_product_id: 4, corrected_product_id: 3, source_sku: 'D', corrected_sku: 'C' },
+  ];
+
+  const result = analyzeLineage(products, corrections);
+
+  assert.deepEqual(result.ordered.map((product) => product.full_sku), ['A', 'B', 'C', 'D']);
+  assert.deepEqual(result.warnings.map((warning) => warning.code), ['LINEAGE_CYCLE']);
 });
 
 test('timeline changes decode semantic value IDs through each recorded immutable schema', () => {
@@ -160,4 +218,97 @@ test('timeline preserves calibration states when an old schema did not snapshot 
   assert.equal(changes[0].fieldLabel, 'Калібрування');
   assert.deepEqual(changes[0].before, { value: 0, label: 'Некалібрована' });
   assert.deepEqual(changes[0].after, { value: 1, label: 'Калібрована' });
+});
+
+test('timeline exposes missing historical labels instead of inventing current meanings', () => {
+  const changes = normalizeStoredChanges({
+    oldPayload: { answers: { removed_question: 7 } },
+    newPayload: { answers: { removed_question: 8 } },
+    oldSchema: null,
+    newSchema: null,
+  });
+
+  assert.deepEqual(changes, [{
+    kind: 'answer',
+    fieldKey: 'removed_question',
+    fieldLabel: null,
+    before: { value: 7, label: null },
+    after: { value: 8, label: null },
+    labelStatus: 'not_recorded',
+  }]);
+});
+
+test('timeline presenter keeps missing audit history explicit and groups legacy request completion', () => {
+  const result = presentProductTimeline('SKU-A', {
+    products: [{
+      id: 1,
+      full_sku: 'SKU-A',
+      category: 'BR',
+      status: 'corrected',
+      created_at: '2026-01-01T00:00:00.000Z',
+      corrected_from_product_id: null,
+      corrected_to_product_id: 2,
+      created_by_user_id: null,
+      sku_schema_version_id: null,
+    }, {
+      id: 2,
+      full_sku: 'SKU-B',
+      category: 'BR',
+      status: 'active',
+      created_at: '2026-01-02T00:00:00.000Z',
+      corrected_from_product_id: 1,
+      corrected_to_product_id: null,
+      sku_schema_version_id: null,
+    }],
+    corrections: [{
+      id: 10,
+      source_product_id: 1,
+      corrected_product_id: 2,
+      source_sku: 'SKU-A',
+      corrected_sku: 'SKU-B',
+      old_payload: { totalPriceUah: 100, answers: { removed: 1 } },
+      new_payload: { totalPriceUah: 125, answers: { removed: 2 } },
+      price_delta_uah: 25,
+      reason: 'Legacy correction',
+      created_at: '2026-01-02T00:00:00.000Z',
+      performed_by_user_id: 7,
+    }],
+    requests: [{
+      id: 20,
+      source_product_id: 1,
+      corrected_product_id: 2,
+      source_sku: 'SKU-A',
+      proposed_sku: 'SKU-B',
+      old_payload: { answers: { removed: 1 } },
+      proposed_payload: { answers: { removed: 2 } },
+      changes: [{ key: 'removed', from: 1, to: 2 }],
+      comment: '',
+      status: 'completed',
+      created_at: '2026-01-01T12:00:00.000Z',
+      completed_at: '2026-01-02T00:00:00.000Z',
+      created_by_user_id: null,
+    }],
+    repricingItems: [],
+    audits: [],
+    schemaRows: [],
+  });
+
+  assert.equal(result.lineage.integrity, 'ok');
+  assert.equal(result.lineage.rootSku, 'SKU-A');
+  assert.equal(result.lineage.currentSku, 'SKU-B');
+  assert.deepEqual(result.events.map((event) => event.type), [
+    'product.created',
+    'correction_request.created',
+    'correction_request.completed',
+    'product.corrected',
+  ]);
+  assert.equal(result.events[0].actor.status, 'not_recorded');
+  assert.equal(result.events[2].timestampStatus, 'recorded');
+  assert.equal(result.events[2].actor.status, 'not_recorded');
+  assert.equal(result.events[3].actor.status, 'recorded_reference');
+  assert.equal(result.events[3].details.applicationMode, 'request');
+  assert.equal(result.events[2].groupKey, result.events[3].groupKey);
+  assert.equal(result.events[3].changes[0].labelStatus, 'not_recorded');
+  assert.equal(JSON.stringify(result).includes('internalGroup'), false);
+  assert.equal(JSON.stringify(result).includes('correctionRequestId'), false);
 });

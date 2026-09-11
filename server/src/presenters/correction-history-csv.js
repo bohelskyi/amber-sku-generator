@@ -1,4 +1,4 @@
-const { getCorrectionChangesText } = require('../services/correction-history.service');
+const { getCorrectionChangesText } = require('./correction-history');
 const { buildCsv } = require('../utils/csv');
 const { presentCsvDownload } = require('./csv-download');
 

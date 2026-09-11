@@ -113,3 +113,47 @@ test('history filters validate date ranges and normalize category', () => {
   );
   assert.throws(() => normalizeHistoryFilters({ from: '01.08.2026' }), /Некоректна/);
 });
+
+test('history uses current configuration fallbacks and keeps missing historical labels explicit', () => {
+  const item = normalizeCorrectionRow({
+    id: 8,
+    source_product_id: null,
+    corrected_product_id: null,
+    category_code: 'BR',
+    source_sku: 'BR-OLD',
+    corrected_sku: 'BR-NEW',
+    price_delta_uah: null,
+    reason: '',
+    created_at: null,
+    old_payload: {
+      totalPriceUah: 100,
+      answers: { raw_type: 2, quality: 1, legacy_field: 'old' },
+      logMessage: 'Legacy matrix (details unavailable)',
+    },
+    new_payload: {
+      totalPriceUah: 125,
+      answers: { raw_type: 2, quality: 2, legacy_field: 'new' },
+    },
+  }, config);
+
+  assert.equal(item.oldMatrixName, 'Legacy matrix');
+  assert.equal(item.priceDeltaUah, 0);
+  assert.deepEqual(item.changes, [
+    {
+      key: 'quality',
+      from: 1,
+      to: 2,
+      questionLabel: 'Якість',
+      fromLabel: '1 сорт - формований',
+      toLabel: '2 сорт - натура',
+    },
+    {
+      key: 'legacy_field',
+      from: 'old',
+      to: 'new',
+      questionLabel: 'legacy_field',
+      fromLabel: 'old',
+      toLabel: 'new',
+    },
+  ]);
+});
