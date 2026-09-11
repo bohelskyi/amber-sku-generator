@@ -3,17 +3,17 @@ const { writeAuditEvent } = require('../audit/audit-events');
 const { addAuditChange } = require('../audit/change-set');
 const { createMutationContext } = require('../audit/mutation-context');
 const { getUsdUahRateInfo } = require('./currency.service');
-const { resolveAxisValue } = require('../utils/pricing-axis');
 const {
   normalizePriceMode,
   normalizeScenarioStatus,
-  resolveWeightBand,
-  sortScenariosByPrecedence,
   validateWeightBands,
 } = require('../utils/pricing-scenarios');
-const { asRuleObject, getRuleDependencies, isRuleMatched } = require('../utils/rules');
-const { roundAutomaticUah } = require('../utils/money');
+const { asRuleObject } = require('../utils/rules');
 const { parsePositiveDecimal } = require('../utils/numbers');
+const {
+  calculatePricingBase,
+  finalizePricing,
+} = require('./pricing/pricing-calculator');
 
 function hasWeightBandChanges(summary) {
   return summary.created > 0
@@ -30,73 +30,6 @@ function normalizeScenarioGroup(groupName, scenarioName = '') {
   if (!normalizedName) return 'Без групи';
   if (normalizedName.includes(' - ')) return normalizedName.split(' - ')[0].trim() || 'Без групи';
   return normalizedName;
-}
-
-function getAnswerValue(answers, key) {
-  return answers[key] === undefined || answers[key] === null || answers[key] === ''
-    ? 0
-    : Number(answers[key]);
-}
-
-function isPricingRuleMatched(ruleJson, answers, normalizedCalibrated) {
-  const context = {
-    ...answers,
-    is_calibrated: normalizedCalibrated,
-  };
-  for (const key of getRuleDependencies(ruleJson)) {
-    if (context[key] === undefined || context[key] === null || context[key] === '') {
-      context[key] = getAnswerValue(answers, key);
-    }
-  }
-  return isRuleMatched(ruleJson, context);
-}
-
-function axisUsesKey(axisKey, targetKey) {
-  return String(axisKey || '')
-    .split('+')
-    .map((key) => key.trim())
-    .includes(targetKey);
-}
-
-function getAxisKeys(axisKey) {
-  return String(axisKey || '')
-    .split('+')
-    .map((key) => key.trim())
-    .filter(Boolean);
-}
-
-function getAxisDependentKeys(axisKey) {
-  return getAxisKeys(axisKey).map((key) => (key === 'weight_band' ? 'weight' : key));
-}
-
-function getRuleKeys(ruleJson) {
-  return getRuleDependencies(ruleJson);
-}
-
-function uniqueKeys(keys) {
-  return Array.from(new Set(keys.filter(Boolean)));
-}
-
-function getPricingWeight(answers = {}, weight) {
-  const parsedWeight = Number.parseFloat(weight);
-  if (Number.isFinite(parsedWeight) && parsedWeight > 0) return parsedWeight;
-
-  const answerWeight = Number.parseFloat(answers.weight);
-  return Number.isFinite(answerWeight) ? answerWeight : 0;
-}
-
-function getEffectivePriceMode(scenario, categoryRequiresWeight, scenarioUsesWeight) {
-  const configuredMode = normalizePriceMode(scenario?.price_mode);
-  if (configuredMode !== 'category_default') return configuredMode;
-  return categoryRequiresWeight || scenarioUsesWeight ? 'per_gram_usd' : 'fixed_uah';
-}
-
-function resolveScenarioAxisValue(axisKey, answers, weight, weightBands) {
-  if (axisKey === 'weight_band') {
-    return resolveWeightBand(weightBands, weight)?.id ?? null;
-  }
-
-  return resolveAxisValue(axisKey, answers);
 }
 
 async function loadPricingContext(categoryCode, queryable = pool) {
@@ -163,254 +96,26 @@ async function calculatePricing(
   { queryable = pool, context = null, rateInfo = null } = {}
 ) {
   const pricingContext = context || await loadPricingContext(categoryCode, queryable);
-  if (pricingContext.categoryCode !== categoryCode) {
-    throw new Error(`Pricing context does not belong to category ${categoryCode}`);
-  }
-  const scenarios = { rows: pricingContext.scenarios };
-  const categoryResult = { rows: pricingContext.category ? [pricingContext.category] : [] };
-  const { weightBandsByScenario } = pricingContext;
-
-  let pricePerGram = 0;
-  let fixedPriceUah = null;
-  let logMessage = 'Ціна не знайдена';
-  const calibratedAnswer =
-    answers.is_calibrated !== undefined &&
-    answers.is_calibrated !== null &&
-    answers.is_calibrated !== ''
-      ? answers.is_calibrated
-      : isCalibrated;
-  const normalizedCalibrated = Number(calibratedAnswer || 0);
-  const weightVal = getPricingWeight(answers, weight);
-  let pricingDetails = null;
-
-  const activeScenario = sortScenariosByPrecedence(scenarios.rows).find((scenario) => {
-    return isPricingRuleMatched(scenario.match_json, answers, normalizedCalibrated);
+  const baseCalculation = calculatePricingBase({
+    categoryCode,
+    answers,
+    weight,
+    isCalibrated,
+    context: pricingContext,
   });
-  const categoryRequiresWeight =
-    categoryResult.rows.length > 0 &&
-    Number(categoryResult.rows[0].requires_weight) === 1;
-  const scenarioUsesWeight =
-    activeScenario &&
-    (axisUsesKey(activeScenario.axis_x_key, 'weight') ||
-      axisUsesKey(activeScenario.axis_y_key, 'weight') ||
-      axisUsesKey(activeScenario.axis_x_key, 'weight_band') ||
-      axisUsesKey(activeScenario.axis_y_key, 'weight_band'));
-  const priceMode = getEffectivePriceMode(
-    activeScenario,
-    categoryRequiresWeight,
-    scenarioUsesWeight
-  );
-  const isWeightBased = priceMode === 'per_gram_usd';
-  const usesWeight = categoryRequiresWeight || scenarioUsesWeight;
 
-  if (activeScenario) {
-    const matrixAnswers = scenarioUsesWeight ? { ...answers, weight: 0 } : answers;
-    const weightBands = weightBandsByScenario.get(Number(activeScenario.id)) || [];
-    const xVal = resolveScenarioAxisValue(
-      activeScenario.axis_x_key,
-      matrixAnswers,
-      weightVal,
-      weightBands
-    );
-    const yVal = resolveScenarioAxisValue(
-      activeScenario.axis_y_key,
-      matrixAnswers,
-      weightVal,
-      weightBands
-    );
-
-    const matrixRow = xVal === null || yVal === null
-      ? null
-      : pricingContext.matrixByCell.get(
-          `${Number(activeScenario.id)}:${Number(xVal)}:${Number(yVal)}`
-        );
-    const priceRow = { rows: matrixRow ? [matrixRow] : [] };
-
-    if (priceRow.rows.length > 0) {
-      const basePrice = Number(priceRow.rows[0].price);
-      const matchedModifiers = [];
-      let calculatedPrice = basePrice;
-      logMessage = `${activeScenario.name} (Базова: ${isWeightBased ? `$${calculatedPrice}` : `${calculatedPrice} ₴`})`;
-
-      const modifiers = activeScenario.apply_modifiers === false
-        ? { rows: [] }
-        : { rows: pricingContext.modifiers };
-
-      for (const modifier of modifiers.rows) {
-        const modifierRule = Object.keys(asRuleObject(modifier.match_json)).length > 0
-          ? modifier.match_json
-          : { [modifier.trigger_key]: modifier.trigger_val };
-
-        if (isPricingRuleMatched(modifierRule, answers, normalizedCalibrated)) {
-          calculatedPrice *= Number(modifier.factor);
-          matchedModifiers.push({
-            id: modifier.id,
-            factor: Number(modifier.factor),
-            match_json: asRuleObject(modifierRule),
-            dependentKeys: getRuleKeys(modifierRule),
-          });
-          logMessage += ` + Модифікатор (${Math.round((Number(modifier.factor) - 1) * 100)}%)`;
-        }
-      }
-
-      pricePerGram = isWeightBased ? calculatedPrice : 0;
-      fixedPriceUah = priceMode === 'fixed_uah' ? calculatedPrice : null;
-
-      pricingDetails = {
-        isWeightBased,
-        usesWeight,
-        priceMode,
-        calibratedValue: normalizedCalibrated,
-        scenario: {
-          id: activeScenario.id,
-          name: activeScenario.name,
-          group_name: activeScenario.group_name || '',
-          match_json: asRuleObject(activeScenario.match_json),
-          axis_x_key: activeScenario.axis_x_key,
-          axis_y_key: activeScenario.axis_y_key,
-          priority: Number(activeScenario.priority || 0),
-          status: activeScenario.status || 'active',
-          price_mode: normalizePriceMode(activeScenario.price_mode),
-          apply_modifiers: activeScenario.apply_modifiers !== false,
-        },
-        matrix: {
-          x: {
-            key: activeScenario.axis_x_key,
-            value: xVal,
-            label: activeScenario.axis_x_key === 'weight_band'
-              ? weightBands.find((band) => Number(band.id) === Number(xVal))?.label || null
-              : null,
-            dependentKeys: getAxisDependentKeys(activeScenario.axis_x_key),
-          },
-          y: {
-            key: activeScenario.axis_y_key,
-            value: yVal,
-            label: activeScenario.axis_y_key === 'weight_band'
-              ? weightBands.find((band) => Number(band.id) === Number(yVal))?.label || null
-              : null,
-            dependentKeys: getAxisDependentKeys(activeScenario.axis_y_key),
-          },
-        },
-        basePrice,
-        finalPricePerGram: isWeightBased ? pricePerGram : null,
-        finalFixedPriceUah: fixedPriceUah,
-        matchedModifiers,
-        dependentKeys: uniqueKeys([
-          ...getRuleKeys(activeScenario.match_json),
-          ...getAxisDependentKeys(activeScenario.axis_x_key),
-          ...getAxisDependentKeys(activeScenario.axis_y_key),
-          ...matchedModifiers.flatMap((modifier) => modifier.dependentKeys),
-        ]),
-      };
-    } else {
-      logMessage = `${activeScenario.name} (Нема ціни для комбінації)`;
-    }
-  } else {
-    logMessage = 'Немає сценарію для цих параметрів';
-  }
-
-  let totalPrice = isWeightBased ? (pricePerGram * weightVal).toFixed(2) : '0.00';
-
-  let currencyPayload = {
-    uahRate: null,
-    pricePerGramUah: null,
-    calculatedPriceUah: null,
-    totalPriceUah: null,
-  };
+  let resolvedRateInfo = rateInfo;
+  let rateError = null;
   try {
-    const resolvedRateInfo = rateInfo || await getUsdUahRateInfo();
-    const uahRate = Number(resolvedRateInfo.rate);
-    if (!Number.isFinite(uahRate) || uahRate <= 0) {
-      throw new Error(resolvedRateInfo.error || 'USD/UAH rate is unavailable');
-    }
-    if (isWeightBased) {
-      const calculatedPriceUah = pricePerGram > 0
-        ? pricePerGram * weightVal * uahRate
-        : null;
-      currencyPayload = {
-        uahRate,
-        pricePerGramUah: (pricePerGram * uahRate).toFixed(2),
-        calculatedPriceUah,
-        totalPriceUah: roundAutomaticUah(calculatedPriceUah),
-      };
-    } else {
-      totalPrice = uahRate > 0 ? (Number(fixedPriceUah || 0) / uahRate).toFixed(2) : '0.00';
-      const calculatedPriceUah = fixedPriceUah !== null && Number(fixedPriceUah) > 0
-        ? Number(fixedPriceUah)
-        : null;
-      currencyPayload = {
-        uahRate,
-        pricePerGramUah: null,
-        calculatedPriceUah,
-        totalPriceUah: roundAutomaticUah(calculatedPriceUah),
-      };
-    }
-    currencyPayload = {
-      ...currencyPayload,
-      uahRateSource: resolvedRateInfo.source,
-      uahRateDate: resolvedRateInfo.rateDate,
-      uahRateFetchedAt: resolvedRateInfo.fetchedAt,
-      uahRateAgeMs: resolvedRateInfo.ageMs,
-      uahRateStale: Boolean(resolvedRateInfo.stale),
-      uahRateError: resolvedRateInfo.error || null,
-    };
+    resolvedRateInfo = rateInfo || await getUsdUahRateInfo();
   } catch (err) {
-    if (!isWeightBased) {
-      currencyPayload = {
-        uahRate: null,
-        pricePerGramUah: null,
-        calculatedPriceUah: fixedPriceUah,
-        totalPriceUah: roundAutomaticUah(fixedPriceUah),
-      };
-    }
-    currencyPayload = {
-      ...currencyPayload,
-      uahRateError: String(err.message || err),
-    };
+    rateError = err;
   }
 
-  return {
-    weightVal,
-    pricePerGram,
-    fixedPriceUah,
-    priceMode,
-    usesWeight,
-    totalPrice,
-    logMessage,
-    currencyPayload,
-    pricingDetails: pricingDetails || {
-      isWeightBased,
-      usesWeight,
-      priceMode,
-      calibratedValue: normalizedCalibrated,
-      scenario: activeScenario
-        ? {
-            id: activeScenario.id,
-            name: activeScenario.name,
-            group_name: activeScenario.group_name || '',
-            match_json: asRuleObject(activeScenario.match_json),
-            axis_x_key: activeScenario.axis_x_key,
-            axis_y_key: activeScenario.axis_y_key,
-            priority: Number(activeScenario.priority || 0),
-            status: activeScenario.status || 'active',
-            price_mode: normalizePriceMode(activeScenario.price_mode),
-            apply_modifiers: activeScenario.apply_modifiers !== false,
-          }
-        : null,
-      matrix: null,
-      basePrice: null,
-      finalPricePerGram: isWeightBased ? pricePerGram : null,
-      finalFixedPriceUah: fixedPriceUah,
-      matchedModifiers: [],
-      dependentKeys: activeScenario
-        ? uniqueKeys([
-            ...getRuleKeys(activeScenario.match_json),
-            ...getAxisDependentKeys(activeScenario.axis_x_key),
-            ...getAxisDependentKeys(activeScenario.axis_y_key),
-          ])
-        : [],
-    },
-  };
+  return finalizePricing(baseCalculation, {
+    rateInfo: resolvedRateInfo,
+    rateError,
+  });
 }
 
 async function getAdminPrices(catCode) {
