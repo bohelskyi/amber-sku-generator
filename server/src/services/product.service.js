@@ -1,4 +1,3 @@
-const crypto = require('node:crypto');
 const pool = require('../db/pool');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
@@ -29,6 +28,10 @@ const {
   getSchemaVersionById,
   parseVersionedSkuPart,
 } = require('./sku-schema.service');
+const {
+  getProductPreviewToken,
+  getProductStateSignature,
+} = require('./product/product-signatures');
 
 async function getAllCategories() {
   const result = await pool.query(
@@ -579,24 +582,6 @@ function isOptionAvailable(option, answers) {
     && !(option.hidden_if_json && isRuleMatched(option.hidden_if_json, answers));
 }
 
-function getProductStateSignature(product) {
-  const relevantState = {
-    id: Number(product?.id),
-    fullSku: product?.full_sku || null,
-    category: product?.category || null,
-    weight: product?.weight === null ? null : Number(product?.weight),
-    totalPrice: product?.total_price === null ? null : Number(product?.total_price),
-    totalPriceUah: product?.total_price_uah === null ? null : Number(product?.total_price_uah),
-    pricePerGram: product?.price_per_gram === null ? null : Number(product?.price_per_gram),
-    uahRate: product?.uah_rate === null ? null : Number(product?.uah_rate),
-    status: product?.status || 'active',
-    correctedToProductId: product?.corrected_to_product_id || null,
-    schemaVersionId: product?.sku_schema_version_id || null,
-    details: getProductDetails(product),
-  };
-  return crypto.createHash('sha256').update(JSON.stringify(relevantState)).digest('hex');
-}
-
 function validationError(message) {
   const error = new Error(message);
   error.statusCode = 422;
@@ -613,30 +598,6 @@ function parseManualPriceUah(value) {
     throw validationError('Ручна ціна повинна бути більшою за 0.');
   }
   return parsed;
-}
-
-function getProductPreviewToken(preview, categoryCode, answers, isCalibrated) {
-  const stableAnswers = Object.entries(answers)
-    .map(([key, value]) => [key, value ?? null])
-    .sort(([firstKey], [secondKey]) => firstKey.localeCompare(secondKey));
-  const payload = {
-    categoryCode,
-    answers: stableAnswers,
-    isCalibrated: Number(answers.is_calibrated ?? isCalibrated ?? 0),
-    weight: Number(preview.weightVal || 0),
-    skuSchemaVersionId: Number(preview.skuSchemaVersionId),
-    baseSku: preview.baseSku,
-    mode: preview.mode,
-    priceMode: preview.priceMode,
-    pricePerGram: preview.pricePerGram,
-    fixedPriceUah: preview.fixedPriceUah ?? null,
-    totalPrice: preview.totalPrice,
-    calculatedPriceUah: preview.calculatedPriceUah ?? null,
-    totalPriceUah: preview.totalPriceUah ?? null,
-    uahRate: preview.uahRate ?? null,
-    uahRateDate: preview.uahRateDate ?? null,
-  };
-  return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
 function finalizeProductPreview(preview, categoryCode, answers, isCalibrated) {
