@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+const repricingService = require('../src/services/repricing.service');
 const {
   assertNoBlockingCorrectionRequests,
   applyManualOverridesToPreview,
@@ -18,7 +19,7 @@ const {
   normalizeAutomaticProductIds,
   normalizeManualOverrides,
   normalizeReviewedProductIds,
-} = require('../src/services/repricing.service');
+} = repricingService;
 
 const scenario = {
   id: 63,
@@ -82,6 +83,107 @@ test('scenario repricing token binds complete configuration and every candidate 
     configurationToken: 'configuration-a',
     candidateBindings: [candidateBindings[1]],
   }));
+});
+
+test('corrected repricing token bytes and facade exports remain stable', () => {
+  const applicableItems = [{
+    productId: 1,
+    sku: 'NM1',
+    weight: 10,
+    answers: { extra: 2, is_calibrated: 2 },
+    oldPriceUah: 300,
+    calculatedPriceUah: 413.4,
+    automaticPriceUah: 400,
+    newPriceUah: 400,
+    status: 'changed',
+    errorCode: null,
+    pricingChange: {
+      reasonCodes: ['fixed_price_changed'],
+      reasonLabels: ['changed'],
+    },
+  }];
+  const scenarioToken = getPreviewToken(scenario, applicableItems, {
+    configurationToken: 'configuration-a',
+    candidateBindings: [
+      { productId: 2, productStateToken: 'product-2' },
+      { productId: 1, productStateToken: 'product-1' },
+    ],
+  });
+  assert.equal(
+    scenarioToken,
+    '46476994accbe329fcf4ed064b97378c6e2a39700a63287a4356af2c71ca8fb1'
+  );
+  assert.equal(
+    getGlobalPreviewToken('configuration-a', [{
+      productId: 2,
+      productStateToken: 'product-2',
+      scenarioId: 22,
+      oldPriceUah: 200,
+      calculatedPriceUah: 251,
+      automaticPriceUah: 250,
+      newPriceUah: 250,
+      status: 'changed',
+      errorCode: null,
+      pricingState: 'automatic',
+      pricingChange: null,
+    }, {
+      productId: 1,
+      productStateToken: 'product-1',
+      scenarioId: 11,
+      oldPriceUah: 100,
+      calculatedPriceUah: 100,
+      automaticPriceUah: 100,
+      newPriceUah: 100,
+      status: 'unchanged',
+      errorCode: null,
+      pricingState: 'automatic',
+      pricingChange: null,
+    }]),
+    '20d9a35cd3089c892b44a783f3120ff315b640eb3887c7b0fe7073a92d3d313a'
+  );
+  assert.equal(
+    getApplicationToken(
+      scenarioToken,
+      [{ productId: 9, newPriceUah: '123,45' }],
+      [7]
+    ),
+    'eeec76d08f2191dbf349295255c2f1b6f0ce76d708e6b287e5aea340d011f56f'
+  );
+  assert.deepEqual(Object.keys(repricingService).sort(), [
+    'applyGlobalRepricing',
+    'applyManualOverridesToPreview',
+    'applyRepricing',
+    'areNullableNumbersEqual',
+    'assertNoBlockingCorrectionRequests',
+    'buildGlobalRepricingPreview',
+    'buildPricingChange',
+    'buildPricingState',
+    'buildRepricingPreview',
+    'createRepricingDraft',
+    'discardRepricingDraft',
+    'doesProductMatchRepricingBatch',
+    'getApplicationToken',
+    'getDraftSyncInfo',
+    'getGlobalPreviewToken',
+    'getPreviewToken',
+    'getProductRepricingStateToken',
+    'getRepricingBatchItems',
+    'getRepricingBatches',
+    'getRepricingDraft',
+    'getRepricingDrafts',
+    'getRepricingPreviewFingerprint',
+    'getRepricingPreviewSnapshot',
+    'getRepricingProductIds',
+    'getRepricingRollbackItems',
+    'getRepricingScenarios',
+    'hasManualPrice',
+    'normalizeAutomaticProductIds',
+    'normalizeManualOverrides',
+    'normalizeReviewedProductIds',
+    'rollbackRepricing',
+    'saveRepricingDraft',
+    'syncRepricingDraft',
+  ]);
 });
 
 test('global repricing token binds configuration and every product exactly once', () => {

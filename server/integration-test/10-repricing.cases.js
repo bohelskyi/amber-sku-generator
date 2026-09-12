@@ -639,6 +639,81 @@ test('scenario repricing revalidates full product state after acquiring row lock
   }
 });
 
+test('simultaneous repricing apply and rollback requests remain idempotent', async () => {
+  const matrixDelta = 17;
+  let batchId = null;
+  let rolledBack = false;
+  await pool.query(
+    'UPDATE price_matrix SET price = price + $1 WHERE scenario_id = $2',
+    [matrixDelta, schemas.ZZScenario]
+  );
+
+  try {
+    const preview = await request('/api/admin/repricing/preview', {
+      method: 'POST', body: { scenarioId: schemas.ZZScenario },
+    });
+    assert.equal(preview.response.status, 200, preview.text);
+    assert.ok(preview.data.summary.changedCount > 0);
+    const payload = {
+      scenarioId: schemas.ZZScenario,
+      previewToken: preview.data.previewToken,
+      manualOverrides: preview.data.items
+        .filter((item) => ['manual_price', 'price_missing'].includes(item.errorCode))
+        .map((item) => ({
+          productId: Number(item.productId),
+          newPriceUah: Number(item.oldPriceUah),
+        })),
+    };
+    const applyResults = await Promise.all([
+      request('/api/admin/repricing/apply', { method: 'POST', body: payload }),
+      request('/api/admin/repricing/apply', { method: 'POST', body: payload }),
+    ]);
+    assert.deepEqual(applyResults.map((result) => result.response.status), [200, 200]);
+    assert.deepEqual(
+      applyResults.map((result) => Boolean(result.data.alreadyApplied)).sort(),
+      [false, true]
+    );
+    const batchIds = new Set(applyResults.map((result) => Number(result.data.batch.id)));
+    assert.equal(batchIds.size, 1);
+    batchId = [...batchIds][0];
+    assert.equal(Number((await pool.query(
+      `SELECT count(*) FROM audit_events
+       WHERE event_key = 'repricing.applied'
+         AND subject_type = 'repricing_batch'
+         AND subject_id = $1`,
+      [String(batchId)]
+    )).rows[0].count), 1);
+
+    const rollbackResults = await Promise.all([
+      request(`/api/admin/repricing/${batchId}/rollback`, { method: 'POST', body: {} }),
+      request(`/api/admin/repricing/${batchId}/rollback`, { method: 'POST', body: {} }),
+    ]);
+    assert.deepEqual(rollbackResults.map((result) => result.response.status), [200, 200]);
+    assert.deepEqual(
+      rollbackResults.map((result) => Boolean(result.data.alreadyRolledBack)).sort(),
+      [false, true]
+    );
+    assert.equal(Number((await pool.query(
+      `SELECT count(*) FROM audit_events
+       WHERE event_key = 'repricing.rolled_back'
+         AND subject_type = 'repricing_batch'
+         AND subject_id = $1`,
+      [String(batchId)]
+    )).rows[0].count), 1);
+    rolledBack = true;
+  } finally {
+    if (batchId && !rolledBack) {
+      await request(`/api/admin/repricing/${batchId}/rollback`, {
+        method: 'POST', body: {},
+      });
+    }
+    await pool.query(
+      'UPDATE price_matrix SET price = price - $1 WHERE scenario_id = $2',
+      [matrixDelta, schemas.ZZScenario]
+    );
+  }
+});
+
 test('repricing preview/apply/rollback and correction blocking work', async () => {
   await pool.query(
     'UPDATE price_matrix SET price = price + 113 WHERE scenario_id = $1',
