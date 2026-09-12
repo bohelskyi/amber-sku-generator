@@ -1,9 +1,7 @@
 const pool = require('../db/pool');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
-const { parseOptionalRule } = require('../utils/rules');
 const { normalizeCategoryCode } = require('./catalog/catalog-input');
-const { buildOptionChanges } = require('./catalog/catalog-audit');
 const { getAppConfig } = require('./catalog/catalog-read-model');
 const {
   createCategory,
@@ -13,173 +11,18 @@ const {
   createQuestion,
   updateQuestion,
 } = require('./catalog/question-commands');
-
-async function createOption(payload, options = {}) {
-  const visibleRule = parseOptionalRule(payload.visible_if_json ?? payload.visible_if);
-  const hiddenRule = parseOptionalRule(payload.hidden_if_json ?? payload.hidden_if);
-  const skuCode = String(payload.sku_code ?? payload.value_id ?? '').trim();
-  if (!/^\d+$/.test(skuCode)) {
-    const err = new Error('SKU-код варіанта має складатися лише з цифр.');
-    err.statusCode = 400;
-    throw err;
-  }
-  const mutationContext = createMutationContext(options.mutationContext);
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const result = await client.query(
-      `INSERT INTO options (question_id, value_id, sku_code, label, visible_if_json, hidden_if_json, archived)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
-       RETURNING id`,
-      [
-        Number(payload.question_id),
-        Number(payload.value_id),
-        skuCode,
-        payload.label,
-        visibleRule ? JSON.stringify(visibleRule) : null,
-        hiddenRule ? JSON.stringify(hiddenRule) : null,
-        Boolean(payload.archived),
-      ]
-    );
-    const optionId = result.rows[0].id;
-    const questionResult = await client.query(
-      'SELECT category_code, key FROM questions WHERE id = $1',
-      [Number(payload.question_id)]
-    );
-    const question = questionResult.rows[0];
-    await writeAuditEvent(client, {
-      mutationContext,
-      eventKey: 'catalog.option.created',
-      subjectType: 'catalog_option',
-      subjectId: optionId,
-      details: {
-        categoryCode: question.category_code,
-        questionId: Number(payload.question_id),
-        questionKey: question.key,
-        valueId: Number(payload.value_id),
-        skuCode,
-        label: payload.label,
-      },
-    });
-    await client.query('COMMIT');
-    return { id: optionId };
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
-async function getOptionForMutation(client, optionId) {
-  const result = await client.query(
-    `SELECT o.id, o.question_id, o.value_id, o.sku_code, o.label,
-            o.visible_if_json, o.hidden_if_json, o.archived,
-            q.key AS question_key, q.category_code,
-            (
-              SELECT COUNT(*)::int
-              FROM products p
-              WHERE p.category = q.category_code
-                AND p.details #>> ARRAY['answers', q.key] = o.value_id::text
-            ) AS product_count
-     FROM options o
-     JOIN questions q ON q.id = o.question_id
-     WHERE o.id = $1
-     FOR UPDATE OF o`,
-    [Number(optionId)]
-  );
-  return result.rows[0] || null;
-}
-
-async function updateOption(payload, options = {}) {
-  const visibleRule = parseOptionalRule(payload.visible_if_json ?? payload.visible_if);
-  const hiddenRule = parseOptionalRule(payload.hidden_if_json ?? payload.hidden_if);
-  const skuCode = String(payload.sku_code ?? payload.value_id ?? '').trim();
-  if (!/^\d+$/.test(skuCode)) {
-    const err = new Error('SKU-код варіанта має складатися лише з цифр.');
-    err.statusCode = 400;
-    throw err;
-  }
-  const mutationContext = createMutationContext(options.mutationContext);
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const currentOption = await getOptionForMutation(client, payload.id);
-    if (!currentOption) {
-      const err = new Error('Варіант не знайдено');
-      err.statusCode = 404;
-      throw err;
-    }
-    if (
-      Number(currentOption.value_id) !== Number(payload.value_id)
-      && Number(currentOption.product_count) > 0
-    ) {
-      const err = new Error(
-        `Код цього варіанта використовується у ${currentOption.product_count} товарах і не може бути змінений.`
-      );
-      err.statusCode = 409;
-      throw err;
-    }
-
-    const nextArchived =
-      payload.archived === undefined ? Boolean(currentOption.archived) : Boolean(payload.archived);
-    const changes = buildOptionChanges(currentOption, {
-      valueId: Number(payload.value_id),
-      skuCode,
-      label: payload.label,
-      visibleRule,
-      hiddenRule,
-      archived: nextArchived,
-    });
-
-    if (Object.keys(changes).length === 0) {
-      await client.query('COMMIT');
-      return;
-    }
-
-    await client.query(
-      `UPDATE options
-       SET value_id = $1, sku_code = $2, label = $3, visible_if_json = $4::jsonb,
-           hidden_if_json = $5::jsonb, archived = $6
-       WHERE id = $7`,
-      [
-        Number(payload.value_id),
-        skuCode,
-        payload.label,
-        visibleRule ? JSON.stringify(visibleRule) : null,
-        hiddenRule ? JSON.stringify(hiddenRule) : null,
-        nextArchived,
-        Number(payload.id),
-      ]
-    );
-    await writeAuditEvent(client, {
-      mutationContext,
-      eventKey: 'catalog.option.updated',
-      subjectType: 'catalog_option',
-      subjectId: Number(payload.id),
-      details: {
-        categoryCode: currentOption.category_code,
-        questionId: Number(currentOption.question_id),
-        questionKey: currentOption.question_key,
-        valueId: Number(payload.value_id),
-        changes,
-      },
-    });
-    await client.query('COMMIT');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
-}
+const {
+  createOption,
+  updateOption,
+} = require('./catalog/option-commands');
+const { lockOptionWithUsage } = require('./catalog/option-mutation-state');
 
 async function setOptionArchived({ id, archived }, options = {}) {
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const currentOption = await getOptionForMutation(client, id);
+    const currentOption = await lockOptionWithUsage(client, id);
     if (!currentOption) {
       const err = new Error('Варіант не знайдено');
       err.statusCode = 404;
@@ -373,7 +216,7 @@ async function deleteCatalogItem(type, id, options = {}) {
         };
       }
     } else if (type === 'option') {
-      const option = await getOptionForMutation(client, id);
+      const option = await lockOptionWithUsage(client, id);
       if (option && Number(option.product_count) > 0) {
         const err = new Error(
           `Цей варіант використовується у ${option.product_count} товарах. Архівуйте його замість видалення.`
