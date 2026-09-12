@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const repricingService = require('../src/services/repricing.service');
 const {
@@ -184,6 +186,88 @@ test('corrected repricing token bytes and facade exports remain stable', () => {
     'saveRepricingDraft',
     'syncRepricingDraft',
   ]);
+});
+
+test('repricing facade keeps production callers and transaction coordinators together', () => {
+  const servicesDirectory = path.join(__dirname, '..', 'src', 'services');
+  const facadeSource = fs.readFileSync(
+    path.join(servicesDirectory, 'repricing.service.js'),
+    'utf8'
+  ).replace(/\r\n/g, '\n');
+  const leafDirectory = path.join(servicesDirectory, 'repricing');
+  for (const filename of fs.readdirSync(leafDirectory).filter((name) => name.endsWith('.js'))) {
+    const source = fs.readFileSync(path.join(leafDirectory, filename), 'utf8');
+    assert.doesNotMatch(source, /require\(['"]\.\.\/repricing\.service['"]\)/);
+  }
+
+  const applySource = facadeSource.slice(
+    facadeSource.indexOf('async function applyRepricingScope'),
+    facadeSource.indexOf('async function applyRepricing(')
+  );
+  const applySteps = [
+    "await client.query('BEGIN')",
+    'ORDER BY id\n       FOR UPDATE',
+    'getBlockingCorrectionRequests(changedItems, client)',
+    'INSERT INTO repricing_batches',
+    'getProductRepricingStateToken(product)',
+    'UPDATE products',
+    "eventKey: 'repricing.applied'",
+    "await client.query('COMMIT')",
+  ].map((step) => applySource.indexOf(step));
+  assert.ok(applySteps.every((index) => index >= 0));
+  assert.deepEqual(applySteps, [...applySteps].sort((first, second) => first - second));
+
+  const rollbackSource = facadeSource.slice(
+    facadeSource.indexOf('async function rollbackRepricing'),
+    facadeSource.indexOf('module.exports =')
+  );
+  const rollbackSteps = [
+    "await client.query('BEGIN')",
+    'WHERE id = $1\n       FOR UPDATE',
+    'ORDER BY p.id\n       FOR UPDATE OF p',
+    'doesProductMatchRepricingBatch',
+    'UPDATE products',
+    'UPDATE repricing_batches',
+    "eventKey: 'repricing.rolled_back'",
+  ].map((step) => rollbackSource.indexOf(step));
+  rollbackSteps.push(rollbackSource.lastIndexOf("await client.query('COMMIT')"));
+  assert.ok(rollbackSteps.every((index) => index >= 0));
+  assert.deepEqual(rollbackSteps, [...rollbackSteps].sort((first, second) => first - second));
+
+  const routesSource = fs.readFileSync(
+    path.join(servicesDirectory, '..', 'routes', 'admin', 'repricing.routes.js'),
+    'utf8'
+  );
+  const routeImports = routesSource
+    .match(/const \{([^}]+)\} = require\('\.\.\/\.\.\/services\/repricing\.service'\);/)[1]
+    .split(',')
+    .map((name) => name.trim())
+    .sort();
+  assert.deepEqual(routeImports, [
+    'applyGlobalRepricing',
+    'applyRepricing',
+    'buildGlobalRepricingPreview',
+    'buildRepricingPreview',
+    'createRepricingDraft',
+    'discardRepricingDraft',
+    'getRepricingBatchItems',
+    'getRepricingBatches',
+    'getRepricingDraft',
+    'getRepricingDrafts',
+    'getRepricingRollbackItems',
+    'getRepricingScenarios',
+    'rollbackRepricing',
+    'saveRepricingDraft',
+    'syncRepricingDraft',
+  ]);
+  const correctionSource = fs.readFileSync(
+    path.join(servicesDirectory, 'correction-request.service.js'),
+    'utf8'
+  );
+  assert.match(
+    correctionSource,
+    /const \{ syncRepricingDraft \} = require\('\.\/repricing\.service'\);/
+  );
 });
 
 test('global repricing token binds configuration and every product exactly once', () => {
