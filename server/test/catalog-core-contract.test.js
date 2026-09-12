@@ -6,6 +6,7 @@ const catalogReadModel = require('../src/services/catalog/catalog-read-model');
 const categoryCommands = require('../src/services/catalog/category-commands');
 const questionCommands = require('../src/services/catalog/question-commands');
 const optionCommands = require('../src/services/catalog/option-commands');
+const lifecycleCommands = require('../src/services/catalog/catalog-lifecycle-commands');
 const {
   normalizeInputType,
   normalizeEditableSkuSeparator,
@@ -56,6 +57,12 @@ test('catalog question facade resolves directly to question command coordinators
 test('catalog option facade resolves directly to option command coordinators', () => {
   assert.equal(catalogService.createOption, optionCommands.createOption);
   assert.equal(catalogService.updateOption, optionCommands.updateOption);
+});
+
+test('catalog lifecycle facade resolves directly to archive, order, and delete coordinators', () => {
+  assert.equal(catalogService.setOptionArchived, lifecycleCommands.setOptionArchived);
+  assert.equal(catalogService.updateQuestionsOrder, lifecycleCommands.updateQuestionsOrder);
+  assert.equal(catalogService.deleteCatalogItem, lifecycleCommands.deleteCatalogItem);
 });
 
 test('catalog input normalization preserves defaults and validation contracts', () => {
