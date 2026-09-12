@@ -4,6 +4,7 @@ const test = require('node:test');
 const catalogService = require('../src/services/catalog.service');
 const catalogReadModel = require('../src/services/catalog/catalog-read-model');
 const categoryCommands = require('../src/services/catalog/category-commands');
+const questionCommands = require('../src/services/catalog/question-commands');
 const {
   normalizeInputType,
   normalizeEditableSkuSeparator,
@@ -44,6 +45,11 @@ test('catalog read facade resolves directly to the catalog read model', () => {
 test('catalog category facade resolves directly to category command coordinators', () => {
   assert.equal(catalogService.createCategory, categoryCommands.createCategory);
   assert.equal(catalogService.updateCategory, categoryCommands.updateCategory);
+});
+
+test('catalog question facade resolves directly to question command coordinators', () => {
+  assert.equal(catalogService.createQuestion, questionCommands.createQuestion);
+  assert.equal(catalogService.updateQuestion, questionCommands.updateQuestion);
 });
 
 test('catalog input normalization preserves defaults and validation contracts', () => {
