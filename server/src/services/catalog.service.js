@@ -1,57 +1,20 @@
 const initialConfig = require('../../data_config');
 const pool = require('../db/pool');
 const { writeAuditEvent } = require('../audit/audit-events');
-const { addAuditChange } = require('../audit/change-set');
 const { createMutationContext } = require('../audit/mutation-context');
 const { parseOptionalRule } = require('../utils/rules');
-const { normalizeSkuSeparator } = require('../utils/sku');
-
-function normalizeInputType(inputType) {
-  return String(inputType || 'options').trim().toLowerCase() === 'text' ? 'text' : 'options';
-}
-
-function normalizeEditableSkuSeparator(separator) {
-  const rawSeparator = String(separator || '').trim();
-  const normalizedSeparator = normalizeSkuSeparator(rawSeparator);
-
-  if (rawSeparator && !normalizedSeparator) {
-    const err = new Error('Розділювач SKU може містити тільки -, _, . або /');
-    err.statusCode = 400;
-    throw err;
-  }
-
-  return normalizedSeparator;
-}
-
-function normalizeCategoryCode(code) {
-  return String(code || '').trim().toUpperCase();
-}
-
-function normalizeQuestionKey(key) {
-  return String(key || '').trim();
-}
-
-function getNormalizedQuestionNumbers(payload, includeInSku) {
-  const skuIndex = includeInSku === 1 ? Number(payload.sku_index) : 0;
-  if (includeInSku === 1 && !Number.isFinite(skuIndex)) {
-    const err = new Error('Для питання, яке додається в SKU, потрібен SKU index');
-    err.statusCode = 400;
-    throw err;
-  }
-
-  const displayOrder =
-    payload.display_order !== undefined && payload.display_order !== ''
-      ? Number(payload.display_order)
-      : skuIndex;
-
-  if (!Number.isFinite(displayOrder)) {
-    const err = new Error('Потрібен порядок питання у формі');
-    err.statusCode = 400;
-    throw err;
-  }
-
-  return { skuIndex, displayOrder };
-}
+const {
+  normalizeInputType,
+  normalizeEditableSkuSeparator,
+  normalizeCategoryCode,
+  normalizeQuestionKey,
+  getNormalizedQuestionNumbers,
+} = require('./catalog/catalog-input');
+const {
+  buildCategoryChanges,
+  buildQuestionChanges,
+  buildOptionChanges,
+} = require('./catalog/catalog-audit');
 
 function renameJsonObjectKey(value, oldKey, newKey) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
@@ -342,21 +305,12 @@ async function updateCategory(
     }
 
     const currentCategory = currentResult.rows[0];
-    const changes = {};
-    addAuditChange(changes, 'code', currentCategory.code, nextCode);
-    addAuditChange(changes, 'name', currentCategory.name, name);
-    addAuditChange(
-      changes,
-      'requiresWeight',
-      Number(currentCategory.requires_weight),
-      normalizedRequiresWeight
-    );
-    addAuditChange(
-      changes,
-      'skipHiddenSkuQuestions',
-      Number(currentCategory.skip_hidden_sku_questions),
-      normalizedSkipHidden
-    );
+    const changes = buildCategoryChanges(currentCategory, {
+      nextCode,
+      name,
+      requiresWeight: normalizedRequiresWeight,
+      skipHiddenSkuQuestions: normalizedSkipHidden,
+    });
 
     if (Object.keys(changes).length === 0) {
       await client.query('COMMIT');
@@ -534,22 +488,16 @@ async function updateQuestion(payload, options = {}) {
 
     const currentQuestion = currentResult.rows[0];
     const nextKey = questionKey || currentQuestion.key;
-    const changes = {};
-    addAuditChange(changes, 'key', currentQuestion.key, nextKey);
-    addAuditChange(changes, 'label', currentQuestion.label, payload.label);
-    addAuditChange(changes, 'skuIndex', Number(currentQuestion.sku_index), skuIndex);
-    addAuditChange(changes, 'displayOrder', Number(currentQuestion.display_order), displayOrder);
-    addAuditChange(changes, 'required', Number(currentQuestion.required), normalizedRequired);
-    addAuditChange(
-      changes,
-      'includeInSku',
-      Number(currentQuestion.include_in_sku),
-      normalizedIncludeInSku
-    );
-    addAuditChange(changes, 'inputType', currentQuestion.input_type, normalizedInputType);
-    addAuditChange(changes, 'skuSeparator', currentQuestion.sku_separator || '', skuSeparator);
-    addAuditChange(changes, 'visibleRule', currentQuestion.visible_if_json, visibleRule, {
-      sensitive: true,
+    const changes = buildQuestionChanges(currentQuestion, {
+      nextKey,
+      label: payload.label,
+      skuIndex,
+      displayOrder,
+      required: normalizedRequired,
+      includeInSku: normalizedIncludeInSku,
+      inputType: normalizedInputType,
+      skuSeparator,
+      visibleRule,
     });
 
     if (Object.keys(changes).length === 0) {
@@ -726,17 +674,14 @@ async function updateOption(payload, options = {}) {
 
     const nextArchived =
       payload.archived === undefined ? Boolean(currentOption.archived) : Boolean(payload.archived);
-    const changes = {};
-    addAuditChange(changes, 'valueId', Number(currentOption.value_id), Number(payload.value_id));
-    addAuditChange(changes, 'skuCode', currentOption.sku_code, skuCode);
-    addAuditChange(changes, 'label', currentOption.label, payload.label);
-    addAuditChange(changes, 'visibleRule', currentOption.visible_if_json, visibleRule, {
-      sensitive: true,
+    const changes = buildOptionChanges(currentOption, {
+      valueId: Number(payload.value_id),
+      skuCode,
+      label: payload.label,
+      visibleRule,
+      hiddenRule,
+      archived: nextArchived,
     });
-    addAuditChange(changes, 'hiddenRule', currentOption.hidden_if_json, hiddenRule, {
-      sensitive: true,
-    });
-    addAuditChange(changes, 'archived', Boolean(currentOption.archived), nextArchived);
 
     if (Object.keys(changes).length === 0) {
       await client.query('COMMIT');
