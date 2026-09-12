@@ -543,26 +543,59 @@ test('manual overrides reject invalid and unrelated products', () => {
   );
 });
 
-test('rollback only accepts a product still owned by the same repricing batch', () => {
+test('rollback only accepts the exact complete applied product payload', () => {
   const product = {
     status: 'active',
     total_price: 10,
     total_price_uah: 500,
     price_per_gram: 1,
     uah_rate: 50,
-    details: { repricing: { batchId: 12 } },
+    details: {
+      answers: { kind: 1 },
+      repricing: { batchId: 12, manualOverride: false },
+    },
   };
   const payload = {
     totalPrice: 10,
     totalPriceUah: 500,
     pricePerGram: 1,
     uahRate: 50,
+    details: {
+      repricing: { manualOverride: false, batchId: 12 },
+      answers: { kind: 1 },
+    },
   };
 
   assert.equal(doesProductMatchRepricingBatch(product, payload, 12), true);
   assert.equal(doesProductMatchRepricingBatch(product, payload, 11), false);
   assert.equal(
-    doesProductMatchRepricingBatch({ ...product, total_price_uah: 501 }, payload, 12),
+    doesProductMatchRepricingBatch({
+      ...product,
+      details: { ...product.details, laterMutation: true },
+    }, payload, 12),
     false
   );
+  assert.equal(
+    doesProductMatchRepricingBatch({ ...product, total_price: 10.0001 }, payload, 12),
+    false
+  );
+  assert.equal(
+    doesProductMatchRepricingBatch({ ...product, total_price_uah: 500.01 }, payload, 12),
+    false
+  );
+  assert.equal(
+    doesProductMatchRepricingBatch({ ...product, price_per_gram: 1.0001 }, payload, 12),
+    false
+  );
+  assert.equal(
+    doesProductMatchRepricingBatch({ ...product, uah_rate: 50.000001 }, payload, 12),
+    false
+  );
+  assert.equal(doesProductMatchRepricingBatch({
+    ...product,
+    total_price: null,
+    total_price_uah: null,
+    price_per_gram: null,
+    uah_rate: null,
+  }, { details: product.details }, 12), false);
 });

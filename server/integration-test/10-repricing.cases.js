@@ -211,6 +211,159 @@ test('repricing financial audit is atomic, attributed, and idempotent', async ()
   }
 });
 
+test('repricing rollback requires the exact complete applied payload', async () => {
+  const productResult = await pool.query(
+    `SELECT id, full_sku, total_price, total_price_uah, price_per_gram, uah_rate, details
+     FROM products
+     WHERE COALESCE(status, 'active') = 'active'
+       AND total_price_uah > 0
+     ORDER BY id
+     LIMIT 1`
+  );
+  assert.equal(productResult.rows.length, 1);
+  const original = productResult.rows[0];
+  const oldPayload = {
+    totalPrice: original.total_price === null ? null : Number(original.total_price),
+    totalPriceUah: Number(original.total_price_uah),
+    pricePerGram: original.price_per_gram === null ? null : Number(original.price_per_gram),
+    uahRate: original.uah_rate === null ? null : Number(original.uah_rate),
+    details: original.details || {},
+  };
+  let batchId = null;
+
+  try {
+    const batchResult = await pool.query(
+      `INSERT INTO repricing_batches
+       (scope, scenario_id, category_code, scenario_name, scenario_snapshot, preview_token,
+        status, candidate_count, changed_count, unchanged_count, skipped_count, error_count,
+        applied_at)
+       VALUES ('global', NULL, NULL, 'Exact rollback test', '{}'::jsonb,
+               'exact-rollback-payload-integration', 'completed', 1, 1, 0, 0, 0,
+               CURRENT_TIMESTAMP)
+       RETURNING id`
+    );
+    batchId = Number(batchResult.rows[0].id);
+    const appliedDetails = {
+      ...(original.details || {}),
+      repricing: {
+        batchId,
+        scenarioId: null,
+        oldPriceUah: oldPayload.totalPriceUah,
+        newPriceUah: oldPayload.totalPriceUah,
+        manualOverride: false,
+        useAutomatic: false,
+      },
+    };
+    const newPayload = { ...oldPayload, details: appliedDetails };
+    await pool.query('UPDATE products SET details = $1::jsonb WHERE id = $2', [
+      JSON.stringify(appliedDetails),
+      Number(original.id),
+    ]);
+    await pool.query(
+      `INSERT INTO repricing_items
+       (batch_id, product_id, sku, old_price_uah, new_price_uah, price_delta_uah,
+        old_payload, new_payload)
+       VALUES ($1, $2, $3, $4, $4, 0, $5::jsonb, $6::jsonb)`,
+      [
+        batchId,
+        Number(original.id),
+        original.full_sku,
+        oldPayload.totalPriceUah,
+        JSON.stringify(oldPayload),
+        JSON.stringify(newPayload),
+      ]
+    );
+
+    await pool.query(
+      `UPDATE products
+       SET details = jsonb_set(details, '{postApplyMutation}', 'true'::jsonb, TRUE)
+       WHERE id = $1`,
+      [Number(original.id)]
+    );
+    const batches = await request('/api/admin/repricing/batches?limit=100');
+    assert.equal(batches.response.status, 200, batches.text);
+    assert.equal(
+      batches.data.find((batch) => Number(batch.id) === batchId)?.can_rollback,
+      false
+    );
+    const auditCountBefore = Number((await pool.query(
+      `SELECT count(*) FROM audit_events
+       WHERE event_key = 'repricing.rolled_back'
+         AND subject_type = 'repricing_batch'
+         AND subject_id = $1`,
+      [String(batchId)]
+    )).rows[0].count);
+    const detailsMismatch = await request(`/api/admin/repricing/${batchId}/rollback`, {
+      method: 'POST', body: {},
+    });
+    assert.equal(detailsMismatch.response.status, 409, detailsMismatch.text);
+    const afterDetailsMismatch = await pool.query(
+      'SELECT total_price, total_price_uah, price_per_gram, uah_rate, details FROM products WHERE id = $1',
+      [Number(original.id)]
+    );
+    assert.equal(afterDetailsMismatch.rows[0].details.postApplyMutation, true);
+    assert.equal(Number((await pool.query(
+      `SELECT count(*) FROM audit_events
+       WHERE event_key = 'repricing.rolled_back'
+         AND subject_type = 'repricing_batch'
+         AND subject_id = $1`,
+      [String(batchId)]
+    )).rows[0].count), auditCountBefore);
+    assert.equal((await pool.query(
+      'SELECT status, rolled_back_by_user_id FROM repricing_batches WHERE id = $1',
+      [batchId]
+    )).rows[0].status, 'completed');
+
+    await pool.query('UPDATE products SET details = $1::jsonb WHERE id = $2', [
+      JSON.stringify(appliedDetails),
+      Number(original.id),
+    ]);
+    await pool.query(
+      'UPDATE products SET total_price_uah = total_price_uah + 0.01 WHERE id = $1',
+      [Number(original.id)]
+    );
+    const numericMismatch = await request(`/api/admin/repricing/${batchId}/rollback`, {
+      method: 'POST', body: {},
+    });
+    assert.equal(numericMismatch.response.status, 409, numericMismatch.text);
+
+    await pool.query(
+      'UPDATE products SET total_price_uah = $1, details = $2::jsonb WHERE id = $3',
+      [oldPayload.totalPriceUah, JSON.stringify(appliedDetails), Number(original.id)]
+    );
+    const rolledBack = await request(`/api/admin/repricing/${batchId}/rollback`, {
+      method: 'POST', body: {},
+    });
+    assert.equal(rolledBack.response.status, 200, rolledBack.text);
+    const restored = await pool.query(
+      'SELECT total_price, total_price_uah, price_per_gram, uah_rate, details FROM products WHERE id = $1',
+      [Number(original.id)]
+    );
+    assert.deepEqual(restored.rows[0], {
+      total_price: original.total_price,
+      total_price_uah: original.total_price_uah,
+      price_per_gram: original.price_per_gram,
+      uah_rate: original.uah_rate,
+      details: original.details,
+    });
+  } finally {
+    await pool.query(
+      `UPDATE products
+       SET total_price = $1, total_price_uah = $2, price_per_gram = $3, uah_rate = $4,
+           details = $5::jsonb
+       WHERE id = $6`,
+      [
+        original.total_price,
+        original.total_price_uah,
+        original.price_per_gram,
+        original.uah_rate,
+        JSON.stringify(original.details || {}),
+        Number(original.id),
+      ]
+    );
+  }
+});
+
 test('repricing preview/apply/rollback and correction blocking work', async () => {
   await pool.query(
     'UPDATE price_matrix SET price = price + 113 WHERE scenario_id = $1',

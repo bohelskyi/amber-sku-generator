@@ -1855,7 +1855,13 @@ async function getRepricingBatches(limit = 20) {
                     p.id IS NULL
                     OR COALESCE(p.status, 'active') <> 'active'
                     OR p.details #>> '{repricing,batchId}' IS DISTINCT FROM b.id::text
-                    OR p.total_price_uah IS DISTINCT FROM ri.new_price_uah
+                    OR jsonb_build_object(
+                      'totalPrice', p.total_price,
+                      'totalPriceUah', p.total_price_uah,
+                      'pricePerGram', p.price_per_gram,
+                      'uahRate', p.uah_rate,
+                      'details', p.details
+                    ) IS DISTINCT FROM ri.new_payload
                   )
               )
             ) AS can_rollback
@@ -1885,14 +1891,49 @@ function areNullableNumbersEqual(first, second, tolerance = 0.01) {
   return Math.abs(Number(first) - Number(second)) <= tolerance;
 }
 
+const REPRICING_PAYLOAD_NUMBER_KEYS = [
+  'totalPrice',
+  'totalPriceUah',
+  'pricePerGram',
+  'uahRate',
+];
+
+function normalizeRecordedRepricingPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  if (!Object.hasOwn(payload, 'details')) return null;
+  if (!payload.details || typeof payload.details !== 'object' || Array.isArray(payload.details)) {
+    return null;
+  }
+
+  const normalized = { details: payload.details };
+  for (const key of REPRICING_PAYLOAD_NUMBER_KEYS) {
+    if (!Object.hasOwn(payload, key)) return null;
+    const value = payload[key];
+    if (value === null) {
+      normalized[key] = null;
+      continue;
+    }
+    const number = Number(value);
+    if (!Number.isFinite(number)) return null;
+    normalized[key] = number;
+  }
+  return normalized;
+}
+
 function doesProductMatchRepricingBatch(product, newPayload, batchId) {
+  const recordedPayload = normalizeRecordedRepricingPayload(newPayload);
+  if (!recordedPayload) return false;
+  const currentPayload = {
+    totalPrice: toNullableNumber(product.total_price),
+    totalPriceUah: toNullableNumber(product.total_price_uah),
+    pricePerGram: toNullableNumber(product.price_per_gram),
+    uahRate: toNullableNumber(product.uah_rate),
+    details: getProductDetails(product),
+  };
   return (
     String(product.status || 'active') === 'active'
     && Number(product.details?.repricing?.batchId || 0) === Number(batchId)
-    && areNullableNumbersEqual(product.total_price, newPayload.totalPrice)
-    && areNullableNumbersEqual(product.total_price_uah, newPayload.totalPriceUah)
-    && areNullableNumbersEqual(product.price_per_gram, newPayload.pricePerGram)
-    && areNullableNumbersEqual(product.uah_rate, newPayload.uahRate)
+    && isDeepStrictEqual(currentPayload, recordedPayload)
   );
 }
 
