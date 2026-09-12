@@ -211,6 +211,8 @@ test('repricing facade keeps production callers and transaction coordinators tog
     'INSERT INTO repricing_batches',
     'getProductRepricingStateToken(product)',
     'UPDATE products',
+    'jsonb_to_recordset',
+    'RETURNING product_id',
     "eventKey: 'repricing.applied'",
     "await client.query('COMMIT')",
   ].map((step) => applySource.indexOf(step));

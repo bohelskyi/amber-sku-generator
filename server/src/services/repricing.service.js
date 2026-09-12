@@ -630,6 +630,7 @@ async function applyRepricingScope({
 
     const batchId = Number(batchResult.rows[0].id);
     const appliedAt = batchResult.rows[0].applied_at;
+    const repricingItemRecords = [];
 
     for (const item of changedItems) {
       const product = lockedProducts.get(Number(item.productId));
@@ -692,22 +693,53 @@ async function applyRepricingScope({
         ]
       );
 
-      await client.query(
-        `INSERT INTO repricing_items
-         (batch_id, product_id, sku, old_price_uah, new_price_uah, price_delta_uah,
-          old_payload, new_payload)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
-        [
-          batchId,
-          item.productId,
-          item.sku,
-          item.oldPriceUah,
-          item.newPriceUah,
-          item.priceDeltaUah,
-          JSON.stringify(oldPayload),
-          JSON.stringify(newPayload),
-        ]
-      );
+      repricingItemRecords.push({
+        ordinal: repricingItemRecords.length,
+        product_id: Number(item.productId),
+        sku: item.sku,
+        old_price_uah: item.oldPriceUah,
+        new_price_uah: item.newPriceUah,
+        price_delta_uah: item.priceDeltaUah,
+        old_payload: oldPayload,
+        new_payload: newPayload,
+      });
+    }
+
+    const itemInsertResult = await client.query(
+      `INSERT INTO repricing_items
+       (batch_id, product_id, sku, old_price_uah, new_price_uah, price_delta_uah,
+        old_payload, new_payload)
+       SELECT $1, item.product_id, item.sku, item.old_price_uah, item.new_price_uah,
+              item.price_delta_uah, item.old_payload, item.new_payload
+       FROM jsonb_to_recordset($2::jsonb) AS item(
+         ordinal INTEGER,
+         product_id INTEGER,
+         sku TEXT,
+         old_price_uah NUMERIC,
+         new_price_uah NUMERIC,
+         price_delta_uah NUMERIC,
+         old_payload JSONB,
+         new_payload JSONB
+       )
+       ORDER BY item.ordinal
+       RETURNING product_id`,
+      [batchId, JSON.stringify(repricingItemRecords)]
+    );
+
+    const expectedProductIds = [...new Set(changedItems.map((item) => Number(item.productId)))]
+      .sort((left, right) => left - right);
+    const insertedProductIds = [
+      ...new Set(itemInsertResult.rows.map((row) => Number(row.product_id))),
+    ].sort((left, right) => left - right);
+    const insertedExpectedProducts = expectedProductIds.length === insertedProductIds.length
+      && expectedProductIds.every((productId, index) => productId === insertedProductIds[index]);
+    if (
+      itemInsertResult.rowCount !== changedItems.length
+      || expectedProductIds.length !== changedItems.length
+      || insertedProductIds.length !== itemInsertResult.rowCount
+      || !insertedExpectedProducts
+    ) {
+      throw new Error('Repricing item batch insert did not persist the complete changed-product set.');
     }
 
     if (draft) {

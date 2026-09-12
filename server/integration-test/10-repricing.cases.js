@@ -1103,6 +1103,114 @@ test('repricing rolls back every product and batch row after a mid-apply failure
   }
 });
 
+test('repricing rolls back the complete transaction after a repricing item insert failure', async () => {
+  const matrixDelta = 31;
+  let draftId = null;
+  await pool.query(
+    'UPDATE price_matrix SET price = price + $1 WHERE scenario_id = $2',
+    [matrixDelta, schemas.ZZScenario]
+  );
+
+  try {
+    const preview = await request('/api/admin/repricing/preview', {
+      method: 'POST', body: { scenarioId: schemas.ZZScenario },
+    });
+    assert.equal(preview.response.status, 200, preview.text);
+    const changedItems = preview.data.items.filter((item) => item.status === 'changed');
+    const manualOverrides = preview.data.items
+      .filter((item) => ['manual_price', 'price_missing'].includes(item.errorCode))
+      .map((item) => ({
+        productId: Number(item.productId),
+        newPriceUah: Number(item.oldPriceUah),
+      }));
+    assert.ok(changedItems.length >= 2);
+    const productIds = changedItems.map((item) => Number(item.productId));
+    const beforeProducts = await pool.query(
+      `SELECT id, total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
+      [productIds]
+    );
+    const draft = await request('/api/admin/repricing/drafts', {
+      method: 'POST',
+      body: {
+        scenarioId: schemas.ZZScenario,
+        manualOverrides,
+        reviewedProductIds: [],
+        uiState: {},
+      },
+    });
+    assert.equal(draft.response.status, 200, draft.text);
+    draftId = Number(draft.data.draft.id);
+
+    const countsBefore = (await pool.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM repricing_batches) AS batches,
+         (SELECT COUNT(*)::int FROM repricing_items) AS items,
+         (SELECT COUNT(*)::int FROM audit_events WHERE event_key = 'repricing.applied') AS audits`
+    )).rows[0];
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION fail_test_repricing_item_insert()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM repricing_items WHERE batch_id = NEW.batch_id
+        ) THEN
+          RAISE EXCEPTION 'forced repricing item insert failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER fail_test_repricing_item_insert
+      BEFORE INSERT ON repricing_items
+      FOR EACH ROW EXECUTE FUNCTION fail_test_repricing_item_insert();
+    `);
+    try {
+      const failed = await request('/api/admin/repricing/apply', {
+        method: 'POST',
+        body: {
+          scenarioId: schemas.ZZScenario,
+          previewToken: preview.data.previewToken,
+          manualOverrides,
+          draftId,
+        },
+      });
+      assert.equal(failed.response.status, 500, failed.text);
+    } finally {
+      await pool.query('DROP TRIGGER fail_test_repricing_item_insert ON repricing_items');
+      await pool.query('DROP FUNCTION fail_test_repricing_item_insert()');
+    }
+
+    assert.deepEqual((await pool.query(
+      `SELECT id, total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
+      [productIds]
+    )).rows, beforeProducts.rows);
+    assert.deepEqual((await pool.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM repricing_batches) AS batches,
+         (SELECT COUNT(*)::int FROM repricing_items) AS items,
+         (SELECT COUNT(*)::int FROM audit_events WHERE event_key = 'repricing.applied') AS audits`
+    )).rows[0], countsBefore);
+    assert.deepEqual((await pool.query(
+      'SELECT status, applied_batch_id FROM repricing_drafts WHERE id = $1',
+      [draftId]
+    )).rows, [{ status: 'draft', applied_batch_id: null }]);
+  } finally {
+    if (draftId) {
+      await pool.query(
+        `UPDATE repricing_drafts
+         SET status = 'discarded', discarded_at = CURRENT_TIMESTAMP
+         WHERE id = $1 AND status = 'draft'`,
+        [draftId]
+      );
+    }
+    await pool.query(
+      'UPDATE price_matrix SET price = price - $1 WHERE scenario_id = $2',
+      [matrixDelta, schemas.ZZScenario]
+    );
+  }
+});
+
 test('global repricing is authoritative, atomic, unique per product, and fully rollbackable', async () => {
   const createProduct = async (categoryCode, kind, manualPriceUah = null) => {
     const preview = await request('/api/preview', {
@@ -1120,6 +1228,37 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
         skuSchemaVersionId: schemas[categoryCode],
         previewToken: preview.data.previewToken,
         manualPriceUah,
+      },
+    });
+    assert.equal(saved.response.status, 200, saved.text);
+    return saved.data;
+  };
+  const createCalibratedLnProduct = async (isCalibrated) => {
+    const answers = {
+      raw_type: 1,
+      shape: isCalibrated === 1 ? 6 : 7,
+      is_calibrated: isCalibrated,
+      ...(isCalibrated === 1 ? { size: 1 } : {}),
+    };
+    const preview = await request('/api/preview', {
+      method: 'POST',
+      body: {
+        categoryCode: 'LN',
+        answers,
+        weight: 20,
+        isCalibrated,
+      },
+    });
+    assert.equal(preview.response.status, 200, preview.text);
+    const saved = await request('/api/save', {
+      method: 'POST',
+      body: {
+        category: 'LN',
+        answers,
+        weight: 20,
+        isCalibrated,
+        skuSchemaVersionId: schemas.LN,
+        previewToken: preview.data.previewToken,
       },
     });
     assert.equal(saved.response.status, 200, saved.text);
@@ -1144,6 +1283,7 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
   const manualProduct = await createProduct('MM', 1, 700);
   const changedManualProduct = await createProduct('MM', 1, 750);
   const missingProduct = await createProduct('MM', 2, 800);
+  await createCalibratedLnProduct(1);
   await pool.query(
     `UPDATE products
      SET details = details - 'manualPriceUah'
@@ -1161,15 +1301,26 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
   );
   assert.equal(semiScenario.rows.length, 1);
   const semiScenarioId = Number(semiScenario.rows[0].id);
+  const calibratedScenario = await pool.query(
+    `SELECT id FROM price_scenarios
+     WHERE category_code = 'LN'
+       AND status = 'active'
+       AND match_json @> '{"is_calibrated":1}'::jsonb
+     ORDER BY priority DESC, id
+     LIMIT 1`
+  );
+  assert.equal(calibratedScenario.rows.length, 1);
+  const calibratedScenarioId = Number(calibratedScenario.rows[0].id);
   const originalCells = await pool.query(
     `SELECT scenario_id, x_val, y_val, price
      FROM price_matrix
      WHERE (scenario_id = $1 AND x_val = 1 AND y_val = 0)
-        OR (scenario_id = $2 AND x_val = 6 AND y_val = 0)
+        OR (scenario_id = $2 AND x_val = 7 AND y_val = 0)
+        OR (scenario_id = $3 AND x_val = 6 AND y_val = 0)
      ORDER BY scenario_id, x_val, y_val`,
-    [schemas.ZZScenario, semiScenarioId]
+    [schemas.ZZScenario, semiScenarioId, calibratedScenarioId]
   );
-  assert.equal(originalCells.rows.length, 2);
+  assert.equal(originalCells.rows.length, 3);
 
   let activeRequestId = null;
   let appliedBatchId = null;
@@ -1192,10 +1343,15 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
     );
     await pool.query(
       `UPDATE price_matrix
-       SET price = CASE WHEN scenario_id = $1 THEN price + 38 ELSE price + 0.25 END
+       SET price = CASE
+         WHEN scenario_id = $1 THEN price + 38
+         WHEN scenario_id = $2 THEN price + 0.25
+         ELSE price + 0.5
+       END
        WHERE (scenario_id = $1 AND x_val = 1 AND y_val = 0)
-          OR (scenario_id = $2 AND x_val = 6 AND y_val = 0)`,
-      [schemas.ZZScenario, semiScenarioId]
+          OR (scenario_id = $2 AND x_val = 7 AND y_val = 0)
+          OR (scenario_id = $3 AND x_val = 6 AND y_val = 0)`,
+      [schemas.ZZScenario, semiScenarioId, calibratedScenarioId]
     );
 
     const initial = await request('/api/admin/repricing/global/preview', {
@@ -1216,6 +1372,7 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
     );
     assert.equal(changedScenarioIds.has(Number(schemas.ZZScenario)), true);
     assert.equal(changedScenarioIds.has(semiScenarioId), true);
+    assert.equal(changedScenarioIds.has(calibratedScenarioId), true);
     assert.equal(
       initial.data.items.find((item) => Number(item.productId) === Number(unchangedAutomatic.id))?.status,
       'unchanged'
@@ -1378,6 +1535,18 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
        FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
       [changedProductIds]
     );
+    const beforePayloadsById = new Map(beforeApply.rows.map((product) => [
+      Number(product.id),
+      {
+        totalPrice: product.total_price === null ? null : Number(product.total_price),
+        totalPriceUah: product.total_price_uah === null
+          ? null
+          : Number(product.total_price_uah),
+        pricePerGram: product.price_per_gram === null ? null : Number(product.price_per_gram),
+        uahRate: product.uah_rate === null ? null : Number(product.uah_rate),
+        details: product.details || {},
+      },
+    ]));
     const batchesBeforeFailure = await pool.query(
       "SELECT count(*)::int AS count FROM repricing_batches WHERE scope = 'global'"
     );
@@ -1486,7 +1655,10 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
     appliedBatchId = Number(applied.data.batch.id);
     activeDraftId = null;
     const appliedItems = await pool.query(
-      `SELECT ri.product_id, ri.new_price_uah, p.total_price_uah,
+      `SELECT ri.id AS item_id, ri.batch_id AS item_batch_id, ri.product_id,
+              ri.old_price_uah, ri.new_price_uah,
+              ri.price_delta_uah, ri.old_payload, ri.new_payload,
+              p.total_price, p.total_price_uah, p.price_per_gram, p.uah_rate, p.details,
               p.details #>> '{repricing,batchId}' AS batch_id,
               p.details #>> '{pricingScenario,id}' AS scenario_id,
               p.details ->> 'calculatedPriceUah' AS calculated_price_uah,
@@ -1499,19 +1671,58 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
        FROM repricing_items ri
        JOIN products p ON p.id = ri.product_id
        WHERE ri.batch_id = $1
-       ORDER BY ri.product_id`,
+       ORDER BY ri.id`,
       [appliedBatchId]
     );
     assert.equal(appliedItems.rows.length, changedProductIds.length);
+    assert.equal(
+      new Set(appliedItems.rows.map((item) => Number(item.product_id))).size,
+      changedProductIds.length
+    );
+    assert.deepEqual(
+      appliedItems.rows.map((item) => Number(item.product_id)),
+      changedProductIds
+    );
     for (const item of appliedItems.rows) {
+      const expectedOldPayload = beforePayloadsById.get(Number(item.product_id));
+      const committedPayload = {
+        totalPrice: item.total_price === null ? null : Number(item.total_price),
+        totalPriceUah: item.total_price_uah === null ? null : Number(item.total_price_uah),
+        pricePerGram: item.price_per_gram === null ? null : Number(item.price_per_gram),
+        uahRate: item.uah_rate === null ? null : Number(item.uah_rate),
+        details: item.details || {},
+      };
+      assert.deepEqual(item.old_payload, expectedOldPayload);
+      assert.deepEqual(item.new_payload, committedPayload);
+      assert.equal(
+        item.old_price_uah === null ? null : Number(item.old_price_uah),
+        expectedOldPayload.totalPriceUah
+      );
       assert.equal(Number(item.total_price_uah), Number(item.new_price_uah));
+      assert.equal(
+        Number(item.price_delta_uah),
+        Number(item.new_price_uah) - Number(item.old_price_uah)
+      );
+      assert.equal(Number(item.item_batch_id), appliedBatchId);
       assert.equal(Number(item.batch_id), appliedBatchId);
     }
+    assert.deepEqual(
+      [...new Set(appliedItems.rows.map((item) => Number(
+        item.old_payload?.details?.answers?.is_calibrated
+          ?? item.old_payload?.details?.isCalibrated
+      )))].filter(Number.isFinite).sort(),
+      [0, 1, 2]
+    );
+    assert.equal(
+      appliedItems.rows.some((item) => Number(item.old_payload?.pricePerGram) === 0),
+      true
+    );
     const appliedScenarioIds = new Set(
       appliedItems.rows.map((item) => Number(item.scenario_id)).filter(Number.isFinite)
     );
     assert.equal(appliedScenarioIds.has(Number(schemas.ZZScenario)), true);
     assert.equal(appliedScenarioIds.has(semiScenarioId), true);
+    assert.equal(appliedScenarioIds.has(calibratedScenarioId), true);
     const switchedProduct = appliedItems.rows.find((item) => (
       Number(item.product_id) === Number(automaticSwitchProduct.id)
     ));
