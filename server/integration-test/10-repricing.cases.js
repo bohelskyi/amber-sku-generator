@@ -364,6 +364,281 @@ test('repricing rollback requires the exact complete applied payload', async () 
   }
 });
 
+test('scenario repricing binds complete product and pricing configuration state', async () => {
+  const matrixDelta = 19;
+  let draftId = null;
+  let modifierId = null;
+  let productId = null;
+  let originalDetails = null;
+  await pool.query(
+    'UPDATE price_matrix SET price = price + $1 WHERE scenario_id = $2',
+    [matrixDelta, schemas.ZZScenario]
+  );
+
+  try {
+    const preview = await request('/api/admin/repricing/preview', {
+      method: 'POST', body: { scenarioId: schemas.ZZScenario },
+    });
+    assert.equal(preview.response.status, 200, preview.text);
+    assert.equal(Object.hasOwn(preview.data, 'configurationToken'), false);
+    assert.equal(
+      preview.data.items.some((item) => Object.hasOwn(item, 'productStateToken')),
+      false
+    );
+    const changedItem = preview.data.items.find((item) => item.status === 'changed');
+    assert.ok(changedItem);
+    productId = Number(changedItem.productId);
+    const product = await pool.query('SELECT details FROM products WHERE id = $1', [productId]);
+    originalDetails = product.rows[0].details;
+    const manualOverrides = preview.data.items
+      .filter((item) => ['manual_price', 'price_missing'].includes(item.errorCode))
+      .map((item) => ({
+        productId: Number(item.productId),
+        newPriceUah: Number(item.oldPriceUah),
+      }));
+    const draft = await request('/api/admin/repricing/drafts', {
+      method: 'POST',
+      body: {
+        scenarioId: schemas.ZZScenario,
+        manualOverrides,
+        reviewedProductIds: [],
+        uiState: {},
+      },
+    });
+    assert.equal(draft.response.status, 200, draft.text);
+    draftId = Number(draft.data.draft.id);
+
+    await pool.query(
+      `UPDATE products
+       SET details = jsonb_set(details, '{scenarioBindingMutation}', 'true'::jsonb, TRUE)
+       WHERE id = $1`,
+      [productId]
+    );
+    const staleDraft = await request(`/api/admin/repricing/drafts/${draftId}`);
+    assert.equal(staleDraft.response.status, 200, staleDraft.text);
+    assert.equal(staleDraft.data.sync.hasChanges, true);
+    assert.equal(staleDraft.data.sync.contextChanged, true);
+    const batchCountBeforeDraftApply = Number((await pool.query(
+      'SELECT count(*) FROM repricing_batches'
+    )).rows[0].count);
+    const auditCountBeforeDraftApply = Number((await pool.query(
+      "SELECT count(*) FROM audit_events WHERE event_key = 'repricing.applied'"
+    )).rows[0].count);
+    const staleProductApply = await request('/api/admin/repricing/apply', {
+      method: 'POST',
+      body: {
+        scenarioId: schemas.ZZScenario,
+        previewToken: preview.data.previewToken,
+        manualOverrides,
+        draftId,
+      },
+    });
+    assert.equal(staleProductApply.response.status, 409, staleProductApply.text);
+    assert.equal(Number((await pool.query(
+      'SELECT count(*) FROM repricing_batches'
+    )).rows[0].count), batchCountBeforeDraftApply);
+    assert.equal(Number((await pool.query(
+      "SELECT count(*) FROM audit_events WHERE event_key = 'repricing.applied'"
+    )).rows[0].count), auditCountBeforeDraftApply);
+    assert.equal((await pool.query(
+      'SELECT status FROM repricing_drafts WHERE id = $1', [draftId]
+    )).rows[0].status, 'draft');
+
+    await pool.query('UPDATE products SET details = $1::jsonb WHERE id = $2', [
+      JSON.stringify(originalDetails), productId,
+    ]);
+    const discarded = await request(`/api/admin/repricing/drafts/${draftId}`, {
+      method: 'DELETE', body: {},
+    });
+    assert.equal(discarded.response.status, 200, discarded.text);
+    draftId = null;
+
+    const configurationPreview = await request('/api/admin/repricing/preview', {
+      method: 'POST', body: { scenarioId: schemas.ZZScenario },
+    });
+    assert.equal(configurationPreview.response.status, 200, configurationPreview.text);
+    const configurationOverrides = configurationPreview.data.items
+      .filter((item) => ['manual_price', 'price_missing'].includes(item.errorCode))
+      .map((item) => ({
+        productId: Number(item.productId),
+        newPriceUah: Number(item.oldPriceUah),
+      }));
+    const modifier = await pool.query(
+      `INSERT INTO price_modifiers
+       (category_code, trigger_key, trigger_val, match_json, factor)
+       VALUES ('ZZ', '__repricing_never_matches__', 999999, NULL, 1.125)
+       RETURNING id`
+    );
+    modifierId = Number(modifier.rows[0].id);
+    const batchCountBeforeConfigurationApply = Number((await pool.query(
+      'SELECT count(*) FROM repricing_batches'
+    )).rows[0].count);
+    const staleConfigurationApply = await request('/api/admin/repricing/apply', {
+      method: 'POST',
+      body: {
+        scenarioId: schemas.ZZScenario,
+        previewToken: configurationPreview.data.previewToken,
+        manualOverrides: configurationOverrides,
+      },
+    });
+    assert.equal(staleConfigurationApply.response.status, 409, staleConfigurationApply.text);
+    assert.equal(Number((await pool.query(
+      'SELECT count(*) FROM repricing_batches'
+    )).rows[0].count), batchCountBeforeConfigurationApply);
+  } finally {
+    if (modifierId) {
+      await pool.query('DELETE FROM price_modifiers WHERE id = $1', [modifierId]);
+    }
+    if (productId && originalDetails) {
+      await pool.query('UPDATE products SET details = $1::jsonb WHERE id = $2', [
+        JSON.stringify(originalDetails), productId,
+      ]);
+    }
+    if (draftId) {
+      await pool.query(
+        `UPDATE repricing_drafts
+         SET status = 'discarded', discarded_at = CURRENT_TIMESTAMP
+         WHERE id = $1 AND status = 'draft'`,
+        [draftId]
+      );
+    }
+    await pool.query(
+      'UPDATE price_matrix SET price = price - $1 WHERE scenario_id = $2',
+      [matrixDelta, schemas.ZZScenario]
+    );
+  }
+});
+
+test('scenario repricing revalidates full product state after acquiring row locks', async () => {
+  const matrixDelta = 23;
+  let productId = null;
+  let originalProduct = null;
+  let lockClient = null;
+  let lockTransactionOpen = false;
+  let applyPromise = null;
+  await pool.query(
+    'UPDATE price_matrix SET price = price + $1 WHERE scenario_id = $2',
+    [matrixDelta, schemas.ZZScenario]
+  );
+
+  try {
+    const preview = await request('/api/admin/repricing/preview', {
+      method: 'POST', body: { scenarioId: schemas.ZZScenario },
+    });
+    assert.equal(preview.response.status, 200, preview.text);
+    const changedItems = preview.data.items
+      .filter((item) => item.status === 'changed')
+      .sort((first, second) => Number(first.productId) - Number(second.productId));
+    assert.ok(changedItems.length > 0);
+    productId = Number(changedItems[0].productId);
+    const originalResult = await pool.query(
+      `SELECT total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = $1`,
+      [productId]
+    );
+    originalProduct = originalResult.rows[0];
+    const oldKind = Number(originalProduct.details?.answers?.kind || 0);
+    const nextKind = oldKind === 1 ? 2 : 1;
+    const manualOverrides = preview.data.items
+      .filter((item) => ['manual_price', 'price_missing'].includes(item.errorCode))
+      .map((item) => ({
+        productId: Number(item.productId),
+        newPriceUah: Number(item.oldPriceUah),
+      }));
+    const batchCountBefore = Number((await pool.query(
+      'SELECT count(*) FROM repricing_batches'
+    )).rows[0].count);
+    const auditCountBefore = Number((await pool.query(
+      "SELECT count(*) FROM audit_events WHERE event_key = 'repricing.applied'"
+    )).rows[0].count);
+
+    lockClient = await pool.connect();
+    await lockClient.query('BEGIN');
+    lockTransactionOpen = true;
+    const holderPid = Number((await lockClient.query('SELECT pg_backend_pid() AS pid')).rows[0].pid);
+    await lockClient.query('SELECT id FROM products WHERE id = $1 FOR UPDATE', [productId]);
+    applyPromise = request('/api/admin/repricing/apply', {
+      method: 'POST',
+      body: {
+        scenarioId: schemas.ZZScenario,
+        previewToken: preview.data.previewToken,
+        manualOverrides,
+      },
+    });
+
+    let applyIsBlocked = false;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const waiting = await pool.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM pg_stat_activity
+           WHERE $1 = ANY(pg_blocking_pids(pid))
+         ) AS waiting`,
+        [holderPid]
+      );
+      if (waiting.rows[0].waiting) {
+        applyIsBlocked = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(applyIsBlocked, true, 'scenario apply must be waiting for the held product lock');
+    await lockClient.query(
+      `UPDATE products
+       SET details = jsonb_set(details, '{answers,kind}', to_jsonb($1::int), TRUE)
+       WHERE id = $2`,
+      [nextKind, productId]
+    );
+    await lockClient.query('COMMIT');
+    lockTransactionOpen = false;
+
+    const applied = await applyPromise;
+    applyPromise = null;
+    assert.equal(applied.response.status, 409, applied.text);
+    const after = await pool.query(
+      `SELECT total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = $1`,
+      [productId]
+    );
+    assert.equal(Number(after.rows[0].details.answers.kind), nextKind);
+    assert.equal(after.rows[0].total_price, originalProduct.total_price);
+    assert.equal(after.rows[0].total_price_uah, originalProduct.total_price_uah);
+    assert.equal(after.rows[0].price_per_gram, originalProduct.price_per_gram);
+    assert.equal(after.rows[0].uah_rate, originalProduct.uah_rate);
+    assert.equal(Number((await pool.query(
+      'SELECT count(*) FROM repricing_batches'
+    )).rows[0].count), batchCountBefore);
+    assert.equal(Number((await pool.query(
+      "SELECT count(*) FROM audit_events WHERE event_key = 'repricing.applied'"
+    )).rows[0].count), auditCountBefore);
+  } finally {
+    if (lockClient) {
+      if (lockTransactionOpen) await lockClient.query('ROLLBACK');
+      lockClient.release();
+    }
+    if (applyPromise) await Promise.allSettled([applyPromise]);
+    if (productId && originalProduct) {
+      await pool.query(
+        `UPDATE products
+         SET total_price = $1, total_price_uah = $2, price_per_gram = $3, uah_rate = $4,
+             details = $5::jsonb
+         WHERE id = $6`,
+        [
+          originalProduct.total_price,
+          originalProduct.total_price_uah,
+          originalProduct.price_per_gram,
+          originalProduct.uah_rate,
+          JSON.stringify(originalProduct.details),
+          productId,
+        ]
+      );
+    }
+    await pool.query(
+      'UPDATE price_matrix SET price = price - $1 WHERE scenario_id = $2',
+      [matrixDelta, schemas.ZZScenario]
+    );
+  }
+});
+
 test('repricing preview/apply/rollback and correction blocking work', async () => {
   await pool.query(
     'UPDATE price_matrix SET price = price + 113 WHERE scenario_id = $1',

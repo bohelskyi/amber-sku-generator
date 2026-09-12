@@ -292,25 +292,36 @@ function getGlobalPreviewToken(configurationToken, items) {
   });
 }
 
-function getPreviewToken(scenario, applicableItems) {
-  const payload = {
+function getPreviewToken(scenario, applicableItems, {
+  configurationToken = null,
+  candidateBindings = [],
+} = {}) {
+  return hashPayload({
+    scope: REPRICING_SCOPE_SCENARIO,
+    configurationToken,
     scenario: getScenarioSnapshot(scenario),
-    changes: applicableItems.map((item) => ({
-      productId: item.productId,
-      sku: item.sku,
-      weight: item.weight ?? null,
-      answers: item.answers || {},
-      oldPriceUah: item.oldPriceUah,
-      calculatedPriceUah: item.calculatedPriceUah ?? null,
-      automaticPriceUah: item.automaticPriceUah ?? null,
-      newPriceUah: item.newPriceUah ?? null,
-      status: item.status,
-      errorCode: item.errorCode || null,
-      pricingChange: item.pricingChange || null,
-    })),
-  };
-
-  return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+    candidates: [...candidateBindings]
+      .sort((first, second) => Number(first.productId) - Number(second.productId))
+      .map((binding) => ({
+        productId: Number(binding.productId),
+        productStateToken: binding.productStateToken,
+      })),
+    changes: [...applicableItems]
+      .sort((first, second) => Number(first.productId) - Number(second.productId))
+      .map((item) => ({
+        productId: item.productId,
+        sku: item.sku,
+        weight: item.weight ?? null,
+        answers: item.answers || {},
+        oldPriceUah: item.oldPriceUah,
+        calculatedPriceUah: item.calculatedPriceUah ?? null,
+        automaticPriceUah: item.automaticPriceUah ?? null,
+        newPriceUah: item.newPriceUah ?? null,
+        status: item.status,
+        errorCode: item.errorCode || null,
+        pricingChange: item.pricingChange || null,
+      })),
+  });
 }
 
 function getRepricingPreviewSnapshot(preview) {
@@ -349,7 +360,11 @@ function getRepricingPreviewSnapshot(preview) {
     };
   }
 
-  return { scenario: preview.scenario, ...snapshot };
+  return {
+    scenario: preview.scenario,
+    bindingToken: preview.previewToken || null,
+    ...snapshot,
+  };
 }
 
 function getRepricingPreviewFingerprint(preview) {
@@ -380,14 +395,20 @@ function getDraftSyncInfo(storedSnapshot = {}, currentPreview) {
         scenarios: storedSnapshot.scenarios || [],
         configurationToken: storedSnapshot.configurationToken || null,
       }
-    : storedSnapshot.scenario || {};
+    : {
+        scenario: storedSnapshot.scenario || {},
+        bindingToken: storedSnapshot.bindingToken || null,
+      };
   const currentContext = currentSnapshot.scope === REPRICING_SCOPE_GLOBAL
     ? {
         scope: currentSnapshot.scope,
         scenarios: currentSnapshot.scenarios || [],
         configurationToken: currentSnapshot.configurationToken || null,
       }
-    : currentSnapshot.scenario || {};
+    : {
+        scenario: currentSnapshot.scenario || {},
+        bindingToken: currentSnapshot.bindingToken || null,
+      };
   const contextChanged = !isDeepStrictEqual(storedContext, currentContext);
   const summaryChanged = !isDeepStrictEqual(
     storedSnapshot.summary || {},
@@ -742,7 +763,7 @@ function assertNoBlockingCorrectionRequests(requests = []) {
   throw error;
 }
 
-async function buildRepricingPreview(scenarioId) {
+async function buildRepricingPreviewState(scenarioId) {
   const loadedPricing = await loadScenarioPricingContext(scenarioId);
   if (!loadedPricing) {
     const error = new Error('Активну цінову матрицю не знайдено.');
@@ -750,6 +771,7 @@ async function buildRepricingPreview(scenarioId) {
     throw error;
   }
   const { scenario, context: pricingContext } = loadedPricing;
+  const configurationToken = hashPayload([getPricingContextSnapshot(pricingContext)]);
   let rateInfo = null;
   try {
     rateInfo = await getUsdUahRateInfo();
@@ -776,12 +798,17 @@ async function buildRepricingPreview(scenarioId) {
   );
 
   const items = [];
+  const candidateBindings = [];
   let skippedCount = 0;
 
   for (const product of productsResult.rows) {
     const details = getProductDetails(product);
     const answers = getPricingAnswers(product, details);
     if (!isRuleMatched(scenarioRule, answers)) continue;
+    candidateBindings.push({
+      productId: Number(product.id),
+      productStateToken: getProductRepricingStateToken(product),
+    });
 
     if (hasManualPrice(details)) {
       items.push(buildErrorItem(
@@ -886,9 +913,12 @@ async function buildRepricingPreview(scenarioId) {
   ));
   const blockingCorrectionRequests = await getBlockingCorrectionRequests(items);
 
-  return {
+  const preview = {
     scenario: getScenarioSnapshot(scenario),
-    previewToken: getPreviewToken(scenario, applicableItems),
+    previewToken: getPreviewToken(scenario, applicableItems, {
+      configurationToken,
+      candidateBindings,
+    }),
     summary: {
       candidateCount: items.length + skippedCount,
       changedCount: changedItems.length,
@@ -899,6 +929,16 @@ async function buildRepricingPreview(scenarioId) {
     items,
     blockingCorrectionRequests,
   };
+  return {
+    preview,
+    productStateTokensById: new Map(candidateBindings.map((binding) => (
+      [binding.productId, binding.productStateToken]
+    ))),
+  };
+}
+
+async function buildRepricingPreview(scenarioId) {
+  return (await buildRepricingPreviewState(scenarioId)).preview;
 }
 
 async function buildGlobalRepricingPreview() {
@@ -1572,9 +1612,18 @@ async function applyRepricingScope({
     return { success: true, alreadyApplied: true, batch: existingBatch };
   }
 
-  const basePreview = scope === REPRICING_SCOPE_GLOBAL
-    ? await buildGlobalRepricingPreview()
-    : await buildRepricingPreview(scenarioId);
+  let basePreview;
+  let productStateTokensById;
+  if (scope === REPRICING_SCOPE_GLOBAL) {
+    basePreview = await buildGlobalRepricingPreview();
+    productStateTokensById = new Map(basePreview.items.map((item) => (
+      [Number(item.productId), item.productStateToken]
+    )));
+  } else {
+    const previewState = await buildRepricingPreviewState(scenarioId);
+    basePreview = previewState.preview;
+    productStateTokensById = previewState.productStateTokensById;
+  }
   if (draft && getRepricingPreviewFingerprint(basePreview) !== draft.preview_fingerprint) {
     const error = new Error('Склад товарів або розрахунок змінився. Синхронізуйте чернетку.');
     error.statusCode = 409;
@@ -1711,9 +1760,10 @@ async function applyRepricingScope({
       const currentPrice = product.total_price_uah === null
         ? null
         : Number(product.total_price_uah);
+      const expectedProductStateToken = productStateTokensById.get(Number(item.productId));
       if (
-        item.productStateToken
-        && getProductRepricingStateToken(product) !== item.productStateToken
+        !expectedProductStateToken
+        || getProductRepricingStateToken(product) !== expectedProductStateToken
       ) {
         const error = new Error(`Товар ${item.sku} змінився під час підготовки переоцінки.`);
         error.statusCode = 409;

@@ -46,6 +46,44 @@ test('repricing preview token is stable for the same changes', () => {
   );
 });
 
+test('scenario repricing token binds complete configuration and every candidate product state', () => {
+  const applicableItems = [{
+    productId: 1,
+    sku: 'NM1',
+    oldPriceUah: 300,
+    newPriceUah: 400,
+    status: 'changed',
+  }];
+  const candidateBindings = [
+    { productId: 2, productStateToken: 'unchanged-product-2' },
+    { productId: 1, productStateToken: 'changed-product-1' },
+  ];
+  const token = getPreviewToken(scenario, applicableItems, {
+    configurationToken: 'configuration-a',
+    candidateBindings,
+  });
+
+  assert.equal(token, getPreviewToken(scenario, applicableItems, {
+    configurationToken: 'configuration-a',
+    candidateBindings: [...candidateBindings].reverse(),
+  }));
+  assert.notEqual(token, getPreviewToken(scenario, applicableItems, {
+    configurationToken: 'configuration-b',
+    candidateBindings,
+  }));
+  assert.notEqual(token, getPreviewToken(scenario, applicableItems, {
+    configurationToken: 'configuration-a',
+    candidateBindings: [
+      candidateBindings[0],
+      { ...candidateBindings[1], productStateToken: 'changed-product-1-later' },
+    ],
+  }));
+  assert.notEqual(token, getPreviewToken(scenario, applicableItems, {
+    configurationToken: 'configuration-a',
+    candidateBindings: [candidateBindings[1]],
+  }));
+});
+
 test('global repricing token binds configuration and every product exactly once', () => {
   const items = [
     {
@@ -598,4 +636,29 @@ test('rollback only accepts the exact complete applied product payload', () => {
     price_per_gram: null,
     uah_rate: null,
   }, { details: product.details }, 12), false);
+});
+
+test('scenario draft fingerprint and synchronization bind the opaque preview token', () => {
+  const base = {
+    scenario,
+    previewToken: 'scenario-binding-a',
+    summary: { candidateCount: 1, changedCount: 1, unchangedCount: 0, errorCount: 0 },
+    items: [{
+      productId: 1,
+      sku: 'NM1',
+      oldPriceUah: 300,
+      newPriceUah: 400,
+      status: 'changed',
+    }],
+  };
+  const changed = { ...base, previewToken: 'scenario-binding-b' };
+
+  assert.notEqual(
+    getRepricingPreviewFingerprint(base),
+    getRepricingPreviewFingerprint(changed)
+  );
+  assert.equal(
+    getDraftSyncInfo(getRepricingPreviewSnapshot(base), changed).hasChanges,
+    true
+  );
 });
