@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const catalogService = require('../src/services/catalog.service');
+const catalogReadModel = require('../src/services/catalog/catalog-read-model');
 const {
   normalizeInputType,
   normalizeEditableSkuSeparator,
@@ -28,6 +29,10 @@ test('catalog service keeps its ten-export compatibility surface', () => {
     'updateQuestionsOrder',
     'deleteCatalogItem',
   ]);
+});
+
+test('catalog read facade resolves directly to the catalog read model', () => {
+  assert.equal(catalogService.getAppConfig, catalogReadModel.getAppConfig);
 });
 
 test('catalog input normalization preserves defaults and validation contracts', () => {
