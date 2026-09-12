@@ -15,125 +15,9 @@ const {
   buildOptionChanges,
 } = require('./catalog/catalog-audit');
 const { getAppConfig } = require('./catalog/catalog-read-model');
-
-function renameJsonObjectKey(value, oldKey, newKey) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-
-  return Object.entries(value).reduce((result, [key, item]) => {
-    const isLogicalOperator = key === '$or' || key === '$and';
-    const nextKey = !isLogicalOperator && key === oldKey ? newKey : key;
-    result[nextKey] = isLogicalOperator && Array.isArray(item)
-      ? item.map((branch) => renameJsonObjectKey(branch, oldKey, newKey))
-      : item;
-    return result;
-  }, {});
-}
-
-function renameAxisKey(axisKey, oldKey, newKey) {
-  if (!axisKey) return axisKey;
-  return String(axisKey)
-    .split('+')
-    .map((key) => (key.trim() === oldKey ? newKey : key.trim()))
-    .join('+');
-}
-
-async function renameRuleKey(client, tableName, idColumn, columnName, row, oldKey, newKey) {
-  const currentRule = row[columnName];
-  const nextRule = renameJsonObjectKey(currentRule, oldKey, newKey);
-  if (JSON.stringify(nextRule) === JSON.stringify(currentRule)) return;
-
-  await client.query(
-    `UPDATE ${tableName} SET ${columnName} = $1::jsonb WHERE ${idColumn} = $2`,
-    [JSON.stringify(nextRule), row.id]
-  );
-}
-
-async function renameQuestionKeyReferences(client, categoryCode, oldKey, newKey) {
-  const questionRules = await client.query(
-    `SELECT id, visible_if_json
-     FROM questions
-     WHERE category_code = $1
-       AND visible_if_json IS NOT NULL`,
-    [categoryCode]
-  );
-  for (const row of questionRules.rows) {
-    await renameRuleKey(client, 'questions', 'id', 'visible_if_json', row, oldKey, newKey);
-  }
-
-  const optionRules = await client.query(
-    `SELECT o.id, o.visible_if_json, o.hidden_if_json
-     FROM options o
-     JOIN questions q ON q.id = o.question_id
-     WHERE q.category_code = $1
-       AND (o.visible_if_json IS NOT NULL OR o.hidden_if_json IS NOT NULL)`,
-    [categoryCode]
-  );
-  for (const row of optionRules.rows) {
-    await renameRuleKey(client, 'options', 'id', 'visible_if_json', row, oldKey, newKey);
-    await renameRuleKey(client, 'options', 'id', 'hidden_if_json', row, oldKey, newKey);
-  }
-
-  const scenarios = await client.query(
-    `SELECT id, match_json, axis_x_key, axis_y_key
-     FROM price_scenarios
-     WHERE category_code = $1
-       AND (
-         match_json IS NOT NULL
-         OR axis_x_key = $2
-         OR axis_y_key = $2
-         OR axis_x_key LIKE $3
-         OR axis_y_key LIKE $3
-       )`,
-    [categoryCode, oldKey, `%${oldKey}%`]
-  );
-  for (const row of scenarios.rows) {
-    const nextMatchJson = renameJsonObjectKey(row.match_json, oldKey, newKey);
-    await client.query(
-      `UPDATE price_scenarios
-       SET match_json = $1::jsonb,
-           axis_x_key = $2,
-           axis_y_key = $3
-       WHERE id = $4`,
-      [
-        JSON.stringify(nextMatchJson || {}),
-        renameAxisKey(row.axis_x_key, oldKey, newKey),
-        renameAxisKey(row.axis_y_key, oldKey, newKey),
-        row.id,
-      ]
-    );
-  }
-
-  const modifierRules = await client.query(
-    `SELECT id, match_json
-     FROM price_modifiers
-     WHERE category_code = $1
-       AND match_json IS NOT NULL`,
-    [categoryCode]
-  );
-  for (const row of modifierRules.rows) {
-    await renameRuleKey(client, 'price_modifiers', 'id', 'match_json', row, oldKey, newKey);
-  }
-
-  await client.query(
-    `UPDATE price_modifiers
-     SET trigger_key = $1
-     WHERE category_code = $2 AND trigger_key = $3`,
-    [newKey, categoryCode, oldKey]
-  );
-
-  await client.query(
-    `UPDATE products
-     SET details = jsonb_set(
-       details #- $1::text[],
-       $2::text[],
-       details #> $1::text[],
-       true
-     )
-     WHERE category = $3
-       AND details #> $1::text[] IS NOT NULL`,
-    [[`answers`, oldKey], [`answers`, newKey], categoryCode]
-  );
-}
+const {
+  rewriteQuestionKeyReferences,
+} = require('./catalog/question-key-references');
 
 async function createCategory(
   { code, name, requires_weight, skip_hidden_sku_questions },
@@ -420,12 +304,11 @@ async function updateQuestion(payload, options = {}) {
         throw err;
       }
 
-      await renameQuestionKeyReferences(
-        client,
-        currentQuestion.category_code,
-        currentQuestion.key,
-        nextKey
-      );
+      await rewriteQuestionKeyReferences(client, {
+        categoryCode: currentQuestion.category_code,
+        oldKey: currentQuestion.key,
+        newKey: nextKey,
+      });
     }
 
     await client.query(

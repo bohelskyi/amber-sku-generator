@@ -15,6 +15,11 @@ const {
   buildQuestionChanges,
   buildOptionChanges,
 } = require('../src/services/catalog/catalog-audit');
+const {
+  renameJsonObjectKey,
+  renameAxisKey,
+  rewriteRuleKeyForTarget,
+} = require('../src/services/catalog/question-key-references');
 
 test('catalog service keeps its ten-export compatibility surface', () => {
   assert.deepEqual(Object.keys(catalogService), [
@@ -118,4 +123,60 @@ test('catalog audit builders preserve semantic changes and sensitive rule marker
     visibleRule: { changed: true },
     archived: { from: false, to: true },
   });
+});
+
+test('question-key transforms preserve nested logical and composite-axis behavior', () => {
+  assert.deepEqual(renameJsonObjectKey({
+    $and: [
+      { old_key: 1 },
+      { $or: [{ old_key: [1, 2] }, { other_key: 2 }] },
+    ],
+    arbitrary: { old_key: 3 },
+  }, 'old_key', 'new_key'), {
+    $and: [
+      { new_key: 1 },
+      { $or: [{ new_key: [1, 2] }, { other_key: 2 }] },
+    ],
+    arbitrary: { old_key: 3 },
+  });
+  assert.deepEqual(renameJsonObjectKey([{ old_key: 1 }], 'old_key', 'new_key'), [
+    { old_key: 1 },
+  ]);
+  assert.equal(renameAxisKey(' old_key + other_old_key ', 'old_key', 'new_key'),
+    'new_key+other_old_key');
+  assert.equal(renameAxisKey(null, 'old_key', 'new_key'), null);
+});
+
+test('question-key rule rewrites accept only complete static SQL targets', async () => {
+  const calls = [];
+  const client = {
+    async query(sql, values) {
+      calls.push({ sql, values });
+      return { rows: [] };
+    },
+  };
+
+  await rewriteRuleKeyForTarget(
+    client,
+    'optionHidden',
+    { id: 17, hidden_if_json: { old_key: 1 } },
+    'old_key',
+    'new_key'
+  );
+  assert.deepEqual(calls, [{
+    sql: 'UPDATE options SET hidden_if_json = $1::jsonb WHERE id = $2',
+    values: ['{"new_key":1}', 17],
+  }]);
+
+  await assert.rejects(
+    rewriteRuleKeyForTarget(
+      client,
+      'options; DROP TABLE options',
+      { id: 17, hidden_if_json: { old_key: 1 } },
+      'old_key',
+      'new_key'
+    ),
+    /Unsupported catalog rule rewrite target/
+  );
+  assert.equal(calls.length, 1);
 });
