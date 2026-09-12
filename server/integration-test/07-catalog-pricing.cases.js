@@ -3,6 +3,8 @@ const {
   assert,
   test,
   pool,
+  Pool,
+  TEST_DATABASE_URL,
   request,
   authenticateApplicationSession,
   schemas,
@@ -13,6 +15,29 @@ const {
   loadPricingContexts,
 } = require('../src/services/pricing/pricing-context');
 const { getAdminPrices } = require('../src/services/pricing/pricing-read-model');
+const { updateCategory } = require('../src/services/catalog.service');
+
+async function waitUntilBlockedBy(client, queryFragment, timeoutMs = 5000) {
+  const blockerPid = Number((await client.query('SELECT pg_backend_pid() AS pid')).rows[0].pid);
+  const deadline = Date.now() + timeoutMs;
+  let lastBlocked = [];
+  while (Date.now() < deadline) {
+    const blocked = await client.query(
+      `SELECT pid, query
+       FROM pg_stat_activity
+       WHERE pid <> pg_backend_pid()
+         AND $1 = ANY(pg_blocking_pids(pid))`,
+      [blockerPid]
+    );
+    lastBlocked = blocked.rows;
+    const matching = blocked.rows.find((row) => row.query.includes(queryFragment));
+    if (matching) return Number(matching.pid);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(
+    `Timed out waiting for a blocked query containing: ${queryFragment}; blocked=${JSON.stringify(lastBlocked)}`
+  );
+}
 
 async function replaceSnapshotConfiguration(client, configurations) {
   await client.query('BEGIN');
@@ -252,6 +277,128 @@ test('duplicate question invariant is atomic across independent transactions', a
     ['ZZ', questionKey]
   );
   assert.equal(stored.rows[0].count, 1);
+});
+
+test('category rename revalidates a no-product schema after concurrent publication commits', async () => {
+  if (!suite.authenticatedSession) suite.authenticatedSession = await authenticateApplicationSession('/admin');
+  const currentCode = 'PS';
+  const nextCode = 'PT';
+  const publicationPool = new Pool({ connectionString: TEST_DATABASE_URL, max: 1 });
+  const publisher = await publicationPool.connect();
+  let publicationOpen = false;
+
+  try {
+    await pool.query(
+      `INSERT INTO categories (code, name, requires_weight, skip_hidden_sku_questions)
+       VALUES ($1, 'Publication serialization', 0, 0)`,
+      [currentCode]
+    );
+    const question = await pool.query(
+      `INSERT INTO questions
+         (category_code, key, label, sku_index, display_order, required, include_in_sku, input_type)
+       VALUES ($1, 'kind', 'Kind', 1, 1, 1, 1, 'options')
+       RETURNING id`,
+      [currentCode]
+    );
+    await pool.query(
+      `INSERT INTO options (question_id, value_id, sku_code, label)
+       VALUES ($1, 1, '1', 'One')`,
+      [question.rows[0].id]
+    );
+
+    await publisher.query('BEGIN');
+    publicationOpen = true;
+    await publisher.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `sku-schema:${currentCode}`,
+    ]);
+    await publisher.query(
+      `SELECT * FROM sku_schema_versions
+       WHERE category_code = $1 AND status = 'active'
+       FOR UPDATE`,
+      [currentCode]
+    );
+    const schemaVersion = await publisher.query(
+      `INSERT INTO sku_schema_versions
+         (category_code, version, marker, status, config_hash)
+       VALUES ($1, 1, '', 'active', 'concurrent-publication')
+       RETURNING id`,
+      [currentCode]
+    );
+    const schemaQuestion = await publisher.query(
+      `INSERT INTO sku_schema_questions
+         (schema_version_id, question_key, label, sku_index, required, sku_separator,
+          visible_if_json, display_order)
+       VALUES ($1, 'kind', 'Kind', 1, 1, '', NULL, 1)
+       RETURNING id`,
+      [schemaVersion.rows[0].id]
+    );
+    await publisher.query(
+      `INSERT INTO sku_schema_options
+         (schema_question_id, value_id, sku_code, label, visible_if_json, hidden_if_json, archived)
+       VALUES ($1, 1, '1', 'One', NULL, NULL, FALSE)`,
+      [schemaQuestion.rows[0].id]
+    );
+
+    const renamePromise = updateCategory(
+      {
+        code: currentCode,
+        next_code: nextCode,
+        name: 'Retagged category',
+        requires_weight: 0,
+        skip_hidden_sku_questions: 0,
+      },
+      {
+        mutationContext: {
+          actorUserId: Number(suite.authenticatedSession.applicationUser.id),
+          requestId: 'category-publish-rename-race',
+        },
+      }
+    );
+
+    await waitUntilBlockedBy(
+      publisher,
+      'SELECT * FROM categories WHERE code = $1 FOR UPDATE'
+    );
+    await publisher.query('COMMIT');
+    publicationOpen = false;
+
+    const rename = await renamePromise.then(
+      (value) => ({ value, error: null }),
+      (error) => ({ value: null, error })
+    );
+    assert.equal(rename.error?.statusCode, 409);
+
+    const state = await pool.query(
+      `SELECT
+         EXISTS (SELECT 1 FROM categories WHERE code = $1) AS current_exists,
+         EXISTS (SELECT 1 FROM categories WHERE code = $2) AS next_exists,
+         (SELECT category_code FROM sku_schema_versions WHERE id = $3) AS schema_category,
+         (SELECT COUNT(*)::int FROM audit_events
+          WHERE event_key = 'catalog.category.updated' AND subject_id = $2) AS rename_audits`,
+      [currentCode, nextCode, schemaVersion.rows[0].id]
+    );
+    assert.deepEqual(state.rows[0], {
+      current_exists: true,
+      next_exists: false,
+      schema_category: currentCode,
+      rename_audits: 0,
+    });
+
+    const config = await request('/api/admin/config');
+    assert.equal(config.response.status, 200, config.text);
+    assert.equal(config.data.categories[currentCode].code_mutable, false);
+  } finally {
+    if (publicationOpen) await publisher.query('ROLLBACK');
+    publisher.release();
+    await publicationPool.end();
+    await pool.query(
+      'DELETE FROM sku_schema_versions WHERE category_code = ANY($1::text[])',
+      [[currentCode, nextCode]]
+    );
+    await pool.query('DELETE FROM categories WHERE code = ANY($1::text[])', [
+      [currentCode, nextCode],
+    ]);
+  }
 });
 
 test('question-key updates rewrite every live reference while published schemas stay immutable', async () => {

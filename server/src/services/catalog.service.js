@@ -188,7 +188,6 @@ async function getAppConfig() {
               OR EXISTS (
                 SELECT 1
                 FROM sku_schema_versions sv
-                JOIN products sp ON sp.sku_schema_version_id = sv.id
                 WHERE sv.category_code = c.code AND sv.published_at IS NOT NULL
               )
             ) AS code_mutable
@@ -392,7 +391,6 @@ async function updateCategory(
          OR EXISTS (
            SELECT 1
            FROM sku_schema_versions sv
-           JOIN products p ON p.sku_schema_version_id = sv.id
            WHERE sv.category_code = $1 AND sv.published_at IS NOT NULL
          ) AS used`,
       [currentCode]
