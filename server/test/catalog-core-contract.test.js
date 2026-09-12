@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const catalogService = require('../src/services/catalog.service');
 const catalogReadModel = require('../src/services/catalog/catalog-read-model');
+const categoryCommands = require('../src/services/catalog/category-commands');
 const {
   normalizeInputType,
   normalizeEditableSkuSeparator,
@@ -38,6 +39,11 @@ test('catalog service keeps its ten-export compatibility surface', () => {
 
 test('catalog read facade resolves directly to the catalog read model', () => {
   assert.equal(catalogService.getAppConfig, catalogReadModel.getAppConfig);
+});
+
+test('catalog category facade resolves directly to category command coordinators', () => {
+  assert.equal(catalogService.createCategory, categoryCommands.createCategory);
+  assert.equal(catalogService.updateCategory, categoryCommands.updateCategory);
 });
 
 test('catalog input normalization preserves defaults and validation contracts', () => {
