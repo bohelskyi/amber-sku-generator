@@ -25,6 +25,7 @@ const {
   hashPayload,
 } = require('./tokens');
 const { getBlockingCorrectionRequests } = require('./correction-blockers');
+const { startPhase } = require('../../observability/performance-metrics');
 
 async function getActiveScenario(scenarioId) {
   const result = await pool.query(
@@ -117,6 +118,7 @@ async function buildRepricingPreviewState(scenarioId) {
     [scenario.category_code]
   );
 
+  const finishProjection = startPhase('repricing.projection_and_tokens');
   const items = [];
   const candidateBindings = [];
   let skippedCount = 0;
@@ -249,6 +251,7 @@ async function buildRepricingPreviewState(scenarioId) {
     items,
     blockingCorrectionRequests,
   };
+  finishProjection();
   return {
     preview,
     productStateTokensById: new Map(candidateBindings.map((binding) => (
@@ -269,6 +272,7 @@ async function buildGlobalRepricingPreview() {
      WHERE COALESCE(status, 'active') = 'active'
      ORDER BY id`
   );
+  const finishProjection = startPhase('repricing.projection_and_tokens');
   const categoryCodes = [...new Set(productsResult.rows.map((product) => product.category))]
     .filter(Boolean)
     .sort();
@@ -415,7 +419,7 @@ async function buildGlobalRepricingPreview() {
   }
 
   const blockingCorrectionRequests = await getBlockingCorrectionRequests(items);
-  return {
+  const preview = {
     scope: REPRICING_SCOPE_GLOBAL,
     scenarios,
     configurationToken,
@@ -430,6 +434,8 @@ async function buildGlobalRepricingPreview() {
     items,
     blockingCorrectionRequests,
   };
+  finishProjection();
+  return preview;
 }
 
 module.exports = {
@@ -439,4 +445,3 @@ module.exports = {
   getActiveScenario,
   getRepricingScenarios,
 };
-

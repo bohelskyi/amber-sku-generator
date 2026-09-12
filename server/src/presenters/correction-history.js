@@ -2,10 +2,12 @@ const { toUahNumber } = require('../utils/money');
 const {
   normalizeCorrectionRow,
 } = require('../services/correction-history/correction-history-normalizer');
+const { startPhase } = require('../observability/performance-metrics');
 
 function presentCorrectionHistoryReport(data, config, pagination) {
+  const finishNormalization = startPhase('correction_history.normalization');
   const summary = data.summaryRow;
-  return {
+  const report = {
     items: data.itemRows.map((row) => normalizeCorrectionRow(row, config)),
     summary: {
       totalCount: Number(summary.total_count || 0),
@@ -26,6 +28,8 @@ function presentCorrectionHistoryReport(data, config, pagination) {
     limit: pagination.limit,
     offset: pagination.offset,
   };
+  finishNormalization();
+  return report;
 }
 
 function getCorrectionChangesText(item) {

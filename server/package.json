@@ -6,6 +6,7 @@
     "start": "node server.js",
     "auth:bootstrap-admin": "node scripts/bootstrap-admin.js",
     "audit:data": "node scripts/audit-data-integrity.js",
+    "benchmark:phase7": "node performance-test/run-phase7.js",
     "migrate:config": "node scripts/migrate-sqlite-config-to-postgres.js",
     "lint": "eslint server.js src scripts",
     "test": "node --require ./test/setup-env.js --test test/*.test.js",

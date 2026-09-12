@@ -1,0 +1,5130 @@
+{
+  "run": 1,
+  "databaseName": "amber_test",
+  "nodeVersion": "v24.19.0",
+  "postgresVersion": "16.15",
+  "revision": "215ac09d34065f48598bff6a4f2d0d9a4d8a12bc",
+  "platform": "win32",
+  "architecture": "x64",
+  "cpuModel": "AMD Ryzen 9 9950X3D 16-Core Processor          ",
+  "cpuCount": 32,
+  "ramBytes": 66155474944,
+  "pool": {
+    "max": 10
+  },
+  "fixtureSeed": "phase7-v1",
+  "requestedScales": {
+    "categories": 25,
+    "products": 1000,
+    "corrections": 999,
+    "activeCorrections": 100,
+    "activeDrafts": 25,
+    "repricingChanges": 500,
+    "exportRange": 1000,
+    "lineage": 50,
+    "fixtureSeed": "phase7-v1",
+    "samples": "baseline",
+    "caseIds": null,
+    "outputDirectory": "D:\\Work\\amber-sku-generator\\docs\\performance\\phase7-baseline",
+    "revision": "215ac09d34065f48598bff6a4f2d0d9a4d8a12bc",
+    "cpuModel": "AMD Ryzen 9 9950X3D 16-Core Processor          ",
+    "cpuCount": 32,
+    "ramBytes": 66155474944,
+    "run": 1
+  },
+  "cardinalities": {
+    "categories": 25,
+    "products": 1105,
+    "corrections": 1069,
+    "correction_requests": 135,
+    "drafts": 0,
+    "repricing_items": 451,
+    "export_snapshots": 140
+  },
+  "results": [
+    {
+      "id": "product_config",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 46.273,
+        "p95": 48.486
+      },
+      "databaseMs": {
+        "p50": 33.943,
+        "p95": 35.634
+      },
+      "maxQueryMs": {
+        "p50": 15.639,
+        "p95": 16.25
+      },
+      "queryCount": {
+        "min": 31,
+        "p50": 31,
+        "max": 31
+      },
+      "responseBytes": {
+        "p50": 12135,
+        "p95": 12135
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 808016,
+        "p95": 891384
+      },
+      "peakHeapBytes": 34526616,
+      "peakRssBytes": 104108032,
+      "eventLoopDelayMs": {
+        "p50": 11.731,
+        "p95": 12.857
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "42b860e35bff3401",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 1573.873,
+          "maxDurationMs": 16.451
+        },
+        {
+          "fingerprint": "99cf317af0017f0f",
+          "command": "SELECT",
+          "count": 2500,
+          "durationMs": 1379.18,
+          "maxDurationMs": 1.339
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 144.231,
+          "maxDurationMs": 1.694
+        },
+        {
+          "fingerprint": "55b5a53b54abcf8a",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 101.211,
+          "maxDurationMs": 1.528
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 73.909,
+          "maxDurationMs": 1.157
+        },
+        {
+          "fingerprint": "37ed5a59fa2e48d8",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 73.525,
+          "maxDurationMs": 1.191
+        },
+        {
+          "fingerprint": "ee6c99185481e5fe",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 61.528,
+          "maxDurationMs": 0.88
+        }
+      ]
+    },
+    {
+      "id": "product_config",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 45.779,
+        "p95": 51.218
+      },
+      "databaseMs": {
+        "p50": 38.702,
+        "p95": 41.371
+      },
+      "maxQueryMs": {
+        "p50": 17.937,
+        "p95": 18.886
+      },
+      "queryCount": {
+        "min": 31,
+        "p50": 31,
+        "max": 31
+      },
+      "responseBytes": {
+        "p50": 12135,
+        "p95": 12135
+      },
+      "cpuMs": {
+        "p50": 15,
+        "p95": 32
+      },
+      "heapDeltaBytes": {
+        "p50": 2823704,
+        "p95": 3035992
+      },
+      "peakHeapBytes": 78058832,
+      "peakRssBytes": 199524352,
+      "eventLoopDelayMs": {
+        "p50": 11.686,
+        "p95": 12.074
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "42b860e35bff3401",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 7205.155,
+          "maxDurationMs": 20.699
+        },
+        {
+          "fingerprint": "99cf317af0017f0f",
+          "command": "SELECT",
+          "count": 10000,
+          "durationMs": 6458.698,
+          "maxDurationMs": 4.24
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 615.895,
+          "maxDurationMs": 2.084
+        },
+        {
+          "fingerprint": "55b5a53b54abcf8a",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 390.135,
+          "maxDurationMs": 1.497
+        },
+        {
+          "fingerprint": "37ed5a59fa2e48d8",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 313.534,
+          "maxDurationMs": 3.483
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 305.311,
+          "maxDurationMs": 1.45
+        },
+        {
+          "fingerprint": "ee6c99185481e5fe",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 258.117,
+          "maxDurationMs": 3.362
+        }
+      ]
+    },
+    {
+      "id": "product_preview",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 15.408,
+        "p95": 16.197
+      },
+      "databaseMs": {
+        "p50": 7.31,
+        "p95": 7.904
+      },
+      "maxQueryMs": {
+        "p50": 1.374,
+        "p95": 1.528
+      },
+      "queryCount": {
+        "min": 9,
+        "p50": 9,
+        "max": 9
+      },
+      "responseBytes": {
+        "p50": 1223,
+        "p95": 1224
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 403672,
+        "p95": 434944
+      },
+      "peakHeapBytes": 63798648,
+      "peakRssBytes": 208420864,
+      "eventLoopDelayMs": {
+        "p50": 0,
+        "p95": 9.777
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 138.603,
+          "maxDurationMs": 2.507
+        },
+        {
+          "fingerprint": "4a2d95a2bc2260f0",
+          "command": "WITH",
+          "count": 100,
+          "durationMs": 131.769,
+          "maxDurationMs": 1.788
+        },
+        {
+          "fingerprint": "3810c9967d7e897e",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 79.322,
+          "maxDurationMs": 0.896
+        },
+        {
+          "fingerprint": "37ed5a59fa2e48d8",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 71.597,
+          "maxDurationMs": 0.984
+        },
+        {
+          "fingerprint": "a53d4ee8154de532",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 70.8,
+          "maxDurationMs": 0.983
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 66.832,
+          "maxDurationMs": 1.056
+        },
+        {
+          "fingerprint": "3175ab35df1a1a10",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 58.803,
+          "maxDurationMs": 0.914
+        },
+        {
+          "fingerprint": "ee6c99185481e5fe",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 58.09,
+          "maxDurationMs": 0.758
+        },
+        {
+          "fingerprint": "99cf317af0017f0f",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 56.988,
+          "maxDurationMs": 0.74
+        }
+      ]
+    },
+    {
+      "id": "product_preview",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 15.04,
+        "p95": 16.354
+      },
+      "databaseMs": {
+        "p50": 8.169,
+        "p95": 9.049
+      },
+      "maxQueryMs": {
+        "p50": 1.631,
+        "p95": 2.136
+      },
+      "queryCount": {
+        "min": 9,
+        "p50": 9,
+        "max": 9
+      },
+      "responseBytes": {
+        "p50": 1224,
+        "p95": 1224
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 1502912,
+        "p95": 1608408
+      },
+      "peakHeapBytes": 83492032,
+      "peakRssBytes": 212729856,
+      "eventLoopDelayMs": {
+        "p50": 0,
+        "p95": 10.031
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "4a2d95a2bc2260f0",
+          "command": "WITH",
+          "count": 400,
+          "durationMs": 634.419,
+          "maxDurationMs": 2.583
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 601.014,
+          "maxDurationMs": 1.896
+        },
+        {
+          "fingerprint": "a53d4ee8154de532",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 360.194,
+          "maxDurationMs": 3.855
+        },
+        {
+          "fingerprint": "3810c9967d7e897e",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 353.466,
+          "maxDurationMs": 1.498
+        },
+        {
+          "fingerprint": "37ed5a59fa2e48d8",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 310.036,
+          "maxDurationMs": 1.054
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 276.972,
+          "maxDurationMs": 3.158
+        },
+        {
+          "fingerprint": "ee6c99185481e5fe",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 263.061,
+          "maxDurationMs": 0.95
+        },
+        {
+          "fingerprint": "99cf317af0017f0f",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 254.354,
+          "maxDurationMs": 1.905
+        },
+        {
+          "fingerprint": "3175ab35df1a1a10",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 246.543,
+          "maxDurationMs": 3.425
+        }
+      ]
+    },
+    {
+      "id": "product_save",
+      "kind": "write",
+      "concurrency": 1,
+      "sampleCount": 30,
+      "requestMs": {
+        "p50": 19.399,
+        "p95": 20.558
+      },
+      "databaseMs": {
+        "p50": 10.72,
+        "p95": 11.756
+      },
+      "maxQueryMs": {
+        "p50": 1.283,
+        "p95": 1.558
+      },
+      "queryCount": {
+        "min": 15,
+        "p50": 15,
+        "max": 15
+      },
+      "responseBytes": {
+        "p50": 46,
+        "p95": 46
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 442048,
+        "p95": 471072
+      },
+      "peakHeapBytes": 87714864,
+      "peakRssBytes": 215302144,
+      "eventLoopDelayMs": {
+        "p50": 10.486,
+        "p95": 10.74
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 39.243,
+          "maxDurationMs": 1.657
+        },
+        {
+          "fingerprint": "4a2d95a2bc2260f0",
+          "command": "WITH",
+          "count": 30,
+          "durationMs": 37.407,
+          "maxDurationMs": 1.515
+        },
+        {
+          "fingerprint": "4c93380abebe4682",
+          "command": "SELECT",
+          "count": 60,
+          "durationMs": 34.36,
+          "maxDurationMs": 0.78
+        },
+        {
+          "fingerprint": "3810c9967d7e897e",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 23.188,
+          "maxDurationMs": 1.15
+        },
+        {
+          "fingerprint": "1d0c448e39dfc70f",
+          "command": "INSERT",
+          "count": 30,
+          "durationMs": 22.93,
+          "maxDurationMs": 0.86
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 21.821,
+          "maxDurationMs": 1.072
+        },
+        {
+          "fingerprint": "37ed5a59fa2e48d8",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 21.012,
+          "maxDurationMs": 0.772
+        },
+        {
+          "fingerprint": "a53d4ee8154de532",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 20.358,
+          "maxDurationMs": 0.796
+        },
+        {
+          "fingerprint": "7c555434c445a453",
+          "command": "INSERT",
+          "count": 30,
+          "durationMs": 20.267,
+          "maxDurationMs": 0.785
+        },
+        {
+          "fingerprint": "84f25fb8acc544ba",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 17.958,
+          "maxDurationMs": 0.66
+        },
+        {
+          "fingerprint": "87fd48805697cf84",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 17.599,
+          "maxDurationMs": 0.684
+        },
+        {
+          "fingerprint": "3175ab35df1a1a10",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 17.489,
+          "maxDurationMs": 0.656
+        }
+      ]
+    },
+    {
+      "id": "product_decode",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 14.771,
+        "p95": 15.297
+      },
+      "databaseMs": {
+        "p50": 6.312,
+        "p95": 6.72
+      },
+      "maxQueryMs": {
+        "p50": 1.287,
+        "p95": 1.415
+      },
+      "queryCount": {
+        "min": 8,
+        "p50": 8,
+        "max": 8
+      },
+      "responseBytes": {
+        "p50": 2123,
+        "p95": 2123
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 15
+      },
+      "heapDeltaBytes": {
+        "p50": 397568,
+        "p95": 400480
+      },
+      "peakHeapBytes": 91052696,
+      "peakRssBytes": 219971584,
+      "eventLoopDelayMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 128.738,
+          "maxDurationMs": 1.795
+        },
+        {
+          "fingerprint": "4a2d95a2bc2260f0",
+          "command": "WITH",
+          "count": 100,
+          "durationMs": 125.19,
+          "maxDurationMs": 1.889
+        },
+        {
+          "fingerprint": "37ed5a59fa2e48d8",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 68.439,
+          "maxDurationMs": 0.862
+        },
+        {
+          "fingerprint": "ea06d31f8139ab32",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 67.239,
+          "maxDurationMs": 0.858
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 66.674,
+          "maxDurationMs": 1.094
+        },
+        {
+          "fingerprint": "e78c9da196e9b597",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 61.891,
+          "maxDurationMs": 0.834
+        },
+        {
+          "fingerprint": "ee6c99185481e5fe",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 59.534,
+          "maxDurationMs": 0.749
+        },
+        {
+          "fingerprint": "9bdbb766c2964788",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 56.306,
+          "maxDurationMs": 0.668
+        }
+      ]
+    },
+    {
+      "id": "product_decode",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 14.348,
+        "p95": 20.47
+      },
+      "databaseMs": {
+        "p50": 7.394,
+        "p95": 8.779
+      },
+      "maxQueryMs": {
+        "p50": 1.786,
+        "p95": 2.645
+      },
+      "queryCount": {
+        "min": 8,
+        "p50": 8,
+        "max": 8
+      },
+      "responseBytes": {
+        "p50": 2123,
+        "p95": 2123
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 1511576,
+        "p95": 1606944
+      },
+      "peakHeapBytes": 118521672,
+      "peakRssBytes": 253988864,
+      "eventLoopDelayMs": {
+        "p50": 0,
+        "p95": 10.277
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "4a2d95a2bc2260f0",
+          "command": "WITH",
+          "count": 400,
+          "durationMs": 707.964,
+          "maxDurationMs": 2.986
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 593.945,
+          "maxDurationMs": 2.568
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 330.104,
+          "maxDurationMs": 4.933
+        },
+        {
+          "fingerprint": "37ed5a59fa2e48d8",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 318.687,
+          "maxDurationMs": 1.948
+        },
+        {
+          "fingerprint": "ea06d31f8139ab32",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 295.487,
+          "maxDurationMs": 1.98
+        },
+        {
+          "fingerprint": "e78c9da196e9b597",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 268.291,
+          "maxDurationMs": 5.055
+        },
+        {
+          "fingerprint": "9bdbb766c2964788",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 260.6,
+          "maxDurationMs": 1.857
+        },
+        {
+          "fingerprint": "ee6c99185481e5fe",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 257.078,
+          "maxDurationMs": 1.314
+        }
+      ]
+    },
+    {
+      "id": "recount_preview",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 30.153,
+        "p95": 32.223
+      },
+      "databaseMs": {
+        "p50": 13.562,
+        "p95": 15.027
+      },
+      "maxQueryMs": {
+        "p50": 1.368,
+        "p95": 1.694
+      },
+      "queryCount": {
+        "min": 18,
+        "p50": 18,
+        "max": 18
+      },
+      "responseBytes": {
+        "p50": 2666,
+        "p95": 2666
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 659864,
+        "p95": 672016
+      },
+      "peakHeapBytes": 73771592,
+      "peakRssBytes": 256892928,
+      "eventLoopDelayMs": {
+        "p50": 9.785,
+        "p95": 10.31
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "4a2d95a2bc2260f0",
+          "command": "WITH",
+          "count": 200,
+          "durationMs": 258.569,
+          "maxDurationMs": 4.605
+        },
+        {
+          "fingerprint": "37ed5a59fa2e48d8",
+          "command": "SELECT",
+          "count": 300,
+          "durationMs": 215.342,
+          "maxDurationMs": 1.148
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 137.69,
+          "maxDurationMs": 1.931
+        },
+        {
+          "fingerprint": "ee6c99185481e5fe",
+          "command": "SELECT",
+          "count": 200,
+          "durationMs": 118.852,
+          "maxDurationMs": 0.813
+        },
+        {
+          "fingerprint": "3810c9967d7e897e",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 77.834,
+          "maxDurationMs": 1.11
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 74.238,
+          "maxDurationMs": 1.183
+        },
+        {
+          "fingerprint": "ea06d31f8139ab32",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 70.563,
+          "maxDurationMs": 1.128
+        },
+        {
+          "fingerprint": "a53d4ee8154de532",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 64.107,
+          "maxDurationMs": 0.9
+        },
+        {
+          "fingerprint": "e78c9da196e9b597",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 63.495,
+          "maxDurationMs": 0.872
+        },
+        {
+          "fingerprint": "99cf317af0017f0f",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 62.47,
+          "maxDurationMs": 2.231
+        },
+        {
+          "fingerprint": "9bdbb766c2964788",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 60.902,
+          "maxDurationMs": 3.544
+        },
+        {
+          "fingerprint": "1ac7cb62ba800856",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 58.085,
+          "maxDurationMs": 0.702
+        }
+      ]
+    },
+    {
+      "id": "recount_preview",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 29.306,
+        "p95": 31.488
+      },
+      "databaseMs": {
+        "p50": 14.656,
+        "p95": 17.307
+      },
+      "maxQueryMs": {
+        "p50": 1.659,
+        "p95": 2.516
+      },
+      "queryCount": {
+        "min": 18,
+        "p50": 18,
+        "max": 18
+      },
+      "responseBytes": {
+        "p50": 2666,
+        "p95": 2666
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 2541992,
+        "p95": 2657464
+      },
+      "peakHeapBytes": 95354824,
+      "peakRssBytes": 258424832,
+      "eventLoopDelayMs": {
+        "p50": 9.302,
+        "p95": 10.281
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "4a2d95a2bc2260f0",
+          "command": "WITH",
+          "count": 800,
+          "durationMs": 1187.548,
+          "maxDurationMs": 4.799
+        },
+        {
+          "fingerprint": "37ed5a59fa2e48d8",
+          "command": "SELECT",
+          "count": 1200,
+          "durationMs": 901.06,
+          "maxDurationMs": 5.156
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 591.213,
+          "maxDurationMs": 2.016
+        },
+        {
+          "fingerprint": "ee6c99185481e5fe",
+          "command": "SELECT",
+          "count": 800,
+          "durationMs": 484.074,
+          "maxDurationMs": 2.691
+        },
+        {
+          "fingerprint": "a53d4ee8154de532",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 322.59,
+          "maxDurationMs": 4.327
+        },
+        {
+          "fingerprint": "3810c9967d7e897e",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 320.204,
+          "maxDurationMs": 2.364
+        },
+        {
+          "fingerprint": "1ac7cb62ba800856",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 312.647,
+          "maxDurationMs": 3.813
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 291.649,
+          "maxDurationMs": 1.506
+        },
+        {
+          "fingerprint": "ea06d31f8139ab32",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 291.199,
+          "maxDurationMs": 1.049
+        },
+        {
+          "fingerprint": "e78c9da196e9b597",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 257.534,
+          "maxDurationMs": 1.428
+        },
+        {
+          "fingerprint": "99cf317af0017f0f",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 251.215,
+          "maxDurationMs": 1.099
+        },
+        {
+          "fingerprint": "9bdbb766c2964788",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 248.879,
+          "maxDurationMs": 1.671
+        }
+      ]
+    },
+    {
+      "id": "recount_direct_apply",
+      "kind": "write",
+      "concurrency": 1,
+      "sampleCount": 30,
+      "requestMs": {
+        "p50": 30.234,
+        "p95": 34.274
+      },
+      "databaseMs": {
+        "p50": 24.412,
+        "p95": 25.927
+      },
+      "maxQueryMs": {
+        "p50": 1.265,
+        "p95": 1.441
+      },
+      "queryCount": {
+        "min": 36,
+        "p50": 36,
+        "max": 36
+      },
+      "responseBytes": {
+        "p50": 2708,
+        "p95": 2708
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 31
+      },
+      "heapDeltaBytes": {
+        "p50": 973792,
+        "p95": 979864
+      },
+      "peakHeapBytes": 99158864,
+      "peakRssBytes": 258260992,
+      "eventLoopDelayMs": {
+        "p50": 9.814,
+        "p95": 10.166
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "4a2d95a2bc2260f0",
+          "command": "WITH",
+          "count": 90,
+          "durationMs": 107.633,
+          "maxDurationMs": 1.437
+        },
+        {
+          "fingerprint": "37ed5a59fa2e48d8",
+          "command": "SELECT",
+          "count": 120,
+          "durationMs": 79.368,
+          "maxDurationMs": 0.902
+        },
+        {
+          "fingerprint": "3810c9967d7e897e",
+          "command": "SELECT",
+          "count": 60,
+          "durationMs": 42.938,
+          "maxDurationMs": 0.836
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 38.674,
+          "maxDurationMs": 1.986
+        },
+        {
+          "fingerprint": "a53d4ee8154de532",
+          "command": "SELECT",
+          "count": 60,
+          "durationMs": 37.275,
+          "maxDurationMs": 1.326
+        },
+        {
+          "fingerprint": "ee6c99185481e5fe",
+          "command": "SELECT",
+          "count": 60,
+          "durationMs": 35.658,
+          "maxDurationMs": 1.091
+        },
+        {
+          "fingerprint": "3175ab35df1a1a10",
+          "command": "SELECT",
+          "count": 60,
+          "durationMs": 34.344,
+          "maxDurationMs": 0.757
+        },
+        {
+          "fingerprint": "84f25fb8acc544ba",
+          "command": "SELECT",
+          "count": 60,
+          "durationMs": 34.159,
+          "maxDurationMs": 0.716
+        },
+        {
+          "fingerprint": "1ac7cb62ba800856",
+          "command": "SELECT",
+          "count": 60,
+          "durationMs": 33.609,
+          "maxDurationMs": 0.76
+        },
+        {
+          "fingerprint": "4c93380abebe4682",
+          "command": "SELECT",
+          "count": 60,
+          "durationMs": 33.572,
+          "maxDurationMs": 0.864
+        },
+        {
+          "fingerprint": "b7ae868cd5cccc59",
+          "command": "INSERT",
+          "count": 30,
+          "durationMs": 23.58,
+          "maxDurationMs": 1.182
+        },
+        {
+          "fingerprint": "30350ffb2834e9c2",
+          "command": "INSERT",
+          "count": 30,
+          "durationMs": 22.677,
+          "maxDurationMs": 0.849
+        }
+      ]
+    },
+    {
+      "id": "correction_completion",
+      "kind": "write",
+      "concurrency": 1,
+      "sampleCount": 30,
+      "requestMs": {
+        "p50": 100.669,
+        "p95": 103.718
+      },
+      "databaseMs": {
+        "p50": 85.78,
+        "p95": 88.759
+      },
+      "maxQueryMs": {
+        "p50": 1.398,
+        "p95": 1.812
+      },
+      "queryCount": {
+        "min": 107,
+        "p50": 107,
+        "max": 107
+      },
+      "responseBytes": {
+        "p50": 9322,
+        "p95": 9322
+      },
+      "cpuMs": {
+        "p50": 16,
+        "p95": 31
+      },
+      "heapDeltaBytes": {
+        "p50": 3881928,
+        "p95": 3899224
+      },
+      "peakHeapBytes": 105871624,
+      "peakRssBytes": 255746048,
+      "eventLoopDelayMs": {
+        "p50": 10.368,
+        "p95": 11.004
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "c40f6529037e9d93",
+          "command": "WITH",
+          "count": 750,
+          "durationMs": 930.018,
+          "maxDurationMs": 1.837
+        },
+        {
+          "fingerprint": "fc709e0b2455c7e2",
+          "command": "SELECT",
+          "count": 750,
+          "durationMs": 463.479,
+          "maxDurationMs": 0.993
+        },
+        {
+          "fingerprint": "4a2d95a2bc2260f0",
+          "command": "WITH",
+          "count": 150,
+          "durationMs": 182.761,
+          "maxDurationMs": 1.658
+        },
+        {
+          "fingerprint": "37ed5a59fa2e48d8",
+          "command": "SELECT",
+          "count": 210,
+          "durationMs": 138.148,
+          "maxDurationMs": 0.849
+        },
+        {
+          "fingerprint": "ee6c99185481e5fe",
+          "command": "SELECT",
+          "count": 120,
+          "durationMs": 69.161,
+          "maxDurationMs": 0.705
+        },
+        {
+          "fingerprint": "3810c9967d7e897e",
+          "command": "SELECT",
+          "count": 90,
+          "durationMs": 65.823,
+          "maxDurationMs": 0.903
+        },
+        {
+          "fingerprint": "a53d4ee8154de532",
+          "command": "SELECT",
+          "count": 90,
+          "durationMs": 56.309,
+          "maxDurationMs": 1.015
+        },
+        {
+          "fingerprint": "1ac7cb62ba800856",
+          "command": "SELECT",
+          "count": 90,
+          "durationMs": 52.481,
+          "maxDurationMs": 1.606
+        },
+        {
+          "fingerprint": "84f25fb8acc544ba",
+          "command": "SELECT",
+          "count": 90,
+          "durationMs": 50.656,
+          "maxDurationMs": 0.72
+        },
+        {
+          "fingerprint": "3175ab35df1a1a10",
+          "command": "SELECT",
+          "count": 90,
+          "durationMs": 49.775,
+          "maxDurationMs": 0.726
+        },
+        {
+          "fingerprint": "99600078980c3728",
+          "command": "SELECT",
+          "count": 60,
+          "durationMs": 46.417,
+          "maxDurationMs": 1.012
+        },
+        {
+          "fingerprint": "7c555434c445a453",
+          "command": "INSERT",
+          "count": 60,
+          "durationMs": 40.027,
+          "maxDurationMs": 0.886
+        }
+      ]
+    },
+    {
+      "id": "catalog_read",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 30.786,
+        "p95": 32.028
+      },
+      "databaseMs": {
+        "p50": 16.876,
+        "p95": 18.212
+      },
+      "maxQueryMs": {
+        "p50": 13.892,
+        "p95": 14.665
+      },
+      "queryCount": {
+        "min": 4,
+        "p50": 4,
+        "max": 4
+      },
+      "responseBytes": {
+        "p50": 12070,
+        "p95": 12070
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 340992,
+        "p95": 362256
+      },
+      "peakHeapBytes": 108618976,
+      "peakRssBytes": 255856640,
+      "eventLoopDelayMs": {
+        "p50": 15.405,
+        "p95": 15.888
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "42b860e35bff3401",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 1401.452,
+          "maxDurationMs": 15.066
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 131.504,
+          "maxDurationMs": 1.794
+        },
+        {
+          "fingerprint": "55b5a53b54abcf8a",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 92.868,
+          "maxDurationMs": 1.346
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 74.936,
+          "maxDurationMs": 1.251
+        }
+      ]
+    },
+    {
+      "id": "catalog_read",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 30.519,
+        "p95": 33.014
+      },
+      "databaseMs": {
+        "p50": 19.799,
+        "p95": 21.798
+      },
+      "maxQueryMs": {
+        "p50": 16.346,
+        "p95": 17.368
+      },
+      "queryCount": {
+        "min": 4,
+        "p50": 4,
+        "max": 4
+      },
+      "responseBytes": {
+        "p50": 12070,
+        "p95": 12070
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 1315296,
+        "p95": 1411392
+      },
+      "peakHeapBytes": 61813320,
+      "peakRssBytes": 256393216,
+      "eventLoopDelayMs": {
+        "p50": 15.34,
+        "p95": 16.355
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "42b860e35bff3401",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 6596.702,
+          "maxDurationMs": 26.576
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 604.59,
+          "maxDurationMs": 3.599
+        },
+        {
+          "fingerprint": "55b5a53b54abcf8a",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 485.734,
+          "maxDurationMs": 2.309
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 313.802,
+          "maxDurationMs": 1.746
+        }
+      ]
+    },
+    {
+      "id": "schema_read",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 15.403,
+        "p95": 16.121
+      },
+      "databaseMs": {
+        "p50": 5.458,
+        "p95": 6.006
+      },
+      "maxQueryMs": {
+        "p50": 1.383,
+        "p95": 1.539
+      },
+      "queryCount": {
+        "min": 7,
+        "p50": 7,
+        "max": 7
+      },
+      "responseBytes": {
+        "p50": 264,
+        "p95": 264
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 288112,
+        "p95": 288960
+      },
+      "peakHeapBytes": 60667544,
+      "peakRssBytes": 252002304,
+      "eventLoopDelayMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 139.904,
+          "maxDurationMs": 1.864
+        },
+        {
+          "fingerprint": "60ad91a6a200367d",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 82.711,
+          "maxDurationMs": 1.065
+        },
+        {
+          "fingerprint": "37ed5a59fa2e48d8",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 73.384,
+          "maxDurationMs": 0.942
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 70.895,
+          "maxDurationMs": 1.074
+        },
+        {
+          "fingerprint": "055b1e6fa87a7cb8",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 60.997,
+          "maxDurationMs": 0.877
+        },
+        {
+          "fingerprint": "99cf317af0017f0f",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 60.577,
+          "maxDurationMs": 0.88
+        },
+        {
+          "fingerprint": "ee6c99185481e5fe",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 59.653,
+          "maxDurationMs": 0.74
+        }
+      ]
+    },
+    {
+      "id": "schema_read",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 15.167,
+        "p95": 17.65
+      },
+      "databaseMs": {
+        "p50": 5.954,
+        "p95": 7.577
+      },
+      "maxQueryMs": {
+        "p50": 1.513,
+        "p95": 2.065
+      },
+      "queryCount": {
+        "min": 7,
+        "p50": 7,
+        "max": 7
+      },
+      "responseBytes": {
+        "p50": 264,
+        "p95": 264
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 1095168,
+        "p95": 1150856
+      },
+      "peakHeapBytes": 74182512,
+      "peakRssBytes": 252530688,
+      "eventLoopDelayMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 622.468,
+          "maxDurationMs": 3.152
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 348.504,
+          "maxDurationMs": 2.957
+        },
+        {
+          "fingerprint": "60ad91a6a200367d",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 343.263,
+          "maxDurationMs": 1.362
+        },
+        {
+          "fingerprint": "37ed5a59fa2e48d8",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 305.667,
+          "maxDurationMs": 1.213
+        },
+        {
+          "fingerprint": "055b1e6fa87a7cb8",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 301.544,
+          "maxDurationMs": 1.47
+        },
+        {
+          "fingerprint": "99cf317af0017f0f",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 264.897,
+          "maxDurationMs": 1.191
+        },
+        {
+          "fingerprint": "ee6c99185481e5fe",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 261.229,
+          "maxDurationMs": 1.073
+        }
+      ]
+    },
+    {
+      "id": "pricing_read",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 15.365,
+        "p95": 16.068
+      },
+      "databaseMs": {
+        "p50": 3.528,
+        "p95": 4.219
+      },
+      "maxQueryMs": {
+        "p50": 1.399,
+        "p95": 1.614
+      },
+      "queryCount": {
+        "min": 3,
+        "p50": 3,
+        "max": 3
+      },
+      "responseBytes": {
+        "p50": 6591,
+        "p95": 6591
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 254136,
+        "p95": 254168
+      },
+      "peakHeapBytes": 64780400,
+      "peakRssBytes": 253349888,
+      "eventLoopDelayMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 139.327,
+          "maxDurationMs": 1.997
+        },
+        {
+          "fingerprint": "fbd5e277e43cd5e3",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 138.201,
+          "maxDurationMs": 1.74
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 83.244,
+          "maxDurationMs": 1.488
+        }
+      ]
+    },
+    {
+      "id": "pricing_read",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 15.132,
+        "p95": 16.286
+      },
+      "databaseMs": {
+        "p50": 3.733,
+        "p95": 4.633
+      },
+      "maxQueryMs": {
+        "p50": 1.537,
+        "p95": 1.879
+      },
+      "queryCount": {
+        "min": 3,
+        "p50": 3,
+        "max": 3
+      },
+      "responseBytes": {
+        "p50": 6591,
+        "p95": 6591
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 975680,
+        "p95": 1029864
+      },
+      "peakHeapBytes": 83640624,
+      "peakRssBytes": 257028096,
+      "eventLoopDelayMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "fbd5e277e43cd5e3",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 615.193,
+          "maxDurationMs": 5.191
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 577.41,
+          "maxDurationMs": 2.171
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 330.069,
+          "maxDurationMs": 1.595
+        }
+      ]
+    },
+    {
+      "id": "correction_queue",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 14.914,
+        "p95": 18.825
+      },
+      "databaseMs": {
+        "p50": 6.385,
+        "p95": 8.153
+      },
+      "maxQueryMs": {
+        "p50": 3.708,
+        "p95": 4.088
+      },
+      "queryCount": {
+        "min": 4,
+        "p50": 4,
+        "max": 4
+      },
+      "responseBytes": {
+        "p50": 228935,
+        "p95": 228935
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 2203040,
+        "p95": 2213736
+      },
+      "peakHeapBytes": 114000736,
+      "peakRssBytes": 311156736,
+      "eventLoopDelayMs": {
+        "p50": 0,
+        "p95": 9.31
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "a2f08c042bb060a0",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 374.393,
+          "maxDurationMs": 6.024
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 137.742,
+          "maxDurationMs": 3.398
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 72.51,
+          "maxDurationMs": 1.18
+        },
+        {
+          "fingerprint": "035f0b55a5e176b9",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 69.725,
+          "maxDurationMs": 2.132
+        }
+      ]
+    },
+    {
+      "id": "correction_queue",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 27.52,
+        "p95": 31.184
+      },
+      "databaseMs": {
+        "p50": 10.325,
+        "p95": 15.18
+      },
+      "maxQueryMs": {
+        "p50": 6.676,
+        "p95": 9.547
+      },
+      "queryCount": {
+        "min": 4,
+        "p50": 4,
+        "max": 4
+      },
+      "responseBytes": {
+        "p50": 228935,
+        "p95": 228935
+      },
+      "cpuMs": {
+        "p50": 16,
+        "p95": 32
+      },
+      "heapDeltaBytes": {
+        "p50": 8529896,
+        "p95": 9626696
+      },
+      "peakHeapBytes": 100744800,
+      "peakRssBytes": 320536576,
+      "eventLoopDelayMs": {
+        "p50": 11.293,
+        "p95": 14.184
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "a2f08c042bb060a0",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 2647.866,
+          "maxDurationMs": 14.222
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 673.314,
+          "maxDurationMs": 6.314
+        },
+        {
+          "fingerprint": "035f0b55a5e176b9",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 477.163,
+          "maxDurationMs": 7.196
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 405.551,
+          "maxDurationMs": 1.659
+        }
+      ]
+    },
+    {
+      "id": "correction_history_page",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 30.609,
+        "p95": 31.483
+      },
+      "databaseMs": {
+        "p50": 24.483,
+        "p95": 25.862
+      },
+      "maxQueryMs": {
+        "p50": 13.99,
+        "p95": 14.582
+      },
+      "queryCount": {
+        "min": 7,
+        "p50": 7,
+        "max": 7
+      },
+      "responseBytes": {
+        "p50": 107328,
+        "p95": 107328
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 2251128,
+        "p95": 2257000
+      },
+      "peakHeapBytes": 86973512,
+      "peakRssBytes": 297172992,
+      "eventLoopDelayMs": {
+        "p50": 15.405,
+        "p95": 15.471
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "42b860e35bff3401",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 1408.516,
+          "maxDurationMs": 15.25
+        },
+        {
+          "fingerprint": "250e44216dcf927c",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 497.012,
+          "maxDurationMs": 6.085
+        },
+        {
+          "fingerprint": "a207201a1beea3a2",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 149.061,
+          "maxDurationMs": 2.297
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 137.794,
+          "maxDurationMs": 2.588
+        },
+        {
+          "fingerprint": "1a43276b88160eef",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 103.938,
+          "maxDurationMs": 1.69
+        },
+        {
+          "fingerprint": "55b5a53b54abcf8a",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 90.594,
+          "maxDurationMs": 1.262
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 78.647,
+          "maxDurationMs": 1.284
+        }
+      ]
+    },
+    {
+      "id": "correction_history_page",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 29.495,
+        "p95": 38.94
+      },
+      "databaseMs": {
+        "p50": 27.092,
+        "p95": 32.454
+      },
+      "maxQueryMs": {
+        "p50": 15.585,
+        "p95": 19.059
+      },
+      "queryCount": {
+        "min": 3,
+        "p50": 7,
+        "max": 7
+      },
+      "responseBytes": {
+        "p50": 107328,
+        "p95": 107328
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 32
+      },
+      "heapDeltaBytes": {
+        "p50": 7571176,
+        "p95": 8814256
+      },
+      "peakHeapBytes": 96000600,
+      "peakRssBytes": 300662784,
+      "eventLoopDelayMs": {
+        "p50": 10.539,
+        "p95": 14.897
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "42b860e35bff3401",
+          "command": "SELECT",
+          "count": 201,
+          "durationMs": 3624.047,
+          "maxDurationMs": 26.07
+        },
+        {
+          "fingerprint": "250e44216dcf927c",
+          "command": "SELECT",
+          "count": 300,
+          "durationMs": 1825.851,
+          "maxDurationMs": 8.537
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 610.269,
+          "maxDurationMs": 2.123
+        },
+        {
+          "fingerprint": "55b5a53b54abcf8a",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 492.012,
+          "maxDurationMs": 2.622
+        },
+        {
+          "fingerprint": "a207201a1beea3a2",
+          "command": "SELECT",
+          "count": 204,
+          "durationMs": 347.993,
+          "maxDurationMs": 3.146
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 326.109,
+          "maxDurationMs": 1.7
+        },
+        {
+          "fingerprint": "1a43276b88160eef",
+          "command": "SELECT",
+          "count": 286,
+          "durationMs": 292.461,
+          "maxDurationMs": 1.667
+        }
+      ]
+    },
+    {
+      "id": "correction_history_csv",
+      "kind": "write",
+      "concurrency": 1,
+      "sampleCount": 30,
+      "requestMs": {
+        "p50": 30.583,
+        "p95": 33.157
+      },
+      "databaseMs": {
+        "p50": 26.769,
+        "p95": 27.933
+      },
+      "maxQueryMs": {
+        "p50": 14.125,
+        "p95": 14.879
+      },
+      "queryCount": {
+        "min": 7,
+        "p50": 7,
+        "max": 7
+      },
+      "responseBytes": {
+        "p50": 132403,
+        "p95": 132403
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 9166152,
+        "p95": 9183024
+      },
+      "peakHeapBytes": 101792432,
+      "peakRssBytes": 292536320,
+      "eventLoopDelayMs": {
+        "p50": 10.736,
+        "p95": 15.446
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "42b860e35bff3401",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 428.46,
+          "maxDurationMs": 14.972
+        },
+        {
+          "fingerprint": "0a376bf5f8c65b3c",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 208.484,
+          "maxDurationMs": 7.882
+        },
+        {
+          "fingerprint": "a207201a1beea3a2",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 45.27,
+          "maxDurationMs": 1.979
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 40.353,
+          "maxDurationMs": 1.433
+        },
+        {
+          "fingerprint": "1a43276b88160eef",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 31.317,
+          "maxDurationMs": 1.309
+        },
+        {
+          "fingerprint": "55b5a53b54abcf8a",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 26.892,
+          "maxDurationMs": 0.979
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 23.32,
+          "maxDurationMs": 1.032
+        }
+      ]
+    },
+    {
+      "id": "product_timeline",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 74.99,
+        "p95": 81.672
+      },
+      "databaseMs": {
+        "p50": 63.224,
+        "p95": 67.252
+      },
+      "maxQueryMs": {
+        "p50": 42.459,
+        "p95": 45.499
+      },
+      "queryCount": {
+        "min": 9,
+        "p50": 9,
+        "max": 9
+      },
+      "responseBytes": {
+        "p50": 958381,
+        "p95": 958381
+      },
+      "cpuMs": {
+        "p50": 31,
+        "p95": 93
+      },
+      "heapDeltaBytes": {
+        "p50": 18891008,
+        "p95": 19034392
+      },
+      "peakHeapBytes": 135259776,
+      "peakRssBytes": 330387456,
+      "eventLoopDelayMs": {
+        "p50": 11.269,
+        "p95": 13.33
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "7fb822237c918c46",
+          "command": "WITH",
+          "count": 100,
+          "durationMs": 4299.088,
+          "maxDurationMs": 55.421
+        },
+        {
+          "fingerprint": "c0f7180190224588",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 719.004,
+          "maxDurationMs": 9.482
+        },
+        {
+          "fingerprint": "5e5ad256007ff180",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 608.323,
+          "maxDurationMs": 7.912
+        },
+        {
+          "fingerprint": "3247ef6dd7f0c6fe",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 215.169,
+          "maxDurationMs": 3.02
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 159.407,
+          "maxDurationMs": 3.942
+        },
+        {
+          "fingerprint": "f41638f47ee57c02",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 133.609,
+          "maxDurationMs": 2.225
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 104.21,
+          "maxDurationMs": 1.75
+        },
+        {
+          "fingerprint": "cfba6b8d0a31895e",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 74.41,
+          "maxDurationMs": 0.944
+        },
+        {
+          "fingerprint": "70de484684621f76",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 73.297,
+          "maxDurationMs": 2.672
+        }
+      ]
+    },
+    {
+      "id": "product_timeline",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 111.929,
+        "p95": 124.787
+      },
+      "databaseMs": {
+        "p50": 88.333,
+        "p95": 112.89
+      },
+      "maxQueryMs": {
+        "p50": 43.553,
+        "p95": 50.435
+      },
+      "queryCount": {
+        "min": 7,
+        "p50": 9,
+        "max": 9
+      },
+      "responseBytes": {
+        "p50": 958381,
+        "p95": 958381
+      },
+      "cpuMs": {
+        "p50": 78,
+        "p95": 141
+      },
+      "heapDeltaBytes": {
+        "p50": 19434896,
+        "p95": 60450648
+      },
+      "peakHeapBytes": 326171952,
+      "peakRssBytes": 504287232,
+      "eventLoopDelayMs": {
+        "p50": 13.558,
+        "p95": 15.222
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "7fb822237c918c46",
+          "command": "WITH",
+          "count": 400,
+          "durationMs": 17765.215,
+          "maxDurationMs": 77.892
+        },
+        {
+          "fingerprint": "c0f7180190224588",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 5276.057,
+          "maxDurationMs": 33.32
+        },
+        {
+          "fingerprint": "cfba6b8d0a31895e",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 3979.95,
+          "maxDurationMs": 33.404
+        },
+        {
+          "fingerprint": "3247ef6dd7f0c6fe",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 3600.133,
+          "maxDurationMs": 29.687
+        },
+        {
+          "fingerprint": "5e5ad256007ff180",
+          "command": "SELECT",
+          "count": 352,
+          "durationMs": 2688.49,
+          "maxDurationMs": 18.705
+        },
+        {
+          "fingerprint": "f41638f47ee57c02",
+          "command": "SELECT",
+          "count": 334,
+          "durationMs": 1039.599,
+          "maxDurationMs": 17.661
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 647.112,
+          "maxDurationMs": 4.832
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 472.694,
+          "maxDurationMs": 5.781
+        },
+        {
+          "fingerprint": "70de484684621f76",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 273.137,
+          "maxDurationMs": 3.937
+        }
+      ]
+    },
+    {
+      "id": "repricing_scenario_preview",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 29.098,
+        "p95": 39.105
+      },
+      "databaseMs": {
+        "p50": 8.06,
+        "p95": 10.203
+      },
+      "maxQueryMs": {
+        "p50": 2.966,
+        "p95": 3.541
+      },
+      "queryCount": {
+        "min": 5,
+        "p50": 5,
+        "max": 5
+      },
+      "responseBytes": {
+        "p50": 1258698,
+        "p95": 1258698
+      },
+      "cpuMs": {
+        "p50": 16,
+        "p95": 62
+      },
+      "heapDeltaBytes": {
+        "p50": 24885208,
+        "p95": 25184320
+      },
+      "peakHeapBytes": 145376896,
+      "peakRssBytes": 452132864,
+      "eventLoopDelayMs": {
+        "p50": 13.797,
+        "p95": 17.85
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "c4598a7f852ec27b",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 294.865,
+          "maxDurationMs": 3.9
+        },
+        {
+          "fingerprint": "c40f6529037e9d93",
+          "command": "WITH",
+          "count": 100,
+          "durationMs": 162.831,
+          "maxDurationMs": 4.472
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 146.757,
+          "maxDurationMs": 3.781
+        },
+        {
+          "fingerprint": "8a9515ab81bc925d",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 145.459,
+          "maxDurationMs": 3.172
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 91.788,
+          "maxDurationMs": 1.371
+        }
+      ]
+    },
+    {
+      "id": "repricing_scenario_preview",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 82.6,
+        "p95": 95.429
+      },
+      "databaseMs": {
+        "p50": 45.601,
+        "p95": 59.75
+      },
+      "maxQueryMs": {
+        "p50": 25.272,
+        "p95": 31.727
+      },
+      "queryCount": {
+        "min": 5,
+        "p50": 5,
+        "max": 5
+      },
+      "responseBytes": {
+        "p50": 1258698,
+        "p95": 1258698
+      },
+      "cpuMs": {
+        "p50": 79,
+        "p95": 156
+      },
+      "heapDeltaBytes": {
+        "p50": -18073312,
+        "p95": 51225896
+      },
+      "peakHeapBytes": 138044520,
+      "peakRssBytes": 461987840,
+      "eventLoopDelayMs": {
+        "p50": 22.562,
+        "p95": 26.324
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "8a9515ab81bc925d",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 9617.056,
+          "maxDurationMs": 36.724
+        },
+        {
+          "fingerprint": "c4598a7f852ec27b",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 6707.15,
+          "maxDurationMs": 40.174
+        },
+        {
+          "fingerprint": "c40f6529037e9d93",
+          "command": "WITH",
+          "count": 400,
+          "durationMs": 932.226,
+          "maxDurationMs": 6.611
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 634.985,
+          "maxDurationMs": 2.18
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 429.364,
+          "maxDurationMs": 3.997
+        }
+      ]
+    },
+    {
+      "id": "repricing_global_preview",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 28.75,
+        "p95": 45.214
+      },
+      "databaseMs": {
+        "p50": 7.966,
+        "p95": 10.128
+      },
+      "maxQueryMs": {
+        "p50": 2.925,
+        "p95": 3.561
+      },
+      "queryCount": {
+        "min": 5,
+        "p50": 5,
+        "max": 5
+      },
+      "responseBytes": {
+        "p50": 1481642,
+        "p95": 1481642
+      },
+      "cpuMs": {
+        "p50": 16,
+        "p95": 78
+      },
+      "heapDeltaBytes": {
+        "p50": 27807144,
+        "p95": 27824592
+      },
+      "peakHeapBytes": 99840008,
+      "peakRssBytes": 455843840,
+      "eventLoopDelayMs": {
+        "p50": 12.681,
+        "p95": 19.063
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "7add6a70d5e49e57",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 299.856,
+          "maxDurationMs": 5.389
+        },
+        {
+          "fingerprint": "8a9515ab81bc925d",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 149.029,
+          "maxDurationMs": 3.506
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 147.325,
+          "maxDurationMs": 1.872
+        },
+        {
+          "fingerprint": "4a2d95a2bc2260f0",
+          "command": "WITH",
+          "count": 100,
+          "durationMs": 138.793,
+          "maxDurationMs": 3.246
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 87.413,
+          "maxDurationMs": 1.161
+        }
+      ]
+    },
+    {
+      "id": "repricing_global_preview",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 94.314,
+        "p95": 105.238
+      },
+      "databaseMs": {
+        "p50": 48.347,
+        "p95": 65.448
+      },
+      "maxQueryMs": {
+        "p50": 26.038,
+        "p95": 30.52
+      },
+      "queryCount": {
+        "min": 5,
+        "p50": 5,
+        "max": 5
+      },
+      "responseBytes": {
+        "p50": 1481642,
+        "p95": 1481642
+      },
+      "cpuMs": {
+        "p50": 94,
+        "p95": 171
+      },
+      "heapDeltaBytes": {
+        "p50": 181504,
+        "p95": 58231560
+      },
+      "peakHeapBytes": 145575976,
+      "peakRssBytes": 492535808,
+      "eventLoopDelayMs": {
+        "p50": 21.163,
+        "p95": 27.012
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "8a9515ab81bc925d",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 10360.864,
+          "maxDurationMs": 38.983
+        },
+        {
+          "fingerprint": "4a2d95a2bc2260f0",
+          "command": "WITH",
+          "count": 400,
+          "durationMs": 5329.995,
+          "maxDurationMs": 33.675
+        },
+        {
+          "fingerprint": "7add6a70d5e49e57",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 2900.586,
+          "maxDurationMs": 13.384
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 644.709,
+          "maxDurationMs": 2.482
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 433.372,
+          "maxDurationMs": 1.785
+        }
+      ]
+    },
+    {
+      "id": "repricing_draft_list",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 15.377,
+        "p95": 16.123
+      },
+      "databaseMs": {
+        "p50": 2.788,
+        "p95": 3.308
+      },
+      "maxQueryMs": {
+        "p50": 1.296,
+        "p95": 1.534
+      },
+      "queryCount": {
+        "min": 3,
+        "p50": 3,
+        "max": 3
+      },
+      "responseBytes": {
+        "p50": 14189,
+        "p95": 14189
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "heapDeltaBytes": {
+        "p50": 348928,
+        "p95": 362480
+      },
+      "peakHeapBytes": 118895576,
+      "peakRssBytes": 441397248,
+      "eventLoopDelayMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 131.69,
+          "maxDurationMs": 1.607
+        },
+        {
+          "fingerprint": "362e3c2ebdc0f5c4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 80.535,
+          "maxDurationMs": 1.231
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 71.286,
+          "maxDurationMs": 1.127
+        }
+      ]
+    },
+    {
+      "id": "repricing_draft_list",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 15.164,
+        "p95": 16.603
+      },
+      "databaseMs": {
+        "p50": 3.304,
+        "p95": 4.133
+      },
+      "maxQueryMs": {
+        "p50": 1.425,
+        "p95": 1.741
+      },
+      "queryCount": {
+        "min": 3,
+        "p50": 3,
+        "max": 3
+      },
+      "responseBytes": {
+        "p50": 14189,
+        "p95": 14189
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 1374432,
+        "p95": 1424184
+      },
+      "peakHeapBytes": 131390256,
+      "peakRssBytes": 413310976,
+      "eventLoopDelayMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 579.31,
+          "maxDurationMs": 3.909
+        },
+        {
+          "fingerprint": "362e3c2ebdc0f5c4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 435.437,
+          "maxDurationMs": 4.238
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 327.693,
+          "maxDurationMs": 1.481
+        }
+      ]
+    },
+    {
+      "id": "repricing_draft_read",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 39.743,
+        "p95": 46.581
+      },
+      "databaseMs": {
+        "p50": 13.861,
+        "p95": 15.149
+      },
+      "maxQueryMs": {
+        "p50": 5.977,
+        "p95": 6.931
+      },
+      "queryCount": {
+        "min": 6,
+        "p50": 6,
+        "max": 6
+      },
+      "responseBytes": {
+        "p50": 1259506,
+        "p95": 1259506
+      },
+      "cpuMs": {
+        "p50": 16,
+        "p95": 63
+      },
+      "heapDeltaBytes": {
+        "p50": -26672104,
+        "p95": 30160792
+      },
+      "peakHeapBytes": 98798976,
+      "peakRssBytes": 423628800,
+      "eventLoopDelayMs": {
+        "p50": 12.485,
+        "p95": 14.003
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "fc709e0b2455c7e2",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 610.344,
+          "maxDurationMs": 7.243
+        },
+        {
+          "fingerprint": "c4598a7f852ec27b",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 281.256,
+          "maxDurationMs": 3.726
+        },
+        {
+          "fingerprint": "c40f6529037e9d93",
+          "command": "WITH",
+          "count": 100,
+          "durationMs": 155.715,
+          "maxDurationMs": 2.173
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 147.539,
+          "maxDurationMs": 1.854
+        },
+        {
+          "fingerprint": "8a9515ab81bc925d",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 113.37,
+          "maxDurationMs": 1.619
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 94.901,
+          "maxDurationMs": 1.405
+        }
+      ]
+    },
+    {
+      "id": "repricing_draft_read",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 96.584,
+        "p95": 110.531
+      },
+      "databaseMs": {
+        "p50": 61.554,
+        "p95": 76.08
+      },
+      "maxQueryMs": {
+        "p50": 26.73,
+        "p95": 31.709
+      },
+      "queryCount": {
+        "min": 6,
+        "p50": 6,
+        "max": 6
+      },
+      "responseBytes": {
+        "p50": 1259506,
+        "p95": 1259506
+      },
+      "cpuMs": {
+        "p50": 95,
+        "p95": 188
+      },
+      "heapDeltaBytes": {
+        "p50": 5583192,
+        "p95": 18111360
+      },
+      "peakHeapBytes": 164069288,
+      "peakRssBytes": 467554304,
+      "eventLoopDelayMs": {
+        "p50": 18.422,
+        "p95": 20.301
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "8a9515ab81bc925d",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 10399.081,
+          "maxDurationMs": 41.828
+        },
+        {
+          "fingerprint": "c4598a7f852ec27b",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 6871.205,
+          "maxDurationMs": 39.176
+        },
+        {
+          "fingerprint": "fc709e0b2455c7e2",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 4424.508,
+          "maxDurationMs": 16.853
+        },
+        {
+          "fingerprint": "c40f6529037e9d93",
+          "command": "WITH",
+          "count": 400,
+          "durationMs": 1356.301,
+          "maxDurationMs": 28.812
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 664.09,
+          "maxDurationMs": 4.63
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 587.191,
+          "maxDurationMs": 7.783
+        }
+      ]
+    },
+    {
+      "id": "repricing_draft_create",
+      "kind": "write",
+      "concurrency": 1,
+      "sampleCount": 30,
+      "requestMs": {
+        "p50": 72.026,
+        "p95": 94.195
+      },
+      "databaseMs": {
+        "p50": 34.998,
+        "p95": 57.16
+      },
+      "maxQueryMs": {
+        "p50": 10.461,
+        "p95": 32.518
+      },
+      "queryCount": {
+        "min": 16,
+        "p50": 16,
+        "max": 16
+      },
+      "responseBytes": {
+        "p50": 1259506,
+        "p95": 1259506
+      },
+      "cpuMs": {
+        "p50": 32,
+        "p95": 109
+      },
+      "heapDeltaBytes": {
+        "p50": -8642760,
+        "p95": 54885064
+      },
+      "peakHeapBytes": 130086872,
+      "peakRssBytes": 430026752,
+      "eventLoopDelayMs": {
+        "p50": 12.84,
+        "p95": 15.052
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "0f281910da0f0af6",
+          "command": "INSERT",
+          "count": 30,
+          "durationMs": 367.31,
+          "maxDurationMs": 33.419
+        },
+        {
+          "fingerprint": "fc709e0b2455c7e2",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 178.602,
+          "maxDurationMs": 7.176
+        },
+        {
+          "fingerprint": "c4598a7f852ec27b",
+          "command": "SELECT",
+          "count": 60,
+          "durationMs": 171.508,
+          "maxDurationMs": 3.892
+        },
+        {
+          "fingerprint": "c40f6529037e9d93",
+          "command": "WITH",
+          "count": 60,
+          "durationMs": 89.398,
+          "maxDurationMs": 1.768
+        },
+        {
+          "fingerprint": "8a9515ab81bc925d",
+          "command": "SELECT",
+          "count": 60,
+          "durationMs": 76.349,
+          "maxDurationMs": 2.628
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 49.647,
+          "maxDurationMs": 4.153
+        },
+        {
+          "fingerprint": "87fd48805697cf84",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 43.747,
+          "maxDurationMs": 1.776
+        },
+        {
+          "fingerprint": "a8402858d4f1e1d2",
+          "command": "BEGIN",
+          "count": 30,
+          "durationMs": 24.34,
+          "maxDurationMs": 2.396
+        },
+        {
+          "fingerprint": "7c555434c445a453",
+          "command": "INSERT",
+          "count": 30,
+          "durationMs": 22.684,
+          "maxDurationMs": 0.865
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 22.569,
+          "maxDurationMs": 0.981
+        },
+        {
+          "fingerprint": "4afa2b477818c7bf",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 22.421,
+          "maxDurationMs": 3.504
+        },
+        {
+          "fingerprint": "c474b113d70bc104",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 19.436,
+          "maxDurationMs": 0.946
+        }
+      ]
+    },
+    {
+      "id": "repricing_draft_sync",
+      "kind": "write",
+      "concurrency": 1,
+      "sampleCount": 30,
+      "requestMs": {
+        "p50": 77.308,
+        "p95": 88.443
+      },
+      "databaseMs": {
+        "p50": 37.055,
+        "p95": 42.185
+      },
+      "maxQueryMs": {
+        "p50": 11.265,
+        "p95": 15.003
+      },
+      "queryCount": {
+        "min": 11,
+        "p50": 11,
+        "max": 11
+      },
+      "responseBytes": {
+        "p50": 1259506,
+        "p95": 1259506
+      },
+      "cpuMs": {
+        "p50": 46,
+        "p95": 125
+      },
+      "heapDeltaBytes": {
+        "p50": -13092352,
+        "p95": 56397048
+      },
+      "peakHeapBytes": 97132032,
+      "peakRssBytes": 408305664,
+      "eventLoopDelayMs": {
+        "p50": 12.975,
+        "p95": 14.528
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "fc709e0b2455c7e2",
+          "command": "SELECT",
+          "count": 60,
+          "durationMs": 365.402,
+          "maxDurationMs": 7.315
+        },
+        {
+          "fingerprint": "0a4e793f21ccedff",
+          "command": "UPDATE",
+          "count": 30,
+          "durationMs": 348.318,
+          "maxDurationMs": 15.589
+        },
+        {
+          "fingerprint": "c4598a7f852ec27b",
+          "command": "SELECT",
+          "count": 60,
+          "durationMs": 169.757,
+          "maxDurationMs": 3.655
+        },
+        {
+          "fingerprint": "c40f6529037e9d93",
+          "command": "WITH",
+          "count": 60,
+          "durationMs": 96.903,
+          "maxDurationMs": 2.041
+        },
+        {
+          "fingerprint": "8a9515ab81bc925d",
+          "command": "SELECT",
+          "count": 60,
+          "durationMs": 80.091,
+          "maxDurationMs": 2.453
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 46.409,
+          "maxDurationMs": 1.742
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 27.69,
+          "maxDurationMs": 1.304
+        }
+      ]
+    },
+    {
+      "id": "repricing_apply",
+      "kind": "write",
+      "concurrency": 1,
+      "sampleCount": 30,
+      "requestMs": {
+        "p50": 657.249,
+        "p95": 679.065
+      },
+      "databaseMs": {
+        "p50": 610.078,
+        "p95": 629.148
+      },
+      "maxQueryMs": {
+        "p50": 4.029,
+        "p95": 5.176
+      },
+      "queryCount": {
+        "min": 915,
+        "p50": 915,
+        "max": 915
+      },
+      "responseBytes": {
+        "p50": 284,
+        "p95": 284
+      },
+      "cpuMs": {
+        "p50": 156,
+        "p95": 218
+      },
+      "heapDeltaBytes": {
+        "p50": -8047800,
+        "p95": -1184072
+      },
+      "peakHeapBytes": 99255168,
+      "peakRssBytes": 392261632,
+      "eventLoopDelayMs": {
+        "p50": 10.229,
+        "p95": 10.437
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "a73690c34e6594b0",
+          "command": "UPDATE",
+          "count": 13530,
+          "durationMs": 9040.351,
+          "maxDurationMs": 2.268
+        },
+        {
+          "fingerprint": "f953d66b9d72005a",
+          "command": "INSERT",
+          "count": 13530,
+          "durationMs": 8746.749,
+          "maxDurationMs": 2.885
+        },
+        {
+          "fingerprint": "c4598a7f852ec27b",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 121.786,
+          "maxDurationMs": 5.176
+        },
+        {
+          "fingerprint": "0f1011f34573c83f",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 90.842,
+          "maxDurationMs": 4.002
+        },
+        {
+          "fingerprint": "8a9515ab81bc925d",
+          "command": "SELECT",
+          "count": 60,
+          "durationMs": 66.922,
+          "maxDurationMs": 2.252
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 48.346,
+          "maxDurationMs": 3.162
+        },
+        {
+          "fingerprint": "c40f6529037e9d93",
+          "command": "WITH",
+          "count": 30,
+          "durationMs": 45.197,
+          "maxDurationMs": 1.76
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 27.634,
+          "maxDurationMs": 1.215
+        },
+        {
+          "fingerprint": "14222ea11ffd4131",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 23.493,
+          "maxDurationMs": 2.281
+        },
+        {
+          "fingerprint": "06ad549bde5e79bf",
+          "command": "INSERT",
+          "count": 30,
+          "durationMs": 21.716,
+          "maxDurationMs": 0.843
+        },
+        {
+          "fingerprint": "79663c1d3b43ceaf",
+          "command": "COMMIT",
+          "count": 30,
+          "durationMs": 21.477,
+          "maxDurationMs": 5.386
+        },
+        {
+          "fingerprint": "7c555434c445a453",
+          "command": "INSERT",
+          "count": 30,
+          "durationMs": 21.145,
+          "maxDurationMs": 1.184
+        }
+      ]
+    },
+    {
+      "id": "repricing_rollback",
+      "kind": "write",
+      "concurrency": 1,
+      "sampleCount": 30,
+      "requestMs": {
+        "p50": 329.099,
+        "p95": 341.989
+      },
+      "databaseMs": {
+        "p50": 308.425,
+        "p95": 318.73
+      },
+      "maxQueryMs": {
+        "p50": 10.544,
+        "p95": 12.421
+      },
+      "queryCount": {
+        "min": 461,
+        "p50": 461,
+        "max": 461
+      },
+      "responseBytes": {
+        "p50": 281,
+        "p95": 281
+      },
+      "cpuMs": {
+        "p50": 62,
+        "p95": 125
+      },
+      "heapDeltaBytes": {
+        "p50": -37914328,
+        "p95": 11655176
+      },
+      "peakHeapBytes": 98565544,
+      "peakRssBytes": 394911744,
+      "eventLoopDelayMs": {
+        "p50": 10.195,
+        "p95": 10.315
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "a73690c34e6594b0",
+          "command": "UPDATE",
+          "count": 13530,
+          "durationMs": 8750.215,
+          "maxDurationMs": 2.08
+        },
+        {
+          "fingerprint": "1634277a3ba08129",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 326.93,
+          "maxDurationMs": 12.716
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 48.255,
+          "maxDurationMs": 3.653
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 22.272,
+          "maxDurationMs": 1.202
+        },
+        {
+          "fingerprint": "7c555434c445a453",
+          "command": "INSERT",
+          "count": 30,
+          "durationMs": 21.025,
+          "maxDurationMs": 0.895
+        },
+        {
+          "fingerprint": "3eb3512a26973196",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 20.895,
+          "maxDurationMs": 0.944
+        },
+        {
+          "fingerprint": "d3a9d0d581f7682b",
+          "command": "UPDATE",
+          "count": 30,
+          "durationMs": 19.831,
+          "maxDurationMs": 0.838
+        },
+        {
+          "fingerprint": "fb6617c24a7c3142",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 18.905,
+          "maxDurationMs": 0.986
+        },
+        {
+          "fingerprint": "a8402858d4f1e1d2",
+          "command": "BEGIN",
+          "count": 30,
+          "durationMs": 17.554,
+          "maxDurationMs": 2.127
+        },
+        {
+          "fingerprint": "87fd48805697cf84",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 17.047,
+          "maxDurationMs": 0.634
+        },
+        {
+          "fingerprint": "79663c1d3b43ceaf",
+          "command": "COMMIT",
+          "count": 30,
+          "durationMs": 16.198,
+          "maxDurationMs": 0.643
+        }
+      ]
+    },
+    {
+      "id": "repricing_csv",
+      "kind": "write",
+      "concurrency": 1,
+      "sampleCount": 30,
+      "requestMs": {
+        "p50": 20.145,
+        "p95": 29.285
+      },
+      "databaseMs": {
+        "p50": 10.406,
+        "p95": 12.093
+      },
+      "maxQueryMs": {
+        "p50": 7.565,
+        "p95": 8.385
+      },
+      "queryCount": {
+        "min": 4,
+        "p50": 4,
+        "max": 4
+      },
+      "responseBytes": {
+        "p50": 62889,
+        "p95": 62889
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 32
+      },
+      "heapDeltaBytes": {
+        "p50": 4448784,
+        "p95": 4503728
+      },
+      "peakHeapBytes": 104373616,
+      "peakRssBytes": 397185024,
+      "eventLoopDelayMs": {
+        "p50": 10.378,
+        "p95": 10.559
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "acab7e36552c2c98",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 230.076,
+          "maxDurationMs": 9.175
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 45.323,
+          "maxDurationMs": 1.796
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 22.402,
+          "maxDurationMs": 1.156
+        },
+        {
+          "fingerprint": "3a287902ebea8917",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 20.571,
+          "maxDurationMs": 2.193
+        }
+      ]
+    },
+    {
+      "id": "export_status",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 15.34,
+        "p95": 16.412
+      },
+      "databaseMs": {
+        "p50": 4.188,
+        "p95": 5.531
+      },
+      "maxQueryMs": {
+        "p50": 1.417,
+        "p95": 1.819
+      },
+      "queryCount": {
+        "min": 4,
+        "p50": 4,
+        "max": 4
+      },
+      "responseBytes": {
+        "p50": 166,
+        "p95": 166
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 203888,
+        "p95": 205496
+      },
+      "peakHeapBytes": 102282216,
+      "peakRssBytes": 397185024,
+      "eventLoopDelayMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 146.488,
+          "maxDurationMs": 3.685
+        },
+        {
+          "fingerprint": "c9d06fb821c40469",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 136.264,
+          "maxDurationMs": 2.008
+        },
+        {
+          "fingerprint": "3083908a883b0812",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 78.911,
+          "maxDurationMs": 1.134
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 74.762,
+          "maxDurationMs": 1.283
+        }
+      ]
+    },
+    {
+      "id": "export_status",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 15.238,
+        "p95": 16.706
+      },
+      "databaseMs": {
+        "p50": 4.871,
+        "p95": 5.765
+      },
+      "maxQueryMs": {
+        "p50": 1.706,
+        "p95": 2.146
+      },
+      "queryCount": {
+        "min": 4,
+        "p50": 4,
+        "max": 4
+      },
+      "responseBytes": {
+        "p50": 166,
+        "p95": 166
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 765224,
+        "p95": 815032
+      },
+      "peakHeapBytes": 75555592,
+      "peakRssBytes": 373952512,
+      "eventLoopDelayMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "c9d06fb821c40469",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 657.583,
+          "maxDurationMs": 2.358
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 628.117,
+          "maxDurationMs": 2.187
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 349.324,
+          "maxDurationMs": 1.723
+        },
+        {
+          "fingerprint": "3083908a883b0812",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 323.861,
+          "maxDurationMs": 4.021
+        }
+      ]
+    },
+    {
+      "id": "export_snapshot_create",
+      "kind": "write",
+      "concurrency": 1,
+      "sampleCount": 30,
+      "requestMs": {
+        "p50": 30.17,
+        "p95": 31.935
+      },
+      "databaseMs": {
+        "p50": 12.755,
+        "p95": 14.537
+      },
+      "maxQueryMs": {
+        "p50": 4.459,
+        "p95": 5.989
+      },
+      "queryCount": {
+        "min": 12,
+        "p50": 12,
+        "max": 12
+      },
+      "responseBytes": {
+        "p50": 167,
+        "p95": 167
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 31
+      },
+      "heapDeltaBytes": {
+        "p50": 4277448,
+        "p95": 4602408
+      },
+      "peakHeapBytes": 74066848,
+      "peakRssBytes": 374083584,
+      "eventLoopDelayMs": {
+        "p50": 10.031,
+        "p95": 10.482
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "fa8bb3c3993ff81f",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 138.966,
+          "maxDurationMs": 6.31
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 42.44,
+          "maxDurationMs": 1.578
+        },
+        {
+          "fingerprint": "174035244ae6a3a3",
+          "command": "SELECT",
+          "count": 60,
+          "durationMs": 37.442,
+          "maxDurationMs": 0.759
+        },
+        {
+          "fingerprint": "c6be66d4918b1aed",
+          "command": "INSERT",
+          "count": 30,
+          "durationMs": 34.359,
+          "maxDurationMs": 1.259
+        },
+        {
+          "fingerprint": "df3839fd2622ac57",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 26.257,
+          "maxDurationMs": 1.526
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 22.228,
+          "maxDurationMs": 1.051
+        },
+        {
+          "fingerprint": "7c555434c445a453",
+          "command": "INSERT",
+          "count": 30,
+          "durationMs": 20.577,
+          "maxDurationMs": 0.781
+        },
+        {
+          "fingerprint": "a01b880cd98e6a61",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 18.132,
+          "maxDurationMs": 0.683
+        },
+        {
+          "fingerprint": "87fd48805697cf84",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 17.514,
+          "maxDurationMs": 0.659
+        },
+        {
+          "fingerprint": "a8402858d4f1e1d2",
+          "command": "BEGIN",
+          "count": 30,
+          "durationMs": 15.225,
+          "maxDurationMs": 1.012
+        },
+        {
+          "fingerprint": "79663c1d3b43ceaf",
+          "command": "COMMIT",
+          "count": 30,
+          "durationMs": 15.223,
+          "maxDurationMs": 0.616
+        }
+      ]
+    },
+    {
+      "id": "export_snapshot_reuse",
+      "kind": "write",
+      "concurrency": 1,
+      "sampleCount": 30,
+      "requestMs": {
+        "p50": 5.209,
+        "p95": 20.399
+      },
+      "databaseMs": {
+        "p50": 2.729,
+        "p95": 3.125
+      },
+      "maxQueryMs": {
+        "p50": 1.339,
+        "p95": 1.506
+      },
+      "queryCount": {
+        "min": 3,
+        "p50": 3,
+        "max": 3
+      },
+      "responseBytes": {
+        "p50": 167,
+        "p95": 167
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "heapDeltaBytes": {
+        "p50": 235080,
+        "p95": 240736
+      },
+      "peakHeapBytes": 79309280,
+      "peakRssBytes": 374444032,
+      "eventLoopDelayMs": {
+        "p50": 10.056,
+        "p95": 15.616
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 40.528,
+          "maxDurationMs": 1.539
+        },
+        {
+          "fingerprint": "a01b880cd98e6a61",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 23.353,
+          "maxDurationMs": 0.854
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 19.746,
+          "maxDurationMs": 0.948
+        }
+      ]
+    },
+    {
+      "id": "export_snapshot_download",
+      "kind": "write",
+      "concurrency": 1,
+      "sampleCount": 30,
+      "requestMs": {
+        "p50": 17.584,
+        "p95": 20.263
+      },
+      "databaseMs": {
+        "p50": 2.955,
+        "p95": 3.829
+      },
+      "maxQueryMs": {
+        "p50": 1.397,
+        "p95": 1.742
+      },
+      "queryCount": {
+        "min": 3,
+        "p50": 3,
+        "max": 3
+      },
+      "responseBytes": {
+        "p50": 25072,
+        "p95": 25072
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 15
+      },
+      "heapDeltaBytes": {
+        "p50": 234040,
+        "p95": 268096
+      },
+      "peakHeapBytes": 81934576,
+      "peakRssBytes": 378470400,
+      "eventLoopDelayMs": {
+        "p50": 15.374,
+        "p95": 15.686
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 42.88,
+          "maxDurationMs": 1.774
+        },
+        {
+          "fingerprint": "8ef9a8fad3af9465",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 24.551,
+          "maxDurationMs": 1.082
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 23.375,
+          "maxDurationMs": 1.182
+        }
+      ]
+    },
+    {
+      "id": "export_snapshot_confirmation",
+      "kind": "write",
+      "concurrency": 1,
+      "sampleCount": 30,
+      "requestMs": {
+        "p50": 8.855,
+        "p95": 24.872
+      },
+      "databaseMs": {
+        "p50": 6.292,
+        "p95": 8.121
+      },
+      "maxQueryMs": {
+        "p50": 1.341,
+        "p95": 1.692
+      },
+      "queryCount": {
+        "min": 9,
+        "p50": 9,
+        "max": 9
+      },
+      "responseBytes": {
+        "p50": 89,
+        "p95": 89
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 302240,
+        "p95": 336632
+      },
+      "peakHeapBytes": 82411472,
+      "peakRssBytes": 378527744,
+      "eventLoopDelayMs": {
+        "p50": 10.047,
+        "p95": 15.567
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 41.396,
+          "maxDurationMs": 1.787
+        },
+        {
+          "fingerprint": "6f2b2f728d0455d6",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 24.261,
+          "maxDurationMs": 1.018
+        },
+        {
+          "fingerprint": "dc6f64addc5ae630",
+          "command": "UPDATE",
+          "count": 30,
+          "durationMs": 21.767,
+          "maxDurationMs": 0.956
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 21.057,
+          "maxDurationMs": 1.316
+        },
+        {
+          "fingerprint": "7c555434c445a453",
+          "command": "INSERT",
+          "count": 30,
+          "durationMs": 20.607,
+          "maxDurationMs": 0.864
+        },
+        {
+          "fingerprint": "6be212bcd01b6f79",
+          "command": "INSERT",
+          "count": 30,
+          "durationMs": 19.404,
+          "maxDurationMs": 0.791
+        },
+        {
+          "fingerprint": "87fd48805697cf84",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 17.284,
+          "maxDurationMs": 0.746
+        },
+        {
+          "fingerprint": "a8402858d4f1e1d2",
+          "command": "BEGIN",
+          "count": 30,
+          "durationMs": 15.486,
+          "maxDurationMs": 0.627
+        },
+        {
+          "fingerprint": "79663c1d3b43ceaf",
+          "command": "COMMIT",
+          "count": 30,
+          "durationMs": 15.027,
+          "maxDurationMs": 0.605
+        }
+      ]
+    }
+  ],
+  "plans": [
+    {
+      "id": "catalog_hydration",
+      "temperature": "first",
+      "fileName": "catalog_hydration.first.json",
+      "planningTimeMs": 0.607,
+      "executionTimeMs": 0.157,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 27,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Hash Join",
+          "relation": null,
+          "actualRows": 27,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Hash Join",
+          "relation": null,
+          "actualRows": 27,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "options",
+          "actualRows": 26,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Hash",
+          "relation": null,
+          "actualRows": 26,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "questions",
+          "actualRows": 26,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Hash",
+          "relation": null,
+          "actualRows": 25,
+          "planRows": 25,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "categories",
+          "actualRows": 25,
+          "planRows": 25,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "catalog_hydration",
+      "temperature": "warm",
+      "fileName": "catalog_hydration.warm.json",
+      "planningTimeMs": 0.44,
+      "executionTimeMs": 0.116,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 27,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Hash Join",
+          "relation": null,
+          "actualRows": 27,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Hash Join",
+          "relation": null,
+          "actualRows": 27,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "options",
+          "actualRows": 26,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Hash",
+          "relation": null,
+          "actualRows": 26,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "questions",
+          "actualRows": 26,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Hash",
+          "relation": null,
+          "actualRows": 25,
+          "planRows": 25,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "categories",
+          "actualRows": 25,
+          "planRows": 25,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "schema_lookup",
+      "temperature": "first",
+      "fileName": "schema_lookup.first.json",
+      "planningTimeMs": 0.342,
+      "executionTimeMs": 0.053,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 2,
+          "planRows": 2,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Nested Loop",
+          "relation": null,
+          "actualRows": 2,
+          "planRows": 2,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Nested Loop",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "sku_schema_versions",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "sku_schema_questions",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "sku_schema_options",
+          "actualRows": 2,
+          "planRows": 2,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "schema_lookup",
+      "temperature": "warm",
+      "fileName": "schema_lookup.warm.json",
+      "planningTimeMs": 0.11,
+      "executionTimeMs": 0.07,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 2,
+          "planRows": 2,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Nested Loop",
+          "relation": null,
+          "actualRows": 2,
+          "planRows": 2,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Nested Loop",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "sku_schema_versions",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "sku_schema_questions",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "sku_schema_options",
+          "actualRows": 2,
+          "planRows": 2,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "product_sequence_common",
+      "temperature": "first",
+      "fileName": "product_sequence_common.first.json",
+      "planningTimeMs": 0.174,
+      "executionTimeMs": 0.776,
+      "nodes": [
+        {
+          "nodeType": "Limit",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 535,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 1035,
+          "loops": 1,
+          "sharedHitBlocks": 535,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Bitmap Heap Scan",
+          "relation": "products",
+          "actualRows": 1035,
+          "planRows": 1035,
+          "loops": 1,
+          "sharedHitBlocks": 535,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Bitmap Index Scan",
+          "relation": null,
+          "actualRows": 1192,
+          "planRows": 1035,
+          "loops": 1,
+          "sharedHitBlocks": 16,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "product_sequence_common",
+      "temperature": "warm",
+      "fileName": "product_sequence_common.warm.json",
+      "planningTimeMs": 0.064,
+      "executionTimeMs": 0.476,
+      "nodes": [
+        {
+          "nodeType": "Limit",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 535,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 1035,
+          "loops": 1,
+          "sharedHitBlocks": 535,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Bitmap Heap Scan",
+          "relation": "products",
+          "actualRows": 1035,
+          "planRows": 1035,
+          "loops": 1,
+          "sharedHitBlocks": 535,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Bitmap Index Scan",
+          "relation": null,
+          "actualRows": 1192,
+          "planRows": 1035,
+          "loops": 1,
+          "sharedHitBlocks": 16,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "product_variation_rare",
+      "temperature": "first",
+      "fileName": "product_variation_rare.first.json",
+      "planningTimeMs": 0.159,
+      "executionTimeMs": 0.05,
+      "nodes": [
+        {
+          "nodeType": "Seq Scan",
+          "relation": "sku_registry",
+          "actualRows": 0,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 8,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "product_variation_rare",
+      "temperature": "warm",
+      "fileName": "product_variation_rare.warm.json",
+      "planningTimeMs": 0.031,
+      "executionTimeMs": 0.046,
+      "nodes": [
+        {
+          "nodeType": "Seq Scan",
+          "relation": "sku_registry",
+          "actualRows": 0,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 8,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "pricing_context",
+      "temperature": "first",
+      "fileName": "pricing_context.first.json",
+      "planningTimeMs": 0.295,
+      "executionTimeMs": 0.036,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 2,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Nested Loop",
+          "relation": null,
+          "actualRows": 2,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "price_scenarios",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "price_matrix",
+          "actualRows": 2,
+          "planRows": 2,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "pricing_context",
+      "temperature": "warm",
+      "fileName": "pricing_context.warm.json",
+      "planningTimeMs": 0.123,
+      "executionTimeMs": 0.032,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 2,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Nested Loop",
+          "relation": null,
+          "actualRows": 2,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "price_scenarios",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "price_matrix",
+          "actualRows": 2,
+          "planRows": 2,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "correction_queue_common",
+      "temperature": "first",
+      "fileName": "correction_queue_common.first.json",
+      "planningTimeMs": 0.186,
+      "executionTimeMs": 0.027,
+      "nodes": [
+        {
+          "nodeType": "Limit",
+          "relation": null,
+          "actualRows": 0,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 0,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Index Scan",
+          "relation": "correction_requests",
+          "actualRows": 0,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "correction_queue_common",
+      "temperature": "warm",
+      "fileName": "correction_queue_common.warm.json",
+      "planningTimeMs": 0.041,
+      "executionTimeMs": 0.032,
+      "nodes": [
+        {
+          "nodeType": "Limit",
+          "relation": null,
+          "actualRows": 0,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 0,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Index Scan",
+          "relation": "correction_requests",
+          "actualRows": 0,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "correction_history_page",
+      "temperature": "first",
+      "fileName": "correction_history_page.first.json",
+      "planningTimeMs": 0.291,
+      "executionTimeMs": 0.404,
+      "nodes": [
+        {
+          "nodeType": "Limit",
+          "relation": null,
+          "actualRows": 200,
+          "planRows": 200,
+          "loops": 1,
+          "sharedHitBlocks": 32,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 200,
+          "planRows": 1069,
+          "loops": 1,
+          "sharedHitBlocks": 32,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "product_corrections",
+          "actualRows": 1069,
+          "planRows": 1069,
+          "loops": 1,
+          "sharedHitBlocks": 32,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "correction_history_page",
+      "temperature": "warm",
+      "fileName": "correction_history_page.warm.json",
+      "planningTimeMs": 0.033,
+      "executionTimeMs": 0.436,
+      "nodes": [
+        {
+          "nodeType": "Limit",
+          "relation": null,
+          "actualRows": 200,
+          "planRows": 200,
+          "loops": 1,
+          "sharedHitBlocks": 32,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 200,
+          "planRows": 1069,
+          "loops": 1,
+          "sharedHitBlocks": 32,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "product_corrections",
+          "actualRows": 1069,
+          "planRows": 1069,
+          "loops": 1,
+          "sharedHitBlocks": 32,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "repricing_candidates",
+      "temperature": "first",
+      "fileName": "repricing_candidates.first.json",
+      "planningTimeMs": 0.11,
+      "executionTimeMs": 1.591,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 986,
+          "planRows": 6,
+          "loops": 1,
+          "sharedHitBlocks": 2618,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "products",
+          "actualRows": 986,
+          "planRows": 6,
+          "loops": 1,
+          "sharedHitBlocks": 2618,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "repricing_candidates",
+      "temperature": "warm",
+      "fileName": "repricing_candidates.warm.json",
+      "planningTimeMs": 0.041,
+      "executionTimeMs": 1.446,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 986,
+          "planRows": 6,
+          "loops": 1,
+          "sharedHitBlocks": 2618,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "products",
+          "actualRows": 986,
+          "planRows": 6,
+          "loops": 1,
+          "sharedHitBlocks": 2618,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "timeline_recursive_lineage",
+      "temperature": "first",
+      "fileName": "timeline_recursive_lineage.first.json",
+      "planningTimeMs": 0.177,
+      "executionTimeMs": 0.171,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 50,
+          "planRows": 31,
+          "loops": 1,
+          "sharedHitBlocks": 150,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Recursive Union",
+          "relation": null,
+          "actualRows": 50,
+          "planRows": 31,
+          "loops": 1,
+          "sharedHitBlocks": 150,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Bitmap Heap Scan",
+          "relation": "products",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Bitmap Index Scan",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Nested Loop",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 3,
+          "loops": 50,
+          "sharedHitBlocks": 147,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "WorkTable Scan",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 3,
+          "loops": 50,
+          "sharedHitBlocks": 0,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Bitmap Heap Scan",
+          "relation": "products",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 50,
+          "sharedHitBlocks": 147,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Bitmap Index Scan",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 50,
+          "sharedHitBlocks": 98,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "CTE Scan",
+          "relation": null,
+          "actualRows": 50,
+          "planRows": 31,
+          "loops": 1,
+          "sharedHitBlocks": 150,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "timeline_recursive_lineage",
+      "temperature": "warm",
+      "fileName": "timeline_recursive_lineage.warm.json",
+      "planningTimeMs": 0.082,
+      "executionTimeMs": 0.157,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 50,
+          "planRows": 31,
+          "loops": 1,
+          "sharedHitBlocks": 150,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Recursive Union",
+          "relation": null,
+          "actualRows": 50,
+          "planRows": 31,
+          "loops": 1,
+          "sharedHitBlocks": 150,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Bitmap Heap Scan",
+          "relation": "products",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Bitmap Index Scan",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Nested Loop",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 3,
+          "loops": 50,
+          "sharedHitBlocks": 147,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "WorkTable Scan",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 3,
+          "loops": 50,
+          "sharedHitBlocks": 0,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Bitmap Heap Scan",
+          "relation": "products",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 50,
+          "sharedHitBlocks": 147,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Bitmap Index Scan",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 50,
+          "sharedHitBlocks": 98,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "CTE Scan",
+          "relation": null,
+          "actualRows": 50,
+          "planRows": 31,
+          "loops": 1,
+          "sharedHitBlocks": 150,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "export_range_common",
+      "temperature": "first",
+      "fileName": "export_range_common.first.json",
+      "planningTimeMs": 0.111,
+      "executionTimeMs": 1.107,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 965,
+          "planRows": 6,
+          "loops": 1,
+          "sharedHitBlocks": 515,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Bitmap Heap Scan",
+          "relation": "products",
+          "actualRows": 965,
+          "planRows": 6,
+          "loops": 1,
+          "sharedHitBlocks": 515,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Bitmap Index Scan",
+          "relation": null,
+          "actualRows": 1073,
+          "planRows": 6,
+          "loops": 1,
+          "sharedHitBlocks": 16,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "export_range_common",
+      "temperature": "warm",
+      "fileName": "export_range_common.warm.json",
+      "planningTimeMs": 0.082,
+      "executionTimeMs": 0.872,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 965,
+          "planRows": 6,
+          "loops": 1,
+          "sharedHitBlocks": 515,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Bitmap Heap Scan",
+          "relation": "products",
+          "actualRows": 965,
+          "planRows": 6,
+          "loops": 1,
+          "sharedHitBlocks": 515,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Bitmap Index Scan",
+          "relation": null,
+          "actualRows": 1073,
+          "planRows": 6,
+          "loops": 1,
+          "sharedHitBlocks": 16,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    }
+  ]
+}

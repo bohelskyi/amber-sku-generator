@@ -1,0 +1,333 @@
+{
+  "gates": {
+    "requestP95Ms": 500,
+    "readQueryCount": 20,
+    "writeQueryCount": 75,
+    "maxSingleQueryMs": 100,
+    "responseBytes": 5242880,
+    "heapGrowthBytes": 67108864,
+    "planEstimateRatio": 10,
+    "sharedReadBlocks": 10000,
+    "tempBlocks": 1
+  },
+  "classifications": [
+    {
+      "id": "product_config",
+      "concurrency": 1,
+      "classification": "confirmed",
+      "evidence": "All three processes crossed: query p50 31 >= 20."
+    },
+    {
+      "id": "product_config",
+      "concurrency": 4,
+      "classification": "confirmed",
+      "evidence": "All three processes crossed: query p50 31 >= 20."
+    },
+    {
+      "id": "product_preview",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "product_preview",
+      "concurrency": 4,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "product_save",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "product_decode",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "product_decode",
+      "concurrency": 4,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "recount_preview",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "recount_preview",
+      "concurrency": 4,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "recount_direct_apply",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "correction_completion",
+      "concurrency": 1,
+      "classification": "confirmed",
+      "evidence": "All three processes crossed: query p50 107 >= 75."
+    },
+    {
+      "id": "catalog_read",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "catalog_read",
+      "concurrency": 4,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "schema_read",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "schema_read",
+      "concurrency": 4,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "pricing_read",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "pricing_read",
+      "concurrency": 4,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "correction_queue",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "correction_queue",
+      "concurrency": 4,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "correction_history_page",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "correction_history_page",
+      "concurrency": 4,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "correction_history_csv",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "product_timeline",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "product_timeline",
+      "concurrency": 4,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "repricing_scenario_preview",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "repricing_scenario_preview",
+      "concurrency": 4,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "repricing_global_preview",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "repricing_global_preview",
+      "concurrency": 4,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "repricing_draft_list",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "repricing_draft_list",
+      "concurrency": 4,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "repricing_draft_read",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "repricing_draft_read",
+      "concurrency": 4,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "repricing_draft_create",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "repricing_draft_sync",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "repricing_apply",
+      "concurrency": 1,
+      "classification": "confirmed",
+      "evidence": "All three processes crossed: request p95 679.065ms >= 500ms; query p50 915 >= 75."
+    },
+    {
+      "id": "repricing_rollback",
+      "concurrency": 1,
+      "classification": "confirmed",
+      "evidence": "All three processes crossed: query p50 461 >= 75."
+    },
+    {
+      "id": "repricing_csv",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "export_status",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "export_status",
+      "concurrency": 4,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "export_snapshot_create",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "export_snapshot_reuse",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "export_snapshot_download",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "export_snapshot_confirmation",
+      "concurrency": 1,
+      "classification": "rejected",
+      "evidence": "All three representative/high-scale processes stayed below every endpoint gate."
+    },
+    {
+      "id": "plan_catalog_hydration",
+      "classification": "rejected",
+      "evidence": "All three first/warm plan pairs stayed below every plan gate.",
+      "concurrency": null
+    },
+    {
+      "id": "plan_schema_lookup",
+      "classification": "rejected",
+      "evidence": "All three first/warm plan pairs stayed below every plan gate.",
+      "concurrency": null
+    },
+    {
+      "id": "plan_product_sequence_common",
+      "classification": "confirmed",
+      "evidence": "All three first/warm plan pairs crossed the estimate ratio gate. This is a plan-quality finding; endpoint latency must still justify any optimization experiment.",
+      "concurrency": null
+    },
+    {
+      "id": "plan_product_variation_rare",
+      "classification": "rejected",
+      "evidence": "All three first/warm plan pairs stayed below every plan gate.",
+      "concurrency": null
+    },
+    {
+      "id": "plan_pricing_context",
+      "classification": "rejected",
+      "evidence": "All three first/warm plan pairs stayed below every plan gate.",
+      "concurrency": null
+    },
+    {
+      "id": "plan_correction_queue_common",
+      "classification": "rejected",
+      "evidence": "All three first/warm plan pairs stayed below every plan gate.",
+      "concurrency": null
+    },
+    {
+      "id": "plan_correction_history_page",
+      "classification": "rejected",
+      "evidence": "All three first/warm plan pairs stayed below every plan gate.",
+      "concurrency": null
+    },
+    {
+      "id": "plan_repricing_candidates",
+      "classification": "confirmed",
+      "evidence": "All three first/warm plan pairs crossed the estimate ratio gate. This is a plan-quality finding; endpoint latency must still justify any optimization experiment.",
+      "concurrency": null
+    },
+    {
+      "id": "plan_timeline_recursive_lineage",
+      "classification": "rejected",
+      "evidence": "All three first/warm plan pairs stayed below every plan gate.",
+      "concurrency": null
+    },
+    {
+      "id": "plan_export_range_common",
+      "classification": "confirmed",
+      "evidence": "All three first/warm plan pairs crossed the estimate ratio gate. This is a plan-quality finding; endpoint latency must still justify any optimization experiment.",
+      "concurrency": null
+    }
+  ]
+}

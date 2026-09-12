@@ -1,0 +1,37 @@
+{
+  "passed": true,
+  "checkedAt": "2026-09-12T12:23:07.398Z",
+  "fileCount": 201,
+  "runCount": 3,
+  "resultRowsPerRun": [
+    43,
+    43,
+    43
+  ],
+  "planRowsPerRun": [
+    20,
+    20,
+    20
+  ],
+  "phaseRowsPerRun": [
+    10,
+    10,
+    10
+  ],
+  "stateValidationRowsPerRun": [
+    11,
+    11,
+    11
+  ],
+  "checks": [
+    "three corrected process artifacts share one revision and fixture definition",
+    "all HTTP result rows contain observed query metrics",
+    "all first/warm EXPLAIN plan pairs are present",
+    "all six request-scoped phase timers were observed in three supplemental processes",
+    "all mutation/export database postconditions passed in three state-validation processes",
+    "no database URL or credential material",
+    "no session or fixture identity material",
+    "no raw query text fields or stored CSV payload fields",
+    "no synthetic product payload values or SKU-shaped fixture values"
+  ]
+}

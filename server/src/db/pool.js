@@ -8,6 +8,7 @@ const {
   pgQueryTimeoutMs,
   pgStatementTimeoutMs,
 } = require('../config/env');
+const { instrumentPostgresPool } = require('../observability/performance-metrics');
 
 const pool = new Pool({
   ...databaseOptions,
@@ -18,6 +19,8 @@ const pool = new Pool({
   query_timeout: pgQueryTimeoutMs,
   statement_timeout: pgStatementTimeoutMs,
 });
+
+instrumentPostgresPool(pool);
 
 pool.on('error', (err) => {
   require('../utils/logger').error('postgres.pool.error', {

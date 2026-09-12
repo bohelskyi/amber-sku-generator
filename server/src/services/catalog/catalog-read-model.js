@@ -1,5 +1,6 @@
 const initialConfig = require('../../../data_config');
 const pool = require('../../db/pool');
+const { startPhase } = require('../../observability/performance-metrics');
 
 async function getAppConfig() {
   const config = { categories: {}, questions: {}, extraConfig: initialConfig.extraConfig };
@@ -57,6 +58,7 @@ async function getAppConfig() {
     ORDER BY q.category_code, COALESCE(q.display_order, q.sku_index), q.sku_index, o.value_id
   `);
 
+  const finishHydration = startPhase('catalog.hydration');
   const tempQuestions = new Map();
   for (const row of questions.rows) {
     if (!tempQuestions.has(row.q_db_id)) {
@@ -93,6 +95,7 @@ async function getAppConfig() {
     if (!config.questions[question.cat]) config.questions[question.cat] = [];
     config.questions[question.cat].push(question);
   }
+  finishHydration();
 
   return config;
 }

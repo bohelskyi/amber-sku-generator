@@ -1,6 +1,7 @@
 const { getCorrectionChangesText } = require('./correction-history');
 const { buildCsv } = require('../utils/csv');
 const { presentCsvDownload } = require('./csv-download');
+const { startPhase } = require('../observability/performance-metrics');
 
 const CORRECTION_HISTORY_COLUMNS = Object.freeze([
   'date',
@@ -20,6 +21,7 @@ const CORRECTION_HISTORY_COLUMNS = Object.freeze([
 ]);
 
 function presentCorrectionHistoryCsv(items) {
+  const finishCsv = startPhase('correction_history.csv');
   const csv = buildCsv([
     CORRECTION_HISTORY_COLUMNS,
     ...items.map((item) => [
@@ -39,8 +41,9 @@ function presentCorrectionHistoryCsv(items) {
       item.reason,
     ]),
   ]);
-
-  return presentCsvDownload('amber-correction-history.csv', csv);
+  const result = presentCsvDownload('amber-correction-history.csv', csv);
+  finishCsv();
+  return result;
 }
 
 module.exports = {

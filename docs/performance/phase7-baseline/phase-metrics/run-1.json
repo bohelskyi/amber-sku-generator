@@ -1,0 +1,2061 @@
+{
+  "run": 1,
+  "databaseName": "amber_test",
+  "nodeVersion": "v24.19.0",
+  "postgresVersion": "16.15",
+  "revision": "215ac09d34065f48598bff6a4f2d0d9a4d8a12bc",
+  "platform": "win32",
+  "architecture": "x64",
+  "cpuModel": "AMD Ryzen 9 9950X3D 16-Core Processor          ",
+  "cpuCount": 32,
+  "ramBytes": 66155474944,
+  "pool": {
+    "max": 10
+  },
+  "fixtureSeed": "phase7-v1",
+  "requestedScales": {
+    "categories": 25,
+    "products": 1000,
+    "corrections": 999,
+    "activeCorrections": 100,
+    "activeDrafts": 25,
+    "repricingChanges": 500,
+    "exportRange": 1000,
+    "lineage": 50,
+    "fixtureSeed": "phase7-v1",
+    "samples": "baseline",
+    "caseIds": [
+      "catalog_read",
+      "correction_history_page",
+      "correction_history_csv",
+      "repricing_scenario_preview",
+      "repricing_global_preview",
+      "export_snapshot_create"
+    ],
+    "outputDirectory": "D:\\Work\\amber-sku-generator\\docs\\performance\\phase7-baseline\\phase-metrics",
+    "revision": "215ac09d34065f48598bff6a4f2d0d9a4d8a12bc",
+    "cpuModel": "AMD Ryzen 9 9950X3D 16-Core Processor          ",
+    "cpuCount": 32,
+    "ramBytes": 66155474944,
+    "run": 1
+  },
+  "cardinalities": {
+    "categories": 25,
+    "products": 1000,
+    "corrections": 999,
+    "correction_requests": 100,
+    "drafts": 25,
+    "repricing_items": 0,
+    "export_snapshots": 35
+  },
+  "results": [
+    {
+      "id": "catalog_read",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 30.672,
+        "p95": 33.234
+      },
+      "databaseMs": {
+        "p50": 19.606,
+        "p95": 23.455
+      },
+      "maxQueryMs": {
+        "p50": 16.095,
+        "p95": 18.757
+      },
+      "queryCount": {
+        "min": 4,
+        "p50": 4,
+        "max": 4
+      },
+      "responseBytes": {
+        "p50": 12070,
+        "p95": 12070
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 388328,
+        "p95": 452696
+      },
+      "peakHeapBytes": 29283840,
+      "peakRssBytes": 93491200,
+      "eventLoopDelayMs": {
+        "p50": 15.364,
+        "p95": 15.479
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "42b860e35bff3401",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 1649.122,
+          "maxDurationMs": 25.375
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 158.328,
+          "maxDurationMs": 2.274
+        },
+        {
+          "fingerprint": "55b5a53b54abcf8a",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 112.603,
+          "maxDurationMs": 1.728
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 87.943,
+          "maxDurationMs": 1.207
+        }
+      ],
+      "phases": {
+        "catalog.hydration": {
+          "observedSamples": 100,
+          "durationMs": {
+            "p50": 0.014,
+            "p95": 0.022
+          },
+          "maxDurationMs": 0.029
+        }
+      }
+    },
+    {
+      "id": "catalog_read",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 30.247,
+        "p95": 35.76
+      },
+      "databaseMs": {
+        "p50": 21.292,
+        "p95": 22.952
+      },
+      "maxQueryMs": {
+        "p50": 17.772,
+        "p95": 18.837
+      },
+      "queryCount": {
+        "min": 4,
+        "p50": 4,
+        "max": 4
+      },
+      "responseBytes": {
+        "p50": 12070,
+        "p95": 12070
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 1349304,
+        "p95": 1507208
+      },
+      "peakHeapBytes": 44150720,
+      "peakRssBytes": 140484608,
+      "eventLoopDelayMs": {
+        "p50": 15.348,
+        "p95": 20.636
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "42b860e35bff3401",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 7155.644,
+          "maxDurationMs": 20.978
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 608.384,
+          "maxDurationMs": 2.893
+        },
+        {
+          "fingerprint": "55b5a53b54abcf8a",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 493.707,
+          "maxDurationMs": 2.085
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 309.618,
+          "maxDurationMs": 2.05
+        }
+      ],
+      "phases": {
+        "catalog.hydration": {
+          "observedSamples": 400,
+          "durationMs": {
+            "p50": 0.008,
+            "p95": 0.015
+          },
+          "maxDurationMs": 0.03
+        }
+      }
+    },
+    {
+      "id": "correction_history_page",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 30.617,
+        "p95": 31.886
+      },
+      "databaseMs": {
+        "p50": 23.123,
+        "p95": 24.242
+      },
+      "maxQueryMs": {
+        "p50": 13.685,
+        "p95": 16.15
+      },
+      "queryCount": {
+        "min": 7,
+        "p50": 7,
+        "max": 7
+      },
+      "responseBytes": {
+        "p50": 105900,
+        "p95": 105900
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 31
+      },
+      "heapDeltaBytes": {
+        "p50": 1516304,
+        "p95": 1623376
+      },
+      "peakHeapBytes": 70984056,
+      "peakRssBytes": 210259968,
+      "eventLoopDelayMs": {
+        "p50": 15.38,
+        "p95": 15.487
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "42b860e35bff3401",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 1436.929,
+          "maxDurationMs": 16.663
+        },
+        {
+          "fingerprint": "250e44216dcf927c",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 236.185,
+          "maxDurationMs": 3.592
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 151.475,
+          "maxDurationMs": 2.112
+        },
+        {
+          "fingerprint": "a207201a1beea3a2",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 141.392,
+          "maxDurationMs": 2.549
+        },
+        {
+          "fingerprint": "1a43276b88160eef",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 105.162,
+          "maxDurationMs": 1.806
+        },
+        {
+          "fingerprint": "55b5a53b54abcf8a",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 103.561,
+          "maxDurationMs": 1.502
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 83.196,
+          "maxDurationMs": 1.29
+        }
+      ],
+      "phases": {
+        "catalog.hydration": {
+          "observedSamples": 100,
+          "durationMs": {
+            "p50": 0.012,
+            "p95": 0.018
+          },
+          "maxDurationMs": 0.028
+        },
+        "correction_history.normalization": {
+          "observedSamples": 100,
+          "durationMs": {
+            "p50": 0.173,
+            "p95": 0.299
+          },
+          "maxDurationMs": 0.336
+        }
+      }
+    },
+    {
+      "id": "correction_history_page",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 29.25,
+        "p95": 34.498
+      },
+      "databaseMs": {
+        "p50": 13.388,
+        "p95": 26.339
+      },
+      "maxQueryMs": {
+        "p50": 5.534,
+        "p95": 15.768
+      },
+      "queryCount": {
+        "min": 3,
+        "p50": 6,
+        "max": 7
+      },
+      "responseBytes": {
+        "p50": 105900,
+        "p95": 105900
+      },
+      "cpuMs": {
+        "p50": 15,
+        "p95": 32
+      },
+      "heapDeltaBytes": {
+        "p50": 5179512,
+        "p95": 6400232
+      },
+      "peakHeapBytes": 102777928,
+      "peakRssBytes": 238305280,
+      "eventLoopDelayMs": {
+        "p50": 15.307,
+        "p95": 15.512
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "42b860e35bff3401",
+          "command": "SELECT",
+          "count": 200,
+          "durationMs": 3048.699,
+          "maxDurationMs": 23.342
+        },
+        {
+          "fingerprint": "250e44216dcf927c",
+          "command": "SELECT",
+          "count": 300,
+          "durationMs": 865.04,
+          "maxDurationMs": 5.805
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 633.501,
+          "maxDurationMs": 2.166
+        },
+        {
+          "fingerprint": "55b5a53b54abcf8a",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 532.681,
+          "maxDurationMs": 5.534
+        },
+        {
+          "fingerprint": "a207201a1beea3a2",
+          "command": "SELECT",
+          "count": 201,
+          "durationMs": 376.362,
+          "maxDurationMs": 4.847
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 312.906,
+          "maxDurationMs": 1.353
+        },
+        {
+          "fingerprint": "1a43276b88160eef",
+          "command": "SELECT",
+          "count": 289,
+          "durationMs": 311.39,
+          "maxDurationMs": 4.775
+        }
+      ],
+      "phases": {
+        "catalog.hydration": {
+          "observedSamples": 400,
+          "durationMs": {
+            "p50": 0.008,
+            "p95": 0.013
+          },
+          "maxDurationMs": 0.027
+        },
+        "correction_history.normalization": {
+          "observedSamples": 400,
+          "durationMs": {
+            "p50": 0.09,
+            "p95": 0.14
+          },
+          "maxDurationMs": 0.284
+        }
+      }
+    },
+    {
+      "id": "correction_history_csv",
+      "kind": "write",
+      "concurrency": 1,
+      "sampleCount": 30,
+      "requestMs": {
+        "p50": 30.783,
+        "p95": 33.126
+      },
+      "databaseMs": {
+        "p50": 22.704,
+        "p95": 24.286
+      },
+      "maxQueryMs": {
+        "p50": 12.855,
+        "p95": 13.502
+      },
+      "queryCount": {
+        "min": 7,
+        "p50": 7,
+        "max": 7
+      },
+      "responseBytes": {
+        "p50": 121063,
+        "p95": 121063
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 7845328,
+        "p95": 7855440
+      },
+      "peakHeapBytes": 94517848,
+      "peakRssBytes": 235708416,
+      "eventLoopDelayMs": {
+        "p50": 15.356,
+        "p95": 15.462
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "42b860e35bff3401",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 388.236,
+          "maxDurationMs": 13.687
+        },
+        {
+          "fingerprint": "0a376bf5f8c65b3c",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 119.01,
+          "maxDurationMs": 4.953
+        },
+        {
+          "fingerprint": "a207201a1beea3a2",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 48.076,
+          "maxDurationMs": 4.081
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 45.596,
+          "maxDurationMs": 1.788
+        },
+        {
+          "fingerprint": "1a43276b88160eef",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 31.02,
+          "maxDurationMs": 1.254
+        },
+        {
+          "fingerprint": "55b5a53b54abcf8a",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 30.248,
+          "maxDurationMs": 1.305
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 25.823,
+          "maxDurationMs": 1.234
+        }
+      ],
+      "phases": {
+        "catalog.hydration": {
+          "observedSamples": 30,
+          "durationMs": {
+            "p50": 0.01,
+            "p95": 0.013
+          },
+          "maxDurationMs": 0.015
+        },
+        "correction_history.normalization": {
+          "observedSamples": 30,
+          "durationMs": {
+            "p50": 0.421,
+            "p95": 0.654
+          },
+          "maxDurationMs": 0.678
+        },
+        "correction_history.csv": {
+          "observedSamples": 30,
+          "durationMs": {
+            "p50": 1.101,
+            "p95": 2.051
+          },
+          "maxDurationMs": 2.268
+        }
+      }
+    },
+    {
+      "id": "repricing_scenario_preview",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 29.364,
+        "p95": 45.457
+      },
+      "databaseMs": {
+        "p50": 8.649,
+        "p95": 10.821
+      },
+      "maxQueryMs": {
+        "p50": 2.628,
+        "p95": 3.959
+      },
+      "queryCount": {
+        "min": 5,
+        "p50": 5,
+        "max": 5
+      },
+      "responseBytes": {
+        "p50": 1217423,
+        "p95": 1217423
+      },
+      "cpuMs": {
+        "p50": 16,
+        "p95": 78
+      },
+      "heapDeltaBytes": {
+        "p50": 23701224,
+        "p95": 23998480
+      },
+      "peakHeapBytes": 95099216,
+      "peakRssBytes": 302202880,
+      "eventLoopDelayMs": {
+        "p50": 13.486,
+        "p95": 17.31
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "c4598a7f852ec27b",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 263.633,
+          "maxDurationMs": 3.814
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 189.186,
+          "maxDurationMs": 5.184
+        },
+        {
+          "fingerprint": "c40f6529037e9d93",
+          "command": "WITH",
+          "count": 100,
+          "durationMs": 172.481,
+          "maxDurationMs": 2.993
+        },
+        {
+          "fingerprint": "8a9515ab81bc925d",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 157.749,
+          "maxDurationMs": 3.767
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 105.763,
+          "maxDurationMs": 1.538
+        }
+      ],
+      "phases": {
+        "repricing.projection_and_tokens": {
+          "observedSamples": 100,
+          "durationMs": {
+            "p50": 9.514,
+            "p95": 13.425
+          },
+          "maxDurationMs": 16.897
+        }
+      }
+    },
+    {
+      "id": "repricing_scenario_preview",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 81.885,
+        "p95": 93.741
+      },
+      "databaseMs": {
+        "p50": 43.955,
+        "p95": 57.948
+      },
+      "maxQueryMs": {
+        "p50": 24.099,
+        "p95": 28.561
+      },
+      "queryCount": {
+        "min": 5,
+        "p50": 5,
+        "max": 5
+      },
+      "responseBytes": {
+        "p50": 1217423,
+        "p95": 1217423
+      },
+      "cpuMs": {
+        "p50": 78,
+        "p95": 156
+      },
+      "heapDeltaBytes": {
+        "p50": -17991096,
+        "p95": 36055304
+      },
+      "peakHeapBytes": 114044472,
+      "peakRssBytes": 345055232,
+      "eventLoopDelayMs": {
+        "p50": 20.977,
+        "p95": 25.376
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "8a9515ab81bc925d",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 9183.788,
+          "maxDurationMs": 31.862
+        },
+        {
+          "fingerprint": "c4598a7f852ec27b",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 6071.788,
+          "maxDurationMs": 35.158
+        },
+        {
+          "fingerprint": "c40f6529037e9d93",
+          "command": "WITH",
+          "count": 400,
+          "durationMs": 1013.919,
+          "maxDurationMs": 17.204
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 705.976,
+          "maxDurationMs": 5.34
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 432.114,
+          "maxDurationMs": 2.317
+        }
+      ],
+      "phases": {
+        "repricing.projection_and_tokens": {
+          "observedSamples": 400,
+          "durationMs": {
+            "p50": 31.71,
+            "p95": 34.527
+          },
+          "maxDurationMs": 42.729
+        }
+      }
+    },
+    {
+      "id": "repricing_global_preview",
+      "kind": "read",
+      "concurrency": 1,
+      "sampleCount": 100,
+      "requestMs": {
+        "p50": 29.066,
+        "p95": 41.352
+      },
+      "databaseMs": {
+        "p50": 7.866,
+        "p95": 10.577
+      },
+      "maxQueryMs": {
+        "p50": 2.584,
+        "p95": 4.461
+      },
+      "queryCount": {
+        "min": 5,
+        "p50": 5,
+        "max": 5
+      },
+      "responseBytes": {
+        "p50": 1432457,
+        "p95": 1432457
+      },
+      "cpuMs": {
+        "p50": 16,
+        "p95": 63
+      },
+      "heapDeltaBytes": {
+        "p50": 25780904,
+        "p95": 25823624
+      },
+      "peakHeapBytes": 123004464,
+      "peakRssBytes": 356556800,
+      "eventLoopDelayMs": {
+        "p50": 11.518,
+        "p95": 19.98
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "7add6a70d5e49e57",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 273.901,
+          "maxDurationMs": 5.446
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 159.074,
+          "maxDurationMs": 4.461
+        },
+        {
+          "fingerprint": "4a2d95a2bc2260f0",
+          "command": "WITH",
+          "count": 100,
+          "durationMs": 144.502,
+          "maxDurationMs": 1.853
+        },
+        {
+          "fingerprint": "8a9515ab81bc925d",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 144.297,
+          "maxDurationMs": 3.064
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 100,
+          "durationMs": 94.972,
+          "maxDurationMs": 1.448
+        }
+      ],
+      "phases": {
+        "repricing.projection_and_tokens": {
+          "observedSamples": 100,
+          "durationMs": {
+            "p50": 12.287,
+            "p95": 16.257
+          },
+          "maxDurationMs": 19.052
+        }
+      }
+    },
+    {
+      "id": "repricing_global_preview",
+      "kind": "read",
+      "concurrency": 4,
+      "sampleCount": 400,
+      "requestMs": {
+        "p50": 85.175,
+        "p95": 107.353
+      },
+      "databaseMs": {
+        "p50": 45.115,
+        "p95": 63.589
+      },
+      "maxQueryMs": {
+        "p50": 25,
+        "p95": 31.925
+      },
+      "queryCount": {
+        "min": 5,
+        "p50": 5,
+        "max": 5
+      },
+      "responseBytes": {
+        "p50": 1432457,
+        "p95": 1432457
+      },
+      "cpuMs": {
+        "p50": 93,
+        "p95": 157
+      },
+      "heapDeltaBytes": {
+        "p50": -21600104,
+        "p95": 53326208
+      },
+      "peakHeapBytes": 112708696,
+      "peakRssBytes": 354058240,
+      "eventLoopDelayMs": {
+        "p50": 20.43,
+        "p95": 25.922
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "8a9515ab81bc925d",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 10012.516,
+          "maxDurationMs": 41.267
+        },
+        {
+          "fingerprint": "4a2d95a2bc2260f0",
+          "command": "WITH",
+          "count": 400,
+          "durationMs": 4645.659,
+          "maxDurationMs": 31.191
+        },
+        {
+          "fingerprint": "7add6a70d5e49e57",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 2664.486,
+          "maxDurationMs": 13.655
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 680.8,
+          "maxDurationMs": 5.516
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 400,
+          "durationMs": 458.933,
+          "maxDurationMs": 2.459
+        }
+      ],
+      "phases": {
+        "repricing.projection_and_tokens": {
+          "observedSamples": 400,
+          "durationMs": {
+            "p50": 47.478,
+            "p95": 61.795
+          },
+          "maxDurationMs": 83.868
+        }
+      }
+    },
+    {
+      "id": "export_snapshot_create",
+      "kind": "write",
+      "concurrency": 1,
+      "sampleCount": 30,
+      "requestMs": {
+        "p50": 15.341,
+        "p95": 27.108
+      },
+      "databaseMs": {
+        "p50": 10.415,
+        "p95": 13.16
+      },
+      "maxQueryMs": {
+        "p50": 2.408,
+        "p95": 3.551
+      },
+      "queryCount": {
+        "min": 12,
+        "p50": 12,
+        "max": 12
+      },
+      "responseBytes": {
+        "p50": 168,
+        "p95": 168
+      },
+      "cpuMs": {
+        "p50": 0,
+        "p95": 16
+      },
+      "heapDeltaBytes": {
+        "p50": 3155328,
+        "p95": 3696056
+      },
+      "peakHeapBytes": 78144032,
+      "peakRssBytes": 286130176,
+      "eventLoopDelayMs": {
+        "p50": 0,
+        "p95": 10.408
+      },
+      "fingerprints": [
+        {
+          "fingerprint": "fa8bb3c3993ff81f",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 75.734,
+          "maxDurationMs": 3.583
+        },
+        {
+          "fingerprint": "6495b53b95900bd4",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 41.07,
+          "maxDurationMs": 1.639
+        },
+        {
+          "fingerprint": "c6be66d4918b1aed",
+          "command": "INSERT",
+          "count": 30,
+          "durationMs": 40.32,
+          "maxDurationMs": 3.551
+        },
+        {
+          "fingerprint": "174035244ae6a3a3",
+          "command": "SELECT",
+          "count": 60,
+          "durationMs": 35.285,
+          "maxDurationMs": 0.731
+        },
+        {
+          "fingerprint": "df3839fd2622ac57",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 24.846,
+          "maxDurationMs": 1.21
+        },
+        {
+          "fingerprint": "7c555434c445a453",
+          "command": "INSERT",
+          "count": 30,
+          "durationMs": 20.344,
+          "maxDurationMs": 1.111
+        },
+        {
+          "fingerprint": "0a9da44cd77fb1ae",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 19.404,
+          "maxDurationMs": 0.916
+        },
+        {
+          "fingerprint": "87fd48805697cf84",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 19.124,
+          "maxDurationMs": 1.567
+        },
+        {
+          "fingerprint": "a01b880cd98e6a61",
+          "command": "SELECT",
+          "count": 30,
+          "durationMs": 17.552,
+          "maxDurationMs": 0.728
+        },
+        {
+          "fingerprint": "79663c1d3b43ceaf",
+          "command": "COMMIT",
+          "count": 30,
+          "durationMs": 14.824,
+          "maxDurationMs": 0.573
+        },
+        {
+          "fingerprint": "a8402858d4f1e1d2",
+          "command": "BEGIN",
+          "count": 30,
+          "durationMs": 14.717,
+          "maxDurationMs": 0.635
+        }
+      ],
+      "phases": {
+        "export.shaping": {
+          "observedSamples": 30,
+          "durationMs": {
+            "p50": 1.004,
+            "p95": 1.376
+          },
+          "maxDurationMs": 1.621
+        },
+        "export.csv": {
+          "observedSamples": 30,
+          "durationMs": {
+            "p50": 0.241,
+            "p95": 0.53
+          },
+          "maxDurationMs": 0.64
+        }
+      }
+    }
+  ],
+  "plans": [
+    {
+      "id": "catalog_hydration",
+      "temperature": "first",
+      "fileName": "catalog_hydration.first.json",
+      "planningTimeMs": 0.642,
+      "executionTimeMs": 0.131,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 27,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Hash Join",
+          "relation": null,
+          "actualRows": 27,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Hash Join",
+          "relation": null,
+          "actualRows": 27,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "options",
+          "actualRows": 26,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Hash",
+          "relation": null,
+          "actualRows": 26,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "questions",
+          "actualRows": 26,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Hash",
+          "relation": null,
+          "actualRows": 25,
+          "planRows": 25,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "categories",
+          "actualRows": 25,
+          "planRows": 25,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "catalog_hydration",
+      "temperature": "warm",
+      "fileName": "catalog_hydration.warm.json",
+      "planningTimeMs": 0.253,
+      "executionTimeMs": 0.195,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 27,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Hash Join",
+          "relation": null,
+          "actualRows": 27,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Hash Join",
+          "relation": null,
+          "actualRows": 27,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "options",
+          "actualRows": 26,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Hash",
+          "relation": null,
+          "actualRows": 26,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "questions",
+          "actualRows": 26,
+          "planRows": 26,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Hash",
+          "relation": null,
+          "actualRows": 25,
+          "planRows": 25,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "categories",
+          "actualRows": 25,
+          "planRows": 25,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "schema_lookup",
+      "temperature": "first",
+      "fileName": "schema_lookup.first.json",
+      "planningTimeMs": 0.316,
+      "executionTimeMs": 0.064,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 2,
+          "planRows": 2,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Nested Loop",
+          "relation": null,
+          "actualRows": 2,
+          "planRows": 2,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Nested Loop",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "sku_schema_versions",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "sku_schema_questions",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "sku_schema_options",
+          "actualRows": 2,
+          "planRows": 2,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "schema_lookup",
+      "temperature": "warm",
+      "fileName": "schema_lookup.warm.json",
+      "planningTimeMs": 0.099,
+      "executionTimeMs": 0.041,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 2,
+          "planRows": 2,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Nested Loop",
+          "relation": null,
+          "actualRows": 2,
+          "planRows": 2,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Nested Loop",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "sku_schema_versions",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "sku_schema_questions",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "sku_schema_options",
+          "actualRows": 2,
+          "planRows": 2,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "product_sequence_common",
+      "temperature": "first",
+      "fileName": "product_sequence_common.first.json",
+      "planningTimeMs": 0.128,
+      "executionTimeMs": 0.151,
+      "nodes": [
+        {
+          "nodeType": "Limit",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 56,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 1000,
+          "loops": 1,
+          "sharedHitBlocks": 56,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "products",
+          "actualRows": 1000,
+          "planRows": 1000,
+          "loops": 1,
+          "sharedHitBlocks": 56,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "product_sequence_common",
+      "temperature": "warm",
+      "fileName": "product_sequence_common.warm.json",
+      "planningTimeMs": 0.034,
+      "executionTimeMs": 0.126,
+      "nodes": [
+        {
+          "nodeType": "Limit",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 56,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 1000,
+          "loops": 1,
+          "sharedHitBlocks": 56,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "products",
+          "actualRows": 1000,
+          "planRows": 1000,
+          "loops": 1,
+          "sharedHitBlocks": 56,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "product_variation_rare",
+      "temperature": "first",
+      "fileName": "product_variation_rare.first.json",
+      "planningTimeMs": 0.116,
+      "executionTimeMs": 0.044,
+      "nodes": [
+        {
+          "nodeType": "Seq Scan",
+          "relation": "sku_registry",
+          "actualRows": 0,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 7,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "product_variation_rare",
+      "temperature": "warm",
+      "fileName": "product_variation_rare.warm.json",
+      "planningTimeMs": 0.025,
+      "executionTimeMs": 0.04,
+      "nodes": [
+        {
+          "nodeType": "Seq Scan",
+          "relation": "sku_registry",
+          "actualRows": 0,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 7,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "pricing_context",
+      "temperature": "first",
+      "fileName": "pricing_context.first.json",
+      "planningTimeMs": 0.301,
+      "executionTimeMs": 0.036,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 2,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Nested Loop",
+          "relation": null,
+          "actualRows": 2,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "price_scenarios",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "price_matrix",
+          "actualRows": 2,
+          "planRows": 2,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "pricing_context",
+      "temperature": "warm",
+      "fileName": "pricing_context.warm.json",
+      "planningTimeMs": 0.111,
+      "executionTimeMs": 0.03,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 2,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Nested Loop",
+          "relation": null,
+          "actualRows": 2,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 2,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "price_scenarios",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "price_matrix",
+          "actualRows": 2,
+          "planRows": 2,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "correction_queue_common",
+      "temperature": "first",
+      "fileName": "correction_queue_common.first.json",
+      "planningTimeMs": 0.241,
+      "executionTimeMs": 0.032,
+      "nodes": [
+        {
+          "nodeType": "Limit",
+          "relation": null,
+          "actualRows": 0,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 8,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 0,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 8,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Index Scan",
+          "relation": "correction_requests",
+          "actualRows": 0,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 8,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "correction_queue_common",
+      "temperature": "warm",
+      "fileName": "correction_queue_common.warm.json",
+      "planningTimeMs": 0.04,
+      "executionTimeMs": 0.032,
+      "nodes": [
+        {
+          "nodeType": "Limit",
+          "relation": null,
+          "actualRows": 0,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 0,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Index Scan",
+          "relation": "correction_requests",
+          "actualRows": 0,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 1,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "correction_history_page",
+      "temperature": "first",
+      "fileName": "correction_history_page.first.json",
+      "planningTimeMs": 0.171,
+      "executionTimeMs": 0.346,
+      "nodes": [
+        {
+          "nodeType": "Limit",
+          "relation": null,
+          "actualRows": 200,
+          "planRows": 200,
+          "loops": 1,
+          "sharedHitBlocks": 24,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 200,
+          "planRows": 999,
+          "loops": 1,
+          "sharedHitBlocks": 24,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "product_corrections",
+          "actualRows": 999,
+          "planRows": 999,
+          "loops": 1,
+          "sharedHitBlocks": 24,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "correction_history_page",
+      "temperature": "warm",
+      "fileName": "correction_history_page.warm.json",
+      "planningTimeMs": 0.023,
+      "executionTimeMs": 0.31,
+      "nodes": [
+        {
+          "nodeType": "Limit",
+          "relation": null,
+          "actualRows": 200,
+          "planRows": 200,
+          "loops": 1,
+          "sharedHitBlocks": 24,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 200,
+          "planRows": 999,
+          "loops": 1,
+          "sharedHitBlocks": 24,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "product_corrections",
+          "actualRows": 999,
+          "planRows": 999,
+          "loops": 1,
+          "sharedHitBlocks": 24,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "repricing_candidates",
+      "temperature": "first",
+      "fileName": "repricing_candidates.first.json",
+      "planningTimeMs": 0.085,
+      "executionTimeMs": 0.329,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 951,
+          "planRows": 5,
+          "loops": 1,
+          "sharedHitBlocks": 56,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "products",
+          "actualRows": 951,
+          "planRows": 5,
+          "loops": 1,
+          "sharedHitBlocks": 56,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "repricing_candidates",
+      "temperature": "warm",
+      "fileName": "repricing_candidates.warm.json",
+      "planningTimeMs": 0.029,
+      "executionTimeMs": 0.338,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 951,
+          "planRows": 5,
+          "loops": 1,
+          "sharedHitBlocks": 56,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Seq Scan",
+          "relation": "products",
+          "actualRows": 951,
+          "planRows": 5,
+          "loops": 1,
+          "sharedHitBlocks": 56,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "timeline_recursive_lineage",
+      "temperature": "first",
+      "fileName": "timeline_recursive_lineage.first.json",
+      "planningTimeMs": 0.122,
+      "executionTimeMs": 0.114,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 50,
+          "planRows": 31,
+          "loops": 1,
+          "sharedHitBlocks": 150,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Recursive Union",
+          "relation": null,
+          "actualRows": 50,
+          "planRows": 31,
+          "loops": 1,
+          "sharedHitBlocks": 150,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Index Scan",
+          "relation": "products",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Nested Loop",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 3,
+          "loops": 50,
+          "sharedHitBlocks": 147,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "WorkTable Scan",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 3,
+          "loops": 50,
+          "sharedHitBlocks": 0,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Index Scan",
+          "relation": "products",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 50,
+          "sharedHitBlocks": 147,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "CTE Scan",
+          "relation": null,
+          "actualRows": 50,
+          "planRows": 31,
+          "loops": 1,
+          "sharedHitBlocks": 150,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "timeline_recursive_lineage",
+      "temperature": "warm",
+      "fileName": "timeline_recursive_lineage.warm.json",
+      "planningTimeMs": 0.094,
+      "executionTimeMs": 0.127,
+      "nodes": [
+        {
+          "nodeType": "Sort",
+          "relation": null,
+          "actualRows": 50,
+          "planRows": 31,
+          "loops": 1,
+          "sharedHitBlocks": 150,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Recursive Union",
+          "relation": null,
+          "actualRows": 50,
+          "planRows": 31,
+          "loops": 1,
+          "sharedHitBlocks": 150,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Index Scan",
+          "relation": "products",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 1,
+          "sharedHitBlocks": 3,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Nested Loop",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 3,
+          "loops": 50,
+          "sharedHitBlocks": 147,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "WorkTable Scan",
+          "relation": null,
+          "actualRows": 1,
+          "planRows": 3,
+          "loops": 50,
+          "sharedHitBlocks": 0,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "Index Scan",
+          "relation": "products",
+          "actualRows": 1,
+          "planRows": 1,
+          "loops": 50,
+          "sharedHitBlocks": 147,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        },
+        {
+          "nodeType": "CTE Scan",
+          "relation": null,
+          "actualRows": 50,
+          "planRows": 31,
+          "loops": 1,
+          "sharedHitBlocks": 150,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "export_range_common",
+      "temperature": "first",
+      "fileName": "export_range_common.first.json",
+      "planningTimeMs": 0.089,
+      "executionTimeMs": 0.129,
+      "nodes": [
+        {
+          "nodeType": "Index Scan",
+          "relation": "products",
+          "actualRows": 1000,
+          "planRows": 5,
+          "loops": 1,
+          "sharedHitBlocks": 45,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    },
+    {
+      "id": "export_range_common",
+      "temperature": "warm",
+      "fileName": "export_range_common.warm.json",
+      "planningTimeMs": 0.066,
+      "executionTimeMs": 0.117,
+      "nodes": [
+        {
+          "nodeType": "Index Scan",
+          "relation": "products",
+          "actualRows": 1000,
+          "planRows": 5,
+          "loops": 1,
+          "sharedHitBlocks": 45,
+          "sharedReadBlocks": 0,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
+        }
+      ]
+    }
+  ]
+}
