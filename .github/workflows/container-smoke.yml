@@ -1,6 +1,9 @@
 name: Container smoke
 
 on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 4 * * 1'
   push:
     paths:
       - 'server/**'

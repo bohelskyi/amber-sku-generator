@@ -940,7 +940,19 @@ Both operations still acquire product locks in stable ascending ID order with `S
 
 ### Phase 8 — Operational hardening
 
-Add path-filtered container build/smoke coverage and evaluate image pinning, non-root/read-only operation, build-context minimization, and PostgreSQL port exposure. Treat runtime/network changes separately from source refactors.
+**Status: complete through `25be7f0`, followed by the final scheduled-smoke and documentation closure checkpoint.**
+
+| Checkpoint | Completed change |
+| --- | --- |
+| `3d60d11` | Added path-filtered production container build and smoke coverage for Compose validation, startup health, client serving, unauthenticated JSON behavior, callback-log redaction, and graceful server shutdown. |
+| `25be7f0` | Minimized the production client and server Docker build contexts without changing runtime images or behavior. |
+| Closure checkpoint | Added manual and weekly Monday 04:23 UTC smoke triggers so mutable base-image changes are exercised without waiting for a repository change. |
+
+The final read-only review found no further runtime change suitable for this refactor. The current Node 20 and nginx 1.27 image lines must not be digest-pinned before they are upgraded to supported versions. A managed tag/digest policy also needs automated, reviewed image updates; pinning the current artifacts without that process would freeze obsolete or stale components. PostgreSQL 16 remains on its current floating minor tag.
+
+Non-root/read-only operation remains feasible for the server but requires a separately tested runtime change. nginx currently binds port 80 and writes its rendered configuration, PID, and temporary paths. PostgreSQL requires its writable data volume and runtime paths, and its entrypoint prepares volume ownership before dropping privileges. These changes remain separate operational/security work.
+
+The base Compose PostgreSQL service remains host-published for direct local-server and optional import workflows. Compose-internal application traffic and backup/restore scripts do not require that publishing, while the canonical local integration database uses its separate loopback-only port. Separating local and production database exposure requires an explicit production administration decision and remains deferred.
 
 ## Relative effort and risk by phase
 
