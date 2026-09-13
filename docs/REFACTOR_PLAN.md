@@ -921,7 +921,22 @@ Split reads and resource commands, constrain dynamic SQL identifiers, and isolat
 
 ### Phase 7 — Measured performance work
 
-Add bounded query timing, gather production-like query plans and volumes, then address only demonstrated problems. Any index or schema adjustment requires the next forward migration and the full migration verification matrix.
+**Status: complete through `0aed9e9`.** Phase 7.0 (`948e879`) added bounded query instrumentation and the benchmark harness, then recorded the original measurements in the [historical Phase 7.0 baseline](performance/phase7-baseline/BASELINE.md). That report's measurements and candidate checkpoints describe the starting state; the results below are later measurements, not revisions to the baseline.
+
+| Checkpoint | Completed change |
+| --- | --- |
+| Phase 7.1, `e5ce41d` | Batched the `repricing_items` INSERT for apply. |
+| Phase 7.2 rollback, `b418bfc` | Replaced 451 sequential product UPDATE calls with one parameterized set-based UPDATE. |
+| Phase 7.2 apply, `0aed9e9` | Replaced 451 sequential product UPDATE calls with one parameterized set-based UPDATE. |
+
+The existing Phase 7 harness measured 451 changed products on Node 20 and a disposable PostgreSQL 16 database:
+
+| Operation | Initial Phase 7.0 queries | After Phase 7.1 queries | Final queries | Final request p95 | Final DB p95 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Apply | 915 | 465 | 15 | about 111 ms | about 79–83 ms |
+| Rollback | 461 | 461 | 11 | about 37–44 ms | — |
+
+Both operations still acquire product locks in stable ascending ID order with `SELECT ... FOR UPDATE` (rollback also locks the batch first). JavaScript validation of locked rows, exact state, and per-product payloads remains before the parameterized update; each set-based input contains one row per product ID, and the returned ID set is checked. Apply and rollback retain their transaction boundaries, atomicity, idempotency, exact-state checks, audit behavior, and failure semantics. These checkpoints introduced no migrations, indexes, isolation changes, new advisory locks, or concurrency-policy changes. Phase 7 repricing optimization is complete; no further speculative optimization is currently planned.
 
 ### Phase 8 — Operational hardening
 
