@@ -6,6 +6,7 @@ const {
   normalizeCorrectionRow,
   normalizeHistoryFilters,
 } = require('../src/services/correction-history.service');
+const { presentCorrectionHistoryCsv } = require('../src/presenters/correction-history-csv');
 
 const config = {
   categories: { BR: { name: 'Браслети' } },
@@ -21,6 +22,12 @@ const config = {
           { id: 2, label: '2 сорт - натура', visible_if_json: { raw_type: 1 } },
         ],
       },
+      {
+        id: 'extra',
+        label: 'Додатково',
+        required: 0,
+        options: [],
+      },
     ],
   },
   extraConfig: {
@@ -29,6 +36,7 @@ const config = {
       options: [
         { id: 0, label: 'Ні' },
         { id: 1, label: 'Так' },
+        { id: 2, label: 'Напівкалібрована' },
       ],
     },
   },
@@ -156,4 +164,60 @@ test('history uses current configuration fallbacks and keeps missing historical 
       toLabel: 'new',
     },
   ]);
+});
+
+test('history and CSV omit only placeholder-backed semantic no-op changes', () => {
+  const item = normalizeCorrectionRow({
+    id: 9,
+    source_product_id: 20,
+    corrected_product_id: 21,
+    category_code: 'BR',
+    source_sku: 'BR-PLACEHOLDER',
+    corrected_sku: 'BR-CORRECTED',
+    price_delta_uah: 0,
+    reason: 'Уточнено калібрування',
+    created_at: '2026-09-12T08:00:00.000Z',
+    old_payload: {
+      totalPriceUah: 500,
+      answers: { extra: 0, is_calibrated: 0, legacy_zero: 0 },
+      decodedAnswers: [
+        {
+          key: 'extra',
+          label: 'Додатково',
+          value_id: null,
+          value_label: 'Не обрано',
+          is_placeholder: true,
+        },
+        {
+          key: 'is_calibrated',
+          label: 'Калібрування',
+          value_id: 0,
+          value_label: 'Некалібрована',
+          is_placeholder: false,
+        },
+      ],
+    },
+    new_payload: {
+      categoryCode: 'BR',
+      totalPriceUah: 500,
+      answers: { is_calibrated: 2 },
+    },
+  }, config);
+
+  assert.deepEqual(item.changes.map((change) => change.key), [
+    'is_calibrated',
+    'legacy_zero',
+  ]);
+  assert.equal(item.changes[0].fromLabel, 'Некалібрована');
+  assert.equal(item.changes[0].toLabel, 'Напівкалібрована');
+  assert.equal(item.changes[1].from, 0);
+  assert.equal(item.changes[1].to, null);
+
+  const changesText = getCorrectionChangesText(item);
+  assert.doesNotMatch(changesText, /Додатково/);
+  assert.match(changesText, /Калібрування: Некалібрована -> Напівкалібрована/);
+
+  const csv = presentCorrectionHistoryCsv([item]).body;
+  assert.doesNotMatch(csv, /Додатково/);
+  assert.match(csv, /Некалібрована -> Напівкалібрована/);
 });

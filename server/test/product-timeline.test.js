@@ -238,6 +238,47 @@ test('timeline exposes missing historical labels instead of inventing current me
   }]);
 });
 
+test('timeline omits only placeholder-backed semantic no-op changes', () => {
+  const changes = normalizeStoredChanges({
+    oldPayload: {
+      answers: { extra: 0, is_calibrated: 0, legacy_zero: 0 },
+      decodedAnswers: [
+        {
+          key: 'extra',
+          label: 'Додатково',
+          value_id: null,
+          value_label: 'Не обрано',
+          is_placeholder: true,
+        },
+        {
+          key: 'is_calibrated',
+          label: 'Калібрування',
+          value_id: 0,
+          value_label: 'Некалібрована',
+          is_placeholder: false,
+        },
+      ],
+    },
+    newPayload: { answers: { is_calibrated: 2 } },
+    oldSchema: null,
+    newSchema: null,
+    storedChanges: [
+      { key: 'extra', from: 0, to: null },
+      { key: 'is_calibrated', from: 0, to: 2 },
+      { key: 'legacy_zero', from: 0, to: null },
+    ],
+  });
+
+  assert.deepEqual(changes.map((change) => change.fieldKey), [
+    'is_calibrated',
+    'legacy_zero',
+  ]);
+  assert.deepEqual(changes[0].before, { value: 0, label: 'Некалібрована' });
+  assert.deepEqual(changes[0].after, { value: 2, label: 'Напівкалібрована' });
+  assert.deepEqual(changes[1].before, { value: 0, label: 'Не вказано' });
+  assert.deepEqual(changes[1].after, { value: null, label: null });
+});
+
 test('timeline presenter keeps missing audit history explicit and groups legacy request completion', () => {
   const result = presentProductTimeline('SKU-A', {
     products: [{

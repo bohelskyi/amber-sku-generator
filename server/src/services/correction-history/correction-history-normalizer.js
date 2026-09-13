@@ -1,4 +1,7 @@
-const { getAnswerChanges } = require('../../utils/answer-changes');
+const {
+  filterPresentableAnswerChanges,
+  getAnswerChanges,
+} = require('../../utils/answer-changes');
 const { asRuleObject, isRuleMatched } = require('../../utils/rules');
 const { toUahNumber } = require('../../utils/money');
 
@@ -73,7 +76,10 @@ function normalizeCorrectionRow(row, config) {
   const categoryCode = String(
     row.category_code || newPayload.categoryCode || oldPayload.categoryCode || ''
   ).toUpperCase();
-  const changes = getAnswerChanges(oldAnswers, newAnswers).map((change) => {
+  const changes = filterPresentableAnswerChanges(
+    getAnswerChanges(oldAnswers, newAnswers),
+    { oldPayload, newPayload }
+  ).map((change) => {
     const historicalAnswer = oldAnswerMap.get(change.key);
     const fromLabel = historicalAnswer && sameAnswerValue(historicalAnswer.value_id, change.from)
       ? historicalAnswer.value_label
