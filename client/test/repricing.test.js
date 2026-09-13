@@ -313,3 +313,31 @@ test('combined repricing rows filter by scenario, status, review, and SKU', () =
     reviewedProductIds: [1],
   }), [items[0]]);
 });
+
+test('focused manual-price row bypasses only a status filter mismatch', () => {
+  const items = [
+    { productId: 1, sku: 'BR1', scenarioId: 10, status: 'changed' },
+    { productId: 2, sku: 'BR2', scenarioId: 10, status: 'changed' },
+  ];
+
+  assert.deepEqual(filterRepricingItems(items, {
+    status: 'error',
+    retainedStatusProductId: 1,
+  }), [items[0]]);
+  assert.deepEqual(filterRepricingItems(items, {
+    status: 'error',
+    scenarioFilter: '20',
+    retainedStatusProductId: 1,
+  }), []);
+  assert.deepEqual(filterRepricingItems(items, {
+    status: 'error',
+    reviewFilter: 'reviewed',
+    retainedStatusProductId: 1,
+    reviewedProductIds: [],
+  }), []);
+  assert.deepEqual(filterRepricingItems(items, {
+    status: 'error',
+    search: 'BR2',
+    retainedStatusProductId: 1,
+  }), []);
+});

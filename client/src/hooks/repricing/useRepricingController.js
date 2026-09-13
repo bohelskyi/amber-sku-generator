@@ -224,11 +224,13 @@ export function useRepricingController() {
       search: state.search,
       reviewFilter: state.reviewFilter,
       reviewedProductIds: state.reviewedProductIds,
+      retainedStatusProductId: state.focusedManualPriceProductId,
     }),
     state.sort
   ), [
     effectiveItems,
     state.filter,
+    state.focusedManualPriceProductId,
     state.reviewFilter,
     state.reviewedProductIds,
     state.scenarioFilter,
@@ -450,6 +452,10 @@ export function useRepricingController() {
     dispatch({ type: 'manualPriceChanged', productId, value });
   }, [dispatch]);
 
+  const handleManualPriceFocus = useCallback((productId) => {
+    dispatch({ type: 'manualPriceFocused', productId });
+  }, [dispatch]);
+
   const resetManualPrice = useCallback((productId) => {
     dispatch({ type: 'manualPriceChanged', productId, value: undefined });
   }, [dispatch]);
@@ -498,10 +504,12 @@ export function useRepricingController() {
   }, [edit]);
 
   const handleManualPriceBlur = useCallback((productId, value, hasAutomaticResolution) => {
-    if (hasAutomaticResolution) return;
-    const normalizedPrice = parseManualPrice(value);
-    if (normalizedPrice !== null) setManualPrice(productId, String(normalizedPrice));
-  }, [setManualPrice]);
+    if (!hasAutomaticResolution) {
+      const normalizedPrice = parseManualPrice(value);
+      if (normalizedPrice !== null) setManualPrice(productId, String(normalizedPrice));
+    }
+    dispatch({ type: 'manualPriceBlurred', productId });
+  }, [dispatch, setManualPrice]);
 
   const handleRecountApplied = useCallback(async ({ result }) => {
     const current = stateRef.current;
@@ -661,6 +669,7 @@ export function useRepricingController() {
     globalDraft,
     handleCorrectionRequestCreated,
     handleManualPriceBlur,
+    handleManualPriceFocus,
     handleRecountApplied,
     handleSort,
     invalidManualPriceIds,
