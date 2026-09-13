@@ -631,6 +631,7 @@ async function applyRepricingScope({
     const batchId = Number(batchResult.rows[0].id);
     const appliedAt = batchResult.rows[0].applied_at;
     const repricingItemRecords = [];
+    const productUpdates = [];
 
     for (const item of changedItems) {
       const product = lockedProducts.get(Number(item.productId));
@@ -675,23 +676,14 @@ async function applyRepricingScope({
         details: nextDetails,
       };
 
-      await client.query(
-        `UPDATE products
-         SET total_price = $1,
-             total_price_uah = $2,
-             price_per_gram = $3,
-             uah_rate = $4,
-             details = $5::jsonb
-         WHERE id = $6`,
-        [
-          item.totalPrice,
-          item.newPriceUah,
-          item.pricePerGram,
-          item.uahRate,
-          JSON.stringify(nextDetails),
-          item.productId,
-        ]
-      );
+      productUpdates.push({
+        product_id: Number(item.productId),
+        total_price: item.totalPrice,
+        total_price_uah: item.newPriceUah,
+        price_per_gram: item.pricePerGram,
+        uah_rate: item.uahRate,
+        details: nextDetails,
+      });
 
       repricingItemRecords.push({
         ordinal: repricingItemRecords.length,
@@ -703,6 +695,39 @@ async function applyRepricingScope({
         old_payload: oldPayload,
         new_payload: newPayload,
       });
+    }
+
+    const expectedUpdatedProductIds = productUpdates.map((item) => item.product_id);
+    if (new Set(expectedUpdatedProductIds).size !== expectedUpdatedProductIds.length) {
+      throw new Error('Repricing product update contains duplicate product IDs.');
+    }
+    const updatedProductsResult = await client.query(
+      `UPDATE products AS product
+       SET total_price = item.total_price,
+           total_price_uah = item.total_price_uah,
+           price_per_gram = item.price_per_gram,
+           uah_rate = item.uah_rate,
+           details = item.details
+       FROM jsonb_to_recordset($1::jsonb) AS item(
+         product_id INTEGER,
+         total_price NUMERIC,
+         total_price_uah NUMERIC,
+         price_per_gram NUMERIC,
+         uah_rate NUMERIC,
+         details JSONB
+       )
+       WHERE product.id = item.product_id
+       RETURNING product.id`,
+      [JSON.stringify(productUpdates)]
+    );
+    const updatedProductIds = updatedProductsResult.rows.map((row) => Number(row.id));
+    const updatedProductSet = new Set(updatedProductIds);
+    if (
+      updatedProductsResult.rowCount !== expectedUpdatedProductIds.length
+      || updatedProductSet.size !== expectedUpdatedProductIds.length
+      || expectedUpdatedProductIds.some((productId) => !updatedProductSet.has(productId))
+    ) {
+      throw new Error('Repricing product update did not persist the complete changed-product set.');
     }
 
     const itemInsertResult = await client.query(

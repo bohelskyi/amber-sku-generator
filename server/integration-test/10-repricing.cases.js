@@ -759,6 +759,160 @@ test('scenario repricing revalidates full product state after acquiring row lock
   }
 });
 
+test('apply reports the first later invalid locked product without persisting earlier updates', async () => {
+  const matrixDelta = 29;
+  const createdProductIds = [];
+  let originalProducts = null;
+  let productIds = [];
+  let lockClient = null;
+  let lockTransactionOpen = false;
+  let applyPromise = null;
+  await pool.query(
+    'UPDATE price_matrix SET price = price + $1 WHERE scenario_id = $2',
+    [matrixDelta, schemas.ZZScenario]
+  );
+
+  try {
+    for (let index = 0; index < 3; index += 1) {
+      const sku = `ZZ1${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+      const product = await pool.query(
+        `INSERT INTO products
+         (full_sku, base_sku, sequence_number, category, weight, total_price,
+          total_price_uah, price_per_gram, uah_rate, details, sku_schema_version_id)
+         VALUES ($1, 'ZZ1', $2, 'ZZ', 0, $3, $4, 0, 40, $5::jsonb, $6)
+         RETURNING id`,
+        [sku, 100000 + index, 25 + index, 900 + index * 100,
+          JSON.stringify({ answers: { kind: index % 2 + 1, is_calibrated: index },
+            isCalibrated: index, applyFixtureMarker: index }), schemas.ZZ]
+      );
+      createdProductIds.push(Number(product.rows[0].id));
+    }
+    const preview = await request('/api/admin/repricing/preview', {
+      method: 'POST', body: { scenarioId: schemas.ZZScenario },
+    });
+    assert.equal(preview.response.status, 200, preview.text);
+    const changedItems = preview.data.items
+      .filter((item) => item.status === 'changed')
+      .sort((first, second) => Number(first.productId) - Number(second.productId));
+    assert.ok(changedItems.length >= 3);
+    productIds = changedItems.map((item) => Number(item.productId));
+    assert.equal(new Set(productIds).size, productIds.length);
+    const createdItems = changedItems.filter((item) => (
+      createdProductIds.includes(Number(item.productId))
+    ));
+    assert.equal(createdItems.length, 3);
+    const laterItems = createdItems.slice(1);
+    originalProducts = (await pool.query(
+      `SELECT id, total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
+      [productIds]
+    )).rows;
+    const countsBefore = (await pool.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM repricing_batches) AS batches,
+         (SELECT COUNT(*)::int FROM repricing_items) AS items,
+         (SELECT COUNT(*)::int FROM audit_events WHERE event_key = 'repricing.applied') AS audits`
+    )).rows[0];
+    const manualOverrides = preview.data.items
+      .filter((item) => ['manual_price', 'price_missing'].includes(item.errorCode))
+      .map((item) => ({
+        productId: Number(item.productId),
+        newPriceUah: Number(item.oldPriceUah),
+      }));
+
+    lockClient = await pool.connect();
+    await lockClient.query('BEGIN');
+    lockTransactionOpen = true;
+    const holderPid = Number((await lockClient.query('SELECT pg_backend_pid() AS pid')).rows[0].pid);
+    await lockClient.query(
+      'SELECT id FROM products WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE',
+      [laterItems.map((item) => Number(item.productId))]
+    );
+    applyPromise = request('/api/admin/repricing/apply', {
+      method: 'POST',
+      body: {
+        scenarioId: schemas.ZZScenario,
+        previewToken: preview.data.previewToken,
+        manualOverrides,
+      },
+    });
+
+    let applyIsBlocked = false;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const waiting = await pool.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))
+         ) AS waiting`,
+        [holderPid]
+      );
+      if (waiting.rows[0].waiting) {
+        applyIsBlocked = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(applyIsBlocked, true, 'apply must wait for the later product lock');
+    await lockClient.query(
+      `UPDATE products
+       SET details = jsonb_set(details, '{applyLockedStateMutation}', to_jsonb(id), TRUE)
+       WHERE id = ANY($1::int[])`,
+      [laterItems.map((item) => Number(item.productId))]
+    );
+    const expectedProducts = (await lockClient.query(
+      `SELECT id, total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
+      [productIds]
+    )).rows;
+    await lockClient.query('COMMIT');
+    lockTransactionOpen = false;
+
+    const applied = await applyPromise;
+    applyPromise = null;
+    assert.equal(applied.response.status, 409, applied.text);
+    assert.equal(
+      applied.data.error,
+      `Товар ${laterItems[0].sku} змінився під час підготовки переоцінки.`
+    );
+    assert.notEqual(applied.data.error.includes(laterItems[1].sku), true);
+    assert.deepEqual((await pool.query(
+      `SELECT id, total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
+      [productIds]
+    )).rows, expectedProducts);
+    assert.deepEqual((await pool.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM repricing_batches) AS batches,
+         (SELECT COUNT(*)::int FROM repricing_items) AS items,
+         (SELECT COUNT(*)::int FROM audit_events WHERE event_key = 'repricing.applied') AS audits`
+    )).rows[0], countsBefore);
+  } finally {
+    if (lockClient) {
+      if (lockTransactionOpen) await lockClient.query('ROLLBACK');
+      lockClient.release();
+    }
+    if (applyPromise) await Promise.allSettled([applyPromise]);
+    if (originalProducts) {
+      for (const product of originalProducts) {
+        await pool.query(
+          `UPDATE products
+           SET total_price = $1, total_price_uah = $2, price_per_gram = $3,
+               uah_rate = $4, details = $5::jsonb
+           WHERE id = $6`,
+          [product.total_price, product.total_price_uah, product.price_per_gram,
+            product.uah_rate, JSON.stringify(product.details), product.id]
+        );
+      }
+    }
+    if (createdProductIds.length > 0) {
+      await pool.query('DELETE FROM products WHERE id = ANY($1::int[])', [createdProductIds]);
+    }
+    await pool.query(
+      'UPDATE price_matrix SET price = price - $1 WHERE scenario_id = $2',
+      [matrixDelta, schemas.ZZScenario]
+    );
+  }
+});
+
 test('simultaneous repricing apply and rollback requests remain idempotent', async () => {
   const matrixDelta = 17;
   let batchId = null;
@@ -1171,6 +1325,12 @@ test('repricing rolls back every product and batch row after a mid-apply failure
        FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
       [productIds]
     );
+    const countsBefore = (await pool.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM repricing_batches) AS batches,
+         (SELECT COUNT(*)::int FROM repricing_items) AS items,
+         (SELECT COUNT(*)::int FROM audit_events WHERE event_key = 'repricing.applied') AS audits`
+    )).rows[0];
     const failureProductId = productIds[1];
     await pool.query(`
       CREATE OR REPLACE FUNCTION fail_test_repricing_update()
@@ -1215,6 +1375,48 @@ test('repricing rolls back every product and batch row after a mid-apply failure
       [preview.data.previewToken]
     );
     assert.equal(persisted.rows[0].batches, 0);
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION skip_test_repricing_update()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.id = ${failureProductId}
+           AND NEW.details #>> '{repricing,batchId}'
+               IS DISTINCT FROM OLD.details #>> '{repricing,batchId}' THEN
+          RETURN NULL;
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER skip_test_repricing_update
+      BEFORE UPDATE ON products
+      FOR EACH ROW EXECUTE FUNCTION skip_test_repricing_update();
+    `);
+    try {
+      const skipped = await request('/api/admin/repricing/apply', {
+        method: 'POST',
+        body: {
+          scenarioId: schemas.ZZScenario,
+          previewToken: preview.data.previewToken,
+          manualOverrides,
+        },
+      });
+      assert.equal(skipped.response.status, 500, skipped.text);
+      assert.match(skipped.data.error, /did not persist the complete changed-product set/);
+    } finally {
+      await pool.query('DROP TRIGGER skip_test_repricing_update ON products');
+      await pool.query('DROP FUNCTION skip_test_repricing_update()');
+    }
+    assert.deepEqual((await pool.query(
+      `SELECT id, total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
+      [productIds]
+    )).rows, before.rows);
+    assert.deepEqual((await pool.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM repricing_batches) AS batches,
+         (SELECT COUNT(*)::int FROM repricing_items) AS items,
+         (SELECT COUNT(*)::int FROM audit_events WHERE event_key = 'repricing.applied') AS audits`
+    )).rows[0], countsBefore);
   } finally {
     await pool.query(
       'UPDATE price_matrix SET price = price - 30 WHERE scenario_id = $1',
