@@ -1,0 +1,122 @@
+name: Container smoke
+
+on:
+  push:
+    paths:
+      - 'server/**'
+      - 'client/**'
+      - docker-compose.yml
+      - docker-compose.local.yml
+      - .env.example
+      - .github/workflows/container-smoke.yml
+  pull_request:
+    paths:
+      - 'server/**'
+      - 'client/**'
+      - docker-compose.yml
+      - docker-compose.local.yml
+      - .env.example
+      - .github/workflows/container-smoke.yml
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE_PROJECT_NAME: amber-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+      POSTGRES_DB: amber_smoke_test
+      POSTGRES_USER: amber_smoke
+      POSTGRES_PASSWORD: amber_smoke_ci_only
+      POSTGRES_HOST_PORT: '55433'
+      CLIENT_HTTP_PORT: '18080'
+      APP_BASE_URL: http://localhost:18080
+      OIDC_ISSUER_URL: https://oidc.invalid/realms/smoke
+      OIDC_CLIENT_ID: amber-smoke
+      OIDC_CLIENT_SECRET: amber-smoke-ci-only
+      OIDC_REDIRECT_URI: http://localhost:18080/api/auth/callback
+      SESSION_SECRET: amber-smoke-session-secret-ci-only-0123456789-Aa!
+      SESSION_COOKIE_SECURE: 'false'
+      NBU_RATE_OVERRIDE: '40'
+      VITE_API_BASE_URL: /api
+    steps:
+      - name: Check out repository
+        id: checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Compose configurations
+        run: |
+          docker compose --env-file .env.example -f docker-compose.yml config --quiet
+          docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.local.yml config --quiet
+
+      - name: Build production images
+        run: docker compose --env-file .env.example -f docker-compose.yml build server client
+
+      - name: Start disposable stack
+        run: docker compose --env-file .env.example -f docker-compose.yml up --no-build --wait --wait-timeout 180
+
+      - name: Smoke health, client, auth, and callback logging
+        shell: bash
+        run: |
+          set -euo pipefail
+          compose() { docker compose --env-file .env.example -f docker-compose.yml "$@"; }
+
+          compose exec -T server node - <<'NODE'
+          (async () => {
+            for (const [path, expectedStatus] of [['/health/live', 'ok'], ['/health/ready', 'ready']]) {
+              const response = await fetch(`http://127.0.0.1:${process.env.PORT}${path}`);
+              const body = await response.json();
+              if (response.status !== 200 || body.status !== expectedStatus) {
+                throw new Error(`${path}: ${response.status} ${JSON.stringify(body)}`);
+              }
+            }
+          })().catch((error) => { console.error(error); process.exit(1); });
+          NODE
+
+          curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 \
+            http://127.0.0.1:18080/ -o "$RUNNER_TEMP/amber-client.html"
+          grep -Fq '<title>Amber SKU manager</title>' "$RUNNER_TEMP/amber-client.html"
+
+          auth_status="$(curl --silent --show-error -D "$RUNNER_TEMP/amber-auth-headers" \
+            -o "$RUNNER_TEMP/amber-auth-body" -w '%{http_code}' \
+            http://127.0.0.1:18080/api/auth/me)"
+          test "$auth_status" = 401
+          grep -Eqi '^content-type: application/json' "$RUNNER_TEMP/amber-auth-headers"
+          ! grep -Eqi '^location:' "$RUNNER_TEMP/amber-auth-headers"
+          python3 -c 'import json,sys; assert json.load(open(sys.argv[1], encoding="utf-8")) == {"error": "Authentication required"}' \
+            "$RUNNER_TEMP/amber-auth-body"
+
+          callback_marker="ci-callback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          callback_status="$(curl --silent --show-error -o /dev/null -w '%{http_code}' \
+            "http://127.0.0.1:18080/api/auth/callback?code=${callback_marker}&state=invalid")"
+          test "$callback_status" = 400
+          compose logs --no-color client > "$RUNNER_TEMP/amber-client-logs"
+          compose logs --no-color server > "$RUNNER_TEMP/amber-server-logs"
+          grep -Fq '/api/auth/callback' "$RUNNER_TEMP/amber-client-logs"
+          grep -Fq '/api/auth/callback' "$RUNNER_TEMP/amber-server-logs"
+          ! grep -Fq "$callback_marker" "$RUNNER_TEMP/amber-client-logs"
+          ! grep -Fq "$callback_marker" "$RUNNER_TEMP/amber-server-logs"
+
+      - name: Verify graceful server shutdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          compose() { docker compose --env-file .env.example -f docker-compose.yml "$@"; }
+          compose stop -t 15 server
+          server_id="$(compose ps --all --quiet server)"
+          test -n "$server_id"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$server_id")" = 0
+          server_logs="$(compose logs --no-color server)"
+          grep -Fq '"event":"server.shutdown.completed"' <<< "$server_logs"
+
+      - name: Show diagnostics on failure
+        if: failure() && steps.checkout.outcome == 'success'
+        run: |
+          docker compose --env-file .env.example -f docker-compose.yml ps --all || true
+          docker compose --env-file .env.example -f docker-compose.yml logs --no-color --tail 100 postgres server client || true
+
+      - name: Remove disposable stack and volumes
+        if: always() && steps.checkout.outcome == 'success'
+        run: docker compose --env-file .env.example -f docker-compose.yml down --volumes --remove-orphans
