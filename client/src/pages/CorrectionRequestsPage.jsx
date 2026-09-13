@@ -16,7 +16,11 @@ import { correctionsApi } from '../api/corrections-api';
 import { AppPageHeader, EmptyState, LoadingState, Notice } from '../components/app/UiPrimitives.jsx';
 import { CopyButton } from '../components/shared/CopyButton';
 import { useDialogAccessibility } from '../hooks/useDialogAccessibility';
-import { getAnswerValueLabel, getQuestionLabel } from '../lib/answer-labels';
+import {
+  filterPresentableAnswerChanges,
+  getAnswerValueLabel,
+  getQuestionLabel,
+} from '../lib/answer-labels';
 import { formatDateTime, formatUah } from '../lib/formatters';
 import { getApiError } from '../lib/http-error';
 import { getPermissionUiState } from '../lib/permission-ui.js';
@@ -70,9 +74,13 @@ function StatusBadge({ status }) {
 }
 
 function RequestChanges({ config, request }) {
+  const changes = filterPresentableAnswerChanges(request.changes, {
+    oldPayload: request.oldPayload,
+    newPayload: request.proposedPayload,
+  });
   return (
     <div className="divide-y divide-slate-100 rounded-md border border-slate-200 bg-white">
-      {request.changes.map((change) => (
+      {changes.map((change) => (
         <div
           key={change.key}
           className="grid gap-1 px-3 py-2.5 text-sm sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.4fr)] sm:gap-3"

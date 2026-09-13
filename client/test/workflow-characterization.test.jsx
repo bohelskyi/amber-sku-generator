@@ -869,6 +869,83 @@ function correctionRequest(id, sourceSku) {
 }
 
 describe('Correction queue polling', () => {
+  it('hides a placeholder-backed no-op while preserving a real calibration change', async () => {
+    const correctionConfig = {
+      ...builderConfig,
+      questions: {
+        BR: [
+          ...builderConfig.questions.BR,
+          {
+            id: 'extra',
+            label: 'Додатково',
+            required: 0,
+            options: [],
+          },
+        ],
+      },
+      extraConfig: {
+        is_calibrated: {
+          label: 'Калібрування',
+          options: [
+            { id: 0, label: 'Некалібрована' },
+            { id: 1, label: 'Калібрована' },
+            { id: 2, label: 'Напівкалібрована' },
+          ],
+        },
+      },
+    };
+    const request = {
+      ...correctionRequest(3, 'BR-PLACEHOLDER'),
+      oldPayload: {
+        totalPriceUah: 1250,
+        answers: { extra: 0, is_calibrated: 0 },
+        decodedAnswers: [
+          {
+            key: 'extra',
+            label: 'Додатково',
+            value_id: null,
+            value_label: 'Не обрано',
+            is_placeholder: true,
+          },
+          {
+            key: 'is_calibrated',
+            label: 'Калібрування',
+            value_id: 0,
+            value_label: 'Некалібрована',
+            is_placeholder: false,
+          },
+        ],
+      },
+      proposedPayload: {
+        totalPriceUah: 1250,
+        answers: { is_calibrated: 2 },
+      },
+      changes: [
+        { key: 'extra', from: 0, to: null },
+        { key: 'is_calibrated', from: 0, to: 2 },
+      ],
+    };
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/config') return response(correctionConfig);
+      if (url === '/admin/correction-requests') {
+        return response({ items: [request], summary: { active: 1, pending: 1 } });
+      }
+      throw new Error(`Unexpected GET ${url}`);
+    });
+
+    render(
+      <AuthContext.Provider value={authValue(['corrections.view'])}>
+        <MemoryRouter><CorrectionRequestsPage /></MemoryRouter>
+      </AuthContext.Provider>
+    );
+
+    await screen.findByText('BR-PLACEHOLDER');
+    expect(screen.queryByText('Додатково')).toBeNull();
+    expect(screen.getByText('Калібрування')).toBeTruthy();
+    expect(screen.getByText('Некалібрована')).toBeTruthy();
+    expect(screen.getByText('Напівкалібрована')).toBeTruthy();
+  });
+
   it('loads immediately, polls every five seconds without overlap, and renders the completed refresh', async () => {
     vi.useFakeTimers();
     const inFlightPoll = deferred();

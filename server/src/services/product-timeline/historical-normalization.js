@@ -1,4 +1,7 @@
-const { getAnswerChanges } = require('../../utils/answer-changes');
+const {
+  filterPresentableAnswerChanges,
+  getAnswerChanges,
+} = require('../../utils/answer-changes');
 const { asRuleObject, isRuleMatched } = require('../../utils/rules');
 
 const CALIBRATION_STATES = new Map([
@@ -105,7 +108,10 @@ function normalizeStoredChanges({
   const answerChanges = Array.isArray(storedChanges)
     ? storedChanges.filter((change) => change?.key && change.key !== 'weight')
     : getAnswerChanges(oldAnswers, newAnswers);
-  const changes = answerChanges.map((change) => {
+  const changes = filterPresentableAnswerChanges(
+    answerChanges,
+    { oldPayload, newPayload }
+  ).map((change) => {
     const key = String(change.key);
     const historical = getDecodedAnswer(oldPayload, key, change.from);
     const question = oldSchema?.get(key) || newSchema?.get(key);
