@@ -172,11 +172,15 @@ export function filterRepricingItems(items = [], {
   search = '',
   reviewFilter = 'all',
   reviewedProductIds = [],
+  retainedStatusProductId = null,
 } = {}) {
   const normalizedSearch = String(search || '').trim().toUpperCase();
   const reviewedIds = new Set(reviewedProductIds.map(Number));
   return items.filter((item) => {
-    if (status !== 'all' && item.status !== status) return false;
+    const retainsStatus = retainedStatusProductId !== null
+      && retainedStatusProductId !== undefined
+      && Number(item.productId) === Number(retainedStatusProductId);
+    if (status !== 'all' && item.status !== status && !retainsStatus) return false;
     const itemScenario = item.scenarioId === null || item.scenarioId === undefined
       ? 'none'
       : String(item.scenarioId);

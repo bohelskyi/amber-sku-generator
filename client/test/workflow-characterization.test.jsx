@@ -622,6 +622,108 @@ describe('Repricing workflow', () => {
     expect(screen.getByRole('button', { name: 'Відкотити переоцінку 31' })).toBeTruthy();
   });
 
+  it('keeps a manual-price editor focused until a complete resolution is entered', async () => {
+    const manualPreview = {
+      ...repricingPreview,
+      scope: 'global',
+      scenario: null,
+      summary: { ...repricingPreview.summary, changedCount: 0, errorCount: 1 },
+      items: [{
+        ...repricingPreview.items[0],
+        oldPriceUah: 1000,
+        newPriceUah: 1200,
+        automaticPriceUah: 1200,
+        status: 'error',
+        errorCode: 'manual_price',
+        pricingState: 'manual',
+        message: 'Товар має ручну ціну.',
+      }],
+    };
+    let savedDraft = null;
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/config') return response(repricingConfig);
+      if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
+      if (url === '/admin/repricing/batches') return response([]);
+      if (url === '/admin/repricing/drafts') return response(savedDraft ? [savedDraft] : []);
+      if (url === '/admin/correction-requests') return response({ items: [] });
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+      if (url === '/admin/repricing/global/preview') return response(manualPreview);
+      if (url === '/admin/repricing/drafts') {
+        savedDraft = {
+          id: 77,
+          scope: 'global',
+          scenarioId: null,
+          updatedAt: '2026-09-11T09:00:00.000Z',
+        };
+        return response({ draft: savedDraft });
+      }
+      throw new Error(`Unexpected POST ${url}`);
+    });
+
+    renderRepricing();
+    fireEvent.click(await screen.findByRole('button', { name: 'Переоцінити все' }));
+    const errorFilter = await screen.findByRole('button', { name: 'Помилки' });
+    const applyButton = screen.getByRole('button', { name: 'Застосувати переоцінку' });
+    const priceInput = screen.getByRole('textbox', { name: 'Нова ціна для BR1001' });
+    expect(errorFilter.className).toContain('border-amber-300');
+    expect(applyButton.disabled).toBe(true);
+
+    vi.useFakeTimers();
+    priceInput.focus();
+    expect(document.activeElement).toBe(priceInput);
+    for (const value of ['1', '12', '123', '1234', '12345']) {
+      fireEvent.change(priceInput, { target: { value } });
+      expect(priceInput.isConnected).toBe(true);
+      expect(document.activeElement).toBe(priceInput);
+    }
+
+    expect(priceInput.value).toBe('12345');
+    expect(screen.getByText('Ручну ціну підтверджено')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Переглянуті · 0' })).toBeTruthy();
+    expect(applyButton.disabled).toBe(false);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(800);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(post).toHaveBeenCalledWith('/admin/repricing/drafts', {
+      scope: 'global',
+      scenarioId: null,
+      manualOverrides: [{ productId: 501, newPriceUah: 12345 }],
+      automaticProductIds: [],
+      reviewedProductIds: [],
+      uiState: {
+        filter: 'error',
+        reviewFilter: 'all',
+        scenarioFilter: 'all',
+        search: '',
+        sort: { key: 'sku', direction: 'asc' },
+      },
+    });
+    expect(priceInput.isConnected).toBe(true);
+    expect(document.activeElement).toBe(priceInput);
+
+    fireEvent.blur(priceInput);
+    expect(screen.queryByRole('textbox', { name: 'Нова ціна для BR1001' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Зміняться' }));
+    expect(screen.getByRole('textbox', { name: 'Нова ціна для BR1001' }).value).toBe('12345');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Усі' }));
+    const allItemsInput = screen.getByRole('textbox', { name: 'Нова ціна для BR1001' });
+    allItemsInput.focus();
+    fireEvent.change(allItemsInput, { target: { value: '123456' } });
+    expect(allItemsInput.isConnected).toBe(true);
+    expect(document.activeElement).toBe(allItemsInput);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Непереглянуті' }));
+    expect(screen.getByRole('textbox', { name: 'Нова ціна для BR1001' }).value).toBe('123456');
+    expect(screen.getByRole('button', { name: 'Переглянуті · 0' })).toBeTruthy();
+  });
+
   it('preserves explicit automatic and manual resolution cycles in a global draft', async () => {
     const manualPreview = {
       ...repricingPreview,

@@ -38,6 +38,7 @@ test('repricing controller resets dependent workflow state when the scenario cha
     appliedBatch: { id: 3 },
     automaticProductIds: [44],
     draftConflicts: [{ productId: 45 }],
+    focusedManualPriceProductId: 44,
     manualPrices: { 44: '125.50' },
     preview: { previewToken: 'old-token' },
     previewing: true,
@@ -53,6 +54,7 @@ test('repricing controller resets dependent workflow state when the scenario cha
   assert.equal(selected.activeDraft, null);
   assert.equal(selected.appliedBatch, null);
   assert.equal(selected.previewing, false);
+  assert.equal(selected.focusedManualPriceProductId, null);
   assert.deepEqual(selected.manualPrices, {});
   assert.deepEqual(selected.automaticProductIds, []);
   assert.deepEqual(selected.reviewedProductIds, []);

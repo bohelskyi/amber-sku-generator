@@ -18,6 +18,7 @@ export const initialRepricingControllerState = Object.freeze({
   draftSync: null,
   error: '',
   filter: 'changed',
+  focusedManualPriceProductId: null,
   loading: true,
   manualPrices: {},
   preview: null,
@@ -53,6 +54,7 @@ const emptyWorkflow = Object.freeze({
   draftConflicts: [],
   draftSaveState: 'idle',
   draftSync: null,
+  focusedManualPriceProductId: null,
   manualPrices: {},
   preview: null,
   reviewFilter: 'all',
@@ -109,6 +111,7 @@ export function repricingControllerReducer(state, action) {
         draftSync: action.sync,
         filter: action.uiState.filter
           || (action.preview?.summary?.errorCount > 0 ? 'error' : 'changed'),
+        focusedManualPriceProductId: null,
         manualPrices: action.manualPrices,
         preview: action.preview || state.preview,
         reviewFilter: action.uiState.reviewFilter || 'all',
@@ -125,6 +128,15 @@ export function repricingControllerReducer(state, action) {
       else manualPrices[action.productId] = action.value;
       return { ...state, automaticProductIds, manualPrices };
     }
+    case 'manualPriceFocused':
+      return {
+        ...state,
+        focusedManualPriceProductId: Number(action.productId),
+      };
+    case 'manualPriceBlurred':
+      return Number(state.focusedManualPriceProductId) === Number(action.productId)
+        ? { ...state, focusedManualPriceProductId: null }
+        : state;
     case 'automaticPriceSelected':
       return {
         ...state,

@@ -18,6 +18,7 @@ export function RepricingTable({
     activeCorrectionRequestByProductId,
     config,
     handleManualPriceBlur,
+    handleManualPriceFocus,
     handleSort,
     invalidManualPriceIds,
     keepCurrentManualPrice,
@@ -209,6 +210,7 @@ export function RepricingTable({
                                   ? formatDecimal(item.automaticPriceUah ?? item.newPriceUah)
                                   : (requiresManualPrice ? '' : formatDecimal(item.newPriceUah)))}
                             onChange={(event) => setManualPrice(item.productId, event.target.value)}
+                            onFocus={() => handleManualPriceFocus(item.productId)}
                             onBlur={(event) => handleManualPriceBlur(
                               item.productId,
                               event.target.value,
