@@ -1,4 +1,5 @@
 const suite = require('./suite-context');
+const { randomUUID } = require('node:crypto');
 const {
   assert,
   test,
@@ -6,6 +7,125 @@ const {
   request,
   schemas,
 } = suite;
+
+const rollbackProductColumns = `id, full_sku, total_price, total_price_uah,
+  price_per_gram, uah_rate, details, legacy_uah_price_unset`;
+
+async function readRollbackProducts(productIds) {
+  return (await pool.query(
+    `SELECT ${rollbackProductColumns} FROM products WHERE id = ANY($1::int[]) ORDER BY id`,
+    [productIds]
+  )).rows;
+}
+
+async function createRollbackFixture({ count = 2, legacyZero = false } = {}) {
+  const selected = (await pool.query(
+    `SELECT ${rollbackProductColumns}
+     FROM products
+     WHERE COALESCE(status, 'active') = 'active' AND total_price_uah > 0
+     ORDER BY id LIMIT $1`,
+    [count]
+  )).rows;
+  assert.equal(selected.length, count);
+  const productIds = selected.map((row) => Number(row.id));
+  let batchId = null;
+  try {
+    for (const [index, row] of selected.entries()) {
+      await pool.query(
+        `UPDATE products
+         SET total_price = $1, total_price_uah = $2, price_per_gram = $3,
+             uah_rate = $4, details = $5::jsonb, legacy_uah_price_unset = $6
+         WHERE id = $7`,
+        [
+          legacyZero && index === 0 ? 0 : index + 10,
+          legacyZero && index === 0 ? 0 : 410 + index * 127,
+          index + 0.125,
+          40 + index,
+          JSON.stringify({ ...(row.details || {}), rollbackFixtureMarker: index }),
+          legacyZero && index === 0 ? true : row.legacy_uah_price_unset,
+          row.id,
+        ]
+      );
+    }
+    const oldRows = await readRollbackProducts(productIds);
+    batchId = Number((await pool.query(
+      `INSERT INTO repricing_batches
+       (scope, scenario_id, category_code, scenario_name, scenario_snapshot, preview_token,
+        status, candidate_count, changed_count, unchanged_count, skipped_count, error_count,
+        applied_at)
+       VALUES ('global', NULL, NULL, 'Rollback fixture', '{}'::jsonb, $1,
+               'completed', $2, $2, 0, 0, 0, CURRENT_TIMESTAMP)
+       RETURNING id`,
+      [`rollback-fixture-${randomUUID()}`, count]
+    )).rows[0].id);
+    for (const [index, row] of oldRows.entries()) {
+      const oldPayload = {
+        totalPrice: Number(row.total_price),
+        totalPriceUah: Number(row.total_price_uah),
+        pricePerGram: Number(row.price_per_gram),
+        uahRate: Number(row.uah_rate),
+        details: row.details,
+      };
+      const newPayload = {
+        ...oldPayload,
+        totalPrice: 100 + index,
+        totalPriceUah: 610 + index * 137,
+        pricePerGram: 2 + index * 0.125,
+        uahRate: 45 + index,
+        details: { ...row.details, repricing: { batchId, fixtureProductId: Number(row.id) } },
+      };
+      await pool.query(
+        `UPDATE products
+         SET total_price = $1, total_price_uah = $2, price_per_gram = $3,
+             uah_rate = $4, details = $5::jsonb
+         WHERE id = $6`,
+        [newPayload.totalPrice, newPayload.totalPriceUah, newPayload.pricePerGram,
+          newPayload.uahRate, JSON.stringify(newPayload.details), row.id]
+      );
+      await pool.query(
+        `INSERT INTO repricing_items
+         (batch_id, product_id, sku, old_price_uah, new_price_uah, price_delta_uah,
+          old_payload, new_payload)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
+        [batchId, row.id, row.full_sku, oldPayload.totalPriceUah,
+          newPayload.totalPriceUah, newPayload.totalPriceUah - oldPayload.totalPriceUah,
+          JSON.stringify(oldPayload), JSON.stringify(newPayload)]
+      );
+    }
+    return {
+      batchId,
+      productIds,
+      oldRows,
+      appliedRows: await readRollbackProducts(productIds),
+      async cleanup() {
+        for (const row of selected) {
+          await pool.query(
+            `UPDATE products
+             SET total_price = $1, total_price_uah = $2, price_per_gram = $3,
+                 uah_rate = $4, details = $5::jsonb, legacy_uah_price_unset = $6
+             WHERE id = $7`,
+            [row.total_price, row.total_price_uah, row.price_per_gram, row.uah_rate,
+              JSON.stringify(row.details || {}), row.legacy_uah_price_unset, row.id]
+          );
+        }
+        await pool.query('DELETE FROM repricing_batches WHERE id = $1', [batchId]);
+      },
+    };
+  } catch (error) {
+    for (const row of selected) {
+      await pool.query(
+        `UPDATE products
+         SET total_price = $1, total_price_uah = $2, price_per_gram = $3,
+             uah_rate = $4, details = $5::jsonb, legacy_uah_price_unset = $6
+         WHERE id = $7`,
+        [row.total_price, row.total_price_uah, row.price_per_gram, row.uah_rate,
+          JSON.stringify(row.details || {}), row.legacy_uah_price_unset, row.id]
+      );
+    }
+    if (batchId) await pool.query('DELETE FROM repricing_batches WHERE id = $1', [batchId]);
+    throw error;
+  }
+}
 
 test('repricing financial audit is atomic, attributed, and idempotent', async () => {
   const actorUserId = Number(suite.authenticatedSession.applicationUser.id);
@@ -1807,5 +1927,196 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
         [cell.price, cell.scenario_id, cell.x_val, cell.y_val]
       );
     }
+  }
+});
+
+test('rollback restores distinct old payloads to every product without changing item history', async () => {
+  const fixture = await createRollbackFixture({ count: 3 });
+  try {
+    const itemsBefore = (await pool.query(
+      `SELECT product_id, old_payload, new_payload FROM repricing_items
+       WHERE batch_id = $1 ORDER BY product_id`,
+      [fixture.batchId]
+    )).rows;
+    assert.equal(new Set(itemsBefore.map((item) => item.old_payload.totalPriceUah)).size, 3);
+    const rolledBack = await request(`/api/admin/repricing/${fixture.batchId}/rollback`, {
+      method: 'POST', body: {},
+    });
+    assert.equal(rolledBack.response.status, 200, rolledBack.text);
+    assert.equal(rolledBack.data.alreadyRolledBack, false);
+    assert.deepEqual(await readRollbackProducts(fixture.productIds), fixture.oldRows);
+    assert.deepEqual((await pool.query(
+      `SELECT product_id, old_payload, new_payload FROM repricing_items
+       WHERE batch_id = $1 ORDER BY product_id`,
+      [fixture.batchId]
+    )).rows, itemsBefore);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('rollback rejects a product changed while waiting for its ordered row lock', async () => {
+  const fixture = await createRollbackFixture();
+  const contestedId = fixture.productIds[1];
+  let lockClient = null;
+  let lockTransactionOpen = false;
+  let rollbackPromise = null;
+  try {
+    lockClient = await pool.connect();
+    await lockClient.query('BEGIN');
+    lockTransactionOpen = true;
+    const holderPid = Number((await lockClient.query('SELECT pg_backend_pid() AS pid')).rows[0].pid);
+    await lockClient.query('SELECT id FROM products WHERE id = $1 FOR UPDATE', [contestedId]);
+    rollbackPromise = request(`/api/admin/repricing/${fixture.batchId}/rollback`, {
+      method: 'POST', body: {},
+    });
+    let rollbackIsBlocked = false;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const waiting = await pool.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))
+         ) AS waiting`,
+        [holderPid]
+      );
+      if (waiting.rows[0].waiting) {
+        rollbackIsBlocked = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(rollbackIsBlocked, true, 'rollback must wait for the held product lock');
+    await lockClient.query(
+      `UPDATE products
+       SET details = jsonb_set(details, '{rollbackRace}', 'true'::jsonb, TRUE)
+       WHERE id = $1`,
+      [contestedId]
+    );
+    await lockClient.query('COMMIT');
+    lockTransactionOpen = false;
+    const result = await rollbackPromise;
+    rollbackPromise = null;
+    assert.equal(result.response.status, 409, result.text);
+    assert.match(result.data.error, new RegExp(fixture.appliedRows[1].full_sku));
+    const after = await readRollbackProducts(fixture.productIds);
+    assert.deepEqual(after[0], fixture.appliedRows[0]);
+    assert.equal(after[1].details.rollbackRace, true);
+    assert.equal((await pool.query(
+      'SELECT status FROM repricing_batches WHERE id = $1', [fixture.batchId]
+    )).rows[0].status, 'completed');
+    assert.equal(Number((await pool.query(
+      `SELECT COUNT(*) FROM audit_events
+       WHERE event_key = 'repricing.rolled_back' AND subject_id = $1`,
+      [String(fixture.batchId)]
+    )).rows[0].count), 0);
+  } finally {
+    if (lockClient) {
+      if (lockTransactionOpen) await lockClient.query('ROLLBACK');
+      lockClient.release();
+    }
+    if (rollbackPromise) await Promise.allSettled([rollbackPromise]);
+    await fixture.cleanup();
+  }
+});
+
+test('a later product UPDATE failure leaves rollback products, batch, and audit unchanged', async () => {
+  const fixture = await createRollbackFixture();
+  const failureProductId = fixture.productIds[1];
+  try {
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION fail_test_repricing_rollback_product_update()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.id = ${failureProductId}
+           AND NEW.details #>> '{repricing,batchId}'
+               IS DISTINCT FROM OLD.details #>> '{repricing,batchId}' THEN
+          RAISE EXCEPTION 'forced rollback product update failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER fail_test_repricing_rollback_product_update
+      BEFORE UPDATE ON products
+      FOR EACH ROW EXECUTE FUNCTION fail_test_repricing_rollback_product_update();
+    `);
+    try {
+      const failed = await request(`/api/admin/repricing/${fixture.batchId}/rollback`, {
+        method: 'POST', body: {},
+      });
+      assert.equal(failed.response.status, 500, failed.text);
+    } finally {
+      await pool.query('DROP TRIGGER fail_test_repricing_rollback_product_update ON products');
+      await pool.query('DROP FUNCTION fail_test_repricing_rollback_product_update()');
+    }
+    assert.deepEqual(await readRollbackProducts(fixture.productIds), fixture.appliedRows);
+    assert.deepEqual((await pool.query(
+      'SELECT status, rolled_back_by_user_id FROM repricing_batches WHERE id = $1',
+      [fixture.batchId]
+    )).rows, [{ status: 'completed', rolled_back_by_user_id: null }]);
+    assert.equal(Number((await pool.query(
+      `SELECT COUNT(*) FROM audit_events
+       WHERE event_key = 'repricing.rolled_back' AND subject_id = $1`,
+      [String(fixture.batchId)]
+    )).rows[0].count), 0);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('rollback rejects an incomplete UPDATE RETURNING product set', async () => {
+  const fixture = await createRollbackFixture();
+  const skippedProductId = fixture.productIds[1];
+  try {
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION skip_test_repricing_rollback_product_update()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.id = ${skippedProductId}
+           AND NEW.details #>> '{repricing,batchId}'
+               IS DISTINCT FROM OLD.details #>> '{repricing,batchId}' THEN
+          RETURN NULL;
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER skip_test_repricing_rollback_product_update
+      BEFORE UPDATE ON products
+      FOR EACH ROW EXECUTE FUNCTION skip_test_repricing_rollback_product_update();
+    `);
+    try {
+      const failed = await request(`/api/admin/repricing/${fixture.batchId}/rollback`, {
+        method: 'POST', body: {},
+      });
+      assert.equal(failed.response.status, 500, failed.text);
+      assert.match(failed.data.error, /did not restore the complete product set/);
+    } finally {
+      await pool.query('DROP TRIGGER skip_test_repricing_rollback_product_update ON products');
+      await pool.query('DROP FUNCTION skip_test_repricing_rollback_product_update()');
+    }
+    assert.deepEqual(await readRollbackProducts(fixture.productIds), fixture.appliedRows);
+    assert.equal((await pool.query(
+      'SELECT status FROM repricing_batches WHERE id = $1', [fixture.batchId]
+    )).rows[0].status, 'completed');
+    assert.equal(Number((await pool.query(
+      `SELECT COUNT(*) FROM audit_events
+       WHERE event_key = 'repricing.rolled_back' AND subject_id = $1`,
+      [String(fixture.batchId)]
+    )).rows[0].count), 0);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('rollback restores grandfathered zero UAH price and keeps its compatibility flag', async () => {
+  const fixture = await createRollbackFixture({ legacyZero: true });
+  try {
+    assert.equal(Number(fixture.oldRows[0].total_price_uah), 0);
+    assert.equal(fixture.oldRows[0].legacy_uah_price_unset, true);
+    const rolledBack = await request(`/api/admin/repricing/${fixture.batchId}/rollback`, {
+      method: 'POST', body: {},
+    });
+    assert.equal(rolledBack.response.status, 200, rolledBack.text);
+    assert.deepEqual(await readRollbackProducts(fixture.productIds), fixture.oldRows);
+  } finally {
+    await fixture.cleanup();
   }
 });

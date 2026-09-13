@@ -876,25 +876,50 @@ async function rollbackRepricing(batchId, options = {}) {
       }
     }
 
-    for (const item of itemsResult.rows) {
+    const productUpdates = itemsResult.rows.map((item) => {
       const oldPayload = item.old_payload || {};
-      await client.query(
-        `UPDATE products
-         SET total_price = $1,
-             total_price_uah = $2,
-             price_per_gram = $3,
-             uah_rate = $4,
-             details = $5::jsonb
-         WHERE id = $6`,
-        [
-          oldPayload.totalPrice ?? null,
-          oldPayload.totalPriceUah ?? null,
-          oldPayload.pricePerGram ?? null,
-          oldPayload.uahRate ?? null,
-          JSON.stringify(oldPayload.details || {}),
-          Number(item.product_id),
-        ]
+      return {
+        product_id: Number(item.product_id),
+        total_price: oldPayload.totalPrice ?? null,
+        total_price_uah: oldPayload.totalPriceUah ?? null,
+        price_per_gram: oldPayload.pricePerGram ?? null,
+        uah_rate: oldPayload.uahRate ?? null,
+        details: oldPayload.details || {},
+      };
+    });
+    const expectedProductIds = productUpdates.map((item) => item.product_id);
+    if (new Set(expectedProductIds).size !== expectedProductIds.length) {
+      throw new Error('Rollback product update contains duplicate product IDs.');
+    }
+    if (productUpdates.length > 0) {
+      const updatedProductsResult = await client.query(
+        `UPDATE products AS product
+         SET total_price = item.total_price,
+             total_price_uah = item.total_price_uah,
+             price_per_gram = item.price_per_gram,
+             uah_rate = item.uah_rate,
+             details = item.details
+         FROM jsonb_to_recordset($1::jsonb) AS item(
+           product_id INTEGER,
+           total_price NUMERIC,
+           total_price_uah NUMERIC,
+           price_per_gram NUMERIC,
+           uah_rate NUMERIC,
+           details JSONB
+         )
+         WHERE product.id = item.product_id
+         RETURNING product.id`,
+        [JSON.stringify(productUpdates)]
       );
+      const updatedProductIds = updatedProductsResult.rows.map((row) => Number(row.id));
+      const updatedProductSet = new Set(updatedProductIds);
+      if (
+        updatedProductsResult.rowCount !== expectedProductIds.length
+        || updatedProductSet.size !== expectedProductIds.length
+        || expectedProductIds.some((productId) => !updatedProductSet.has(productId))
+      ) {
+        throw new Error('Rollback product update did not restore the complete product set.');
+      }
     }
 
     const rolledBackResult = await client.query(
