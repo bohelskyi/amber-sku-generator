@@ -5,6 +5,7 @@ const { buildCsv } = require('../utils/csv');
 const { toUahNumber } = require('../utils/money');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
+const { startPhase } = require('../observability/performance-metrics');
 
 async function getNonSkuQuestionMaps(categoryCodes) {
   if (!categoryCodes || categoryCodes.length === 0) return new Map();
@@ -162,6 +163,7 @@ async function getExportRows(fromSku, toSku) {
     params
   );
 
+  const finishShaping = startPhase('export.shaping');
   const categoryCodes = Array.from(
     new Set(result.rows.map((row) => String(row.category || '').trim()).filter((code) => code))
   );
@@ -172,6 +174,7 @@ async function getExportRows(fromSku, toSku) {
     export_size: getExportSizeValue(row, nonSkuQuestionMaps),
     export_text_values: getExportTextValues(row, nonSkuQuestionMaps),
   }));
+  finishShaping();
 
   return {
     rows: rowsWithSize,
@@ -188,8 +191,9 @@ async function getExportRows(fromSku, toSku) {
 }
 
 function buildExportCsv(exportData) {
+  const finishCsv = startPhase('export.csv');
   const textHeaders = exportData.textColumns.map((column) => column.key);
-  return buildCsv([
+  const csv = buildCsv([
     ['sku', 'price_uah', 'size', ...textHeaders],
     ...exportData.rows.map((row) => [
       row.full_sku,
@@ -200,6 +204,8 @@ function buildExportCsv(exportData) {
       ...exportData.textColumns.map((column) => row.export_text_values?.[column.key] || ''),
     ]),
   ]);
+  finishCsv();
+  return csv;
 }
 
 function assertSnapshotMatchesRequest(snapshot, fromSku, toSku) {

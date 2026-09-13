@@ -2,6 +2,7 @@ const express = require('express');
 const publicRoutes = require('./routes/public.routes');
 const adminRoutes = require('./routes/admin.routes');
 const crypto = require('node:crypto');
+const { sendHttpError } = require('./http/errors');
 const pool = require('./db/pool');
 const { trustProxy } = require('./config/env');
 const { createSessionMiddleware } = require('./auth/session');
@@ -13,6 +14,11 @@ const {
 const { createRequireActiveApplicationUser } = require('./auth/authorization');
 const logger = require('./utils/logger');
 const { getRequestLogPath } = require('./utils/request-log-path');
+const {
+  createRequestMetrics,
+  runWithRequestMetrics,
+  summarizeRequestMetrics,
+} = require('./observability/performance-metrics');
 
 function createApp({
   sessionMiddleware = createSessionMiddleware(),
@@ -28,13 +34,19 @@ function createApp({
     const startedAt = Date.now();
     req.requestId = requestId;
     res.setHeader('X-Request-ID', requestId);
+    const requestMetrics = createRequestMetrics(requestId);
     res.on('finish', () => {
+      const contentLength = Number(res.getHeader('content-length'));
       const context = {
         requestId,
         method: req.method,
         path: getRequestLogPath(req),
         statusCode: res.statusCode,
         durationMs: Date.now() - startedAt,
+        ...summarizeRequestMetrics(requestMetrics, {
+          pool,
+          responseBytes: Number.isFinite(contentLength) ? contentLength : null,
+        }),
       };
       logger.info('http.request.completed', context);
       if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
@@ -44,7 +56,7 @@ function createApp({
         });
       }
     });
-    next();
+    runWithRequestMetrics(requestMetrics, next);
   });
 
   app.get('/health/live', (_req, res) => res.json({ status: 'ok' }));
@@ -83,7 +95,7 @@ function createApp({
       error: error.message,
       code: error.code,
     });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Internal server error' });
+    sendHttpError(res, error);
   });
 
   return app;

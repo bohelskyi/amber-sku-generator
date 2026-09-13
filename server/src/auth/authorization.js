@@ -45,7 +45,7 @@ function requirePermission(permissionKey) {
     throw new Error(`Invalid permission key: ${permissionKey}`);
   }
 
-  return function requirePermissionMiddleware(req, res, next) {
+  function requirePermissionMiddleware(req, res, next) {
     if (Array.isArray(req.permissions) && req.permissions.includes(permissionKey)) {
       return next();
     }
@@ -56,7 +56,12 @@ function requirePermission(permissionKey) {
       error: INSUFFICIENT_PERMISSION_ERROR,
       requiredPermission: permissionKey,
     });
-  };
+  }
+
+  Object.defineProperty(requirePermissionMiddleware, 'permissionKey', {
+    value: permissionKey,
+  });
+  return requirePermissionMiddleware;
 }
 
 module.exports = {

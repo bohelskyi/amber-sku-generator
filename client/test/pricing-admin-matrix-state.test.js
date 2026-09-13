@@ -12,8 +12,12 @@ const editorSource = fs.readFileSync(
   new URL('../src/components/admin/AdminPricingEditor.jsx', import.meta.url),
   'utf8'
 );
+const pricingFormsSource = fs.readFileSync(
+  new URL('../src/components/admin/AdminPricingForms.jsx', import.meta.url),
+  'utf8'
+);
 const hookSource = fs.readFileSync(
-  new URL('../src/hooks/useAdminPanel.js', import.meta.url),
+  new URL('../src/hooks/admin/useAdminPricingController.js', import.meta.url),
   'utf8'
 );
 
@@ -26,7 +30,7 @@ test('same-group scenarios use independent matrix cell identities', () => {
     getScenarioMatrixCellKey(scenarioB.id, 1, 2, '100.0000')
   );
   assert.match(
-    editorSource,
+    pricingFormsSource,
     /key=\{getScenarioMatrixCellKey\(scenario\.id, xOption\.id, yOption\.id, cell\?\.price\)\}/
   );
 });

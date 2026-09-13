@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
+const repricingService = require('../src/services/repricing.service');
 const {
   assertNoBlockingCorrectionRequests,
   applyManualOverridesToPreview,
@@ -18,7 +21,7 @@ const {
   normalizeAutomaticProductIds,
   normalizeManualOverrides,
   normalizeReviewedProductIds,
-} = require('../src/services/repricing.service');
+} = repricingService;
 
 const scenario = {
   id: 63,
@@ -43,6 +46,229 @@ test('repricing preview token is stable for the same changes', () => {
   assert.notEqual(
     getPreviewToken(scenario, [{ ...items[0], calculatedPriceUah: 413 }]),
     getPreviewToken(scenario, [{ ...items[0], calculatedPriceUah: 414 }])
+  );
+});
+
+test('scenario repricing token binds complete configuration and every candidate product state', () => {
+  const applicableItems = [{
+    productId: 1,
+    sku: 'NM1',
+    oldPriceUah: 300,
+    newPriceUah: 400,
+    status: 'changed',
+  }];
+  const candidateBindings = [
+    { productId: 2, productStateToken: 'unchanged-product-2' },
+    { productId: 1, productStateToken: 'changed-product-1' },
+  ];
+  const token = getPreviewToken(scenario, applicableItems, {
+    configurationToken: 'configuration-a',
+    candidateBindings,
+  });
+
+  assert.equal(token, getPreviewToken(scenario, applicableItems, {
+    configurationToken: 'configuration-a',
+    candidateBindings: [...candidateBindings].reverse(),
+  }));
+  assert.notEqual(token, getPreviewToken(scenario, applicableItems, {
+    configurationToken: 'configuration-b',
+    candidateBindings,
+  }));
+  assert.notEqual(token, getPreviewToken(scenario, applicableItems, {
+    configurationToken: 'configuration-a',
+    candidateBindings: [
+      candidateBindings[0],
+      { ...candidateBindings[1], productStateToken: 'changed-product-1-later' },
+    ],
+  }));
+  assert.notEqual(token, getPreviewToken(scenario, applicableItems, {
+    configurationToken: 'configuration-a',
+    candidateBindings: [candidateBindings[1]],
+  }));
+});
+
+test('corrected repricing token bytes and facade exports remain stable', () => {
+  const applicableItems = [{
+    productId: 1,
+    sku: 'NM1',
+    weight: 10,
+    answers: { extra: 2, is_calibrated: 2 },
+    oldPriceUah: 300,
+    calculatedPriceUah: 413.4,
+    automaticPriceUah: 400,
+    newPriceUah: 400,
+    status: 'changed',
+    errorCode: null,
+    pricingChange: {
+      reasonCodes: ['fixed_price_changed'],
+      reasonLabels: ['changed'],
+    },
+  }];
+  const scenarioToken = getPreviewToken(scenario, applicableItems, {
+    configurationToken: 'configuration-a',
+    candidateBindings: [
+      { productId: 2, productStateToken: 'product-2' },
+      { productId: 1, productStateToken: 'product-1' },
+    ],
+  });
+  assert.equal(
+    scenarioToken,
+    '46476994accbe329fcf4ed064b97378c6e2a39700a63287a4356af2c71ca8fb1'
+  );
+  assert.equal(
+    getGlobalPreviewToken('configuration-a', [{
+      productId: 2,
+      productStateToken: 'product-2',
+      scenarioId: 22,
+      oldPriceUah: 200,
+      calculatedPriceUah: 251,
+      automaticPriceUah: 250,
+      newPriceUah: 250,
+      status: 'changed',
+      errorCode: null,
+      pricingState: 'automatic',
+      pricingChange: null,
+    }, {
+      productId: 1,
+      productStateToken: 'product-1',
+      scenarioId: 11,
+      oldPriceUah: 100,
+      calculatedPriceUah: 100,
+      automaticPriceUah: 100,
+      newPriceUah: 100,
+      status: 'unchanged',
+      errorCode: null,
+      pricingState: 'automatic',
+      pricingChange: null,
+    }]),
+    '20d9a35cd3089c892b44a783f3120ff315b640eb3887c7b0fe7073a92d3d313a'
+  );
+  assert.equal(
+    getApplicationToken(
+      scenarioToken,
+      [{ productId: 9, newPriceUah: '123,45' }],
+      [7]
+    ),
+    'eeec76d08f2191dbf349295255c2f1b6f0ce76d708e6b287e5aea340d011f56f'
+  );
+  assert.deepEqual(Object.keys(repricingService).sort(), [
+    'applyGlobalRepricing',
+    'applyManualOverridesToPreview',
+    'applyRepricing',
+    'areNullableNumbersEqual',
+    'assertNoBlockingCorrectionRequests',
+    'buildGlobalRepricingPreview',
+    'buildPricingChange',
+    'buildPricingState',
+    'buildRepricingPreview',
+    'createRepricingDraft',
+    'discardRepricingDraft',
+    'doesProductMatchRepricingBatch',
+    'getApplicationToken',
+    'getDraftSyncInfo',
+    'getGlobalPreviewToken',
+    'getPreviewToken',
+    'getProductRepricingStateToken',
+    'getRepricingBatchItems',
+    'getRepricingBatches',
+    'getRepricingDraft',
+    'getRepricingDrafts',
+    'getRepricingPreviewFingerprint',
+    'getRepricingPreviewSnapshot',
+    'getRepricingProductIds',
+    'getRepricingRollbackItems',
+    'getRepricingScenarios',
+    'hasManualPrice',
+    'normalizeAutomaticProductIds',
+    'normalizeManualOverrides',
+    'normalizeReviewedProductIds',
+    'rollbackRepricing',
+    'saveRepricingDraft',
+    'syncRepricingDraft',
+  ]);
+});
+
+test('repricing facade keeps production callers and transaction coordinators together', () => {
+  const servicesDirectory = path.join(__dirname, '..', 'src', 'services');
+  const facadeSource = fs.readFileSync(
+    path.join(servicesDirectory, 'repricing.service.js'),
+    'utf8'
+  ).replace(/\r\n/g, '\n');
+  const leafDirectory = path.join(servicesDirectory, 'repricing');
+  for (const filename of fs.readdirSync(leafDirectory).filter((name) => name.endsWith('.js'))) {
+    const source = fs.readFileSync(path.join(leafDirectory, filename), 'utf8');
+    assert.doesNotMatch(source, /require\(['"]\.\.\/repricing\.service['"]\)/);
+  }
+
+  const applySource = facadeSource.slice(
+    facadeSource.indexOf('async function applyRepricingScope'),
+    facadeSource.indexOf('async function applyRepricing(')
+  );
+  const applySteps = [
+    "await client.query('BEGIN')",
+    'ORDER BY id\n       FOR UPDATE',
+    'getBlockingCorrectionRequests(changedItems, client)',
+    'INSERT INTO repricing_batches',
+    'getProductRepricingStateToken(product)',
+    'UPDATE products',
+    'jsonb_to_recordset',
+    'RETURNING product_id',
+    "eventKey: 'repricing.applied'",
+    "await client.query('COMMIT')",
+  ].map((step) => applySource.indexOf(step));
+  assert.ok(applySteps.every((index) => index >= 0));
+  assert.deepEqual(applySteps, [...applySteps].sort((first, second) => first - second));
+
+  const rollbackSource = facadeSource.slice(
+    facadeSource.indexOf('async function rollbackRepricing'),
+    facadeSource.indexOf('module.exports =')
+  );
+  const rollbackSteps = [
+    "await client.query('BEGIN')",
+    'WHERE id = $1\n       FOR UPDATE',
+    'ORDER BY p.id\n       FOR UPDATE OF p',
+    'doesProductMatchRepricingBatch',
+    'UPDATE products',
+    'UPDATE repricing_batches',
+    "eventKey: 'repricing.rolled_back'",
+  ].map((step) => rollbackSource.indexOf(step));
+  rollbackSteps.push(rollbackSource.lastIndexOf("await client.query('COMMIT')"));
+  assert.ok(rollbackSteps.every((index) => index >= 0));
+  assert.deepEqual(rollbackSteps, [...rollbackSteps].sort((first, second) => first - second));
+
+  const routesSource = fs.readFileSync(
+    path.join(servicesDirectory, '..', 'routes', 'admin', 'repricing.routes.js'),
+    'utf8'
+  );
+  const routeImports = routesSource
+    .match(/const \{([^}]+)\} = require\('\.\.\/\.\.\/services\/repricing\.service'\);/)[1]
+    .split(',')
+    .map((name) => name.trim())
+    .sort();
+  assert.deepEqual(routeImports, [
+    'applyGlobalRepricing',
+    'applyRepricing',
+    'buildGlobalRepricingPreview',
+    'buildRepricingPreview',
+    'createRepricingDraft',
+    'discardRepricingDraft',
+    'getRepricingBatchItems',
+    'getRepricingBatches',
+    'getRepricingDraft',
+    'getRepricingDrafts',
+    'getRepricingRollbackItems',
+    'getRepricingScenarios',
+    'rollbackRepricing',
+    'saveRepricingDraft',
+    'syncRepricingDraft',
+  ]);
+  const correctionSource = fs.readFileSync(
+    path.join(servicesDirectory, 'correction-request.service.js'),
+    'utf8'
+  );
+  assert.match(
+    correctionSource,
+    /const \{ syncRepricingDraft \} = require\('\.\/repricing\.service'\);/
   );
 });
 
@@ -543,26 +769,84 @@ test('manual overrides reject invalid and unrelated products', () => {
   );
 });
 
-test('rollback only accepts a product still owned by the same repricing batch', () => {
+test('rollback only accepts the exact complete applied product payload', () => {
   const product = {
     status: 'active',
     total_price: 10,
     total_price_uah: 500,
     price_per_gram: 1,
     uah_rate: 50,
-    details: { repricing: { batchId: 12 } },
+    details: {
+      answers: { kind: 1 },
+      repricing: { batchId: 12, manualOverride: false },
+    },
   };
   const payload = {
     totalPrice: 10,
     totalPriceUah: 500,
     pricePerGram: 1,
     uahRate: 50,
+    details: {
+      repricing: { manualOverride: false, batchId: 12 },
+      answers: { kind: 1 },
+    },
   };
 
   assert.equal(doesProductMatchRepricingBatch(product, payload, 12), true);
   assert.equal(doesProductMatchRepricingBatch(product, payload, 11), false);
   assert.equal(
-    doesProductMatchRepricingBatch({ ...product, total_price_uah: 501 }, payload, 12),
+    doesProductMatchRepricingBatch({
+      ...product,
+      details: { ...product.details, laterMutation: true },
+    }, payload, 12),
     false
+  );
+  assert.equal(
+    doesProductMatchRepricingBatch({ ...product, total_price: 10.0001 }, payload, 12),
+    false
+  );
+  assert.equal(
+    doesProductMatchRepricingBatch({ ...product, total_price_uah: 500.01 }, payload, 12),
+    false
+  );
+  assert.equal(
+    doesProductMatchRepricingBatch({ ...product, price_per_gram: 1.0001 }, payload, 12),
+    false
+  );
+  assert.equal(
+    doesProductMatchRepricingBatch({ ...product, uah_rate: 50.000001 }, payload, 12),
+    false
+  );
+  assert.equal(doesProductMatchRepricingBatch({
+    ...product,
+    total_price: null,
+    total_price_uah: null,
+    price_per_gram: null,
+    uah_rate: null,
+  }, { details: product.details }, 12), false);
+});
+
+test('scenario draft fingerprint and synchronization bind the opaque preview token', () => {
+  const base = {
+    scenario,
+    previewToken: 'scenario-binding-a',
+    summary: { candidateCount: 1, changedCount: 1, unchangedCount: 0, errorCount: 0 },
+    items: [{
+      productId: 1,
+      sku: 'NM1',
+      oldPriceUah: 300,
+      newPriceUah: 400,
+      status: 'changed',
+    }],
+  };
+  const changed = { ...base, previewToken: 'scenario-binding-b' };
+
+  assert.notEqual(
+    getRepricingPreviewFingerprint(base),
+    getRepricingPreviewFingerprint(changed)
+  );
+  assert.equal(
+    getDraftSyncInfo(getRepricingPreviewSnapshot(base), changed).hasChanges,
+    true
   );
 });

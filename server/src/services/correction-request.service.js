@@ -4,12 +4,15 @@ const pool = require('../db/pool');
 const {
   applyProductRecount,
   buildProductRecountPreview,
-  getProductStateSignature,
 } = require('./product.service');
 const { syncRepricingDraft } = require('./repricing.service');
-const { toUahNumber } = require('../utils/money');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
+const {
+  getCorrectionPreviewSignature,
+  getProductStateSignature,
+  stableAnswerEntries,
+} = require('./product/product-signatures');
 
 const REQUEST_STATUSES = new Set(['pending', 'in_progress', 'completed', 'rejected']);
 const ACTIVE_REQUEST_STATUSES = ['pending', 'in_progress'];
@@ -87,33 +90,6 @@ async function writeCorrectionAuditEvent(client, mutationContext, eventKey, requ
     subjectId: requestId,
     details,
   });
-}
-
-function stableAnswerEntries(answers = {}) {
-  return Object.entries(answers || {})
-    .map(([key, value]) => [key, value ?? null])
-    .sort(([firstKey], [secondKey]) => firstKey.localeCompare(secondKey));
-}
-
-function getCorrectionPreviewSignature(preview) {
-  const snapshot = {
-    source: {
-      productId: Number(preview?.source?.productId || 0),
-      sku: preview?.source?.sku || null,
-      totalPriceUah: toUahNumber(preview?.source?.totalPriceUah),
-      answers: stableAnswerEntries(preview?.source?.answers),
-    },
-    corrected: {
-      sku: preview?.corrected?.fullSku || null,
-      proposedSku: preview?.corrected?.proposedFullSku || null,
-      calculatedPriceUah: toUahNumber(preview?.corrected?.calculatedPriceUah),
-      autoPriceUah: toUahNumber(preview?.corrected?.autoPriceUah),
-      totalPriceUah: toUahNumber(preview?.corrected?.totalPriceUah),
-      answers: stableAnswerEntries(preview?.corrected?.answers),
-    },
-  };
-
-  return crypto.createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
 }
 
 function normalizeRequestStatusFilter(status) {

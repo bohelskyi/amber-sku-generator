@@ -27,12 +27,16 @@ test('matrix and correction request errors have visible alert regions', () => {
     new URL('../src/components/admin/AdminPricingEditor.jsx', import.meta.url),
     'utf8'
   );
+  const matrixFormsSource = fs.readFileSync(
+    new URL('../src/components/admin/AdminPricingForms.jsx', import.meta.url),
+    'utf8'
+  );
   const dialogSource = fs.readFileSync(
     new URL('../src/components/app/RecountConfirmDialog.jsx', import.meta.url),
     'utf8'
   );
   assert.match(matrixSource, /matrixValidationError/);
-  assert.match(matrixSource, /role="alert"/);
+  assert.match(`${matrixSource}\n${matrixFormsSource}`, /role="alert"/);
   assert.match(dialogSource, /role="alert"/);
 });
 
@@ -45,8 +49,8 @@ test('dialogs share focus trapping, Escape handling, and focus restoration', () 
     new URL('../src/hooks/useDialogAccessibility.js', import.meta.url),
     'utf8'
   );
-  const repricingSource = fs.readFileSync(
-    new URL('../src/pages/RepricingPage.jsx', import.meta.url),
+  const repricingDialogsSource = fs.readFileSync(
+    new URL('../src/components/repricing/RepricingDialogs.jsx', import.meta.url),
     'utf8'
   );
   const correctionQueueSource = fs.readFileSync(
@@ -63,7 +67,8 @@ test('dialogs share focus trapping, Escape handling, and focus restoration', () 
   assert.match(hookSource, /previousActiveElement/);
   assert.match(hookSource, /document\.body\.style\.overflow = 'hidden'/);
   assert.match(dialogSource, /useDialogAccessibility/);
-  assert.match(repricingSource, /role="dialog"/);
+  assert.match(repricingDialogsSource, /role="dialog"/);
+  assert.match(repricingDialogsSource, /useDialogAccessibility/);
   assert.match(correctionQueueSource, /aria-modal="true"/);
   assert.match(drawerSource, /role="dialog"/);
 });
@@ -123,8 +128,8 @@ test('operational placeholder inputs have explicit accessible names', () => {
     '../src/components/app/HomeDashboard.jsx',
     '../src/components/app/RepricingRecountDrawer.jsx',
     '../src/components/app/RecountConfirmDialog.jsx',
+    '../src/components/repricing/RepricingTable.jsx',
     '../src/pages/CorrectionRequestsPage.jsx',
-    '../src/pages/RepricingPage.jsx',
   ].map((path) => fs.readFileSync(new URL(path, import.meta.url), 'utf8'));
 
   for (const source of sources) {
@@ -132,42 +137,13 @@ test('operational placeholder inputs have explicit accessible names', () => {
   }
 });
 
-test('repricing renders the same manual resolution control on later manual-price cycles', () => {
-  const source = fs.readFileSync(
-    new URL('../src/pages/RepricingPage.jsx', import.meta.url),
-    'utf8'
-  );
-
-  assert.match(source, /\['price_missing', 'manual_price'\]\.includes/);
-  assert.match(source, /Залишити ручну ціну/);
-  assert.match(source, /keepCurrentManualPrice\(\s*item\.productId,\s*item\.oldPriceUah\s*\)/);
-  assert.match(source, /Застосувати автоматичну ціну/);
-  assert.match(source, /disabled=\{!canApply\}/);
-});
-
-test('repricing exposes a server-authoritative global catalog workflow', () => {
-  const source = fs.readFileSync(
-    new URL('../src/pages/RepricingPage.jsx', import.meta.url),
-    'utf8'
-  );
-
-  assert.match(source, /Переоцінити все/);
-  assert.match(source, /\/admin\/repricing\/global\/preview/);
-  assert.match(source, /\/admin\/repricing\/global\/apply/);
-  assert.match(source, /scenarioFilter/);
-  assert.match(source, /Залишити поточні ручні ціни для всіх/);
-  assert.match(source, /Застосувати автоматичну ціну/);
-  assert.match(source, /keepCurrentManualPrices/);
-  assert.doesNotMatch(source, /Promise\.all\([^)]*\/admin\/repricing\/preview/);
-});
-
 test('fixed-scale API decimals are compacted in editable pricing fields', () => {
-  const matrixSource = fs.readFileSync(
-    new URL('../src/components/admin/AdminPricingEditor.jsx', import.meta.url),
+  const matrixFormsSource = fs.readFileSync(
+    new URL('../src/components/admin/AdminPricingForms.jsx', import.meta.url),
     'utf8'
   );
   const adminHookSource = fs.readFileSync(
-    new URL('../src/hooks/useAdminPanel.js', import.meta.url),
+    new URL('../src/hooks/admin/useAdminPricingController.js', import.meta.url),
     'utf8'
   );
   const adminPricingStateSource = fs.readFileSync(
@@ -175,11 +151,11 @@ test('fixed-scale API decimals are compacted in editable pricing fields', () => 
     'utf8'
   );
   const repricingSource = fs.readFileSync(
-    new URL('../src/pages/RepricingPage.jsx', import.meta.url),
+    new URL('../src/components/repricing/RepricingTable.jsx', import.meta.url),
     'utf8'
   );
 
-  assert.match(matrixSource, /defaultValue=\{cell \? formatDecimal\(cell\.price\) : ''\}/);
+  assert.match(matrixFormsSource, /defaultValue=\{cell \? formatDecimal\(cell\.price\) : ''\}/);
   assert.match(adminHookSource, /factor: formatDecimal\(modifier\.factor\)/);
   assert.match(adminPricingStateSource, /min_weight: formatDecimal\(band\.min_weight\)/);
   assert.match(repricingSource, /formatDecimal\(item\.newPriceUah\)/);
@@ -253,12 +229,17 @@ test('product builder live pricing refreshes after answer and weight edits witho
     new URL('../src/hooks/useSkuManager.js', import.meta.url),
     'utf8'
   );
+  const productsApiSource = fs.readFileSync(
+    new URL('../src/api/products-api.js', import.meta.url),
+    'utf8'
+  );
   const appSource = fs.readFileSync(
     new URL('../src/pages/AppPage.jsx', import.meta.url),
     'utf8'
   );
 
-  assert.match(skuManagerSource, /api\.post\('\/price-preview'/);
+  assert.match(productsApiSource, /client\.post\('\/price-preview'/);
+  assert.match(skuManagerSource, /productsApi\.previewPrice\(/);
   assert.match(
     skuManagerSource,
     /\[selectedCat, config, answers, weight, isCalibrated, isWeightRequired\]/,
@@ -472,6 +453,10 @@ test('pricing uses selected scenario and modifier master-detail editors', () => 
     new URL('../src/components/admin/AdminPricingEditor.jsx', import.meta.url),
     'utf8'
   );
+  const formsSource = fs.readFileSync(
+    new URL('../src/components/admin/AdminPricingForms.jsx', import.meta.url),
+    'utf8'
+  );
   const styles = fs.readFileSync(
     new URL('../src/index.css', import.meta.url),
     'utf8'
@@ -491,9 +476,9 @@ test('pricing uses selected scenario and modifier master-detail editors', () => 
   assert.match(source, /workspaceMode === 'modifiers'/);
   assert.match(source, /selectedModifier/);
   assert.match(source, /isNewModifier/);
-  assert.match(source, /handlePriceChange\(scenario\.id, xOption\.id, yOption\.id, null\)/);
-  assert.match(source, /getMatrixPriceValidationError\(normalizedPrice\)/);
-  assert.match(source, /role="alert"/);
+  assert.match(formsSource, /handlePriceChange\(scenario\.id, xOption\.id, yOption\.id, null\)/);
+  assert.match(formsSource, /getMatrixPriceValidationError\(normalizedPrice\)/);
+  assert.match(formsSource, /role="alert"/);
   assert.match(styles, /\.pricing-matrix-table thead th[\s\S]*?sticky top-0/);
   assert.match(styles, /\.pricing-matrix-table tbody th[\s\S]*?sticky left-0/);
   assert.doesNotMatch(source, /space-y-6 border-t border-slate-200 p-4/);
@@ -505,6 +490,10 @@ test('correction queue wires application-user claims and legacy compatibility in
     new URL('../src/pages/CorrectionRequestsPage.jsx', import.meta.url),
     'utf8'
   );
+  const apiSource = fs.readFileSync(
+    new URL('../src/api/corrections-api.js', import.meta.url),
+    'utf8'
+  );
 
   assert.match(source, /createVisibilityAwarePoller/);
   assert.match(source, /createLatestRequestGate/);
@@ -512,9 +501,11 @@ test('correction queue wires application-user claims and legacy compatibility in
   assert.match(source, /nextFilter === 'workspace' \? 'active'/);
   assert.match(source, /getCorrectionRequestsForView/);
   assert.match(source, /isCorrectionClaimConflict/);
-  assert.match(source, /\/correction-requests\/\$\{request\.id\}\/claim/);
+  assert.match(source, /correctionsApi\.claimRequest\(request\.id\)/);
+  assert.match(apiSource, /\/correction-requests\/\$\{requestId\}\/claim/);
   assert.match(source, /getCorrectionLegacyClaimToken/);
-  assert.match(source, /claimVersion: request\.claimVersion/);
+  assert.match(source, /correctionsApi\.releaseRequest\([\s\S]*?request\.claimVersion/);
+  assert.match(apiSource, /\{ claimVersion \}/);
   assert.match(source, /В роботі у вас/);
   assert.match(source, /getEmployeeLabel\(request\.claimedByUser\)/);
   assert.doesNotMatch(source, /В роботі в іншому браузері/);

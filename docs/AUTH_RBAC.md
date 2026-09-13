@@ -83,7 +83,7 @@ Permission replacement is atomic and affects assigned active users on their next
 
 Successful approve, role-change, disable, and enable operations append one immutable `audit_events` row inside the same database transaction. Attribution uses `application_users.id`, the request ID, and a minimal event-time snapshot containing display name and preferred username; historical rendering must not depend on the actor's current OIDC-synchronized profile. Existing `user_role_assignments.assigned_by` and `revoked_by` history is preserved. Failed operations and same-role no-ops do not write success events, and an audit insert failure rolls back the user mutation.
 
-Operational HTTP mutation logs are separate, non-durable telemetry. Their `actorId` uses the resolved local application-user ID where available; neither operational nor durable attribution uses OIDC `sub` or username as the actor key. Migration `023` defines `audit.view`, but this foundation does not add an audit-view endpoint or client UI.
+Operational HTTP mutation logs are separate, non-durable telemetry. Their `actorId` uses the resolved local application-user ID where available; neither operational nor durable attribution uses OIDC `sub` or username as the actor key. The `GET /api/admin/audit-events` endpoint and `/admin/audit` client page enforce Administrator-only `audit.view` and expose filtered keyset pagination without making audit records mutable.
 
 ## Correction ownership
 
@@ -93,9 +93,9 @@ Administrator has no implicit bypass for another user's ordinary claim. Only the
 
 ## Deferred authorization work
 
-Application authentication, local users, built-in RBAC, user administration, the durable audit foundation, product create/archive/recount, repricing, export snapshot, and SKU schema publication attribution, permission-aware UI, and live access-state handling are implemented. The following remain intentionally pending:
+Application authentication, local users, built-in RBAC, user administration, the durable audit foundation and viewer, catalog/pricing audit coverage, product create/archive/recount, repricing, export snapshot, and SKU schema publication attribution, permission-aware UI, and live access-state handling are implemented. The following remain intentionally pending:
 
-- durable audit coverage outside application-user administration, product create/archive/recount, correction-request lifecycle events, repricing draft creation/discard plus apply/rollback, export snapshot creation/confirmation, and SKU schema publication, plus the Administrator-only audit viewer;
+- additional durable audit coverage outside the currently enumerated application-user, role, catalog, pricing, product, correction, repricing, export, and schema-publication events;
 - invitations.
 
 Do not infer actor identity from OIDC `sub` or from a correction claim token. See [`RECOUNT_CORRECTIONS.md`](RECOUNT_CORRECTIONS.md) for current ownership semantics.

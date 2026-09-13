@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
-import { api } from '../lib/api';
+import { productsApi } from '../api/products-api';
 import { useProductRecount } from './useProductRecount';
+import { useCopyFeedback } from './product/useCopyFeedback';
+import { useProductExportController } from './product/useProductExportController';
+import { useProductRecordsController } from './product/useProductRecordsController';
+import { getApiError } from '../lib/http-error';
 import {
   isValidPositivePrice,
   requiresManualPrice as needsManualPrice,
@@ -62,23 +66,11 @@ export function useSkuManager() {
   const [variationData, setVariationData] = useState(null);
   const [variationError, setVariationError] = useState('');
   const [isVariationLoading, setIsVariationLoading] = useState(false);
-  const [history, setHistory] = useState([]);
-  const [exportStatus, setExportStatus] = useState(null);
-  const [skuToDelete, setSkuToDelete] = useState('');
-  const [exportFromSku, setExportFromSku] = useState('');
-  const [exportToSku, setExportToSku] = useState('');
-  const [exportError, setExportError] = useState('');
-  const [isExportLoading, setIsExportLoading] = useState(false);
-  const [copyMessage, setCopyMessage] = useState('');
   const [manualPriceUah, setManualPriceUah] = useState('');
   const [isManualPriceEditing, setIsManualPriceEditing] = useState(false);
-  const fetchHistory = () => {
-    api.get('/products').then((res) => setHistory(res.data));
-  };
-
-  const fetchExportStatus = () => {
-    api.get('/export/status').then((res) => setExportStatus(res.data));
-  };
+  const productExport = useProductExportController();
+  const records = useProductRecordsController({ onArchived: productExport.fetchExportStatus });
+  const copyFeedback = useCopyFeedback();
 
   const {
     decodeData,
@@ -117,15 +109,13 @@ export function useSkuManager() {
   } = useProductRecount({
     config,
     onApplied: () => {
-      fetchHistory();
-      fetchExportStatus();
+      records.fetchHistory();
+      productExport.fetchExportStatus();
     },
   });
 
   useEffect(() => {
-    api.get('/config').then((res) => setConfig(res.data));
-    fetchHistory();
-    fetchExportStatus();
+    productsApi.getConfig().then((res) => setConfig(res.data));
   }, []);
 
   const isCalibrated = answers.is_calibrated ?? null;
@@ -278,7 +268,7 @@ export function useSkuManager() {
       setIsLivePriceLoading(true);
       setLivePriceError('');
 
-      api.post('/price-preview', {
+      productsApi.previewPrice({
         categoryCode: selectedCat,
         answers,
         weight: isWeightRequired ? weight : 0,
@@ -321,7 +311,7 @@ export function useSkuManager() {
       return alert(`Будь ласка, заповніть обов'язкові питання: ${missingRequired.map((question) => question.label).join(', ')}`);
     }
 
-    return api.post('/preview', {
+    return productsApi.preview({
       categoryCode: selectedCat,
       answers,
       weight: isWeightRequired ? weight : 0,
@@ -348,7 +338,7 @@ export function useSkuManager() {
     setIsSaving(true);
     setSaveError('');
 
-    api.post('/save', {
+    productsApi.save({
       skuSchemaVersionId: previewData.skuSchemaVersionId,
       previewToken: previewData.previewToken,
       category: selectedCat,
@@ -358,11 +348,11 @@ export function useSkuManager() {
       manualPriceUah: hasManualPrice ? effectiveTotalPriceUah : null,
       useVariation: Boolean(variationData),
     }).then(() => {
-      fetchHistory();
-      fetchExportStatus();
+      records.fetchHistory();
+      productExport.fetchExportStatus();
       resetProductFlow(null);
     }).catch((err) => {
-      setSaveError(err.response?.data?.error || err.message);
+      setSaveError(getApiError(err));
     }).finally(() => {
       setIsSaving(false);
     });
@@ -374,89 +364,16 @@ export function useSkuManager() {
     setVariationError('');
     setSaveError('');
 
-    api.post('/variation', { sku: previewData.fullProposedSku })
+    productsApi.getVariation(previewData.fullProposedSku)
       .then((res) => {
         setDisplaySku(res.data.fullSku);
         setVariationData(res.data);
       })
       .catch((err) => {
-        setVariationError(err.response?.data?.error || err.message);
+        setVariationError(getApiError(err));
       })
       .finally(() => {
         setIsVariationLoading(false);
-      });
-  };
-
-  const handleExportCsv = async () => {
-    const fromSku = exportFromSku.trim().toUpperCase();
-    const toSku = exportToSku.trim().toUpperCase();
-
-    if (!fromSku) {
-      setExportError('Вкажіть артикул, з якого починати експорт.');
-      return;
-    }
-
-    setIsExportLoading(true);
-    setExportError('');
-
-    try {
-      const idempotencyKey = globalThis.crypto?.randomUUID?.()
-        || `export-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const snapshotResponse = await api.post('/export/snapshots', {
-        fromSku,
-        ...(toSku ? { toSku } : {}),
-      }, {
-        headers: { 'Idempotency-Key': idempotencyKey },
-      });
-      const snapshot = snapshotResponse.data;
-      const response = await api.get(`/export/snapshots/${snapshot.id}/csv`, {
-        responseType: 'blob',
-      });
-
-      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const fileNameMatch = response.headers['content-disposition']?.match(/filename="(.+)"/);
-      const fileName = fileNameMatch?.[1] || snapshot.fileName || `amber-export-${fromSku}.csv`;
-
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.setAttribute('download', fileName);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(downloadUrl);
-      await api.post(`/export/snapshots/${snapshot.id}/confirm`);
-      fetchExportStatus();
-    } catch (err) {
-      if (err.response?.data instanceof Blob) {
-        const errorText = await err.response.data.text();
-        try {
-          const parsed = JSON.parse(errorText);
-          setExportError(parsed.error || 'Не вдалося виконати експорт.');
-        } catch {
-          setExportError('Не вдалося виконати експорт.');
-        }
-      } else {
-        setExportError(err.response?.data?.error || err.message);
-      }
-    } finally {
-      setIsExportLoading(false);
-    }
-  };
-
-  const handleDelete = (sku) => {
-    if (!sku) return;
-    if (!window.confirm(`Перенести ${sku} в архів?`)) return;
-
-    api.post('/delete', { skuToDelete: sku })
-      .then((res) => {
-        alert(res.data.message);
-        setSkuToDelete('');
-        fetchHistory();
-        fetchExportStatus();
-      })
-      .catch((err) => {
-        alert(`ПОМИЛКА: ${err.response?.data?.error || err.message}`);
       });
   };
 
@@ -486,30 +403,16 @@ export function useSkuManager() {
     setIsManualPriceEditing(false);
   };
 
-  const handleCopyText = async (text, label) => {
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopyMessage(`${label} скопійовано`);
-      setTimeout(() => setCopyMessage(''), 1500);
-    } catch {
-      setCopyMessage('Не вдалося скопіювати');
-      setTimeout(() => setCopyMessage(''), 1500);
-    }
-  };
-
   return {
+    ...copyFeedback,
+    ...productExport,
+    ...records,
     answers,
     answeredRequiredCount,
     config,
-    copyMessage,
     decodeData,
     decodeError,
     decodeErrorDetails,
-    exportError,
-    exportFromSku,
-    exportStatus,
-    exportToSku,
     effectiveTotalPriceUah,
     finalSku,
     getVisibleOptions,
@@ -521,11 +424,8 @@ export function useSkuManager() {
     handleCancelRecount,
     handleCancelRecountConfirmation,
     handleConfirmRecount,
-    handleCopyText,
     handleDecode,
     handleDecodeInputChange,
-    handleDelete,
-    handleExportCsv,
     handlePreview,
     handleRecountAnswer,
     handleRecountTextAnswer,
@@ -538,9 +438,7 @@ export function useSkuManager() {
     handleTextAnswer,
     hasRecountChanges,
     hasManualPrice,
-    history,
     isCalibrated,
-    isExportLoading,
     isLivePriceLoading,
     isManualPriceEditing,
     isRecountApplying,
@@ -574,16 +472,11 @@ export function useSkuManager() {
     saveError,
     resetProductFlow,
     selectedCat,
-    setExportError,
-    setExportFromSku,
-    setExportToSku,
     setSelectedCat,
     setRecountReason,
     setRecountManualPriceUah,
-    setSkuToDelete,
     setWeight: handleWeightChange,
     skuToDecode,
-    skuToDelete,
     variationData,
     variationError,
     weight,

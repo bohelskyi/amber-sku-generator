@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "test": "node --test && vitest run --config vitest.config.js",
+    "test:coverage": "node --experimental-test-coverage --test && vitest run --coverage --coverage.reporter=text-summary --config vitest.config.js",
     "test:auth": "vitest run --config vitest.config.js",
     "preview": "vite preview"
   },
@@ -25,6 +26,7 @@
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "@vitest/coverage-v8": "4.1.11",
     "autoprefixer": "^10.4.23",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",

@@ -1,203 +1,40 @@
-const crypto = require('node:crypto');
 const pool = require('../db/pool');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
 const { calculatePricing } = require('./pricing.service');
 const { getAnswerChanges } = require('../utils/answer-changes');
-const {
-  resolveCalibrationState,
-  shouldHidePriceForCalibration,
-} = require('../utils/calibration');
 const { toUahNumber } = require('../utils/money');
 const {
   appendSkuSuffix,
-  buildSkuSuffixDecodeAttempts,
   buildBaseSku,
-  decodeSkuAnswers,
-  decodeStoredSkuAnswers,
-  decodeVisibleSkuAnswers,
-  diagnoseSkuAttempts,
   getOptionCode,
-  getOptionValue,
-  isOptionalPlaceholderAnswer,
   parseVariationSku,
 } = require('../utils/sku');
-const { isRuleMatched } = require('../utils/rules');
 const {
   getActiveSchema,
-  getSchemaVersion,
   getSchemaVersionById,
-  parseVersionedSkuPart,
 } = require('./sku-schema.service');
-
-async function getAllCategories() {
-  const result = await pool.query(
-    `SELECT code, name, requires_weight, skip_hidden_sku_questions
-     FROM categories
-     ORDER BY LENGTH(code) DESC, code ASC`
-  );
-
-  return result.rows.map((row) => ({
-    code: row.code,
-    name: row.name,
-    requires_weight: Number(row.requires_weight),
-    skip_hidden_sku_questions: Number(row.skip_hidden_sku_questions || 0),
-  }));
-}
-
-async function getQuestionsForCategory(categoryCode) {
-  const result = await pool.query(
-    `
-      SELECT
-        q.key,
-        q.label AS q_label,
-        q.sku_index,
-        COALESCE(q.sku_separator, '') AS sku_separator,
-        q.required,
-        q.visible_if_json,
-        o.value_id,
-        o.label AS o_label
-      FROM questions q
-      LEFT JOIN options o ON q.id = o.question_id
-      WHERE q.category_code = $1 AND COALESCE(q.include_in_sku, 1) = 1
-      ORDER BY q.sku_index, LENGTH(CAST(o.value_id AS TEXT)) DESC, o.value_id ASC
-    `,
-    [categoryCode]
-  );
-
-  const questions = [];
-  let currentQuestion = null;
-
-  for (const row of result.rows) {
-    if (!currentQuestion || currentQuestion.key !== row.key) {
-      currentQuestion = {
-        key: row.key,
-        label: row.q_label,
-        sku_index: Number(row.sku_index),
-        sku_separator: row.sku_separator || '',
-        required: Number(row.required),
-        visible_if_json: row.visible_if_json || null,
-        options: [],
-      };
-      questions.push(currentQuestion);
-    }
-
-    if (row.value_id !== null && row.value_id !== undefined) {
-      currentQuestion.options.push({
-        id: Number(row.value_id),
-        label: row.o_label,
-      });
-    }
-  }
-
-  return questions;
-}
-
-function getRuleSpecificity(rule) {
-  return rule && typeof rule === 'object' ? Object.keys(rule).length : 0;
-}
-
-function getContextualOption(question, value, answers) {
-  const candidates = (question.options || []).filter(
-    (option) => String(getOptionValue(option)) === String(value)
-  );
-  const eligible = candidates.filter((option) => (
-    isRuleMatched(option.visible_if_json, answers)
-    && !(option.hidden_if_json && isRuleMatched(option.hidden_if_json, answers))
-  ));
-  return [...(eligible.length ? eligible : candidates)].sort((first, second) => (
-    getRuleSpecificity(second.visible_if_json) - getRuleSpecificity(first.visible_if_json)
-  ))[0] || null;
-}
-
-function resolveContextualAnswerLabels(decodedAnswers, questions) {
-  const answers = buildAnswerMap(decodedAnswers);
-  const questionsByKey = new Map(questions.map((question) => [question.key, question]));
-  return decodedAnswers.map((answer) => {
-    if (answer.is_placeholder) return answer;
-    const option = getContextualOption(
-      questionsByKey.get(answer.key) || { options: [] },
-      answer.value_id,
-      answers
-    );
-    return option ? { ...answer, value_label: option.label } : answer;
-  });
-}
-
-async function getCalibrationQuestionForCategory(categoryCode) {
-  const result = await pool.query(
-    `SELECT visible_if_json
-     FROM questions
-     WHERE category_code = $1 AND key = 'is_calibrated'
-     LIMIT 1`,
-    [categoryCode]
-  );
-
-  return result.rows[0] || null;
-}
-
-function buildAnswerMap(decodedAnswers) {
-  return decodedAnswers.reduce((answers, item) => {
-    answers[item.key] = item.value_id === null ? 0 : item.value_id;
-    return answers;
-  }, {});
-}
-
-function haveSameDecodedAnswers(firstAnswers, secondAnswers) {
-  if (!firstAnswers || !secondAnswers || firstAnswers.length !== secondAnswers.length) {
-    return false;
-  }
-
-  const secondAnswerMap = buildAnswerMap(secondAnswers);
-  return firstAnswers.every((answer) => (
-    secondAnswerMap[answer.key] === (answer.value_id === null ? 0 : answer.value_id)
-  ));
-}
-
-function normalizeAnswerMap(answers = {}) {
-  return Object.entries(answers || {}).reduce((result, [key, value]) => {
-    if (value === undefined || value === null || value === '') return result;
-    const numericValue = Number(value);
-    result[key] = Number.isNaN(numericValue) ? value : numericValue;
-    return result;
-  }, {});
-}
-
-function mergeRecountAnswerPatch(previousAnswers, submittedAnswers) {
-  const answerPatch = submittedAnswers && typeof submittedAnswers === 'object'
-    ? submittedAnswers
-    : {};
-  const mergedAnswers = {
-    ...previousAnswers,
-    ...normalizeAnswerMap(answerPatch),
-  };
-
-  for (const [key, value] of Object.entries(answerPatch)) {
-    if (value === undefined || value === null || String(value).trim() === '') {
-      delete mergedAnswers[key];
-    }
-  }
-
-  return mergedAnswers;
-}
-
-function getProductDetails(product) {
-  if (!product?.details || typeof product.details !== 'object') return {};
-  return product.details;
-}
-
-function getStoredMatrixName(productDetails) {
-  const structuredName = productDetails?.pricingScenario?.name;
-  if (structuredName) return String(structuredName);
-
-  const legacyLogMessage = String(productDetails?.logMessage || '');
-  const detailsMarkerIndex = legacyLogMessage.indexOf(' (');
-  return detailsMarkerIndex > 0 ? legacyLogMessage.slice(0, detailsMarkerIndex) : null;
-}
-
-function uniqueValues(values) {
-  return Array.from(new Set(values.filter(Boolean)));
-}
+const {
+  getProductPreviewToken,
+  getProductStateSignature,
+} = require('./product/product-signatures');
+const {
+  buildProductAnswerContext,
+  getCorrectionWeight,
+  getProductDetails,
+  mergeRecountAnswerPatch,
+  normalizeAnswerMap,
+  omitHiddenRecountAnswers,
+} = require('./product/product-answers');
+const {
+  inspectNonSkuAnswer,
+  inspectSkuAnswer,
+} = require('./product/product-validation');
+const {
+  getProductBySku: queryProductBySku,
+  getRecentProducts: queryRecentProducts,
+} = require('./product/product-queries');
+const { decodeSku: decodeProductSku } = require('./product/product-decode');
 
 function normalizeSkuWriteError(err, sku) {
   if (err?.code !== '23505') return err;
@@ -207,298 +44,8 @@ function normalizeSkuWriteError(err, sku) {
   return err;
 }
 
-function getPricingConditionValue(key, pricingAnswers, pricingDetails) {
-  if (key === 'is_calibrated') {
-    return pricingAnswers.is_calibrated ?? pricingDetails?.calibratedValue ?? null;
-  }
-
-  return pricingAnswers[key] ?? null;
-}
-
-function getStoredAnswers(product) {
-  const productDetails = getProductDetails(product);
-  return productDetails.answers && typeof productDetails.answers === 'object'
-    ? normalizeAnswerMap(productDetails.answers)
-    : {};
-}
-
-function buildProductAnswerContext(decodedProduct) {
-  const answers = {
-    ...buildAnswerMap(decodedProduct.decodedAnswers || []),
-    ...getStoredAnswers(decodedProduct.product),
-  };
-
-  const storedCalibrated = getProductDetails(decodedProduct.product).isCalibrated;
-  if (
-    answers.is_calibrated === undefined
-    && storedCalibrated !== undefined
-    && storedCalibrated !== null
-    && storedCalibrated !== ''
-  ) {
-    answers.is_calibrated = Number(storedCalibrated);
-  }
-
-  return answers;
-}
-
-function getCorrectionWeight(decodedProduct) {
-  const product = decodedProduct.product;
-  if (product?.weight !== null && product?.weight !== undefined && Number(product.weight) > 0) {
-    return Number(product.weight);
-  }
-
-  return decodedProduct.suffix?.type === 'weight' && decodedProduct.suffix.value !== null
-    ? Number(decodedProduct.suffix.value)
-    : 0;
-}
-
-function getDecodedPricingPayload({
-  decodedAnswers,
-  product,
-  pricing,
-  pricingAnswers,
-  suffixValue,
-}) {
-  const productDetails = getProductDetails(product);
-  const hasStoredProduct = Boolean(product);
-  const storedCalculatedPriceUah = toUahNumber(
-    productDetails.calculatedPriceUah ?? productDetails.autoPriceUah
-  );
-  const storedAutomaticPriceUah = toUahNumber(
-    productDetails.autoPriceUah
-      ?? (productDetails.manualPriceUah === null || productDetails.manualPriceUah === undefined
-        ? product?.total_price_uah
-        : null)
-  );
-  const storedPricePerGram = product?.price_per_gram !== null && product?.price_per_gram !== undefined
-    ? Number(product.price_per_gram)
-    : null;
-  const storedUahRate = product?.uah_rate !== null && product?.uah_rate !== undefined
-    ? Number(product.uah_rate)
-    : null;
-  const storedWeight = product?.weight !== null && product?.weight !== undefined
-    ? Number(product.weight)
-    : null;
-  const calculatedPricePerGram = Number(pricing.pricePerGram || 0);
-  const pricePerGram = storedPricePerGram !== null ? storedPricePerGram : calculatedPricePerGram;
-  const uahRate = storedUahRate ?? pricing.currencyPayload?.uahRate ?? null;
-  const pricePerGramUah =
-    Number(pricePerGram) > 0 && Number(uahRate) > 0
-      ? (Number(pricePerGram) * Number(uahRate)).toFixed(2)
-      : pricing.currencyPayload?.pricePerGramUah || null;
-  const dependentKeys = pricing.pricingDetails?.dependentKeys || [];
-  const matrixName =
-    (storedPricePerGram !== null ? getStoredMatrixName(productDetails) : null)
-    || pricing.pricingDetails?.scenario?.name
-    || null;
-  const shouldShowCalibratedCondition =
-    dependentKeys.includes('is_calibrated') ||
-    pricingAnswers.is_calibrated !== undefined ||
-    productDetails.isCalibrated !== undefined;
-  const conditionKeys = uniqueValues([
-    ...dependentKeys,
-    ...(shouldShowCalibratedCondition ? ['is_calibrated'] : []),
-  ]);
-
-  return {
-    source: storedPricePerGram !== null ? 'stored' : 'calculated',
-    isWeightBased: Boolean(pricing.pricingDetails?.isWeightBased),
-    usesWeight: Boolean(pricing.pricingDetails?.usesWeight),
-    priceMode: pricing.pricingDetails?.priceMode || pricing.priceMode || 'category_default',
-    weight: storedWeight ?? pricing.weightVal ?? suffixValue ?? null,
-    pricePerGram,
-    pricePerGramUah,
-    uahRate,
-    totalPrice: product?.total_price ?? pricing.totalPrice,
-    calculatedPriceUah: hasStoredProduct
-      ? storedCalculatedPriceUah
-      : toUahNumber(pricing.currencyPayload?.calculatedPriceUah),
-    automaticPriceUah: hasStoredProduct
-      ? storedAutomaticPriceUah
-      : toUahNumber(pricing.currencyPayload?.totalPriceUah),
-    totalPriceUah: toUahNumber(
-      product?.total_price_uah ?? pricing.currencyPayload?.totalPriceUah ?? null
-    ),
-    logMessage: productDetails.logMessage || pricing.logMessage,
-    matrixName,
-    dependentKeys,
-    conditions: conditionKeys.map((key) => ({
-      key,
-      value: getPricingConditionValue(key, pricingAnswers, pricing.pricingDetails),
-      isInSku: decodedAnswers.some((answer) => answer.key === key),
-    })),
-    details: pricing.pricingDetails || null,
-    decodedPriceAnswers: decodedAnswers
-      .filter((answer) => dependentKeys.includes(answer.key))
-      .map((answer) => answer.key),
-  };
-}
-
 async function decodeSku(skuValue) {
-  const { normalizedSku, baseFullSku, variationNumber } = parseVariationSku(skuValue);
-  if (!normalizedSku) {
-    throw new Error('Введіть артикул для розшифровки');
-  }
-
-  const categories = await getAllCategories();
-  const category = categories.find((item) => baseFullSku.startsWith(item.code));
-  if (!category) {
-    const err = new Error('Не вдалося визначити категорію за кодом артикула.');
-    err.statusCode = 422;
-    err.details = {
-      type: 'unknown_category',
-      received: baseFullSku.slice(0, 2) || normalizedSku,
-      categories: categories.map((item) => ({ code: item.code, name: item.name })),
-    };
-    throw err;
-  }
-
-  const productResult = await pool.query(
-    `SELECT id, full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah,
-            price_per_gram, uah_rate, details, status, exclude_from_export,
-            corrected_from_product_id, corrected_to_product_id, correction_reason, created_at,
-            sku_schema_version_id
-     FROM products
-     WHERE full_sku = $1
-     ORDER BY id ASC
-     LIMIT 1`,
-    [normalizedSku]
-  );
-  const product = productResult.rows[0] || null;
-  const parsedSchema = parseVersionedSkuPart(baseFullSku.slice(category.code.length));
-  const schema = await getSchemaVersion(category.code, parsedSchema.version);
-  if (!schema) {
-    const err = new Error(
-      `SKU-схему V${parsedSchema.version} для категорії ${category.code} не знайдено.`
-    );
-    err.statusCode = 422;
-    err.details = {
-      type: 'unknown_sku_schema',
-      category: { code: category.code, name: category.name },
-      version: parsedSchema.version,
-      marker: parsedSchema.marker,
-    };
-    throw err;
-  }
-  const questions = schema.questions;
-  const calibrationQuestion = await getCalibrationQuestionForCategory(category.code);
-  const attempts = buildSkuSuffixDecodeAttempts(parsedSchema.encodedWithSuffix);
-  const productDetails = getProductDetails(product);
-  const storedAnswers = getStoredAnswers(product);
-
-  for (const attempt of attempts) {
-    const configuredDecodedAnswers =
-      Number(category.skip_hidden_sku_questions || 0) === 1
-        ? decodeVisibleSkuAnswers(questions, attempt.encodedPart)
-        : decodeSkuAnswers(questions, attempt.encodedPart);
-    const storedDecodedAnswers = !product || !Object.keys(storedAnswers).length
-      ? null
-      : decodeStoredSkuAnswers(questions, attempt.encodedPart, storedAnswers);
-    const usesStoredHistory = Boolean(
-      storedDecodedAnswers
-      && !haveSameDecodedAnswers(configuredDecodedAnswers, storedDecodedAnswers)
-    );
-    const rawDecodedAnswers = usesStoredHistory
-      ? storedDecodedAnswers
-      : configuredDecodedAnswers || storedDecodedAnswers;
-    if (!rawDecodedAnswers) continue;
-    const decodedAnswers = resolveContextualAnswerLabels(rawDecodedAnswers, questions);
-
-    const suffixValue =
-      attempt.suffixRaw !== null && /^\d+$/.test(attempt.suffixRaw)
-        ? Number(attempt.suffixRaw)
-        : null;
-    const decodedAnswerMap = buildAnswerMap(decodedAnswers);
-    const pricingAnswers = {
-      ...decodedAnswerMap,
-      ...storedAnswers,
-    };
-    const calibration = resolveCalibrationState({
-      question: calibrationQuestion,
-      answers: pricingAnswers,
-      storedValue: productDetails.isCalibrated,
-    });
-    const pricingWeight =
-      product?.weight !== null && product?.weight !== undefined && Number(product.weight) > 0
-        ? Number(product.weight)
-        : category.requires_weight === 1
-          ? suffixValue
-          : 0;
-    const calculatedPricing = await calculatePricing(
-      category.code,
-      pricingAnswers,
-      pricingWeight,
-      calibration.value
-    );
-    const pricing = shouldHidePriceForCalibration(
-      calibration,
-      calculatedPricing.pricingDetails?.dependentKeys || []
-    )
-      ? null
-      : calculatedPricing;
-
-    return {
-      sku: normalizedSku,
-      decodeSource: usesStoredHistory ? 'stored_history' : 'versioned_schema',
-      skuSchema: {
-        id: Number(schema.id),
-        version: schema.version,
-        marker: schema.marker,
-        status: schema.status,
-      },
-      calibration,
-      category: {
-        code: category.code,
-        name: category.name,
-        requires_weight: category.requires_weight,
-        skip_hidden_sku_questions: category.skip_hidden_sku_questions,
-      },
-      baseSku: category.code + schema.marker + attempt.encodedPart,
-      decodedAnswers,
-      suffix: {
-        raw: attempt.suffixRaw,
-        type: attempt.hasSuffix
-          ? category.requires_weight === 1
-            ? 'weight'
-            : 'sequence'
-          : 'none',
-        value: suffixValue,
-      },
-      pricing: pricing
-        ? getDecodedPricingPayload({
-            decodedAnswers,
-            product,
-            pricing,
-            pricingAnswers,
-            suffixValue,
-          })
-        : null,
-      variation:
-        variationNumber !== null
-          ? {
-              number: variationNumber,
-              suffix: `-${String(variationNumber).padStart(3, '0')}`,
-            }
-          : null,
-      existsInDb: productResult.rows.length > 0,
-      product,
-    };
-  }
-
-  const diagnosis = diagnoseSkuAttempts(questions, attempts, {
-    skipHiddenQuestions: Number(category.skip_hidden_sku_questions || 0) === 1,
-  });
-  const err = new Error(
-    diagnosis?.message || 'Артикул не відповідає поточній конфігурації категорії.'
-  );
-  err.statusCode = 422;
-  err.details = {
-    type: 'sku_config_mismatch',
-    category: { code: category.code, name: category.name },
-    skuSchema: { version: schema.version, marker: schema.marker },
-    issue: diagnosis,
-  };
-  throw err;
+  return decodeProductSku(skuValue, pool);
 }
 
 async function getNextVariationSku(skuValue, queryable = pool) {
@@ -534,12 +81,7 @@ async function getNextVariationSku(skuValue, queryable = pool) {
 }
 
 async function getProductBySku(fullSku) {
-  const result = await pool.query(
-    'SELECT id, full_sku, created_at FROM products WHERE full_sku = $1 ORDER BY id ASC LIMIT 1',
-    [String(fullSku || '').trim().toUpperCase()]
-  );
-
-  return result.rows[0] || null;
+  return queryProductBySku(pool, fullSku);
 }
 
 async function isSkuReserved(fullSku, queryable = pool) {
@@ -548,53 +90,6 @@ async function isSkuReserved(fullSku, queryable = pool) {
     [String(fullSku || '').trim().toUpperCase()]
   );
   return result.rows.length > 0;
-}
-
-function isQuestionVisibleForSku(question, answers, isCalibrated) {
-  const calibratedAnswer =
-    answers.is_calibrated !== undefined &&
-    answers.is_calibrated !== null &&
-    answers.is_calibrated !== ''
-      ? answers.is_calibrated
-      : isCalibrated;
-  return isRuleMatched(question.visible_if_json, {
-    ...answers,
-    is_calibrated: calibratedAnswer,
-  });
-}
-
-function omitHiddenRecountAnswers(answers, schemaQuestions, isCalibrated) {
-  return (schemaQuestions || []).reduce((result, question) => {
-    if (!isQuestionVisibleForSku(question, answers, isCalibrated)) {
-      delete result[question.key];
-    }
-    return result;
-  }, { ...answers });
-}
-
-function isOptionAvailable(option, answers) {
-  return Boolean(option)
-    && !option.archived
-    && isRuleMatched(option.visible_if_json, answers)
-    && !(option.hidden_if_json && isRuleMatched(option.hidden_if_json, answers));
-}
-
-function getProductStateSignature(product) {
-  const relevantState = {
-    id: Number(product?.id),
-    fullSku: product?.full_sku || null,
-    category: product?.category || null,
-    weight: product?.weight === null ? null : Number(product?.weight),
-    totalPrice: product?.total_price === null ? null : Number(product?.total_price),
-    totalPriceUah: product?.total_price_uah === null ? null : Number(product?.total_price_uah),
-    pricePerGram: product?.price_per_gram === null ? null : Number(product?.price_per_gram),
-    uahRate: product?.uah_rate === null ? null : Number(product?.uah_rate),
-    status: product?.status || 'active',
-    correctedToProductId: product?.corrected_to_product_id || null,
-    schemaVersionId: product?.sku_schema_version_id || null,
-    details: getProductDetails(product),
-  };
-  return crypto.createHash('sha256').update(JSON.stringify(relevantState)).digest('hex');
 }
 
 function validationError(message) {
@@ -613,30 +108,6 @@ function parseManualPriceUah(value) {
     throw validationError('Ручна ціна повинна бути більшою за 0.');
   }
   return parsed;
-}
-
-function getProductPreviewToken(preview, categoryCode, answers, isCalibrated) {
-  const stableAnswers = Object.entries(answers)
-    .map(([key, value]) => [key, value ?? null])
-    .sort(([firstKey], [secondKey]) => firstKey.localeCompare(secondKey));
-  const payload = {
-    categoryCode,
-    answers: stableAnswers,
-    isCalibrated: Number(answers.is_calibrated ?? isCalibrated ?? 0),
-    weight: Number(preview.weightVal || 0),
-    skuSchemaVersionId: Number(preview.skuSchemaVersionId),
-    baseSku: preview.baseSku,
-    mode: preview.mode,
-    priceMode: preview.priceMode,
-    pricePerGram: preview.pricePerGram,
-    fixedPriceUah: preview.fixedPriceUah ?? null,
-    totalPrice: preview.totalPrice,
-    calculatedPriceUah: preview.calculatedPriceUah ?? null,
-    totalPriceUah: preview.totalPriceUah ?? null,
-    uahRate: preview.uahRate ?? null,
-    uahRateDate: preview.uahRateDate ?? null,
-  };
-  return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
 function finalizeProductPreview(preview, categoryCode, answers, isCalibrated) {
@@ -680,16 +151,15 @@ async function validateNonSkuAnswers(categoryCode, answers, isCalibrated, querya
   }
 
   for (const question of questions.values()) {
-    if (!isQuestionVisibleForSku(question, answers, isCalibrated)) continue;
-    const value = answers[question.key];
-    const hasValue = value !== undefined && value !== null && String(value).trim() !== '';
-    if (question.required === 1 && !hasValue) {
+    const validation = inspectNonSkuAnswer(question, answers, isCalibrated);
+    if (!validation.visible) continue;
+    if (validation.issue === 'required') {
       throw validationError(`Заповніть обов'язкове поле «${question.label}».`);
     }
-    if (!hasValue || question.input_type === 'text') continue;
-    const option = getContextualOption(question, value, answers);
-    if (!isOptionAvailable(option, answers)) {
-      throw validationError(`Значення «${value}» недоступне для поля «${question.label}».`);
+    if (validation.issue === 'unavailable') {
+      throw validationError(
+        `Значення «${validation.value}» недоступне для поля «${question.label}».`
+      );
     }
   }
 }
@@ -747,26 +217,22 @@ async function buildProductPreview(
   const answerCodes = [];
   const answerCodeParts = [];
   for (const question of schema.questions) {
+    const validation = inspectSkuAnswer(question, normalizedAnswers, isCalibrated);
     if (
       skipHiddenSkuQuestions &&
-      !isQuestionVisibleForSku(question, normalizedAnswers, isCalibrated)
+      !validation.visible
     ) {
       continue;
     }
 
-    const value = normalizedAnswers[question.key];
-    const hasValue = value !== undefined && value !== null && value !== '';
-    if (Number(question.required) === 1
-        && isQuestionVisibleForSku(question, normalizedAnswers, isCalibrated)
-        && !hasValue) {
+    const { issue, option, value } = validation;
+    if (issue === 'required') {
       throw validationError(`Заповніть обов'язкове поле «${question.label}».`);
     }
-    const option = hasValue ? getContextualOption(question, value, normalizedAnswers) : null;
-    const isPlaceholder = hasValue && isOptionalPlaceholderAnswer(question, value, option);
-    if (hasValue && option && !isOptionAvailable(option, normalizedAnswers)) {
+    if (issue === 'unavailable') {
       throw validationError(`Значення «${value}» недоступне для поля «${question.label}».`);
     }
-    if (hasValue && !option && !isPlaceholder) {
+    if (issue === 'unknown') {
       const err = new Error(
         `Значення «${value}» не належить активній SKU-схемі питання «${question.label}».`
       );
@@ -1537,16 +1003,7 @@ async function deleteProductBySku(skuToDelete, options = {}) {
 }
 
 async function getRecentProducts() {
-  const result = await pool.query(
-    `SELECT *
-     FROM products
-     WHERE COALESCE(status, 'active') <> 'archived'
-     ORDER BY created_at DESC
-     LIMIT 15`,
-    []
-  );
-
-  return result.rows;
+  return queryRecentProducts(pool);
 }
 
 module.exports = {

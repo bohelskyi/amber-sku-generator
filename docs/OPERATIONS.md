@@ -33,7 +33,7 @@ Real-environment verification has covered Keycloak plus `amber.local` AD login, 
 - `/health/ready` runs `SELECT 1` and is exposed only after startup migrations/seed/schema capture. It does not audit all business data or NBU availability.
 - Both health endpoints remain unauthenticated.
 
-Requests receive and return `X-Request-ID`; completions and mutations are logged as structured JSON. OIDC callback logging strips query strings so authorization codes, state, and provider errors do not enter application or nginx access logs. Mutation actor attribution remains null pending a dedicated actor/audit-events design.
+Requests receive and return `X-Request-ID`; completions and mutations are logged as structured JSON. OIDC callback logging strips query strings so authorization codes, state, and provider errors do not enter application or nginx access logs. For authenticated business mutations, operational log `actorId` uses the resolved local `application_users.id` where available. These logs remain non-durable telemetry and are separate from transaction-coupled `audit_events`.
 
 SIGTERM/SIGINT stop new HTTP acceptance, wait for HTTP closure, close the PostgreSQL pool, and force-exit after ten seconds if shutdown stalls. Preserve that ordering.
 

@@ -1,0 +1,52 @@
+{
+  "method": "5 rounds; 100 warm-ups and 500 samples per mode; requested 2ms asynchronous PostgreSQL-shaped delay (observed raw median about 15.5ms on this Windows host)",
+  "disabledPercent": 0,
+  "enabledPercent": 0,
+  "thresholds": {
+    "disabledPercent": 2,
+    "enabledPercent": 5
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "rawMs": 15.476,
+      "disabledMs": 15.49,
+      "enabledMs": 15.494,
+      "disabledPercent": 0.09046265184801852,
+      "enabledPercent": 0.1163091238045936
+    },
+    {
+      "round": 2,
+      "rawMs": 15.49,
+      "disabledMs": 15.487,
+      "enabledMs": 15.475,
+      "disabledPercent": -0.019367333763719262,
+      "enabledPercent": -0.09683666881859632
+    },
+    {
+      "round": 3,
+      "rawMs": 15.486,
+      "disabledMs": 15.499,
+      "enabledMs": 15.505,
+      "disabledPercent": 0.08394679064961837,
+      "enabledPercent": 0.12269146325713631
+    },
+    {
+      "round": 4,
+      "rawMs": 15.495,
+      "disabledMs": 15.495,
+      "enabledMs": 15.48,
+      "disabledPercent": 0,
+      "enabledPercent": -0.09680542110357401
+    },
+    {
+      "round": 5,
+      "rawMs": 15.496,
+      "disabledMs": 15.489,
+      "enabledMs": 15.491,
+      "disabledPercent": -0.045172947857509506,
+      "enabledPercent": -0.03226639132679905
+    }
+  ],
+  "passed": true
+}

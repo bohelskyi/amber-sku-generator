@@ -1,0 +1,9 @@
+const REPRICING_SCOPE_SCENARIO = 'scenario';
+const REPRICING_SCOPE_GLOBAL = 'global';
+const GLOBAL_REPRICING_NAME = 'Весь каталог';
+
+module.exports = {
+  REPRICING_SCOPE_SCENARIO,
+  REPRICING_SCOPE_GLOBAL,
+  GLOBAL_REPRICING_NAME,
+};

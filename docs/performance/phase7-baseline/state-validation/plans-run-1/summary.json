@@ -1,0 +1,1018 @@
+[
+  {
+    "id": "catalog_hydration",
+    "temperature": "first",
+    "fileName": "catalog_hydration.first.json",
+    "planningTimeMs": 0.386,
+    "executionTimeMs": 0.112,
+    "nodes": [
+      {
+        "nodeType": "Sort",
+        "relation": null,
+        "actualRows": 4,
+        "planRows": 3,
+        "loops": 1,
+        "sharedHitBlocks": 3,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Hash Join",
+        "relation": null,
+        "actualRows": 4,
+        "planRows": 3,
+        "loops": 1,
+        "sharedHitBlocks": 3,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Hash Join",
+        "relation": null,
+        "actualRows": 4,
+        "planRows": 3,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "options",
+        "actualRows": 3,
+        "planRows": 3,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Hash",
+        "relation": null,
+        "actualRows": 3,
+        "planRows": 3,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "questions",
+        "actualRows": 3,
+        "planRows": 3,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Hash",
+        "relation": null,
+        "actualRows": 2,
+        "planRows": 2,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "categories",
+        "actualRows": 2,
+        "planRows": 2,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "catalog_hydration",
+    "temperature": "warm",
+    "fileName": "catalog_hydration.warm.json",
+    "planningTimeMs": 0.114,
+    "executionTimeMs": 0.118,
+    "nodes": [
+      {
+        "nodeType": "Sort",
+        "relation": null,
+        "actualRows": 4,
+        "planRows": 3,
+        "loops": 1,
+        "sharedHitBlocks": 3,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Hash Join",
+        "relation": null,
+        "actualRows": 4,
+        "planRows": 3,
+        "loops": 1,
+        "sharedHitBlocks": 3,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Hash Join",
+        "relation": null,
+        "actualRows": 4,
+        "planRows": 3,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "options",
+        "actualRows": 3,
+        "planRows": 3,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Hash",
+        "relation": null,
+        "actualRows": 3,
+        "planRows": 3,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "questions",
+        "actualRows": 3,
+        "planRows": 3,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Hash",
+        "relation": null,
+        "actualRows": 2,
+        "planRows": 2,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "categories",
+        "actualRows": 2,
+        "planRows": 2,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "schema_lookup",
+    "temperature": "first",
+    "fileName": "schema_lookup.first.json",
+    "planningTimeMs": 0.344,
+    "executionTimeMs": 0.046,
+    "nodes": [
+      {
+        "nodeType": "Sort",
+        "relation": null,
+        "actualRows": 2,
+        "planRows": 2,
+        "loops": 1,
+        "sharedHitBlocks": 3,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Nested Loop",
+        "relation": null,
+        "actualRows": 2,
+        "planRows": 2,
+        "loops": 1,
+        "sharedHitBlocks": 3,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Nested Loop",
+        "relation": null,
+        "actualRows": 1,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "sku_schema_versions",
+        "actualRows": 1,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "sku_schema_questions",
+        "actualRows": 1,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "sku_schema_options",
+        "actualRows": 2,
+        "planRows": 2,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "schema_lookup",
+    "temperature": "warm",
+    "fileName": "schema_lookup.warm.json",
+    "planningTimeMs": 0.149,
+    "executionTimeMs": 0.059,
+    "nodes": [
+      {
+        "nodeType": "Sort",
+        "relation": null,
+        "actualRows": 2,
+        "planRows": 2,
+        "loops": 1,
+        "sharedHitBlocks": 3,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Nested Loop",
+        "relation": null,
+        "actualRows": 2,
+        "planRows": 2,
+        "loops": 1,
+        "sharedHitBlocks": 3,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Nested Loop",
+        "relation": null,
+        "actualRows": 1,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "sku_schema_versions",
+        "actualRows": 1,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "sku_schema_questions",
+        "actualRows": 1,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "sku_schema_options",
+        "actualRows": 2,
+        "planRows": 2,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "product_sequence_common",
+    "temperature": "first",
+    "fileName": "product_sequence_common.first.json",
+    "planningTimeMs": 0.309,
+    "executionTimeMs": 0.065,
+    "nodes": [
+      {
+        "nodeType": "Limit",
+        "relation": null,
+        "actualRows": 1,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 35,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Sort",
+        "relation": null,
+        "actualRows": 1,
+        "planRows": 103,
+        "loops": 1,
+        "sharedHitBlocks": 35,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "products",
+        "actualRows": 103,
+        "planRows": 103,
+        "loops": 1,
+        "sharedHitBlocks": 35,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "product_sequence_common",
+    "temperature": "warm",
+    "fileName": "product_sequence_common.warm.json",
+    "planningTimeMs": 0.046,
+    "executionTimeMs": 0.057,
+    "nodes": [
+      {
+        "nodeType": "Limit",
+        "relation": null,
+        "actualRows": 1,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 35,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Sort",
+        "relation": null,
+        "actualRows": 1,
+        "planRows": 103,
+        "loops": 1,
+        "sharedHitBlocks": 35,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "products",
+        "actualRows": 103,
+        "planRows": 103,
+        "loops": 1,
+        "sharedHitBlocks": 35,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "product_variation_rare",
+    "temperature": "first",
+    "fileName": "product_variation_rare.first.json",
+    "planningTimeMs": 0.141,
+    "executionTimeMs": 0.013,
+    "nodes": [
+      {
+        "nodeType": "Seq Scan",
+        "relation": "sku_registry",
+        "actualRows": 0,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "product_variation_rare",
+    "temperature": "warm",
+    "fileName": "product_variation_rare.warm.json",
+    "planningTimeMs": 0.028,
+    "executionTimeMs": 0.012,
+    "nodes": [
+      {
+        "nodeType": "Seq Scan",
+        "relation": "sku_registry",
+        "actualRows": 0,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "pricing_context",
+    "temperature": "first",
+    "fileName": "pricing_context.first.json",
+    "planningTimeMs": 0.339,
+    "executionTimeMs": 0.035,
+    "nodes": [
+      {
+        "nodeType": "Sort",
+        "relation": null,
+        "actualRows": 2,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Nested Loop",
+        "relation": null,
+        "actualRows": 2,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "price_scenarios",
+        "actualRows": 1,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "price_matrix",
+        "actualRows": 2,
+        "planRows": 2,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "pricing_context",
+    "temperature": "warm",
+    "fileName": "pricing_context.warm.json",
+    "planningTimeMs": 0.113,
+    "executionTimeMs": 0.029,
+    "nodes": [
+      {
+        "nodeType": "Sort",
+        "relation": null,
+        "actualRows": 2,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Nested Loop",
+        "relation": null,
+        "actualRows": 2,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "price_scenarios",
+        "actualRows": 1,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "price_matrix",
+        "actualRows": 2,
+        "planRows": 2,
+        "loops": 1,
+        "sharedHitBlocks": 1,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "correction_queue_common",
+    "temperature": "first",
+    "fileName": "correction_queue_common.first.json",
+    "planningTimeMs": 0.389,
+    "executionTimeMs": 0.025,
+    "nodes": [
+      {
+        "nodeType": "Limit",
+        "relation": null,
+        "actualRows": 0,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Sort",
+        "relation": null,
+        "actualRows": 0,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "correction_requests",
+        "actualRows": 0,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "correction_queue_common",
+    "temperature": "warm",
+    "fileName": "correction_queue_common.warm.json",
+    "planningTimeMs": 0.045,
+    "executionTimeMs": 0.028,
+    "nodes": [
+      {
+        "nodeType": "Limit",
+        "relation": null,
+        "actualRows": 0,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Sort",
+        "relation": null,
+        "actualRows": 0,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "correction_requests",
+        "actualRows": 0,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "correction_history_page",
+    "temperature": "first",
+    "fileName": "correction_history_page.first.json",
+    "planningTimeMs": 0.288,
+    "executionTimeMs": 0.037,
+    "nodes": [
+      {
+        "nodeType": "Limit",
+        "relation": null,
+        "actualRows": 26,
+        "planRows": 26,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Sort",
+        "relation": null,
+        "actualRows": 26,
+        "planRows": 26,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "product_corrections",
+        "actualRows": 26,
+        "planRows": 26,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "correction_history_page",
+    "temperature": "warm",
+    "fileName": "correction_history_page.warm.json",
+    "planningTimeMs": 0.023,
+    "executionTimeMs": 0.042,
+    "nodes": [
+      {
+        "nodeType": "Limit",
+        "relation": null,
+        "actualRows": 26,
+        "planRows": 26,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Sort",
+        "relation": null,
+        "actualRows": 26,
+        "planRows": 26,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "product_corrections",
+        "actualRows": 26,
+        "planRows": 26,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "repricing_candidates",
+    "temperature": "first",
+    "fileName": "repricing_candidates.first.json",
+    "planningTimeMs": 0.105,
+    "executionTimeMs": 0.074,
+    "nodes": [
+      {
+        "nodeType": "Sort",
+        "relation": null,
+        "actualRows": 99,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 35,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "products",
+        "actualRows": 99,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 35,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "repricing_candidates",
+    "temperature": "warm",
+    "fileName": "repricing_candidates.warm.json",
+    "planningTimeMs": 0.033,
+    "executionTimeMs": 0.072,
+    "nodes": [
+      {
+        "nodeType": "Sort",
+        "relation": null,
+        "actualRows": 99,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 35,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Seq Scan",
+        "relation": "products",
+        "actualRows": 99,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 35,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "timeline_recursive_lineage",
+    "temperature": "first",
+    "fileName": "timeline_recursive_lineage.first.json",
+    "planningTimeMs": 0.143,
+    "executionTimeMs": 0.076,
+    "nodes": [
+      {
+        "nodeType": "Sort",
+        "relation": null,
+        "actualRows": 5,
+        "planRows": 31,
+        "loops": 1,
+        "sharedHitBlocks": 10,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Recursive Union",
+        "relation": null,
+        "actualRows": 5,
+        "planRows": 31,
+        "loops": 1,
+        "sharedHitBlocks": 10,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Index Scan",
+        "relation": "products",
+        "actualRows": 1,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Nested Loop",
+        "relation": null,
+        "actualRows": 1,
+        "planRows": 3,
+        "loops": 5,
+        "sharedHitBlocks": 8,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "WorkTable Scan",
+        "relation": null,
+        "actualRows": 1,
+        "planRows": 3,
+        "loops": 5,
+        "sharedHitBlocks": 0,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Index Scan",
+        "relation": "products",
+        "actualRows": 1,
+        "planRows": 1,
+        "loops": 5,
+        "sharedHitBlocks": 8,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "CTE Scan",
+        "relation": null,
+        "actualRows": 5,
+        "planRows": 31,
+        "loops": 1,
+        "sharedHitBlocks": 10,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "timeline_recursive_lineage",
+    "temperature": "warm",
+    "fileName": "timeline_recursive_lineage.warm.json",
+    "planningTimeMs": 0.073,
+    "executionTimeMs": 0.078,
+    "nodes": [
+      {
+        "nodeType": "Sort",
+        "relation": null,
+        "actualRows": 5,
+        "planRows": 31,
+        "loops": 1,
+        "sharedHitBlocks": 10,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Recursive Union",
+        "relation": null,
+        "actualRows": 5,
+        "planRows": 31,
+        "loops": 1,
+        "sharedHitBlocks": 10,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Index Scan",
+        "relation": "products",
+        "actualRows": 1,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 2,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Nested Loop",
+        "relation": null,
+        "actualRows": 1,
+        "planRows": 3,
+        "loops": 5,
+        "sharedHitBlocks": 8,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "WorkTable Scan",
+        "relation": null,
+        "actualRows": 1,
+        "planRows": 3,
+        "loops": 5,
+        "sharedHitBlocks": 0,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "Index Scan",
+        "relation": "products",
+        "actualRows": 1,
+        "planRows": 1,
+        "loops": 5,
+        "sharedHitBlocks": 8,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      },
+      {
+        "nodeType": "CTE Scan",
+        "relation": null,
+        "actualRows": 5,
+        "planRows": 31,
+        "loops": 1,
+        "sharedHitBlocks": 10,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "export_range_common",
+    "temperature": "first",
+    "fileName": "export_range_common.first.json",
+    "planningTimeMs": 0.104,
+    "executionTimeMs": 0.073,
+    "nodes": [
+      {
+        "nodeType": "Index Scan",
+        "relation": "products",
+        "actualRows": 97,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 277,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  },
+  {
+    "id": "export_range_common",
+    "temperature": "warm",
+    "fileName": "export_range_common.warm.json",
+    "planningTimeMs": 0.071,
+    "executionTimeMs": 0.037,
+    "nodes": [
+      {
+        "nodeType": "Index Scan",
+        "relation": "products",
+        "actualRows": 97,
+        "planRows": 1,
+        "loops": 1,
+        "sharedHitBlocks": 38,
+        "sharedReadBlocks": 0,
+        "tempReadBlocks": 0,
+        "tempWrittenBlocks": 0
+      }
+    ]
+  }
+]

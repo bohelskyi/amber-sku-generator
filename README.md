@@ -5,9 +5,9 @@
 1. Install Docker Engine + Compose plugin (official docs):
    - https://docs.docker.com/engine/install/ubuntu/
 
-2. Clone project and move into app folder:
+2. Clone the project and move into its repository folder:
 ```bash
-cd amber-app
+cd amber-sku-generator
 ```
 
 3. Create local runtime configuration and replace the placeholder database and server secrets:
@@ -23,10 +23,12 @@ The `.env` file is ignored by Git. Keep production copies in protected deploymen
 docker compose up -d --build
 ```
 
-5. Open app:
+5. Put the deployment behind the configured HTTPS proxy and open the registered application URL:
 ```text
-http://YOUR_SERVER_IP
+https://skumanager.ambergalbin.space
 ```
+
+The checked-in Compose topology serves the client over HTTP for local/single-host use. Production OIDC and secure session cookies require the documented HTTPS origin and proxy forwarding settings; see [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 
 ### Useful commands
 

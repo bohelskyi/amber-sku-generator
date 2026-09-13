@@ -4,7 +4,7 @@
 
 Amber SKU Manager is an internal application for defining amber-product classifications, generating authoritative SKUs and prices, saving and decoding inventory records, recounting/correcting products, controlled mass repricing, and immutable CSV exports.
 
-This document summarizes the current `feature/auth-rbac` checkout. Runtime PostgreSQL data and the current code/migrations remain authoritative. Detailed invariants live in the linked domain documents.
+This document summarizes the current `refactor/codebase-cleanup` checkout based on the approved `b5617ace75b2617a3454768341bc6a6182e5ab3e` production baseline. Runtime PostgreSQL data and the current code/migrations remain authoritative. Detailed invariants live in the linked domain documents.
 
 ## Current architecture
 
@@ -26,7 +26,7 @@ Stable capability keys guard every business endpoint after authentication, activ
 
 The three system roles are Administrator, Manager, and Storekeeper. Administrator is permanent, immutable, and always receives every defined permission. Manager and Storekeeper retain their initial mappings but are editable through role administration like custom roles. `users.manage`, `roles.manage`, and `audit.view` are reserved to Administrator. Exactly one current role may be assigned to each user.
 
-Administrators can create and edit custom roles, edit Manager and Storekeeper, assign any active role, and approve, disable, or re-enable users while retaining assignment history. Role and user mutations share one advisory-lock boundary, optimistic role/assignment conflict detection, last-Administrator protection, and transaction-coupled durable audit. Product, correction, repricing, export, and schema-publication records retain the applicable nullable local-user actor foreign keys. Correction requests record their creator and use local application-user ownership plus a monotonic claim epoch; retained browser capability tokens authorize only one-time adoption of legacy token-only claims. The one-use offline first-Administrator bootstrap remains implemented. Invitations and the audit viewer remain pending.
+Administrators can create and edit custom roles, edit Manager and Storekeeper, assign any active role, and approve, disable, or re-enable users while retaining assignment history. Role and user mutations share one advisory-lock boundary, optimistic role/assignment conflict detection, last-Administrator protection, and transaction-coupled durable audit. Product, correction, repricing, export, and schema-publication records retain the applicable nullable local-user actor foreign keys. Correction requests record their creator and use local application-user ownership plus a monotonic claim epoch; retained browser capability tokens authorize only one-time adoption of legacy token-only claims. The one-use offline first-Administrator bootstrap and Administrator-only global audit viewer are implemented. Invitations remain pending.
 
 See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permission model.
 
@@ -45,7 +45,7 @@ See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permi
 | `server/src/utils/` | SKU/rule/pricing helpers, numeric parsing, CSV safety, HTTP/logging utilities. |
 | `server/data_config.js` | Defaults for an empty catalog only; not deployed live configuration after seeding. |
 | `server/test/` | Server unit tests. |
-| `server/integration-test/critical-flows.test.js` | Destructive real-PostgreSQL API, migration, upgrade, and concurrency tests. |
+| `server/integration-test/` | One serialized destructive PostgreSQL entrypoint, ordered domain case modules, shared fixtures, API/migration/upgrade coverage, and real concurrency tests. |
 | `server/scripts/` | Administrator bootstrap, integrity audit, optional SQLite configuration import. |
 | `client/src/auth/` | Memory-only authentication state and AuthGate. |
 | `client/src/hooks/`, `client/src/lib/` | Client orchestration and testable presentation rules. |
@@ -72,14 +72,16 @@ See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permi
 
 - PostgreSQL architecture and migrations `000`–`028` are implemented and immutable history.
 - Authoritative product preview/save/decode, catalog schema versioning, pricing, recount/corrections, scenario/global repricing, and export snapshots are implemented with focused unit and PostgreSQL integration coverage.
+- Phase 7 measured repricing performance work is complete through `0aed9e9`; the completed checkpoints and final 451-product measurements are recorded in [`docs/REFACTOR_PLAN.md`](docs/REFACTOR_PLAN.md#phase-7--measured-performance-work). The original [Phase 7.0 baseline](docs/performance/phase7-baseline/BASELINE.md) remains historical evidence.
+- Phase 8 operational refactor work is complete: `3d60d11` added production container smoke coverage, `25be7f0` minimized production Docker build contexts, and the closure checkpoint added manual and weekly smoke execution. Image upgrades and managed digest pinning, non-root/read-only operation, and environment-specific PostgreSQL publishing remain separate operational/security changes.
 - OIDC authentication, PostgreSQL sessions, active-user access gating, application-owned RBAC, user management, first-admin bootstrap, permission-aware UI, and live access-state transitions are implemented.
 - Server-side authorization and CSRF remain authoritative. `APP_ACCESS_PENDING`/`APP_ACCESS_DISABLED` move the client to the matching AuthGate state; `INSUFFICIENT_PERMISSION` preserves the active session.
-- Operational mutation logs use the resolved local `application_users.id` where available and remain distinct from durable audit events. Immutable, transaction-coupled `audit_events` cover application-user administration, product create/archive/recount, correction-request lifecycle changes, repricing draft creation/discard plus apply/rollback, export snapshot creation/confirmation, and SKU schema publication. Repricing drafts/batches, export snapshots, and published schema versions retain nullable local-user actor attribution; audit coverage for other domains remains pending.
-- Custom-role and role-permission administration are implemented. Invitations and an audit viewer are not implemented.
+- Operational mutation logs use the resolved local `application_users.id` where available and remain distinct from durable audit events. Immutable, transaction-coupled `audit_events` cover application-user and role administration; catalog category/question/option changes; pricing scenario/matrix/modifier changes; product create/archive/recount; correction-request lifecycle changes; repricing draft creation/discard plus apply/rollback; export snapshot creation/confirmation; and SKU schema publication. Repricing drafts/batches, export snapshots, and published schema versions retain nullable local-user actor attribution. The Administrator-only global audit viewer supports filtered keyset pagination over these events.
+- Custom-role and role-permission administration and the Administrator-only audit viewer are implemented. Invitations are not implemented.
 - Live catalog contents and production data quality cannot be inferred from seed defaults or the repository and require operational verification.
 
 ## Testing and operations summary
 
-CI runs server unit tests, destructive PostgreSQL integration tests, client tests, client lint, and the production client build. Integration tests refuse a database name that does not end in `_test`; use only a disposable database.
+CI validates Compose, runs scoped server static checks, server unit tests with non-blocking coverage visibility, the serialized destructive PostgreSQL integration suite, client tests with non-blocking coverage visibility, client lint, and the production client build. The container smoke workflow also supports manual execution and runs weekly to detect mutable base-image compatibility drift. Integration tests refuse a database name that does not end in `_test`; use only a disposable database.
 
 The checked-in Compose setup is a development/single-host baseline, not a complete hardened infrastructure design. PostgreSQL is host-exposed by the base Compose file, secrets come from ignored environment configuration, and backup scheduling/retention/encryption/off-host monitoring remain external responsibilities. See [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
