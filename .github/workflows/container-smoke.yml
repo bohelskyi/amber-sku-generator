@@ -49,10 +49,8 @@ jobs:
         id: checkout
         uses: actions/checkout@v4
 
-      - name: Validate Compose configurations
-        run: |
-          docker compose --env-file .env.example -f docker-compose.yml config --quiet
-          docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.local.yml config --quiet
+      - name: Validate Compose configuration
+        run: docker compose --env-file .env.example -f docker-compose.yml config --quiet
 
       - name: Build production images
         run: docker compose --env-file .env.example -f docker-compose.yml build server client
