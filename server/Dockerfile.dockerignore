@@ -1,6 +1,9 @@
+# Production Dockerfile only; Dockerfile.test keeps the existing .dockerignore.
 node_modules
-dist
+**/node_modules
 Dockerfile
+Dockerfile.test
+Dockerfile.dockerignore
 .dockerignore
 .env
 .env.*
@@ -8,18 +11,21 @@ Dockerfile
 **/.env.*
 
 test
-vitest.config.js
+integration-test
 eslint.config.js
-README.md
 coverage
 **/coverage
 .nyc_output
+dist
 .cache
 **/.cache
 
 *.log
 **/*.log
 *.tmp
+*.db
+*.sqlite
+*.sqlite3
 .git
 .gitignore
 .vscode
