@@ -3,10 +3,14 @@ const { analyzeLineage } = require('../services/product-timeline/lineage-analysi
 const {
   asObject,
   buildSchemaMap,
+  buildSchemaVersionMap,
   getPayloadSchema,
   normalizeStoredChanges,
   nullableNumber,
 } = require('../services/product-timeline/historical-normalization');
+const {
+  buildConfigurationEvolution,
+} = require('../services/product-timeline/configuration-evolution');
 
 function actorFromAudit(audit, fallbackActorId) {
   if (audit) {
@@ -81,6 +85,7 @@ function presentProductTimeline(querySku, data) {
     schemaRows,
   } = data;
   const schemas = buildSchemaMap(schemaRows);
+  const schemaVersions = buildSchemaVersionMap(schemaRows);
   const audits = mapAudits(auditRows);
   const productById = new Map(products.map((product) => [Number(product.id), product]));
   const graph = analyzeLineage(products, corrections);
@@ -352,6 +357,15 @@ function presentProductTimeline(querySku, data) {
   });
 
   const currentProduct = graph.endpoints.length === 1 ? graph.endpoints[0] : null;
+  const configurationEvolution = buildConfigurationEvolution({
+    graph,
+    products,
+    corrections,
+    requests,
+    audits: auditRows,
+    schemas,
+    schemaVersions,
+  });
   return {
     querySku,
     lineage: {
@@ -366,6 +380,7 @@ function presentProductTimeline(querySku, data) {
         createdAt: product.created_at,
       })),
     },
+    configurationEvolution,
     events: normalizedEvents,
   };
 }

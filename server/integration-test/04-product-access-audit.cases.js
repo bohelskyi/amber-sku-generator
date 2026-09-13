@@ -220,6 +220,19 @@ test('product timeline resolves every actual SKU across corrections and combines
     assert.deepEqual(timeline.data.lineage.products.map((product) => product.sku), expectedSkus);
     assert.equal(timeline.data.lineage.currentSku, skuC);
     assert.equal(timeline.data.lineage.integrity, 'ok');
+    assert.equal(timeline.data.configurationEvolution.status, 'complete');
+    assert.deepEqual(
+      timeline.data.configurationEvolution.snapshots.map((snapshot) => snapshot.establishingSku),
+      expectedSkus
+    );
+    assert.deepEqual(
+      timeline.data.configurationEvolution.snapshots.map((snapshot) => (
+        snapshot.fields.find((field) => field.key === 'kind')?.value.value
+      )),
+      [1, 2, 1]
+    );
+    assert.equal(timeline.data.configurationEvolution.snapshots.at(-1).isCurrent, true);
+    assert.equal(timeline.data.configurationEvolution.snapshots.at(-1).currentSku, skuC);
     const types = timeline.data.events.map((event) => event.type);
     assert.ok(types.includes('product.created'));
     assert.equal(types.filter((type) => type === 'product.corrected').length, 2);
@@ -249,6 +262,61 @@ test('product timeline resolves every actual SKU across corrections and combines
   const invalid = await request('/api/product-timeline?sku=');
   assert.equal(invalid.response.status, 400, invalid.text);
   assert.equal(invalid.data.code, 'INVALID_SKU');
+});
+
+test('configuration evolution collapses a persisted weight-only successor into current metadata', async () => {
+  const preview = await request('/api/preview', {
+    method: 'POST',
+    body: {
+      categoryCode: 'WW', answers: { kind: 1 }, weight: 10, isCalibrated: 0,
+    },
+  });
+  assert.equal(preview.response.status, 200, preview.text);
+  const created = await request('/api/save', {
+    method: 'POST',
+    body: {
+      category: 'WW', answers: { kind: 1 }, weight: 10, isCalibrated: 0,
+      skuSchemaVersionId: schemas.WW, previewToken: preview.data.previewToken,
+      manualPriceUah: 500,
+    },
+  });
+  assert.equal(created.response.status, 200, created.text);
+
+  const corrected = await request('/api/recount/apply', {
+    method: 'POST',
+    body: {
+      sourceSku: created.data.fullSku,
+      answers: { kind: 1 },
+      weight: 11,
+      reason: 'timeline weight-only successor',
+      manualPriceUah: 550,
+    },
+  });
+  assert.equal(corrected.response.status, 200, corrected.text);
+
+  const timeline = await request(
+    `/api/product-timeline?sku=${encodeURIComponent(corrected.data.corrected.fullSku)}`
+  );
+  assert.equal(timeline.response.status, 200, timeline.text);
+  assert.equal(timeline.data.lineage.products.length, 2);
+  assert.equal(timeline.data.events.filter((event) => event.type === 'product.corrected').length, 1);
+  assert.equal(timeline.data.configurationEvolution.status, 'complete');
+  assert.equal(timeline.data.configurationEvolution.snapshots.length, 1);
+  assert.equal(
+    timeline.data.configurationEvolution.snapshots[0].establishingSku,
+    created.data.fullSku
+  );
+  assert.equal(
+    timeline.data.configurationEvolution.snapshots[0].currentSku,
+    corrected.data.corrected.fullSku
+  );
+  assert.equal(timeline.data.configurationEvolution.snapshots[0].isCurrent, true);
+  assert.deepEqual(
+    timeline.data.configurationEvolution.snapshots[0].fields
+      .filter((field) => field.key === 'kind')
+      .map((field) => field.value.value),
+    [1]
+  );
 });
 
 test('a failed product audit insert rolls back product creation and SKU reservation', async () => {

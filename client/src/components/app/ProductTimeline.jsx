@@ -73,6 +73,171 @@ function TimelineChanges({ changes }) {
   );
 }
 
+const CONFIGURATION_SOURCE_LABELS = {
+  product_created: 'Створення товару',
+  direct_recount: 'Прямий переоблік',
+  correction_request: 'Виконаний запит на виправлення',
+  legacy_correction: 'Застосоване виправлення',
+};
+
+function schemaVersionLabel(schema, prefix = 'Схема') {
+  return schema?.version ? `${prefix} V${schema.version}` : `${prefix} не записана`;
+}
+
+function sameSchemaVersion(first, second) {
+  if (!first && !second) return true;
+  if (!first || !second) return false;
+  return Number(first.id) === Number(second.id)
+    && Number(first.version) === Number(second.version)
+    && String(first.marker || '') === String(second.marker || '');
+}
+
+function ConfigurationFields({ fields, showPrevious = false }) {
+  if (!fields?.length) {
+    return <div className="rounded-md bg-slate-50 px-3 py-3 text-sm text-slate-500">Характеристики не записані.</div>;
+  }
+  return (
+    <div className="divide-y divide-slate-100 rounded-md border border-slate-200">
+      {fields.map((field) => (
+        <div
+          key={field.key}
+          data-testid={`configuration-field-${field.key}`}
+          data-changed={field.changed ? 'true' : 'false'}
+          className={`grid gap-1 px-3 py-2 text-sm sm:grid-cols-[minmax(140px,0.8fr)_minmax(0,1.4fr)] ${field.changed ? 'bg-amber-50/70' : ''}`}
+        >
+          <span className="font-medium text-slate-600">{field.fieldLabel || field.key}</span>
+          <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-slate-700">
+            {showPrevious && field.changed && field.previous && (
+              <>
+                <span>{valueLabel(field.previous)}</span>
+                <ArrowRight size={13} className="shrink-0 text-slate-400" />
+              </>
+            )}
+            <strong className="font-semibold text-slate-900">{valueLabel(field.value)}</strong>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ConfigurationEvolution({ evolution }) {
+  const [mode, setMode] = useState('changes');
+  if (!evolution) return null;
+
+  return (
+    <section className="card p-4 sm:p-5" role="region" aria-labelledby="configuration-evolution-title">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 id="configuration-evolution-title" className="text-base font-semibold text-slate-900">
+            Еволюція характеристик
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">Підтверджені стани конфігурації та зміни між ними.</p>
+        </div>
+        {evolution.status !== 'unavailable' && (
+          <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-1" aria-label="Режим відображення характеристик">
+            <button
+              type="button"
+              className={`rounded px-3 py-1.5 text-xs font-semibold ${mode === 'changes' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+              aria-pressed={mode === 'changes'}
+              onClick={() => setMode('changes')}
+            >
+              Лише зміни
+            </button>
+            <button
+              type="button"
+              className={`rounded px-3 py-1.5 text-xs font-semibold ${mode === 'full' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+              aria-pressed={mode === 'full'}
+              onClick={() => setMode('full')}
+            >
+              Повний стан
+            </button>
+          </div>
+        )}
+      </div>
+
+      {evolution.warnings?.length > 0 && (
+        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900" role="status">
+          <ul className="list-disc space-y-1 pl-5">
+            {evolution.warnings.map((item) => <li key={item.code}>{item.message}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {evolution.status === 'unavailable' ? (
+        !evolution.warnings?.length && (
+          <div className="mt-4 rounded-md bg-slate-50 px-3 py-3 text-sm text-slate-500">
+            Історичні конфігурації неможливо надійно відновити.
+          </div>
+        )
+      ) : (
+        <div className="relative mt-5 space-y-4 pl-7">
+          <div aria-hidden="true" className="absolute bottom-4 left-[9px] top-4 w-px bg-slate-200" />
+          {evolution.snapshots.map((snapshot) => {
+            const currentSchemaDiffers = snapshot.isCurrent
+              && !sameSchemaVersion(snapshot.establishingSchemaVersion, snapshot.currentSchemaVersion);
+            const currentSkuDiffers = snapshot.isCurrent
+              && snapshot.currentSku
+              && snapshot.currentSku !== snapshot.establishingSku;
+            return (
+              <article
+                key={snapshot.id}
+                data-testid="configuration-snapshot"
+                className="relative rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+              >
+                <span aria-hidden="true" className="absolute -left-[31px] top-5 h-3 w-3 rounded-full border-2 border-white bg-amber-500 ring-1 ring-amber-300" />
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-semibold text-slate-900">Конфігурація {snapshot.ordinal}</h3>
+                      {snapshot.isInitial && <StatusBadge>Початковий</StatusBadge>}
+                      {snapshot.isCurrent && (
+                        <StatusBadge tone={snapshot.productStatus === 'archived' ? 'neutral' : 'success'}>
+                          {snapshot.productStatus === 'archived' ? 'Останній' : 'Поточний'}
+                        </StatusBadge>
+                      )}
+                      {snapshot.completeness !== 'complete' && <StatusBadge tone="warning">Неповні дані</StatusBadge>}
+                    </div>
+                    <div className="mt-1 break-all font-mono text-sm font-semibold text-slate-800">
+                      {snapshot.establishingSku}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {CONFIGURATION_SOURCE_LABELS[snapshot.source] || 'Джерело не записано'} ·{' '}
+                      {snapshot.timestampStatus === 'recorded' && snapshot.occurredAt
+                        ? formatDateTime(snapshot.occurredAt)
+                        : 'Час не записано'}
+                    </div>
+                  </div>
+                  <span className="text-xs font-medium text-slate-500">
+                    {schemaVersionLabel(snapshot.establishingSchemaVersion)}
+                  </span>
+                </div>
+
+                {(currentSkuDiffers || currentSchemaDiffers) && (
+                  <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+                    {currentSkuDiffers && (
+                      <span>Поточний SKU: <strong className="font-mono">{snapshot.currentSku}</strong></span>
+                    )}
+                    {currentSchemaDiffers && (
+                      <span>{schemaVersionLabel(snapshot.currentSchemaVersion, 'Поточна схема:')}</span>
+                    )}
+                  </div>
+                )}
+
+                <div className="mt-4">
+                  {mode === 'changes' && !snapshot.isInitial
+                    ? <TimelineChanges changes={snapshot.changes} />
+                    : <ConfigurationFields fields={snapshot.fields} showPrevious={mode === 'full'} />}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function PriceChange({ price }) {
   if (!price || (price.beforeUah === null && price.afterUah === null)) return null;
   return (
@@ -275,6 +440,8 @@ export function ProductTimeline() {
                 </div>
               </div>
             </section>
+
+            <ConfigurationEvolution evolution={data.configurationEvolution} />
 
             <section className="timeline-list" aria-label="Хронологія подій">
               {groups.map((group) => <TimelineCard key={group.key} events={group.events} />)}

@@ -104,10 +104,14 @@ async function loadProductTimelineData(seedId, database = pool) {
   const schemaResult = schemaIds.size === 0
     ? { rows: [] }
     : await database.query(
-      `SELECT q.schema_version_id, q.question_key, q.label AS question_label,
-              o.id AS option_id, o.value_id, o.label AS option_label,
-              o.visible_if_json, o.hidden_if_json
+      `SELECT q.schema_version_id, v.version AS schema_version, v.marker AS schema_marker,
+              v.status AS schema_status, q.question_key, q.label AS question_label,
+              q.sku_index, q.display_order, q.required, q.sku_separator,
+              q.visible_if_json AS question_visible_if,
+              o.id AS option_id, o.value_id, o.sku_code, o.label AS option_label,
+              o.visible_if_json, o.hidden_if_json, o.archived AS option_archived
        FROM sku_schema_questions q
+       JOIN sku_schema_versions v ON v.id = q.schema_version_id
        LEFT JOIN sku_schema_options o ON o.schema_question_id = q.id
        WHERE q.schema_version_id = ANY($1::int[])
        ORDER BY q.schema_version_id, q.sku_index, o.id`,
