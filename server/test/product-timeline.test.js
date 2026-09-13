@@ -353,3 +353,486 @@ test('timeline presenter keeps missing audit history explicit and groups legacy 
   assert.equal(JSON.stringify(result).includes('internalGroup'), false);
   assert.equal(JSON.stringify(result).includes('correctionRequestId'), false);
 });
+
+test('timeline presents complete logical configuration snapshots for applied answer changes', () => {
+  const result = presentProductTimeline('BR1002', {
+    products: [
+      {
+        id: 1,
+        full_sku: 'BR1001',
+        base_sku: 'BR1',
+        category: 'BR',
+        status: 'corrected',
+        created_at: '2026-01-01T08:00:00.000Z',
+        corrected_from_product_id: null,
+        corrected_to_product_id: 2,
+        sku_schema_version_id: 4,
+        details: { answers: { kind: 1, is_calibrated: 0 } },
+      },
+      {
+        id: 2,
+        full_sku: 'BR2001',
+        base_sku: 'BR2',
+        category: 'BR',
+        status: 'corrected',
+        created_at: '2026-01-02T08:00:00.000Z',
+        corrected_from_product_id: 1,
+        corrected_to_product_id: 3,
+        sku_schema_version_id: 4,
+        details: { answers: { kind: 2, is_calibrated: 1 } },
+      },
+      {
+        id: 3,
+        full_sku: 'BR1002',
+        base_sku: 'BR1',
+        category: 'BR',
+        status: 'active',
+        created_at: '2026-01-03T08:00:00.000Z',
+        corrected_from_product_id: 2,
+        corrected_to_product_id: null,
+        sku_schema_version_id: 4,
+        details: { answers: { kind: 1, is_calibrated: 2 } },
+      },
+    ],
+    corrections: [
+      {
+        id: 10,
+        source_product_id: 1,
+        corrected_product_id: 2,
+        source_sku: 'BR1001',
+        corrected_sku: 'BR2001',
+        old_payload: { answers: { kind: 1, is_calibrated: 0 }, skuSchemaVersionId: 4 },
+        new_payload: { answers: { kind: 2, is_calibrated: 1 }, skuSchemaVersionId: 4 },
+        created_at: '2026-01-02T08:00:00.000Z',
+      },
+      {
+        id: 11,
+        source_product_id: 2,
+        corrected_product_id: 3,
+        source_sku: 'BR2001',
+        corrected_sku: 'BR1002',
+        old_payload: { answers: { kind: 2, is_calibrated: 1 }, skuSchemaVersionId: 4 },
+        new_payload: { answers: { kind: 1, is_calibrated: 2 }, skuSchemaVersionId: 4 },
+        created_at: '2026-01-03T08:00:00.000Z',
+      },
+    ],
+    requests: [{
+      id: 20,
+      source_product_id: 2,
+      corrected_product_id: 3,
+      source_sku: 'BR2001',
+      proposed_sku: 'BR1002',
+      old_payload: { answers: { kind: 2, is_calibrated: 1 } },
+      proposed_payload: { answers: { kind: 1, is_calibrated: 2 } },
+      changes: [],
+      status: 'completed',
+      created_at: '2026-01-02T12:00:00.000Z',
+      completed_at: '2026-01-03T08:00:00.000Z',
+    }],
+    repricingItems: [],
+    audits: [{
+      id: 30,
+      event_key: 'product.recounted',
+      subject_type: 'product',
+      subject_id: '2',
+      details: { productCorrectionId: 11, correctionRequestId: 20 },
+      occurred_at: '2026-01-03T08:00:00.000Z',
+      actor_snapshot: { displayName: 'Worker' },
+    }],
+    schemaRows: [1, 2].map((valueId) => ({
+      schema_version_id: 4,
+      schema_version: 1,
+      schema_marker: '',
+      schema_status: 'archived',
+      question_key: 'kind',
+      question_label: 'Вид',
+      sku_index: 1,
+      display_order: 1,
+      required: 1,
+      sku_separator: '',
+      question_visible_if: null,
+      option_id: valueId,
+      value_id: valueId,
+      sku_code: String(valueId),
+      option_label: valueId === 1 ? 'Перший' : 'Другий',
+      visible_if_json: null,
+      hidden_if_json: null,
+      option_archived: valueId === 2,
+    })),
+  });
+
+  assert.equal(result.configurationEvolution.status, 'complete');
+  assert.deepEqual(
+    result.configurationEvolution.snapshots.map((snapshot) => snapshot.establishingSku),
+    ['BR1001', 'BR2001', 'BR1002']
+  );
+  assert.deepEqual(result.configurationEvolution.snapshots.map((snapshot) => snapshot.source), [
+    'product_created',
+    'direct_recount',
+    'correction_request',
+  ]);
+  assert.equal(result.configurationEvolution.snapshots[0].isInitial, true);
+  assert.equal(result.configurationEvolution.snapshots[2].isCurrent, true);
+  assert.equal(result.configurationEvolution.snapshots[2].currentSku, 'BR1002');
+  assert.deepEqual(result.configurationEvolution.snapshots[0].fields.map((field) => (
+    [field.key, field.value.value, field.value.label]
+  )), [
+    ['kind', 1, 'Перший'],
+    ['is_calibrated', 0, 'Некалібрована'],
+  ]);
+  assert.deepEqual(result.configurationEvolution.snapshots[2].changes.map((change) => (
+    [change.fieldKey, change.before.value, change.after.value]
+  )), [
+    ['kind', 2, 1],
+    ['is_calibrated', 1, 2],
+  ]);
+});
+
+test('timeline collapses non-answer successors without reinterpreting the establishing schema', () => {
+  const result = presentProductTimeline('BR2/1001', {
+    products: [
+      {
+        id: 1,
+        full_sku: 'BR1001',
+        base_sku: 'BR1',
+        category: 'BR',
+        weight: 10,
+        status: 'corrected',
+        created_at: '2026-02-01T08:00:00.000Z',
+        corrected_from_product_id: null,
+        corrected_to_product_id: 2,
+        sku_schema_version_id: 4,
+        details: { answers: { kind: 1 } },
+      },
+      {
+        id: 2,
+        full_sku: 'BR2/1001',
+        base_sku: 'BR2/1',
+        category: 'BR',
+        weight: 11,
+        status: 'active',
+        created_at: '2026-02-02T08:00:00.000Z',
+        corrected_from_product_id: 1,
+        corrected_to_product_id: null,
+        sku_schema_version_id: 5,
+        details: { answers: { kind: 1 } },
+      },
+    ],
+    corrections: [{
+      id: 12,
+      source_product_id: 1,
+      corrected_product_id: 2,
+      source_sku: 'BR1001',
+      corrected_sku: 'BR2/1001',
+      old_payload: { answers: { kind: 1 }, weight: 10, skuSchemaVersionId: 4 },
+      new_payload: { answers: { kind: 1 }, weight: 11, skuSchemaVersionId: 5 },
+      created_at: '2026-02-02T08:00:00.000Z',
+    }],
+    requests: [],
+    repricingItems: [],
+    audits: [],
+    schemaRows: [{
+      schema_version_id: 4,
+      schema_version: 1,
+      schema_marker: '',
+      schema_status: 'archived',
+      question_key: 'kind',
+      question_label: 'Історичний вид',
+      sku_index: 1,
+      display_order: 1,
+      required: 1,
+      sku_separator: '',
+      question_visible_if: null,
+      option_id: 1,
+      value_id: 1,
+      sku_code: '1',
+      option_label: 'Історичне значення',
+      visible_if_json: null,
+      hidden_if_json: null,
+      option_archived: false,
+    }, {
+      schema_version_id: 5,
+      schema_version: 2,
+      schema_marker: '2/',
+      schema_status: 'active',
+      question_key: 'kind',
+      question_label: 'Нова назва виду',
+      sku_index: 1,
+      display_order: 1,
+      required: 1,
+      sku_separator: '',
+      question_visible_if: null,
+      option_id: 2,
+      value_id: 1,
+      sku_code: '1',
+      option_label: 'Нова назва значення',
+      visible_if_json: null,
+      hidden_if_json: null,
+      option_archived: false,
+    }],
+  });
+
+  assert.equal(result.configurationEvolution.snapshots.length, 1);
+  const snapshot = result.configurationEvolution.snapshots[0];
+  assert.equal(snapshot.establishingSku, 'BR1001');
+  assert.deepEqual(snapshot.establishingSchemaVersion, { id: 4, version: 1, marker: '' });
+  assert.equal(snapshot.currentSku, 'BR2/1001');
+  assert.deepEqual(snapshot.currentSchemaVersion, { id: 5, version: 2, marker: '2/' });
+  assert.equal(snapshot.fields[0].fieldLabel, 'Історичний вид');
+  assert.equal(snapshot.fields[0].value.label, 'Історичне значення');
+  assert.equal(snapshot.occurredAt, '2026-02-01T08:00:00.000Z');
+  assert.equal(snapshot.source, 'product_created');
+});
+
+test('timeline marks immutable-SKU-only legacy reconstruction as partial and ambiguity unavailable', () => {
+  const legacy = presentProductTimeline('BR1001', {
+    products: [{
+      id: 1,
+      full_sku: 'BR1001',
+      base_sku: 'BR1',
+      category: 'BR',
+      status: 'active',
+      created_at: null,
+      corrected_from_product_id: null,
+      corrected_to_product_id: null,
+      sku_schema_version_id: 4,
+      details: {},
+    }],
+    corrections: [], requests: [], repricingItems: [], audits: [],
+    schemaRows: [{
+      schema_version_id: 4,
+      schema_version: 1,
+      schema_marker: '',
+      schema_status: 'active',
+      question_key: 'kind',
+      question_label: 'Вид',
+      sku_index: 1,
+      display_order: 1,
+      required: 1,
+      sku_separator: '',
+      question_visible_if: null,
+      option_id: 1,
+      value_id: 1,
+      sku_code: '1',
+      option_label: 'Перший',
+      visible_if_json: null,
+      hidden_if_json: null,
+      option_archived: false,
+    }],
+  });
+  assert.equal(legacy.configurationEvolution.status, 'partial');
+  assert.equal(legacy.configurationEvolution.snapshots[0].completeness, 'partial');
+  assert.deepEqual(legacy.configurationEvolution.snapshots[0].fields[0].value, {
+    value: 1,
+    label: 'Перший',
+  });
+
+  const ambiguous = presentProductTimeline('DUPLICATE', {
+    products: [
+      { id: 1, full_sku: 'DUPLICATE', category: 'BR', created_at: '2026-01-01' },
+      { id: 2, full_sku: 'DUPLICATE', category: 'BR', created_at: '2026-01-02' },
+      { id: 3, full_sku: 'TARGET', category: 'BR', created_at: '2026-01-03' },
+    ],
+    corrections: [{
+      id: 13,
+      source_product_id: null,
+      corrected_product_id: null,
+      source_sku: 'DUPLICATE',
+      corrected_sku: 'TARGET',
+    }],
+    requests: [], repricingItems: [], audits: [], schemaRows: [],
+  });
+  assert.equal(ambiguous.configurationEvolution.status, 'unavailable');
+  assert.deepEqual(ambiguous.configurationEvolution.snapshots, []);
+});
+
+test('configuration evidence fills missing keys but omits conflicts and never borrows another schema', () => {
+  const result = presentProductTimeline('BR1001', {
+    products: [{
+      id: 1, full_sku: 'BR1001', base_sku: 'BR1', category: 'BR',
+      sku_schema_version_id: 4, status: 'active', created_at: '2026-01-01',
+      details: { answers: { kind: 1, disputed: 1 } },
+    }, {
+      id: 2, full_sku: 'BR2001', base_sku: 'BR2', category: 'BR',
+      sku_schema_version_id: 5, status: 'active', created_at: '2026-01-02',
+      details: { answers: { kind: 2, disputed: 2 } },
+    }],
+    corrections: [{
+      id: 9, source_product_id: 1, corrected_product_id: 2,
+      source_sku: 'BR1001', corrected_sku: 'BR2001',
+      old_payload: { skuSchemaVersionId: 4, answers: { kind: 1, extra: 0, disputed: 2 } },
+      new_payload: { skuSchemaVersionId: 99, answers: { kind: 2, disputed: 1 } },
+    }],
+    requests: [], repricingItems: [], audits: [],
+    schemaRows: [{
+      schema_version_id: 5, schema_version: 2, schema_marker: '2/',
+      question_key: 'kind', question_label: 'New schema kind',
+      option_id: 2, value_id: 2, sku_code: '2', option_label: 'New schema label',
+    }],
+  });
+  const [initial, successor] = result.configurationEvolution.snapshots;
+  assert.equal(result.configurationEvolution.status, 'partial');
+  assert.deepEqual(initial.fields.map((field) => [field.key, field.value.value]), [
+    ['extra', 0], ['kind', 1],
+  ]);
+  assert.equal(initial.fields.some((field) => field.key === 'disputed'), false);
+  assert.deepEqual(initial.establishingSchemaVersion, { id: 4, version: null, marker: null });
+  assert.equal(initial.fields.find((field) => field.key === 'kind').value.label, null);
+  assert.equal(successor.establishingSchemaVersion.id, 5);
+  assert.equal(successor.fields.find((field) => field.key === 'kind').value.label, null);
+  assert.equal(successor.fields.some((field) => field.key === 'disputed'), false);
+  assert.ok(result.configurationEvolution.warnings.some((item) => (
+    item.code === 'CONFIGURATION_EVIDENCE_CONFLICT'
+  )));
+  assert.ok(result.configurationEvolution.warnings.some((item) => (
+    item.code === 'HISTORICAL_SCHEMA_MISSING'
+  )));
+});
+
+test('configuration evolution derives a legacy answer transition from stored products when correction payload answers are missing', () => {
+  const result = presentProductTimeline('BR2001', {
+    products: [{
+      id: 1, full_sku: 'BR1001', category: 'BR', sku_schema_version_id: 4,
+      details: { answers: { kind: 1 } }, corrected_to_product_id: 2,
+    }, {
+      id: 2, full_sku: 'BR2001', category: 'BR', sku_schema_version_id: 4,
+      details: { answers: { kind: 2 } }, corrected_from_product_id: 1,
+    }],
+    corrections: [{
+      id: 9, source_product_id: 1, corrected_product_id: 2,
+      source_sku: 'BR1001', corrected_sku: 'BR2001', old_payload: {}, new_payload: {},
+    }],
+    requests: [], repricingItems: [], audits: [],
+    schemaRows: [1, 2].map((value) => ({
+      schema_version_id: 4, schema_version: 1, schema_marker: '',
+      question_key: 'kind', question_label: 'Kind', sku_index: 1,
+      option_id: value, value_id: value, sku_code: String(value),
+      option_label: `Value ${value}`,
+    })),
+  });
+  assert.deepEqual(result.configurationEvolution.snapshots.map((snapshot) => (
+    snapshot.establishingSku
+  )), ['BR1001', 'BR2001']);
+  assert.deepEqual(result.configurationEvolution.snapshots[1].changes.map((change) => [
+    change.fieldKey, change.before.value, change.after.value,
+  ]), [['kind', 1, 2]]);
+  assert.deepEqual(result.configurationEvolution.snapshots[1].fields[0].value, {
+    value: 2, label: 'Value 2',
+  });
+});
+
+test('legacy SKU-only reconstruction refuses ambiguous parses and visibility-dependent questions', () => {
+  const product = {
+    id: 1, full_sku: 'BR111001', base_sku: 'BR111', category: 'BR',
+    sku_schema_version_id: 4, details: {}, status: 'active',
+  };
+  const schemaRows = [
+    ['first', 1, 1, '1'], ['first', 1, 11, '11'],
+    ['second', 2, 1, '1'], ['second', 2, 11, '11'],
+  ].map(([key, index, value, code], optionIndex) => ({
+    schema_version_id: 4, schema_version: 1, schema_marker: '',
+    question_key: key, question_label: key, sku_index: index, required: 1,
+    option_id: optionIndex + 1, value_id: value, sku_code: code, option_label: code,
+  }));
+  const data = { products: [product], corrections: [], requests: [],
+    repricingItems: [], audits: [], schemaRows };
+  const ambiguous = presentProductTimeline(product.full_sku, data);
+  assert.equal(ambiguous.configurationEvolution.status, 'unavailable');
+  assert.deepEqual(ambiguous.configurationEvolution.snapshots[0].fields, []);
+
+  const visibilityDependent = presentProductTimeline(product.full_sku, {
+    ...data,
+    schemaRows: schemaRows.map((row) => ({
+      ...row, question_visible_if: row.question_key === 'first' ? { kind: 1 } : null,
+    })),
+  });
+  assert.equal(visibilityDependent.configurationEvolution.status, 'unavailable');
+  assert.deepEqual(visibilityDependent.configurationEvolution.snapshots[0].fields, []);
+});
+
+test('configuration evolution refuses a dangling successor even if its loaded products appear linear', () => {
+  const result = presentProductTimeline('BR1001', {
+    products: [{
+      id: 1, full_sku: 'BR1001', category: 'BR',
+      status: 'corrected', corrected_to_product_id: 999,
+      details: { answers: { kind: 1 } },
+    }],
+    corrections: [], requests: [], repricingItems: [], audits: [], schemaRows: [],
+  });
+  assert.equal(result.configurationEvolution.status, 'unavailable');
+  assert.deepEqual(result.configurationEvolution.snapshots, []);
+});
+
+test('configuration snapshots keep genuine and hidden historical zero values but omit placeholder no-ops', () => {
+  const states = [
+    { kind: 1, option_zero: 0, optional: 0, is_calibrated: 0 },
+    { kind: 1, option_zero: 1, optional: null, is_calibrated: 1 },
+    { kind: 1, option_zero: 1, optional: null, is_calibrated: 2 },
+  ];
+  const schemaOptions = [
+    ['kind', 1, '1', 'Archived hidden kind', true, { flag: 1 }],
+    ['option_zero', 0, '0', 'Real zero', false, null],
+    ['option_zero', 1, '1', 'Other', false, null],
+    ['optional', 1, '1', 'Selected', false, null],
+  ];
+  const result = presentProductTimeline('BR3001', {
+    products: states.map((answers, index) => ({
+      id: index + 1, full_sku: `BR${index + 1}001`, category: 'BR',
+      sku_schema_version_id: 4, details: { answers },
+      corrected_from_product_id: index || null,
+      corrected_to_product_id: index < 2 ? index + 2 : null,
+    })),
+    corrections: [0, 1].map((index) => ({
+      id: index + 10, source_product_id: index + 1, corrected_product_id: index + 2,
+      source_sku: `BR${index + 1}001`, corrected_sku: `BR${index + 2}001`,
+      old_payload: {
+        skuSchemaVersionId: 4, answers: states[index],
+        decodedAnswers: index === 0 ? [{
+          key: 'optional', value_id: null, is_placeholder: true, value_label: 'Не обрано',
+        }] : [],
+      },
+      new_payload: { skuSchemaVersionId: 4, answers: states[index + 1] },
+    })),
+    requests: [], repricingItems: [], audits: [],
+    schemaRows: schemaOptions.map(([key, value, code, label, archived, hidden], index) => ({
+      schema_version_id: 4, schema_version: 1, schema_marker: '',
+      question_key: key, question_label: key, sku_index: index + 1,
+      option_id: index + 1, value_id: value, sku_code: code,
+      option_label: label, option_archived: archived, hidden_if_json: hidden,
+    })),
+  });
+  const snapshots = result.configurationEvolution.snapshots;
+  assert.equal(result.configurationEvolution.status, 'complete');
+  assert.equal(snapshots.length, 3);
+  assert.equal(snapshots[0].fields.find((field) => field.key === 'kind').value.label, 'Archived hidden kind');
+  assert.deepEqual(snapshots[0].fields.find((field) => field.key === 'option_zero').value, {
+    value: 0, label: 'Real zero',
+  });
+  assert.equal(snapshots[0].fields.find((field) => field.key === 'optional').value.label, 'Не обрано');
+  assert.deepEqual(snapshots[1].changes.map((change) => change.fieldKey), [
+    'option_zero', 'is_calibrated',
+  ]);
+  assert.deepEqual(snapshots.map((snapshot) => (
+    snapshot.fields.find((field) => field.key === 'is_calibrated').value.value
+  )), [0, 1, 2]);
+});
+
+test('SKU-only legacy evidence keeps a proven value without guessing among contextual labels', () => {
+  const result = presentProductTimeline('BR1001', {
+    products: [{
+      id: 1, full_sku: 'BR1001', base_sku: 'BR1', category: 'BR',
+      status: 'active', sku_schema_version_id: 4, details: {},
+    }],
+    corrections: [], requests: [], repricingItems: [], audits: [],
+    schemaRows: ['Context A', 'Context B'].map((label, index) => ({
+      schema_version_id: 4, schema_version: 1, schema_marker: '',
+      question_key: 'kind', question_label: 'Kind', sku_index: 1, required: 1,
+      option_id: index + 1, value_id: 1, sku_code: '1', option_label: label,
+      visible_if_json: { other: index + 1 },
+    })),
+  });
+  assert.equal(result.configurationEvolution.status, 'partial');
+  assert.deepEqual(result.configurationEvolution.snapshots[0].fields[0].value, {
+    value: 1, label: null,
+  });
+});
