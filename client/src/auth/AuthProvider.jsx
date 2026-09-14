@@ -114,10 +114,18 @@ export function AuthProvider({
     void loadCurrentSession();
   }, [loadCurrentSession]);
 
-  const login = useCallback(() => {
+  const startLogin = useCallback((endpoint) => {
     const returnTo = getCurrentReturnTo(locationObject);
-    locationObject.assign(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
+    locationObject.assign(`${endpoint}?returnTo=${encodeURIComponent(returnTo)}`);
   }, [locationObject]);
+
+  const login = useCallback(() => {
+    startLogin('/api/auth/login');
+  }, [startLogin]);
+
+  const loginWithWindows = useCallback(() => {
+    startLogin('/api/auth/login/windows');
+  }, [startLogin]);
 
   const logout = useCallback(async () => {
     const response = await apiClient.post('/auth/logout');
@@ -136,11 +144,20 @@ export function AuthProvider({
       AUTH_STATUS.DISABLED,
     ].includes(auth.status),
     login,
+    loginWithWindows,
     logout,
     refresh: loadCurrentSession,
     retry,
     markUnauthenticated,
-  }), [auth, loadCurrentSession, login, logout, markUnauthenticated, retry]);
+  }), [
+    auth,
+    loadCurrentSession,
+    login,
+    loginWithWindows,
+    logout,
+    markUnauthenticated,
+    retry,
+  ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

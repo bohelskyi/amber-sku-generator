@@ -38,6 +38,7 @@ function createFakeAdapter(overrides = {}) {
         scope: 'openid profile email',
         state: transaction.state,
         nonce: transaction.nonce,
+        acr_values: transaction.acrValue,
         code_challenge: challenge,
         code_challenge_method: 'S256',
       }).toString();
@@ -56,6 +57,7 @@ function createFakeAdapter(overrides = {}) {
         access_token: 'not-an-identity-claim',
         refresh_token: 'not-an-identity-claim',
         id_token: 'not-an-identity-claim',
+        acr: 'amber-windows',
         groups: ['must-not-be-exposed'],
       };
     },
@@ -205,7 +207,6 @@ test('login persists random state, nonce, and PKCE S256 transaction before redir
     assert.equal(result.response.status, 302);
     assert.ok(result.cookie);
     assert.equal(result.response.headers.get('cache-control'), 'no-store');
-    assert.equal(result.transaction.returnTo, '/admin');
     assert.equal(result.transaction.state.length, 43);
     assert.equal(result.transaction.nonce.length, 43);
     assert.equal(result.transaction.codeVerifier.length, 86);
@@ -216,6 +217,7 @@ test('login persists random state, nonce, and PKCE S256 transaction before redir
     assert.equal(redirect.searchParams.get('scope'), 'openid profile email');
     assert.equal(redirect.searchParams.get('state'), result.transaction.state);
     assert.equal(redirect.searchParams.get('nonce'), result.transaction.nonce);
+    assert.equal(redirect.searchParams.get('acr_values'), 'amber-password');
     assert.equal(redirect.searchParams.get('code_challenge_method'), 'S256');
     assert.equal(
       redirect.searchParams.get('code_challenge'),
@@ -225,9 +227,45 @@ test('login persists random state, nonce, and PKCE S256 transaction before redir
     const storedSessions = await new Promise((resolve, reject) => {
       server.store.all((error, sessions) => (error ? reject(error) : resolve(sessions)));
     });
-    assert.equal(Object.values(storedSessions).some(
+    const storedTransaction = Object.values(storedSessions).find(
       (session) => session.oidcTransaction?.state === result.transaction.state
-    ), true);
+    )?.oidcTransaction;
+    assert.ok(storedTransaction);
+    assert.equal(storedTransaction.returnTo, '/admin');
+    assert.equal(storedTransaction.acrValue, undefined);
+  } finally {
+    await server.close();
+  }
+});
+
+test('Windows login uses its fixed ACR and shares the protected login transaction behavior', async () => {
+  const { adapter, calls } = createFakeAdapter();
+  const server = await startAuthServer({ adapter });
+  try {
+    const response = await authFetch(
+      server,
+      '/api/auth/login/windows?returnTo=%2Fadmin%2Frepricing'
+    );
+    assert.equal(response.status, 302);
+    assert.ok(cookieFrom(response));
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+
+    const transaction = calls.authorization.at(-1);
+    assert.equal(transaction.acrValue, 'amber-windows');
+    const redirect = new URL(response.headers.get('location'));
+    assert.equal(redirect.searchParams.get('acr_values'), 'amber-windows');
+    assert.equal(redirect.searchParams.get('state'), transaction.state);
+    assert.equal(redirect.searchParams.get('nonce'), transaction.nonce);
+    assert.equal(redirect.searchParams.get('code_challenge_method'), 'S256');
+
+    const storedSessions = await new Promise((resolve, reject) => {
+      server.store.all((error, sessions) => (error ? reject(error) : resolve(sessions)));
+    });
+    const storedTransaction = Object.values(storedSessions).find(
+      (session) => session.oidcTransaction?.state === transaction.state
+    )?.oidcTransaction;
+    assert.equal(storedTransaction.returnTo, '/admin/repricing');
+    assert.equal(storedTransaction.acrValue, undefined);
   } finally {
     await server.close();
   }
@@ -286,7 +324,7 @@ test('callback regenerates the session and exposes normalized identity and local
     assert.equal(typeof body.csrfToken, 'string');
     assert.equal(body.csrfToken.length, 43);
     const serialized = JSON.stringify(body);
-    assert.doesNotMatch(serialized, /access_token|refresh_token|id_token|server-only|groups/);
+    assert.doesNotMatch(serialized, /access_token|refresh_token|id_token|server-only|groups|acr/);
 
     const protectedResponse = await authFetch(server, '/api/test-protected', {
       cookie: authenticatedCookie,

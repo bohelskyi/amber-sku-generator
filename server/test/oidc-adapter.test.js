@@ -57,8 +57,18 @@ test('OIDC adapter dynamically imports once, discovers once, and uses validated 
   });
 
   await Promise.all([
-    adapter.buildAuthorizationRedirect({ state: 'state-1', nonce: 'nonce-1', codeVerifier: 'verifier-1' }),
-    adapter.buildAuthorizationRedirect({ state: 'state-2', nonce: 'nonce-2', codeVerifier: 'verifier-2' }),
+    adapter.buildAuthorizationRedirect({
+      state: 'state-1',
+      nonce: 'nonce-1',
+      codeVerifier: 'verifier-1',
+      acrValue: 'amber-password',
+    }),
+    adapter.buildAuthorizationRedirect({
+      state: 'state-2',
+      nonce: 'nonce-2',
+      codeVerifier: 'verifier-2',
+      acrValue: 'amber-windows',
+    }),
   ]);
   const returnedClaims = await adapter.exchangeAuthorizationCode({
     callbackUrl: new URL('https://app.example.invalid/api/auth/callback?code=code&state=state-1'),
@@ -87,6 +97,8 @@ test('OIDC adapter dynamically imports once, discovers once, and uses validated 
   assert.equal(calls.authorizationParameters[0].code_challenge, 'calculated-challenge');
   assert.equal(calls.authorizationParameters[0].code_challenge_method, 'S256');
   assert.equal(calls.authorizationParameters[0].nonce, 'nonce-1');
+  assert.equal(calls.authorizationParameters[0].acr_values, 'amber-password');
+  assert.equal(calls.authorizationParameters[1].acr_values, 'amber-windows');
   assert.equal(calls.grants[0][2].expectedState, 'state-1');
   assert.equal(calls.grants[0][2].expectedNonce, 'nonce-1');
   assert.equal(calls.grants[0][2].pkceCodeVerifier, 'verifier-1');

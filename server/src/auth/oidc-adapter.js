@@ -41,7 +41,7 @@ function createOidcAdapter({
     return configurationPromise;
   }
 
-  async function buildAuthorizationRedirect({ state, nonce, codeVerifier }) {
+  async function buildAuthorizationRedirect({ state, nonce, codeVerifier, acrValue }) {
     const [client, configuration] = await Promise.all([getModule(), getConfiguration()]);
     const codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
     return client.buildAuthorizationUrl(configuration, {
@@ -50,6 +50,7 @@ function createOidcAdapter({
       scope: OIDC_SCOPE,
       state,
       nonce,
+      acr_values: acrValue,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
     });

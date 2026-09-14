@@ -21,9 +21,14 @@ export function AuthGate({ children }) {
         <div className="card auth-card">
           <h1 className="text-xl font-semibold">Amber SKU Manager</h1>
           <p className="mt-2 text-sm text-slate-500">Увійдіть, щоб продовжити роботу.</p>
-          <button type="button" className="btn btn-amber mt-5" onClick={auth.login}>
-            Увійти
-          </button>
+          <div className="mt-5 flex flex-col gap-3">
+            <button type="button" className="btn btn-amber" onClick={auth.login}>
+              Увійти
+            </button>
+            <button type="button" className="btn btn-outline" onClick={auth.loginWithWindows}>
+              Увійти через Windows
+            </button>
+          </div>
         </div>
       </main>
     );

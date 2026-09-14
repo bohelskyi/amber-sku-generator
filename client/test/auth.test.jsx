@@ -223,7 +223,7 @@ describe('authentication bootstrap and gate', () => {
 });
 
 describe('login, identity, and logout UI', () => {
-  it('starts login through same-origin top-level navigation with the current SPA return path', async () => {
+  it('starts either login flow through same-origin navigation with the current SPA return path', async () => {
     const apiClient = {
       get: vi.fn().mockRejectedValue({ response: { status: 401 } }),
       post: vi.fn(),
@@ -239,6 +239,11 @@ describe('login, identity, and logout UI', () => {
 
     expect(locationObject.assign).toHaveBeenCalledWith(
       '/api/auth/login?returnTo=%2Fadmin%2Frepricing%3Fdraft%3D12%23items'
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Увійти через Windows' }));
+    expect(locationObject.assign).toHaveBeenCalledWith(
+      '/api/auth/login/windows?returnTo=%2Fadmin%2Frepricing%3Fdraft%3D12%23items'
     );
     expect(getCurrentReturnTo({ pathname: '//evil.test', search: '', hash: '' })).toBe('/');
   });

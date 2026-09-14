@@ -17,6 +17,8 @@ const logger = require('../utils/logger');
 
 const OIDC_TRANSACTION_TTL_MS = 10 * 60 * 1000;
 const MAX_RETURN_TO_LENGTH = 2048;
+const PASSWORD_LOGIN_ACR = 'amber-password';
+const WINDOWS_LOGIN_ACR = 'amber-windows';
 
 function randomBase64Url(byteLength) {
   return crypto.randomBytes(byteLength).toString('base64url');
@@ -105,29 +107,39 @@ function createAuthRouter({
 } = {}) {
   const router = express.Router();
 
-  router.get('/login', async (req, res) => {
-    res.set('Cache-Control', 'no-store');
-    const transaction = {
-      state: randomToken(32),
-      nonce: randomToken(32),
-      codeVerifier: randomToken(64),
-      returnTo: normalizeReturnTo(req.query.returnTo),
-      createdAt: now(),
-    };
+  function createLoginHandler(acrValue) {
+    return async (req, res) => {
+      res.set('Cache-Control', 'no-store');
+      const transaction = {
+        state: randomToken(32),
+        nonce: randomToken(32),
+        codeVerifier: randomToken(64),
+        returnTo: normalizeReturnTo(req.query.returnTo),
+        createdAt: now(),
+      };
 
-    try {
-      const authorizationUrl = await oidcAdapter.buildAuthorizationRedirect(transaction);
-      req.session.oidcTransaction = transaction;
-      await saveSession(req);
-      return res.redirect(authorizationUrl.toString());
-    } catch (error) {
-      logger.warn('auth.login.unavailable', {
-        requestId: req.requestId,
-        errorType: error?.name || 'Error',
-      });
-      return res.status(503).json({ error: 'Authentication service unavailable' });
-    }
-  });
+      try {
+        const authorizationUrl = await oidcAdapter.buildAuthorizationRedirect({
+          state: transaction.state,
+          nonce: transaction.nonce,
+          codeVerifier: transaction.codeVerifier,
+          acrValue,
+        });
+        req.session.oidcTransaction = transaction;
+        await saveSession(req);
+        return res.redirect(authorizationUrl.toString());
+      } catch (error) {
+        logger.warn('auth.login.unavailable', {
+          requestId: req.requestId,
+          errorType: error?.name || 'Error',
+        });
+        return res.status(503).json({ error: 'Authentication service unavailable' });
+      }
+    };
+  }
+
+  router.get('/login', createLoginHandler(PASSWORD_LOGIN_ACR));
+  router.get('/login/windows', createLoginHandler(WINDOWS_LOGIN_ACR));
 
   router.get('/callback', async (req, res, next) => {
     res.set('Cache-Control', 'no-store');
