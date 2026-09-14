@@ -115,7 +115,7 @@ test('sticky navigation and admin anchors use shared responsive offsets', () => 
     'utf8'
   );
 
-  assert.match(stylesSource, /--workspace-nav-height: 70px/);
+  assert.match(stylesSource, /--workspace-nav-height: 64px/);
   assert.match(stylesSource, /--workspace-nav-height: 56px/);
   assert.match(stylesSource, /\.admin-section-nav[\s\S]*?top: var\(--workspace-nav-height\)/);
   assert.match(stylesSource, /\.admin-anchor-section[\s\S]*?scroll-margin-top:/);
@@ -357,8 +357,28 @@ test('home and decode presentation share aligned columns and compact authoritati
   assert.match(navSource, /amber-logo-white-orange\.png/);
   assert.match(navSource, /<img src=\{amberLogo\}/);
   assert.doesNotMatch(navSource, /workspace-brand-mark|workspace-brand-copy/);
-  assert.match(stylesSource, /--workspace-nav-height: 70px/);
-  assert.match(stylesSource, /\.workspace-brand-logo \{ @apply block h-9 w-auto sm:h-12; \}/);
+  assert.match(stylesSource, /--workspace-nav-height: 64px/);
+  assert.match(stylesSource, /\.workspace-brand-logo \{ @apply block h-9 w-auto sm:h-10; \}/);
+});
+
+test('operations chrome is flatter while authentication and overlays retain their geometry', () => {
+  const stylesSource = fs.readFileSync(
+    new URL('../src/index.css', import.meta.url),
+    'utf8'
+  );
+  const canvas = stylesSource.slice(stylesSource.indexOf('  .app-bg,'), stylesSource.indexOf('  .auth-gate {'));
+  const card = stylesSource.slice(stylesSource.indexOf('  .card,\n'), stylesSource.indexOf('  .card.auth-card {'));
+  const pageHeading = stylesSource.slice(stylesSource.indexOf('  .page-heading {'), stylesSource.indexOf('  .app-page >'));
+
+  assert.match(canvas, /background: var\(--canvas\)/);
+  assert.doesNotMatch(canvas, /linear-gradient/);
+  assert.match(stylesSource, /--radius-sm: 6px;[\s\S]*--radius-md: 8px;[\s\S]*--radius-lg: 10px;/);
+  assert.doesNotMatch(card, /box-shadow|:hover/);
+  assert.match(pageHeading, /border-b pb-3/);
+  assert.doesNotMatch(pageHeading, /rounded|bg-white|box-shadow/);
+  assert.match(stylesSource, /\.card\.auth-card \{[\s\S]*?border-radius: 16px;[\s\S]*?box-shadow: var\(--shadow-sm\)/);
+  assert.match(stylesSource, /\.dialog-surface \{[\s\S]*?border-radius: 16px;/);
+  assert.match(stylesSource, /\[role="dialog"\] \.btn,[\s\S]*?border-radius: 8px;/);
 });
 
 test('recount uses a Builder-aligned editor with one authoritative comparison summary', () => {
