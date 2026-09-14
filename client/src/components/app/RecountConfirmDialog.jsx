@@ -1,9 +1,16 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Copy } from 'lucide-react';
 import { formatDecimal, formatUah } from '../../lib/formatters';
 import { copyPlainText } from '../../lib/clipboard';
 import { useDialogAccessibility } from '../../hooks/useDialogAccessibility';
+
+function hasValidDecisionPrice(value, scale) {
+  const text = String(value ?? '').trim().replace(',', '.');
+  const amount = Number(text);
+  return /^\d+(?:\.\d+)?$/.test(text) && Number.isFinite(amount)
+    && amount > 0 && Number(amount.toFixed(scale)) === amount;
+}
 
 export function RecountConfirmDialog({
   canPriceOverride = false,
@@ -28,6 +35,7 @@ export function RecountConfirmDialog({
 }) {
   const dialogRef = useRef(null);
   const confirmButtonRef = useRef(null);
+  const [previewBeforeDecisionEdit, setPreviewBeforeDecisionEdit] = useState(null);
   const dialogOpen = Boolean(isOpen && preview);
 
   useDialogAccessibility({
@@ -42,13 +50,22 @@ export function RecountConfirmDialog({
 
   const oldPrice = preview.source.totalPriceUah;
   const newPrice = preview.corrected.totalPriceUah;
-  const plainNewPrice = Number.isFinite(Number(newPrice))
-    ? formatDecimal(newPrice)
-    : '';
   const priceDelta = Number(preview.priceDeltaUah || 0);
   const isChoiceMode = mode === 'choice';
   const isRequestMode = mode === 'request';
   const showDecision = canPriceOverride && (isRequestMode || isChoiceMode);
+  const isCustomDecision = showDecision && pricingMode !== 'system_auto';
+  const hasValidCustomInput = pricingMode === 'usd_per_gram'
+    ? hasValidDecisionPrice(usdPerGram, 4)
+    : pricingMode === 'manual_uah'
+      ? hasValidDecisionPrice(manualPriceUah, 2)
+      : true;
+  const showTargetPrice = !isCustomDecision || (
+    previewCurrent && hasValidCustomInput && previewBeforeDecisionEdit !== preview
+  );
+  const plainNewPrice = showTargetPrice && Number.isFinite(Number(newPrice))
+    ? formatDecimal(newPrice)
+    : '';
   const requiresManualPrice = !(Number(newPrice) > 0)
     && (!showDecision || (isChoiceMode && pricingMode === 'system_auto'));
   const hasManualPrice = Number(manualPriceUah) > 0;
@@ -92,7 +109,10 @@ export function RecountConfirmDialog({
               <label className="block text-sm">
                 Режим ціни
                 <select className="input mt-2" value={pricingMode}
-                  onChange={(event) => onPricingModeChange(event.target.value)}>
+                  onChange={(event) => {
+                    setPreviewBeforeDecisionEdit(preview);
+                    onPricingModeChange(event.target.value);
+                  }}>
                   <option value="system_auto">Автоматична ціна системи</option>
                   <option value="usd_per_gram">Власна ціна USD/г</option>
                   <option value="manual_uah">Точна ручна ціна UAH</option>
@@ -102,11 +122,17 @@ export function RecountConfirmDialog({
                 <div className="mt-3 space-y-3">
                   <label className="block text-sm">USD за грам
                     <input className="input mt-2" type="number" min="0.0001" step="0.0001"
-                      value={usdPerGram} onChange={(event) => onUsdPerGramChange(event.target.value)} />
+                      value={usdPerGram} onChange={(event) => {
+                        setPreviewBeforeDecisionEdit(preview);
+                        onUsdPerGramChange(event.target.value);
+                      }} />
                   </label>
                   <label className="flex items-center gap-2 text-sm">
                     <input type="checkbox" checked={marketingRoundingEnabled}
-                      onChange={(event) => onMarketingRoundingChange(event.target.checked)} />
+                      onChange={(event) => {
+                        setPreviewBeforeDecisionEdit(preview);
+                        onMarketingRoundingChange(event.target.checked);
+                      }} />
                     Маркетингове округлення
                   </label>
                 </div>
@@ -115,7 +141,10 @@ export function RecountConfirmDialog({
                 <label className="mt-3 block text-sm">Точна ціна UAH
                   <input className="input mt-2" type="number" min="0.01" step="0.01"
                     value={manualPriceUah}
-                    onChange={(event) => onManualPriceChange(event.target.value)} />
+                    onChange={(event) => {
+                      setPreviewBeforeDecisionEdit(preview);
+                      onManualPriceChange(event.target.value);
+                    }} />
                 </label>
               )}
               {!previewCurrent && <p className="mt-2 text-sm text-amber-800">Оновлюємо розрахунок…</p>}
@@ -158,7 +187,7 @@ export function RecountConfirmDialog({
               </div>
               <div className="mt-2 flex items-center gap-2">
                 <div className="min-w-0 flex-1 text-sm font-semibold text-slate-900">
-                  {formatUah(newPrice)}
+                  {showTargetPrice ? formatUah(newPrice) : '—'}
                 </div>
                 <button
                   type="button"
@@ -166,6 +195,7 @@ export function RecountConfirmDialog({
                   className="btn btn-outline btn-icon"
                   aria-label="Скопіювати нову ціну"
                   title="Скопіювати ціну"
+                  disabled={!showTargetPrice}
                 >
                   <Copy size={15} aria-hidden="true" />
                 </button>
@@ -175,7 +205,9 @@ export function RecountConfirmDialog({
 
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 px-4 py-3 text-sm">
             <span className="text-slate-600">Різниця в ціні</span>
-            <span className="font-semibold text-slate-900">{formatUah(priceDelta)}</span>
+            <span className="font-semibold text-slate-900">
+              {showTargetPrice ? formatUah(priceDelta.toFixed(2)) : '—'}
+            </span>
           </div>
 
           {requiresManualPrice && (
@@ -214,6 +246,11 @@ export function RecountConfirmDialog({
                 ? 'Запит не змінить товар у базі. Переоблік буде виконано після ручного оновлення сайту.'
                 : 'Новий артикул буде активним товаром, але не потрапить у звичайний експорт.'}
           </div>
+          {isChoiceMode && isCustomDecision && (
+            <p className="text-sm text-slate-600">
+              Індивідуальна ціна діє лише для запитів на виправлення. Прямий переоблік використовує звичайні правила ціноутворення.
+            </p>
+          )}
         </div>
 
         <div className={`dialog-footer grid gap-3 ${isChoiceMode ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
@@ -230,25 +267,27 @@ export function RecountConfirmDialog({
               type="button"
               onClick={() => onConfirm('request')}
               className="btn btn-outline order-1 sm:order-2"
-              disabled={isApplying || !previewCurrent || (showDecision && pricingMode === 'system_auto'
+              disabled={isApplying || !previewCurrent || (isCustomDecision && !showTargetPrice)
+                || (showDecision && pricingMode === 'system_auto'
                 && !(Number(newPrice) > 0)) || (requiresManualPrice && !hasManualPrice)}
             >
               {isApplying && submittingMode === 'request' ? 'Створюємо...' : 'Створити запит'}
             </button>
           )}
-          {(!isChoiceMode || !showDecision || pricingMode === 'system_auto') && <button
+          <button
             ref={confirmButtonRef}
             type="button"
             onClick={() => onConfirm(isRequestMode ? 'request' : 'apply')}
             className={`btn btn-primary order-1 ${isChoiceMode ? 'sm:order-3' : 'sm:order-2'}`}
-            disabled={isApplying || !previewCurrent || (requiresManualPrice && !hasManualPrice)}
+            disabled={isApplying || !previewCurrent || (isChoiceMode && isCustomDecision)
+              || (requiresManualPrice && !hasManualPrice)}
           >
             {isApplying && submittingMode === (isRequestMode ? 'request' : 'apply')
               ? 'Створюємо...'
               : isRequestMode
                 ? 'Створити запит'
                 : 'Створити коригувальний артикул'}
-          </button>}
+          </button>
         </div>
       </div>
     </div>,
