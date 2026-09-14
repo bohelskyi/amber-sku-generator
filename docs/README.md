@@ -19,4 +19,3 @@ Current server code and PostgreSQL migrations are authoritative for implemented 
 ## Historical evidence
 
 - [2026 refactor audit and completed roadmap](archive/REFACTOR_2026.md)
-- [Phase 7.0 performance baseline and supporting artifacts](performance/phase7-baseline/BASELINE.md)

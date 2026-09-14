@@ -923,7 +923,7 @@ Split reads and resource commands, constrain dynamic SQL identifiers, and isolat
 
 ### Phase 7 — Measured performance work
 
-**Status: complete through `0aed9e9`.** Phase 7.0 (`948e879`) added bounded query instrumentation and the benchmark harness, then recorded the original measurements in the [historical Phase 7.0 baseline](../performance/phase7-baseline/BASELINE.md). That report's measurements and candidate checkpoints describe the starting state; the results below are later measurements, not revisions to the baseline.
+**Status: complete through `0aed9e9`.** Phase 7.0 (`948e879`) added bounded query instrumentation and the benchmark harness and established the original performance baseline. The original baseline measurements are summarized below; the later checkpoints record the measured optimization results.
 
 | Checkpoint | Completed change |
 | --- | --- |
