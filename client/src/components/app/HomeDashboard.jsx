@@ -130,24 +130,24 @@ export function HomeDashboard({
   return (
     <div className="space-y-5">
       <div className={`home-top-workspace${canCreateProducts ? '' : ' is-decoder-only'}`}>
-        {canCreateProducts && <section className="home-workspace-panel home-create-panel card p-4 sm:p-5 fade-up stagger-1">
-          <div className="section-title mb-4">
+        {canCreateProducts && <section className="home-workspace-panel home-create-panel card fade-up stagger-1">
+          <div className="home-create-heading section-title">
             <div>
               <p className="eyebrow">Створити SKU</p>
               <h2 className="section-title-text">Оберіть категорію</h2>
             </div>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="home-category-list grid sm:grid-cols-2 xl:grid-cols-3">
             {Object.values(config.categories).map((category) => (
               <button
                 key={category.code}
                 onClick={() => onStart(category.code)}
-                className="category-card"
+                className="home-category-option"
               >
                 <div className="flex items-center gap-3">
                   <span className="category-code">{category.code}</span>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold text-slate-900">{category.name}</div>
+                    <div className="text-sm font-semibold text-slate-900">{category.name}</div>
                     <div className="category-meta">
                       {category.requires_weight === 1 ? 'Вага обов’язкова' : 'Без ваги'}
                     </div>
@@ -158,11 +158,11 @@ export function HomeDashboard({
           </div>
         </section>}
 
-        <div className="home-side-workspace fade-up stagger-2">
-          <div className="home-workspace-panel home-decode-panel card p-4 sm:p-5">
+        <div className="home-side-workspace home-workspace-panel card fade-up stagger-2">
+          <div className="home-decode-panel px-4 py-3">
             <p className="eyebrow">Розшифрувати SKU</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Знайти та перевірити товар</h2>
-            <div className="home-decode-actions mt-4 flex flex-col gap-3 sm:flex-row lg:flex-col">
+            <div className="home-decode-actions mt-3 flex flex-col gap-2 sm:flex-row lg:flex-col">
               <input
                 type="text"
                 value={skuToDecode}
@@ -184,7 +184,7 @@ export function HomeDashboard({
             )}
           </div>
 
-          <div className="home-workspace-panel home-export-panel utility-strip">
+          <div className="home-export-panel">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold text-slate-700">Експорт</p>
@@ -201,7 +201,7 @@ export function HomeDashboard({
               </span>
             </div>
             {exportStatus && (
-              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
                 <span>У базі: {exportStatus.totalProducts}</span>
                 {exportStatus.exportableProducts !== undefined && <span>До експорту: {exportStatus.exportableProducts}</span>}
               </div>
