@@ -12,7 +12,7 @@ const {
   getPricingAnswers,
   getProductDetails,
 } = require('./repricing/pricing-state');
-const { toUahNumber } = require('../utils/money');
+const { roundAutomaticUah, toUahNumber } = require('../utils/money');
 
 const PRODUCT_COLUMNS = `id, full_sku, category, weight, total_price, total_price_uah,
   price_per_gram, uah_rate, details, status, corrected_to_product_id,
@@ -34,6 +34,23 @@ function normalizeProductId(value) {
 }
 
 function normalizePriceChangeDecision(input) {
+  if (input?.mode === 'manual_uah') {
+    const allowedKeys = ['mode', 'manualPriceUah', 'marketingRoundingEnabled'];
+    if (Array.isArray(input)
+        || Object.keys(input).some((key) => !allowedKeys.includes(key))
+        || typeof input.marketingRoundingEnabled !== 'boolean') {
+      throw commandError(
+        'Явно виберіть маркетингове округлення для ручної ціни UAH.'
+      );
+    }
+    return {
+      ...normalizePricingDecision({
+        mode: 'manual_uah',
+        manualPriceUah: input.manualPriceUah,
+      }),
+      marketingRoundingEnabled: input.marketingRoundingEnabled,
+    };
+  }
   const decision = normalizePricingDecision(input);
   if (decision.mode === 'system_auto') {
     throw commandError('Для зміни ціни виберіть «Ручна UAH» або «USD/г».');
@@ -107,7 +124,10 @@ async function calculatePriceChange(product, decision, queryable) {
   const calculatedPriceUah = toUahNumber(pricing.currencyPayload.calculatedPriceUah);
   const autoPriceUah = toUahNumber(pricing.currencyPayload.totalPriceUah);
   const manualPriceUah = decision.mode === 'manual_uah'
-    ? decision.manualPriceUah : null;
+    ? toUahNumber(decision.marketingRoundingEnabled
+      ? roundAutomaticUah(decision.manualPriceUah)
+      : decision.manualPriceUah)
+    : null;
   const finalPriceUah = manualPriceUah ?? autoPriceUah;
   if (!(Number(finalPriceUah) > 0)) {
     throw commandError('Вибране цінове рішення не утворює додатну ціну UAH.');
@@ -169,9 +189,10 @@ async function calculatePriceChange(product, decision, queryable) {
 function getPriceChangePreviewToken(product, decision, projected) {
   if (decision.mode === 'manual_uah') {
     return hashPayload({
-      version: 1,
+      version: 2,
       productState: getProductStateSignature(product),
       decision,
+      resultingPriceUah: projected.totalPriceUah,
     });
   }
   return hashPayload({
@@ -301,6 +322,17 @@ async function applyProductPriceChange(payload = {}, options = {}) {
       );
     }
 
+    const exportRevision = await client.query(
+      `INSERT INTO product_export_revisions
+         (product_id, revision, confirmed_revision, changed_at)
+       VALUES ($1, 1, 0, CURRENT_TIMESTAMP)
+       ON CONFLICT (product_id) DO UPDATE
+       SET revision = product_export_revisions.revision + 1,
+           changed_at = CURRENT_TIMESTAMP
+       RETURNING revision`,
+      [productId]
+    );
+
     const audit = await writeAuditEvent(client, {
       mutationContext,
       eventKey: 'product.price_changed',
@@ -309,8 +341,10 @@ async function applyProductPriceChange(payload = {}, options = {}) {
       details: {
         fullSku: product.full_sku,
         priceMode: decision.mode,
+        pricingDecision: decision,
         oldPrice,
         newPrice,
+        exportRevision: Number(exportRevision.rows[0].revision),
       },
     });
     await client.query('COMMIT');

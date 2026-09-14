@@ -1,6 +1,7 @@
 const suite = require('./suite-context');
 const {
   assert,
+  crypto,
   test,
   pool,
   request,
@@ -8,6 +9,68 @@ const {
   replaceActiveRoleForTest,
   authenticateIdentitySession,
 } = suite;
+
+async function createReexportProduct({ excludeFromExport = 0, priceUah = 2400 } = {}) {
+  const fullSku = `RX${crypto.randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+  const result = await pool.query(
+    `INSERT INTO products
+       (full_sku, base_sku, sequence_number, category, weight, total_price,
+        total_price_uah, price_per_gram, uah_rate, details, sku_schema_version_id,
+        exclude_from_export)
+     VALUES ($1, $1, 0, 'LN', 10, $2, $3, 6, 40,
+       '{"answers":{"raw_type":1,"size":3,"shape":6,"is_calibrated":1},"isCalibrated":1}'::jsonb,
+       $4, $5)
+     RETURNING id, full_sku`,
+    [fullSku, priceUah / 40, priceUah, suite.schemas.LN, excludeFromExport]
+  );
+  return result.rows[0];
+}
+
+async function changeManualPrice(productId, manualPriceUah) {
+  const pricingDecision = {
+    mode: 'manual_uah',
+    manualPriceUah,
+    marketingRoundingEnabled: false,
+  };
+  const preview = await request('/api/product-price-change/preview', {
+    method: 'POST', body: { productId, pricingDecision },
+  });
+  assert.equal(preview.response.status, 200, preview.text);
+  const applied = await request('/api/product-price-change/apply', {
+    method: 'POST',
+    body: { productId, pricingDecision, previewToken: preview.data.previewToken },
+  });
+  assert.equal(applied.response.status, 200, applied.text);
+  return applied.data;
+}
+
+async function createSnapshot(fromSku, toSku = fromSku) {
+  const result = await request('/api/export/snapshots', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': `reexport-${crypto.randomUUID()}` },
+    body: { fromSku, toSku },
+  });
+  assert.equal(result.response.status, 201, result.text);
+  return result.data;
+}
+
+async function confirmSnapshot(snapshotId) {
+  const result = await request(`/api/export/snapshots/${snapshotId}/confirm`, {
+    method: 'POST', body: {},
+  });
+  assert.equal(result.response.status, 200, result.text);
+  return result.data;
+}
+
+async function snapshotCsv(snapshotId) {
+  const result = await request(`/api/export/snapshots/${snapshotId}/csv`);
+  assert.equal(result.response.status, 200, result.text);
+  return result.text;
+}
+
+function csvRowsForSku(csv, sku) {
+  return csv.split(/\r?\n/).filter((line) => line.startsWith(`${sku},`));
+}
 
 test('export snapshot creation and confirmation are attributed, audited, and idempotent', async () => {
   const exportSku = (await pool.query(
@@ -148,6 +211,139 @@ test('export snapshot creation and confirmation are attributed, audited, and ide
   );
   } finally {
     await replaceActiveRoleForTest(confirmerUserId, 'manager');
+  }
+});
+
+test('in-place price changes coalesce into one immutable pending re-export with the latest price', async () => {
+  const product = await createReexportProduct();
+  const nextProduct = await createReexportProduct({ priceUah: 1100 });
+  try {
+    const initialSnapshot = await createSnapshot(product.full_sku, product.full_sku);
+    const initialCsv = await snapshotCsv(initialSnapshot.id);
+    const initialRows = csvRowsForSku(initialCsv, product.full_sku);
+    assert.equal(initialRows.length, 1);
+    assert.ok(initialRows[0].startsWith(`${product.full_sku},2400,`));
+    await confirmSnapshot(initialSnapshot.id);
+    const cursorBeforeChanges = Number((await pool.query(
+      'SELECT exported_to_product_id FROM export_state WHERE singleton = TRUE'
+    )).rows[0].exported_to_product_id);
+    assert.equal(cursorBeforeChanges, Number(product.id));
+
+    await changeManualPrice(product.id, 2500);
+    await changeManualPrice(product.id, 2600);
+    assert.deepEqual((await pool.query(
+      `SELECT revision, confirmed_revision
+       FROM product_export_revisions WHERE product_id = $1`,
+      [product.id]
+    )).rows, [{ revision: '2', confirmed_revision: '0' }]);
+    assert.equal(Number((await pool.query(
+      'SELECT exported_to_product_id FROM export_state WHERE singleton = TRUE'
+    )).rows[0].exported_to_product_id), cursorBeforeChanges);
+
+    const nextSnapshot = await createSnapshot(nextProduct.full_sku, nextProduct.full_sku);
+    const nextCsv = await snapshotCsv(nextSnapshot.id);
+    const reexportedRows = csvRowsForSku(nextCsv, product.full_sku);
+    assert.equal(reexportedRows.length, 1);
+    assert.ok(reexportedRows[0].startsWith(`${product.full_sku},2600,`));
+    assert.equal(csvRowsForSku(nextCsv, nextProduct.full_sku).length, 1);
+    const captured = (await pool.query(
+      `SELECT reexport_revisions FROM export_snapshots WHERE id = $1`,
+      [nextSnapshot.id]
+    )).rows[0].reexport_revisions;
+    assert.deepEqual(captured, [{ productId: Number(product.id), revision: 2 }]);
+
+    await confirmSnapshot(nextSnapshot.id);
+    assert.deepEqual((await pool.query(
+      `SELECT revision, confirmed_revision
+       FROM product_export_revisions WHERE product_id = $1`,
+      [product.id]
+    )).rows, [{ revision: '2', confirmed_revision: '2' }]);
+    assert.equal(await snapshotCsv(initialSnapshot.id), initialCsv);
+  } finally {
+    await pool.query('DELETE FROM products WHERE id = ANY($1::int[])', [
+      [Number(product.id), Number(nextProduct.id)],
+    ]);
+  }
+});
+
+test('snapshot confirmation clears only its captured revision under later changes and out-of-order confirmation', async () => {
+  const product = await createReexportProduct();
+  const anchors = [
+    await createReexportProduct({ priceUah: 1101 }),
+    await createReexportProduct({ priceUah: 1102 }),
+    await createReexportProduct({ priceUah: 1103 }),
+  ];
+  try {
+    const initialSnapshot = await createSnapshot(product.full_sku, product.full_sku);
+    await confirmSnapshot(initialSnapshot.id);
+
+    await changeManualPrice(product.id, 2500);
+    const olderSnapshot = await createSnapshot(anchors[0].full_sku, anchors[0].full_sku);
+    const olderCsv = await snapshotCsv(olderSnapshot.id);
+    const olderRows = csvRowsForSku(olderCsv, product.full_sku);
+    assert.equal(olderRows.length, 1);
+    assert.ok(olderRows[0].startsWith(`${product.full_sku},2500,`));
+
+    await changeManualPrice(product.id, 2600);
+    await confirmSnapshot(olderSnapshot.id);
+    assert.deepEqual((await pool.query(
+      `SELECT revision, confirmed_revision
+       FROM product_export_revisions WHERE product_id = $1`,
+      [product.id]
+    )).rows, [{ revision: '2', confirmed_revision: '1' }]);
+
+    const middleSnapshot = await createSnapshot(anchors[1].full_sku, anchors[1].full_sku);
+    const middleRows = csvRowsForSku(await snapshotCsv(middleSnapshot.id), product.full_sku);
+    assert.equal(middleRows.length, 1);
+    assert.ok(middleRows[0].startsWith(`${product.full_sku},2600,`));
+    await changeManualPrice(product.id, 2700);
+    const latestSnapshot = await createSnapshot(anchors[2].full_sku, anchors[2].full_sku);
+    const latestRows = csvRowsForSku(await snapshotCsv(latestSnapshot.id), product.full_sku);
+    assert.equal(latestRows.length, 1);
+    assert.ok(latestRows[0].startsWith(`${product.full_sku},2700,`));
+
+    const concurrentConfirmations = await Promise.all([
+      confirmSnapshot(latestSnapshot.id),
+      confirmSnapshot(middleSnapshot.id),
+    ]);
+    assert.equal(concurrentConfirmations.length, 2);
+    assert.deepEqual((await pool.query(
+      `SELECT revision, confirmed_revision
+       FROM product_export_revisions WHERE product_id = $1`,
+      [product.id]
+    )).rows, [{ revision: '3', confirmed_revision: '3' }]);
+    assert.equal(await snapshotCsv(olderSnapshot.id), olderCsv);
+    assert.equal(Number((await pool.query(
+      'SELECT exported_to_product_id FROM export_state WHERE singleton = TRUE'
+    )).rows[0].exported_to_product_id), Number(anchors[2].id));
+  } finally {
+    await pool.query('DELETE FROM products WHERE id = ANY($1::int[])', [[
+      Number(product.id),
+      ...anchors.map((item) => Number(item.id)),
+    ]]);
+  }
+});
+
+test('an intentionally excluded product is not emitted by the pending re-export queue', async () => {
+  const excluded = await createReexportProduct({ excludeFromExport: 1 });
+  const anchor = await createReexportProduct({ priceUah: 1104 });
+  try {
+    const cursorSnapshot = await createSnapshot(anchor.full_sku, anchor.full_sku);
+    await confirmSnapshot(cursorSnapshot.id);
+    assert.ok(Number(anchor.id) > Number(excluded.id));
+
+    await changeManualPrice(excluded.id, 2500);
+    const nextSnapshot = await createSnapshot(anchor.full_sku, anchor.full_sku);
+    assert.equal(csvRowsForSku(await snapshotCsv(nextSnapshot.id), excluded.full_sku).length, 0);
+    assert.deepEqual((await pool.query(
+      `SELECT revision, confirmed_revision
+       FROM product_export_revisions WHERE product_id = $1`,
+      [excluded.id]
+    )).rows, [{ revision: '1', confirmed_revision: '0' }]);
+  } finally {
+    await pool.query('DELETE FROM products WHERE id = ANY($1::int[])', [[
+      Number(excluded.id), Number(anchor.id),
+    ]]);
   }
 });
 

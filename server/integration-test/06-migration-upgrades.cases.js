@@ -60,6 +60,62 @@ test('migration 029 enables rounding for categories created before the upgrade',
   }
 });
 
+test('migration 031 preserves existing export snapshots and adds immutable revision evidence', async () => {
+  const databaseName = 'amber_product_reexport_upgrade_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const oldDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-pre-product-reexport-'));
+  try {
+    const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
+      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('031_'));
+    await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
+      path.resolve(serverRoot, 'migrations', fileName), path.resolve(oldDirectory, fileName)
+    )));
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations({ directory: ${JSON.stringify(oldDirectory)} })
+        .finally(() => db.end()).catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+    const upgradePool = new Pool({ connectionString: databaseUrl });
+    try {
+      await upgradePool.query(`
+        INSERT INTO export_snapshots
+          (id, idempotency_key, from_sku, resolved_to_sku, exported_to_product_id,
+           row_count, file_name, csv_content)
+        VALUES ('pre-031-snapshot', 'pre-031-key', 'OLD1', 'OLD1', 0, 0,
+                'old.csv', 'sku,price_uah')
+      `);
+      await runNodeInDatabase(databaseUrl, `
+        const db = require('./src/db/pool');
+        const { runMigrations } = require('./src/db/run-migrations');
+        (async () => { await runMigrations(); await runMigrations(); await db.end(); })()
+          .catch((error) => { console.error(error); process.exitCode = 1; });
+      `);
+      const upgraded = await upgradePool.query(`
+        SELECT csv_content, reexport_revisions
+        FROM export_snapshots WHERE id = 'pre-031-snapshot'
+      `);
+      assert.deepEqual(upgraded.rows, [{
+        csv_content: 'sku,price_uah',
+        reexport_revisions: [],
+      }]);
+      await assert.rejects(
+        upgradePool.query(`
+          UPDATE export_snapshots
+          SET reexport_revisions = '[{"productId":1,"revision":1}]'::jsonb
+          WHERE id = 'pre-031-snapshot'
+        `),
+        /immutable/
+      );
+    } finally {
+      await upgradePool.end();
+    }
+  } finally {
+    await fs.rm(oldDirectory, { recursive: true, force: true });
+    await dropTestDatabase(databaseName);
+  }
+});
+
 test('migration 030 preserves legacy requests and advances Manager permission version once', async () => {
   const databaseName = 'amber_correction_pricing_upgrade_test';
   const databaseUrl = await recreateTestDatabase(databaseName);

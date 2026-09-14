@@ -56,6 +56,7 @@ export function useProductRecount({
   const [isPriceChangeOpen, setIsPriceChangeOpen] = useState(false);
   const [priceChangeMode, setPriceChangeMode] = useState('manual_uah');
   const [priceChangeManualUah, setPriceChangeManualUah] = useState('');
+  const [priceChangeManualRounding, setPriceChangeManualRounding] = useState(false);
   const [priceChangeUsdPerGram, setPriceChangeUsdPerGram] = useState('');
   const [priceChangeMarketingRounding, setPriceChangeMarketingRounding] = useState(true);
   const [priceChangePreview, setPriceChangePreview] = useState(null);
@@ -87,9 +88,14 @@ export function useProductRecount({
         usdPerGram: priceChangeUsdPerGram,
         marketingRoundingEnabled: priceChangeMarketingRounding,
       }
-      : { mode: 'manual_uah', manualPriceUah: priceChangeManualUah }
+      : {
+        mode: 'manual_uah',
+        manualPriceUah: priceChangeManualUah,
+        marketingRoundingEnabled: priceChangeManualRounding,
+      }
   ), [
     priceChangeManualUah,
+    priceChangeManualRounding,
     priceChangeMarketingRounding,
     priceChangeMode,
     priceChangeUsdPerGram,
@@ -476,6 +482,7 @@ export function useProductRecount({
       priceChangeRequestIdRef.current += 1;
       setPriceChangeMode('manual_uah');
       setPriceChangeManualUah('');
+      setPriceChangeManualRounding(false);
       setPriceChangeUsdPerGram('');
       setPriceChangeMarketingRounding(getCorrectionMarketingRoundingDefault(
         config,
@@ -519,6 +526,14 @@ export function useProductRecount({
   const handlePriceChangeManualUah = (value) => {
     priceChangeRequestIdRef.current += 1;
     setPriceChangeManualUah(value);
+    setPriceChangePreview(null);
+    setPriceChangeError('');
+    setIsPriceChangeLoading(false);
+  };
+
+  const handlePriceChangeManualRounding = (value) => {
+    priceChangeRequestIdRef.current += 1;
+    setPriceChangeManualRounding(value);
     setPriceChangePreview(null);
     setPriceChangeError('');
     setIsPriceChangeLoading(false);
@@ -645,6 +660,7 @@ export function useProductRecount({
     isPriceChangeOpen,
     priceChangeError,
     priceChangeManualUah,
+    priceChangeManualRounding,
     priceChangeMarketingRounding,
     priceChangeMode,
     priceChangePreview,
@@ -668,6 +684,7 @@ export function useProductRecount({
     setRecountUsdPerGram,
     setRecountMarketingRounding,
     setPriceChangeManualUah: handlePriceChangeManualUah,
+    setPriceChangeManualRounding: handlePriceChangeManualRounding,
     setPriceChangeMarketingRounding: handlePriceChangeMarketingRounding,
     setPriceChangeMode: handlePriceChangeMode,
     setPriceChangeUsdPerGram: handlePriceChangeUsdPerGram,

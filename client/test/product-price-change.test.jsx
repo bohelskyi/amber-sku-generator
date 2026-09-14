@@ -9,6 +9,7 @@ function renderDialog(overrides = {}) {
     onCancel: vi.fn(),
     onConfirm: vi.fn(),
     onManualPriceChange: vi.fn(),
+    onManualMarketingRoundingChange: vi.fn(),
     onMarketingRoundingChange: vi.fn(),
     onModeChange: vi.fn(),
     onUsdPerGramChange: vi.fn(),
@@ -33,7 +34,7 @@ function renderDialog(overrides = {}) {
 }
 
 it('defaults to the Manual UAH presentation and shows SKU and authoritative price comparison', () => {
-  renderDialog();
+  const handlers = renderDialog();
   const choices = within(screen.getByRole('radiogroup', { name: 'Режим зміни ціни' }))
     .getAllByRole('radio');
   expect(choices.map((choice) => choice.value)).toEqual(['manual_uah', 'usd_per_gram']);
@@ -42,6 +43,10 @@ it('defaults to the Manual UAH presentation and shows SKU and authoritative pric
   expect(screen.getByText('2400 ₴')).toBeTruthy();
   expect(screen.getByText('2500 ₴')).toBeTruthy();
   expect(screen.getByText('+100 ₴')).toBeTruthy();
+  const rounding = screen.getByLabelText('Маркетингове округлення');
+  expect(rounding.checked).toBe(false);
+  fireEvent.click(rounding);
+  expect(handlers.onManualMarketingRoundingChange).toHaveBeenCalledWith(true);
   expect(screen.getByRole('button', { name: 'Змінити ціну' }).disabled).toBe(false);
 });
 

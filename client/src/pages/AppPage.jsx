@@ -174,6 +174,7 @@ function AppPage() {
         isLoading={sku.isPriceChangeLoading}
         isOpen={sku.isPriceChangeOpen}
         manualPriceUah={sku.priceChangeManualUah}
+        manualMarketingRoundingEnabled={sku.priceChangeManualRounding}
         marketingRoundingEnabled={sku.priceChangeMarketingRounding}
         mode={sku.priceChangeMode}
         preview={sku.priceChangePreview}
@@ -182,6 +183,7 @@ function AppPage() {
         onCancel={sku.handleCancelPriceChange}
         onConfirm={sku.handleConfirmPriceChange}
         onManualPriceChange={sku.setPriceChangeManualUah}
+        onManualMarketingRoundingChange={sku.setPriceChangeManualRounding}
         onMarketingRoundingChange={sku.setPriceChangeMarketingRounding}
         onModeChange={sku.setPriceChangeMode}
         onUsdPerGramChange={sku.setPriceChangeUsdPerGram}

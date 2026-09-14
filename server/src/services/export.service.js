@@ -1,16 +1,16 @@
 const pool = require('../db/pool');
 const crypto = require('node:crypto');
-const { getProductBySku } = require('./product.service');
+const { getProductBySku } = require('./product/product-queries');
 const { buildCsv } = require('../utils/csv');
 const { toUahNumber } = require('../utils/money');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
 const { startPhase } = require('../observability/performance-metrics');
 
-async function getNonSkuQuestionMaps(categoryCodes) {
+async function getNonSkuQuestionMaps(categoryCodes, queryable = pool) {
   if (!categoryCodes || categoryCodes.length === 0) return new Map();
 
-  const result = await pool.query(
+  const result = await queryable.query(
     `
       SELECT
         q.category_code,
@@ -120,7 +120,10 @@ function getExportSizeValue(productRow, nonSkuQuestionMaps) {
   return labels.join(' / ');
 }
 
-async function getExportRows(fromSku, toSku) {
+async function getExportRows(fromSku, toSku, options = {}) {
+  const queryable = options.queryable || pool;
+  const includePendingReexports = Boolean(options.includePendingReexports);
+  const lockProducts = Boolean(options.lockProducts);
   const normalizedFromSku = String(fromSku || '').trim().toUpperCase();
   const normalizedToSku = String(toSku || '').trim().toUpperCase();
 
@@ -128,14 +131,14 @@ async function getExportRows(fromSku, toSku) {
     throw new Error('Потрібно вказати артикул, з якого починати експорт');
   }
 
-  const fromProduct = await getProductBySku(normalizedFromSku);
+  const fromProduct = await getProductBySku(queryable, normalizedFromSku);
   if (!fromProduct) {
     throw new Error(`Артикул ${normalizedFromSku} не знайдено`);
   }
 
   let toProduct = null;
   if (normalizedToSku) {
-    toProduct = await getProductBySku(normalizedToSku);
+    toProduct = await getProductBySku(queryable, normalizedToSku);
     if (!toProduct) {
       throw new Error(`Артикул ${normalizedToSku} не знайдено`);
     }
@@ -147,18 +150,33 @@ async function getExportRows(fromSku, toSku) {
   const endId = idTo !== null ? Math.max(idFrom, idTo) : null;
 
   const params = [startId];
-  const whereClauses = ['id >= $1', 'COALESCE(exclude_from_export, 0) = 0'];
+  const rangeClauses = ['p.id >= $1'];
   if (endId !== null) {
     params.push(endId);
-    whereClauses.push(`id <= $${params.length}`);
+    rangeClauses.push(`p.id <= $${params.length}`);
   }
+  const inRequestedRangeSql = `(${rangeClauses.join(' AND ')})`;
+  const pendingReexportSql = includePendingReexports
+    ? `OR (
+         revisions.revision > revisions.confirmed_revision
+         AND p.id <= COALESCE((
+           SELECT exported_to_product_id FROM export_state WHERE singleton = TRUE
+         ), 0)
+       )`
+    : '';
 
-  const result = await pool.query(
+  const result = await queryable.query(
     `
-      SELECT id, full_sku, category, total_price_uah, details, created_at
-      FROM products
-      WHERE ${whereClauses.join(' AND ')}
-      ORDER BY id ASC
+      SELECT p.id, p.full_sku, p.category, p.total_price_uah, p.details, p.created_at,
+             revisions.revision AS reexport_revision,
+             revisions.confirmed_revision AS confirmed_export_revision,
+             ${inRequestedRangeSql} AS in_requested_range
+      FROM products p
+      LEFT JOIN product_export_revisions revisions ON revisions.product_id = p.id
+      WHERE COALESCE(p.exclude_from_export, 0) = 0
+        AND (${inRequestedRangeSql} ${pendingReexportSql})
+      ORDER BY p.id ASC
+      ${lockProducts ? 'FOR SHARE OF p' : ''}
     `,
     params
   );
@@ -167,7 +185,7 @@ async function getExportRows(fromSku, toSku) {
   const categoryCodes = Array.from(
     new Set(result.rows.map((row) => String(row.category || '').trim()).filter((code) => code))
   );
-  const nonSkuQuestionMaps = await getNonSkuQuestionMaps(categoryCodes);
+  const nonSkuQuestionMaps = await getNonSkuQuestionMaps(categoryCodes, queryable);
   const textColumns = collectExportTextColumns(result.rows, nonSkuQuestionMaps);
   const rowsWithSize = result.rows.map((row) => ({
     ...row,
@@ -176,16 +194,24 @@ async function getExportRows(fromSku, toSku) {
   }));
   finishShaping();
 
+  const requestedRangeRows = rowsWithSize.filter((row) => row.in_requested_range);
+  const lastRequestedRangeRow = requestedRangeRows[requestedRangeRows.length - 1] || null;
+  const reexportRevisions = rowsWithSize
+    .filter((row) => Number(row.reexport_revision) > Number(row.confirmed_export_revision))
+    .map((row) => ({
+      productId: Number(row.id),
+      revision: Number(row.reexport_revision),
+    }));
+
   return {
     rows: rowsWithSize,
     textColumns,
+    reexportRevisions,
     range: {
       fromSku: fromProduct.full_sku,
       toSku: toProduct ? toProduct.full_sku : null,
-      resolvedToSku:
-        rowsWithSize.length > 0
-          ? rowsWithSize[rowsWithSize.length - 1].full_sku
-          : fromProduct.full_sku,
+      resolvedToSku: lastRequestedRangeRow?.full_sku || fromProduct.full_sku,
+      exportedToProductId: lastRequestedRangeRow ? Number(lastRequestedRangeRow.id) : 0,
     },
   };
 }
@@ -239,20 +265,23 @@ async function createExportSnapshot({ fromSku, toSku, idempotencyKey }, options 
     return assertSnapshotMatchesRequest(existing.rows[0], fromSku, toSku);
   }
 
-  const exportData = await getExportRows(fromSku, toSku);
-  const suffixPart = exportData.range.toSku ? `-${exportData.range.toSku}` : '-to-latest';
-  const fileName = `amber-export-${exportData.range.fromSku}${suffixPart}.csv`;
-  const exportedToProductId = exportData.rows.length > 0
-    ? Number(exportData.rows[exportData.rows.length - 1].id)
-    : 0;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const exportData = await getExportRows(fromSku, toSku, {
+      queryable: client,
+      includePendingReexports: true,
+      lockProducts: true,
+    });
+    const suffixPart = exportData.range.toSku ? `-${exportData.range.toSku}` : '-to-latest';
+    const fileName = `amber-export-${exportData.range.fromSku}${suffixPart}.csv`;
+    const exportedToProductId = exportData.range.exportedToProductId;
     const result = await client.query(
       `INSERT INTO export_snapshots
        (id, idempotency_key, from_sku, to_sku, resolved_to_sku,
-        exported_to_product_id, row_count, file_name, csv_content, created_by_user_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        exported_to_product_id, row_count, file_name, csv_content, created_by_user_id,
+        reexport_revisions)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
        RETURNING *`,
       [
         crypto.randomUUID(),
@@ -265,6 +294,7 @@ async function createExportSnapshot({ fromSku, toSku, idempotencyKey }, options 
         fileName,
         buildExportCsv(exportData),
         mutationContext.actorUserId,
+        JSON.stringify(exportData.reexportRevisions),
       ]
     );
     const snapshot = result.rows[0];
@@ -335,6 +365,39 @@ async function confirmExportSnapshot(snapshotId, options = {}) {
         subjectId: snapshotId,
         details: { exportedToProductId: Number(snapshot.exported_to_product_id) },
       });
+    }
+    const representedReexports = Array.isArray(snapshot.reexport_revisions)
+      ? snapshot.reexport_revisions
+        .map((item) => ({
+          productId: Number(item?.productId),
+          revision: Number(item?.revision),
+        }))
+        .filter((item) => Number.isSafeInteger(item.productId) && item.productId > 0
+          && Number.isSafeInteger(item.revision) && item.revision > 0)
+        .sort((first, second) => first.productId - second.productId)
+      : [];
+    if (representedReexports.length > 0) {
+      const productIds = representedReexports.map((item) => item.productId);
+      await client.query(
+        `SELECT product_id
+         FROM product_export_revisions
+         WHERE product_id = ANY($1::int[])
+         ORDER BY product_id
+         FOR UPDATE`,
+        [productIds]
+      );
+      await client.query(
+        `UPDATE product_export_revisions revisions
+         SET confirmed_revision = GREATEST(
+               revisions.confirmed_revision,
+               represented.revision
+             )
+         FROM jsonb_to_recordset($1::jsonb)
+           AS represented("productId" integer, revision bigint)
+         WHERE revisions.product_id = represented."productId"
+           AND represented.revision <= revisions.revision`,
+        [JSON.stringify(representedReexports)]
+      );
     }
     await client.query(
       `INSERT INTO export_state

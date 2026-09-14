@@ -27,11 +27,13 @@ export function ProductPriceChangeDialog({
   isLoading = false,
   isOpen = false,
   manualPriceUah = '',
+  manualMarketingRoundingEnabled = false,
   marketingRoundingEnabled = true,
   mode = 'manual_uah',
   onCancel,
   onConfirm,
   onManualPriceChange,
+  onManualMarketingRoundingChange,
   onMarketingRoundingChange,
   onModeChange,
   onUsdPerGramChange,
@@ -108,17 +110,27 @@ export function ProductPriceChangeDialog({
             </div>
 
             {mode === 'manual_uah' ? (
-              <label className="mt-4 block text-sm">Нова ціна UAH
-                <input
-                  className="input mt-2"
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  value={manualPriceUah}
-                  onChange={(event) => onManualPriceChange(event.target.value)}
-                  autoFocus
-                />
-              </label>
+              <div className="mt-4 space-y-3">
+                <label className="block text-sm">Нова ціна UAH
+                  <input
+                    className="input mt-2"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={manualPriceUah}
+                    onChange={(event) => onManualPriceChange(event.target.value)}
+                    autoFocus
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={manualMarketingRoundingEnabled}
+                    onChange={(event) => onManualMarketingRoundingChange(event.target.checked)}
+                  />
+                  Маркетингове округлення
+                </label>
+              </div>
             ) : (
               <div className="mt-4 space-y-3">
                 <label className="block text-sm">USD за грам

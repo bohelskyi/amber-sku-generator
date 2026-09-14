@@ -311,6 +311,12 @@ function TimelineCard({ events }) {
       {event.type === 'product.price_changed' && (
         <div className="mt-4 space-y-2">
           <PriceChange price={event.details.price} />
+          {event.details.pricingDecision?.mode === 'manual_uah' && (
+            <p className="text-xs text-slate-500">
+              Введено вручну: {formatUah(event.details.pricingDecision.manualPriceUah)} · маркетингове округлення{' '}
+              {event.details.pricingDecision.marketingRoundingEnabled ? 'увімкнено' : 'вимкнено'}
+            </p>
+          )}
         </div>
       )}
 

@@ -70,6 +70,41 @@ test('migration 030 adds constrained correction pricing decisions and initial RB
   ]);
 });
 
+test('migration 031 adds durable product re-export revisions to immutable snapshots', async () => {
+  const tables = await pool.query(`
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = 'product_export_revisions'
+  `);
+  assert.deepEqual(tables.rows, [{ table_name: 'product_export_revisions' }]);
+
+  const revisionColumns = await pool.query(`
+    SELECT column_name, data_type, is_nullable
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'product_export_revisions'
+    ORDER BY ordinal_position
+  `);
+  assert.deepEqual(revisionColumns.rows, [
+    { column_name: 'product_id', data_type: 'integer', is_nullable: 'NO' },
+    { column_name: 'revision', data_type: 'bigint', is_nullable: 'NO' },
+    { column_name: 'confirmed_revision', data_type: 'bigint', is_nullable: 'NO' },
+    { column_name: 'changed_at', data_type: 'timestamp with time zone', is_nullable: 'NO' },
+  ]);
+
+  const snapshotColumn = await pool.query(`
+    SELECT data_type, is_nullable, column_default
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'export_snapshots'
+      AND column_name = 'reexport_revisions'
+  `);
+  assert.deepEqual(snapshotColumn.rows, [{
+    data_type: 'jsonb',
+    is_nullable: 'NO',
+    column_default: "'[]'::jsonb",
+  }]);
+});
+
 test('migration 019 matches the connect-pg-simple 10.0.0 table contract', async () => {
   const columns = await pool.query(`
     SELECT column_name, data_type, is_nullable, datetime_precision
@@ -105,7 +140,7 @@ test('migration 019 matches the connect-pg-simple 10.0.0 table contract', async 
   ]);
 });
 
-test('migrations 020-030 create constrained RBAC, audit, and business actor attribution', async () => {
+test('migrations 020-031 create constrained RBAC, audit, and business actor attribution', async () => {
   const requiredTables = await pool.query(`
     SELECT table_name
     FROM information_schema.tables

@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations `000`–`029` are immutable history; whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations `000`–`030` are immutable history; whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -42,7 +42,7 @@ Important database protections are layered:
 - active correction requests and active repricing drafts use partial unique indexes;
 - correction claims use conditional atomic updates and token-hash comparison;
 - repricing locks products in stable ID order and applies/rolls back atomically;
-- export idempotency, immutability, row-locked confirmation, and monotonic cursor protections work together.
+- export idempotency, immutable CSV/re-export revision evidence, product-locked snapshot capture, row-locked confirmation, coalescing product revision high-water marks, and the monotonic cursor work together.
 - durable user-administration audit inserts use the mutation's existing transaction, so an audit failure rolls back the domain mutation and no success event is emitted for a failure or no-op.
 - user and role administration share one advisory lock, revalidate the actor after acquiring it, use role/assignment optimistic concurrency, and preserve one current assignment plus the final active Administrator.
 - product create, archive, and recount actor writes and audit inserts share their existing business transaction; recount retains its established source/SKU lock order and final-state validation.
@@ -87,6 +87,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `028_custom_roles.sql` | Versioned editable roles, one-current-role enforcement, case-insensitive role names, immutable role identity, permanent role records, and database-enforced Administrator/reserved-permission protections. |
 | `029_category_marketing_rounding.sql` | Adds a constrained, default-enabled category flag for automatic-price marketing rounding. |
 | `030_correction_request_pricing_decisions.sql` | Adds persisted correction pricing decisions plus the Manager pricing-override permission and role-version advance. |
+| `031_product_price_reexports.sql` | Adds coalescing per-product price-change export revisions and immutable snapshot revision evidence. |
 
 ## Test database safety
 

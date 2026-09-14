@@ -298,6 +298,9 @@ function presentProductTimeline(querySku, data) {
       summary: 'Product price changed in place',
       details: {
         priceMode: details.priceMode || null,
+        pricingDecision: details.pricingDecision
+          ? asObject(details.pricingDecision)
+          : null,
         price: {
           beforeUah,
           afterUah,
