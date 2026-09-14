@@ -57,7 +57,7 @@ Migration `025` leaves existing token columns in place. A token is considered on
 
 The client queue loads immediately, polls every five seconds only while visible, refreshes on focus/visibility return, prevents overlapping polls, and prevents an older response from replacing newer state.
 
-## Current role behavior
+## Initial built-in role permissions
 
 | Role | Correction behavior |
 | --- | --- |
@@ -65,7 +65,11 @@ The client queue loads immediately, polls every five seconds only while visible,
 | Manager | View, create, reject/reopen. Cannot claim/release, refresh/complete, force-release, or directly apply recount. UI is monitoring/request-oriented. |
 | Storekeeper | View, create, claim/release, refresh/complete, reject/reopen, and direct recount. Cannot force-release. |
 
-Server permission checks remain authoritative; client controls are hidden from effective `/api/auth/me` permission keys only.
+Manager and Storekeeper permissions are Administrator-editable, so this table describes initial built-in mappings, not a deployed user's current access. Server permission checks remain authoritative; client controls are hidden from effective `/api/auth/me` permission keys only.
+
+## Product timeline and configuration evolution
+
+`GET /api/product-timeline` reads a product's correction lineage and returns historical events plus `configurationEvolution`. The latter presents the initial recorded configuration and later answer-changing configurations, with a changes-only view and a full-state view in the client. It uses stored product/correction evidence and historical SKU schemas; it does not infer unrecorded values from today's catalog. Ambiguous lineage or insufficient/conflicting historical evidence is reported as `partial` or `unavailable` with warnings rather than shown as certain history.
 
 ## Attribution and audit
 

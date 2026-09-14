@@ -58,6 +58,7 @@ Run the narrow regression first, then all applicable checks before handoff:
 ```text
 cd server
 npm test
+npm run lint
 
 set TEST_DATABASE_URL to a disposable database ending in _test
 npm run test:integration
@@ -72,9 +73,9 @@ git diff --check
 git status --short
 ```
 
-There is no separate server lint/build command. For deployment-image changes, also run `docker compose build`; validate Compose changes with `docker compose config`.
+There is no separate server build command. For deployment-image changes, also run `docker compose build`; validate Compose changes with `docker compose config`.
 
-CI uses Node 20 and PostgreSQL 16 and runs server unit/integration tests plus client test/lint/build.
+CI uses Node 20 and PostgreSQL 16 and validates Compose, runs server lint/unit/integration checks, plus client test/lint/build.
 
 ## Operational safety
 

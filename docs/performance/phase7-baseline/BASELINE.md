@@ -1,5 +1,7 @@
 # Phase 7.0 Baseline Measurement
 
+> **Historical baseline — non-authoritative for current performance.** The measurements, candidate classifications, proposed checkpoint 7.1 experiments, and approval language below describe the original Phase 7.0 state. Later repricing optimizations and their measured results are recorded in the [completed 2026 refactor history](../../archive/REFACTOR_2026.md#phase-7--measured-performance-work). Preserve these figures and supporting artifacts as collected; current code and fresh measurements govern present behavior.
+
 Generated: 2026-09-12T12:23:07.356Z
 
 This report records measurement infrastructure and baseline evidence only. No optimization, SQL rewrite, index, cache, batching, pagination, concurrency, transaction, configuration, or migration change is included.

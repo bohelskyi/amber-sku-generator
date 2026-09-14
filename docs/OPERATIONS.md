@@ -10,22 +10,24 @@ Credentials and OIDC/session secrets come from the ignored project-level `.env` 
 
 ## OIDC deployment
 
-Current registered application locations are:
+The repository's example production application locations are:
 
 - production application: `https://skumanager.ambergalbin.space`;
-- production callback: `https://skumanager.ambergalbin.space/api/auth/callback`;
+- production callback: `https://skumanager.ambergalbin.space/api/auth/callback`.
+
+The application cannot verify which URLs are currently registered with the external OIDC provider. Before deployment, confirm its allowed callback and post-logout URLs and set matching `APP_BASE_URL` and `OIDC_REDIRECT_URI` values.
 
 For local execution, `APP_BASE_URL` depends on the client mode:
 
 - Vite development: [http://localhost:5173](http://localhost:5173);
 - Docker/nginx local client: [http://localhost](http://localhost);
-- OIDC callback in both cases: [http://localhost:5000/api/auth/callback](http://localhost:5000/api/auth/callback).
+- OIDC callback for a directly launched server or the local Compose override: [http://localhost:5000/api/auth/callback](http://localhost:5000/api/auth/callback).
 
 Production uses the nginx `/api` path with the server kept internal. `TRUST_PROXY` is an exact hop count, and the outer TLS proxy must replace untrusted forwarding headers and preserve the original HTTPS scheme so Express emits secure cookies. Never directly expose the server when proxy trust is enabled.
 
-For local development, use the registered localhost origins consistently rather than mixing `localhost` and `127.0.0.1`. `docker-compose.local.yml` may expose the server port and is not the production Compose file.
+For local development, register and use the chosen localhost origins consistently rather than mixing `localhost` and `127.0.0.1`. Vite proxies `/api` to a directly launched server on port 5000. Base Compose exposes that server only to other containers; use `docker-compose.local.yml` when a local Docker callback must reach `localhost:5000`. The override also defines the disposable `postgres-test` service and is not the production Compose file.
 
-Real-environment verification has covered Keycloak plus `amber.local` AD login, PostgreSQL application sessions, `/api/auth/me`, provider logout, JSON `401` for unauthenticated business requests, and existing authenticated workflows.
+Earlier real-environment verification covered Keycloak plus `amber.local` AD login, PostgreSQL application sessions, `/api/auth/me`, provider logout, JSON `401` for unauthenticated business requests, and authenticated workflows. This is historical verification, not evidence of current provider registration or deployment state.
 
 ## Health, logs, and shutdown
 
@@ -43,7 +45,15 @@ The request pool has configurable size and connect/idle/query/statement timeouts
 
 `scripts/postgres-backup.sh` creates a timestamped custom-format archive, removes incomplete output on failure, verifies non-empty output, and checks the archive listing.
 
+```bash
+sh ./scripts/postgres-backup.sh /secure/local/backup/path
+```
+
 `scripts/postgres-restore.sh` is destructive. It requires an exact dump path and `--confirm`, validates the archive, stops client/server if running, restores with `--clean --if-exists --single-transaction --exit-on-error`, checks basic product/migration tables, and restarts only services that were previously running.
+
+```bash
+sh ./scripts/postgres-restore.sh /secure/local/backup/path/amber-YYYYMMDDTHHMMSSZ.dump --confirm
+```
 
 Before restore, verify both dump path and target environment. Keep backups outside the repository, copy them to monitored off-host storage, and regularly test restores in a disposable environment. Scheduling, retention, encryption, off-host transfer, monitoring, and disaster-recovery orchestration are external infrastructure responsibilities.
 
@@ -51,4 +61,11 @@ Before restore, verify both dump path and target environment. Keep backups outsi
 
 `npm run audit:data` in `server/` is read-only and reports missing/duplicate SKUs and products without a saved UAH price; `--json` emits machine-readable output.
 
+```bash
+docker compose exec server npm run audit:data
+docker compose exec server npm run audit:data -- --json
+```
+
 The optional SQLite importer moves configuration/pricing only, not product history. It refuses implicit replacement of a non-empty target and refuses replacement if target products exist; `--replace` is explicit. It creates V1 schema snapshots and preserves/imports `sku_code` values. Never run imports against an unintended database.
+
+For a direct-server import, run `npm run migrate:config -- --sqlite=./amber.db` from `server/` with a verified `DATABASE_URL` targeting the intended PostgreSQL database. Add `--replace` only after explicitly deciding to replace existing configuration; the script still refuses replacement when products exist.

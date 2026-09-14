@@ -1,110 +1,46 @@
-# amber-sku-generator
+# Amber SKU Manager
 
-## Deploy with Docker (Ubuntu 24.04)
+Amber SKU Manager is an internal application for catalog configuration, authoritative SKU and price generation, product recount and corrections, repricing, and immutable CSV export. See the [project overview](PROJECT_CONTEXT.md) and [documentation index](docs/README.md) for current behavior and historical records.
 
-1. Install Docker Engine + Compose plugin (official docs):
-   - https://docs.docker.com/engine/install/ubuntu/
+## Deploy with Docker
 
-2. Clone the project and move into its repository folder:
-```bash
-cd amber-sku-generator
-```
+1. Install [Docker Engine and the Compose plugin](https://docs.docker.com/engine/install/ubuntu/), clone the repository, and run the following commands from its root.
+2. Create deployment configuration:
 
-3. Create local runtime configuration and replace the placeholder database and server secrets:
-```bash
-cp .env.example .env
-${EDITOR:-vi} .env
-```
+   ```bash
+   cp .env.example .env
+   ${EDITOR:-vi} .env
+   ```
 
-The `.env` file is ignored by Git. Keep production copies in protected deployment storage and do not commit them. `OIDC_CLIENT_SECRET` is server-only. Generate `SESSION_SECRET` from at least 32 cryptographically random bytes; do not reuse the OIDC client secret.
+   Replace the database password, OIDC client secret, and session secret. Set `APP_BASE_URL` to the externally visible application origin, `OIDC_REDIRECT_URI` to its registered `/api/auth/callback` URL, and the issuer/client values to the deployment's provider. For production HTTPS, set `SESSION_COOKIE_SECURE=true` and the exact `TRUST_PROXY` hop count (`1` for the checked-in nginx-to-server path). The sample `.env.example` uses **local HTTP** origins and flags; do not deploy with those defaults. The outer TLS proxy must pass the original HTTPS scheme and replace untrusted forwarding headers. Keep `.env` outside version control.
 
-4. Build and run:
-```bash
-docker compose up -d --build
-```
+3. Build and start:
 
-5. Put the deployment behind the configured HTTPS proxy and open the registered application URL:
-```text
-https://skumanager.ambergalbin.space
-```
+   ```bash
+   docker compose up -d --build
+   docker compose ps
+   ```
 
-The checked-in Compose topology serves the client over HTTP for local/single-host use. Production OIDC and secure session cookies require the documented HTTPS origin and proxy forwarding settings; see [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
+The checked-in Compose topology serves the client over HTTP and publishes PostgreSQL on the host. Production HTTPS, proxy trust, database exposure, and backup arrangements need environment-specific review. Follow [operations](docs/OPERATIONS.md) before deploying or restoring data.
 
-### Useful commands
+## Local development and verification
+
+For a Vite client on `http://localhost:5173`, register `http://localhost:5000/api/auth/callback` with the local OIDC client and set `APP_BASE_URL=http://localhost:5173`, `SESSION_COOKIE_SECURE=false`, and `TRUST_PROXY=false`. Vite proxies `/api` to the local server. When running the Docker/nginx client locally, use `APP_BASE_URL=http://localhost` and the [local Compose override](docs/OPERATIONS.md#oidc-deployment) to expose the server callback port. Use `localhost` consistently.
+
+With local database and OIDC settings configured in `.env`, start the server and Vite in separate terminals:
 
 ```bash
-docker compose logs -f
-docker compose ps
-docker compose down
+cd server && npm ci && npm start
 ```
-
-### Data integrity audit
-
-The audit is read-only. It reports missing and duplicate SKUs, plus products without a saved UAH price:
 
 ```bash
-docker compose exec server npm run audit:data
+cd client && npm ci && npm run dev
 ```
 
-For machine-readable output:
+`VITE_API_BASE_URL` is browser-visible configuration; never put a secret in a `VITE_*` variable. Integration-test safety and required checks are described in [AGENTS.md](AGENTS.md). Configuration settings are listed in [.env.example](.env.example).
 
-```bash
-docker compose exec server npm run audit:data -- --json
-```
+## Data and upgrades
 
-Database migrations from `server/migrations` run automatically during server startup and are recorded in `schema_migrations`.
+Migrations run automatically before the server listens and are recorded in `schema_migrations`. The first rollout of SKU schema versioning was a historical upgrade checkpoint, not a pending deployment step. Existing installations should use the current [migration guide](docs/DATABASE_MIGRATIONS.md) and take a verified backup before a deployment that changes data. The default catalog in `server/data_config.js` seeds an empty database only and does not describe a deployed catalog.
 
-### SKU schema versions
-
-- Existing articles without a marker are decoded by the immutable V1 snapshot.
-- Structural changes in the admin panel remain a draft until `Опублікувати V…` is pressed.
-- New published versions use a compact numeric marker, for example `BR2/...` or `BR52/...`.
-- `Внутрішнє значення` is used by pricing rules; `Код у SKU` is the encoded value and may be reused after the old option is archived.
-- Labels for natural and formed grades may share the same internal value and SKU code; their visibility conditions select the contextual label.
-
-Create a database backup before the first deployment of the versioning migration. On startup, the service automatically captures the current historical structure as V1 and links existing products to it.
-
-### Data persistence
-
-- PostgreSQL data is stored in Docker volume `postgres_data`.
-- PostgreSQL database, user, and password are required in the project-level `.env`; Compose passes the same values to PostgreSQL and the server.
-- Changing `.env` does not rewrite credentials in an already-initialized PostgreSQL volume. Coordinate credential rotation in PostgreSQL before changing deployed values.
-
-For timestamped custom-format backups with archive verification:
-
-```bash
-sh ./scripts/postgres-backup.sh /secure/local/backup/path
-sh ./scripts/postgres-restore.sh /secure/local/backup/path/amber-YYYYMMDDTHHMMSSZ.dump --confirm
-```
-
-The restore command is intentionally explicit and replaces matching database objects. Test restores regularly in a disposable environment. Production deployments must additionally copy backups to a monitored off-host destination; that destination is infrastructure-specific and is not hardcoded here.
-
-### Migrate config from old SQLite (optional)
-
-If you need to keep existing categories/questions/options and price settings from old `server/amber.db`, run:
-
-```bash
-cd server
-npm install
-DATABASE_URL='postgresql://example_user:example_password@localhost:5432/amber' \
-  npm run migrate:config -- --sqlite=./amber.db
-```
-
-Notes:
-- This migrates only config/pricing tables.
-- Products history (`products`) is not copied.
-- By default the script only imports into a database without configuration.
-- To explicitly replace configuration, add `--replace`. Replacement is refused when the target contains products.
-- The import creates V1 SKU schema snapshots and preserves/imports `sku_code` values.
-
-### Runtime configuration
-
-See `.env.example` for all supported settings. `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` are required by Compose and are also used by a directly launched server when `DATABASE_URL` is absent. Standard `PG*` variables can override individual connection fields; startup fails clearly when credentials are absent or runtime values are invalid.
-
-The server requires the OIDC issuer/client/callback settings plus `APP_BASE_URL` and `SESSION_SECRET`. It exposes the server-owned Authorization Code + PKCE flow at `/api/auth/login` and `/api/auth/callback`, current identity at `/api/auth/me`, and CSRF-protected local/provider logout at `POST /api/auth/logout`. Successful logout returns a server-generated Keycloak `logoutUrl` for the browser to open as a top-level navigation; the API response itself does not redirect cross-origin. All business API routes require an authenticated application session, and unsafe methods also require the synchronizer CSRF token. The PostgreSQL-backed session cookie is host-only, `HttpOnly`, `SameSite=Lax`, scoped to `/api`, and has a fixed configurable lifetime (`SESSION_MAX_AGE_MS`, eight hours by default).
-
-For direct local development, use `APP_BASE_URL=http://localhost:5173`, the registered `http://localhost:5000/api/auth/callback`, `SESSION_COOKIE_SECURE=false`, and `TRUST_PROXY=false`. Use `localhost` consistently rather than mixing it with `127.0.0.1`.
-
-For production, use `APP_BASE_URL=https://skumanager.ambergalbin.space`, the registered HTTPS callback, `SESSION_COOKIE_SECURE=true`, and the exact trusted proxy-hop count (`TRUST_PROXY=1` for the checked-in nginx-to-server path). Register the same `APP_BASE_URL` as the Keycloak post-logout redirect URI. The outer TLS proxy must replace untrusted forwarding headers and pass the original HTTPS protocol to nginx. Never expose the server container directly when proxy trust is enabled.
-
-`VITE_API_BASE_URL` is intentionally public configuration because Vite bundles it into the browser application. Never put a secret in a `VITE_*` variable.
+For backup, restore, the read-only data audit, and optional legacy SQLite configuration import, use the commands and safeguards in [operations](docs/OPERATIONS.md). SKU version and decoding rules are in [SKU and catalog](docs/SKU_CATALOG.md).

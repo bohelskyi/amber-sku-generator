@@ -4,7 +4,7 @@
 
 Amber SKU Manager is an internal application for defining amber-product classifications, generating authoritative SKUs and prices, saving and decoding inventory records, recounting/correcting products, controlled mass repricing, and immutable CSV exports.
 
-This document summarizes the current `refactor/codebase-cleanup` checkout based on the approved `b5617ace75b2617a3454768341bc6a6182e5ab3e` production baseline. Runtime PostgreSQL data and the current code/migrations remain authoritative. Detailed invariants live in the linked domain documents.
+This is a branch-independent overview. Current code and PostgreSQL migrations are authoritative for implemented behavior; deployed configuration and data determine environment-specific facts. The maintained guides are listed in the [documentation index](docs/README.md).
 
 ## Current architecture
 
@@ -18,7 +18,7 @@ In Docker, nginx serves the client, provides SPA fallback, and proxies `/api/` t
 
 ## Authentication and RBAC state
 
-Server-owned Keycloak OIDC Authorization Code flow with PKCE, state, and nonce is implemented. Sessions are opaque, PostgreSQL-backed, fixed/non-rolling, and exposed through a host-only `HttpOnly` `amber.sid` cookie. OIDC tokens and the client secret remain server-side.
+Server-owned OIDC Authorization Code flow with PKCE, state, and nonce is implemented; the example deployment uses Keycloak. Sessions are opaque, PostgreSQL-backed, fixed/non-rolling, and exposed through a host-only `HttpOnly` `amber.sid` cookie. OIDC tokens and the client secret remain server-side.
 
 Local application users and exact immutable `issuer` + `sub` identity links are implemented. Users move through `pending`, `active`, and `disabled` states. Every business request resolves current local status, roles, and permissions from PostgreSQL, so disablement and role revocation affect existing sessions immediately.
 
@@ -38,9 +38,9 @@ See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permi
 | `server/src/app.js` | Express middleware/routes, health, request IDs, structured logging, errors. |
 | `server/src/auth/`, `server/src/routes/auth.routes.js` | OIDC, sessions, local-user resolution, access/permission/CSRF middleware, auth endpoints. |
 | `server/src/audit/` | Local-user mutation context and transaction-scoped durable audit writer. |
-| `server/src/routes/public.routes.js` | Authenticated product, recount, history, and export APIs; the historical name does not mean unauthenticated. |
-| `server/src/routes/admin.routes.js` | Catalog, pricing, corrections, repricing, and user-administration APIs. |
-| `server/src/services/` | Authoritative domain services. |
+| `server/src/routes/public.routes.js`, `server/src/routes/public/` | Aggregator and domain routers for authenticated product, recount, history, and export APIs; the historical name does not mean unauthenticated. |
+| `server/src/routes/admin.routes.js`, `server/src/routes/admin/` | Aggregator and domain routers for catalog, pricing, corrections, repricing, audit, and access administration. |
+| `server/src/services/`, `server/src/presenters/` | Authoritative domain services, extracted domain modules, and response/CSV presenters. |
 | `server/src/db/`, `server/migrations/` | Pool, startup seed compatibility, migration runner, ordered schema history. |
 | `server/src/utils/` | SKU/rule/pricing helpers, numeric parsing, CSV safety, HTTP/logging utilities. |
 | `server/data_config.js` | Defaults for an empty catalog only; not deployed live configuration after seeding. |
@@ -55,30 +55,13 @@ See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permi
 | `docker-compose*.yml`, `*/Dockerfile`, `client/nginx.conf` | Runtime and image wiring. |
 | `.github/workflows/ci.yml` | Node 20/PostgreSQL 16 CI. |
 
-## Module summaries
+## Current behavior
 
-| Domain | Current module responsibility | Detail |
-| --- | --- | --- |
-| Authentication and access | OIDC identity, PostgreSQL sessions, local users, system/custom roles, permissions, AuthGate states, user and role administration | [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) |
-| SKU and catalog | Draft catalog, immutable schema publication, SKU encoding/decoding, permanent reservation, product preview/save | [`docs/SKU_CATALOG.md`](docs/SKU_CATALOG.md) |
-| Pricing | Scenario selection, matrices, modifiers, manual pricing, marketing rounding, NBU cache | [`docs/PRICING.md`](docs/PRICING.md) |
-| Recount and corrections | Target-schema transitions, correction request queue, application-user claims, legacy-token adoption, and completion | [`docs/RECOUNT_CORRECTIONS.md`](docs/RECOUNT_CORRECTIONS.md) |
-| Repricing | Scenario/global previews, drafts, explicit resolutions, atomic apply and rollback | [`docs/REPRICING.md`](docs/REPRICING.md) |
-| Exports | Immutable snapshots, range-bound idempotency, safe CSV, monotonic confirmation cursor | [`docs/EXPORTS.md`](docs/EXPORTS.md) |
-| Database | PostgreSQL schema, transactional/checksummed forward migrations `000`–`028`, upgrade/concurrency protections | [`docs/DATABASE_MIGRATIONS.md`](docs/DATABASE_MIGRATIONS.md) |
-| Operations | Deployment topology, health/readiness, logs, shutdown, backup/restore, SQLite import | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) |
+Authoritative product preview/save/decode, catalog schema versioning, pricing, recount/corrections, scenario/global repricing, export snapshots, and the Administrator-only audit viewer are implemented. Product history includes a timeline and a `configurationEvolution` projection: it reconstructs recorded configuration states across a correction lineage and reports partial or unavailable evidence rather than inventing missing history. See the [recount and corrections guide](docs/RECOUNT_CORRECTIONS.md).
 
-## Current status
+Server-side authorization and CSRF remain authoritative. `APP_ACCESS_PENDING` and `APP_ACCESS_DISABLED` move the client to the matching AuthGate state; `INSUFFICIENT_PERMISSION` preserves the active session. Durable transaction-coupled audit events cover access administration, catalog/pricing changes, products, correction requests, repricing, exports, and SKU schema publication. Invitations are not implemented. See [authentication and RBAC](docs/AUTH_RBAC.md).
 
-- PostgreSQL architecture and migrations `000`–`028` are implemented and immutable history.
-- Authoritative product preview/save/decode, catalog schema versioning, pricing, recount/corrections, scenario/global repricing, and export snapshots are implemented with focused unit and PostgreSQL integration coverage.
-- Phase 7 measured repricing performance work is complete through `0aed9e9`; the completed checkpoints and final 451-product measurements are recorded in [`docs/REFACTOR_PLAN.md`](docs/REFACTOR_PLAN.md#phase-7--measured-performance-work). The original [Phase 7.0 baseline](docs/performance/phase7-baseline/BASELINE.md) remains historical evidence.
-- Phase 8 operational refactor work is complete: `3d60d11` added production container smoke coverage, `25be7f0` minimized production Docker build contexts, and the closure checkpoint added manual and weekly smoke execution. Image upgrades and managed digest pinning, non-root/read-only operation, and environment-specific PostgreSQL publishing remain separate operational/security changes.
-- OIDC authentication, PostgreSQL sessions, active-user access gating, application-owned RBAC, user management, first-admin bootstrap, permission-aware UI, and live access-state transitions are implemented.
-- Server-side authorization and CSRF remain authoritative. `APP_ACCESS_PENDING`/`APP_ACCESS_DISABLED` move the client to the matching AuthGate state; `INSUFFICIENT_PERMISSION` preserves the active session.
-- Operational mutation logs use the resolved local `application_users.id` where available and remain distinct from durable audit events. Immutable, transaction-coupled `audit_events` cover application-user and role administration; catalog category/question/option changes; pricing scenario/matrix/modifier changes; product create/archive/recount; correction-request lifecycle changes; repricing draft creation/discard plus apply/rollback; export snapshot creation/confirmation; and SKU schema publication. Repricing drafts/batches, export snapshots, and published schema versions retain nullable local-user actor attribution. The Administrator-only global audit viewer supports filtered keyset pagination over these events.
-- Custom-role and role-permission administration and the Administrator-only audit viewer are implemented. Invitations are not implemented.
-- Live catalog contents and production data quality cannot be inferred from seed defaults or the repository and require operational verification.
+The completed refactor and its measured performance evidence are [historical records](docs/archive/REFACTOR_2026.md). Live catalog contents and production data quality require operational verification.
 
 ## Testing and operations summary
 

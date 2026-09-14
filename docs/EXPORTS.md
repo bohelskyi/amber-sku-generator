@@ -22,7 +22,7 @@ Snapshot payload and CSV content are written once and protected from mutation by
 
 Creation stores the authenticated local application user in nullable `created_by_user_id` and appends one transactional `export_snapshot.created` event referencing the immutable snapshot with only its range and row count. Historical snapshots remain unattributed. Idempotent reuse returns the original snapshot without changing its creator or writing another event.
 
-A required `Idempotency-Key` is bound to the normalized `fromSku`/`toSku` range:
+A nonempty idempotency key is required. The creation route accepts the `Idempotency-Key` header or `body.idempotencyKey` and binds the key to the normalized `fromSku`/`toSku` range:
 
 - reuse with the same range returns the same snapshot;
 - reuse with a different range returns `409`;

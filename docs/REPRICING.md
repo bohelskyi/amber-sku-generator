@@ -49,7 +49,7 @@ Rollback requires `repricing.rollback`. It locks the batch and all affected prod
 
 Correction completion may synchronize active drafts only after the correction transaction commits. Each successful synchronization records the correction actor as the draft's last modifier without a routine repricing audit event. A failed synchronization remains best effort and cannot undo the completed correction.
 
-## Current RBAC boundary
+## Initial built-in role permissions
 
 | Role | Repricing behavior |
 | --- | --- |
@@ -57,4 +57,4 @@ Correction completion may synchronize active drafts only after the correction tr
 | Manager | View and prepare drafts/previews; Apply and Rollback are denied and hidden. |
 | Storekeeper | View and prepare drafts/previews; Apply and Rollback are denied and hidden. |
 
-These UI boundaries use effective permission keys, while route middleware remains authoritative.
+Manager and Storekeeper permissions are Administrator-editable, so these rows describe the initial built-in mappings, not a guarantee about a deployed user's current access. The UI uses effective permission keys from `/api/auth/me`; route middleware remains authoritative.

@@ -2,7 +2,7 @@
 
 ## Authoritative calculation
 
-`pricing.service.js` is authoritative. It selects matching active scenarios by priority, resolves one- or two-dimensional matrix axes (including composite axes and weight bands), and applies matching modifiers.
+The server pricing service is authoritative. `pricing.service.js` is its entry point; calculation, context loading, read models, and administration commands live under `server/src/services/pricing/`. Calculation selects matching active scenarios by priority, resolves one- or two-dimensional matrix axes (including composite axes and weight bands), and applies matching modifiers.
 
 Supported modes are:
 

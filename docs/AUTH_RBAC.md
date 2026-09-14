@@ -2,7 +2,7 @@
 
 ## Architecture
 
-Keycloak realm `amber` is the OpenID Provider. The confidential client is `amber-sku-manager`; Keycloak authenticates `amber.local` Active Directory users through LDAP federation over LDAPS. Express owns OIDC discovery and the Authorization Code flow with PKCE, state, and nonce. The client secret never enters the browser bundle.
+The repository's example deployment uses Keycloak realm `amber` and confidential client `amber-sku-manager`. Its `amber.local` Active Directory federation over LDAPS is an external deployment setting, not something the application code verifies; confirm the active provider configuration operationally. Express owns OIDC discovery and the Authorization Code flow with PKCE, state, and nonce. The client secret never enters the browser bundle.
 
 The authentication endpoints are:
 
@@ -85,17 +85,8 @@ Successful approve, role-change, disable, and enable operations append one immut
 
 Operational HTTP mutation logs are separate, non-durable telemetry. Their `actorId` uses the resolved local application-user ID where available; neither operational nor durable attribution uses OIDC `sub` or username as the actor key. The `GET /api/admin/audit-events` endpoint and `/admin/audit` client page enforce Administrator-only `audit.view` and expose filtered keyset pagination without making audit records mutable.
 
-## Correction ownership
+## Correction ownership and remaining gap
 
-Correction requests use the local `application_users.id` as ordinary claim ownership. The authenticated owner may continue the same claim from another browser or workstation by submitting the current `claimVersion`; retained claim tokens are ignored once `claimed_by_user_id` is set. A legacy token-only in-progress claim may use its matching token once to atomically bind the claim to the authenticated user. Release, force-release, in-progress rejection, and completion advance the claim epoch so stale operations cannot act on a later claim.
+Correction claims are owned by local `application_users.id`, with a monotonic claim version. Administrator has no implicit bypass of another user's ordinary claim; the explicit confirmed force-release operation requires `corrections.force_release`. Legacy token-only claims have a one-time adoption path. See [recount and corrections](RECOUNT_CORRECTIONS.md) for the complete workflow. Do not infer actor identity from OIDC `sub` or a claim token.
 
-Administrator has no implicit bypass for another user's ordinary claim. Only the explicit, confirmed `corrections.force_release` operation bypasses ownership, and that operation is audited. Disabling or demoting an owner does not release the request automatically.
-
-## Deferred authorization work
-
-Application authentication, local users, built-in RBAC, user administration, the durable audit foundation and viewer, catalog/pricing audit coverage, product create/archive/recount, repricing, export snapshot, and SKU schema publication attribution, permission-aware UI, and live access-state handling are implemented. The following remain intentionally pending:
-
-- additional durable audit coverage outside the currently enumerated application-user, role, catalog, pricing, product, correction, repricing, export, and schema-publication events;
-- invitations.
-
-Do not infer actor identity from OIDC `sub` or from a correction claim token. See [`RECOUNT_CORRECTIONS.md`](RECOUNT_CORRECTIONS.md) for current ownership semantics.
+Invitations are not implemented. Durable audit coverage is described here for access administration and in the relevant domain guides for business operations; do not assume an event exists for an unlisted operation.

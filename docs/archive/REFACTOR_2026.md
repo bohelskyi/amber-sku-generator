@@ -1,5 +1,7 @@
 # Comprehensive refactoring audit and phased plan
 
+> **Historical record — non-authoritative.** This audit began on 2026-09-11 and the 2026 codebase refactor has since been completed and merged. Branch names, test counts, file sizes, open questions, phase instructions, and proposed next steps below describe their original checkpoints, not current work. Current server code, PostgreSQL migrations, and the [maintained documentation](../README.md) take precedence. The original measurements and later completion evidence are preserved without rewriting their results.
+
 ## Document status
 
 This document records the read-only repository audit performed on 2026-09-11 before any refactoring work. The audited revision was:
@@ -921,7 +923,7 @@ Split reads and resource commands, constrain dynamic SQL identifiers, and isolat
 
 ### Phase 7 — Measured performance work
 
-**Status: complete through `0aed9e9`.** Phase 7.0 (`948e879`) added bounded query instrumentation and the benchmark harness, then recorded the original measurements in the [historical Phase 7.0 baseline](performance/phase7-baseline/BASELINE.md). That report's measurements and candidate checkpoints describe the starting state; the results below are later measurements, not revisions to the baseline.
+**Status: complete through `0aed9e9`.** Phase 7.0 (`948e879`) added bounded query instrumentation and the benchmark harness, then recorded the original measurements in the [historical Phase 7.0 baseline](../performance/phase7-baseline/BASELINE.md). That report's measurements and candidate checkpoints describe the starting state; the results below are later measurements, not revisions to the baseline.
 
 | Checkpoint | Completed change |
 | --- | --- |
