@@ -51,7 +51,7 @@ function pruneHiddenAnswers(categoryQuestions, answersMap) {
   return nextAnswers;
 }
 
-export function useSkuManager() {
+export function useSkuManager({ canPriceOverride = false, submitMode = 'apply' } = {}) {
   const [config, setConfig] = useState(null);
   const [selectedCat, setSelectedCat] = useState(null);
   const [answers, setAnswers] = useState({});
@@ -97,6 +97,9 @@ export function useSkuManager() {
     recountBlockers,
     recountError,
     recountManualPriceUah,
+    recountPricingMode,
+    recountUsdPerGram,
+    recountMarketingRounding,
     recountPreview,
     recountReason,
     recountSubmitMode,
@@ -104,14 +107,19 @@ export function useSkuManager() {
     recountValidationAttempt,
     recountWeight,
     setRecountManualPriceUah,
+    setRecountPricingMode,
+    setRecountUsdPerGram,
+    setRecountMarketingRounding,
     setRecountReason,
     skuToDecode,
   } = useProductRecount({
+    canPriceOverride,
     config,
     onApplied: () => {
       records.fetchHistory();
       productExport.fetchExportStatus();
     },
+    submitMode,
   });
 
   useEffect(() => {
@@ -464,6 +472,9 @@ export function useSkuManager() {
     recountError,
     recountManualPriceUah,
     recountPreview,
+    recountPricingMode,
+    recountUsdPerGram,
+    recountMarketingRounding,
     recountReason,
     recountSubmitMode,
     recountSuccess,
@@ -475,6 +486,9 @@ export function useSkuManager() {
     setSelectedCat,
     setRecountReason,
     setRecountManualPriceUah,
+    setRecountPricingMode,
+    setRecountUsdPerGram,
+    setRecountMarketingRounding,
     setWeight: handleWeightChange,
     skuToDecode,
     variationData,

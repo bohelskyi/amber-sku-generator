@@ -393,7 +393,7 @@ function getUpdatedDetails(details, item, batchId, appliedAt) {
   const calculatedPriceUah = item.calculatedPriceUah ?? null;
   const autoPriceUah = item.automaticPriceUah
     ?? (item.manualOverride ? null : item.newPriceUah);
-  return {
+  const nextDetails = {
     ...details,
     logMessage: item.logMessage,
     calculatedPriceUah,
@@ -401,7 +401,16 @@ function getUpdatedDetails(details, item, batchId, appliedAt) {
     manualPriceUah: item.useAutomatic
       ? null
       : (item.manualOverride ? item.newPriceUah : (details.manualPriceUah ?? null)),
-    pricingScenario: item.pricingDetails?.scenario || details.pricingScenario || null,
+    pricingScenario: item.customUsdPerGramBasis
+      ? null : (item.pricingDetails?.scenario || details.pricingScenario || null),
+    ...(item.customUsdPerGramBasis ? {
+      rateMetadata: {
+        source: item.uahRateSource,
+        date: item.uahRateDate,
+        fetchedAt: item.uahRateFetchedAt,
+        stale: item.uahRateStale,
+      },
+    } : {}),
     repricing: {
       batchId,
       scenarioId: item.pricingDetails?.scenario?.id || details.pricingScenario?.id || null,
@@ -415,6 +424,8 @@ function getUpdatedDetails(details, item, batchId, appliedAt) {
       appliedAt,
     },
   };
+  if (item.manualOverride || item.useAutomatic) delete nextDetails.customUsdPerGramBasis;
+  return nextDetails;
 }
 
 async function getBatchByPreviewToken(previewToken, client = pool) {

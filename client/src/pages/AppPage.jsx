@@ -11,9 +11,12 @@ import { getPermissionUiState, getRecountUiMode } from '../lib/permission-ui.js'
 
 function AppPage() {
   const auth = useAuth();
-  const sku = useSkuManager();
   const permissionUi = getPermissionUiState(auth.permissions);
   const recountMode = getRecountUiMode(permissionUi);
+  const sku = useSkuManager({
+    canPriceOverride: permissionUi.canPriceOverrideCorrections,
+    submitMode: recountMode || 'apply',
+  });
   const {
     canArchiveProducts,
     canCreateExports,
@@ -141,13 +144,21 @@ function AppPage() {
         )}
       </div>
       <RecountConfirmDialog
+        canPriceOverride={permissionUi.canPriceOverrideCorrections}
         error={sku.recountError}
         isApplying={sku.isRecountApplying}
         isOpen={sku.isRecountConfirmOpen}
         preview={sku.recountPreview}
         reason={sku.recountReason}
         manualPriceUah={sku.recountManualPriceUah}
+        pricingMode={sku.recountPricingMode}
+        usdPerGram={sku.recountUsdPerGram}
+        marketingRoundingEnabled={sku.recountMarketingRounding}
+        previewCurrent={sku.isRecountPreviewCurrent}
         onManualPriceChange={sku.setRecountManualPriceUah}
+        onPricingModeChange={sku.setRecountPricingMode}
+        onUsdPerGramChange={sku.setRecountUsdPerGram}
+        onMarketingRoundingChange={sku.setRecountMarketingRounding}
         mode={recountMode || 'apply'}
         submittingMode={sku.recountSubmitMode}
         onCancel={sku.handleCancelRecountConfirmation}

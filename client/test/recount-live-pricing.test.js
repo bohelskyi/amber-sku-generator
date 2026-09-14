@@ -18,6 +18,10 @@ const dashboardSource = fs.readFileSync(
   new URL('../src/components/app/HomeDashboard.jsx', import.meta.url),
   'utf8'
 );
+const repricingDrawerSource = fs.readFileSync(
+  new URL('../src/components/app/RepricingRecountDrawer.jsx', import.meta.url),
+  'utf8'
+);
 
 const decoded = {
   category: { requires_weight: 1 },
@@ -57,22 +61,30 @@ test('live and Continue preview payloads match for the same complete Size target
   assert.deepEqual(livePayload, continuePayload);
   assert.deepEqual(canonicalPreviewPayload, continuePayload);
   assert.equal(livePayload.manualPriceUah, null);
-  assert.equal(
-    hookSource.match(/api\.post\('\/recount\/preview', recountPreviewPayload\)/g)?.length,
-    2
-  );
+  assert.equal(hookSource.match(/api\.post\(previewPath, recountPreviewPayload\)/g)?.length, 2);
+  assert.match(hookSource, /previewPath = useDecisionPreview[\s\S]*?correction-requests\/preview/);
 });
 
 test('changing size schedules a debounced authoritative recount price update', () => {
   assert.equal(haveRecountTargetChanged(decoded, { size: 3, shape: 1 }, '20'), true);
   assert.equal(hookSource.includes('RECOUNT_PREVIEW_DEBOUNCE_MS'), true);
-  assert.equal(hookSource.includes("api.post('/recount/preview'"), true);
+  assert.equal(hookSource.includes('api.post(previewPath'), true);
   assert.match(hookSource, /useEffect\([\s\S]*?recountAnswers[\s\S]*?recountWeight/);
 });
 
 test('changing another pricing-driving option uses the same live authoritative preview path', () => {
   assert.equal(haveRecountTargetChanged(decoded, { size: 2, shape: 2 }, '20'), true);
-  assert.equal(hookSource.includes("api.post('/recount/preview'"), true);
+  assert.equal(hookSource.includes('api.post(previewPath'), true);
+});
+
+test('repricing drawer action mode drives both preview and final submission mode', () => {
+  assert.match(repricingDrawerSource, /submitMode: mode/);
+  assert.match(repricingDrawerSource, /mode=\{mode\}/);
+  assert.match(hookSource, /submitMode !== 'apply'/);
+  assert.match(
+    hookSource,
+    /isRequestMode \? '\/admin\/correction-requests' : '\/recount\/apply'/
+  );
 });
 
 test('pricing-driving recount questions use authoritative dependency metadata', () => {

@@ -86,6 +86,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `027_export_and_sku_schema_actor_attribution.sql` | Nullable local-user attribution for export snapshot create/confirm and SKU schema publication, plus export provenance immutability, without historical backfill or synthesized audit events. |
 | `028_custom_roles.sql` | Versioned editable roles, one-current-role enforcement, case-insensitive role names, immutable role identity, permanent role records, and database-enforced Administrator/reserved-permission protections. |
 | `029_category_marketing_rounding.sql` | Adds a constrained, default-enabled category flag for automatic-price marketing rounding. |
+| `030_correction_request_pricing_decisions.sql` | Adds persisted correction pricing decisions plus the Manager pricing-override permission and role-version advance. |
 
 ## Test database safety
 

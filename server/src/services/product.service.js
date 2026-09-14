@@ -2,7 +2,7 @@ const pool = require('../db/pool');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
 const { calculatePricing, loadPricingContext } = require('./pricing.service');
-const { getPricingContextFingerprint } = require('./pricing/pricing-context-fingerprint');
+const { getPricingContextFingerprint, hashPayload } = require('./pricing/pricing-context-fingerprint');
 const { getAnswerChanges } = require('../utils/answer-changes');
 const { toUahNumber } = require('../utils/money');
 const {
@@ -16,6 +16,7 @@ const {
   getSchemaVersionById,
 } = require('./sku-schema.service');
 const {
+  getCorrectionDecisionSignature,
   getProductPreviewToken,
   getProductStateSignature,
 } = require('./product/product-signatures');
@@ -36,6 +37,7 @@ const {
   getRecentProducts: queryRecentProducts,
 } = require('./product/product-queries');
 const { decodeSku: decodeProductSku } = require('./product/product-decode');
+const { calculateDecisionPricing } = require('./product/correction-pricing-decision');
 
 function normalizeSkuWriteError(err, sku) {
   if (err?.code !== '23505') return err;
@@ -163,11 +165,12 @@ async function validateNonSkuAnswers(categoryCode, answers, isCalibrated, querya
       );
     }
   }
+  return result.rows;
 }
 
 async function buildProductPreview(
   { categoryCode, answers = {}, weight, isCalibrated, skuSchemaVersionId },
-  { queryable = pool, lockSequence = false } = {}
+  { queryable = pool, lockSequence = false, pricingDecision = null } = {}
 ) {
   const normalizedCategoryCode = String(categoryCode || '').trim().toUpperCase();
   const normalizedAnswers = normalizeAnswerMap(answers);
@@ -208,7 +211,7 @@ async function buildProductPreview(
   if (requiresWeight && (!Number.isFinite(normalizedWeight) || normalizedWeight <= 0)) {
     throw validationError('Для цієї категорії вага повинна бути більшою за 0.');
   }
-  await validateNonSkuAnswers(
+  const nonSkuConfiguration = await validateNonSkuAnswers(
     normalizedCategoryCode,
     normalizedAnswers,
     isCalibrated,
@@ -253,15 +256,31 @@ async function buildProductPreview(
   const baseSku = buildBaseSku(schemaPrefix, answerCodeParts);
   const compactBaseSku = buildBaseSku(schemaPrefix, answerCodes);
   const legacySeparatedBaseSku = buildBaseSku(schemaPrefix, answerCodes, legacySkuSeparator);
-  const pricingContext = await loadPricingContext(normalizedCategoryCode, queryable);
-  const pricingContextFingerprint = getPricingContextFingerprint(pricingContext);
-  const pricing = await calculatePricing(
-    normalizedCategoryCode,
-    normalizedAnswers,
-    normalizedWeight,
-    isCalibrated,
-    { queryable, context: pricingContext }
-  );
+  const targetValidityFingerprint = hashPayload({
+    categoryCode: normalizedCategoryCode,
+    requiresWeight,
+    skipHiddenSkuQuestions,
+    legacySkuSeparator,
+    schemaId: Number(schema.id),
+    schemaHash: schema.config_hash,
+    schemaQuestions: schema.questions,
+    nonSkuConfiguration,
+  });
+  const usesCustomUsdBasis = pricingDecision?.mode === 'usd_per_gram';
+  const pricingContext = usesCustomUsdBasis
+    ? null : await loadPricingContext(normalizedCategoryCode, queryable);
+  const pricingContextFingerprint = pricingContext
+      && (!pricingDecision || pricingDecision.mode === 'system_auto')
+    ? getPricingContextFingerprint(pricingContext) : null;
+  const pricing = usesCustomUsdBasis
+    ? await calculateDecisionPricing(pricingDecision, normalizedWeight)
+    : await calculatePricing(
+      normalizedCategoryCode,
+      normalizedAnswers,
+      normalizedWeight,
+      isCalibrated,
+      { queryable, context: pricingContext }
+    );
   const {
     weightVal,
     pricePerGram,
@@ -319,6 +338,7 @@ async function buildProductPreview(
       logMessage,
       pricingDetails,
       pricingContextFingerprint,
+      targetValidityFingerprint,
       ...currencyPayload,
     }, normalizedCategoryCode, normalizedAnswers, isCalibrated);
   }
@@ -356,6 +376,7 @@ async function buildProductPreview(
     logMessage,
     pricingDetails,
     pricingContextFingerprint,
+    targetValidityFingerprint,
     ...currencyPayload,
   }, normalizedCategoryCode, normalizedAnswers, isCalibrated);
 }
@@ -383,6 +404,7 @@ async function buildProductRecountPreview({
   weight,
   reason = '',
   manualPriceUah,
+  pricingDecision = null,
 }) {
   const sourceDecoded = await decodeSku(sourceSku);
   if (!sourceDecoded.existsInDb || !sourceDecoded.product) {
@@ -442,11 +464,12 @@ async function buildProductRecountPreview({
     weight: correctedWeight,
     isCalibrated: nextIsCalibrated,
     skuSchemaVersionId: activeSchema?.id,
-  });
+  }, { pricingDecision });
   const correctionSku = await resolveCorrectionSku(correctedPreview.fullProposedSku);
   const previewCalculatedPriceUah = toUahNumber(correctedPreview.calculatedPriceUah);
   const previewAutoPriceUah = toUahNumber(correctedPreview.totalPriceUah);
-  const previewManualPrice = parseManualPriceUah(manualPriceUah);
+  const previewManualPrice = pricingDecision?.mode === 'manual_uah'
+    ? pricingDecision.manualPriceUah : parseManualPriceUah(manualPriceUah);
   if (previewManualPrice) {
     const previewRate = Number(correctedPreview.uahRate);
     correctedPreview.totalPriceUah = previewManualPrice;
@@ -516,7 +539,10 @@ async function buildProductRecountPreview({
       logMessage: correctedPreview.logMessage,
       pricingDetails: correctedPreview.pricingDetails,
       pricingContextFingerprint: correctedPreview.pricingContextFingerprint,
+      targetValidityFingerprint: correctedPreview.targetValidityFingerprint,
       manualPriceUah: previewManualPrice,
+      ...(pricingDecision ? { pricingDecision } : {}),
+      uahRateDate: correctedPreview.uahRateDate ?? null,
     },
     changes,
     priceDeltaUah: newPriceUah > 0 ? newPriceUah - oldPriceUah : null,
@@ -528,6 +554,11 @@ async function buildProductRecountPreview({
 }
 
 async function applyProductRecount(payload, options = {}) {
+  if (payload?.pricingDecision && options.trustedCorrectionDecision !== true) {
+    const error = new Error('Рішення про ціну застосовується тільки через запит на виправлення.');
+    error.statusCode = 403;
+    throw error;
+  }
   const mutationContext = createMutationContext(options.mutationContext);
   const preview = await buildProductRecountPreview(payload || {});
   const client = await pool.connect();
@@ -569,10 +600,11 @@ async function applyProductRecount(payload, options = {}) {
       weight: preview.corrected.weight,
       isCalibrated: preview.corrected.answers.is_calibrated,
       skuSchemaVersionId: preview.corrected.skuSchemaVersionId,
-    }, { queryable: client, lockSequence: true });
+    }, { queryable: client, lockSequence: true, pricingDecision: payload.pricingDecision || null });
     const correctionCalculatedPriceUah = toUahNumber(freshPreview.calculatedPriceUah);
     const correctionAutoPriceUah = toUahNumber(freshPreview.totalPriceUah);
-    const correctionManualPriceUah = parseManualPriceUah(payload.manualPriceUah);
+    const correctionManualPriceUah = payload.pricingDecision?.mode === 'manual_uah'
+      ? payload.pricingDecision.manualPriceUah : parseManualPriceUah(payload.manualPriceUah);
     const correctionFinalPriceUah = correctionManualPriceUah
       || (correctionAutoPriceUah > 0 ? correctionAutoPriceUah : null);
     if (!correctionFinalPriceUah) {
@@ -595,7 +627,8 @@ async function applyProductRecount(payload, options = {}) {
         ).toFixed(2);
       }
     }
-    Object.assign(preview.corrected, {
+    const authoritativeCorrected = {
+      ...preview.corrected,
       skuSchemaVersionId: freshPreview.skuSchemaVersionId,
       skuSchemaVersion: freshPreview.skuSchemaVersion,
       skuSchemaMarker: freshPreview.skuSchemaMarker,
@@ -616,8 +649,27 @@ async function applyProductRecount(payload, options = {}) {
       logMessage: freshPreview.logMessage,
       pricingDetails: freshPreview.pricingDetails,
       pricingContextFingerprint: freshPreview.pricingContextFingerprint,
+      targetValidityFingerprint: freshPreview.targetValidityFingerprint,
       manualPriceUah: correctionManualPriceUah,
-    });
+      ...(payload.pricingDecision ? { pricingDecision: payload.pricingDecision } : {}),
+      uahRateDate: freshPreview.uahRateDate ?? null,
+    };
+    const authoritativePreview = {
+      ...preview,
+      source: {
+        ...preview.source,
+        stateSignature: getProductStateSignature(lockedSource),
+      },
+      corrected: authoritativeCorrected,
+    };
+    if (payload.pricingDecision
+        && getCorrectionDecisionSignature(authoritativePreview, payload.pricingDecision)
+          !== payload.correctionRequestSignature) {
+      const error = new Error('Ціна або конфігурація виправлення змінилася. Оновіть запит.');
+      error.statusCode = 409;
+      throw error;
+    }
+    preview.corrected = authoritativeCorrected;
     preview.priceDeltaUah = correctionFinalPriceUah - Number(preview.source.totalPriceUah || 0);
     const freshPriceUsd = Number(freshPreview.totalPrice);
     const sourcePriceUsd = Number(preview.source.totalPrice);
@@ -666,6 +718,13 @@ async function applyProductRecount(payload, options = {}) {
       calculatedPriceUah: corrected.calculatedPriceUah ?? null,
       autoPriceUah: corrected.autoPriceUah ?? null,
       manualPriceUah: corrected.manualPriceUah ?? null,
+      ...(payload.pricingDecision?.mode === 'usd_per_gram' ? {
+        customUsdPerGramBasis: {
+          usdPerGram: payload.pricingDecision.usdPerGram,
+          marketingRoundingEnabled: payload.pricingDecision.marketingRoundingEnabled,
+          correctionRequestId: Number(payload.correctionRequestId),
+        },
+      } : {}),
       rateMetadata: {
         source: freshPreview.uahRateSource || null,
         date: freshPreview.uahRateDate || null,

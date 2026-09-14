@@ -40,19 +40,19 @@ Permission keys are stable capabilities stored in `permissions` and mapped to ro
 | Area | Permission keys |
 | --- | --- |
 | Products/history | `products.view`, `products.decode`, `products.create`, `products.archive`, `products.recount`, `history.view` |
-| Corrections | `corrections.view`, `corrections.create`, `corrections.claim`, `corrections.complete`, `corrections.reject`, `corrections.force_release` |
+| Corrections | `corrections.view`, `corrections.create`, `corrections.price_override`, `corrections.claim`, `corrections.complete`, `corrections.reject`, `corrections.force_release` |
 | Repricing | `repricing.view`, `repricing.prepare`, `repricing.apply`, `repricing.rollback` |
 | Exports | `exports.view`, `exports.create` |
 | Catalog/pricing | `catalog.view`, `catalog.manage`, `sku_schemas.publish`, `pricing.view`, `pricing.manage` |
 | Access administration | `users.manage`, `roles.manage` |
 | Audit | `audit.view` |
 
-Initial system-role mappings after migration `023`:
+Initial system-role mappings after migration `030`:
 
 | Role | Effective scope |
 | --- | --- |
 | Administrator | Every defined permission, including the explicitly Administrator-only `audit.view`. Full product, catalog, pricing, correction, repricing, export, user, role-management, and future audit-view access. |
-| Manager | Initially product view/decode, history, correction view/create/reject, repricing view/prepare, pricing view, and export view. Its name, description, permissions, and status are Administrator-editable. |
+| Manager | Initially product view/decode, history, correction view/create/price-override/reject, repricing view/prepare, pricing view, and export view. Its name, description, permissions, and status are Administrator-editable. |
 | Storekeeper | Initially product view/decode/create/archive/direct recount, history, correction view/create/claim/complete/reject, repricing view/prepare, and export view. Its name, description, permissions, and status are Administrator-editable. |
 
 The built-in Administrator role is permanent and immutable and automatically receives every permission inserted into `permissions`. It cannot be renamed, disabled, deleted, or permission-edited. Manager, Storekeeper, and custom roles retain immutable `role_key` and `is_system` identity fields but otherwise use the same editable lifecycle. Roles are never hard-deleted. `users.manage`, `roles.manage`, and `audit.view` are reserved to Administrator and database constraints reject mappings to any other role.

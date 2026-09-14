@@ -52,6 +52,7 @@ const ENDPOINT_MANIFEST = Object.freeze([
   endpoint('GET', '/admin/product-corrections', 'history.view'),
   endpoint('GET', '/admin/product-corrections/csv', 'history.view', 'csv'),
   endpoint('POST', '/admin/correction-requests', 'corrections.create'),
+  endpoint('POST', '/admin/correction-requests/preview', 'corrections.create'),
   endpoint('POST', '/admin/correction-requests/:requestId/claim', 'corrections.claim'),
   endpoint('POST', '/admin/correction-requests/:requestId/release', 'corrections.claim'),
   endpoint('POST', '/admin/correction-requests/:requestId/force-release', 'corrections.force_release'),

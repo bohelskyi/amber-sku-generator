@@ -1,5 +1,5 @@
 const express = require('express');
-const { CLAIM_TOKEN_HEADER, claimCorrectionRequest, completeCorrectionRequest, createCorrectionRequest, forceReleaseCorrectionRequest, getCorrectionRequests, refreshCorrectionRequest, releaseCorrectionRequest, updateCorrectionRequestStatus } = require('../../services/correction-request.service');
+const { CLAIM_TOKEN_HEADER, claimCorrectionRequest, completeCorrectionRequest, createCorrectionRequest, forceReleaseCorrectionRequest, getCorrectionRequests, previewCorrectionRequest, refreshCorrectionRequest, releaseCorrectionRequest, updateCorrectionRequestStatus } = require('../../services/correction-request.service');
 const { getCorrectionHistory } = require('../../services/correction-history.service');
 const { getRequestMutationContext } = require('../../audit/mutation-context');
 const { presentCorrectionHistoryCsv } = require('../../presenters/correction-history-csv');
@@ -7,6 +7,15 @@ const { sendCsvDownload } = require('../../presenters/csv-download');
 const { requirePermission } = require('../../auth/authorization');
 
 const router = express.Router();
+
+function rejectPricingMutation(req, res, next) {
+  if (Object.keys(req.body || {}).some((key) => (
+    ['pricingDecision', 'manualPriceUah', 'usdPerGram', 'marketingRoundingEnabled'].includes(key)
+  ))) {
+    return res.status(422).json({ error: 'Рішення про ціну не можна змінити під час обробки запиту.' });
+  }
+  return next();
+}
 
 router.get('/admin/correction-requests', requirePermission('corrections.view'), async (req, res) => {
   try {
@@ -33,11 +42,24 @@ router.get('/admin/product-corrections/csv', requirePermission('history.view'), 
   }
 });
 
+router.post('/admin/correction-requests/preview', requirePermission('corrections.create'), async (req, res) => {
+  try {
+    res.json(await previewCorrectionRequest(req.body || {}, {
+      canOverride: req.permissions.includes('corrections.price_override'),
+    }));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
 router.post('/admin/correction-requests', requirePermission('corrections.create'), async (req, res) => {
   try {
     res.json(await createCorrectionRequest(
       req.body || {},
-      { mutationContext: getRequestMutationContext(req) }
+      {
+        mutationContext: getRequestMutationContext(req),
+        canOverride: req.permissions.includes('corrections.price_override'),
+      }
     ));
   } catch (err) {
     res.status(err.statusCode || 500).json({
@@ -93,7 +115,7 @@ router.post('/admin/correction-requests/:requestId/force-release', requirePermis
   }
 });
 
-router.post('/admin/correction-requests/:requestId/refresh', requirePermission('corrections.complete'), async (req, res) => {
+router.post('/admin/correction-requests/:requestId/refresh', requirePermission('corrections.complete'), rejectPricingMutation, async (req, res) => {
   try {
     res.json(await refreshCorrectionRequest(
       req.params.requestId,
@@ -126,7 +148,7 @@ router.patch('/admin/correction-requests/:requestId/status', requirePermission('
   }
 });
 
-router.post('/admin/correction-requests/:requestId/complete', requirePermission('corrections.complete'), async (req, res) => {
+router.post('/admin/correction-requests/:requestId/complete', requirePermission('corrections.complete'), rejectPricingMutation, async (req, res) => {
   try {
     res.json(await completeCorrectionRequest(
       req.params.requestId,

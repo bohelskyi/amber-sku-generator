@@ -21,6 +21,149 @@ const {
 const rollbackProductColumns = `id, full_sku, total_price, total_price_uah,
   price_per_gram, uah_rate, details, legacy_uah_price_unset`;
 
+test('protected custom USD basis ignores matrix rounding changes and survives apply rollback', async () => {
+  let productId;
+  let scenarioId;
+  let draftId;
+  const batchIds = [];
+  const rolledBackBatchIds = new Set();
+  try {
+    await pool.query(`INSERT INTO categories
+      (code, name, requires_weight, skip_hidden_sku_questions, marketing_rounding_enabled)
+      VALUES ('CU', 'Custom USD repricing', 1, 0, 1)`);
+    const scenario = await pool.query(`INSERT INTO price_scenarios
+      (category_code, name, match_json, axis_x_key, price_mode, status)
+      VALUES ('CU', 'Unused custom matrix', '{}'::jsonb, 'kind', 'per_gram_usd', 'active')
+      RETURNING id`);
+    scenarioId = Number(scenario.rows[0].id);
+    await pool.query(`INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
+      VALUES ($1, 1, 0, 3)`, [scenarioId]);
+    const originalDetails = {
+      answers: { kind: 1, is_calibrated: 0 },
+      isCalibrated: 0,
+      logMessage: 'Захищена ціна USD/г із запиту на виправлення',
+      pricingScenario: null,
+      calculatedPriceUah: 3999.9,
+      autoPriceUah: 3999.9,
+      manualPriceUah: null,
+      customUsdPerGramBasis: {
+        usdPerGram: 10.05,
+        marketingRoundingEnabled: false,
+        correctionRequestId: 777,
+      },
+      rateMetadata: { source: 'historical', date: '2026-09-13', fetchedAt: null, stale: false },
+    };
+    const inserted = await pool.query(`INSERT INTO products
+      (full_sku, base_sku, sequence_number, category, weight, total_price,
+       total_price_uah, price_per_gram, uah_rate, details, status)
+      VALUES ('CU1010', 'CU1', 10, 'CU', 10, 100.5, 3999.9, 10.05, 39.8,
+        $1::jsonb, 'active') RETURNING id`, [JSON.stringify(originalDetails)]);
+    productId = Number(inserted.rows[0].id);
+
+    const before = await request('/api/admin/repricing/preview', {
+      method: 'POST', body: { scenarioId },
+    });
+    assert.equal(before.response.status, 200, before.text);
+    const item = before.data.items.find((candidate) => Number(candidate.productId) === productId);
+    assert.ok(item);
+    assert.equal(Number(item.calculatedPriceUah), 4020);
+    assert.equal(Number(item.automaticPriceUah), 4020);
+    assert.equal(Number(item.pricePerGram), 10.05);
+    const beforeGlobal = await request('/api/admin/repricing/global/preview', {
+      method: 'POST', body: {},
+    });
+    assert.equal(beforeGlobal.response.status, 200, beforeGlobal.text);
+    const globalItem = beforeGlobal.data.items.find(
+      (candidate) => Number(candidate.productId) === productId
+    );
+    assert.ok(globalItem);
+    assert.equal(Number(globalItem.automaticPriceUah), 4020);
+
+    const draft = await request('/api/admin/repricing/drafts', {
+      method: 'POST', body: { scenarioId, manualOverrides: [], reviewedProductIds: [], uiState: {} },
+    });
+    assert.equal(draft.response.status, 200, draft.text);
+    draftId = Number(draft.data.draft.id);
+    await pool.query("UPDATE categories SET marketing_rounding_enabled = 0 WHERE code = 'CU'");
+    await pool.query('UPDATE price_matrix SET price = 99 WHERE scenario_id = $1', [scenarioId]);
+    const after = await request('/api/admin/repricing/preview', {
+      method: 'POST', body: { scenarioId },
+    });
+    assert.equal(after.response.status, 200, after.text);
+    assert.equal(after.data.previewToken, before.data.previewToken);
+    const afterGlobal = await request('/api/admin/repricing/global/preview', {
+      method: 'POST', body: {},
+    });
+    assert.equal(afterGlobal.response.status, 200, afterGlobal.text);
+    assert.equal(afterGlobal.data.previewToken, beforeGlobal.data.previewToken);
+    const currentDraft = await request(`/api/admin/repricing/drafts/${draftId}`);
+    assert.equal(currentDraft.response.status, 200, currentDraft.text);
+    assert.equal(currentDraft.data.sync.hasChanges, false);
+    await request(`/api/admin/repricing/drafts/${draftId}`, { method: 'DELETE', body: {} });
+    draftId = null;
+
+    const automaticApply = await request('/api/admin/repricing/apply', {
+      method: 'POST', body: { scenarioId, previewToken: after.data.previewToken },
+    });
+    assert.equal(automaticApply.response.status, 200, automaticApply.text);
+    const automaticBatchId = Number(automaticApply.data.batch?.id || automaticApply.data.batchId);
+    batchIds.push(automaticBatchId);
+    const automaticallyUpdated = (await pool.query(
+      'SELECT total_price_uah, details FROM products WHERE id = $1', [productId]
+    )).rows[0];
+    assert.equal(Number(automaticallyUpdated.total_price_uah), 4020);
+    assert.deepEqual(automaticallyUpdated.details.customUsdPerGramBasis,
+      originalDetails.customUsdPerGramBasis);
+    const automaticRollback = await request(`/api/admin/repricing/${automaticBatchId}/rollback`, {
+      method: 'POST', body: {},
+    });
+    assert.equal(automaticRollback.response.status, 200, automaticRollback.text);
+    rolledBackBatchIds.add(automaticBatchId);
+
+    const manualPreview = await request('/api/admin/repricing/preview', {
+      method: 'POST', body: { scenarioId },
+    });
+    const manualApply = await request('/api/admin/repricing/apply', {
+      method: 'POST', body: {
+        scenarioId, previewToken: manualPreview.data.previewToken,
+        manualOverrides: [{ productId, newPriceUah: 4100 }],
+      },
+    });
+    assert.equal(manualApply.response.status, 200, manualApply.text);
+    const manualBatchId = Number(manualApply.data.batch?.id || manualApply.data.batchId);
+    batchIds.push(manualBatchId);
+    const manuallyUpdated = (await pool.query(
+      'SELECT details FROM products WHERE id = $1', [productId]
+    )).rows[0];
+    assert.equal(manuallyUpdated.details.customUsdPerGramBasis, undefined);
+    assert.equal(Number(manuallyUpdated.details.manualPriceUah), 4100);
+    const manualRollback = await request(`/api/admin/repricing/${manualBatchId}/rollback`, {
+      method: 'POST', body: {},
+    });
+    assert.equal(manualRollback.response.status, 200, manualRollback.text);
+    rolledBackBatchIds.add(manualBatchId);
+    const restored = (await pool.query(`SELECT total_price, total_price_uah,
+      price_per_gram, uah_rate, details FROM products WHERE id = $1`, [productId])).rows[0];
+    assert.equal(Number(restored.total_price_uah), 3999.9);
+    assert.equal(Number(restored.price_per_gram), 10.05);
+    assert.equal(Number(restored.uah_rate), 39.8);
+    assert.deepEqual(restored.details, originalDetails);
+  } finally {
+    if (draftId) await request(`/api/admin/repricing/drafts/${draftId}`, { method: 'DELETE', body: {} });
+    for (const batchId of batchIds.reverse()) {
+      if (!rolledBackBatchIds.has(batchId)) {
+        await request(`/api/admin/repricing/${batchId}/rollback`, { method: 'POST', body: {} });
+      }
+    }
+    if (productId) {
+      await pool.query("UPDATE products SET status = 'archived', exclude_from_export = 1 WHERE id = $1", [productId]);
+    }
+    if (scenarioId) {
+      await pool.query("UPDATE price_scenarios SET status = 'archived' WHERE id = $1", [scenarioId]);
+    }
+  }
+});
+
 test('pre-feature repricing drafts remain current at default rounding and stale after a toggle', async () => {
   const originalFlag = (await pool.query(
     'SELECT marketing_rounding_enabled FROM categories WHERE code = $1', ['ZZ']

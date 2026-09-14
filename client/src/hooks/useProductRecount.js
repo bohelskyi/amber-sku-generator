@@ -4,8 +4,11 @@ import {
   RECOUNT_PREVIEW_DEBOUNCE_MS,
   buildRecountPayload,
   buildRecountPreviewPayload,
+  buildCorrectionRequestPayload,
   createRecountPreviewGate,
+  getCorrectionMarketingRoundingDefault,
   getDecodedAnswerMap,
+  getDirectRecountManualPrice,
   getRecountSourceWeight,
   haveRecountTargetChanged,
   normalizeRecountTargetState,
@@ -15,6 +18,7 @@ import {
 import { getRecountFieldBlockers } from '../lib/recount-blockers.js';
 
 export function useProductRecount({
+  canPriceOverride = false,
   config,
   onApplied,
   onRequestCreated,
@@ -33,6 +37,9 @@ export function useProductRecount({
   const [recountWeight, setRecountWeight] = useState('');
   const [recountReason, setRecountReason] = useState('');
   const [recountManualPriceUah, setRecountManualPriceUah] = useState('');
+  const [recountPricingMode, setRecountPricingMode] = useState('system_auto');
+  const [recountUsdPerGram, setRecountUsdPerGram] = useState('');
+  const [recountMarketingRounding, setRecountMarketingRounding] = useState(true);
   const [recountPreview, setRecountPreview] = useState(null);
   const [recountError, setRecountError] = useState('');
   const [recountSuccess, setRecountSuccess] = useState('');
@@ -50,12 +57,31 @@ export function useProductRecount({
   const hasRecountChanges = Boolean(
     haveRecountTargetChanged(decodeData, recountAnswers, recountWeight)
   );
-  const recountPreviewPayload = useMemo(() => buildRecountPreviewPayload({
-    sourceSku: decodeData?.sku,
-    answers: recountAnswers,
-    isCalibrated: recountAnswers.is_calibrated ?? null,
-    weight: recountWeight,
-  }), [decodeData?.sku, recountAnswers, recountWeight]);
+  const useDecisionPreview = canPriceOverride && submitMode !== 'apply';
+  const pricingDecision = useMemo(() => {
+    if (recountPricingMode === 'usd_per_gram') return {
+      mode: 'usd_per_gram',
+      usdPerGram: recountUsdPerGram,
+      marketingRoundingEnabled: recountMarketingRounding,
+    };
+    if (recountPricingMode === 'manual_uah') return {
+      mode: 'manual_uah', manualPriceUah: recountManualPriceUah,
+    };
+    return { mode: 'system_auto' };
+  }, [recountPricingMode, recountUsdPerGram, recountMarketingRounding, recountManualPriceUah]);
+  const recountPreviewPayload = useMemo(() => {
+    const basePayload = buildRecountPreviewPayload({
+      sourceSku: decodeData?.sku,
+      answers: recountAnswers,
+      isCalibrated: recountAnswers.is_calibrated ?? null,
+      weight: recountWeight,
+    });
+    if (!useDecisionPreview) return basePayload;
+    const { manualPriceUah: _legacyManualPrice, ...decisionPayload } = basePayload;
+    return { ...decisionPayload, pricingDecision };
+  }, [decodeData?.sku, recountAnswers, recountWeight, useDecisionPreview, pricingDecision]);
+  const previewPath = useDecisionPreview
+    ? '/admin/correction-requests/preview' : '/recount/preview';
   const requiresRecountWeight = Number(decodeData?.category?.requires_weight) === 1;
   const recountBlockers = recountValidationActive
     ? getRecountFieldBlockers({
@@ -150,6 +176,12 @@ export function useProductRecount({
     setRecountWeight(String(getRecountSourceWeight(decodeData) || ''));
     setRecountReason('');
     setRecountManualPriceUah('');
+    setRecountPricingMode('system_auto');
+    setRecountUsdPerGram('');
+    setRecountMarketingRounding(getCorrectionMarketingRoundingDefault(
+      config,
+      decodeData?.category?.code
+    ));
     setRecountPreview(null);
     setIsRecountPreviewCurrent(false);
     setIsRecountPreviewUnavailable(false);
@@ -236,14 +268,22 @@ export function useProductRecount({
     setRecountValidationMessage('');
   };
 
-  const getRecountPayload = () => buildRecountPayload({
-    sourceSku: decodeData?.sku,
-    answers: recountAnswers,
-    isCalibrated: recountAnswers.is_calibrated ?? null,
-    weight: recountWeight,
-    reason: recountReason,
-    manualPriceUah: recountManualPriceUah,
-  });
+  const getRecountPayload = (requestMode = false) => {
+    const payload = buildRecountPayload({
+      sourceSku: decodeData?.sku,
+      answers: recountAnswers,
+      isCalibrated: recountAnswers.is_calibrated ?? null,
+      weight: recountWeight,
+      reason: recountReason,
+      manualPriceUah: getDirectRecountManualPrice(
+        recountPreview,
+        recountManualPriceUah
+      ),
+    });
+    return requestMode && useDecisionPreview
+      ? buildCorrectionRequestPayload(payload, pricingDecision, recountPreview?.previewSignature)
+      : payload;
+  };
 
   const requestRecountPreview = ({ openConfirmation = false, surfaceValidation = false } = {}) => {
     if (!decodeData?.sku) return;
@@ -263,11 +303,12 @@ export function useProductRecount({
     const requestId = previewRequestGateRef.current.invalidate();
     previewRequestIdRef.current = requestId;
 
-    api.post('/recount/preview', recountPreviewPayload)
+    api.post(previewPath, recountPreviewPayload)
       .then((res) => {
         if (requestId !== previewRequestIdRef.current
             || !previewRequestGateRef.current.isCurrent(requestId)) return;
         setRecountPreview(res.data);
+        setRecountError('');
         setIsRecountPreviewCurrent(true);
         setIsRecountPreviewUnavailable(false);
         setRecountValidationActive(false);
@@ -310,11 +351,12 @@ export function useProductRecount({
     const requestId = previewRequestGateRef.current.invalidate();
     previewRequestIdRef.current = requestId;
     const timerId = window.setTimeout(() => {
-      api.post('/recount/preview', recountPreviewPayload)
+      api.post(previewPath, recountPreviewPayload)
         .then((res) => {
           if (requestId !== previewRequestIdRef.current
               || !previewRequestGateRef.current.isCurrent(requestId)) return;
           setRecountPreview(res.data);
+          setRecountError('');
           setIsRecountPreviewCurrent(true);
           setIsRecountPreviewUnavailable(false);
           setRecountValidationActive(false);
@@ -323,9 +365,10 @@ export function useProductRecount({
         .catch(() => {
           if (requestId !== previewRequestIdRef.current
               || !previewRequestGateRef.current.isCurrent(requestId)) return;
-          setRecountPreview(null);
+          if (!isRecountConfirmOpen) setRecountPreview(null);
           setIsRecountPreviewCurrent(false);
           setIsRecountPreviewUnavailable(true);
+          if (isRecountConfirmOpen) setRecountError('Вкажіть коректну ціну для вибраного режиму.');
         })
         .finally(() => {
           if (requestId === previewRequestIdRef.current
@@ -336,7 +379,7 @@ export function useProductRecount({
     }, RECOUNT_PREVIEW_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timerId);
-  }, [hasRecountChanges, isRecountOpen, recountPreviewPayload]);
+  }, [hasRecountChanges, isRecountOpen, recountPreviewPayload, previewPath, isRecountConfirmOpen]);
 
   useEffect(() => () => {
     previewRequestGateRef.current.invalidate();
@@ -374,7 +417,7 @@ export function useProductRecount({
     const isRequestMode = effectiveSubmitMode === 'request';
     api.post(
       isRequestMode ? '/admin/correction-requests' : '/recount/apply',
-      getRecountPayload()
+      getRecountPayload(isRequestMode)
     )
       .then((res) => {
         setIsRecountConfirmOpen(false);
@@ -427,6 +470,9 @@ export function useProductRecount({
     recountBlockers,
     recountError,
     recountManualPriceUah,
+    recountPricingMode,
+    recountUsdPerGram,
+    recountMarketingRounding,
     recountPreview,
     recountReason,
     recountSubmitMode,
@@ -435,6 +481,9 @@ export function useProductRecount({
     recountWeight,
     setRecountReason,
     setRecountManualPriceUah,
+    setRecountPricingMode,
+    setRecountUsdPerGram,
+    setRecountMarketingRounding,
     skuToDecode,
   };
 }

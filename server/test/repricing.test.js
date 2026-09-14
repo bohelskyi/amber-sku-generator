@@ -87,6 +87,48 @@ test('scenario repricing token binds complete configuration and every candidate 
   }));
 });
 
+test('protected USD repricing token binds a rate change even when rounding keeps the same final UAH', () => {
+  const customItem = {
+    productId: 1,
+    sku: 'NM1',
+    weight: 10,
+    answers: { extra: 2 },
+    oldPriceUah: 4000,
+    calculatedPriceUah: 4020,
+    automaticPriceUah: 4000,
+    newPriceUah: 4000,
+    status: 'unchanged',
+    errorCode: null,
+    pricingChange: null,
+    customUsdPerGramBasis: {
+      usdPerGram: 10.05,
+      marketingRoundingEnabled: true,
+      correctionRequestId: 77,
+    },
+    uahRateDate: '2026-09-14',
+  };
+  const options = {
+    configurationToken: 'custom-scenario-selection',
+    candidateBindings: [{ productId: 1, productStateToken: 'product-1' }],
+    customOnlyPricing: true,
+  };
+  const token = getPreviewToken(scenario, [customItem], options);
+
+  assert.notEqual(token, getPreviewToken(scenario, [{
+    ...customItem,
+    calculatedPriceUah: 4020.1,
+    automaticPriceUah: 4000,
+    newPriceUah: 4000,
+  }], options));
+  assert.notEqual(token, getPreviewToken(scenario, [{
+    ...customItem,
+    customUsdPerGramBasis: {
+      ...customItem.customUsdPerGramBasis,
+      marketingRoundingEnabled: false,
+    },
+  }], options));
+});
+
 test('corrected repricing token bytes and facade exports remain stable', () => {
   const applicableItems = [{
     productId: 1,

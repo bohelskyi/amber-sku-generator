@@ -8,7 +8,13 @@ const {
   getCorrectionPreviewSignature,
   haveSameRequestAnswers,
   normalizeRequestStatusFilter,
+  previewCorrectionRequest,
 } = require('../src/services/correction-request.service');
+const { getCorrectionDecisionSignature } = require('../src/services/product/product-signatures');
+const {
+  calculateDecisionPricing,
+  normalizePricingDecision,
+} = require('../src/services/product/correction-pricing-decision');
 
 function buildPreview(overrides = {}) {
   return {
@@ -23,11 +29,109 @@ function buildPreview(overrides = {}) {
       fullSku: 'NM211',
       proposedFullSku: 'NM211',
       totalPriceUah: 600,
+      weight: 10,
+      targetValidityFingerprint: 'target-a',
+      pricingContextFingerprint: 'context-a',
+      uahRate: 40,
+      uahRateDate: '2026-09-14',
       answers: { quality: 2, processing: 2 },
       ...overrides.corrected,
     },
   };
 }
+
+test('correction pricing decisions validate strict mode-specific fields', () => {
+  assert.deepEqual(normalizePricingDecision({ mode: 'system_auto' }), { mode: 'system_auto' });
+  assert.deepEqual(normalizePricingDecision({
+    mode: 'usd_per_gram', usdPerGram: '10.05', marketingRoundingEnabled: false,
+  }), { mode: 'usd_per_gram', usdPerGram: 10.05, marketingRoundingEnabled: false });
+  assert.deepEqual(normalizePricingDecision({ mode: 'manual_uah', manualPriceUah: '4020.25' }), {
+    mode: 'manual_uah', manualPriceUah: 4020.25,
+  });
+  assert.throws(() => normalizePricingDecision({
+    mode: 'usd_per_gram', usdPerGram: 0, marketingRoundingEnabled: false,
+  }), /додатним/);
+  assert.throws(() => normalizePricingDecision({
+    mode: 'manual_uah', manualPriceUah: 10, marketingRoundingEnabled: true,
+  }), /не відповідають/);
+});
+
+test('correction create permission alone cannot authorize a pricing override', async () => {
+  await assert.rejects(previewCorrectionRequest({
+    pricingDecision: {
+      mode: 'usd_per_gram', usdPerGram: 10.05, marketingRoundingEnabled: false,
+    },
+  }, { canOverride: false }), (error) => error.statusCode === 403);
+});
+
+test('custom USD per gram bypasses matrices and applies only its explicit rounding choice', async () => {
+  const rateInfo = { rate: 40, source: 'test', rateDate: '2026-09-14' };
+  const exact = await calculateDecisionPricing({
+    mode: 'usd_per_gram', usdPerGram: 10.05, marketingRoundingEnabled: false,
+  }, 10, rateInfo);
+  const rounded = await calculateDecisionPricing({
+    mode: 'usd_per_gram', usdPerGram: 10.05, marketingRoundingEnabled: true,
+  }, 10, rateInfo);
+  assert.equal(exact.currencyPayload.calculatedPriceUah, 4020);
+  assert.equal(exact.currencyPayload.totalPriceUah, 4020);
+  assert.equal(rounded.currencyPayload.calculatedPriceUah, 4020);
+  assert.equal(rounded.currencyPayload.totalPriceUah, 4000);
+  assert.equal(exact.pricingDetails.matrix, null);
+});
+
+test('exact manual UAH pricing does not use rounding or an exchange rate', async () => {
+  const pricing = await calculateDecisionPricing({
+    mode: 'manual_uah', manualPriceUah: 4020.25,
+  }, 10);
+  assert.equal(pricing.currencyPayload.totalPriceUah, 4020.25);
+  assert.equal(pricing.currencyPayload.calculatedPriceUah, null);
+  assert.equal(pricing.currencyPayload.uahRate, null);
+});
+
+test('correction decision signatures bind only dependencies of their pricing mode', () => {
+  const usdDecision = {
+    mode: 'usd_per_gram', usdPerGram: 10.05, marketingRoundingEnabled: false,
+  };
+  const manualDecision = { mode: 'manual_uah', manualPriceUah: 4020.25 };
+  const systemDecision = { mode: 'system_auto' };
+  const preview = buildPreview();
+
+  assert.notEqual(
+    getCorrectionDecisionSignature(preview, systemDecision),
+    getCorrectionDecisionSignature(buildPreview({ corrected: {
+      pricingContextFingerprint: 'context-b',
+    } }), systemDecision)
+  );
+  assert.equal(
+    getCorrectionDecisionSignature(preview, usdDecision),
+    getCorrectionDecisionSignature(buildPreview({ corrected: {
+      pricingContextFingerprint: 'unrelated-context', totalPriceUah: 9999,
+    } }), usdDecision)
+  );
+  assert.notEqual(
+    getCorrectionDecisionSignature(preview, usdDecision),
+    getCorrectionDecisionSignature(buildPreview({ corrected: {
+      uahRate: 41, totalPriceUah: 600,
+    } }), usdDecision)
+  );
+  assert.equal(
+    getCorrectionDecisionSignature(preview, manualDecision),
+    getCorrectionDecisionSignature(buildPreview({ corrected: {
+      pricingContextFingerprint: 'unrelated-context', uahRate: 41,
+      uahRateDate: '2026-09-15', totalPriceUah: 9999,
+    } }), manualDecision)
+  );
+  assert.notEqual(
+    getCorrectionDecisionSignature(preview, manualDecision),
+    getCorrectionDecisionSignature(preview, { ...manualDecision, manualPriceUah: 4021.25 })
+  );
+  assert.notEqual(
+    getCorrectionDecisionSignature(preview, manualDecision),
+    getCorrectionDecisionSignature(buildPreview({ corrected: {
+      targetValidityFingerprint: 'target-b',
+    } }), manualDecision)
+  );
+});
 
 test('correction request signature is stable for reordered answers', () => {
   const first = buildPreview();

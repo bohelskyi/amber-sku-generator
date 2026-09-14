@@ -6,6 +6,7 @@ import { copyPlainText } from '../../lib/clipboard';
 import { useDialogAccessibility } from '../../hooks/useDialogAccessibility';
 
 export function RecountConfirmDialog({
+  canPriceOverride = false,
   error = '',
   isApplying,
   isOpen,
@@ -14,7 +15,14 @@ export function RecountConfirmDialog({
   preview,
   reason,
   manualPriceUah,
+  pricingMode = 'system_auto',
+  usdPerGram = '',
+  marketingRoundingEnabled = true,
+  previewCurrent = true,
   onManualPriceChange,
+  onPricingModeChange,
+  onUsdPerGramChange,
+  onMarketingRoundingChange,
   mode = 'apply',
   submittingMode = null,
 }) {
@@ -40,7 +48,9 @@ export function RecountConfirmDialog({
   const priceDelta = Number(preview.priceDeltaUah || 0);
   const isChoiceMode = mode === 'choice';
   const isRequestMode = mode === 'request';
-  const requiresManualPrice = !(Number(newPrice) > 0);
+  const showDecision = canPriceOverride && (isRequestMode || isChoiceMode);
+  const requiresManualPrice = !(Number(newPrice) > 0)
+    && (!showDecision || (isChoiceMode && pricingMode === 'system_auto'));
   const hasManualPrice = Number(manualPriceUah) > 0;
 
   return createPortal(
@@ -76,6 +86,41 @@ export function RecountConfirmDialog({
         </div>
 
         <div className="dialog-body space-y-5 px-5 py-5 sm:px-6">
+          {showDecision && (
+            <fieldset className="rounded-lg border border-slate-200 p-4">
+              <legend className="px-1 text-sm font-semibold">Ціна запиту на виправлення</legend>
+              <label className="block text-sm">
+                Режим ціни
+                <select className="input mt-2" value={pricingMode}
+                  onChange={(event) => onPricingModeChange(event.target.value)}>
+                  <option value="system_auto">Автоматична ціна системи</option>
+                  <option value="usd_per_gram">Власна ціна USD/г</option>
+                  <option value="manual_uah">Точна ручна ціна UAH</option>
+                </select>
+              </label>
+              {pricingMode === 'usd_per_gram' && (
+                <div className="mt-3 space-y-3">
+                  <label className="block text-sm">USD за грам
+                    <input className="input mt-2" type="number" min="0.0001" step="0.0001"
+                      value={usdPerGram} onChange={(event) => onUsdPerGramChange(event.target.value)} />
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={marketingRoundingEnabled}
+                      onChange={(event) => onMarketingRoundingChange(event.target.checked)} />
+                    Маркетингове округлення
+                  </label>
+                </div>
+              )}
+              {pricingMode === 'manual_uah' && (
+                <label className="mt-3 block text-sm">Точна ціна UAH
+                  <input className="input mt-2" type="number" min="0.01" step="0.01"
+                    value={manualPriceUah}
+                    onChange={(event) => onManualPriceChange(event.target.value)} />
+                </label>
+              )}
+              {!previewCurrent && <p className="mt-2 text-sm text-amber-800">Оновлюємо розрахунок…</p>}
+            </fieldset>
+          )}
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Було</div>
@@ -185,24 +230,25 @@ export function RecountConfirmDialog({
               type="button"
               onClick={() => onConfirm('request')}
               className="btn btn-outline order-1 sm:order-2"
-              disabled={isApplying || (requiresManualPrice && !hasManualPrice)}
+              disabled={isApplying || !previewCurrent || (showDecision && pricingMode === 'system_auto'
+                && !(Number(newPrice) > 0)) || (requiresManualPrice && !hasManualPrice)}
             >
               {isApplying && submittingMode === 'request' ? 'Створюємо...' : 'Створити запит'}
             </button>
           )}
-          <button
+          {(!isChoiceMode || !showDecision || pricingMode === 'system_auto') && <button
             ref={confirmButtonRef}
             type="button"
             onClick={() => onConfirm(isRequestMode ? 'request' : 'apply')}
             className={`btn btn-primary order-1 ${isChoiceMode ? 'sm:order-3' : 'sm:order-2'}`}
-            disabled={isApplying || (requiresManualPrice && !hasManualPrice)}
+            disabled={isApplying || !previewCurrent || (requiresManualPrice && !hasManualPrice)}
           >
             {isApplying && submittingMode === (isRequestMode ? 'request' : 'apply')
               ? 'Створюємо...'
               : isRequestMode
                 ? 'Створити запит'
                 : 'Створити коригувальний артикул'}
-          </button>
+          </button>}
         </div>
       </div>
     </div>,

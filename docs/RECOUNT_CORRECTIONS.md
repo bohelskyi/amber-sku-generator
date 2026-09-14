@@ -30,13 +30,15 @@ Both source and corrected products are excluded from the normal export queue by 
 
 Successful direct apply and correction-request completion use the authenticated local application user as `product_corrections.performed_by_user_id` and as the successor product's `products.created_by_user_id`. They append one semantic `product.recounted` durable audit event in the same transaction. Its concise details link the source and corrected product/SKU plus the detailed correction row and optional correction request; the existing old/new recount payload is not duplicated into `audit_events`. Historical product/correction rows remain `NULL` and no historical events are synthesized.
 
-Direct apply requires `products.recount`; correction preview/request creation requires `corrections.create`.
+Direct apply requires `products.recount`; correction preview/request creation requires `corrections.create`. Selecting a custom USD-per-gram or exact manual UAH decision additionally requires `corrections.price_override`.
 
 ## Correction requests
 
 Correction requests move through `pending`, `in_progress`, `completed`, and `rejected`. A partial unique index permits only one active request per source. Active requests block competing direct correction and repricing.
 
-Signatures bind source/proposed state. Refresh recalculates the proposed result. Completion uses the same transactional recount application, stores the final payload, and attempts to synchronize affected repricing drafts.
+Every new request stores its pricing mode, including requests from older clients that omit `pricingDecision`. Those requests become `system_auto`, or `manual_uah` with origin `automatic_unavailable_fallback` when the accepted legacy manual field supplies a missing automatic price. System automatic mode uses the normal matrix, modifiers, category rounding, and full pricing-context binding. Custom USD-per-gram mode multiplies the stored positive USD/gram value by target weight and the current authoritative USD/UAH rate, applying only the stored explicit rounding choice. Exact manual UAH mode stores a positive final UAH amount without rounding or an exchange-rate dependency and retains any available automatic result as its history baseline. Processors can view but cannot replace the decision. Only pre-feature rows retain their NULL mode and legacy signature behavior.
+
+Signatures bind source/proposed state and mode-specific price dependencies. Refresh recalculates the proposed result; claim retains its existing post-commit refresh. Completion rejects a real dependency change even when it produces the same final rounded amount. Completion uses the same transactional recount application, stores the final payload, and attempts to synchronize affected repricing drafts.
 
 ## Application-user claim workflow
 
@@ -62,7 +64,7 @@ The client queue loads immediately, polls every five seconds only while visible,
 | Role | Correction behavior |
 | --- | --- |
 | Administrator | View, create, claim/release, refresh/complete, reject/reopen, and force-release. Also direct recount. |
-| Manager | View, create, reject/reopen. Cannot claim/release, refresh/complete, force-release, or directly apply recount. UI is monitoring/request-oriented. |
+| Manager | View and create, including the initial custom-pricing permission; reject/reopen. Cannot claim/release, refresh/complete, force-release, or directly apply recount. UI is monitoring/request-oriented. |
 | Storekeeper | View, create, claim/release, refresh/complete, reject/reopen, and direct recount. Cannot force-release. |
 
 Manager and Storekeeper permissions are Administrator-editable, so this table describes initial built-in mappings, not a deployed user's current access. Server permission checks remain authoritative; client controls are hidden from effective `/api/auth/me` permission keys only.

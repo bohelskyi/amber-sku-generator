@@ -39,6 +39,8 @@ If no scenario, matrix cell, or usable automatic UAH result exists, preview expo
 
 Historical decode prefers stored calculated, automatic, manual, and final fields. Compatibility fallback for older products must not recalculate history from current configuration or treat a manual final price as an automatic result.
 
+Correction requests may store a protected custom USD-per-gram basis. This value is always USD/gram and bypasses matrices and modifiers. Its final UAH price uses target weight, the authoritative rate, and the request's explicit rounding choice. Completed products retain the basis and provenance as automatic pricing. Exact manual UAH decisions remain manual and independent of automatic context and exchange rates; when normal automatic pricing is available, its raw and selected results remain in `calculatedPriceUah` and `autoPriceUah` as the historical baseline while `manualPriceUah` and `totalPriceUah` hold the exact manual decision.
+
 ## Numeric storage and legacy zero prices
 
 Relevant PostgreSQL scales include weight `NUMERIC(14,3)`, product USD/final values `(18,4)`, UAH `(18,2)`, exchange rates `(18,6)`, matrix prices `(18,4)`, and modifier factors `(12,6)`. The `pg` driver returns `NUMERIC` as strings; services convert to JavaScript `Number` at calculation/API boundaries. Full PostgreSQL arbitrary precision is therefore not preserved near JavaScript safe-integer limits; normal business-scale behavior is covered, but no explicit maximum business value is encoded.

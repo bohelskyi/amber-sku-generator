@@ -6,6 +6,7 @@ import { useDialogAccessibility } from '../../hooks/useDialogAccessibility';
 import { useProductRecount } from '../../hooks/useProductRecount';
 
 export function RepricingRecountDrawer({
+  canPriceOverride = false,
   canApplyRecount = true,
   canCreateRequest = true,
   config,
@@ -27,6 +28,7 @@ export function RepricingRecountDrawer({
         : 'request';
   const [mode, setMode] = useState(allowedInitialMode);
   const recount = useProductRecount({
+    canPriceOverride,
     config,
     onApplied,
     onRequestCreated,
@@ -178,13 +180,21 @@ export function RepricingRecountDrawer({
       </main>
 
       <RecountConfirmDialog
+        canPriceOverride={canPriceOverride}
         error={recount.recountError}
         isApplying={recount.isRecountApplying}
         isOpen={recount.isRecountConfirmOpen}
         preview={recount.recountPreview}
         reason={recount.recountReason}
         manualPriceUah={recount.recountManualPriceUah}
+        pricingMode={recount.recountPricingMode}
+        usdPerGram={recount.recountUsdPerGram}
+        marketingRoundingEnabled={recount.recountMarketingRounding}
+        previewCurrent={recount.isRecountPreviewCurrent}
         onManualPriceChange={recount.setRecountManualPriceUah}
+        onPricingModeChange={recount.setRecountPricingMode}
+        onUsdPerGramChange={recount.setRecountUsdPerGram}
+        onMarketingRoundingChange={recount.setRecountMarketingRounding}
         mode={mode}
         submittingMode={recount.recountSubmitMode}
         onCancel={recount.handleCancelRecountConfirmation}

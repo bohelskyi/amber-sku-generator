@@ -24,6 +24,8 @@ The preview token and draft fingerprint bind:
 
 Manual price itself is independently validated user input, but normalized resolution choices and all real product/pricing dependencies participate in stale-state protection.
 
+Products created from a protected correction-request USD-per-gram decision are revalued from that stored basis, current authoritative rate, and stored rounding choice. Matrix, modifier, and category-rounding edits do not alter that basis. An explicit manual repricing resolution clears the protected basis; the batch's exact old payload retains and restores the complete basis and provenance on rollback. The existing global transition to automatic applies only to manual-priced rows and does not create a separate return-to-matrix action for protected custom pricing.
+
 ## Explicit manual resolutions
 
 Manual-priced rows are never silently converted:

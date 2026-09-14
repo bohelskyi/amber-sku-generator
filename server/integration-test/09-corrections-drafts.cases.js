@@ -7,6 +7,7 @@ const {
   pool,
   integrationOidcAdapter,
   request,
+  authenticateApplicationSession,
   activateApplicationUserForTest,
   roleIdForKey,
   currentAssignmentIdForUser,
@@ -15,6 +16,9 @@ const {
 } = suite;
 
 test('pre-feature correction signatures survive the default-on upgrade but stale on a rounding toggle', async () => {
+  if (!suite.authenticatedSession) {
+    suite.authenticatedSession = await authenticateApplicationSession('/admin');
+  }
   const originalFlag = (await pool.query(
     'SELECT marketing_rounding_enabled FROM categories WHERE code = $1', ['ZZ']
   )).rows[0].marketing_rounding_enabled;
@@ -55,6 +59,9 @@ test('pre-feature correction signatures survive the default-on upgrade but stale
       assert.equal(created.response.status, 200, created.text);
       const requestId = Number(created.data.request.id);
       requestIds.push(requestId);
+      assert.equal((await pool.query(
+        'SELECT pricing_mode FROM correction_requests WHERE id = $1', [requestId]
+      )).rows[0].pricing_mode, 'system_auto');
       const claimed = await request(`/api/admin/correction-requests/${requestId}/claim`, {
         method: 'POST', body: {},
       });
@@ -66,10 +73,18 @@ test('pre-feature correction signatures survive the default-on upgrade but stale
       await pool.query(
         `UPDATE correction_requests
          SET proposed_payload = proposed_payload - 'pricingContextFingerprint',
-             preview_signature = $1
+             preview_signature = $1,
+             pricing_mode = NULL,
+             pricing_usd_per_gram = NULL,
+             pricing_manual_uah = NULL,
+             pricing_rounding_enabled = NULL,
+             pricing_origin = NULL
          WHERE id = $2`,
         [legacySignature, requestId]
       );
+      assert.equal((await pool.query(
+        'SELECT pricing_mode FROM correction_requests WHERE id = $1', [requestId]
+      )).rows[0].pricing_mode, null);
       if (toggle) {
         await pool.query('UPDATE categories SET marketing_rounding_enabled = 0 WHERE code = $1', ['ZZ']);
         const unchangedNumber = await request('/api/recount/preview', {
@@ -107,6 +122,395 @@ test('pre-feature correction signatures survive the default-on upgrade but stale
       'UPDATE price_matrix SET price = $1 WHERE scenario_id = $2 AND x_val = 2 AND y_val = 0',
       [originalCell, schemas.ZZScenario]
     );
+  }
+});
+
+test('new legacy-shaped correction requests persist explicit system and fallback pricing modes', async () => {
+  if (!suite.authenticatedSession) {
+    suite.authenticatedSession = await authenticateApplicationSession('/admin');
+  }
+  const storekeeperSession = await authenticateIdentitySession({
+    issuer: 'https://correction-pricing.example/realms/amber',
+    subject: 'legacy-shaped-storekeeper',
+    preferredUsername: 'legacy.shaped.storekeeper',
+    displayName: 'Legacy Shaped Storekeeper',
+  });
+  await activateApplicationUserForTest(
+    'https://correction-pricing.example/realms/amber',
+    'legacy-shaped-storekeeper',
+    'storekeeper'
+  );
+  const originalCell = (await pool.query(
+    'SELECT price FROM price_matrix WHERE scenario_id = $1 AND x_val = 2 AND y_val = 0',
+    [schemas.ZZScenario]
+  )).rows[0].price;
+  const requestIds = [];
+  const productIds = [];
+  async function createSource() {
+    const preview = await request('/api/preview', {
+      method: 'POST', body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0 },
+    });
+    assert.equal(preview.response.status, 200, preview.text);
+    const saved = await request('/api/save', { method: 'POST', body: {
+      category: 'ZZ', answers: { kind: 1 }, weight: 0,
+      skuSchemaVersionId: schemas.ZZ, previewToken: preview.data.previewToken,
+    } });
+    assert.equal(saved.response.status, 200, saved.text);
+    productIds.push(Number(saved.data.id));
+    return saved.data.fullSku;
+  }
+
+  try {
+    const automaticSourceSku = await createSource();
+    const fallbackSourceSku = await createSource();
+    const automatic = await request('/api/admin/correction-requests', {
+      method: 'POST',
+      authentication: storekeeperSession,
+      body: {
+        sourceSku: automaticSourceSku,
+        answers: { kind: 2 },
+        reason: 'legacy-shaped automatic request',
+      },
+    });
+    assert.equal(automatic.response.status, 200, automatic.text);
+    requestIds.push(Number(automatic.data.request.id));
+    assert.deepEqual(automatic.data.request.pricingDecision, { mode: 'system_auto' });
+    assert.equal(automatic.data.request.pricingOrigin, null);
+    assert.deepEqual((await pool.query(
+      `SELECT pricing_mode, pricing_manual_uah, pricing_origin
+       FROM correction_requests WHERE id = $1`,
+      [automatic.data.request.id]
+    )).rows, [{
+      pricing_mode: 'system_auto', pricing_manual_uah: null, pricing_origin: null,
+    }]);
+
+    await pool.query(
+      'UPDATE price_matrix SET price = NULL WHERE scenario_id = $1 AND x_val = 2 AND y_val = 0',
+      [schemas.ZZScenario]
+    );
+    const fallback = await request('/api/admin/correction-requests', {
+      method: 'POST',
+      authentication: storekeeperSession,
+      body: {
+        sourceSku: fallbackSourceSku,
+        answers: { kind: 2 },
+        reason: 'legacy-shaped missing automatic fallback',
+        manualPriceUah: 725.25,
+      },
+    });
+    assert.equal(fallback.response.status, 200, fallback.text);
+    requestIds.push(Number(fallback.data.request.id));
+    assert.deepEqual(fallback.data.request.pricingDecision, {
+      mode: 'manual_uah', manualPriceUah: 725.25,
+    });
+    assert.equal(fallback.data.request.pricingOrigin, 'automatic_unavailable_fallback');
+    assert.equal(fallback.data.request.proposedPayload.calculatedPriceUah, null);
+    assert.equal(fallback.data.request.proposedPayload.autoPriceUah, null);
+    assert.equal(Number(fallback.data.request.proposedPayload.manualPriceUah), 725.25);
+    assert.equal(Number(fallback.data.request.proposedPayload.totalPriceUah), 725.25);
+    assert.deepEqual((await pool.query(
+      `SELECT pricing_mode, pricing_manual_uah, pricing_origin
+       FROM correction_requests WHERE id = $1`,
+      [fallback.data.request.id]
+    )).rows, [{
+      pricing_mode: 'manual_uah',
+      pricing_manual_uah: '725.25',
+      pricing_origin: 'automatic_unavailable_fallback',
+    }]);
+  } finally {
+    await pool.query(
+      'UPDATE price_matrix SET price = $1 WHERE scenario_id = $2 AND x_val = 2 AND y_val = 0',
+      [originalCell, schemas.ZZScenario]
+    );
+    if (requestIds.length > 0) {
+      await pool.query('DELETE FROM correction_requests WHERE id = ANY($1::int[])', [requestIds]);
+    }
+    if (productIds.length > 0) {
+      await pool.query(
+        "UPDATE products SET status = 'archived', exclude_from_export = 1 WHERE id = ANY($1::int[]) AND status = 'active'",
+        [productIds]
+      );
+    }
+  }
+});
+
+test('authorized correction pricing decisions remain authoritative through completion', async () => {
+  if (!suite.authenticatedSession) {
+    suite.authenticatedSession = await authenticateApplicationSession('/admin');
+  }
+  const categoryFlag = (await pool.query(
+    "SELECT marketing_rounding_enabled FROM categories WHERE code = 'LN'"
+  )).rows[0].marketing_rounding_enabled;
+  const productIds = [];
+  const requestIds = [];
+  let matrixUpdated = false;
+  async function createSource(weight) {
+    const body = {
+      categoryCode: 'LN',
+      answers: { raw_type: 1, shape: 6, is_calibrated: 2 },
+      weight,
+      isCalibrated: 2,
+    };
+    const preview = await request('/api/preview', { method: 'POST', body });
+    assert.equal(preview.response.status, 200, preview.text);
+    const saved = await request('/api/save', { method: 'POST', body: {
+      category: 'LN', answers: body.answers, weight,
+      skuSchemaVersionId: schemas.LN, previewToken: preview.data.previewToken,
+    } });
+    assert.equal(saved.response.status, 200, saved.text);
+    productIds.push(Number(saved.data.id));
+    return saved.data.fullSku;
+  }
+  try {
+    const sourceSku = await createSource(10);
+    const requestBody = {
+      sourceSku,
+      answers: { shape: 7 },
+      weight: 10,
+      reason: 'manager custom USD price',
+      pricingDecision: {
+        mode: 'usd_per_gram', usdPerGram: 10.05, marketingRoundingEnabled: false,
+      },
+    };
+    const preview = await request('/api/admin/correction-requests/preview', {
+      method: 'POST', body: requestBody,
+    });
+    assert.equal(preview.response.status, 200, preview.text);
+    assert.equal(Number(preview.data.corrected.calculatedPriceUah), 4020);
+    assert.equal(Number(preview.data.corrected.autoPriceUah), 4020);
+    assert.equal(Number(preview.data.corrected.totalPriceUah), 4020);
+    assert.equal(preview.data.corrected.manualPriceUah, null);
+    assert.equal(preview.data.corrected.pricingDetails.matrix, null);
+    const created = await request('/api/admin/correction-requests', { method: 'POST', body: {
+      ...requestBody, previewSignature: preview.data.previewSignature,
+    } });
+    assert.equal(created.response.status, 200, created.text);
+    requestIds.push(Number(created.data.request.id));
+    assert.deepEqual(created.data.request.pricingDecision, requestBody.pricingDecision);
+    const stored = await pool.query(`
+      SELECT pricing_mode, pricing_usd_per_gram, pricing_rounding_enabled,
+        pricing_manual_uah, pricing_origin FROM correction_requests WHERE id = $1
+    `, [created.data.request.id]);
+    assert.deepEqual(stored.rows, [{
+      pricing_mode: 'usd_per_gram', pricing_usd_per_gram: '10.0500',
+      pricing_rounding_enabled: 0, pricing_manual_uah: null, pricing_origin: null,
+    }]);
+    const claimed = await request(
+      `/api/admin/correction-requests/${created.data.request.id}/claim`,
+      { method: 'POST', body: {} }
+    );
+    assert.equal(claimed.response.status, 200, claimed.text);
+    await pool.query("UPDATE categories SET marketing_rounding_enabled = 0 WHERE code = 'LN'");
+    await pool.query(`UPDATE price_matrix SET price = price + 0.25 WHERE scenario_id IN (
+      SELECT id FROM price_scenarios WHERE category_code = 'LN')`);
+    matrixUpdated = true;
+    const replaced = await request(
+      `/api/admin/correction-requests/${created.data.request.id}/complete`,
+      { method: 'POST', body: {
+        claimVersion: claimed.data.request.claimVersion,
+        pricingDecision: { mode: 'manual_uah', manualPriceUah: 1 },
+      } }
+    );
+    assert.equal(replaced.response.status, 422, replaced.text);
+    const completed = await request(
+      `/api/admin/correction-requests/${created.data.request.id}/complete`,
+      { method: 'POST', body: { claimVersion: claimed.data.request.claimVersion } }
+    );
+    assert.equal(completed.response.status, 200, completed.text);
+    productIds.push(Number(completed.data.recount.correctedProductId));
+    const corrected = await pool.query(`
+      SELECT total_price_uah, price_per_gram, uah_rate, details
+      FROM products WHERE id = $1
+    `, [completed.data.recount.correctedProductId]);
+    assert.equal(Number(corrected.rows[0].total_price_uah), 4020);
+    assert.equal(Number(corrected.rows[0].price_per_gram), 10.05);
+    assert.equal(Number(corrected.rows[0].uah_rate), 40);
+    assert.equal(corrected.rows[0].details.manualPriceUah, null);
+    assert.deepEqual(corrected.rows[0].details.customUsdPerGramBasis, {
+      usdPerGram: 10.05, marketingRoundingEnabled: false,
+      correctionRequestId: Number(created.data.request.id),
+    });
+
+    const manualSourceSku = await createSource(11);
+    const manualBody = {
+      sourceSku: manualSourceSku, answers: { shape: 7 }, weight: 11,
+      reason: 'manager exact UAH',
+      pricingDecision: { mode: 'manual_uah', manualPriceUah: 4020.25 },
+    };
+    const manualPreview = await request('/api/admin/correction-requests/preview', {
+      method: 'POST', body: manualBody,
+    });
+    assert.equal(manualPreview.response.status, 200, manualPreview.text);
+    assert.ok(Number(manualPreview.data.corrected.calculatedPriceUah) > 0);
+    assert.ok(Number(manualPreview.data.corrected.autoPriceUah) > 0);
+    assert.equal(Number(manualPreview.data.corrected.totalPriceUah), 4020.25);
+    assert.equal(Number(manualPreview.data.corrected.manualPriceUah), 4020.25);
+    assert.equal(Number(manualPreview.data.corrected.uahRate), 40);
+    const manualCreated = await request('/api/admin/correction-requests', {
+      method: 'POST', body: { ...manualBody, previewSignature: manualPreview.data.previewSignature },
+    });
+    assert.equal(manualCreated.response.status, 200, manualCreated.text);
+    requestIds.push(Number(manualCreated.data.request.id));
+    const manualClaim = await request(
+      `/api/admin/correction-requests/${manualCreated.data.request.id}/claim`,
+      { method: 'POST', body: {} }
+    );
+    assert.equal(manualClaim.response.status, 200, manualClaim.text);
+    await pool.query("UPDATE categories SET marketing_rounding_enabled = 1 WHERE code = 'LN'");
+    const manualComplete = await request(
+      `/api/admin/correction-requests/${manualCreated.data.request.id}/complete`,
+      { method: 'POST', body: { claimVersion: manualClaim.data.request.claimVersion } }
+    );
+    assert.equal(manualComplete.response.status, 200, manualComplete.text);
+    productIds.push(Number(manualComplete.data.recount.correctedProductId));
+    const manualProduct = await pool.query(
+      'SELECT total_price_uah, details FROM products WHERE id = $1',
+      [manualComplete.data.recount.correctedProductId]
+    );
+    assert.equal(Number(manualProduct.rows[0].total_price_uah), 4020.25);
+    assert.equal(
+      Number(manualProduct.rows[0].details.calculatedPriceUah),
+      Number(manualPreview.data.corrected.calculatedPriceUah)
+    );
+    assert.ok(Number(manualProduct.rows[0].details.autoPriceUah) > 0);
+    assert.equal(Number(manualProduct.rows[0].details.manualPriceUah), 4020.25);
+  } finally {
+    await pool.query("UPDATE categories SET marketing_rounding_enabled = $1 WHERE code = 'LN'",
+      [categoryFlag]);
+    if (matrixUpdated) {
+      await pool.query(`UPDATE price_matrix SET price = price - 0.25 WHERE scenario_id IN (
+        SELECT id FROM price_scenarios WHERE category_code = 'LN')`);
+    }
+    if (requestIds.length) {
+      await pool.query("DELETE FROM correction_requests WHERE id = ANY($1::int[]) AND status <> 'completed'", [requestIds]);
+    }
+    if (productIds.length) {
+      await pool.query("UPDATE products SET status = 'archived', exclude_from_export = 1 WHERE id = ANY($1::int[]) AND status = 'active'", [productIds]);
+    }
+  }
+});
+
+test('correction completion revalidates decision dependencies after the source lock', async () => {
+  if (!suite.authenticatedSession) {
+    suite.authenticatedSession = await authenticateApplicationSession('/admin');
+  }
+  let requestId;
+  let sourceProductId;
+  let lockClient;
+  let lockOpen = false;
+  let targetQuestion;
+  let completionPromise;
+  try {
+    const sourceBody = {
+      categoryCode: 'LN',
+      answers: { raw_type: 1, shape: 6, is_calibrated: 2 },
+      weight: 13,
+      isCalibrated: 2,
+    };
+    const sourcePreview = await request('/api/preview', {
+      method: 'POST', body: sourceBody,
+    });
+    assert.equal(sourcePreview.response.status, 200, sourcePreview.text);
+    const source = await request('/api/save', { method: 'POST', body: {
+      category: 'LN', answers: sourceBody.answers, weight: sourceBody.weight,
+      isCalibrated: sourceBody.isCalibrated,
+      skuSchemaVersionId: schemas.LN,
+      previewToken: sourcePreview.data.previewToken,
+    } });
+    assert.equal(source.response.status, 200, source.text);
+    sourceProductId = Number(source.data.id);
+
+    const requestBody = {
+      sourceSku: source.data.fullSku,
+      answers: { shape: 7 },
+      weight: 13,
+      reason: 'transactional decision dependency race',
+      pricingDecision: {
+        mode: 'usd_per_gram', usdPerGram: 10.05, marketingRoundingEnabled: true,
+      },
+    };
+    const decisionPreview = await request('/api/admin/correction-requests/preview', {
+      method: 'POST', body: requestBody,
+    });
+    assert.equal(decisionPreview.response.status, 200, decisionPreview.text);
+    const created = await request('/api/admin/correction-requests', {
+      method: 'POST',
+      body: { ...requestBody, previewSignature: decisionPreview.data.previewSignature },
+    });
+    assert.equal(created.response.status, 200, created.text);
+    requestId = Number(created.data.request.id);
+    const claimed = await request(`/api/admin/correction-requests/${requestId}/claim`, {
+      method: 'POST', body: {},
+    });
+    assert.equal(claimed.response.status, 200, claimed.text);
+
+    targetQuestion = (await pool.query(
+      `SELECT id, label FROM questions
+       WHERE category_code = 'LN' AND COALESCE(include_in_sku, 1) = 0
+       ORDER BY id LIMIT 1`
+    )).rows[0];
+    lockClient = await pool.connect();
+    await lockClient.query('BEGIN');
+    lockOpen = true;
+    const blockerPid = Number((await lockClient.query(
+      'SELECT pg_backend_pid() AS pid'
+    )).rows[0].pid);
+    await lockClient.query('SELECT id FROM products WHERE id = $1 FOR UPDATE', [sourceProductId]);
+
+    completionPromise = request(`/api/admin/correction-requests/${requestId}/complete`, {
+      method: 'POST', body: { claimVersion: claimed.data.request.claimVersion },
+    });
+    let completionBlocked = false;
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const waiting = await pool.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM pg_stat_activity
+           WHERE $1 = ANY(pg_blocking_pids(pid))
+         ) AS waiting`,
+        [blockerPid]
+      );
+      if (waiting.rows[0].waiting) {
+        completionBlocked = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(completionBlocked, true, 'completion must wait for the held source lock');
+    await lockClient.query(
+      'UPDATE questions SET label = $1 WHERE id = $2',
+      [`${targetQuestion.label} (changed while completing)`, targetQuestion.id]
+    );
+    await lockClient.query('COMMIT');
+    lockOpen = false;
+
+    const completed = await completionPromise;
+    completionPromise = null;
+    assert.equal(completed.response.status, 409, completed.text);
+    assert.equal((await pool.query(
+      'SELECT status FROM correction_requests WHERE id = $1', [requestId]
+    )).rows[0].status, 'in_progress');
+    assert.equal((await pool.query(
+      'SELECT status FROM products WHERE id = $1', [sourceProductId]
+    )).rows[0].status, 'active');
+  } finally {
+    if (lockOpen) await lockClient.query('ROLLBACK');
+    if (completionPromise) await completionPromise;
+    if (lockClient) lockClient.release();
+    if (targetQuestion) {
+      await pool.query(
+        'UPDATE questions SET label = $1 WHERE id = $2',
+        [targetQuestion.label, targetQuestion.id]
+      );
+    }
+    if (requestId) {
+      await pool.query('DELETE FROM correction_requests WHERE id = $1', [requestId]);
+    }
+    if (sourceProductId) {
+      await pool.query(
+        "UPDATE products SET status = 'archived', exclude_from_export = 1 WHERE id = $1 AND status = 'active'",
+        [sourceProductId]
+      );
+    }
   }
 });
 

@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 
 const { toUahNumber } = require('../../utils/money');
+const { hashPayload } = require('../pricing/pricing-context-fingerprint');
 
 function stableAnswerEntries(answers = {}) {
   return Object.entries(answers || {})
@@ -72,8 +73,39 @@ function getCorrectionPreviewSignature(preview, { legacyDefaultRounding = false 
   return crypto.createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
 }
 
+function getCorrectionDecisionSignature(preview, decision) {
+  if (!decision) return getCorrectionPreviewSignature(preview);
+  if (decision.mode === 'system_auto') {
+    return hashPayload({ version: 2, mode: decision.mode,
+      legacySignature: getCorrectionPreviewSignature(preview),
+      sourceState: preview.source.stateSignature,
+      targetValidity: preview.corrected.targetValidityFingerprint,
+      weight: preview.corrected.weight,
+    });
+  }
+  return hashPayload({
+    version: 2,
+    mode: decision.mode,
+    decision,
+    sourceState: preview.source.stateSignature,
+    sourceSku: preview.source.sku,
+    categoryCode: preview.corrected.categoryCode,
+    targetValidity: preview.corrected.targetValidityFingerprint,
+    skuSchemaVersionId: preview.corrected.skuSchemaVersionId,
+    proposedSku: preview.corrected.proposedFullSku,
+    fullSku: preview.corrected.fullSku,
+    answers: stableAnswerEntries(preview.corrected.answers),
+    weight: Number(preview.corrected.weight),
+    ...(decision.mode === 'usd_per_gram' ? {
+      rate: Number(preview.corrected.uahRate),
+      rateDate: preview.corrected.uahRateDate || null,
+    } : {}),
+  });
+}
+
 module.exports = {
   getCorrectionPreviewSignature,
+  getCorrectionDecisionSignature,
   getProductPreviewToken,
   getProductStateSignature,
   stableAnswerEntries,

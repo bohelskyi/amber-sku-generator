@@ -49,6 +49,11 @@ export function getRecountSourceWeight(decoded) {
   return 0;
 }
 
+export function getCorrectionMarketingRoundingDefault(config, categoryCode) {
+  const storedValue = config?.categories?.[categoryCode]?.marketing_rounding_enabled;
+  return Number(storedValue ?? 1) !== 0;
+}
+
 export function haveRecountTargetChanged(decoded, answers, weight) {
   if (!decoded) return false;
   if (haveAnswersChanged(getDecodedAnswerMap(decoded), answers)) return true;
@@ -304,4 +309,21 @@ export function buildRecountPreviewPayload({
     reason: '',
     manualPriceUah: null,
   });
+}
+
+export function getDirectRecountManualPrice(preview, manualPriceUah) {
+  const corrected = preview?.corrected;
+  const hasAutomaticPrice = Number(corrected?.autoPriceUah) > 0
+    || (!(Number(corrected?.manualPriceUah) > 0)
+      && Number(corrected?.totalPriceUah) > 0);
+  return hasAutomaticPrice ? null : manualPriceUah;
+}
+
+export function buildCorrectionRequestPayload(basePayload, pricingDecision, previewSignature) {
+  const { manualPriceUah: _legacyManualPrice, ...requestPayload } = basePayload;
+  return {
+    ...requestPayload,
+    pricingDecision,
+    previewSignature,
+  };
 }

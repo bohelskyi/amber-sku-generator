@@ -10,6 +10,15 @@ const {
 } = require('./constants');
 const { getProductRepricingState } = require('./pricing-state');
 
+function getScenarioSelectionSnapshot(scenario) {
+  return {
+    id: Number(scenario.id),
+    categoryCode: scenario.category_code || scenario.categoryCode,
+    priority: Number(scenario.priority || 0),
+    matchJson: scenario.match_json || scenario.matchJson || {},
+  };
+}
+
 function getProductRepricingStateToken(product) {
   return hashPayload(getProductRepricingState(product));
 }
@@ -32,6 +41,10 @@ function getGlobalPreviewToken(configurationToken, items) {
         errorCode: item.errorCode || null,
         pricingState: item.pricingState,
         pricingChange: item.pricingChange || null,
+        ...(item.customUsdPerGramBasis ? {
+          customUsdPerGramBasis: item.customUsdPerGramBasis,
+          uahRateDate: item.uahRateDate || null,
+        } : {}),
       })),
   });
 }
@@ -39,11 +52,13 @@ function getGlobalPreviewToken(configurationToken, items) {
 function getPreviewToken(scenario, applicableItems, {
   configurationToken = null,
   candidateBindings = [],
+  customOnlyPricing = false,
 } = {}) {
   return hashPayload({
     scope: REPRICING_SCOPE_SCENARIO,
     configurationToken,
-    scenario: getScenarioSnapshot(scenario),
+    scenario: customOnlyPricing
+      ? getScenarioSelectionSnapshot(scenario) : getScenarioSnapshot(scenario),
     candidates: [...candidateBindings]
       .sort((first, second) => Number(first.productId) - Number(second.productId))
       .map((binding) => ({
@@ -64,6 +79,10 @@ function getPreviewToken(scenario, applicableItems, {
         status: item.status,
         errorCode: item.errorCode || null,
         pricingChange: item.pricingChange || null,
+        ...(item.customUsdPerGramBasis ? {
+          customUsdPerGramBasis: item.customUsdPerGramBasis,
+          uahRateDate: item.uahRateDate || null,
+        } : {}),
       })),
   });
 }
@@ -91,6 +110,10 @@ function getRepricingPreviewSnapshot(preview) {
         uahRate: item.uahRate ?? null,
         matrixName: item.matrixName || null,
         pricingChange: item.pricingChange || null,
+        ...(item.customUsdPerGramBasis ? {
+          customUsdPerGramBasis: item.customUsdPerGramBasis,
+          uahRateDate: item.uahRateDate || null,
+        } : {}),
       }))
       .sort((first, second) => first.productId - second.productId),
   };
@@ -98,14 +121,16 @@ function getRepricingPreviewSnapshot(preview) {
   if (isGlobal) {
     return {
       scope: REPRICING_SCOPE_GLOBAL,
-      scenarios: preview.scenarios || [],
+      scenarios: preview.bindingScenarios
+        || (preview.customOnlyPricing ? [] : (preview.scenarios || [])),
       configurationToken: preview.configurationToken,
       ...snapshot,
     };
   }
 
   return {
-    scenario: preview.scenario,
+    scenario: preview.customOnlyPricing
+      ? getScenarioSelectionSnapshot(preview.scenario) : preview.scenario,
     bindingToken: preview.previewToken || null,
     ...snapshot,
   };

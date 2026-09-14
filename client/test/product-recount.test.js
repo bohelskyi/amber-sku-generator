@@ -3,9 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 import {
+  buildCorrectionRequestPayload,
   buildRecountPayload,
   buildRecountPreviewPayload,
+  getCorrectionMarketingRoundingDefault,
   getDecodedAnswerMap,
+  getDirectRecountManualPrice,
   haveAnswersChanged,
   normalizeRecountTargetAnswers,
   normalizeRecountTargetState,
@@ -312,4 +315,54 @@ test('recount clears target-hidden inherited answers without changing normal pro
     { raw_type: 2, legacy_detail: null }
   );
   assert.doesNotMatch(skuManagerSource, /normalizeRecountTargetAnswers/);
+});
+
+test('direct recount drops an inactive manual decision but preserves missing-price fallback', () => {
+  const enteredManualPrice = '4020.25';
+  assert.equal(getDirectRecountManualPrice({
+    corrected: {
+      autoPriceUah: 4000,
+      totalPriceUah: 4000,
+      manualPriceUah: null,
+    },
+  }, enteredManualPrice), null);
+  assert.equal(getDirectRecountManualPrice({
+    corrected: {
+      autoPriceUah: null,
+      totalPriceUah: null,
+      manualPriceUah: null,
+    },
+  }, enteredManualPrice), enteredManualPrice);
+});
+
+test('custom USD per gram rounding starts from the target category setting', () => {
+  const config = {
+    categories: {
+      PAINT: { marketing_rounding_enabled: 0 },
+      AMBER: { marketing_rounding_enabled: 1 },
+    },
+  };
+
+  assert.equal(getCorrectionMarketingRoundingDefault(config, 'PAINT'), false);
+  assert.equal(getCorrectionMarketingRoundingDefault(config, 'AMBER'), true);
+  assert.equal(getCorrectionMarketingRoundingDefault(config, 'LEGACY'), true);
+  assert.match(
+    recountHookSource,
+    /setRecountMarketingRounding\(getCorrectionMarketingRoundingDefault/
+  );
+});
+
+test('correction request payload replaces the legacy manual field with the stored decision', () => {
+  const base = buildRecountPayload({
+    sourceSku: 'BR1001', answers: { size: 2 }, isCalibrated: 0,
+    weight: '10', reason: 'resize', manualPriceUah: '999',
+  });
+  const decision = {
+    mode: 'usd_per_gram', usdPerGram: '10.05', marketingRoundingEnabled: false,
+  };
+  assert.deepEqual(buildCorrectionRequestPayload(base, decision, 'signed-preview'), {
+    sourceSku: 'BR1001', answers: { size: 2 }, isCalibrated: 0,
+    weight: '10', reason: 'resize', pricingDecision: decision,
+    previewSignature: 'signed-preview',
+  });
 });

@@ -7,6 +7,8 @@ const {
 const { getUsdUahRateInfo } = require('../currency.service');
 const { toUahNumber } = require('../../utils/money');
 const { asRuleObject, isRuleMatched } = require('../../utils/rules');
+const { sortScenariosByPrecedence } = require('../../utils/pricing-scenarios');
+const { buildCustomUsdRepricingItem, getCustomUsdBasis } = require('./custom-usd-basis');
 const { REPRICING_SCOPE_GLOBAL } = require('./constants');
 const {
   buildPricingChange,
@@ -92,11 +94,8 @@ async function buildRepricingPreviewState(scenarioId) {
     throw error;
   }
   const { scenario, context: pricingContext } = loadedPricing;
-  const configurationToken = hashPayload([getPricingContextSnapshot(pricingContext)]);
-  const legacyConfigurationToken = Number(pricingContext.category?.marketing_rounding_enabled) === 1
-    ? hashPayload([getPricingContextSnapshot(pricingContext, { legacyDefaultRounding: true })])
-    : null;
-  let rateInfo = null;
+  const fullConfigurationToken = hashPayload([getPricingContextSnapshot(pricingContext)]);
+  let rateInfo;
   try {
     rateInfo = await getUsdUahRateInfo();
   } catch (error) {
@@ -125,11 +124,14 @@ async function buildRepricingPreviewState(scenarioId) {
   const items = [];
   const candidateBindings = [];
   let skippedCount = 0;
+  let hasSystemCandidates = false;
 
   for (const product of productsResult.rows) {
     const details = getProductDetails(product);
     const answers = getPricingAnswers(product, details);
     if (!isRuleMatched(scenarioRule, answers)) continue;
+    const customBasis = getCustomUsdBasis(details);
+    if (!customBasis || hasManualPrice(details)) hasSystemCandidates = true;
     candidateBindings.push({
       productId: Number(product.id),
       productStateToken: getProductRepricingStateToken(product),
@@ -143,6 +145,25 @@ async function buildRepricingPreviewState(scenarioId) {
         'manual_price',
         'Товар має ручну ціну.'
       ));
+      continue;
+    }
+
+    if (Object.hasOwn(details, 'customUsdPerGramBasis')) {
+      try {
+        if (!customBasis) throw new Error('Збережена ціна USD/г пошкоджена.');
+        const selectedScenario = sortScenariosByPrecedence(pricingContext.scenarios)
+          .find((candidate) => isRuleMatched(candidate.match_json, {
+            ...answers, is_calibrated: Number(answers.is_calibrated || 0),
+          }));
+        if (Number(selectedScenario?.id || 0) !== Number(scenario.id)) {
+          skippedCount += 1;
+          continue;
+        }
+        items.push(await buildCustomUsdRepricingItem(product, details, answers, rateInfo));
+      } catch (error) {
+        items.push(buildErrorItem(product, details, answers,
+          'calculation_failed', error.message || 'Помилка ціни USD/г.'));
+      }
       continue;
     }
 
@@ -237,12 +258,27 @@ async function buildRepricingPreviewState(scenarioId) {
     item.status === 'changed' || ['price_missing', 'manual_price'].includes(item.errorCode)
   ));
   const blockingCorrectionRequests = await getBlockingCorrectionRequests(items);
+  const customOnlyPricing = !hasSystemCandidates && candidateBindings.length > 0;
+  const configurationToken = customOnlyPricing
+    ? hashPayload(sortScenariosByPrecedence(pricingContext.scenarios).map((candidate) => ({
+      id: Number(candidate.id),
+      categoryCode: candidate.category_code,
+      priority: Number(candidate.priority || 0),
+      matchJson: asRuleObject(candidate.match_json),
+    })))
+    : fullConfigurationToken;
+  const legacyConfigurationToken = !customOnlyPricing
+    && Number(pricingContext.category?.marketing_rounding_enabled) === 1
+    ? hashPayload([getPricingContextSnapshot(pricingContext, { legacyDefaultRounding: true })])
+    : null;
 
   const preview = {
     scenario: getScenarioSnapshot(scenario),
+    customOnlyPricing,
     previewToken: getPreviewToken(scenario, applicableItems, {
       configurationToken,
       candidateBindings,
+      customOnlyPricing,
     }),
     summary: {
       candidateCount: items.length + skippedCount,
@@ -289,21 +325,30 @@ async function buildGlobalRepricingPreview() {
     .sort();
   const contextsByCategory = await loadPricingContexts(categoryCodes);
   const contexts = categoryCodes.map((categoryCode) => contextsByCategory.get(categoryCode));
-  const configuration = contexts.map(getPricingContextSnapshot);
+  const systemCategories = new Set(productsResult.rows.filter((product) => {
+    const details = getProductDetails(product);
+    return !getCustomUsdBasis(details) || hasManualPrice(details);
+  }).map((product) => product.category));
+  const customOnlyPricing = systemCategories.size === 0 && productsResult.rows.length > 0;
+  const configuration = contexts.map((context) => systemCategories.has(context.categoryCode)
+    ? getPricingContextSnapshot(context)
+    : { categoryCode: context.categoryCode, customUsdBasis: true });
   const configurationToken = hashPayload(configuration);
-  const legacyConfigurationToken = contexts.every((context) => (
+  const legacyConfigurationToken = systemCategories.size === categoryCodes.length
+    && contexts.every((context) => (
     Number(context.category?.marketing_rounding_enabled) === 1
   ))
     ? hashPayload(contexts.map((context) => getPricingContextSnapshot(
       context, { legacyDefaultRounding: true }
     )))
     : null;
-  const scenarios = configuration.flatMap((context) => context.scenarios)
+  const scenarios = contexts.flatMap((context) => getPricingContextSnapshot(context).scenarios)
     .sort((first, second) => (
       String(first.categoryCode).localeCompare(String(second.categoryCode))
       || Number(first.id) - Number(second.id)
     ));
-  let rateInfo = null;
+  const bindingScenarios = scenarios.filter((scenario) => systemCategories.has(scenario.categoryCode));
+  let rateInfo;
   try {
     rateInfo = await getUsdUahRateInfo();
   } catch (error) {
@@ -336,6 +381,18 @@ async function buildGlobalRepricingPreview() {
       uahRate: toNullableNumber(product.uah_rate),
       hasManualPrice: hasManualPrice(details),
     };
+
+    if (!hasManualPrice(details) && Object.hasOwn(details, 'customUsdPerGramBasis')) {
+      try {
+        if (!getCustomUsdBasis(details)) throw new Error('Збережена ціна USD/г пошкоджена.');
+        items.push({ ...baseItem,
+          ...await buildCustomUsdRepricingItem(product, details, answers, rateInfo) });
+      } catch (error) {
+        items.push({ ...baseItem, status: 'error', errorCode: 'calculation_failed',
+          message: error.message || 'Помилка ціни USD/г.', pricingState: 'missing' });
+      }
+      continue;
+    }
 
     try {
       const pricing = await calculatePricing(
@@ -439,7 +496,9 @@ async function buildGlobalRepricingPreview() {
   const blockingCorrectionRequests = await getBlockingCorrectionRequests(items);
   const preview = {
     scope: REPRICING_SCOPE_GLOBAL,
+    customOnlyPricing,
     scenarios,
+    bindingScenarios,
     configurationToken,
     previewToken: getGlobalPreviewToken(configurationToken, items),
     summary: {

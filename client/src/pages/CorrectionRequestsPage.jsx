@@ -73,6 +73,20 @@ function StatusBadge({ status }) {
   );
 }
 
+function PricingDecision({ request }) {
+  const decision = request.pricingDecision;
+  if (!decision) {
+    return <span>Ціна: {request.pricingOrigin ? 'точна ручна UAH (резервний режим)' : 'системна автоматична'}</span>;
+  }
+  if (decision.mode === 'usd_per_gram') {
+    return <span>Ціна: {decision.usdPerGram} USD/г · маркетингове округлення {decision.marketingRoundingEnabled ? 'увімкнено' : 'вимкнено'}</span>;
+  }
+  if (decision.mode === 'manual_uah') {
+    return <span>Ціна: точна ручна {formatUah(decision.manualPriceUah)}</span>;
+  }
+  return <span>Ціна: системна автоматична</span>;
+}
+
 function RequestChanges({ config, request }) {
   const changes = filterPresentableAnswerChanges(request.changes, {
     oldPayload: request.oldPayload,
@@ -570,6 +584,9 @@ export default function CorrectionRequestsPage() {
                       <div className="min-w-0">
                         <div className="mb-2 text-xs font-semibold uppercase text-slate-500">Зміни характеристик</div>
                         <RequestChanges config={config} request={request} />
+                        <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                          <PricingDecision request={request} />
+                        </div>
                         {request.comment && (
                           <div className="mt-3 border-l-2 border-slate-300 pl-3 text-sm leading-6 text-slate-600">
                             {request.comment}

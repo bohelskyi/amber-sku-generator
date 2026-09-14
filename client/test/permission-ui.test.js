@@ -16,7 +16,9 @@ const commonPermissions = [
 ];
 
 test('Manager UI is monitoring/request-oriented with read-only pricing', () => {
-  const ui = getPermissionUiState([...commonPermissions, 'pricing.view']);
+  const ui = getPermissionUiState([
+    ...commonPermissions, 'pricing.view', 'corrections.price_override',
+  ]);
 
   assert.equal(ui.canViewPricing, true);
   assert.equal(ui.canManagePricing, false);
@@ -29,6 +31,7 @@ test('Manager UI is monitoring/request-oriented with read-only pricing', () => {
   assert.equal(ui.canForceReleaseCorrections, false);
   assert.equal(ui.canRejectCorrections, true);
   assert.equal(ui.canApplyRepricing, false);
+  assert.equal(ui.canPriceOverrideCorrections, true);
   assert.equal(ui.canRollbackRepricing, false);
   assert.equal(getRecountUiMode(ui), 'request');
 });
@@ -55,6 +58,7 @@ test('Storekeeper UI keeps product and correction processing but hides final adm
   assert.equal(ui.canForceReleaseCorrections, false);
   assert.equal(ui.canApplyRepricing, false);
   assert.equal(ui.canRollbackRepricing, false);
+  assert.equal(ui.canPriceOverrideCorrections, false);
   assert.equal(getRecountUiMode(ui), 'choice');
 });
 
@@ -71,6 +75,7 @@ test('Administrator effective permissions expose every guarded UI action', () =>
     'corrections.complete',
     'corrections.reject',
     'corrections.force_release',
+    'corrections.price_override',
     'repricing.apply',
     'repricing.rollback',
     'exports.create',

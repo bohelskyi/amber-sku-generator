@@ -40,6 +40,36 @@ test('migration 029 defaults existing and new category rounding flags to enabled
   }
 });
 
+test('migration 030 adds constrained correction pricing decisions and initial RBAC mapping', async () => {
+  const columns = await pool.query(`
+    SELECT column_name, data_type, is_nullable
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'correction_requests'
+      AND column_name LIKE 'pricing_%'
+    ORDER BY column_name
+  `);
+  assert.deepEqual(columns.rows, [
+    { column_name: 'pricing_manual_uah', data_type: 'numeric', is_nullable: 'YES' },
+    { column_name: 'pricing_mode', data_type: 'text', is_nullable: 'YES' },
+    { column_name: 'pricing_origin', data_type: 'text', is_nullable: 'YES' },
+    { column_name: 'pricing_rounding_enabled', data_type: 'integer', is_nullable: 'YES' },
+    { column_name: 'pricing_usd_per_gram', data_type: 'numeric', is_nullable: 'YES' },
+  ]);
+  const mappings = await pool.query(`
+    SELECT r.role_key, r.version, EXISTS (
+      SELECT 1 FROM role_permissions rp
+      WHERE rp.role_id = r.id AND rp.permission_key = 'corrections.price_override'
+    ) AS has_override
+    FROM roles r WHERE r.role_key IN ('administrator', 'manager', 'storekeeper')
+    ORDER BY r.role_key
+  `);
+  assert.deepEqual(mappings.rows, [
+    { role_key: 'administrator', version: '1', has_override: true },
+    { role_key: 'manager', version: '2', has_override: true },
+    { role_key: 'storekeeper', version: '1', has_override: false },
+  ]);
+});
+
 test('migration 019 matches the connect-pg-simple 10.0.0 table contract', async () => {
   const columns = await pool.query(`
     SELECT column_name, data_type, is_nullable, datetime_precision
@@ -75,7 +105,7 @@ test('migration 019 matches the connect-pg-simple 10.0.0 table contract', async 
   ]);
 });
 
-test('migrations 020-028 create constrained RBAC, audit, and business actor attribution', async () => {
+test('migrations 020-030 create constrained RBAC, audit, and business actor attribution', async () => {
   const requiredTables = await pool.query(`
     SELECT table_name
     FROM information_schema.tables
@@ -111,6 +141,7 @@ test('migrations 020-028 create constrained RBAC, audit, and business actor attr
     'corrections.complete',
     'corrections.create',
     'corrections.force_release',
+    'corrections.price_override',
     'corrections.reject',
     'corrections.view',
     'exports.create',
@@ -153,6 +184,7 @@ test('migrations 020-028 create constrained RBAC, audit, and business actor attr
   assert.deepEqual(byRole.administrator.permission_keys, permissionKeys);
   assert.deepEqual(byRole.manager.permission_keys, [
     'corrections.create',
+    'corrections.price_override',
     'corrections.reject',
     'corrections.view',
     'exports.view',
@@ -336,7 +368,9 @@ test('migration 028 aborts without changing unsafe existing RBAC state', async (
   try {
     const migrationDirectory = path.resolve(serverRoot, 'migrations');
     const migrationFiles = (await fs.readdir(migrationDirectory))
-      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('028_'));
+      .filter((fileName) => fileName.endsWith('.sql')
+        && !fileName.startsWith('028_')
+        && !fileName.startsWith('030_'));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
       path.resolve(preCustomRoleDirectory, fileName)
@@ -763,6 +797,7 @@ test('migration 024 preserves historical product attribution as null', async () 
         && !fileName.startsWith('026_')
         && !fileName.startsWith('027_')
         && !fileName.startsWith('028_')
+        && !fileName.startsWith('030_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -907,6 +942,7 @@ test('migration 026 preserves historical repricing attribution as null without a
         && !fileName.startsWith('026_')
         && !fileName.startsWith('027_')
         && !fileName.startsWith('028_')
+        && !fileName.startsWith('030_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -994,6 +1030,7 @@ test('migration 027 preserves historical export and publication attribution as n
         fileName.endsWith('.sql')
         && !fileName.startsWith('027_')
         && !fileName.startsWith('028_')
+        && !fileName.startsWith('030_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),

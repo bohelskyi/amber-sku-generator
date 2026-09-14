@@ -57,7 +57,7 @@ See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permi
 
 ## Current behavior
 
-Authoritative product preview/save/decode, catalog schema versioning, pricing, recount/corrections, scenario/global repricing, export snapshots, and the Administrator-only audit viewer are implemented. Product history includes a timeline and a `configurationEvolution` projection: it reconstructs recorded configuration states across a correction lineage and reports partial or unavailable evidence rather than inventing missing history. See the [recount and corrections guide](docs/RECOUNT_CORRECTIONS.md).
+Authoritative product preview/save/decode, catalog schema versioning, pricing, recount/corrections, scenario/global repricing, export snapshots, and the Administrator-only audit viewer are implemented. Correction requests can persist a permitted creator's system-automatic, protected USD-per-gram, or exact manual-UAH pricing decision for authoritative completion and later repricing. Product history includes a timeline and a `configurationEvolution` projection: it reconstructs recorded configuration states across a correction lineage and reports partial or unavailable evidence rather than inventing missing history. See the [recount and corrections guide](docs/RECOUNT_CORRECTIONS.md).
 
 Server-side authorization and CSRF remain authoritative. `APP_ACCESS_PENDING` and `APP_ACCESS_DISABLED` move the client to the matching AuthGate state; `INSUFFICIENT_PERMISSION` preserves the active session. Durable transaction-coupled audit events cover access administration, catalog/pricing changes, products, correction requests, repricing, exports, and SKU schema publication. Invitations are not implemented. See [authentication and RBAC](docs/AUTH_RBAC.md).
 

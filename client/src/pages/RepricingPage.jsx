@@ -132,6 +132,7 @@ export default function RepricingPage() {
 
       {controller.recountTarget && (
         <RepricingRecountDrawer
+          canPriceOverride={permissionUi.canPriceOverrideCorrections}
           canApplyRecount={canApplyDirectRecount}
           canCreateRequest={canCreateCorrectionRequest}
           config={controller.config}

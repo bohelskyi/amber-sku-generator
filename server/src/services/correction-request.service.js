@@ -9,10 +9,15 @@ const { syncRepricingDraft } = require('./repricing.service');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
 const {
+  getCorrectionDecisionSignature,
   getCorrectionPreviewSignature,
   getProductStateSignature,
   stableAnswerEntries,
 } = require('./product/product-signatures');
+const {
+  decisionFromRequest,
+  normalizePricingDecision,
+} = require('./product/correction-pricing-decision');
 const { loadPricingContext } = require('./pricing/pricing-context');
 const { getPricingContextFingerprint } = require('./pricing/pricing-context-fingerprint');
 
@@ -118,6 +123,8 @@ function normalizeRequestRow(row) {
     oldPayload: row.old_payload || {},
     proposedPayload: row.proposed_payload || {},
     finalPayload: row.final_payload || null,
+    pricingDecision: decisionFromRequest(row),
+    pricingOrigin: row.pricing_origin || null,
     changes: Array.isArray(row.changes) ? row.changes : [],
     comment: row.comment || '',
     status: row.status,
@@ -142,6 +149,60 @@ function normalizeRequestRow(row) {
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
     rejectedAt: row.rejected_at,
+  };
+}
+
+function getRequestedDecision(payload, canOverride) {
+  if (!Object.hasOwn(payload, 'pricingDecision')) return null;
+  const decision = normalizePricingDecision(payload.pricingDecision);
+  if (Object.hasOwn(payload, 'manualPriceUah')) {
+    const error = new Error('Не поєднуйте рішення про ціну зі старим полем ручної ціни.');
+    error.statusCode = 422;
+    throw error;
+  }
+  if (decision.mode !== 'system_auto' && !canOverride) {
+    const error = new Error('Недостатньо дозволу для вибору ціни запиту.');
+    error.statusCode = 403;
+    throw error;
+  }
+  return decision;
+}
+
+function getPersistedNewRequestDecision(requestedDecision, preview) {
+  if (requestedDecision) {
+    return {
+      decision: requestedDecision,
+      pricingOrigin: requestedDecision.mode === 'manual_uah'
+        ? 'authorized_override' : null,
+    };
+  }
+  if (Number(preview?.corrected?.manualPriceUah) > 0) {
+    return {
+      decision: {
+        mode: 'manual_uah',
+        manualPriceUah: Number(preview.corrected.manualPriceUah),
+      },
+      pricingOrigin: 'automatic_unavailable_fallback',
+    };
+  }
+  return {
+    decision: { mode: 'system_auto' },
+    pricingOrigin: null,
+  };
+}
+
+async function previewCorrectionRequest(payload = {}, options = {}) {
+  const decision = getRequestedDecision(payload, options.canOverride === true);
+  const preview = await buildProductRecountPreview({ ...payload, pricingDecision: decision });
+  if (!decision && preview.corrected.manualPriceUah
+      && Number(preview.corrected.autoPriceUah) > 0) {
+    const error = new Error('Ручна ціна без дозволу доступна лише за відсутності автоматичної.');
+    error.statusCode = 403;
+    throw error;
+  }
+  return {
+    ...preview,
+    previewSignature: getCorrectionDecisionSignature(preview, decision),
   };
 }
 
@@ -415,8 +476,38 @@ async function getCorrectionRequests({ status, search, limit } = {}) {
 
 async function createCorrectionRequest(payload = {}, options = {}) {
   const mutationContext = createMutationContext(options.mutationContext);
-  const preview = await buildProductRecountPreview(payload);
-  const signature = getCorrectionPreviewSignature(preview);
+  const requestedDecision = getRequestedDecision(payload, options.canOverride === true);
+  const preview = await buildProductRecountPreview({
+    ...payload,
+    pricingDecision: requestedDecision,
+  });
+  if (requestedDecision?.mode === 'system_auto'
+      && !(Number(preview.corrected.autoPriceUah) > 0)) {
+    const error = new Error('Автоматична ціна відсутня. Виберіть інший дозволений режим ціни.');
+    error.statusCode = 422;
+    throw error;
+  }
+  if (!requestedDecision && !(Number(preview.corrected.totalPriceUah) > 0)) {
+    const error = new Error('Автоматична ціна відсутня. Вкажіть точну ручну ціну UAH.');
+    error.statusCode = 422;
+    throw error;
+  }
+  if (!requestedDecision && preview.corrected.manualPriceUah
+      && Number(preview.corrected.autoPriceUah) > 0) {
+    const error = new Error('Ручна ціна без дозволу доступна лише за відсутності автоматичної.');
+    error.statusCode = 403;
+    throw error;
+  }
+  const { decision, pricingOrigin } = getPersistedNewRequestDecision(
+    requestedDecision,
+    preview
+  );
+  const signature = getCorrectionDecisionSignature(preview, decision);
+  if (requestedDecision && payload.previewSignature !== signature) {
+    const error = new Error('Попередній розрахунок змінився. Оновіть його перед створенням запиту.');
+    error.statusCode = 409;
+    throw error;
+  }
   const client = await pool.connect();
 
   try {
@@ -442,8 +533,11 @@ async function createCorrectionRequest(payload = {}, options = {}) {
     const result = await client.query(
       `INSERT INTO correction_requests
        (source_product_id, category_code, source_sku, proposed_sku, old_payload,
-        proposed_payload, changes, comment, preview_signature, created_by_user_id)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10)
+        proposed_payload, changes, comment, preview_signature, created_by_user_id,
+        pricing_mode, pricing_usd_per_gram, pricing_manual_uah, pricing_rounding_enabled,
+        pricing_origin)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10,
+               $11, $12, $13, $14, $15)
        RETURNING *`,
       [
         Number(preview.source.productId),
@@ -456,6 +550,12 @@ async function createCorrectionRequest(payload = {}, options = {}) {
         preview.reason || null,
         signature,
         mutationContext.actorUserId,
+        decision.mode,
+        decision.mode === 'usd_per_gram' ? decision.usdPerGram : null,
+        decision.mode === 'manual_uah' ? decision.manualPriceUah : null,
+        decision.mode === 'usd_per_gram'
+          ? Number(decision.marketingRoundingEnabled) : null,
+        pricingOrigin,
       ]
     );
     await writeCorrectionAuditEvent(
@@ -467,6 +567,8 @@ async function createCorrectionRequest(payload = {}, options = {}) {
         sourceProductId: Number(preview.source.productId),
         sourceSku: preview.source.sku,
         proposedSku: preview.corrected.fullSku,
+        pricingMode: decision.mode,
+        pricingDecision: decision,
       }
     );
     await client.query('COMMIT');
@@ -490,12 +592,15 @@ async function refreshClaimedCorrectionRequest(
   claimToken,
   options = {}
 ) {
+  const pricingDecision = decisionFromRequest(row);
   const preview = await buildProductRecountPreview({
     sourceSku: row.source_sku,
     answers: row.proposed_payload?.answers || {},
     isCalibrated: row.proposed_payload?.answers?.is_calibrated ?? null,
     reason: row.comment || '',
     manualPriceUah: row.proposed_payload?.manualPriceUah ?? null,
+    weight: row.proposed_payload?.weight ?? undefined,
+    pricingDecision,
   });
   const mutationContext = createMutationContext(
     options.mutationContext || { actorUserId, requestId: null }
@@ -535,7 +640,7 @@ async function refreshClaimedCorrectionRequest(
         JSON.stringify(preview.source),
         JSON.stringify(preview.corrected),
         JSON.stringify(preview.changes || []),
-        getCorrectionPreviewSignature(preview),
+        getCorrectionDecisionSignature(preview, pricingDecision),
         actorUserId,
         Number(row.id),
       ]
@@ -717,15 +822,20 @@ async function completeCorrectionRequest(
     claimToken
   );
 
+  const pricingDecision = decisionFromRequest(row);
   const preview = await buildProductRecountPreview({
     sourceSku: row.source_sku,
     answers: row.proposed_payload?.answers || {},
     isCalibrated: row.proposed_payload?.answers?.is_calibrated ?? null,
     reason: row.comment || '',
     manualPriceUah: row.proposed_payload?.manualPriceUah ?? null,
+    weight: row.proposed_payload?.weight ?? undefined,
+    pricingDecision,
   });
-  let signatureMatches = getCorrectionPreviewSignature(preview) === row.preview_signature;
-  if (!signatureMatches && !Object.hasOwn(row.proposed_payload || {}, 'pricingContextFingerprint')) {
+  let signatureMatches = getCorrectionDecisionSignature(preview, pricingDecision)
+    === row.preview_signature;
+  if (!pricingDecision && !signatureMatches
+      && !Object.hasOwn(row.proposed_payload || {}, 'pricingContextFingerprint')) {
     const context = await loadPricingContext(row.category_code);
     signatureMatches = Number(context?.category?.marketing_rounding_enabled) === 1
       && getPricingContextFingerprint(context) === preview.corrected.pricingContextFingerprint
@@ -745,6 +855,8 @@ async function completeCorrectionRequest(
     isCalibrated: row.proposed_payload?.answers?.is_calibrated ?? null,
     reason: row.comment || '',
     manualPriceUah: row.proposed_payload?.manualPriceUah ?? null,
+    weight: row.proposed_payload?.weight ?? undefined,
+    pricingDecision,
     correctionRequestId: Number(requestId),
     correctionRequestSignature: row.preview_signature,
     correctionRequestClaimVersion: ownership.claimVersion,
@@ -752,6 +864,7 @@ async function completeCorrectionRequest(
     correctionRequestLegacyAdopted: ownership.legacyAdopted,
   }, {
     mutationContext,
+    trustedCorrectionDecision: Boolean(pricingDecision),
   });
   const completedRow = await getCorrectionRequestRow(requestId);
   const draftSyncFailures = await syncActiveRepricingDrafts(mutationContext);
@@ -774,6 +887,7 @@ module.exports = {
   claimCorrectionRequest,
   completeCorrectionRequest,
   createCorrectionRequest,
+  previewCorrectionRequest,
   forceReleaseCorrectionRequest,
   getCorrectionPreviewSignature,
   getCorrectionRequests,

@@ -9,6 +9,7 @@ export function getPermissionUiState(permissions = []) {
     canClaimCorrections: has('corrections.claim'),
     canCompleteCorrections: has('corrections.complete'),
     canCreateCorrectionRequest: has('corrections.create'),
+    canPriceOverrideCorrections: has('corrections.price_override'),
     canCreateExports: has('exports.create'),
     canCreateProducts: has('products.create'),
     canForceReleaseCorrections: has('corrections.force_release'),
