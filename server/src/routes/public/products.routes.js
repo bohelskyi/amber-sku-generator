@@ -4,6 +4,10 @@ const { calculatePricing } = require('../../services/pricing.service');
 const { decodeSku, getNextVariationSku, buildProductPreview, buildProductRecountPreview, applyProductRecount, saveProduct, deleteProductBySku } = require('../../services/product.service');
 const { getRequestMutationContext } = require('../../audit/mutation-context');
 const { requirePermission } = require('../../auth/authorization');
+const {
+  applyProductPriceChange,
+  previewProductPriceChange,
+} = require('../../services/product-price-change.service');
 
 const router = express.Router();
 
@@ -82,6 +86,32 @@ router.post('/recount/apply', requirePermission('products.recount'), async (req,
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 400).json({ error: err.message });
+  }
+});
+
+router.post('/product-price-change/preview', requirePermission('products.recount'), async (req, res) => {
+  try {
+    const result = await previewProductPriceChange(req.body || {});
+    res.json(result);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({
+      error: err.message,
+      ...(err.publicCode ? { code: err.publicCode } : {}),
+    });
+  }
+});
+
+router.post('/product-price-change/apply', requirePermission('products.recount'), async (req, res) => {
+  try {
+    const result = await applyProductPriceChange(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({
+      error: err.message,
+      ...(err.publicCode ? { code: err.publicCode } : {}),
+    });
   }
 });
 

@@ -93,6 +93,7 @@ export function DecodeErrorPanel({ details, message }) {
 }
 
 export function HomeDashboard({
+  canChangeProductPrice = false,
   canCreateProducts = true,
   canStartRecount = true,
   config,
@@ -230,6 +231,7 @@ export function HomeDashboard({
           recountSuccess={recountSuccess}
           recountMode={recountMode}
           canStartRecount={canStartRecount}
+          canChangeProductPrice={canChangeProductPrice}
           onApplyRecount={onApplyRecount}
           onCancelRecount={onCancelRecount}
           onRecountAnswer={onRecountAnswer}
@@ -244,6 +246,7 @@ export function HomeDashboard({
 }
 
 export function DecodeWorkspace({
+  canChangeProductPrice = false,
   canStartRecount = true,
   config,
   decodeData,
@@ -296,6 +299,7 @@ export function DecodeWorkspace({
       <section className="fade-up stagger-3">
         <RecountPanel
           config={config}
+          canChangeProductPrice={canChangeProductPrice}
           decodeData={decodeData}
           hasRecountChanges={hasRecountChanges}
           isRecountApplying={isRecountApplying}
@@ -539,6 +543,7 @@ function getDecodedProductStatus(decodeData) {
 }
 
 function RecountPanel({
+  canChangeProductPrice = false,
   config,
   decodeData,
   hasRecountChanges,
@@ -900,13 +905,16 @@ function RecountPanel({
               <button
                 onClick={onApplyRecount}
                 className="btn btn-primary w-full"
-                disabled={!hasRecountChanges || isRecountLoading || isRecountApplying}
+                disabled={(!hasRecountChanges && !canChangeProductPrice)
+                  || isRecountLoading || isRecountApplying}
               >
                 {isRecountApplying
                   ? 'Застосовуємо...'
                   : isRecountLoading
                     ? 'Готуємо...'
-                    : 'Продовжити'}
+                    : hasRecountChanges
+                      ? 'Продовжити'
+                      : 'Змінити ціну'}
               </button>
             </div>
           </div>

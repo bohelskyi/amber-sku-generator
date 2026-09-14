@@ -47,15 +47,19 @@ Permission keys are stable capabilities stored in `permissions` and mapped to ro
 | Access administration | `users.manage`, `roles.manage` |
 | Audit | `audit.view` |
 
+`products.recount` authorizes both the existing direct recount apply and the separate direct in-place product price-change command, including `POST /api/product-price-change/preview` and `POST /api/product-price-change/apply`. The server enforces that permission independently of client visibility. `corrections.create` and `corrections.price_override` authorize the request-based correction workflow only and do not authorize either direct price-change endpoint.
+
 Initial system-role mappings after migration `030`:
 
 | Role | Effective scope |
 | --- | --- |
 | Administrator | Every defined permission, including the explicitly Administrator-only `audit.view`. Full product, catalog, pricing, correction, repricing, export, user, role-management, and future audit-view access. |
 | Manager | Initially product view/decode, history, correction view/create/price-override/reject, repricing view/prepare, pricing view, and export view. Its name, description, permissions, and status are Administrator-editable. |
-| Storekeeper | Initially product view/decode/create/archive/direct recount, history, correction view/create/claim/complete/reject, repricing view/prepare, and export view. Its name, description, permissions, and status are Administrator-editable. |
+| Storekeeper | Initially product view/decode/create/archive/direct recount/direct in-place price change, history, correction view/create/claim/complete/reject, repricing view/prepare, and export view. Its name, description, permissions, and status are Administrator-editable. |
 
 The built-in Administrator role is permanent and immutable and automatically receives every permission inserted into `permissions`. It cannot be renamed, disabled, deleted, or permission-edited. Manager, Storekeeper, and custom roles retain immutable `role_key` and `is_system` identity fields but otherwise use the same editable lifecycle. Roles are never hard-deleted. `users.manage`, `roles.manage`, and `audit.view` are reserved to Administrator and database constraints reject mappings to any other role.
+
+The initial Manager role remains request-only for these operations: it has correction-request creation and price-override permissions but not `products.recount`, so the direct in-place price-change preview and apply remain denied. Adding the direct command does not broaden Manager access; an editable Manager or custom role receives it only when an Administrator explicitly grants `products.recount`.
 
 The permission-aware client uses only the effective keys from `/api/auth/me`, never role-name checks, to hide unavailable controls. Manager pricing uses the published product catalog projection to select a category and the category pricing endpoint to render matrices/modifiers read-only; this does not grant `catalog.view`.
 

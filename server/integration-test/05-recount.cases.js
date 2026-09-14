@@ -6,6 +6,20 @@ const {
   request,
 } = suite;
 
+test('recount preview still rejects an unchanged product target', async () => {
+  const preview = await request('/api/recount/preview', {
+    method: 'POST',
+    body: {
+      sourceSku: 'LN136021',
+      answers: {},
+      weight: 20.6,
+      isCalibrated: 1,
+    },
+  });
+  assert.equal(preview.response.status, 422, preview.text);
+  assert.match(preview.data.error, /змініть хоча б один параметр/i);
+});
+
 test('recount preview authoritatively reprices a changed weight in UAH and USD', async () => {
   const preview = await request('/api/recount/preview', {
     method: 'POST',

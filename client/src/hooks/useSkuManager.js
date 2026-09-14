@@ -51,7 +51,11 @@ function pruneHiddenAnswers(categoryQuestions, answersMap) {
   return nextAnswers;
 }
 
-export function useSkuManager({ canPriceOverride = false, submitMode = 'apply' } = {}) {
+export function useSkuManager({
+  canChangeProductPrice = false,
+  canPriceOverride = false,
+  submitMode = 'apply',
+} = {}) {
   const [config, setConfig] = useState(null);
   const [selectedCat, setSelectedCat] = useState(null);
   const [answers, setAnswers] = useState({});
@@ -79,6 +83,8 @@ export function useSkuManager({ canPriceOverride = false, submitMode = 'apply' }
     handleApplyRecount,
     handleCancelRecount,
     handleCancelRecountConfirmation,
+    handleCancelPriceChange,
+    handleConfirmPriceChange,
     handleConfirmRecount,
     handleDecode,
     handleDecodeInputChange,
@@ -93,6 +99,15 @@ export function useSkuManager({ canPriceOverride = false, submitMode = 'apply' }
     isRecountOpen,
     isRecountPreviewCurrent,
     isRecountPreviewUnavailable,
+    isPriceChangeApplying,
+    isPriceChangeLoading,
+    isPriceChangeOpen,
+    priceChangeError,
+    priceChangeManualUah,
+    priceChangeMarketingRounding,
+    priceChangeMode,
+    priceChangePreview,
+    priceChangeUsdPerGram,
     recountAnswers,
     recountBlockers,
     recountError,
@@ -110,9 +125,14 @@ export function useSkuManager({ canPriceOverride = false, submitMode = 'apply' }
     setRecountPricingMode,
     setRecountUsdPerGram,
     setRecountMarketingRounding,
+    setPriceChangeManualUah,
+    setPriceChangeMarketingRounding,
+    setPriceChangeMode,
+    setPriceChangeUsdPerGram,
     setRecountReason,
     skuToDecode,
   } = useProductRecount({
+    canChangeProductPrice,
     canPriceOverride,
     config,
     onApplied: () => {
@@ -431,6 +451,8 @@ export function useSkuManager({ canPriceOverride = false, submitMode = 'apply' }
     handleAnswer,
     handleCancelRecount,
     handleCancelRecountConfirmation,
+    handleCancelPriceChange,
+    handleConfirmPriceChange,
     handleConfirmRecount,
     handleDecode,
     handleDecodeInputChange,
@@ -455,6 +477,9 @@ export function useSkuManager({ canPriceOverride = false, submitMode = 'apply' }
     isRecountOpen,
     isRecountPreviewCurrent,
     isRecountPreviewUnavailable,
+    isPriceChangeApplying,
+    isPriceChangeLoading,
+    isPriceChangeOpen,
     isSaving,
     isTextQuestion,
     isVariationActive,
@@ -480,6 +505,12 @@ export function useSkuManager({ canPriceOverride = false, submitMode = 'apply' }
     recountSuccess,
     recountValidationAttempt,
     recountWeight,
+    priceChangeError,
+    priceChangeManualUah,
+    priceChangeMarketingRounding,
+    priceChangeMode,
+    priceChangePreview,
+    priceChangeUsdPerGram,
     saveError,
     resetProductFlow,
     selectedCat,
@@ -489,6 +520,10 @@ export function useSkuManager({ canPriceOverride = false, submitMode = 'apply' }
     setRecountPricingMode,
     setRecountUsdPerGram,
     setRecountMarketingRounding,
+    setPriceChangeManualUah,
+    setPriceChangeMarketingRounding,
+    setPriceChangeMode,
+    setPriceChangeUsdPerGram,
     setWeight: handleWeightChange,
     skuToDecode,
     variationData,

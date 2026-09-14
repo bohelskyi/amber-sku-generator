@@ -25,6 +25,7 @@ const EVENT_META = {
   'correction_request.reopened': { label: 'Запит відкрито повторно', icon: ClipboardList, toneClass: 'text-blue-700' },
   'correction_request.completed': { label: 'Запит виконано', icon: CheckCircle2, toneClass: 'text-emerald-700' },
   'product.corrected': { label: 'Товар виправлено', icon: History, toneClass: 'text-amber-700' },
+  'product.price_changed': { label: 'Ціну товару змінено', icon: History, toneClass: 'text-blue-700' },
   'repricing.applied': { label: 'Ціну змінено переоцінкою', icon: History, toneClass: 'text-blue-700' },
   'repricing.rolled_back': { label: 'Переоцінку відкочено', icon: Undo2, toneClass: 'text-amber-700' },
   'product.archived': { label: 'Товар архівовано', icon: Archive, toneClass: 'text-slate-700' },
@@ -305,6 +306,11 @@ function TimelineCard({ events }) {
         <div className="mt-4 space-y-2">
           <PriceChange price={event.details.price} />
           {event.details.scenarioName && <p className="text-xs text-slate-500">Матриця: {event.details.scenarioName}</p>}
+        </div>
+      )}
+      {event.type === 'product.price_changed' && (
+        <div className="mt-4 space-y-2">
+          <PriceChange price={event.details.price} />
         </div>
       )}
 

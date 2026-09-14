@@ -44,6 +44,7 @@ const EVENT_LABELS = Object.freeze({
   'pricing.modifier.deleted': 'Модифікатор ціни видалено',
   'product.created': 'Товар створено',
   'product.recounted': 'Товар перераховано',
+  'product.price_changed': 'Ціну товару змінено',
   'product.archived': 'Товар архівовано',
   'correction_request.created': 'Запит на виправлення створено',
   'correction_request.claimed': 'Запит взято в роботу',

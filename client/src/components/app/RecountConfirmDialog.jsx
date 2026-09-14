@@ -7,8 +7,8 @@ import { useDialogAccessibility } from '../../hooks/useDialogAccessibility';
 
 const PRICING_MODES = [
   { value: 'system_auto', label: 'Автоматична' },
-  { value: 'usd_per_gram', label: 'USD/г' },
   { value: 'manual_uah', label: 'Ручна UAH' },
+  { value: 'usd_per_gram', label: 'USD/г' },
 ];
 
 function hasValidDecisionPrice(value, scale) {

@@ -186,8 +186,12 @@ test('rapid edits invalidate older recount preview responses', () => {
   assert.equal(hookSource.includes('requestId !== previewRequestIdRef.current'), true);
 });
 
-test('Continue is gated while the latest recount preview is pending', () => {
-  assert.match(dashboardSource, /disabled=\{!hasRecountChanges \|\| isRecountLoading \|\| isRecountApplying\}/);
+test('Continue stays gated while a recount preview is pending and no-change price access is explicit', () => {
+  assert.match(
+    dashboardSource,
+    /disabled=\{\(!hasRecountChanges && !canChangeProductPrice\)[\s\S]*?\|\| isRecountLoading \|\| isRecountApplying\}/
+  );
+  assert.equal(dashboardSource.includes("'Змінити ціну'"), true);
   assert.equal(hookSource.includes('isRecountPreviewCurrent'), true);
 });
 

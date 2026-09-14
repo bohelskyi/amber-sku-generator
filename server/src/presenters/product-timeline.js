@@ -281,6 +281,35 @@ function presentProductTimeline(querySku, data) {
     });
   }
 
+  for (const audit of auditRows) {
+    if (audit.event_key !== 'product.price_changed') continue;
+    const product = productById.get(Number(audit.subject_id));
+    if (!product) continue;
+    const details = asObject(audit.details);
+    const oldPrice = asObject(details.oldPrice);
+    const newPrice = asObject(details.newPrice);
+    const beforeUah = toUahNumber(oldPrice.totalPriceUah);
+    const afterUah = toUahNumber(newPrice.totalPriceUah);
+    pushEvent({
+      type: 'product.price_changed',
+      ...eventTimestamp(audit.occurred_at),
+      actor: actorFromAudit(audit, null),
+      sku: details.fullSku || product.full_sku,
+      summary: 'Product price changed in place',
+      details: {
+        priceMode: details.priceMode || null,
+        price: {
+          beforeUah,
+          afterUah,
+          deltaUah: beforeUah === null || afterUah === null
+            ? null : Number((afterUah - beforeUah).toFixed(2)),
+        },
+      },
+      changes: [],
+      sortOrder: 65,
+    });
+  }
+
   for (const item of repricingItems) {
     const applyAudit = firstAudit(audits, 'repricing.applied', item.batch_id);
     const oldPayload = asObject(item.old_payload);

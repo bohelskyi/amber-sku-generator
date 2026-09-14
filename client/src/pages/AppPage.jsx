@@ -3,6 +3,7 @@ import { HistoryTable } from '../components/app/HistoryTable';
 import { HomeDashboard } from '../components/app/HomeDashboard';
 import { PageHeader, Toast } from '../components/app/PageHeader';
 import { ProductBuilder } from '../components/app/ProductBuilder';
+import { ProductPriceChangeDialog } from '../components/app/ProductPriceChangeDialog';
 import { RecountConfirmDialog } from '../components/app/RecountConfirmDialog';
 import { LoadingState } from '../components/app/UiPrimitives.jsx';
 import { useAuth } from '../auth/auth-context.js';
@@ -14,6 +15,7 @@ function AppPage() {
   const permissionUi = getPermissionUiState(auth.permissions);
   const recountMode = getRecountUiMode(permissionUi);
   const sku = useSkuManager({
+    canChangeProductPrice: permissionUi.canApplyDirectRecount,
     canPriceOverride: permissionUi.canPriceOverrideCorrections,
     submitMode: recountMode || 'apply',
   });
@@ -59,6 +61,7 @@ function AppPage() {
             recountWeight={sku.recountWeight}
             canCreateProducts={canCreateProducts}
             canStartRecount={Boolean(recountMode)}
+            canChangeProductPrice={permissionUi.canApplyDirectRecount}
             recountMode={recountMode || 'apply'}
             onApplyRecount={sku.handleApplyRecount}
             onCancelRecount={sku.handleCancelRecount}
@@ -163,6 +166,25 @@ function AppPage() {
         submittingMode={sku.recountSubmitMode}
         onCancel={sku.handleCancelRecountConfirmation}
         onConfirm={sku.handleConfirmRecount}
+      />
+      <ProductPriceChangeDialog
+        currentPriceUah={sku.decodeData?.pricing?.totalPriceUah}
+        error={sku.priceChangeError}
+        isApplying={sku.isPriceChangeApplying}
+        isLoading={sku.isPriceChangeLoading}
+        isOpen={sku.isPriceChangeOpen}
+        manualPriceUah={sku.priceChangeManualUah}
+        marketingRoundingEnabled={sku.priceChangeMarketingRounding}
+        mode={sku.priceChangeMode}
+        preview={sku.priceChangePreview}
+        sku={sku.decodeData?.sku}
+        usdPerGram={sku.priceChangeUsdPerGram}
+        onCancel={sku.handleCancelPriceChange}
+        onConfirm={sku.handleConfirmPriceChange}
+        onManualPriceChange={sku.setPriceChangeManualUah}
+        onMarketingRoundingChange={sku.setPriceChangeMarketingRounding}
+        onModeChange={sku.setPriceChangeMode}
+        onUsdPerGramChange={sku.setPriceChangeUsdPerGram}
       />
     </div>
   );

@@ -14,6 +14,8 @@ Questions visible in the target remain required and validated normally. This cle
 
 Preview requires an actual answer change and computes the proposed corrected SKU and price. Missing automatic pricing can be resolved only by an independently validated positive manual UAH price.
 
+When the submitted answers, calibration state, and weight do not change, recount remains invalid. A user with `products.recount` may instead use the separate in-place product price-change workflow. It does not call or relax `applyProductRecount()`.
+
 ## Direct apply
 
 Recount apply is one authoritative transaction that:
@@ -31,6 +33,16 @@ Both source and corrected products are excluded from the normal export queue by 
 Successful direct apply and correction-request completion use the authenticated local application user as `product_corrections.performed_by_user_id` and as the successor product's `products.created_by_user_id`. They append one semantic `product.recounted` durable audit event in the same transaction. Its concise details link the source and corrected product/SKU plus the detailed correction row and optional correction request; the existing old/new recount payload is not duplicated into `audit_events`. Historical product/correction rows remain `NULL` and no historical events are synthesized.
 
 Direct apply requires `products.recount`; correction preview/request creation requires `corrections.create`. Selecting a custom USD-per-gram or exact manual UAH decision additionally requires `corrections.price_override`.
+
+## In-place product price changes
+
+`POST /api/product-price-change/preview` and `POST /api/product-price-change/apply` both require `products.recount`. They accept only `manual_uah` and `usd_per_gram`; there is no automatic mode. Manual UAH uses the existing positive, finite, two-decimal validation. USD/gram uses the existing positive, finite, four-decimal validation and an explicit marketing-rounding choice; the server calculates final UAH from the product's stored authoritative weight and the authoritative exchange-rate provider.
+
+Apply locks and reloads the active, uncorrected product row, rejects an active correction request, recalculates pricing inside the transaction, and verifies the opaque preview token against the complete product pricing state and mode-specific dependencies. Concurrent product/repricing updates therefore stale the preview. An unchanged effective final UAH price is rejected. Active repricing drafts do not block the command; the changed complete product state makes their prior tokens stale and draft synchronization reports the change.
+
+The update changes only `total_price`, `total_price_uah`, `price_per_gram`, `uah_rate`, and the pricing-related portions of `details`. Product ID, SKU, SKU reservation/sequence state, weight, answers, schema version, status, and correction lineage remain unchanged. A `product.price_changed` audit event is inserted in the same transaction with immutable actor/time attribution and complete old/new pricing evidence. Audit failure rolls back the product update.
+
+Manual price changes reuse correction persistence semantics: normal automatic pricing is recomputed as evidence; its raw and selected results remain `calculatedPriceUah` and `autoPriceUah`, the decision is stored in `manualPriceUah`, and the final selected amount is `total_price_uah`. USD/gram changes store the supplied basis in `customUsdPerGramBasis`, store the authoritative rate and metadata, keep `manualPriceUah` null, and store raw/selected server results in their existing fields. Neither mode gives any field a new meaning.
 
 ## Correction requests
 
@@ -72,6 +84,8 @@ Manager and Storekeeper permissions are Administrator-editable, so this table de
 ## Product timeline and configuration evolution
 
 `GET /api/product-timeline` reads a product's correction lineage and returns historical events plus `configurationEvolution`. The latter presents the initial recorded configuration and later answer-changing configurations, with a changes-only view and a full-state view in the client. It uses stored product/correction evidence and historical SKU schemas; it does not infer unrecorded values from today's catalog. Ambiguous lineage or insufficient/conflicting historical evidence is reported as `partial` or `unavailable` with warnings rather than shown as certain history.
+
+In-place price changes appear as `product.price_changed` events with old/new prices and an empty configuration-change list. They neither add a product to correction lineage nor create a configuration-evolution snapshot.
 
 ## Attribution and audit
 

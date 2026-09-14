@@ -8,6 +8,7 @@ for (const modulePath of [
   './03-authentication-sessions.cases',
   './04-product-access-audit.cases',
   './05-recount.cases',
+  './05-product-price-change.cases',
   './06-migration-upgrades.cases',
   './07-catalog-pricing.cases',
   './08-products-pricing.cases',

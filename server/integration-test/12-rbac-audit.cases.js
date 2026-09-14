@@ -265,6 +265,14 @@ test('business endpoints enforce the Administrator, Storekeeper, and Manager cap
   await denied('/api/recount/apply', {
     method: 'POST', body: { sourceSku: managerRequestSource.data.fullSku, answers: { kind: 2 } },
   }, 'products.recount');
+  await denied('/api/product-price-change/preview', {
+    method: 'POST', body: { productId: managerRequestSource.data.id,
+      pricingDecision: { mode: 'manual_uah', manualPriceUah: 1000 } },
+  }, 'products.recount');
+  await denied('/api/product-price-change/apply', {
+    method: 'POST', body: { productId: managerRequestSource.data.id,
+      pricingDecision: { mode: 'manual_uah', manualPriceUah: 1000 }, previewToken: 'denied' },
+  }, 'products.recount');
   await denied('/api/admin/config', {}, 'catalog.view');
   await denied('/api/admin/roles', {}, 'roles.manage');
   await denied('/api/admin/category', {

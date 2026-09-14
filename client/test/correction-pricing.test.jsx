@@ -42,10 +42,10 @@ it('shows all three request pricing modes only with override permission', () => 
   const handlers = renderDialog();
   const choices = within(screen.getByRole('radiogroup', { name: 'Режим ціни' })).getAllByRole('radio');
   expect(choices.map((option) => option.value)).toEqual([
-    'system_auto', 'usd_per_gram', 'manual_uah',
+    'system_auto', 'manual_uah', 'usd_per_gram',
   ]);
   expect(choices.map((option) => option.parentElement.textContent)).toEqual([
-    'Автоматична', 'USD/г', 'Ручна UAH',
+    'Автоматична', 'Ручна UAH', 'USD/г',
   ]);
   expect(screen.getByRole('radio', { name: 'Автоматична' }).checked).toBe(true);
   fireEvent.click(screen.getByRole('radio', { name: 'USD/г' }));

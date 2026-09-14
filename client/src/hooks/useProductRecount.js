@@ -18,6 +18,7 @@ import {
 import { getRecountFieldBlockers } from '../lib/recount-blockers.js';
 
 export function useProductRecount({
+  canChangeProductPrice = false,
   canPriceOverride = false,
   config,
   onApplied,
@@ -52,8 +53,18 @@ export function useProductRecount({
   const [recountValidationMessage, setRecountValidationMessage] = useState('');
   const [isRecountPreviewCurrent, setIsRecountPreviewCurrent] = useState(false);
   const [isRecountPreviewUnavailable, setIsRecountPreviewUnavailable] = useState(false);
+  const [isPriceChangeOpen, setIsPriceChangeOpen] = useState(false);
+  const [priceChangeMode, setPriceChangeMode] = useState('manual_uah');
+  const [priceChangeManualUah, setPriceChangeManualUah] = useState('');
+  const [priceChangeUsdPerGram, setPriceChangeUsdPerGram] = useState('');
+  const [priceChangeMarketingRounding, setPriceChangeMarketingRounding] = useState(true);
+  const [priceChangePreview, setPriceChangePreview] = useState(null);
+  const [priceChangeError, setPriceChangeError] = useState('');
+  const [isPriceChangeLoading, setIsPriceChangeLoading] = useState(false);
+  const [isPriceChangeApplying, setIsPriceChangeApplying] = useState(false);
   const previewRequestGateRef = useRef(createRecountPreviewGate());
   const previewRequestIdRef = useRef(0);
+  const priceChangeRequestIdRef = useRef(0);
   const hasRecountChanges = Boolean(
     haveRecountTargetChanged(decodeData, recountAnswers, recountWeight)
   );
@@ -69,6 +80,20 @@ export function useProductRecount({
     };
     return { mode: 'system_auto' };
   }, [recountPricingMode, recountUsdPerGram, recountMarketingRounding, recountManualPriceUah]);
+  const priceChangeDecision = useMemo(() => (
+    priceChangeMode === 'usd_per_gram'
+      ? {
+        mode: 'usd_per_gram',
+        usdPerGram: priceChangeUsdPerGram,
+        marketingRoundingEnabled: priceChangeMarketingRounding,
+      }
+      : { mode: 'manual_uah', manualPriceUah: priceChangeManualUah }
+  ), [
+    priceChangeManualUah,
+    priceChangeMarketingRounding,
+    priceChangeMode,
+    priceChangeUsdPerGram,
+  ]);
   const recountPreviewPayload = useMemo(() => {
     const basePayload = buildRecountPreviewPayload({
       sourceSku: decodeData?.sku,
@@ -122,6 +147,7 @@ export function useProductRecount({
     }
 
     previewRequestGateRef.current.invalidate();
+    priceChangeRequestIdRef.current += 1;
     api.post('/decode', { sku: normalizedSku })
       .then((res) => {
         setSkuToDecode(normalizedSku);
@@ -130,6 +156,7 @@ export function useProductRecount({
         setDecodeErrorDetails(null);
         setIsRecountOpen(false);
         setIsRecountConfirmOpen(false);
+        setIsPriceChangeOpen(false);
         setRecountPreview(null);
         setIsRecountPreviewCurrent(false);
         setIsRecountPreviewUnavailable(false);
@@ -147,12 +174,14 @@ export function useProductRecount({
 
   const handleDecodeInputChange = (value) => {
     previewRequestGateRef.current.invalidate();
+    priceChangeRequestIdRef.current += 1;
     setSkuToDecode(value.toUpperCase());
     setDecodeData(null);
     setDecodeError('');
     setDecodeErrorDetails(null);
     setIsRecountOpen(false);
     setIsRecountConfirmOpen(false);
+    setIsPriceChangeOpen(false);
     setRecountPreview(null);
     setIsRecountPreviewCurrent(false);
     setIsRecountPreviewUnavailable(false);
@@ -196,8 +225,10 @@ export function useProductRecount({
 
   const handleCancelRecount = () => {
     previewRequestGateRef.current.invalidate();
+    priceChangeRequestIdRef.current += 1;
     setIsRecountOpen(false);
     setIsRecountConfirmOpen(false);
+    setIsPriceChangeOpen(false);
     setRecountPreview(null);
     setIsRecountPreviewCurrent(false);
     setIsRecountPreviewUnavailable(false);
@@ -385,8 +416,78 @@ export function useProductRecount({
     previewRequestGateRef.current.invalidate();
   }, []);
 
+  useEffect(() => {
+    if (!isPriceChangeOpen || !decodeData?.product?.id) return undefined;
+    const value = priceChangeMode === 'usd_per_gram'
+      ? priceChangeUsdPerGram : priceChangeManualUah;
+    const scale = priceChangeMode === 'usd_per_gram' ? 4 : 2;
+    const normalized = String(value ?? '').trim().replace(',', '.');
+    const amount = Number(normalized);
+    const valid = /^\d+(?:\.\d+)?$/.test(normalized)
+      && Number.isFinite(amount) && amount > 0
+      && Number(amount.toFixed(scale)) === amount;
+    const requestId = ++priceChangeRequestIdRef.current;
+    if (!valid) {
+      const resetTimerId = window.setTimeout(() => {
+        setPriceChangePreview(null);
+        setIsPriceChangeLoading(false);
+      }, 0);
+      return () => window.clearTimeout(resetTimerId);
+    }
+
+    const timerId = window.setTimeout(() => {
+      setIsPriceChangeLoading(true);
+      setPriceChangePreview(null);
+      setPriceChangeError('');
+      api.post('/product-price-change/preview', {
+        productId: decodeData.product.id,
+        pricingDecision: priceChangeDecision,
+      })
+        .then((res) => {
+          if (requestId !== priceChangeRequestIdRef.current) return;
+          setPriceChangePreview(res.data);
+          setPriceChangeError('');
+        })
+        .catch((err) => {
+          if (requestId !== priceChangeRequestIdRef.current) return;
+          setPriceChangePreview(null);
+          setPriceChangeError(err.response?.data?.error || err.message);
+        })
+        .finally(() => {
+          if (requestId === priceChangeRequestIdRef.current) {
+            setIsPriceChangeLoading(false);
+          }
+        });
+    }, RECOUNT_PREVIEW_DEBOUNCE_MS);
+    return () => window.clearTimeout(timerId);
+  }, [
+    decodeData?.product?.id,
+    isPriceChangeOpen,
+    priceChangeDecision,
+    priceChangeManualUah,
+    priceChangeMode,
+    priceChangeUsdPerGram,
+  ]);
+
   const handleApplyRecount = () => {
-    if (!decodeData?.sku || !hasRecountChanges || isRecountLoading) return;
+    if (!decodeData?.sku) return;
+    if (!hasRecountChanges) {
+      if (!canChangeProductPrice || isPriceChangeApplying) return;
+      priceChangeRequestIdRef.current += 1;
+      setPriceChangeMode('manual_uah');
+      setPriceChangeManualUah('');
+      setPriceChangeUsdPerGram('');
+      setPriceChangeMarketingRounding(getCorrectionMarketingRoundingDefault(
+        config,
+        decodeData?.category?.code
+      ));
+      setPriceChangePreview(null);
+      setPriceChangeError('');
+      setIsPriceChangeLoading(false);
+      setIsPriceChangeOpen(true);
+      return;
+    }
+    if (isRecountLoading) return;
     if (recountPreview && isRecountPreviewCurrent) {
       setIsRecountConfirmOpen(true);
       return;
@@ -396,6 +497,77 @@ export function useProductRecount({
 
   const handleCancelRecountConfirmation = () => {
     if (!isRecountApplying) setIsRecountConfirmOpen(false);
+  };
+
+  const handleCancelPriceChange = () => {
+    if (isPriceChangeApplying) return;
+    priceChangeRequestIdRef.current += 1;
+    setIsPriceChangeOpen(false);
+    setPriceChangePreview(null);
+    setPriceChangeError('');
+    setIsPriceChangeLoading(false);
+  };
+
+  const handlePriceChangeMode = (value) => {
+    priceChangeRequestIdRef.current += 1;
+    setPriceChangeMode(value);
+    setPriceChangePreview(null);
+    setPriceChangeError('');
+    setIsPriceChangeLoading(false);
+  };
+
+  const handlePriceChangeManualUah = (value) => {
+    priceChangeRequestIdRef.current += 1;
+    setPriceChangeManualUah(value);
+    setPriceChangePreview(null);
+    setPriceChangeError('');
+    setIsPriceChangeLoading(false);
+  };
+
+  const handlePriceChangeUsdPerGram = (value) => {
+    priceChangeRequestIdRef.current += 1;
+    setPriceChangeUsdPerGram(value);
+    setPriceChangePreview(null);
+    setPriceChangeError('');
+    setIsPriceChangeLoading(false);
+  };
+
+  const handlePriceChangeMarketingRounding = (value) => {
+    priceChangeRequestIdRef.current += 1;
+    setPriceChangeMarketingRounding(value);
+    setPriceChangePreview(null);
+    setPriceChangeError('');
+    setIsPriceChangeLoading(false);
+  };
+
+  const handleConfirmPriceChange = () => {
+    if (!decodeData?.product?.id || !priceChangePreview?.previewToken
+        || priceChangePreview.unchanged || isPriceChangeLoading || isPriceChangeApplying) return;
+    const sourceSku = decodeData.sku;
+    setIsPriceChangeApplying(true);
+    setPriceChangeError('');
+    api.post('/product-price-change/apply', {
+      productId: decodeData.product.id,
+      pricingDecision: priceChangeDecision,
+      previewToken: priceChangePreview.previewToken,
+    })
+      .then((res) => {
+        setIsPriceChangeOpen(false);
+        setIsRecountOpen(false);
+        setPriceChangePreview(null);
+        setRecountSuccess(`Ціну товару ${sourceSku} змінено.`);
+        Promise.resolve(onApplied?.({
+          result: res.data,
+          sourceSku,
+          correctedSku: sourceSku,
+          priceChanged: true,
+        })).catch(() => {});
+        handleDecode(sourceSku);
+      })
+      .catch((err) => {
+        setPriceChangeError(err.response?.data?.error || err.message);
+      })
+      .finally(() => setIsPriceChangeApplying(false));
   };
 
   const handleConfirmRecount = (requestedMode = submitMode) => {
@@ -452,6 +624,8 @@ export function useProductRecount({
     handleApplyRecount,
     handleCancelRecount,
     handleCancelRecountConfirmation,
+    handleCancelPriceChange,
+    handleConfirmPriceChange,
     handleConfirmRecount,
     handleDecode,
     handleDecodeInputChange,
@@ -466,6 +640,15 @@ export function useProductRecount({
     isRecountOpen,
     isRecountPreviewCurrent,
     isRecountPreviewUnavailable,
+    isPriceChangeApplying,
+    isPriceChangeLoading,
+    isPriceChangeOpen,
+    priceChangeError,
+    priceChangeManualUah,
+    priceChangeMarketingRounding,
+    priceChangeMode,
+    priceChangePreview,
+    priceChangeUsdPerGram,
     recountAnswers,
     recountBlockers,
     recountError,
@@ -484,6 +667,10 @@ export function useProductRecount({
     setRecountPricingMode,
     setRecountUsdPerGram,
     setRecountMarketingRounding,
+    setPriceChangeManualUah: handlePriceChangeManualUah,
+    setPriceChangeMarketingRounding: handlePriceChangeMarketingRounding,
+    setPriceChangeMode: handlePriceChangeMode,
+    setPriceChangeUsdPerGram: handlePriceChangeUsdPerGram,
     skuToDecode,
   };
 }
