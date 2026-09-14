@@ -70,6 +70,24 @@ test('correction request signature changes with SKU, price, or parameters', () =
     signature,
     getCorrectionPreviewSignature(buildPreview({ source: { answers: { quality: 3 } } }))
   );
+  assert.notEqual(
+    getCorrectionPreviewSignature(buildPreview({ corrected: { pricingContextFingerprint: 'enabled' } })),
+    getCorrectionPreviewSignature(buildPreview({ corrected: { pricingContextFingerprint: 'disabled' } }))
+  );
+});
+
+test('legacy correction signature omits only the new context binding', () => {
+  const preview = buildPreview({ corrected: { pricingContextFingerprint: 'default-enabled' } });
+  const legacySignature = getCorrectionPreviewSignature(
+    preview, { legacyDefaultRounding: true }
+  );
+  assert.equal(legacySignature, getCorrectionPreviewSignature(
+    buildPreview(), { legacyDefaultRounding: true }
+  ));
+  assert.notEqual(legacySignature, getCorrectionPreviewSignature(preview));
+  assert.notEqual(legacySignature, getCorrectionPreviewSignature(buildPreview({
+    corrected: { totalPriceUah: 601 },
+  }), { legacyDefaultRounding: true }));
 });
 
 test('correction request status transitions protect completed requests', () => {

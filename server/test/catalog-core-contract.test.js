@@ -92,16 +92,19 @@ test('catalog audit builders preserve semantic changes and sensitive rule marker
     name: 'Before',
     requires_weight: 1,
     skip_hidden_sku_questions: 0,
+    marketing_rounding_enabled: 1,
   }, {
     nextCode: 'AB',
     name: 'After',
     requiresWeight: 0,
     skipHiddenSkuQuestions: 1,
+    marketingRoundingEnabled: 0,
   }), {
     code: { from: 'AA', to: 'AB' },
     name: { from: 'Before', to: 'After' },
     requiresWeight: { from: 1, to: 0 },
     skipHiddenSkuQuestions: { from: 0, to: 1 },
+    marketingRoundingEnabled: { from: 1, to: 0 },
   });
 
   assert.deepEqual(buildQuestionChanges({

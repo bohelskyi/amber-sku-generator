@@ -58,6 +58,13 @@ test('preview token changes when the effective price changes', () => {
   );
 });
 
+test('preview token changes with pricing context even when prices match', () => {
+  assert.notEqual(
+    getProductPreviewToken(preview({ pricingContextFingerprint: 'enabled' }), 'ZZ', { kind: 1 }, 0),
+    getProductPreviewToken(preview({ pricingContextFingerprint: 'disabled' }), 'ZZ', { kind: 1 }, 0)
+  );
+});
+
 test('preview token treats an unset calibration answer as false', () => {
   const unset = getProductPreviewToken(preview(), 'ZZ', { kind: 1 }, null);
   const explicitlyFalse = getProductPreviewToken(preview(), 'ZZ', { kind: 1 }, 0);

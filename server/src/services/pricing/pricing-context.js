@@ -4,6 +4,7 @@ const CONTEXT_PROJECTION = `
 SELECT
   requested.category_code,
   categories.requires_weight,
+  categories.marketing_rounding_enabled,
   COALESCE((
     SELECT json_agg(json_build_object(
       'id', scenario.id,
@@ -85,7 +86,10 @@ function hydratePricingContext(row) {
     categoryCode: row.category_code,
     category: row.requires_weight === null || row.requires_weight === undefined
       ? null
-      : { requires_weight: row.requires_weight },
+      : {
+        requires_weight: row.requires_weight,
+        marketing_rounding_enabled: row.marketing_rounding_enabled,
+      },
     scenarios: row.scenarios || [],
     weightBandsByScenario,
     matrixByCell,

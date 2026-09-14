@@ -7,6 +7,13 @@ const {
 const { asRuleObject, getRuleDependencies, isRuleMatched } = require('../../utils/rules');
 const { roundAutomaticUah } = require('../../utils/money');
 
+function selectAutomaticUah(value, marketingRoundingEnabled) {
+  if (marketingRoundingEnabled) return roundAutomaticUah(value);
+  if (value === null || value === undefined || value === '') return null;
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? Number(numericValue.toFixed(2)) : null;
+}
+
 function getAnswerValue(answers, key) {
   return answers[key] === undefined || answers[key] === null || answers[key] === ''
     ? 0
@@ -132,6 +139,7 @@ function calculatePricingBase({
   );
   const isWeightBased = priceMode === 'per_gram_usd';
   const usesWeight = categoryRequiresWeight || scenarioUsesWeight;
+  const marketingRoundingEnabled = Number(context.category?.marketing_rounding_enabled ?? 1) === 1;
 
   if (activeScenario) {
     const matrixAnswers = scenarioUsesWeight ? { ...answers, weight: 0 } : answers;
@@ -251,6 +259,7 @@ function calculatePricingBase({
         : [],
     },
     isWeightBased,
+    marketingRoundingEnabled,
   };
 }
 
@@ -260,6 +269,7 @@ function finalizePricing(baseCalculation, { rateInfo = null, rateError = null } 
     weightVal,
     pricePerGram,
     fixedPriceUah,
+    marketingRoundingEnabled,
   } = baseCalculation;
   let { totalPrice } = baseCalculation;
   let currencyPayload = {
@@ -283,7 +293,7 @@ function finalizePricing(baseCalculation, { rateInfo = null, rateError = null } 
         uahRate,
         pricePerGramUah: (pricePerGram * uahRate).toFixed(2),
         calculatedPriceUah,
-        totalPriceUah: roundAutomaticUah(calculatedPriceUah),
+        totalPriceUah: selectAutomaticUah(calculatedPriceUah, marketingRoundingEnabled),
       };
     } else {
       totalPrice = uahRate > 0 ? (Number(fixedPriceUah || 0) / uahRate).toFixed(2) : '0.00';
@@ -294,7 +304,7 @@ function finalizePricing(baseCalculation, { rateInfo = null, rateError = null } 
         uahRate,
         pricePerGramUah: null,
         calculatedPriceUah,
-        totalPriceUah: roundAutomaticUah(calculatedPriceUah),
+        totalPriceUah: selectAutomaticUah(calculatedPriceUah, marketingRoundingEnabled),
       };
     }
     currencyPayload = {
@@ -312,7 +322,7 @@ function finalizePricing(baseCalculation, { rateInfo = null, rateError = null } 
         uahRate: null,
         pricePerGramUah: null,
         calculatedPriceUah: fixedPriceUah,
-        totalPriceUah: roundAutomaticUah(fixedPriceUah),
+        totalPriceUah: selectAutomaticUah(fixedPriceUah, marketingRoundingEnabled),
       };
     }
     currencyPayload = {
@@ -323,6 +333,7 @@ function finalizePricing(baseCalculation, { rateInfo = null, rateError = null } 
 
   const publicCalculation = { ...baseCalculation };
   delete publicCalculation.isWeightBased;
+  delete publicCalculation.marketingRoundingEnabled;
   return {
     ...publicCalculation,
     totalPrice,

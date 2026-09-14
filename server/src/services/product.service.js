@@ -1,7 +1,8 @@
 const pool = require('../db/pool');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
-const { calculatePricing } = require('./pricing.service');
+const { calculatePricing, loadPricingContext } = require('./pricing.service');
+const { getPricingContextFingerprint } = require('./pricing/pricing-context-fingerprint');
 const { getAnswerChanges } = require('../utils/answer-changes');
 const { toUahNumber } = require('../utils/money');
 const {
@@ -252,12 +253,14 @@ async function buildProductPreview(
   const baseSku = buildBaseSku(schemaPrefix, answerCodeParts);
   const compactBaseSku = buildBaseSku(schemaPrefix, answerCodes);
   const legacySeparatedBaseSku = buildBaseSku(schemaPrefix, answerCodes, legacySkuSeparator);
+  const pricingContext = await loadPricingContext(normalizedCategoryCode, queryable);
+  const pricingContextFingerprint = getPricingContextFingerprint(pricingContext);
   const pricing = await calculatePricing(
     normalizedCategoryCode,
     normalizedAnswers,
     normalizedWeight,
     isCalibrated,
-    { queryable }
+    { queryable, context: pricingContext }
   );
   const {
     weightVal,
@@ -315,6 +318,7 @@ async function buildProductPreview(
       weightVal,
       logMessage,
       pricingDetails,
+      pricingContextFingerprint,
       ...currencyPayload,
     }, normalizedCategoryCode, normalizedAnswers, isCalibrated);
   }
@@ -351,6 +355,7 @@ async function buildProductPreview(
     weightVal,
     logMessage,
     pricingDetails,
+    pricingContextFingerprint,
     ...currencyPayload,
   }, normalizedCategoryCode, normalizedAnswers, isCalibrated);
 }
@@ -510,6 +515,7 @@ async function buildProductRecountPreview({
       uahRate: correctedPreview.uahRate,
       logMessage: correctedPreview.logMessage,
       pricingDetails: correctedPreview.pricingDetails,
+      pricingContextFingerprint: correctedPreview.pricingContextFingerprint,
       manualPriceUah: previewManualPrice,
     },
     changes,
@@ -609,6 +615,7 @@ async function applyProductRecount(payload, options = {}) {
       uahRate: freshPreview.uahRate,
       logMessage: freshPreview.logMessage,
       pricingDetails: freshPreview.pricingDetails,
+      pricingContextFingerprint: freshPreview.pricingContextFingerprint,
       manualPriceUah: correctionManualPriceUah,
     });
     preview.priceDeltaUah = correctionFinalPriceUah - Number(preview.source.totalPriceUah || 0);

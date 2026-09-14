@@ -258,6 +258,151 @@ test('automatic marketing rounding is persisted through save, decode, and recoun
   }
 });
 
+test('disabled category rounding stays automatic through save, recount, and correction completion', async () => {
+  const originalCategory = (await pool.query(
+    'SELECT marketing_rounding_enabled FROM categories WHERE code = $1', ['ZZ']
+  )).rows[0];
+  const originalCells = (await pool.query(
+    'SELECT x_val, y_val, price FROM price_matrix WHERE scenario_id = $1 AND x_val = ANY($2::int[]) ORDER BY x_val',
+    [schemas.ZZScenario, [1, 2]]
+  )).rows;
+  const createdProductIds = [];
+  try {
+    await pool.query('UPDATE categories SET marketing_rounding_enabled = 1 WHERE code = $1', ['ZZ']);
+    await pool.query(
+      'UPDATE price_matrix SET price = CASE x_val WHEN 1 THEN 4020 ELSE 918 END WHERE scenario_id = $1 AND x_val = ANY($2::int[])',
+      [schemas.ZZScenario, [1, 2]]
+    );
+    const input = { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0, isCalibrated: 0 };
+    const rounded = await request('/api/preview', { method: 'POST', body: input });
+    assert.equal(rounded.response.status, 200, rounded.text);
+    assert.equal(rounded.data.calculatedPriceUah, 4020);
+    assert.equal(rounded.data.totalPriceUah, 4000);
+
+    await pool.query('UPDATE categories SET marketing_rounding_enabled = 0 WHERE code = $1', ['ZZ']);
+    const staleSave = await request('/api/save', { method: 'POST', body: {
+      category: 'ZZ', answers: input.answers, weight: 0, isCalibrated: 0,
+      skuSchemaVersionId: schemas.ZZ, previewToken: rounded.data.previewToken,
+    } });
+    assert.equal(staleSave.response.status, 409, staleSave.text);
+    const exact = await request('/api/preview', { method: 'POST', body: input });
+    assert.equal(exact.response.status, 200, exact.text);
+    assert.equal(exact.data.calculatedPriceUah, 4020);
+    assert.equal(exact.data.totalPriceUah, 4020);
+    assert.notEqual(exact.data.previewToken, rounded.data.previewToken);
+
+    const saveBody = {
+      category: 'ZZ', answers: input.answers, weight: 0, isCalibrated: 0,
+      skuSchemaVersionId: schemas.ZZ, previewToken: exact.data.previewToken,
+    };
+    const automatic = await request('/api/save', { method: 'POST', body: saveBody });
+    assert.equal(automatic.response.status, 200, automatic.text);
+    createdProductIds.push(Number(automatic.data.id));
+    const manual = await request('/api/save', { method: 'POST', body: {
+      ...saveBody, manualPriceUah: 613.25,
+    } });
+    assert.equal(manual.response.status, 200, manual.text);
+    createdProductIds.push(Number(manual.data.id));
+    for (const [saved, expectedFinal, expectedManual] of [
+      [automatic, 4020, null], [manual, 613.25, 613.25],
+    ]) {
+      const stored = (await pool.query('SELECT total_price_uah, details FROM products WHERE id = $1', [saved.data.id])).rows[0];
+      assert.equal(Number(stored.total_price_uah), expectedFinal);
+      assert.equal(Number(stored.details.calculatedPriceUah), 4020);
+      assert.equal(Number(stored.details.autoPriceUah), 4020);
+      assert.equal(stored.details.manualPriceUah, expectedManual);
+      const decoded = await request('/api/decode', { method: 'POST', body: { sku: saved.data.fullSku } });
+      assert.equal(decoded.response.status, 200, decoded.text);
+      assert.equal(decoded.data.pricing.automaticPriceUah, 4020);
+      assert.equal(decoded.data.pricing.totalPriceUah, expectedFinal);
+    }
+
+    const recountBody = { sourceSku: automatic.data.fullSku, answers: { kind: 2 }, reason: 'exact automatic recount' };
+    const recountPreview = await request('/api/recount/preview', { method: 'POST', body: recountBody });
+    assert.equal(recountPreview.response.status, 200, recountPreview.text);
+    assert.equal(recountPreview.data.corrected.autoPriceUah, 918);
+    const recounted = await request('/api/recount/apply', { method: 'POST', body: recountBody });
+    assert.equal(recounted.response.status, 200, recounted.text);
+    createdProductIds.push(Number(recounted.data.correctedProductId));
+    const storedRecount = (await pool.query(
+      'SELECT total_price_uah, details FROM products WHERE id = $1', [recounted.data.correctedProductId]
+    )).rows[0];
+    assert.equal(Number(storedRecount.total_price_uah), 918);
+    assert.equal(Number(storedRecount.details.autoPriceUah), 918);
+    assert.equal(storedRecount.details.manualPriceUah, null);
+
+    const correctionBody = { sourceSku: manual.data.fullSku, answers: { kind: 2 }, reason: 'exact automatic correction' };
+    const createdRequest = await request('/api/admin/correction-requests', { method: 'POST', body: correctionBody });
+    assert.equal(createdRequest.response.status, 200, createdRequest.text);
+    const requestId = Number(createdRequest.data.request.id);
+    assert.equal(Number(createdRequest.data.request.proposedPayload.autoPriceUah), 918);
+    const claimed = await request(`/api/admin/correction-requests/${requestId}/claim`, { method: 'POST', body: {} });
+    assert.equal(claimed.response.status, 200, claimed.text);
+    const claimVersion = Number(claimed.data.request.claimVersion);
+    await pool.query('UPDATE categories SET marketing_rounding_enabled = 1 WHERE code = $1', ['ZZ']);
+    const historicalAutomatic = await request('/api/decode', {
+      method: 'POST', body: { sku: automatic.data.fullSku },
+    });
+    const historicalManual = await request('/api/decode', {
+      method: 'POST', body: { sku: manual.data.fullSku },
+    });
+    assert.equal(historicalAutomatic.data.pricing.automaticPriceUah, 4020);
+    assert.equal(historicalAutomatic.data.pricing.totalPriceUah, 4020);
+    assert.equal(historicalManual.data.pricing.automaticPriceUah, 4020);
+    assert.equal(historicalManual.data.pricing.totalPriceUah, 613.25);
+    const staleCompletion = await request(`/api/admin/correction-requests/${requestId}/complete`, {
+      method: 'POST', body: { claimVersion },
+    });
+    assert.equal(staleCompletion.response.status, 409, staleCompletion.text);
+    const refreshed = await request(`/api/admin/correction-requests/${requestId}/refresh`, {
+      method: 'POST', body: { claimVersion },
+    });
+    assert.equal(refreshed.response.status, 200, refreshed.text);
+    assert.equal(Number(refreshed.data.request.proposedPayload.autoPriceUah), 900);
+    await pool.query('UPDATE categories SET marketing_rounding_enabled = 0 WHERE code = $1', ['ZZ']);
+    const staleAgain = await request(`/api/admin/correction-requests/${requestId}/complete`, {
+      method: 'POST', body: { claimVersion },
+    });
+    assert.equal(staleAgain.response.status, 409, staleAgain.text);
+    const exactRefresh = await request(`/api/admin/correction-requests/${requestId}/refresh`, {
+      method: 'POST', body: { claimVersion },
+    });
+    assert.equal(exactRefresh.response.status, 200, exactRefresh.text);
+    const completed = await request(`/api/admin/correction-requests/${requestId}/complete`, {
+      method: 'POST', body: { claimVersion },
+    });
+    assert.equal(completed.response.status, 200, completed.text);
+    const correctedFromRequest = (await pool.query(
+      'SELECT id, total_price_uah, details FROM products WHERE corrected_from_product_id = $1', [manual.data.id]
+    )).rows[0];
+    assert.ok(correctedFromRequest);
+    assert.equal(Number(correctedFromRequest.total_price_uah), 918);
+    assert.equal(Number(correctedFromRequest.details.autoPriceUah), 918);
+    assert.equal(correctedFromRequest.details.manualPriceUah, null);
+    createdProductIds.push(Number(correctedFromRequest.id));
+
+    await pool.query('UPDATE price_matrix SET price = 4000 WHERE scenario_id = $1 AND x_val = 1', [schemas.ZZScenario]);
+    await pool.query('UPDATE categories SET marketing_rounding_enabled = 1 WHERE code = $1', ['ZZ']);
+    const samePriceBefore = await request('/api/preview', { method: 'POST', body: input });
+    await pool.query('UPDATE categories SET marketing_rounding_enabled = 0 WHERE code = $1', ['ZZ']);
+    const samePriceAfter = await request('/api/preview', { method: 'POST', body: input });
+    assert.equal(samePriceBefore.data.totalPriceUah, 4000);
+    assert.equal(samePriceAfter.data.totalPriceUah, 4000);
+    assert.notEqual(samePriceBefore.data.previewToken, samePriceAfter.data.previewToken);
+  } finally {
+    await pool.query('UPDATE categories SET marketing_rounding_enabled = $1 WHERE code = $2',
+      [originalCategory.marketing_rounding_enabled, 'ZZ']);
+    for (const cell of originalCells) {
+      await pool.query('UPDATE price_matrix SET price = $1 WHERE scenario_id = $2 AND x_val = $3 AND y_val = $4',
+        [cell.price, schemas.ZZScenario, cell.x_val, cell.y_val]);
+    }
+    if (createdProductIds.length > 0) {
+      await pool.query("UPDATE products SET status = 'archived', exclude_from_export = 1 WHERE id = ANY($1::int[]) AND status = 'active'",
+        [createdProductIds]);
+    }
+  }
+});
+
 test('required answers, weight, schema ownership, and manual fallback fail closed', async () => {
   const missing = await request('/api/preview', {
     method: 'POST', body: { categoryCode: 'ZZ', answers: {}, weight: 0 },

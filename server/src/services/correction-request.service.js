@@ -13,6 +13,8 @@ const {
   getProductStateSignature,
   stableAnswerEntries,
 } = require('./product/product-signatures');
+const { loadPricingContext } = require('./pricing/pricing-context');
+const { getPricingContextFingerprint } = require('./pricing/pricing-context-fingerprint');
 
 const REQUEST_STATUSES = new Set(['pending', 'in_progress', 'completed', 'rejected']);
 const ACTIVE_REQUEST_STATUSES = ['pending', 'in_progress'];
@@ -722,7 +724,15 @@ async function completeCorrectionRequest(
     reason: row.comment || '',
     manualPriceUah: row.proposed_payload?.manualPriceUah ?? null,
   });
-  if (getCorrectionPreviewSignature(preview) !== row.preview_signature) {
+  let signatureMatches = getCorrectionPreviewSignature(preview) === row.preview_signature;
+  if (!signatureMatches && !Object.hasOwn(row.proposed_payload || {}, 'pricingContextFingerprint')) {
+    const context = await loadPricingContext(row.category_code);
+    signatureMatches = Number(context?.category?.marketing_rounding_enabled) === 1
+      && getPricingContextFingerprint(context) === preview.corrected.pricingContextFingerprint
+      && getCorrectionPreviewSignature(preview, { legacyDefaultRounding: true })
+        === row.preview_signature;
+  }
+  if (!signatureMatches) {
     const error = new Error('Товар або розрахунок змінилися після створення запиту. Оновіть запит і звірте дані на сайті.');
     error.statusCode = 409;
     error.details = { type: 'stale_correction_request' };

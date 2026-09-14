@@ -19,7 +19,7 @@ The preview token and draft fingerprint bind:
 
 - scope and candidate/product state;
 - complete pricing configuration;
-- raw and marketing-rounded calculations;
+- raw and category-selected automatic calculations;
 - normalized manual and automatic resolutions.
 
 Manual price itself is independently validated user input, but normalized resolution choices and all real product/pricing dependencies participate in stale-state protection.
@@ -31,7 +31,7 @@ Manual-priced rows are never silently converted:
 - a positive manual override equal to the stored price explicitly keeps manual pricing;
 - a different positive manual override explicitly sets a new manual price;
 - a row without usable automatic pricing requires a positive manual resolution;
-- in global scope only, a manual-priced row with a valid authoritative automatic result may explicitly switch to automatic through `automaticProductIds`, clearing `manualPriceUah` and selecting the rounded automatic result.
+- in global scope only, a manual-priced row with a valid authoritative automatic result may explicitly switch to automatic through `automaticProductIds`, clearing `manualPriceUah` and selecting the category-selected automatic result.
 
 A product cannot receive both manual and automatic resolutions. Missing-price rows cannot switch to nonexistent automatic pricing, and unrelated calculation errors cannot be resolved through either mechanism.
 
@@ -41,7 +41,7 @@ Apply requires `repricing.apply`. It re-previews and rejects stale configuration
 
 Changed products are locked in stable ID order. The completed batch, authenticated local-user apply attribution, every product update, old/new item payloads, normal draft transition to applied, and one `repricing.applied` audit event commit in one transaction. An audit or mid-apply failure leaves no completed batch and no partial product changes. Idempotent retries return the existing completed batch without another event.
 
-Stored repricing details retain `calculatedPriceUah`, rounded `autoPriceUah`, the selected manual/automatic state, and batch ownership. A unique application token makes completed apply idempotent; a rolled-back batch no longer occupies its active token.
+Stored repricing details retain `calculatedPriceUah`, category-selected `autoPriceUah`, the selected manual/automatic state, and batch ownership. A unique application token makes completed apply idempotent; a rolled-back batch no longer occupies its active token.
 
 ## Atomic rollback
 

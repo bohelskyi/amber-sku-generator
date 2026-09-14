@@ -93,6 +93,9 @@ async function buildRepricingPreviewState(scenarioId) {
   }
   const { scenario, context: pricingContext } = loadedPricing;
   const configurationToken = hashPayload([getPricingContextSnapshot(pricingContext)]);
+  const legacyConfigurationToken = Number(pricingContext.category?.marketing_rounding_enabled) === 1
+    ? hashPayload([getPricingContextSnapshot(pricingContext, { legacyDefaultRounding: true })])
+    : null;
   let rateInfo = null;
   try {
     rateInfo = await getUsdUahRateInfo();
@@ -251,6 +254,14 @@ async function buildRepricingPreviewState(scenarioId) {
     items,
     blockingCorrectionRequests,
   };
+  if (legacyConfigurationToken) {
+    Object.defineProperty(preview, 'legacyPreviewToken', {
+      value: getPreviewToken(scenario, applicableItems, {
+        configurationToken: legacyConfigurationToken,
+        candidateBindings,
+      }),
+    });
+  }
   finishProjection();
   return {
     preview,
@@ -280,6 +291,13 @@ async function buildGlobalRepricingPreview() {
   const contexts = categoryCodes.map((categoryCode) => contextsByCategory.get(categoryCode));
   const configuration = contexts.map(getPricingContextSnapshot);
   const configurationToken = hashPayload(configuration);
+  const legacyConfigurationToken = contexts.every((context) => (
+    Number(context.category?.marketing_rounding_enabled) === 1
+  ))
+    ? hashPayload(contexts.map((context) => getPricingContextSnapshot(
+      context, { legacyDefaultRounding: true }
+    )))
+    : null;
   const scenarios = configuration.flatMap((context) => context.scenarios)
     .sort((first, second) => (
       String(first.categoryCode).localeCompare(String(second.categoryCode))
@@ -434,6 +452,12 @@ async function buildGlobalRepricingPreview() {
     items,
     blockingCorrectionRequests,
   };
+  if (legacyConfigurationToken) {
+    Object.defineProperties(preview, {
+      legacyConfigurationToken: { value: legacyConfigurationToken },
+      legacyPreviewToken: { value: getGlobalPreviewToken(legacyConfigurationToken, items) },
+    });
+  }
   finishProjection();
   return preview;
 }

@@ -4,21 +4,31 @@ const { createMutationContext } = require('../../audit/mutation-context');
 const { normalizeCategoryCode } = require('./catalog-input');
 const { buildCategoryChanges } = require('./catalog-audit');
 
+function normalizeMarketingRoundingEnabled(value, fallback) {
+  if (value === undefined) return fallback;
+  if (value === 1 || value === true) return 1;
+  if (value === 0 || value === false) return 0;
+  const error = new Error('Налаштування маркетингового округлення має бути 0 або 1.');
+  error.statusCode = 400;
+  throw error;
+}
+
 async function createCategory(
-  { code, name, requires_weight, skip_hidden_sku_questions },
+  { code, name, requires_weight, skip_hidden_sku_questions, marketing_rounding_enabled },
   options = {}
 ) {
   const normalizedCode = normalizeCategoryCode(code);
   const normalizedRequiresWeight = requires_weight !== undefined ? Number(requires_weight) : 1;
   const normalizedSkipHidden =
     skip_hidden_sku_questions !== undefined ? Number(skip_hidden_sku_questions) : 0;
+  const normalizedMarketingRounding = normalizeMarketingRoundingEnabled(marketing_rounding_enabled, 1);
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     await client.query(
-      'INSERT INTO categories (code, name, requires_weight, skip_hidden_sku_questions) VALUES ($1, $2, $3, $4)',
-      [normalizedCode, name, normalizedRequiresWeight, normalizedSkipHidden]
+      'INSERT INTO categories (code, name, requires_weight, skip_hidden_sku_questions, marketing_rounding_enabled) VALUES ($1, $2, $3, $4, $5)',
+      [normalizedCode, name, normalizedRequiresWeight, normalizedSkipHidden, normalizedMarketingRounding]
     );
     await writeAuditEvent(client, {
       mutationContext,
@@ -30,6 +40,7 @@ async function createCategory(
         name,
         requiresWeight: normalizedRequiresWeight,
         skipHiddenSkuQuestions: normalizedSkipHidden,
+        marketingRoundingEnabled: normalizedMarketingRounding,
       },
     });
     await client.query('COMMIT');
@@ -43,7 +54,7 @@ async function createCategory(
 }
 
 async function updateCategory(
-  { code, next_code, name, requires_weight, skip_hidden_sku_questions },
+  { code, next_code, name, requires_weight, skip_hidden_sku_questions, marketing_rounding_enabled },
   options = {}
 ) {
   const currentCode = normalizeCategoryCode(code);
@@ -78,11 +89,16 @@ async function updateCategory(
     }
 
     const currentCategory = currentResult.rows[0];
+    const normalizedMarketingRounding = normalizeMarketingRoundingEnabled(
+      marketing_rounding_enabled,
+      Number(currentCategory.marketing_rounding_enabled)
+    );
     const changes = buildCategoryChanges(currentCategory, {
       nextCode,
       name,
       requiresWeight: normalizedRequiresWeight,
       skipHiddenSkuQuestions: normalizedSkipHidden,
+      marketingRoundingEnabled: normalizedMarketingRounding,
     });
 
     if (Object.keys(changes).length === 0) {
@@ -92,8 +108,8 @@ async function updateCategory(
 
     if (currentCode === nextCode) {
       await client.query(
-        'UPDATE categories SET name = $1, requires_weight = $2, skip_hidden_sku_questions = $3 WHERE code = $4',
-        [name, normalizedRequiresWeight, normalizedSkipHidden, currentCode]
+        'UPDATE categories SET name = $1, requires_weight = $2, skip_hidden_sku_questions = $3, marketing_rounding_enabled = $4 WHERE code = $5',
+        [name, normalizedRequiresWeight, normalizedSkipHidden, normalizedMarketingRounding, currentCode]
       );
       await writeAuditEvent(client, {
         mutationContext,
@@ -141,8 +157,8 @@ async function updateCategory(
     }
 
     await client.query(
-      'INSERT INTO categories (code, name, requires_weight, sku_separator, skip_hidden_sku_questions) SELECT $1, $2, $3, sku_separator, $4 FROM categories WHERE code = $5',
-      [nextCode, name, normalizedRequiresWeight, normalizedSkipHidden, currentCode]
+      'INSERT INTO categories (code, name, requires_weight, sku_separator, skip_hidden_sku_questions, marketing_rounding_enabled) SELECT $1, $2, $3, sku_separator, $4, $5 FROM categories WHERE code = $6',
+      [nextCode, name, normalizedRequiresWeight, normalizedSkipHidden, normalizedMarketingRounding, currentCode]
     );
     await client.query('UPDATE questions SET category_code = $1 WHERE category_code = $2', [nextCode, currentCode]);
     await client.query('UPDATE price_scenarios SET category_code = $1 WHERE category_code = $2', [nextCode, currentCode]);

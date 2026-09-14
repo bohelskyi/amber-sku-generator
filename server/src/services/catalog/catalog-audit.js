@@ -5,6 +5,7 @@ function buildCategoryChanges(currentCategory, {
   name,
   requiresWeight,
   skipHiddenSkuQuestions,
+  marketingRoundingEnabled,
 }) {
   const changes = {};
   addAuditChange(changes, 'code', currentCategory.code, nextCode);
@@ -20,6 +21,12 @@ function buildCategoryChanges(currentCategory, {
     'skipHiddenSkuQuestions',
     Number(currentCategory.skip_hidden_sku_questions),
     skipHiddenSkuQuestions
+  );
+  addAuditChange(
+    changes,
+    'marketingRoundingEnabled',
+    Number(currentCategory.marketing_rounding_enabled),
+    marketingRoundingEnabled
   );
   return changes;
 }

@@ -29,6 +29,7 @@ async function getAppConfig() {
       code: row.code,
       requires_weight: row.requires_weight,
       skip_hidden_sku_questions: row.skip_hidden_sku_questions || 0,
+      marketing_rounding_enabled: row.marketing_rounding_enabled,
       code_mutable: Boolean(row.code_mutable),
     };
   }

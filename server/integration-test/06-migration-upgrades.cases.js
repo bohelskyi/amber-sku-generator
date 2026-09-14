@@ -19,6 +19,46 @@ const {
   schemas,
 } = suite;
 
+test('migration 029 enables rounding for categories created before the upgrade', async () => {
+  const databaseName = 'amber_rounding_upgrade_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const preRoundingDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-pre-rounding-migrations-'));
+  try {
+    const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
+      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('029_'));
+    await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
+      path.resolve(serverRoot, 'migrations', fileName),
+      path.resolve(preRoundingDirectory, fileName)
+    )));
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations({ directory: ${JSON.stringify(preRoundingDirectory)} })
+        .finally(() => db.end())
+        .catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+    const upgradePool = new Pool({ connectionString: databaseUrl });
+    try {
+      await upgradePool.query("INSERT INTO categories (code, name, requires_weight) VALUES ('OLD', 'Existing category', 0)");
+      await runNodeInDatabase(databaseUrl, `
+        const db = require('./src/db/pool');
+        const { runMigrations } = require('./src/db/run-migrations');
+        (async () => { await runMigrations(); await runMigrations(); await db.end(); })()
+          .catch((error) => { console.error(error); process.exitCode = 1; });
+      `);
+      const upgraded = await upgradePool.query(
+        "SELECT name, marketing_rounding_enabled FROM categories WHERE code = 'OLD'"
+      );
+      assert.deepEqual(upgraded.rows, [{ name: 'Existing category', marketing_rounding_enabled: 1 }]);
+    } finally {
+      await upgradePool.end();
+    }
+  } finally {
+    await fs.rm(preRoundingDirectory, { recursive: true, force: true });
+    await dropTestDatabase(databaseName);
+  }
+});
+
 test('parallel replica bootstrap is idempotent through calibrated questions and SKU schemas', async () => {
   const databaseName = 'amber_startup_race_test';
   const databaseUrl = await recreateTestDatabase(databaseName);
@@ -263,6 +303,7 @@ test('migration 023 rolls back its audit schema and permission grant together', 
         && !fileName.startsWith('026_')
         && !fileName.startsWith('027_')
         && !fileName.startsWith('028_')
+        && !fileName.startsWith('029_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -413,6 +454,7 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
          && !fileName.startsWith('026_')
          && !fileName.startsWith('027_')
          && !fileName.startsWith('028_')
+         && !fileName.startsWith('029_')
       ))
       .map((fileName) => fs.copyFile(
         path.resolve(serverRoot, 'migrations', fileName),
@@ -523,6 +565,7 @@ test('migrations 020-024 upgrade a database at migration 019 and repeated startu
         && !fileName.startsWith('026_')
         && !fileName.startsWith('027_')
         && !fileName.startsWith('028_')
+        && !fileName.startsWith('029_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -596,6 +639,7 @@ test('migration 021 adds business capabilities and corrects built-in mappings on
         && !fileName.startsWith('026_')
         && !fileName.startsWith('027_')
         && !fileName.startsWith('028_')
+        && !fileName.startsWith('029_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -678,6 +722,7 @@ test('migration 022 removes Manager correction processing without changing other
         && !fileName.startsWith('026_')
         && !fileName.startsWith('027_')
         && !fileName.startsWith('028_')
+        && !fileName.startsWith('029_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -833,6 +878,7 @@ test('legacy in-progress correction requests survive through migration 025 witho
         && !fileName.startsWith('026_')
         && !fileName.startsWith('027_')
         && !fileName.startsWith('028_')
+        && !fileName.startsWith('029_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -989,7 +1035,7 @@ test('legacy zero prices upgrade without repricing products or blocking edits', 
   );
   try {
     const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
-      .filter((fileName) => fileName.endsWith('.sql') && !/^(014|015|016)_/.test(fileName));
+      .filter((fileName) => fileName.endsWith('.sql') && !/^(014|015|016|029)_/.test(fileName));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
       path.resolve(preCompatibilityDirectory, fileName)

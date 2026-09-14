@@ -17,7 +17,6 @@ const {
 const {
   getGlobalPreviewToken,
   getPreviewToken,
-  getPricingContextSnapshot,
   getProductRepricingStateToken,
   getRepricingPreviewFingerprint,
   getRepricingPreviewSnapshot,
@@ -33,6 +32,7 @@ const {
   serializePricingResolutions,
 } = require('./repricing/resolutions');
 const {
+  getDraftComparisonPreview,
   getDraftSyncInfo,
   normalizeDraftRow,
   normalizeDraftUiState,
@@ -506,12 +506,16 @@ async function applyRepricingScope({
     basePreview = previewState.preview;
     productStateTokensById = previewState.productStateTokensById;
   }
-  if (draft && getRepricingPreviewFingerprint(basePreview) !== draft.preview_fingerprint) {
+  const comparisonPreview = draft
+    ? getDraftComparisonPreview(draft.preview_snapshot || {}, basePreview)
+    : basePreview;
+  if (draft && getRepricingPreviewFingerprint(comparisonPreview) !== draft.preview_fingerprint) {
     const error = new Error('Склад товарів або розрахунок змінився. Синхронізуйте чернетку.');
     error.statusCode = 409;
     throw error;
   }
-  if (basePreview.previewToken !== previewToken) {
+  if (basePreview.previewToken !== previewToken
+      && (!draft || comparisonPreview.previewToken !== previewToken)) {
     const error = new Error('Дані або ціни змінилися. Сформуйте попередній перегляд повторно.');
     error.statusCode = 409;
     throw error;

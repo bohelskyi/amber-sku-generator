@@ -7,7 +7,7 @@ import { useAdminPricingController } from './admin/useAdminPricingController';
 import { useAdminSchemaController } from './admin/useAdminSchemaController';
 
 const emptyEditOption = { id: null, value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false };
-const emptyNewCategory = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false };
+const emptyNewCategory = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false, marketing_rounding_enabled: true };
 const emptyNewQuestion = { key: '', label: '', display_order: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' };
 const emptyNewOption = { value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false };
 const getNextDisplayOrder = (questions = []) => {
@@ -52,7 +52,7 @@ export function useAdminPanel() {
   const [config, setConfig] = useState(null);
   const [selectedCat, setSelectedCat] = useState(null);
   const [selectedQuestion, setSelectedQuestion] = useState(null);
-  const [editCat, setEditCat] = useState({ code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false });
+  const [editCat, setEditCat] = useState(emptyNewCategory);
   const [editQuestion, setEditQuestion] = useState({ key: '', label: '', display_order: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' });
   const [newCat, setNewCat] = useState(emptyNewCategory);
   const [newQuest, setNewQuest] = useState(emptyNewQuestion);
@@ -130,6 +130,7 @@ export function useAdminPanel() {
       name: category.name,
       requires_weight: category.requires_weight === 1,
       skip_hidden_sku_questions: category.skip_hidden_sku_questions === 1,
+      marketing_rounding_enabled: category.marketing_rounding_enabled !== 0,
       code_mutable: category.code_mutable !== false,
     });
     setEditOpt(emptyEditOption);
@@ -150,6 +151,7 @@ export function useAdminPanel() {
       ...newCat,
       requires_weight: newCat.requires_weight ? 1 : 0,
       skip_hidden_sku_questions: newCat.skip_hidden_sku_questions ? 1 : 0,
+      marketing_rounding_enabled: newCat.marketing_rounding_enabled ? 1 : 0,
     })
       .then(() => {
         setNewCat(emptyNewCategory);
@@ -169,6 +171,7 @@ export function useAdminPanel() {
       name: editCat.name,
       requires_weight: editCat.requires_weight ? 1 : 0,
       skip_hidden_sku_questions: editCat.skip_hidden_sku_questions ? 1 : 0,
+      marketing_rounding_enabled: editCat.marketing_rounding_enabled ? 1 : 0,
     })
       .then((res) => {
         const savedCode = res.data?.code || nextCode;
@@ -181,6 +184,7 @@ export function useAdminPanel() {
               name: nextCategory.name,
               requires_weight: nextCategory.requires_weight === 1,
               skip_hidden_sku_questions: nextCategory.skip_hidden_sku_questions === 1,
+              marketing_rounding_enabled: nextCategory.marketing_rounding_enabled !== 0,
               code_mutable: nextCategory.code_mutable !== false,
             });
             pricing.fetchPricesForCategory(nextCategory.code);

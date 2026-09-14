@@ -1,4 +1,5 @@
 const suite = require('./suite-context');
+const { getCorrectionPreviewSignature } = require('../src/services/product/product-signatures');
 const {
   assert,
   crypto,
@@ -12,6 +13,102 @@ const {
   authenticateIdentitySession,
   schemas,
 } = suite;
+
+test('pre-feature correction signatures survive the default-on upgrade but stale on a rounding toggle', async () => {
+  const originalFlag = (await pool.query(
+    'SELECT marketing_rounding_enabled FROM categories WHERE code = $1', ['ZZ']
+  )).rows[0].marketing_rounding_enabled;
+  const originalCell = (await pool.query(
+    'SELECT price FROM price_matrix WHERE scenario_id = $1 AND x_val = 2 AND y_val = 0',
+    [schemas.ZZScenario]
+  )).rows[0].price;
+  const requestIds = [];
+  const productIds = [];
+  try {
+    await pool.query('UPDATE categories SET marketing_rounding_enabled = 1 WHERE code = $1', ['ZZ']);
+    await pool.query(
+      'UPDATE price_matrix SET price = 4000 WHERE scenario_id = $1 AND x_val = 2 AND y_val = 0',
+      [schemas.ZZScenario]
+    );
+    for (const toggle of [false, true]) {
+      const sourcePreview = await request('/api/preview', {
+        method: 'POST', body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0 },
+      });
+      assert.equal(sourcePreview.response.status, 200, sourcePreview.text);
+      const source = await request('/api/save', { method: 'POST', body: {
+        category: 'ZZ', answers: { kind: 1 }, weight: 0,
+        skuSchemaVersionId: schemas.ZZ, previewToken: sourcePreview.data.previewToken,
+      } });
+      assert.equal(source.response.status, 200, source.text);
+      productIds.push(Number(source.data.id));
+      const correctionBody = {
+        sourceSku: source.data.fullSku, answers: { kind: 2 }, reason: 'legacy signature upgrade',
+      };
+      const historicalPreview = await request('/api/recount/preview', {
+        method: 'POST', body: correctionBody,
+      });
+      assert.equal(historicalPreview.response.status, 200, historicalPreview.text);
+      assert.equal(Number(historicalPreview.data.corrected.autoPriceUah), 4000);
+      const created = await request('/api/admin/correction-requests', {
+        method: 'POST', body: correctionBody,
+      });
+      assert.equal(created.response.status, 200, created.text);
+      const requestId = Number(created.data.request.id);
+      requestIds.push(requestId);
+      const claimed = await request(`/api/admin/correction-requests/${requestId}/claim`, {
+        method: 'POST', body: {},
+      });
+      assert.equal(claimed.response.status, 200, claimed.text);
+      const claimVersion = Number(claimed.data.request.claimVersion);
+      const legacySignature = getCorrectionPreviewSignature(
+        historicalPreview.data, { legacyDefaultRounding: true }
+      );
+      await pool.query(
+        `UPDATE correction_requests
+         SET proposed_payload = proposed_payload - 'pricingContextFingerprint',
+             preview_signature = $1
+         WHERE id = $2`,
+        [legacySignature, requestId]
+      );
+      if (toggle) {
+        await pool.query('UPDATE categories SET marketing_rounding_enabled = 0 WHERE code = $1', ['ZZ']);
+        const unchangedNumber = await request('/api/recount/preview', {
+          method: 'POST', body: correctionBody,
+        });
+        assert.equal(unchangedNumber.response.status, 200, unchangedNumber.text);
+        assert.equal(Number(unchangedNumber.data.corrected.autoPriceUah), 4000);
+      }
+      const completed = await request(`/api/admin/correction-requests/${requestId}/complete`, {
+        method: 'POST', body: { claimVersion },
+      });
+      assert.equal(completed.response.status, toggle ? 409 : 200, completed.text);
+      if (toggle) {
+        await pool.query('UPDATE categories SET marketing_rounding_enabled = 1 WHERE code = $1', ['ZZ']);
+      } else {
+        productIds.push(Number(completed.data.recount.correctedProductId));
+      }
+    }
+  } finally {
+    if (requestIds.length > 0) {
+      await pool.query(
+        "DELETE FROM correction_requests WHERE id = ANY($1::int[]) AND status <> 'completed'",
+        [requestIds]
+      );
+    }
+    if (productIds.length > 0) {
+      await pool.query(
+        "UPDATE products SET status = 'archived', exclude_from_export = 1 WHERE id = ANY($1::int[]) AND status = 'active'",
+        [productIds]
+      );
+    }
+    await pool.query('UPDATE categories SET marketing_rounding_enabled = $1 WHERE code = $2',
+      [originalFlag, 'ZZ']);
+    await pool.query(
+      'UPDATE price_matrix SET price = $1 WHERE scenario_id = $2 AND x_val = 2 AND y_val = 0',
+      [originalCell, schemas.ZZScenario]
+    );
+  }
+});
 
 test('concurrent correction only applies once after transactional revalidation', async () => {
   const correctionPayload = { sourceSku: suite.primarySku, answers: { kind: 2 }, reason: 'integration' };

@@ -6,6 +6,7 @@ const { calculatePricing } = require('../src/services/pricing.service');
 function makeContext({
   categoryCode = 'ZZ',
   requiresWeight = 0,
+  marketingRoundingEnabled = 1,
   scenarios = [],
   weightBands = [],
   matrix = [],
@@ -28,7 +29,7 @@ function makeContext({
 
   return {
     categoryCode,
-    category: { requires_weight: requiresWeight },
+    category: { requires_weight: requiresWeight, marketing_rounding_enabled: marketingRoundingEnabled },
     scenarios,
     weightBandsByScenario,
     matrixByCell,
@@ -247,6 +248,34 @@ test('rate failures retain fixed UAH pricing and fail closed for per-gram pricin
     totalPriceUah: null,
     uahRateError: 'rate offline',
   });
+});
+
+test('category flag selects exact automatic UAH for fixed and per-gram pricing', async () => {
+  const fixedScenario = { id: 1, name: 'Fixed', match_json: {}, axis_x_key: null, axis_y_key: null, price_mode: 'fixed_uah' };
+  const fixedMatrix = [{ scenario_id: 1, x_val: 0, y_val: 0, price: '4020' }];
+  const roundedFixed = await calculatePricing('ZZ', {}, 0, 0, {
+    context: makeContext({ scenarios: [fixedScenario], matrix: fixedMatrix }), rateInfo: RATE,
+  });
+  const exactFixed = await calculatePricing('ZZ', {}, 0, 0, {
+    context: makeContext({ marketingRoundingEnabled: 0, scenarios: [fixedScenario], matrix: fixedMatrix }), rateInfo: RATE,
+  });
+  const offlineFixed = await calculatePricing('ZZ', {}, 0, 0, {
+    context: makeContext({ marketingRoundingEnabled: 0, scenarios: [fixedScenario], matrix: fixedMatrix }),
+    rateInfo: { rate: null, error: 'offline' },
+  });
+  assert.equal(roundedFixed.currencyPayload.totalPriceUah, 4000);
+  assert.equal(exactFixed.currencyPayload.calculatedPriceUah, 4020);
+  assert.equal(exactFixed.currencyPayload.totalPriceUah, 4020);
+  assert.equal(offlineFixed.currencyPayload.totalPriceUah, 4020);
+
+  const weightedScenario = { id: 2, name: 'Weighted', match_json: {}, axis_x_key: null, axis_y_key: null, price_mode: 'per_gram_usd' };
+  const weightedMatrix = [{ scenario_id: 2, x_val: 0, y_val: 0, price: '2.0000' }];
+  const exactWeighted = await calculatePricing('ZZ', {}, 50.255, 0, {
+    context: makeContext({ requiresWeight: 1, marketingRoundingEnabled: 0, scenarios: [weightedScenario], matrix: weightedMatrix }),
+    rateInfo: RATE,
+  });
+  assert.equal(exactWeighted.currencyPayload.calculatedPriceUah, 4020.4);
+  assert.equal(exactWeighted.currencyPayload.totalPriceUah, 4020.4);
 });
 
 test('category mismatch fails before any supplied rate is interpreted', async () => {

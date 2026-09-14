@@ -1,5 +1,15 @@
 const suite = require('./suite-context');
 const { randomUUID } = require('node:crypto');
+const { loadPricingContexts, loadScenarioPricingContext } = require('../src/services/pricing/pricing-context');
+const { buildGlobalRepricingPreview, buildRepricingPreviewState } = require('../src/services/repricing/preview-read-model');
+const {
+  getGlobalPreviewToken,
+  getPreviewToken,
+  getPricingContextSnapshot,
+  getRepricingPreviewFingerprint,
+  getRepricingPreviewSnapshot,
+  hashPayload,
+} = require('../src/services/repricing/tokens');
 const {
   assert,
   test,
@@ -10,6 +20,116 @@ const {
 
 const rollbackProductColumns = `id, full_sku, total_price, total_price_uah,
   price_per_gram, uah_rate, details, legacy_uah_price_unset`;
+
+test('pre-feature repricing drafts remain current at default rounding and stale after a toggle', async () => {
+  const originalFlag = (await pool.query(
+    'SELECT marketing_rounding_enabled FROM categories WHERE code = $1', ['ZZ']
+  )).rows[0].marketing_rounding_enabled;
+  const originalCell = (await pool.query(
+    'SELECT price FROM price_matrix WHERE scenario_id = $1 AND x_val = 1 AND y_val = 0',
+    [schemas.ZZScenario]
+  )).rows[0].price;
+  const draftIds = [];
+  const scopesByDraftId = new Map();
+  try {
+    await pool.query('UPDATE categories SET marketing_rounding_enabled = 1 WHERE code = $1', ['ZZ']);
+    await pool.query(
+      'UPDATE price_matrix SET price = 4000 WHERE scenario_id = $1 AND x_val = 1 AND y_val = 0',
+      [schemas.ZZScenario]
+    );
+    for (const scope of ['scenario', 'global']) {
+      const created = await request('/api/admin/repricing/drafts', {
+        method: 'POST', body: scope === 'global'
+          ? { scope: 'global', manualOverrides: [], reviewedProductIds: [], uiState: {} }
+          : { scenarioId: schemas.ZZScenario, manualOverrides: [], reviewedProductIds: [], uiState: {} },
+      });
+      assert.equal(created.response.status, 200, created.text);
+      const draftId = Number(created.data.draft.id);
+      draftIds.push(draftId);
+      scopesByDraftId.set(draftId, scope);
+      let preview;
+      let legacyPreview;
+      if (scope === 'global') {
+        preview = await buildGlobalRepricingPreview();
+        const codes = [...new Set(preview.items.map((item) => item.categoryCode))].sort();
+        const contextsByCode = await loadPricingContexts(codes);
+        const legacyConfigurationToken = hashPayload(codes.map((code) => (
+          getPricingContextSnapshot(contextsByCode.get(code), { legacyDefaultRounding: true })
+        )));
+        legacyPreview = {
+          ...preview,
+          configurationToken: legacyConfigurationToken,
+          previewToken: getGlobalPreviewToken(legacyConfigurationToken, preview.items),
+        };
+      } else {
+        const state = await buildRepricingPreviewState(schemas.ZZScenario);
+        preview = state.preview;
+        const loaded = await loadScenarioPricingContext(schemas.ZZScenario);
+        const legacyConfigurationToken = hashPayload([getPricingContextSnapshot(
+          loaded.context, { legacyDefaultRounding: true }
+        )]);
+        const applicableItems = preview.items.filter((item) => (
+          item.status === 'changed' || ['price_missing', 'manual_price'].includes(item.errorCode)
+        ));
+        const candidateBindings = [...state.productStateTokensById.entries()].map(([
+          productId, productStateToken,
+        ]) => ({ productId, productStateToken }));
+        legacyPreview = {
+          ...preview,
+          previewToken: getPreviewToken(loaded.scenario, applicableItems, {
+            configurationToken: legacyConfigurationToken, candidateBindings,
+          }),
+        };
+      }
+      assert.notEqual(legacyPreview.previewToken, preview.previewToken);
+      await pool.query(
+        `UPDATE repricing_drafts
+         SET preview_fingerprint = $1, preview_snapshot = $2::jsonb
+         WHERE id = $3`,
+        [getRepricingPreviewFingerprint(legacyPreview),
+          JSON.stringify(getRepricingPreviewSnapshot(legacyPreview)), draftId]
+      );
+      const reopened = await request(`/api/admin/repricing/drafts/${draftId}`);
+      assert.equal(reopened.response.status, 200, reopened.text);
+      assert.equal(reopened.data.sync.hasChanges, false);
+    }
+    await pool.query('UPDATE categories SET marketing_rounding_enabled = 0 WHERE code = $1', ['ZZ']);
+    for (const draftId of draftIds) {
+      const stale = await request(`/api/admin/repricing/drafts/${draftId}`);
+      assert.equal(stale.response.status, 200, stale.text);
+      assert.equal(stale.data.sync.hasChanges, true);
+      assert.equal(stale.data.sync.contextChanged, true);
+      const staleApply = await request(
+        scopesByDraftId.get(draftId) === 'global'
+          ? '/api/admin/repricing/global/apply'
+          : '/api/admin/repricing/apply',
+        { method: 'POST', body: {
+          ...(scopesByDraftId.get(draftId) === 'scenario'
+            ? { scenarioId: schemas.ZZScenario } : {}),
+          previewToken: stale.data.preview.previewToken,
+          draftId,
+        } }
+      );
+      assert.equal(staleApply.response.status, 409, staleApply.text);
+    }
+    const unchanged = await request('/api/admin/repricing/preview', {
+      method: 'POST', body: { scenarioId: schemas.ZZScenario },
+    });
+    assert.equal(unchanged.response.status, 200, unchanged.text);
+    assert.ok(unchanged.data.items.some((item) => Number(item.calculatedPriceUah) === 4000
+      && Number(item.automaticPriceUah) === 4000));
+  } finally {
+    for (const draftId of draftIds) {
+      await request(`/api/admin/repricing/drafts/${draftId}`, { method: 'DELETE', body: {} });
+    }
+    await pool.query('UPDATE categories SET marketing_rounding_enabled = $1 WHERE code = $2',
+      [originalFlag, 'ZZ']);
+    await pool.query(
+      'UPDATE price_matrix SET price = $1 WHERE scenario_id = $2 AND x_val = 1 AND y_val = 0',
+      [originalCell, schemas.ZZScenario]
+    );
+  }
+});
 
 async function readRollbackProducts(productIds) {
   return (await pool.query(
@@ -1091,6 +1211,110 @@ test('repricing preview/apply/rollback and correction blocking work', async () =
   lockClient.release();
   const raceResults = await Promise.all([correctionPromise, repricingPromise]);
   assert.deepEqual(raceResults.map((item) => item.response.status).sort(), [200, 409]);
+});
+
+test('rounding toggle stales scenario and global repricing state and exact automatic prices roll back', async () => {
+  const originalFlag = (await pool.query(
+    'SELECT marketing_rounding_enabled FROM categories WHERE code = $1', ['ZZ']
+  )).rows[0].marketing_rounding_enabled;
+  const originalCell = (await pool.query(
+    'SELECT price FROM price_matrix WHERE scenario_id = $1 AND x_val = 1 AND y_val = 0',
+    [schemas.ZZScenario]
+  )).rows[0].price;
+  let draftId = null;
+  let batchId = null;
+  let rolledBack = false;
+  try {
+    await pool.query('UPDATE price_matrix SET price = 4000 WHERE scenario_id = $1 AND x_val = 1 AND y_val = 0',
+      [schemas.ZZScenario]);
+    await pool.query('UPDATE categories SET marketing_rounding_enabled = 1 WHERE code = $1', ['ZZ']);
+    const before = await request('/api/admin/repricing/preview', {
+      method: 'POST', body: { scenarioId: schemas.ZZScenario },
+    });
+    const beforeGlobal = await request('/api/admin/repricing/global/preview', {
+      method: 'POST', body: {},
+    });
+    assert.equal(before.response.status, 200, before.text);
+    assert.equal(beforeGlobal.response.status, 200, beforeGlobal.text);
+    const draft = await request('/api/admin/repricing/drafts', {
+      method: 'POST', body: { scenarioId: schemas.ZZScenario, manualOverrides: [], reviewedProductIds: [], uiState: {} },
+    });
+    assert.equal(draft.response.status, 200, draft.text);
+    draftId = Number(draft.data.draft.id);
+
+    await pool.query('UPDATE categories SET marketing_rounding_enabled = 0 WHERE code = $1', ['ZZ']);
+    const after = await request('/api/admin/repricing/preview', {
+      method: 'POST', body: { scenarioId: schemas.ZZScenario },
+    });
+    const afterGlobal = await request('/api/admin/repricing/global/preview', {
+      method: 'POST', body: {},
+    });
+    assert.equal(after.response.status, 200, after.text);
+    assert.equal(afterGlobal.response.status, 200, afterGlobal.text);
+    const samePrice = after.data.items.find((item) => Number(item.calculatedPriceUah) === 4000);
+    assert.ok(samePrice);
+    assert.equal(samePrice.automaticPriceUah, 4000);
+    assert.notEqual(after.data.previewToken, before.data.previewToken);
+    assert.notEqual(afterGlobal.data.previewToken, beforeGlobal.data.previewToken);
+    const staleDraft = await request(`/api/admin/repricing/drafts/${draftId}`);
+    assert.equal(staleDraft.response.status, 200, staleDraft.text);
+    assert.equal(staleDraft.data.sync.hasChanges, true);
+    const staleApply = await request('/api/admin/repricing/apply', {
+      method: 'POST', body: {
+        scenarioId: schemas.ZZScenario, previewToken: before.data.previewToken, draftId,
+      },
+    });
+    assert.equal(staleApply.response.status, 409, staleApply.text);
+    const discarded = await request(`/api/admin/repricing/drafts/${draftId}`, {
+      method: 'DELETE', body: {},
+    });
+    assert.equal(discarded.response.status, 200, discarded.text);
+    draftId = null;
+
+    await pool.query('UPDATE price_matrix SET price = 4020 WHERE scenario_id = $1 AND x_val = 1 AND y_val = 0',
+      [schemas.ZZScenario]);
+    const exactPreview = await request('/api/admin/repricing/preview', {
+      method: 'POST', body: { scenarioId: schemas.ZZScenario },
+    });
+    assert.equal(exactPreview.response.status, 200, exactPreview.text);
+    const exactItem = exactPreview.data.items.find((item) => (
+      item.status === 'changed' && Number(item.calculatedPriceUah) === 4020
+    ));
+    assert.ok(exactItem);
+    assert.equal(Number(exactItem.automaticPriceUah), 4020);
+    const manualOverrides = exactPreview.data.items
+      .filter((item) => ['manual_price', 'price_missing'].includes(item.errorCode))
+      .map((item) => ({ productId: Number(item.productId), newPriceUah: Number(item.oldPriceUah) }));
+    const applied = await request('/api/admin/repricing/apply', {
+      method: 'POST', body: { scenarioId: schemas.ZZScenario,
+        previewToken: exactPreview.data.previewToken, manualOverrides },
+    });
+    assert.equal(applied.response.status, 200, applied.text);
+    batchId = Number(applied.data.batch?.id || applied.data.batchId);
+    const stored = (await pool.query(
+      'SELECT total_price_uah, details FROM products WHERE id = $1', [exactItem.productId]
+    )).rows[0];
+    assert.equal(Number(stored.total_price_uah), 4020);
+    assert.equal(Number(stored.details.calculatedPriceUah), 4020);
+    assert.equal(Number(stored.details.autoPriceUah), 4020);
+    assert.equal(stored.details.manualPriceUah, null);
+    const rollback = await request(`/api/admin/repricing/${batchId}/rollback`, {
+      method: 'POST', body: {},
+    });
+    assert.equal(rollback.response.status, 200, rollback.text);
+    rolledBack = true;
+  } finally {
+    if (batchId && !rolledBack) {
+      await request(`/api/admin/repricing/${batchId}/rollback`, { method: 'POST', body: {} });
+    }
+    if (draftId) {
+      await request(`/api/admin/repricing/drafts/${draftId}`, { method: 'DELETE', body: {} });
+    }
+    await pool.query('UPDATE price_matrix SET price = $1 WHERE scenario_id = $2 AND x_val = 1 AND y_val = 0',
+      [originalCell, schemas.ZZScenario]);
+    await pool.query('UPDATE categories SET marketing_rounding_enabled = $1 WHERE code = $2',
+      [originalFlag, 'ZZ']);
+  }
 });
 
 test('repricing keeps manual-priced products editable across consecutive cycles', async () => {

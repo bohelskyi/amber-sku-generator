@@ -60,7 +60,7 @@ test('preview token preserves calibration state 2 and its serialized preview sna
     uahRateFetchedAt: 'excluded from token',
   }, 'ZZ', { kind: 1, is_calibrated: 2 }, null);
 
-  assert.equal(token, '8a179a390b5de9884f20186b8fada2fb685c93477515d736364214e31b1b7e33');
+  assert.equal(token, '02256d3a37685e698e1bd44ed78caf99f41a31dc96369a47d7ac98bb4420113a');
 });
 
 test('correction preview signature preserves its public re-export and snapshot', () => {
@@ -79,7 +79,7 @@ test('correction preview signature preserves its public re-export and snapshot',
       totalPriceUah: 600,
       answers: { quality: 2, processing: 2 },
     },
-  }), '4bddf740391be82c8be27d07166698a6adf3863f8adb2e7add25482d516d34a5');
+  }), '91a11962eb08ce95c06d27291de31736a577bfd2a8493e7ccecd2a6075fbe9f0');
 });
 
 test('signature facades resolve to the leaf module without a circular fallback', () => {

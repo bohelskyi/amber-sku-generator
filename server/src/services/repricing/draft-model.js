@@ -3,8 +3,27 @@ const { REPRICING_SCOPE_GLOBAL, REPRICING_SCOPE_SCENARIO } = require('./constant
 const { normalizeStoredPricingResolutions } = require('./resolutions');
 const { getRepricingPreviewSnapshot } = require('./tokens');
 
+function getDraftComparisonPreview(storedSnapshot = {}, currentPreview) {
+  if (storedSnapshot.scope === REPRICING_SCOPE_GLOBAL) {
+    if (currentPreview.legacyConfigurationToken
+        && storedSnapshot.configurationToken === currentPreview.legacyConfigurationToken) {
+      return {
+        ...currentPreview,
+        configurationToken: currentPreview.legacyConfigurationToken,
+        previewToken: currentPreview.legacyPreviewToken,
+      };
+    }
+  } else if (currentPreview.legacyPreviewToken
+      && storedSnapshot.bindingToken === currentPreview.legacyPreviewToken) {
+    return { ...currentPreview, previewToken: currentPreview.legacyPreviewToken };
+  }
+  return currentPreview;
+}
+
 function getDraftSyncInfo(storedSnapshot = {}, currentPreview) {
-  const currentSnapshot = getRepricingPreviewSnapshot(currentPreview);
+  const currentSnapshot = getRepricingPreviewSnapshot(
+    getDraftComparisonPreview(storedSnapshot, currentPreview)
+  );
   const storedItems = new Map(
     (storedSnapshot.items || []).map((item) => [Number(item.productId), item])
   );
@@ -119,6 +138,7 @@ function normalizeDraftRow(row) {
 }
 
 module.exports = {
+  getDraftComparisonPreview,
   getDraftSyncInfo,
   normalizeDraftRow,
   normalizeDraftUiState,

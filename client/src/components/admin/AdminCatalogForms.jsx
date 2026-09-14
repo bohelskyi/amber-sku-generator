@@ -44,6 +44,7 @@ export function CategoryForm({ category, isEdit = false, onCancel, onChange, onS
       <div className="catalog-checkbox-row">
         <label><input type="checkbox" checked={category.requires_weight} onChange={(event) => onChange({ ...category, requires_weight: event.target.checked })} />Потрібна вага</label>
         <label><input type="checkbox" checked={category.skip_hidden_sku_questions} onChange={(event) => onChange({ ...category, skip_hidden_sku_questions: event.target.checked })} />Пропускати приховані питання в SKU</label>
+        <label><input type="checkbox" checked={category.marketing_rounding_enabled} onChange={(event) => onChange({ ...category, marketing_rounding_enabled: event.target.checked })} />Маркетингове округлення автоматичних цін</label>
       </div>
       <div className="catalog-form-actions">
         <button type="button" onClick={onSave} className={`btn ${isEdit ? 'btn-primary' : 'btn-amber'}`}>{isEdit ? 'Зберегти зміни' : 'Зберегти категорію'}</button>

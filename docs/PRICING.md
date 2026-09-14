@@ -27,11 +27,13 @@ Scenario, matrix, modifier, weight-band, rules, and schema changes are part of a
 Automatic calculation preserves separate meanings:
 
 - `calculatedPriceUah`: raw result before marketing rounding;
-- `autoPriceUah`: rounded authoritative automatic result in stored details;
+- `autoPriceUah`: authoritative automatic result in stored details, marketing-rounded when enabled for the category;
 - `totalPriceUah`/`products.total_price_uah`: chosen final price, automatic or manual;
 - `manualPriceUah`: optional independently supplied manual result.
 
-Marketing rounding selects its tier from the unrounded amount and then rounds: values through 100 are unchanged, then nearest 10 below 300, 50 below 5,000, 100 below 25,000, 500 below 100,000, and 1,000 thereafter. Never pre-round before selecting the tier. Preserve raw and rounded values through save, recount, repricing, audit payloads, and historical decode.
+Marketing rounding selects its tier from the unrounded amount and then rounds: values through 100 are unchanged, then nearest 10 below 300, 50 below 5,000, 100 below 25,000, 500 below 100,000, and 1,000 thereafter. Never pre-round before selecting the tier. Preserve raw and selected automatic values through save, recount, repricing, audit payloads, and historical decode.
+
+Each category has `marketing_rounding_enabled` (default `1`). Setting it to `0` skips marketing rounding for both automatic price modes; the selected automatic UAH amount uses the existing two-decimal storage scale, while `calculatedPriceUah` remains the raw calculation. The choice also applies to fixed-UAH prices when the exchange rate is unavailable. It does not turn automatic pricing into a manual override. The category setting participates in pricing-context fingerprints, so outstanding product/correction previews and repricing drafts become stale when it changes, even if the selected amount is unchanged. Existing product history is not rewritten; eligible active products change through the normal repricing workflow.
 
 If no scenario, matrix cell, or usable automatic UAH result exists, preview exposes no positive automatic price. Save or correction then requires a separately parsed and validated positive manual UAH price. Manual prices are user input, are excluded from the stale-preview pricing context, are revalidated at transactional write time, are not marketing-rounded, and retain decimals at the UAH storage scale. Invalid, non-finite, zero, or negative final prices fail closed.
 

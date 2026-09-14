@@ -17,6 +17,47 @@ const {
 const { getAdminPrices } = require('../src/services/pricing/pricing-read-model');
 const { updateCategory } = require('../src/services/catalog.service');
 
+test('category API persists rounding flag, preserves omitted updates, and audits toggles', async () => {
+  if (!suite.authenticatedSession) suite.authenticatedSession = await authenticateApplicationSession('/admin');
+  const code = `R${Date.now().toString().slice(-8)}`;
+  try {
+    const created = await request('/api/admin/category', {
+      method: 'POST', body: { code, name: 'Rounding category', requires_weight: 0 },
+    });
+    assert.equal(created.response.status, 200, created.text);
+    const initialConfig = await request('/api/admin/config');
+    assert.equal(initialConfig.data.categories[code].marketing_rounding_enabled, 1);
+
+    const toggled = await request('/api/admin/category', {
+      method: 'PUT', body: {
+        code, name: 'Rounding category', requires_weight: 0,
+        skip_hidden_sku_questions: 0, marketing_rounding_enabled: 0,
+      },
+    });
+    assert.equal(toggled.response.status, 200, toggled.text);
+    const omitted = await request('/api/admin/category', {
+      method: 'PUT', body: { code, name: 'Renamed category', requires_weight: 0, skip_hidden_sku_questions: 0 },
+    });
+    assert.equal(omitted.response.status, 200, omitted.text);
+    const currentConfig = await request('/api/admin/config');
+    assert.equal(currentConfig.data.categories[code].marketing_rounding_enabled, 0);
+    const audit = await pool.query(
+      "SELECT details FROM audit_events WHERE event_key = 'catalog.category.updated' AND subject_id = $1 ORDER BY id",
+      [code]
+    );
+    assert.deepEqual(audit.rows[0].details.changes.marketingRoundingEnabled, { from: 1, to: 0 });
+    assert.equal(Object.hasOwn(audit.rows[1].details.changes, 'marketingRoundingEnabled'), false);
+
+    const invalid = await request('/api/admin/category', {
+      method: 'PUT', body: { code, name: 'Renamed category', requires_weight: 0,
+        skip_hidden_sku_questions: 0, marketing_rounding_enabled: 2 },
+    });
+    assert.equal(invalid.response.status, 400, invalid.text);
+  } finally {
+    await pool.query('DELETE FROM categories WHERE code = $1', [code]);
+  }
+});
+
 async function waitUntilBlockedBy(client, queryFragment, timeoutMs = 5000) {
   const blockerPid = Number((await client.query('SELECT pg_backend_pid() AS pid')).rows[0].pid);
   const deadline = Date.now() + timeoutMs;

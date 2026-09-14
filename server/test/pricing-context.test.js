@@ -11,6 +11,7 @@ function contextRow(categoryCode, overrides = {}) {
   return {
     category_code: categoryCode,
     requires_weight: 0,
+    marketing_rounding_enabled: 1,
     scenarios: [],
     weight_bands: [],
     matrix: [],
@@ -65,7 +66,7 @@ test('single-category context is hydrated by one query without taking transactio
   assert.deepEqual(calls[0].values, [['ZZ']]);
   assert.match(calls[0].sql, /WITH requested/);
   assert.equal(context.categoryCode, 'ZZ');
-  assert.deepEqual(context.category, { requires_weight: 0 });
+  assert.deepEqual(context.category, { requires_weight: 0, marketing_rounding_enabled: 1 });
   assert.equal(context.scenarios[0].id, 1);
   assert.equal(context.weightBandsByScenario.get(1)[0].min_weight, '0');
   assert.equal(context.matrixByCell.get('1:1:0').price, '1000.0000');

@@ -41,13 +41,14 @@ function getProductPreviewToken(preview, categoryCode, answers, isCalibrated) {
     totalPrice: preview.totalPrice,
     calculatedPriceUah: preview.calculatedPriceUah ?? null,
     totalPriceUah: preview.totalPriceUah ?? null,
+    pricingContextFingerprint: preview.pricingContextFingerprint ?? null,
     uahRate: preview.uahRate ?? null,
     uahRateDate: preview.uahRateDate ?? null,
   };
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
-function getCorrectionPreviewSignature(preview) {
+function getCorrectionPreviewSignature(preview, { legacyDefaultRounding = false } = {}) {
   const snapshot = {
     source: {
       productId: Number(preview?.source?.productId || 0),
@@ -61,6 +62,9 @@ function getCorrectionPreviewSignature(preview) {
       calculatedPriceUah: toUahNumber(preview?.corrected?.calculatedPriceUah),
       autoPriceUah: toUahNumber(preview?.corrected?.autoPriceUah),
       totalPriceUah: toUahNumber(preview?.corrected?.totalPriceUah),
+      ...(!legacyDefaultRounding ? {
+        pricingContextFingerprint: preview?.corrected?.pricingContextFingerprint ?? null,
+      } : {}),
       answers: stableAnswerEntries(preview?.corrected?.answers),
     },
   };

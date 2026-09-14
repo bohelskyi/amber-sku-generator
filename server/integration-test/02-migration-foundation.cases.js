@@ -15,6 +15,31 @@ const {
   roleIdForKey,
 } = suite;
 
+test('migration 029 defaults existing and new category rounding flags to enabled', async () => {
+  const column = await pool.query(`
+    SELECT data_type, is_nullable, column_default
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'categories'
+      AND column_name = 'marketing_rounding_enabled'
+  `);
+  assert.deepEqual(column.rows, [{ data_type: 'integer', is_nullable: 'NO', column_default: '1' }]);
+  const existing = await pool.query('SELECT count(*)::int AS count FROM categories WHERE marketing_rounding_enabled <> 1');
+  assert.equal(existing.rows[0].count, 0);
+  const code = 'TFLAG29';
+  try {
+    await pool.query('INSERT INTO categories (code, name, requires_weight) VALUES ($1, $2, 0)', [code, 'Flag default']);
+    assert.equal(Number((await pool.query(
+      'SELECT marketing_rounding_enabled FROM categories WHERE code = $1', [code]
+    )).rows[0].marketing_rounding_enabled), 1);
+    await assert.rejects(
+      pool.query('UPDATE categories SET marketing_rounding_enabled = 2 WHERE code = $1', [code]),
+      (error) => error.code === '23514'
+    );
+  } finally {
+    await pool.query('DELETE FROM categories WHERE code = $1', [code]);
+  }
+});
+
 test('migration 019 matches the connect-pg-simple 10.0.0 table contract', async () => {
   const columns = await pool.query(`
     SELECT column_name, data_type, is_nullable, datetime_precision

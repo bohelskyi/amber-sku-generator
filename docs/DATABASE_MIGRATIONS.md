@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations `000`–`028` are immutable history; whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations `000`–`029` are immutable history; whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -85,6 +85,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `026_repricing_actor_attribution.sql` | Nullable local-user attribution for repricing draft create/modify/discard and batch apply/rollback without historical backfill or synthesized audit events. |
 | `027_export_and_sku_schema_actor_attribution.sql` | Nullable local-user attribution for export snapshot create/confirm and SKU schema publication, plus export provenance immutability, without historical backfill or synthesized audit events. |
 | `028_custom_roles.sql` | Versioned editable roles, one-current-role enforcement, case-insensitive role names, immutable role identity, permanent role records, and database-enforced Administrator/reserved-permission protections. |
+| `029_category_marketing_rounding.sql` | Adds a constrained, default-enabled category flag for automatic-price marketing rounding. |
 
 ## Test database safety
 
