@@ -8,6 +8,59 @@ const {
   schemas,
 } = suite;
 
+test('published Necklaces rule accepts hidden molded size only with absent calibration', async () => {
+  if (!suite.authenticatedSession) {
+    suite.authenticatedSession = await suite.authenticateApplicationSession('/admin');
+  }
+  const code = 'NV';
+  await pool.query(`INSERT INTO categories (code, name, requires_weight, skip_hidden_sku_questions)
+    VALUES ($1, 'Necklace visibility', 0, 0)`, [code]);
+  const questions = await pool.query(`INSERT INTO questions
+    (category_code, key, label, sku_index, display_order, required, include_in_sku, input_type, visible_if_json)
+    VALUES
+      ($1, 'raw_type', 'Тип сировини', 1, 1, 1, 1, 'options', NULL),
+      ($1, 'size', 'Розмір', 2, 3, 1, 1, 'options', '{"is_calibrated":[0,1]}'::jsonb),
+      ($1, 'is_calibrated', 'Калібрування', 0, 2, 1, 0, 'options', '{"raw_type":1}'::jsonb)
+    RETURNING id, key`, [code]);
+  const ids = Object.fromEntries(questions.rows.map((row) => [row.key, row.id]));
+  await pool.query(`INSERT INTO options (question_id, value_id, sku_code, label, visible_if_json)
+    VALUES
+      ($1, 1, '1', 'Натуральний', NULL), ($1, 2, '2', 'Формований', NULL),
+      ($2, 1, '1', '5-10 Ø', '{"raw_type":[1,2],"is_calibrated":[1,null]}'::jsonb),
+      ($2, 4, '4', 'Відсів', '{"raw_type":1,"is_calibrated":0}'::jsonb),
+      ($3, 0, '0', 'Ні', NULL), ($3, 1, '1', 'Так', NULL), ($3, 2, '2', 'Напів', NULL)`,
+  [ids.raw_type, ids.size, ids.is_calibrated]);
+  const scenario = await pool.query(`INSERT INTO price_scenarios
+    (category_code, name, match_json, axis_x_key, axis_y_key, price_mode, status)
+    VALUES ($1, 'Visibility fixture', '{}'::jsonb, 'raw_type', NULL, 'fixed_uah', 'active')
+    RETURNING id`, [code]);
+  await pool.query(`INSERT INTO price_matrix (scenario_id, x_val, y_val, price)
+    VALUES ($1, 1, 0, 1000), ($1, 2, 0, 1200)`, [scenario.rows[0].id]);
+
+  const published = await request(`/api/admin/sku-schema/${code}/publish`, { method: 'POST' });
+  assert.equal(published.response.status, 200, published.text);
+  const preview = async (answers, isCalibrated = answers.is_calibrated ?? null) => request('/api/preview', { method: 'POST', body: {
+    categoryCode: code, answers, isCalibrated, weight: 0,
+  } });
+  for (const [calibration, size] of [[0, 4], [1, 1]]) {
+    const missing = await preview({ raw_type: 1, is_calibrated: calibration });
+    assert.equal(missing.response.status, 422, missing.text);
+    assert.match(missing.data.error, /Розмір/);
+    const complete = await preview({ raw_type: 1, is_calibrated: calibration, size });
+    assert.equal(complete.response.status, 200, complete.text);
+  }
+  const semi = await preview({ raw_type: 1, is_calibrated: 2 });
+  assert.equal(semi.response.status, 200, semi.text);
+  assert.equal(semi.data.baseSku, `${code}10`, 'hidden size keeps the published placeholder');
+  const molded = await preview({ raw_type: 2 });
+  assert.equal(molded.response.status, 200, molded.text);
+  assert.equal(molded.data.baseSku, `${code}20`, 'molded size is hidden with null calibration');
+  assert.equal(molded.data.skuSchemaVersionId, published.data.id);
+  const coerced = await preview({ raw_type: 2 }, 0);
+  assert.equal(coerced.response.status, 422, coerced.text);
+  assert.match(coerced.data.error, /Розмір/);
+});
+
 test('preview/save are authoritative and concurrent sequences are unique', async () => {
   const preview = await request('/api/preview', {
     method: 'POST',

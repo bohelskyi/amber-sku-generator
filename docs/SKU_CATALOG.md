@@ -56,6 +56,8 @@ Never coerce this field to boolean. Preview-token compatibility treats missing c
 
 Decode reports calibration as known, stored, unknown, or not applicable. Price display is hidden only when calibration is unknown and the selected calculation actually depends on it.
 
+The published Necklaces `size` rule shows and requires size for natural calibration `0` or `1`. It hides size for calibration `2` and for molded material, where calibration is not applicable. Product creation sends `null` for absent calibration during authoritative preview so the hidden-size placeholder path is used; this does not change the preview-token compatibility rule above.
+
 ## Authoritative preview and save
 
 `buildProductPreview()` validates category/schema ownership, required weight, visible questions, option existence, visibility, and archive state. Depending on `skip_hidden_sku_questions`, hidden SKU questions are omitted from encoding or represented through the historical placeholder model.

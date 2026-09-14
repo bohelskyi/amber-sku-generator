@@ -2,7 +2,29 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { getPricingAxis } from '../src/lib/pricing-axis.js';
-import { getVisibleOptionsForQuestion } from '../src/lib/sku-visibility.js';
+import { getVisibleOptionsForQuestion, isQuestionVisible } from '../src/lib/sku-visibility.js';
+
+test('Necklaces size is shown only for natural calibration 0 or 1', () => {
+  const question = {
+    id: 'size',
+    visible_if_json: { is_calibrated: [0, 1] },
+    options: [
+      { id: 1, visible_if_json: { raw_type: [1, 2], is_calibrated: [1, null] } },
+      { id: 4, visible_if_json: { raw_type: 1, is_calibrated: 0 } },
+    ],
+  };
+  for (const [answers, visible, optionIds] of [
+    [{ raw_type: 1, is_calibrated: 0 }, true, [4]],
+    [{ raw_type: 1, is_calibrated: 1 }, true, [1]],
+    [{ raw_type: 1, is_calibrated: 2 }, false, []],
+    [{ raw_type: 2 }, false, []],
+  ]) {
+    assert.equal(isQuestionVisible(question, answers, answers.is_calibrated ?? null), visible);
+    if (visible) {
+      assert.deepEqual(getVisibleOptionsForQuestion(question, answers).map((option) => option.id), optionIds);
+    }
+  }
+});
 
 const qualityQuestion = {
   id: 'quality',

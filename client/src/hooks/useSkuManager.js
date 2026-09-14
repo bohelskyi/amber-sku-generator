@@ -280,7 +280,7 @@ export function useSkuManager({ canPriceOverride = false, submitMode = 'apply' }
         categoryCode: selectedCat,
         answers,
         weight: isWeightRequired ? weight : 0,
-        isCalibrated: isCalibrated === null ? 0 : isCalibrated,
+        isCalibrated,
       })
         .then((res) => {
           if (!isCancelled) setLivePriceData(res.data);
@@ -323,7 +323,7 @@ export function useSkuManager({ canPriceOverride = false, submitMode = 'apply' }
       categoryCode: selectedCat,
       answers,
       weight: isWeightRequired ? weight : 0,
-      isCalibrated: isCalibrated === null ? 0 : isCalibrated,
+      isCalibrated,
     }).then((res) => {
       setPreviewData(res.data);
       setSaveError('');

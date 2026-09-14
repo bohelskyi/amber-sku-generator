@@ -10,6 +10,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthContext } from '../src/auth/auth-context.js';
 import { useSkuManager } from '../src/hooks/useSkuManager.js';
+import { ProductBuilder } from '../src/components/app/ProductBuilder.jsx';
 import { api } from '../src/lib/api.js';
 import AdminPage from '../src/pages/AdminPage.jsx';
 import CorrectionRequestsPage from '../src/pages/CorrectionRequestsPage.jsx';
@@ -68,6 +69,71 @@ const builderConfig = {
   },
   extraConfig: {},
 };
+
+const necklaceConfig = {
+  categories: { NM: { code: 'NM', name: 'Намиста', requires_weight: 0 } },
+  questions: { NM: [
+    { id: 'raw_type', label: 'Тип сировини', required: 1, include_in_sku: 1, options: [
+      { id: 1, label: 'Натуральний' }, { id: 2, label: 'Формований' },
+    ] },
+    { id: 'is_calibrated', label: 'Калібрування', required: 1, include_in_sku: 0,
+      visible_if_json: { raw_type: 1 }, options: [
+        { id: 0, label: 'Ні' }, { id: 1, label: 'Так' }, { id: 2, label: 'Напів' },
+      ] },
+    { id: 'size', label: 'Розмір', required: 1, include_in_sku: 1,
+      visible_if_json: { is_calibrated: [0, 1] }, options: [
+        { id: 1, label: '5-10 Ø', visible_if_json: { raw_type: [1, 2], is_calibrated: [1, null] } },
+        { id: 4, label: 'Відсів', visible_if_json: { raw_type: 1, is_calibrated: 0 } },
+      ] },
+  ] },
+  extraConfig: {},
+};
+
+function NecklaceBuilderHarness() {
+  const sku = useSkuManager();
+  if (!sku.config) return <div>loading</div>;
+  return <>
+    <button type="button" onClick={() => sku.resetProductFlow('NM')}>Start necklace</button>
+    {sku.selectedCat && <ProductBuilder
+      {...sku}
+      getVisibleOptionsForQuestion={sku.getVisibleOptions}
+      isQuestionVisible={sku.getQuestionVisibility}
+      onAnswer={sku.handleAnswer}
+      onTextAnswer={sku.handleTextAnswer}
+      onPreview={sku.handlePreview}
+      onCancel={() => sku.setSelectedCat(null)}
+    />}
+  </>;
+}
+
+describe('Necklaces product creation', () => {
+  it('hides size for molded material and sends not-applicable calibration as null', async () => {
+    const posts = [];
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/config') return response(necklaceConfig);
+      if (url === '/products') return response([]);
+      if (url === '/export/status') return response({});
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    vi.spyOn(api, 'post').mockImplementation(async (url, body) => {
+      posts.push({ url, body });
+      return response({ totalPriceUah: 1000, fullProposedSku: 'NM2/11', weightVal: 0 });
+    });
+
+    render(<NecklaceBuilderHarness />);
+    fireEvent.click(await screen.findByText('Start necklace'));
+    fireEvent.click(screen.getByRole('button', { name: 'Формований' }));
+    expect(screen.queryByRole('group', { name: 'Калібрування' })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Розмір' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Розрахувати SKU і ціну' }));
+    await waitFor(() => expect(posts.some((post) => post.url === '/preview')).toBe(true));
+    expect(posts.find((post) => post.url === '/preview').body).toMatchObject({
+      categoryCode: 'NM', answers: { raw_type: 2 }, isCalibrated: null,
+    });
+    await waitFor(() => expect(posts.some((post) => post.url === '/price-preview')).toBe(true));
+    expect(posts.find((post) => post.url === '/price-preview').body.isCalibrated).toBeNull();
+  });
+});
 
 function SkuLivePreviewHarness() {
   const sku = useSkuManager();
