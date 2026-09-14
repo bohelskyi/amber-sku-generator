@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { RecountConfirmDialog } from '../src/components/app/RecountConfirmDialog.jsx';
 
@@ -40,18 +40,64 @@ function renderDialog(overrides = {}) {
 
 it('shows all three request pricing modes only with override permission', () => {
   const handlers = renderDialog();
-  const selector = screen.getByLabelText('Режим ціни');
-  expect([...selector.options].map((option) => option.value)).toEqual([
+  const choices = within(screen.getByRole('radiogroup', { name: 'Режим ціни' })).getAllByRole('radio');
+  expect(choices.map((option) => option.value)).toEqual([
     'system_auto', 'usd_per_gram', 'manual_uah',
   ]);
-  fireEvent.change(selector, { target: { value: 'usd_per_gram' } });
+  expect(choices.map((option) => option.parentElement.textContent)).toEqual([
+    'Автоматична', 'USD/г', 'Ручна UAH',
+  ]);
+  expect(screen.getByRole('radio', { name: 'Автоматична' }).checked).toBe(true);
+  fireEvent.click(screen.getByRole('radio', { name: 'USD/г' }));
   expect(handlers.onPricingModeChange).toHaveBeenCalledWith('usd_per_gram');
 
   cleanup();
   render(<RecountConfirmDialog isOpen isApplying={false} preview={preview}
     reason="" mode="request" manualPriceUah="" onManualPriceChange={vi.fn()}
     onCancel={vi.fn()} onConfirm={vi.fn()} />);
-  expect(screen.queryByLabelText('Режим ціни')).toBeNull();
+  expect(screen.queryByRole('radiogroup', { name: 'Режим ціни' })).toBeNull();
+});
+
+it('selects each pricing segment and shows only its matching inputs', () => {
+  function DialogWithModes() {
+    const [pricingMode, setPricingMode] = useState('system_auto');
+    return <RecountConfirmDialog
+      canPriceOverride isOpen isApplying={false} preview={preview}
+      previewCurrent mode="request" pricingMode={pricingMode}
+      usdPerGram="10" manualPriceUah="4020"
+      onPricingModeChange={setPricingMode} onCancel={vi.fn()} onConfirm={vi.fn()}
+    />;
+  }
+
+  render(<DialogWithModes />);
+  expect(screen.getByRole('radio', { name: 'Автоматична' }).checked).toBe(true);
+  expect(screen.queryByLabelText('USD за грам')).toBeNull();
+  expect(screen.queryByLabelText('Точна ціна UAH')).toBeNull();
+
+  fireEvent.click(screen.getByRole('radio', { name: 'USD/г' }));
+  expect(screen.getByRole('radio', { name: 'USD/г' }).checked).toBe(true);
+  expect(screen.getByLabelText('USD за грам')).toBeTruthy();
+  expect(screen.getByLabelText('Маркетингове округлення')).toBeTruthy();
+  expect(screen.queryByLabelText('Точна ціна UAH')).toBeNull();
+
+  fireEvent.click(screen.getByRole('radio', { name: 'Ручна UAH' }));
+  expect(screen.getByRole('radio', { name: 'Ручна UAH' }).checked).toBe(true);
+  expect(screen.getByLabelText('Точна ціна UAH')).toBeTruthy();
+  expect(screen.queryByLabelText('USD за грам')).toBeNull();
+  expect(screen.queryByLabelText('Маркетингове округлення')).toBeNull();
+
+  fireEvent.click(screen.getByRole('radio', { name: 'Автоматична' }));
+  expect(screen.getByRole('radio', { name: 'Автоматична' }).checked).toBe(true);
+  expect(screen.queryByLabelText('USD за грам')).toBeNull();
+  expect(screen.queryByLabelText('Точна ціна UAH')).toBeNull();
+});
+
+it('keeps the selected native radio keyboard-focusable with a visible focus style', () => {
+  renderDialog();
+  const selected = screen.getByRole('radio', { name: 'Автоматична' });
+  selected.focus();
+  expect(document.activeElement).toBe(selected);
+  expect(selected.nextElementSibling.className).toContain('peer-focus-visible:outline');
 });
 
 it('edits USD per gram and its explicit marketing-rounding choice', () => {
@@ -114,7 +160,7 @@ it('waits for a new preview after switching to a valid custom decision', () => {
 
   render(<DialogWithDecision />);
   expect(screen.getByText('4020 ₴')).toBeTruthy();
-  fireEvent.change(screen.getByLabelText('Режим ціни'), { target: { value: 'manual_uah' } });
+  fireEvent.click(screen.getByRole('radio', { name: 'Ручна UAH' }));
   expect(screen.queryByText('4020 ₴')).toBeNull();
   expect(screen.getByRole('button', { name: 'Створити запит' }).disabled).toBe(true);
 

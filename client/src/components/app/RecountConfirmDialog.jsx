@@ -5,6 +5,12 @@ import { formatDecimal, formatUah } from '../../lib/formatters';
 import { copyPlainText } from '../../lib/clipboard';
 import { useDialogAccessibility } from '../../hooks/useDialogAccessibility';
 
+const PRICING_MODES = [
+  { value: 'system_auto', label: 'Автоматична' },
+  { value: 'usd_per_gram', label: 'USD/г' },
+  { value: 'manual_uah', label: 'Ручна UAH' },
+];
+
 function hasValidDecisionPrice(value, scale) {
   const text = String(value ?? '').trim().replace(',', '.');
   const amount = Number(text);
@@ -106,18 +112,24 @@ export function RecountConfirmDialog({
           {showDecision && (
             <fieldset className="rounded-lg border border-slate-200 p-4">
               <legend className="px-1 text-sm font-semibold">Ціна запиту на виправлення</legend>
-              <label className="block text-sm">
-                Режим ціни
-                <select className="input mt-2" value={pricingMode}
-                  onChange={(event) => {
-                    setPreviewBeforeDecisionEdit(preview);
-                    onPricingModeChange(event.target.value);
-                  }}>
-                  <option value="system_auto">Автоматична ціна системи</option>
-                  <option value="usd_per_gram">Власна ціна USD/г</option>
-                  <option value="manual_uah">Точна ручна ціна UAH</option>
-                </select>
-              </label>
+              <div className="text-sm">Режим ціни</div>
+              <div role="radiogroup" aria-label="Режим ціни"
+                className="mt-2 flex flex-wrap gap-1 rounded-md bg-slate-100 p-1">
+                {PRICING_MODES.map(({ value, label }) => (
+                  <label key={value} className="relative min-w-20 flex-1 cursor-pointer">
+                    <input type="radio" name="correction-pricing-mode" value={value}
+                      checked={pricingMode === value}
+                      onChange={() => {
+                        setPreviewBeforeDecisionEdit(preview);
+                        onPricingModeChange(value);
+                      }}
+                      className="peer sr-only" />
+                    <span className="flex min-h-9 items-center justify-center rounded-md border border-transparent px-1.5 py-2 text-center text-xs font-semibold text-slate-600 transition hover:bg-white hover:text-slate-900 peer-checked:border-amber-300 peer-checked:bg-amber-50 peer-checked:text-amber-950 peer-checked:shadow-sm peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-amber-500">
+                      {label}
+                    </span>
+                  </label>
+                ))}
+              </div>
               {pricingMode === 'usd_per_gram' && (
                 <div className="mt-3 space-y-3">
                   <label className="block text-sm">USD за грам
