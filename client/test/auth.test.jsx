@@ -158,7 +158,13 @@ describe('authentication bootstrap and gate', () => {
 
     renderAuth({ apiClient });
 
-    await screen.findByRole('button', { name: 'Увійти' });
+    await screen.findByRole('button', { name: 'Увійти через Windows' });
+    expect(screen.getByText('Вхід до системи')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Amber SKU Manager' })).toBeTruthy();
+    expect(screen.getByText('Оберіть спосіб входу, щоб продовжити роботу.')).toBeTruthy();
+    expect(screen.getByText("Рекомендовано для офісних і доменних комп'ютерів.")).toBeTruthy();
+    expect(screen.getByText('або')).toBeTruthy();
+    expect(screen.getByText('Використовуйте, якщо входите не з офісного комп’ютера.')).toBeTruthy();
     expect(apiClient.get).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('alert')).toBeNull();
   });
@@ -223,7 +229,7 @@ describe('authentication bootstrap and gate', () => {
 });
 
 describe('login, identity, and logout UI', () => {
-  it('starts either login flow through same-origin navigation with the current SPA return path', async () => {
+  it('presents Windows first and starts either login flow with the current SPA return path', async () => {
     const apiClient = {
       get: vi.fn().mockRejectedValue({ response: { status: 401 } }),
       post: vi.fn(),
@@ -235,15 +241,21 @@ describe('login, identity, and logout UI', () => {
     });
 
     renderAuth({ apiClient, locationObject });
-    fireEvent.click(await screen.findByRole('button', { name: 'Увійти' }));
+    const loginButtons = await screen.findAllByRole('button');
+    expect(loginButtons.map((button) => button.textContent.trim())).toEqual([
+      'Увійти через Windows',
+      'Увійти за логіном і паролем',
+    ]);
 
-    expect(locationObject.assign).toHaveBeenCalledWith(
-      '/api/auth/login?returnTo=%2Fadmin%2Frepricing%3Fdraft%3D12%23items'
-    );
+    fireEvent.click(loginButtons[0]);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Увійти через Windows' }));
     expect(locationObject.assign).toHaveBeenCalledWith(
       '/api/auth/login/windows?returnTo=%2Fadmin%2Frepricing%3Fdraft%3D12%23items'
+    );
+
+    fireEvent.click(loginButtons[1]);
+    expect(locationObject.assign).toHaveBeenCalledWith(
+      '/api/auth/login?returnTo=%2Fadmin%2Frepricing%3Fdraft%3D12%23items'
     );
     expect(getCurrentReturnTo({ pathname: '//evil.test', search: '', hash: '' })).toBe('/');
   });
@@ -387,7 +399,7 @@ describe('Axios authentication integration', () => {
     });
 
     fireEvent.click(await screen.findByRole('button', { name: 'Make expired request' }));
-    await screen.findByRole('button', { name: 'Увійти' });
+    await screen.findByRole('button', { name: 'Увійти через Windows' });
   });
 
   it.each([

@@ -221,6 +221,46 @@
 
   .auth-card { @apply w-full max-w-sm p-8 text-center; }
 
+  .auth-login-card {
+    @apply overflow-hidden p-0 text-left;
+    max-width: 27.5rem;
+  }
+
+  .auth-login-brand {
+    @apply flex items-center justify-center px-8 py-7 sm:px-9;
+    background: var(--navy-900);
+  }
+
+  .auth-login-logo { @apply h-auto w-40 sm:w-48; }
+
+  .auth-login-body { @apply p-7 sm:p-9; }
+
+  .auth-login-title {
+    @apply mt-2 text-[1.75rem] font-semibold leading-tight tracking-tight sm:text-3xl;
+  }
+
+  .auth-login-intro { @apply mt-3 text-sm leading-6 text-slate-500; }
+
+  .auth-login-actions { @apply mt-7 flex flex-col gap-5; }
+
+  .auth-login-hint {
+    @apply mt-2.5 px-1 text-[13px] leading-5;
+    color: var(--text-muted);
+  }
+
+  .auth-login-divider {
+    @apply flex items-center gap-4 text-[11px] font-semibold uppercase tracking-[0.16em];
+    color: var(--text-muted);
+  }
+
+  .auth-login-divider::before,
+  .auth-login-divider::after {
+    content: "";
+    height: 1px;
+    flex: 1;
+    background: var(--border);
+  }
+
   .eyebrow {
     @apply text-[11px] font-semibold uppercase tracking-[0.18em];
     color: var(--amber-600);

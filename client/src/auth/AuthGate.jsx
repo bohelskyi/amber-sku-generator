@@ -1,3 +1,5 @@
+import { KeyRound, Monitor } from 'lucide-react';
+import amberLogo from '../assets/amber-logo-white-orange.png';
 import { useAuth } from './auth-context.js';
 import { AUTH_STATUS } from './auth-model.js';
 
@@ -18,16 +20,49 @@ export function AuthGate({ children }) {
   if (auth.status === AUTH_STATUS.UNAUTHENTICATED) {
     return (
       <main className="auth-gate">
-        <div className="card auth-card">
-          <h1 className="text-xl font-semibold">Amber SKU Manager</h1>
-          <p className="mt-2 text-sm text-slate-500">Увійдіть, щоб продовжити роботу.</p>
-          <div className="mt-5 flex flex-col gap-3">
-            <button type="button" className="btn btn-amber" onClick={auth.login}>
-              Увійти
-            </button>
-            <button type="button" className="btn btn-outline" onClick={auth.loginWithWindows}>
-              Увійти через Windows
-            </button>
+        <div className="card auth-card auth-login-card">
+          <div className="auth-login-brand">
+            <img src={amberLogo} alt="" className="auth-login-logo" />
+          </div>
+
+          <div className="auth-login-body">
+            <p className="eyebrow">Вхід до системи</p>
+            <h1 className="auth-login-title">Amber SKU Manager</h1>
+            <p className="auth-login-intro">
+              Оберіть спосіб входу, щоб продовжити роботу.
+            </p>
+
+            <div className="auth-login-actions">
+              <div>
+                <button
+                  type="button"
+                  className="btn btn-amber w-full gap-2"
+                  onClick={auth.loginWithWindows}
+                >
+                  <Monitor size={18} aria-hidden="true" />
+                  Увійти через Windows
+                </button>
+                <p className="auth-login-hint">
+                  Рекомендовано для офісних і доменних комп'ютерів.
+                </p>
+              </div>
+
+              <div className="auth-login-divider"><span>або</span></div>
+
+              <div>
+                <button
+                  type="button"
+                  className="btn btn-outline w-full gap-2"
+                  onClick={auth.login}
+                >
+                  <KeyRound size={18} aria-hidden="true" />
+                  Увійти за логіном і паролем
+                </button>
+                <p className="auth-login-hint">
+                  Використовуйте, якщо входите не з офісного комп’ютера.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </main>
