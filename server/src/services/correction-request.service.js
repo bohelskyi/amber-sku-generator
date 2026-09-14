@@ -191,6 +191,21 @@ function getPersistedNewRequestDecision(requestedDecision, preview) {
   };
 }
 
+function getStoredRecountAnswerPatch(row) {
+  const proposedAnswers = row.proposed_payload?.answers || {};
+  const oldAnswers = row.old_payload?.answers;
+  if (!oldAnswers || typeof oldAnswers !== 'object' || Array.isArray(oldAnswers)
+      || !proposedAnswers || typeof proposedAnswers !== 'object'
+      || Array.isArray(proposedAnswers)) {
+    return proposedAnswers;
+  }
+  const answerPatch = { ...proposedAnswers };
+  for (const key of Object.keys(oldAnswers)) {
+    if (!Object.hasOwn(proposedAnswers, key)) answerPatch[key] = null;
+  }
+  return answerPatch;
+}
+
 async function previewCorrectionRequest(payload = {}, options = {}) {
   const decision = getRequestedDecision(payload, options.canOverride === true);
   const preview = await buildProductRecountPreview({ ...payload, pricingDecision: decision });
@@ -593,9 +608,10 @@ async function refreshClaimedCorrectionRequest(
   options = {}
 ) {
   const pricingDecision = decisionFromRequest(row);
+  const answers = getStoredRecountAnswerPatch(row);
   const preview = await buildProductRecountPreview({
     sourceSku: row.source_sku,
-    answers: row.proposed_payload?.answers || {},
+    answers,
     isCalibrated: row.proposed_payload?.answers?.is_calibrated ?? null,
     reason: row.comment || '',
     manualPriceUah: row.proposed_payload?.manualPriceUah ?? null,
@@ -823,9 +839,10 @@ async function completeCorrectionRequest(
   );
 
   const pricingDecision = decisionFromRequest(row);
+  const answers = getStoredRecountAnswerPatch(row);
   const preview = await buildProductRecountPreview({
     sourceSku: row.source_sku,
-    answers: row.proposed_payload?.answers || {},
+    answers,
     isCalibrated: row.proposed_payload?.answers?.is_calibrated ?? null,
     reason: row.comment || '',
     manualPriceUah: row.proposed_payload?.manualPriceUah ?? null,
@@ -851,7 +868,7 @@ async function completeCorrectionRequest(
 
   const recountResult = await applyProductRecount({
     sourceSku: row.source_sku,
-    answers: row.proposed_payload?.answers || {},
+    answers,
     isCalibrated: row.proposed_payload?.answers?.is_calibrated ?? null,
     reason: row.comment || '',
     manualPriceUah: row.proposed_payload?.manualPriceUah ?? null,

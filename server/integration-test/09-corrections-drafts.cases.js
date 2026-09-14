@@ -234,6 +234,72 @@ test('new legacy-shaped correction requests persist explicit system and fallback
   }
 });
 
+test('correction request replays an explicitly cleared optional answer through claim refresh and completion', async () => {
+  if (!suite.authenticatedSession) {
+    suite.authenticatedSession = await authenticateApplicationSession('/admin');
+  }
+  const storekeeperIdentity = {
+    issuer: 'https://correction-clear.example/realms/amber',
+    subject: 'clear-answer-storekeeper',
+    preferredUsername: 'clear.answer.storekeeper',
+    displayName: 'Clear Answer Storekeeper',
+  };
+  const storekeeperSession = await authenticateIdentitySession(storekeeperIdentity);
+  await activateApplicationUserForTest(
+    storekeeperIdentity.issuer,
+    storekeeperIdentity.subject,
+    'storekeeper'
+  );
+  const sourceSku = 'OC1002';
+  const body = {
+    sourceSku,
+    answers: { discount: null },
+    reason: 'clear an existing optional discount',
+  };
+  const preview = await request('/api/recount/preview', { method: 'POST', body });
+  assert.equal(preview.response.status, 200, preview.text);
+  assert.equal(Object.hasOwn(preview.data.corrected.answers, 'discount'), false);
+  assert.equal(preview.data.corrected.answers.zero_option, 0);
+
+  const created = await request('/api/admin/correction-requests', { method: 'POST', body });
+  assert.equal(created.response.status, 200, created.text);
+  const requestId = Number(created.data.request.id);
+  const stored = (await pool.query(
+    `SELECT old_payload->'answers' AS old_answers,
+            proposed_payload->'answers' AS proposed_answers
+     FROM correction_requests WHERE id = $1`,
+    [requestId]
+  )).rows[0];
+  assert.equal(stored.old_answers.discount, 1);
+  assert.equal(Object.hasOwn(stored.proposed_answers, 'discount'), false);
+
+  const claimed = await request(`/api/admin/correction-requests/${requestId}/claim`, {
+    method: 'POST', body: {}, authentication: storekeeperSession,
+  });
+  assert.equal(claimed.response.status, 200, claimed.text);
+  const claimVersion = Number(claimed.data.request.claimVersion);
+  const refreshed = await request(`/api/admin/correction-requests/${requestId}/refresh`, {
+    method: 'POST', body: { claimVersion }, authentication: storekeeperSession,
+  });
+  assert.equal(refreshed.response.status, 200, refreshed.text);
+  assert.equal(Object.hasOwn(refreshed.data.request.proposedPayload.answers, 'discount'), false);
+
+  const completed = await request(`/api/admin/correction-requests/${requestId}/complete`, {
+    method: 'POST', body: { claimVersion }, authentication: storekeeperSession,
+  });
+  assert.equal(completed.response.status, 200, completed.text);
+  const corrected = (await pool.query(
+    `SELECT product.details->'answers' AS answers
+     FROM correction_requests request
+     JOIN products product ON product.id = request.corrected_product_id
+     WHERE request.id = $1`,
+    [requestId]
+  )).rows[0];
+  assert.equal(Object.hasOwn(corrected.answers, 'discount'), false);
+  assert.equal(corrected.answers.kind, 1);
+  assert.equal(corrected.answers.zero_option, 0);
+});
+
 test('authorized correction pricing decisions remain authoritative through completion', async () => {
   if (!suite.authenticatedSession) {
     suite.authenticatedSession = await authenticateApplicationSession('/admin');
