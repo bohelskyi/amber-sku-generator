@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { AuthContext } from '../src/auth/auth-context.js';
@@ -108,6 +108,29 @@ describe('role-management UI', () => {
     expect(screen.queryByRole('link', { name: /Ролі/ })).toBeNull();
     expect(screen.getByRole('alert').textContent).toContain('Недостатньо прав');
     expect(get).not.toHaveBeenCalled();
+  });
+
+  it('presents selectable roles as one list with status, protection, and counts', async () => {
+    const listedRoles = [roles[0], { ...roles[1], status: 'inactive' }];
+    vi.spyOn(api, 'get').mockImplementation(async (url) => response(
+      url === '/admin/roles' ? { roles: listedRoles } : { permissions }
+    ));
+    render(<AuthContext.Provider value={authValue()}><RolesPage /></AuthContext.Provider>);
+
+    const list = await screen.findByRole('list', { name: 'Ролі' });
+    const rows = within(list).getAllByRole('listitem');
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]).getByRole('button', { name: /Administrator/ }).getAttribute('aria-pressed')).toBe('true');
+    expect(within(rows[0]).getByLabelText('Захищена роль')).toBeTruthy();
+    expect(within(rows[0]).getByText('5 дозволів · 1 користувачів')).toBeTruthy();
+    expect(within(rows[1]).getByText('Деактивована')).toBeTruthy();
+
+    const manager = within(rows[1]).getByRole('button', { name: /Manager/ });
+    manager.focus();
+    expect(document.activeElement).toBe(manager);
+    fireEvent.click(manager);
+    expect(manager.getAttribute('aria-pressed')).toBe('true');
+    expect(within(rows[0]).getByRole('button', { name: /Administrator/ }).getAttribute('aria-pressed')).toBe('false');
   });
 
   it('edits Manager, locks reserved permissions, and confirms live permission removal', async () => {

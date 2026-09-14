@@ -208,17 +208,20 @@ export default function RolesPage() {
 
         {loading ? <LoadingState label="Завантажуємо ролі…" /> : (
           <div className="grid gap-5 lg:grid-cols-[360px_minmax(0,1fr)]">
-            <section className="card h-fit space-y-3 p-4 sm:p-5 lg:sticky lg:top-[calc(var(--workspace-nav-height)+1rem)]">
-              <button type="button" className="btn btn-primary w-full gap-2" onClick={startCreate}><Plus size={16} aria-hidden="true" />Створити роль</button>
-              <div className="space-y-2" aria-label="Ролі">
-                {roles.map((role) => (
-                  <button key={role.id} type="button" aria-pressed={selectedRoleId === role.id} onClick={() => selectRole(role)} className={`role-list-item ${selectedRoleId === role.id ? 'is-selected' : ''}`}>
-                    <div className="flex items-start justify-between gap-2"><span className="font-semibold text-slate-900">{role.displayName}</span>{role.isProtected && <LockKeyhole size={16} className="shrink-0 text-amber-700" aria-label="Захищена роль" />}</div>
-                    <div className="mt-1 flex flex-wrap gap-1.5"><StatusBadge tone={role.status === 'active' ? 'success' : 'neutral'}>{role.status === 'active' ? 'Активна' : 'Деактивована'}</StatusBadge><StatusBadge>{roleTypeLabel(role)}</StatusBadge></div>
-                    <div className="mt-2 text-xs text-slate-600">{role.permissionCount} дозволів · {role.assignedUserCount} користувачів</div>
-                  </button>
-                ))}
+            <section className="card h-fit overflow-hidden p-0 lg:sticky lg:top-[calc(var(--workspace-nav-height)+1rem)]">
+              <div className="border-b border-slate-200 px-4 py-3 sm:px-5">
+                <button type="button" className="btn btn-primary w-full gap-2" onClick={startCreate}><Plus size={16} aria-hidden="true" />Створити роль</button>
               </div>
+              <ul className="role-master-list" aria-label="Ролі">
+                {roles.map((role) => (
+                  <li key={role.id}>
+                    <button type="button" aria-pressed={selectedRoleId === role.id} onClick={() => selectRole(role)} className={`role-list-item ${selectedRoleId === role.id ? 'is-selected' : ''}`}>
+                      <div className="flex items-start justify-between gap-2"><span className="font-semibold text-slate-900">{role.displayName}</span>{role.isProtected && <LockKeyhole size={16} className="shrink-0 text-amber-700" aria-label="Захищена роль" />}</div>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1"><StatusBadge tone={role.status === 'active' ? 'success' : 'neutral'}>{role.status === 'active' ? 'Активна' : 'Деактивована'}</StatusBadge><StatusBadge>{roleTypeLabel(role)}</StatusBadge><span className="text-xs text-slate-600">{role.permissionCount} дозволів · {role.assignedUserCount} користувачів</span></div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </section>
 
             <section className="card space-y-5 p-4 sm:p-5">

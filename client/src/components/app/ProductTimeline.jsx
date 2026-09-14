@@ -54,9 +54,9 @@ function valueLabel(value) {
 function TimelineChanges({ changes }) {
   if (!changes?.length) return null;
   return (
-    <div className="divide-y divide-slate-100 rounded-md border border-slate-200">
+    <div className="timeline-change-list divide-y divide-slate-100">
       {changes.map((change) => (
-        <div key={`${change.kind}:${change.fieldKey}`} className="grid gap-1 px-3 py-2 text-sm sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.4fr)]">
+        <div key={`${change.kind}:${change.fieldKey}`} className="grid gap-1 py-2 text-sm sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.4fr)]">
           <span className="font-medium text-slate-600">
             {change.kind === 'weight' ? 'Вага' : (change.fieldLabel || change.fieldKey)}
           </span>
@@ -97,13 +97,13 @@ function ConfigurationFields({ fields, showPrevious = false }) {
     return <div className="rounded-md bg-slate-50 px-3 py-3 text-sm text-slate-500">Характеристики не записані.</div>;
   }
   return (
-    <div className="divide-y divide-slate-100 rounded-md border border-slate-200">
+    <div className="timeline-configuration-fields divide-y divide-slate-100">
       {fields.map((field) => (
         <div
           key={field.key}
           data-testid={`configuration-field-${field.key}`}
           data-changed={field.changed ? 'true' : 'false'}
-          className={`grid gap-1 px-3 py-2 text-sm sm:grid-cols-[minmax(140px,0.8fr)_minmax(0,1.4fr)] ${field.changed ? 'bg-amber-50/70' : ''}`}
+          className={`grid gap-1 px-2 py-2 text-sm sm:grid-cols-[minmax(140px,0.8fr)_minmax(0,1.4fr)] ${field.changed ? 'bg-amber-50/70' : ''}`}
         >
           <span className="font-medium text-slate-600">{field.fieldLabel || field.key}</span>
           <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-slate-700">
@@ -138,7 +138,7 @@ function ConfigurationEvolution({ evolution }) {
           <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-1" aria-label="Режим відображення характеристик">
             <button
               type="button"
-              className={`rounded px-3 py-1.5 text-xs font-semibold ${mode === 'changes' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+              className={`rounded px-3 py-1.5 text-xs font-semibold ${mode === 'changes' ? 'bg-white text-slate-900' : 'text-slate-500'}`}
               aria-pressed={mode === 'changes'}
               onClick={() => setMode('changes')}
             >
@@ -146,7 +146,7 @@ function ConfigurationEvolution({ evolution }) {
             </button>
             <button
               type="button"
-              className={`rounded px-3 py-1.5 text-xs font-semibold ${mode === 'full' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+              className={`rounded px-3 py-1.5 text-xs font-semibold ${mode === 'full' ? 'bg-white text-slate-900' : 'text-slate-500'}`}
               aria-pressed={mode === 'full'}
               onClick={() => setMode('full')}
             >
@@ -183,9 +183,9 @@ function ConfigurationEvolution({ evolution }) {
               <article
                 key={snapshot.id}
                 data-testid="configuration-snapshot"
-                className="relative rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+                className="timeline-snapshot relative border-t border-slate-200 py-4"
               >
-                <span aria-hidden="true" className="absolute -left-[31px] top-5 h-3 w-3 rounded-full border-2 border-white bg-amber-500 ring-1 ring-amber-300" />
+                <span aria-hidden="true" className={`absolute -left-[25px] top-5 h-3 w-3 rounded-full border-2 border-white ring-1 ${snapshot.isCurrent ? 'bg-amber-500 ring-amber-300' : 'bg-slate-400 ring-slate-200'}`} />
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -241,7 +241,7 @@ function ConfigurationEvolution({ evolution }) {
 function PriceChange({ price }) {
   if (!price || (price.beforeUah === null && price.afterUah === null)) return null;
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700">
+    <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2 text-sm text-slate-700">
       <span>Ціна:</span>
       <strong>{price.beforeUah === null ? 'Не записано' : formatUah(price.beforeUah)}</strong>
       <ArrowRight size={13} className="text-slate-400" />
@@ -294,7 +294,7 @@ function TimelineCard({ events }) {
           <SkuTransition
             sourceSku={event.details.sourceSku}
             targetSku={event.details.correctedSku}
-            className="rounded-md border border-slate-200 px-3 py-2 text-sm"
+            className="text-sm"
             strong
           />
           <PriceChange price={event.details.price} />
@@ -310,10 +310,10 @@ function TimelineCard({ events }) {
 
       {hasExpandable && (
         <details className="mt-4 border-t border-slate-100 pt-3">
-          <summary className="cursor-pointer text-sm font-semibold text-[#8a5f2b]">Деталі</summary>
+          <summary className="cursor-pointer text-sm font-semibold text-slate-700 hover:text-slate-900">Деталі</summary>
           <div className="mt-3 space-y-3">
             {proposal && (
-              <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50/60 p-3">
+              <div className="space-y-2 border-l-2 border-amber-300 pl-3">
                 <div className="text-xs font-semibold uppercase text-amber-800">Остання збережена пропозиція</div>
                 <SkuTransition sourceSku={proposal.sourceSku} targetSku={proposal.proposedSku} className="text-sm" />
                 {proposal.comment && <p className="text-sm text-slate-600">{proposal.comment}</p>}

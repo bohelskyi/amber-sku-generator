@@ -151,6 +151,11 @@ describe('product timeline', () => {
     expect(screen.getByText('9')).toBeTruthy();
     expect(screen.getByText('останній')).toBeTruthy();
     const transitions = screen.getAllByTestId('sku-transition');
+    expect(document.querySelectorAll('.timeline-card')).toHaveLength(3);
+    expect(document.querySelectorAll('.timeline-snapshot')).toHaveLength(2);
+    expect(document.querySelector('.timeline-card').className).not.toContain('shadow');
+    expect(document.querySelector('.timeline-snapshot').className).not.toContain('shadow');
+    expect(document.querySelector('.timeline-change-list')).toBeTruthy();
     expect(transitions).toHaveLength(2);
     for (const transition of transitions) {
       expect(transition.textContent).toBe('SKU-BSKU-C');

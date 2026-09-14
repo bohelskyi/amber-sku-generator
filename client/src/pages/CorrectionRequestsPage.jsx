@@ -93,19 +93,21 @@ function RequestChanges({ config, request }) {
     newPayload: request.proposedPayload,
   });
   return (
-    <div className="divide-y divide-slate-100 rounded-md border border-slate-200 bg-white">
+    <div className="correction-change-list divide-y divide-slate-200">
       {changes.map((change) => (
         <div
           key={change.key}
-          className="grid gap-1 px-3 py-2.5 text-sm sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.4fr)] sm:gap-3"
+          className="change-record-row text-sm"
         >
-          <span className="font-medium text-slate-600">
+          <span className="change-record-label font-medium text-slate-700">
             {getQuestionLabel(config, request.categoryCode, change.key)}
           </span>
-          <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-slate-700">
-            <span>{getAnswerValueLabel(config, request.categoryCode, change.key, change.from)}</span>
-            <ArrowRight size={13} className="shrink-0 text-slate-400" />
-            <strong className="font-semibold text-slate-900">
+          <span className="correction-change-comparison">
+            <span className="change-record-old text-slate-500">
+              {getAnswerValueLabel(config, request.categoryCode, change.key, change.from)}
+            </span>
+            <ArrowRight size={13} className="change-record-arrow text-slate-400" />
+            <strong className="change-record-new font-semibold text-slate-900">
               {getAnswerValueLabel(config, request.categoryCode, change.key, change.to)}
             </strong>
           </span>
@@ -490,7 +492,7 @@ export default function CorrectionRequestsPage() {
                 <button
                   key={value}
                   type="button"
-                  className={`shrink-0 rounded-md border px-3 py-1.5 text-xs font-semibold ${filter === value ? 'border-amber-300 bg-amber-50 text-amber-950 shadow-sm' : 'border-transparent text-slate-600'}`}
+                  className={`shrink-0 rounded-md border px-3 py-1.5 text-xs font-semibold ${filter === value ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-transparent text-slate-600'}`}
                   onClick={() => changeFilter(value)}
                 >
                   {label}{countKey ? ` · ${summary[countKey] || 0}` : ''}
@@ -514,10 +516,11 @@ export default function CorrectionRequestsPage() {
           ) : visibleRequests.length === 0 ? (
             <EmptyState compact>Запитів для цього фільтра немає.</EmptyState>
           ) : (
-            <div className="correction-list divide-y divide-slate-200">
+            <div className="correction-list">
               {visibleRequests.map((request) => {
                 const requestBusy = busyId === request.id;
                 const proposedPrice = request.proposedPayload?.totalPriceUah;
+                const creatorLabel = getEmployeeLabel(request.createdByUser);
                 const claimOwnership = getCorrectionClaimOwnership(
                   request,
                   currentUserId,
@@ -528,20 +531,17 @@ export default function CorrectionRequestsPage() {
                   <article
                     id={`correction-request-${request.id}`}
                     key={request.id}
-                    className={`p-3 transition-colors sm:p-4 ${focusedRequestId === request.id ? 'is-focused' : 'bg-white/40'}`}
+                    className={`correction-record px-4 py-4 sm:px-5 sm:py-5 ${focusedRequestId === request.id ? 'is-focused' : ''}`}
                   >
-                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-2">
+                    <div className="correction-record-header">
+                      <div className="correction-record-identity">
                         <StatusBadge status={request.status} />
-                        <Link to={`/admin/corrections/history?sku=${encodeURIComponent(request.sourceSku)}`} className="btn btn-outline text-xs px-2 py-1">
+                        <Link to={`/admin/corrections/history?sku=${encodeURIComponent(request.sourceSku)}`} className="btn btn-outline btn-compact-md">
                           Історія товару
                         </Link>
-                        <span className="text-xs text-slate-500">
-                          #{request.id} · створено {formatDateTime(request.createdAt)}
-                          {getEmployeeLabel(request.createdByUser)
-                            ? ` · ${getEmployeeLabel(request.createdByUser)}`
-                            : ''}
-                        </span>
+                        <strong className="correction-record-number">Запит #{request.id}</strong>
+                        <time className="correction-record-meta" dateTime={request.createdAt || undefined}>Створено {formatDateTime(request.createdAt)}</time>
+                        <span className="correction-record-meta">Автор: {creatorLabel || 'не вказано'}</span>
                       </div>
                       {request.status === 'in_progress' && (
                         <div className="flex flex-wrap items-center gap-2">
@@ -556,9 +556,9 @@ export default function CorrectionRequestsPage() {
                         </div>
                       )}
                     </div>
-                    <div className="grid gap-4 border-t border-slate-100 pt-3 xl:grid-cols-[minmax(220px,0.8fr)_minmax(320px,1.35fr)_minmax(230px,0.75fr)]">
+                    <div className="correction-record-body">
                       <div className="min-w-0">
-                        <div className="space-y-2.5">
+                        <div className="space-y-3">
                           <div>
                             <div className="text-xs font-semibold uppercase text-slate-500">Було</div>
                             <div className="mt-1 flex min-w-0 items-center gap-2">
@@ -582,9 +582,9 @@ export default function CorrectionRequestsPage() {
                       </div>
 
                       <div className="min-w-0">
-                        <div className="mb-2 text-xs font-semibold uppercase text-slate-500">Зміни характеристик</div>
+                        <div className="mb-2.5 text-xs font-semibold uppercase text-slate-500">Зміни характеристик</div>
                         <RequestChanges config={config} request={request} />
-                        <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                        <div className="correction-pricing-line mt-2 border-t border-slate-100 pt-2 text-sm leading-5 text-slate-600">
                           <PricingDecision request={request} />
                         </div>
                         {request.comment && (
@@ -598,7 +598,7 @@ export default function CorrectionRequestsPage() {
                         <div className="text-sm text-slate-500">
                           {request.completedAt && <>Виконано: {formatDateTime(request.completedAt)}</>}
                         </div>
-                        <div className="flex flex-wrap justify-start gap-2 xl:justify-end">
+                        <div className="flex flex-wrap justify-end gap-2">
                           {(request.status === 'pending'
                             || (request.hasUnownedLegacyClaim && !request.claimFingerprint))
                             && canClaim && (

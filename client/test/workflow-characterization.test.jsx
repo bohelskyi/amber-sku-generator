@@ -962,6 +962,7 @@ describe('Correction queue polling', () => {
     };
     const request = {
       ...correctionRequest(3, 'BR-PLACEHOLDER'),
+      createdByUser: { id: 9, displayName: 'Олена Коваль' },
       oldPayload: {
         totalPriceUah: 1250,
         answers: { extra: 0, is_calibrated: 0 },
@@ -1006,6 +1007,27 @@ describe('Correction queue polling', () => {
     );
 
     await screen.findByText('BR-PLACEHOLDER');
+    const requestRecord = document.querySelector('.correction-list article');
+    expect(requestRecord.classList.contains('correction-record')).toBe(true);
+    const recordHeader = requestRecord.querySelector('.correction-record-header');
+    expect(recordHeader.querySelector('.status-badge')).toBeTruthy();
+    expect(recordHeader.querySelector('a.btn-compact-md').textContent).toContain('Історія товару');
+    expect(recordHeader.textContent).toContain('Запит #3');
+    expect(recordHeader.textContent).toContain('Автор: Олена Коваль');
+    expect(recordHeader.querySelector('time').getAttribute('dateTime')).toBe(request.createdAt);
+    expect(requestRecord.querySelector('.correction-record-body')).toBeTruthy();
+    const changeList = requestRecord.querySelector('.correction-change-list');
+    expect(changeList).toBeTruthy();
+    expect(changeList.querySelectorAll('.change-record-row')).toHaveLength(1);
+    const comparison = changeList.querySelector('.change-record-row');
+    expect(comparison.children).toHaveLength(2);
+    expect(comparison.children[0].classList.contains('change-record-label')).toBe(true);
+    expect(comparison.children[1].classList.contains('correction-change-comparison')).toBe(true);
+    expect([...comparison.querySelector('.correction-change-comparison').children].map((child) => [...child.classList].find((name) => name.startsWith('change-record-')))).toEqual([
+      'change-record-old', 'change-record-arrow', 'change-record-new',
+    ]);
+    expect(requestRecord.querySelector('.correction-pricing-line')).toBeTruthy();
+    expect(requestRecord.querySelector('a.btn-compact-md')).toBeTruthy();
     expect(screen.queryByText('Додатково')).toBeNull();
     expect(screen.getByText('Калібрування')).toBeTruthy();
     expect(screen.getByText('Некалібрована')).toBeTruthy();
