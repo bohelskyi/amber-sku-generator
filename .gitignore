@@ -26,3 +26,6 @@ backups/
 # PROJECT_CONTEXT.md
 
 amber-app/client/src/assets/
+
+# Generated local benchmark artifacts
+.artifacts/

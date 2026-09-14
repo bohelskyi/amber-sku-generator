@@ -31,7 +31,7 @@ async function main() {
   const smoke = process.argv.includes('--smoke');
   const supplemental = process.argv.includes('--supplemental');
   const outputArgument = process.argv.find((value) => value.startsWith('--output='))?.slice(9);
-  const outputDirectory = path.resolve(repositoryRoot, outputArgument || 'docs/performance/phase7-baseline');
+  const outputDirectory = path.resolve(repositoryRoot, outputArgument || '.artifacts/performance/phase7');
   const caseArgument = process.argv.find((value) => value.startsWith('--cases='))?.slice(8);
   const options = {
     categories: readNumber('categories', smoke ? 2 : 25, 1),
