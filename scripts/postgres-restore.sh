@@ -14,6 +14,14 @@ if [ ! -s "$backup_file" ]; then
 fi
 
 docker compose exec -T postgres pg_restore --list < "$backup_file" >/dev/null
+docker compose exec -T postgres sh -c '
+  case "$POSTGRES_DB" in
+    ""|postgres|template0|template1)
+      printf "%s\n" "Refusing to replace reserved database: ${POSTGRES_DB:-<empty>}" >&2
+      exit 2
+      ;;
+  esac
+'
 running_services="$(docker compose ps --status running --services)"
 server_was_running=0
 client_was_running=0
@@ -25,13 +33,24 @@ restart_previously_running_services() {
   if [ "$client_was_running" -eq 1 ]; then docker compose start client; fi
 }
 
+report_destructive_restore_failure() {
+  restore_status=$?
+  printf '%s\n' \
+    "Restore failed after the destructive phase began; server and client were intentionally left stopped." >&2
+  exit "$restore_status"
+}
+
 docker compose stop client server
-trap 'restart_previously_running_services >/dev/null 2>&1 || true' EXIT
+trap 'report_destructive_restore_failure' EXIT
 docker compose exec -T postgres sh -c \
-  'exec pg_restore --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --clean --if-exists --no-owner --no-acl --single-transaction --exit-on-error' \
+  'exec dropdb --username="$POSTGRES_USER" --maintenance-db=postgres --force --if-exists -- "$POSTGRES_DB"'
+docker compose exec -T postgres sh -c \
+  'exec createdb --username="$POSTGRES_USER" --maintenance-db=postgres --owner="$POSTGRES_USER" --template=template0 -- "$POSTGRES_DB"'
+docker compose exec -T postgres sh -c \
+  'exec pg_restore --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --no-owner --no-acl --single-transaction --exit-on-error' \
   < "$backup_file"
 docker compose exec -T postgres sh -c \
   'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --command="SELECT COUNT(*) AS products FROM products; SELECT COUNT(*) AS migrations FROM schema_migrations;"'
-restart_previously_running_services
 trap - EXIT
+restart_previously_running_services
 printf '%s\n' "Restore completed and basic table verification passed."

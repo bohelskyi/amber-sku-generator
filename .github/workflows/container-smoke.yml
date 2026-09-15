@@ -8,17 +8,21 @@ on:
     paths:
       - 'server/**'
       - 'client/**'
+      - 'scripts/**'
       - docker-compose.yml
       - docker-compose.local.yml
       - .env.example
+      - docs/OPERATIONS.md
       - .github/workflows/container-smoke.yml
   pull_request:
     paths:
       - 'server/**'
       - 'client/**'
+      - 'scripts/**'
       - docker-compose.yml
       - docker-compose.local.yml
       - .env.example
+      - docs/OPERATIONS.md
       - .github/workflows/container-smoke.yml
 
 permissions:
@@ -99,6 +103,116 @@ jobs:
           grep -Fq '/api/auth/callback' "$RUNNER_TEMP/amber-server-logs"
           ! grep -Fq "$callback_marker" "$RUNNER_TEMP/amber-client-logs"
           ! grep -Fq "$callback_marker" "$RUNNER_TEMP/amber-server-logs"
+
+      - name: Regression-test older database restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          compose() { docker compose --env-file .env.example -f docker-compose.yml "$@"; }
+          wait_for_server() {
+            for attempt in $(seq 1 120); do
+              server_id="$(compose ps --all --quiet server)"
+              if test -n "$server_id" && test "$(docker inspect --format '{{.State.Health.Status}}' "$server_id")" = healthy; then
+                return 0
+              fi
+              if test "$attempt" -eq 120; then
+                compose ps --all server
+                compose logs --no-color --tail 100 server
+                return 1
+              fi
+              sleep 1
+            done
+          }
+          source_database="amber_restore_source_test"
+          dump_file="$RUNNER_TEMP/amber-restore-pre-031.dump"
+          invalid_dump="$RUNNER_TEMP/amber-restore-invalid.dump"
+          failing_dump="$RUNNER_TEMP/amber-restore-truncated.dump"
+          expected_migrations="$(find server/migrations -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+          test "$expected_migrations" -gt 31
+
+          compose exec -T postgres dropdb \
+            --username="$POSTGRES_USER" --maintenance-db=postgres --force --if-exists -- "$source_database"
+          compose exec -T postgres createdb \
+            --username="$POSTGRES_USER" --maintenance-db=postgres \
+            --owner="$POSTGRES_USER" --template=template0 -- "$source_database"
+          # Expansion belongs to the container shell.
+          # shellcheck disable=SC2016
+          compose exec -T -e PGDATABASE="$source_database" server sh -c '
+            checkpoint_dir="$(mktemp -d)"
+            cp /app/migrations/0[0-2][0-9]_*.sql "$checkpoint_dir/"
+            cp /app/migrations/030_*.sql "$checkpoint_dir/"
+            CHECKPOINT_DIR="$checkpoint_dir" node -e \
+              "require(\"./src/db/run-migrations\").runMigrations({ directory: process.env.CHECKPOINT_DIR }).catch((error) => { console.error(error); process.exit(1); })"
+          '
+          compose exec -T postgres psql \
+            --username="$POSTGRES_USER" --dbname="$source_database" --set=ON_ERROR_STOP=1 \
+            --command="CREATE TABLE restore_regression_fixture (id integer PRIMARY KEY, value text NOT NULL); INSERT INTO restore_regression_fixture VALUES (1, 'restored'); CREATE TABLE zz_restore_failure_fixture (id integer PRIMARY KEY, value text NOT NULL); INSERT INTO zz_restore_failure_fixture SELECT id, md5(id::text || repeat('x', 100)) FROM generate_series(1, 50000) AS id;"
+          compose exec -T postgres pg_dump \
+            --username="$POSTGRES_USER" --dbname="$source_database" \
+            --format=custom --no-owner --no-acl > "$dump_file"
+          compose exec -T postgres dropdb \
+            --username="$POSTGRES_USER" --maintenance-db=postgres --force -- "$source_database"
+
+          compose exec -T postgres psql \
+            --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 \
+            --command="CREATE TABLE restore_regression_target_only (id integer PRIMARY KEY, product_id integer NOT NULL REFERENCES products(id));"
+          printf '%s\n' 'not a PostgreSQL archive' > "$invalid_dump"
+          set +e
+          invalid_output="$(sh ./scripts/postgres-restore.sh "$invalid_dump" --confirm 2>&1)"
+          invalid_status=$?
+          set -e
+          test "$invalid_status" -ne 0
+          if grep -Fq 'Restore completed' <<< "$invalid_output"; then exit 1; fi
+          test "$(compose exec -T postgres psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="SELECT to_regclass('public.restore_regression_target_only') IS NOT NULL;")" = t
+          running_services="$(compose ps --status running --services)"
+          grep -qx server <<< "$running_services"
+          grep -qx client <<< "$running_services"
+
+          restore_output="$(sh ./scripts/postgres-restore.sh "$dump_file" --confirm 2>&1)"
+          grep -Fq 'Restore completed and basic table verification passed.' <<< "$restore_output"
+          wait_for_server
+          test "$(compose exec -T postgres psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="SELECT value FROM restore_regression_fixture WHERE id = 1;")" = restored
+          test "$(compose exec -T postgres psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="SELECT to_regclass('public.restore_regression_target_only') IS NULL;")" = t
+          test "$(compose exec -T postgres psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="SELECT COUNT(*) FROM schema_migrations;")" = "$expected_migrations"
+          test "$(compose exec -T postgres psql --username="$POSTGRES_USER" --dbname=postgres --tuples-only --no-align --command="SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = '$POSTGRES_DB';")" = "$POSTGRES_USER"
+          test "$(compose exec -T postgres psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="SELECT to_regclass('public.product_export_revisions') IS NOT NULL AND to_regclass('public.price_export_snapshots') IS NOT NULL;")" = t
+          running_services="$(compose ps --status running --services)"
+          grep -qx server <<< "$running_services"
+          grep -qx client <<< "$running_services"
+
+          compose stop client
+          compose exec -T postgres psql \
+            --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 \
+            --command="CREATE TABLE restore_regression_target_only (id integer PRIMARY KEY, product_id integer NOT NULL REFERENCES products(id));"
+          repeated_output="$(sh ./scripts/postgres-restore.sh "$dump_file" --confirm 2>&1)"
+          grep -Fq 'Restore completed and basic table verification passed.' <<< "$repeated_output"
+          wait_for_server
+          running_services="$(compose ps --status running --services)"
+          grep -qx server <<< "$running_services"
+          if grep -qx client <<< "$running_services"; then exit 1; fi
+          test "$(compose exec -T postgres psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="SELECT value FROM restore_regression_fixture WHERE id = 1;")" = restored
+          test "$(compose exec -T postgres psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="SELECT to_regclass('public.restore_regression_target_only') IS NULL;")" = t
+          test "$(compose exec -T postgres psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="SELECT COUNT(*) FROM schema_migrations;")" = "$expected_migrations"
+          compose exec -T server node -e \
+            "fetch('http://127.0.0.1:' + process.env.PORT + '/health/ready').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))"
+
+          compose start client
+          cp "$dump_file" "$failing_dump"
+          dump_size="$(wc -c < "$failing_dump")"
+          truncate --size="$((dump_size / 2))" "$failing_dump"
+          compose exec -T postgres pg_restore --list < "$failing_dump" >/dev/null
+          set +e
+          failing_output="$(sh ./scripts/postgres-restore.sh "$failing_dump" --confirm 2>&1)"
+          failing_status=$?
+          set -e
+          test "$failing_status" -ne 0
+          grep -Fq 'Restore failed after the destructive phase began; server and client were intentionally left stopped.' <<< "$failing_output"
+          if grep -Fq 'Restore completed' <<< "$failing_output"; then exit 1; fi
+          running_services="$(compose ps --status running --services)"
+          if grep -qx server <<< "$running_services"; then exit 1; fi
+          if grep -qx client <<< "$running_services"; then exit 1; fi
+          test "$(compose exec -T postgres psql --username="$POSTGRES_USER" --dbname=postgres --tuples-only --no-align --command="SELECT COUNT(*) FROM pg_database WHERE datname = '$POSTGRES_DB';")" = 1
+          test "$(compose exec -T postgres psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="SELECT to_regclass('public.restore_regression_fixture') IS NULL;")" = t
 
       - name: Verify graceful server shutdown
         shell: bash

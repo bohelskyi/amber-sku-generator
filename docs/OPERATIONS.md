@@ -49,7 +49,9 @@ The request pool has configurable size and connect/idle/query/statement timeouts
 sh ./scripts/postgres-backup.sh /secure/local/backup/path
 ```
 
-`scripts/postgres-restore.sh` is destructive. It requires an exact dump path and `--confirm`, validates the archive, stops client/server if running, restores with `--clean --if-exists --single-transaction --exit-on-error`, checks basic product/migration tables, and restarts only services that were previously running.
+`scripts/postgres-restore.sh` is destructive. It requires an exact dump path and `--confirm`, validates the archive before destructive work, and refuses to replace the PostgreSQL maintenance/template databases. It then stops client/server if running, force-disconnects other sessions from only the configured application database, drops and recreates that database from `template0` with the configured PostgreSQL user as owner, and restores with `--no-owner --no-acl --single-transaction --exit-on-error`. Recreating the database ensures target-only objects from a newer schema cannot block or survive an older restore. The script checks basic product/migration tables and restarts only services that were previously running.
+
+Archive validation catches an unreadable archive before the database is removed, but database replacement and archive restore cannot be one transaction. If database creation, restore, or verification fails after the destructive phase begins, the old contents are no longer available in the target; the target may be absent or newly created without restored objects. The restore transaction prevents a partially restored archive. The command exits nonzero without printing success and intentionally leaves server/client stopped so startup cannot migrate or seed an empty database. Retain the verified dump until the restore and subsequent application startup checks have passed.
 
 ```bash
 sh ./scripts/postgres-restore.sh /secure/local/backup/path/amber-YYYYMMDDTHHMMSSZ.dump --confirm
