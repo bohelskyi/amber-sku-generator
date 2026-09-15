@@ -125,6 +125,76 @@ test('pre-feature correction signatures survive the default-on upgrade but stale
   }
 });
 
+test('price-change request stays inert while pending and completes through the in-place command', async () => {
+  if (!suite.authenticatedSession) {
+    suite.authenticatedSession = await authenticateApplicationSession('/admin');
+  }
+  const sourcePreview = await request('/api/preview', {
+    method: 'POST', body: { categoryCode: 'ZZ', answers: { kind: 1 }, weight: 0 },
+  });
+  assert.equal(sourcePreview.response.status, 200, sourcePreview.text);
+  const source = await request('/api/save', { method: 'POST', body: {
+    category: 'ZZ', answers: { kind: 1 }, weight: 0,
+    skuSchemaVersionId: schemas.ZZ, previewToken: sourcePreview.data.previewToken,
+  } });
+  assert.equal(source.response.status, 200, source.text);
+  let requestId = null;
+  try {
+    const decision = {
+      mode: 'manual_uah', manualPriceUah: 3333.25, marketingRoundingEnabled: false,
+    };
+    const preview = await request('/api/admin/correction-requests/preview', {
+      method: 'POST', body: {
+        requestType: 'price_change', productId: source.data.id, pricingDecision: decision,
+      },
+    });
+    assert.equal(preview.response.status, 200, preview.text);
+    const created = await request('/api/admin/correction-requests', {
+      method: 'POST', body: {
+        requestType: 'price_change', productId: source.data.id,
+        pricingDecision: decision, previewToken: preview.data.previewToken,
+      },
+    });
+    assert.equal(created.response.status, 200, created.text);
+    requestId = Number(created.data.request.id);
+    assert.equal(created.data.request.requestType, 'price_change');
+    assert.deepEqual(created.data.request.changes, []);
+    assert.equal(Number((await pool.query(
+      'SELECT total_price_uah FROM products WHERE id = $1', [source.data.id]
+    )).rows[0].total_price_uah), Number(sourcePreview.data.totalPriceUah));
+    assert.equal((await pool.query(
+      'SELECT count(*) FROM product_export_revisions WHERE product_id = $1', [source.data.id]
+    )).rows[0].count, '0');
+
+    const claimed = await request(`/api/admin/correction-requests/${requestId}/claim`, {
+      method: 'POST', body: {},
+    });
+    assert.equal(claimed.response.status, 200, claimed.text);
+    const completed = await request(`/api/admin/correction-requests/${requestId}/complete`, {
+      method: 'POST', body: { claimVersion: claimed.data.request.claimVersion },
+    });
+    assert.equal(completed.response.status, 200, completed.text);
+    assert.equal(completed.data.request.requestType, 'price_change');
+    const state = await pool.query(`
+      SELECT products.total_price_uah, revisions.revision, revisions.confirmed_revision,
+             revisions.has_product_snapshot, correction_requests.status,
+             correction_requests.corrected_product_id, correction_requests.changes
+      FROM products
+      JOIN product_export_revisions revisions ON revisions.product_id = products.id
+      JOIN correction_requests ON correction_requests.source_product_id = products.id
+      WHERE products.id = $1 AND correction_requests.id = $2
+    `, [source.data.id, requestId]);
+    assert.deepEqual(state.rows, [{
+      total_price_uah: '3333.25', revision: '1', confirmed_revision: '0',
+      has_product_snapshot: false, status: 'completed', corrected_product_id: null, changes: [],
+    }]);
+  } finally {
+    if (requestId) await pool.query('DELETE FROM correction_requests WHERE id = $1', [requestId]);
+    await pool.query('DELETE FROM products WHERE id = $1', [source.data.id]);
+    await pool.query('DELETE FROM sku_registry WHERE full_sku = $1', [source.data.fullSku]);
+  }
+});
+
 test('new legacy-shaped correction requests persist explicit system and fallback pricing modes', async () => {
   if (!suite.authenticatedSession) {
     suite.authenticatedSession = await authenticateApplicationSession('/admin');

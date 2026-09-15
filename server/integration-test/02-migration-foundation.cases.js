@@ -66,11 +66,11 @@ test('migration 030 adds constrained correction pricing decisions and initial RB
   assert.deepEqual(mappings.rows, [
     { role_key: 'administrator', version: '1', has_override: true },
     { role_key: 'manager', version: '2', has_override: true },
-    { role_key: 'storekeeper', version: '1', has_override: false },
+    { role_key: 'storekeeper', version: '2', has_override: false },
   ]);
 });
 
-test('migration 031 adds durable product re-export revisions to immutable snapshots', async () => {
+test('migrations 031-032 reuse durable product revisions for dedicated price exports', async () => {
   const tables = await pool.query(`
     SELECT table_name
     FROM information_schema.tables
@@ -90,6 +90,7 @@ test('migration 031 adds durable product re-export revisions to immutable snapsh
     { column_name: 'revision', data_type: 'bigint', is_nullable: 'NO' },
     { column_name: 'confirmed_revision', data_type: 'bigint', is_nullable: 'NO' },
     { column_name: 'changed_at', data_type: 'timestamp with time zone', is_nullable: 'NO' },
+    { column_name: 'has_product_snapshot', data_type: 'boolean', is_nullable: 'NO' },
   ]);
 
   const snapshotColumn = await pool.query(`
@@ -103,6 +104,31 @@ test('migration 031 adds durable product re-export revisions to immutable snapsh
     is_nullable: 'NO',
     column_default: "'[]'::jsonb",
   }]);
+
+  const priceSnapshot = await pool.query(`
+    SELECT table_name FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'price_export_snapshots'
+  `);
+  assert.deepEqual(priceSnapshot.rows, [{ table_name: 'price_export_snapshots' }]);
+  const requestType = await pool.query(`
+    SELECT data_type, is_nullable, column_default
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'correction_requests'
+      AND column_name = 'request_type'
+  `);
+  assert.deepEqual(requestType.rows, [{
+    data_type: 'text', is_nullable: 'NO', column_default: "'recount'::text",
+  }]);
+  const roleMappings = await pool.query(`
+    SELECT role.role_key
+    FROM roles role
+    JOIN role_permissions mapping ON mapping.role_id = role.id
+    WHERE mapping.permission_key = 'products.price_change'
+    ORDER BY role.role_key
+  `);
+  assert.deepEqual(roleMappings.rows.map((row) => row.role_key), [
+    'administrator', 'storekeeper',
+  ]);
 });
 
 test('migration 019 matches the connect-pg-simple 10.0.0 table contract', async () => {
@@ -187,6 +213,7 @@ test('migrations 020-031 create constrained RBAC, audit, and business actor attr
     'products.archive',
     'products.create',
     'products.decode',
+    'products.price_change',
     'products.recount',
     'products.view',
     'repricing.apply',
@@ -241,6 +268,7 @@ test('migrations 020-031 create constrained RBAC, audit, and business actor attr
     'products.archive',
     'products.create',
     'products.decode',
+    'products.price_change',
     'products.recount',
     'products.view',
     'repricing.prepare',
@@ -405,7 +433,9 @@ test('migration 028 aborts without changing unsafe existing RBAC state', async (
     const migrationFiles = (await fs.readdir(migrationDirectory))
       .filter((fileName) => fileName.endsWith('.sql')
         && !fileName.startsWith('028_')
-        && !fileName.startsWith('030_'));
+        && !fileName.startsWith('030_')
+        && !fileName.startsWith('031_')
+        && !fileName.startsWith('032_'));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
       path.resolve(preCustomRoleDirectory, fileName)
@@ -833,6 +863,8 @@ test('migration 024 preserves historical product attribution as null', async () 
         && !fileName.startsWith('027_')
         && !fileName.startsWith('028_')
         && !fileName.startsWith('030_')
+        && !fileName.startsWith('031_')
+        && !fileName.startsWith('032_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -978,6 +1010,8 @@ test('migration 026 preserves historical repricing attribution as null without a
         && !fileName.startsWith('027_')
         && !fileName.startsWith('028_')
         && !fileName.startsWith('030_')
+        && !fileName.startsWith('031_')
+        && !fileName.startsWith('032_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -1066,6 +1100,8 @@ test('migration 027 preserves historical export and publication attribution as n
         && !fileName.startsWith('027_')
         && !fileName.startsWith('028_')
         && !fileName.startsWith('030_')
+        && !fileName.startsWith('031_')
+        && !fileName.startsWith('032_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),

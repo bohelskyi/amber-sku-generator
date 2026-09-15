@@ -90,3 +90,7 @@ In-place price changes appear as `product.price_changed` events with old/new pri
 ## Attribution and audit
 
 Correction requests record nullable `created_by_user_id` and current `claimed_by_user_id` references to local application users. Historical rows are not backfilled. Create, claim/adopt, release, force-release, reject, reopen, and complete write concise immutable audit events in the same transaction as the lifecycle mutation. Completion also retains the authoritative detailed recount record and semantic `product.recounted` event without copying its large payload into the correction lifecycle event.
+
+## Price-change requests
+
+`correction_requests.request_type` distinguishes `recount` from `price_change`; omitted API values remain recount for compatibility. Price requests reuse the same active-request uniqueness, ownership, claim epoch, refresh, release, reject/reopen, and idempotent completion lifecycle. They retain one SKU, store no characteristic changes, and never create a corrected product. Pending requests do not mutate products, audits for product changes, or export revisions. Refresh replays the stored pricing mode against current authoritative product/rate/configuration dependencies without fallback. Completion verifies the stored preview again and calls the same transactional in-place price-change primitive as direct apply, so product, request, price-export revision, and audit commit or roll back together.

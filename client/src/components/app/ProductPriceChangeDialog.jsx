@@ -22,6 +22,10 @@ function optionalUah(value) {
 }
 
 export function ProductPriceChangeDialog({
+  canApplyDirect = true,
+  canCreateRequest = false,
+  canRequestOverride = false,
+  canUseOverrides = true,
   currentPriceUah,
   error = '',
   isApplying = false,
@@ -33,6 +37,7 @@ export function ProductPriceChangeDialog({
   mode = 'manual_uah',
   onCancel,
   onConfirm,
+  onRequest,
   onManualPriceChange,
   onManualMarketingRoundingChange,
   onMarketingRoundingChange,
@@ -59,6 +64,10 @@ export function ProductPriceChangeDialog({
       : validPositiveDecimal(manualPriceUah, 2));
   const resultingPrice = preview?.resultingPriceUah ?? null;
   const difference = preview?.priceDifferenceUah ?? null;
+  const visibleModes = canUseOverrides
+    ? MODES : MODES.filter((item) => item.value === 'system_auto');
+  const requestAllowedForMode = mode === 'system_auto' || canRequestOverride;
+  const actionDisabled = !validInput || !preview || preview.unchanged || isLoading || isApplying;
 
   return createPortal(
     <div className="dialog-backdrop" onMouseDown={(event) => {
@@ -94,7 +103,7 @@ export function ProductPriceChangeDialog({
           <fieldset className="rounded-lg border border-slate-200 p-4">
             <legend className="px-1 text-sm font-semibold">Режим ціни</legend>
             <div role="radiogroup" aria-label="Режим зміни ціни" className="mt-2 flex gap-1 rounded-md bg-slate-100 p-1">
-              {MODES.map((item) => (
+              {visibleModes.map((item) => (
                 <label key={item.value} className="relative flex-1 cursor-pointer">
                   <input
                     type="radio"
@@ -184,19 +193,29 @@ export function ProductPriceChangeDialog({
           {error && <div className="danger-panel p-4 text-sm" role="alert">{error}</div>}
         </div>
 
-        <div className="dialog-footer grid gap-3 sm:grid-cols-2">
+        <div className={`dialog-footer grid gap-3 ${canApplyDirect && canCreateRequest ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
           <button type="button" className="btn btn-outline order-2 sm:order-1" onClick={onCancel} disabled={isApplying}>
             Скасувати
           </button>
-          <button
+          {canCreateRequest && <button
+            ref={!canApplyDirect ? confirmButtonRef : undefined}
+            type="button"
+            className="btn btn-outline order-1 sm:order-2"
+            onClick={onRequest}
+            disabled={actionDisabled || !requestAllowedForMode}
+            title={!requestAllowedForMode ? 'Для цього режиму потрібен дозвіл керування ціною запиту.' : undefined}
+          >
+            {isApplying ? 'Виконуємо…' : 'Створити запит на зміну ціни'}
+          </button>}
+          {canApplyDirect && <button
             ref={confirmButtonRef}
             type="button"
-            className="btn btn-primary order-1 sm:order-2"
+            className="btn btn-primary order-1 sm:order-3"
             onClick={onConfirm}
-            disabled={!validInput || !preview || preview.unchanged || isLoading || isApplying}
+            disabled={actionDisabled}
           >
             {isApplying ? 'Змінюємо…' : 'Змінити ціну'}
-          </button>
+          </button>}
         </div>
       </div>
     </div>,

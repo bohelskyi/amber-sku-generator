@@ -60,6 +60,9 @@ function decisionFromRequest(row) {
   if (row.pricing_mode === 'manual_uah') return {
     mode: 'manual_uah',
     manualPriceUah: Number(row.pricing_manual_uah),
+    ...(row.request_type === 'price_change'
+      ? { marketingRoundingEnabled: Number(row.pricing_rounding_enabled) === 1 }
+      : {}),
   };
   return null;
 }

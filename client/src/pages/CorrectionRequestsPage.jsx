@@ -73,6 +73,12 @@ function StatusBadge({ status }) {
   );
 }
 
+function RequestTypeBadge({ requestType }) {
+  return <span className="status-badge is-neutral">
+    {requestType === 'price_change' ? 'Зміна ціни' : 'Переоблік'}
+  </span>;
+}
+
 function PricingDecision({ request }) {
   const decision = request.pricingDecision;
   if (!decision) {
@@ -82,7 +88,11 @@ function PricingDecision({ request }) {
     return <span>Ціна: {decision.usdPerGram} USD/г · маркетингове округлення {decision.marketingRoundingEnabled ? 'увімкнено' : 'вимкнено'}</span>;
   }
   if (decision.mode === 'manual_uah') {
-    return <span>Ціна: точна ручна {formatUah(decision.manualPriceUah)}</span>;
+    return <span>Ціна: ручна {formatUah(decision.manualPriceUah)}
+      {request.requestType === 'price_change'
+        ? ` · маркетингове округлення ${decision.marketingRoundingEnabled ? 'увімкнено' : 'вимкнено'}`
+        : ' · точно без округлення'}
+    </span>;
   }
   return <span>Ціна: системна автоматична</span>;
 }
@@ -149,15 +159,21 @@ function CompletionDialog({ busy, request, onCancel, onConfirm }) {
           <div className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
             <div className="flex min-w-0 items-center gap-2">
               <span className="min-w-0 flex-1 break-all font-mono font-semibold">{request.sourceSku}</span>
-              <ArrowRight size={15} className="shrink-0 text-slate-400" />
-              <span className="min-w-0 flex-1 break-all text-right font-mono font-semibold">{request.proposedSku}</span>
+              {request.requestType === 'price_change' ? (
+                <span className="text-xs font-semibold text-slate-500">той самий товар</span>
+              ) : <>
+                <ArrowRight size={15} className="shrink-0 text-slate-400" />
+                <span className="min-w-0 flex-1 break-all text-right font-mono font-semibold">{request.proposedSku}</span>
+              </>}
             </div>
             <div className="text-right font-semibold text-slate-900">
               {formatUah(request.proposedPayload?.totalPriceUah)}
             </div>
           </div>
           <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-slate-700">
-            Після підтвердження SKU Manager виконає переоблік і закриє цей запит.
+            {request.requestType === 'price_change'
+              ? 'Після підтвердження SKU Manager змінить ціну цього товару на місці й закриє запит.'
+              : 'Після підтвердження SKU Manager виконає переоблік і закриє цей запит.'}
           </div>
         </div>
         <div className="dialog-footer grid gap-3 sm:grid-cols-2">
@@ -166,7 +182,8 @@ function CompletionDialog({ busy, request, onCancel, onConfirm }) {
           </button>
           <button ref={confirmRef} type="button" className="btn btn-primary order-1 gap-2 sm:order-2" onClick={onConfirm} disabled={busy}>
             <CheckCircle2 size={16} />
-            {busy ? 'Підтверджуємо...' : 'Підтвердити виправлення'}
+            {busy ? 'Підтверджуємо...'
+              : request.requestType === 'price_change' ? 'Змінити ціну' : 'Підтвердити виправлення'}
           </button>
         </div>
       </div>
@@ -437,7 +454,9 @@ export default function CorrectionRequestsPage() {
       await loadRequests(filter);
       const syncFailures = response.data.draftSyncFailures || [];
       setSuccess(
-        syncFailures.length > 0
+        request.requestType === 'price_change'
+          ? `Запит #${request.id} виконано, ціну товару змінено.`
+          : syncFailures.length > 0
           ? `Запит #${request.id} виконано. ${syncFailures.length} чернеток переоцінки потребують ручного оновлення.`
           : `Запит #${request.id} виконано, чернетки переоцінки синхронізовано.`
       );
@@ -536,6 +555,7 @@ export default function CorrectionRequestsPage() {
                     <div className="correction-record-header">
                       <div className="correction-record-identity">
                         <StatusBadge status={request.status} />
+                        <RequestTypeBadge requestType={request.requestType} />
                         <Link to={`/admin/corrections/history?sku=${encodeURIComponent(request.sourceSku)}`} className="btn btn-outline btn-compact-md">
                           Історія товару
                         </Link>
@@ -582,8 +602,21 @@ export default function CorrectionRequestsPage() {
                       </div>
 
                       <div className="min-w-0">
-                        <div className="mb-2.5 text-xs font-semibold uppercase text-slate-500">Зміни характеристик</div>
-                        <RequestChanges config={config} request={request} />
+                        {request.requestType === 'price_change' ? (
+                          <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                            <div className="flex justify-between gap-3">
+                              <span>Поточна ціна</span>
+                              <strong>{formatUah(request.oldPayload?.totalPriceUah)}</strong>
+                            </div>
+                            <div className="mt-2 flex justify-between gap-3">
+                              <span>Запитана ціна</span>
+                              <strong>{formatUah(proposedPrice)}</strong>
+                            </div>
+                          </div>
+                        ) : <>
+                          <div className="mb-2.5 text-xs font-semibold uppercase text-slate-500">Зміни характеристик</div>
+                          <RequestChanges config={config} request={request} />
+                        </>}
                         <div className="correction-pricing-line mt-2 border-t border-slate-100 pt-2 text-sm leading-5 text-slate-600">
                           <PricingDecision request={request} />
                         </div>

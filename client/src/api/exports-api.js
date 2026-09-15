@@ -10,6 +10,14 @@ export function createExportsApi(client = api) {
       responseType: 'blob',
     }),
     confirmSnapshot: (snapshotId) => client.post(`/export/snapshots/${snapshotId}/confirm`),
+    getPriceStatus: () => client.get('/price-export/status'),
+    createPriceSnapshot: (idempotencyKey) => client.post('/price-export/snapshots', {}, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    }),
+    downloadPriceSnapshot: (snapshotId) => client.get(`/price-export/snapshots/${snapshotId}/csv`, {
+      responseType: 'blob',
+    }),
+    confirmPriceSnapshot: (snapshotId) => client.post(`/price-export/snapshots/${snapshotId}/confirm`),
   });
 }
 

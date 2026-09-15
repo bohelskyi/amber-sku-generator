@@ -52,7 +52,8 @@ test('endpoint manifest records the shared access boundary and response contract
       'GET /admin/product-corrections/csv',
       'GET /admin/repricing/:batchId/csv',
       'GET /admin/repricing/:batchId/rollback-csv',
-      'GET /export/snapshots/:id/csv',
+    'GET /export/snapshots/:id/csv',
+    'GET /price-export/snapshots/:id/csv',
     ].sort()
   );
 });

@@ -113,6 +113,7 @@ describe('Necklaces product creation', () => {
       if (url === '/config') return response(necklaceConfig);
       if (url === '/products') return response([]);
       if (url === '/export/status') return response({});
+      if (url === '/price-export/status') return response({});
       throw new Error(`Unexpected GET ${url}`);
     });
     vi.spyOn(api, 'post').mockImplementation(async (url, body) => {
@@ -157,6 +158,7 @@ describe('Product Builder live pricing', () => {
       if (url === '/config') return response(builderConfig);
       if (url === '/products') return response([]);
       if (url === '/export/status') return response({});
+      if (url === '/price-export/status') return response({});
       throw new Error(`Unexpected GET ${url}`);
     });
     vi.spyOn(api, 'post').mockImplementation((url, body) => {

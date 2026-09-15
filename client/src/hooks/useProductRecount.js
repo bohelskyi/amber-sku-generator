@@ -19,6 +19,8 @@ import { getRecountFieldBlockers } from '../lib/recount-blockers.js';
 
 export function useProductRecount({
   canChangeProductPrice = false,
+  canApplyDirectPriceChange = canChangeProductPrice,
+  canCreatePriceChangeRequest = false,
   canPriceOverride = false,
   config,
   onApplied,
@@ -447,7 +449,10 @@ export function useProductRecount({
       setIsPriceChangeLoading(true);
       setPriceChangePreview(null);
       setPriceChangeError('');
-      api.post('/product-price-change/preview', {
+      api.post(canApplyDirectPriceChange
+        ? '/product-price-change/preview'
+        : '/admin/correction-requests/preview', {
+        ...(!canApplyDirectPriceChange ? { requestType: 'price_change' } : {}),
         productId: decodeData.product.id,
         pricingDecision: priceChangeDecision,
       })
@@ -470,6 +475,7 @@ export function useProductRecount({
     return () => window.clearTimeout(timerId);
   }, [
     decodeData?.product?.id,
+    canApplyDirectPriceChange,
     isPriceChangeOpen,
     priceChangeDecision,
     priceChangeManualUah,
@@ -482,7 +488,9 @@ export function useProductRecount({
     if (!hasRecountChanges) {
       if (!canChangeProductPrice || isPriceChangeApplying) return;
       priceChangeRequestIdRef.current += 1;
-      setPriceChangeMode('manual_uah');
+      setPriceChangeMode(
+        canApplyDirectPriceChange || canPriceOverride ? 'manual_uah' : 'system_auto'
+      );
       setPriceChangeManualUah('');
       setPriceChangeManualRounding(false);
       setPriceChangeUsdPerGram('');
@@ -558,6 +566,7 @@ export function useProductRecount({
   };
 
   const handleConfirmPriceChange = () => {
+    if (!canApplyDirectPriceChange) return;
     if (!decodeData?.product?.id || !priceChangePreview?.previewToken
         || priceChangePreview.unchanged || isPriceChangeLoading || isPriceChangeApplying) return;
     const sourceSku = decodeData.sku;
@@ -584,6 +593,38 @@ export function useProductRecount({
       .catch((err) => {
         setPriceChangeError(err.response?.data?.error || err.message);
       })
+      .finally(() => setIsPriceChangeApplying(false));
+  };
+
+  const handleRequestPriceChange = () => {
+    if (!canCreatePriceChangeRequest || !decodeData?.product?.id
+        || !priceChangePreview?.previewToken || priceChangePreview.unchanged
+        || isPriceChangeLoading || isPriceChangeApplying) return;
+    if (priceChangeDecision.mode !== 'system_auto' && !canPriceOverride) {
+      setPriceChangeError('Недостатньо дозволу для вибраного режиму ціни в запиті.');
+      return;
+    }
+    const sourceSku = decodeData.sku;
+    setIsPriceChangeApplying(true);
+    setPriceChangeError('');
+    api.post('/admin/correction-requests', {
+      requestType: 'price_change',
+      productId: decodeData.product.id,
+      pricingDecision: priceChangeDecision,
+      previewToken: priceChangePreview.previewToken,
+    })
+      .then((res) => {
+        setIsPriceChangeOpen(false);
+        setIsRecountOpen(false);
+        setPriceChangePreview(null);
+        setRecountSuccess(`Створено запит на зміну ціни #${res.data.request.id}.`);
+        Promise.resolve(onRequestCreated?.({
+          request: res.data.request,
+          sourceSku,
+        })).catch(() => {});
+        handleDecode(sourceSku);
+      })
+      .catch((err) => setPriceChangeError(err.response?.data?.error || err.message))
       .finally(() => setIsPriceChangeApplying(false));
   };
 
@@ -643,6 +684,7 @@ export function useProductRecount({
     handleCancelRecountConfirmation,
     handleCancelPriceChange,
     handleConfirmPriceChange,
+    handleRequestPriceChange,
     handleConfirmRecount,
     handleDecode,
     handleDecodeInputChange,

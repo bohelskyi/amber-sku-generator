@@ -25,6 +25,7 @@ test('Manager UI is monitoring/request-oriented with read-only pricing', () => {
   assert.equal(ui.canCreateProducts, false);
   assert.equal(ui.canArchiveProducts, false);
   assert.equal(ui.canApplyDirectRecount, false);
+  assert.equal(ui.canApplyDirectPriceChange, false);
   assert.equal(ui.canCreateExports, false);
   assert.equal(ui.canClaimCorrections, false);
   assert.equal(ui.canCompleteCorrections, false);
@@ -42,6 +43,7 @@ test('Storekeeper UI keeps product and correction processing but hides final adm
     'products.create',
     'products.archive',
     'products.recount',
+    'products.price_change',
     'corrections.claim',
     'corrections.complete',
   ]);
@@ -49,6 +51,7 @@ test('Storekeeper UI keeps product and correction processing but hides final adm
   assert.equal(ui.canCreateProducts, true);
   assert.equal(ui.canArchiveProducts, true);
   assert.equal(ui.canApplyDirectRecount, true);
+  assert.equal(ui.canApplyDirectPriceChange, true);
   assert.equal(ui.canClaimCorrections, true);
   assert.equal(ui.canCompleteCorrections, true);
   assert.equal(ui.canRejectCorrections, true);
@@ -70,6 +73,7 @@ test('Administrator effective permissions expose every guarded UI action', () =>
     'products.create',
     'products.archive',
     'products.recount',
+    'products.price_change',
     'corrections.create',
     'corrections.claim',
     'corrections.complete',

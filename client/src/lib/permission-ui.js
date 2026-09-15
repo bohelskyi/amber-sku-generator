@@ -4,6 +4,7 @@ export function getPermissionUiState(permissions = []) {
 
   return {
     canApplyDirectRecount: has('products.recount'),
+    canApplyDirectPriceChange: has('products.price_change'),
     canApplyRepricing: has('repricing.apply'),
     canArchiveProducts: has('products.archive'),
     canClaimCorrections: has('corrections.claim'),

@@ -240,6 +240,11 @@ function buildPreviewResponse(product, decision, projected) {
     priceDifferenceUah: Number((resultingPriceUah - currentPriceUah).toFixed(2)),
     unchanged: resultingPriceUah === currentPriceUah,
     previewToken: getPriceChangePreviewToken(product, decision, projected),
+    productStateSignature: getProductStateSignature(product),
+    currentPricing: current,
+    resultingPricing: next,
+    pricingContextFingerprint: projected.pricingContextFingerprint,
+    uahRateDate: projected.uahRateDate,
   };
 }
 
@@ -254,14 +259,15 @@ async function loadProduct(productId, queryable, { lock = false } = {}) {
   return result.rows[0] || null;
 }
 
-async function assertNoActiveCorrectionRequest(productId, queryable) {
+async function assertNoActiveCorrectionRequest(productId, queryable, allowedRequestId = null) {
   const result = await queryable.query(
     `SELECT id
      FROM correction_requests
      WHERE source_product_id = $1
        AND status IN ('pending', 'in_progress')
+       AND ($2::bigint IS NULL OR id <> $2)
      LIMIT 1`,
-    [productId]
+    [productId, allowedRequestId]
   );
   if (result.rows.length > 0) {
     throw commandError(
@@ -276,27 +282,33 @@ async function previewProductPriceChange(payload = {}, options = {}) {
   const queryable = options.queryable || pool;
   const productId = normalizeProductId(payload.productId);
   const decision = normalizePriceChangeDecision(payload.pricingDecision);
-  const product = await loadProduct(productId, queryable);
+  const product = await loadProduct(productId, queryable, {
+    lock: options.lockProduct === true,
+  });
   assertActiveProduct(product);
-  await assertNoActiveCorrectionRequest(productId, queryable);
+  await assertNoActiveCorrectionRequest(
+    productId,
+    queryable,
+    options.allowedCorrectionRequestId || null
+  );
   const projected = await calculatePriceChange(product, decision, queryable);
   return buildPreviewResponse(product, decision, projected);
 }
 
-async function applyProductPriceChange(payload = {}, options = {}) {
+async function applyProductPriceChangeInTransaction(payload = {}, options = {}) {
   const productId = normalizeProductId(payload.productId);
   const decision = normalizePriceChangeDecision(payload.pricingDecision);
   if (!String(payload.previewToken || '').trim()) {
     throw commandError('Для зміни ціни потрібен актуальний previewToken.');
   }
+  const client = options.queryable;
+  if (!client) throw new Error('Price change transaction requires a queryable client.');
   const mutationContext = createMutationContext(options.mutationContext);
-  const client = await pool.connect();
+  const correctionRequest = options.correctionRequest || null;
 
-  try {
-    await client.query('BEGIN');
     const product = await loadProduct(productId, client, { lock: true });
     assertActiveProduct(product);
-    await assertNoActiveCorrectionRequest(productId, client);
+    await assertNoActiveCorrectionRequest(productId, client, correctionRequest?.id || null);
     const projected = await calculatePriceChange(product, decision, client);
     const authoritativePreview = buildPreviewResponse(product, decision, projected);
     if (authoritativePreview.previewToken !== payload.previewToken) {
@@ -312,6 +324,35 @@ async function applyProductPriceChange(payload = {}, options = {}) {
         422,
         'PRODUCT_PRICE_UNCHANGED'
       );
+    }
+
+    if (correctionRequest) {
+      const requestLock = await client.query(
+        `SELECT id
+         FROM correction_requests
+         WHERE id = $1
+           AND request_type = 'price_change'
+           AND source_product_id = $2
+           AND status = 'in_progress'
+           AND claimed_by_user_id = $3
+           AND claim_version = $4
+           AND proposed_payload->>'previewToken' = $5
+         FOR UPDATE`,
+        [
+          correctionRequest.id,
+          productId,
+          correctionRequest.claimedByUserId,
+          correctionRequest.claimVersion,
+          correctionRequest.previewToken,
+        ]
+      );
+      if (requestLock.rows.length !== 1) {
+        throw commandError(
+          'Запит змінився під час завершення. Оновіть чергу.',
+          409,
+          'CORRECTION_REQUEST_STALE'
+        );
+      }
     }
 
     const oldPrice = currentPricingEvidence(product);
@@ -346,14 +387,75 @@ async function applyProductPriceChange(payload = {}, options = {}) {
 
     const exportRevision = await client.query(
       `INSERT INTO product_export_revisions
-         (product_id, revision, confirmed_revision, changed_at)
-       VALUES ($1, 1, 0, CURRENT_TIMESTAMP)
+         (product_id, revision, confirmed_revision, changed_at, has_product_snapshot)
+       VALUES ($1, 1, 0, CURRENT_TIMESTAMP, FALSE)
        ON CONFLICT (product_id) DO UPDATE
        SET revision = product_export_revisions.revision + 1,
            changed_at = CURRENT_TIMESTAMP
        RETURNING revision`,
       [productId]
     );
+
+    const revision = Number(exportRevision.rows[0].revision);
+    let completedRequest = null;
+    if (correctionRequest) {
+      const finalPayload = {
+        requestType: 'price_change',
+        productId,
+        sku: product.full_sku,
+        pricingDecision: decision,
+        currentPriceUah: authoritativePreview.currentPriceUah,
+        resultingPriceUah: authoritativePreview.resultingPriceUah,
+        priceDifferenceUah: authoritativePreview.priceDifferenceUah,
+        currentPricing: oldPrice,
+        resultingPricing: newPrice,
+        priceExportRevision: revision,
+      };
+      const requestResult = await client.query(
+        `UPDATE correction_requests
+         SET status = 'completed', completed_at = CURRENT_TIMESTAMP,
+             final_payload = $1::jsonb, corrected_product_id = NULL,
+             claimed_by_user_id = NULL, claimed_at = NULL,
+             claim_version = claim_version + 1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2
+           AND request_type = 'price_change'
+           AND source_product_id = $3
+           AND status = 'in_progress'
+           AND claimed_by_user_id = $4
+           AND claim_version = $5
+           AND proposed_payload->>'previewToken' = $6
+         RETURNING *`,
+        [
+          JSON.stringify(finalPayload),
+          correctionRequest.id,
+          productId,
+          correctionRequest.claimedByUserId,
+          correctionRequest.claimVersion,
+          correctionRequest.previewToken,
+        ]
+      );
+      if (requestResult.rows.length !== 1) {
+        throw commandError(
+          'Запит змінився під час завершення. Оновіть чергу.',
+          409,
+          'CORRECTION_REQUEST_STALE'
+        );
+      }
+      completedRequest = requestResult.rows[0];
+      await writeAuditEvent(client, {
+        mutationContext,
+        eventKey: 'correction_request.completed',
+        subjectType: 'correction_request',
+        subjectId: correctionRequest.id,
+        details: {
+          requestType: 'price_change',
+          claimVersion: Number(correctionRequest.claimVersion),
+          sourceProductId: productId,
+          resultingPriceUah: authoritativePreview.resultingPriceUah,
+          priceExportRevision: revision,
+        },
+      });
+    }
 
     const audit = await writeAuditEvent(client, {
       mutationContext,
@@ -366,10 +468,12 @@ async function applyProductPriceChange(payload = {}, options = {}) {
         pricingDecision: decision,
         oldPrice,
         newPrice,
-        exportRevision: Number(exportRevision.rows[0].revision),
+        applicationMode: correctionRequest ? 'correction_request' : 'direct',
+        correctionRequestId: correctionRequest ? Number(correctionRequest.id) : null,
+        exportRevision: revision,
+        priceExportRevision: revision,
       },
     });
-    await client.query('COMMIT');
 
     return {
       success: true,
@@ -381,7 +485,21 @@ async function applyProductPriceChange(payload = {}, options = {}) {
       priceDifferenceUah: authoritativePreview.priceDifferenceUah,
       auditEventId: Number(audit.id),
       occurredAt: audit.occurred_at,
+      priceExportRevision: revision,
+      completedRequest,
     };
+}
+
+async function applyProductPriceChange(payload = {}, options = {}) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await applyProductPriceChangeInTransaction(payload, {
+      ...options,
+      queryable: client,
+    });
+    await client.query('COMMIT');
+    return result;
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -392,5 +510,8 @@ async function applyProductPriceChange(payload = {}, options = {}) {
 
 module.exports = {
   applyProductPriceChange,
+  applyProductPriceChangeInTransaction,
+  buildPreviewResponse,
+  normalizePriceChangeDecision,
   previewProductPriceChange,
 };

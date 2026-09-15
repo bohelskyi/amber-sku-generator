@@ -47,6 +47,8 @@ For Manual UAH the command recomputes the normal automatic baseline and stores n
 
 For USD/gram, behavior is unchanged: the command stores the positive input as `price_per_gram` and in `customUsdPerGramBasis`, derives `total_price`, raw/selected UAH, `uah_rate`, and rate metadata server-side, and clears the manual price. The command preserves unrelated product details and removes obsolete repricing-batch ownership metadata because the in-place write supersedes that applied payload. It never treats `total_price`, `price_per_gram`, `uah_rate`, `calculatedPriceUah`, `autoPriceUah`, or `manualPriceUah` as a different unit or concept.
 
+The same three modes are available to price-change requests. Request previews and completion share the direct command's calculation and preview-token semantics. Manual UAH price requests persist their explicit rounding flag; recount Manual UAH remains exact and keeps its prior validation. A pending request is calculation evidence only and cannot change the product or export state.
+
 ## Numeric storage and legacy zero prices
 
 Relevant PostgreSQL scales include weight `NUMERIC(14,3)`, product USD/final values `(18,4)`, UAH `(18,2)`, exchange rates `(18,6)`, matrix prices `(18,4)`, and modifier factors `(12,6)`. The `pg` driver returns `NUMERIC` as strings; services convert to JavaScript `Number` at calculation/API boundaries. Full PostgreSQL arbitrary precision is therefore not preserved near JavaScript safe-integer limits; normal business-scale behavior is covered, but no explicit maximum business value is encoded.

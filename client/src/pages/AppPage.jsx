@@ -15,7 +15,10 @@ function AppPage() {
   const permissionUi = getPermissionUiState(auth.permissions);
   const recountMode = getRecountUiMode(permissionUi);
   const sku = useSkuManager({
-    canChangeProductPrice: permissionUi.canApplyDirectRecount,
+    canChangeProductPrice: permissionUi.canApplyDirectPriceChange
+      || permissionUi.canCreateCorrectionRequest,
+    canApplyDirectPriceChange: permissionUi.canApplyDirectPriceChange,
+    canCreatePriceChangeRequest: permissionUi.canCreateCorrectionRequest,
     canPriceOverride: permissionUi.canPriceOverrideCorrections,
     submitMode: recountMode || 'apply',
   });
@@ -41,6 +44,7 @@ function AppPage() {
           <HomeDashboard
             config={sku.config}
             exportStatus={sku.exportStatus}
+            priceExportStatus={sku.priceExportStatus}
             skuToDecode={sku.skuToDecode}
             decodeData={sku.decodeData}
             decodeError={sku.decodeError}
@@ -61,7 +65,8 @@ function AppPage() {
             recountWeight={sku.recountWeight}
             canCreateProducts={canCreateProducts}
             canStartRecount={Boolean(recountMode)}
-            canChangeProductPrice={permissionUi.canApplyDirectRecount}
+            canChangeProductPrice={permissionUi.canApplyDirectPriceChange
+              || permissionUi.canCreateCorrectionRequest}
             recountMode={recountMode || 'apply'}
             onApplyRecount={sku.handleApplyRecount}
             onCancelRecount={sku.handleCancelRecount}
@@ -137,9 +142,13 @@ function AppPage() {
             exportError={sku.exportError}
             setExportError={sku.setExportError}
             isExportLoading={sku.isExportLoading}
+            isPriceExportLoading={sku.isPriceExportLoading}
+            priceExportError={sku.priceExportError}
+            priceExportStatus={sku.priceExportStatus}
             skuToDelete={sku.skuToDelete}
             setSkuToDelete={sku.setSkuToDelete}
             onExportCsv={sku.handleExportCsv}
+            onPriceExportCsv={sku.handlePriceExportCsv}
             onDelete={sku.handleDelete}
             canArchive={canArchiveProducts}
             canCreateExport={canCreateExports}
@@ -168,6 +177,11 @@ function AppPage() {
         onConfirm={sku.handleConfirmRecount}
       />
       <ProductPriceChangeDialog
+        canApplyDirect={permissionUi.canApplyDirectPriceChange}
+        canCreateRequest={permissionUi.canCreateCorrectionRequest}
+        canRequestOverride={permissionUi.canPriceOverrideCorrections}
+        canUseOverrides={permissionUi.canApplyDirectPriceChange
+          || permissionUi.canPriceOverrideCorrections}
         currentPriceUah={sku.decodeData?.pricing?.totalPriceUah}
         error={sku.priceChangeError}
         isApplying={sku.isPriceChangeApplying}
@@ -182,6 +196,7 @@ function AppPage() {
         usdPerGram={sku.priceChangeUsdPerGram}
         onCancel={sku.handleCancelPriceChange}
         onConfirm={sku.handleConfirmPriceChange}
+        onRequest={sku.handleRequestPriceChange}
         onManualPriceChange={sku.setPriceChangeManualUah}
         onManualMarketingRoundingChange={sku.setPriceChangeManualRounding}
         onMarketingRoundingChange={sku.setPriceChangeMarketingRounding}

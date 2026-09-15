@@ -141,6 +141,7 @@ function presentProductTimeline(querySku, data) {
     );
     const newSchema = getPayloadSchema(schemas, request.proposed_payload, null);
     const latestProposal = {
+      requestType: request.request_type || 'recount',
       label: 'latest_stored_proposal',
       sourceSku: request.source_sku,
       proposedSku: request.proposed_sku,
@@ -169,8 +170,10 @@ function presentProductTimeline(querySku, data) {
         ...eventTimestamp(audit.occurred_at),
         actor: actorFromAudit(audit, null),
         sku: request.source_sku,
-        summary: requestEventNames.get(audit.event_key),
-        details: audit.event_key === 'correction_request.created' ? { latestProposal } : {},
+        summary: `${requestEventNames.get(audit.event_key)} (${request.request_type === 'price_change' ? 'price change' : 'recount'})`,
+        details: audit.event_key === 'correction_request.created'
+          ? { requestType: request.request_type || 'recount', latestProposal }
+          : { requestType: request.request_type || 'recount' },
         changes: [],
         internalGroup: completionGroup,
         sortOrder: audit.event_key === 'correction_request.completed' ? 50 : 30,
@@ -290,6 +293,7 @@ function presentProductTimeline(querySku, data) {
     const newPrice = asObject(details.newPrice);
     const beforeUah = toUahNumber(oldPrice.totalPriceUah);
     const afterUah = toUahNumber(newPrice.totalPriceUah);
+    const correctionRequestId = nullableNumber(details.correctionRequestId);
     pushEvent({
       type: 'product.price_changed',
       ...eventTimestamp(audit.occurred_at),
@@ -297,6 +301,8 @@ function presentProductTimeline(querySku, data) {
       sku: details.fullSku || product.full_sku,
       summary: 'Product price changed in place',
       details: {
+        applicationMode: details.applicationMode || 'direct',
+        correctionRequestId,
         priceMode: details.priceMode || null,
         pricingDecision: details.pricingDecision
           ? asObject(details.pricingDecision)
@@ -309,6 +315,8 @@ function presentProductTimeline(querySku, data) {
         },
       },
       changes: [],
+      internalGroup: correctionRequestId
+        ? requestGroups.get(correctionRequestId) || null : null,
       sortOrder: 65,
     });
   }

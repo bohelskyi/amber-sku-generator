@@ -13,8 +13,10 @@ const {
 const { getCorrectionDecisionSignature } = require('../src/services/product/product-signatures');
 const {
   calculateDecisionPricing,
+  decisionFromRequest,
   normalizePricingDecision,
 } = require('../src/services/product/correction-pricing-decision');
+const { normalizePriceChangeDecision } = require('../src/services/product-price-change.service');
 
 function buildPreview(overrides = {}) {
   return {
@@ -54,6 +56,24 @@ test('correction pricing decisions validate strict mode-specific fields', () => 
   assert.throws(() => normalizePricingDecision({
     mode: 'manual_uah', manualPriceUah: 10, marketingRoundingEnabled: true,
   }), /не відповідають/);
+});
+
+test('price-change requests preserve explicit Manual UAH rounding without weakening recount', () => {
+  assert.deepEqual(normalizePriceChangeDecision({
+    mode: 'manual_uah', manualPriceUah: '4020.25', marketingRoundingEnabled: true,
+  }), {
+    mode: 'manual_uah', manualPriceUah: 4020.25, marketingRoundingEnabled: true,
+  });
+  assert.deepEqual(decisionFromRequest({
+    request_type: 'price_change', pricing_mode: 'manual_uah',
+    pricing_manual_uah: '4020.25', pricing_rounding_enabled: 1,
+  }), {
+    mode: 'manual_uah', manualPriceUah: 4020.25, marketingRoundingEnabled: true,
+  });
+  assert.deepEqual(decisionFromRequest({
+    request_type: 'recount', pricing_mode: 'manual_uah',
+    pricing_manual_uah: '4020.25', pricing_rounding_enabled: null,
+  }), { mode: 'manual_uah', manualPriceUah: 4020.25 });
 });
 
 test('correction create permission alone cannot authorize a pricing override', async () => {

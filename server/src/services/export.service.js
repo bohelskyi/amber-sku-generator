@@ -122,7 +122,6 @@ function getExportSizeValue(productRow, nonSkuQuestionMaps) {
 
 async function getExportRows(fromSku, toSku, options = {}) {
   const queryable = options.queryable || pool;
-  const includePendingReexports = Boolean(options.includePendingReexports);
   const lockProducts = Boolean(options.lockProducts);
   const normalizedFromSku = String(fromSku || '').trim().toUpperCase();
   const normalizedToSku = String(toSku || '').trim().toUpperCase();
@@ -156,25 +155,13 @@ async function getExportRows(fromSku, toSku, options = {}) {
     rangeClauses.push(`p.id <= $${params.length}`);
   }
   const inRequestedRangeSql = `(${rangeClauses.join(' AND ')})`;
-  const pendingReexportSql = includePendingReexports
-    ? `OR (
-         revisions.revision > revisions.confirmed_revision
-         AND p.id <= COALESCE((
-           SELECT exported_to_product_id FROM export_state WHERE singleton = TRUE
-         ), 0)
-       )`
-    : '';
-
   const result = await queryable.query(
     `
       SELECT p.id, p.full_sku, p.category, p.total_price_uah, p.details, p.created_at,
-             revisions.revision AS reexport_revision,
-             revisions.confirmed_revision AS confirmed_export_revision,
              ${inRequestedRangeSql} AS in_requested_range
       FROM products p
-      LEFT JOIN product_export_revisions revisions ON revisions.product_id = p.id
       WHERE COALESCE(p.exclude_from_export, 0) = 0
-        AND (${inRequestedRangeSql} ${pendingReexportSql})
+        AND ${inRequestedRangeSql}
       ORDER BY p.id ASC
       ${lockProducts ? 'FOR SHARE OF p' : ''}
     `,
@@ -196,17 +183,9 @@ async function getExportRows(fromSku, toSku, options = {}) {
 
   const requestedRangeRows = rowsWithSize.filter((row) => row.in_requested_range);
   const lastRequestedRangeRow = requestedRangeRows[requestedRangeRows.length - 1] || null;
-  const reexportRevisions = rowsWithSize
-    .filter((row) => Number(row.reexport_revision) > Number(row.confirmed_export_revision))
-    .map((row) => ({
-      productId: Number(row.id),
-      revision: Number(row.reexport_revision),
-    }));
-
   return {
     rows: rowsWithSize,
     textColumns,
-    reexportRevisions,
     range: {
       fromSku: fromProduct.full_sku,
       toSku: toProduct ? toProduct.full_sku : null,
@@ -214,6 +193,38 @@ async function getExportRows(fromSku, toSku, options = {}) {
       exportedToProductId: lastRequestedRangeRow ? Number(lastRequestedRangeRow.id) : 0,
     },
   };
+}
+
+async function establishProductSnapshotExposure(client, productRows) {
+  const productIds = productRows.map((row) => Number(row.id)).sort((a, b) => a - b);
+  if (productIds.length === 0) return [];
+  await client.query(
+    `INSERT INTO product_export_revisions
+       (product_id, revision, confirmed_revision, changed_at, has_product_snapshot)
+     SELECT product_id, 0, 0, CURRENT_TIMESTAMP, TRUE
+     FROM unnest($1::int[]) AS product_id
+     ON CONFLICT (product_id) DO NOTHING`,
+    [productIds]
+  );
+  const revisions = await client.query(
+    `SELECT product_id, revision, has_product_snapshot
+     FROM product_export_revisions
+     WHERE product_id = ANY($1::int[])
+     ORDER BY product_id
+     FOR UPDATE`,
+    [productIds]
+  );
+  const captured = revisions.rows
+    .filter((row) => row.has_product_snapshot === false && Number(row.revision) > 0)
+    .map((row) => ({ productId: Number(row.product_id), revision: Number(row.revision) }));
+  await client.query(
+    `UPDATE product_export_revisions
+     SET has_product_snapshot = TRUE
+     WHERE product_id = ANY($1::int[])
+       AND has_product_snapshot = FALSE`,
+    [productIds]
+  );
+  return captured;
 }
 
 function buildExportCsv(exportData) {
@@ -270,9 +281,9 @@ async function createExportSnapshot({ fromSku, toSku, idempotencyKey }, options 
     await client.query('BEGIN');
     const exportData = await getExportRows(fromSku, toSku, {
       queryable: client,
-      includePendingReexports: true,
       lockProducts: true,
     });
+    const exposureRevisions = await establishProductSnapshotExposure(client, exportData.rows);
     const suffixPart = exportData.range.toSku ? `-${exportData.range.toSku}` : '-to-latest';
     const fileName = `amber-export-${exportData.range.fromSku}${suffixPart}.csv`;
     const exportedToProductId = exportData.range.exportedToProductId;
@@ -294,7 +305,7 @@ async function createExportSnapshot({ fromSku, toSku, idempotencyKey }, options 
         fileName,
         buildExportCsv(exportData),
         mutationContext.actorUserId,
-        JSON.stringify(exportData.reexportRevisions),
+        JSON.stringify(exposureRevisions),
       ]
     );
     const snapshot = result.rows[0];

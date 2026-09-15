@@ -88,6 +88,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `029_category_marketing_rounding.sql` | Adds a constrained, default-enabled category flag for automatic-price marketing rounding. |
 | `030_correction_request_pricing_decisions.sql` | Adds persisted correction pricing decisions plus the Manager pricing-override permission and role-version advance. |
 | `031_product_price_reexports.sql` | Adds coalescing per-product price-change export revisions and immutable snapshot revision evidence. |
+| `032_price_change_requests_and_price_exports.sql` | Adds direct-price RBAC, typed price requests, exposure-aware reuse of `product_export_revisions`, and immutable dedicated price snapshots. Generated legacy snapshots establish exposure but only confirmed evidence advances revisions. |
 
 ## Test database safety
 

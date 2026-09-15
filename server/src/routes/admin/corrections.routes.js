@@ -48,7 +48,10 @@ router.post('/admin/correction-requests/preview', requirePermission('corrections
       canOverride: req.permissions.includes('corrections.price_override'),
     }));
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({
+      error: err.message,
+      ...(err.publicCode ? { code: err.publicCode } : {}),
+    });
   }
 });
 
@@ -64,6 +67,7 @@ router.post('/admin/correction-requests', requirePermission('corrections.create'
   } catch (err) {
     res.status(err.statusCode || 500).json({
       error: err.message,
+      ...(err.publicCode ? { code: err.publicCode } : {}),
       ...(err.details ? { details: err.details } : {}),
     });
   }

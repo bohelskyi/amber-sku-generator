@@ -20,6 +20,11 @@ const {
 } = require('./product/correction-pricing-decision');
 const { loadPricingContext } = require('./pricing/pricing-context');
 const { getPricingContextFingerprint } = require('./pricing/pricing-context-fingerprint');
+const {
+  applyProductPriceChange,
+  normalizePriceChangeDecision,
+  previewProductPriceChange,
+} = require('./product-price-change.service');
 
 const REQUEST_STATUSES = new Set(['pending', 'in_progress', 'completed', 'rejected']);
 const ACTIVE_REQUEST_STATUSES = ['pending', 'in_progress'];
@@ -113,6 +118,7 @@ function normalizeRequestRow(row) {
   if (!row) return null;
   return {
     id: Number(row.id),
+    requestType: row.request_type || 'recount',
     sourceProductId: Number(row.source_product_id),
     correctedProductId: row.corrected_product_id === null
       ? null
@@ -150,6 +156,26 @@ function normalizeRequestRow(row) {
     completedAt: row.completed_at,
     rejectedAt: row.rejected_at,
   };
+}
+
+function normalizeRequestType(value) {
+  const requestType = String(value || 'recount').trim().toLowerCase();
+  if (!['recount', 'price_change'].includes(requestType)) {
+    const error = new Error('Невідомий тип запиту на виправлення.');
+    error.statusCode = 422;
+    throw error;
+  }
+  return requestType;
+}
+
+function getRequestedPriceChangeDecision(payload, canOverride) {
+  const decision = normalizePriceChangeDecision(payload.pricingDecision);
+  if (decision.mode !== 'system_auto' && !canOverride) {
+    const error = new Error('Недостатньо дозволу для вибору ціни запиту.');
+    error.statusCode = 403;
+    throw error;
+  }
+  return decision;
 }
 
 function getRequestedDecision(payload, canOverride) {
@@ -207,6 +233,17 @@ function getStoredRecountAnswerPatch(row) {
 }
 
 async function previewCorrectionRequest(payload = {}, options = {}) {
+  const requestType = normalizeRequestType(payload.requestType);
+  if (requestType === 'price_change') {
+    const decision = getRequestedPriceChangeDecision(payload, options.canOverride === true);
+    return {
+      requestType,
+      ...await previewProductPriceChange({
+        productId: payload.productId,
+        pricingDecision: decision,
+      }),
+    };
+  }
   const decision = getRequestedDecision(payload, options.canOverride === true);
   const preview = await buildProductRecountPreview({ ...payload, pricingDecision: decision });
   if (!decision && preview.corrected.manualPriceUah
@@ -216,6 +253,7 @@ async function previewCorrectionRequest(payload = {}, options = {}) {
     throw error;
   }
   return {
+    requestType: 'recount',
     ...preview,
     previewSignature: getCorrectionDecisionSignature(preview, decision),
   };
@@ -267,6 +305,7 @@ async function claimCorrectionRequest(requestId, options = {}) {
       'claimed',
       requestId,
       {
+        requestType: claimedRow.request_type || 'recount',
         claimVersion: Number(claimedRow.claim_version),
         ...(isLegacyUnowned ? { legacyUnownedClaimAdopted: true } : {}),
       }
@@ -339,6 +378,7 @@ async function releaseCorrectionRequest(requestId, claimVersion, claimToken, opt
       [Number(requestId)]
     );
     await writeCorrectionAuditEvent(client, mutationContext, 'released', requestId, {
+      requestType: result.rows[0].request_type || 'recount',
       claimVersion: ownership.claimVersion,
       nextClaimVersion: Number(updated.rows[0].claim_version),
       ...(ownership.legacyAdopted ? { legacyClaimAdopted: true } : {}),
@@ -394,6 +434,7 @@ async function forceReleaseCorrectionRequest(requestId, claimVersion, confirmed 
       [Number(requestId)]
     );
     await writeCorrectionAuditEvent(client, mutationContext, 'force_released', requestId, {
+      requestType: row.request_type || 'recount',
       claimVersion: expectedVersion,
       nextClaimVersion: Number(updated.rows[0].claim_version),
       previousOwnerUserId: row.claimed_by_user_id === null
@@ -489,7 +530,120 @@ async function getCorrectionRequests({ status, search, limit } = {}) {
   };
 }
 
+async function createPriceChangeRequest(payload = {}, options = {}) {
+  const mutationContext = createMutationContext(options.mutationContext);
+  const decision = getRequestedPriceChangeDecision(payload, options.canOverride === true);
+  const suppliedToken = String(payload.previewToken || '').trim();
+  if (!suppliedToken) {
+    const error = new Error('Для створення запиту потрібен актуальний previewToken.');
+    error.statusCode = 422;
+    throw error;
+  }
+  const productId = Number(payload.productId);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const sourceResult = await client.query(
+      `SELECT id, full_sku, category
+       FROM products
+       WHERE id = $1
+       FOR UPDATE`,
+      [productId]
+    );
+    if (sourceResult.rows.length !== 1) {
+      const error = new Error('Товар для зміни ціни більше не існує.');
+      error.statusCode = 404;
+      throw error;
+    }
+    const preview = await previewProductPriceChange({
+      productId,
+      pricingDecision: decision,
+    }, { queryable: client });
+    if (preview.previewToken !== suppliedToken) {
+      const error = new Error('Попередній розрахунок змінився. Оновіть його перед створенням запиту.');
+      error.statusCode = 409;
+      error.publicCode = 'STALE_PRODUCT_PRICE_PREVIEW';
+      throw error;
+    }
+    if (preview.unchanged) {
+      const error = new Error('Результуюча ціна UAH не відрізняється від поточної.');
+      error.statusCode = 422;
+      error.publicCode = 'PRODUCT_PRICE_UNCHANGED';
+      throw error;
+    }
+    const oldPayload = {
+      requestType: 'price_change',
+      productId,
+      sku: preview.sku,
+      stateSignature: preview.productStateSignature,
+      totalPriceUah: preview.currentPriceUah,
+      pricing: preview.currentPricing,
+    };
+    const proposedPayload = {
+      requestType: 'price_change',
+      productId,
+      sku: preview.sku,
+      totalPriceUah: preview.resultingPriceUah,
+      priceDifferenceUah: preview.priceDifferenceUah,
+      pricingDecision: decision,
+      pricing: preview.resultingPricing,
+      pricingContextFingerprint: preview.pricingContextFingerprint,
+      uahRateDate: preview.uahRateDate,
+      previewToken: preview.previewToken,
+    };
+    const result = await client.query(
+      `INSERT INTO correction_requests
+       (request_type, source_product_id, category_code, source_sku, proposed_sku,
+        old_payload, proposed_payload, changes, comment, preview_signature,
+        created_by_user_id, pricing_mode, pricing_usd_per_gram, pricing_manual_uah,
+        pricing_rounding_enabled, pricing_origin)
+       VALUES ('price_change', $1, $2, $3, $3, $4::jsonb, $5::jsonb, '[]'::jsonb,
+               $6, $7, $8, $9, $10, $11, $12, $13)
+       RETURNING *`,
+      [
+        productId,
+        sourceResult.rows[0].category,
+        preview.sku,
+        JSON.stringify(oldPayload),
+        JSON.stringify(proposedPayload),
+        String(payload.comment || payload.reason || '').trim() || null,
+        preview.previewToken,
+        mutationContext.actorUserId,
+        decision.mode,
+        decision.mode === 'usd_per_gram' ? decision.usdPerGram : null,
+        decision.mode === 'manual_uah' ? decision.manualPriceUah : null,
+        decision.mode === 'system_auto' ? null : Number(decision.marketingRoundingEnabled),
+        decision.mode === 'manual_uah' ? 'authorized_override' : null,
+      ]
+    );
+    await writeCorrectionAuditEvent(client, mutationContext, 'created', result.rows[0].id, {
+      requestType: 'price_change',
+      sourceProductId: productId,
+      sourceSku: preview.sku,
+      proposedSku: preview.sku,
+      pricingMode: decision.mode,
+      pricingDecision: decision,
+      currentPriceUah: preview.currentPriceUah,
+      resultingPriceUah: preview.resultingPriceUah,
+    });
+    await client.query('COMMIT');
+    return { success: true, request: normalizeRequestRow(result.rows[0]) };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    if (error?.code === '23505') {
+      error.statusCode = 409;
+      error.message = 'Для цього товару вже існує активний запит на виправлення.';
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function createCorrectionRequest(payload = {}, options = {}) {
+  if (normalizeRequestType(payload.requestType) === 'price_change') {
+    return createPriceChangeRequest(payload, options);
+  }
   const mutationContext = createMutationContext(options.mutationContext);
   const requestedDecision = getRequestedDecision(payload, options.canOverride === true);
   const preview = await buildProductRecountPreview({
@@ -547,11 +701,11 @@ async function createCorrectionRequest(payload = {}, options = {}) {
     }
     const result = await client.query(
       `INSERT INTO correction_requests
-       (source_product_id, category_code, source_sku, proposed_sku, old_payload,
+       (request_type, source_product_id, category_code, source_sku, proposed_sku, old_payload,
         proposed_payload, changes, comment, preview_signature, created_by_user_id,
         pricing_mode, pricing_usd_per_gram, pricing_manual_uah, pricing_rounding_enabled,
         pricing_origin)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10,
+       VALUES ('recount', $1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10,
                $11, $12, $13, $14, $15)
        RETURNING *`,
       [
@@ -579,6 +733,7 @@ async function createCorrectionRequest(payload = {}, options = {}) {
       'created',
       result.rows[0].id,
       {
+        requestType: 'recount',
         sourceProductId: Number(preview.source.productId),
         sourceSku: preview.source.sku,
         proposedSku: preview.corrected.fullSku,
@@ -600,6 +755,101 @@ async function createCorrectionRequest(payload = {}, options = {}) {
   }
 }
 
+async function refreshClaimedPriceChangeRequest(
+  row,
+  actorUserId,
+  claimVersion,
+  claimToken,
+  options = {}
+) {
+  const pricingDecision = decisionFromRequest(row);
+  const mutationContext = createMutationContext(
+    options.mutationContext || { actorUserId, requestId: null }
+  );
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const preview = await previewProductPriceChange({
+      productId: Number(row.source_product_id),
+      pricingDecision,
+    }, {
+      allowedCorrectionRequestId: Number(row.id),
+      lockProduct: true,
+      queryable: client,
+    });
+    if (preview.unchanged) {
+      const error = new Error('Після оновлення результуюча ціна не відрізняється від поточної.');
+      error.statusCode = 422;
+      error.publicCode = 'PRODUCT_PRICE_UNCHANGED';
+      throw error;
+    }
+    const locked = await client.query(
+      'SELECT * FROM correction_requests WHERE id = $1 FOR UPDATE',
+      [Number(row.id)]
+    );
+    if (locked.rows.length === 0) {
+      const error = new Error('Запит на виправлення не знайдено.');
+      error.statusCode = 404;
+      throw error;
+    }
+    const ownership = assertClaimOwnership(
+      locked.rows[0], actorUserId, claimVersion, claimToken
+    );
+    const oldPayload = {
+      requestType: 'price_change',
+      productId: Number(row.source_product_id),
+      sku: preview.sku,
+      stateSignature: preview.productStateSignature,
+      totalPriceUah: preview.currentPriceUah,
+      pricing: preview.currentPricing,
+    };
+    const proposedPayload = {
+      requestType: 'price_change',
+      productId: Number(row.source_product_id),
+      sku: preview.sku,
+      totalPriceUah: preview.resultingPriceUah,
+      priceDifferenceUah: preview.priceDifferenceUah,
+      pricingDecision,
+      pricing: preview.resultingPricing,
+      pricingContextFingerprint: preview.pricingContextFingerprint,
+      uahRateDate: preview.uahRateDate,
+      previewToken: preview.previewToken,
+    };
+    const result = await client.query(
+      `UPDATE correction_requests
+       SET source_sku = $1, proposed_sku = $1,
+           old_payload = $2::jsonb, proposed_payload = $3::jsonb,
+           changes = '[]'::jsonb, preview_signature = $4,
+           claimed_by_user_id = $5, claim_token_hash = NULL,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $6 AND request_type = 'price_change'
+       RETURNING *`,
+      [
+        preview.sku,
+        JSON.stringify(oldPayload),
+        JSON.stringify(proposedPayload),
+        preview.previewToken,
+        actorUserId,
+        Number(row.id),
+      ]
+    );
+    if (ownership.legacyAdopted) {
+      await writeCorrectionAuditEvent(client, mutationContext, 'claimed', row.id, {
+        requestType: 'price_change',
+        claimVersion: ownership.claimVersion,
+        legacyClaimAdopted: true,
+      });
+    }
+    await client.query('COMMIT');
+    return result.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function refreshClaimedCorrectionRequest(
   row,
   actorUserId,
@@ -607,6 +857,11 @@ async function refreshClaimedCorrectionRequest(
   claimToken,
   options = {}
 ) {
+  if ((row.request_type || 'recount') === 'price_change') {
+    return refreshClaimedPriceChangeRequest(
+      row, actorUserId, claimVersion, claimToken, options
+    );
+  }
   const pricingDecision = decisionFromRequest(row);
   const answers = getStoredRecountAnswerPatch(row);
   const preview = await buildProductRecountPreview({
@@ -764,6 +1019,7 @@ async function updateCorrectionRequestStatus(
       normalizedStatus === 'rejected' ? 'rejected' : 'reopened',
       requestId,
       {
+        requestType: row.request_type || 'recount',
         fromStatus: row.status,
         toStatus: normalizedStatus,
         claimVersion: Number(row.claim_version),
@@ -837,6 +1093,28 @@ async function completeCorrectionRequest(
     claimVersion,
     claimToken
   );
+
+  if ((row.request_type || 'recount') === 'price_change') {
+    const priceChange = await applyProductPriceChange({
+      productId: Number(row.source_product_id),
+      pricingDecision: decisionFromRequest(row),
+      previewToken: row.proposed_payload?.previewToken || row.preview_signature,
+    }, {
+      mutationContext,
+      correctionRequest: {
+        id: Number(row.id),
+        claimedByUserId: mutationContext.actorUserId,
+        claimVersion: ownership.claimVersion,
+        previewToken: row.proposed_payload?.previewToken || row.preview_signature,
+      },
+    });
+    const completedRow = await getCorrectionRequestRow(requestId);
+    return {
+      success: true,
+      request: normalizeRequestRow(completedRow),
+      priceChange,
+    };
+  }
 
   const pricingDecision = decisionFromRequest(row);
   const answers = getStoredRecountAnswerPatch(row);

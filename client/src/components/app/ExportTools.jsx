@@ -6,9 +6,13 @@ export function ExportTools({
   exportError,
   setExportError,
   isExportLoading,
+  isPriceExportLoading,
+  priceExportError,
+  priceExportStatus,
   skuToDelete,
   setSkuToDelete,
   onExportCsv,
+  onPriceExportCsv,
   onDelete,
   canArchive = true,
   canCreateExport = true,
@@ -32,8 +36,8 @@ export function ExportTools({
           {canCreateExport && <div className="field-group">
             <div className="section-title mb-3">
               <div>
-                <h4 className="section-title-text text-lg">Експорт CSV</h4>
-                <p className="section-subtitle">Перша колонка: артикул. Друга: зафіксована ціна в гривні.</p>
+                <h4 className="section-title-text text-lg">Повний експорт товарів</h4>
+                <p className="section-subtitle">Повні незмінні рядки товарів у вибраному діапазоні.</p>
               </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
@@ -71,6 +75,27 @@ export function ExportTools({
                 {exportError}
               </div>
             )}
+          </div>}
+
+          {canCreateExport && <div className="field-group">
+            <div className="section-title mb-3">
+              <div>
+                <h4 className="section-title-text text-lg">Експорт змін цін</h4>
+                <p className="section-subtitle">
+                  Окремий CSV <span className="font-mono">sku,price</span>. Очікує: {priceExportStatus?.pendingCount ?? '…'}.
+                  {Number(priceExportStatus?.excludedPendingCount) > 0
+                    ? ` Виключено: ${priceExportStatus.excludedPendingCount}.` : ''}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={onPriceExportCsv}
+              className="btn btn-primary px-6"
+              disabled={isPriceExportLoading || Number(priceExportStatus?.pendingCount || 0) === 0}
+            >
+              {isPriceExportLoading ? 'Експортуємо ціни…' : 'Експортувати зміни цін'}
+            </button>
+            {priceExportError && <div className="danger-panel p-3 mt-3 text-sm">{priceExportError}</div>}
           </div>}
 
           {canArchive && <div className="field-group">

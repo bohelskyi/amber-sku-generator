@@ -9,10 +9,17 @@ export function useProductExportController() {
   const [exportToSku, setExportToSku] = useState('');
   const [exportError, setExportError] = useState('');
   const [isExportLoading, setIsExportLoading] = useState(false);
+  const [priceExportStatus, setPriceExportStatus] = useState(null);
+  const [priceExportError, setPriceExportError] = useState('');
+  const [isPriceExportLoading, setIsPriceExportLoading] = useState(false);
 
-  const fetchExportStatus = () => exportsApi.getStatus().then((response) => {
-    setExportStatus(response.data);
-    return response.data;
+  const fetchExportStatus = () => Promise.all([
+    exportsApi.getStatus(),
+    exportsApi.getPriceStatus(),
+  ]).then(([productResponse, priceResponse]) => {
+    setExportStatus(productResponse.data);
+    setPriceExportStatus(priceResponse.data);
+    return productResponse.data;
   });
 
   useEffect(() => {
@@ -64,6 +71,40 @@ export function useProductExportController() {
     }
   };
 
+  const handlePriceExportCsv = async () => {
+    setIsPriceExportLoading(true);
+    setPriceExportError('');
+    try {
+      const key = globalThis.crypto?.randomUUID?.()
+        || `price-export-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const snapshotResponse = await exportsApi.createPriceSnapshot(key);
+      const snapshot = snapshotResponse.data;
+      const response = await exportsApi.downloadPriceSnapshot(snapshot.id);
+      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+      const fileNameMatch = response.headers['content-disposition']?.match(/filename="(.+)"/);
+      downloadBlob(
+        blob,
+        fileNameMatch?.[1] || snapshot.fileName || 'amber-price-export.csv',
+        { documentRef: document, urlApi: window.URL }
+      );
+      await exportsApi.confirmPriceSnapshot(snapshot.id);
+      await fetchExportStatus();
+    } catch (error) {
+      if (error.response?.data instanceof Blob) {
+        const errorText = await error.response.data.text();
+        try {
+          setPriceExportError(JSON.parse(errorText).error || 'Не вдалося експортувати ціни.');
+        } catch {
+          setPriceExportError('Не вдалося експортувати ціни.');
+        }
+      } else {
+        setPriceExportError(getApiError(error));
+      }
+    } finally {
+      setIsPriceExportLoading(false);
+    }
+  };
+
   return {
     exportError,
     exportFromSku,
@@ -71,9 +112,14 @@ export function useProductExportController() {
     exportToSku,
     fetchExportStatus,
     handleExportCsv,
+    handlePriceExportCsv,
     isExportLoading,
+    isPriceExportLoading,
+    priceExportError,
+    priceExportStatus,
     setExportError,
     setExportFromSku,
     setExportToSku,
+    setPriceExportError,
   };
 }

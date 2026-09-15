@@ -26,7 +26,8 @@ test('migration 029 enables rounding for categories created before the upgrade',
   try {
     const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
       .filter((fileName) => fileName.endsWith('.sql')
-        && !fileName.startsWith('029_') && !fileName.startsWith('030_'));
+        && !fileName.startsWith('029_') && !fileName.startsWith('030_')
+        && !fileName.startsWith('031_') && !fileName.startsWith('032_'));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
       path.resolve(preRoundingDirectory, fileName)
@@ -66,7 +67,8 @@ test('migration 031 preserves existing export snapshots and adds immutable revis
   const oldDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-pre-product-reexport-'));
   try {
     const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
-      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('031_'));
+      .filter((fileName) => fileName.endsWith('.sql')
+        && !fileName.startsWith('031_') && !fileName.startsWith('032_'));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName), path.resolve(oldDirectory, fileName)
     )));
@@ -116,13 +118,106 @@ test('migration 031 preserves existing export snapshots and adds immutable revis
   }
 });
 
+test('migration 032 marks generated legacy exposure without confirming its captured revision', async () => {
+  const databaseName = 'amber_price_export_upgrade_test';
+  const databaseUrl = await recreateTestDatabase(databaseName);
+  const pre032Directory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-pre-price-export-'));
+  try {
+    const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
+      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('032_'));
+    await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
+      path.resolve(serverRoot, 'migrations', fileName), path.resolve(pre032Directory, fileName)
+    )));
+    await runNodeInDatabase(databaseUrl, `
+      const db = require('./src/db/pool');
+      const { runMigrations } = require('./src/db/run-migrations');
+      runMigrations({ directory: ${JSON.stringify(pre032Directory)} })
+        .finally(() => db.end()).catch((error) => { console.error(error); process.exitCode = 1; });
+    `);
+    const upgradePool = new Pool({ connectionString: databaseUrl });
+    try {
+      await upgradePool.query(`
+        INSERT INTO categories (code, name, requires_weight) VALUES ('PX', 'Price export', 0);
+        INSERT INTO products
+          (full_sku, base_sku, sequence_number, category, weight, total_price,
+           total_price_uah, price_per_gram, details)
+        VALUES ('PX1', 'PX1', 1, 'PX', 0, 25, 1000, 0, '{}'::jsonb);
+        INSERT INTO product_export_revisions (product_id, revision, confirmed_revision)
+        SELECT id, 3, 0 FROM products WHERE full_sku = 'PX1';
+        INSERT INTO export_snapshots
+          (id, idempotency_key, from_sku, resolved_to_sku, exported_to_product_id,
+           row_count, file_name, csv_content, status, confirmed_at, reexport_revisions)
+        SELECT 'confirmed-pre-032', 'confirmed-pre-032', 'PX1', 'PX1', id,
+               1, 'confirmed.csv', 'sku,price_uah', 'confirmed', CURRENT_TIMESTAMP,
+               jsonb_build_array(jsonb_build_object('productId', id, 'revision', 1))
+        FROM products WHERE full_sku = 'PX1';
+        INSERT INTO export_snapshots
+          (id, idempotency_key, from_sku, resolved_to_sku, exported_to_product_id,
+           row_count, file_name, csv_content, reexport_revisions)
+        SELECT 'generated-pre-032', 'generated-pre-032', 'PX1', 'PX1', id,
+               1, 'generated.csv', 'sku,price_uah',
+               jsonb_build_array(jsonb_build_object('productId', id, 'revision', 2))
+        FROM products WHERE full_sku = 'PX1';
+      `);
+      await runNodeInDatabase(databaseUrl, `
+        const db = require('./src/db/pool');
+        const { runMigrations } = require('./src/db/run-migrations');
+        (async () => { await runMigrations(); await runMigrations(); await db.end(); })()
+          .catch((error) => { console.error(error); process.exitCode = 1; });
+      `);
+      const revision = await upgradePool.query(`
+        SELECT revision, confirmed_revision, has_product_snapshot
+        FROM product_export_revisions revisions
+        JOIN products ON products.id = revisions.product_id
+        WHERE products.full_sku = 'PX1'
+      `);
+      assert.deepEqual(revision.rows, [{
+        revision: '3', confirmed_revision: '1', has_product_snapshot: true,
+      }]);
+      assert.deepEqual((await upgradePool.query(`
+        SELECT reexport_revisions FROM export_snapshots
+        WHERE id = 'generated-pre-032'
+      `)).rows[0].reexport_revisions.length, 1);
+      const actorId = Number((await upgradePool.query(
+        `INSERT INTO application_users (status, display_name)
+         VALUES ('active', 'Migration confirmation actor')
+         RETURNING id`
+      )).rows[0].id);
+      await runNodeInDatabase(databaseUrl, `
+        const db = require('./src/db/pool');
+        const { confirmExportSnapshot } = require('./src/services/export.service');
+        confirmExportSnapshot('generated-pre-032', {
+          mutationContext: { actorUserId: ${actorId}, requestId: 'migration-032-upgrade-test' }
+        }).finally(() => db.end()).catch((error) => {
+          console.error(error); process.exitCode = 1;
+        });
+      `);
+      assert.deepEqual((await upgradePool.query(`
+        SELECT revision, confirmed_revision, has_product_snapshot
+        FROM product_export_revisions revisions
+        JOIN products ON products.id = revisions.product_id
+        WHERE products.full_sku = 'PX1'
+      `)).rows, [{
+        revision: '3', confirmed_revision: '2', has_product_snapshot: true,
+      }]);
+    } finally {
+      await upgradePool.end();
+    }
+  } finally {
+    await fs.rm(pre032Directory, { recursive: true, force: true });
+    await dropTestDatabase(databaseName);
+  }
+});
+
 test('migration 030 preserves legacy requests and advances Manager permission version once', async () => {
   const databaseName = 'amber_correction_pricing_upgrade_test';
   const databaseUrl = await recreateTestDatabase(databaseName);
   const oldDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-pre-pricing-decision-'));
   try {
     const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
-      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('030_'));
+      .filter((fileName) => fileName.endsWith('.sql')
+        && !fileName.startsWith('030_') && !fileName.startsWith('031_')
+        && !fileName.startsWith('032_'));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName), path.resolve(oldDirectory, fileName)
     )));
@@ -181,7 +276,7 @@ test('migration 030 preserves legacy requests and advances Manager permission ve
       assert.deepEqual(roles.rows, [
         { role_key: 'administrator', version: versionByRole.administrator, granted: true },
         { role_key: 'manager', version: String(Number(versionByRole.manager) + 1), granted: true },
-        { role_key: 'storekeeper', version: versionByRole.storekeeper, granted: false },
+        { role_key: 'storekeeper', version: String(Number(versionByRole.storekeeper) + 1), granted: false },
       ]);
       await assert.rejects(upgradePool.query(`
         UPDATE correction_requests SET pricing_mode = 'usd_per_gram',
@@ -442,6 +537,8 @@ test('migration 023 rolls back its audit schema and permission grant together', 
         && !fileName.startsWith('028_')
         && !fileName.startsWith('029_')
         && !fileName.startsWith('030_')
+        && !fileName.startsWith('031_')
+        && !fileName.startsWith('032_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -594,6 +691,8 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
          && !fileName.startsWith('028_')
          && !fileName.startsWith('029_')
          && !fileName.startsWith('030_')
+         && !fileName.startsWith('031_')
+         && !fileName.startsWith('032_')
       ))
       .map((fileName) => fs.copyFile(
         path.resolve(serverRoot, 'migrations', fileName),
@@ -706,6 +805,8 @@ test('migrations 020-024 upgrade a database at migration 019 and repeated startu
         && !fileName.startsWith('028_')
         && !fileName.startsWith('029_')
         && !fileName.startsWith('030_')
+        && !fileName.startsWith('031_')
+        && !fileName.startsWith('032_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -747,9 +848,9 @@ test('migrations 020-024 upgrade a database at migration 019 and repeated startu
             + '(SELECT count(*) FROM roles)::int AS roles, '
             + '(SELECT count(*) FROM role_permissions)::int AS mappings'
         );
-        if (counts.rows[0].permissions !== 27
+            if (counts.rows[0].permissions !== 28
             || counts.rows[0].roles !== 3
-            || counts.rows[0].mappings !== 52) {
+                || counts.rows[0].mappings !== 54) {
           throw new Error('Unexpected RBAC seed counts: ' + JSON.stringify(counts.rows[0]));
         }
         await db.end();
@@ -781,6 +882,8 @@ test('migration 021 adds business capabilities and corrects built-in mappings on
         && !fileName.startsWith('028_')
         && !fileName.startsWith('029_')
         && !fileName.startsWith('030_')
+        && !fileName.startsWith('031_')
+        && !fileName.startsWith('032_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -865,6 +968,8 @@ test('migration 022 removes Manager correction processing without changing other
         && !fileName.startsWith('028_')
         && !fileName.startsWith('029_')
         && !fileName.startsWith('030_')
+        && !fileName.startsWith('031_')
+        && !fileName.startsWith('032_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -983,7 +1088,7 @@ test('first-Administrator bootstrap is verified, transactional, concurrent-safe,
     assert.equal(access.roles[0].key, 'administrator');
     assert.equal(access.roles[0].displayName, 'Administrator');
     assert.equal(Number.isSafeInteger(access.roles[0].id), true);
-    assert.equal(access.permissions.length, 27);
+    assert.equal(access.permissions.length, 28);
     const state = await bootstrapPool.query(
       `SELECT administrator_user_id, completed_at IS NOT NULL AS completed
        FROM security_bootstrap_state WHERE singleton = TRUE`
@@ -1022,6 +1127,8 @@ test('legacy in-progress correction requests survive through migration 025 witho
         && !fileName.startsWith('028_')
         && !fileName.startsWith('029_')
         && !fileName.startsWith('030_')
+        && !fileName.startsWith('031_')
+        && !fileName.startsWith('032_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -1178,7 +1285,7 @@ test('legacy zero prices upgrade without repricing products or blocking edits', 
   );
   try {
     const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
-      .filter((fileName) => fileName.endsWith('.sql') && !/^(014|015|016|029)_/.test(fileName));
+      .filter((fileName) => fileName.endsWith('.sql') && !/^(014|015|016|029|030|031|032)_/.test(fileName));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
       path.resolve(preCompatibilityDirectory, fileName)

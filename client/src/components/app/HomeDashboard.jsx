@@ -98,6 +98,7 @@ export function HomeDashboard({
   canStartRecount = true,
   config,
   exportStatus,
+  priceExportStatus,
   skuToDecode,
   decodeData,
   decodeError,
@@ -188,7 +189,7 @@ export function HomeDashboard({
           <div className="home-export-panel">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-xs font-semibold text-slate-700">Експорт</p>
+                <p className="text-xs font-semibold text-slate-700">Повний експорт товарів</p>
                 <p className="mt-0.5 text-xs text-slate-500">
                   {exportStatus
                     ? (exportStatus.hasExport
@@ -206,6 +207,17 @@ export function HomeDashboard({
                 <span>У базі: {exportStatus.totalProducts}</span>
                 {exportStatus.exportableProducts !== undefined && <span>До експорту: {exportStatus.exportableProducts}</span>}
               </div>
+            )}
+            <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-200 pt-3 text-xs">
+              <span className="font-semibold text-slate-700">Експорт змін цін</span>
+              <span className="status-badge is-neutral">
+                {priceExportStatus ? `${priceExportStatus.pendingCount} очікує` : '...'}
+              </span>
+            </div>
+            {Number(priceExportStatus?.excludedPendingCount) > 0 && (
+              <p className="mt-1 text-xs text-slate-500">
+                Виключено з експорту: {priceExportStatus.excludedPendingCount}
+              </p>
             )}
           </div>
         </div>

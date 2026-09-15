@@ -16,7 +16,8 @@ const COMMON_DETAIL_KEYS = new Set([
   'exportedToProductId', 'factor', 'fromSku', 'fullSku', 'groupName', 'key', 'label',
   'name', 'newDisplayName', 'newPrice', 'newRole', 'newStatus', 'oldPrice',
   'permissionKeys', 'previousCode', 'previousDisplayName', 'previousOwnerUserId',
-  'previousRole', 'previousStatus', 'priceMode', 'proposedSku', 'questionId',
+  'previousRole', 'previousStatus', 'priceMode', 'priceExportRevision',
+  'applicationMode', 'requestType', 'proposedSku', 'questionId',
   'questionKey', 'requiresWeight', 'role', 'roleKey', 'rowCount', 'scenarioId',
   'scenarioName', 'scope', 'skipHiddenSkuQuestions', 'skuCode', 'sourceScenarioId',
   'sourceSku', 'status', 'toSku', 'triggerKey', 'triggerValue', 'userStatus',
@@ -26,7 +27,8 @@ const COMMON_DETAIL_KEYS = new Set([
 
 const KNOWN_EVENT_PREFIXES = new Set([
   'application_user', 'catalog', 'correction_request', 'export_snapshot',
-  'pricing', 'product', 'repricing', 'repricing_draft', 'role', 'sku_schema',
+  'price_export_snapshot', 'pricing', 'product', 'repricing', 'repricing_draft',
+  'role', 'sku_schema',
 ]);
 
 const SENSITIVE_DETAIL_KEY_PATTERN = /(token|secret|session|request[_]?id|claim|hash|issuer|oidc|subject)/i;

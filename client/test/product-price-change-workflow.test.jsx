@@ -73,6 +73,7 @@ it('refreshes the authoritative Manual UAH result when marketing rounding is tog
     if (url === '/config') return response(config);
     if (url === '/products') return response([]);
     if (url === '/export/status') return response({});
+    if (url === '/price-export/status') return response({});
     throw new Error(`Unexpected GET ${url}`);
   });
   const post = vi.spyOn(api, 'post').mockImplementation(async (url, body) => {
@@ -143,6 +144,7 @@ it('requests and applies automatic pricing without override fields', async () =>
     if (url === '/config') return response(config);
     if (url === '/products') return response([]);
     if (url === '/export/status') return response({});
+    if (url === '/price-export/status') return response({});
     throw new Error(`Unexpected GET ${url}`);
   });
   const post = vi.spyOn(api, 'post').mockImplementation(async (url, body) => {
@@ -186,4 +188,48 @@ it('requests and applies automatic pricing without override fields', async () =>
     pricingDecision: { mode: 'system_auto' },
     previewToken: 'automatic-token',
   });
+});
+
+it('derives request-only and mixed price-change actions from permissions', () => {
+  const baseProps = {
+    currentPriceUah: 2300,
+    isOpen: true,
+    mode: 'system_auto',
+    preview: {
+      resultingPriceUah: 2400,
+      priceDifferenceUah: 100,
+      previewToken: 'token',
+      unchanged: false,
+    },
+    sku: decodedProduct.sku,
+    onCancel: vi.fn(),
+    onConfirm: vi.fn(),
+    onRequest: vi.fn(),
+    onManualPriceChange: vi.fn(),
+    onManualMarketingRoundingChange: vi.fn(),
+    onMarketingRoundingChange: vi.fn(),
+    onModeChange: vi.fn(),
+    onUsdPerGramChange: vi.fn(),
+  };
+  const view = render(<ProductPriceChangeDialog
+    {...baseProps}
+    canApplyDirect={false}
+    canCreateRequest
+    canRequestOverride={false}
+    canUseOverrides={false}
+  />);
+  expect(screen.getByRole('button', { name: 'Створити запит на зміну ціни' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Змінити ціну' })).toBeNull();
+  expect(screen.queryByRole('radio', { name: 'Ручна UAH' })).toBeNull();
+
+  view.rerender(<ProductPriceChangeDialog
+    {...baseProps}
+    canApplyDirect
+    canCreateRequest
+    canRequestOverride
+    canUseOverrides
+  />);
+  expect(screen.getByRole('button', { name: 'Створити запит на зміну ціни' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Змінити ціну' })).toBeTruthy();
+  expect(screen.getByRole('radio', { name: 'Ручна UAH' })).toBeTruthy();
 });

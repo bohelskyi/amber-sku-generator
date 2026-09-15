@@ -94,3 +94,7 @@ Operational HTTP mutation logs are separate, non-durable telemetry. Their `actor
 Correction claims are owned by local `application_users.id`, with a monotonic claim version. Administrator has no implicit bypass of another user's ordinary claim; the explicit confirmed force-release operation requires `corrections.force_release`. Legacy token-only claims have a one-time adoption path. See [recount and corrections](RECOUNT_CORRECTIONS.md) for the complete workflow. Do not infer actor identity from OIDC `sub` or a claim token.
 
 Invitations are not implemented. Durable audit coverage is described here for access administration and in the relevant domain guides for business operations; do not assume an event exists for an unlisted operation.
+
+## Price-change capabilities
+
+`products.price_change` authorizes direct in-place price preview and apply independently from `products.recount`. Migration 032 grants it to every editable role that had direct recount at upgrade time, preserving Storekeeper and custom-role behavior; Administrator receives it through the protected permission-catalog trigger. `corrections.create` authorizes recount and price-change requests, while `corrections.price_override` controls Manual UAH and USD/gram decisions in either request type. UI and server behavior use effective permission keys only and never role names.

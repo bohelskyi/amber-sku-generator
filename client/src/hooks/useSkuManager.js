@@ -53,6 +53,8 @@ function pruneHiddenAnswers(categoryQuestions, answersMap) {
 
 export function useSkuManager({
   canChangeProductPrice = false,
+  canApplyDirectPriceChange = canChangeProductPrice,
+  canCreatePriceChangeRequest = false,
   canPriceOverride = false,
   submitMode = 'apply',
 } = {}) {
@@ -85,6 +87,7 @@ export function useSkuManager({
     handleCancelRecountConfirmation,
     handleCancelPriceChange,
     handleConfirmPriceChange,
+    handleRequestPriceChange,
     handleConfirmRecount,
     handleDecode,
     handleDecodeInputChange,
@@ -135,6 +138,8 @@ export function useSkuManager({
     skuToDecode,
   } = useProductRecount({
     canChangeProductPrice,
+    canApplyDirectPriceChange,
+    canCreatePriceChangeRequest,
     canPriceOverride,
     config,
     onApplied: () => {
@@ -455,6 +460,7 @@ export function useSkuManager({
     handleCancelRecountConfirmation,
     handleCancelPriceChange,
     handleConfirmPriceChange,
+    handleRequestPriceChange,
     handleConfirmRecount,
     handleDecode,
     handleDecodeInputChange,

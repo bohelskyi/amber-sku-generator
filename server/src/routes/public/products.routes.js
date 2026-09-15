@@ -89,7 +89,7 @@ router.post('/recount/apply', requirePermission('products.recount'), async (req,
   }
 });
 
-router.post('/product-price-change/preview', requirePermission('products.recount'), async (req, res) => {
+router.post('/product-price-change/preview', requirePermission('products.price_change'), async (req, res) => {
   try {
     const result = await previewProductPriceChange(req.body || {});
     res.json(result);
@@ -101,7 +101,7 @@ router.post('/product-price-change/preview', requirePermission('products.recount
   }
 });
 
-router.post('/product-price-change/apply', requirePermission('products.recount'), async (req, res) => {
+router.post('/product-price-change/apply', requirePermission('products.price_change'), async (req, res) => {
   try {
     const result = await applyProductPriceChange(req.body || {}, {
       mutationContext: getRequestMutationContext(req),
