@@ -394,13 +394,26 @@
       border-top: 0;
       border-left: 1px solid var(--border);
     }
+
+    .home-top-workspace:not(.is-decoder-only) .home-create-panel {
+      @apply flex self-stretch flex-col;
+    }
+
+    .home-top-workspace:not(.is-decoder-only) .home-category-list {
+      @apply flex-1;
+      grid-auto-rows: minmax(80px, 1fr);
+    }
+
+    .home-top-workspace:not(.is-decoder-only) .home-category-option {
+      @apply h-full;
+    }
   }
 
   .home-workspace-panel { border-radius: var(--radius-sm); }
-  .home-create-panel { @apply self-start overflow-hidden; }
-  .home-create-heading { @apply px-4 py-4 sm:px-5; }
+  .home-create-panel { @apply overflow-hidden; }
+  .home-create-heading { @apply px-4 py-5 sm:px-5; }
   .home-category-list {
-    @apply gap-2 p-3 sm:p-4;
+    @apply gap-3 p-4 sm:p-5;
     border-top: 1px solid var(--border);
   }
   .home-export-panel {
@@ -1593,8 +1606,8 @@
   }
 
   .home-category-option {
-    @apply relative w-full cursor-pointer border px-3 py-2.5 text-left transition-colors duration-150;
-    min-height: 68px;
+    @apply relative w-full cursor-pointer border px-4 py-3.5 text-left transition-colors duration-150;
+    min-height: 80px;
     border-color: var(--border);
     border-radius: var(--radius-sm);
     background: var(--surface-muted);

@@ -32,6 +32,29 @@ const decodedProduct = {
   pricing: { totalPriceUah: 2300 },
 };
 
+function getDialogProps() {
+  return {
+    currentPriceUah: 2300,
+    isOpen: true,
+    mode: 'system_auto',
+    preview: {
+      resultingPriceUah: 2400,
+      priceDifferenceUah: 100,
+      previewToken: 'token',
+      unchanged: false,
+    },
+    sku: decodedProduct.sku,
+    onCancel: vi.fn(),
+    onConfirm: vi.fn(),
+    onRequest: vi.fn(),
+    onManualPriceChange: vi.fn(),
+    onManualMarketingRoundingChange: vi.fn(),
+    onMarketingRoundingChange: vi.fn(),
+    onModeChange: vi.fn(),
+    onUsdPerGramChange: vi.fn(),
+  };
+}
+
 function PriceChangeWorkflowHarness() {
   const sku = useSkuManager({ canChangeProductPrice: true });
   if (!sku.config) return <div>loading</div>;
@@ -190,46 +213,52 @@ it('requests and applies automatic pricing without override fields', async () =>
   });
 });
 
-it('derives request-only and mixed price-change actions from permissions', () => {
-  const baseProps = {
-    currentPriceUah: 2300,
-    isOpen: true,
-    mode: 'system_auto',
-    preview: {
-      resultingPriceUah: 2400,
-      priceDifferenceUah: 100,
-      previewToken: 'token',
-      unchanged: false,
-    },
-    sku: decodedProduct.sku,
-    onCancel: vi.fn(),
-    onConfirm: vi.fn(),
-    onRequest: vi.fn(),
-    onManualPriceChange: vi.fn(),
-    onManualMarketingRoundingChange: vi.fn(),
-    onMarketingRoundingChange: vi.fn(),
-    onModeChange: vi.fn(),
-    onUsdPerGramChange: vi.fn(),
-  };
-  const view = render(<ProductPriceChangeDialog
-    {...baseProps}
+it('makes the request action primary for request-only access', () => {
+  render(<ProductPriceChangeDialog
+    {...getDialogProps()}
     canApplyDirect={false}
     canCreateRequest
     canRequestOverride={false}
     canUseOverrides={false}
   />);
-  expect(screen.getByRole('button', { name: 'Створити запит на зміну ціни' })).toBeTruthy();
+  const cancelButton = screen.getByRole('button', { name: 'Скасувати' });
+  const requestButton = screen.getByRole('button', { name: 'Створити запит на зміну ціни' });
+
+  expect(cancelButton.classList.contains('btn-outline')).toBe(true);
+  expect(requestButton.classList.contains('btn-primary')).toBe(true);
+  expect(requestButton.classList.contains('btn-outline')).toBe(false);
   expect(screen.queryByRole('button', { name: 'Змінити ціну' })).toBeNull();
   expect(screen.queryByRole('radio', { name: 'Ручна UAH' })).toBeNull();
+});
 
-  view.rerender(<ProductPriceChangeDialog
-    {...baseProps}
+it('keeps direct apply primary and the request action secondary for mixed access', () => {
+  render(<ProductPriceChangeDialog
+    {...getDialogProps()}
     canApplyDirect
     canCreateRequest
     canRequestOverride
     canUseOverrides
   />);
-  expect(screen.getByRole('button', { name: 'Створити запит на зміну ціни' })).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Змінити ціну' })).toBeTruthy();
+  const cancelButton = screen.getByRole('button', { name: 'Скасувати' });
+  const requestButton = screen.getByRole('button', { name: 'Створити запит на зміну ціни' });
+  const directButton = screen.getByRole('button', { name: 'Змінити ціну' });
+
+  expect(cancelButton.classList.contains('btn-outline')).toBe(true);
+  expect(requestButton.classList.contains('btn-outline')).toBe(true);
+  expect(requestButton.classList.contains('btn-primary')).toBe(false);
+  expect(directButton.classList.contains('btn-primary')).toBe(true);
   expect(screen.getByRole('radio', { name: 'Ручна UAH' })).toBeTruthy();
+});
+
+it('keeps direct apply primary for direct-only access', () => {
+  render(<ProductPriceChangeDialog
+    {...getDialogProps()}
+  />);
+
+  const cancelButton = screen.getByRole('button', { name: 'Скасувати' });
+  const directButton = screen.getByRole('button', { name: 'Змінити ціну' });
+
+  expect(cancelButton.classList.contains('btn-outline')).toBe(true);
+  expect(directButton.classList.contains('btn-primary')).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Створити запит на зміну ціни' })).toBeNull();
 });

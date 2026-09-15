@@ -347,6 +347,10 @@ test('home and decode presentation share aligned columns and compact authoritati
   assert.match(stylesSource, /\.home-top-workspace,[\s\S]*?\.operational-split-layout[\s\S]*?360px/);
   assert.match(stylesSource, /\.home-top-workspace\.is-decoder-only[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(stylesSource, /\.home-top-workspace\.is-decoder-only \.home-side-workspace[\s\S]*?minmax\(0, 1fr\) 360px/);
+  assert.match(stylesSource, /\.home-top-workspace:not\(\.is-decoder-only\) \.home-create-panel \{[\s\S]*?flex self-stretch flex-col/);
+  assert.match(stylesSource, /\.home-top-workspace:not\(\.is-decoder-only\) \.home-category-list \{[\s\S]*?flex-1;[\s\S]*?grid-auto-rows: minmax\(80px, 1fr\)/);
+  assert.match(stylesSource, /\.home-top-workspace:not\(\.is-decoder-only\) \.home-category-option \{[\s\S]*?h-full/);
+  assert.doesNotMatch(stylesSource, /\.home-create-panel \{ @apply self-start/);
   assert.match(homeSource, /const finalStoredPriceUsd = decodeData\.existsInDb \? pricing\?\.totalPrice : null/);
   assert.match(homeSource, /formatOptionalValue\(finalStoredPriceUsd, formatUsd\)/);
   assert.doesNotMatch(homeSource, /decode-rounding-note/);

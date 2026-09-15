@@ -200,7 +200,7 @@ export function ProductPriceChangeDialog({
           {canCreateRequest && <button
             ref={!canApplyDirect ? confirmButtonRef : undefined}
             type="button"
-            className="btn btn-outline order-1 sm:order-2"
+            className={`btn ${canApplyDirect ? 'btn-outline' : 'btn-primary'} order-1 sm:order-2`}
             onClick={onRequest}
             disabled={actionDisabled || !requestAllowedForMode}
             title={!requestAllowedForMode ? 'Для цього режиму потрібен дозвіл керування ціною запиту.' : undefined}

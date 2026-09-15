@@ -37,8 +37,12 @@ describe('Home workspace', () => {
     const { container, onStart } = renderHome();
     const selectionSurface = container.querySelector('.home-create-panel');
     const options = selectionSurface.querySelectorAll('.home-category-option');
+    const categoryList = selectionSurface.querySelector('.home-category-list');
 
-    expect(selectionSurface.querySelector('.home-category-list')).toBeTruthy();
+    expect(categoryList).toBeTruthy();
+    expect(categoryList.classList.contains('grid')).toBe(true);
+    expect(categoryList.classList.contains('sm:grid-cols-2')).toBe(true);
+    expect(categoryList.classList.contains('xl:grid-cols-3')).toBe(true);
     expect(options).toHaveLength(2);
     expect(options[0].textContent).toContain('BR');
     expect(options[0].textContent).toContain('Браслети');
