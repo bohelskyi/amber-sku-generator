@@ -81,8 +81,9 @@ export function useProductRecount({
     };
     return { mode: 'system_auto' };
   }, [recountPricingMode, recountUsdPerGram, recountMarketingRounding, recountManualPriceUah]);
-  const priceChangeDecision = useMemo(() => (
-    priceChangeMode === 'usd_per_gram'
+  const priceChangeDecision = useMemo(() => {
+    if (priceChangeMode === 'system_auto') return { mode: 'system_auto' };
+    return priceChangeMode === 'usd_per_gram'
       ? {
         mode: 'usd_per_gram',
         usdPerGram: priceChangeUsdPerGram,
@@ -92,8 +93,8 @@ export function useProductRecount({
         mode: 'manual_uah',
         manualPriceUah: priceChangeManualUah,
         marketingRoundingEnabled: priceChangeManualRounding,
-      }
-  ), [
+      };
+  }, [
     priceChangeManualUah,
     priceChangeManualRounding,
     priceChangeMarketingRounding,
@@ -429,9 +430,10 @@ export function useProductRecount({
     const scale = priceChangeMode === 'usd_per_gram' ? 4 : 2;
     const normalized = String(value ?? '').trim().replace(',', '.');
     const amount = Number(normalized);
-    const valid = /^\d+(?:\.\d+)?$/.test(normalized)
-      && Number.isFinite(amount) && amount > 0
-      && Number(amount.toFixed(scale)) === amount;
+    const valid = priceChangeMode === 'system_auto'
+      || (/^\d+(?:\.\d+)?$/.test(normalized)
+        && Number.isFinite(amount) && amount > 0
+        && Number(amount.toFixed(scale)) === amount);
     const requestId = ++priceChangeRequestIdRef.current;
     if (!valid) {
       const resetTimerId = window.setTimeout(() => {

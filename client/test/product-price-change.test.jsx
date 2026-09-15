@@ -37,7 +37,9 @@ it('defaults to the Manual UAH presentation and shows SKU and authoritative pric
   const handlers = renderDialog();
   const choices = within(screen.getByRole('radiogroup', { name: 'Режим зміни ціни' }))
     .getAllByRole('radio');
-  expect(choices.map((choice) => choice.value)).toEqual(['manual_uah', 'usd_per_gram']);
+  expect(choices.map((choice) => choice.value)).toEqual([
+    'system_auto', 'manual_uah', 'usd_per_gram',
+  ]);
   expect(screen.getByRole('radio', { name: 'Ручна UAH' }).checked).toBe(true);
   expect(screen.getByText('LN136021')).toBeTruthy();
   expect(screen.getByText('2400 ₴')).toBeTruthy();
@@ -48,6 +50,40 @@ it('defaults to the Manual UAH presentation and shows SKU and authoritative pric
   fireEvent.click(rounding);
   expect(handlers.onManualMarketingRoundingChange).toHaveBeenCalledWith(true);
   expect(screen.getByRole('button', { name: 'Змінити ціну' }).disabled).toBe(false);
+});
+
+it('shows authoritative automatic pricing without override controls', () => {
+  renderDialog({
+    currentPriceUah: 2500,
+    manualPriceUah: '',
+    mode: 'system_auto',
+    preview: {
+      currentPriceUah: 2500,
+      resultingPriceUah: 2400,
+      priceDifferenceUah: -100,
+      previewToken: 'automatic-token',
+      unchanged: false,
+    },
+  });
+
+  expect(screen.getByRole('radio', { name: 'Автоматична' }).checked).toBe(true);
+  expect(screen.queryByLabelText('Нова ціна UAH')).toBeNull();
+  expect(screen.queryByLabelText('USD за грам')).toBeNull();
+  expect(screen.queryByLabelText('Маркетингове округлення')).toBeNull();
+  expect(screen.getByText('2400 ₴')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Змінити ціну' }).disabled).toBe(false);
+});
+
+it('surfaces unavailable automatic pricing and keeps apply disabled', () => {
+  renderDialog({
+    error: 'Автоматична ціна для цього товару зараз недоступна.',
+    manualPriceUah: '',
+    mode: 'system_auto',
+    preview: null,
+  });
+
+  expect(screen.getByRole('alert').textContent).toContain('Автоматична ціна');
+  expect(screen.getByRole('button', { name: 'Змінити ціну' }).disabled).toBe(true);
 });
 
 it('switches to USD/g and exposes the rounding control', () => {

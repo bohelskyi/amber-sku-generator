@@ -14,29 +14,227 @@ async function ensureSession() {
   }
 }
 
-async function createPriceChangeProduct({ priceUah = 2400 } = {}) {
+async function createPriceChangeProduct({
+  details = {},
+  pricePerGram = 6,
+  priceUah = 2400,
+  totalPrice = priceUah / 40,
+  uahRate = 40,
+} = {}) {
   const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase();
   const fullSku = `PC${suffix}`;
   const result = await pool.query(
     `INSERT INTO products
        (full_sku, base_sku, sequence_number, category, weight, total_price,
         total_price_uah, price_per_gram, uah_rate, details, sku_schema_version_id)
-     VALUES ($1, $1, 0, 'LN', 10, $2, $3, 6, 40,
-       $4::jsonb, $5)
+     VALUES ($1, $1, 0, 'LN', 10, $2, $3, $4, $5,
+       $6::jsonb, $7)
      RETURNING id, full_sku, sku_schema_version_id, details`,
     [
       fullSku,
-      priceUah / 40,
+      totalPrice,
       priceUah,
+      pricePerGram,
+      uahRate,
       JSON.stringify({
         answers: { raw_type: 1, size: 3, shape: 6, is_calibrated: 1 },
         isCalibrated: 1,
+        ...details,
       }),
       schemas.LN,
     ]
   );
   return result.rows[0];
 }
+
+test('automatic pricing clears a manual override while preserving product identity and re-exporting', async () => {
+  await ensureSession();
+  const product = await createPriceChangeProduct({
+    priceUah: 2500,
+    pricePerGram: 6.25,
+    totalPrice: 62.5,
+    details: {
+      calculatedPriceUah: 2400,
+      autoPriceUah: 2400,
+      manualPriceUah: 2500,
+      repricing: { batchId: 999 },
+    },
+  });
+  try {
+    const before = (await pool.query(
+      `SELECT id, full_sku, sku_schema_version_id, weight, details,
+              (SELECT count(*) FROM sku_registry WHERE full_sku = products.full_sku) AS registry_count
+       FROM products WHERE id = $1`,
+      [product.id]
+    )).rows[0];
+    const decision = { mode: 'system_auto' };
+    const pricePreview = await preview(product.id, decision);
+    assert.equal(pricePreview.response.status, 200, pricePreview.text);
+    assert.equal(pricePreview.data.currentPriceUah, 2500);
+    assert.equal(pricePreview.data.resultingPriceUah, 2400);
+    assert.equal(pricePreview.data.unchanged, false);
+
+    const changed = await apply(product.id, decision, pricePreview.data.previewToken);
+    assert.equal(changed.response.status, 200, changed.text);
+    const after = (await pool.query(
+      `SELECT id, full_sku, sku_schema_version_id, weight, total_price,
+              total_price_uah, price_per_gram, uah_rate, details,
+              (SELECT count(*) FROM sku_registry WHERE full_sku = products.full_sku) AS registry_count
+       FROM products WHERE id = $1`,
+      [product.id]
+    )).rows[0];
+    assert.equal(Number(after.id), Number(before.id));
+    assert.equal(after.full_sku, before.full_sku);
+    assert.equal(Number(after.sku_schema_version_id), Number(before.sku_schema_version_id));
+    assert.equal(Number(after.weight), Number(before.weight));
+    assert.deepEqual(after.details.answers, before.details.answers);
+    assert.equal(after.details.isCalibrated, before.details.isCalibrated);
+    assert.equal(Number(after.registry_count), Number(before.registry_count));
+    assert.equal(Number(after.total_price), 60);
+    assert.equal(Number(after.total_price_uah), 2400);
+    assert.equal(Number(after.price_per_gram), 6);
+    assert.equal(Number(after.uah_rate), 40);
+    assert.equal(after.details.calculatedPriceUah, 2400);
+    assert.equal(after.details.autoPriceUah, 2400);
+    assert.equal(after.details.manualPriceUah, null);
+    assert.equal(Object.hasOwn(after.details, 'customUsdPerGramBasis'), false);
+    assert.equal(Object.hasOwn(after.details, 'repricing'), false);
+    assert.equal((await pool.query(
+      'SELECT count(*) FROM product_corrections WHERE source_product_id = $1 OR corrected_product_id = $1',
+      [product.id]
+    )).rows[0].count, '0');
+
+    const revision = (await pool.query(
+      `SELECT revision, confirmed_revision
+       FROM product_export_revisions WHERE product_id = $1`,
+      [product.id]
+    )).rows[0];
+    assert.deepEqual(
+      { revision: Number(revision.revision), confirmedRevision: Number(revision.confirmed_revision) },
+      { revision: 1, confirmedRevision: 0 }
+    );
+    const audit = (await pool.query(
+      `SELECT details FROM audit_events
+       WHERE event_key = 'product.price_changed' AND subject_id = $1
+       ORDER BY id DESC LIMIT 1`,
+      [String(product.id)]
+    )).rows[0].details;
+    assert.equal(audit.priceMode, 'system_auto');
+    assert.deepEqual(audit.pricingDecision, decision);
+    assert.equal(audit.oldPrice.manualPriceUah, 2500);
+    assert.equal(audit.newPrice.manualPriceUah, null);
+    assert.equal(audit.newPrice.totalPriceUah, 2400);
+    assert.equal(audit.exportRevision, 1);
+  } finally {
+    await removeProduct(product.id);
+  }
+});
+
+test('automatic pricing clears a custom USD-per-gram override', async () => {
+  await ensureSession();
+  const product = await createPriceChangeProduct({
+    priceUah: 2800,
+    pricePerGram: 7,
+    totalPrice: 70,
+    details: {
+      calculatedPriceUah: 2800,
+      autoPriceUah: 2800,
+      manualPriceUah: null,
+      customUsdPerGramBasis: {
+        usdPerGram: 7,
+        marketingRoundingEnabled: false,
+        source: 'product_price_change',
+      },
+    },
+  });
+  try {
+    const decision = { mode: 'system_auto' };
+    const pricePreview = await preview(product.id, decision);
+    assert.equal(pricePreview.response.status, 200, pricePreview.text);
+    assert.equal(pricePreview.data.resultingPriceUah, 2400);
+    const changed = await apply(product.id, decision, pricePreview.data.previewToken);
+    assert.equal(changed.response.status, 200, changed.text);
+
+    const stored = (await pool.query(
+      `SELECT total_price, total_price_uah, price_per_gram, uah_rate, details
+       FROM products WHERE id = $1`,
+      [product.id]
+    )).rows[0];
+    assert.equal(Number(stored.total_price), 60);
+    assert.equal(Number(stored.total_price_uah), 2400);
+    assert.equal(Number(stored.price_per_gram), 6);
+    assert.equal(Number(stored.uah_rate), 40);
+    assert.equal(stored.details.manualPriceUah, null);
+    assert.equal(Object.hasOwn(stored.details, 'customUsdPerGramBasis'), false);
+  } finally {
+    await removeProduct(product.id);
+  }
+});
+
+test('automatic pricing rejects unavailable, unchanged, and stale previews authoritatively', async () => {
+  await ensureSession();
+  const noOpProduct = await createPriceChangeProduct();
+  const staleProduct = await createPriceChangeProduct({
+    priceUah: 2500,
+    pricePerGram: 6.25,
+    totalPrice: 62.5,
+    details: { manualPriceUah: 2500 },
+  });
+  const category = (await pool.query(
+    `SELECT marketing_rounding_enabled FROM categories WHERE code = 'LN'`
+  )).rows[0];
+  const scenario = (await pool.query(
+    `SELECT id, status FROM price_scenarios
+     WHERE category_code = 'LN' AND match_json @> '{"is_calibrated":1}'::jsonb
+     ORDER BY priority DESC, id LIMIT 1`
+  )).rows[0];
+  try {
+    const decision = { mode: 'system_auto' };
+    const noOpPreview = await preview(noOpProduct.id, decision);
+    assert.equal(noOpPreview.response.status, 200, noOpPreview.text);
+    assert.equal(noOpPreview.data.resultingPriceUah, 2400);
+    assert.equal(noOpPreview.data.unchanged, true);
+    const noOpApply = await apply(noOpProduct.id, decision, noOpPreview.data.previewToken);
+    assert.equal(noOpApply.response.status, 422, noOpApply.text);
+    assert.equal(noOpApply.data.code, 'PRODUCT_PRICE_UNCHANGED');
+
+    const stalePreview = await preview(staleProduct.id, decision);
+    assert.equal(stalePreview.response.status, 200, stalePreview.text);
+    await pool.query(
+      `UPDATE categories SET marketing_rounding_enabled = $1 WHERE code = 'LN'`,
+      [Number(category.marketing_rounding_enabled) === 1 ? 0 : 1]
+    );
+    const staleApply = await apply(staleProduct.id, decision, stalePreview.data.previewToken);
+    assert.equal(staleApply.response.status, 409, staleApply.text);
+    assert.equal(staleApply.data.code, 'STALE_PRODUCT_PRICE_PREVIEW');
+    assert.equal(Number((await pool.query(
+      'SELECT total_price_uah FROM products WHERE id = $1', [staleProduct.id]
+    )).rows[0].total_price_uah), 2500);
+    await pool.query(
+      `UPDATE categories SET marketing_rounding_enabled = $1 WHERE code = 'LN'`,
+      [category.marketing_rounding_enabled]
+    );
+
+    await pool.query(`UPDATE price_scenarios SET status = 'archived' WHERE id = $1`, [scenario.id]);
+    const unavailablePreview = await preview(staleProduct.id, decision);
+    assert.equal(unavailablePreview.response.status, 422, unavailablePreview.text);
+    assert.equal(unavailablePreview.data.code, 'AUTOMATIC_PRICE_UNAVAILABLE');
+    const unavailableApply = await apply(staleProduct.id, decision, 'unavailable-token');
+    assert.equal(unavailableApply.response.status, 422, unavailableApply.text);
+    assert.equal(unavailableApply.data.code, 'AUTOMATIC_PRICE_UNAVAILABLE');
+  } finally {
+    await pool.query(
+      `UPDATE categories SET marketing_rounding_enabled = $1 WHERE code = 'LN'`,
+      [category.marketing_rounding_enabled]
+    );
+    await pool.query(`UPDATE price_scenarios SET status = $1 WHERE id = $2`, [
+      scenario.status,
+      scenario.id,
+    ]);
+    await removeProduct(noOpProduct.id);
+    await removeProduct(staleProduct.id);
+  }
+});
 
 async function removeProduct(productId) {
   await pool.query('DELETE FROM correction_requests WHERE source_product_id = $1', [productId]);
@@ -143,23 +341,32 @@ test('manual UAH marketing rounding is optional, authoritative, and bound to pre
   const product = await createPriceChangeProduct();
   try {
     const exactDecision = {
-      mode: 'manual_uah', manualPriceUah: 2476, marketingRoundingEnabled: false,
+      mode: 'manual_uah', manualPriceUah: 2390, marketingRoundingEnabled: false,
     };
     const exactPreview = await preview(product.id, exactDecision);
     assert.equal(exactPreview.response.status, 200, exactPreview.text);
-    assert.equal(exactPreview.data.resultingPriceUah, 2476);
+    assert.equal(exactPreview.data.resultingPriceUah, 2390);
     const exactChange = await apply(product.id, exactDecision, exactPreview.data.previewToken);
     assert.equal(exactChange.response.status, 200, exactChange.text);
     assert.equal(Number((await pool.query(
       'SELECT total_price_uah FROM products WHERE id = $1', [product.id]
-    )).rows[0].total_price_uah), 2476);
+    )).rows[0].total_price_uah), 2390);
 
     const roundedDecision = {
-      mode: 'manual_uah', manualPriceUah: 2526, marketingRoundingEnabled: true,
+      mode: 'manual_uah', manualPriceUah: 2390, marketingRoundingEnabled: true,
     };
     const roundedPreview = await preview(product.id, roundedDecision);
     assert.equal(roundedPreview.response.status, 200, roundedPreview.text);
-    assert.equal(roundedPreview.data.resultingPriceUah, 2550);
+    assert.equal(roundedPreview.data.resultingPriceUah, 2400);
+
+    const changedChoice = {
+      ...roundedDecision,
+      marketingRoundingEnabled: false,
+    };
+    const staleApply = await apply(product.id, changedChoice, roundedPreview.data.previewToken);
+    assert.equal(staleApply.response.status, 409, staleApply.text);
+    assert.equal(staleApply.data.code, 'STALE_PRODUCT_PRICE_PREVIEW');
+
     const roundedChange = await apply(
       product.id,
       roundedDecision,
@@ -169,33 +376,19 @@ test('manual UAH marketing rounding is optional, authoritative, and bound to pre
     const roundedStored = (await pool.query(
       `SELECT total_price_uah, details FROM products WHERE id = $1`, [product.id]
     )).rows[0];
-    assert.equal(Number(roundedStored.total_price_uah), 2550);
-    assert.equal(roundedStored.details.manualPriceUah, 2550);
+    assert.equal(Number(roundedStored.total_price_uah), 2400);
+    assert.equal(roundedStored.details.manualPriceUah, 2400);
 
     const noOpDecision = {
-      mode: 'manual_uah', manualPriceUah: 2549, marketingRoundingEnabled: true,
+      mode: 'manual_uah', manualPriceUah: 2390, marketingRoundingEnabled: true,
     };
     const noOpPreview = await preview(product.id, noOpDecision);
     assert.equal(noOpPreview.response.status, 200, noOpPreview.text);
-    assert.equal(noOpPreview.data.resultingPriceUah, 2550);
+    assert.equal(noOpPreview.data.resultingPriceUah, 2400);
     assert.equal(noOpPreview.data.unchanged, true);
     const noOpApply = await apply(product.id, noOpDecision, noOpPreview.data.previewToken);
     assert.equal(noOpApply.response.status, 422, noOpApply.text);
     assert.equal(noOpApply.data.code, 'PRODUCT_PRICE_UNCHANGED');
-
-    const stalePreviewDecision = {
-      mode: 'manual_uah', manualPriceUah: 2576, marketingRoundingEnabled: true,
-    };
-    const stalePreview = await preview(product.id, stalePreviewDecision);
-    assert.equal(stalePreview.response.status, 200, stalePreview.text);
-    assert.equal(stalePreview.data.resultingPriceUah, 2600);
-    const changedChoice = {
-      ...stalePreviewDecision,
-      marketingRoundingEnabled: false,
-    };
-    const staleApply = await apply(product.id, changedChoice, stalePreview.data.previewToken);
-    assert.equal(staleApply.response.status, 409, staleApply.text);
-    assert.equal(staleApply.data.code, 'STALE_PRODUCT_PRICE_PREVIEW');
 
     const roundedAudit = (await pool.query(
       `SELECT details FROM audit_events
@@ -204,8 +397,8 @@ test('manual UAH marketing rounding is optional, authoritative, and bound to pre
       [String(product.id)]
     )).rows[0].details;
     assert.deepEqual(roundedAudit.pricingDecision, roundedDecision);
-    assert.equal(roundedAudit.newPrice.manualPriceUah, 2550);
-    assert.equal(roundedAudit.newPrice.totalPriceUah, 2550);
+    assert.equal(roundedAudit.newPrice.manualPriceUah, 2400);
+    assert.equal(roundedAudit.newPrice.totalPriceUah, 2400);
   } finally {
     await removeProduct(product.id);
   }

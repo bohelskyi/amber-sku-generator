@@ -2,7 +2,10 @@ const pool = require('../db/pool');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
 const { calculatePricing, loadPricingContext } = require('./pricing.service');
-const { hashPayload } = require('./pricing/pricing-context-fingerprint');
+const {
+  getPricingContextFingerprint,
+  hashPayload,
+} = require('./pricing/pricing-context-fingerprint');
 const {
   calculateDecisionPricing,
   normalizePricingDecision,
@@ -51,11 +54,7 @@ function normalizePriceChangeDecision(input) {
       marketingRoundingEnabled: input.marketingRoundingEnabled,
     };
   }
-  const decision = normalizePricingDecision(input);
-  if (decision.mode === 'system_auto') {
-    throw commandError('Для зміни ціни виберіть «Ручна UAH» або «USD/г».');
-  }
-  return decision;
+  return normalizePricingDecision(input);
 }
 
 function assertActiveProduct(product) {
@@ -107,9 +106,13 @@ async function calculatePriceChange(product, decision, queryable) {
   const oldDetails = getProductDetails(product);
   const answers = getPricingAnswers(product, oldDetails);
   let pricing;
+  let pricingContextFingerprint = null;
 
-  if (decision.mode === 'manual_uah') {
+  if (decision.mode === 'manual_uah' || decision.mode === 'system_auto') {
     const context = await loadPricingContext(product.category, queryable);
+    if (decision.mode === 'system_auto') {
+      pricingContextFingerprint = getPricingContextFingerprint(context);
+    }
     pricing = await calculatePricing(
       product.category,
       answers,
@@ -130,6 +133,13 @@ async function calculatePriceChange(product, decision, queryable) {
     : null;
   const finalPriceUah = manualPriceUah ?? autoPriceUah;
   if (!(Number(finalPriceUah) > 0)) {
+    if (decision.mode === 'system_auto') {
+      throw commandError(
+        'Автоматична ціна для цього товару зараз недоступна.',
+        422,
+        'AUTOMATIC_PRICE_UNAVAILABLE'
+      );
+    }
     throw commandError('Вибране цінове рішення не утворює додатну ціну UAH.');
   }
 
@@ -182,6 +192,7 @@ async function calculatePriceChange(product, decision, queryable) {
       || pricing.currencyPayload.uahRate === undefined
       ? null : Number(pricing.currencyPayload.uahRate),
     details,
+    pricingContextFingerprint,
     uahRateDate: pricing.currencyPayload.uahRateDate ?? null,
   };
 }
@@ -193,6 +204,17 @@ function getPriceChangePreviewToken(product, decision, projected) {
       productState: getProductStateSignature(product),
       decision,
       resultingPriceUah: projected.totalPriceUah,
+    });
+  }
+  if (decision.mode === 'system_auto') {
+    return hashPayload({
+      version: 1,
+      productState: getProductStateSignature(product),
+      decision,
+      pricingContextFingerprint: projected.pricingContextFingerprint,
+      resultingPriceUah: projected.totalPriceUah,
+      rate: projected.uahRate,
+      uahRateDate: projected.uahRateDate,
     });
   }
   return hashPayload({

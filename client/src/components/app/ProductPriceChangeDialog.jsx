@@ -4,6 +4,7 @@ import { useDialogAccessibility } from '../../hooks/useDialogAccessibility';
 import { formatUah } from '../../lib/formatters';
 
 const MODES = [
+  { value: 'system_auto', label: 'Автоматична' },
   { value: 'manual_uah', label: 'Ручна UAH' },
   { value: 'usd_per_gram', label: 'USD/г' },
 ];
@@ -52,9 +53,10 @@ export function ProductPriceChangeDialog({
   });
   if (!isOpen) return null;
 
-  const validInput = mode === 'usd_per_gram'
-    ? validPositiveDecimal(usdPerGram, 4)
-    : validPositiveDecimal(manualPriceUah, 2);
+  const validInput = mode === 'system_auto'
+    || (mode === 'usd_per_gram'
+      ? validPositiveDecimal(usdPerGram, 4)
+      : validPositiveDecimal(manualPriceUah, 2));
   const resultingPrice = preview?.resultingPriceUah ?? null;
   const difference = preview?.priceDifferenceUah ?? null;
 
@@ -109,7 +111,11 @@ export function ProductPriceChangeDialog({
               ))}
             </div>
 
-            {mode === 'manual_uah' ? (
+            {mode === 'system_auto' ? (
+              <p className="mt-4 text-sm text-slate-600">
+                Ціну буде перераховано за поточною автоматичною конфігурацією.
+              </p>
+            ) : mode === 'manual_uah' ? (
               <div className="mt-4 space-y-3">
                 <label className="block text-sm">Нова ціна UAH
                   <input
