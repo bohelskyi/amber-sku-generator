@@ -197,6 +197,15 @@ function requiredText(answers, key, field, errors, required = true) {
   return value;
 }
 
+function magentoDecimal(value, field, errors) {
+  if (!value) return '';
+  if (!/^\d+(?:[.,]\d+)?$/.test(value) || !Number.isFinite(Number(value.replace(',', '.')))) {
+    errors.push({ field, message: 'Некоректне числове значення для Magento.' });
+    return '';
+  }
+  return value.replace(',', '.');
+}
+
 function rawName(group, answers, sku, errors, product) {
   if (group === 'AR') {
     const pair = AR_NAMES[String(answers.type)];
@@ -436,6 +445,9 @@ function mapProduct(product, catalog = new Map()) {
     base.vaha_vyrobu = numericWeight(product.weight, 'vaha_vyrobu', errors);
     base.rozmir_kameniu = base.dovzhyna_namystyny && base.diametr_namystyny
       ? `${base.dovzhyna_namystyny}×${base.diametr_namystyny}` : '';
+    for (const field of ['dovzhyna_namystyny', 'diametr_namystyny', 'dovzhyna_vyrobu']) {
+      base[field] = magentoDecimal(base[field], field, errors);
+    }
   }
   if (group === 'AR' && !hasAnswer(answers, 'glass')) base.sklo = 'Без скла';
   if (group === 'SV') {
@@ -452,7 +464,7 @@ function mapProduct(product, catalog = new Map()) {
     base.meta_description = paintingSeo(answers.type, 'description');
   }
   const english = { sku, store_view_code: 'en', name: enName,
-    product_type: 'simple' };
+    attribute_set_code: base.attribute_set_code, product_type: 'simple' };
   if (SEO[group]?.enTitle) english.meta_title = SEO[group].enTitle;
   if (SEO[group]?.enDescription) english.meta_description = SEO[group].enDescription;
   return { group, sku, errors, base, english };

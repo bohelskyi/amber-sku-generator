@@ -3,6 +3,17 @@ import { exportsApi } from '../../api/exports-api';
 import { getApiError } from '../../lib/http-error';
 import { getNewProductCopy } from '../../lib/product-export-copy';
 
+const MAGENTO_GROUP_LABELS = {
+  BR: 'Браслети', NM: 'Намиста', KL: 'Кулони',
+  CH: 'Чотки', AR: 'Картини', SV: 'Сувеніри',
+};
+
+function productSummary(count, singular, plural) {
+  const form = new Intl.PluralRules('uk').select(count);
+  const noun = form === 'one' ? 'товар' : form === 'few' ? 'товари' : 'товарів';
+  return `${count} ${noun} ${form === 'one' ? singular : plural}`;
+}
+
 function ManualMagentoNameEditor({ product, onClose, onSaved,
   translationSuggestionAvailable }) {
   const [subjectUa, setSubjectUa] = useState('');
@@ -134,6 +145,7 @@ export function ExportTools({
   const [manualNameProduct, setManualNameProduct] = useState(null);
   const newProductCount = Number(exportStatus?.countSinceLastExport || 0);
   const newProductCopy = getNewProductCopy(newProductCount);
+  const hasReadinessErrors = exportPreview?.errors?.length > 0;
   return (
     <section className="fade-up stagger-2">
       <details className="collapsible">
@@ -150,14 +162,14 @@ export function ExportTools({
         </summary>
 
         <div className="mt-4 space-y-6">
-          {canCreateExport && <div className="field-group">
+          {canCreateExport && <div className="min-w-0 border-t border-slate-200 pt-5">
             <div className="section-title mb-3">
               <div>
-                <h4 className="section-title-text text-lg">Magento Products v1</h4>
-                <p className="section-subtitle">Один незмінний знімок і файли Magento для представлених груп.</p>
+                <h4 className="section-title-text text-lg">Експорт товарів у Magento</h4>
+                <p className="section-subtitle">Підготуйте товари, завантажте файли та завершіть експорт.</p>
               </div>
             </div>
-            <p className="text-sm text-slate-700">
+            <p className={`mt-5 ${exportPreview || exportSnapshot ? 'text-sm text-slate-500' : 'text-xl font-semibold text-slate-800'}`}>
               {exportStatus
                 ? (newProductCount > 0
                   ? newProductCopy.pendingLabel
@@ -167,68 +179,41 @@ export function ExportTools({
             {newProductCount > 0 && (
               <button
                 onClick={() => onPreviewExport('new')}
-                className="btn btn-primary mt-3 px-6"
+                className={`btn mt-3 px-6 ${(exportPreview && !exportSnapshot) || (exportSnapshot && exportSnapshot.status !== 'confirmed') ? 'btn-outline' : 'btn-primary'}`}
                 disabled={isExportLoading}
               >
                 {isExportLoading ? 'Перевіряємо…'
-                  : newProductCopy.previewLabel}
+                  : exportPreview && !exportSnapshot ? 'Перевірити ще раз' : 'Підготувати експорт'}
               </button>
             )}
-            <details className="mt-4 rounded-lg border border-slate-200 p-3">
-              <summary className="cursor-pointer text-sm font-semibold text-slate-700">
-                Повторний експорт або власний діапазон
-              </summary>
-              <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                <input
-                  type="text"
-                  value={exportFromSku}
-                  onChange={(event) => {
-                    setExportFromSku(event.target.value.toUpperCase());
-                    setExportError('');
-                  }}
-                  placeholder="Один SKU або початок діапазону"
-                  aria-label="Початковий SKU для повторного експорту"
-                  className="input"
-                />
-                <input
-                  type="text"
-                  value={exportToSku}
-                  onChange={(event) => {
-                    setExportToSku(event.target.value.toUpperCase());
-                    setExportError('');
-                  }}
-                  placeholder="Кінцевий SKU, необов’язково"
-                  aria-label="Кінцевий SKU для повторного експорту, необов’язково"
-                  className="input"
-                />
-                <button
-                  onClick={() => onPreviewExport('manual')}
-                  className="btn btn-primary px-6"
-                  disabled={isExportLoading}
-                >
-                  Перевірити діапазон
-                </button>
-              </div>
-              <p className="mt-2 text-xs text-slate-500">
-                Порожній кінцевий SKU означає повторний експорт одного товару.
-                Для діапазону вкажіть обидва SKU; порядок визначають збережені товари.
-              </p>
-            </details>
             {exportError && (
-              <div className="danger-panel p-3 mt-3 text-sm">
+              <div className="danger-panel p-3 mt-3 text-sm" role="alert">
                 {exportError}
               </div>
             )}
-            {exportPreview && (
+            {exportPreview && !exportSnapshot && (
               <div className="mt-3 space-y-3 text-sm">
-                <p className="font-semibold">{exportPreview.mode === 'new'
-                  ? 'Нові товари після останнього прийнятого знімка'
-                  : 'Повторний експорт або власний діапазон'}</p>
-                <p>Представлено: <strong>{exportPreview.representedCount}</strong>.
-                  Готові до Magento: <strong>{exportPreview.readyCount}</strong>.</p>
-                {exportPreview.errors?.length > 0 && (
-                  <div className="danger-panel p-3">
-                    <p className="font-semibold">Потрібно виправити перед створенням знімка:</p>
+                {exportPreview.mode !== 'new' && (
+                  <p className="text-xs text-slate-500">Повторний / вибірковий експорт</p>
+                )}
+                {!hasReadinessErrors && (
+                  <div className="py-3" role="status">
+                    <h5 className="text-xl font-semibold text-slate-800">
+                      {exportPreview.representedCount
+                        ? productSummary(exportPreview.readyCount, 'готовий до експорту', 'готові до експорту')
+                        : 'Немає товарів для експорту'}
+                    </h5>
+                    {exportPreview.representedCount > 0 && (
+                      <p className="mt-1 text-slate-600">Усі дані заповнені та пройшли перевірку.</p>
+                    )}
+                  </div>
+                )}
+                {hasReadinessErrors && (
+                  <div className="border-l-4 border-amber-500 bg-amber-50 p-4" role="alert">
+                    <h5 className="text-xl font-semibold text-slate-800">
+                      {productSummary(exportPreview.errors.length, 'потребує виправлення', 'потребують виправлення')}
+                    </h5>
+                    <p className="mt-1 text-slate-700">Готово: {exportPreview.readyCount} із {exportPreview.representedCount}</p>
                     <ul className="mt-2 list-disc pl-5">
                       {exportPreview.errors.map((item) => (
                         <li key={`${item.productId}-${item.sku}`}>
@@ -257,55 +242,113 @@ export function ExportTools({
                       onPreviewExport(exportPreview.mode);
                     }} />
                 )}
-                <p>Файли: {exportPreview.artifacts?.length
-                  ? exportPreview.artifacts.map((item) => item.fileName).join(', ')
-                  : 'немає представлених готових груп'}.</p>
                 <button
                   onClick={onCreateSnapshot}
                   className="btn btn-primary px-6"
                   disabled={isExportLoading || exportPreview.errors?.length > 0
                     || !exportPreview.representedCount || Boolean(exportSnapshot)}
                 >
-                  Створити знімок
+                  Створити файли
                 </button>
               </div>
             )}
             {exportSnapshot && (
-              <div className="mt-3 space-y-3 text-sm">
-                <p>Знімок {exportSnapshot.id}: {exportSnapshot.status === 'confirmed'
-                  ? 'прийнятий як використаний' : 'створений, очікує прийняття'}.</p>
-                <div className="flex flex-wrap gap-2">
-                  {(exportSnapshot.artifacts || []).map((item) => (
-                    <button
-                      key={item.groupCode}
-                      className="btn btn-primary px-4"
-                      disabled={isExportLoading}
-                      onClick={() => onDownloadMagentoArtifact(item.groupCode)}
-                    >
-                      Завантажити {item.fileName}
-                    </button>
-                  ))}
+              <div className="mt-5 space-y-4 text-sm">
+                <div role="status">
+                  <h5 className="text-xl font-semibold text-slate-800">
+                    {exportSnapshot.status === 'confirmed' ? 'Експорт завершено' : 'Файли Magento готові'}
+                  </h5>
+                  <p className="mt-1 text-slate-600">Завантажте CSV для кожної групи товарів та імпортуйте файли в Magento.</p>
                 </div>
+                <ul className="divide-y divide-slate-200">
+                  {(exportSnapshot.artifacts || []).map((item) => (
+                    <li key={item.groupCode} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                      <span className="font-semibold text-slate-800">{MAGENTO_GROUP_LABELS[item.groupCode] || item.groupCode}</span>
+                      <button
+                        className="btn btn-outline px-4"
+                        aria-label={`Завантажити CSV: ${MAGENTO_GROUP_LABELS[item.groupCode] || item.groupCode}`}
+                        disabled={isExportLoading}
+                        onClick={() => onDownloadMagentoArtifact(item.groupCode)}
+                      >
+                        Завантажити CSV
+                      </button>
+                    </li>
+                  ))}
+                </ul>
                 {exportSnapshot.status !== 'confirmed' && (
-                  <button
-                    className="btn btn-primary px-6"
-                    disabled={isExportLoading}
-                    onClick={onConfirmSnapshot}
-                  >
-                    Прийняти знімок як використаний
-                  </button>
+                  <div className="pt-2">
+                    <button
+                      className="btn btn-primary px-6"
+                      disabled={isExportLoading}
+                      onClick={onConfirmSnapshot}
+                    >
+                      Завершити експорт
+                    </button>
+                    <p className="mt-2 max-w-2xl text-xs leading-relaxed text-slate-500">Після завершення ці товари будуть прибрані з черги нових. Це не означає, що Magento вже імпортувала файли.</p>
+                  </div>
                 )}
-                <p className="text-xs text-slate-500">Прийняття знімка не означає успішний імпорт у Magento.</p>
+                {exportSnapshot.status === 'confirmed' && (
+                  <p className="text-xs text-slate-500">Завершення експорту не означає, що Magento вже імпортувала файли.</p>
+                )}
+                <details className="text-xs text-slate-500">
+                  <summary className="cursor-pointer font-medium">Технічні дані</summary>
+                  <p className="mt-2 break-all">ID експорту: {exportSnapshot.id}</p>
+                  <ul className="mt-1 space-y-1 break-all">
+                    {(exportSnapshot.artifacts || []).map((item) => (
+                      <li key={item.groupCode}>{item.fileName}</li>
+                    ))}
+                  </ul>
+                </details>
               </div>
             )}
+            <details className="mt-6 border-t border-slate-200 pt-4">
+              <summary className="cursor-pointer text-sm font-semibold text-slate-700">
+                Повторний / вибірковий експорт
+              </summary>
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <input
+                  type="text"
+                  value={exportFromSku}
+                  onChange={(event) => {
+                    setExportFromSku(event.target.value.toUpperCase());
+                    setExportError('');
+                  }}
+                  placeholder="Один SKU або початок діапазону"
+                  aria-label="Початковий SKU для повторного експорту"
+                  className="input"
+                />
+                <input
+                  type="text"
+                  value={exportToSku}
+                  onChange={(event) => {
+                    setExportToSku(event.target.value.toUpperCase());
+                    setExportError('');
+                  }}
+                  placeholder="Кінцевий SKU, необов’язково"
+                  aria-label="Кінцевий SKU для повторного експорту, необов’язково"
+                  className="input"
+                />
+                <button
+                  onClick={() => onPreviewExport('manual')}
+                  className="btn btn-outline px-6"
+                  disabled={isExportLoading}
+                >
+                  Перевірити діапазон
+                </button>
+              </div>
+              <p className="mt-2 text-xs text-slate-500">
+                Порожній кінцевий SKU означає повторний експорт одного товару.
+                Для діапазону вкажіть обидва SKU; порядок визначають збережені товари.
+              </p>
+            </details>
           </div>}
 
-          {canCreateExport && <div className="field-group">
+          {canCreateExport && <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 sm:flex sm:flex-wrap sm:items-center sm:justify-between sm:gap-4">
             <div className="section-title mb-3">
               <div>
                 <h4 className="section-title-text text-lg">Експорт змін цін</h4>
                 <p className="section-subtitle">
-                  Окремий CSV <span className="font-mono">sku,price</span>. Очікує: {priceExportStatus?.pendingCount ?? '…'}.
+                  Окремий файл із оновленими цінами. Очікує: {priceExportStatus?.pendingCount ?? '…'}.
                   {Number(priceExportStatus?.excludedPendingCount) > 0
                     ? ` Виключено: ${priceExportStatus.excludedPendingCount}.` : ''}
                 </p>
@@ -313,7 +356,7 @@ export function ExportTools({
             </div>
             <button
               onClick={onPriceExportCsv}
-              className="btn btn-primary px-6"
+              className="btn btn-outline px-6"
               disabled={isPriceExportLoading || Number(priceExportStatus?.pendingCount || 0) === 0}
             >
               {isPriceExportLoading ? 'Експортуємо ціни…' : 'Експортувати зміни цін'}
@@ -321,7 +364,7 @@ export function ExportTools({
             {priceExportError && <div className="danger-panel p-3 mt-3 text-sm">{priceExportError}</div>}
           </div>}
 
-          {canArchive && <div className="field-group">
+          {canArchive && <div className="border-t border-slate-200 pt-5">
             <div className="section-title mb-3">
               <div>
                 <h4 className="section-title-text text-lg">Архівування</h4>

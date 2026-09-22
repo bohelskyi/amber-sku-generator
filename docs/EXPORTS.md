@@ -23,6 +23,8 @@ The internal compatibility CSV contains the SKU, stored final UAH price (includi
 
 Magento Products v1 writes one CSV per represented group: Браслети, Намиста, Кулони, Чотки, Картини, and Сувеніри. Souvenir products with semantic `souvenir=5` use the Камінь attribute set and category paths. There is no Silver or separate Stone workflow. The six worksheet header lists and order are fixed in `magento-products-v1.js`. Each product has exactly a complete base row (blank `store_view_code`) and an EN row containing SKU, store view, name, `product_type=simple`, and defined EN SEO fields. Descriptions stay blank. Categories are comma-separated. The mapper reads stored `details.answers` value IDs and the final stored UAH price; it never decodes characteristics from SKU text or uses editable option labels. Profile constants include `simple`, `base`, `product_online=2`, `Catalog, Search`, quantity 1, stock status 1, `old_product=No`, and `is_ownproduction=Yes`. KL dimensions use current `pedant_size`, with `exact_size` only as a fallback for stored legacy answers.
 
+EN rows carry the same `attribute_set_code` as their base row, including Камінь for Stone souvenirs. CH numeric attributes `dovzhyna_namystyny`, `diametr_namystyny`, and `dovzhyna_vyrobu` accept stored decimal commas or dots and serialize with a dot (`15,8` becomes `15.8`). Invalid present numeric values fail Magento readiness. The existing `rozmir_kameniu` formatting is unchanged.
+
 Missing mandatory values or unmapped semantic IDs are grouped by SKU and Magento field in `POST /api/export/preview`. Preview does not advance cursor or exposure. `POST /api/export/snapshots` rechecks under product locks and rolls back parent snapshot, artifacts, audit, and exposure together on any readiness error. Undefined optional SEO stays blank. Souvenir subtypes without approved English names remain not-ready. Historical `CH.is_calibrated=3` is outside the Magento payload and does not by itself block export; its separate catalog/data remediation remains pending business definition.
 
 For a souvenir without an approved automatic semantic name, readiness reports `manual_name_required`. An operator can save a UA/EN subject pair through `/api/product-magento-name/preview` and `/apply`. The server stores only the pair on the same active product and audits old/new values in the same transaction; product identity, answers, price, correction history, flags, and export revisions do not change. The saved pair takes precedence over the automatic name. Final names are `{UA subject} з бурштину. Арт: {sku}` and `Amber {EN subject}. Art: {sku}`. Export never translates or regenerates the stored subjects. Already generated artifacts remain immutable; a later same-SKU re-export captures the updated names.
@@ -61,3 +63,20 @@ For each represented re-export, confirmation advances `confirmed_revision` with 
 ## CSV safety
 
 Fields retain correct quoting/escaping for commas, quotes, and newlines. Text beginning with spreadsheet formula sigils `=`, `+`, `-`, or `@`—including after leading whitespace or a tab—is prefixed so spreadsheet software does not execute it as a formula.
+
+## Confirmed Magento Products v1 acceptance
+
+On 2026-09-23, the operator confirmed that all six CSV files from the fresh 40-fixture snapshot passed Magento **Check Data** with **File is valid**.
+
+The run used a clean local restored production copy with startup and migrations through `034` healthy. Forty fresh products were created through authoritative preview/save services: two each of BR, NM, KL, CH, and AR, plus 30 SV products. Required manual names were saved through the existing manual-name preview/apply service. The explicit product-ID range was verified to contain only these fresh fixtures, with no older pending products; Magento preview reported `represented=40` and `ready=40` before snapshot creation.
+
+| Group | CSV file | Products | Magento Check Data |
+| --- | --- | ---: | --- |
+| BR — Браслети | `amber-magento-BR-magento-products-v1.csv` | 2 | File is valid |
+| NM — Намиста | `amber-magento-NM-magento-products-v1.csv` | 2 | File is valid |
+| KL — Кулони | `amber-magento-KL-magento-products-v1.csv` | 2 | File is valid |
+| CH — Чотки | `amber-magento-CH-magento-products-v1.csv` | 2 | File is valid |
+| AR — Картини | `amber-magento-AR-magento-products-v1.csv` | 2 | File is valid |
+| SV — Сувеніри | `amber-magento-SV-magento-products-v1.csv` | 30 | File is valid |
+
+This records Check Data validation, not a completed Magento import. The fixture generator, manifest, reports, and generated CSVs remain local-only and are not repository deliverables. The accepted mappings and export behavior require no further changes unless a real defect is found; explicit `url_key` generation remains deferred.
