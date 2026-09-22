@@ -49,6 +49,29 @@ export function getRecountSourceWeight(decoded) {
   return 0;
 }
 
+// Presentation hint only. The server checks the catalog and pricing rules again.
+const INFORMATION_FIELDS_V1 = {
+  BR: ['braclet_size'],
+  NM: ['neckle_size'],
+  KL: ['exact_size'],
+  CH: ['bead_length', 'bead_width', 'rosary_length'],
+  SV: ['size'],
+};
+
+export function getInformationOnlyPatch(decoded, answers, weight, submitMode = 'apply') {
+  const category = decoded?.category?.code;
+  const eligible = INFORMATION_FIELDS_V1[category] || [];
+  if (submitMode !== 'apply' || !decoded?.product?.id || eligible.length === 0
+      || Number(weight) !== getRecountSourceWeight(decoded)) return null;
+  const previous = getDecodedAnswerMap(decoded);
+  const keys = new Set([...Object.keys(previous), ...Object.keys(answers || {})]);
+  const changed = [...keys].filter(
+    (key) => String(previous[key] ?? '') !== String(answers?.[key] ?? '')
+  );
+  if (changed.length === 0 || changed.some((key) => !eligible.includes(key))) return null;
+  return Object.fromEntries(changed.map((key) => [key, answers?.[key] ?? null]));
+}
+
 export function getCorrectionMarketingRoundingDefault(config, categoryCode) {
   const storedValue = config?.categories?.[categoryCode]?.marketing_rounding_enabled;
   return Number(storedValue ?? 1) !== 0;

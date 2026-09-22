@@ -154,6 +154,7 @@ export function RepricingRecountDrawer({
             config={config}
             decodeData={recount.decodeData}
             hasRecountChanges={recount.hasRecountChanges}
+            isInformationOnly={recount.isInformationOnly}
             isRecountApplying={recount.isRecountApplying}
             isRecountLoading={recount.isRecountLoading}
             isRecountOpen={recount.isRecountOpen}

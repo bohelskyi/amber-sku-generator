@@ -9,6 +9,7 @@ import {
   formatUsd,
 } from '../../lib/formatters';
 import { getAnswerValueLabel, getQuestionLabel } from '../../lib/answer-labels';
+import { getNewProductCopy } from '../../lib/product-export-copy';
 import {
   getVisibleOptionsForQuestion,
   isQuestionVisible,
@@ -104,6 +105,7 @@ export function HomeDashboard({
   decodeError,
   decodeErrorDetails,
   hasRecountChanges,
+  isInformationOnly = false,
   isRecountApplying,
   isRecountLoading,
   isRecountOpen,
@@ -129,6 +131,7 @@ export function HomeDashboard({
   onDecode,
   onDecodeInputChange,
 }) {
+  const newProductCopy = getNewProductCopy(exportStatus?.countSinceLastExport);
   return (
     <div className="space-y-5">
       <div className={`home-top-workspace${canCreateProducts ? '' : ' is-decoder-only'}`}>
@@ -199,14 +202,15 @@ export function HomeDashboard({
                 </p>
               </div>
               <span className="status-badge is-neutral">
-                {exportStatus ? `${exportStatus.countSinceLastExport} нових` : '...'}
+                {exportStatus ? newProductCopy.countLabel : '...'}
               </span>
             </div>
             {exportStatus && (
-              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
-                <span>У базі: {exportStatus.totalProducts}</span>
-                {exportStatus.exportableProducts !== undefined && <span>До експорту: {exportStatus.exportableProducts}</span>}
-              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                {Number(exportStatus.countSinceLastExport) > 0
+                  ? newProductCopy.pendingLabel
+                  : 'Нових товарів для експорту немає'}
+              </p>
             )}
             <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-200 pt-3 text-xs">
               <span className="font-semibold text-slate-700">Експорт змін цін</span>
@@ -228,6 +232,7 @@ export function HomeDashboard({
           config={config}
           decodeData={decodeData}
           hasRecountChanges={hasRecountChanges}
+          isInformationOnly={isInformationOnly}
           isRecountApplying={isRecountApplying}
           isRecountLoading={isRecountLoading}
           isRecountOpen={isRecountOpen}
@@ -263,6 +268,7 @@ export function DecodeWorkspace({
   config,
   decodeData,
   hasRecountChanges,
+  isInformationOnly = false,
   isRecountApplying,
   isRecountLoading,
   isRecountOpen,
@@ -314,6 +320,7 @@ export function DecodeWorkspace({
           canChangeProductPrice={canChangeProductPrice}
           decodeData={decodeData}
           hasRecountChanges={hasRecountChanges}
+          isInformationOnly={isInformationOnly}
           isRecountApplying={isRecountApplying}
           isRecountLoading={isRecountLoading}
           isRecountPreviewCurrent={isRecountPreviewCurrent}
@@ -559,6 +566,7 @@ function RecountPanel({
   config,
   decodeData,
   hasRecountChanges,
+  isInformationOnly = false,
   isRecountApplying,
   isRecountLoading,
   isRecountPreviewCurrent,
@@ -882,6 +890,12 @@ function RecountPanel({
               )}
             </div>
 
+            {isInformationOnly && (
+              <p className="builder-summary-note">
+                Зміняться лише інформаційні характеристики. SKU, товар і ціна залишаться без змін.
+              </p>
+            )}
+
             {isRecountPreviewCurrent && recountPreview?.corrected.variation && (
               <p className="builder-summary-note is-warning">
                 Новий SKU буде варіацією наявного артикула.
@@ -925,7 +939,7 @@ function RecountPanel({
                   : isRecountLoading
                     ? 'Готуємо...'
                     : hasRecountChanges
-                      ? 'Продовжити'
+                      ? (isInformationOnly ? 'Оновити характеристики' : 'Продовжити')
                       : 'Змінити ціну'}
               </button>
             </div>

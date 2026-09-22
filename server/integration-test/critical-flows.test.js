@@ -15,6 +15,7 @@ for (const modulePath of [
   './09-corrections-drafts.cases',
   './10-repricing.cases',
   './11-exports-schemas.cases',
+  './11-magento-products.cases',
   './12-rbac-audit.cases',
   './13-sqlite-import.cases',
 ]) {

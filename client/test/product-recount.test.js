@@ -9,6 +9,7 @@ import {
   getCorrectionMarketingRoundingDefault,
   getDecodedAnswerMap,
   getDirectRecountManualPrice,
+  getInformationOnlyPatch,
   haveAnswersChanged,
   normalizeRecountTargetAnswers,
   normalizeRecountTargetState,
@@ -315,6 +316,28 @@ test('recount clears target-hidden inherited answers without changing normal pro
     { raw_type: 2, legacy_detail: null }
   );
   assert.doesNotMatch(skuManagerSource, /normalizeRecountTargetAnswers/);
+});
+
+test('client suggests in-place completion only for the narrow Magento informational list', () => {
+  const decoded = {
+    category: { code: 'BR', requires_weight: 1 },
+    product: { id: 9, weight: 10, details: { answers: {
+      raw_type: 1, braclet_size: '14', is_calibrated: 0,
+    } } },
+    decodedAnswers: [{ key: 'raw_type', value_id: 1 }],
+  };
+  assert.deepEqual(getInformationOnlyPatch(decoded, {
+    raw_type: 1, braclet_size: '16', is_calibrated: 0,
+  }, '10', 'apply'), { braclet_size: '16' });
+  assert.equal(getInformationOnlyPatch(decoded, {
+    raw_type: 2, braclet_size: '16', is_calibrated: 0,
+  }, '10', 'apply'), null);
+  assert.equal(getInformationOnlyPatch(decoded, {
+    raw_type: 1, braclet_size: '16', is_calibrated: 0,
+  }, '11', 'apply'), null);
+  assert.equal(getInformationOnlyPatch({
+    ...decoded, category: { code: 'SV', requires_weight: 0 },
+  }, { raw_type: 1, braclet_size: '14', is_calibrated: 0, weight: '25' }, '10'), null);
 });
 
 test('direct recount drops an inactive manual decision but preserves missing-price fallback', () => {

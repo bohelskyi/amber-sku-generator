@@ -6,6 +6,10 @@ const { toUahNumber } = require('../utils/money');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
 const { startPhase } = require('../observability/performance-metrics');
+const {
+  buildMagentoPayload,
+  loadMagentoCatalog,
+} = require('./magento-products-v1');
 
 async function getNonSkuQuestionMaps(categoryCodes, queryable = pool) {
   if (!categoryCodes || categoryCodes.length === 0) return new Map();
@@ -157,7 +161,9 @@ async function getExportRows(fromSku, toSku, options = {}) {
   const inRequestedRangeSql = `(${rangeClauses.join(' AND ')})`;
   const result = await queryable.query(
     `
-      SELECT p.id, p.full_sku, p.category, p.total_price_uah, p.details, p.created_at,
+      SELECT p.id, p.full_sku, p.category, p.weight, p.total_price_uah,
+             p.details, p.created_at, p.magento_name_subject_ua,
+             p.magento_name_subject_en,
              ${inRequestedRangeSql} AS in_requested_range
       FROM products p
       WHERE COALESCE(p.exclude_from_export, 0) = 0
@@ -260,8 +266,58 @@ function assertSnapshotMatchesRequest(snapshot, fromSku, toSku) {
   return snapshot;
 }
 
-async function createExportSnapshot({ fromSku, toSku, idempotencyKey }, options = {}) {
+function staleNewRangeError() {
+  const error = new Error('Список нових товарів змінився. Перевірте його ще раз.');
+  error.statusCode = 409;
+  error.publicCode = 'NEW_EXPORT_RANGE_STALE';
+  return error;
+}
+
+async function getConfirmedExportCursor(queryable, lock = false) {
+  const result = await queryable.query(
+    `SELECT exported_to_product_id FROM export_state WHERE singleton = TRUE
+     ${lock ? 'FOR SHARE' : ''}`
+  );
+  return Number(result.rows[0]?.exported_to_product_id || 0);
+}
+
+async function resolveNewExportRange(queryable) {
+  const cursor = await getConfirmedExportCursor(queryable);
+  const result = await queryable.query(
+    `SELECT MIN(id)::int AS first_id, MAX(id)::int AS last_id,
+            count(*)::int AS product_count
+     FROM products
+     WHERE id > $1 AND COALESCE(exclude_from_export, 0) = 0`,
+    [cursor]
+  );
+  const { first_id: firstId, last_id: lastId, product_count: productCount } = result.rows[0];
+  if (!productCount) return { cursor, fromSku: null, toSku: null, productCount: 0 };
+  const anchors = await queryable.query(
+    'SELECT id, full_sku FROM products WHERE id = ANY($1::int[])',
+    [[firstId, lastId]]
+  );
+  const byId = new Map(anchors.rows.map((row) => [Number(row.id), row.full_sku]));
+  return { cursor, fromSku: byId.get(firstId), toSku: byId.get(lastId), productCount };
+}
+
+async function createExportSnapshot({ fromSku, toSku, idempotencyKey, profile, mode }, options = {}) {
   const mutationContext = createMutationContext(options.mutationContext);
+  const requestedProfile = profile || 'magento-products-v1';
+  if (!['magento-products-v1', 'internal-legacy'].includes(requestedProfile)) {
+    const error = new Error('Невідомий профіль експорту.');
+    error.statusCode = 422;
+    throw error;
+  }
+  if (mode && mode !== 'new') {
+    const error = new Error('Невідомий режим вибору товарів для експорту.');
+    error.statusCode = 422;
+    throw error;
+  }
+  if (mode === 'new' && (requestedProfile !== 'magento-products-v1' || !fromSku || !toSku)) {
+    const error = new Error('Спочатку перевірте нові товари для Magento.');
+    error.statusCode = 422;
+    throw error;
+  }
   const key = String(idempotencyKey || '').trim();
   if (!key || key.length > 200) {
     const error = new Error('Потрібен коректний Idempotency-Key для створення export snapshot.');
@@ -273,17 +329,50 @@ async function createExportSnapshot({ fromSku, toSku, idempotencyKey }, options 
     [key]
   );
   if (existing.rows[0]) {
-    return assertSnapshotMatchesRequest(existing.rows[0], fromSku, toSku);
+    const snapshot = assertSnapshotMatchesRequest(existing.rows[0], fromSku, toSku);
+    await assertSnapshotProfile(snapshot, requestedProfile);
+    return snapshot;
   }
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    let newRange = null;
+    if (mode === 'new') {
+      newRange = await resolveNewExportRange(client);
+      if (!newRange.productCount
+          || newRange.fromSku !== String(fromSku).trim().toUpperCase()
+          || newRange.toSku !== String(toSku).trim().toUpperCase()) {
+        throw staleNewRangeError();
+      }
+    }
     const exportData = await getExportRows(fromSku, toSku, {
       queryable: client,
       lockProducts: true,
     });
+    if (newRange && exportData.rows.length !== newRange.productCount) {
+      throw staleNewRangeError();
+    }
+    const catalog = requestedProfile === 'magento-products-v1'
+      ? await loadMagentoCatalog(client) : null;
+    const magento = catalog
+      ? buildMagentoPayload(exportData.rows, catalog) : { errors: [], artifacts: [] };
+    if (requestedProfile === 'magento-products-v1' && exportData.rows.length === 0) {
+      const error = new Error('У діапазоні немає товарів для Magento.');
+      error.statusCode = 422;
+      throw error;
+    }
+    if (magento.errors.length) {
+      const error = new Error('У діапазоні є товари, не готові до Magento.');
+      error.statusCode = 422;
+      error.publicCode = 'MAGENTO_NOT_READY';
+      error.details = magento.errors;
+      throw error;
+    }
     const exposureRevisions = await establishProductSnapshotExposure(client, exportData.rows);
+    if (newRange && await getConfirmedExportCursor(client, true) !== newRange.cursor) {
+      throw staleNewRangeError();
+    }
     const suffixPart = exportData.range.toSku ? `-${exportData.range.toSku}` : '-to-latest';
     const fileName = `amber-export-${exportData.range.fromSku}${suffixPart}.csv`;
     const exportedToProductId = exportData.range.exportedToProductId;
@@ -309,6 +398,16 @@ async function createExportSnapshot({ fromSku, toSku, idempotencyKey }, options 
       ]
     );
     const snapshot = result.rows[0];
+    for (const artifact of magento.artifacts) {
+      await client.query(
+        `INSERT INTO magento_export_artifacts
+         (snapshot_id, profile_version, group_code, file_name, csv_content,
+          product_count, row_count)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [snapshot.id, artifact.profileVersion, artifact.groupCode,
+          artifact.fileName, artifact.csvContent, artifact.productCount, artifact.rowCount]
+      );
+    }
     await writeAuditEvent(client, {
       mutationContext,
       eventKey: 'export_snapshot.created',
@@ -330,10 +429,108 @@ async function createExportSnapshot({ fromSku, toSku, idempotencyKey }, options 
       [key]
     )).rows[0];
     if (!conflictingSnapshot) throw error;
-    return assertSnapshotMatchesRequest(conflictingSnapshot, fromSku, toSku);
+    const snapshot = assertSnapshotMatchesRequest(conflictingSnapshot, fromSku, toSku);
+    await assertSnapshotProfile(snapshot, requestedProfile);
+    return snapshot;
   } finally {
     client.release();
   }
+}
+
+async function assertSnapshotProfile(snapshot, requestedProfile) {
+  const artifacts = await getMagentoArtifacts(snapshot.id);
+  const hasMagento = artifacts.length > 0;
+  if (hasMagento !== (requestedProfile === 'magento-products-v1')) {
+    const error = new Error('Цей Idempotency-Key належить іншому профілю знімка.');
+    error.statusCode = 409;
+    throw error;
+  }
+}
+
+async function previewExport({ fromSku, toSku, mode }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    if (mode && mode !== 'new') {
+      const error = new Error('Невідомий режим вибору товарів для експорту.');
+      error.statusCode = 422;
+      throw error;
+    }
+    const newRange = mode === 'new' ? await resolveNewExportRange(client) : null;
+    if (newRange && !newRange.productCount) {
+      await client.query('COMMIT');
+      return { mode: 'new', range: null, representedCount: 0,
+        readyCount: 0, errors: [], artifacts: [] };
+    }
+    const exportData = await getExportRows(
+      newRange?.fromSku || fromSku,
+      newRange?.toSku || toSku,
+      { queryable: client }
+    );
+    const catalog = await loadMagentoCatalog(client);
+    const magento = buildMagentoPayload(exportData.rows, catalog);
+    await client.query('COMMIT');
+    return {
+      mode: mode || 'manual',
+      range: exportData.range,
+      representedCount: magento.representedCount,
+      readyCount: magento.readyCount,
+      errors: magento.errors,
+      artifacts: magento.artifacts.map((item) => ({
+        groupCode: item.groupCode,
+        groupName: item.groupName,
+        profileVersion: item.profileVersion,
+        fileName: item.fileName,
+        productCount: item.productCount,
+        rowCount: item.rowCount,
+      })),
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function getMagentoArtifacts(snapshotId) {
+  await getExportSnapshot(snapshotId);
+  const result = await pool.query(
+    `SELECT snapshot_id, profile_version, group_code, file_name,
+            product_count, row_count
+     FROM magento_export_artifacts WHERE snapshot_id = $1
+     ORDER BY CASE group_code WHEN 'BR' THEN 1 WHEN 'NM' THEN 2
+       WHEN 'KL' THEN 3 WHEN 'CH' THEN 4 WHEN 'AR' THEN 5 ELSE 6 END`,
+    [snapshotId]
+  );
+  return result.rows.map((row) => ({
+    groupCode: row.group_code,
+    profileVersion: row.profile_version,
+    fileName: row.file_name,
+    productCount: Number(row.product_count),
+    rowCount: Number(row.row_count),
+  }));
+}
+
+async function getMagentoArtifact(snapshotId, groupCode) {
+  const group = String(groupCode || '').toUpperCase();
+  if (!['BR', 'NM', 'KL', 'CH', 'AR', 'SV'].includes(group)) {
+    const error = new Error('Невідома Magento-група.');
+    error.statusCode = 404;
+    throw error;
+  }
+  const result = await pool.query(
+    `SELECT * FROM magento_export_artifacts
+     WHERE snapshot_id = $1 AND group_code = $2
+       AND profile_version = 'magento-products-v1'`,
+    [snapshotId, group]
+  );
+  if (!result.rows[0]) {
+    const error = new Error('Magento artifact не знайдено.');
+    error.statusCode = 404;
+    throw error;
+  }
+  return result.rows[0];
 }
 
 async function getExportSnapshot(snapshotId) {
@@ -536,5 +733,8 @@ module.exports = {
   getExportSnapshot,
   getExportRows,
   getExportStatus,
+  getMagentoArtifact,
+  getMagentoArtifacts,
+  previewExport,
   recordExportEvent,
 };

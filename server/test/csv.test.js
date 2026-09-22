@@ -8,7 +8,7 @@ test('CSV neutralizes spreadsheet formulas in text values', () => {
     assert.equal(escapeCsvValue(`${prefix}SUM(A1:A2)`), `'${prefix}SUM(A1:A2)`);
   }
   assert.equal(escapeCsvValue('\t=SUM(A1:A2)'), "'\t=SUM(A1:A2)");
-  assert.equal(escapeCsvValue('\r@SUM(A1:A2)'), "'\r@SUM(A1:A2)");
+  assert.equal(escapeCsvValue('\r@SUM(A1:A2)'), '"\'\r@SUM(A1:A2)"');
   assert.equal(escapeCsvValue('  +SUM(A1:A2)'), "'  +SUM(A1:A2)");
   assert.equal(escapeCsvValue(-12.5), '-12.5');
 });

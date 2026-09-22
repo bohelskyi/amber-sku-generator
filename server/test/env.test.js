@@ -37,6 +37,14 @@ test('runtime configuration accepts a complete PostgreSQL URL', () => {
   assert.equal(config.trustProxy, false);
 });
 
+test('Google Translation key is optional and remains server-only configuration', () => {
+  const withoutKey = loadConfig(withAuth({ DATABASE_URL: validDatabaseUrl }));
+  assert.equal(withoutKey.googleTranslationApiKey, '');
+  const withKey = loadConfig(withAuth({ DATABASE_URL: validDatabaseUrl,
+    GOOGLE_TRANSLATION_API_KEY: 'test-server-key' }));
+  assert.equal(withKey.googleTranslationApiKey, 'test-server-key');
+});
+
 test('runtime configuration accepts individual PostgreSQL settings', () => {
   const config = loadConfig(withAuth({
     PGHOST: 'postgres',

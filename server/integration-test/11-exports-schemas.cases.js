@@ -48,7 +48,7 @@ async function createSnapshot(fromSku, toSku = fromSku) {
   const result = await request('/api/export/snapshots', {
     method: 'POST',
     headers: { 'Idempotency-Key': `reexport-${crypto.randomUUID()}` },
-    body: { fromSku, toSku },
+    body: { fromSku, toSku, profile: 'internal-legacy' },
   });
   assert.equal(result.response.status, 201, result.text);
   return result.data;
@@ -124,7 +124,7 @@ test('export snapshot creation and confirmation are attributed, audited, and ide
       'Idempotency-Key': idempotencyKey,
       'X-Request-ID': 'export-snapshot-created',
     },
-    body: { fromSku: exportSku, toSku: exportSku },
+    body: { fromSku: exportSku, toSku: exportSku, profile: 'internal-legacy' },
   });
   assert.equal(created.response.status, 201, created.text);
   const snapshotId = created.data.id;
@@ -159,7 +159,7 @@ test('export snapshot creation and confirmation are attributed, audited, and ide
       'Idempotency-Key': idempotencyKey,
       'X-Request-ID': 'export-snapshot-reused',
     },
-    body: { fromSku: exportSku, toSku: exportSku },
+    body: { fromSku: exportSku, toSku: exportSku, profile: 'internal-legacy' },
   });
   assert.equal(reused.response.status, 201, reused.text);
   assert.equal(reused.data.id, snapshotId);
@@ -477,7 +477,7 @@ test('export audit failures roll back snapshot creation and first confirmation',
     const failedCreation = await request('/api/export/snapshots', {
       method: 'POST',
       headers: { 'Idempotency-Key': failedCreationKey },
-      body: { fromSku: exportSku, toSku: exportSku },
+      body: { fromSku: exportSku, toSku: exportSku, profile: 'internal-legacy' },
     });
     assert.equal(failedCreation.response.status, 400, failedCreation.text);
   } finally {
@@ -492,7 +492,7 @@ test('export audit failures roll back snapshot creation and first confirmation',
   const created = await request('/api/export/snapshots', {
     method: 'POST',
     headers: { 'Idempotency-Key': 'integration-export-confirmed-audit-failure' },
-    body: { fromSku: exportSku, toSku: exportSku },
+    body: { fromSku: exportSku, toSku: exportSku, profile: 'internal-legacy' },
   });
   assert.equal(created.response.status, 201, created.text);
   const cursorBefore = (await pool.query(
@@ -627,16 +627,16 @@ test('export snapshot is immutable, idempotent, and cursor is monotonic', async 
   const legacyBypass = await request(`/api/export/csv?fromSku=${encodeURIComponent(suite.primarySku)}`);
   assert.equal(legacyBypass.response.status, 410);
   const first = await request('/api/export/snapshots', {
-    method: 'POST', body: { fromSku: suite.primarySku }, headers: { 'Idempotency-Key': 'integration-export-1' },
+    method: 'POST', body: { fromSku: suite.primarySku, profile: 'internal-legacy' }, headers: { 'Idempotency-Key': 'integration-export-1' },
   });
   assert.equal(first.response.status, 201, first.text);
   const repeated = await request('/api/export/snapshots', {
-    method: 'POST', body: { fromSku: suite.primarySku }, headers: { 'Idempotency-Key': 'integration-export-1' },
+    method: 'POST', body: { fromSku: suite.primarySku, profile: 'internal-legacy' }, headers: { 'Idempotency-Key': 'integration-export-1' },
   });
   assert.equal(repeated.data.id, first.data.id);
   const mismatched = await request('/api/export/snapshots', {
     method: 'POST',
-    body: { fromSku: suite.primarySku, toSku: suite.primarySku },
+    body: { fromSku: suite.primarySku, toSku: suite.primarySku, profile: 'internal-legacy' },
     headers: { 'Idempotency-Key': 'integration-export-1' },
   });
   assert.equal(mismatched.response.status, 409);
@@ -648,7 +648,7 @@ test('export snapshot is immutable, idempotent, and cursor is monotonic', async 
 
   const historical = await request('/api/export/snapshots', {
     method: 'POST',
-    body: { fromSku: suite.primarySku, toSku: suite.primarySku },
+    body: { fromSku: suite.primarySku, toSku: suite.primarySku, profile: 'internal-legacy' },
     headers: { 'Idempotency-Key': 'integration-export-old' },
   });
   await request(`/api/export/snapshots/${historical.data.id}/confirm`, { method: 'POST', body: {} });
@@ -715,12 +715,12 @@ test('export snapshot is immutable, idempotent, and cursor is monotonic', async 
     const concurrent = await Promise.all([
       request('/api/export/snapshots', {
         method: 'POST',
-        body: { fromSku: endpoints[0], toSku: endpoints[0] },
+        body: { fromSku: endpoints[0], toSku: endpoints[0], profile: 'internal-legacy' },
         headers: { 'Idempotency-Key': concurrentKey },
       }),
       request('/api/export/snapshots', {
         method: 'POST',
-        body: { fromSku: endpoints[1], toSku: endpoints[1] },
+        body: { fromSku: endpoints[1], toSku: endpoints[1], profile: 'internal-legacy' },
         headers: { 'Idempotency-Key': concurrentKey },
       }),
     ]);
@@ -772,7 +772,7 @@ test('export viewing is shared while snapshot creation and confirmation remain A
     assert.equal((await request('/api/export/status')).response.status, 200);
     const administratorSnapshot = await request('/api/export/snapshots', {
       method: 'POST',
-      body: { fromSku: suite.primarySku, toSku: suite.primarySku },
+      body: { fromSku: suite.primarySku, toSku: suite.primarySku, profile: 'internal-legacy' },
       headers: { 'Idempotency-Key': 'rbac-export-administrator' },
     });
     assert.equal(administratorSnapshot.response.status, 201, administratorSnapshot.text);
@@ -788,7 +788,7 @@ test('export viewing is shared while snapshot creation and confirmation remain A
 
     const unconfirmedSnapshot = await request('/api/export/snapshots', {
       method: 'POST',
-      body: { fromSku: suite.primarySku, toSku: suite.primarySku },
+      body: { fromSku: suite.primarySku, toSku: suite.primarySku, profile: 'internal-legacy' },
       headers: { 'Idempotency-Key': 'rbac-export-denied-confirm' },
     });
     assert.equal(unconfirmedSnapshot.response.status, 201, unconfirmedSnapshot.text);
@@ -808,7 +808,7 @@ test('export viewing is shared while snapshot creation and confirmation remain A
 
       await expectDenied('/api/export/snapshots', {
         method: 'POST',
-        body: { fromSku: suite.primarySku, toSku: suite.primarySku },
+        body: { fromSku: suite.primarySku, toSku: suite.primarySku, profile: 'internal-legacy' },
         headers: { 'Idempotency-Key': `rbac-export-${roleKey}-denied` },
       });
       await expectDenied(`/api/export/snapshots/${unconfirmedSnapshot.data.id}/confirm`, {

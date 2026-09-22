@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations `000`–`030` are immutable history; whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations `000`–`032` are immutable history; whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -89,6 +89,8 @@ New paths touching these resources must follow existing lock order and final-sta
 | `030_correction_request_pricing_decisions.sql` | Adds persisted correction pricing decisions plus the Manager pricing-override permission and role-version advance. |
 | `031_product_price_reexports.sql` | Adds coalescing per-product price-change export revisions and immutable snapshot revision evidence. |
 | `032_price_change_requests_and_price_exports.sql` | Adds direct-price RBAC, typed price requests, exposure-aware reuse of `product_export_revisions`, and immutable dedicated price snapshots. Generated legacy snapshots establish exposure but only confirmed evidence advances revisions. |
+| `033_magento_snapshot_artifacts.sql` | Adds immutable per-group Magento Products v1 CSV artifacts owned by normal export snapshots. No new cursor, product revision stream, catalog question, or historical backfill. |
+| `034_product_magento_manual_names.sql` | Adds a nullable paired UA/EN manual subject to products, with a nonblank and length check. Existing products retain null subjects; no historical snapshot or product backfill. |
 
 ## Test database safety
 

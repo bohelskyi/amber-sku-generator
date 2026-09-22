@@ -8,6 +8,15 @@ const {
   applyProductPriceChange,
   previewProductPriceChange,
 } = require('../../services/product-price-change.service');
+const {
+  applyProductInformation,
+  previewProductInformation,
+} = require('../../services/product-information.service');
+const {
+  applyProductMagentoName,
+  previewProductMagentoName,
+  suggestEnglishSubject,
+} = require('../../services/product-magento-name.service');
 
 const router = express.Router();
 
@@ -86,6 +95,63 @@ router.post('/recount/apply', requirePermission('products.recount'), async (req,
     res.json(result);
   } catch (err) {
     res.status(err.statusCode || 400).json({ error: err.message });
+  }
+});
+
+router.post('/product-information/preview', requirePermission('products.recount'), async (req, res) => {
+  try {
+    res.json(await previewProductInformation(req.body || {}));
+  } catch (err) {
+    res.status(err.statusCode || 400).json({
+      error: err.message,
+      ...(err.publicCode ? { code: err.publicCode } : {}),
+    });
+  }
+});
+
+router.post('/product-information/apply', requirePermission('products.recount'), async (req, res) => {
+  try {
+    res.json(await applyProductInformation(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    }));
+  } catch (err) {
+    res.status(err.statusCode || 400).json({
+      error: err.message,
+      ...(err.publicCode ? { code: err.publicCode } : {}),
+    });
+  }
+});
+
+function sendMagentoNameError(res, error) {
+  res.status(error.statusCode || 500).json({
+    error: error.message,
+    ...(error.publicCode ? { code: error.publicCode } : {}),
+  });
+}
+
+router.post('/product-magento-name/suggest', requirePermission('exports.create'), async (req, res) => {
+  try {
+    res.json(await suggestEnglishSubject(req.body || {}));
+  } catch (error) {
+    sendMagentoNameError(res, error);
+  }
+});
+
+router.post('/product-magento-name/preview', requirePermission('exports.create'), async (req, res) => {
+  try {
+    res.json(await previewProductMagentoName(req.body || {}));
+  } catch (error) {
+    sendMagentoNameError(res, error);
+  }
+});
+
+router.post('/product-magento-name/apply', requirePermission('exports.create'), async (req, res) => {
+  try {
+    res.json(await applyProductMagentoName(req.body || {}, {
+      mutationContext: getRequestMutationContext(req),
+    }));
+  } catch (error) {
+    sendMagentoNameError(res, error);
   }
 });
 

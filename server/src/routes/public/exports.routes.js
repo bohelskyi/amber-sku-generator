@@ -1,7 +1,11 @@
 const express = require('express');
-const { getExportStatus, confirmExportSnapshot, createExportSnapshot, getExportSnapshot } = require('../../services/export.service');
+const {
+  getExportStatus, confirmExportSnapshot, createExportSnapshot, getExportSnapshot,
+  getMagentoArtifact, getMagentoArtifacts, previewExport,
+} = require('../../services/export.service');
 const { getRequestMutationContext } = require('../../audit/mutation-context');
 const { requirePermission } = require('../../auth/authorization');
+const config = require('../../config/env');
 const {
   confirmPriceExportSnapshot,
   createPriceExportSnapshot,
@@ -14,7 +18,8 @@ const router = express.Router();
 router.get('/export/status', requirePermission('exports.view'), async (req, res) => {
   try {
     const status = await getExportStatus();
-    res.json(status);
+    res.json({ ...status,
+      translationSuggestionAvailable: Boolean(config.googleTranslationApiKey) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -26,12 +31,26 @@ router.get('/export/csv', requirePermission('exports.view'), async (req, res) =>
   });
 });
 
+router.post('/export/preview', requirePermission('exports.view'), async (req, res) => {
+  try {
+    res.json(await previewExport({
+      fromSku: req.body?.fromSku,
+      toSku: req.body?.toSku,
+      mode: req.body?.mode,
+    }));
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
+  }
+});
+
 router.post('/export/snapshots', requirePermission('exports.create'), async (req, res) => {
   try {
     const snapshot = await createExportSnapshot({
       fromSku: req.body?.fromSku,
       toSku: req.body?.toSku,
       idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey,
+      profile: req.body?.profile,
+      mode: req.body?.mode,
     }, { mutationContext: getRequestMutationContext(req) });
     res.status(201).json({
       id: snapshot.id,
@@ -39,7 +58,38 @@ router.post('/export/snapshots', requirePermission('exports.create'), async (req
       fileName: snapshot.file_name,
       rowCount: Number(snapshot.row_count),
       generatedAt: snapshot.generated_at,
+      artifacts: await getMagentoArtifacts(snapshot.id),
     });
+  } catch (err) {
+    res.status(err.statusCode || 400).json({
+      error: err.message,
+      ...(err.publicCode ? { code: err.publicCode } : {}),
+      ...(err.details ? { errors: err.details } : {}),
+    });
+  }
+});
+
+router.get('/export/snapshots/:id', requirePermission('exports.view'), async (req, res) => {
+  try {
+    const snapshot = await getExportSnapshot(req.params.id);
+    res.json({
+      id: snapshot.id,
+      status: snapshot.status,
+      rowCount: Number(snapshot.row_count),
+      generatedAt: snapshot.generated_at,
+      artifacts: await getMagentoArtifacts(snapshot.id),
+    });
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
+  }
+});
+
+router.get('/export/snapshots/:id/magento/:group/csv', requirePermission('exports.view'), async (req, res) => {
+  try {
+    const artifact = await getMagentoArtifact(req.params.id, req.params.group);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${artifact.file_name}"`);
+    res.send(artifact.csv_content);
   } catch (err) {
     res.status(err.statusCode || 400).json({ error: err.message });
   }

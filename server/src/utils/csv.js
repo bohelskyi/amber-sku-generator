@@ -3,7 +3,7 @@ function escapeCsvValue(value) {
   const stringValue = typeof value === 'string' && /^[\t\r ]*[=+\-@]/.test(value)
     ? `'${value}`
     : String(value);
-  if (/[",\n]/.test(stringValue)) {
+  if (/[",\r\n]/.test(stringValue)) {
     return `"${stringValue.replace(/"/g, '""')}"`;
   }
   return stringValue;

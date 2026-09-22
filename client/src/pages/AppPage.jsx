@@ -50,6 +50,7 @@ function AppPage() {
             decodeError={sku.decodeError}
             decodeErrorDetails={sku.decodeErrorDetails}
             hasRecountChanges={sku.hasRecountChanges}
+            isInformationOnly={sku.isInformationOnly}
             isRecountApplying={sku.isRecountApplying}
             isRecountLoading={sku.isRecountLoading}
             isRecountOpen={sku.isRecountOpen}
@@ -140,6 +141,9 @@ function AppPage() {
             exportToSku={sku.exportToSku}
             setExportToSku={sku.setExportToSku}
             exportError={sku.exportError}
+            exportStatus={sku.exportStatus}
+            exportPreview={sku.exportPreview}
+            exportSnapshot={sku.exportSnapshot}
             setExportError={sku.setExportError}
             isExportLoading={sku.isExportLoading}
             isPriceExportLoading={sku.isPriceExportLoading}
@@ -147,7 +151,10 @@ function AppPage() {
             priceExportStatus={sku.priceExportStatus}
             skuToDelete={sku.skuToDelete}
             setSkuToDelete={sku.setSkuToDelete}
-            onExportCsv={sku.handleExportCsv}
+            onPreviewExport={sku.handlePreviewExport}
+            onCreateSnapshot={sku.handleCreateSnapshot}
+            onDownloadMagentoArtifact={sku.handleDownloadMagentoArtifact}
+            onConfirmSnapshot={sku.handleConfirmSnapshot}
             onPriceExportCsv={sku.handlePriceExportCsv}
             onDelete={sku.handleDelete}
             canArchive={canArchiveProducts}
