@@ -92,11 +92,29 @@ New paths touching these resources must follow existing lock order and final-sta
 | `033_magento_snapshot_artifacts.sql` | Adds immutable per-group Magento Products v1 CSV artifacts owned by normal export snapshots. No new cursor, product revision stream, catalog question, or historical backfill. |
 | `034_product_magento_manual_names.sql` | Adds a nullable paired UA/EN manual subject to products, with a nonblank and length check. Existing products retain null subjects; no historical snapshot or product backfill. |
 | `035_export_templates.sql` | Adds permanent template families, one revisioned JSONB draft per family, immutable published versions, legacy-initialized singleton selection metadata, and four delegable template capabilities. No snapshot columns, baseline template, product/catalog capture, synthetic actor or audit backfill. |
+| `036_export_snapshot_template_binding.sql` | Adds immutable opt-in snapshot request intent, published-version provenance, input fingerprint and effective capture evidence. Composite publication identity FK plus complete/null shape checks; old snapshots stay legacy and unattributed. Extends the existing payload trigger without changing artifact bytes or confirmation attribution rules. |
 
 Export-template mutations take the existing access-admin advisory lock and recheck the actor's specific capability before locking family then draft. Publication allocates a per-family version number under those locks and inserts attribution and audit atomically. The unique family/source-revision tuple supports completed retries even after the draft advances. Draft base-version ownership uses a composite foreign key; historical source revision is not a foreign key to the mutable draft revision. Selection writers lock the singleton after the access boundary and only read immutable versions; they never lock products, revisions or cursors.
 
 Publication UPDATE/DELETE/TRUNCATE is rejected by database triggers, including definition, constants, metadata and actor/time. Family identities and draft/selection rows are permanent, with monotonic revision/generation guards. Normal application writes cannot remove this evidence. Privileged integration teardown drops/recreates the disposable schema; it never disables these guards. Definition JSONB has a 512 KiB storage-text backstop (JSONB adds whitespace); the service enforces the stricter PR1B 256 KiB serialized-JSON limit and structural safety before writes.
 
 ## Test database safety
+
+PR3 treats every migration through 035 as immutable. Snapshot additions are
+`request_contract` (mechanical `legacy` default), `template_id`,
+`template_version_id`, `template_definition_hash`, `template_evaluator_version`,
+`template_output_contract`, `template_format_version`, `request_intent`,
+`input_fingerprint`, and `binding_evidence`. Legacy rows require all nine nullable
+provenance/evidence columns to be null. Template rows require all nine populated,
+positive represented count and matching intent/effective/range/cursor/selection
+evidence. A composite FK binds version, family, hash, evaluator, output and format
+to one immutable publication. The existing payload trigger rejects changing or
+attaching any of this evidence after INSERT. Normal confirmation remains valid.
+The artifact `profile_version` is still the output contract, not template identity.
+
+Template captures use RR with a shared pre-transaction access lock, per-key
+transaction coordination, selection, ascending products, ascending revisions,
+then new-mode cursor. Recovery uses a fresh committed lookup only after rollback;
+an advisory wait never refreshes RR. See [the complete export contract](EXPORTS.md#published-export-snapshots-pr3).
 
 PostgreSQL integration tests destroy/recreate their target `public` schema and create/drop temporary databases. The harness deliberately refuses a primary database name not ending in `_test`. Never run it against production, staging, or a developer database containing useful data.

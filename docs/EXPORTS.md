@@ -83,7 +83,7 @@ This records Check Data validation, not a completed Magento import. The fixture 
 
 ## Export-template administration (PR2)
 
-Migration `035_export_templates.sql` adds `export_templates`, `export_template_drafts`, `export_template_versions`, and `export_template_activation`. The normal exporter and the dedicated price exporter do not read these tables. Selection responses explicitly report `metadataOnly: true` and `effectiveExporter: "legacy"`; publishing or selecting a version does not switch dispatch, expose products, advance cursors/revisions or alter snapshots. Initialization creates only a legacy selection at generation `1` with a null version/actor, plus permissions. No baseline definition is captured or published at startup.
+Migration `035_export_templates.sql` adds `export_templates`, `export_template_drafts`, `export_template_versions`, and `export_template_activation`. Default/legacy product export and dedicated price export do not read these tables. Selection responses retain the PR2 compatibility fields `metadataOnly: true` and `effectiveExporter: "legacy"`, describing default dispatch. PR3 explicitly opted-in requests read selection; publishing or selecting alone does not switch default dispatch, expose products, advance cursors/revisions or alter snapshots. Initialization creates only a legacy selection at generation `1` with a null version/actor, plus permissions. No baseline definition is captured or published at startup.
 
 All endpoints below are relative to `/api/admin/export-templates` and retain authenticated active-user and unsafe-method CSRF enforcement. Revision/generation/version-number fields are decimal strings, preserving PostgreSQL bigint precision. Expected counters also accept safe positive JSON integers. Errors use JSON `error`, `code`, and optional `details`.
 
@@ -119,4 +119,181 @@ Draft test-preview requires both the requested revision and hash. It loads only 
 
 Events `export_template.created`, `.draft_updated`, `.published`, and `.activated` commit with their mutations. Details contain IDs, hashes and revision/generation changes, not definitions or products. Audit failure rolls back all changes; failures, no-ops and completed retries emit no success event. The audit reader exposes only the public `definitionHash` exception to its general hash redaction; `audit.view` remains Administrator-only.
 
-PR3 still owns snapshot version binding and staleness/retry integration; PR4 owns the editor and controlled operational activation. Release prerequisites remain the previously investigated recount fix, target catalog/alias lineage review, frozen-rule approval, KL `addit=0` compatibility decision, narrow SV naming, malformed-input difference acceptance, measurement units, and fresh controlled Magento Check Data. PR2 is not Magento acceptance or rollout readiness.
+PR3 snapshot binding and retry integration are described below; PR4 owns the editor and controlled operational activation. Release prerequisites remain the previously investigated recount fix, target catalog/alias lineage review, frozen-rule approval, KL `addit=0` compatibility decision, narrow SV naming, malformed-input difference acceptance, measurement units, and fresh controlled Magento Check Data. Server implementation is not Magento acceptance or rollout readiness.
+
+## Published export snapshots (PR3)
+
+This is a server opt-in on the existing endpoints, not a default exporter switch.
+The discriminator is exactly `requestContract: "template-v1"`. Omission keeps the
+legacy mapper, ordered normalized SKU anchor identity, open upper bound and profile
+behavior. Any supplied unknown discriminator, including `"legacy"` or null, fails
+with `422 EXPORT_CONTRACT_INVALID`. Dedicated price endpoints are unchanged.
+
+For example, an existing manual request remains:
+
+```json
+POST /api/export/preview
+{"fromSku":" BR-A ","toSku":"br-b"}
+
+POST /api/export/snapshots
+{"fromSku":" BR-A ","toSku":"br-b","idempotencyKey":"legacy-operation-1"}
+```
+
+Its create response retains `id`, `status`, `fileName`, `rowCount`, `generatedAt`
+and `artifacts`; it has no template attribution. A legacy `{ "mode": "new" }`
+preview still requires its returned anchors in the subsequent legacy create body.
+Legacy explicit `profile: "internal-legacy"` remains supported.
+
+Template selection defaults to `{ "mode": "active" }`, or explicitly pins both
+IDs. A family ID alone never selects its latest version. Only compatible published
+versions can be resolved; legacy/null activation returns
+`422 EXPORT_TEMPLATE_NOT_SELECTED`. `internal-legacy` is incompatible with this
+contract. Draft test-preview returns no creation token.
+
+```json
+POST /api/export/preview
+{
+  "requestContract":"template-v1",
+  "mode":"new",
+  "selection":{"mode":"active"}
+}
+
+POST /api/export/preview
+{
+  "requestContract":"template-v1",
+  "fromSku":"BR-A",
+  "toSku":null,
+  "selection":{
+    "mode":"explicit",
+    "templateId":"11111111-1111-4111-8111-111111111111",
+    "versionId":"22222222-2222-4222-8222-222222222222"
+  }
+}
+```
+
+Example new-mode preview response (IDs, hash, timestamps and opaque token below are
+illustrative values; use the actual returned token and installed published IDs):
+
+```json
+{
+  "mode":"new",
+  "range":{"fromSku":"BR-A","toSku":"BR-A","resolvedToSku":"BR-A","exportedToProductId":420},
+  "representedCount":1,
+  "readyCount":1,
+  "errors":[],
+  "requestContract":"template-v1",
+  "intent":{"requestContract":"template-v1","profile":"magento-products-v1","mode":"new","fromSku":null,"toSku":null,"selection":{"mode":"active"}},
+  "template":{"templateId":"11111111-1111-4111-8111-111111111111","versionId":"22222222-2222-4222-8222-222222222222","definitionHash":"<64 lowercase hex characters>","evaluatorVersion":"magento-declarative-1","outputContract":"magento-products-v1","formatVersion":1,"activationGeneration":"7"},
+  "previewToken":"<opaque ep1 token>",
+  "represented":[{"productId":420,"group":"BR","sku":"BR-A","status":"ready","artifactRows":2}],
+  "artifacts":[{"groupCode":"BR","groupName":"Браслети","profileVersion":"magento-products-v1","fileName":"amber-magento-BR-magento-products-v1.csv","productCount":1,"rowCount":2}]
+}
+```
+
+Create sends **the same caller intent** and adds the returned token and key:
+
+```json
+POST /api/export/snapshots
+{
+  "requestContract":"template-v1",
+  "mode":"new",
+  "selection":{"mode":"active"},
+  "previewToken":"<returned previewToken>",
+  "idempotencyKey":"template-operation-1"
+}
+```
+
+The key can instead be supplied through `Idempotency-Key`, as before. Creation
+returns HTTP 201 with the existing fields plus `requestContract`, `template`
+(the same safe effective-version shape) and `inputFingerprint` (SHA-256).
+`GET /api/export/snapshots/:id` adds the same provenance without returning product
+answers, definitions or tokens. Download URLs and filenames do not change.
+For mode:new, omitted caller anchors stay null in intent; returned resolved anchors
+belong to the operation's separate capture evidence. Adding those anchors only at
+create changes intent and fails binding validation. Callers can supply anchors at
+both stages, in which case they must match the server's pending range at preview
+and capture. Completed retries never derive a new operation from today's cursor.
+
+Preview uses `REPEATABLE READ READ ONLY`, the full authoritative eligible range,
+stored final prices/answers/manual subjects, persisted definition and PR2 source
+validation. The admin preview's 100-ID limit does not apply. Existing evaluator
+work/cell/64 MiB output limits apply and fail explicitly without truncation.
+Frozen requiredness/visibility is not recaptured from live rules. Source conflicts
+and unresolved references still fail. Empty new previews have `range:null`, zero
+counts and `previewToken:null`. Not-ready previews also have no token; all
+represented products must be ready before durable creation.
+
+The token uses `ep1`, purpose `amber:published-export-preview:v1`, HMAC-SHA256 with
+a purpose-derived key from the existing required `SESSION_SECRET`, integer
+issue/expiry seconds and a 15-minute lifetime for new creations. Maximum token
+size is 8192 bytes. No random per-process signing fallback exists. Restart with
+the same configured secret preserves verification; changing that secret
+invalidates supplied old tokens, while authorized tokenless completed retries
+remain available. Signature comparison is constant-time. Tokens are not logged,
+stored in audit details or treated as authorization capabilities.
+
+The streaming typed SHA-256 fingerprint preserves missing/null/blank/zero and
+array order. It covers normalized intent; effective immutable version/hash/
+evaluator/output/format; active generation; resolved range and ordered products;
+product ID/SKU/category/exclusion, weight, final UAH, complete stored answers,
+manual subjects and schema link; relevant repository source/schema evidence;
+the ordered live non-SKU internal-column projection; and the confirmed cursor
+for new mode. Bigint selection counters remain decimal strings. Draft edits and
+pricing/rate changes alone do not stale it. Revision/exposure changes are handled
+by capture locks rather than included as product facts. Bounded ranges exclude
+later inserts beyond their upper ID; open ranges include them at the capture
+instant. Active A → B → A stales an unused token; explicit pins have no generation
+binding. A product committed after the RR snapshot starts remains outside that
+capture and eligible for later work.
+
+| Existing key / supplied evidence | Result |
+| --- | --- |
+| Matching legacy anchors/profile | Original stored snapshot, independent of activation |
+| Matching template intent and original signed binding | Original snapshot even after confirmation, product/cursor/activation changes or expiry |
+| Matching template intent, token omitted | Original snapshot; no active resolution, compilation, source validation or activation permission |
+| Supplied token has different effective version, generation, input or resolved range | `409 EXPORT_IDEMPOTENCY_CONFLICT` |
+| Contract/profile/ordered anchors/template mode/explicit IDs differ | Conflict; no duplicate snapshot |
+| Unused key without token | `422 EXPORT_PREVIEW_REQUIRED` |
+| Malformed, wrong-purpose, tampered or oversized token | `422 EXPORT_PREVIEW_INVALID` |
+| Unused key with expired or future-issued token | `409 EXPORT_PREVIEW_EXPIRED` |
+| Unused key with changed bound state or RR serialization failure | `409 EXPORT_PREVIEW_STALE`, after fresh winner recovery |
+
+Legacy range/profile conflicts retain their previous error shape. Template/cross-
+contract conflicts use `EXPORT_IDEMPOTENCY_CONFLICT`. Other explicit input errors
+are `EXPORT_SELECTION_INVALID`, `EXPORT_MODE_INVALID`, `EXPORT_PROFILE_INVALID`
+(422); incompatible definitions/source evidence use existing `TEMPLATE_INVALID`,
+`TEMPLATE_VERSION_INTEGRITY`, `TEMPLATE_SOURCE_INVALID`; output/work limits use
+`422 EVALUATION_LIMIT`. Readiness failures retain `422 MAGENTO_NOT_READY`.
+Preview/create JSON errors include `code` where classified and `errors` for
+diagnostics. No automatic refresh, rebinding or replacement key occurs.
+
+New capture holds the existing access-admin advisory key in shared **session**
+mode before beginning RR, then rechecks the actor. This deliberate pre-transaction
+boundary prevents an access-lock wait from freezing stale permissions; readers
+coexist, and access/activation writers keep their existing exclusive boundary.
+It releases on the same connection after commit/rollback. Within RR the order is:
+namespaced per-key transaction advisory lock → second completed lookup → selection
+`FOR SHARE` and published-version resolution → eligible products `FOR SHARE` in
+ascending ID → existing revision insertion/ascending revision locks and exposure
+capture → new-mode cursor `FOR SHARE` → parent/artifacts/audit → commit.
+There is no independently committed key reservation. Confirmation keeps
+snapshot → revisions → cursor; dedicated price operations retain their old locks.
+
+An advisory wait does not refresh an RR snapshot. Following rollback for the
+specific `export_snapshots_idempotency_key_key` constraint, serialization or
+relevant stale-preview/range failure, a fresh statement checks committed key
+state and applies the **same** intent/binding comparison as an early hit. No
+winner returns the classified original failure. Other integrity violations are
+not interpreted as idempotency collisions. Generation, initial exposure, parent,
+every artifact and the existing `export_snapshot.created` event share one
+transaction. Template events add concise contract/template/version IDs; retry
+does not recreate exposure, artifacts, attribution or audit.
+
+Preview requires `exports.view`; create/confirm require `exports.create` with
+the existing session, active-user and CSRF boundary. Active export does not need
+template management. A new explicit selection that is not currently active also
+requires `export_templates.activate`; the active-version exception is protected
+during capture. Completed retries need ordinary export authority only. Stored
+downloads and confirmation never compile or inspect current product readiness.
+Returning selection to legacy neither rewrites artifacts nor resets cursor,
+exposure or pending revisions.

@@ -24,6 +24,7 @@ const COMMON_DETAIL_KEYS = new Set([
   'valueId', 'version', 'versionFrom', 'versionTo', 'weightBandChanges',
   'weightBandCount', 'xValue', 'yValue', 'removedPermissionKeys', 'reason',
   'templateId', 'templateVersionId', 'previousTemplateVersionId', 'baseVersionId',
+  'requestContract',
   'draftRevision', 'revisionFrom', 'revisionTo', 'generationFrom', 'generationTo', 'implementation',
 ]);
 

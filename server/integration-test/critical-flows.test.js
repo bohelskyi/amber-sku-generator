@@ -18,6 +18,7 @@ for (const modulePath of [
   './11-magento-products.cases',
   './12-rbac-audit.cases',
   './12-export-templates.cases',
+  './12-export-template-snapshots.cases',
   './13-sqlite-import.cases',
 ]) {
   require(modulePath);

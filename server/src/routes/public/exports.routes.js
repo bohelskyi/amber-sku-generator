@@ -6,6 +6,7 @@ const {
 const { getRequestMutationContext } = require('../../audit/mutation-context');
 const { requirePermission } = require('../../auth/authorization');
 const config = require('../../config/env');
+const { manifestProvenance } = require('../../services/export-templates/snapshot-binding');
 const {
   confirmPriceExportSnapshot,
   createPriceExportSnapshot,
@@ -37,9 +38,14 @@ router.post('/export/preview', requirePermission('exports.view'), async (req, re
       fromSku: req.body?.fromSku,
       toSku: req.body?.toSku,
       mode: req.body?.mode,
-    }));
+      profile: req.body?.profile,
+      requestContract: req.body?.requestContract,
+      selection: req.body?.selection,
+    }, { mutationContext: getRequestMutationContext(req) }));
   } catch (err) {
-    res.status(err.statusCode || 400).json({ error: err.message });
+    res.status(err.statusCode || 400).json({ error: err.message,
+      ...(err.statusCode && err.code ? { code: err.code } : {}),
+      ...(err.details ? { errors: err.details } : {}) });
   }
 });
 
@@ -51,6 +57,9 @@ router.post('/export/snapshots', requirePermission('exports.create'), async (req
       idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey,
       profile: req.body?.profile,
       mode: req.body?.mode,
+      requestContract: req.body?.requestContract,
+      selection: req.body?.selection,
+      previewToken: req.body?.previewToken,
     }, { mutationContext: getRequestMutationContext(req) });
     res.status(201).json({
       id: snapshot.id,
@@ -59,11 +68,13 @@ router.post('/export/snapshots', requirePermission('exports.create'), async (req
       rowCount: Number(snapshot.row_count),
       generatedAt: snapshot.generated_at,
       artifacts: await getMagentoArtifacts(snapshot.id),
+      ...manifestProvenance(snapshot),
     });
   } catch (err) {
     res.status(err.statusCode || 400).json({
       error: err.message,
       ...(err.publicCode ? { code: err.publicCode } : {}),
+      ...(err.statusCode && err.code ? { code: err.code } : {}),
       ...(err.details ? { errors: err.details } : {}),
     });
   }
@@ -78,6 +89,7 @@ router.get('/export/snapshots/:id', requirePermission('exports.view'), async (re
       rowCount: Number(snapshot.row_count),
       generatedAt: snapshot.generated_at,
       artifacts: await getMagentoArtifacts(snapshot.id),
+      ...manifestProvenance(snapshot),
     });
   } catch (err) {
     res.status(err.statusCode || 400).json({ error: err.message });

@@ -311,4 +311,5 @@ async function listSources(options = {}) {
 }
 
 module.exports = { prepareDraft, counter, listTemplates, getTemplate, createTemplate, saveDraft, cloneDraft,
-  validateDraft, testPreview, publishTemplate, getActivation, updateActivation, listSources };
+  validateDraft, testPreview, publishTemplate, getActivation, updateActivation, listSources,
+  loadVersion, verifyVersion, pureCall };

@@ -66,6 +66,18 @@ The permission-aware client uses only the effective keys from `/api/auth/me`, ne
 
 Migration `035` adds the four export-template capabilities through the existing protected Administrator propagation trigger. Manager, Storekeeper and custom roles receive no incidental grants. These capabilities are delegable through ordinary role administration; they are not reserved permissions and do not require `users.manage`. Template definition/source reads use `view`; draft create/save/from-version/validate use `manage`; draft test-preview requires both `manage` and `exports.view`; publication uses `publish`; selection metadata changes use `activate`. Every template mutation uses `runAccessAdminMutation` with its specific capability, including the access advisory lock and post-lock active-user/permission recheck. See [the export-template API contract](EXPORTS.md#export-template-administration-pr2).
 
+PR3 published export preview uses `exports.view`; snapshot create and confirmation
+use `exports.create`. Ordinary active-version export does not require template
+view/manage/publish/activate. A new explicit non-active version additionally
+requires `export_templates.activate`; a currently active explicit version uses
+protected selection evidence for its exception. Completed matching retries need
+ordinary export permission, including current active-user validation, but do not
+require activation permission again. Tokens never confer authority. New opt-in
+preview/capture takes the existing access advisory key in shared session mode
+before beginning RR and rechecks the actor; access mutations retain exclusive
+locking, so a prior revocation cannot be hidden by an old transaction snapshot.
+Stored download/confirmation has no template permission or compiler dependency.
+
 ## First-Administrator bootstrap
 
 Bootstrap is deliberately offline and permanently one-use:

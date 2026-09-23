@@ -104,7 +104,7 @@ async function installGoldenEvidence() {
   }
 }
 
-test('PR2 fresh migration: legacy metadata only, Administrator grants, no snapshot schema changes', async () => {
+test('PR2 fresh migration: legacy selection, Administrator grants, historical snapshots unattributed', async () => {
   admin = await authenticateApplicationSession();
   const selected = await templates.getActivation();
   assert.equal(selected.implementation, 'legacy'); assert.equal(selected.templateVersionId, null);
@@ -113,13 +113,15 @@ test('PR2 fresh migration: legacy metadata only, Administrator grants, no snapsh
   assert.deepEqual((await pool.query(`SELECT r.role_key, count(*)::int AS n FROM roles r
     JOIN role_permissions rp ON rp.role_id = r.id WHERE rp.permission_key LIKE 'export_templates.%'
     GROUP BY r.role_key ORDER BY r.role_key`)).rows, [{ role_key: 'administrator', n: 4 }]);
-  assert.equal((await pool.query(`SELECT count(*)::int AS n FROM information_schema.columns
-    WHERE table_name = 'export_snapshots' AND column_name LIKE 'template_%'`)).rows[0].n, 0);
+  assert.equal((await pool.query(`SELECT count(*)::int AS n FROM export_snapshots
+    WHERE template_version_id IS NOT NULL`)).rows[0].n, 0);
   assert.equal((await request(`${root}/sources`, { authentication: admin })).response.status, 200);
   const hints = await templates.listSources();
   assert.equal(hints.productionAcceptanceVerified, false);
   assert.ok(hints.operations.includes('questionValue'));
 });
+
+module.exports = { definition, installGoldenEvidence };
 
 test('PR2 JSONB drafts and publications retain canonical hashes and all ten independent exact CSV goldens', async () => {
   await installGoldenEvidence();

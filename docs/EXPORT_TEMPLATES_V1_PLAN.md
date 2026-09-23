@@ -1739,3 +1739,186 @@ it was not reinvestigated or applied. Target catalog/alias lineage, frozen-rule
 approval, KL.addit=0, narrow SV naming, the closed malformed-input difference
 register, measurement units and fresh controlled Magento Check Data remain
 acceptance prerequisites. PR2 completion is not rollout or Magento acceptance.
+
+## PR3 addendum — opt-in published snapshot binding (2026-09-23)
+
+This addendum supersedes the earlier statements that PR3 is unimplemented; all
+earlier results above remain historical records. Scope is server PR3 only. The
+client/editor, controlled selection in a useful environment, default dispatch
+switch and Magento acceptance are not part of this change.
+
+Actual initial checkout: `D:/Work/amber-sku-generator`, branch
+`feature/magento-export-constructor`, HEAD
+`b32555bacebb4e8e10e676f40470d49b9c9a93cf`, clean tracked/untracked status. Inventory
+was 000–035, including committed `035_export_templates.sql`. No nested AGENTS.md
+was present. No historical migration was edited; 036 was the next free number.
+
+Before editing, the implementation checklist identified the existing public
+preview/create routes, `getExportRows`/`resolveNewExportRange`, shared snapshot
+coordinator, `establishProductSnapshotExposure`, PR2 `loadVersion`/`verifyVersion`
+and source evidence, pure `evaluateBatch`, and the required `SESSION_SECRET`.
+It separated request intent from effective binding and resolved range, and fixed
+the order as access protection before RR; key/second lookup; activation; ascending
+products; ascending revisions; new-mode cursor; parent/artifacts/audit. This was
+an implementation checklist, not an additional approval or design phase.
+
+### Implemented seams and invariants
+
+- `036_export_snapshot_template_binding.sql` adds the nine nullable provenance/
+  evidence columns and mechanical legacy discriminator documented in
+  [the migration guide](DATABASE_MIGRATIONS.md). A complete/null check and composite
+  publication FK enforce family/version/hash/evaluator/output/format identity;
+  JSON intent/effective/range/cursor/selection evidence is checked for consistency.
+  The replacement trigger retains every 031 payload, creator, confirmer and
+  revision-evidence check. Old rows stay unattributed; normal confirmation works.
+- `snapshot-binding.js` owns discriminator/intent normalization, tagged streaming
+  canonical SHA-256, bounded purpose-separated HMAC tokens, strict signed claim
+  parsing, shared completed-operation comparison and safe manifest provenance.
+  Tokens bind full input hashes, not raw answers; issued timestamps are not
+  operation identity. No process-random signing fallback or unsigned old token
+  reuse exists. New creation TTL is 15 minutes; authentic matching completed
+  retries bypass expiry and current-state checks.
+- `published-capture.js` uses actual PR2 version verification and repository
+  reference checks, without recapturing live visibility/requiredness. It binds
+  all selected product facts, schema/reference evidence and the ordered legacy
+  internal-column projection. Drafts, rates/matrices and revision/exposure-only
+  changes are not mistaken for product-value changes. PR1 compiler, evaluator,
+  projection, baseline definition, serializer and mapper remain unchanged.
+- `export.service.js` remains the only normal-snapshot coordinator and store.
+  Explicit `template-v1` capture uses RR; default legacy retains READ COMMITTED
+  and its mapper. Both branches retain one idempotency namespace and artifacts.
+  Captured exposure/revisions and confirmation logic are reused. SQL failures
+  roll back before a fresh committed winner lookup. Only the actual key unique
+  constraint is treated as a key collision; arbitrary 23505 is not masked.
+- Authorization uses existing capabilities. Shared session access protection
+  begins before RR, so an access-lock wait cannot freeze pre-revocation authority.
+  It is held through capture and released on the same connection. Within RR,
+  namespaced transaction key lock precedes second lookup, then selection, products,
+  revisions and cursor. Access/activation writers keep their existing exclusive
+  access boundary and never wait for product/export locks. Explicit active-version
+  exceptions use protected selection evidence; non-active choices need activate.
+  Completed retries need no activation authority. Downloads/confirmation remain
+  independent of current evaluator, definitions and readiness.
+- Existing public endpoints accept the opt-in fields and expose only safe
+  manifest provenance. No new endpoint, cursor, queue, snapshot table, CSV column,
+  artifact profile, filename or download URL is introduced. Legacy shapes stay
+  unchanged. Existing creation audit adds contract/template/version IDs to its
+  concise details; no new audit event type or repeated retry event is introduced.
+
+The full implemented body/response examples, errors, signing coverage and retry
+decision table are in [Exports — PR3](EXPORTS.md#published-export-snapshots-pr3).
+New-mode template callers retain their original anchors (normally null) as intent;
+preview-resolved anchors belong to immutable capture evidence. They must not add
+returned anchors only at create. Existing legacy new-mode callers retain their
+old requirement to send the returned anchors. No client was changed.
+
+### Evidence by required boundary
+
+`12-export-template-snapshots.cases.js` adds 20 cases to the serialized harness;
+each case contains its stated sub-scenarios, not just an HTTP status assertion.
+
+| Boundary | Actual evidence |
+| --- | --- |
+| Persistence/upgrade | Fresh suite plus actual 035 checkpoint with stored parent/artifact bytes, actor and captured revisions; injected 036 failure rolls back DDL/history; two subsequent startups; partial-null and mismatching composite FK rejection; immutable intent/version/hash/input evidence; successful legitimate confirmation |
+| Authoritative preview/artifacts | Read-only state comparisons; all six groups in one parent; persisted baseline definitions for ten golden scenarios; stored and HTTP-downloaded UTF-8 Buffers; 105 represented products produce 210 rows with no admin-preview cap |
+| Fingerprint invalidation | Final price, weight, complete answers including null/zero/blank, paired manual names, exclusion, SKU, category, schema link, internal catalog labels and unresolved source keys; bounded versus open upper range; cursor/new-range changes |
+| Frozen/irrelevant state | Live requiredness/visibility and committed rate/matrix edits do not change frozen output; draft edits and revision-only changes do not stale a pin; explicit pin remains usable after selection changes with authority |
+| Token/HTTP | Tampered, truncated, oversized, foreign-purpose and draft tokens; strict claim shapes; exact deterministic TTL boundary; separate process with stable configured secret; authentication, pending/disabled users, CSRF and delegated ordinary export permissions |
+| Completed retry | Original snapshot after product/activation/cursor changes, confirmation and expiry; token omission; newer input/version evidence conflicts; cross-contract/profile/range/mode/explicit selection conflicts; original delegated creator and one generation event; child process with compiler deliberately unavailable still retries, downloads and confirms |
+| Same-key concurrency | Independent pools plus `pg_blocking_pids` prove second request waits after establishing old RR; same binding and tokenless retry return one winner; same active intent with different effective binding conflicts; one parent, artifact set, original actor and one event |
+| Cross-contract concurrency | Legacy-first and template-first race on one key; loser rolls back and conflicts, retaining exactly the winner's contract/artifacts/event |
+| Capture concurrency | Product/name/price mutation first causes stale/serialization failure with no exposure; capture first stores coherent old bytes while mutation waits; activation-first/capture-first orderings; permission revoked while shared access lock is waiting is rejected before capture |
+| Cursor/revisions | Normal confirmation versus new template creation in both orders; stable product → revisions → cursor ordering; no lost captured revisions or cursor regression; a held revision-row barrier and separately named Node/PostgreSQL processes force both newest-first and oldest-first price confirmations, with waiting backends verified through `pg_blocking_pids`; later normal/template confirmations retain revision 4 pending with confirmed high water 3 and one event/actor per snapshot |
+| MVCC membership | New product commits after captured RR membership; first snapshot includes only its coherent original product, confirms only that cursor and leaves the inserted product unexposed and eligible for the next new preview |
+| Atomicity | Parent insertion failure after exposure, second-artifact failure after first artifact insert, audit failure, and 64 MiB output-limit rejection all leave no partial parent/artifacts/exposure/audit; invalid represented product blocks the full two-product range |
+| Stored reads | Downloads are read-only, remain identical after product/catalog changes, and confirmation never regenerates output; unsupported/unavailable current compiler cannot block stored operations |
+
+### Golden-byte and oracle scope clarification
+
+All ten original pure PR1 goldens still compare exact UTF-8 bytes through persisted
+definitions in PR2, and all original PR1 unit oracle cases pass unchanged. Nine
+golden scenarios can additionally be stored/downloaded byte-for-byte against the
+literal original CSV. The tenth, `SV-escaping`, supplies `full_sku: " =SKU"` to the
+pure evaluator. Existing migration 001 unconditionally trims SKU on INSERT, so
+that exact raw product cannot be persisted through the authoritative database.
+PR3's integration fixture therefore asserts the actual stored `=SKU` and adapts
+**only those SKU occurrences** in its local expected Buffer; all other escaping,
+Unicode, CRLF, quotes, manual subjects and output bytes remain compared exactly.
+No oracle file, mapper, SKU trigger, database guard or expected-output register
+was changed to conceal this distinction. This is a persistence-fixture constraint,
+not a newly accepted evaluator/output difference. Literal 10/10 original CSV
+identity at the storage boundary is not claimed.
+
+The eight PR1A working-file SHA-256 values and canonical Git-blob SHA-256 values
+match both PR1B/PR2 registers above. They were checked with SHA-256 and bytewise
+`git cat-file --filters HEAD:<path>` comparison. All 36 historical migrations,
+unchanged PR1/PR2 pure implementation/source files and the closed difference
+register also match HEAD (53 protected files checked). Some historical migrations
+are already LF files, so those match the raw blob rather than the CRLF checkout
+filter; no file was rewritten and checksum policy is unchanged. CSV Buffer
+comparisons do not normalize line endings.
+
+### Runtime and verification environment
+
+The prior user's absolute Node path does not exist in this Windows account. Its
+same cache-relative executable exists at
+`C:/Users/bohel/AppData/Local/npm-cache/_npx/ebaba8b9e55fd0a9/node_modules/node/bin/node.exe`
+and reports **20.20.2**. The installed system npm CLI now reports 11.17.0, so an
+official npm **10.9.0** archive was unpacked only into `%TEMP%/amber-pr3-node20`.
+The prior method was reused: process-local PATH, extensionless Git Bash launcher,
+and NODE_OPTIONS preload guard checking exact `process.execPath` and version in
+every Node process, including npm/test/ESLint/Vite and integration subprocesses.
+No system Node, persistent npm setting, project dependency or lockfile changed.
+
+Only canonical `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d postgres-test`
+was started. Identity query returned `amber_test`, user `amber_test`, PostgreSQL
+**16.15** on the loopback-mapped 55432 service. Both TEST_DATABASE_URL and
+DATABASE_URL were set before any tests/imports to the exact canonical throwaway
+URL from AGENTS.md. Checkpoint subprocesses used the harness's disposable `_test`
+databases on this same service. No alternative server, restored dump or useful
+database was used.
+
+### Commands and final observed results
+
+The npm commands below used Node 20 explicitly, the temporary npm 10.9.0 CLI,
+and `--script-shell='D:/Programs/Git/bin/bash.exe'` with the process-local guard.
+Server commands ran from `server/`, client commands from `client/`.
+
+| Command/check | Observed result |
+| --- | --- |
+| Baseline `node --require ./test/setup-env.js --test` with the three `magento-v1-*` oracle suites and three `export-template-*` PR1/PR2 suites | 217 passed, 0 failed/skipped, before implementation |
+| Baseline `node --test --test-concurrency=1 --test-name-pattern=PR2 integration-test/critical-flows.test.js` | 14 passed, 138 unrelated cases intentionally filtered |
+| `node --require ./test/setup-env.js --test test/export-snapshot-binding.test.js` | 5 passed, 0 failed/skipped; includes child-process verification and deterministic lifetime tests |
+| `node --test --test-concurrency=1 --test-name-pattern=PR3 integration-test/critical-flows.test.js` | 20 passed, 152 unrelated cases intentionally filtered |
+| Server `npm test` | 486 passed, 0 failed/skipped |
+| Server `npm run lint` | Exit 0; only the two existing unused `sortOrder`/`sourceOrder` warnings at product-timeline.js:391 |
+| Server `npm run test:integration` | 172 passed, 0 failed/skipped, including the original 152 and all 20 PR3 cases |
+| Client `npm test` | 112 Node tests and 102 Vitest tests across 13 Vitest files passed; 0 failures/skips |
+| Client `npm run lint` | Exit 0, no diagnostics |
+| Client `npm run build` | Exit 0, Vite production build successful; no client source change or rollout |
+| `git diff --check`, new-file whitespace checks and full scoped review | Passed; Git only reports normal LF→CRLF checkout warnings for the five new files |
+| Protected SHA-256/byte checks | All eight oracle working/blob fingerprints unchanged; 53 protected files match HEAD, including all 36 historical migrations and closed differences |
+
+Final full server runs followed the focused regressions and final code review.
+Intermediate fixture issues (the pure escaping SKU's leading space and a test
+query using the wrong matrix column) were corrected before these passing runs.
+No oracle assertion, production invariant or evaluator budget was disabled.
+No infrastructure blocker remains. There is no server build command. Docker
+image build/Compose configuration checks were not applicable because deployment
+files were unchanged. No restored-database, live activation, Magento Check Data
+or import verification was run or claimed.
+
+The only started disposable service was stopped with
+`docker compose -f docker-compose.yml -f docker-compose.local.yml stop postgres-test`;
+exit 0 and service status `Exited (0)` were verified. No other service/volume was
+stopped, deleted or replaced. No useful database or production operation occurred.
+
+Final repository state: same branch and HEAD as the baseline; 13 modified tracked
+files and five new untracked files, all scoped to PR3 implementation, regression
+coverage and maintained documentation. The index remains untouched. No staging,
+commit, push, reset, clean, stash, merge, cherry-pick, rebase or branch switch.
+Default export still uses the existing mapper and the dedicated price service is
+unchanged. PR4/editor/client opt-in and operational activation stop at this boundary.
+The missing recount fix and all previously documented business/target-catalog/
+alias/frozen-rule/KL/SV/malformed-input/unit/Magento acceptance prerequisites remain;
+they were neither reinvestigated nor implemented in PR3.
