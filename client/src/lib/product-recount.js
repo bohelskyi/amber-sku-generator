@@ -8,6 +8,14 @@ const hasRecountAnswerValue = (value) => (
   value !== undefined && value !== null && String(value).trim() !== ''
 );
 
+const isOptionalPlaceholderAnswer = (question, value) => (
+  Number(question?.required) !== 1
+  && Number(question?.include_in_sku ?? 1) === 1
+  && hasRecountAnswerValue(value)
+  && String(value).trim() === '0'
+  && !(question?.options || []).some((option) => String(option.id).trim() === '0')
+);
+
 export function getDecodedAnswerMap(decoded) {
   const decodedMap = (decoded?.decodedAnswers || []).reduce((result, answer) => {
     result[answer.key] = answer.value_id === null ? 0 : answer.value_id;
@@ -196,6 +204,13 @@ export function normalizeRecountTargetState(
       const hasRetainedValue = hasRecountAnswerValue(retainedValue);
 
       if (isTextQuestion(question)) continue;
+
+      if (isOptionalPlaceholderAnswer(question, selectedValue)) continue;
+      if (!hasSelectedValue && isOptionalPlaceholderAnswer(question, retainedValue)) {
+        nextAnswers[questionId] = retainedValue;
+        changed = true;
+        continue;
+      }
 
       const targetOptions = getDistinctTargetOptions(question, nextAnswers);
       const retainedSelectionIsValid = hasRetainedValue && targetOptions.some(
