@@ -13,6 +13,17 @@ function endpoint(method, path, permission, response = 'json') {
 }
 
 const ENDPOINT_MANIFEST = Object.freeze([
+  endpoint('GET', '/export/template-options', 'exports.view'),
+  endpoint('GET', '/export/sessions', 'exports.view'),
+  endpoint('POST', '/export/sessions', 'exports.create'),
+  endpoint('GET', '/export/sessions/:id', 'exports.view'),
+  endpoint('PUT', '/export/sessions/:id', 'exports.create'),
+  endpoint('POST', '/export/sessions/:id/preview', 'exports.view'),
+  endpoint('POST', '/export/sessions/:id/prepare', 'exports.create'),
+  endpoint('POST', '/export/sessions/:id/generate', 'exports.create'),
+  endpoint('GET', '/export/sessions/:id/recipients', 'exports.create'),
+  endpoint('POST', '/export/sessions/:id/invitations', 'exports.create'),
+  endpoint('POST', '/export/sessions/:id/membership', 'exports.view'),
   endpoint('GET', '/config', 'products.view'),
   endpoint('POST', '/preview', 'products.create'),
   endpoint('POST', '/price-preview', 'products.create'),
@@ -59,6 +70,8 @@ const ENDPOINT_MANIFEST = Object.freeze([
   endpoint('POST', '/admin/roles/:roleId/reactivate', 'roles.manage'),
   endpoint('GET', '/admin/export-templates', 'export_templates.view'),
   endpoint('GET', '/admin/export-templates/sources', 'export_templates.view'),
+  Object.freeze({ ...endpoint('GET', '/admin/export-templates/candidate', 'export_templates.view'),
+    additionalPermissions: ['export_templates.manage'] }),
   endpoint('GET', '/admin/export-templates/activation', 'export_templates.view'),
   endpoint('GET', '/admin/export-templates/:id', 'export_templates.view'),
   endpoint('POST', '/admin/export-templates', 'export_templates.manage'),

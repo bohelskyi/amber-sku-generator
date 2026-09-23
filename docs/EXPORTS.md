@@ -1,5 +1,9 @@
 # Exports
 
+For the current durable private/shared controlled workflow, see
+[Shared export sessions](SHARED_EXPORT_SESSIONS.md). This extends the earlier PR4
+client-only recovery boundary below without changing legacy/default or price export.
+
 ## Supported workflow
 
 The legacy direct CSV endpoint remains disabled with `410`. The operator's full-product workflow is:
@@ -92,6 +96,7 @@ All endpoints below are relative to `/api/admin/export-templates` and retain aut
 | `GET /` | Family list with draft revisions and publication counts | `export_templates.view` |
 | `GET /:id` | Family, current draft, and complete immutable versions | `export_templates.view` |
 | `GET /sources` | Approved product fields, operations, limits, units and safe current/historical reference hints; no product rows | `export_templates.view` |
+| `GET /candidate` | Read-only Magento v1 candidate captured from the actual catalog, canonical hash, reference diagnostics; no persistence/publication/selection | `export_templates.view` **and** `export_templates.manage` |
 | `GET /activation` | Selection generation/version and metadata-only status | `export_templates.view` |
 | `POST /` | `{key,displayName,definition?}`; creates family and revision `1`; omitted definition is `{}` | `export_templates.manage` |
 | `PUT /:id/draft` | `{expectedRevision,definition}`; returns draft/revision/canonical hash | `export_templates.manage` |
@@ -297,3 +302,46 @@ during capture. Completed retries need ordinary export authority only. Stored
 downloads and confirmation never compile or inspect current product readiness.
 Returning selection to legacy neither rewrites artifacts nor resets cursor,
 exposure or pending revisions.
+
+## Form editor and controlled client workflow (PR4)
+
+`/admin/export-templates` requires `export_templates.view` before mounting the
+administrative workspace. Candidate preparation/save/clone/validation require
+`manage`; draft test-preview also needs `exports.view`. Publication and candidate
+selection independently require `publish` and `activate`. No role-name or
+`users.manage` dependency was added. See [PR4 details and limits](EXPORT_TEMPLATES_PR4.md).
+
+`GET /api/export/template-options` requires `exports.view` and returns only
+`generation`, `activeVersionId`, `implementation`, `defaultExporter: "legacy"`,
+and safe publication identities (`templateId`, `versionId`, `versionNumber`,
+`displayName`). Ordinary exporters receive only the selected publication;
+`export_templates.activate` additionally permits other publication identities.
+No definitions, draft data, source catalog, products or tokens are returned.
+This is descriptive metadata; published preview/capture still authoritatively
+resolve and verify compatibility and selection. No snapshot binding was changed.
+
+`/exports` supports delegated exporters without product/catalog permissions and
+reuses the existing ExportTools workspace. The product page also keeps ExportTools.
+Both share one mounted controller above routes. The checkbox for controlled
+published-template export starts **off**, even if a publication is selected.
+Metadata reads occur only after opt-in; ordinary export never reads admin APIs.
+No unavailable selection silently falls back to legacy.
+
+Draft test-preview is read-only and accepts 1–100 explicit unique product IDs;
+missing IDs are errors. Published preview is a separate read-only check yielding
+an opaque token. Explicit file creation is a real export and may establish
+exposure. Stored downloads never confirm; normal confirmation remains a separate
+“Завершити експорт” action. The dedicated price-export sequence is unchanged.
+
+Create retains its original payload, token, effective evidence and idempotency
+key through rerenders, transport/ambiguous failures and internal navigation.
+Unused stale/expired preview responses require an explicit fresh check and a new
+operation. Completed uncertain retries are attempted with the original key/token
+without a client TTL gate. No token goes to URLs, logging or browser storage.
+The retained direct PR3 compatibility controller's in-memory operation does **not**
+survive reload, closing the app or logout. The shipped controlled UI now uses
+durable sessions instead: `/exports/sessions` stores the original operation before
+generation, supports explicit invitations/acceptance and recovers its exact result
+through authorized lists after login/reload. Default legacy export stays separate.
+Known historical snapshot IDs can be opened explicitly; unknown pre-feature
+operations receive no speculative matching/backfill. See the linked session guide.

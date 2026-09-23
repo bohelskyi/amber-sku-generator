@@ -310,6 +310,42 @@ async function listSources(options = {}) {
   return readTransaction(options, getSourceRegistry);
 }
 
+// Candidate preparation is read-only. Capture rules and reference evidence in one
+// coherent snapshot; never substitute the seed catalog or publish on first use.
+async function prepareMagentoCandidate(options = {}) {
+  return readTransaction(options, async (client) => {
+    const { loadMagentoCatalog } = require('../magento-products-v1');
+    const { materializeMagentoV1 } = require('./magento-v1-definition');
+    const evidence = await loadSourceEvidence(client);
+    const duplicates = evidence.questions.filter((q, index, all) => all.findIndex(
+      (other) => other.category_code === q.category_code && other.key === q.key) !== index);
+    if (duplicates.length) throw error(422, 'TEMPLATE_SOURCE_INVALID', 'Duplicate current question keys', {
+      diagnostics: duplicates.map((q) => ({ sourceId: `${q.category_code}.${q.key}`,
+        code: 'SOURCE_REFERENCE_AMBIGUOUS', message: 'Duplicate current question key' })),
+    });
+    const catalog = await loadMagentoCatalog(client);
+    const definition = pureCall(() => materializeMagentoV1(catalog));
+    const diagnostics = validateSourceReferences(definition, evidence);
+    return { definition, definitionHash: hashJsonData(definition), diagnostics,
+      candidateOnly: true, capturedRules: true, productionAcceptanceVerified: false };
+  });
+}
+
+// Exporters receive publication identity only, never definitions/source registry.
+// includeNonActive is derived from current server capabilities by the route.
+async function getExportTemplateOptions({ includeNonActive = false, ...options } = {}) {
+  return readTransaction(options, async (client) => {
+    const selected = (await client.query('SELECT * FROM export_template_activation WHERE id=1')).rows[0];
+    const versions = (await client.query(`SELECT v.id AS "versionId", v.template_id AS "templateId",
+      v.version_number AS "versionNumber", t.display_name AS "displayName"
+      FROM export_template_versions v JOIN export_templates t ON t.id=v.template_id
+      WHERE ($1::boolean OR v.id=$2::text)
+      ORDER BY t.template_key, v.version_number DESC`, [includeNonActive, selected.template_version_id])).rows;
+    return { generation: selected.generation, activeVersionId: selected.template_version_id,
+      implementation: selected.implementation, defaultExporter: 'legacy', versions };
+  });
+}
+
 module.exports = { prepareDraft, counter, listTemplates, getTemplate, createTemplate, saveDraft, cloneDraft,
   validateDraft, testPreview, publishTemplate, getActivation, updateActivation, listSources,
-  loadVersion, verifyVersion, pureCall };
+  loadVersion, verifyVersion, pureCall, prepareMagentoCandidate, getExportTemplateOptions };

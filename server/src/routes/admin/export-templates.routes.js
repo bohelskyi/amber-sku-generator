@@ -15,6 +15,7 @@ const handle = (operation, status = 200) => async (req, res) => {
 const context = (req) => ({ mutationContext: getRequestMutationContext(req) });
 
 // Static endpoints must precede /:id.
+router.get(`${root}/candidate`, permission('view'), permission('manage'), handle(() => templates.prepareMagentoCandidate()));
 router.get(`${root}/sources`, permission('view'), handle(() => templates.listSources()));
 router.get(`${root}/activation`, permission('view'), handle(() => templates.getActivation()));
 router.put(`${root}/activation`, permission('activate'), handle((req) => templates.updateActivation(req.body, context(req))));

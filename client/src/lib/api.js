@@ -16,26 +16,30 @@ export function createApiClient({
   let getCsrfToken = null;
   let onUnauthorized = null;
   let onAccessStatusChange = null;
+  let getPrincipalLifetime = null;
 
   client.interceptors.request.use((config) => {
+    config.applicationPrincipal = getPrincipalLifetime?.();
     const method = String(config.method || 'get').toLowerCase();
     const csrfToken = UNSAFE_METHODS.has(method) ? getCsrfToken?.() : null;
     if (csrfToken) {
       config.headers.set('X-CSRF-Token', csrfToken);
     }
     return config;
-  });
+  }, undefined, { synchronous: true });
 
   client.interceptors.response.use(
     (response) => response,
     (error) => {
-      if (error?.response?.status === 401 && !error.config?.skipAuthHandling) {
+      const dispatchedPrincipal = error.config?.applicationPrincipal;
+      const currentPrincipal = !dispatchedPrincipal || (dispatchedPrincipal.valid && dispatchedPrincipal === getPrincipalLifetime?.());
+      if (currentPrincipal && error?.response?.status === 401 && !error.config?.skipAuthHandling) {
         onUnauthorized?.();
       }
       const accessStatus = error?.response?.status === 403
         ? ACCESS_STATUS_BY_ERROR_CODE[error.response?.data?.code]
         : null;
-      if (accessStatus && !error.config?.skipAuthHandling) {
+      if (currentPrincipal && accessStatus && !error.config?.skipAuthHandling) {
         onAccessStatusChange?.(accessStatus);
       }
       return Promise.reject(error);
@@ -52,14 +56,17 @@ export function createApiClient({
     const registeredOnAccessStatusChange = typeof handlers.onAccessStatusChange === 'function'
       ? handlers.onAccessStatusChange
       : null;
+    const registeredGetPrincipalLifetime = typeof handlers.getPrincipalLifetime === 'function' ? handlers.getPrincipalLifetime : null;
     getCsrfToken = registeredGetCsrfToken;
     onUnauthorized = registeredOnUnauthorized;
     onAccessStatusChange = registeredOnAccessStatusChange;
+    getPrincipalLifetime = registeredGetPrincipalLifetime;
 
     return () => {
       if (getCsrfToken === registeredGetCsrfToken) getCsrfToken = null;
       if (onUnauthorized === registeredOnUnauthorized) onUnauthorized = null;
       if (onAccessStatusChange === registeredOnAccessStatusChange) onAccessStatusChange = null;
+      if (getPrincipalLifetime === registeredGetPrincipalLifetime) getPrincipalLifetime = null;
     };
   }
 

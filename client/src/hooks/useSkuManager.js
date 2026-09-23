@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { productsApi } from '../api/products-api';
 import { useProductRecount } from './useProductRecount';
 import { useCopyFeedback } from './product/useCopyFeedback';
-import { useProductExportController } from './product/useProductExportController';
+import { useExportWorkflow } from './product/useExportWorkflow';
 import { useProductRecordsController } from './product/useProductRecordsController';
 import { getApiError } from '../lib/http-error';
 import {
@@ -74,7 +74,7 @@ export function useSkuManager({
   const [isVariationLoading, setIsVariationLoading] = useState(false);
   const [manualPriceUah, setManualPriceUah] = useState('');
   const [isManualPriceEditing, setIsManualPriceEditing] = useState(false);
-  const productExport = useProductExportController();
+  const productExport = useExportWorkflow();
   const records = useProductRecordsController({ onArchived: productExport.fetchExportStatus });
   const copyFeedback = useCopyFeedback();
 

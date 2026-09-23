@@ -3,6 +3,8 @@ import { AlertTriangle, CheckCircle2, Download, RefreshCw } from 'lucide-react';
 import { exportsApi } from '../../api/exports-api';
 import { getApiError } from '../../lib/http-error';
 import { getNewProductCopy } from '../../lib/product-export-copy';
+import { ControlledExportOptions } from './ControlledExportOptions';
+import { Link } from 'react-router-dom';
 
 const INITIAL_PROBLEM_ROWS = 6;
 
@@ -217,7 +219,7 @@ function ManualMagentoNameEditor({ product, onClose, onSaved,
   );
 }
 
-function PreviewSummary({ preview, loading, onRefresh }) {
+export function PreviewSummary({ preview, loading, onRefresh }) {
   const representedCount = Number(preview.representedCount || 0);
   const readyCount = Number(preview.readyCount || 0);
   const attentionCount = Math.max(0, representedCount - readyCount);
@@ -239,7 +241,7 @@ function PreviewSummary({ preview, loading, onRefresh }) {
   );
 }
 
-function ReadinessProblems({ errors, expanded, showAll, onToggle, onShowAll,
+export function ReadinessProblems({ errors, expanded, showAll, onToggle, onShowAll,
   manualNameProduct, onEditName, onCloseName, onSavedName,
   translationSuggestionAvailable }) {
   const groups = getProblemGroups(errors);
@@ -268,7 +270,7 @@ function ReadinessProblems({ errors, expanded, showAll, onToggle, onShowAll,
           <div className="divide-y divide-slate-200">
             {visibleErrors.map((product) => {
               const problems = getProductProblems(product);
-              const canEditName = product.fields?.some((field) => field.code === 'manual_name_required');
+              const canEditName = Boolean(onEditName) && product.fields?.some((field) => field.code === 'manual_name_required');
               return (
                 <div key={`${product.productId}-${product.sku}`}
                   className="grid gap-1 px-3 py-3 text-sm sm:grid-cols-[minmax(120px,0.7fr)_minmax(260px,2fr)_minmax(130px,0.8fr)] sm:items-center sm:gap-3">
@@ -304,7 +306,7 @@ function ReadinessProblems({ errors, expanded, showAll, onToggle, onShowAll,
   );
 }
 
-function ReadyToCreate({ count, loading, onCreate }) {
+function ReadyToCreate({ count, loading, disabled = loading, onCreate }) {
   return (
     <div className="px-4 py-5 sm:px-5">
       <div className="flex gap-3">
@@ -312,7 +314,7 @@ function ReadyToCreate({ count, loading, onCreate }) {
         <div>
           <h5 className="font-semibold text-slate-900">{readinessHeading(count)}</h5>
           <p className="mt-1 text-sm text-slate-600">Усі необхідні дані заповнені та пройшли перевірку.</p>
-          <button type="button" className="btn btn-primary mt-4 px-5" onClick={onCreate} disabled={loading}>
+          <button type="button" className="btn btn-primary mt-4 px-5" onClick={onCreate} disabled={disabled}>
             {loading ? 'Створюємо файли…' : 'Створити файли Magento'}
           </button>
         </div>
@@ -321,7 +323,7 @@ function ReadyToCreate({ count, loading, onCreate }) {
   );
 }
 
-function SnapshotFiles({ snapshot, loading, onDownload, onConfirm }) {
+export function SnapshotFiles({ snapshot, loading, onDownload, onConfirm, canConfirm = true }) {
   const confirmed = snapshot.status === 'confirmed';
   return (
     <div className="px-4 py-5 sm:px-5">
@@ -330,6 +332,7 @@ function SnapshotFiles({ snapshot, loading, onDownload, onConfirm }) {
         <div>
           <h5 className="text-lg font-semibold text-slate-900">Файли Magento готові</h5>
           <p className="mt-1 text-sm text-slate-600">Завантажте CSV для кожної представленої групи.</p>
+          {snapshot.capturedRange && <p className="mt-1 text-sm break-words">Діапазон цього знімка: {snapshot.capturedRange.fromSku} — {snapshot.capturedRange.toSku || snapshot.capturedRange.resolvedToSku}.</p>}
         </div>
       </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -359,7 +362,7 @@ function SnapshotFiles({ snapshot, loading, onDownload, onConfirm }) {
           <>
             <h6 className="font-semibold text-slate-900">Завантажили всі потрібні файли?</h6>
             <p className="mt-1 max-w-2xl text-sm text-slate-600">Після завершення ці товари будуть прибрані з черги нових. Це не означає, що Magento вже імпортувала файли.</p>
-            <button type="button" className="btn btn-primary mt-3 px-5" disabled={loading} onClick={onConfirm}>
+            <button type="button" className="btn btn-primary mt-3 px-5" disabled={loading || !canConfirm} onClick={onConfirm}>
               {loading ? 'Завершуємо…' : 'Завершити експорт'}
             </button>
           </>
@@ -410,6 +413,14 @@ export function ExportTools({
   onDelete,
   canArchive = true,
   canCreateExport = true,
+  canViewExport = canCreateExport,
+  templateMode = false,
+  setTemplateMode,
+  templateSelection,
+  setTemplateSelection,
+  pendingCreate,
+  canActivateTemplate = false,
+  durableSessions = false,
 }) {
   const [manualNameProduct, setManualNameProduct] = useState(null);
   const [problemsExpanded, setProblemsExpanded] = useState(false);
@@ -433,13 +444,18 @@ export function ExportTools({
 
   return (
     <section className="fade-up stagger-2 space-y-4">
-      {canCreateExport && (
+      {canViewExport && (
         <div className="card overflow-hidden">
           <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
             <p className="eyebrow">Magento Products v1</p>
             <h3 className="section-title-text mt-1">Експорт товарів у Magento</h3>
             <p className="section-subtitle mt-1">Перевірте нові товари, створіть файли та завершіть експорт після завантаження.</p>
           </div>
+
+          {durableSessions ? <div className="p-4 border-b"><Link className="underline" to="/exports/sessions">Мої експорти · Запрошення · Створити свій експорт за шаблоном</Link><p className="text-xs mt-2">Нижче — звичайний Magento v1. Контрольований експорт відкривається окремо й зберігається на сервері.</p></div> : setTemplateMode && <ControlledExportOptions templateMode={templateMode} setTemplateMode={setTemplateMode}
+            templateSelection={templateSelection} setTemplateSelection={setTemplateSelection}
+            pendingCreate={pendingCreate} isExportLoading={isExportLoading || !canCreateExport}
+            onRetry={onCreateSnapshot} evidence={exportSnapshot || exportPreview} canActivate={canActivateTemplate} />}
 
           {!exportStatus && !exportPreview && !exportSnapshot && (
             <div className="px-4 py-5 text-sm text-slate-600 sm:px-5" role="status">Завантаження статусу експорту…</div>
@@ -452,7 +468,7 @@ export function ExportTools({
                   <p className="font-semibold text-slate-900">{newProductCopy.pendingLabel}</p>
                   <p className="mt-1 text-sm text-slate-600">Перевірте готовність товарів перед створенням файлів.</p>
                   <button type="button" onClick={() => startPreview('new')}
-                    className="btn btn-primary mt-4 px-5" disabled={isExportLoading}>
+                    className="btn btn-primary mt-4 px-5" disabled={isExportLoading || Boolean(pendingCreate)}>
                     {isExportLoading ? 'Перевіряємо…' : newProductCopy.previewLabel}
                   </button>
                 </>
@@ -467,7 +483,7 @@ export function ExportTools({
 
           {exportPreview && !exportSnapshot && (
             <>
-              <PreviewSummary preview={exportPreview} loading={isExportLoading}
+              <PreviewSummary preview={exportPreview} loading={isExportLoading || Boolean(pendingCreate)}
                 onRefresh={() => refreshPreview(exportPreview.mode)} />
               {previewErrors.length > 0 ? (
                 <ReadinessProblems errors={previewErrors} expanded={problemsExpanded}
@@ -475,13 +491,13 @@ export function ExportTools({
                   onToggle={() => setProblemsExpanded((current) => !current)}
                   onShowAll={() => setShowAllProblems(true)}
                   manualNameProduct={manualNameProduct}
-                  onEditName={setManualNameProduct}
+                  onEditName={canCreateExport ? setManualNameProduct : null}
                   onCloseName={() => setManualNameProduct(null)}
                   translationSuggestionAvailable={exportStatus?.translationSuggestionAvailable === true}
                   onSavedName={() => refreshPreview(exportPreview.mode)} />
               ) : Number(exportPreview.representedCount) > 0 ? (
                 <ReadyToCreate count={exportPreview.representedCount}
-                  loading={isExportLoading} onCreate={onCreateSnapshot} />
+                  loading={isExportLoading} disabled={isExportLoading || !canCreateExport || Boolean(pendingCreate)} onCreate={onCreateSnapshot} />
               ) : (
                 <div className="px-4 py-5 text-sm text-slate-600 sm:px-5">У вибраному діапазоні немає товарів для експорту.</div>
               )}
@@ -489,7 +505,7 @@ export function ExportTools({
           )}
 
           {exportSnapshot && (
-            <SnapshotFiles snapshot={exportSnapshot} loading={isExportLoading}
+            <SnapshotFiles snapshot={exportSnapshot} loading={isExportLoading} canConfirm={canCreateExport}
               onDownload={onDownloadMagentoArtifact} onConfirm={onConfirmSnapshot} />
           )}
 
@@ -515,7 +531,7 @@ export function ExportTools({
                 placeholder="Кінцевий SKU, необов’язково"
                 aria-label="Кінцевий SKU для повторного експорту, необов’язково" className="input" />
               <button type="button" onClick={() => startPreview('manual')}
-                className="btn btn-outline px-5" disabled={isExportLoading}>Перевірити діапазон</button>
+                className="btn btn-outline px-5" disabled={isExportLoading || Boolean(pendingCreate)}>Перевірити діапазон</button>
             </div>
             <p className="mt-2 text-xs text-slate-500">Порожній кінцевий SKU означає повторний експорт одного товару.</p>
           </details>

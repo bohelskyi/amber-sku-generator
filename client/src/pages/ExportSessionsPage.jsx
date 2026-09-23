@@ -1,0 +1,238 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { useAuth } from '../auth/auth-context';
+import { exportSessionsApi as api } from '../api/export-sessions-api';
+import { exportsApi } from '../api/exports-api';
+import { ControlledExportOptions } from '../components/app/ControlledExportOptions';
+import { PreviewSummary, ReadinessProblems, SnapshotFiles } from '../components/app/ExportTools';
+import { useDirtyNavigation } from '../hooks/useDirtyNavigation';
+import { getApiError } from '../lib/http-error';
+import { downloadBlob } from '../lib/download';
+
+const freshSettings = () => ({ requestContract: 'template-v1', mode: 'new', selection: { mode: 'active' } });
+const stateLabels = { prepared: 'Підготовлено — очікує явного створення', executing: 'Створення виконується', interrupted: 'Виконання перервано — можна повторити ту саму спробу', failed: 'Спроба завершилася помилкою', succeeded: 'Збережені файли готові', superseded: 'Спробу замінено', 'not-ready': 'Потрібні виправлення' };
+function useLifetime() {
+  const { principalLifetime } = useAuth(); const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  return useCallback(() => alive.current && principalLifetime?.valid !== false, [principalLifetime]);
+}
+function Settings({ value, onChange, disabled, canActivate }) {
+  const update = (key, next) => onChange({ ...value, [key]: next });
+  return <fieldset disabled={disabled} className="space-y-3">
+    <label className="block">Назва експорту<input className="input" maxLength={160} value={value.title} onChange={(e) => update('title', e.target.value)} /></label>
+    <label className="block">Діапазон<select className="input" value={value.settings.mode || 'manual'} onChange={(e) => update('settings', { ...value.settings, mode: e.target.value, fromSku: null, toSku: null })}>
+      <option value="new">Нові товари після спільного курсора</option><option value="manual">Власний діапазон / повторний експорт</option>
+    </select></label>
+    {value.settings.mode === 'manual' && <div className="grid sm:grid-cols-2 gap-3">
+      <label>Від SKU<input className="input" value={value.settings.fromSku || ''} onChange={(e) => update('settings', { ...value.settings, fromSku: e.target.value })} /></label>
+      <label>До SKU (порожньо — до останнього)<input className="input" value={value.settings.toSku || ''} onChange={(e) => update('settings', { ...value.settings, toSku: e.target.value || null })} /></label>
+    </div>}
+    <ControlledExportOptions fixedMode templateMode templateSelection={value.settings.selection}
+      setTemplateSelection={(selection) => update('settings', { ...value.settings, selection })} canActivate={canActivate} />
+  </fieldset>;
+}
+function StoredResult({ id, canCreate, onDenied }) {
+  const principalCurrent = useLifetime(); const accessible = useRef(true); const seenEpoch = useRef(null);
+  const current = useCallback(() => principalCurrent() && accessible.current, [principalCurrent]);
+  const [snapshot, setSnapshot] = useState(null); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
+  const loading = useRef(false);
+  const read = useCallback(async () => {
+    if (!current()) return;
+    try {
+      const { data } = await exportsApi.getSnapshot(id); if (!current()) return;
+      if (seenEpoch.current !== null && seenEpoch.current !== data.accessEpoch) { accessible.current = false; setSnapshot(null); onDenied?.(); return; }
+      seenEpoch.current = data.accessEpoch; setSnapshot(data);
+    } catch (e) { if (!current()) return; if ([403,404].includes(e.response?.status)) { accessible.current = false; setSnapshot(null); onDenied?.(); } setError(getApiError(e)); }
+  }, [id, current, onDenied]);
+  useEffect(() => { const initial = window.setTimeout(() => { void read(); }, 0); const focus = () => { void read(); }; window.addEventListener('focus', focus); return () => { window.clearTimeout(initial); window.removeEventListener('focus', focus); }; }, [read]);
+  const run = async (task) => {
+    if (!current() || loading.current) return; loading.current = true; setBusy(true); setError('');
+    try { await task(); } catch (e) { if (current()) { if ([403,404].includes(e.response?.status)) { accessible.current = false; setSnapshot(null); onDenied?.(); } setError(getApiError(e)); } }
+    finally { loading.current = false; if (current()) setBusy(false); }
+  };
+  return <section className="card p-3 space-y-3">
+    <p>Це незмінний збережений результат. Читання та завантаження нічого не підтверджують.</p>
+    {snapshot?.template && <div className="text-sm"><p>Зафіксований шаблон: {snapshot.templateLabel?.displayName || 'Шаблон'} · v{snapshot.templateLabel?.versionNumber || '—'}</p><details><summary>Ідентифікатор публікації та хеш</summary><p className="break-all">{snapshot.template.versionId} · {snapshot.template.definitionHash}</p></details></div>}
+    {error && <p role="alert">{error}</p>}
+    {!snapshot ? <p role="status">{error ? 'Результат недоступний.' : 'Завантаження збереженого результату…'}</p> : <SnapshotFiles snapshot={snapshot} loading={busy} canConfirm={canCreate}
+      onDownload={(group) => run(async () => {
+        const response = await exportsApi.downloadMagentoArtifact(id, group); if (!current()) return;
+        downloadBlob(new Blob([response.data], { type: 'text/csv;charset=utf-8;' }), snapshot.artifacts.find((a) => a.groupCode === group)?.fileName || `magento-${group}.csv`, { documentRef: document, urlApi: window.URL });
+      })} onConfirm={() => run(async () => {
+        if (!canCreate || !current()) return;
+        await exportsApi.confirmSnapshot(id, snapshot.accessEpoch); if (current()) await read();
+      })} />}
+  </section>;
+}
+function NewSession({ canActivate, onCreated, register }) {
+  const current = useLifetime(); const [value, setValue] = useState({ title: '', settings: freshSettings() }); const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false); const [submitted, setSubmitted] = useState(false); const pending = useRef(null); const loading = useRef(false);
+  const dirty = Boolean(value.title || value.settings.mode !== 'new' || value.settings.selection.mode !== 'active');
+  const save = useCallback(async () => {
+    if (!current() || loading.current) return false;
+    if (!value.title.trim()) { setError('Вкажіть назву експорту.'); return false; }
+    if (!pending.current) { pending.current = { ...value, creationKey: crypto.randomUUID() }; setSubmitted(true); }
+    loading.current = true; setBusy(true); setError('');
+    try { const { data } = await api.create(pending.current); if (!current()) return false; onCreated(data.id); return true; }
+    catch (e) {
+      if (current()) {
+        if (e.response?.status === 422) { pending.current = null; setSubmitted(false); setError(getApiError(e)); }
+        else setError(`${getApiError(e)} Повтор зберігає початкову назву, налаштування й ключ. Також перевірте «Мої експорти»: відповідь могла загубитися.`);
+      }
+      return false;
+    }
+    finally { loading.current = false; if (current()) setBusy(false); }
+  }, [value, current, onCreated]);
+  useEffect(() => { register({ dirty, busy, save, discard: () => setValue({ title: '', settings: freshSettings() }) }); }, [dirty, busy, save, register]);
+  return <section className="card p-4 space-y-3"><h2 className="font-semibold">Створити свій експорт</h2>
+    <p>Спочатку приватний: доступ маєте лише ви. Створення зберігає налаштування, але не створює файлів і не резервує товари.</p>
+    <Settings value={value} onChange={setValue} canActivate={canActivate} disabled={busy || submitted} />
+    {error && <p role="alert">{error}</p>}<button className="btn btn-primary px-3" disabled={busy} onClick={save}>{submitted ? 'Повторити створення цього експорту' : 'Створити приватний експорт'}</button>
+  </section>;
+}
+function SessionDetail({ id, canCreate, canActivate, register, onLost }) {
+  const principalCurrent = useLifetime(); const accessible = useRef(true);
+  const current = useCallback(() => principalCurrent() && accessible.current, [principalCurrent]);
+  const [session, setSession] = useState(null); const [value, setValue] = useState(null); const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [preview, setPreview] = useState(null); const [remoteChange, setRemoteChange] = useState(false);
+  const [query, setQuery] = useState(''); const [recipients, setRecipients] = useState([]); const [recipient, setRecipient] = useState('');
+  const [manualName, setManualName] = useState(null); const [expanded, setExpanded] = useState(false); const [showAll, setShowAll] = useState(false);
+  const dirtyRef = useRef(false); const revisionRef = useRef(null); const membershipRef = useRef(null); const loading = useRef(false); const readTicket = useRef(0);
+  const denied = useCallback(() => { if (current()) { accessible.current = false; readTicket.current++; setSession(null); setValue(null); setPreview(null); setRecipients([]); setManualName(null); setDirty(false); dirtyRef.current = false; onLost(); } }, [current, onLost]);
+  const handleError = useCallback((e) => { if (!current()) return; if ([401,403,404].includes(e.response?.status)) denied(); else setError(getApiError(e)); }, [current, denied]);
+  const refresh = useCallback(async () => {
+    if (!current()) return; const ticket = ++readTicket.current;
+    try {
+      const { data } = await api.get(id); if (!current() || ticket !== readTicket.current) return;
+      if (membershipRef.current !== null && membershipRef.current !== data.accessEpoch) { denied(); return; }
+      membershipRef.current = data.accessEpoch;
+      if (dirtyRef.current && revisionRef.current !== data.configurationRevision) setRemoteChange(true);
+      if (!dirtyRef.current) { setValue({ title: data.title, settings: data.settings }); revisionRef.current = data.configurationRevision; }
+      setSession(data);
+    } catch (e) { if (ticket === readTicket.current) handleError(e); }
+  }, [id, current, handleError, denied]);
+  useEffect(() => {
+    const initial = window.setTimeout(() => { void refresh(); }, 0); const focus = () => { if (!loading.current) void refresh(); };
+    const timer = window.setInterval(() => { if (!document.hidden && !loading.current) void refresh(); }, 10000);
+    window.addEventListener('focus', focus); return () => { window.clearTimeout(initial); window.clearInterval(timer); window.removeEventListener('focus', focus); };
+  }, [refresh]);
+  const run = useCallback(async (task, apply) => {
+    if (!current() || loading.current) return false; loading.current = true; setBusy(true); setError('');
+    try { const { data } = await task(); if (!current()) return false; apply?.(data); return true; }
+    catch (e) { handleError(e); return false; }
+    finally { loading.current = false; if (current()) setBusy(false); }
+  }, [current, handleError]);
+  const save = useCallback(() => {
+    if (!session || !canCreate) return false;
+    return run(() => api.save(id, { ...value, expectedRevision: revisionRef.current, expectedAccessEpoch: session.accessEpoch }), (data) => {
+      readTicket.current++; dirtyRef.current = false; setDirty(false); setRemoteChange(false); revisionRef.current = data.configurationRevision;
+      setValue({ title: data.title, settings: data.settings }); setSession({ ...session, ...data, attempt: null }); setPreview(null);
+    });
+  }, [session, canCreate, run, id, value]);
+  const discard = useCallback(() => { if (!session) return; dirtyRef.current = false; setDirty(false); setRemoteChange(false); revisionRef.current = session.configurationRevision; setValue({ title: session.title, settings: session.settings }); }, [session]);
+  useEffect(() => { register({ dirty, busy, save: canCreate ? save : null, discard }); }, [dirty, busy, save, discard, canCreate, register]);
+  useEffect(() => { if (!dirty) return undefined; const warn = (e) => { e.preventDefault(); e.returnValue = ''; }; window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn); }, [dirty]);
+  if (!session || !value) return <p role="status">Завантаження експорту…</p>;
+  const precondition = { expectedRevision: session.configurationRevision, expectedAccessEpoch: session.accessEpoch };
+  const frozen = Boolean(session.snapshotId); const p = preview || session.attempt?.preview;
+  const prepare = (supersede = false) => run(() => api.prepare(id, { ...precondition, ...(supersede ? { supersedeAttemptId: session.currentAttemptId } : {}) }), (a) => { setPreview(a.preview); void refresh(); });
+  const memberAction = (body) => run(() => api.membership(id, { expectedAccessEpoch: session.accessEpoch, ...body }), () => { void refresh(); });
+  return <section className="space-y-4">
+    <div className="card p-4 space-y-3"><h2 className="text-xl font-semibold">{session.title}</h2>
+      <p>Власник: {session.ownerName || session.ownerUserId} · {session.isOwner ? 'ваш експорт' : 'спільний експорт'} · збережена ревізія {session.configurationRevision}</p>
+      <p role="status">{frozen ? 'Файли зафіксовано; діапазон і шаблон незмінні.' : session.executing ? 'Операція виконується; стан оновлюється.' : stateLabels[session.attempt?.state] || 'Налаштування збережено; файлів ще немає.'}</p>
+      {session.attempt?.lastErrorCode && <p>Остання помилка: {session.attempt.lastErrorCode}. Повторіть ту саму спробу або явно підготуйте нову перевірку.</p>}
+      {error && <p role="alert">{error}</p>}{remoteChange && <p role="alert">Інший учасник змінив експорт. Ваші локальні поля збережено; збереження старої ревізії буде відхилено. Відкиньте зміни явно, щоб прийняти серверну версію.</p>}
+      {frozen ? <div className="rounded border p-3 space-y-2">
+        <p>Зафіксований діапазон: {p?.range?.fromSku} — {p?.range?.resolvedToSku || p?.range?.toSku}.</p>
+        <p>Опублікований шаблон: {p?.template?.displayName || 'Шаблон'} · v{p?.template?.versionNumber || '—'}</p>
+        <details><summary>Походження результату</summary><p className="break-all">Версія: {p?.template?.versionId} · SHA-256 {p?.template?.definitionHash}</p></details>
+        <p>Інший діапазон або шаблон потребує дії «Створити свій експорт».</p>
+      </div> : <Settings value={value} disabled={busy || !canCreate || session.executing} canActivate={canActivate} onChange={(next) => { dirtyRef.current = true; setDirty(true); setValue(next); }} />}
+      {dirty && <p>Незбережені зміни бачите лише ви.</p>}
+      {!frozen && canCreate && <div className="flex flex-wrap gap-3">
+        <button className="btn btn-primary px-3" disabled={busy || !dirty || session.executing} onClick={save}>Зберегти налаштування</button>
+        {dirty && <button className="btn btn-outline px-3" disabled={busy} onClick={discard}>Відкинути локальні зміни</button>}
+      </div>}
+      <button className="underline" disabled={busy} onClick={refresh}>Оновити стан із сервера</button>
+      {!frozen && <div className="flex flex-wrap gap-3">
+        <button className="btn btn-outline px-3" disabled={busy || dirty || session.executing} onClick={() => run(() => api.preview(id), setPreview)}>Перевірити збережений діапазон (лише читання)</button>
+        {canCreate && <button className="btn btn-outline px-3" disabled={busy || dirty || session.executing} onClick={() => prepare(Boolean(session.currentAttemptId))}>{session.currentAttemptId ? 'Явно оновити перевірку та замінити спробу' : 'Підготувати збережену спробу'}</button>}
+        {canCreate && session.currentAttemptId && <button className="btn btn-primary px-3" disabled={busy || dirty || session.executing} onClick={() => run(() => api.generate(id, { ...precondition, attemptId: session.currentAttemptId }), () => { void refresh(); })}>
+          {['failed','interrupted'].includes(session.attempt?.state) ? 'Повторити ту саму спробу' : 'Створити файли цієї спроби'}</button>}
+      </div>}
+      <p className="text-xs">Підготовка зберігає доказ перевірки без резервування товарів. Лише «Створити файли» створює знімок та експозицію. Різні експорти можуть мати спільні товари; курсор один для всіх.</p>
+      <details><summary>Посилання та ідентифікатори</summary><Link className="break-all underline" to={`/exports/sessions/${id}`}>{id}</Link><p className="break-all">Спроба: {session.currentAttemptId || '—'} · Знімок: {session.snapshotId || '—'}</p></details>
+    </div>
+    {!frozen && p && <div className="card"><PreviewSummary preview={p} loading={busy} onRefresh={() => run(() => api.preview(id), setPreview)} />
+      {p.errors?.length > 0 && <ReadinessProblems errors={p.errors} expanded={expanded} showAll={showAll} onToggle={() => setExpanded(!expanded)} onShowAll={() => setShowAll(true)}
+        manualNameProduct={manualName} onEditName={canCreate ? setManualName : null} onCloseName={() => setManualName(null)} onSavedName={() => { setManualName(null); setPreview(null); }} translationSuggestionAvailable={false} />}
+      {p.template && <div className="p-3 text-sm"><p>Опублікований шаблон: {p.template.displayName || 'Шаблон'} · v{p.template.versionNumber || '—'}</p><details><summary>Походження</summary><p className="break-all">Версія: {p.template.versionId} · SHA-256 {p.template.definitionHash}</p></details></div>}
+    </div>}
+    {session.snapshotId && <StoredResult key={session.snapshotId} id={session.snapshotId} canCreate={canCreate} onDenied={denied} />}
+    <div className="card p-4 space-y-3"><h3 className="font-semibold">Учасники</h3><p>Власник: {session.ownerName || session.ownerUserId}</p>
+      <ul className="space-y-2">{session.participants.map((m) => <li key={m.user_id}>{m.display_name || m.preferred_username || m.user_id} · {({ pending: 'запрошено', accepted: 'приєднався', revoked: 'доступ відкликано', left: 'вийшов', declined: 'відхилено' })[m.state]}
+        {session.isOwner && canCreate && ['pending','accepted'].includes(m.state) && <button className="ml-3 underline" disabled={busy} onClick={() => memberAction({ action: 'revoke', userId: m.user_id, expectedMemberEpoch: m.epoch })}>Відкликати доступ</button>}</li>)}</ul>
+      {!session.isOwner && <button className="btn btn-outline px-3" disabled={busy} onClick={() => run(() => api.membership(id, { action: 'leave', expectedAccessEpoch: session.accessEpoch }), denied)}>Вийти зі спільного експорту</button>}
+      {session.isOwner && canCreate && <details><summary>Поділитися</summary><p className="mt-3">Запросіть конкретного користувача. Він має явно приєднатися; його права не зміняться.</p>
+        <label className="block">Ім’я або логін одержувача<input className="input" maxLength={80} value={query} onChange={(e) => { setQuery(e.target.value); setRecipients([]); setRecipient(''); }} /></label>
+        <button className="btn btn-outline px-3" disabled={busy || query.trim().length < 2} onClick={() => run(() => api.recipients(id, query), (data) => setRecipients(data.users))}>Знайти користувача</button>
+        <label className="block">Одержувач<select className="input" value={recipient} onChange={(e) => setRecipient(e.target.value)}><option value="">Оберіть точного користувача</option>{recipients.map((u) => <option key={u.id} value={u.id}>{u.display_name || u.preferred_username} · {u.preferred_username} · ID {u.id}</option>)}</select></label>
+        <button className="btn btn-primary px-3" disabled={busy || !recipient} onClick={() => run(() => api.invite(id, { userId: recipient, expectedAccessEpoch: session.accessEpoch }), () => { setRecipients([]); setRecipient(''); void refresh(); })}>Надіслати запрошення в застосунку</button>
+      </details>}
+      <p className="text-xs">Відкликання закриває подальший доступ. Воно не видаляє вже завантажені файли.</p>
+    </div>
+  </section>;
+}
+function SessionWorkspace({ canCreate, canActivate }) {
+  const current = useLifetime(); const { sessionId } = useParams(); const [scope, setScope] = useState('owned'); const [items, setItems] = useState([]); const [next, setNext] = useState(null);
+  const [selected, setSelected] = useState(null); const [openedLifetime, setOpenedLifetime] = useState(0); const [newSession, setNewSession] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
+  const [form, setForm] = useState({ dirty: false, busy: false }); const [knownId, setKnownId] = useState(''); const [known, setKnown] = useState(''); const listTicket = useRef(0);
+  const register = useCallback((state) => setForm(state), []);
+  const navigation = useDirtyNavigation(form);
+  const list = useCallback(async (after = '') => {
+    if (!current()) return; const ticket = ++listTicket.current;
+    try { const { data } = await api.list(scope, after); if (!current() || ticket !== listTicket.current) return; setItems((old) => after ? [...old, ...data.items] : data.items); setNext(data.next); }
+    catch (e) { if (current() && ticket === listTicket.current) setError(getApiError(e)); }
+  }, [scope, current]);
+  useEffect(() => { const initial = window.setTimeout(() => { void list(); }, 0); const focus = () => { void list(); }; window.addEventListener('focus', focus); return () => { window.clearTimeout(initial); window.removeEventListener('focus', focus); }; }, [list]);
+  useEffect(() => { if (!form.dirty) return undefined; const warn = (e) => { e.preventDefault(); e.returnValue = ''; }; window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn); }, [form.dirty]);
+  const open = useCallback((id) => { if (!current()) return; setForm({ dirty: false, busy: false }); setSelected(id); setOpenedLifetime((n) => n + 1); setNewSession(false); setKnown(''); setNotice(''); }, [current]);
+  const lost = useCallback(() => { setSelected(null); setKnown(''); setForm({ dirty: false, busy: false }); setNotice('Доступ до цього експорту втрачено. Дані закрито; відкрийте доступний експорт через поточний обліковий запис.'); void list(); }, [list]);
+  const newOwn = () => navigation.request(() => { setForm({ dirty: false, busy: false }); setSelected(null); setKnown(''); setOpenedLifetime((n) => n + 1); setNewSession(true); });
+  const respond = (invite, action) => navigation.request(async () => {
+    if (!current()) return;
+    try { await api.membership(invite.id, { action, expectedAccessEpoch: invite.accessEpoch }); if (!current()) return; if (action === 'accept') open(invite.id); void list(); }
+    catch (e) { if (current()) setError(getApiError(e)); }
+  });
+  return <main className="app-page"><div className="mx-auto max-w-5xl p-4 sm:p-6 space-y-5">
+    {navigation.prompt}<Link to="/exports" className="underline">Звичайний експорт та sku,price</Link><h1 className="text-2xl font-semibold">Збережені контрольовані експорти</h1>
+    <p>Кожний експорт — окрема приватна або явно спільна операція за опублікованим шаблоном. Чернетки шаблонів не передаються учасникам.</p>
+    {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+    <div className="flex flex-wrap gap-3">{canCreate && <button className="btn btn-primary px-3" onClick={newOwn}>Створити свій експорт</button>}
+      <button className="btn btn-outline px-3" onClick={() => { void list(); }}>Оновити список</button></div>
+    <div className="card p-4 space-y-3"><label className="block">Список експортів<select className="input" value={scope} onChange={(e) => setScope(e.target.value)}>
+      <option value="owned">Мої експорти</option><option value="invitations">Запрошення</option><option value="shared">Спільні зі мною</option></select></label>
+      {scope === 'invitations' && <p>Ваші поточні права: {canCreate ? 'читати, створювати файли та явно підтверджувати результат' : 'лише читати й завантажувати; створення та підтвердження недоступні'}. Приєднання не надає нових дозволів. Ви також можете створити свій незалежний експорт.</p>}
+      {!items.length && <p>У цьому списку поки немає експортів.</p>}
+      <ul className="space-y-3">{items.map((s) => <li key={s.id} className="rounded border p-3"><strong>{s.title}</strong><p>Власник: {s.ownerName || s.ownerUserId}{s.configurationRevision ? ` · ревізія ${s.configurationRevision} · ${s.snapshotId ? 'файли готові' : s.currentAttemptId ? 'спроба збережена' : 'налаштування'}` : ''}</p>
+        {s.template && <p>{s.template.displayName} · v{s.template.versionNumber}</p>}{s.createdAt && <p className="text-xs">Створено: {new Date(s.createdAt).toLocaleString('uk-UA')}</p>}
+        {scope === 'invitations' ? <div className="flex flex-wrap gap-3"><button className="underline" onClick={() => respond(s, 'accept')}>Приєднатися до експорту користувача {s.ownerName || s.ownerUserId}</button><button className="underline" onClick={() => respond(s, 'decline')}>Відхилити запрошення</button></div>
+          : <button className="underline" onClick={() => navigation.request(() => open(s.id))}>Відкрити / продовжити {s.title}</button>}</li>)}</ul>
+      {next && <button className="underline" onClick={() => { void list(next); }}>Наступні експорти</button>}
+    </div>
+    {sessionId && <button className="btn btn-outline px-3 break-all" onClick={() => navigation.request(() => open(sessionId))}>Відкрити експорт із посилання через мій обліковий запис</button>}
+    {newSession && <NewSession key={openedLifetime} canActivate={canActivate} onCreated={open} register={register} />}
+    {selected && <SessionDetail key={`${selected}:${openedLifetime}`} id={selected} canCreate={canCreate} canActivate={canActivate} register={register} onLost={lost} />}
+    <details className="card p-4"><summary>Відкрити відомий історичний знімок</summary><p className="my-3 text-sm">Потрібен точний ID. Невідомі операції, створені до збережених сесій, автоматично не зіставляються.</p>
+      <label className="block">ID збереженого знімка<input className="input" value={knownId} maxLength={200} onChange={(e) => setKnownId(e.target.value)} /></label>
+      <button className="btn btn-outline px-3" disabled={!knownId.trim()} onClick={() => navigation.request(() => { setForm({ dirty: false, busy: false }); setSelected(null); setNewSession(false); setOpenedLifetime((n) => n + 1); setKnown(knownId.trim()); })}>Прочитати знімок без підтвердження</button>
+    </details>
+    {known && <StoredResult key={`${known}:${openedLifetime}`} id={known} canCreate={canCreate} onDenied={lost} />}
+  </div></main>;
+}
+export default function ExportSessionsPage() {
+  const { permissions, applicationUser } = useAuth();
+  if (!permissions.includes('exports.view')) return <main className="app-page p-6">Немає дозволу на перегляд експорту</main>;
+  return <SessionWorkspace key={`${applicationUser?.id}:${permissions.includes('exports.create')}`} canCreate={permissions.includes('exports.create')} canActivate={permissions.includes('export_templates.activate')} />;
+}

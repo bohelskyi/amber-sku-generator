@@ -10,6 +10,7 @@ const bindingTools = require('./export-templates/snapshot-binding');
 const published = require('./export-templates/published-capture');
 const previewSigner = bindingTools.makeSigner(require('../config/env').sessionSecret);
 const { assertActorStillAuthorized } = require('./access-admin-transaction');
+const sessionAccess = require('./export-session-access');
 const {
   buildMagentoPayload,
   loadMagentoCatalog,
@@ -342,6 +343,9 @@ async function createExportSnapshot(input, options = {}) {
   const suppliedBinding = template && input.previewToken !== undefined
     ? previewSigner.verify(input.previewToken, { completed: true }) : null;
   async function match(snapshot, queryable = database) {
+    await sessionAccess.assertSnapshotAccess(queryable, snapshot, options);
+    if (options.sessionAttempt && (snapshot.export_session_id !== options.sessionAttempt.sessionId
+      || snapshot.export_attempt_id !== options.sessionAttempt.attemptId)) throw bindingTools.conflict();
     if (template) return bindingTools.assertCompleted(snapshot, intent, suppliedBinding);
     if (snapshot.request_contract === 'template-v1') throw bindingTools.conflict();
     assertSnapshotMatchesRequest(snapshot, fromSku, toSku);
@@ -358,6 +362,8 @@ async function createExportSnapshot(input, options = {}) {
   if (existing.rows[0]) {
     return match(existing.rows[0]);
   }
+  // A server-owned prepared key is never a second direct capture entrance.
+  if (!options.sessionAttempt && (await database.query('SELECT 1 FROM export_session_attempts WHERE idempotency_key=$1', [key])).rows.length) throw sessionAccess.missing();
   if (template && requestedProfile !== 'magento-products-v1') {
     throw bindingTools.error(422, 'EXPORT_PROFILE_INVALID', 'Template exports require magento-products-v1');
   }
@@ -446,9 +452,10 @@ async function createExportSnapshot(input, options = {}) {
         exported_to_product_id, row_count, file_name, csv_content, created_by_user_id,
         reexport_revisions, request_contract, template_id, template_version_id,
         template_definition_hash, template_evaluator_version, template_output_contract,
-        template_format_version, request_intent, input_fingerprint, binding_evidence)
+        template_format_version, request_intent, input_fingerprint, binding_evidence,
+        export_session_id, export_attempt_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb,
-         $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21::jsonb)
+         $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21::jsonb, $22, $23)
        RETURNING *`,
       [
         crypto.randomUUID(),
@@ -467,6 +474,7 @@ async function createExportSnapshot(input, options = {}) {
         binding?.effective.outputContract || null, binding?.effective.formatVersion || null,
         intent ? JSON.stringify(intent) : null, binding?.inputFingerprint || null,
         binding ? JSON.stringify(binding) : null,
+        options.sessionAttempt?.sessionId || null, options.sessionAttempt?.attemptId || null,
       ]
     );
     const snapshot = result.rows[0];
@@ -493,6 +501,7 @@ async function createExportSnapshot(input, options = {}) {
           templateVersionId: binding.effective.versionId } : {}),
       },
     });
+    if (options.linkSessionResult) await options.linkSessionResult(client, snapshot);
     await client.query('COMMIT');
     return snapshot;
   } catch (error) {
@@ -587,9 +596,9 @@ async function previewExport(input, options = {}) {
   }
 }
 
-async function getMagentoArtifacts(snapshotId) {
-  await getExportSnapshot(snapshotId);
-  const result = await pool.query(
+async function getMagentoArtifacts(snapshotId, options = {}) {
+  await getExportSnapshot(snapshotId, options);
+  const result = await (options.databasePool || pool).query(
     `SELECT snapshot_id, profile_version, group_code, file_name,
             product_count, row_count
      FROM magento_export_artifacts WHERE snapshot_id = $1
@@ -606,14 +615,15 @@ async function getMagentoArtifacts(snapshotId) {
   }));
 }
 
-async function getMagentoArtifact(snapshotId, groupCode) {
+async function getMagentoArtifact(snapshotId, groupCode, options = {}) {
+  await getExportSnapshot(snapshotId, options);
   const group = String(groupCode || '').toUpperCase();
   if (!['BR', 'NM', 'KL', 'CH', 'AR', 'SV'].includes(group)) {
     const error = new Error('Невідома Magento-група.');
     error.statusCode = 404;
     throw error;
   }
-  const result = await pool.query(
+  const result = await (options.databasePool || pool).query(
     `SELECT * FROM magento_export_artifacts
      WHERE snapshot_id = $1 AND group_code = $2
        AND profile_version = 'magento-products-v1'`,
@@ -627,18 +637,27 @@ async function getMagentoArtifact(snapshotId, groupCode) {
   return result.rows[0];
 }
 
-async function getExportSnapshot(snapshotId) {
-  const result = await pool.query('SELECT * FROM export_snapshots WHERE id = $1', [snapshotId]);
+async function getExportSnapshot(snapshotId, options = {}) {
+  const database = options.databasePool || pool;
+  const result = await database.query('SELECT * FROM export_snapshots WHERE id = $1', [snapshotId]);
   if (!result.rows[0]) {
-    const error = new Error('Export snapshot не знайдено.');
-    error.statusCode = 404;
-    throw error;
+    throw sessionAccess.missing();
   }
-  return result.rows[0];
+  const access = await sessionAccess.assertSnapshotAccess(database, result.rows[0], options);
+  const snapshot = result.rows[0];
+  const label = snapshot.template_version_id ? (await database.query(`SELECT t.display_name AS "displayName", v.version_number AS "versionNumber"
+    FROM export_template_versions v JOIN export_templates t ON t.id=v.template_id WHERE v.id=$1`, [snapshot.template_version_id])).rows[0] : null;
+  return { ...snapshot, ...(access ? { session_access_epoch: access.accessEpoch } : {}), ...(label ? { template_label: label } : {}) };
 }
 
 async function confirmExportSnapshot(snapshotId, options = {}) {
   const mutationContext = createMutationContext(options.mutationContext);
+  if (!options.sessionAuthorized) {
+    const row = (await (options.databasePool || pool).query('SELECT export_session_id FROM export_snapshots WHERE id=$1', [snapshotId])).rows[0];
+    if (row?.export_session_id) return sessionAccess.withSession(row.export_session_id, {
+      ...options, write: true, mutate: true,
+    }, (_client, _session, { databasePool }) => confirmExportSnapshot(snapshotId, { ...options, databasePool, sessionAuthorized: true }));
+  }
   const client = await (options.databasePool || pool).connect();
   try {
     await client.query('BEGIN');
@@ -648,9 +667,7 @@ async function confirmExportSnapshot(snapshotId, options = {}) {
     );
     const snapshot = snapshotResult.rows[0];
     if (!snapshot) {
-      const error = new Error('Export snapshot не знайдено.');
-      error.statusCode = 404;
-      throw error;
+      throw sessionAccess.missing();
     }
     if (snapshot.status !== 'confirmed') {
       await client.query(
@@ -728,7 +745,7 @@ async function confirmExportSnapshot(snapshotId, options = {}) {
   }
 }
 
-async function getExportStatus() {
+async function getExportStatus(options = {}) {
   const lastExportResult = await pool.query(
     `
       SELECT COALESCE(s.id, 'legacy-' || e.id::text) AS id,
@@ -737,7 +754,8 @@ async function getExportStatus() {
              COALESCE(s.resolved_to_sku, e.resolved_to_sku) AS resolved_to_sku,
              st.exported_to_product_id,
              COALESCE(s.row_count, e.row_count, 0) AS row_count,
-             COALESCE(s.confirmed_at, e.created_at) AS created_at
+             COALESCE(s.confirmed_at, e.created_at) AS created_at,
+             s.export_session_id
       FROM export_state st
       LEFT JOIN export_snapshots s ON s.id = st.last_snapshot_id
       LEFT JOIN LATERAL (
@@ -776,6 +794,11 @@ async function getExportStatus() {
   }
 
   const lastExport = lastExportResult.rows[0];
+  let privateResult = false;
+  if (lastExport.export_session_id) {
+    try { await sessionAccess.assertSnapshotAccess(pool, lastExport, options); }
+    catch (error) { if ([403,404].includes(error.statusCode)) privateResult = true; else throw error; }
+  }
   const exportedToId = Number(lastExport.exported_to_product_id || 0);
   const sinceResult = await pool.query(
     'SELECT count(*)::int AS count FROM products WHERE id > $1 AND COALESCE(exclude_from_export, 0) = 0',
@@ -789,7 +812,7 @@ async function getExportStatus() {
     countSinceLastExport: Number(sinceResult.rows[0]?.count || 0),
     latestProductId,
     latestExportableProductId,
-    lastExport: {
+    lastExport: privateResult ? { createdAt: lastExport.created_at } : {
       id: String(lastExport.id),
       fromSku: lastExport.from_sku,
       toSku: lastExport.to_sku,

@@ -16,9 +16,16 @@ const {
 
 const router = express.Router();
 
+router.get('/export/template-options', requirePermission('exports.view'), async (req, res) => {
+  try {
+    const { getExportTemplateOptions } = require('../../services/export-templates/template.service');
+    res.json(await getExportTemplateOptions({ includeNonActive: req.permissions.includes('export_templates.activate') }));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.get('/export/status', requirePermission('exports.view'), async (req, res) => {
   try {
-    const status = await getExportStatus();
+    const status = await getExportStatus({ mutationContext: getRequestMutationContext(req) });
     res.json({ ...status,
       translationSuggestionAvailable: Boolean(config.googleTranslationApiKey) });
   } catch (err) {
@@ -67,7 +74,7 @@ router.post('/export/snapshots', requirePermission('exports.create'), async (req
       fileName: snapshot.file_name,
       rowCount: Number(snapshot.row_count),
       generatedAt: snapshot.generated_at,
-      artifacts: await getMagentoArtifacts(snapshot.id),
+      artifacts: await getMagentoArtifacts(snapshot.id, { mutationContext: getRequestMutationContext(req) }),
       ...manifestProvenance(snapshot),
     });
   } catch (err) {
@@ -82,13 +89,15 @@ router.post('/export/snapshots', requirePermission('exports.create'), async (req
 
 router.get('/export/snapshots/:id', requirePermission('exports.view'), async (req, res) => {
   try {
-    const snapshot = await getExportSnapshot(req.params.id);
+    const snapshot = await getExportSnapshot(req.params.id, { mutationContext: getRequestMutationContext(req) });
     res.json({
       id: snapshot.id,
       status: snapshot.status,
       rowCount: Number(snapshot.row_count),
       generatedAt: snapshot.generated_at,
-      artifacts: await getMagentoArtifacts(snapshot.id),
+      artifacts: await getMagentoArtifacts(snapshot.id, { mutationContext: getRequestMutationContext(req) }),
+      ...(snapshot.export_session_id ? { sessionId: snapshot.export_session_id, accessEpoch: snapshot.session_access_epoch } : {}),
+      ...(snapshot.template_label ? { templateLabel: snapshot.template_label } : {}),
       ...manifestProvenance(snapshot),
     });
   } catch (err) {
@@ -98,7 +107,7 @@ router.get('/export/snapshots/:id', requirePermission('exports.view'), async (re
 
 router.get('/export/snapshots/:id/magento/:group/csv', requirePermission('exports.view'), async (req, res) => {
   try {
-    const artifact = await getMagentoArtifact(req.params.id, req.params.group);
+    const artifact = await getMagentoArtifact(req.params.id, req.params.group, { mutationContext: getRequestMutationContext(req) });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${artifact.file_name}"`);
     res.send(artifact.csv_content);
@@ -109,7 +118,7 @@ router.get('/export/snapshots/:id/magento/:group/csv', requirePermission('export
 
 router.get('/export/snapshots/:id/csv', requirePermission('exports.view'), async (req, res) => {
   try {
-    const snapshot = await getExportSnapshot(req.params.id);
+    const snapshot = await getExportSnapshot(req.params.id, { mutationContext: getRequestMutationContext(req) });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${snapshot.file_name}"`);
     res.send(snapshot.csv_content);
@@ -122,6 +131,7 @@ router.post('/export/snapshots/:id/confirm', requirePermission('exports.create')
   try {
     res.json(await confirmExportSnapshot(req.params.id, {
       mutationContext: getRequestMutationContext(req),
+      expectedAccessEpoch: req.body?.expectedAccessEpoch,
     }));
   } catch (err) {
     res.status(err.statusCode || 400).json({ error: err.message });

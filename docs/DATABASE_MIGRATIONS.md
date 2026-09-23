@@ -93,12 +93,18 @@ New paths touching these resources must follow existing lock order and final-sta
 | `034_product_magento_manual_names.sql` | Adds a nullable paired UA/EN manual subject to products, with a nonblank and length check. Existing products retain null subjects; no historical snapshot or product backfill. |
 | `035_export_templates.sql` | Adds permanent template families, one revisioned JSONB draft per family, immutable published versions, legacy-initialized singleton selection metadata, and four delegable template capabilities. No snapshot columns, baseline template, product/catalog capture, synthetic actor or audit backfill. |
 | `036_export_snapshot_template_binding.sql` | Adds immutable opt-in snapshot request intent, published-version provenance, input fingerprint and effective capture evidence. Composite publication identity FK plus complete/null shape checks; old snapshots stay legacy and unattributed. Extends the existing payload trigger without changing artifact bytes or confirmation attribution rules. |
+| `037_shared_export_sessions.sql` | Durable private/shared controlled sessions, membership epochs, immutable attempt identity/proof, one successful snapshot per session, and deferred atomic reverse-result association. No historical ownership backfill; 000–036 remain immutable. |
 
 Export-template mutations take the existing access-admin advisory lock and recheck the actor's specific capability before locking family then draft. Publication allocates a per-family version number under those locks and inserts attribution and audit atomically. The unique family/source-revision tuple supports completed retries even after the draft advances. Draft base-version ownership uses a composite foreign key; historical source revision is not a foreign key to the mutable draft revision. Selection writers lock the singleton after the access boundary and only read immutable versions; they never lock products, revisions or cursors.
 
 Publication UPDATE/DELETE/TRUNCATE is rejected by database triggers, including definition, constants, metadata and actor/time. Family identities and draft/selection rows are permanent, with monotonic revision/generation guards. Normal application writes cannot remove this evidence. Privileged integration teardown drops/recreates the disposable schema; it never disables these guards. Definition JSONB has a 512 KiB storage-text backstop (JSONB adds whitespace); the service enforces the stricter PR1B 256 KiB serialized-JSON limit and structural safety before writes.
 
 ## Test database safety
+
+Controlled shared sessions add a pre-transaction session advisory lock after the
+shared access boundary. All membership/configuration/generation/confirmation commands
+use this order; the existing product → revision → cursor and snapshot-confirmation
+order remain intact. See [session locking and recovery](SHARED_EXPORT_SESSIONS.md).
 
 PR3 treats every migration through 035 as immutable. Snapshot additions are
 `request_contract` (mechanical `legacy` default), `template_id`,

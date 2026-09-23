@@ -25,6 +25,19 @@ import { getPermissionUiState, getRecountUiMode } from '../src/lib/permission-ui
 import AdminPage from '../src/pages/AdminPage.jsx';
 import CorrectionRequestsPage from '../src/pages/CorrectionRequestsPage.jsx';
 import { api, createApiClient } from '../src/lib/api.js';
+
+it.each([401,403])('late %s from an invalidated principal cannot change the current authentication gate', async (status) => {
+  const isolated = createApiClient(); const onUnauthorized = vi.fn(); const onAccessStatusChange = vi.fn();
+  let principal = { id: 'A', valid: true }; let csrf = 'csrf-A'; let reject;
+  isolated.configureAuth({ getPrincipalLifetime: () => principal, getCsrfToken: () => csrf, onUnauthorized, onAccessStatusChange });
+  let dispatched;
+  isolated.client.defaults.adapter = (config) => { dispatched = config; return new Promise((_resolve, rejectResponse) => { reject = rejectResponse; }); };
+  const pending = isolated.client.post('/export/preview', {}).catch((error) => error);
+  expect(dispatched.headers.get('X-CSRF-Token')).toBe('csrf-A');
+  principal.valid = false; principal = { id: 'B', valid: true }; csrf = 'csrf-B';
+  reject({ config: dispatched, response: { status, data: { code: 'APP_ACCESS_DISABLED' } } }); await pending;
+  expect(onUnauthorized).not.toHaveBeenCalled(); expect(onAccessStatusChange).not.toHaveBeenCalled();
+});
 import {
   APPLICATION_USER_STATUS_LABELS,
 } from '../src/lib/user-management.js';

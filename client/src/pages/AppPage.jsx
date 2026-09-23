@@ -135,7 +135,13 @@ function AppPage() {
         />
 
         {!sku.selectedCat && (canCreateExports || canArchiveProducts) && (
-          <ExportTools
+          <ExportTools durableSessions
+            templateMode={sku.templateMode}
+            setTemplateMode={sku.setTemplateMode}
+            templateSelection={sku.templateSelection}
+            setTemplateSelection={sku.setTemplateSelection}
+            pendingCreate={sku.pendingCreate}
+            canActivateTemplate={auth.permissions.includes('export_templates.activate')}
             exportFromSku={sku.exportFromSku}
             setExportFromSku={sku.setExportFromSku}
             exportToSku={sku.exportToSku}

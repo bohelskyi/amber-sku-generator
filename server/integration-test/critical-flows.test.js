@@ -19,6 +19,8 @@ for (const modulePath of [
   './12-rbac-audit.cases',
   './12-export-templates.cases',
   './12-export-template-snapshots.cases',
+  './12-export-template-editor.cases',
+  './12-export-sessions.cases',
   './13-sqlite-import.cases',
 ]) {
   require(modulePath);

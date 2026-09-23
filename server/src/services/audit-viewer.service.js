@@ -24,14 +24,14 @@ const COMMON_DETAIL_KEYS = new Set([
   'valueId', 'version', 'versionFrom', 'versionTo', 'weightBandChanges',
   'weightBandCount', 'xValue', 'yValue', 'removedPermissionKeys', 'reason',
   'templateId', 'templateVersionId', 'previousTemplateVersionId', 'baseVersionId',
-  'requestContract',
+  'requestContract', 'attemptId', 'snapshotId', 'userId', 'epoch', 'revision',
   'draftRevision', 'revisionFrom', 'revisionTo', 'generationFrom', 'generationTo', 'implementation',
 ]);
 
 const KNOWN_EVENT_PREFIXES = new Set([
   'application_user', 'catalog', 'correction_request', 'export_snapshot',
   'price_export_snapshot', 'pricing', 'product', 'repricing', 'repricing_draft',
-  'role', 'sku_schema', 'export_template',
+  'role', 'sku_schema', 'export_template', 'export_session',
 ]);
 
 const SENSITIVE_DETAIL_KEY_PATTERN = /(token|secret|session|request[_]?id|claim|hash|issuer|oidc|subject)/i;

@@ -24,8 +24,15 @@ export function AuthProvider({
   const [auth, setAuth] = useState(EMPTY_AUTH);
   const csrfTokenRef = useRef(null);
   const latestRequestRef = useRef(0);
+  const principalRef = useRef({ id: null, valid: false });
+
+  const invalidatePrincipal = useCallback(() => {
+    principalRef.current.valid = false;
+    principalRef.current = { id: null, valid: false };
+  }, []);
 
   const markUnauthenticated = useCallback(() => {
+    invalidatePrincipal();
     latestRequestRef.current += 1;
     csrfTokenRef.current = null;
     setAuth({
@@ -37,10 +44,11 @@ export function AuthProvider({
       csrfToken: null,
       errorMessage: null,
     });
-  }, []);
+  }, [invalidatePrincipal]);
 
   const markAccessStatus = useCallback((applicationUserStatus) => {
     if (!['pending', 'disabled'].includes(applicationUserStatus)) return;
+    invalidatePrincipal();
     latestRequestRef.current += 1;
     setAuth((currentAuth) => {
       if (!currentAuth.identity || !currentAuth.applicationUser) return currentAuth;
@@ -58,7 +66,7 @@ export function AuthProvider({
         errorMessage: null,
       };
     });
-  }, []);
+  }, [invalidatePrincipal]);
 
   const loadCurrentSession = useCallback(async () => {
     const requestId = latestRequestRef.current + 1;
@@ -68,10 +76,16 @@ export function AuthProvider({
       if (latestRequestRef.current !== requestId) return;
       const currentSession = normalizeCurrentSession(response.data);
       if (!currentSession) throw new Error('Invalid current-session response');
+      const id = currentSession.applicationUser?.status === 'active' ? String(currentSession.applicationUser.id) : null;
+      if (principalRef.current.id !== id || !principalRef.current.valid) {
+        invalidatePrincipal();
+        principalRef.current = { id, valid: id !== null };
+      }
       csrfTokenRef.current = currentSession.csrfToken;
       setAuth({
         status: getApplicationAuthStatus(currentSession.applicationUser),
         ...currentSession,
+        principalLifetime: principalRef.current,
         errorMessage: null,
       });
     } catch (error) {
@@ -81,6 +95,7 @@ export function AuthProvider({
         return;
       }
       csrfTokenRef.current = null;
+      invalidatePrincipal();
       setAuth({
         status: AUTH_STATUS.ERROR,
         identity: null,
@@ -91,11 +106,12 @@ export function AuthProvider({
         errorMessage: 'Не вдалося перевірити сеанс. Спробуйте ще раз.',
       });
     }
-  }, [apiClient, markUnauthenticated]);
+  }, [apiClient, markUnauthenticated, invalidatePrincipal]);
 
   useEffect(() => {
     const removeApiAuth = bindApiAuth({
       getCsrfToken: () => csrfTokenRef.current,
+      getPrincipalLifetime: () => principalRef.current,
       onAccessStatusChange: markAccessStatus,
       onUnauthorized: markUnauthenticated,
     });

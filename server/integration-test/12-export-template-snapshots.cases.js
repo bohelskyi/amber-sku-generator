@@ -134,6 +134,15 @@ test('PR3 persisted preview and HTTP stored/downloaded parity for ten golden cas
     assert.deepEqual(Buffer.from(download.text), Buffer.from(expected), fixture.id);
     const artifact = await exportsService.getMagentoArtifact(made.data.id, fixture.group);
     assert.deepEqual(Buffer.from(artifact.csv_content), Buffer.from(expected));
+    if (fixture.id === 'SV-escaping') {
+      assert.equal(p.full_sku, ' =SKU', 'original pure fixture, before persistence');
+      const authoritative = (await pool.query('SELECT * FROM products WHERE id=$1', [stored.id])).rows[0];
+      assert.equal(authoritative.full_sku, '=SKU', '001 products_reserve_sku / reserve_product_sku: UPPER(TRIM(...))');
+      const oldOutput = require('../src/services/magento-products-v1').buildMagentoPayload([authoritative], rules);
+      assert.deepEqual(oldOutput.errors, []);
+      assert.deepEqual(Buffer.from(oldOutput.artifacts[0].csvContent), Buffer.from(artifact.csv_content),
+        'old mapper and published-template stored artifact: same persisted facts and captured catalog rules');
+    }
     durable.push({ id: made.data.id, group: fixture.group, bytes: expected });
   }
   assert.equal(new Set([...byGroup.values()].map((p) => p.category)).size, 6);

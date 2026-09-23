@@ -1,7 +1,8 @@
-import { lazy, Suspense } from 'react';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { lazy, Suspense, useState } from 'react';
+import { createBrowserRouter, RouterProvider, Route, Routes } from 'react-router-dom';
 import { WorkspaceNav } from './components/app/WorkspaceNav.jsx';
 import { LoadingState } from './components/app/UiPrimitives.jsx';
+import { ExportWorkflowProvider } from './hooks/product/export-workflow-context';
 
 const AppPage = lazy(() => import('./pages/AppPage.jsx'));
 const AdminPage = lazy(() => import('./pages/AdminPage.jsx'));
@@ -11,10 +12,18 @@ const CorrectionHistoryPage = lazy(() => import('./pages/CorrectionHistoryPage.j
 const UsersPage = lazy(() => import('./pages/UsersPage.jsx'));
 const RolesPage = lazy(() => import('./pages/RolesPage.jsx'));
 const AuditPage = lazy(() => import('./pages/AuditPage.jsx'));
+const ExportTemplatesPage = lazy(() => import('./pages/ExportTemplatesPage.jsx'));
+const ExportsPage = lazy(() => import('./pages/ExportsPage.jsx'));
+const ExportSessionsPage = lazy(() => import('./pages/ExportSessionsPage.jsx'));
 
 export default function AppRouter() {
+  const [router] = useState(() => createBrowserRouter([{ path: '*', element: <Workspace /> }]));
+  return <RouterProvider router={router} />;
+}
+
+function Workspace() {
   return (
-    <BrowserRouter>
+      <ExportWorkflowProvider>
       <div className="app-shell">
         <WorkspaceNav />
         <Suspense fallback={<main className="app-page"><LoadingState label="Відкриваємо розділ…" /></main>}>
@@ -27,9 +36,12 @@ export default function AppRouter() {
             <Route path="/admin/users" element={<UsersPage />} />
             <Route path="/admin/roles" element={<RolesPage />} />
             <Route path="/admin/audit" element={<AuditPage />} />
+            <Route path="/admin/export-templates" element={<ExportTemplatesPage />} />
+            <Route path="/exports" element={<ExportsPage />} />
+            <Route path="/exports/sessions/:sessionId?" element={<ExportSessionsPage />} />
           </Routes>
         </Suspense>
       </div>
-    </BrowserRouter>
+      </ExportWorkflowProvider>
   );
 }

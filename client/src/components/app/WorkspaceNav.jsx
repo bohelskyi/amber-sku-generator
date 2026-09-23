@@ -15,6 +15,8 @@ import { getIdentityDisplayName } from '../../auth/auth-model.js';
 import amberLogo from '../../assets/amber-logo-white-orange.png';
 
 const navigation = [
+  { to: '/exports', label: 'Експорт', icon: <Boxes size={16} aria-hidden="true" />, permissions: ['exports.view'] },
+  { to: '/admin/export-templates', label: 'Шаблони експорту', icon: <ScrollText size={16} aria-hidden="true" />, permissions: ['export_templates.view'] },
   { to: '/', label: 'Товари', icon: <Boxes size={16} aria-hidden="true" />, end: true, permissions: ['products.view'] },
   { to: '/admin', label: 'Каталог і ціни', icon: <SlidersHorizontal size={16} aria-hidden="true" />, end: true, permissions: ['catalog.view', 'pricing.view'] },
   { to: '/admin/repricing', label: 'Переоцінка', icon: <CircleDollarSign size={16} aria-hidden="true" />, permissions: ['repricing.view'] },

@@ -1922,3 +1922,25 @@ unchanged. PR4/editor/client opt-in and operational activation stop at this boun
 The missing recount fix and all previously documented business/target-catalog/
 alias/frozen-rule/KL/SV/malformed-input/unit/Magento acceptance prerequisites remain;
 they were neither reinvestigated nor implemented in PR3.
+
+## PR4 addendum — form editor and explicit client opt-in (2026-09-23)
+
+The application implementation and isolated verification are recorded in
+[EXPORT_TEMPLATES_PR4.md](EXPORT_TEMPLATES_PR4.md), including actual checkout,
+routes/capabilities, read-only candidate and safe publication-identity adapters,
+lossless/shared-reference forms, concurrency/retry behavior, same-persisted-input
+SV evidence, actual test counts and the unavailable browser-inspection boundary.
+Earlier addenda and all oracle/difference registers remain historical records.
+
+The subsequent PR4 correction/session implementation adds local interpolation-slot
+composition, supported router dirty navigation, principal/dispatch isolation and
+durable private/shared attempts with exact operation recovery. See
+[the focused contract](SHARED_EXPORT_SESSIONS.md) and the final correction addendum
+in the PR4 implementation record. Migration 037 is forward-only; all original pure
+oracles, published mappings, PR3 engine semantics and rollout gates are preserved.
+
+The ordinary/default flow remains legacy even with candidate selection metadata;
+published-template export requires explicit client opt-in. Dedicated price exports
+are unchanged. No production activation, real-catalog remediation, Magento import,
+recount work or acceptance flag is part of PR4. Operational acceptance/rollout and
+the existing business/catalog/recount/Magento release gates remain separate.
