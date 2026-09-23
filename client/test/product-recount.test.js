@@ -118,6 +118,129 @@ test('required recount answers and genuine zero values are not cleared as option
   );
 });
 
+test('recount keeps an optional placeholder blank when an unrelated answer changes', () => {
+  const questions = [
+    {
+      id: 'quality',
+      label: 'Якість',
+      required: 1,
+      options: [{ id: 1 }, { id: 2 }],
+    },
+    {
+      id: 'addit',
+      label: 'Інклюз',
+      required: 0,
+      include_in_sku: 1,
+      options: [{ id: 1, label: 'Є інклюз' }],
+    },
+  ];
+
+  const edited = updateRecountOptionAnswer(
+    { quality: 1, addit: 0 },
+    questions[0],
+    2
+  );
+
+  const normalized = normalizeRecountTargetAnswers(questions, edited);
+  assert.deepEqual(normalized, { quality: 2, addit: 0 });
+  assert.equal(buildRecountPreviewPayload({ answers: normalized }).answers.addit, 0);
+});
+
+test('shared recount normalization keeps another optional single-option placeholder blank', () => {
+  const questions = [
+    {
+      id: 'type',
+      label: 'Тип',
+      required: 1,
+      options: [{ id: 1 }, { id: 2 }],
+    },
+    {
+      id: 'glass',
+      label: 'Скло',
+      required: 0,
+      include_in_sku: 1,
+      options: [{ id: 1, label: 'Зі склом' }],
+    },
+  ];
+
+  assert.deepEqual(
+    normalizeRecountTargetAnswers(questions, { type: 2, glass: 0 }),
+    { type: 2, glass: 0 }
+  );
+});
+
+test('an optional placeholder stays blank through a visibility round trip', () => {
+  const questions = [
+    {
+      id: 'raw_type',
+      required: 1,
+      options: [{ id: 1 }, { id: 2 }],
+    },
+    {
+      id: 'addit',
+      label: 'Інклюз',
+      required: 0,
+      include_in_sku: 1,
+      visible_if_json: { raw_type: 1 },
+      options: [{ id: 1, label: 'Є інклюз' }],
+    },
+  ];
+
+  const hidden = normalizeRecountTargetState(questions, { raw_type: 2, addit: 0 });
+  assert.deepEqual(hidden.answers, { raw_type: 2, addit: null });
+
+  const visibleAgain = normalizeRecountTargetState(
+    questions,
+    { ...hidden.answers, raw_type: 1 },
+    hidden.retainedHiddenAnswers
+  );
+  assert.deepEqual(visibleAgain.answers, { raw_type: 1, addit: 0 });
+});
+
+test('recount normalization preserves a genuine optional zero option', () => {
+  const questions = [{
+    id: 'count',
+    required: 0,
+    include_in_sku: 1,
+    options: [
+      { id: 0, label: '30' },
+      { id: 1, label: '33' },
+    ],
+  }];
+
+  assert.deepEqual(normalizeRecountTargetAnswers(questions, { count: 0 }), { count: 0 });
+});
+
+test('recount preserves and intentionally changes an optional explicit selection', () => {
+  const questions = [
+    {
+      id: 'quality',
+      label: 'Якість',
+      required: 1,
+      options: [{ id: 1 }, { id: 2 }],
+    },
+    {
+      id: 'addit',
+      label: 'Інклюз',
+      required: 0,
+      include_in_sku: 1,
+      options: [{ id: 1, label: 'Є інклюз' }],
+    },
+  ];
+
+  assert.deepEqual(
+    normalizeRecountTargetAnswers(questions, { quality: 2, addit: 1 }),
+    { quality: 2, addit: 1 }
+  );
+
+  const selected = normalizeRecountTargetAnswers(
+    questions,
+    updateRecountOptionAnswer({ quality: 2, addit: 0 }, questions[1], 1)
+  );
+  assert.equal(selected.addit, 1);
+  assert.equal(buildRecountPreviewPayload({ answers: selected }).answers.addit, 1);
+});
+
 test('recount selects the sole authoritative target option after an inherited answer becomes invalid', () => {
   const edited = updateRecountOptionAnswer(
     { raw_type: 1, size: 5 },
