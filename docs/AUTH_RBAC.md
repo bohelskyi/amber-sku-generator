@@ -43,6 +43,7 @@ Permission keys are stable capabilities stored in `permissions` and mapped to ro
 | Corrections | `corrections.view`, `corrections.create`, `corrections.price_override`, `corrections.claim`, `corrections.complete`, `corrections.reject`, `corrections.force_release` |
 | Repricing | `repricing.view`, `repricing.prepare`, `repricing.apply`, `repricing.rollback` |
 | Exports | `exports.view`, `exports.create` |
+| Export template administration | `export_templates.view`, `export_templates.manage`, `export_templates.publish`, `export_templates.activate` |
 | Catalog/pricing | `catalog.view`, `catalog.manage`, `sku_schemas.publish`, `pricing.view`, `pricing.manage` |
 | Access administration | `users.manage`, `roles.manage` |
 | Audit | `audit.view` |
@@ -62,6 +63,8 @@ The built-in Administrator role is permanent and immutable and automatically rec
 The initial Manager role remains request-only for these operations: it has correction-request creation and price-override permissions but not `products.recount`, so the direct in-place price-change preview and apply remain denied. Adding the direct command does not broaden Manager access; an editable Manager or custom role receives it only when an Administrator explicitly grants `products.recount`.
 
 The permission-aware client uses only the effective keys from `/api/auth/me`, never role-name checks, to hide unavailable controls. Manager pricing uses the published product catalog projection to select a category and the category pricing endpoint to render matrices/modifiers read-only; this does not grant `catalog.view`.
+
+Migration `035` adds the four export-template capabilities through the existing protected Administrator propagation trigger. Manager, Storekeeper and custom roles receive no incidental grants. These capabilities are delegable through ordinary role administration; they are not reserved permissions and do not require `users.manage`. Template definition/source reads use `view`; draft create/save/from-version/validate use `manage`; draft test-preview requires both `manage` and `exports.view`; publication uses `publish`; selection metadata changes use `activate`. Every template mutation uses `runAccessAdminMutation` with its specific capability, including the access advisory lock and post-lock active-user/permission recheck. See [the export-template API contract](EXPORTS.md#export-template-administration-pr2).
 
 ## First-Administrator bootstrap
 

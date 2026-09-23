@@ -28,6 +28,8 @@ function createApp({
   const app = express();
 
   app.set('trust proxy', trustProxy);
+  // PR1B permits 256 KiB definitions; leave all other routes' parser limits unchanged.
+  app.use('/api/admin/export-templates', express.json({ limit: '272kb' }));
   app.use(express.json());
   app.use((req, res, next) => {
     const requestId = String(req.get('X-Request-ID') || crypto.randomUUID()).slice(0, 128);

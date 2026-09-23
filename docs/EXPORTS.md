@@ -80,3 +80,43 @@ The run used a clean local restored production copy with startup and migrations 
 | SV — Сувеніри | `amber-magento-SV-magento-products-v1.csv` | 30 | File is valid |
 
 This records Check Data validation, not a completed Magento import. The fixture generator, manifest, reports, and generated CSVs remain local-only and are not repository deliverables. The accepted mappings and export behavior require no further changes unless a real defect is found; explicit `url_key` generation remains deferred.
+
+## Export-template administration (PR2)
+
+Migration `035_export_templates.sql` adds `export_templates`, `export_template_drafts`, `export_template_versions`, and `export_template_activation`. The normal exporter and the dedicated price exporter do not read these tables. Selection responses explicitly report `metadataOnly: true` and `effectiveExporter: "legacy"`; publishing or selecting a version does not switch dispatch, expose products, advance cursors/revisions or alter snapshots. Initialization creates only a legacy selection at generation `1` with a null version/actor, plus permissions. No baseline definition is captured or published at startup.
+
+All endpoints below are relative to `/api/admin/export-templates` and retain authenticated active-user and unsafe-method CSRF enforcement. Revision/generation/version-number fields are decimal strings, preserving PostgreSQL bigint precision. Expected counters also accept safe positive JSON integers. Errors use JSON `error`, `code`, and optional `details`.
+
+| Method/path | Body/result | Required capability |
+| --- | --- | --- |
+| `GET /` | Family list with draft revisions and publication counts | `export_templates.view` |
+| `GET /:id` | Family, current draft, and complete immutable versions | `export_templates.view` |
+| `GET /sources` | Approved product fields, operations, limits, units and safe current/historical reference hints; no product rows | `export_templates.view` |
+| `GET /activation` | Selection generation/version and metadata-only status | `export_templates.view` |
+| `POST /` | `{key,displayName,definition?}`; creates family and revision `1`; omitted definition is `{}` | `export_templates.manage` |
+| `PUT /:id/draft` | `{expectedRevision,definition}`; returns draft/revision/canonical hash | `export_templates.manage` |
+| `POST /:id/draft/from-version` | `{expectedRevision,versionId}`; copies a publication from the same family into the draft | `export_templates.manage` |
+| `POST /:id/validate` | `{expectedRevision,expectedDefinitionHash}`; full stored-draft validation and reference diagnostics | `export_templates.manage` |
+| `POST /:id/test-preview` | `{expectedRevision,expectedDefinitionHash,productIds}`; 1–100 unique integer IDs, loaded in product-ID order | `export_templates.manage` **and** `exports.view` |
+| `POST /:id/publish` | `{expectedRevision,expectedDefinitionHash}`; server-assigned version, hash, actor and timestamp | `export_templates.publish` |
+| `PUT /activation` | `{expectedGeneration,implementation,templateVersionId,reason?}`; `legacy` requires null version, `template` requires a supported publication | `export_templates.activate` |
+
+Only Administrator receives these capabilities initially. They can be explicitly delegated to editable roles independently of access-administration permissions. Static `/sources` and `/activation` routes precede `/:id`.
+
+Draft save permits incomplete definitions, including unsupported format/evaluator values for later editing. It enforces PR1B JSON/size/depth limits, plain JSON data, safe keys, no executable accessors, and PostgreSQL-compatible Unicode; NUL and unpaired surrogates are rejected. The shared PR1B canonical hash is available for incomplete drafts, but their response is explicitly `state: "draft"`. Saving is not publication validation. Full validation, preview and publication reuse the original PR1B compiler and evaluator; there is no alternate schema or mapper.
+
+Draft writes compare `expectedRevision` before considering no-op equality. Stale writes return `409 TEMPLATE_DRAFT_CONFLICT`; an identical definition and base-version reference at the expected revision preserves actor/time/revision and emits no event. From-version copying preserves the published source and advances the draft only when definition/base reference changes. Cross-family versions are rejected by the service and composite FK. Template keys are permanent and no delete workflow exists.
+
+Publication runs one transaction: shared access-admin lock, current actor/capability recheck, family lock, draft lock, completed-retry lookup, revision/hash preconditions, full validation, coherent repository source reads, locked version allocation, immutable insert, and audit. The complete detached definition includes all constants, rules and question contracts. INSERT results are recompiled and their persisted hash checked; mismatches fail without rewriting provenance. Published UPDATE, DELETE and TRUNCATE are rejected, even for unreferenced versions. Actor references use `application_users.id`.
+
+A completed retry with the same family/source revision/hash returns the original version and original actor/time even after the draft advances. A different expected hash conflicts. Concurrent identical publications create one version/event. Source revision is historical evidence and does not constrain future draft edits. Publication never changes selection. Selection uses independent `expectedGeneration` CAS, increments for every real change including A → B → A, and preserves no-op attribution. Unsupported contracts/evaluators or a mismatching stored hash cannot be selected.
+
+Repository source validation is separate from frozen-rule semantics. Publication takes one SQL-statement MVCC snapshot of category/current-question/historical-schema evidence on its transaction client. Validation/test-preview use `REPEATABLE READ READ ONLY` across draft, source and product reads. Declared categories must exist; semantic keys require historical SKU-question evidence or current non-SKU metadata, while information keys require current non-SKU metadata. Captured allowed IDs must have semantic `value_id` evidence; archive status and live option labels/`sku_code` never reinterpret them. Missing questions/categories/IDs and duplicate current keys produce explicit `TEMPLATE_SOURCE_INVALID` diagnostics. Frozen required/visibility rules are validated as supplied and never silently refreshed from current rules.
+
+PR1B schema-scoped aliases carry a free-text `evidence` claim. The repository has no durable cross-key lineage that can verify equivalence. PR2 checks declared schema/category/key ownership, then rejects otherwise resolved aliases with `SOURCE_REFERENCE_UNSUPPORTED`; unresolved ownership uses `SOURCE_REFERENCE_UNRESOLVED`. Non-SKU alias lineage likewise cannot be inferred. The pure PR1B alias interface/parity tests remain unchanged. Successful reference validation explicitly does not certify production acceptance.
+
+Draft test-preview requires both the requested revision and hash. It loads only stored product identity, schema link, answers, manual subjects, weight and final UAH price; caller-authored products/prices and unknown command fields are rejected. Missing requested IDs return `422 TEMPLATE_PRODUCTS_MISSING` with `details.missingProductIds`. The preview may inspect excluded products explicitly requested by ID; it does not perform normal export selection. It returns draft-only evaluator results, no signed token, snapshot, audit mutation, repair, price recalculation, exposure or cursor update.
+
+Events `export_template.created`, `.draft_updated`, `.published`, and `.activated` commit with their mutations. Details contain IDs, hashes and revision/generation changes, not definitions or products. Audit failure rolls back all changes; failures, no-ops and completed retries emit no success event. The audit reader exposes only the public `definitionHash` exception to its general hash redaction; `audit.view` remains Administrator-only.
+
+PR3 still owns snapshot version binding and staleness/retry integration; PR4 owns the editor and controlled operational activation. Release prerequisites remain the previously investigated recount fix, target catalog/alias lineage review, frozen-rule approval, KL `addit=0` compatibility decision, narrow SV naming, malformed-input difference acceptance, measurement units, and fresh controlled Magento Check Data. PR2 is not Magento acceptance or rollout readiness.

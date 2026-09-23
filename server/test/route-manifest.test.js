@@ -8,15 +8,18 @@ const { ENDPOINT_MANIFEST } = require('../src/routes/endpoint-manifest');
 function readRouter(router) {
   return router.stack.flatMap((layer) => {
     if (layer.route) {
-      const permissionMiddleware = layer.route.stack.find(
+      const permissionMiddlewares = layer.route.stack.filter(
         (entry) => entry.handle.permissionKey || entry.handle.permissionKeys
-      )?.handle;
+      ).map((entry) => entry.handle);
+      const permissionMiddleware = permissionMiddlewares[0];
       const permission = permissionMiddleware?.permissionKey
         || permissionMiddleware?.permissionKeys;
       return Object.keys(layer.route.methods).map((method) => ({
         method: method.toUpperCase(),
         path: layer.route.path,
         permission,
+        ...(permissionMiddlewares.length > 1
+          ? { additionalPermissions: permissionMiddlewares.slice(1).map((entry) => entry.permissionKey) } : {}),
       }));
     }
     return layer.handle?.stack ? readRouter(layer.handle) : [];
@@ -31,7 +34,8 @@ test('endpoint manifest exactly covers every public and admin business route', (
   const actual = [...readRouter(publicRoutes), ...readRouter(adminRoutes)]
     .sort((left, right) => key(left).localeCompare(key(right)));
   const expected = ENDPOINT_MANIFEST
-    .map(({ method, path, permission }) => ({ method, path, permission }))
+    .map(({ method, path, permission, additionalPermissions }) => ({ method, path, permission,
+      ...(additionalPermissions ? { additionalPermissions } : {}) }))
     .sort((left, right) => key(left).localeCompare(key(right)));
 
   assert.equal(new Set(expected.map(key)).size, expected.length, 'manifest route keys are unique');

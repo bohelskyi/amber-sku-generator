@@ -23,12 +23,14 @@ const COMMON_DETAIL_KEYS = new Set([
   'sourceSku', 'status', 'toSku', 'triggerKey', 'triggerValue', 'userStatus',
   'valueId', 'version', 'versionFrom', 'versionTo', 'weightBandChanges',
   'weightBandCount', 'xValue', 'yValue', 'removedPermissionKeys', 'reason',
+  'templateId', 'templateVersionId', 'previousTemplateVersionId', 'baseVersionId',
+  'draftRevision', 'revisionFrom', 'revisionTo', 'generationFrom', 'generationTo', 'implementation',
 ]);
 
 const KNOWN_EVENT_PREFIXES = new Set([
   'application_user', 'catalog', 'correction_request', 'export_snapshot',
   'price_export_snapshot', 'pricing', 'product', 'repricing', 'repricing_draft',
-  'role', 'sku_schema',
+  'role', 'sku_schema', 'export_template',
 ]);
 
 const SENSITIVE_DETAIL_KEY_PATTERN = /(token|secret|session|request[_]?id|claim|hash|issuer|oidc|subject)/i;
@@ -163,6 +165,9 @@ function normalizeDetails(eventKey, details) {
     return {};
   }
   return Object.fromEntries(Object.entries(details).flatMap(([key, value]) => (
+    // Only this public definition fingerprint is safe; other hash/token fields remain hidden.
+    domain === 'export_template' && key === 'definitionHash' && typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
+      ? [[key, value]] :
     COMMON_DETAIL_KEYS.has(key) && !SENSITIVE_DETAIL_KEY_PATTERN.test(key)
       ? [[key, safeDetailValue(value)]]
       : []

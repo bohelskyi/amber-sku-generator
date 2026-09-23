@@ -285,4 +285,11 @@ function compileDefinition(definition) {
 }
 function assertCompiled(value) { check(compiledDefinitions.has(value), 'Compile the definition first'); }
 
-module.exports = { LIMITS, compileDefinition, validateDefinition, assertCompiled, validateJsonData: preflight };
+// The same canonical identity is also available for bounded, incomplete drafts.
+// This does not certify that the data is a valid executable definition.
+function hashJsonData(value) {
+  preflight(value);
+  return createHash('sha256').update(canonical(value), 'utf8').digest('hex');
+}
+
+module.exports = { LIMITS, compileDefinition, validateDefinition, assertCompiled, validateJsonData: preflight, hashJsonData };

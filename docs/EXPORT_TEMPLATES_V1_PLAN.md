@@ -1542,3 +1542,200 @@ recount integration/release prerequisite remains unchanged and was not
 re-audited. No database/client/Magento checks or operations were needed or run.
 No staging, commits, pushes, branch operations, dependency/configuration changes,
 production activity or PR2 work occurred; active export dispatch is unchanged.
+
+## PR2 addendum — persistence and administrative API (2026-09-23)
+
+**PR2 implemented and verified. PR3/PR4 not started; exporter dispatch remains legacy.**
+Actual starting/final branch: `feature/magento-export-constructor`; HEAD:
+`7a3adde881408231d8184010da522a2950a9e4de`. Starting status was clean: PR1A/PR1B
+were already tracked in this checkout, unlike the earlier addenda. No nested
+AGENTS instructions were present. Migration inventory was `000` through
+`034_product_magento_manual_names.sql`; the sole addition is
+`035_export_templates.sql`. Historical migration bytes/runner are unchanged.
+
+### Implemented files and contracts
+
+- `server/migrations/035_export_templates.sql`: permanent families, one draft per
+  family, immutable versions and a generation-based singleton selection. It
+  initializes only legacy/null-version metadata and four permission records;
+  Administrator propagation uses migration 028's existing trigger. No template,
+  publication, synthetic actor/event, snapshot column or catalog capture is seeded.
+- `server/src/services/export-templates/template.service.js`: family/list/detail,
+  bounded incomplete-draft save, same-family from-version copying, explicit
+  validation, read-only authoritative preview, publication/retries and selection CAS.
+- `source-references.js`: closed source/operation registry and coherent repository
+  reference checks. `draft-inputs.js`: narrowly isolated stored-product reads.
+- `definition.js`: only adds `hashJsonData`, exposing the existing PR1B preflight
+  and canonical hashing for incomplete drafts. Compiler/evaluator schemas and
+  semantics, materializer and constant tables are unchanged.
+- `server/src/routes/admin/export-templates.routes.js`, `admin.routes.js`,
+  `endpoint-manifest.js`: eleven administrative routes under
+  `/api/admin/export-templates`, including static sources/activation reads before
+  `/:id`. `app.js` adds a parser limit of 272 KiB only for this namespace to carry
+  the PR1B 256 KiB definition plus its command envelope; other route limits stay
+  unchanged. No authentication middleware or access transaction was refactored.
+- `audit-viewer.service.js`: concise template event fields and the exact public
+  definition-hash exception; other secret/hash redaction and audit access remain.
+- `server/test/export-template-persistence.test.js`, `route-manifest.test.js`:
+  canonical-hash adaptation, incomplete-draft safety, source policies, bigint
+  preconditions, audit filtering, complete routes and both preview permissions.
+- `server/integration-test/12-export-templates.cases.js`, registered in the existing
+  serialized `critical-flows.test.js`: fourteen PR2 PostgreSQL/API cases. Existing
+  `02-migration-foundation`, `04-product-access-audit`, and `06-migration-upgrades`
+  expectations now include four extra Administrator capabilities. Old checkpoint
+  builders exclude 035 until their normal upgrade; no historical SQL is edited.
+- Maintained docs: `PROJECT_CONTEXT.md`, `AUTH_RBAC.md`, `DATABASE_MIGRATIONS.md`,
+  `EXPORTS.md`, and this appended record. The complete implemented route/body/
+  permission matrix is in [Export-template administration](EXPORTS.md#export-template-administration-pr2).
+
+Definition/source/list/detail/selection reads require `export_templates.view`.
+Create/save/from-version/validate require `export_templates.manage`; test-preview
+also requires `exports.view`. Publish and selection updates require respectively
+`export_templates.publish` and `export_templates.activate`. These capabilities
+are explicitly delegable, not new reserved permissions. HTTP tests delegate
+each independently without `users.manage`, verify manage+exports preview, and
+keep `audit.view` denied. Manager/Storekeeper/custom upgrade roles gain nothing.
+
+Draft saves accept incomplete bounded plain JSON; unsupported evaluator/format is
+storable but not publishable. PR1B structural/256 KiB limits apply, with NUL and
+unpaired-surrogate rejection for JSONB. Drafts are marked as drafts. Hashes use
+PR1B object-key canonicalization, not JSONB key order. Database storage has a
+512 KiB text backstop allowing JSONB whitespace. Revision/hash preconditions use
+decimal strings for bigint precision. Save checks stale revision before no-op
+equality; unchanged definition/base preserves revision, actor/time and audit count.
+From-version copies within the same family; changed base/data advances revision.
+Composite FKs reject cross-family bases, and source revision has no FK to the
+mutable current revision.
+
+All mutations reuse `runAccessAdminMutation`: access advisory lock → post-lock
+actor/specific-capability recheck → family → draft. Publication then checks a
+completed source-revision publication **before** rejecting a newer current draft,
+fully validates the stored draft and expected hash, reads repository evidence,
+allocates the next version under the family lock, inserts actor/time/definition
+and audits in one transaction. Matching retries retain the original attribution;
+mismatching hashes conflict. A persisted hash mismatch fails without repair.
+Publication UPDATE/DELETE/TRUNCATE, including metadata and constants, are rejected.
+Family identity and state cannot be deleted/reset. Privileged test teardown uses
+schema disposal; no immutability trigger is disabled.
+
+Source validation uses one coherent SQL-statement snapshot on the publication
+transaction client. Validation/test-preview use REPEATABLE READ READ ONLY across
+draft, evidence and product loading. Semantic sources use historical SKU evidence
+or current non-SKU metadata; informational sources require current non-SKU metadata.
+Allowed semantic IDs need repository evidence, including archived historical
+options, without interpreting SKU codes or labels. Categories, unresolved keys,
+missing captured questions and duplicate current keys fail explicitly. Frozen
+rules remain supplied data: publication never silently recaptures live rules.
+
+Documented adaptation to section 6: PR1B aliases contain only `schemaId`, `key`,
+and caller-authored text `evidence`. The repository has no durable cross-key
+lineage that verifies equivalence. PR2 checks schema/category/key ownership and
+returns `SOURCE_REFERENCE_UNRESOLVED` or `SOURCE_REFERENCE_UNSUPPORTED`, rather
+than trusting the text claim. No supported verified alias lineage is invented;
+the pure PR1B alias behavior and its tests remain intact. Registry/validation
+success explicitly does not mean production acceptance.
+
+Selection is metadata only: legacy/null at generation 1, unchanged by publication,
+dedicated-capability CAS, supported-version/hash verification, no-op preservation,
+and generation increments for A → B → A. Responses explicitly say `metadataOnly`
+and `effectiveExporter: legacy`. Selection writes take access then singleton locks
+and immutable-version reads, never product/revision/cursor locks. The four events
+`export_template.created`, `.draft_updated`, `.published`, `.activated` share the
+mutation transaction; failures, no-ops and retries do not emit success events.
+
+Preview requires revision **and** hash plus 1–100 unique product IDs. Only stored
+fields/answers/prices are loaded; unknown caller product/actor/provenance fields
+are rejected. Missing products are reported explicitly. No snapshot token,
+snapshot, audit write, price calculation, repair, revision, exposure or cursor
+change is performed by validation/preview.
+
+### Verification actually executed
+
+The existing Node executable was checked before running tests:
+`C:/Users/bohdan.bohelskyi/AppData/Local/npm-cache/_npx/ebaba8b9e55fd0a9/node_modules/node/bin/node.exe`,
+**v20.20.2**. npm CLI at `C:/Program Files/nodejs/node_modules/npm/bin/npm-cli.js`
+reported **10.9.0**. The prior process-local extensionless launcher and preload
+guard method was reused from `%TEMP%/amber-pr2-node20`; every recorded test,
+lint/npm and test-child process used that exact executable/version. Default
+Node 22, persistent npm settings, packages/scripts, CI and Docker are unchanged.
+
+Canonical Compose service definition was inspected: PostgreSQL 16 Alpine,
+`127.0.0.1:55432`, fixed throwaway credentials, `tmpfs` data, no useful volume.
+Only `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d postgres-test`
+was started. Identity read confirmed database/user `amber_test` and PostgreSQL
+**16.14**. Every integration process received both TEST_DATABASE_URL and
+DATABASE_URL targeting that service; the established harness also sets the latter
+before database-bound imports, and its subprocess helpers override only disposable
+`*_test` database names on the same instance. No fallback instance was used.
+
+Commands below ran from `server/` through verified Node 20 (`$node20`) and npm CLI
+(`$npmCli`), with the guard and command-local PATH applied:
+
+| Command/check | Final observed result |
+| --- | --- |
+| `& $node20 --test test/magento-v1-characterization.test.js test/magento-v1-categories.test.js test/magento-v1-goldens.test.js test/export-template-parity.test.js test/export-template-definition.test.js` before changes | **209/209**, comprising PR1A 83 + PR1B 126; zero skips/failures |
+| `& $node20 --require ./test/setup-env.js --test test/export-template-persistence.test.js` | **8/8** |
+| `& $node20 --test --test-concurrency=1 --test-name-pattern=PR2 integration-test/critical-flows.test.js` | **14/14 PR2 cases**; 138 unrelated cases intentionally filtered |
+| `& $node20 $npmCli --script-shell='D:/Programs/Git/bin/bash.exe' test` | **481/481**, zero skips/failures; includes unchanged PR1A/PR1B suites |
+| `& $node20 $npmCli --script-shell='D:/Programs/Git/bin/bash.exe' run lint` | Exit 0, zero errors; only the two pre-existing product-timeline unused-variable warnings |
+| `& $node20 $npmCli --script-shell='D:/Programs/Git/bin/bash.exe' run test:integration` | **152/152**, zero skips/failures, PostgreSQL 16.14 |
+| `git diff --check`, scoped tracked/untracked review | Passed; historical migrations, both export services/routes, mapper/serializer, client, dependencies and Compose unchanged |
+
+Earlier runs identified the expected manifest/permission-count updates and missing
+synthetic reference-fixture setup; those were corrected before the successful full
+runs. Temporary Windows preload-path/log-name launch errors were corrected without
+repository settings changes. One focused run had an HTTP fetch failure; subsequent
+focused and complete runs passed on the same canonical instance. No test assertion,
+immutability guard, output budget or parity difference was disabled. No verification
+blocker remains. Client checks and Compose builds are not applicable because no
+client or deployment files changed.
+
+Persistence evidence includes draft → JSONB reload → compile/hash → publish →
+JSONB version reload → compile/hash/evaluate for **all ten independent exact CSV
+goldens**, using explicit synthetic repository-reference fixtures only in the
+disposable DB. Independent connections and `pg_blocking_pids` barriers force
+same-revision save, matching publish, both publish/edit orderings, and access
+revocation/disablement races. Final rows/revisions/actors/version and audit counts
+are asserted. Tests cover cross-family FK rejection, immutable publication
+UPDATE/DELETE/TRUNCATE, completed retry after edits and by another actor, monotonic
+versioning, unsupported/mismatching identities, metadata ABA, injected audit
+rollback for all four mutations, authoritative preview inputs and no side effects.
+Normal Magento and dedicated price snapshot CSVs remain byte-identical with
+template selection metadata set. Fresh, actual 034 upgrade, old supported
+checkpoint topology, failure rollback, repeat startup, and checksum/newline tests
+all pass in the serialized suite.
+
+### Oracle preservation and final boundaries
+
+All eight HEAD blob SHA-256 values exactly match the preceding PR1B fingerprint
+register. This committed checkout uses `core.autocrlf=true`, so working source-file
+bytes have CRLF and do **not** share the earlier untracked LF-file SHA values.
+Each working file was compared byte-for-byte with `git cat-file --filters HEAD:<path>`
+and matched; CRLF→LF hashing also matches its HEAD blob and the historical register.
+No oracle was rewritten. This source-checkout distinction does not normalize CSV
+payload comparisons: all ten CSVs are compared as exact UTF-8 Buffers.
+
+| PR1A artifact under `server/test/` | Actual unchanged CRLF working-file SHA-256 |
+| --- | --- |
+| `magento-v1-characterization.test.js` | `B884966F0C94CDF21BA759B8A4DDD9E4BC6889A3F301087A494AD61B96F234DF` |
+| `magento-v1-categories.test.js` | `363723249F50AAA884B20DDB58FA776699571F81971939EBA0FD94EB63A86886` |
+| `magento-v1-goldens.test.js` | `589CCF4B3F2E1C53759EB9137D89E9A99EA80A6D871CDE830D9853BB6E0CF37E` |
+| `fixtures/magento-v1/contract.js` | `CEB7FF99E220CFF1F576D3266B0B8797380C071346E94ADA662B010D60BE6D4F` |
+| `fixtures/magento-v1/expected-rows.js` | `BA083E0D59B1040C5C864FA21722B6213E900DE2760CE98D05687521379B14AD` |
+| `fixtures/magento-v1/goldens.json` | `FC2DFFCE7C6CBFAD3F1D944F9B084A0423C3025F127872A9DB78749CD28D8A6B` |
+| `fixtures/magento-v1/README.md` | `3F890D0910F95377FD67032B11AE67CDAF07230D60FCEF922ED7C02D8D8EED6A` |
+| `fixtures/magento-v1/write-goldens.py` | `DAB8EE531B73EABB86CF74690A2927F6A40E0CEFD895FEC86DC0206B69DC3859` |
+
+Only the started disposable service was stopped using
+`docker compose -f docker-compose.yml -f docker-compose.local.yml stop postgres-test`
+(exit 0). No main postgres/server/client service or persistent developer volume
+was touched, and no useful-database/production/Magento operation occurred.
+All changes are unstaged PR2 files on the original branch/HEAD; no staging,
+commit, push, reset, clean, stash, merge, cherry-pick, rebase or branch switch.
+
+PR3 snapshot binding and PR4 editor/controlled activation remain unimplemented.
+The previously investigated missing recount fix remains a release prerequisite;
+it was not reinvestigated or applied. Target catalog/alias lineage, frozen-rule
+approval, KL.addit=0, narrow SV naming, the closed malformed-input difference
+register, measurement units and fresh controlled Magento Check Data remain
+acceptance prerequisites. PR2 completion is not rollout or Magento acceptance.

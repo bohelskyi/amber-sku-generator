@@ -394,7 +394,7 @@ test('role revocation is reflected immediately without replacing the active sess
     [userId, administratorRole.rows[0].id]
   );
   const restoredMe = await request('/api/auth/me');
-  assert.equal(restoredMe.data.permissions.length, 28);
+  assert.equal(restoredMe.data.permissions.length, 32);
   const permittedAgain = await request('/api/config');
   assert.equal(permittedAgain.response.status, 200, permittedAgain.text);
 });

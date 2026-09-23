@@ -65,6 +65,8 @@ The completed refactor and its measured performance evidence are [historical rec
 
 Magento souvenir names can use audited, in-place UA/EN manual subjects when an approved semantic name is unavailable. An optional server-only Google Cloud Translation API v2 Basic key provides an editable EN suggestion; export reads only saved subjects. See [exports](docs/EXPORTS.md).
 
+Export-template PR2 adds administrative persistence, revisioned drafts, immutable publications, source-reference validation, read-only draft test-preview, four delegable capabilities and transactional audit. The selection singleton is configuration metadata only: normal product exports and dedicated price exports still use their established implementations. No template is seeded or automatically published/selected. Snapshot binding and the editor remain later PRs; see the [implemented API contract](docs/EXPORTS.md#export-template-administration-pr2) and [plan history](docs/EXPORT_TEMPLATES_V1_PLAN.md).
+
 ## Testing and operations summary
 
 CI validates Compose, runs scoped server static checks, server unit tests with non-blocking coverage visibility, the serialized destructive PostgreSQL integration suite, client tests with non-blocking coverage visibility, client lint, and the production client build. The container smoke workflow also supports manual execution and runs weekly to detect mutable base-image compatibility drift. Integration tests refuse a database name that does not end in `_test`; use only a disposable database.
