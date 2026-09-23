@@ -1178,3 +1178,367 @@ SEO supplies the named base/EN cells in section 3.1; missing properties become b
 ```
 
 Title: `{title noun} з бурштину від виробника | купити в Amber Galbin`. Non-mosaic description: `Купити {description subject} з бурштину від виробника Amber Galbin. Ручна робота підкреслює природну фактуру та красу бурштину. Картини з бурштину від Amber Galbin`. Mosaic description: `Купити декоративну мозаїку з бурштину від виробника Amber Galbin. Ручне оформлення підкреслює природну фактуру бурштину. Картини з бурштину від Amber Galbin`. AR EN SEO is always empty.
+
+## PR1A addendum — independent characterization, 2026-09-23
+
+PR1 is split into PR1A (this completed pure-test checkpoint) and PR1B (future
+declarative validator/evaluator and old/new parity). Section 11 above remains the
+unchanged historical Phase 0 record. **No evaluator or full PR1/parity gate is
+complete.** The active exporter is unchanged.
+
+### Actual checkout and seams
+
+| Evidence | PR1A observation |
+| --- | --- |
+| Branch | `feature/magento-export-constructor` |
+| HEAD | `1bed5d2311761b603d7857949d576aeee9e831b8` |
+| Initial `git status --short` | Empty; the Phase 0 plan is tracked at this HEAD |
+| Accepted six-group prerequisite | Present; current source and existing seven narrow mapper/CSV tests inspected and passed |
+| Recent optional-SKU-placeholder recount fix | `7c803dc` is not an ancestor (`git merge-base --is-ancestor 7c803dc HEAD` exits 1); its `isOptionalPlaceholderAnswer` helper and new tests are absent. Older placeholder handling is not this fix. No recount edit or branch operation performed |
+| Tested production entry points | Existing pure `mapProduct(product,catalog)`, `buildMagentoPayload(products,catalog)`, and `buildCsv(rows)`; no new production exports |
+| Input/ordering seam | Already-selected synthetic inputs in caller order, normally ascending product ID. Mapper preserves input order, provisional groups follow first ready encounter. Stored manifest's fixed BR/NM/KL/CH/AR/SV order is a different service seam |
+
+### Delivered contract and compatibility
+
+Three new test files, reusable synthetic fixtures, ten complete exact-byte CSV
+goldens and the [fixture provenance/compatibility register](../server/test/fixtures/magento-v1/README.md)
+cover all six groups, all **164 header positions**, all **41 semantic bindings**,
+all 30 V dictionaries plus all 28 AR sizes. There are 157 distinct dictionary
+entries / 196 entries counted per binding, each tested as numeric and string IDs.
+CH texture 8 and count 9 assert their actual readiness rejection.
+
+Expected tables, category phrases, headers and base/EN cells are independently
+specified test data; no production constants construct expectations. Full CSV
+JSON was encoded offline from reviewed expected cells with the standard Python
+CSV writer, never captured from mapper output. Tests compare raw UTF-8 Buffers;
+seven corrupted-output self-checks prove sensitivity to constants, headers, EN,
+decimals, newlines and BOM. Tests do not regenerate goldens. Source/inventory
+comparison was a separate read-only audit, not expected-output generation.
+
+Verified compatibility details (passing tests do not imply business approval):
+
+- KL omitted/null/blank `addit` has no inclusion path. Present numeric/string zero
+  always adds `Default/Кулони/З інклюзом`; a visible question records an unmapped
+  `kulony_dodatkovo` error and excludes the product from provisional artifacts.
+  A hidden question leaves that attribute blank and the product ready, including
+  when required. Visible semantic 1 maps `Інклюз`. The zero input is never changed.
+- Genuine NM extra 0, CH count 0 and SV stone-processing 0 retain their different
+  meanings. Export does not infer placeholder provenance. SV automatic naming is
+  still only souvenir 6; complete saved UA/EN pairs win even there.
+- Current rules remain live catalog rules; hidden attributes can still affect
+  paths/names. AR size postvalidation may add a second error on the same field.
+  Errors retain exact messages/order and are **not deduplicated**; only the existing
+  `manual_name_required` code is asserted, not proposed future evaluator codes.
+- Provisional artifacts with ready products do not authorize a snapshot containing
+  other invalid products. Range selection and whole-range transactional rejection
+  remain service/integration responsibilities.
+- NM nonnumeric length passthrough, Number coercion/precision, malformed rule
+  permissiveness, missing SKU permissiveness and source-key rename limitations
+  are recorded without runtime fixes. Formula protection matches leading
+  space/tab/CR, but not leading LF or NBSP. Raw CH stone-size spelling is retained.
+
+The register separates verified existing behavior, proposed future strict/frozen
+contracts, and DB/API/concurrency coverage elsewhere. Remaining evidence gaps are
+target live catalog/rename lineage, business approval of quirks and frozen rules,
+measurement-unit expectations, new evaluator parity and fresh Magento acceptance.
+Historical Check Data evidence was not rerun or promoted to new evidence.
+
+### Verification actually executed
+
+| Command / check | Observed result |
+| --- | --- |
+| Initial `node --test test/magento-products-v1.test.js test/csv.test.js` from server | 7/7 passed on system Node 22.12.0; these also pass in the later full Node 20 runs |
+| Node 20.20.2: `node --test test/magento-v1-characterization.test.js test/magento-v1-categories.test.js test/magento-v1-goldens.test.js` | **83/83 passed**, no skips/failures |
+| Node 20.20.2: plain `npm.cmd test` using default Windows shell | Existing launcher limitation: `test/*.test.js` is not expanded; exits before tests. Not a new test failure |
+| Node 20.20.2: `node --require ./test/setup-env.js --test @testFiles`, where PowerShell enumerates `test/*.test.js` | **347/347 passed**, no skips/failures |
+| Node 20.20.2: `npm.cmd --script-shell='D:/Programs/Git/bin/bash.exe' test` | Unmodified npm script, **347/347 passed**, no skips/failures. An earlier attempted shell path under `C:/Program Files/Git` did not exist and launched no tests |
+| Node 20.20.2: `npm.cmd run lint` | Exit 0, no errors; two existing unused-variable warnings (`sortOrder`, `sourceOrder`) in `server/src/presenters/product-timeline.js:391`. Current lint script excludes test files |
+| Read-only inventory audit | All 164 headers, 41 bindings and 30 V tables match independent fixture literals; all AR sizes exercised via actual mapper |
+| Root `git diff --check`, scoped diff and explicit untracked-file review | Passed; only this addendum and new `server/test/` assets differ |
+
+Node 20.20.2 was obtained in the user npm cache; only command-local PATH/shell
+selection was used, with no repository dependency, lockfile or environment-setting
+change. Full reproduction commands are in the fixture README. No behavioral test
+failures were observed; Windows command-launch issues are listed separately.
+
+PostgreSQL integration, client test/lint/build and Compose checks are not applicable
+to this isolated pure server-test change and were not run. No database instance,
+application bootstrap, migration, seed, restore, real snapshot or provider was
+used. Production code, routes, snapshot/cursor/exposure logic, client, price-export
+behavior, migrations, dependencies and configuration are unchanged. Final state:
+one modified plan plus eight new untracked test/fixture files; nothing staged,
+committed, pushed, merged or deployed. PR1A stops here; PR1B requires a later task.
+
+## PR1B addendum — isolated declarative implementation (2026-09-23)
+
+**Implemented in isolation, not activated or deployed. PR2 is not started.**
+Initial branch/HEAD: `feature/magento-export-constructor` /
+`1bed5d2311761b603d7857949d576aeee9e831b8`. Initial status already contained
+the modified plan, the three untracked PR1A tests and their fixture directory.
+Those changes were preserved. No existing runtime file was changed, and no
+application entry point imports the new modules.
+
+### Interfaces and representation actually implemented
+
+All production additions are under `server/src/services/export-templates/`:
+
+| Module | Pure interface / responsibility |
+| --- | --- |
+| `input-projection.js` | `readSource(descriptor, product)`; closed product fields and own-property answer access, literal key `2`, scalar/type checks, explicitly evidenced schema-scoped aliases. No database projection/loading |
+| `definition.js` | `validateDefinition(definition)` returns measured definition inventory or throws `TEMPLATE_INVALID`; `compileDefinition(definition)` returns detached deeply frozen `{definition,hash,metrics}`. SHA-256 over canonical JSON; object keys sorted, arrays and exact strings retained. No compiled-result cache |
+| `evaluate.js` | `evaluateProduct(compiled, product, optionalLowerBudgets)` returns legacy-compatible mapped rows/errors; `evaluateBatch(compiled, products, optionalLowerBudgets)` returns ordered represented identities/statuses, counts, diagnostics, artifacts and measured work/bytes; `legacyPreview(result)` projects the legacy provisional shape without changing values/errors |
+| `magento-v1-data.js` | Frozen audited literals: approved headers, 41 attribute specifications, dictionaries, names and SEO. No legacy mapper import |
+| `magento-v1-definition.js` | `materializeMagentoV1(explicitCatalogMap)` builds and validates detached serializable six-group JSON. Its helpers construct nodes and never accept products |
+
+Definition identity is `formatVersion:1`, `evaluatorVersion:"magento-declarative-1"`,
+`outputContract:"magento-products-v1"`. It contains `sources`, text `tables`,
+`questionContracts`, ordered scoped `bindings`, and six `groups` with approved
+ordered `columns`, explicit diagnostic evaluation roots and base/EN `rows`.
+Each row has `default:""`; EN sparsity is explicit. The fixed header set is
+validated, while column order is configurable. Missing required identity cells,
+duplicate routes/columns/bindings, forward/cross-group/cyclic references,
+unknown properties/operations/formats/types, unsafe keys and malformed rules fail.
+
+Implemented operations: `literal`, `source`, `ref`, `text`, `present`,
+`semanticKey`, `lookup`, `firstPresent`, `when`, `eq`, `in`, `all`, `any`, `not`,
+`catalogRule`, `questionValue`, `numberText`, `decimalText`, `numericBand`,
+`interpolate`, `join`, `require`, `error`. Scalar conversions and numeric formats
+are closed/versioned. Required question/numeric/constraint failure branches must
+emit diagnostics. Bindings are memoized per product; selected branches alone run.
+All branches are validated, including hidden ones. No Magento category-specific
+operation, executable definition callback, Python, test table, live catalog,
+pricing utility, clock, random source, filesystem or network is used in evaluation.
+Only the unchanged `buildCsv` and `escapeCsvValue` low-level utilities are reused;
+catalog-rule scalar normalization is implemented with closed own-property sources.
+
+Synthetic catalog provenance is exclusively PR1A `contract.js:catalog()` and
+explicit per-case overrides; the old exporter receives that same Map. Labels,
+SKU codes and archive hints are not semantic sources. Captured rules/options
+are detached before compilation. Multiple catalog-rule predicates are captured
+as ordered conjunction arrays to preserve short-circuit order through hashing.
+An explicit captured `exists:false` preserves all PR1A missing-question product
+diagnostics; an omitted/unresolved contract reference is invalid. This pure
+representation does not implement the future publication policy for missing
+catalog questions discussed in section 5.1.
+
+Missing, null, trim-blank, numeric/string zero and invalid present values remain
+distinct until the chosen operation handles them. Source aliases require a literal
+key, positive schema ID string and nonempty evidence; only the supplied matching
+schema enables them. Dual aliases must have identical stored scalars (no implicit
+number/string normalization). Other alias/provenance features fail validation.
+No historical schema, placeholder or calibration inference is performed.
+
+### Traceable execution coverage and exact parity
+
+`export-template-parity.test.js` executes independent expected rows and all ten
+UTF-8 Buffer goldens directly, as well as all 392 numeric/string dictionary
+checks (41 bindings; 164 header positions). Additionally, a child-only adapter
+in `test/fixtures/export-templates/replay.cjs` runs the **unchanged** three PR1A
+files: every supported mapper call compares old/new results and returns the
+candidate result to the independent PR1A assertions. This is actual candidate
+execution, not merely another green run of legacy tests. Serializer-only and
+inventory-only assertions retain their original scope. The adapter is never
+loaded by application code.
+
+| PR1A family / stable test-name fragment | New execution path |
+| --- | --- |
+| `every semantic dictionary entry`, `all 41 question-existence`, `live catalog labels/options` | Replay + `candidate inventory`; all entries, missing/unknown/hidden/required gates and unmapped diagnostics |
+| `every category-only phrase`, `natural/pressed`, `NM extra path` | Replay; complete ordered BR/NM/KL/CH paths and UA/EN names |
+| `KL current/legacy dimensions`, `KL addit` | Replay + named `KL.addit=0 legacy inclusion presence`; absent-only fallback, opaque SKU, visible failure/hidden readiness, inclusion path unchanged |
+| `NM bands` | Replay; every endpoint/gap, comma/hex/exponent and nonnumeric passthrough |
+| `CH preserves`, `CH invalid numeric` | Replay; raw size versus normalized decimals, count 0/9, texture 8, calibration 0/1/2/3, exact errors; composite exceptions separately rejected |
+| `AR seven type branches`, `AR size requires`, `AR absent glass` | Replay + AR/AR-mosaic goldens; all names/SEO, 28 sizes, membership and ordered duplicate post-check errors |
+| `SV category routing`, `SV fractions`, `SV only key chain`, `SV synthetic dependent` | Replay + SV/Stone/escaping goldens; every subtype, literal key `2`, all thresholds, answer weight, pair precedence and narrow automatic naming |
+| `final stored price`, `all weight sources`, `required free text` | Replay; stored price authority/coercions/zero rejection, all weight sources and presence rules |
+| `hidden attributes`, `current source-key references`, `legacy malformed rules` | Replay; captured gating and original rename behavior; closed rejection register below |
+| `readiness preserves`, `already-selected interleaved` | Replay + native invalid-batch test; exact counts, diagnostic order, duplicate products, first-ready group order and input order |
+| `independent complete fields and UTF-8 golden`, byte comparator | Direct ten-golden tests + replay; every cell, sparse blanks, escaped Unicode, formula-neutralization, no BOM/newline normalization |
+
+Measured replay calls (each compared directly with the old mapper):
+
+| Group | Exact product-map comparisons | Products in exact batch comparisons | Complete independent goldens |
+| --- | ---: | ---: | ---: |
+| BR | 142 | 75 | 1 |
+| NM | 165 | 63 | 1 |
+| KL | 157 | 75 | 2 |
+| CH | 184 | 56 | 1 |
+| AR | 134 | 85 | 2 |
+| SV | 319 | 111 | 3 |
+
+Also compared: six unsupported/missing-group map calls and one unsupported-group
+batch member. No unexplained CSV/readiness differences remain in supported cases.
+These counts are mapper-seam coverage, **not** SQL selection, exclusions, stored
+manifest order, locks, snapshots, confirmation or cursor verification.
+
+Native batch metadata deliberately differs: `status`, `failedCount`, ordered
+`represented` entries with readiness/artifact-row counts, and resource metrics.
+Any represented invalid product makes `status:"not-ready"` and `artifacts:[]`;
+ready products' rows are available only as `provisionalArtifacts`. Legacy preview
+projection retains all errors and provisional readiness without authorizing a
+snapshot. Invalid definitions, input-type/alias failures and limits throw, returning
+no success or partial artifacts. Existing field messages, ordering, repeated errors
+and `manual_name_required` are preserved for supported cases.
+
+### Closed deliberate non-parity register — acceptance required
+
+`test/fixtures/export-templates/differences.js` and named `intentional NON-parity`
+tests record identical source input, the old result and new explicit failure.
+There is no general legacy-differences exemption. The replay permits only its
+17 enumerated PR1A cases (18 calls, because the price-object input is also batched);
+they are **not counted as exact parity successes**. Supplementary cases extend
+malformed-input coverage without changing the oracle.
+
+| Named cases | Old result | New rule / diagnostic |
+| --- | --- | --- |
+| `D-rule-1`–`D-rule-8`: `{broken`, JSON `null`/`[]`/`42`/`"text"`, array/boolean/number rule roots | Visible NM.extra=1 → `З підвісками` | Object-rule contract rejects malformed JSON/root: `TEMPLATE_INVALID` |
+| `D-rule-9`: `$and:"bad"` | Hidden NM.extra, blank and ready | Logical branches must be arrays of valid rules: `TEMPLATE_INVALID` |
+| `D-composite-bead_length`, `-bead_width`, `-rosary_length` | `{}` coerced to text, then legacy numeric-field error | Evaluated composite source prohibited: `INPUT_INVALID` |
+| `D-price-array`, `D-price-object`, `D-text-object`, `D-semantic-array` | `[12]` → price `12`; `{}` → price error; `{}` → `[object Object]` dimension; `[1]` → mapped natural material | Evaluated sources must be scalars: `INPUT_INVALID` |
+| `D-semantic-boolean`, `D-semantic-NaN`, `D-semantic-Infinity` | NM.extra unmapped-value error | Semantic keys require text or finite numbers: `INPUT_INVALID` |
+| `D-sku-number`, `D-sku-boolean`, named category `0` / `false` cases | SKU 0/false → blank; category 0/false → unsupported empty group | Stored identity inputs are nullable text, not coercible numeric/boolean identities: `INPUT_INVALID` |
+| `D-manual-composite` | Object UA subject ignored, automatic key-chain name used | Evaluated composite source prohibited: `INPUT_INVALID` |
+| `D-catalog-required`, `-options-shape`, `-duplicate-option`, `-option-type` | BR natural attribute remains mapped with required=2, non-array options, duplicate ID or object ID | Captured flags/options must have valid shape and unique scalar IDs: `TEMPLATE_INVALID` |
+| `D-catalog-rule-object` | Object-valued expected operand hides the BR natural attribute; product ready | Captured comparisons require scalar operands: `TEMPLATE_INVALID` |
+
+Other invalid-definition/security/limit tests exercise contracts with no valid
+legacy template equivalent, not permissive parity exceptions. Executable accessors
+and inherited definition properties are never evaluated. Hidden/unused product
+answers remain lazy and may contain otherwise invalid values without diagnostics.
+
+Business concerns remain open: KL inclusion-on-presence zero is an explicit
+`KL.legacyInclusionPresence` expression, **not an approved business rule**; SV
+automatic names still only souvenir 6; live-to-frozen catalog policy, actual
+target source lineage/aliases and units require later acceptance. No live catalog
+or production activation policy was inferred from synthetic inputs.
+
+### Configurability, bounds and verification
+
+`export-template-definition.test.js` proves exact output changes from definition
+data alone for a literal, dictionary entry, name/category interpolation, condition,
+fallback priority and column order. It also proves JSON roundtrip, deterministic
+hash/output, object-key-order equivalence, array/string/contract hash sensitivity,
+caller/catalog/result mutation isolation, lazy branches with eager static validation,
+own-property access, explicit aliases/conflicts and malformed-reference rejection.
+
+Baseline definition: **103,012 UTF-8 JSON bytes**, 55 sources, 133 bindings,
+245 literal-table entries plus 232 captured/inline membership entries. Limits:
+256 KiB definition; six groups/two rows; 64 columns/group (approved exact sets);
+256 sources/contracts; 512 bindings; depth 8; 16 expression/predicate children;
+512 entries per lookup/membership table and 4,096 combined; 4,096 characters per
+literal; 20,000 evaluated nodes/rule steps per product; 16 KiB per accessed scalar
+text/intermediate/cell; 64 MiB final escaped CSV across all artifacts. Inline `in`
+values are bounded membership tables, not expression children. Structural JSON
+traversal is also capped before cloning. Diagnostic bytes use the same request
+budget independently, with an additional 20,000 failed-product cap.
+
+Boundary evidence: work fixture succeeds at **19,522** steps and fails at the
+20,000 cap with 512 repeated catalog predicates; a formula/quote/CRLF/Unicode
+fixture has **787 exact escaped UTF-8 bytes** and **151 steps** (exact lower budget
+succeeds, one less fails). A 16,384-byte cell succeeds; 16,385 fails. A synthetic
+SV batch succeeds at **4,004 products / 67,107,447 bytes**, while 4,005 fails before
+serialization/allocation of a success artifact. No timings are asserted.
+
+Actual environment: system **Node 22.12.0**, installed Git Bash at
+`D:/Programs/Git/bin/bash.exe`; no Node/dependency/configuration changes.
+
+| Actual command/check (server working directory unless noted) | Result |
+| --- | --- |
+| `node --test test/magento-v1-characterization.test.js test/magento-v1-categories.test.js test/magento-v1-goldens.test.js` before edits and after implementation | 83/83 passed, unchanged oracle |
+| `node --test test/export-template-parity.test.js test/export-template-definition.test.js` | 126/126 passed; includes the child execution of all 83 original assertions and explicit non-parity rejection checks |
+| `npm.cmd --script-shell='D:/Programs/Git/bin/bash.exe' test` | 473/473 passed, no skips/failures |
+| `npm.cmd run lint` | Exit 0; only the two pre-existing `sortOrder`/`sourceOrder` warnings in `product-timeline.js:391` |
+| Root `git diff --check`, complete scoped/new-file inspection, import-boundary search | Passed; no existing runtime module imports the candidate. New-file diff inspection reports Git's existing LF→CRLF working-copy policy warnings; no whitespace errors |
+
+PostgreSQL integration, client test/lint/build and Compose checks were not applicable
+to an isolated candidate absent from the application dependency graph. They were
+not run and are not parity evidence. No database connection/instance, bootstrap,
+migration, seed, restore, snapshot, translation, Magento Check Data/import or
+production operation occurred. Later integration must run its applicable checks;
+only the canonical disposable `postgres-test` environment may be used.
+
+Oracle SHA-256 fingerprints were recorded before implementation and rechecked
+afterward; all eight match exactly (including the independent Python writer):
+
+| Artifact (`server/test/`, fixture paths abbreviated) | SHA-256 before = after |
+| --- | --- |
+| `magento-v1-characterization.test.js` | `2CA4967801403961B892D4F565BECA168D0F51E3DAACF2FE1F92AF12C67131DC` |
+| `magento-v1-categories.test.js` | `26C848196251FA1024BDC3AB58C850F8742CDB27A4C67D1A71A4524D1ABDEF9D` |
+| `magento-v1-goldens.test.js` | `DB84DA7C2E94C2269D6D0741145BC5E5D8AD3CE9CC70D60472F3E0261AB4B1B0` |
+| `fixtures/magento-v1/contract.js` | `3A377B7A8FAC617C851908C9E7BEF9F3318A1597C37E3D3290C9C81B5BF5D4A4` |
+| `fixtures/magento-v1/expected-rows.js` | `998964357A96F771BA7B8F6C722E718FD631B192746CE2FD498FDEB52B4C5C63` |
+| `fixtures/magento-v1/goldens.json` | `FFFD67A04CBA342A80BB8094643CC91A1D4742C5406DFC8B57A804E57B444150` |
+| `fixtures/magento-v1/README.md` | `A1B86C11D7537C9F59C05CDA5708EAB9EE879B67B4A815DCDCDD476B0F3871E3` |
+| `fixtures/magento-v1/write-goldens.py` | `642671ADA1CA9F616A7EBFB69A89D0B0ADB1884274BCD7FB858908A69547F65E` |
+
+Recount prerequisite rechecked: `git merge-base --is-ancestor 7c803dc HEAD`
+returns 1; the commit exists in repository history. Its actual helper and the
+selected/retained optional-placeholder guards are absent from
+`client/src/lib/product-recount.js:normalizeRecountTargetState`; the added
+placeholder-preservation regressions in `product-recount.test.js` and
+`home-workspace.test.jsx` are also absent. Older optional-selection/zero tests
+are not equivalent. Integrating that fix remains a later deployment prerequisite,
+not a blocker for this isolated work; recount was not changed.
+
+Final change scope: the previously modified plan with this appended record, five
+new isolated production modules, two new test files and two supplementary fixture
+helpers; the pre-existing PR1A files remain untracked and unchanged. No staging,
+commit, push, reset/clean/stash, branch switch/merge/rebase/cherry-pick, persistence,
+publication or snapshot integration was performed.
+
+### Target-runtime verification follow-up (2026-09-23)
+
+The repository still targets Node 20: `server/Dockerfile` uses
+`node:20-bookworm-slim`, CI sets `node-version: 20`, and AGENTS/project
+context agree. No conflicting server package engine declaration was found.
+Branch remained `feature/magento-export-constructor`, HEAD
+`1bed5d2311761b603d7857949d576aeee9e831b8`.
+
+Verification used the existing cached standalone **Node v20.20.2** executable:
+`C:/Users/bohdan.bohelskyi/AppData/Local/npm-cache/_npx/ebaba8b9e55fd0a9/node_modules/node/bin/node.exe`
+(`$node20` below). Its reported `process.execPath` matches that executable.
+npm **10.9.0** was run explicitly through Node 20 using
+`C:/Program Files/nodejs/node_modules/npm/bin/npm-cli.js` (`$npmCli`).
+Tests ran against the actual working tree, including all untracked PR1A/PR1B
+files, with existing dependencies; no installation or disposable repository copy
+was necessary.
+
+Only process-local PATH/NODE_OPTIONS and temporary files were used. A preload
+guard checked the exact executable and Node major in every Node process.
+Git Bash exists at `D:/Programs/Git/bin/bash.exe`; its initial resolution of
+the extensionless `node` command selected system Node 22 and was rejected by
+the guard before tests ran. A temporary extensionless shell launcher pointing
+explicitly to the cached Node 20 executable resolved this environment issue.
+A temporary preload-path quoting issue was also corrected. Neither was an
+evaluator defect. Successful PR1A, PR1B, full-suite and lint runs recorded,
+respectively, **4, 7, 58 and 2** guarded processes, all on that Node v20.20.2
+executable, including npm-spawned tests and ESLint.
+
+Commands from `server/` and observed results (all exit 0):
+
+| Command | Result |
+| --- | --- |
+| `& $node20 --test test/magento-v1-characterization.test.js test/magento-v1-categories.test.js test/magento-v1-goldens.test.js` | 83 passed, 0 failed/skipped |
+| `& $node20 --test test/export-template-parity.test.js test/export-template-definition.test.js` | 126 passed, 0 failed/skipped |
+| `& $node20 $npmCli --script-shell='D:/Programs/Git/bin/bash.exe' test` | 473 passed, 0 failed/skipped |
+| `& $node20 $npmCli run lint` | 0 errors; the same 2 existing unused-variable warnings for sortOrder/sourceOrder at product-timeline.js:391 |
+
+All output-limit tests remained enabled: the 4,004-product case produced
+67,107,447 bytes and the 4,005-product case was rejected. Work-limit checks also
+remained enabled (19,522-work case accepted; 512-predicate case exceeded 20,000).
+No compatibility defect was reproduced, so no source/test fix or Node 22 rerun
+was needed. Earlier Node 22 results above remain historical evidence; the
+machine's default Node v22.12.0 was not changed.
+
+All eight PR1A SHA-256 fingerprints, recomputed with
+`Get-FileHash -Algorithm SHA256`, match the preceding register and the
+follow-up's initial snapshot. All 17 untracked files were explicitly inspected
+and retain their initial hashes. Runtime declarations, lockfile and package
+scripts are unchanged. The only follow-up edit is this appended documentation;
+the preceding document bytes are preserved. `git diff --check` passed, with
+the existing modified-plan/untracked-PR1A/PR1B Git status preserved.
+
+The target-runtime verification gate is **passed**. The previously recorded
+recount integration/release prerequisite remains unchanged and was not
+re-audited. No database/client/Magento checks or operations were needed or run.
+No staging, commits, pushes, branch operations, dependency/configuration changes,
+production activity or PR2 work occurred; active export dispatch is unchanged.
