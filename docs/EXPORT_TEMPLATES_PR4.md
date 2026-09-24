@@ -848,3 +848,489 @@ Exact task file scope:
 - `client/test/export-template-ui.test.jsx`
 - `client/test/export-template-presentation.test.js` (new)
 - `docs/EXPORT_TEMPLATES_PR4.md` (this record)
+
+## OFFICE creation/source-validation correction — 2026-09-24
+
+Branch `feature/magento-export-constructor`, HEAD
+`d3916f3888b5d52065b944c2aaeb32fb6272c6cf`; initial working tree clean.
+No index, commit, push or branch operation was performed.
+
+**Creation finding: A and D, not B or C.** The creation button in
+`ExportTemplatesPage.jsx` checks busy state, a trimmed nonempty name and the
+permanent-key pattern. Source diagnostics are not a disable/submit condition.
+The rendered original component with the same three diagnostics disables the
+empty-name form, then submits the unchanged definition for **Office template
+regression**. The disposable authenticated HTTP regression returns `400
+TEMPLATE_COMMAND_INVALID` for an empty name, `201` for a valid unresolved draft,
+`200` for save/reopen, and `422 TEMPLATE_SOURCE_INVALID` for validate, publish and
+test-preview of a genuinely unresolved draft. No create request or diagnostic
+draft was written in the user's database. This is rendered/HTTP test evidence,
+not a claim that a request was submitted from the screenshot or manual browser.
+
+`createTemplate`/`saveDraft` already use the bounded JSON-safe `prepareDraft`
+contract separately from `validateStored`. That separation was preserved.
+Incomplete safe drafts remain editable; unsafe/non-JSONB/unbounded definitions
+are rejected. Full structural compilation, source proof, permissions, CSRF,
+identity validation, draft CAS, audit and publication/export gates are unchanged.
+
+### Verified OFFICE evidence and precise diagnosis
+
+Before connecting, inspected the running Docker server's target without printing
+credentials: no `DATABASE_URL` override; `PGHOST=postgres`, port 5432,
+`PGDATABASE=amber`, on this checkout's local Compose network. The connection
+confirmed database `amber`, container address `172.18.0.3`, transaction read-only
+`on`. Only parameterized SELECTs in explicit read-only transactions were used;
+no startup/bootstrap imports. Inspection covered only the four question keys,
+their schema options, aggregate KL key counts and aggregate NM/AR answer values
+by schema. No product records, identities, sessions or credentials were dumped.
+
+All three descriptors have `type: scalar`, `provenance:
+supplied-stored-answers-v1`, and no aliases. `materializeMagentoV1` builds the
+definition from `loadMagentoCatalog`; it takes contract `allowed` IDs from actual
+catalog options, **not** from every key of an output dictionary.
+
+| Source claim | Current evidence | Immutable historical evidence | Failed check and disposition |
+| --- | --- | --- | --- |
+| `KL.exact_size`, information key `exact_size`, category KL; ordered fallback after information key `pedant_size`; no allowed-ID contract | No `exact_size` question. `pedant_size` is text, non-SKU, required, label `Точний розмір кулону`, visible for `is_calibrated=1` | Neither information key is a SKU-schema question. Across 360 KL records, 27 have the current key, 101 the legacy key, 23 both | `validateSourceReferences`: information sources used only current non-SKU matches, falsely rejecting the documented legacy input. Fixed by the closed approved historical-information registry for this exact key/category/output/evaluator contract. |
+| `NM.extra`, semantic key `extra`, category NM, captured allowed IDs `0,1,2` | SKU question `Додатково`, optional; options 1 and 2 active, 0 archived with label `Не обрано` | Schemas 5/v1, 8/v2, 10/v3 and 12/v4 contain only semantic IDs 1 and 2; v4 active, earlier versions archived | `validateSourceReferences`: allowed minus historical-SKU/current-non-SKU values is **0**. Current SKU options do not satisfy that proof. Genuine unresolved source-contract claim remains. |
+| `AR.size`, semantic key `size`, category AR, captured allowed IDs `1..31` | Required SKU question `Розмір картини`, active options `1..31` | Schema 1/v1 archived: `1..27`; schema 14/v2 active: `1..28` | The same allowed-ID proof fails for **29, 30, 31**. These are current-only SKU draft options, not fabricated static dictionary entries. Genuine unresolved proof remains. |
+
+NM's 481 stored numeric-zero answers are attached to those schemas without a
+genuine zero option. The existing `isOptionalPlaceholderAnswer` rule distinguishes
+an optional zero without an option from a genuine configured zero; a stored zero
+alone is not historical semantic-option evidence. Full per-product SKU
+reconstruction was not performed or inferred. The reusable `nmExtra['0'] = ''`
+compatibility mapping is retained. A synthetic catalog omitting zero keeps that
+mapping dormant without adding zero to its captured `allowed` IDs. Accepting zero
+as a separately approved placeholder contract rather than claiming a historical
+semantic option requires an explicit compatibility decision; this fix does not
+invent that proof or prune the saved answers/contract.
+
+AR's current-only labels are 29=`75/78`, 30=`74x80`, 31=`70х70` (literal catalog
+spellings). The fixed `arSize` output table ends at 28, so 29–31 additionally lack
+approved Magento output mappings. The aggregate query over all current AR records
+found no 29–31 answers; this is not a small sample and was **not** used to remove
+options or declare them valid. Their intended canonical output sizes and source
+contract require business approval; editable labels are not substituted as output.
+Unknown present values still fail readiness, including NM 999 and AR 29–31/999.
+Historical/archived semantic options remain valid evidence when actually present.
+
+### Scoped correction and remaining state
+
+The historical-information registry recognizes only scalar stored `KL.exact_size`
+without aliases under the existing Magento v1 contract when current metadata is
+absent. A similar name, different category/kind, contradictory current SKU metadata
+or unsupported alias still fails. No schema/answer rename or dummy question was
+introduced. The factory, definitions, output dictionaries and evaluator were not
+modified: `pedant_size` → `exact_size` retains absent/null/blank/zero/false,
+coexistence and invalid-present behavior. This does not claim alias equivalence.
+
+Diagnostics now expose source category/key/kind, exact `unresolvedValueIds`,
+current/historical value sets and the failed requirement. The existing source
+registry lists the approved historical information source separately. The UI
+groups readable Ukrainian fields, including the verified NM label `Додатково`,
+with expandable technical evidence. It explains that source issues allow draft
+saving, identifies an empty name/invalid key separately, retains failed-request
+input, and marks saved/reopened drafts as not confirmed ready to publish.
+Product test-readiness is labelled separately from source proof.
+
+The modeled OFFICE candidate now has two genuine diagnostics: NM zero and AR
+29–31. It is **not publication-ready**. No automatic source rewrite, catalog repair,
+product update, live publication/activation or export was performed.
+
+### Verification and file register
+
+Runtime was verified locally at
+`C:/Users/bohdan.bohelskyi/AppData/Local/npm-cache/_npx/ebaba8b9e55fd0a9/node_modules/node/bin/node.exe`,
+Node **20.20.2**. A process-local executable/version guard and shell shim enforce
+that runtime in child processes. The first npm launcher attempt was caught using
+system Node 22 and corrected before the recorded successful checks. No dependency,
+system runtime, `.env` or repository configuration was changed.
+
+Before the destructive harness, verified that the running manual Docker server
+used `amber` on `postgres`, no host Node application was running, and canonical
+`postgres-test` had zero other connections. Tests used only the canonical
+`127.0.0.1:55432/amber_test` PostgreSQL **16.14** instance and its disposable harness
+databases. `postgres-test` was stopped afterward; client/server/useful PostgreSQL
+containers remained running and were never restarted.
+
+- Failing-before evidence: three of six new server regressions failed (KL proof
+  and missing exact diagnostic details); the new readable-UI assertion failed,
+  while the valid-name creation regression already passed.
+- Focused final source tests: **6 passed**; rendered template UI: **29 passed**.
+- Focused authenticated HTTP integration: **1 passed**, 186 intentionally skipped.
+- Full server unit: **492 passed**. Server lint: zero errors, only the two existing
+  `product-timeline.js:391` unused-variable warnings.
+- Full integration: **187 passed**, no skips/failures. Candidate/validation state
+  comparisons include products, catalog/schema rows and export state; no-op saves
+  preserve definitions/revisions. Original PR1 CSV oracles/parity, immutable
+  snapshots, pricing, cursors and shared-session tests remain intact.
+- Client lint/build passed. First full client run: all 123 Node tests and 160/161
+  Vitest tests passed; the untouched export-session dirty-navigation test timed out
+  during concurrent checks. Template tests passed; a separate final full run is
+  recorded below.
+
+Final full client verification (`npm run test -- --no-file-parallelism`):
+**123 Node passed; 160 Vitest passed, 1 failed** across 16 files. The remaining
+failure is `export-sessions-ui.test.jsx:91`, “dirty session conflict preserves
+exact fields and Stay/Discard protect opening another workspace”: it expected the
+new-session heading but rendered `Legacy workspace`. An intervening ordinary full
+run instead failed the untouched repricing stale-response test at
+`workflow-characterization.test.jsx:567` (missing `NM2002`); that test passed in the
+final serial run. No test was suppressed or timeout changed. The failing modules
+import their own session/repricing screens, not the modified template page; their
+tests, pages and shared navigation hook remain identical to HEAD. These varying
+failures are recorded as an outstanding wider client verification limitation,
+not a green full-suite claim or authorization to change those workflows. All
+**29 template UI cases passed** in each post-fix run.
+
+Final `git diff --check` passed; protected migration, original fixture/oracle,
+factory/data/evaluator, template-service and closed plan-register diffs against
+HEAD are empty. Branch/HEAD are unchanged, with six tracked modifications and
+three new task files, all unstaged. No rollout or production action followed.
+
+Logs are local under `%TEMP%/amber-office-export/`. No manual browser or Magento
+acceptance is claimed. The user's running application was not redeployed.
+
+Task files (six tracked modifications, three new files; nothing staged):
+
+- `server/src/services/export-templates/source-references.js`
+- `server/test/export-template-office.test.js` (new)
+- `server/test/fixtures/magento-v1/office.js` (new synthetic fixture)
+- `server/integration-test/12-export-template-editor.cases.js`
+- `client/src/components/export-templates/SourceDiagnostics.jsx` (new)
+- `client/src/pages/ExportTemplatesPage.jsx`
+- `client/test/export-template-ui.test.jsx`
+- `docs/EXPORTS.md`
+- `docs/EXPORT_TEMPLATES_PR4.md`
+
+## Draft sample source-scope fix — OFFICE, 2026-09-24
+
+Starting branch `feature/magento-export-constructor`, HEAD
+`d3916f3888b5d52065b944c2aaeb32fb6272c6cf`; the six tracked and three
+untracked files from the source-validation fix above were preserved. The user's
+saved `Тест` revision 5 and useful database were not modified or used for writes.
+
+The actual block was server-side: `POST /api/admin/export-templates/:id/test-preview`
+called `template.service.testPreview` → `validateStored` → whole-definition
+`validateSourceReferences` before loading sample products. A synthetic saved
+six-group draft with an explicitly stored BR product returned **422
+TEMPLATE_SOURCE_INVALID**, with `NM.extra` ID `0` and `AR.size` IDs `29/30/31`.
+The isolated regression failed against the original service, then passed with
+the fix. No category was inferred from the user's product ID 3. The client had
+no source-error gate on the sample button; its generic error state also cleared
+the previous full-validation banner when another action started.
+
+Only draft sample source proof is now scoped. The unchanged complete structural
+compiler additionally records each group's dependency closure, including all
+branches, transitive bindings, base/EN output, readiness, captured contracts and
+recursive visibility sources. The new draft-only helper partitions strict
+validator diagnostics using actual source IDs and server-loaded categories,
+not name prefixes; alias/provenance checks remain strict and unclassifiable
+diagnostics block. Missing products, unknown groups, unsafe unselected groups
+and mixed selections containing unresolved dependencies fail without partial
+success. Saved revision/hash, RR read-only projection, limits and access/CSRF
+checks remain intact. Full validation/publication, candidate validation and
+published capture callers retain whole-template validation.
+
+Successful responses identify tested products/revision, explicitly report
+`publicationReady: false`, and expose unrelated `globalSourceDiagnostics`.
+The UI preserves separate full-validation blockers beside the sample and its
+product errors; edits/selection changes and late responses cannot relabel old
+output as current. Failed retries clear the previous sample. NM zero remains
+unproven; AR 29/30/31 still lack required evidence/approved output mappings.
+No schema, option, mapping, answer, publication or export state was repaired.
+
+Verification used the verified local **Node v20.20.2** executable under
+`AppData/Local/npm-cache/_npx/ebaba8b9e55fd0a9/node_modules/node/bin/node.exe`.
+Before destructive tests, sanitized running-server configuration identified
+`postgres:5432/amber`, distinct from canonical `127.0.0.1:55432/amber_test`;
+the test instance reported PostgreSQL 16.14 and no other connections. All DB
+writes used that canonical disposable environment, stopped afterward. The
+manual application was not restarted. Logs: `%TEMP%/amber-draft-sample/`.
+
+- Before/after: original-service BR endpoint regression failed with the exact
+  422 above; fixed focused integration passed. Two new rendered cases failed
+  before the UI fix, then passed; focused totals: 4 source-scope unit tests and
+  31 template UI tests passed.
+- Full server: **496 unit, 188 integration passed**; lint passed with only the
+  two existing `product-timeline.js:391` unused-variable warnings.
+- Full client: **123 Node and 163 Vitest tests passed**; lint/build passed.
+  The previously reported export-session failure did **not** reproduce:
+  isolated session tests passed **8/8 before and 8/8 after**, and the full suite
+  passed. No session test, timeout or implementation was changed.
+- Integration asserts unchanged complete business-table contents around reads
+  and rejected publication, exact remaining blockers, authoritative BR material,
+  color/SKU and saved name, unchanged EN evaluation, product-readiness errors,
+  missing IDs, revision/hash conflicts, limits, authorization and CSRF.
+  Original PR1 goldens and the closed difference register remain unchanged.
+
+This refinement changes `definition.js`, `template.service.js`, the template
+page/tests and these two docs; adds `draft-source-scope.js`,
+`export-template-sample.test.js` and `12-draft-sample.cases.js`; registers the
+integration case in `12-export-templates.cases.js` and gives the earlier OFFICE
+blocked-sample test an explicit synthetic NM product. Final `git diff --check`
+passes. Combined with preserved work: nine tracked modifications, six untracked
+files, nothing staged; branch/HEAD unchanged. No rollout or business acceptance
+is claimed. Manual retest: open the SAME saved draft, select known valid BR IDs,
+view its sample while NM/AR publication blockers remain visible.
+
+## Ordinary attributes and sample-selection UI — OFFICE, 2026-09-24
+
+Starting branch `feature/magento-export-constructor`, HEAD
+`d3916f3888b5d52065b944c2aaeb32fb6272c6cf`: nine tracked modifications and
+six untracked files from the preceding fixes were retained. No useful database,
+real product, catalog or saved `Тест` draft was changed.
+
+The presentation adapter stopped at `questionValue`, although its value was a
+normal lookup (AR size adds a membership guard; AR glass also has an outer
+presence fallback). A shape/reference-based lens now exposes these mappings in
+the normal field inspector. It preserves surrounding contracts, conditions,
+missing-value diagnostics and hidden branches. Field-private bindings retain
+their readiness consumers; shared bindings/tables detach on an explicit local
+edit, including dependent private readiness checks. AR size postcheck and NM
+zero/blank behavior remain unchanged. Viewing/fetching metadata creates no
+identifiers and does not change definition hashes.
+Already-inline question fields also coordinate structurally identical inline
+or referenced readiness projections; this is tested without binding-name guesses.
+
+Baseline field coverage (all 41 option attributes are direct mapping editors):
+
+| Group | Direct option fields (stored source keys) | Other baseline attribute controls |
+| --- | --- | --- |
+| BR | raw_type, processing, texture, color, shape, style | Existing weight and bracelet-length controls |
+| NM | raw_type, processing, texture, color, shape, style, extra | Existing weight, exact necklace length and length-band controls |
+| KL | raw_type, processing, texture, color, type, addit | Existing weight and ordered pendant-size fallback controls |
+| CH | raw_type, texture, color, shape, religion, count | Existing weight, bead length/diameter, product length and stone-size controls |
+| AR | type, size, glass, additional, backlight | Glass fallback and size membership/postcheck retained around direct mappings |
+| SV | souvenir, statuette, 2, bird, plants, symbolic_stat, table_games, stone_processing, additional_stone, color, material | Existing weight, souvenir-size and fraction controls |
+| All groups | Existing literal controls: product_websites, product_online, visibility, qty, is_in_stock, old_product, is_ownproduction | No evaluator changes |
+| Protected | sku, store_view_code, product_type | Read-only by design; absent EN cells never inherit base output |
+| Custom structures | Unsupported operations/contract-value shapes remain lossless read-only summaries | Advanced editor remains for structural contracts, source changes and genuinely custom rules, not any of the 41 baseline option mappings |
+
+Normal paths: **Намиста → Додаткові характеристики намиста** and
+**Картини → Розмір картини** immediately show mappings. Empty output is labeled
+“Порожня клітинка” while remaining `""`; absent mappings, null/invalid mapping
+types and semantic zero remain distinct. Left-hand labels come only from source
+metadata, never the editable output text. Unknown labels retain their exact ID.
+“Переглянути джерело” separates current catalog, historical schemas, frozen
+contracts and output mappings. Source diagnostics navigate to their normal
+field/source panel without discarding edits; shared edits identify consumers.
+
+Two additive read-only display endpoints use the existing RR read-only wrapper:
+`GET /admin/export-templates/source-details?category=…&key=…` requires template
+view and returns only exact-key current metadata plus up to 20 immutable active/
+archived schema records, 512 options each, with explicit truncation;
+`GET /admin/export-templates/sample-products?q=…&offset=…` requires template manage
+plus exports.view, matching draft preview rather than history/catalog grants.
+It returns only ID/SKU/category/status, 20 results/page, literal partial matching
+and case-insensitive exact-first ordering. Missing/incomplete/archived products
+are not filtered to manufacture readiness. Existing history search requires a
+different capability, so it was not reused to broaden permissions.
+
+“Обрати товари” searches SKU, cancels/fences stale requests, deduplicates and
+limits selection to 100. IDs remain internal, with optional technical entry.
+The existing sample endpoint still loads authoritative products. A tested
+quote-aware CSV presenter shows SKU, base/EN identity, the selected field and
+all remaining columns; it never rewrites server CSV bytes. Raw CSV is secondary.
+Revision/counts, product errors, unrelated source blockers and stale-result
+fences remain separate. The rendered end-to-end task uses the saved synthetic
+BR material/color/SKU name, two versioned SKUs and source-error navigation.
+
+Verification used the previously verified Node 20.20.2 and canonical
+`postgres-test` only. Before its destructive harness, the running manual server
+still used `postgres:5432/amber`, while `amber_test` had zero other connections.
+The disposable instance was stopped afterward; the application was not restarted.
+Server: **498 unit / 189 integration passed**, focused display/sample integration
+**2 passed**, lint passed with the two existing product-timeline warnings.
+Client: **130 Node passed** on the final pure-test run; all **37 template rendered tests passed** in the final
+full run. Lint/build passed. Original PR1 goldens and the closed difference
+register are unchanged. Read-only integration snapshots assert no changes to
+products, drafts, publications, audit business events or export state.
+
+Full-client verification is **not entirely green**: the initial parallel run
+passed 167/168 Vitest tests but failed the automatic price-workflow radio lookup;
+that file passed 5/5 separately. An intervening serial full run passed 168/168.
+The final serial run (including the last added case) passed 167/169, failing the
+existing export-session dirty-navigation test (expected new-session heading,
+received `Legacy workspace`) and auth initial-loading test (expected one business
+mount, observed zero). Those two files passed 36/36 together in isolation.
+No assertions, timeouts, session/auth implementation or test selectors in those
+files were changed; this remains a wider intermittent verification limitation.
+For comparison, a temporary source-only archive of HEAD (no checkout/index
+operation) passed its full rendered baseline **159/159**. The exact failures did
+not reproduce there. A recursive local-import check found zero changed files in
+the auth/session/price test graphs (50/12/20 local files respectively). This is
+evidence of isolated scope, not a claim that the intermittent failures are fixed
+or that the final full working-tree suite is green.
+
+Browser visual verification is **pending**: the installed cached Playwright
+cannot load `playwright-core`; the fixture browser script failed before launch.
+No desktop/narrow screenshots, visual keyboard check or measured page-overflow
+claim is made. DOM tests do not replace those checks. Test/attempt logs are local
+under `%TEMP%/amber-field-ux/`.
+
+NM.extra=0 and AR.size=29/30/31 remain genuine publication blockers; mappings do
+not manufacture evidence. Whole-template structural validation, sample source
+closure and strict full validation/publication/published export are unchanged.
+No migration, dependency, evaluator/baseline mapping, snapshot/session, price/recount or
+production changes were made.
+
+Task files: client `DefinitionEditor`, `QuestionField` (new), `SourceDiagnostics`,
+`SampleProducts` (new), `PreviewTable` (new), scoped editor CSS, template API/page,
+`export-template-attributes` and CSV presenter (new), presentation adapter and
+three client test files; server `display-reads` and its unit tests (new), template
+service/routes/endpoint manifest and two integration case files; `EXPORTS.md`
+and this report. Final combined state: 15 tracked modifications, 15 untracked
+files, all unstaged; branch/HEAD unchanged. No rollout or real-draft acceptance
+is claimed.
+
+
+## Table-first implementation — 2026-09-24
+
+The Templates registry always exposes “Magento — поточний системний”. GET list
+and GET /admin/export-templates/system are read-only, materialize the actual
+code-backed six-group baseline and never create a family, version, actor or
+publication. Ordinary dispatch still uses the legacy mapper. Selection metadata
+only chooses the candidate for explicitly requested template exports.
+
+The primary editor is OutputGrid with exact CSV headers, group tabs, blank
+base/EN layout rows and a separate rule-metadata row. Header/rule buttons open
+the column side panel; Escape restores header focus. The same presenter displays
+draft samples, authoritative ordinary/published/session previews and stored
+artifacts. All values come from quote-aware parsing of the server's finalized
+CSV, including formula neutralization, embedded commas/newlines and quotes.
+There is no browser evaluator or CSV serialization from the DOM.
+
+Explicit copy uses the ordinary authorized draft create API. Existing definitions
+are retained exactly until the user requests “Увімкнути редагування колонок · v2”.
+POST /:id/draft/upgrade-columns requires manage permission, saved revision and
+definition hash; it uses the normal draft transaction/audit/CAS path. Repeating
+the conversion is a no-op. No real draft, including “Тест”, was read or changed
+during this implementation.
+
+The distinct output contract is magento-products-columns-v2; formatVersion 1 and
+the existing evaluator remain unchanged. V1 definitions, hashes and ten pure
+serialized golden fixtures keep their original interpretation. Migration 038
+extends artifact and snapshot constraints; old migrations and artifacts are
+unchanged. Engine request profile remains magento-products-v1 and is separate
+from the captured output contract. Column order/rules/labels are persisted and
+hashed; pagination, focus and scroll position are transient UI state.
+
+Dynamic columns persist real headers and independent base/EN cell rules. Add,
+rename, duplicate, move and delete change future serialized CSV. Duplication
+copies reachable rule bindings and mappings; rename copies only affected
+diagnostic paths. Neither operation mutates unrelated shared consumers.
+Deletion removes output-owned readiness checks only when their final owner is
+removed; global checks and still-shared requirements remain. Whole-cell source
+replacement retires only that base column's exclusively owned output checks.
+No source, catalog characteristic, product answer or historical version is
+garbage-collected. Source verification remains global at publication and
+published export, even if an optional column was removed.
+
+Protected full-product headers: sku, store_view_code, name, attribute_set_code,
+product_type, price. Both rows require identity rules; base requires a price
+rule. Runtime requires the stored SKU, base/EN store identity, simple product
+type, nonempty names/attribute sets and positive base price. These are the local
+full-product workflow minimum, not proof of acceptance by a remote Magento
+installation. The dedicated sku,price workflow is unchanged. Header codes are
+unique lowercase ASCII identifiers, max 64 characters/64 columns; unsafe names,
+injection, wrong types, bad refs/scopes and existing work/definition limits fail
+server validation. Invalid editable drafts cannot publish or generate.
+
+Source choices derive from the authorized product-field allowlist and verified
+current information/historical SKU registry, independently of target codes.
+There is no 41-field target restriction. New verified information sources can be
+bound without per-source code changes; current-only unverified SKU sources stay
+unavailable. Target existence/type/options in Magento are not checked or created.
+The checkout still has the existing strict source-evidence contract: no completed
+NM-placeholder/AR-deferred source-support version was present to integrate.
+This work does not invent that support or publish a synthetic real SKU schema.
+A synthetic regression preserves local BR name/color edits and AR mappings
+29→75×78, 30→74×80, 31→70×70 across explicit structural conversion.
+
+Ordinary preview adds csvContent, honest system recipe and previewExpectation.
+Opt-in creation checks this fingerprint against authoritative locked inputs in
+repeatable read before any exposure/capture. The fingerprint covers selection,
+cursor, products, catalog and finalized artifacts. Old callers without the
+expectation retain compatibility. An immutable nullable legacy fingerprint
+supports original-key completed retry without fabricating template provenance.
+Published previews retain existing binding/token capture. Session preparation
+compares the displayed table fingerprint and configuration revision, persists
+the original attempt, and returns its exact CSV projection. Durable summaries
+omit CSV bytes. A reloaded prepared attempt needs a matching fresh table before
+first generation; failed/uncertain attempts retain original-key recovery.
+
+Tables page locally in groups of 50 rows from one complete authoritative response;
+they never fetch/mix pages from different fingerprints or apply the draft-only
+100-product limit to ordinary export. All CSV bytes are transferred for preview;
+server-side streaming/windowed transfer is not implemented. Failed products
+remain in readiness diagnostics and provisional tables are labeled. After
+creation the UI reads stored artifact CSV through authorized snapshot access,
+not live re-evaluation. Manifest rows require exports.view and session membership;
+creation-only responses continue exposing metadata only.
+
+Verification includes rendered header actions, blank design rows, independent
+EN values, keyboard focus return, quote-aware cells and pagination; PostgreSQL
+publication/session/download equality, stale legacy capture, completed retries,
+037→038 upgrade rollback/repeat startup and historical bytes/checksums. No safe
+authenticated browser automation was available: real desktop/narrow screenshots,
+horizontal-scroll layout and sticky-header collision checks remain human visual
+QA. No application restart, useful database access, real publication/activation,
+Magento import/Check Data, dependency change or deployment was performed.
+
+
+### Final verification and repository boundary
+
+Verified with explicit Node 20.20.2 and a preload guard asserting every spawned
+Node executable (including npm/Git Bash children):
+
+| Check | Final result |
+| --- | --- |
+| Server npm test | 498 passed, 0 failed |
+| Server lint | 0 errors; 2 existing unused-variable warnings in product-timeline.js:391 |
+| Canonical PostgreSQL 16 integration | 192 passed, 0 failed, 0 skipped |
+| Client npm test, Node portion | 136 passed, 0 failed |
+| Client npm test, rendered Vitest portion | 176 passed in 18 files, 0 failed |
+| Client lint / production build | Passed |
+| git diff --check | Passed |
+
+Earlier full client runs exposed effect-observer timing races in the snapshot,
+session Stay/Discard and authentication tests; assertions now await the observed
+effect/button readiness without weakening the authorization or navigation
+assertions. A run overlapping build/lint/DB work also timed out in the large
+rendered grid task. The final complete client suite above ran independently;
+no tests were skipped or excluded. Runtime authentication/navigation was not
+changed to address these test observations.
+
+The canonical postgres-test service was verified not to back an active manual
+session before the destructive harness. Only that PostgreSQL instance and its
+disposable _test databases were used; postgres-test was stopped after testing.
+
+Work began on feature/magento-export-constructor at
+d3916f3888b5d52065b944c2aaeb32fb6272c6cf with 15 modified tracked files and
+15 untracked files. Branch/HEAD are unchanged. Final shared worktree has
+31 modified tracked files and 22 untracked files, including the pre-existing
+work; nothing is staged. No commit, reset, stash, branch switch or push occurred.
+Migrations 000–037, the legacy mapper and original ten goldens have no diff.
+Newest migrations are 035 templates, 036 snapshot binding, 037 shared sessions
+and the new 038 editable output columns. The useful application database was
+not migrated and the user's application was not restarted.
+
+New implementation files:
+- client/src/components/export-templates/OutputGrid.jsx
+- client/src/lib/export-template-columns.js
+- client/test/export-grid.test.jsx
+- client/test/export-template-columns.test.js
+- server/src/services/export-templates/column-contract.js
+- server/integration-test/12-export-grid.cases.js
+- server/migrations/038_editable_export_columns.sql
+
+Integration edits are in DefinitionEditor/PreviewTable and editor adapters/CSS,
+ExportTemplatesPage, ExportTools, ExportSessionsPage and the product export
+controller; template/admin/public routes and manifest; template compiler,
+evaluator, source-reference compatibility, binding and template/export/session
+services. Migration-checkpoint tests exclude 038 when constructing earlier
+checkpoints. Existing rendered tests use visible grid controls. EXPORTS.md and
+DATABASE_MIGRATIONS.md link/describe the extended contracts. Existing untracked
+source/sample presenters and regressions remain in the worktree.

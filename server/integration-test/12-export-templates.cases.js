@@ -123,6 +123,9 @@ test('PR2 fresh migration: legacy selection, Administrator grants, historical sn
 
 module.exports = { definition, installGoldenEvidence };
 
+// Needs the initial synthetic source history before the all-options golden fixture.
+require('./12-draft-sample.cases');
+
 test('PR2 JSONB drafts and publications retain canonical hashes and all ten independent exact CSV goldens', async () => {
   await installGoldenEvidence();
   for (const fixture of cases) {
@@ -441,12 +444,14 @@ test('PR2 HTTP auth, active-state, CSRF and individually delegated capabilities'
   await grant(['export_templates.view']);
   for (const url of [root, `${root}/sources`, `${root}/activation`, `${root}/${f.id}`]) assert.equal((await request(url, { authentication: pending })).response.status, 200);
   await grant(['export_templates.manage']);
+  assert.equal((await request(`${root}/sample-products?q=BR`, { authentication: pending })).data.requiredPermission, 'exports.view');
   const made = await request(root, { authentication: pending, method: 'POST', body: { key: `pr2-delegated-${crypto.randomUUID()}`, displayName: 'Delegated', definition: definition() } });
   assert.equal(made.response.status, 201, made.text);
   assert.equal((await request(`${root}/${made.data.id}/validate`, { authentication: pending, method: 'POST', body: precondition(made.data.draft) })).response.status, 200);
   const noExports = await request(`${root}/${made.data.id}/test-preview`, { authentication: pending, method: 'POST', body: { ...precondition(made.data.draft), productIds: [1] } });
   assert.equal(noExports.response.status, 403); assert.equal(noExports.data.requiredPermission, 'exports.view');
   await grant(['export_templates.manage', 'exports.view']);
+  assert.equal((await request(`${root}/sample-products?q=BR`, { authentication: pending })).response.status, 200);
   const previewProduct = (await pool.query("SELECT id FROM products WHERE category = 'BR' ORDER BY id DESC LIMIT 1")).rows[0];
   const preview = await request(`${root}/${made.data.id}/test-preview`, { authentication: pending, method: 'POST', body: {
     ...precondition(made.data.draft), productIds: [previewProduct.id],

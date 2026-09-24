@@ -152,7 +152,16 @@ function runProduct(compiled, product, limits) {
     }
   }
   profile.evaluate.forEach(evaluate);
+  (profile.outputChecks || []).forEach((entry) => evaluate(entry.rule));
   const rows = profile.rows.map((r) => Object.fromEntries(Object.entries(r.cells).map(([k, v]) => [k, evaluate(v)])));
+  if (d.outputContract === 'magento-products-columns-v2') {
+    if (rows[0].sku !== identityText(own(product, 'full_sku'), 'full_sku') || rows[1].sku !== rows[0].sku
+      || rows[0].store_view_code !== '' || rows[1].store_view_code !== 'en'
+      || rows.some((row) => row.product_type !== 'simple' || !present(row.name) || !present(row.attribute_set_code))
+      || !Number.isFinite(Number(rows[0].price)) || Number(rows[0].price) <= 0) {
+      errors.push({ field: 'sku', message: 'Порушено захищений full-product контракт: SKU, base/EN, назва, набір атрибутів, simple або додатна ціна.' });
+    }
+  }
   return { mapped: { group, sku: rows[0].sku, errors, base: rows[0], english: rows[1] }, work };
 }
 

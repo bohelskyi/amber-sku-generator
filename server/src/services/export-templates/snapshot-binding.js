@@ -79,7 +79,7 @@ function validBinding(binding) {
   if (!keys(e, 'activationGeneration,definitionHash,evaluatorVersion,formatVersion,outputContract,templateId,versionId')
     || !id(e.templateId) || !id(e.versionId) || !digest(e.definitionHash)
     || typeof e.evaluatorVersion !== 'string' || !e.evaluatorVersion || e.evaluatorVersion.length > 128
-    || e.outputContract !== 'magento-products-v1' || !Number.isSafeInteger(e.formatVersion) || e.formatVersion < 1
+    || !['magento-products-v1', 'magento-products-columns-v2'].includes(e.outputContract) || !Number.isSafeInteger(e.formatVersion) || e.formatVersion < 1
     || !keys(r, 'exportedToProductId,fromSku,resolvedToSku,toSku')
     || typeof r.fromSku !== 'string' || !r.fromSku || typeof r.resolvedToSku !== 'string' || !r.resolvedToSku
     || (r.toSku !== null && (typeof r.toSku !== 'string' || !r.toSku))

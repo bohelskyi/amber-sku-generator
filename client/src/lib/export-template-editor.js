@@ -46,6 +46,7 @@ export function consumers(definition, kind, id) {
       visit(node, `${group.route} / ${row.id === 'english' ? 'EN' : 'база'} / ${column}`);
     }
     for (const node of group.evaluate || []) visit(node, `${group.route} / перевірка готовності`);
+    for (const check of group.outputChecks || []) visit(check.rule, `${group.route} / перевірка готовності`);
   }
   return [...found];
 }

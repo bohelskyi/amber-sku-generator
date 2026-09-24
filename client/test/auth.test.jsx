@@ -138,7 +138,7 @@ describe('authentication bootstrap and gate', () => {
 
     pending.resolve(response(currentSession));
     await screen.findByText('Protected business app');
-    expect(businessMounts).toBe(1);
+    await waitFor(() => expect(businessMounts).toBe(1));
   });
 
   it('bootstraps an authenticated session and retains only normalized identity fields', async () => {

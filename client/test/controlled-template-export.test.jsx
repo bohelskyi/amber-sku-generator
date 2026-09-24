@@ -11,7 +11,7 @@ import { AuthGate } from '../src/auth/AuthGate';
 import { useExportWorkflow } from '../src/hooks/product/useExportWorkflow';
 import { exportsApi } from '../src/api/exports-api';
 import { downloadBlob } from '../src/lib/download';
-vi.mock('../src/api/exports-api', () => ({ exportsApi: Object.fromEntries(['getStatus', 'getTemplateOptions', 'getPriceStatus', 'preview', 'createSnapshot', 'confirmSnapshot', 'downloadMagentoArtifact', 'createPriceSnapshot', 'downloadPriceSnapshot', 'confirmPriceSnapshot'].map((key) => [key, vi.fn()])) }));
+vi.mock('../src/api/exports-api', () => ({ exportsApi: Object.fromEntries(['getSnapshot', 'getStatus', 'getTemplateOptions', 'getPriceStatus', 'preview', 'createSnapshot', 'confirmSnapshot', 'downloadMagentoArtifact', 'createPriceSnapshot', 'downloadPriceSnapshot', 'confirmPriceSnapshot'].map((key) => [key, vi.fn()])) }));
 vi.mock('../src/lib/download', () => ({ downloadBlob: vi.fn() }));
 const response = (data) => ({ data, headers: {} });
 const template = { versionId: 'version-a', templateId: 'family-a', definitionHash: 'a'.repeat(64) };
@@ -47,6 +47,7 @@ beforeEach(() => {
   exportsApi.getTemplateOptions.mockResolvedValue(response({ activeVersionId: 'version-a', versions: [{ versionId: 'version-a', templateId: 'family-a', displayName: 'Кандидат A', versionNumber: '2' }] }));
   exportsApi.preview.mockImplementation(async (intent) => response(preview(intent.requestContract ? { requestContract: 'template-v1', intent, template, previewToken: 'opaque-token' } : {})));
   exportsApi.createSnapshot.mockResolvedValue(response(snapshot));
+  exportsApi.getSnapshot.mockResolvedValue(response(snapshot));
   exportsApi.downloadMagentoArtifact.mockResolvedValue(response('stored csv'));
   exportsApi.confirmSnapshot.mockResolvedValue(response({ status: 'confirmed' }));
 });
@@ -180,7 +181,7 @@ it.each(['uncertain', 'known'])('full workflow unmount/remount loses %s operatio
   await screen.findByText(/1 новий товар очікує/); optIn(); await start(); click(/Створити файли/);
   await screen.findByText(outcome === 'uncertain' ? /response lost Результат/ : /Файли Magento готові/);
   if (outcome === 'uncertain') expect(observedWorkflow.pendingCreate.idempotencyKey).toBe(exportsApi.createSnapshot.mock.calls[0][1]);
-  else expect(observedWorkflow.exportSnapshot.id).toBe('snapshot-a');
+  else await waitFor(() => expect(observedWorkflow.exportSnapshot?.id).toBe('snapshot-a'));
   first.unmount();
   render(authenticatedWorkflow(apiClient, bindApiAuth, locationObject));
   await screen.findByText(/1 новий товар очікує/);

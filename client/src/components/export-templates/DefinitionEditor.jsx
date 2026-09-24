@@ -1,7 +1,12 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
+import { questionField, editQuestionMapping } from '../../lib/export-template-attributes';
+import { QuestionField, OptionLabel } from './QuestionField';
+import { SourceDiagnostics } from './SourceDiagnostics';
 import { AdvancedDefinitionEditor, Scalar } from './AdvancedDefinitionEditor';
 import { fieldLabels, moveItem, protectedCells, renameSlot, removeSlot, slotNameError } from '../../lib/export-template-editor';
 import { at, affectedFields, editField, editMapping, fieldSection, insertCharacteristic, mappingsForSource, resolveNode, sourceLabel, sourceOf, summary } from '../../lib/export-template-presentation';
+import { OutputGrid } from './OutputGrid';
+import { COLUMN_CONTRACT, requiredColumns, codeError, columnChange, availableSources, bindColumnSource, literalColumn } from '../../lib/export-template-columns';
 import './export-template-editor.css';
 
 const label = (key) => fieldLabels[key] || key;
@@ -11,12 +16,16 @@ const groupNames = { BR: 'Браслети', NM: 'Намиста', KL: 'Куло
 function Scope({ context, trail, table }) {
   if (context.readOnly) return null;
   const affected = affectedFields(context.definition, context.cellPath, trail, table);
+  const readable = context.question ? affected.map((value) => {
+    const [group, row, column] = value.split(' / ');
+    return `${groupNames[group] || group} — ${column ? label(column) + (row === 'EN' ? ' (EN)' : '') : row}`;
+  }) : affected;
   return <div className="et-scope">
     <label>Область зміни<select className="input" value={context.scope} onChange={(e) => context.setScope(e.target.value)}>
       <option value="local">Лише для цього поля</option><option value="shared">Для всіх полів, які використовують це правило</option>
     </select></label>
-    {context.scope === 'shared' ? <p role="note">Зміна вплине на: {affected.join('; ')}.</p>
-      : <p>Зміниться лише це поле. Потрібні правила й відповідності копіюються під час редагування.</p>}
+    {context.scope === 'shared' ? <p role="note">Зміна вплине на: {readable.join('; ')}.</p>
+      : <p>Зміниться лише це поле{context.question ? ' та пов’язана перевірка його готовності' : ''}. Потрібні правила й відповідності копіюються під час редагування.</p>}
   </div>;
 }
 
@@ -79,18 +88,24 @@ function Mapping({ node, trail, context }) {
   const sourceId = sourceOf(context.definition, node.input);
   const table = context.definition.tables[node.table];
   if (!table) return <p role="alert">Таблицю відповідностей не знайдено. Відкрийте розширені правила.</p>;
-  const update = (transform) => context.mapping(trail, transform);
+  const update = (transform) => context.question ? context.questionMapping(transform) : context.mapping(trail, transform);
+  const ids = [...new Set([...Object.keys(table), ...(context.question?.contract.allowed || [])])];
   return <div className="et-mapping">
     <p><strong>Звідки брати значення:</strong> {sourceLabel(context.definition, sourceId, context.registry)}</p>
     <Scope context={context} trail={trail} table={node.table} />
     <h3>Як записувати у файлі</h3><p className="et-muted">ID — збережене значення характеристики. Текст праворуч потрапить у файл.</p>
     <div className="et-table-scroll"><table><thead><tr><th>Значення характеристики</th><th>Текст у файлі</th>{!context.readOnly && <th><span className="sr-only">Дії</span></th>}</tr></thead>
-      <tbody>{Object.entries(table).map(([id, value]) => <tr key={id}><th scope="row">ID {id}</th><td><Scalar disabled={context.readOnly} fixedType value={value} label={`Текст для ID ${id}`} onChange={(next) => update((entries) => ({ ...entries, [id]: next }))} /></td>
-        {!context.readOnly && <td><button type="button" className="et-link" aria-label={`Вилучити відповідність ${id}`} onClick={() => update((entries) => Object.fromEntries(Object.entries(entries).filter(([key]) => key !== id)))}>Вилучити</button></td>}</tr>)}</tbody></table></div>
+      <tbody>{ids.map((id) => <tr key={id}><th scope="row"><OptionLabel evidence={context.sourceEvidence} id={id} /></th><td>{Object.hasOwn(table, id) ? <>
+        {context.question && typeof table[id] !== 'string' ? <p>Некоректний тип відповідності: <code>{JSON.stringify(table[id])}</code>. Збережено без перетворення; виправлення — у розширених правилах.</p>
+          : <Scalar disabled={context.readOnly} fixedType value={table[id]} label={`Текст для ID ${id}`} onChange={(next) => update((entries) => ({ ...entries, [id]: next }))} />}
+        {table[id] === '' && <span>Порожня клітинка</span>}{table[id] === null && <span>null — не порожній текст</span>}</> : <span>Відповідності немає</span>}</td>
+        {!context.readOnly && <td>{Object.hasOwn(table, id) ? <button type="button" className="et-link" aria-label={`Вилучити відповідність ${id}`} onClick={() => update((entries) => Object.fromEntries(Object.entries(entries).filter(([key]) => key !== id)))}>Вилучити</button>
+          : <button type="button" onClick={() => update((entries) => ({ ...entries, [id]: '' }))}>Додати текст для ID {id}</button>}</td>}</tr>)}</tbody></table></div>
     {!context.readOnly && <details><summary>Додати відповідність</summary><label>ID характеристики<input className="input" value={newId} onChange={(e) => setNewId(e.target.value)} /></label>
       <button type="button" className="btn btn-outline px-3" disabled={!newId || Object.hasOwn(table, newId) || ['__proto__', 'constructor', 'prototype'].includes(newId)} onClick={() => { update((entries) => ({ ...entries, [newId]: '' })); setNewId(''); }}>Додати відповідність</button></details>}
-    {node.otherwise && <details><summary>Якщо значення відсутнє або немає відповідності</summary><TaskValue node={node.otherwise} trail={[...trail, 'otherwise']} context={context} /></details>}
-    <details className="et-secondary"><summary>Змінити характеристику</summary><TaskValue node={node.input} trail={[...trail, 'input']} context={context} /></details>
+    {context.question ? <p>Немає відповідності: {node.otherwise?.op === 'literal' && node.otherwise.value === '' ? 'порожній текст; подальші перевірки готовності збережено.' : 'збережена діагностика шаблону; товар може бути не готовим.'}</p> : <>
+      {node.otherwise && <details><summary>Якщо значення відсутнє або немає відповідності</summary><TaskValue node={node.otherwise} trail={[...trail, 'otherwise']} context={context} /></details>}
+      <details className="et-secondary"><summary>Змінити характеристику</summary><TaskValue node={node.input} trail={[...trail, 'input']} context={context} /></details></>}
     <details className="et-secondary"><summary>Джерело та ID таблиці</summary><code>{sourceId} → {node.table}</code></details>
   </div>;
 }
@@ -141,16 +156,18 @@ function TaskValue({ node: original, trail: originalTrail = [], context }) {
   return <div role="note">Власне правило «{node.op || 'невідоме'}» збережено без змін. Для перегляду всіх властивостей відкрийте «Розширені правила».</div>;
 }
 
-function FieldInspector({ definition, cellPath, onChange, registry, readOnly }) {
+function FieldInspector({ definition, cellPath, onChange, registry, readOnly, loadSource, diagnostics, openSource }) {
   const [scope, setScope] = useState('local');
   const [error, setError] = useState('');
   const column = cellPath[5];
   const group = definition.groups[cellPath[1]];
   const row = group.rows[cellPath[3]];
+  const lens = questionField(definition, cellPath);
   const apply = (action) => { if (readOnly) return; try { onChange(action()); setError(''); } catch (e) { setError(e.message); } };
   const context = { definition, cellPath, scope, setScope, registry, readOnly, group: group.route,
     update: (trail, transform) => apply(() => editField(definition, cellPath, trail, scope, transform)),
-    mapping: (trail, transform) => apply(() => editMapping(definition, cellPath, trail, scope, transform)) };
+    mapping: (trail, transform) => apply(() => editMapping(definition, cellPath, trail, scope, transform)),
+    questionMapping: (transform) => apply(() => editQuestionMapping(definition, cellPath, scope, transform)) };
   return <section className="et-inspector" aria-label="Редактор поля">
     <header className="et-inspector-heading"><div><p className="et-eyebrow">{fieldSection(column)}</p><h2>{label(column)}</h2><code>{column}</code></div>
       {!readOnly && <details><summary>Порядок у файлі</summary><div className="et-actions">
@@ -158,19 +175,88 @@ function FieldInspector({ definition, cellPath, onChange, registry, readOnly }) 
         <button type="button" disabled={group.columns.indexOf(column) === group.columns.length - 1} onClick={() => onChange({ ...definition, groups: definition.groups.map((item, i) => i === cellPath[1] ? { ...item, columns: moveItem(item.columns, item.columns.indexOf(column), 1) } : item) })}>Перемістити колонку нижче</button>
       </div></details>}
     </header>{error && <p role="alert" className="danger-panel p-3">{error}</p>}
+    {!lens && openSource && definition.sources[openSource] && <details open className="et-source-panel"><summary>Переглянути джерело</summary>
+      <p>Характеристика товару: {sourceLabel(definition, openSource, registry)} · {openSource}. Значення читається зі збереженого товару.</p>
+      <h3>Поточний каталог</h3><p>{registry?.references?.questions?.filter((q) => q.category_code === definition.sources[openSource].category && q.key === definition.sources[openSource].key).map((q) => `${q.label}: ID ${q.value_ids.join(', ')}`).join('; ') || 'Метадані поточного питання не надано.'}</p>
+      <h3>Історичні SKU-схеми</h3><p>{registry?.references?.schemas?.filter((s) => s.category_code === definition.sources[openSource].category).flatMap((s) => s.questions.filter((q) => q.key === definition.sources[openSource].key).map((q) => `v${s.version}: ID ${q.value_ids.join(', ')}`)).join('; ') || 'Історичні метадані питання не надано.'}</p>
+      <SourceDiagnostics diagnostics={diagnostics.filter((d) => d.sourceId === openSource)} definition={definition} registry={registry} />
+      <details><summary>Зафіксоване джерело — лише читання</summary><pre>{JSON.stringify(definition.sources[openSource], null, 2)}</pre></details>
+      <p>Відповідності тексту не є доказом значення джерела. Каталог і відповіді товарів тут не редагуються.</p>
+    </details>}
     <div className="et-field-value">
-      {protectedCells.has(column) ? <p>Захищене ідентифікаційне поле: {column}.</p> : Object.hasOwn(row.cells, column) ? <TaskValue node={at(definition, cellPath)} context={context} /> : <>
+      {protectedCells.has(column) ? <p>Захищене ідентифікаційне поле: {column}.</p> : lens ? <QuestionField lens={lens} context={context} mappingComponent={Mapping} loadSource={loadSource} diagnostics={diagnostics} openSource={openSource} /> : Object.hasOwn(row.cells, column) ? <TaskValue node={at(definition, cellPath)} context={context} /> : <>
         <p>Порожня комірка. Значення з основного рядка не підставляється.</p>{!readOnly && <button type="button" className="btn btn-outline px-3" onClick={() => context.update([], () => ({ op: 'literal', value: '' }))}>Додати текст у цю комірку</button>}</>}
     </div></section>;
 }
 
-export function DefinitionEditor({ definition, onChange, registry, readOnly = false }) {
+function ColumnStructure({ definition, groupIndex, rowIndex, column, onChange, onSelect, readOnly }) {
+  const group = definition.groups[groupIndex];
+  const [code, setCode] = useState(column);
+  const [newCode, setNewCode] = useState('');
+  const [problem, setProblem] = useState('');
+  const change = (action, value, target = column) => {
+    try { const next = columnChange(definition, groupIndex, action, target, value); onChange(next); setProblem('');
+      if (['add', 'duplicate', 'rename'].includes(action)) onSelect(value);
+      if (action === 'remove') onSelect(next.groups[groupIndex].columns[0]);
+    } catch (e) { setProblem(e.message); }
+  };
+  return <section className="et-column-actions" aria-label="Дії колонки">
+    <h3>Налаштувати правило · {rowIndex === 1 ? 'EN' : 'Основний рядок'}</h3>
+    {problem && <p role="alert">{problem}</p>}
+    {definition.outputContract !== COLUMN_CONTRACT ? <p>Фіксований історичний контракт. Для додавання чи видалення колонок явно оновіть збережену чернетку.</p> : <>
+      <label>Назва для редактора<input className="input" disabled={readOnly} maxLength={160} value={group.columnLabels?.[column] || ''} onChange={(e) => change('label', e.target.value)} /></label>
+      <label>Код колонки CSV<input className="input" disabled={readOnly || requiredColumns.has(column)} value={code} onChange={(e) => setCode(e.target.value)} /></label>
+      <button type="button" disabled={readOnly || requiredColumns.has(column) || Boolean(codeError(code, group.columns, column))} onClick={() => change('rename', code)}>Змінити код колонки</button>
+      <p className="et-muted">Це код атрибута Magento, окремий від джерела. Існування й прийнятність Magento не перевірено; атрибут тут не створюється.</p>
+      <label>Код нової колонки<input className="input" disabled={readOnly} value={newCode} onChange={(e) => setNewCode(e.target.value)} placeholder="custom_attribute" /></label>
+      <div className="et-actions">
+        <button type="button" disabled={readOnly || Boolean(codeError(newCode, group.columns))} onClick={() => change('add', newCode)}>Додати колонку ліворуч</button>
+        <button type="button" disabled={readOnly || Boolean(codeError(newCode, group.columns))} onClick={() => change('add', newCode, group.columns[group.columns.indexOf(column) + 1] ?? null)}>Додати колонку праворуч</button>
+        <button type="button" disabled={readOnly || Boolean(codeError(newCode, group.columns))} onClick={() => change('duplicate', newCode)}>Дублювати</button>
+      </div>
+      <label>Перемістити на позицію<select className="input" disabled={readOnly} value={group.columns.indexOf(column)} onChange={(e) => change('move', Number(e.target.value))}>{group.columns.map((c, i) => <option key={c} value={i}>{i + 1} · {c}</option>)}</select></label>
+      <button type="button" disabled={readOnly || requiredColumns.has(column)} onClick={() => change('remove')}>Видалити колонку</button>
+      {requiredColumns.has(column) && <p>Захищено сервером: ідентичність товару, base/EN або мінімальне значення full-product імпорту.</p>}
+    </>}
+  </section>;
+}
+
+function ColumnSource({ definition, registry, groupIndex, rowIndex, column, onChange, readOnly }) {
+  const [source, setSource] = useState('');
+  const [error, setError] = useState('');
+  const [mode, setMode] = useState('text');
+  const choices = availableSources(registry, definition.groups[groupIndex].route);
+  if (readOnly || protectedCells.has(column) || definition.outputContract !== COLUMN_CONTRACT) return null;
+  return <details className="et-source-panel"><summary>Обрати джерело або літерал для цього рядка</summary>
+    <p>Заміна правила лише цієї клітинки. Інша мова та спільні джерела не змінюються. Порожнє джерело дає порожню клітинку.</p>
+    {error && <p role="alert">{error}</p>}
+    <label>Джерело SKU Manager<select className="input" value={source} onChange={(e) => setSource(e.target.value)}><option value="">Оберіть перевірене джерело</option>{choices.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select></label>
+    <label>Правило значення<select className="input" value={mode} onChange={(e) => setMode(e.target.value)}><option value="text">Збережене значення</option><option value="lookup">Відповідності значень</option><option value="interpolate">Текст із характеристикою</option><option value="firstPresent">Перше заповнене / запасний текст</option><option value="when">Якщо джерело заповнене</option></select></label>
+    <button type="button" disabled={!source} onClick={() => { try { onChange(bindColumnSource(definition, groupIndex, rowIndex, column, choices.find((s) => s.id === source), mode)); setError(''); } catch (e) { setError(e.message); } }}>Застосувати джерело</button>
+    <button type="button" onClick={() => onChange(literalColumn(definition, groupIndex, rowIndex, column))}>Ввести літерал</button>
+  </details>;
+}
+
+export function DefinitionEditor({ definition, onChange, registry, readOnly = false, loadSource, diagnostics = [], focusField, onFieldSelect }) {
   const [groupIndex, setGroupIndex] = useState(0);
   const [rowIndex, setRowIndex] = useState(0);
   const [column, setColumn] = useState('name');
-  const [query, setQuery] = useState('');
+  const [, setQuery] = useState('');
+  const [inspector, setInspector] = useState(false);
+  const drawer = useRef(null);
+  const trigger = useRef(null);
+  const closeInspector = () => { setInspector(false); trigger.current?.focus(); };
+  useEffect(() => { if (inspector) drawer.current?.focus(); }, [inspector, column]);
   const [advanced, setAdvanced] = useState(false);
-  const supported = definition?.formatVersion === 1 && definition.evaluatorVersion === 'magento-declarative-1' && definition.outputContract === 'magento-products-v1'
+  const [seenFocus, setSeenFocus] = useState(null);
+  if (focusField !== seenFocus) {
+    setSeenFocus(focusField);
+    if (focusField) {
+    setGroupIndex(focusField.groupIndex); setRowIndex(focusField.rowIndex); setColumn(focusField.column); setQuery(''); setAdvanced(false); setInspector(true);
+    }
+  }
+  useEffect(() => { onFieldSelect?.({ groupIndex, rowIndex, column }); }, [groupIndex, rowIndex, column, onFieldSelect]);
+  const supported = definition?.formatVersion === 1 && definition.evaluatorVersion === 'magento-declarative-1' && ['magento-products-v1', COLUMN_CONTRACT].includes(definition.outputContract)
     && Array.isArray(definition.groups) && Array.isArray(definition.bindings) && definition.bindings.every((binding) => record(binding) && typeof binding.id === 'string' && record(binding.value))
     && record(definition.sources) && Object.values(definition.sources).every(record)
     && record(definition.tables) && Object.values(definition.tables).every(record)
@@ -185,15 +271,23 @@ export function DefinitionEditor({ definition, onChange, registry, readOnly = fa
     <div className="et-filters"><label>Категорія<select className="input" value={groupIndex} onChange={(e) => { setGroupIndex(Number(e.target.value)); setQuery(''); }}>{definition.groups.map((item, i) => <option key={item.route} value={i}>{groupNames[item.route] || item.name}</option>)}</select></label>
       <label>Мова<select className="input" value={rowIndex} onChange={(e) => setRowIndex(Number(e.target.value))}>{group.rows.map((item, i) => <option key={item.id} value={i}>{item.id === 'english' ? 'English' : 'Українська / основний рядок'}</option>)}</select></label>
       <p className="et-muted">Показано поля однієї категорії. Шаблон зберігає всі {definition.groups.length} категорій.</p></div>
-    <div className="et-field-layout"><aside className="et-field-nav" aria-label="Поля експорту">
-      <label className="et-search">Знайти поле<input className="input" type="search" placeholder="Назва, колір, SEO…" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
-      {['Основне', 'Характеристики', 'Категорії', 'SEO'].map((section) => {
-        const columns = group.columns.filter((key) => fieldSection(key) === section && `${label(key)} ${key}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
-        return columns.length > 0 && <div key={section}><h3>{section}</h3>{columns.map((key) => <button type="button" key={key} aria-pressed={selectedColumn === key} onClick={() => setColumn(key)}>
-          <strong>{label(key)}</strong><span>{summary(definition, row.cells[key])}</span><code>{key}</code></button>)}</div>;
-      })}
-      {!group.columns.some((key) => `${label(key)} ${key}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())) && <p>Полів не знайдено.</p>}
-    </aside><FieldInspector key={`${groupIndex}/${rowIndex}/${selectedColumn}`} definition={definition} cellPath={['groups', groupIndex, 'rows', rowIndex, 'cells', selectedColumn]} onChange={onChange} registry={registry} readOnly={readOnly} /></div>
+    <div className="et-tabs" role="group" aria-label="Категорії файлів">{definition.groups.map((item, i) => <button type="button" key={item.route} aria-pressed={i === groupIndex} onClick={() => { setGroupIndex(i); setInspector(false); }}>{groupNames[item.route] || item.name}</button>)}</div>
+    <div className={inspector ? 'et-design-layout et-design-with-panel' : 'et-design-layout'}>
+      <OutputGrid columns={group.columns} labels={group.columnLabels}
+        title={group.name + ' · структура CSV'}
+        rules={Object.fromEntries(group.columns.map((key) => [key, summary(definition, row.cells[key])]))}
+        rows={[{ label: 'Основний · макет', placeholder: true }, { label: 'EN · макет', placeholder: true }]}
+        onColumn={(key) => { trigger.current = document.activeElement; setColumn(key); setInspector(true); }}>
+        {!readOnly && <button type="button" className="btn btn-outline px-3" onClick={() => { trigger.current = document.activeElement; setColumn(selectedColumn); setInspector(true); }}>+ Колонка</button>}
+      </OutputGrid>
+      {inspector && <aside className="et-column-drawer" ref={drawer} tabIndex={-1} aria-label="Налаштування колонки" onKeyDown={(e) => { if (e.key === 'Escape') closeInspector(); }}>
+        <button type="button" className="et-link" onClick={closeInspector}>Закрити налаштування</button>
+        <ColumnStructure key={groupIndex + '/' + selectedColumn} definition={definition} groupIndex={groupIndex} rowIndex={rowIndex} column={selectedColumn} onChange={onChange} onSelect={setColumn} readOnly={readOnly} />
+        <ColumnSource key={'source/' + groupIndex + '/' + rowIndex + '/' + selectedColumn} definition={definition} registry={registry} groupIndex={groupIndex} rowIndex={rowIndex} column={selectedColumn} onChange={onChange} readOnly={readOnly} />
+        <FieldInspector key={groupIndex + '/' + rowIndex + '/' + selectedColumn} definition={definition} cellPath={['groups', groupIndex, 'rows', rowIndex, 'cells', selectedColumn]} onChange={onChange} registry={registry} readOnly={readOnly} loadSource={loadSource} diagnostics={diagnostics} openSource={focusField?.sourceId && focusField.groupIndex === groupIndex && focusField.column === selectedColumn ? focusField.sourceId : null} />
+      </aside>}
+    </div>
+    <p className="et-muted">Макет без товарів. Правила — метадані редактора, не рядки CSV. Категорія змінює лише вигляд; експорт охоплює весь вибраний діапазон.</p>
     <footer className="et-editor-footer"><button type="button" className="et-link" onClick={() => setAdvanced(true)}>Розширені правила</button><span>Умови, спільні правила, джерела та технічне визначення</span></footer>
   </form>;
 }

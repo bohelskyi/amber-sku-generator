@@ -8,6 +8,8 @@ const { hashJsonData, compileDefinition } = require('./definition');
 const { evaluateBatch } = require('./evaluate');
 const { loadSourceEvidence, validateSourceReferences, getSourceRegistry } = require('./source-references');
 const { loadDraftPreviewProducts } = require('./draft-inputs');
+const { validateDraftSampleSources } = require('./draft-source-scope');
+const displayReads = require('./display-reads');
 
 const error = (status, code, message, details) => new PublicHttpError(status, message, { code, details });
 const conflict = (message = 'Draft revision or hash changed') => error(409, 'TEMPLATE_DRAFT_CONFLICT', message);
@@ -49,6 +51,12 @@ function prepareDraft(definition) {
   const hash = pureCall(() => hashJsonData(definition));
   if (!definition || typeof definition !== 'object' || Array.isArray(definition)) {
     throw error(422, 'TEMPLATE_INVALID', 'Draft must be a JSON object');
+  }
+  if (definition.outputContract === 'magento-products-columns-v2') {
+    const { REQUIRED } = require('./column-contract');
+    if (!Array.isArray(definition.groups) || definition.groups.some((g) => !Array.isArray(g?.columns) || REQUIRED.some((c) => !g.columns.includes(c)))) {
+      throw error(422, 'TEMPLATE_INVALID', 'Захищені колонки full-product: ' + REQUIRED.join(', '));
+    }
   }
   // PostgreSQL JSONB cannot retain NUL or unpaired UTF-16 surrogates. Reject before writing.
   function checkStrings(value) {
@@ -203,6 +211,26 @@ async function saveDraft(templateId, input, options = {}) {
     return replaceDraft(client, row, prepared, row.base_version_id, context);
   });
 }
+async function upgradeDraft(templateId, input, options = {}) {
+  templateId = identity(templateId);
+  command(input, ['expectedRevision', 'expectedDefinitionHash']);
+  const revision = counter(input.expectedRevision); const hash = expectedHash(input.expectedDefinitionHash);
+  return mutation('manage', options, async (client, context) => {
+    const row = await loadDraft(client, templateId, true);
+    assertDraft(row, revision, hash);
+    const definition = pureCall(() => require('./column-contract').upgradeColumns(row.definition));
+    return replaceDraft(client, row, prepareDraft(definition), row.base_version_id, context);
+  });
+}
+
+async function systemProfile(options = {}) {
+  const candidate = await prepareMagentoCandidate(options);
+  const { HEADERS } = require('../magento-products-v1');
+  return { ...candidate, kind: 'system', systemKey: 'magento-legacy',
+    displayName: 'Magento — поточний системний', effectiveExporter: 'legacy',
+    ...(HEADERS ? { headers: HEADERS } : {}) };
+}
+
 async function cloneDraft(templateId, input, options = {}) {
   templateId = identity(templateId);
   command(input, ['expectedRevision', 'versionId']);
@@ -241,10 +269,15 @@ async function testPreview(templateId, input, options = {}) {
   return readTransaction(options, async (client) => {
     const row = await loadDraft(client, templateId);
     assertDraft(row, revision, hash);
-    const compiled = await validateStored(client, row);
+    const compiled = pureCall(() => compileDefinition(row.definition));
     const { products, missingProductIds } = await loadDraftPreviewProducts(client, input.productIds);
     if (missingProductIds.length) throw error(422, 'TEMPLATE_PRODUCTS_MISSING', 'Requested products not found', { missingProductIds });
-    return { revision, definitionHash: compiled.hash, draftOnly: true,
+    const evidence = await loadSourceEvidence(client);
+    const { diagnostics, globalSourceDiagnostics } = pureCall(() => validateDraftSampleSources(compiled, evidence, products));
+    if (diagnostics.length) throw error(422, 'TEMPLATE_SOURCE_INVALID', 'Unresolved or unsupported sample source references',
+      { diagnostics, globalSourceDiagnostics });
+    return { revision, definitionHash: compiled.hash, draftOnly: true, publicationReady: false, globalSourceDiagnostics,
+      sampleProducts: products.map((product) => ({ productId: Number(product.id), sku: product.full_sku, category: product.category })),
       result: pureCall(() => evaluateBatch(compiled, products)) };
   });
 }
@@ -346,6 +379,8 @@ async function getExportTemplateOptions({ includeNonActive = false, ...options }
   });
 }
 
-module.exports = { prepareDraft, counter, listTemplates, getTemplate, createTemplate, saveDraft, cloneDraft,
+module.exports = { upgradeDraft, systemProfile, prepareDraft, counter, listTemplates, getTemplate, createTemplate, saveDraft, cloneDraft,
   validateDraft, testPreview, publishTemplate, getActivation, updateActivation, listSources,
-  loadVersion, verifyVersion, pureCall, prepareMagentoCandidate, getExportTemplateOptions };
+  loadVersion, verifyVersion, pureCall, prepareMagentoCandidate, getExportTemplateOptions,
+  searchSampleProducts: (input, options = {}) => readTransaction(options, (client) => displayReads.searchSampleProducts(client, input)),
+  sourceDetails: (input, options = {}) => readTransaction(options, (client) => displayReads.sourceDetails(client, input)) };

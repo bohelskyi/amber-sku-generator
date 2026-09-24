@@ -308,11 +308,21 @@ async function resolveNewExportRange(queryable) {
   return { cursor, fromSku: byId.get(firstId), toSku: byId.get(lastId), productCount };
 }
 
+function legacyPreviewFingerprint(exportData, catalog, magento, newRange) {
+  return bindingTools.fingerprint({ range: exportData.range, cursor: newRange?.cursor ?? null,
+    products: exportData.rows, columns: exportData.textColumns,
+    catalog: [...catalog].map(([group, questions]) => [group, [...questions]]),
+    artifacts: magento.artifacts });
+}
+
 async function createExportSnapshot(input, options = {}) {
   let { fromSku, toSku } = input;
   const { idempotencyKey, profile, mode } = input;
   const contract = bindingTools.requestContract(input);
   const template = contract === 'template-v1';
+  const expectedLegacy = !template && input.previewExpectation !== undefined;
+  if (expectedLegacy && (typeof input.previewExpectation !== 'string' || !/^[a-f0-9]{64}$/.test(input.previewExpectation)
+    || (input.profile && input.profile !== 'magento-products-v1'))) throw bindingTools.error(422, 'EXPORT_PREVIEW_INVALID', 'Invalid legacy preview expectation');
   const intent = template ? bindingTools.normalizeIntent(input, { allowInternalProfile: true }) : null;
   const database = options.databasePool || pool;
   const mutationContext = createMutationContext(options.mutationContext);
@@ -338,7 +348,7 @@ async function createExportSnapshot(input, options = {}) {
     error.statusCode = 400;
     throw error;
   }
-  if (template) await assertActorStillAuthorized(database, mutationContext.actorUserId, 'exports.create', bindingTools.error);
+  if (template || expectedLegacy) await assertActorStillAuthorized(database, mutationContext.actorUserId, 'exports.create', bindingTools.error);
   // Authenticity applies to completed retries too, but freshness applies only to new work.
   const suppliedBinding = template && input.previewToken !== undefined
     ? previewSigner.verify(input.previewToken, { completed: true }) : null;
@@ -349,6 +359,7 @@ async function createExportSnapshot(input, options = {}) {
     if (template) return bindingTools.assertCompleted(snapshot, intent, suppliedBinding);
     if (snapshot.request_contract === 'template-v1') throw bindingTools.conflict();
     assertSnapshotMatchesRequest(snapshot, fromSku, toSku);
+    if (expectedLegacy && snapshot.legacy_preview_fingerprint !== input.previewExpectation) throw bindingTools.conflict();
     await assertSnapshotProfile(snapshot, requestedProfile, queryable);
     return snapshot;
   }
@@ -371,13 +382,18 @@ async function createExportSnapshot(input, options = {}) {
   const client = await database.connect();
   let authorityProtected = false;
   try {
-    if (template) {
+    if (template || expectedLegacy) {
       await published.protectAuthority(client, mutationContext.actorUserId, 'exports.create');
       authorityProtected = true;
     }
-    await client.query(template ? 'BEGIN ISOLATION LEVEL REPEATABLE READ' : 'BEGIN');
+    await client.query(template || expectedLegacy ? 'BEGIN ISOLATION LEVEL REPEATABLE READ' : 'BEGIN');
     let resolved = null;
     let binding = null;
+    if (expectedLegacy) {
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', ['amber:export-snapshot:v1', key]);
+      const second = await lookup(client);
+      if (second) { const found = await match(second, client); await client.query('COMMIT'); return found; }
+    }
     if (template) {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', ['amber:export-snapshot:v1', key]);
       const second = await lookup(client);
@@ -427,6 +443,8 @@ async function createExportSnapshot(input, options = {}) {
       ({ binding, magento } = await published.capturePublished(client, intent, resolved, exportData, newRange));
       if (bindingTools.fingerprint(binding) !== bindingTools.fingerprint(suppliedBinding)) throw bindingTools.stale();
     }
+    const legacyFingerprint = catalog ? legacyPreviewFingerprint(exportData, catalog, magento, newRange) : null;
+    if (expectedLegacy && legacyFingerprint !== input.previewExpectation) throw bindingTools.stale();
     if (requestedProfile === 'magento-products-v1' && exportData.rows.length === 0) {
       const error = new Error('У діапазоні немає товарів для Magento.');
       error.statusCode = 422;
@@ -453,9 +471,9 @@ async function createExportSnapshot(input, options = {}) {
         reexport_revisions, request_contract, template_id, template_version_id,
         template_definition_hash, template_evaluator_version, template_output_contract,
         template_format_version, request_intent, input_fingerprint, binding_evidence,
-        export_session_id, export_attempt_id)
+        export_session_id, export_attempt_id, legacy_preview_fingerprint)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb,
-         $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21::jsonb, $22, $23)
+         $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21::jsonb, $22, $23, $24)
        RETURNING *`,
       [
         crypto.randomUUID(),
@@ -475,6 +493,7 @@ async function createExportSnapshot(input, options = {}) {
         intent ? JSON.stringify(intent) : null, binding?.inputFingerprint || null,
         binding ? JSON.stringify(binding) : null,
         options.sessionAttempt?.sessionId || null, options.sessionAttempt?.attemptId || null,
+        expectedLegacy ? legacyFingerprint : null,
       ]
     );
     const snapshot = result.rows[0];
@@ -507,7 +526,7 @@ async function createExportSnapshot(input, options = {}) {
   } catch (error) {
     await client.query('ROLLBACK');
     const keyConflict = error?.code === '23505' && error.constraint === 'export_snapshots_idempotency_key_key';
-    if (keyConflict || (template && (error.code === '40001'
+    if (keyConflict || ((template || expectedLegacy) && (error.code === '40001'
       || ['EXPORT_PREVIEW_STALE', 'EXPORT_PREVIEW_EXPIRED', 'EXPORT_PREVIEW_REQUIRED', 'TEMPLATE_SOURCE_INVALID'].includes(error.code)
       || error.publicCode === 'NEW_EXPORT_RANGE_STALE'))) {
       // This connection is now outside its aborted/old RR transaction. A new
@@ -515,7 +534,7 @@ async function createExportSnapshot(input, options = {}) {
       const winner = await lookup(client);
       if (winner) return await match(winner, client);
     }
-    if (template && (error.code === '40001' || error.publicCode === 'NEW_EXPORT_RANGE_STALE')) throw bindingTools.stale();
+    if ((template || expectedLegacy) && (error.code === '40001' || error.publicCode === 'NEW_EXPORT_RANGE_STALE')) throw bindingTools.stale();
     throw error;
   } finally {
     try { if (authorityProtected) await published.releaseAuthority(client); }
@@ -567,7 +586,9 @@ async function previewExport(input, options = {}) {
       { queryable: client, templateInputs: template }
     );
     const captured = template ? await published.capturePublished(client, intent, resolved, exportData, newRange) : null;
-    const magento = captured ? captured.magento : buildMagentoPayload(exportData.rows, await loadMagentoCatalog(client));
+    const catalog = captured ? null : await loadMagentoCatalog(client);
+    const magento = captured ? captured.magento : buildMagentoPayload(exportData.rows, catalog);
+    const tableFingerprint = captured ? bindingTools.fingerprint(captured.binding) : legacyPreviewFingerprint(exportData, catalog, magento, newRange);
     await client.query('COMMIT');
     return {
       mode: mode || 'manual',
@@ -575,6 +596,9 @@ async function previewExport(input, options = {}) {
       representedCount: magento.representedCount,
       readyCount: magento.readyCount,
       errors: magento.errors,
+      tableFingerprint,
+      ...(!template ? { recipe: { kind: 'system', name: 'Magento — поточний системний', outputContract: 'magento-products-v1' },
+        previewExpectation: magento.errors.length ? null : tableFingerprint } : {}),
       ...(template ? { requestContract: 'template-v1', intent, template: resolved.effective,
         previewToken: magento.errors.length || !magento.representedCount ? null : previewSigner.sign(captured.binding),
         represented: magento.represented } : {}),
@@ -585,6 +609,7 @@ async function previewExport(input, options = {}) {
         fileName: item.fileName,
         productCount: item.productCount,
         rowCount: item.rowCount,
+        csvContent: item.csvContent,
       })),
     };
   } catch (error) {
@@ -600,7 +625,7 @@ async function getMagentoArtifacts(snapshotId, options = {}) {
   await getExportSnapshot(snapshotId, options);
   const result = await (options.databasePool || pool).query(
     `SELECT snapshot_id, profile_version, group_code, file_name,
-            product_count, row_count
+            product_count, row_count, csv_content
      FROM magento_export_artifacts WHERE snapshot_id = $1
      ORDER BY CASE group_code WHEN 'BR' THEN 1 WHEN 'NM' THEN 2
        WHEN 'KL' THEN 3 WHEN 'CH' THEN 4 WHEN 'AR' THEN 5 ELSE 6 END`,
@@ -612,6 +637,7 @@ async function getMagentoArtifacts(snapshotId, options = {}) {
     fileName: row.file_name,
     productCount: Number(row.product_count),
     rowCount: Number(row.row_count),
+    ...(options.includeRows ? { csvContent: row.csv_content } : {}),
   }));
 }
 
@@ -626,7 +652,7 @@ async function getMagentoArtifact(snapshotId, groupCode, options = {}) {
   const result = await (options.databasePool || pool).query(
     `SELECT * FROM magento_export_artifacts
      WHERE snapshot_id = $1 AND group_code = $2
-       AND profile_version = 'magento-products-v1'`,
+       AND profile_version IN ('magento-products-v1', 'magento-products-columns-v2')`,
     [snapshotId, group]
   );
   if (!result.rows[0]) {

@@ -1,3 +1,4 @@
+import { ArtifactTables } from '../export-templates/PreviewTable';
 import { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Download, RefreshCw } from 'lucide-react';
 import { exportsApi } from '../../api/exports-api';
@@ -335,6 +336,7 @@ export function SnapshotFiles({ snapshot, loading, onDownload, onConfirm, canCon
           {snapshot.capturedRange && <p className="mt-1 text-sm break-words">Діапазон цього знімка: {snapshot.capturedRange.fromSku} — {snapshot.capturedRange.toSku || snapshot.capturedRange.resolvedToSku}.</p>}
         </div>
       </div>
+      <ArtifactTables artifacts={snapshot.artifacts} stored />
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
         {(snapshot.artifacts || []).map((item) => (
           <div key={item.groupCode} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-3">
@@ -452,7 +454,7 @@ export function ExportTools({
             <p className="section-subtitle mt-1">Перевірте нові товари, створіть файли та завершіть експорт після завантаження.</p>
           </div>
 
-          {durableSessions ? <div className="p-4 border-b"><Link className="underline" to="/exports/sessions">Мої експорти · Запрошення · Створити свій експорт за шаблоном</Link><p className="text-xs mt-2">Нижче — звичайний Magento v1. Контрольований експорт відкривається окремо й зберігається на сервері.</p></div> : setTemplateMode && <ControlledExportOptions templateMode={templateMode} setTemplateMode={setTemplateMode}
+          {durableSessions ? <div className="p-4 border-b"><Link className="underline" to="/exports/sessions">Мої експорти · Запрошення · Створити свій експорт за шаблоном</Link><p className="text-xs mt-2">Нижче — звичайний Magento v1. Експорт за опублікованим шаблоном — окрема збережена операція; учасників можна запросити явно.</p></div> : setTemplateMode && <ControlledExportOptions templateMode={templateMode} setTemplateMode={setTemplateMode}
             templateSelection={templateSelection} setTemplateSelection={setTemplateSelection}
             pendingCreate={pendingCreate} isExportLoading={isExportLoading || !canCreateExport}
             onRetry={onCreateSnapshot} evidence={exportSnapshot || exportPreview} canActivate={canActivateTemplate} />}
@@ -485,6 +487,9 @@ export function ExportTools({
             <>
               <PreviewSummary preview={exportPreview} loading={isExportLoading || Boolean(pendingCreate)}
                 onRefresh={() => refreshPreview(exportPreview.mode)} />
+              <p className="px-4 pt-3 text-sm">{exportPreview.template ? 'Опублікований шаблон · ' + exportPreview.template.versionId : 'Magento — поточний системний · legacy'}</p>
+              <ArtifactTables key={exportPreview.tableFingerprint} artifacts={exportPreview.artifacts} />
+              {previewErrors.length > 0 && <p className="px-4">Таблиця попередня: неготові товари перелічено нижче; створення всього експорту заблоковано.</p>}
               {previewErrors.length > 0 ? (
                 <ReadinessProblems errors={previewErrors} expanded={problemsExpanded}
                   showAll={showAllProblems}

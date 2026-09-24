@@ -5,7 +5,11 @@ export function createExportTemplatesApi(client = api) {
   return Object.freeze({
     list: () => client.get(root),
     sources: () => client.get(`${root}/sources`),
+    sourceDetails: (params, signal) => client.get(`${root}/source-details`, { params, signal }),
+    searchSamples: (params, signal) => client.get(`${root}/sample-products`, { params, signal }),
     candidate: () => client.get(`${root}/candidate`),
+    system: () => client.get(`${root}/system`),
+    upgrade: (id, body) => client.post(`${root}/${id}/draft/upgrade-columns`, body),
     get: (id) => client.get(`${root}/${id}`),
     create: (body) => client.post(root, body),
     save: (id, body) => client.put(`${root}/${id}/draft`, body),

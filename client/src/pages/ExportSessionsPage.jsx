@@ -1,3 +1,4 @@
+import { ArtifactTables } from '../components/export-templates/PreviewTable';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/auth-context';
@@ -106,6 +107,7 @@ function SessionDetail({ id, canCreate, canActivate, register, onLost }) {
       const { data } = await api.get(id); if (!current() || ticket !== readTicket.current) return;
       if (membershipRef.current !== null && membershipRef.current !== data.accessEpoch) { denied(); return; }
       membershipRef.current = data.accessEpoch;
+      if (revisionRef.current !== null && revisionRef.current !== data.configurationRevision) setPreview(null);
       if (dirtyRef.current && revisionRef.current !== data.configurationRevision) setRemoteChange(true);
       if (!dirtyRef.current) { setValue({ title: data.title, settings: data.settings }); revisionRef.current = data.configurationRevision; }
       setSession(data);
@@ -135,7 +137,10 @@ function SessionDetail({ id, canCreate, canActivate, register, onLost }) {
   if (!session || !value) return <p role="status">Завантаження експорту…</p>;
   const precondition = { expectedRevision: session.configurationRevision, expectedAccessEpoch: session.accessEpoch };
   const frozen = Boolean(session.snapshotId); const p = preview || session.attempt?.preview;
-  const prepare = (supersede = false) => run(() => api.prepare(id, { ...precondition, ...(supersede ? { supersedeAttemptId: session.currentAttemptId } : {}) }), (a) => { setPreview(a.preview); void refresh(); });
+  const tableCurrent = !dirty && !remoteChange && (!p?.configurationRevision || p.configurationRevision === session.configurationRevision) && (!session.attempt?.preview?.tableFingerprint || session.attempt.preview.tableFingerprint === p?.tableFingerprint);
+  const recovering = ['failed', 'interrupted'].includes(session.attempt?.state);
+  const tableAvailable = !p?.tableFingerprint || p.artifacts?.every((a) => typeof a.csvContent === 'string');
+  const prepare = (supersede = false) => run(() => api.prepare(id, { ...precondition, ...(preview?.tableFingerprint ? { expectedPreviewFingerprint: preview.tableFingerprint } : {}), ...(supersede ? { supersedeAttemptId: session.currentAttemptId } : {}) }), (a) => { if (!preview || a.preview?.tableFingerprint !== preview.tableFingerprint || a.preview?.artifacts?.every((item) => typeof item.csvContent === 'string')) setPreview(a.preview); void refresh(); });
   const memberAction = (body) => run(() => api.membership(id, { expectedAccessEpoch: session.accessEpoch, ...body }), () => { void refresh(); });
   return <section className="space-y-4">
     <div className="card p-4 space-y-3"><h2 className="text-xl font-semibold">{session.title}</h2>
@@ -158,13 +163,14 @@ function SessionDetail({ id, canCreate, canActivate, register, onLost }) {
       {!frozen && <div className="flex flex-wrap gap-3">
         <button className="btn btn-outline px-3" disabled={busy || dirty || session.executing} onClick={() => run(() => api.preview(id), setPreview)}>Перевірити збережений діапазон (лише читання)</button>
         {canCreate && <button className="btn btn-outline px-3" disabled={busy || dirty || session.executing} onClick={() => prepare(Boolean(session.currentAttemptId))}>{session.currentAttemptId ? 'Явно оновити перевірку та замінити спробу' : 'Підготувати збережену спробу'}</button>}
-        {canCreate && session.currentAttemptId && <button className="btn btn-primary px-3" disabled={busy || dirty || session.executing} onClick={() => run(() => api.generate(id, { ...precondition, attemptId: session.currentAttemptId }), () => { void refresh(); })}>
+        {canCreate && session.currentAttemptId && <button className="btn btn-primary px-3" disabled={busy || dirty || session.executing || (!recovering && (!tableCurrent || !tableAvailable))} onClick={() => run(() => api.generate(id, { ...precondition, attemptId: session.currentAttemptId }), () => { void refresh(); })}>
           {['failed','interrupted'].includes(session.attempt?.state) ? 'Повторити ту саму спробу' : 'Створити файли цієї спроби'}</button>}
       </div>}
+      {recovering && <p>Повтор використовує початкову збережену спробу. Нова таблиця перевірки не замінює її; успішний результат буде прочитано зі знімка.</p>}
       <p className="text-xs">Підготовка зберігає доказ перевірки без резервування товарів. Лише «Створити файли» створює знімок та експозицію. Різні експорти можуть мати спільні товари; курсор один для всіх.</p>
       <details><summary>Посилання та ідентифікатори</summary><Link className="break-all underline" to={`/exports/sessions/${id}`}>{id}</Link><p className="break-all">Спроба: {session.currentAttemptId || '—'} · Знімок: {session.snapshotId || '—'}</p></details>
     </div>
-    {!frozen && p && <div className="card"><PreviewSummary preview={p} loading={busy} onRefresh={() => run(() => api.preview(id), setPreview)} />
+    {!frozen && p && <div className="card">{!tableCurrent && <p role="alert">Таблиця застаріла для поточних налаштувань або збереженої спроби. Оновіть перевірку та явно підготуйте спробу.</p>}<ArtifactTables key={p.tableFingerprint} artifacts={p.artifacts} /><PreviewSummary preview={p} loading={busy} onRefresh={() => run(() => api.preview(id), setPreview)} />
       {p.errors?.length > 0 && <ReadinessProblems errors={p.errors} expanded={expanded} showAll={showAll} onToggle={() => setExpanded(!expanded)} onShowAll={() => setShowAll(true)}
         manualNameProduct={manualName} onEditName={canCreate ? setManualName : null} onCloseName={() => setManualName(null)} onSavedName={() => { setManualName(null); setPreview(null); }} translationSuggestionAvailable={false} />}
       {p.template && <div className="p-3 text-sm"><p>Опублікований шаблон: {p.template.displayName || 'Шаблон'} · v{p.template.versionNumber || '—'}</p><details><summary>Походження</summary><p className="break-all">Версія: {p.template.versionId} · SHA-256 {p.template.definitionHash}</p></details></div>}
@@ -206,7 +212,7 @@ function SessionWorkspace({ canCreate, canActivate }) {
     catch (e) { if (current()) setError(getApiError(e)); }
   });
   return <main className="app-page"><div className="mx-auto max-w-5xl p-4 sm:p-6 space-y-5">
-    {navigation.prompt}<Link to="/exports" className="underline">Звичайний експорт та sku,price</Link><h1 className="text-2xl font-semibold">Збережені контрольовані експорти</h1>
+    {navigation.prompt}<Link to="/exports" className="underline">Звичайний експорт та sku,price</Link><h1 className="text-2xl font-semibold">Мої та спільні експорти за шаблоном</h1>
     <p>Кожний експорт — окрема приватна або явно спільна операція за опублікованим шаблоном. Чернетки шаблонів не передаються учасникам.</p>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     <div className="flex flex-wrap gap-3">{canCreate && <button className="btn btn-primary px-3" onClick={newOwn}>Створити свій експорт</button>}

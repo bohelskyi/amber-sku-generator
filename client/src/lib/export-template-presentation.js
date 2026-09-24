@@ -17,7 +17,7 @@ export function resolveNode(definition, node, trail = []) {
 }
 export function outputNode(definition, node, trail = []) {
   const resolved = resolveNode(definition, node, trail);
-  if (!resolved.problem && ['when', 'require'].includes(resolved.node?.op)) {
+  if (!resolved.problem && ['when', 'require', 'questionValue'].includes(resolved.node?.op)) {
     const key = resolved.node.op === 'when' ? 'then' : 'value';
     const child = outputNode(definition, resolved.node[key], [...resolved.trail, key]);
     return { ...child, guarded: true };

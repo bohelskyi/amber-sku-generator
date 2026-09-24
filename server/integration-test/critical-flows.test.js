@@ -21,6 +21,7 @@ for (const modulePath of [
   './12-export-template-snapshots.cases',
   './12-export-template-editor.cases',
   './12-export-sessions.cases',
+  './12-export-grid.cases',
   './13-sqlite-import.cases',
 ]) {
   require(modulePath);

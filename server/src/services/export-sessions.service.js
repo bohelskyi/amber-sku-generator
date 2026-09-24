@@ -108,22 +108,27 @@ async function saveSession(id, input, options = {}) {
   }));
 }
 async function previewSession(id, options = {}) {
-  return access.withSession(id, options, (_client, s, { databasePool }) => {
+  return access.withSession(id, options, async (_client, s, { databasePool }) => {
     if (s.snapshot_id) throw access.conflict('EXPORT_SESSION_FROZEN');
-    return exportsService().previewExport(s.settings, { ...options, databasePool });
+    return { ...await exportsService().previewExport(s.settings, { ...options, databasePool }), configurationRevision: s.configuration_revision };
   });
 }
 async function prepare(id, input, options = {}) {
   return access.withSession(id, commandOptions(input, options), async (client, s, { context, databasePool }) => {
     checkRevision(s, input); if (s.snapshot_id) throw access.conflict('EXPORT_SESSION_FROZEN');
-    if (s.current_attempt_id && !input.supersedeAttemptId) return attemptSummary((await client.query('SELECT * FROM export_session_attempts WHERE id=$1', [s.current_attempt_id])).rows[0], true);
+    if (s.current_attempt_id && !input.supersedeAttemptId) {
+      const attempt = (await client.query('SELECT * FROM export_session_attempts WHERE id=$1', [s.current_attempt_id])).rows[0];
+      if (input.expectedPreviewFingerprint !== undefined && input.expectedPreviewFingerprint !== binding.fingerprint(attempt.binding_evidence)) throw binding.stale();
+      return attemptSummary(attempt, true);
+    }
     if (input.supersedeAttemptId && input.supersedeAttemptId !== s.current_attempt_id) throw access.conflict('EXPORT_ATTEMPT_CHANGED');
     const p = await exportsService().previewExport(s.settings, { ...options, databasePool });
+    if (input.expectedPreviewFingerprint !== undefined && input.expectedPreviewFingerprint !== p.tableFingerprint) throw binding.stale();
     if (!p.previewToken) return { state: 'not-ready', preview: { ...p, previewToken: undefined } };
     const evidence = signer.verify(p.previewToken);
     // Store only bounded readiness/range/provenance, not the product projection.
     const safePreview = { mode: p.mode, range: p.range, representedCount: p.representedCount, readyCount: p.readyCount,
-      errors: [], artifacts: p.artifacts, template: p.template, requestContract: 'template-v1' };
+      errors: [], artifacts: p.artifacts.map((a) => ({ groupCode: a.groupCode, groupName: a.groupName, profileVersion: a.profileVersion, fileName: a.fileName, productCount: a.productCount, rowCount: a.rowCount })), template: p.template, requestContract: 'template-v1', tableFingerprint: p.tableFingerprint };
     const label = (await client.query(`SELECT t.display_name, v.version_number FROM export_template_versions v
       JOIN export_templates t ON t.id=v.template_id WHERE v.id=$1`, [p.template.versionId])).rows[0];
     safePreview.template = { ...safePreview.template, displayName: label.display_name, versionNumber: label.version_number };
@@ -134,7 +139,7 @@ async function prepare(id, input, options = {}) {
         JSON.stringify(s.settings), JSON.stringify(evidence), p.previewToken, JSON.stringify(safePreview), crypto.randomUUID()])).rows[0];
       await client.query('UPDATE export_sessions SET current_attempt_id=$2,updated_at=CURRENT_TIMESTAMP WHERE id=$1', [id, a.id]);
       await audit(client, context, id, 'prepared', { attemptId: a.id, revision: s.configuration_revision });
-      return attemptSummary(a, true);
+      return { ...attemptSummary(a, true), preview: { ...safePreview, artifacts: p.artifacts, configurationRevision: s.configuration_revision } };
     });
   });
 }

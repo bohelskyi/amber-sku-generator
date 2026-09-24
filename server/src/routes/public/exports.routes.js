@@ -67,6 +67,7 @@ router.post('/export/snapshots', requirePermission('exports.create'), async (req
       requestContract: req.body?.requestContract,
       selection: req.body?.selection,
       previewToken: req.body?.previewToken,
+      previewExpectation: req.body?.previewExpectation,
     }, { mutationContext: getRequestMutationContext(req) });
     res.status(201).json({
       id: snapshot.id,
@@ -95,7 +96,7 @@ router.get('/export/snapshots/:id', requirePermission('exports.view'), async (re
       status: snapshot.status,
       rowCount: Number(snapshot.row_count),
       generatedAt: snapshot.generated_at,
-      artifacts: await getMagentoArtifacts(snapshot.id, { mutationContext: getRequestMutationContext(req) }),
+      artifacts: await getMagentoArtifacts(snapshot.id, { includeRows: true, mutationContext: getRequestMutationContext(req) }),
       ...(snapshot.export_session_id ? { sessionId: snapshot.export_session_id, accessEpoch: snapshot.session_access_epoch } : {}),
       ...(snapshot.template_label ? { templateLabel: snapshot.template_label } : {}),
       ...manifestProvenance(snapshot),

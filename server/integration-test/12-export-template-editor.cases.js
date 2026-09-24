@@ -7,12 +7,66 @@ const root = '/api/admin/export-templates';
 
 async function state() {
   const result = {};
-  for (const table of ['export_templates', 'export_template_drafts', 'export_template_versions', 'export_template_activation',
+  for (const table of ['products', 'questions', 'options', 'sku_schema_versions', 'sku_schema_questions', 'sku_schema_options',
+    'export_templates', 'export_template_drafts', 'export_template_versions', 'export_template_activation',
     'export_snapshots', 'magento_export_artifacts', 'product_export_revisions', 'export_state']) {
     result[table] = (await pool.query(`SELECT COALESCE(jsonb_agg(t ORDER BY to_jsonb(t)::text),'[]') AS data FROM ${table} t`)).rows[0].data;
   }
   return result;
 }
+
+test('OFFICE valid-name unresolved draft creates, saves and reopens; publication remains blocked without repairs', async () => {
+  const admin = await authenticateApplicationSession();
+  // Sample scope now follows the stored category; use an explicit blocked NM fixture.
+  const sample = product('NM');
+  const sampleId = (await pool.query(`INSERT INTO products (full_sku,base_sku,category,weight,total_price_uah,details)
+    VALUES ($1,$1,'NM',$2,$3,$4::jsonb) RETURNING id`, [`NM-OFFICE-${crypto.randomUUID()}`.toUpperCase(), sample.weight, sample.total_price_uah, JSON.stringify(sample.details)])).rows[0].id;
+  const before = await state();
+  const candidate = await request(`${root}/candidate`, { authentication: admin });
+  assert.equal(candidate.response.status, 200, candidate.text);
+  assert.deepEqual(await state(), before);
+  // Remain genuinely unresolved even after other serialized tests add golden evidence.
+  const d = structuredClone(candidate.data.definition);
+  d.sources['NM.extra'].key = 'office_unknown_extra';
+  compileDefinition(d);
+  const key = `office-${crypto.randomUUID()}`;
+  const create = (displayName, definition = d) => request(root, { method: 'POST', authentication: admin,
+    body: { key, displayName, definition } });
+  const empty = await create('');
+  assert.equal(empty.response.status, 400); assert.equal(empty.data.code, 'TEMPLATE_COMMAND_INVALID');
+  for (const unsafe of [null, [], { value: '\u0000' }, JSON.parse('{"__proto__":{}}'), { value: 'x'.repeat(4097) }]) {
+    const rejected = await create('Office template regression', unsafe);
+    assert.equal(rejected.response.status, 422); assert.equal(rejected.data.code, 'TEMPLATE_INVALID');
+  }
+  assert.deepEqual(await state(), before);
+  const created = await create('Office template regression');
+  assert.equal(created.response.status, 201, created.text);
+  const id = created.data.id;
+  const noOpState = await state();
+  const noOp = await request(`${root}/${id}/draft`, { method: 'PUT', authentication: admin,
+    body: { expectedRevision: '1', definition: d } });
+  assert.equal(noOp.response.status, 200); assert.equal(noOp.data.revision, '1');
+  assert.deepEqual(await state(), noOpState);
+  d.groups[0].rows[0].cells.meta_title = { op: 'literal', value: 'Office edit' };
+  const save = await request(`${root}/${id}/draft`, { method: 'PUT', authentication: admin,
+    body: { expectedRevision: '1', definition: d } });
+  assert.equal(save.response.status, 200); assert.equal(save.data.revision, '2');
+  const reopened = await request(`${root}/${id}`, { authentication: admin });
+  assert.deepEqual(reopened.data.draft.definition, d); assert.equal(reopened.data.draft.state, 'draft');
+  assert.deepEqual(reopened.data.versions, []);
+  const beforeValidation = await state();
+  for (const action of ['validate', 'publish', 'test-preview']) {
+    const result = await request(`${root}/${id}/${action}`, { method: 'POST', authentication: admin,
+      body: { expectedRevision: '2', expectedDefinitionHash: save.data.definitionHash,
+        ...(action === 'test-preview' ? { productIds: [sampleId] } : {}) } });
+    assert.equal(result.response.status, 422, result.text); assert.equal(result.data.code, 'TEMPLATE_SOURCE_INVALID');
+    assert.ok(result.data.details.diagnostics.some((v) => v.sourceId === 'NM.extra'));
+  }
+  assert.deepEqual(await state(), beforeValidation, 'validation/publication failure never repairs or exports');
+  for (const table of Object.keys(before).filter((name) => !['export_templates', 'export_template_drafts'].includes(name))) {
+    assert.deepEqual(beforeValidation[table], before[table], table);
+  }
+});
 
 // Only this serialized disposable fixture supplies synthetic catalog evidence.
 // The application adapter never imports test defaults or repairs the catalog.

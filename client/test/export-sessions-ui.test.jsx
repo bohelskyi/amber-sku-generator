@@ -86,7 +86,11 @@ it('dirty session conflict preserves exact fields and Stay/Discard protect openi
   fireEvent.change(screen.getByLabelText('Назва експорту'), { target: { value: '  local title ' } });
   api.save.mockRejectedValue({ response: { status: 409, data: { error: 'revision conflict', code: 'EXPORT_SESSION_CONFLICT' } } });
   fireEvent.click(screen.getByText('Звичайний експорт та sku,price')); await screen.findByRole('dialog'); click('Зберегти й перейти');
-  await screen.findByText('revision conflict'); expect(screen.getByRole('dialog')).toBeTruthy(); click('Залишитися');
+  await screen.findByText('revision conflict'); expect(screen.getByRole('dialog')).toBeTruthy();
+  // The form registers its settled busy state with the navigation guard in an effect.
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Залишитися' }).disabled).toBe(false));
+  click('Залишитися');
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(screen.getByLabelText('Назва експорту').value).toBe('  local title ');
   click('Створити свій експорт'); await screen.findByRole('dialog'); click('Відкинути й перейти'); await screen.findByRole('heading', { name: 'Створити свій експорт' });
 });
@@ -117,4 +121,36 @@ it('principal switch during stored download discards bytes, and B must explicitl
   first.rerender(<AuthContext.Provider value={{ applicationUser: { id: 2 }, permissions: ['exports.view','exports.create'], principalLifetime: { id: 2, valid: true } }}><RouterProvider router={first.router} /></AuthContext.Provider>);
   await act(async () => late.resolve(response('private bytes'))); expect(downloadBlob).not.toHaveBeenCalled(); expect(screen.queryByText(/Файли Magento готові/)).toBeNull();
   expect(api.get).toHaveBeenCalledTimes(1); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A'); await screen.findByText(/Файли Magento готові/); expect(api.get).toHaveBeenCalledTimes(2);
+});
+
+const gridArtifact = { groupCode: 'BR', rowCount: 2, productCount: 1, csvContent: 'sku,store_view_code,synthetic_target\r\nS,,Original\r\nS,en,English\r\n' };
+it('prepared session reload requires a matching authoritative table and mismatched preview cannot generate', async () => {
+  const saved = { ...attempt, preview: { ...attempt.preview, tableFingerprint: 'original', artifacts: [{ ...gridArtifact, csvContent: undefined }] } };
+  api.get.mockResolvedValue(response({ ...own, currentAttemptId: saved.id, attempt: saved }));
+  api.preview.mockResolvedValueOnce(response({ ...saved.preview, configurationRevision: '1', artifacts: [gridArtifact] }))
+    .mockResolvedValueOnce(response({ ...saved.preview, tableFingerprint: 'changed', configurationRevision: '1', artifacts: [{ ...gridArtifact, csvContent: gridArtifact.csvContent.replace('Original','Changed') }] }));
+  page(); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A');
+  const create = await screen.findByRole('button', { name: 'Створити файли цієї спроби' });
+  expect(create.disabled).toBe(true);
+  click('Перевірити збережений діапазон (лише читання)');
+  await screen.findByText('Original');
+  await waitFor(() => expect(create.disabled).toBe(false));
+  click('Перевірити збережений діапазон (лише читання)');
+  await screen.findByText('Changed');
+  expect(create.disabled).toBe(true); expect(api.generate).not.toHaveBeenCalled();
+  expect(screen.getByText(/Таблиця застаріла/)).toBeTruthy();
+});
+
+it('uncertain session recovery keeps the original attempt despite a newer displayed preview', async () => {
+  const saved = { ...attempt, state: 'interrupted', preview: { ...attempt.preview, tableFingerprint: 'original', artifacts: [] } };
+  api.get.mockResolvedValue(response({ ...own, currentAttemptId: saved.id, attempt: saved }));
+  api.preview.mockResolvedValue(response({ ...saved.preview, tableFingerprint: 'newer', configurationRevision: '1', artifacts: [gridArtifact] }));
+  api.generate.mockResolvedValue(response(snapshot));
+  page(); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A');
+  await screen.findByRole('button', { name: 'Повторити ту саму спробу' });
+  click('Перевірити збережений діапазон (лише читання)'); await screen.findByText('Original');
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Повторити ту саму спробу' }).disabled).toBe(false));
+  click('Повторити ту саму спробу');
+  await waitFor(() => expect(api.generate).toHaveBeenCalledWith('session-a', { expectedRevision: '1', expectedAccessEpoch: 'owner', attemptId: 'attempt-a' }));
+  expect(api.prepare).not.toHaveBeenCalled();
 });

@@ -1,11 +1,13 @@
 const { createHash } = require('node:crypto');
 const { HEADERS } = require('./magento-v1-data');
 const { PRODUCT_FIELDS, fail } = require('./input-projection');
+const { CONTRACT, REQUIRED, validCode } = require('./column-contract');
 
 const LIMITS = Object.freeze({ definitionBytes: 256 * 1024, sources: 256, bindings: 512,
   depth: 8, children: 16, tableEntries: 512, totalTableEntries: 4096,
   literalChars: 4096, work: 20000, cellBytes: 16 * 1024, outputBytes: 64 * 1024 * 1024 });
 const compiledDefinitions = new WeakSet();
+const compiledSourceDependencies = new WeakMap();
 const check = (condition, message) => { if (!condition) fail('TEMPLATE_INVALID', message); };
 const record = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const safeKey = (s) => typeof s === 'string' && /^[A-Za-z0-9_]+$/.test(s)
@@ -70,11 +72,12 @@ function freeze(value) {
   return value;
 }
 
-function validateDefinition(d) {
+function inspectDefinition(d) {
   const definitionBytes = preflight(d);
   shape(d, ['formatVersion', 'evaluatorVersion', 'outputContract', 'sources', 'tables', 'questionContracts', 'bindings', 'groups']);
   check(d.formatVersion === 1 && d.evaluatorVersion === 'magento-declarative-1'
-    && d.outputContract === 'magento-products-v1', 'Unsupported version/contract');
+    && ['magento-products-v1', CONTRACT].includes(d.outputContract), 'Unsupported version/contract');
+  const editableColumns = d.outputContract === CONTRACT;
   check(record(d.sources) && Object.keys(d.sources).length <= LIMITS.sources, 'Source limit');
   for (const [name, s] of Object.entries(d.sources)) {
     check(id(name) && record(s), 'Source ID/descriptor');
@@ -114,6 +117,8 @@ function validateDefinition(d) {
     check(tableEntries + membershipEntries <= LIMITS.totalTableEntries, 'Total lookup/membership entry limit');
   }
   check(record(d.questionContracts) && Object.keys(d.questionContracts).length <= LIMITS.sources, 'Question limit');
+  const contractSources = new Map();
+  let ruleSources;
   function rule(r, category, depth = 1) {
     check(depth <= LIMITS.depth && record(r), 'Malformed catalog rule');
     check(Object.keys(r).length <= LIMITS.children, 'Catalog rule branches');
@@ -123,6 +128,7 @@ function validateDefinition(d) {
         v.forEach((b) => rule(b, category, depth + 1));
       } else {
         check(Object.hasOwn(d.sources, key) && d.sources[key].category === category, 'Unresolved rule source');
+        ruleSources.add(key);
         const values = Array.isArray(v) ? v : [v];
         list(values);
         check(values.every((x) => x === null || ['string', 'number', 'boolean'].includes(typeof x)), 'Catalog rule scalar');
@@ -136,10 +142,15 @@ function validateDefinition(d) {
     list(q.allowed, LIMITS.tableEntries);
     membership(q.allowed.length);
     check(q.allowed.every((v) => typeof v === 'string') && new Set(q.allowed).size === q.allowed.length, 'Question option IDs');
+    ruleSources = new Set([q.source]);
     rule(q.rule, d.sources[q.source].category);
+    contractSources.set(name, ruleSources);
   }
   const types = new Map();
   const scopes = new Map();
+  const bindingSources = new Map();
+  const groupSources = new Map();
+  let dependencies;
   function node(n, scope, depth = 1) {
     check(depth <= LIMITS.depth, 'Node nesting limit');
     check(record(n) && typeof n.op === 'string', 'Node required');
@@ -155,10 +166,12 @@ function validateDefinition(d) {
         shape(n, ['op', 'id']);
         check(id(n.id) && Object.hasOwn(d.sources, n.id), 'Unknown source');
         check(d.sources[n.id].kind === 'product' || d.sources[n.id].category === scope, 'Source scope');
+        dependencies.add(n.id);
         return 'scalar';
       case 'ref':
         shape(n, ['op', 'id']);
         check(id(n.id) && types.has(n.id) && (scopes.get(n.id) === scope || scopes.get(n.id) === '*'), 'Unresolved/forward/cross-group reference');
+        bindingSources.get(n.id).forEach((source) => dependencies.add(source));
         return types.get(n.id);
       case 'text':
         shape(n, ['op', 'input', 'trim', 'format', 'onAbsent']);
@@ -198,11 +211,13 @@ function validateDefinition(d) {
       case 'catalogRule':
         shape(n, ['op', 'question']);
         check(id(n.question) && Object.hasOwn(d.questionContracts, n.question), 'Unknown question');
-        check(d.sources[d.questionContracts[n.question].source].category === scope, 'Question scope'); return 'boolean';
+        check(d.sources[d.questionContracts[n.question].source].category === scope, 'Question scope');
+        contractSources.get(n.question).forEach((source) => dependencies.add(source)); return 'boolean';
       case 'questionValue':
         shape(n, ['op', 'question', 'value', 'missingQuestion', 'missingAnswer']);
         check(id(n.question) && Object.hasOwn(d.questionContracts, n.question), 'Unknown question');
         check(d.sources[d.questionContracts[n.question].source].category === scope, 'Question scope');
+        contractSources.get(n.question).forEach((source) => dependencies.add(source));
         text(n.value); text(n.missingQuestion); text(n.missingAnswer);
         check(n.missingQuestion.op === 'error' && n.missingAnswer.op === 'error', 'Question failures must emit diagnostics'); return 'text';
       case 'numberText': case 'decimalText':
@@ -249,17 +264,32 @@ function validateDefinition(d) {
     shape(b, ['id', 'group', 'value']);
     check(id(b.id) && !types.has(b.id) && typeof b.group === 'string'
       && (b.group === '*' || Object.hasOwn(HEADERS, b.group)), 'Binding ID/scope');
+    dependencies = new Set();
     types.set(b.id, node(b.value, b.group)); scopes.set(b.id, b.group);
+    bindingSources.set(b.id, dependencies);
   }
   list(d.groups, 6); check(d.groups.length === 6, 'Six groups required');
   const routes = new Set();
   for (const g of d.groups) {
-    shape(g, ['route', 'name', 'columns', 'evaluate', 'rows']);
+    dependencies = new Set();
+    shape(g, ['route', 'name', 'columns', 'evaluate', 'rows'], editableColumns ? ['columnLabels', 'outputChecks'] : []);
     check(typeof g.route === 'string' && Object.hasOwn(HEADERS, g.route) && !routes.has(g.route)
       && typeof g.name === 'string' && g.name.trim() !== '', 'Group route');
     routes.add(g.route);
     list(g.columns, 64);
-    check(g.columns.length === HEADERS[g.route].length && new Set(g.columns).size === g.columns.length
+    if (editableColumns) {
+      check(new Set(g.columns).size === g.columns.length && g.columns.every(validCode), 'Unique safe output codes required (a-z, 0-9, underscore; max 64)');
+      check(REQUIRED.every((c) => g.columns.includes(c)), 'Protected full-product columns required: ' + REQUIRED.join(', '));
+      if (g.columnLabels !== undefined) check(record(g.columnLabels) && Object.entries(g.columnLabels).every(([c, label]) => g.columns.includes(c) && typeof label === 'string' && label.length <= 160), 'Column labels');
+      if (g.outputChecks !== undefined) {
+        list(g.outputChecks, LIMITS.bindings);
+        for (const entry of g.outputChecks) {
+          shape(entry, ['columns', 'rule']); list(entry.columns, 64);
+          check(entry.columns.length > 0 && new Set(entry.columns).size === entry.columns.length && entry.columns.every((c) => g.columns.includes(c)), 'Output check ownership');
+          node(entry.rule, g.route);
+        }
+      }
+    } else check(g.columns.length === HEADERS[g.route].length && new Set(g.columns).size === g.columns.length
       && g.columns.every((c) => HEADERS[g.route].includes(c)), 'Approved output columns required');
     list(g.evaluate, LIMITS.bindings); g.evaluate.forEach((n) => node(n, g.route));
     list(g.rows, 2); check(g.rows.length === 2, 'Two rows required');
@@ -267,23 +297,57 @@ function validateDefinition(d) {
       shape(r, ['id', 'default', 'cells']);
       check(r.id === ['base', 'english'][i] && r.default === '' && record(r.cells), 'Row contract');
       check(['sku', 'store_view_code', 'name', 'attribute_set_code', 'product_type'].every((k) => Object.hasOwn(r.cells, k)), 'Identity cells required');
+      if (editableColumns && i === 0) check(Object.hasOwn(r.cells, 'price'), 'Base price rule required');
+      if (editableColumns) {
+        for (const key of ['sku', 'name', 'attribute_set_code']) {
+          const cell = r.cells[key];
+          if (cell?.op === 'literal') check(typeof cell.value === 'string' && cell.value.trim() !== '', 'Unresolved protected cell: ' + key);
+        }
+        for (const [key, expected] of [['store_view_code', i ? 'en' : ''], ['product_type', 'simple']]) {
+          if (r.cells[key]?.op === 'literal') check(r.cells[key].value === expected, 'Protected identity rule: ' + key);
+        }
+        const price = r.cells.price;
+        if (i === 0 && price?.op === 'literal') check(Number.isFinite(Number(price.value)) && Number(price.value) > 0, 'Positive base price required');
+      }
       for (const [key, n] of Object.entries(r.cells)) {
         check(g.columns.includes(key) && node(n, g.route) === 'text', 'Output cell type/column');
       }
     });
+    // Include every captured contract for a used source, and recursively its
+    // visibility sources. Even a raw source read must not shed its ID claims.
+    let previousSize;
+    do {
+      previousSize = dependencies.size;
+      for (const [name, q] of Object.entries(d.questionContracts)) {
+        if (dependencies.has(q.source)) contractSources.get(name).forEach((source) => dependencies.add(source));
+      }
+    } while (dependencies.size !== previousSize);
+    groupSources.set(g.route, dependencies);
   }
-  return { definitionBytes, tableEntries, membershipEntries, sources: Object.keys(d.sources).length, bindings: d.bindings.length };
+  return { metrics: { definitionBytes, tableEntries, membershipEntries, sources: Object.keys(d.sources).length, bindings: d.bindings.length }, groupSources };
 }
 
+function validateDefinition(definition) { return inspectDefinition(definition).metrics; }
+
 function compileDefinition(definition) {
-  const metrics = validateDefinition(definition);
+  const { metrics, groupSources } = inspectDefinition(definition);
   const canonicalJson = canonical(definition);
   const result = freeze({ definition: JSON.parse(canonicalJson), metrics,
     hash: createHash('sha256').update(canonicalJson, 'utf8').digest('hex') });
   compiledDefinitions.add(result);
+  compiledSourceDependencies.set(result, groupSources);
   return result;
 }
 function assertCompiled(value) { check(compiledDefinitions.has(value), 'Compile the definition first'); }
+
+// Computed by the same structural traversal that checks every expression branch,
+// binding, contract, readiness expression and both rows. Never evaluates products.
+function getCompiledSourceDependencies(compiled, groups) {
+  assertCompiled(compiled);
+  const index = compiledSourceDependencies.get(compiled);
+  check(Array.isArray(groups) && groups.length > 0 && groups.every((group) => index.has(group)), 'Unknown sample group');
+  return [...new Set(groups.flatMap((group) => [...index.get(group)]))];
+}
 
 // The same canonical identity is also available for bounded, incomplete drafts.
 // This does not certify that the data is a valid executable definition.
@@ -292,4 +356,4 @@ function hashJsonData(value) {
   return createHash('sha256').update(canonical(value), 'utf8').digest('hex');
 }
 
-module.exports = { LIMITS, compileDefinition, validateDefinition, assertCompiled, validateJsonData: preflight, hashJsonData };
+module.exports = { LIMITS, compileDefinition, validateDefinition, assertCompiled, getCompiledSourceDependencies, validateJsonData: preflight, hashJsonData };

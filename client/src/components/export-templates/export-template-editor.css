@@ -68,6 +68,13 @@
 .et-fields *, .et-workspace * { scroll-margin-top: calc(var(--workspace-nav-height) + 180px); }
 .et-fields pre, .et-workspace pre { max-width: 100%; overflow: auto; }
 .et-workspace [hidden] { display: none !important; }
+.et-question, .et-source-panel, .et-sample-picker { min-width: 0; overflow-wrap: anywhere; }
+.et-source-panel { border: 1px solid var(--border); padding: 12px; margin: 12px 0; }
+.et-question small { display: block; font-weight: normal; color: var(--text-muted); }
+.et-output-value { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 160px; }
+.et-sample-picker li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.et-sample-picker button { text-decoration: underline; }
+.et-check > section, .et-check > div { min-width: 0; max-width: 100%; }
 @media (max-width: 850px) {
   .et-filters { grid-template-columns: 1fr 1fr; }
   .et-filters > p { grid-column: 1 / -1; }
@@ -87,3 +94,29 @@
   .et-actions, .et-actions button, .et-token { max-width: 100%; }
   .et-fields *, .et-workspace * { scroll-margin-top: calc(var(--workspace-nav-height) + 16px); }
 }
+
+/* Shared output table: schema, authoritative preview and stored results. */
+.et-grid { min-width: 0; width: 100%; }
+.et-grid-tools { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .75rem; }
+.et-grid-scroll { overflow: auto; max-height: 65vh; border: 1px solid #d9dde5; border-radius: .5rem; }
+.et-grid table { border-collapse: separate; border-spacing: 0; font-size: .82rem; }
+.et-grid th, .et-grid td { border-right: 1px solid #e2e5ec; border-bottom: 1px solid #e2e5ec; padding: .55rem; min-width: 160px; max-width: 260px; vertical-align: top; }
+.et-grid thead th { position: sticky; top: 0; z-index: 2; background: #f5f3ee; text-align: left; }
+.et-grid th small { display: block; font-weight: normal; color: #627084; margin-top: .3rem; }
+.et-grid-rules { background: #f6f8fb; font-size: .75rem; }
+.et-grid-cell { display: block; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 6rem; overflow: hidden; width: 100%; text-align: left; }
+.et-grid button:focus-visible, .et-column-drawer:focus-visible { outline: 2px solid #a78043; outline-offset: 2px; }
+.et-cell-detail { padding: 1rem; border: 1px solid #a78043; }
+.et-cell-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.et-cell-detail strong { display: block; }
+.et-artifacts { padding: 1rem; min-width: 0; }
+.et-design-layout { display: grid; min-width: 0; }
+.et-design-with-panel { grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 1rem; }
+.et-column-drawer { min-width: 0; max-height: 75vh; overflow: auto; border-left: 1px solid #d9dde5; padding: 1rem; }
+.et-column-actions { display: grid; gap: .7rem; }
+.et-column-actions label { display: grid; gap: .3rem; }
+@media (max-width: 850px) { .et-design-with-panel { grid-template-columns: minmax(0, 1fr); } .et-column-drawer { border-left: 0; border-top: 1px solid #d9dde5; max-height: none; } }
+
+.et-tabs { overflow-x: auto; }
+.et-tabs button { flex-shrink: 0; }
+.et-tabs button[aria-pressed="true"] { border-color: var(--amber-500); font-weight: 650; }

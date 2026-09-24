@@ -15,7 +15,7 @@ vi.mock('../src/api/export-templates-api', async (importOriginal) => {
 const require = createRequire(import.meta.url);
 const { materializeMagentoV1 } = require('../../server/src/services/export-templates/magento-v1-definition');
 const { hashJsonData, compileDefinition } = require('../../server/src/services/export-templates/definition');
-const { evaluateProduct } = require('../../server/src/services/export-templates/evaluate');
+const { evaluateProduct, evaluateBatch } = require('../../server/src/services/export-templates/evaluate');
 const { catalog, product } = require('../../server/test/fixtures/magento-v1/contract');
 const baseline = () => materializeMagentoV1(catalog());
 const response = (data) => ({ data });
@@ -39,7 +39,7 @@ const choose = (label, value) => {
   }
   if (label === 'Колонка' && !screen.queryByLabelText('Колонка', { exact: true })) {
     const fields = screen.queryByRole('button', { name: 'Поля експорту', exact: true }); if (fields) fireEvent.click(fields);
-    fireEvent.click([...document.querySelectorAll('.et-field-nav button')].find((button) => button.querySelector('code')?.textContent === value)); return;
+    fireEvent.click(screen.getByRole('button', { name: 'Налаштувати колонку ' + value, exact: true })); return;
   }
   fireEvent.change(screen.getByLabelText(label, { exact: true }), { target: { value } });
 };
@@ -55,10 +55,59 @@ beforeEach(() => {
   for (const method of Object.keys(api)) vi.spyOn(api, method).mockResolvedValue(response({}));
   api.list.mockResolvedValue(response({ templates: [] }));
   api.sources.mockResolvedValue(response({}));
+  api.sourceDetails.mockResolvedValue(response({ current: [], historical: [], truncated: false }));
+  api.searchSamples.mockResolvedValue(response({ products: [], nextOffset: null }));
   api.activation.mockResolvedValue(response({ generation: '9007199254740995', implementation: 'legacy' }));
   api.candidate.mockResolvedValue(response({ definition: baseline(), diagnostics: [], candidateOnly: true }));
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+const officeDiagnostics = [
+  { sourceId: 'KL.exact_size', category: 'KL', key: 'exact_size', code: 'SOURCE_REFERENCE_UNRESOLVED',
+    requirement: 'current_non_sku_question', message: 'Current non-SKU question metadata required' },
+  { sourceId: 'NM.extra', category: 'NM', key: 'extra', code: 'SOURCE_REFERENCE_UNRESOLVED',
+    requirement: 'historical_sku_or_current_non_sku_value_ids', unresolvedValueIds: ['0'], currentValueIds: ['0', '1', '2'], historicalValueIds: ['1', '2'], message: 'Unverified semantic value IDs: NM.extra: 0' },
+  { sourceId: 'AR.size', category: 'AR', key: 'size', code: 'SOURCE_REFERENCE_UNRESOLVED',
+    requirement: 'historical_sku_or_current_non_sku_value_ids', unresolvedValueIds: ['29', '30', '31'], currentValueIds: ['29', '30', '31'], historicalValueIds: ['28'], message: 'Unverified semantic value IDs: AR.size: 29, 30, 31' },
+];
+function officeCandidate() {
+  api.candidate.mockResolvedValue(response({ definition: baseline(), diagnostics: officeDiagnostics }));
+  api.sources.mockResolvedValue(response({ references: { questions: [{ category_code: 'NM', key: 'extra', label: 'Додатково' }] } }));
+}
+it('OFFICE same source diagnostics disable empty name only; valid name submits exact draft and reopens', async () => {
+  officeCandidate(); const f = family(); api.create.mockResolvedValue(response(f)); api.get.mockResolvedValue(response(f));
+  page(); await screen.findByText(/Шаблонів ще немає/); click('Створити шаблон'); await screen.findByText('Новий шаблон');
+  expect(screen.getByRole('button', { name: 'Створити й зберегти чернетку' }).disabled).toBe(true);
+  choose('Назва шаблону', 'Office template regression');
+  expect(screen.getByRole('button', { name: 'Створити й зберегти чернетку' }).disabled).toBe(false);
+  const key = screen.getByLabelText('Сталий ключ (латиниця, цифри, _ або -)').value;
+  choose('Сталий ключ (латиниця, цифри, _ або -)', 'Invalid key');
+  expect(screen.getByRole('button', { name: 'Створити й зберегти чернетку' }).disabled).toBe(true);
+  expect(screen.getByText(/Ключ має починатися/)).toBeTruthy();
+  choose('Сталий ключ (латиниця, цифри, _ або -)', key);
+  click('Створити й зберегти чернетку'); await screen.findByText(/Збережено · ревізія/);
+  expect(api.create).toHaveBeenCalledWith(expect.objectContaining({ displayName: 'Office template regression', definition: baseline() }));
+  click('← До шаблонів'); click('Відкрити Шаблон family'); await screen.findByText(/Збережено · ревізія/);
+  expect(screen.getByText(/Готовність до публікації не підтверджено/)).toBeTruthy();
+  api.validate.mockRejectedValue({ response: { data: { code: 'TEMPLATE_SOURCE_INVALID', details: { diagnostics: officeDiagnostics } } } });
+  click('Перевірити шаблон'); await screen.findByText(/Шаблон не готовий до публікації/);
+  expect(screen.getByText('Непідтверджені value_id: 29, 30, 31')).toBeTruthy();
+  expect(api.publish).not.toHaveBeenCalled(); expect(api.select).not.toHaveBeenCalled();
+});
+it('OFFICE source diagnostics group Ukrainian fields and expose exact failed evidence separately from name', async () => {
+  officeCandidate(); page(); await screen.findByText(/Шаблонів ще немає/); click('Створити шаблон'); await screen.findByText('Новий шаблон');
+  expect(screen.getByText('Чернетку можна зберегти. Перед публікацією потрібно перевірити 3 джерела.')).toBeTruthy();
+  for (const label of ['Кулони — розмір', 'Намиста — Додатково', 'Картини — розмір']) expect(screen.getByText(label)).toBeTruthy();
+  expect(screen.getByText('Непідтверджені value_id: 0')).toBeTruthy();
+  expect(screen.getByText('Непідтверджені value_id: 29, 30, 31')).toBeTruthy();
+  expect(screen.getAllByText('Технічні подробиці')).toHaveLength(3);
+  choose('Назва шаблону', 'Office template regression');
+  const key = screen.getByLabelText('Сталий ключ (латиниця, цифри, _ або -)').value;
+  api.create.mockRejectedValue({ response: { data: { code: 'TEMPLATE_KEY_CONFLICT' } } });
+  click('Створити й зберегти чернетку'); await screen.findByText(/Ключ уже зайнятий/);
+  expect(screen.getByLabelText('Назва шаблону').value).toBe('Office template regression');
+  expect(screen.getByLabelText('Сталий ключ (латиниця, цифри, _ або -)').value).toBe(key);
+});
 
 it('renders empty registry → server candidate → explicit create, without implicit persistence/publication', async () => {
   const f = family(); api.create.mockResolvedValue(response(f));
@@ -183,6 +232,45 @@ it('draft preview validates explicit ID list, displays server diagnostics and ne
   click('Перевірка'); choose('ID товарів (1–100, через кому або пробіл)', '1'); click('Переглянути тестовий результат'); await screen.findByText(/Результат перевірки · ревізія/);
   expect(api.preview).toHaveBeenCalledWith(f.id, { expectedRevision: f.draft.revision, expectedDefinitionHash: f.draft.definitionHash, productIds: [1] });
   expect(screen.getByText(/<script>: name: Потрібна назва/)).toBeTruthy(); expect(document.querySelector('script')).toBeNull();
+});
+
+it('independent BR sample proceeds after full source rejection and keeps publication blockers visibly separate', async () => {
+  const f = family(); f.draft.revision = '5';
+  const blockers = officeDiagnostics.slice(1);
+  api.list.mockResolvedValue(response({ templates: [f] })); api.get.mockResolvedValue(response(f));
+  api.validate.mockRejectedValue({ response: { data: { code: 'TEMPLATE_SOURCE_INVALID', details: { diagnostics: blockers } } } });
+  api.preview.mockResolvedValue(response({ revision: '5', definitionHash: f.draft.definitionHash, draftOnly: true, publicationReady: false,
+    sampleProducts: [{ productId: 42, category: 'BR', sku: 'BR-SYNTH' }], globalSourceDiagnostics: blockers,
+    result: { representedCount: 1, readyCount: 1, errors: [], artifacts: [{ groupCode: 'BR', groupName: 'Браслети', rowCount: 2, csvContent: '[ТЕСТ] Браслет з натурального бурштину. Колір: Світлий. Арт: BR-SYNTH' }] } }));
+  page(); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', f.id); await screen.findByLabelText('Категорія');
+  click('Перевірити шаблон'); await screen.findByText(/Шаблон не готовий до публікації/);
+  choose('ID товарів (1–100, через кому або пробіл)', '42');
+  expect(screen.getByRole('button', { name: 'Переглянути результат', exact: true }).disabled).toBe(false);
+  click('Переглянути результат'); await screen.findByText(/Результат перевірки · ревізія 5/);
+  const full = screen.getByRole('region', { name: 'Повна перевірка шаблону' });
+  expect(within(full).getByText('Непідтверджені value_id: 29, 30, 31')).toBeTruthy();
+  const sample = screen.getByRole('region', { name: 'Тест чернетки' });
+  expect(within(sample).getByText(/публікація заблокована/)).toBeTruthy();
+  expect(within(sample).getByText(/42 · BR · BR-SYNTH/)).toBeTruthy();
+  expect(screen.queryByText(/Сервер перевірив ревізію/)).toBeNull();
+  expect(api.publish).not.toHaveBeenCalled(); expect(api.select).not.toHaveBeenCalled();
+  choose('ID товарів (1–100, через кому або пробіл)', '43');
+  expect(within(sample).getByText(/Застарілий результат/)).toBeTruthy();
+});
+
+it('sample selection fences late results; a failed new sample cannot leave an old sample marked current', async () => {
+  const f = family(); const late = deferred(); api.list.mockResolvedValue(response({ templates: [f] })); api.get.mockResolvedValue(response(f));
+  api.preview.mockReturnValue(late.promise);
+  page(); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', f.id); await screen.findByLabelText('Категорія');
+  click('Перевірка'); choose('ID товарів (1–100, через кому або пробіл)', '42'); click('Переглянути результат');
+  choose('ID товарів (1–100, через кому або пробіл)', '43');
+  await act(async () => late.resolve(response({ revision: f.draft.revision, result: { representedCount: 1, readyCount: 1 } })));
+  expect(screen.queryByRole('region', { name: 'Тест чернетки' })).toBeNull();
+  api.preview.mockResolvedValueOnce(response({ revision: f.draft.revision, result: { representedCount: 1, readyCount: 1 } }));
+  click('Переглянути результат'); await screen.findByRole('region', { name: 'Тест чернетки' });
+  api.preview.mockRejectedValueOnce({ response: { data: { code: 'TEMPLATE_SOURCE_INVALID', details: { diagnostics: officeDiagnostics.slice(1) } } } });
+  click('Переглянути результат'); await screen.findByText(/Шаблон не готовий до публікації/);
+  expect(screen.queryByRole('region', { name: 'Тест чернетки' })).toBeNull();
 });
 it('API adapter forwards actual endpoints and bodies without coercing counters', async () => {
   const client = { get: vi.fn(), put: vi.fn(), post: vi.fn() }; const adapter = createExportTemplatesApi(client);
@@ -335,7 +423,7 @@ it('ordinary KL name workflow adds mapped color, edits only this field, saves an
   api.save.mockImplementation(async (_id, body) => response({ ...f.draft, revision: '9007199254740994', definition: body.definition, definitionHash: hashJsonData(body.definition) }));
   api.preview.mockResolvedValue(response({ revision: '9007199254740994', result: { representedCount: 1, readyCount: 1, errors: [], artifacts: [{ groupCode: 'KL', groupName: 'Кулони', rowCount: 2, csvContent: 'authoritative CSV from API' }] } }));
   page(); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', f.id); await screen.findByLabelText('Категорія');
-  choose('Категорія', '2'); choose('Мова', '0');
+  choose('Категорія', '2'); choose('Мова', '0'); choose('Колонка', 'name');
   expect(screen.getByRole('heading', { name: 'Назва товару' })).toBeTruthy();
   expect(screen.queryByLabelText('Розділ редактора')).toBeNull();
   expect(screen.getByLabelText('Текст у файлі').value).toContain('{material}');
@@ -353,7 +441,7 @@ it('ordinary KL name workflow adds mapped color, edits only this field, saves an
   click('Перевірка'); choose('ID товарів (1–100, через кому або пробіл)', '42'); click('Переглянути результат');
   await screen.findByText(/Результат перевірки · ревізія 9007199254740994/);
   expect(api.preview).toHaveBeenCalledWith(f.id, { expectedRevision: '9007199254740994', expectedDefinitionHash: hashJsonData(edited), productIds: [42] });
-  expect(screen.getByText(/Товари: 42/)).toBeTruthy(); expect(screen.getByText('authoritative CSV from API')).toBeTruthy();
+  expect(screen.getByText(/Товари: 42/)).toBeTruthy(); expect(document.querySelector('pre').textContent).toBe('authoritative CSV from API');
   click('Поля експорту'); choose('Текст у файлі', '  Інший {material}, {color}. {sku}\n'); click('Перевірка');
   expect(screen.getByText(/Застарілий результат/)).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Переглянути результат', exact: true }).disabled).toBe(true);
@@ -363,7 +451,7 @@ it('ordinary KL name workflow adds mapped color, edits only this field, saves an
 it('SEO editing and column ordering stay in the ordinary inspector; tab and language changes preserve exact draft', async () => {
   const f = family(); api.list.mockResolvedValue(response({ templates: [f] })); api.get.mockResolvedValue(response(f)); api.save.mockImplementation(async (_id, body) => response({ ...f.draft, definition: body.definition }));
   page(); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', f.id); await screen.findByLabelText('Категорія');
-  choose('Знайти поле', 'SEO'); choose('Колонка', 'meta_title'); choose('Значення', '  Точний SEO\n');
+  choose('Колонка', 'meta_title'); choose('Значення', '  Точний SEO\n');
   fireEvent.click(screen.getByText('Порядок у файлі')); click('Перемістити колонку вище');
   click('Перевірка'); click('Версії'); click('Поля експорту');
   expect(screen.getByLabelText('Значення', { exact: true }).value).toBe('  Точний SEO\n');
@@ -382,7 +470,7 @@ it('focused tokens support rename, explicit removal and dangling-reference valid
     const [definition, setDefinition] = useState(current);
     return <FieldEditor definition={definition} onChange={(next) => { current = next; setDefinition(next); }} />;
   }
-  render(<Focused />); choose('Категорія', '2'); click('+ Додати характеристику');
+  render(<Focused />); choose('Категорія', '2'); choose('Колонка', 'name'); click('+ Додати характеристику');
   choose('Характеристика', 'KL.color'); choose('Як записувати у файлі', 'klColor'); click('Вставити характеристику');
   expect(screen.getByLabelText('Текст у файлі').checkValidity()).toBe(true);
   click('Колір {color}'); fireEvent.click(screen.getByText('Назва та вилучення характеристики'));
@@ -407,7 +495,7 @@ it('changing principal discards old workspace and ignores a late family response
 it('read-only fields allow inspecting characteristics and branches without edit actions or source requests', () => {
   const change = vi.fn(); const original = baseline();
   render(<FieldEditor definition={original} onChange={change} readOnly />);
-  choose('Категорія', '2'); click('Матеріал {material}');
+  choose('Категорія', '2'); choose('Колонка', 'name'); click('Матеріал {material}');
   expect(screen.getByLabelText('Текст для ID 1').matches(':disabled')).toBe(true);
   expect(screen.queryByRole('button', { name: '+ Додати характеристику' })).toBeNull();
   expect(screen.queryByLabelText('Область зміни')).toBeNull();
@@ -423,11 +511,63 @@ it('focused shared mapping warning names the actual consumers before an explicit
     return <FieldEditor definition={definition} onChange={(next) => { current = next; setDefinition(next); }} />;
   }
   const original = structuredClone(current); render(<Focused />);
-  choose('Категорія', '2'); choose('Область зміни', 'shared'); click('Матеріал {material}');
+  choose('Категорія', '2'); choose('Колонка', 'name'); choose('Область зміни', 'shared'); click('Матеріал {material}');
   const panel = screen.getByRole('region', { name: 'Налаштування характеристики' });
   expect(within(panel).getByText('Зміна вплине на: BR / база / name; NM / база / name; KL / база / name; CH / база / name.').getAttribute('role')).toBe('note');
   expect(current).toEqual(original);
   choose('Текст для ID 1', 'Спільний матеріал');
   expect(current.tables.materialUa['1']).toBe('Спільний матеріал'); expect(current.groups).toEqual(original.groups);
   expect(current.bindings).toEqual(original.bindings);
+});
+
+it('normal saved-draft task searches SKU, selects samples, reads server table and opens source diagnostics without losing edits', async () => {
+  const d = baseline(); const name = d.bindings.find((b) => b.id === 'BR.nameUa').value.then;
+  name.template = '[ТЕСТ] Браслет з {material} бурштину. Колір: {color}. Арт: {sku}';
+  name.slots.color = { op: 'lookup', input: { op: 'semanticKey', input: { op: 'source', id: 'BR.color' } }, table: 'color4', otherwise: { op: 'literal', value: '' } };
+  const f = family('fixture', d); f.draft.revision = '5';
+  const products = [product('BR', { color: 1 }, { id: 42, full_sku: 'BR2/SYNTHETIC-001' }), product('BR', { color: 4 }, { id: 43, full_sku: 'BR2/SYNTHETIC-002' })];
+  api.list.mockResolvedValue(response({ templates: [f] })); api.get.mockResolvedValue(response(f));
+  api.searchSamples.mockResolvedValue(response({ products: products.map((p) => ({ id: p.id, full_sku: p.full_sku, category: p.category, status: 'active' })), nextOffset: null }));
+  const blockers = officeDiagnostics.filter((entry) => entry.sourceId !== 'KL.exact_size');
+  api.validate.mockRejectedValue({ response: { data: { code: 'TEMPLATE_SOURCE_INVALID', details: { diagnostics: blockers } } } });
+  api.preview.mockResolvedValue(response({ revision: '5', definitionHash: f.draft.definitionHash, draftOnly: true, publicationReady: false, globalSourceDiagnostics: blockers,
+    sampleProducts: products.map((p) => ({ productId: p.id, sku: p.full_sku, category: p.category })), result: evaluateBatch(compileDefinition(d), products) }));
+  page(); await screen.findByRole('button', { name: 'Відкрити Шаблон fixture' }); choose('Шаблон', f.id);
+  await screen.findByLabelText('Категорія'); click('Перевірити шаблон'); await screen.findByRole('region', { name: 'Повна перевірка шаблону' });
+  choose('Пошук за SKU', 'BR2/SYNTHETIC'); await screen.findByRole('button', { name: 'Обрати BR2/SYNTHETIC-001' });
+  click('Обрати BR2/SYNTHETIC-001'); click('Обрати BR2/SYNTHETIC-002'); click('Переглянути результат');
+  await screen.findByRole('region', { name: 'Таблиця результату BR' });
+  expect(api.preview).toHaveBeenCalledWith(f.id, { expectedRevision: '5', expectedDefinitionHash: f.draft.definitionHash, productIds: [42, 43] });
+  const table = within(screen.getByRole('region', { name: 'Таблиця результату BR' })).getAllByRole('table')[0];
+  expect(table.textContent).toContain('[ТЕСТ] Браслет з натурального бурштину. Колір: Світлий. Арт: BR2/SYNTHETIC-001');
+  expect(table.textContent).toContain('EN'); expect(screen.getByRole('region', { name: 'Повна перевірка шаблону' }).textContent).toContain('NM.extra');
+  fireEvent.click(screen.getAllByRole('button', { name: 'Відкрити поле та джерело AR.size' })[0]);
+  await screen.findByRole('heading', { name: 'Розмір картини' });
+  expect(screen.getByLabelText('Категорія').value).toBe('4'); expect(screen.getByLabelText('Мова').value).toBe('0');
+  expect(screen.getByText('Переглянути джерело').parentElement.open).toBe(true);
+  choose('Текст для ID 1', 'Локальна зміна'); click('Перевірка');
+  fireEvent.click(screen.getAllByRole('button', { name: 'Відкрити поле та джерело NM.extra' })[0]);
+  expect(screen.getByRole('heading', { name: 'Додаткові характеристики намиста' })).toBeTruthy();
+  choose('Категорія', '4'); choose('Колонка', 'rozmir_kartyny');
+  expect(screen.getByLabelText('Текст для ID 1').value).toBe('Локальна зміна');
+  expect(screen.queryByLabelText('Спільне правило')).toBeNull(); expect(api.save).not.toHaveBeenCalled();
+});
+
+it('empty registry exposes actual code-backed system tables without writes and explicit copy uses the draft API', async () => {
+  api.system.mockResolvedValue(response({ definition: baseline(), kind: 'system' }));
+  api.create.mockResolvedValue(response(family()));
+  page(); await screen.findByRole('button', { name: 'Відкрити системний профіль' });
+  click('Відкрити системний профіль');
+  await screen.findByRole('button', { name: 'Створити редаговану копію' });
+  expect(api.create).not.toHaveBeenCalled(); expect(api.publish).not.toHaveBeenCalled();
+  expect(screen.getByRole('table').textContent).toContain('store_view_code');
+  for (const group of baseline().groups) {
+    fireEvent.click(within(screen.getByRole('group', { name: 'Категорії файлів' })).getByRole('button', { name: group.name, exact: true }));
+    const table = screen.getByRole('table');
+    expect([...table.querySelectorAll('thead code')].map((e) => e.textContent)).toEqual(group.columns);
+  }
+  click('Створити редаговану копію'); choose('Назва шаблону', 'Explicit synthetic copy');
+  click('Створити й зберегти чернетку');
+  await waitFor(() => expect(api.create).toHaveBeenCalledWith(expect.objectContaining({ displayName: 'Explicit synthetic copy', definition: baseline() })));
+  expect(api.publish).not.toHaveBeenCalled(); expect(api.select).not.toHaveBeenCalled();
 });

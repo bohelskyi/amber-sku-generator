@@ -108,6 +108,7 @@ export function useProductExportController({ enabled = true, canCreate = true, p
       const payload = intent.requestContract === 'template-v1'
         ? { ...intent, previewToken: response.previewToken }
         : response.mode === 'new' ? { mode: 'new', fromSku: response.range.fromSku, toSku: response.range.toSku } : intent;
+      if (intent.requestContract !== 'template-v1' && response.previewExpectation) payload.previewExpectation = response.previewExpectation;
       pending.current = { payload, idempotencyKey: globalThis.crypto?.randomUUID?.()
         || `export-${Date.now()}-${Math.random().toString(36).slice(2)}`, evidence: response };
       setPendingCreate(pending.current);
@@ -122,6 +123,12 @@ export function useProductExportController({ enabled = true, canCreate = true, p
       setExportSnapshot({ ...response.data, capturedRange: operation.evidence.range });
       setExportPreview(operation.evidence);
       pending.current = null; setPendingCreate(null); previewEvidence.current = null;
+      try {
+        const stored = await exportsApi.getSnapshot(response.data.id);
+        if (current() && stored.data?.id === response.data.id) setExportSnapshot({ ...stored.data, capturedRange: operation.evidence.range });
+      } catch (readError) {
+        if (current()) setExportError('Знімок створено. Не вдалося прочитати збережену таблицю: ' + getApiError(readError));
+      }
     } catch (error) {
       if (!current()) return;
       const code = error.response?.data?.code;

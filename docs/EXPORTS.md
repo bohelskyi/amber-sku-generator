@@ -118,6 +118,22 @@ A completed retry with the same family/source revision/hash returns the original
 
 Repository source validation is separate from frozen-rule semantics. Publication takes one SQL-statement MVCC snapshot of category/current-question/historical-schema evidence on its transaction client. Validation/test-preview use `REPEATABLE READ READ ONLY` across draft, source and product reads. Declared categories must exist; semantic keys require historical SKU-question evidence or current non-SKU metadata, while information keys require current non-SKU metadata. Captured allowed IDs must have semantic `value_id` evidence; archive status and live option labels/`sku_code` never reinterpret them. Missing questions/categories/IDs and duplicate current keys produce explicit `TEMPLATE_SOURCE_INVALID` diagnostics. Frozen required/visibility rules are validated as supplied and never silently refreshed from current rules.
 
+The closed historical-information registry additionally recognizes `KL.exact_size`
+for the existing Magento v1 stored-answer contract when current metadata is absent.
+This is the documented legacy input to ordered `pedant_size` → `exact_size`
+fallback, not an alias between the keys. Contradictory current SKU metadata,
+arbitrary legacy keys and unverified aliases still fail. No product scan, repair,
+question creation or definition rewrite occurs during candidate preparation or
+validation. The source registry exposes this approved historical input separately.
+
+Semantic diagnostics include exact `unresolvedValueIds`, current and historical
+ID sets, the source key/category and the failed evidence requirement. Current SKU
+draft options do not substitute for immutable SKU-schema evidence, even if archived
+or present in stored answers. Baseline output-table entries are mappings, not option
+evidence; the factory captures `allowed` from the supplied catalog options only.
+Source issues do not prevent safe draft creation/save. The UI separates name/key
+errors, structural errors, publication source proof and product test-readiness.
+
 PR1B schema-scoped aliases carry a free-text `evidence` claim. The repository has no durable cross-key lineage that can verify equivalence. PR2 checks declared schema/category/key ownership, then rejects otherwise resolved aliases with `SOURCE_REFERENCE_UNSUPPORTED`; unresolved ownership uses `SOURCE_REFERENCE_UNRESOLVED`. Non-SKU alias lineage likewise cannot be inferred. The pure PR1B alias interface/parity tests remain unchanged. Successful reference validation explicitly does not certify production acceptance.
 
 Draft test-preview requires both the requested revision and hash. It loads only stored product identity, schema link, answers, manual subjects, weight and final UAH price; caller-authored products/prices and unknown command fields are rejected. Missing requested IDs return `422 TEMPLATE_PRODUCTS_MISSING` with `details.missingProductIds`. The preview may inspect excluded products explicitly requested by ID; it does not perform normal export selection. It returns draft-only evaluator results, no signed token, snapshot, audit mutation, repair, price recalculation, exposure or cursor update.
@@ -328,7 +344,31 @@ Metadata reads occur only after opt-in; ordinary export never reads admin APIs.
 No unavailable selection silently falls back to legacy.
 
 Draft test-preview is read-only and accepts 1–100 explicit unique product IDs;
-missing IDs are errors. Published preview is a separate read-only check yielding
+missing IDs are errors. It compiles the complete six-group definition for safety,
+then checks source proof for the dependency closure of the groups loaded from
+those stored products, in the same repeatable-read read-only transaction as the
+saved revision/hash and evidence. The compiler collects all expression branches,
+transitive bindings, both rows, readiness and captured visibility contracts;
+source validation retains alias/provenance requirements. Unknown dependencies
+fail closed. An unresolved dependency blocks the entire requested sample.
+Unrelated blockers are returned as `globalSourceDiagnostics`, with
+`publicationReady: false` and authoritative `sampleProducts` identities. The UI
+keeps these separate from full-template validation and product readiness, and
+marks changed-selection/revision results stale. This scoped behavior applies
+only to draft test-preview: full validation, publication and published export
+continue requiring all source evidence. A sample yields no export token.
+The ordinary editor exposes standard question-based attribute mappings directly,
+preserving frozen contracts/guards and coordinating each field's readiness refs.
+Read-only `/admin/export-templates/source-details` (template view) supplies
+bounded exact-source labels, with current catalog and immutable historical
+metadata distinguished. It never updates evidence or the definition.
+`/admin/export-templates/sample-products` (template manage + exports.view)
+searches literal SKU fragments of 2–160 characters, exact matches first,
+20 products/page via bounded `offset`; it includes incomplete/archived products
+and returns only ID/SKU/category/status. The picker keeps IDs internally and
+retains the 100-product limit. A quote-aware client presenter renders the same
+server CSV as a table, with unchanged bytes available in a secondary view.
+Published preview is a separate read-only check yielding
 an opaque token. Explicit file creation is a real export and may establish
 exposure. Stored downloads never confirm; normal confirmation remains a separate
 “Завершити експорт” action. The dedicated price-export sequence is unchanged.
@@ -345,3 +385,31 @@ generation, supports explicit invitations/acceptance and recovers its exact resu
 through authorized lists after login/reload. Default legacy export stays separate.
 Known historical snapshot IDs can be opened explicitly; unknown pre-feature
 operations receive no speculative matching/backfill. See the linked session guide.
+
+
+## Table-first implementation — 2026-09-24
+
+Templates now opens the actual code-backed system profile without database
+writes. Explicit copy creates a normal draft. Existing v1 drafts use an explicit
+revision/hash-checked upgrade to magento-products-columns-v2; add, rename,
+duplicate, move and delete persist real output columns and independent base/EN
+rules. The shared grid is the primary design workspace and also presents server
+preview CSV and immutable stored artifacts.
+
+Protected full-product headers are sku, store_view_code, name,
+attribute_set_code, product_type and price. Optional-output readiness ownership
+is separate from global source evidence. Source choices use the authorized
+registry; target attribute existence in Magento is not asserted. Migration 038
+extends supported artifact/binding identities without changing historical
+migrations, definitions, goldens or dedicated price export.
+
+Ordinary preview includes finalized CSV and an opt-in authoritative expectation.
+Changed inputs require refresh; completed original-key retries return stored
+bytes. Session grids retain published binding/configuration identity and durable
+attempt recovery. First generation requires a matching table; uncertain retries
+retain the original attempt even after a newer preview. All visible pages come
+from one complete response, 50 rows at a time; normal export is not limited to
+100 sample products. Snapshot grids read stored CSV through existing access rules.
+
+See [the implementation and verification record](EXPORT_TEMPLATES_PR4.md#table-first-implementation--2026-09-24)
+for exact contract, source-support boundary, migration and visual-QA limitations.
