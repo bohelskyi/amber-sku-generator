@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createMemoryRouter, RouterProvider, Link } from 'react-router-dom';
-import { DefinitionEditor } from '../src/components/export-templates/DefinitionEditor';
+import { AdvancedDefinitionEditor as DefinitionEditor } from '../src/components/export-templates/AdvancedDefinitionEditor';
+import { DefinitionEditor as FieldEditor } from '../src/components/export-templates/DefinitionEditor';
 import ExportTemplatesPage from '../src/pages/ExportTemplatesPage';
 import { AuthContext } from '../src/auth/auth-context';
 import { exportTemplatesApi as api, createExportTemplatesApi } from '../src/api/export-templates-api';
@@ -31,8 +32,24 @@ function page(permissions = all) {
   const router = createMemoryRouter([{ path: '*', element: <><Link to="/elsewhere">Інший розділ</Link><ExportTemplatesPage /></> }, { path: '/elsewhere', element: <p>Інший екран</p> }]);
   return { ...render(<AuthContext.Provider value={{ permissions }}><RouterProvider router={router} /></AuthContext.Provider>), router };
 }
-const choose = (label, value) => fireEvent.change(screen.getByLabelText(label, { exact: true }), { target: { value } });
-const click = (name) => fireEvent.click(screen.getByRole('button', { name, exact: true }));
+const choose = (label, value) => {
+  if (label === 'Шаблон') {
+    const back = screen.queryByRole('button', { name: '← До шаблонів' }); if (back) fireEvent.click(back);
+    fireEvent.click(screen.getByRole('button', { name: 'Відкрити Шаблон ' + value })); return;
+  }
+  if (label === 'Колонка' && !screen.queryByLabelText('Колонка', { exact: true })) {
+    const fields = screen.queryByRole('button', { name: 'Поля експорту', exact: true }); if (fields) fireEvent.click(fields);
+    fireEvent.click([...document.querySelectorAll('.et-field-nav button')].find((button) => button.querySelector('code')?.textContent === value)); return;
+  }
+  fireEvent.change(screen.getByLabelText(label, { exact: true }), { target: { value } });
+};
+const click = (name) => {
+  const mapped = ({ 'Створити шаблон на основі Magento v1': 'Створити шаблон', 'Перевірити збережену ревізію': 'Перевірити шаблон',
+    'Переглянути тестовий результат': 'Переглянути результат', 'Копіювати публікацію в чернетку': 'Створити чернетку з цієї версії' })[name] || (name.startsWith('Опублікувати ревізію') ? 'Опублікувати версію' : name);
+  const tab = ['Перевірити шаблон', 'Переглянути результат'].includes(mapped) ? 'Перевірка' : mapped.startsWith('Опублікувати') || mapped.startsWith('Вибрати відкриту') ? 'Версії' : null;
+  if (tab) fireEvent.click(screen.getByRole('button', { name: tab, exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: mapped, exact: true }));
+};
 beforeEach(() => {
   vi.clearAllMocks();
   for (const method of Object.keys(api)) vi.spyOn(api, method).mockResolvedValue(response({}));
@@ -46,16 +63,16 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 it('renders empty registry → server candidate → explicit create, without implicit persistence/publication', async () => {
   const f = family(); api.create.mockResolvedValue(response(f));
   page(); await screen.findByText(/Шаблонів ще немає/);
-  click('Створити шаблон на основі Magento v1'); await screen.findByText('Новий кандидат — ще не збережено');
+  click('Створити шаблон на основі Magento v1'); await screen.findByText('Новий шаблон');
   expect(api.create).not.toHaveBeenCalled();
-  choose('Назва шаблону', 'Новий шаблон'); choose('Сталий ключ (латиниця, цифри, _ або -)', 'pr4-form');
-  click('Створити й зберегти чернетку'); await screen.findByText(/Чернетка · ревізія/);
+  choose('Назва шаблону', 'Новий шаблон'); fireEvent.click(screen.getByText('Додаткові налаштування')); choose('Сталий ключ (латиниця, цифри, _ або -)', 'pr4-form');
+  click('Створити й зберегти чернетку'); await screen.findByText(/Збережено · ревізія/);
   expect(api.create).toHaveBeenCalledWith({ key: 'pr4-form', displayName: 'Новий шаблон', definition: baseline() });
   expect(api.publish).not.toHaveBeenCalled(); expect(api.select).not.toHaveBeenCalled();
 });
 it('unchanged rendered editor saves exact definition/hash and transport-safe revision', async () => {
   const f = family(); api.list.mockResolvedValue(response({ templates: [{ ...f, draft_revision: f.draft.revision }] })); api.get.mockResolvedValue(response(f)); api.save.mockResolvedValue(response(f.draft));
-  page(); await screen.findByLabelText('Шаблон'); choose('Шаблон', f.id); await screen.findByText(/Чернетка · ревізія/);
+  page(); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', f.id); await screen.findByText(/Збережено · ревізія/);
   click('Зберегти чернетку'); await waitFor(() => expect(api.save).toHaveBeenCalled());
   const body = api.save.mock.calls[0][1]; expect(body.expectedRevision).toBe('9007199254740993');
   expect(hashJsonData(body.definition)).toBe(f.draft.definitionHash); expect(body.definition).toEqual(f.draft.definition);
@@ -115,7 +132,7 @@ it('protects identity, preserves unsupported future nodes and exact null/zero/st
 it('revision conflict retains unsaved form and does not fetch or overwrite the newer draft', async () => {
   const f = family(); api.list.mockResolvedValue(response({ templates: [f] })); api.get.mockResolvedValue(response(f));
   api.save.mockRejectedValue({ response: { status: 409, data: { code: 'TEMPLATE_DRAFT_CONFLICT' } } });
-  page(); await screen.findByLabelText('Шаблон'); choose('Шаблон', f.id); await screen.findByLabelText('Колонка');
+  page(); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', f.id); await screen.findByLabelText('Категорія');
   choose('Колонка', 'meta_title'); choose('Значення', 'Локальні зміни'); click('Зберегти чернетку');
   await screen.findByText(/На сервері вже новіша чернетка/); expect(screen.getByLabelText('Значення', { exact: true }).value).toBe('Локальні зміни');
   expect(api.get).toHaveBeenCalledTimes(1); expect(api.save).toHaveBeenCalledTimes(1);
@@ -123,18 +140,18 @@ it('revision conflict retains unsaved form and does not fetch or overwrite the n
 it('reversed family loads cannot replace a newer selection', async () => {
   const first = deferred(); const second = deferred(); api.list.mockResolvedValue(response({ templates: [family('a'), family('b')] }));
   api.get.mockImplementation((id) => id === 'a' ? first.promise : second.promise);
-  page(); await screen.findByLabelText('Шаблон'); choose('Шаблон', 'a'); choose('Шаблон', 'b');
+  page(); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', 'a'); choose('Шаблон', 'b');
   await act(async () => second.resolve(response(family('b'))));
   await act(async () => first.resolve(response(family('a'))));
-  expect(screen.getByText(/Шаблон b · Чернетка/)).toBeTruthy(); expect(screen.queryByText(/Шаблон a · Чернетка/)).toBeNull();
+  expect(screen.getByText(/Шаблон b/)).toBeTruthy(); expect(screen.queryByText(/Шаблон a/)).toBeNull();
 });
 it('edits invalidate late validation and draft preview; publication sends only exact saved revision/hash', async () => {
   const f = family(); const validation = deferred(); api.list.mockResolvedValue(response({ templates: [f] })); api.get.mockResolvedValue(response(f)); api.validate.mockReturnValue(validation.promise);
-  page(); await screen.findByLabelText('Шаблон'); choose('Шаблон', f.id); await screen.findByLabelText('Колонка');
+  page(); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', f.id); await screen.findByLabelText('Категорія');
   click('Перевірити збережену ревізію'); choose('Колонка', 'meta_title'); choose('Значення', 'Пізніші зміни');
   await act(async () => validation.resolve(response({ valid: true, revision: f.draft.revision })));
   expect(screen.queryByText(/Сервер перевірив ревізію/)).toBeNull();
-  expect(screen.getByRole('button', { name: `Опублікувати ревізію ${f.draft.revision}` }).disabled).toBe(true);
+  click('Версії'); expect(screen.getByRole('button', { name: 'Опублікувати версію' }).disabled).toBe(true);
   click('Відкинути локальні зміни');
   api.publish.mockResolvedValue(response({ id: 'version', versionNumber: '1', sourceDraftRevision: f.draft.revision, definition: f.draft.definition }));
   click(`Опублікувати ревізію ${f.draft.revision}`); await waitFor(() => expect(api.publish).toHaveBeenCalledWith(f.id, { expectedRevision: f.draft.revision, expectedDefinitionHash: f.draft.definitionHash }));
@@ -142,28 +159,28 @@ it('edits invalidate late validation and draft preview; publication sends only e
 it('published view is read-only and clones with existing revision, selection uses exact generation', async () => {
   const f = family(); f.versions = [{ id: 'version', versionNumber: '2', definition: f.draft.definition, definitionHash: f.draft.definitionHash }];
   api.list.mockResolvedValue(response({ templates: [f] })); api.get.mockResolvedValue(response(f)); api.clone.mockResolvedValue(response({ ...f.draft, revision: '9007199254740994' }));
-  page(); await screen.findByLabelText('Шаблон'); choose('Шаблон', f.id); await screen.findByLabelText('Версія'); choose('Версія', 'version');
-  choose('Колонка', 'meta_title'); expect(screen.getByLabelText('Значення', { exact: true }).closest('fieldset').disabled).toBe(false); // enclosing fieldset owns disabled inheritance
+  page(); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', f.id); click('Версії'); await screen.findByLabelText('Версія'); choose('Версія', 'version');
+  choose('Колонка', 'meta_title'); expect(screen.getByLabelText('Значення', { exact: true }).closest('fieldset').disabled).toBe(true);
   expect(screen.getByLabelText('Значення', { exact: true }).matches(':disabled')).toBe(true);
   api.select.mockResolvedValue(response({ generation: '9007199254740996', implementation: 'template', templateVersionId: 'version' }));
   click('Вибрати відкриту публікацію v2'); await waitFor(() => expect(api.select).toHaveBeenCalledWith({ expectedGeneration: '9007199254740995', implementation: 'template', templateVersionId: 'version' }));
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Копіювати публікацію в чернетку' }).disabled).toBe(false));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Створити чернетку з цієї версії' }).disabled).toBe(false));
   click('Копіювати публікацію в чернетку'); await waitFor(() => expect(api.clone).toHaveBeenCalledWith(f.id, { expectedRevision: '9007199254740993', versionId: 'version' }));
 });
 it('direct forbidden navigation issues no definition/source requests; delegated view+publish works independently', async () => {
   const view = page(['exports.view', 'export_templates.manage']); expect(screen.getByText(/Немає дозволу/)).toBeTruthy(); expect(api.list).not.toHaveBeenCalled(); expect(api.sources).not.toHaveBeenCalled();
   view.unmount(); const f = family(); api.list.mockResolvedValue(response({ templates: [f] })); api.get.mockResolvedValue(response(f));
-  const allowed = page(['export_templates.view', 'export_templates.publish']); await screen.findByLabelText('Шаблон'); choose('Шаблон', f.id); await screen.findByLabelText('Колонка');
-  expect(screen.queryByRole('button', { name: 'Зберегти чернетку' })).toBeNull(); expect(screen.getByRole('button', { name: `Опублікувати ревізію ${f.draft.revision}` }).disabled).toBe(false);
+  const allowed = page(['export_templates.view', 'export_templates.publish']); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', f.id); await screen.findByLabelText('Категорія');
+  expect(screen.queryByRole('button', { name: 'Зберегти чернетку' })).toBeNull(); expect(api.sources).not.toHaveBeenCalled(); click('Версії'); expect(screen.getByRole('button', { name: 'Опублікувати версію' }).disabled).toBe(false);
   allowed.rerender(<AuthContext.Provider value={{ permissions: [] }}><ExportTemplatesPage /></AuthContext.Provider>);
   expect(screen.getByText(/Немає дозволу/)).toBeTruthy(); expect(api.list).toHaveBeenCalledTimes(1);
 });
 it('draft preview validates explicit ID list, displays server diagnostics and never creates a snapshot token', async () => {
   const f = family(); api.list.mockResolvedValue(response({ templates: [f] })); api.get.mockResolvedValue(response(f));
   api.preview.mockResolvedValue(response({ revision: f.draft.revision, draftOnly: true, result: { representedCount: 1, readyCount: 0, errors: [{ sku: '<script>', fields: [{ field: 'name', message: 'Потрібна назва' }] }] } }));
-  page(); await screen.findByLabelText('Шаблон'); choose('Шаблон', f.id); await screen.findByLabelText('Колонка');
-  choose('ID товарів (1–100, через кому або пробіл)', '1,1'); click('Переглянути тестовий результат'); await screen.findByRole('alert'); expect(api.preview).not.toHaveBeenCalled();
-  choose('ID товарів (1–100, через кому або пробіл)', '1'); click('Переглянути тестовий результат'); await screen.findByText(/Тест чернетки — лише читання/);
+  page(); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', f.id); await screen.findByLabelText('Категорія');
+  click('Перевірка'); choose('ID товарів (1–100, через кому або пробіл)', '1,1'); click('Переглянути тестовий результат'); await screen.findByRole('alert'); expect(api.preview).not.toHaveBeenCalled();
+  click('Перевірка'); choose('ID товарів (1–100, через кому або пробіл)', '1'); click('Переглянути тестовий результат'); await screen.findByText(/Результат перевірки · ревізія/);
   expect(api.preview).toHaveBeenCalledWith(f.id, { expectedRevision: f.draft.revision, expectedDefinitionHash: f.draft.definitionHash, productIds: [1] });
   expect(screen.getByText(/<script>: name: Потрібна назва/)).toBeTruthy(); expect(document.querySelector('script')).toBeNull();
 });
@@ -196,21 +213,21 @@ it('late save cannot replace a newer loaded family, and late draft preview canno
   const f = family('a'); const other = family('b'); const saved = deferred(); const latePreview = deferred();
   api.list.mockResolvedValue(response({ templates: [f, other] })); api.get.mockImplementation(async (id) => response(id === 'a' ? f : other));
   api.save.mockReturnValue(saved.promise); api.preview.mockReturnValue(latePreview.promise);
-  page(); await screen.findByLabelText('Шаблон'); choose('Шаблон', 'a'); await screen.findByLabelText('Колонка');
-  click('Зберегти чернетку'); choose('Шаблон', 'b'); await screen.findByText(/Шаблон b · Чернетка/);
+  page(); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', 'a'); await screen.findByLabelText('Категорія');
+  click('Зберегти чернетку'); choose('Шаблон', 'b'); await screen.findByText(/Шаблон b/);
   await act(async () => saved.resolve(response({ ...f.draft, revision: '999' })));
-  expect(screen.getByText(/Шаблон b · Чернетка/).textContent).not.toContain('999');
-  choose('ID товарів (1–100, через кому або пробіл)', '1'); click('Переглянути тестовий результат');
+  expect(screen.getByText(/Шаблон b/).textContent).not.toContain('999');
+  click('Перевірка'); choose('ID товарів (1–100, через кому або пробіл)', '1'); click('Переглянути тестовий результат');
   choose('Колонка', 'meta_title'); choose('Значення', 'Змінено під час тесту');
   await act(async () => latePreview.resolve(response({ revision: other.draft.revision, result: { representedCount: 1, readyCount: 1 } })));
-  expect(screen.queryByText(/Тест чернетки — лише читання/)).toBeNull();
-  expect(screen.getByRole('button', { name: `Опублікувати ревізію ${other.draft.revision}` }).disabled).toBe(true);
+  expect(screen.queryByText(/Результат перевірки · ревізія/)).toBeNull();
+  click('Версії'); expect(screen.getByRole('button', { name: 'Опублікувати версію' }).disabled).toBe(true);
 });
 it('manage without exports.view cannot issue draft previews; permission denial does not retry', async () => {
   const f = family(); api.list.mockResolvedValue(response({ templates: [f] })); api.get.mockResolvedValue(response(f));
   api.save.mockRejectedValue({ response: { status: 403, data: { code: 'INSUFFICIENT_PERMISSION', error: 'Недостатньо прав' } } });
-  page(['export_templates.view', 'export_templates.manage']); await screen.findByLabelText('Шаблон'); choose('Шаблон', f.id); await screen.findByLabelText('Колонка');
-  expect(screen.queryByRole('button', { name: 'Переглянути тестовий результат' })).toBeNull();
+  page(['export_templates.view', 'export_templates.manage']); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', f.id); await screen.findByLabelText('Категорія');
+  expect(screen.queryByRole('button', { name: 'Переглянути результат' })).toBeNull();
   click('Зберегти чернетку'); await screen.findByText('Недостатньо прав'); expect(api.save).toHaveBeenCalledTimes(1); expect(api.preview).not.toHaveBeenCalled();
 });
 it('separate lookup copy affects only the explicitly detached consumer; source selection edits only that node', () => {
@@ -277,7 +294,7 @@ it('KL local composition adds mapped color, renames references and removes expli
 
 it('dirty router navigation supports Stay, failed Save, Discard and history back', async () => {
   const f = family(); api.list.mockResolvedValue(response({ templates: [{ ...f, draft_revision: f.draft.revision }] })); api.get.mockResolvedValue(response(f));
-  const { router } = page(); await screen.findByLabelText('Шаблон'); choose('Шаблон', f.id); await screen.findByText(/Чернетка · ревізія/);
+  const { router } = page(); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', f.id); await screen.findByText(/Збережено · ревізія/);
   choose('Колонка', 'meta_title'); choose('Значення', '  unsaved exact\n');
   fireEvent.click(screen.getByText('Інший розділ')); await screen.findByRole('dialog'); click('Залишитися');
   expect(screen.getByLabelText('Значення', { exact: true }).value).toBe('  unsaved exact\n');
@@ -285,13 +302,132 @@ it('dirty router navigation supports Stay, failed Save, Discard and history back
   fireEvent.click(screen.getByText('Інший розділ')); click('Зберегти й перейти');
   await screen.findByText(/На сервері вже новіша чернетка/); expect(router.state.location.pathname).toBe('/');
   expect(screen.getByRole('dialog')).toBeTruthy(); click('Відкинути й перейти'); await screen.findByText('Інший екран');
-  await act(async () => router.navigate(-1)); await screen.findByLabelText('Шаблон');
+  await act(async () => router.navigate(-1)); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ });
 });
 
 it('successful save completes blocked navigation with exact draft', async () => {
   const f = family(); api.list.mockResolvedValue(response({ templates: [{ ...f, draft_revision: f.draft.revision }] })); api.get.mockResolvedValue(response(f));
   api.save.mockImplementation(async (_id, body) => response({ ...f.draft, revision: '9007199254740994', definition: body.definition }));
-  page(); await screen.findByLabelText('Шаблон'); choose('Шаблон', f.id); await screen.findByText(/Чернетка · ревізія/);
+  page(); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', f.id); await screen.findByText(/Збережено · ревізія/);
   choose('Колонка', 'meta_title'); choose('Значення', 'exact'); fireEvent.click(screen.getByText('Інший розділ')); click('Зберегти й перейти');
   await screen.findByText('Інший екран'); expect(api.save.mock.calls[0][1].definition.groups[0].rows[0].cells.meta_title.value).toBe('exact');
+});
+
+it('named creation prepares a technical key once, keeps conflicts editable and prevents duplicate submissions', async () => {
+  const creating = deferred();
+  api.create.mockReturnValueOnce(creating.promise).mockResolvedValueOnce(response(family()));
+  page(); await screen.findByText(/Шаблонів ще немає/); click('Створити шаблон');
+  await screen.findByLabelText('Назва шаблону'); choose('Назва шаблону', 'Мій каталог');
+  expect(screen.queryByLabelText('Категорія')).toBeNull();
+  click('Створити й зберегти чернетку'); click('Створити й зберегти чернетку');
+  expect(api.create).toHaveBeenCalledTimes(1);
+  const body = api.create.mock.calls[0][0]; expect(body.key).toMatch(/^template-[a-f0-9-]+$/);
+  expect(body.displayName).toBe('Мій каталог'); expect(body.definition).toEqual(baseline());
+  await act(async () => creating.reject({ response: { data: { code: 'TEMPLATE_KEY_CONFLICT', error: 'Ключ зайнятий' } } }));
+  await screen.findByText(/Ключ уже зайнятий/); expect(screen.getByLabelText('Назва шаблону').value).toBe('Мій каталог');
+  fireEvent.click(screen.getByText('Додаткові налаштування')); choose('Сталий ключ (латиниця, цифри, _ або -)', 'another-key');
+  click('Створити й зберегти чернетку'); await screen.findByLabelText('Категорія');
+  expect(api.publish).not.toHaveBeenCalled(); expect(api.select).not.toHaveBeenCalled();
+});
+
+it('ordinary KL name workflow adds mapped color, edits only this field, saves and inspects exact server revision without advanced rules', async () => {
+  const f = family(); api.list.mockResolvedValue(response({ templates: [f] })); api.get.mockResolvedValue(response(f));
+  api.save.mockImplementation(async (_id, body) => response({ ...f.draft, revision: '9007199254740994', definition: body.definition, definitionHash: hashJsonData(body.definition) }));
+  api.preview.mockResolvedValue(response({ revision: '9007199254740994', result: { representedCount: 1, readyCount: 1, errors: [], artifacts: [{ groupCode: 'KL', groupName: 'Кулони', rowCount: 2, csvContent: 'authoritative CSV from API' }] } }));
+  page(); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', f.id); await screen.findByLabelText('Категорія');
+  choose('Категорія', '2'); choose('Мова', '0');
+  expect(screen.getByRole('heading', { name: 'Назва товару' })).toBeTruthy();
+  expect(screen.queryByLabelText('Розділ редактора')).toBeNull();
+  expect(screen.getByLabelText('Текст у файлі').value).toContain('{material}');
+  click('+ Додати характеристику'); choose('Характеристика', 'KL.color'); choose('Як записувати у файлі', 'klColor'); click('Вставити характеристику');
+  choose('Текст у файлі', 'Кулон з {material} бурштину, {color}. Арт: {sku}');
+  click('Колір {color}'); choose('Текст для ID 1', '  новий відтінок  ');
+  click('Зберегти чернетку'); await screen.findByText('Збережено · ревізія 9007199254740994');
+  const edited = api.save.mock.calls[0][1].definition;
+  const local = edited.groups[2].rows[0].cells.name;
+  expect(edited.tables.klColor).toEqual(f.draft.definition.tables.klColor);
+  expect(edited.tables[local.then.slots.color.table]['1']).toBe('  новий відтінок  ');
+  expect(edited.bindings).toEqual(f.draft.definition.bindings);
+  expect(local.then.slots.material).toEqual(f.draft.definition.bindings.find((b) => b.id === 'KL.nameUa').value.then.slots.material);
+  expect(local.then.slots.sku).toEqual({ op: 'ref', id: 'sku' });
+  click('Перевірка'); choose('ID товарів (1–100, через кому або пробіл)', '42'); click('Переглянути результат');
+  await screen.findByText(/Результат перевірки · ревізія 9007199254740994/);
+  expect(api.preview).toHaveBeenCalledWith(f.id, { expectedRevision: '9007199254740994', expectedDefinitionHash: hashJsonData(edited), productIds: [42] });
+  expect(screen.getByText(/Товари: 42/)).toBeTruthy(); expect(screen.getByText('authoritative CSV from API')).toBeTruthy();
+  click('Поля експорту'); choose('Текст у файлі', '  Інший {material}, {color}. {sku}\n'); click('Перевірка');
+  expect(screen.getByText(/Застарілий результат/)).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Переглянути результат', exact: true }).disabled).toBe(true);
+  expect(api.publish).not.toHaveBeenCalled(); expect(api.select).not.toHaveBeenCalled();
+});
+
+it('SEO editing and column ordering stay in the ordinary inspector; tab and language changes preserve exact draft', async () => {
+  const f = family(); api.list.mockResolvedValue(response({ templates: [f] })); api.get.mockResolvedValue(response(f)); api.save.mockImplementation(async (_id, body) => response({ ...f.draft, definition: body.definition }));
+  page(); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', f.id); await screen.findByLabelText('Категорія');
+  choose('Знайти поле', 'SEO'); choose('Колонка', 'meta_title'); choose('Значення', '  Точний SEO\n');
+  fireEvent.click(screen.getByText('Порядок у файлі')); click('Перемістити колонку вище');
+  click('Перевірка'); click('Версії'); click('Поля експорту');
+  expect(screen.getByLabelText('Значення', { exact: true }).value).toBe('  Точний SEO\n');
+  choose('Мова', '1'); choose('Мова', '0'); click('Зберегти чернетку'); await waitFor(() => expect(api.save).toHaveBeenCalledTimes(1));
+  const result = api.save.mock.calls[0][1].definition;
+  expect(result.groups[0].rows[0].cells.meta_title.value).toBe('  Точний SEO\n');
+  expect(result.groups[0].columns.indexOf('meta_title')).toBe(f.draft.definition.groups[0].columns.indexOf('meta_title') - 1);
+  expect(result.groups[0].rows[1]).toEqual(f.draft.definition.groups[0].rows[1]);
+  expect(result.groups.slice(1)).toEqual(f.draft.definition.groups.slice(1));
+  expect(screen.queryByLabelText('Розділ редактора')).toBeNull();
+});
+
+it('focused tokens support rename, explicit removal and dangling-reference validation', () => {
+  let current = baseline();
+  function Focused() {
+    const [definition, setDefinition] = useState(current);
+    return <FieldEditor definition={definition} onChange={(next) => { current = next; setDefinition(next); }} />;
+  }
+  render(<Focused />); choose('Категорія', '2'); click('+ Додати характеристику');
+  choose('Характеристика', 'KL.color'); choose('Як записувати у файлі', 'klColor'); click('Вставити характеристику');
+  expect(screen.getByLabelText('Текст у файлі').checkValidity()).toBe(true);
+  click('Колір {color}'); fireEvent.click(screen.getByText('Назва та вилучення характеристики'));
+  choose('Назва підстановки', 'shade'); click('Перейменувати й оновити текст');
+  expect(screen.getByLabelText('Текст у файлі').value).toContain('{shade}');
+  click('Вилучити характеристику та її позначки з тексту');
+  expect(current.groups[2].rows[0].cells.name.then.slots.shade).toBeUndefined();
+  expect(screen.getByLabelText('Текст у файлі').value).not.toContain('{shade}');
+  choose('Текст у файлі', '{unknown}');
+  expect(screen.getByLabelText('Текст у файлі').checkValidity()).toBe(false);
+  expect(screen.getByRole('alert').textContent).toContain('невідомих назв');
+});
+
+it('changing principal discards old workspace and ignores a late family response', async () => {
+  const pending = deferred(); api.list.mockResolvedValue(response({ templates: [family()] })); api.get.mockReturnValue(pending.promise);
+  const view = page(); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', 'family');
+  view.rerender(<AuthContext.Provider value={{ permissions: all, applicationUser: { id: 'different-user' } }}><RouterProvider router={view.router} /></AuthContext.Provider>);
+  await act(async () => pending.resolve(response(family())));
+  expect(screen.queryByLabelText('Категорія')).toBeNull(); expect(screen.queryByRole('button', { name: 'Зберегти чернетку' })).toBeNull();
+});
+
+it('read-only fields allow inspecting characteristics and branches without edit actions or source requests', () => {
+  const change = vi.fn(); const original = baseline();
+  render(<FieldEditor definition={original} onChange={change} readOnly />);
+  choose('Категорія', '2'); click('Матеріал {material}');
+  expect(screen.getByLabelText('Текст для ID 1').matches(':disabled')).toBe(true);
+  expect(screen.queryByRole('button', { name: '+ Додати характеристику' })).toBeNull();
+  expect(screen.queryByLabelText('Область зміни')).toBeNull();
+  click('Інакше');
+  expect(screen.getByLabelText('Значення', { exact: true }).matches(':disabled')).toBe(true);
+  expect(change).not.toHaveBeenCalled(); expect(api.sources).not.toHaveBeenCalled();
+});
+
+it('focused shared mapping warning names the actual consumers before an explicit shared edit', () => {
+  let current = baseline();
+  function Focused() {
+    const [definition, setDefinition] = useState(current);
+    return <FieldEditor definition={definition} onChange={(next) => { current = next; setDefinition(next); }} />;
+  }
+  const original = structuredClone(current); render(<Focused />);
+  choose('Категорія', '2'); choose('Область зміни', 'shared'); click('Матеріал {material}');
+  const panel = screen.getByRole('region', { name: 'Налаштування характеристики' });
+  expect(within(panel).getByText('Зміна вплине на: BR / база / name; NM / база / name; KL / база / name; CH / база / name.').getAttribute('role')).toBe('note');
+  expect(current).toEqual(original);
+  choose('Текст для ID 1', 'Спільний матеріал');
+  expect(current.tables.materialUa['1']).toBe('Спільний матеріал'); expect(current.groups).toEqual(original.groups);
+  expect(current.bindings).toEqual(original.bindings);
 });

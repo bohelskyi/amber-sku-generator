@@ -790,3 +790,61 @@ catalog/business/Magento gates above remain outstanding. The new-slot limitation
 unknown-result recovery gap, active-principal isolation defect and deferred browser
 acceptance must be resolved or explicitly dispositioned before operational rollout;
 passing characterization tests is not acceptance of the unsafe behavior.
+
+## Field-oriented editor UX — 2026-09-24
+
+Started and finished on `feature/magento-export-constructor`, HEAD
+`de95738c73b0f7b3adb4fb8b1119d444ae3ab5e0`. Initial status contained only the
+user's `docs/OPERATIONS.md` modification; it was preserved. No staging, commits,
+branch operations, dependencies, server/API/schema changes or database writes.
+
+The registry, named creation, fields, checks and versions are separate views.
+Creation prepares its technical key once, retains input on conflict and saves only
+on explicit submission. The sticky editor header keeps save/state/errors visible.
+Searchable readable fields sit beside one inspector; category/language selection
+does not change exported profiles. Published content is inspectable but read-only.
+Publication and selection remain separate actions.
+
+Names expose exact editable text and characteristic buttons. One approved-source
+selection inserts both a valid local slot and its placeholder; a button opens its
+mapping/fallback panel. Rename updates placeholders; explicit removal removes both.
+Mapping output is preserved exactly. The API supplies question labels and value IDs,
+not option labels, so mapping rows retain IDs without invented historical names.
+Advanced rules retain the original controls behind explicit navigation, with
+collapsed branches and category/field context.
+
+Structural path adapters preserve conditions, error/fallback branches, references,
+metadata and sparse EN. Local changes detach only the edited reference path and
+copy/rebind its table when necessary in one action. Shared edits show the actual
+transitive consumers. No copies/IDs/defaults are introduced on opening or no-op
+saving; unsupported custom reference metadata fails local isolation explicitly.
+Only the existing saved-revision test API produces results. Sample IDs and exact
+revision are shown; edits mark retained results stale. Dirty navigation, conflicts,
+late-response fencing, principal isolation and shared-session integration remain.
+
+Verification on guarded Node **20.20.2**: focused editor UI **27 passed**; structural
+editor/presentation tests **11 passed**, including all ten original CSV goldens,
+canonical hashes and six-group local-output parity. Full client **123 Node + 159
+Vitest tests passed**; lint/build passed. Server **486 unit tests passed**; lint
+has only the two pre-existing `product-timeline.js:391` warnings. One concurrent
+client run hit an unrelated auth-test effect-timing assertion; focused auth/editor
+and subsequent full runs passed without auth changes. No integration DB was used,
+as explicitly requested for this client-only task. Logs: `%TEMP%/amber-editor-*.log`.
+
+CUA inventory returned no browsers; opening localhost returned “No browser is
+available.” No before/after screenshots were produced. Desktop ~1366×768, narrow
+viewport and real keyboard/focus visual acceptance remain pending; DOM tests are
+not visual acceptance. Existing services and the user's manual environment were
+not restarted or modified. Final whitespace/index checks passed.
+
+Exact task file scope:
+
+- `client/src/pages/ExportTemplatesPage.jsx`
+- `client/src/components/export-templates/DefinitionEditor.jsx`
+- `client/src/components/export-templates/AdvancedDefinitionEditor.jsx` (new)
+- `client/src/components/export-templates/export-template-editor.css` (new)
+- `client/src/lib/export-template-editor.js` (readable field labels only)
+- `client/src/lib/export-template-presentation.js` (new)
+- `client/test/export-template-ui.test.jsx`
+- `client/test/export-template-presentation.test.js` (new)
+- `docs/EXPORT_TEMPLATES_PR4.md` (this record)

@@ -1,275 +1,199 @@
-import { useEffect, useId, useRef, useState } from 'react';
-import { consumers, copyDefinition, fieldLabels, moveItem, operationLabels, protectedCells, replaceAt, slotNameError, renameSlot, removeSlot } from '../../lib/export-template-editor';
+import { useRef, useState } from 'react';
+import { AdvancedDefinitionEditor, Scalar } from './AdvancedDefinitionEditor';
+import { fieldLabels, moveItem, protectedCells, renameSlot, removeSlot, slotNameError } from '../../lib/export-template-editor';
+import { at, affectedFields, editField, editMapping, fieldSection, insertCharacteristic, mappingsForSource, resolveNode, sourceLabel, sourceOf, summary } from '../../lib/export-template-presentation';
+import './export-template-editor.css';
 
-const labelFor = (key) => fieldLabels[key] || key;
-const fixedFields = new Set(['op', 'format', 'policy', 'onAbsent', 'onInvalid', 'field', 'code', 'question']);
+const label = (key) => fieldLabels[key] || key;
 const record = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const groupNames = { BR: 'Браслети', NM: 'Намиста', KL: 'Кулони', CH: 'Чотки', AR: 'Картини', SV: 'Сувеніри' };
 
-function Scalar({ value, label, onChange, fixedType = false, validationError = '' }) {
-  const type = value === null ? 'null' : typeof value;
-  const [invalid, setInvalid] = useState('');
-  const control = useRef(null);
-  const messageId = useId();
-  useEffect(() => { control.current?.setCustomValidity(invalid ? 'Введіть скінченне число' : validationError); }, [invalid, validationError, type]);
-  return <div className="space-y-1">
-    <label className="block text-sm">{label}
-      {type === 'boolean' ? <select className="input" value={String(value)} onChange={(e) => onChange(e.target.value === 'true')}>
-        <option value="true">Так</option><option value="false">Ні</option>
-      </select> : type === 'null' ? <span className="block text-slate-500">null — відсутнє значення</span>
-        : <textarea ref={control} className="input min-h-10" rows={String(value).length > 100 ? 3 : 1}
-          value={invalid || String(value)} aria-invalid={Boolean(invalid || validationError)} aria-describedby={invalid || validationError ? messageId : undefined} onChange={(e) => {
-            const raw = e.target.value;
-            if (type === 'number' && (!raw.trim() || !Number.isFinite(Number(raw)))) { e.target.setCustomValidity('Введіть скінченне число'); setInvalid(raw || ' '); return; }
-            e.target.setCustomValidity('');
-            setInvalid(''); onChange(type === 'number' ? Number(raw) : raw);
-          }} />}
-    </label>
-    {!fixedType && <label className="block text-xs text-slate-500">Тип: {label}
-      <select className="ml-2 rounded border" value={type} onChange={(e) => {
-        setInvalid(''); onChange(({ string: '', number: 0, boolean: false, null: null })[e.target.value]);
-      }}><option value="string">Текст</option><option value="number">Число</option><option value="boolean">Так/ні</option><option value="null">null</option></select>
-    </label>}
-    {(invalid || validationError) && <p id={messageId} role="alert" className="text-sm text-red-700">{invalid ? `${label}: введіть скінченне число. Незавершене значення ще не внесено до визначення.` : validationError}</p>}
-  </div>;
-}
-
-function SourceSelect({ value, onChange, sources, registry, group, label }) {
-  const entries = Object.entries(sources).filter(([, s]) => s.kind === 'product' || s.category === group);
-  return <label className="block text-sm">{label}<select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
-    {!entries.some(([id]) => id === value) && <option value={value}>{value} — невідоме джерело</option>}
-    {entries.map(([id, s]) => {
-      const q = registry?.references?.questions?.find((item) => item.category_code === s.category && item.key === s.key);
-      return <option key={id} value={id}>{q?.label || labelFor(s.field || s.key)} · {s.kind} · {s.category || 'товар'} · {s.key || s.field} · {registry?.units?.[s.field] || 'збережене значення'} ({id})</option>;
-    })}
-  </select></label>;
-}
-
-function RuleForm({ value, onChange, context }) {
-  const [source, setSource] = useState('');
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return <p>Невідома структура видимості збережена без змін: {JSON.stringify(value)}</p>;
-  const remove = (key) => onChange(Object.fromEntries(Object.entries(value).filter(([k]) => k !== key)));
-  return <fieldset className="space-y-3 rounded border p-3"><legend>Зафіксована видимість</legend>
-    {!Object.keys(value).length && <p className="text-sm">Без обмежень видимості</p>}
-    {Object.entries(value).map(([key, item]) => <div key={key} className="space-y-2">
-      {['$and', '$or'].includes(key) && Array.isArray(item) ? <div className="space-y-2"><p>{key === '$and' ? 'Усі гілки' : 'Будь-яка гілка'}</p>
-        {item.map((branch, i) => <div key={i}><RuleForm value={branch} context={context} onChange={(next) => onChange({ ...value, [key]: item.map((b, j) => j === i ? next : b) })} />
-          <button type="button" className="underline text-xs" onClick={() => onChange({ ...value, [key]: item.filter((_, j) => j !== i) })}>Вилучити гілку {i + 1}</button></div>)}
-        <button type="button" className="underline" onClick={() => onChange({ ...value, [key]: [...item, {}] })}>Додати гілку</button>
-      </div> : <ValueForm value={item} label={`Видимість: ${key}`} context={context} path="values" onChange={(next) => onChange({ ...value, [key]: next })} />}
-      <button type="button" className="underline text-xs" onClick={() => remove(key)}>Вилучити умову {key}</button>
-    </div>)}
-    <label className="block">Джерело нової умови<select className="input" value={source} onChange={(e) => setSource(e.target.value)}><option value="">Оберіть джерело</option>
-      {Object.entries(context.definition.sources).filter(([, s]) => s.category === context.group).map(([id, s]) => <option value={id} key={id}>{s.key} · {s.kind} ({id})</option>)}
+function Scope({ context, trail, table }) {
+  if (context.readOnly) return null;
+  const affected = affectedFields(context.definition, context.cellPath, trail, table);
+  return <div className="et-scope">
+    <label>Область зміни<select className="input" value={context.scope} onChange={(e) => context.setScope(e.target.value)}>
+      <option value="local">Лише для цього поля</option><option value="shared">Для всіх полів, які використовують це правило</option>
     </select></label>
-    <button type="button" className="btn btn-outline px-2" disabled={!source || Object.hasOwn(value, source)} onClick={() => { onChange({ ...value, [source]: null }); setSource(''); }}>Додати умову видимості</button>
-    <div className="flex gap-2">{['$and', '$or'].filter((key) => !Object.hasOwn(value, key)).map((key) => <button type="button" className="underline text-sm" key={key} onClick={() => onChange({ ...value, [key]: [{}] })}>{key === '$and' ? 'Додати «усі гілки»' : 'Додати «будь-яка гілка»'}</button>)}</div>
-  </fieldset>;
-}
-
-function TableEntries({ table, onChange }) {
-  const [key, setKey] = useState('');
-  return <div className="space-y-3">{Object.entries(table).map(([id, value]) => <div key={id}>
-    <Scalar value={value} label={`ID ${id}`} fixedType onChange={(next) => onChange({ ...table, [id]: next })} />
-    <button type="button" className="text-xs underline" onClick={() => onChange(Object.fromEntries(Object.entries(table).filter(([k]) => k !== id)))}>Вилучити відповідність {id}</button>
-  </div>)}
-    <label className="block">Новий семантичний ID<input className="input" value={key} onChange={(e) => setKey(e.target.value)} /></label>
-    <button type="button" className="btn btn-outline px-2" disabled={!key || Object.hasOwn(table, key) || ['__proto__', 'constructor', 'prototype'].includes(key)} onClick={() => { onChange({ ...table, [key]: '' }); setKey(''); }}>Додати відповідність</button>
+    {context.scope === 'shared' ? <p role="note">Зміна вплине на: {affected.join('; ')}.</p>
+      : <p>Зміниться лише це поле. Потрібні правила й відповідності копіюються під час редагування.</p>}
   </div>;
 }
 
-function SlotControls({ node, onChange, context }) {
-  const [name, setName] = useState('');
-  const [kind, setKind] = useState('literal');
+function CharacteristicPicker({ node, onInsert, context }) {
   const [source, setSource] = useState('');
   const [table, setTable] = useState('');
-  const [renames, setRenames] = useState({});
-  const error = name ? slotNameError(name, node.slots) : '';
-  const sources = Object.entries(context.definition.sources).filter(([, s]) => (s.kind === 'product' || s.category === context.group) && s.type !== 'boolean');
-  const tables = Object.entries(context.definition.tables).filter(([, entries]) => Object.values(entries).every((v) => typeof v === 'string'));
-  const add = () => {
-    const input = { op: 'source', id: source };
-    const value = kind === 'literal' ? { op: 'literal', value: '' } : kind === 'lookup'
-      ? { op: 'lookup', input: { op: 'semanticKey', input }, table, otherwise: { op: 'literal', value: '' } }
-      : { op: 'text', input, trim: false, format: 'scalar-v1', onAbsent: 'empty' };
-    onChange({ ...node, slots: { ...node.slots, [name]: value } }); setName('');
-  };
-  return <div className="space-y-3 rounded border p-3">
-    <p className="text-sm">Локальні підстановки цього виразу. Додайте підстановку, а потім явно вставте її в текст. Спільні таблиці залишаються спільними.</p>
-    {Object.keys(node.slots).map((slot) => <div key={slot} className="space-y-1">
-      <label className="block">Нова назва підстановки {slot}<input className="input" value={renames[slot] ?? slot} onChange={(e) => setRenames({ ...renames, [slot]: e.target.value })} /></label>
-      {renames[slot] && slotNameError(renames[slot], node.slots, slot) && <p role="alert">{slotNameError(renames[slot], node.slots, slot)}</p>}
-      <button type="button" className="underline text-sm" disabled={!renames[slot] || renames[slot] === slot || Boolean(slotNameError(renames[slot], node.slots, slot))}
-        onClick={() => onChange(renameSlot(node, slot, renames[slot]))}>Перейменувати {slot} та оновити посилання в тексті</button>
-      <button type="button" className="block underline text-sm" disabled={node.template.includes(`{${slot}}`)} onClick={() => onChange(removeSlot(node, slot))}>Вилучити підстановку {slot}</button>
-      {node.template.includes(`{${slot}}`) && <p className="text-xs">Перед вилученням явно приберіть {`{${slot}}`} з тексту.</p>}
-    </div>)}
-    <label className="block">Назва нової підстановки<input className="input" maxLength={64} value={name} onChange={(e) => setName(e.target.value)} /></label>
-    {error && <p role="alert">{error}</p>}
-    <label className="block">Вираз нової підстановки<select className="input" value={kind} onChange={(e) => setKind(e.target.value)}>
-      <option value="literal">Текст</option><option value="source">Текст зі збереженого джерела</option><option value="lookup">Джерело через таблицю відповідностей</option>
+  const sources = Object.entries(context.definition.sources).filter(([, value]) => (value.kind === 'product' || value.category === context.group) && value.type !== 'boolean');
+  const mappings = mappingsForSource(context.definition, source);
+  return <div className="et-source-picker">
+    <label>Характеристика<select className="input" value={source} onChange={(e) => { setSource(e.target.value); setTable(''); }}>
+      <option value="">Оберіть характеристику</option>{sources.map(([id]) => <option key={id} value={id}>{sourceLabel(context.definition, id, context.registry)}</option>)}
     </select></label>
-    {kind !== 'literal' && <label className="block">Джерело нової підстановки<select className="input" value={source} onChange={(e) => setSource(e.target.value)}><option value="">Оберіть джерело</option>
-      {sources.map(([id, s]) => <option key={id} value={id}>{labelFor(s.key || s.field)} ({id})</option>)}
-    </select></label>}
-    {kind === 'lookup' && <label className="block">Таблиця нової підстановки<select className="input" value={table} onChange={(e) => setTable(e.target.value)}><option value="">Оберіть таблицю</option>
-      {tables.map(([id]) => <option key={id}>{id}</option>)}
-    </select></label>}
-    <button type="button" className="btn btn-outline px-3" disabled={!name || Boolean(error) || Object.keys(node.slots).length >= 16 || (kind !== 'literal' && !sources.some(([id]) => id === source)) || (kind === 'lookup' && !tables.some(([id]) => id === table))} onClick={add}>Додати підстановку</button>
-    {Object.keys(node.slots).length >= 16 && <p>Досягнуто серверну межу: 16 підстановок.</p>}
+    <label>Як записувати у файлі<select className="input" value={table} onChange={(e) => setTable(e.target.value)}>
+      <option value="">Збережене значення без заміни</option>{mappings.map((id) => <option key={id} value={id}>Відповідності: {Object.values(context.definition.tables[id]).slice(0, 3).join(' / ')} ({id})</option>)}
+    </select></label>
+    <button type="button" className="btn btn-primary px-3" disabled={!source || Object.keys(node.slots).length >= 16} onClick={() => onInsert(source, table)}>Вставити характеристику</button>
+    {Object.keys(node.slots).length >= 16 && <p>Досягнуто межу: 16 характеристик.</p>}
   </div>;
 }
 
-function ValueForm({ value, onChange, label, context, path = '', fixedType = false, newItem }) {
-  if (value === null || typeof value !== 'object') return <Scalar value={value} label={label} onChange={onChange} fixedType={fixedType} />;
-  if (Array.isArray(value)) return <fieldset className="space-y-2 rounded border p-2"><legend>{label}</legend>
-    {value.map((item, index) => <div className="space-y-1 border-l-2 pl-2" key={index}>
-      <ValueForm value={item} label={`${label} ${index + 1}`} context={context} path={`${path}.${index}`}
-        onChange={(next) => onChange(value.map((v, i) => i === index ? next : v))} fixedType={fixedType} />
-      <div className="flex flex-wrap gap-2 text-xs">
-        <button type="button" disabled={!index} onClick={() => onChange(moveItem(value, index, -1))}>Вище: {label} {index + 1}</button>
-        <button type="button" disabled={index === value.length - 1} onClick={() => onChange(moveItem(value, index, 1))}>Нижче: {label} {index + 1}</button>
-        <button type="button" onClick={() => onChange(value.filter((_, i) => i !== index))}>Вилучити: {label} {index + 1}</button>
-      </div>
-    </div>)}
-    <button type="button" className="btn btn-outline px-2" disabled={!value.length && newItem === undefined && !['values', 'allowed'].includes(path.split('.').at(-1))}
-      onClick={() => onChange([...value, value.length ? copyDefinition(value.at(-1)) : newItem !== undefined ? copyDefinition(newItem) : ''])}>Додати: {label}</button>
-  </fieldset>;
-  if (value.op && (!operationLabels[value.op]
-    || (value.op === 'interpolate' && (typeof value.template !== 'string' || !record(value.slots)))
-    || (value.op === 'literal' && !Object.hasOwn(value, 'value')))) return <div className="rounded border p-2" role="note">
-    Непідтримувана операція «{value.op}»: лише читання, буде збережена без змін.
-    <pre className="overflow-auto text-xs">{JSON.stringify(value, null, 2)}</pre>
+function TextComposer({ node, trail, context }) {
+  const [selected, setSelected] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [renamed, setRenamed] = useState('');
+  const input = useRef(null);
+  const selection = useRef(null);
+  const used = [...node.template.matchAll(/\{([A-Za-z0-9_]+)\}/g)].map((match) => match[1]);
+  const invalid = used.some((slot) => !Object.hasOwn(node.slots, slot)) || Object.keys(node.slots).some((slot) => !used.includes(slot)) || /[{}]/.test(node.template.replace(/\{[A-Za-z0-9_]+\}/g, ''));
+  const update = (transform) => context.update(trail, transform);
+  return <div className="et-composer">
+    <Scope context={context} trail={trail} />
+    <label>Текст у файлі<textarea ref={(element) => { input.current = element; element?.setCustomValidity(invalid ? 'Перевірте характеристики у фігурних дужках.' : ''); }} className="input et-text" rows={3} disabled={context.readOnly}
+      value={node.template} aria-invalid={invalid} aria-describedby="et-text-help" onSelect={(e) => { selection.current = [e.target.selectionStart, e.target.selectionEnd]; }}
+      onChange={(e) => update((value) => ({ ...value, template: e.target.value }))} /></label>
+    <p id="et-text-help" className="et-muted">Текст і розділові знаки зберігаються точно. Характеристики у {'{дужках}'} сервер замінить значеннями товару.</p>
+    {invalid && <p role="alert">Використайте всі додані характеристики, без невідомих назв чи незакритих дужок. Для вилучення скористайтеся кнопкою характеристики.</p>}
+    <div className="et-tokens" aria-label="Характеристики в тексті">{Object.entries(node.slots).map(([slot, value]) => <button key={slot} type="button" className="et-token" aria-pressed={selected === slot} onClick={() => { setSelected(selected === slot ? '' : slot); setRenamed(slot); setAdding(false); }}>
+      {fieldLabels[slot] || sourceLabel(context.definition, sourceOf(context.definition, value), context.registry) || slot}<span>{`{${slot}}`}</span>
+    </button>)}
+      {!context.readOnly && <button type="button" className="btn btn-outline px-3" onClick={() => { setAdding(!adding); setSelected(''); }}>+ Додати характеристику</button>}
+    </div>
+    {adding && <CharacteristicPicker node={node} context={context} onInsert={(source, table) => {
+      update((value) => insertCharacteristic(value, source, table, selection.current)); setAdding(false); input.current?.focus();
+    }} />}
+    {selected && Object.hasOwn(node.slots, selected) && <section className="et-slot" aria-label="Налаштування характеристики">
+      <div className="et-row"><h3>{label(selected)}</h3><button type="button" className="et-link" onClick={() => setSelected('')}>Закрити</button></div>
+      <TaskValue node={node.slots[selected]} trail={[...trail, 'slots', selected]} context={context} />
+      {!context.readOnly && <details className="et-secondary"><summary>Назва та вилучення характеристики</summary>
+        <label>Назва підстановки<input className="input" value={renamed} onChange={(e) => setRenamed(e.target.value)} /></label>
+        <button type="button" className="et-link" disabled={Boolean(slotNameError(renamed, node.slots, selected)) || renamed === selected} onClick={() => { update((value) => renameSlot(value, selected, renamed)); setSelected(renamed); }}>Перейменувати й оновити текст</button>
+        <button type="button" className="et-link" onClick={() => { update((value) => removeSlot({ ...value, template: value.template.split(`{${selected}}`).join('') }, selected)); setSelected(''); }}>Вилучити характеристику та її позначки з тексту</button>
+        {renamed && slotNameError(renamed, node.slots, selected) && <p role="alert">{slotNameError(renamed, node.slots, selected)}</p>}
+      </details>}
+    </section>}
   </div>;
-  const update = (key, next) => onChange({ ...value, [key]: next });
-  if (value.op === 'ref') {
-    const binding = context.definition.bindings?.find((b) => b.id === value.id);
-    return <div className="rounded border bg-amber-50 p-3 space-y-2"><p>{label}: спільне правило <code>{value.id}</code></p>
-      <button type="button" className="underline" onClick={() => context.openBinding(value.id)}>Відкрити спільне правило {value.id}</button>
-      {binding && value.id !== 'sku' && <button type="button" className="block underline" onClick={() => onChange(copyDefinition(binding.value))}>
-        Створити локальну копію правила {value.id}
-      </button>}
-      <p className="text-xs">Локальна копія змінює лише це посилання; вкладені посилання й таблиці залишаються спільними.</p>
-    </div>;
+}
+
+function Mapping({ node, trail, context }) {
+  const [newId, setNewId] = useState('');
+  const sourceId = sourceOf(context.definition, node.input);
+  const table = context.definition.tables[node.table];
+  if (!table) return <p role="alert">Таблицю відповідностей не знайдено. Відкрийте розширені правила.</p>;
+  const update = (transform) => context.mapping(trail, transform);
+  return <div className="et-mapping">
+    <p><strong>Звідки брати значення:</strong> {sourceLabel(context.definition, sourceId, context.registry)}</p>
+    <Scope context={context} trail={trail} table={node.table} />
+    <h3>Як записувати у файлі</h3><p className="et-muted">ID — збережене значення характеристики. Текст праворуч потрапить у файл.</p>
+    <div className="et-table-scroll"><table><thead><tr><th>Значення характеристики</th><th>Текст у файлі</th>{!context.readOnly && <th><span className="sr-only">Дії</span></th>}</tr></thead>
+      <tbody>{Object.entries(table).map(([id, value]) => <tr key={id}><th scope="row">ID {id}</th><td><Scalar disabled={context.readOnly} fixedType value={value} label={`Текст для ID ${id}`} onChange={(next) => update((entries) => ({ ...entries, [id]: next }))} /></td>
+        {!context.readOnly && <td><button type="button" className="et-link" aria-label={`Вилучити відповідність ${id}`} onClick={() => update((entries) => Object.fromEntries(Object.entries(entries).filter(([key]) => key !== id)))}>Вилучити</button></td>}</tr>)}</tbody></table></div>
+    {!context.readOnly && <details><summary>Додати відповідність</summary><label>ID характеристики<input className="input" value={newId} onChange={(e) => setNewId(e.target.value)} /></label>
+      <button type="button" className="btn btn-outline px-3" disabled={!newId || Object.hasOwn(table, newId) || ['__proto__', 'constructor', 'prototype'].includes(newId)} onClick={() => { update((entries) => ({ ...entries, [newId]: '' })); setNewId(''); }}>Додати відповідність</button></details>}
+    {node.otherwise && <details><summary>Якщо значення відсутнє або немає відповідності</summary><TaskValue node={node.otherwise} trail={[...trail, 'otherwise']} context={context} /></details>}
+    <details className="et-secondary"><summary>Змінити характеристику</summary><TaskValue node={node.input} trail={[...trail, 'input']} context={context} /></details>
+    <details className="et-secondary"><summary>Джерело та ID таблиці</summary><code>{sourceId} → {node.table}</code></details>
+  </div>;
+}
+
+function TaskValue({ node: original, trail: originalTrail = [], context }) {
+  const [branch, setBranch] = useState('');
+  const resolved = resolveNode(context.definition, original, originalTrail);
+  const { node, trail } = resolved;
+  const update = (transform) => context.update(trail, transform);
+  if (resolved.problem || !node || typeof node !== 'object') return <p>{resolved.problem || 'Власне значення. Доступне в розширених правилах.'}</p>;
+  if ((node.op === 'interpolate' && (typeof node.template !== 'string' || !record(node.slots)))
+    || (node.op === 'in' && !Array.isArray(node.values))
+    || (node.op === 'numericBand' && (!Array.isArray(node.bands) || node.bands.some((band) => !record(band))))) return <p role="note">Непідтримувана структура «{node.op}». Визначення збережено без змін; відкрийте розширені правила.</p>;
+  if (trail.some((step) => step.ref === 'sku')) return <p>Артикул береться зі збереженого товару. Ідентифікаційне правило захищено.</p>;
+  if (node.op === 'literal' && Object.hasOwn(node, 'value')) return <><Scope context={context} trail={trail} /><Scalar disabled={context.readOnly} value={node.value} label="Значення" onChange={(value) => update((current) => ({ ...current, value }))} /></>;
+  if (node.op === 'interpolate' && typeof node.template === 'string' && node.slots && !Array.isArray(node.slots)) return <TextComposer node={node} trail={trail} context={context} />;
+  if (['when', 'require'].includes(node.op)) {
+    const primary = node.op === 'when' ? 'then' : 'value';
+    const selected = branch || primary;
+    return <div><div className="et-branches" aria-label="Умовне значення">{[[primary, 'Основний текст'], ['if', 'Умова'], [node.op === 'when' ? 'else' : 'error', node.op === 'when' ? 'Інакше' : 'Якщо перевірку не пройдено']].map(([key, title]) =>
+      <button type="button" key={key} aria-pressed={selected === key} onClick={() => setBranch(key)}>{title}</button>)}</div>
+      <TaskValue key={selected} node={node[selected]} trail={[...trail, selected]} context={context} />
+      <p className="et-muted et-guard">Умова та запасна гілка зберігаються під час редагування тексту.</p></div>;
   }
-  return <fieldset className="min-w-0 space-y-3 rounded border border-slate-200 p-3">
-    <legend className="max-w-full break-words text-sm font-semibold">{label}{value.op ? ` · ${operationLabels[value.op]}` : ''}</legend>
-    {Object.entries(value).filter(([key]) => key !== 'op').map(([key, item]) => {
-      const fieldLabel = labelFor(key);
-      if (value.op === 'source' && key === 'id') return <SourceSelect key={key} label="Джерело" value={item} onChange={(next) => update(key, next)} {...context} sources={context.definition.sources} />;
-      if (value.op === 'lookup' && key === 'table') return <div key={key}><label className="block text-sm">Таблиця відповідностей<select className="input" value={item} onChange={(e) => update(key, e.target.value)}>
-        {Object.keys(context.definition.tables || {}).map((name) => <option key={name}>{name}</option>)}
-      </select></label><button type="button" className="underline text-sm" onClick={() => context.openTable(item)}>Редагувати спільну таблицю {item}</button></div>;
-      if (value.op === 'interpolate' && key === 'template') {
-        const declared = Object.keys(value.slots);
-        const used = [...item.matchAll(/\{([A-Za-z0-9_]+)\}/g)].map((m) => m[1]);
-        const missing = declared.filter((slot) => !used.includes(slot));
-        const unknown = used.filter((slot) => !declared.includes(slot));
-        const validationError = missing.length || unknown.length || /[{}]/.test(item.replace(/\{[A-Za-z0-9_]+\}/g, ''))
-          ? `Текст із підстановками: використайте оголошені слоти ${declared.map((s) => `{${s}}`).join(', ')} без невідомих слотів чи незакритих дужок.` : '';
-        return <Scalar key={key} value={item} label={fieldLabel} fixedType validationError={validationError} onChange={(next) => update(key, next)} />;
-      }
-      if (value.op && fixedFields.has(key)) return <p key={key} className="break-words text-xs text-slate-500">{fieldLabel}: {String(item)} (контракт)</p>;
-      return <ValueForm key={key} value={item} label={fieldLabel} context={context} path={`${path}.${key}`}
-        newItem={key === 'bands' ? { min: null, max: null, minInclusive: true, maxInclusive: true, value: '' }
-          : key === 'items' ? { op: 'literal', value: ['all', 'any'].includes(value.op) ? true : value.op === 'firstPresent' ? null : '' } : undefined}
-        fixedType={['template', 'delimiter', 'allowed'].includes(key)} onChange={(next) => update(key, next)} />;
-    })}
-    {value.op === 'interpolate' && <SlotControls node={value} onChange={onChange} context={context} />}
-  </fieldset>;
+  if (node.op === 'lookup') return <Mapping node={node} trail={trail} context={context} />;
+  if (node.op === 'source') return <><Scope context={context} trail={trail} /><label>Звідки брати значення<select className="input" disabled={context.readOnly} value={node.id} onChange={(e) => update((value) => ({ ...value, id: e.target.value }))}>
+    <option value={node.id}>{sourceLabel(context.definition, node.id, context.registry)}</option>{Object.entries(context.definition.sources).filter(([id, source]) => id !== node.id && (source.kind === 'product' || source.category === context.group)).map(([id]) => <option key={id} value={id}>{sourceLabel(context.definition, id, context.registry)}</option>)}
+  </select></label></>;
+  if (['text', 'semanticKey', 'numberText', 'decimalText', 'present', 'not'].includes(node.op) && node.input) return <>
+    {['present', 'not'].includes(node.op) && <p>{node.op === 'present' ? 'Значення має бути заповнене' : 'Зворотна умова'}</p>}
+    <TaskValue node={node.input} trail={[...trail, 'input']} context={context} />
+    <details className="et-secondary"><summary>Формат і обробка значення</summary><p>{node.format || node.policy || 'Збережений формат'}</p>
+      {Object.hasOwn(node, 'trim') && <Scalar disabled={context.readOnly} value={node.trim} fixedType label="Прибирати крайні пробіли" onChange={(trim) => update((value) => ({ ...value, trim }))} />}
+      {node.error && <TaskValue node={node.error} trail={[...trail, 'error']} context={context} />}</details></>;
+  if (['firstPresent', 'join', 'all', 'any'].includes(node.op) && Array.isArray(node.items)) return <>
+    <Scope context={context} trail={trail} /><p>{({ firstPresent: 'Використати перше заповнене значення, зверху вниз.', join: 'Об’єднати значення в цьому порядку.', all: 'Мають виконуватися всі умови.', any: 'Достатньо однієї умови.' })[node.op]}</p>
+    {node.items.map((item, index) => <details key={index} className="et-sequence"><summary>{index + 1}. {summary(context.definition, item)}</summary>
+      <TaskValue node={item} trail={[...trail, 'items', index]} context={context} />
+      {!context.readOnly && <div className="et-actions"><button type="button" disabled={!index} onClick={() => update((value) => ({ ...value, items: moveItem(value.items, index, -1) }))}>Вище</button><button type="button" disabled={index === node.items.length - 1} onClick={() => update((value) => ({ ...value, items: moveItem(value.items, index, 1) }))}>Нижче</button></div>}
+    </details>)}{node.op === 'join' && <Scalar disabled={context.readOnly} fixedType value={node.delimiter} label="Роздільник" onChange={(delimiter) => update((value) => ({ ...value, delimiter }))} />}</>;
+  if (node.op === 'numericBand' && Array.isArray(node.bands)) return <><Scope context={context} trail={trail} /><TaskValue node={node.input} trail={[...trail, 'input']} context={context} />
+    {node.bands.map((band, index) => <details key={index} className="et-sequence"><summary>Діапазон {index + 1}: {band.min ?? '−∞'} … {band.max ?? '+∞'}</summary>
+      {Object.entries(band).map(([key, value]) => <Scalar disabled={context.readOnly} key={key} value={value} label={label(key)} onChange={(next) => context.update([...trail, 'bands', index], (current) => ({ ...current, [key]: next }))} />)}
+    </details>)}{node.outside && <details><summary>Поза діапазонами</summary><TaskValue node={node.outside} trail={[...trail, 'outside']} context={context} /></details>}</>;
+  if (node.op === 'eq') return <><p>Значення повинні збігатися</p><TaskValue node={node.left} trail={[...trail, 'left']} context={context} /><TaskValue node={node.right} trail={[...trail, 'right']} context={context} /></>;
+  if (node.op === 'in') return <><TaskValue node={node.input} trail={[...trail, 'input']} context={context} />{node.values.map((value, index) => <Scalar disabled={context.readOnly} key={index} fixedType value={value} label={`Допустиме значення ${index + 1}`} onChange={(next) => update((current) => ({ ...current, values: current.values.map((entry, i) => i === index ? next : entry) }))} />)}</>;
+  if (node.op === 'error') return <><p>Повідомлення, якщо товар не готовий:</p><TaskValue node={node.message} trail={[...trail, 'message']} context={context} /></>;
+  return <div role="note">Власне правило «{node.op || 'невідоме'}» збережено без змін. Для перегляду всіх властивостей відкрийте «Розширені правила».</div>;
+}
+
+function FieldInspector({ definition, cellPath, onChange, registry, readOnly }) {
+  const [scope, setScope] = useState('local');
+  const [error, setError] = useState('');
+  const column = cellPath[5];
+  const group = definition.groups[cellPath[1]];
+  const row = group.rows[cellPath[3]];
+  const apply = (action) => { if (readOnly) return; try { onChange(action()); setError(''); } catch (e) { setError(e.message); } };
+  const context = { definition, cellPath, scope, setScope, registry, readOnly, group: group.route,
+    update: (trail, transform) => apply(() => editField(definition, cellPath, trail, scope, transform)),
+    mapping: (trail, transform) => apply(() => editMapping(definition, cellPath, trail, scope, transform)) };
+  return <section className="et-inspector" aria-label="Редактор поля">
+    <header className="et-inspector-heading"><div><p className="et-eyebrow">{fieldSection(column)}</p><h2>{label(column)}</h2><code>{column}</code></div>
+      {!readOnly && <details><summary>Порядок у файлі</summary><div className="et-actions">
+        <button type="button" disabled={group.columns.indexOf(column) <= 0} onClick={() => onChange({ ...definition, groups: definition.groups.map((item, i) => i === cellPath[1] ? { ...item, columns: moveItem(item.columns, item.columns.indexOf(column), -1) } : item) })}>Перемістити колонку вище</button>
+        <button type="button" disabled={group.columns.indexOf(column) === group.columns.length - 1} onClick={() => onChange({ ...definition, groups: definition.groups.map((item, i) => i === cellPath[1] ? { ...item, columns: moveItem(item.columns, item.columns.indexOf(column), 1) } : item) })}>Перемістити колонку нижче</button>
+      </div></details>}
+    </header>{error && <p role="alert" className="danger-panel p-3">{error}</p>}
+    <div className="et-field-value">
+      {protectedCells.has(column) ? <p>Захищене ідентифікаційне поле: {column}.</p> : Object.hasOwn(row.cells, column) ? <TaskValue node={at(definition, cellPath)} context={context} /> : <>
+        <p>Порожня комірка. Значення з основного рядка не підставляється.</p>{!readOnly && <button type="button" className="btn btn-outline px-3" onClick={() => context.update([], () => ({ op: 'literal', value: '' }))}>Додати текст у цю комірку</button>}</>}
+    </div></section>;
 }
 
 export function DefinitionEditor({ definition, onChange, registry, readOnly = false }) {
   const [groupIndex, setGroupIndex] = useState(0);
   const [rowIndex, setRowIndex] = useState(0);
   const [column, setColumn] = useState('name');
-  const [bindingId, setBindingId] = useState('');
-  const [tableId, setTableId] = useState('');
-  const [section, setSection] = useState('columns');
-  if (!definition?.groups || !Array.isArray(definition.groups) || definition.formatVersion !== 1
-    || !record(definition.sources) || Object.values(definition.sources).some((s) => !record(s))
-    || !record(definition.tables) || Object.values(definition.tables).some((t) => !record(t))
-    || !record(definition.questionContracts) || Object.values(definition.questionContracts).some((q) => !record(q) || !record(q.rule) || !Array.isArray(q.allowed))
-    || !Array.isArray(definition.bindings) || definition.bindings.some((b) => !record(b) || typeof b.id !== 'string' || !record(b.value))
-    || definition.groups.some((g) => !record(g) || !Array.isArray(g.columns) || !Array.isArray(g.rows) || g.rows.some((r) => !record(r) || !record(r.cells)))
-    || definition.evaluatorVersion !== 'magento-declarative-1' || definition.outputContract !== 'magento-products-v1') {
-    return <div role="note">Цей формат ще не підтримується формами. Визначення збережено без змін.
-      <pre className="overflow-auto">{JSON.stringify(definition, null, 2)}</pre></div>;
-  }
-  const group = definition.groups[groupIndex];
-  if (!group?.rows?.[rowIndex]) return <p>Непідтримувана структура групи збережена без змін.</p>;
-  const row = group.rows[rowIndex];
-  const change = (path, value) => onChange(replaceAt(definition, path, value));
-  const context = { definition, registry, group: group.route,
-    openBinding: (id) => { setBindingId(id); setSection('bindings'); },
-    openTable: (id) => { setTableId(id); setSection('tables'); } };
-  const bindingIndex = definition.bindings.findIndex((b) => b.id === bindingId);
-  return <form id="template-definition-form" onSubmit={(e) => e.preventDefault()} className="space-y-4 break-words">
-    <div className="grid gap-3 sm:grid-cols-3">
-      <label>Група<select className="input" value={groupIndex} onChange={(e) => setGroupIndex(Number(e.target.value))}>
-        {definition.groups.map((g, i) => <option key={g.route} value={i}>{g.name} ({g.route})</option>)}
-      </select></label>
-      <label>Рядок<select className="input" value={rowIndex} onChange={(e) => setRowIndex(Number(e.target.value))}><option value={0}>Базовий</option><option value={1}>EN</option></select></label>
-      <label>Розділ редактора<select className="input" value={section} onChange={(e) => setSection(e.target.value)}>
-        <option value="columns">Колонки й значення</option><option value="bindings">Спільні правила</option><option value="tables">Спільні таблиці</option><option value="contracts">Обов’язковість і видимість</option><option value="sources">Джерела та одиниці</option>
-      </select></label>
-    </div>
-    <p className="text-sm text-slate-600">Маршрути, склад колонок та ідентифікаційні SKU/мова/тип захищені. Порожні EN-комірки не успадковують базові значення.</p>
-    {section === 'columns' && <>
-      <label>Колонка<select className="input" value={column} onChange={(e) => setColumn(e.target.value)}>
-        {!group.columns.includes(column) && <option value={column}>Оберіть колонку</option>}
-        {group.columns.map((key) => <option key={key} value={key}>{labelFor(key)} ({key})</option>)}
-      </select></label>
-      <fieldset disabled={readOnly} className="space-y-3">
-        <div className="flex gap-3"><button type="button" className="btn btn-outline px-3" disabled={group.columns.indexOf(column) <= 0}
-          onClick={() => change(['groups', groupIndex, 'columns'], moveItem(group.columns, group.columns.indexOf(column), -1))}>Перемістити колонку вище</button>
-        <button type="button" className="btn btn-outline px-3" disabled={group.columns.indexOf(column) < 0 || group.columns.indexOf(column) === group.columns.length - 1}
-          onClick={() => change(['groups', groupIndex, 'columns'], moveItem(group.columns, group.columns.indexOf(column), 1))}>Перемістити колонку нижче</button></div>
-        <p className="text-xs break-words">Порядок: {group.columns.join(' → ')}</p>
-        {protectedCells.has(column) ? <p>Захищене ідентифікаційне поле: {column}.</p>
-          : Object.hasOwn(row.cells, column) ? <ValueForm value={row.cells[column]} label={labelFor(column)} context={context}
-            onChange={(next) => change(['groups', groupIndex, 'rows', rowIndex, 'cells', column], next)} />
-            : <><p>Порожня комірка. У визначенні відсутня; виводиться порожній текст.</p>
-              {group.columns.includes(column) && <button type="button" className="btn btn-outline px-3" onClick={() => change(['groups', groupIndex, 'rows', rowIndex, 'cells', column], { op: 'literal', value: '' })}>Додати текст у цю комірку</button>}</>}
-        {Object.hasOwn(row.cells, column) && !['sku', 'store_view_code', 'name', 'attribute_set_code', 'product_type'].includes(column) && <button type="button" className="underline text-sm" onClick={() => change(['groups', groupIndex, 'rows', rowIndex, 'cells'], Object.fromEntries(Object.entries(row.cells).filter(([key]) => key !== column)))}>Прибрати значення комірки (порожній вивід)</button>}
-      </fieldset>
-    </>}
-    {section === 'bindings' && <>
-      <label>Спільне правило<select className="input" value={bindingId} onChange={(e) => setBindingId(e.target.value)}><option value="">Оберіть правило</option>
-        {definition.bindings.map((b) => <option key={b.id} value={b.id}>{b.group} · {labelFor(b.id.split('.').at(-1))} ({b.id})</option>)}
-      </select></label>
-      {bindingIndex >= 0 && <><p className="rounded bg-amber-50 p-3 text-sm">Спільна зміна вплине на: {consumers(definition, 'ref', bindingId).join('; ') || 'лише перевірки або незадіяне правило'}.</p>
-        <fieldset disabled={readOnly || bindingId === 'sku'}><ValueForm value={definition.bindings[bindingIndex].value} label={`Правило ${bindingId}`}
-          context={{ ...context, group: definition.bindings[bindingIndex].group }} onChange={(next) => change(['bindings', bindingIndex, 'value'], next)} /></fieldset></>}
-    </>}
-    {section === 'tables' && <>
-      <label>Спільна таблиця<select className="input" value={tableId} onChange={(e) => setTableId(e.target.value)}><option value="">Оберіть таблицю</option>
-        {Object.keys(definition.tables).map((name) => <option key={name}>{name}</option>)}
-      </select></label>
-      {Object.hasOwn(definition.tables, tableId) && <><p className="rounded bg-amber-50 p-3 text-sm">Спільна зміна вплине на: {consumers(definition, 'table', tableId).join('; ') || 'незадіяну таблицю'}.</p>
-        <fieldset disabled={readOnly} className="space-y-3">
-          <button type="button" className="btn btn-outline px-3" onClick={() => {
-            let index = 1; while (Object.hasOwn(definition.tables, `${tableId}.copy${index}`)) index++;
-            const id = `${tableId}.copy${index}`;
-            change(['tables'], { ...definition.tables, [id]: copyDefinition(definition.tables[tableId]) }); setTableId(id);
-          }}>Створити окрему копію таблиці</button>
-          <p className="text-xs">Копія не змінює споживачів. Щоб використати її локально, оберіть цю копію в потрібному правилі; для комірки спочатку створіть локальну копію правила.</p>
-          <TableEntries key={tableId} table={definition.tables[tableId]} onChange={(next) => change(['tables', tableId], next)} />
-        </fieldset></>}
-    </>}
-    {section === 'contracts' && <div className="space-y-3">{Object.entries(definition.questionContracts).filter(([, q]) => definition.sources[q.source]?.category === group.route).map(([id, contract]) =>
-      <details key={id} className="rounded border p-3"><summary>{id} · {contract.required ? 'обов’язкове' : 'необов’язкове'}</summary>
-        <p className="text-xs">Джерело: {contract.source}; наявність у момент фіксації: {String(contract.exists)}. Поточний каталог не оновлює ці правила автоматично.</p>
-        <fieldset disabled={readOnly} className="space-y-3 mt-3">
-          <Scalar value={contract.required} label="Обов’язкове" fixedType onChange={(v) => change(['questionContracts', id, 'required'], v)} />
-          <RuleForm value={contract.rule} context={context} onChange={(v) => change(['questionContracts', id, 'rule'], v)} />
-          <ValueForm value={contract.allowed} label="Зафіксовані семантичні ID" context={context} fixedType path="allowed" onChange={(v) => change(['questionContracts', id, 'allowed'], v)} />
-        </fieldset>
-      </details>)}</div>}
-    {section === 'sources' && <ul className="space-y-3">{Object.entries(definition.sources).filter(([, s]) => s.kind === 'product' || s.category === group.route).map(([id, source]) =>
-      <li key={id} className="rounded border p-3 break-words"><strong>{id}</strong> · {source.kind} · {source.category || 'товар'} · {source.key || source.field}
-        <p className="text-sm">{registry?.units?.[source.field] || 'Збережені значення; без перетворення одиниць'}</p>
-        {source.aliases?.length > 0 && <p>Аліаси збережені без змін; сервер перевіряє їх походження: {JSON.stringify(source.aliases)}</p>}
-      </li>)}</ul>}
-    <details><summary>Технічне визначення (лише читання)</summary><pre className="max-h-96 overflow-auto text-xs">{JSON.stringify(definition, null, 2)}</pre></details>
+  const [query, setQuery] = useState('');
+  const [advanced, setAdvanced] = useState(false);
+  const supported = definition?.formatVersion === 1 && definition.evaluatorVersion === 'magento-declarative-1' && definition.outputContract === 'magento-products-v1'
+    && Array.isArray(definition.groups) && Array.isArray(definition.bindings) && definition.bindings.every((binding) => record(binding) && typeof binding.id === 'string' && record(binding.value))
+    && record(definition.sources) && Object.values(definition.sources).every(record)
+    && record(definition.tables) && Object.values(definition.tables).every(record)
+    && definition.groups.every((item) => record(item) && Array.isArray(item.columns) && item.columns.every((key) => typeof key === 'string') && Array.isArray(item.rows) && item.rows.every((entry) => record(entry) && record(entry.cells)));
+  const group = definition?.groups?.[groupIndex];
+  const row = group?.rows?.[rowIndex];
+  if (!supported || !Array.isArray(group?.columns) || !row?.cells) return <div role="note">Цей формат ще не підтримується формами. Визначення збережено без змін.<details><summary>Технічне визначення</summary><pre>{JSON.stringify(definition, null, 2)}</pre></details></div>;
+  if (advanced) return <div className="et-advanced"><div className="et-row"><button type="button" className="et-link" onClick={() => setAdvanced(false)}>← Поля експорту</button><span>{groupNames[group.route] || group.name} / {label(column)} / Розширені правила</span></div>
+    <AdvancedDefinitionEditor definition={definition} onChange={onChange} registry={registry} readOnly={readOnly} initialGroup={groupIndex} initialRow={rowIndex} initialColumn={column} /></div>;
+  const selectedColumn = group.columns.includes(column) ? column : group.columns[0];
+  return <form id="template-definition-form" className="et-fields" onSubmit={(e) => e.preventDefault()}>
+    <div className="et-filters"><label>Категорія<select className="input" value={groupIndex} onChange={(e) => { setGroupIndex(Number(e.target.value)); setQuery(''); }}>{definition.groups.map((item, i) => <option key={item.route} value={i}>{groupNames[item.route] || item.name}</option>)}</select></label>
+      <label>Мова<select className="input" value={rowIndex} onChange={(e) => setRowIndex(Number(e.target.value))}>{group.rows.map((item, i) => <option key={item.id} value={i}>{item.id === 'english' ? 'English' : 'Українська / основний рядок'}</option>)}</select></label>
+      <p className="et-muted">Показано поля однієї категорії. Шаблон зберігає всі {definition.groups.length} категорій.</p></div>
+    <div className="et-field-layout"><aside className="et-field-nav" aria-label="Поля експорту">
+      <label className="et-search">Знайти поле<input className="input" type="search" placeholder="Назва, колір, SEO…" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
+      {['Основне', 'Характеристики', 'Категорії', 'SEO'].map((section) => {
+        const columns = group.columns.filter((key) => fieldSection(key) === section && `${label(key)} ${key}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+        return columns.length > 0 && <div key={section}><h3>{section}</h3>{columns.map((key) => <button type="button" key={key} aria-pressed={selectedColumn === key} onClick={() => setColumn(key)}>
+          <strong>{label(key)}</strong><span>{summary(definition, row.cells[key])}</span><code>{key}</code></button>)}</div>;
+      })}
+      {!group.columns.some((key) => `${label(key)} ${key}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())) && <p>Полів не знайдено.</p>}
+    </aside><FieldInspector key={`${groupIndex}/${rowIndex}/${selectedColumn}`} definition={definition} cellPath={['groups', groupIndex, 'rows', rowIndex, 'cells', selectedColumn]} onChange={onChange} registry={registry} readOnly={readOnly} /></div>
+    <footer className="et-editor-footer"><button type="button" className="et-link" onClick={() => setAdvanced(true)}>Розширені правила</button><span>Умови, спільні правила, джерела та технічне визначення</span></footer>
   </form>;
 }
