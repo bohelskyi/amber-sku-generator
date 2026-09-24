@@ -57,10 +57,13 @@ function TemplateWorkspace({ permissions }) {
   const [candidate, setCandidate] = useState(null);
   const [versionId, setVersionId] = useState('');
   const [dirty, setDirty] = useState(false);
+  const [panelPending, setPanelPending] = useState(false);
+  const [editorEpoch, setEditorEpoch] = useState(0);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState(null);
   const [validation, setValidation] = useState(null);
   const [preview, setPreview] = useState(null);
+  const [supportProposal, setSupportProposal] = useState(null);
   const [productIds, setProductIds] = useState('');
   const [sampleProducts, setSampleProducts] = useState([]);
   const [fieldSelection, setFieldSelection] = useState({ groupIndex: 0, rowIndex: 0, column: 'name' });
@@ -105,8 +108,8 @@ function TemplateWorkspace({ permissions }) {
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
 
-  const clearEvidence = () => { setValidation(null); setPreview(null); setMessage(''); };
-  const edit = (next) => { generation.current++; setDefinition(next); setDirty(true); setValidation(null); setMessage(''); };
+  const clearEvidence = () => { setValidation(null); setPreview(null); setSupportProposal(null); setMessage(''); };
+  const edit = (next) => { generation.current++; setDefinition(next); setDirty(true); setValidation(null); setSupportProposal(null); setMessage(''); };
   async function run(label, task, apply, onError) {
     if (operation.current) return;
     if (!document.getElementById('template-definition-form')?.reportValidity() && document.getElementById('template-definition-form')) return;
@@ -136,13 +139,15 @@ function TemplateWorkspace({ permissions }) {
     setFamilies((items) => items?.map((item) => item.id === family.id ? { ...item, draft_revision: draft.revision } : item));
   };
   const selectedVersion = family?.versions?.find((v) => v.id === versionId);
-  const exactSaved = family && !dirty && !versionId && !busy;
+  const exactSaved = family && !dirty && !panelPending && !versionId && !busy;
   const discard = () => {
+    setPanelPending(false); setEditorEpoch((v) => v + 1);
     generation.current++; setDirty(false); clearEvidence(); setError(null);
     if (family) setDefinition(family.draft.definition); else { setCandidate(null); setDefinition(null); setScreen('list'); }
   };
   const save = () => {
     if (!manage || versionId) return false;
+    if (panelPending) { setError(new Error('Спочатку застосуйте або скасуйте введені налаштування колонки.')); return false; }
     if (family) return run('Збереження', () => api.save(family.id, { expectedRevision: family.draft.revision, definition }), saved);
     if (!name.trim() || !/^[a-z][a-z0-9_-]{0,79}$/.test(key)) { setError(new Error('Вкажіть назву та сталий ключ шаблону перед збереженням.')); return false; }
     return run('Створення чернетки', () => api.create({ key, displayName: name, definition }), (data) => {
@@ -150,7 +155,7 @@ function TemplateWorkspace({ permissions }) {
       setFamilies((items) => [...(items || []), { ...data, draft_revision: data.draft.revision, publication_count: 0 }]);
     });
   };
-  const navigation = useDirtyNavigation({ dirty, save: manage ? save : null, discard, busy: Boolean(busy) });
+  const navigation = useDirtyNavigation({ dirty: dirty || panelPending, save: manage ? save : null, discard, busy: Boolean(busy) });
   const openVersion = (id) => navigation.request(() => {
     generation.current++; setVersionId(id); clearEvidence();
     setDefinition(id ? family.versions.find((v) => v.id === id).definition : family.draft.definition);
@@ -185,6 +190,11 @@ function TemplateWorkspace({ permissions }) {
       <label>Назва шаблону<input autoFocus className="input" disabled={Boolean(busy)} value={name} onChange={(e) => { generation.current++; setName(e.target.value); }} maxLength={160} placeholder="Наприклад, Основний каталог" /></label>
       <details><summary>Додаткові налаштування</summary><label>Сталий ключ (латиниця, цифри, _ або -)<input className="input" disabled={Boolean(busy)} value={key} onChange={(e) => { generation.current++; setKey(e.target.value); }} pattern="[a-z][a-z0-9_-]{0,79}" /></label><p className="et-muted">Ключ підготовлено автоматично. Після створення він не змінюється.</p></details>
       {!name.trim() && <p className="et-muted">Вкажіть непорожню назву, щоб зберегти чернетку.</p>}
+      <label><input type="checkbox" disabled={Boolean(busy)} checked={Boolean(definition?.sourceSupport)} onChange={(e) => {
+        const policy = e.target.checked ? 'historical-source-support-v1' : undefined;
+        run('Вибір політики джерел', () => api.candidate(policy), (data) => { setCandidate(data); setDefinition(data.definition); clearEvidence(); });
+      }} /> Історична підтримка NM / AR: доведений числовий placeholder і відкладені значення</label>
+      <p className="et-muted">Це вибір для нової чернетки. Для збереженої чернетки використовуйте підготовку й явне застосування оновлення у вкладці «Перевірка».</p>
       {!/^[a-z][a-z0-9_-]{0,79}$/.test(key) && <p role="alert">Ключ має починатися з малої латинської літери та містити до 80 малих латинських літер, цифр, _ або -.</p>}
       <SourceDiagnostics diagnostics={candidate?.diagnostics} definition={definition} registry={registry} canSave />
       <button className="btn btn-primary px-4" disabled={Boolean(busy) || !name.trim() || !/^[a-z][a-z0-9_-]{0,79}$/.test(key)} onClick={save}>Створити й зберегти чернетку</button>
@@ -200,18 +210,34 @@ function TemplateWorkspace({ permissions }) {
         <div className="et-title-line"><h1>{family?.display_name || 'Завантаження шаблону…'}</h1><span className="et-badge">{selectedVersion ? 'Опублікована v' + selectedVersion.versionNumber + ' · лише читання' : dirty ? 'Незбережена чернетка' : 'Чернетка'}</span>
           {family && <span className="et-muted" role="status">{selectedVersion ? 'Незмінна версія' : dirty ? 'Є незбережені зміни' : 'Збережено · ревізія ' + family.draft.revision}</span>}</div>
         {family && !selectedVersion && !validation?.valid && <p className="et-muted">Готовність до публікації не підтверджено. Збереження чернетки не перевіряє джерела та не створює експорт.</p>}
-        <nav className="et-tabs" aria-label="Розділи шаблону">{[['fields', 'Поля експорту'], ['check', 'Перевірка'], ['versions', 'Версії']].map(([id, title]) => <button key={id} aria-current={view === id ? 'page' : undefined} onClick={() => setView(id)}>{title}</button>)}</nav>
+        <nav className="et-tabs" aria-label="Розділи шаблону">{[['fields', 'Поля експорту'], ['check', 'Перевірка'], ['versions', 'Версії']].map(([id, title]) => <button key={id} aria-current={view === id ? 'page' : undefined} onClick={() => { if (panelPending) navigation.request(() => setView(id)); else setView(id); }}>{title}</button>)}</nav>
       </header>
       {family && <>
         <div hidden={view !== 'fields'} className="card et-editor-surface">
           {manage && !selectedVersion && definition?.outputContract === 'magento-products-v1' && <div className="et-grid-tools"><p>Історичний фіксований v1. Оновлення збереже правила, локальні зміни та порожні EN-клітинки.</p><button className="btn btn-outline px-3" disabled={!exactSaved} onClick={() => run('Оновлення контракту колонок', () => api.upgrade(family.id, precondition()), saved)}>Увімкнути редагування колонок · v2</button></div>}
-          <DefinitionEditor key={family.id + '/' + versionId} definition={definition} onChange={edit} registry={registry} loadSource={api.sourceDetails} diagnostics={sourceDiagnostics} focusField={focusField} onFieldSelect={setFieldSelection} readOnly={!manage || Boolean(selectedVersion) || (Boolean(busy) && !['Перевірка', 'Тест чернетки'].includes(busy))} />
-          <aside className="et-result-hint"><div><h3>Результат на товарі</h3><p>{dirty ? 'Збережіть зміни, щоб отримати актуальний результат.' : preview ? 'Останній тест: ревізія ' + preview.revision + ', товари ' + preview.sampleIds?.join(', ') + '.' : 'Перевірте збережену чернетку на ID наявних товарів.'}</p></div><button className="btn btn-outline px-3" onClick={() => setView('check')}>Перейти до перевірки</button></aside>
+          <DefinitionEditor key={family.id + '/' + versionId + '/' + editorEpoch} definition={definition} onChange={edit} onPendingChange={setPanelPending} registry={registry} loadSource={api.sourceDetails} diagnostics={sourceDiagnostics} focusField={focusField} onFieldSelect={setFieldSelection} readOnly={!manage || Boolean(selectedVersion) || (Boolean(busy) && !['Перевірка', 'Тест чернетки'].includes(busy))} />
+          <aside className="et-result-hint"><div><h3>Результат на товарі</h3><p>{dirty ? 'Збережіть зміни, щоб отримати актуальний результат.' : preview ? 'Останній тест: ревізія ' + preview.revision + ', товари ' + preview.sampleIds?.join(', ') + '.' : 'Перевірте збережену чернетку на ID наявних товарів.'}</p></div><button className="btn btn-outline px-3" onClick={() => { if (panelPending) navigation.request(() => setView('check')); else setView('check'); }}>Перейти до перевірки</button></aside>
         </div>
         {view === 'check' && <section className="card et-check space-y-4">
           <h2>Перевірка шаблону</h2><p>Перевірка правил та результат на збережених товарах. Ці дії не створюють експорт.</p>
           {dirty && <p role="status">Є незбережені зміни. Збережіть чернетку перед перевіркою.</p>}
           {selectedVersion ? <p>Це опублікована версія. Створіть чернетку з цієї версії для перевірки на товарах.</p> : <>
+            {manage && <section aria-label="Підтримка джерел NM / AR">
+              <h3>Підтримка джерел NM / AR</h3>
+              <p>Оновлення зберігає колонки, порядок, назви та всі правила. Спочатку збережіть локальні зміни.</p>
+              <button className="btn btn-outline px-3" disabled={!exactSaved} onClick={() => run('Підготовка підтримки джерел', () => api.prepareSupport(family.id, precondition()), setSupportProposal)}>Підготувати оновлення підтримки джерел</button>
+              {supportProposal && <div>
+                <p>Підготовлено для ревізії {supportProposal.expectedRevision}. Чернетку ще не змінено.</p>
+                <p>NM.extra: числовий 0 дозволено як «Не обрано» лише після відтворення SKU за власною історичною схемою товару та перевірки необов’язкового питання. Рядок «0» не є сумісним placeholder.</p>
+                <p>AR.size: відкладені значення залишаються в каталозі та мапінгах, але не дозволяють експорт товару. Нова SKU-схема сама їх не активує.</p>
+                {Object.entries(supportProposal.changes || {}).map(([source, policy]) => <p key={source}>{source}: семантичні {policy.semanticValues.join(', ') || '—'}; відкладені {policy.deferredValues.join(', ') || '—'}.</p>)}
+                <p>Вихідні тексти не змінюються. Відсутні мапінги заповнюються окремо у формах полів. Після застосування повторіть перевірку й тест товарів.</p>
+                <SourceDiagnostics diagnostics={supportProposal.diagnostics} definition={supportProposal.definition} registry={registry} />
+                {!supportProposal.changed && <p role="status">Цю політику вже застосовано. Змін немає.</p>}
+                <button className="btn btn-primary px-3" disabled={!exactSaved || !supportProposal.changed} onClick={() => run('Застосування підтримки джерел', () => api.applySupport(family.id, { expectedRevision: supportProposal.expectedRevision, expectedDefinitionHash: supportProposal.expectedDefinitionHash, preparationHash: supportProposal.preparationHash }), saved)}>Застосувати оновлення підтримки джерел</button>
+                <button className="btn btn-outline px-3" disabled={Boolean(busy)} onClick={() => setSupportProposal(null)}>Скасувати оновлення</button>
+              </div>}
+            </section>}
             {manage && <button className="btn btn-outline px-3" disabled={!exactSaved} onClick={() => run('Перевірка', () => api.validate(family.id, precondition()), setValidation,
               (error) => setValidation({ revision: family.draft.revision, definitionHash: family.draft.definitionHash, error }))}>Перевірити шаблон</button>}
             {validation && <section aria-label="Повна перевірка шаблону">

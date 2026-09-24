@@ -413,3 +413,74 @@ from one complete response, 50 rows at a time; normal export is not limited to
 
 See [the implementation and verification record](EXPORT_TEMPLATES_PR4.md#table-first-implementation--2026-09-24)
 for exact contract, source-support boundary, migration and visual-QA limitations.
+
+## Opt-in historical source support — 2026-09-24
+
+`sourceSupport.version: historical-source-support-v1` pairs only with
+`evaluatorVersion: magento-declarative-2`, independently of either fixed
+`magento-products-v1` or editable `magento-products-columns-v2` output. Definitions
+without the extension keep evaluator 1, their original strict claims, hashes and
+execution. This is new opt-in behavior, not retroactive parity with the ten legacy
+goldens or a change to the system exporter / dedicated price stream.
+
+The closed `sourceSupport.sources` object declares the storage identities
+`NM.extra` and `AR.size` when present. Each has `semanticValues`, `deferredValues`
+(decimal ID strings), and `placeholder` (`numeric-zero-v1` only for NM.extra,
+`none` for AR.size). Existing `questionContracts.allowed` remains the exact
+captured catalog membership; existing display labels, tables and row rules are
+preserved. It no longer asserts semantic support for these explicitly governed
+sources. Semantic values must have immutable historical evidence; only the
+approved AR IDs 29/30/31 may be deferred. Unknown/incomplete/conflicting policies,
+other unresolved claims and unverified aliases remain blocking. Lookup outputs
+are never source authority. All declaration fields participate in canonical JSONB
+and definition/compilation identity.
+
+Actual consumed reads, including custom columns, duplicated descriptors, refs,
+lookups, catalog conditions and readiness, use one lazy support check. The server
+batches the associated immutable schemas on the existing transaction; the pure
+evaluator caches one historical reconstruction per evaluated product. JSON proof
+flags cannot authorize a product. Missing/null/blank handling stays unchanged.
+NM numeric zero requires category/schema ID/encoded version agreement, an optional
+historical extra question, no semantic-zero option or conflicting all-zero code,
+and successful `decodeStoredSkuAnswers` reconstruction with `is_placeholder=true`
+and `value_id=null`. Exact string `"0"` is **not** a placeholder. A genuine semantic
+zero (numeric or exact string) follows the normal supported semantic path, including
+own-schema reconstruction. Other zero sources and calibration remain unchanged.
+
+AR values need both frozen semantic support and matching reconstruction in their
+own schema. Deferred mappings may publish, but cannot export a present deferred
+value, even after a later SKU schema includes it. Promotion requires explicitly
+moving that ID from deferredValues into semanticValues in a new draft/publication,
+plus historical and actual product evidence. Existing AR membership/post-check
+still controls readiness. The support update never writes mappings: approved
+29→75×78, 30→74×80, 31→70×70 entries are retained **if present**, including exact
+whitespace; missing entries remain ordinary editable mapping/readiness work.
+
+Normal UI for an existing saved draft: **Перевірка → Підготувати оновлення
+підтримки джерел → Застосувати оновлення підтримки джерел**. Save/cancel local
+column work first. Preparation is read-only and displays a detached summary;
+application requires the original revision/hash and preparation fingerprint,
+rechecks coherent evidence, then uses the existing authorized CAS/audit transaction.
+Stale evidence conflicts; repeated preparation/application of an unchanged policy
+does not increment revisions or promote new live options. Successful application
+invalidates preview evidence. Output contract, dynamic order, labels, custom
+base/EN cells, names, mappings, local references and readiness relationships remain
+exact. Published definitions require cloning into a draft first. New candidates
+offer the explicit **Історична підтримка NM / AR** checkbox; the read-only system
+profile continues describing evaluator 1 / the unchanged legacy exporter.
+
+API commands are POST `/:id/draft/source-support/prepare` with saved
+`expectedRevision` / `expectedDefinitionHash`, and POST
+`/:id/draft/source-support/apply` with those fields plus `preparationHash`, below
+`/api/admin/export-templates`. Both require `export_templates.manage` and the
+existing active-user/CSRF boundary. GET `/candidate?supportPolicy=historical-source-support-v1`
+prepares a detached new candidate without writing. Preparation is not validation
+or publication. Unknown policy versions fail closed.
+
+Draft samples retain selected-group source scope. Published preview, direct capture
+and shared-session preparation/final capture use the same support mechanism;
+policy hash, product association and full relevant historical schema facts bind
+the existing fingerprint. Capture rechecks locked products without changing lock
+ordering, atomic result links, exposure or cursors. Failed represented products
+block complete capture. Completed retries/downloads/confirmation continue using
+stored evidence and bytes, never today's policy.

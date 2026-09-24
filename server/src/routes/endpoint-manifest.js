@@ -72,6 +72,8 @@ const ENDPOINT_MANIFEST = Object.freeze([
   endpoint('GET', '/admin/export-templates/sources', 'export_templates.view'),
   endpoint('GET', '/admin/export-templates/system', 'export_templates.view'),
   endpoint('POST', '/admin/export-templates/:id/draft/upgrade-columns', 'export_templates.manage'),
+  endpoint('POST', '/admin/export-templates/:id/draft/source-support/prepare', 'export_templates.manage'),
+  endpoint('POST', '/admin/export-templates/:id/draft/source-support/apply', 'export_templates.manage'),
   endpoint('GET', '/admin/export-templates/source-details', 'export_templates.view'),
   Object.freeze({ ...endpoint('GET', '/admin/export-templates/sample-products', 'export_templates.manage'),
     additionalPermissions: Object.freeze(['exports.view']) }),

@@ -401,6 +401,22 @@ it('successful save completes blocked navigation with exact draft', async () => 
   await screen.findByText('Інший екран'); expect(api.save.mock.calls[0][1].definition.groups[0].rows[0].cells.meta_title.value).toBe('exact');
 });
 
+it('unfinished v2 column creation blocks dirty navigation and cannot be silently saved as a completed column', async () => {
+  const { upgradeColumns } = require('../../server/src/services/export-templates/column-contract');
+  const f = family('column-form', upgradeColumns(baseline()));
+  api.list.mockResolvedValue(response({ templates: [{ ...f, draft_revision: f.draft.revision }] })); api.get.mockResolvedValue(response(f));
+  const { router } = page(); await screen.findAllByRole('button', { name: /^Відкрити Шаблон/ }); choose('Шаблон', f.id); await screen.findByText(/Збережено · ревізія/);
+  click('+ Колонка'); choose('Код колонки CSV', 'pending_color');
+  fireEvent.click(screen.getByText('Інший розділ'));
+  await screen.findByRole('dialog', { name: 'Незбережені зміни' }); click('Залишитися');
+  expect(screen.getByLabelText('Код колонки CSV').value).toBe('pending_color');
+  fireEvent.click(screen.getByText('Інший розділ')); click('Зберегти й перейти');
+  await screen.findByText(/Спочатку застосуйте або скасуйте/); expect(api.save).not.toHaveBeenCalled(); expect(router.state.location.pathname).toBe('/');
+  click('Залишитися'); click('Скасувати');
+  expect(screen.getByText(/Збережено · ревізія/)).toBeTruthy();
+  fireEvent.click(screen.getByText('Інший розділ')); await screen.findByText('Інший екран');
+});
+
 it('named creation prepares a technical key once, keeps conflicts editable and prevents duplicate submissions', async () => {
   const creating = deferred();
   api.create.mockReturnValueOnce(creating.promise).mockResolvedValueOnce(response(family()));
@@ -570,4 +586,68 @@ it('empty registry exposes actual code-backed system tables without writes and e
   click('Створити й зберегти чернетку');
   await waitFor(() => expect(api.create).toHaveBeenCalledWith(expect.objectContaining({ displayName: 'Explicit synthetic copy', definition: baseline() })));
   expect(api.publish).not.toHaveBeenCalled(); expect(api.select).not.toHaveBeenCalled();
+});
+
+it('SUPPORT prepares detached HOME v2 changes; cancel is read-only and explicit apply preserves exact columns and invalidates preview', async () => {
+  const { homeDefinition, officeEvidence } = require('../../server/test/fixtures/export-source-support');
+  const { upgradeSourceSupport } = require('../../server/src/services/export-templates/source-support');
+  const d = homeDefinition(); const f = family('support', d);
+  const next = upgradeSourceSupport(d, officeEvidence());
+  const proposal = { expectedRevision: f.draft.revision, expectedDefinitionHash: f.draft.definitionHash, preparationHash: 'a'.repeat(64),
+    definition: next, definitionHash: hashJsonData(next), changed: true, changes: next.sourceSupport.sources, diagnostics: [] };
+  api.list.mockResolvedValue(response({ templates: [f] })); api.get.mockResolvedValue(response(f));
+  api.prepareSupport.mockResolvedValue(response(proposal));
+  api.applySupport.mockResolvedValue(response({ ...f.draft, revision: '9007199254740994', definition: next, definitionHash: proposal.definitionHash }));
+  api.preview.mockResolvedValue(response({ revision: f.draft.revision, result: evaluateBatch(compileDefinition(d), [product('BR')]) }));
+  page(); await screen.findByRole('button', { name: 'Відкрити Шаблон support' }); choose('Шаблон', f.id);
+  await screen.findByText(/Збережено · ревізія/); click('Перевірка'); choose('ID товарів (1–100, через кому або пробіл)', '1'); click('Переглянути результат');
+  await screen.findByRole('region', { name: 'Тест чернетки' });
+  click('Підготувати оновлення підтримки джерел'); await screen.findByText(/Чернетку ще не змінено/);
+  expect(api.prepareSupport).toHaveBeenCalledWith(f.id, { expectedRevision: f.draft.revision, expectedDefinitionHash: f.draft.definitionHash });
+  expect(api.save).not.toHaveBeenCalled(); expect(api.applySupport).not.toHaveBeenCalled();
+  click('Скасувати оновлення'); expect(screen.queryByText(/Чернетку ще не змінено/)).toBeNull();
+  click('Підготувати оновлення підтримки джерел'); await screen.findByText(/Чернетку ще не змінено/);
+  click('Застосувати оновлення підтримки джерел'); await screen.findByText(/Збережено · ревізія 9007199254740994/);
+  expect(api.applySupport).toHaveBeenCalledWith(f.id, { expectedRevision: f.draft.revision, expectedDefinitionHash: f.draft.definitionHash, preparationHash: proposal.preparationHash });
+  expect(screen.queryByRole('region', { name: 'Тест чернетки' })).toBeNull();
+  click('Поля експорту');
+  expect([...screen.getByRole('table').querySelectorAll('thead code')].map((e) => e.textContent)).toEqual(d.groups[0].columns);
+  expect(screen.getByRole('table').textContent).toContain('test_export_note');
+  expect(api.publish).not.toHaveBeenCalled(); expect(api.select).not.toHaveBeenCalled();
+});
+
+it('SUPPORT conflicts retain saved v2 input; local pending column work disables preparation', async () => {
+  const { homeDefinition, officeEvidence } = require('../../server/test/fixtures/export-source-support');
+  const { upgradeSourceSupport } = require('../../server/src/services/export-templates/source-support');
+  const d = homeDefinition(); const f = family('support', d); const next = upgradeSourceSupport(d, officeEvidence());
+  api.list.mockResolvedValue(response({ templates: [f] })); api.get.mockResolvedValue(response(f));
+  api.prepareSupport.mockResolvedValue(response({ expectedRevision: f.draft.revision, expectedDefinitionHash: f.draft.definitionHash, preparationHash: 'a'.repeat(64), changed: true, changes: next.sourceSupport.sources }));
+  api.applySupport.mockRejectedValue({ response: { data: { code: 'TEMPLATE_DRAFT_CONFLICT' } } });
+  page(); await screen.findByRole('button', { name: 'Відкрити Шаблон support' }); choose('Шаблон', f.id);
+  await screen.findByText(/Збережено · ревізія/); click('Перевірка');
+  click('Підготувати оновлення підтримки джерел'); await screen.findByText(/Чернетку ще не змінено/); click('Застосувати оновлення підтримки джерел');
+  await screen.findByText(/На сервері вже новіша чернетка/);
+  expect(api.save).not.toHaveBeenCalled(); expect(screen.getByText(/Збережено · ревізія/).textContent).toContain(f.draft.revision);
+  click('Поля експорту'); choose('Колонка', 'test_export_note');
+  const value = screen.getByDisplayValue('ПЕРЕВІРКА'); fireEvent.change(value, { target: { value: 'ЛОКАЛЬНЕ' } });
+  expect(api.save).not.toHaveBeenCalled();
+  // Opening the check tab is protected by the existing local-panel navigation guard.
+  click('Перевірка');
+  expect(api.prepareSupport).toHaveBeenCalledTimes(1);
+  expect(screen.getByDisplayValue('ЛОКАЛЬНЕ')).toBeTruthy();
+});
+
+it('SUPPORT new candidate policy is explicit and read-only; the name survives the selection', async () => {
+  const { officeEvidence } = require('../../server/test/fixtures/export-source-support');
+  const { upgradeSourceSupport } = require('../../server/src/services/export-templates/source-support');
+  const next = upgradeSourceSupport(baseline(), officeEvidence());
+  api.candidate.mockImplementation((policy) => Promise.resolve(response({ definition: policy ? next : baseline(), diagnostics: [] })));
+  page(); await screen.findByText(/Шаблонів ще немає/); click('Створити шаблон'); await screen.findByText('Новий шаблон');
+  choose('Назва шаблону', 'Synthetic explicit policy');
+  const checkbox = screen.getByRole('checkbox', { name: /Історична підтримка NM/ });
+  expect(checkbox.checked).toBe(false); fireEvent.click(checkbox);
+  await waitFor(() => expect(checkbox.checked).toBe(true));
+  expect(api.candidate).toHaveBeenLastCalledWith('historical-source-support-v1');
+  expect(screen.getByLabelText('Назва шаблону').value).toBe('Synthetic explicit policy');
+  expect(api.create).not.toHaveBeenCalled(); expect(api.save).not.toHaveBeenCalled(); expect(api.publish).not.toHaveBeenCalled();
 });

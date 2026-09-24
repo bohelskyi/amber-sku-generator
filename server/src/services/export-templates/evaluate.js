@@ -1,6 +1,7 @@
 const { buildCsv, escapeCsvValue } = require('../../utils/csv');
 const { LIMITS, assertCompiled } = require('./definition');
 const { readSource, own, fail, scalar, identityText } = require('./input-projection');
+const { sourceSupportChecker } = require('./source-support');
 
 const present = (v) => v !== undefined && v !== null && String(v).trim() !== '';
 function budgets(options = {}) {
@@ -15,6 +16,15 @@ function budgets(options = {}) {
 }
 
 function runProduct(compiled, product, limits) {
+  try { return runSupportedProduct(compiled, product, limits); }
+  catch (cause) {
+    if (cause.code !== 'SOURCE_SUPPORT_INVALID') throw cause;
+    return { work: 0, mapped: { group: product.category, sku: product.full_sku,
+      errors: [{ code: cause.code, field: 'sourceSupport', message: cause.message }] } };
+  }
+}
+
+function runSupportedProduct(compiled, product, limits) {
   const d = compiled.definition;
   const rawGroup = checkCell(identityText(own(product, 'category'), 'category'));
   const group = rawGroup === undefined || rawGroup === null ? '' : String(rawGroup);
@@ -33,7 +43,16 @@ function runProduct(compiled, product, limits) {
     }
     return value;
   }
-  function source(id) { return checkCell(readSource(d.sources[id], product)); }
+  const sourceMemo = new Map();
+  const checkSupport = sourceSupportChecker(d, product);
+  function source(id) {
+    if (!sourceMemo.has(id)) {
+      const value = checkCell(readSource(d.sources[id], product));
+      checkSupport(d.sources[id], value);
+      sourceMemo.set(id, value);
+    }
+    return sourceMemo.get(id);
+  }
   function rule(r) {
     tick();
     // Same scalar normalization as rules.isRuleMatched, with closed own-property sources.

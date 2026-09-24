@@ -10,6 +10,8 @@ const { loadSourceEvidence, validateSourceReferences, getSourceRegistry } = requ
 const { loadDraftPreviewProducts } = require('./draft-inputs');
 const { validateDraftSampleSources } = require('./draft-source-scope');
 const displayReads = require('./display-reads');
+const { upgradeSourceSupport } = require('./source-support');
+const { loadSupportInputs } = require('./support-inputs');
 
 const error = (status, code, message, details) => new PublicHttpError(status, message, { code, details });
 const conflict = (message = 'Draft revision or hash changed') => error(409, 'TEMPLATE_DRAFT_CONFLICT', message);
@@ -231,6 +233,44 @@ async function systemProfile(options = {}) {
     ...(HEADERS ? { headers: HEADERS } : {}) };
 }
 
+async function supportProposal(client, row) {
+  const evidence = await loadSourceEvidence(client);
+  const definition = pureCall(() => upgradeSourceSupport(row.definition, evidence));
+  const definitionHash = hashJsonData(definition);
+  const expectedRevision = row.revision;
+  const expectedDefinitionHash = hashJsonData(row.definition);
+  const preparationHash = require('./snapshot-binding').fingerprint({ expectedRevision, expectedDefinitionHash, definitionHash, evidence });
+  return { expectedRevision, expectedDefinitionHash, preparationHash, definition, definitionHash,
+    changed: definitionHash !== expectedDefinitionHash,
+    diagnostics: validateSourceReferences(definition, evidence),
+    changes: definition.sourceSupport.sources };
+}
+
+async function prepareSourceSupport(templateId, input, options = {}) {
+  templateId = identity(templateId);
+  command(input, ['expectedRevision', 'expectedDefinitionHash']);
+  const revision = counter(input.expectedRevision); const hash = expectedHash(input.expectedDefinitionHash);
+  return readTransaction(options, async (client) => {
+    const row = await loadDraft(client, templateId);
+    assertDraft(row, revision, hash);
+    return supportProposal(client, row);
+  });
+}
+
+async function applySourceSupport(templateId, input, options = {}) {
+  templateId = identity(templateId);
+  command(input, ['expectedRevision', 'expectedDefinitionHash', 'preparationHash']);
+  const revision = counter(input.expectedRevision); const hash = expectedHash(input.expectedDefinitionHash);
+  const preparationHash = expectedHash(input.preparationHash);
+  return mutation('manage', options, async (client, context) => {
+    const row = await loadDraft(client, templateId, true);
+    assertDraft(row, revision, hash);
+    const proposal = await supportProposal(client, row);
+    if (proposal.preparationHash !== preparationHash) throw conflict('Source evidence changed; prepare the update again');
+    return replaceDraft(client, row, prepareDraft(proposal.definition), row.base_version_id, context);
+  });
+}
+
 async function cloneDraft(templateId, input, options = {}) {
   templateId = identity(templateId);
   command(input, ['expectedRevision', 'versionId']);
@@ -276,9 +316,10 @@ async function testPreview(templateId, input, options = {}) {
     const { diagnostics, globalSourceDiagnostics } = pureCall(() => validateDraftSampleSources(compiled, evidence, products));
     if (diagnostics.length) throw error(422, 'TEMPLATE_SOURCE_INVALID', 'Unresolved or unsupported sample source references',
       { diagnostics, globalSourceDiagnostics });
+    const supported = await loadSupportInputs(client, compiled.definition, products);
     return { revision, definitionHash: compiled.hash, draftOnly: true, publicationReady: false, globalSourceDiagnostics,
       sampleProducts: products.map((product) => ({ productId: Number(product.id), sku: product.full_sku, category: product.category })),
-      result: pureCall(() => evaluateBatch(compiled, products)) };
+      result: pureCall(() => evaluateBatch(compiled, supported.products)) };
   });
 }
 async function publishTemplate(templateId, input, options = {}) {
@@ -346,6 +387,9 @@ async function listSources(options = {}) {
 // Candidate preparation is read-only. Capture rules and reference evidence in one
 // coherent snapshot; never substitute the seed catalog or publish on first use.
 async function prepareMagentoCandidate(options = {}) {
+  if (options.supportPolicy !== undefined && options.supportPolicy !== require('./source-support').VERSION) {
+    throw error(400, 'TEMPLATE_COMMAND_INVALID', 'Unknown source support policy');
+  }
   return readTransaction(options, async (client) => {
     const { loadMagentoCatalog } = require('../magento-products-v1');
     const { materializeMagentoV1 } = require('./magento-v1-definition');
@@ -357,7 +401,8 @@ async function prepareMagentoCandidate(options = {}) {
         code: 'SOURCE_REFERENCE_AMBIGUOUS', message: 'Duplicate current question key' })),
     });
     const catalog = await loadMagentoCatalog(client);
-    const definition = pureCall(() => materializeMagentoV1(catalog));
+    let definition = pureCall(() => materializeMagentoV1(catalog));
+    if (options.supportPolicy) definition = pureCall(() => upgradeSourceSupport(definition, evidence));
     const diagnostics = validateSourceReferences(definition, evidence);
     return { definition, definitionHash: hashJsonData(definition), diagnostics,
       candidateOnly: true, capturedRules: true, productionAcceptanceVerified: false };
@@ -379,7 +424,7 @@ async function getExportTemplateOptions({ includeNonActive = false, ...options }
   });
 }
 
-module.exports = { upgradeDraft, systemProfile, prepareDraft, counter, listTemplates, getTemplate, createTemplate, saveDraft, cloneDraft,
+module.exports = { prepareSourceSupport, applySourceSupport, upgradeDraft, systemProfile, prepareDraft, counter, listTemplates, getTemplate, createTemplate, saveDraft, cloneDraft,
   validateDraft, testPreview, publishTemplate, getActivation, updateActivation, listSources,
   loadVersion, verifyVersion, pureCall, prepareMagentoCandidate, getExportTemplateOptions,
   searchSampleProducts: (input, options = {}) => readTransaction(options, (client) => displayReads.searchSampleProducts(client, input)),

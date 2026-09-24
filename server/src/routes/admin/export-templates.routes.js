@@ -18,7 +18,7 @@ const context = (req) => ({ mutationContext: getRequestMutationContext(req) });
 router.get(`${root}/system`, permission('view'), handle(() => templates.systemProfile()));
 router.get(`${root}/sample-products`, permission('manage'), requirePermission('exports.view'), handle((req) => templates.searchSampleProducts(req.query)));
 router.get(`${root}/source-details`, permission('view'), handle((req) => templates.sourceDetails(req.query)));
-router.get(`${root}/candidate`, permission('view'), permission('manage'), handle(() => templates.prepareMagentoCandidate()));
+router.get(`${root}/candidate`, permission('view'), permission('manage'), handle((req) => templates.prepareMagentoCandidate({ supportPolicy: req.query.supportPolicy })));
 router.get(`${root}/sources`, permission('view'), handle(() => templates.listSources()));
 router.get(`${root}/activation`, permission('view'), handle(() => templates.getActivation()));
 router.put(`${root}/activation`, permission('activate'), handle((req) => templates.updateActivation(req.body, context(req))));
@@ -27,6 +27,8 @@ router.post(root, permission('manage'), handle((req) => templates.createTemplate
 router.get(`${root}/:id`, permission('view'), handle((req) => templates.getTemplate(req.params.id)));
 router.put(`${root}/:id/draft`, permission('manage'), handle((req) => templates.saveDraft(req.params.id, req.body, context(req))));
 router.post(`${root}/:id/draft/upgrade-columns`, permission('manage'), handle((req) => templates.upgradeDraft(req.params.id, req.body, context(req))));
+router.post(`${root}/:id/draft/source-support/prepare`, permission('manage'), handle((req) => templates.prepareSourceSupport(req.params.id, req.body)));
+router.post(`${root}/:id/draft/source-support/apply`, permission('manage'), handle((req) => templates.applySourceSupport(req.params.id, req.body, context(req))));
 router.post(`${root}/:id/draft/from-version`, permission('manage'), handle((req) => templates.cloneDraft(req.params.id, req.body, context(req))));
 router.post(`${root}/:id/validate`, permission('manage'), handle((req) => templates.validateDraft(req.params.id, req.body)));
 router.post(`${root}/:id/test-preview`, permission('manage'), requirePermission('exports.view'),

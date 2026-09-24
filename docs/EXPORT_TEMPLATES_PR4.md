@@ -1334,3 +1334,223 @@ services. Migration-checkpoint tests exclude 038 when constructing earlier
 checkpoints. Existing rendered tests use visible grid controls. EXPORTS.md and
 DATABASE_MIGRATIONS.md link/describe the extended contracts. Existing untracked
 source/sample presenters and regressions remain in the worktree.
+## Addendum: column create/edit workflow — 2026-09-24
+
+Focused client correction on `feature/magento-export-constructor`, HEAD
+`4364cd0428b68209d495d1d9835aed31ade4c356`; initial `git status --short` was empty.
+No branch/staging/commit operations, user-draft reads/writes, application restarts,
+database connections, migrations, API changes or export operations were performed.
+
+**Reproduced cause.** The actual OutputGrid toolbar callback only called
+`setColumn(selectedColumn); setInspector(true)`. It never inserted a column:
+with settings open it appeared inert; with settings closed it reopened the prior
+column. The old label input immediately updated that selected column. This makes
+the reported price-label change plausible, but does not prove a historical
+index-identity bug. No stored labels were inspected or repaired.
+
+**Fix.** Toolbar plus and left/right actions now open one fresh “Нова колонка”
+dialog. Opening/cancelling does not change the definition/hash; repeated plus
+preserves partial input. One guarded submission adds the header, label and chosen
+row expression in one local update, leaves the other language blank, selects and
+reveals the column, and retains explicit server save. Code errors are associated
+with inputs. Existing settings identify their column; pending source/rename input
+requires explicit resolution on navigation. Template/version remount identity,
+category route, row ID, column code and current definition fence stale callbacks.
+Structural helpers reject absent targets and insertion anchors.
+
+Both common forms expose literal text or an authorized characteristic, explicit
+raw/mapping choice, compatible tables and actual mapping rows. Existing empty
+`test_export_color` can become `BR.color → color4` in place. No default raw/first
+mapping selection or conversion from live option labels occurs. Expressions reuse
+the existing source builder and local field/table adapters. Complex guards,
+contracts, fallbacks and readiness remain in the existing lossless editor, with
+an explicit advanced entry. Editing shared mapping outputs locally detaches the
+selected dependency path; selecting a mapping alone retains its reference.
+
+Creation has initial input focus, a keyboard loop and focus return. Settings use a
+wider panel or responsive overlay, with one panel scroll area and readable codes.
+Page dirty navigation also includes unfinished form input; save cannot silently
+omit it. Cancelling creation preserves previously dirty definition content.
+
+**Evidence and commands.** All checks used the repository runtime
+`C:/Users/bohel/AppData/Local/Temp/amber-phase72-node20/node-v20.20.2-win-x64/node.exe`
+(`v20.20.2`), with its directory prepended to PATH and a temporary NODE_OPTIONS
+guard rejecting non-20 child processes. `$node` below denotes that executable;
+`$npm` denotes `C:/Users/bohel/AppData/Local/Temp/amber-pr3-node20/package/bin/npm-cli.js`.
+
+- From `client`: `& $node node_modules/vitest/vitest.mjs run --config vitest.config.js test/export-column-form.test.jsx`
+  first failed on the missing “Нова колонка” dialog, before implementation. The
+  regression uses the real toolbar, headers and close action on a synthetic v2
+  draft with name/price/note and optional existing empty color column.
+- Final focused command: `& $node node_modules/vitest/vitest.mjs run --config vitest.config.js test/export-column-form.test.jsx test/export-grid.test.jsx`:
+  **15 passed**. Tests cover create/edit, cancel/repeated plus, one atomic update,
+  anchors, explicit mapping, invalid codes, source zero/absence, protected/read-only
+  views, queued callbacks, rename/move/duplicate/delete, pending input and category
+  isolation. Serialized editor remount preserves code/label/position/expression;
+  this is not a real database round trip.
+- Form-produced definitions run through the existing **server evaluator in tests**:
+  color 1 → Світлий, color 4 → Комбінований, EN → empty. Exact headers, row widths
+  and every preceding CSV cell equal the original synthetic output. Neighboring
+  price/name/note, other categories, original shared color4 and contracts remain
+  intact. No evaluator is imported into production client code.
+- From `client`: `& $node $npm test`: **137 Node tests + 188 UI tests / 19 files
+  passed**, no skips; `& $node $npm run lint` and `& $node $npm run build`: passed.
+  Full auth/session suites remained included. One later full run failed the
+  existing auth lifecycle test at `auth.test.jsx:634`: it observed the role PUT
+  call, then clicked Disable before `runAction` completed/reloaded users and
+  released the disabled button. No disable POST was sent. The test now holds the
+  role request with a deferred promise, asserts the busy button, resolves the
+  request, and waits for enabled controls between lifecycle actions. All original
+  request assertions remain; production auth/session code is unchanged. The
+  focused auth file passed 28 tests; the final result above is a complete run
+  after this synchronization repair, not an isolated pass or an unchanged retry.
+  A development-only optional-value
+  test initially used missing required product weight and correctly received
+  not-ready; it was corrected to use a separate synthetic optional answer.
+- From `server`: the first `& $node $npm test` could not start because Windows
+  shell passed `test/*.test.js` literally. With process-local
+  `$env:npm_config_script_shell = 'D:/Programs/Git/bin/bash.exe'`, the same complete
+  command passed **498 tests**, including existing pure parity/golden tests.
+  `& $node $npm run lint`: exit 0 with the two existing unused-variable warnings
+  in `src/presenters/product-timeline.js` (`sortOrder`, `sourceOrder`). Integration
+  tests were deliberately not run: this task explicitly forbids database use.
+
+**Browser evidence.** A temporary loopback-only harness bundled the real client
+components with synthetic fixtures, no APIs/DB, and installed build dependencies.
+In a separate Chrome tab, actual controls completed create and existing-empty
+literal → BR.color → color4 workflows at desktop 1440×900 and creation at 390×844.
+DOM evidence showed the four actual color4 rows, exactly one update for creation,
+and price label “Ціна” after editing the new column. At 390×844 the creation
+surface occupied the available width (375 px excluding scrollbar), had no
+horizontal overflow, and action bounds were y=770…843. Screenshot capture timed
+out (`Page.captureScreenshot`); pixel-level visual inspection remains unverified.
+Viewport override was reset, the temporary tab closed and only its own synthetic
+helper stopped. The user's application tab and unsaved work were untouched.
+
+Final `git diff --check` passed; tracked/untracked deltas were inspected. Only the
+12 client/test/report files below changed; branch and HEAD remained unchanged.
+
+Changed files: `client/src/components/export-templates/{ColumnForm.jsx,
+DefinitionEditor.jsx,OutputGrid.jsx,export-template-editor.css}`;
+`client/src/lib/export-template-columns.js`; `client/src/pages/ExportTemplatesPage.jsx`;
+`client/test/{auth.test.jsx,export-column-form.test.jsx,export-grid.test.jsx,
+export-template-columns.test.js,export-template-ui.test.jsx}`; this addendum.
+Original goldens, dependencies, configuration and all migrations are unchanged.
+
+**HOME retest on the existing draft:** open `test_export_color` in BR/base;
+choose “Характеристика товару” → BR.color → “За таблицею відповідностей” → color4;
+inspect 1/2/3/4 outputs and click “Застосувати заповнення”. Confirm EN is empty and
+price/note unchanged, then use the existing “Зберегти чернетку” action. Separately
+open plus while settings are open: it must show a fresh form; cancel must leave
+the existing draft intact. Do not recreate the column/template or reload away
+unsaved work to perform this retest.
+
+## HOME source-support implementation — 2026-09-24
+
+Baseline: `feature/magento-export-constructor`, HEAD
+`4364cd0428b68209d495d1d9835aed31ade4c356`, migrations **000–038**.
+The initial 10 modified tracked + 2 untracked column-dialog/UI/report files were
+preserved. Current code, local history and earlier records contained the reusable
+historical decoder, strict source validation, columns-v2, CAS and common published
+capture/session paths, but no completed NM-placeholder/AR-deferred policy. No other
+branch or workstation was fetched/substituted. The deterministic OFFICE fixture
+reproduced NM `0` and AR `29,30,31` false semantic claims before implementation;
+the first new support regression failed because the extension did not exist.
+
+Implemented `historical-source-support-v1` + `magento-declarative-2`, independently
+compatible with fixed v1 and editable columns-v2. Existing captured `allowed`
+membership and all groups/bindings/tables/names/labels/readiness rules remain exact.
+Closed semantic/deferred lists and the NM-only `numeric-zero-v1` policy are hashed,
+compiled and JSONB-stable. Old definitions retain evaluator 1 and original behavior.
+No migration, default mapping, dependency or production configuration change.
+See [the explicit contract](EXPORTS.md#opt-in-historical-source-support--2026-09-24).
+
+The pure support checker runs at consumed source reads, including custom raw cells,
+lookups, refs, renamed descriptors and condition/readiness paths. It reuses the
+existing variation/version/suffix and stored-answer reconstruction helpers. The
+unchanged pure version-marker parser moved into `utils/sku.js` and remains
+re-exported by the schema service, avoiding DB imports in evaluation. A private
+server projection association supplies batch-loaded historical schemas; client
+JSON proof flags have no authority. Reconstruction is reused within each product
+evaluation. NM numeric zero needs exact ownership/version, optionality, absence of
+genuine semantic/conflicting encoded zero, and a decoded placeholder with null
+value_id. String zero is rejected as a placeholder; genuine zero stays semantic.
+AR needs frozen support plus its own reconstructed semantic value. New live schema
+publication never promotes frozen deferred values. Invalid represented products
+block the complete capture, preserving atomicity and existing lock order.
+
+Existing HOME draft action: save local edits, open **Перевірка**, choose
+**Підготувати оновлення підтримки джерел**, inspect the detached summary, then
+explicitly **Застосувати оновлення підтримки джерел**. Preparation/viewing has no
+writes. Apply checks original revision/hash and freshly recomputed evidence,
+uses authorized CAS/audit and clears old preview evidence. No-op repeats do not
+increment revisions. Published versions must first be cloned. The new-candidate
+checkbox opts in without rewriting the read-only legacy system profile. No output
+mapping is filled/normalized as a side effect: missing AR output entries remain
+separate editable/readiness work, and present text/whitespace remains exact.
+
+Synthetic tests cover historical NM versions, absent/null/blank, exact string zero,
+genuine zero, required/conflicting/unverifiable/foreign schema cases; AR own-version
+limits and explicit future promotion; custom/ref/readiness bypass attempts and lazy
+branches; old strict claims, frozen policy/hash/JSONB identity; read-only/no-op
+preparation, stale evidence/save, permission loss and transactional audit. Disposable
+HTTP/DB tests perform existing-v2 upgrade → validate → publish, authoritative samples,
+direct capture and another authorized shared-session participant's prepare/capture.
+They assert no snapshot/artifact/exposure/result-link/cursor change after invalid
+capture and preserve completed retries/downloads after live answers change.
+The synthetic HOME BR definition has exactly **28 columns**, beginning
+`sku,store_view_code,name,test_export_note,test_export_color,price`; its exact CSV
+is unchanged, with `ПЕРЕВІРКА`, BR.color→color4, sparse EN, prices and labels.
+
+Verification on **Node 20.20.2**, with an exact executable/version preload guard
+also verified in child processes. The initial npm test launch exposed Windows
+literal-glob handling; process-local npm script shell was corrected to the actually
+installed `D:/Programs/Git/bin/bash.exe`. Repository/runtime configuration was not
+changed. Initial test-authoring expectation mismatches (artifact row opt-in,
+not-ready session preparation, permission error identity and independently consumed
+NM category conditions) were corrected to the established APIs without weakening
+the support/atomicity assertions. Final checks:
+
+| Check | Result |
+| --- | --- |
+| Focused new support unit tests | 8 passed |
+| Focused new HTTP/DB cases | 2 passed, unrelated cases intentionally skipped |
+| Full server `npm test` | 506 passed, no skips/failures |
+| Server `npm run lint` | 0 errors; 2 pre-existing product-timeline warnings |
+| Full `npm run test:integration` | 194 passed, no skips/failures |
+| Full client `npm test` | 137 Node + 191 Vitest tests passed, 19 rendered-test files |
+| Client lint / production build | Passed |
+| Protected original files | All 47 recorded migration/fixture/oracle SHA-256 values unchanged; 39 migrations including 038 |
+| `git diff --check`, staged paths | Passed; none staged |
+
+Only canonical `127.0.0.1:55432/amber_test`, user `amber_test`, PostgreSQL **16.15**,
+and its disposable harness `_test` databases received DB writes. Before testing,
+container metadata established that the manual application targets `postgres/amber`,
+the only host Node processes were Codex CUA runtimes, and postgres-test had zero
+other client connections. **postgres-test was already running at entry** and was
+left running; no pre-existing service was stopped/restarted. No useful HOME/OFFICE
+DB connection, real draft load/update, application restart, operational schema/template
+publication, activation, export, restore or Magento request occurred.
+
+Remaining operational acceptance: explicitly apply to the intended saved HOME
+draft, run full validation and actual samples, address any remaining legitimate
+source/mapping/product readiness issues, then separately authorize publication and
+rollout/Magento acceptance. Real-browser acceptance of this new summary/action was
+not performed; rendered UI regressions passed. The real draft revision was neither
+assumed nor read. Prior broader acceptance prerequisites remain in force.
+
+Task file register (earlier user changes in overlapping files are retained):
+`server/src/services/export-templates/{source-support.js,support-inputs.js,
+definition.js,evaluate.js,source-references.js,template.service.js,published-capture.js}`;
+`server/src/{utils/sku.js,services/sku-schema.service.js,routes/endpoint-manifest.js,
+routes/admin/export-templates.routes.js}`;
+`server/test/{export-source-support.test.js,fixtures/export-source-support.js}`;
+`server/integration-test/{12-export-source-support.cases.js,critical-flows.test.js}`;
+`client/src/{api/export-templates-api.js,pages/ExportTemplatesPage.jsx,
+components/export-templates/DefinitionEditor.jsx,
+components/export-templates/AdvancedDefinitionEditor.jsx}`;
+`client/test/export-template-ui.test.jsx`; `docs/{EXPORTS.md,EXPORT_TEMPLATES_PR4.md}`.
+Final shared worktree: 23 modified tracked + 7 untracked paths, including all
+pre-existing work. Branch/HEAD unchanged; no staging, commit, push, reset, clean,
+stash, rebase, merge, cherry-pick or branch switch. Logs are process-local under
+`%TEMP%/amber-source-support-home/`.

@@ -192,7 +192,7 @@ export function AdvancedDefinitionEditor({ definition, onChange, registry, readO
     || !record(definition.questionContracts) || Object.values(definition.questionContracts).some((q) => !record(q) || !record(q.rule) || !Array.isArray(q.allowed))
     || !Array.isArray(definition.bindings) || definition.bindings.some((b) => !record(b) || typeof b.id !== 'string' || !record(b.value))
     || definition.groups.some((g) => !record(g) || !Array.isArray(g.columns) || !Array.isArray(g.rows) || g.rows.some((r) => !record(r) || !record(r.cells)))
-    || definition.evaluatorVersion !== 'magento-declarative-1' || definition.outputContract !== 'magento-products-v1') {
+    || !['magento-declarative-1', 'magento-declarative-2'].includes(definition.evaluatorVersion) || !['magento-products-v1', 'magento-products-columns-v2'].includes(definition.outputContract)) {
     return <div role="note">Цей формат ще не підтримується формами. Визначення збережено без змін.
       <pre className="overflow-auto">{JSON.stringify(definition, null, 2)}</pre></div>;
   }

@@ -1,3 +1,5 @@
+import { at, editField, mappingsForSource, resolveNode, sourceOf } from './export-template-presentation.js';
+
 export const COLUMN_CONTRACT = 'magento-products-columns-v2';
 export const requiredColumns = new Set(['sku', 'store_view_code', 'name', 'attribute_set_code', 'product_type', 'price']);
 export function codeError(code, columns, previous) {
@@ -8,6 +10,7 @@ export function codeError(code, columns, previous) {
 export function columnChange(definition, groupIndex, action, code, value) {
   if (definition.outputContract !== COLUMN_CONTRACT) throw new Error('Спочатку явно оновіть контракт колонок.');
   const next = structuredClone(definition); const g = next.groups[groupIndex];
+  if (!g || (action === 'add' ? code != null && !g.columns.includes(code) : !g.columns.includes(code))) throw new Error('Колонку або позицію вже змінено. Відкрийте налаштування знову.');
   if (['remove', 'rename'].includes(action) && requiredColumns.has(code)) throw new Error('Захищена колонка full-product імпорту.');
   if (['add', 'duplicate', 'rename'].includes(action)) {
     const problem = codeError(value, g.columns, action === 'rename' ? code : undefined);
@@ -106,7 +109,7 @@ export function availableSources(registry, group) {
   }
   return result;
 }
-export function bindColumnSource(definition, gi, ri, code, selected, mode = 'text') {
+export function bindColumnSource(definition, gi, ri, code, selected, mode = 'text', existingTable) {
   const next = structuredClone(definition);
   if (requiredColumns.has(code) && ['sku', 'store_view_code', 'product_type'].includes(code)) throw new Error('Захищене правило.');
   let id = selected.id; let n = 1;
@@ -117,9 +120,13 @@ export function bindColumnSource(definition, gi, ri, code, selected, mode = 'tex
   const blank = { op: 'literal', value: '' };
   let rule = text;
   if (mode === 'lookup') {
-    let table = code + '.mapping'; let i = 1;
-    while (Object.hasOwn(next.tables, table)) table = code + '.mapping' + i++;
-    next.tables[table] = {};
+    let table = existingTable;
+    if (table && !mappingsForSource(definition, selected.id).includes(table)) throw new Error('Оберіть сумісну таблицю відповідностей.');
+    if (!table) {
+      table = code + '.mapping'; let i = 1;
+      while (Object.hasOwn(next.tables, table)) table = code + '.mapping' + i++;
+      next.tables[table] = {};
+    }
     rule = { op: 'lookup', input: { op: 'semanticKey', input }, table, otherwise: blank };
   } else if (mode === 'interpolate') rule = { op: 'interpolate', template: '{value}', slots: { value: text } };
   else if (mode === 'firstPresent') rule = { op: 'firstPresent', policy: 'answer-v1', items: [text, blank] };
@@ -127,6 +134,45 @@ export function bindColumnSource(definition, gi, ri, code, selected, mode = 'tex
   next.groups[gi].rows[ri].cells[code] = rule;
   if (ri === 0) next.groups[gi].outputChecks = (next.groups[gi].outputChecks || []).filter((check) => check.columns.length !== 1 || check.columns[0] !== code);
   return next;
+}
+
+// Only whole, unguarded common expressions may be replaced by the simple form.
+// Everything else stays with the lossless question/field adapters.
+export function directColumn(definition, path) {
+  const { node, trail, problem } = resolveNode(definition, at(definition, path));
+  if (problem) return null;
+  const exact = (value, keys) => value && Object.keys(value).every((key) => keys.includes(key));
+  if (!node) return { mode: 'literal', text: '', trail };
+  if (node.op === 'literal' && typeof node.value === 'string' && exact(node, ['op', 'value'])) return { mode: 'literal', text: node.value, trail };
+  const source = sourceOf(definition, node);
+  if (node.op === 'text' && node.trim === false && node.format === 'scalar-v1' && node.onAbsent === 'empty'
+    && exact(node, ['op', 'input', 'trim', 'format', 'onAbsent']) && node.input?.op === 'source' && exact(node.input, ['op', 'id'])) return { mode: 'source', source, output: 'raw', trail };
+  if (node.op === 'lookup' && exact(node, ['op', 'input', 'table', 'otherwise']) && node.input?.op === 'semanticKey'
+    && exact(node.input, ['op', 'input']) && node.input.input?.op === 'source' && exact(node.input.input, ['op', 'id'])
+    && node.otherwise?.op === 'literal' && node.otherwise.value === '' && exact(node.otherwise, ['op', 'value'])) return { mode: 'source', source, output: 'mapping', table: node.table, trail };
+  return null;
+}
+
+export function applyDirectColumn(definition, gi, ri, code, form, registry) {
+  const path = ['groups', gi, 'rows', ri, 'cells', code];
+  if (!definition.groups[gi]?.columns.includes(code)) throw new Error('Колонку вже змінено.');
+  const lens = directColumn(definition, path);
+  if (!lens) throw new Error('Складне правило: скористайтеся наявним редактором правил.');
+  if (form.mode === 'literal') return editField(definition, path, lens.trail, 'local', () => ({ op: 'literal', value: form.text }));
+  const selected = availableSources(registry, definition.groups[gi].route).find((s) => s.id === form.source);
+  if (!selected) throw new Error('Оберіть перевірену характеристику.');
+  if (!['raw', 'mapping'].includes(form.output)) throw new Error('Оберіть, як записувати значення.');
+  if (form.output === 'mapping' && !mappingsForSource(definition, selected.id).includes(form.table)) throw new Error('Оберіть сумісну таблицю відповідностей.');
+  // Reuse the expression builder, but keep checks and detach only the selected
+  // dependency path via the existing adapter, rather than retiring output checks.
+  const built = bindColumnSource(definition, gi, ri, code, selected, form.output === 'raw' ? 'text' : 'lookup', form.table);
+  return editField({ ...definition, sources: built.sources }, path, lens.trail, 'local', () => built.groups[gi].rows[ri].cells[code]);
+}
+
+export function createColumn(definition, gi, ri, before, form, registry) {
+  let next = columnChange(definition, gi, 'add', before, form.code);
+  next = columnChange(next, gi, 'label', form.code, form.name);
+  return applyDirectColumn(next, gi, ri, form.code, form, registry);
 }
 
 export function literalColumn(definition, gi, ri, code) {

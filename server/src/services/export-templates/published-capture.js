@@ -1,6 +1,7 @@
 const { loadVersion, verifyVersion, pureCall } = require('./template.service');
 const { loadSourceEvidence, validateSourceReferences } = require('./source-references');
 const { evaluateBatch } = require('./evaluate');
+const { loadSupportInputs } = require('./support-inputs');
 const { error, fingerprint, stale } = require('./snapshot-binding');
 const { assertActorStillAuthorized, APPLICATION_USER_ADMIN_LOCK_KEY } = require('../access-admin-transaction');
 
@@ -58,6 +59,7 @@ async function capturePublished(client, intent, resolved, exportData, newRange) 
   const evidence = await loadSourceEvidence(client);
   const diagnostics = validateSourceReferences(resolved.compiled.definition, evidence);
   if (diagnostics.length) throw error(422, 'TEMPLATE_SOURCE_INVALID', 'Unresolved or conflicting source references', { diagnostics });
+  const supported = await loadSupportInputs(client, resolved.compiled.definition, exportData.rows);
   const inputFingerprint = fingerprint({ intent, effective: resolved.effective,
     range: exportData.range, cursor: newRange ? String(newRange.cursor) : null,
     products: exportData.rows.map((p) => ({ id: String(p.id), full_sku: p.full_sku, category: p.category,
@@ -66,10 +68,11 @@ async function capturePublished(client, intent, resolved, exportData, newRange) 
       magento_name_subject_en: p.magento_name_subject_en, sku_schema_version_id: p.sku_schema_version_id })),
     references: relevantReferences(resolved.compiled.definition, evidence, exportData.rows),
     internalCatalog: exportData.internalCatalog,
+    ...(resolved.compiled.definition.sourceSupport ? { supportSchemas: supported.schemas } : {}),
   });
   const binding = { intent, effective: resolved.effective, inputFingerprint,
     range: exportData.range, cursor: newRange ? String(newRange.cursor) : null };
-  return { binding, magento: pureCall(() => evaluateBatch(resolved.compiled, exportData.rows)) };
+  return { binding, magento: pureCall(() => evaluateBatch(resolved.compiled, supported.products)) };
 }
 
 module.exports = { protectAuthority, releaseAuthority, resolvePublished, capturePublished };

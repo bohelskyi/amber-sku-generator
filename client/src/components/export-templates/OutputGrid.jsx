@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { fieldLabels } from '../../lib/export-template-editor';
 import './export-template-editor.css';
 
 // Presentation only. Values come from the authoritative CSV, never an evaluator.
-export function OutputGrid({ columns, rows = [], labels = {}, rules, onColumn, title = 'Таблиця', children }) {
+export function OutputGrid({ columns, rows = [], labels = {}, rules, onColumn, revealColumn, title = 'Таблиця', children }) {
+  const selectedHeader = useRef(null);
+  useEffect(() => { selectedHeader.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }, [revealColumn]);
   const [page, setPage] = useState(0);
   const [detail, setDetail] = useState(null);
   const pageSize = 50;
@@ -13,7 +15,7 @@ export function OutputGrid({ columns, rows = [], labels = {}, rules, onColumn, t
     <div className="et-grid-tools"><strong>{title}</strong>{children}</div>
     <div className="et-grid-scroll" tabIndex={0} aria-label="Прокручування таблиці">
       <table><thead><tr><th scope="col">Рядок</th>{columns.map((code) => <th scope="col" key={code}>
-        {onColumn ? <button type="button" aria-label={`Налаштувати колонку ${code}`} onClick={() => onColumn(code)}><code>{code}</code><span aria-hidden="true"> ▾</span></button> : <code>{code}</code>}
+        {onColumn ? <button ref={code === revealColumn ? selectedHeader : undefined} type="button" aria-label={`Налаштувати колонку ${code}`} onClick={() => onColumn(code)}><code>{code}</code><span aria-hidden="true"> ▾</span></button> : <code>{code}</code>}
         <small>{labels[code] || fieldLabels[code] || code}</small>
       </th>)}</tr></thead><tbody>
         {rules && <tr className="et-grid-rules"><th scope="row">Правила · метадані редактора</th>{columns.map((code) => <td key={code}><button type="button" onClick={() => onColumn(code)}>{rules[code] || 'Порожня клітинка'}</button></td>)}</tr>}

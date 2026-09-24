@@ -74,8 +74,8 @@ function freeze(value) {
 
 function inspectDefinition(d) {
   const definitionBytes = preflight(d);
-  shape(d, ['formatVersion', 'evaluatorVersion', 'outputContract', 'sources', 'tables', 'questionContracts', 'bindings', 'groups']);
-  check(d.formatVersion === 1 && d.evaluatorVersion === 'magento-declarative-1'
+  shape(d, ['formatVersion', 'evaluatorVersion', 'outputContract', 'sources', 'tables', 'questionContracts', 'bindings', 'groups'], ['sourceSupport']);
+  check(d.formatVersion === 1 && ['magento-declarative-1', 'magento-declarative-2'].includes(d.evaluatorVersion)
     && ['magento-products-v1', CONTRACT].includes(d.outputContract), 'Unsupported version/contract');
   const editableColumns = d.outputContract === CONTRACT;
   check(record(d.sources) && Object.keys(d.sources).length <= LIMITS.sources, 'Source limit');
@@ -146,6 +146,7 @@ function inspectDefinition(d) {
     rule(q.rule, d.sources[q.source].category);
     contractSources.set(name, ruleSources);
   }
+  require('./source-support').validateSupport(d, { check, shape, list, membership });
   const types = new Map();
   const scopes = new Map();
   const bindingSources = new Map();

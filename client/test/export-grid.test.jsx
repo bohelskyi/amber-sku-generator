@@ -25,19 +25,22 @@ it('rendered grid task adds an approved-source target, keeps EN blank, duplicate
   expect(screen.getByText('Основний · макет')).toBeTruthy();
   expect(screen.queryByText(product('BR').full_sku)).toBeNull();
   click('+ Колонка');
-  change('Код нової колонки', 'synthetic_target'); click('Додати колонку праворуч');
-  fireEvent.click(screen.getByText('Обрати джерело або літерал для цього рядка'));
-  change('Джерело SKU Manager', 'weight'); click('Застосувати джерело');
+  change('Код колонки CSV', 'synthetic_target');
+  change('Чим заповнювати', 'source'); change('Характеристика', 'weight'); change('Як записувати', 'raw'); click('Додати колонку');
   expect(evaluateBatch(compileDefinition(current), [product('BR')]).status).toBe('ready');
   expect(current.groups[0].rows[1].cells.synthetic_target).toEqual({ op: 'literal', value: '' });
+  fireEvent.click(screen.getByText('Код, порядок та інші дії'));
   change('Код нової колонки', 'synthetic_copy'); click('Дублювати');
+  fireEvent.click(screen.getByText('Код, порядок та інші дії'));
   change('Код колонки CSV', 'synthetic_renamed'); click('Змінити код колонки');
+  fireEvent.click(screen.getByText('Код, порядок та інші дії'));
   change('Перемістити на позицію', '0');
   expect(current.groups[0].columns[0]).toBe('synthetic_renamed');
   click('Видалити колонку');
   expect(current.groups[0].columns).not.toContain('synthetic_renamed');
   expect(current.groups[0].rows[0].cells.synthetic_renamed).toBeUndefined();
   click('Налаштувати колонку sku');
+  fireEvent.click(screen.getByText('Код, порядок та інші дії'));
   expect(screen.getByRole('button', { name: 'Видалити колонку' }).disabled).toBe(true);
 });
 it('header is keyboard reachable, drawer focus is explicit and Escape restores header focus', () => {

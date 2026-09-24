@@ -1,6 +1,7 @@
 const { LIMITS } = require('./definition');
 const { PRODUCT_FIELDS } = require('./input-projection');
 const { HEADERS } = require('./magento-v1-data');
+const { policyFor, EVALUATOR } = require('./source-support');
 
 // Approved stored-information contract, not a cross-key alias or inferred lineage.
 // The original Magento mapper and docs/EXPORTS.md retain this exact legacy key
@@ -72,7 +73,8 @@ function validateSourceReferences(definition, evidence) {
     const approvedLegacyInformation = current.length === 0 && source.kind === 'information'
       && source.type === 'scalar' && source.provenance === 'supplied-stored-answers-v1' && source.aliases.length === 0
       && HISTORICAL_INFORMATION_SOURCES.some((entry) => entry.category === source.category && entry.key === source.key
-        && [entry.outputContract, 'magento-products-columns-v2'].includes(definition.outputContract) && entry.evaluatorVersion === definition.evaluatorVersion);
+        && [entry.outputContract, 'magento-products-columns-v2'].includes(definition.outputContract)
+        && [entry.evaluatorVersion, EVALUATOR].includes(definition.evaluatorVersion));
     if (!matches.length && !approvedLegacyInformation) {
       report(sourceId, 'SOURCE_REFERENCE_UNRESOLVED', source.kind === 'information'
         ? 'Current non-SKU question metadata required' : 'Historical SKU or current non-SKU question evidence required',
@@ -98,7 +100,9 @@ function validateSourceReferences(definition, evidence) {
     if (!contract.exists) report(contract.source, 'SOURCE_REFERENCE_UNRESOLVED', `Missing captured question: ${questionId}`,
       { requirement: 'captured_question', questionId });
     const match = resolved.get(contract.source);
-    const unresolvedValueIds = match ? contract.allowed.filter((value) => !match.values.has(value)) : [];
+    const policy = policyFor(definition, definition.sources[contract.source]);
+    const claims = policy ? policy.semanticValues : contract.allowed;
+    const unresolvedValueIds = match ? claims.filter((value) => !(policy ? match.historicalValueIds.includes(value) : match.values.has(value))) : [];
     if (unresolvedValueIds.length) {
       report(contract.source, 'SOURCE_REFERENCE_UNRESOLVED', `Unverified semantic value IDs: ${questionId}: ${unresolvedValueIds.join(', ')}`,
         { requirement: 'historical_sku_or_current_non_sku_value_ids', questionId, unresolvedValueIds,
@@ -115,6 +119,9 @@ async function getSourceRegistry(client) {
     units: { weight: 'stored grams', total_price_uah: 'stored final UAH', answers: 'stored values; no unit conversion' },
     aliasPolicy: 'No repository-verifiable cross-key lineage; aliases fail publication with explicit diagnostics',
     historicalInformationSources: HISTORICAL_INFORMATION_SOURCES,
+    sourceSupportPolicies: [{ version: require('./source-support').VERSION, evaluatorVersion: EVALUATOR,
+      outputContracts: ['magento-products-v1', 'magento-products-columns-v2'],
+      sources: ['NM.extra', 'AR.size'], placeholder: 'numeric-zero-v1', stringZeroPlaceholder: false }],
     productionAcceptanceVerified: false,
     references: await loadSourceEvidence(client),
   };

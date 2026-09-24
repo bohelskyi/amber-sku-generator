@@ -13,6 +13,14 @@ const { cases } = require('../../server/test/fixtures/magento-v1/expected-rows')
 const goldens = require('../../server/test/fixtures/magento-v1/goldens.json');
 const baseline = () => materializeMagentoV1(catalog());
 const output = (d, p = product('BR')) => evaluateBatch(compileDefinition(d), [p]);
+
+test('stale column actions cannot label an absent column or insert at a missing anchor', () => {
+  const d = upgradeColumns(baseline());
+  for (const action of ['label', 'move', 'remove', 'rename', 'duplicate', 'add']) {
+    assert.throws(() => columnChange(d, 0, action, 'no_longer_present', 'valid_code'), /вже змінено/);
+  }
+  assert.equal(d.groups[0].columnLabels?.no_longer_present, undefined);
+});
 test('explicit column upgrade preserves all ten independent serialized goldens and old hashes', () => {
   for (const fixture of cases) {
     const rules = catalog(); for (const [key, changes] of Object.entries(fixture.questions || {})) Object.assign(rules.get(fixture.group).get(key), changes);
