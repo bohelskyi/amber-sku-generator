@@ -596,7 +596,8 @@ describe('application-user administration UI', () => {
       url === '/admin/users' ? { users: managedUsers } : { roles }
     ));
     const post = vi.spyOn(api, 'post').mockResolvedValue(response({}));
-    const put = vi.spyOn(api, 'put').mockResolvedValue(response({}));
+    const roleUpdate = deferred();
+    const put = vi.spyOn(api, 'put').mockReturnValue(roleUpdate.promise);
 
     render(
       <AuthContext.Provider value={authValue()}>
@@ -620,6 +621,7 @@ describe('application-user administration UI', () => {
       '/admin/users/101/approve',
       { roleId: 2 }
     ));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Підтвердити Pending User' }).disabled).toBe(false));
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Роль для Active User' }), {
       target: { value: '2' },
@@ -630,8 +632,14 @@ describe('application-user administration UI', () => {
       { roleId: 2, expectedAssignmentId: 202 }
     ));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Вимкнути доступ для Active User' }));
+    // Observing PUT is not completion: runAction still awaits it and reloads users.
+    const disable = screen.getByRole('button', { name: 'Вимкнути доступ для Active User' });
+    expect(disable.disabled).toBe(true);
+    roleUpdate.resolve(response({}));
+    await waitFor(() => expect(disable.disabled).toBe(false));
+    fireEvent.click(disable);
     await waitFor(() => expect(post).toHaveBeenCalledWith('/admin/users/102/disable', {}));
+    await waitFor(() => expect(disable.disabled).toBe(false));
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Роль для Disabled User' }), {
       target: { value: '3' },
