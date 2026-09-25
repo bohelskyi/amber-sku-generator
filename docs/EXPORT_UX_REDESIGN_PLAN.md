@@ -1,10 +1,10 @@
 # Export UX/UI Redesign Plan
 
-**Status: Approved plan — UX-1 checkpoint 1 implemented; manual visual/parity acceptance pending. Checkpoint 2 has not started.**
+**Status: UX-1 implementation complete — checkpoint 1 manually accepted on OFFICE; checkpoint 2 implemented, with its final visual checks pending. UX-2 / UX-3 / UX-4 have not started.**
 
 Document: `docs/EXPORT_UX_REDESIGN_PLAN.md`.
 
-**Historical planning closeout:** the approved plan was saved with the four approved amendments below. Sections 1–15 record that planning inspection and its then-uncommitted functional baseline. The current UX-1 checkpoint 1 implementation record is in section 16; the approved later-phase architecture remains unchanged.
+**Historical planning closeout:** the approved plan was saved with the four approved amendments below. Sections 1–15 record that planning inspection and its then-uncommitted functional baseline. The UX-1 implementation records are in sections 16–17; the approved later-phase architecture remains unchanged.
 
 ## 1. Repository baseline and evidence
 
@@ -1428,3 +1428,20 @@ One existing template controller and the existing per-open session controllers r
 Checkpoint 2 requires a later explicit acceptance task. No staging, commit, push or branch operation is part of this implementation.
 
 Final working-tree scope: **10 modified tracked files, 6 new files; nothing staged**. Modified: `client/src/router.jsx`; the three export/template/session pages; `client/src/components/app/ExportTools.jsx`; `client/src/hooks/useDirtyNavigation.jsx`; `client/src/hooks/useDialogAccessibility.js`; the existing template/session rendered tests; this plan. New: the five workspace shell/primitive/style files and `client/test/export-workspace-routes.test.jsx`. All changes were inspected; branch and HEAD remain at the starting point. `AppPage`, export provider/controller, auth, server, migrations, dependencies and deployment files are unchanged.
+
+## 17. UX-1 checkpoint 2 implementation — 2026-09-25
+
+**Checkpoint 1 manual acceptance recorded:** the operator confirmed on OFFICE that `/exports` is the natural export destination; local navigation, deep links, browser Back/Forward, template dirty Save / Discard / Stay and existing template/system views work, with no observed regression in the accepted flows. This explicit acceptance authorizes checkpoint 2 and supersedes section 16's acceptance-pending status.
+
+- Starting checkout: branch `feature/magento-export-constructor`, HEAD `a34bee5e454692149173b6b1895a3d1598dd75aa`, clean `git status --short`. Checkpoint 1 is committed in that HEAD.
+- `AppPage` no longer composes the full `ExportTools`. The existing `HomeDashboard` status panel now shows the ordinary pending-product count, pending price-change count and **Перейти до експорту** → `/exports`; the price count links to `/exports/prices`. It uses the existing read-only status, including zero/loading states, without claiming readiness. Native links perform navigation only. No routes were added or changed; old export/session/template deep links remain valid.
+- The panel requires effective `exports.view`, including for view-only users. It grants no create/confirm authority and fetches no template definitions. Without export access, the panel is absent and the existing provider suppresses export reads. No session, invitation or template details were copied to the product page.
+- The archive form formerly composed inside the product-page `ExportTools` remains on `AppPage`, using the same `products.archive` check, input state, confirmation and handler. Product creation, history, decode, recount and price-change components/controllers remain in place.
+- Provider placement remains `AuthProvider → AuthGate → RouterProvider → Workspace → ExportWorkflowProvider → route pages`. Provider, controller, auth, workspace shells, router and `ExportTools` itself are unchanged. `/exports` still uses the complete ordinary export UI; `/exports/prices` retains its existing price workflow. Rollback requires restoring product-page composition/status presentation only, without reverting routes, providers, server behavior or data.
+- Rendered regressions retain the checkpoint-1 assertions and adapt the former duplicated-workbench case to the handoff. They exercise original uncertain-operation retry identity through product/export/product/export; same-user refresh while on products; late-response fencing for A → B and A → B → A; permission invalidation; zero-count/view-only/denied handoff; navigation without preview, snapshot/session/template commands or downloads; preserved product/archive/decode/recount controls; existing dirty guards and deep links. Composition/focus checks at simulated 390/1440 px do not constitute browser layout verification.
+- Verification: unchanged route/home characterization passed **20/20** before implementation; final focused home/route/auth/export/session/template suites passed **130/130**, including **21 workspace-route cases**. Full `npm test -- --maxWorkers=2` passed **137/137 Node tests + 212/212 rendered tests (20 files)**. Client lint, production build and `git diff --check` passed. A temporary preload guard verified Node **20.20.2** and the exact executable in npm and child processes. No server/DB tests were needed or run.
+- Final scope: **5 modified tracked files, no staged or untracked files** — `AppPage.jsx`, `HomeDashboard.jsx`, `export-workspace-routes.test.jsx`, `home-workspace.test.jsx` and this plan. Shared CSS and global/local navigation are unchanged.
+
+**Remaining manual checks:** inspect the compact product panel at about 1440 px and 390 px, including page overflow, text wrapping and keyboard focus/activation; follow both links and browser Back/Forward with a pending operation; verify view-only/no-export users and the retained archive form. No safe authenticated browser was available through the supplied tooling; no browser stack was installed or application bootstrapped. Checkpoint 2 visual acceptance remains pending.
+
+UX-1 implementation is complete. UX-2 / UX-3 / UX-4 are not started. No server files, business semantics, dependencies, migrations or database operations changed. No staging, commit, push or branch operation was performed.

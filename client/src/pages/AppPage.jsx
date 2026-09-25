@@ -1,4 +1,3 @@
-import { ExportTools } from '../components/app/ExportTools';
 import { HistoryTable } from '../components/app/HistoryTable';
 import { HomeDashboard } from '../components/app/HomeDashboard';
 import { PageHeader, Toast } from '../components/app/PageHeader';
@@ -24,7 +23,6 @@ function AppPage() {
   });
   const {
     canArchiveProducts,
-    canCreateExports,
     canCreateProducts,
   } = permissionUi;
 
@@ -65,6 +63,7 @@ function AppPage() {
             recountValidationAttempt={sku.recountValidationAttempt}
             recountWeight={sku.recountWeight}
             canCreateProducts={canCreateProducts}
+            canViewExports={auth.permissions.includes('exports.view')}
             canStartRecount={Boolean(recountMode)}
             canChangeProductPrice={permissionUi.canApplyDirectPriceChange
               || permissionUi.canCreateCorrectionRequest}
@@ -134,38 +133,17 @@ function AppPage() {
           canArchive={canArchiveProducts}
         />
 
-        {!sku.selectedCat && (canCreateExports || canArchiveProducts) && (
-          <ExportTools durableSessions
-            templateMode={sku.templateMode}
-            setTemplateMode={sku.setTemplateMode}
-            templateSelection={sku.templateSelection}
-            setTemplateSelection={sku.setTemplateSelection}
-            pendingCreate={sku.pendingCreate}
-            canActivateTemplate={auth.permissions.includes('export_templates.activate')}
-            exportFromSku={sku.exportFromSku}
-            setExportFromSku={sku.setExportFromSku}
-            exportToSku={sku.exportToSku}
-            setExportToSku={sku.setExportToSku}
-            exportError={sku.exportError}
-            exportStatus={sku.exportStatus}
-            exportPreview={sku.exportPreview}
-            exportSnapshot={sku.exportSnapshot}
-            setExportError={sku.setExportError}
-            isExportLoading={sku.isExportLoading}
-            isPriceExportLoading={sku.isPriceExportLoading}
-            priceExportError={sku.priceExportError}
-            priceExportStatus={sku.priceExportStatus}
-            skuToDelete={sku.skuToDelete}
-            setSkuToDelete={sku.setSkuToDelete}
-            onPreviewExport={sku.handlePreviewExport}
-            onCreateSnapshot={sku.handleCreateSnapshot}
-            onDownloadMagentoArtifact={sku.handleDownloadMagentoArtifact}
-            onConfirmSnapshot={sku.handleConfirmSnapshot}
-            onPriceExportCsv={sku.handlePriceExportCsv}
-            onDelete={sku.handleDelete}
-            canArchive={canArchiveProducts}
-            canCreateExport={canCreateExports}
-          />
+        {!sku.selectedCat && canArchiveProducts && (
+          <section className="field-group" aria-label="Архівування">
+            <h3 className="text-lg font-semibold text-slate-900">Архівування</h3>
+            <p className="section-subtitle mt-1">Архівний артикул зберігається в базі, але не потрапляє в історію та експорт.</p>
+            <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+              <input type="text" value={sku.skuToDelete}
+                onChange={(event) => sku.setSkuToDelete(event.target.value)}
+                placeholder="Введіть повний артикул..." aria-label="SKU товару для архівування" className="input" />
+              <button type="button" onClick={() => sku.handleDelete(sku.skuToDelete)} className="btn btn-danger px-6">Архівувати</button>
+            </div>
+          </section>
         )}
       </div>
       <RecountConfirmDialog

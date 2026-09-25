@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { HomeDashboard } from '../src/components/app/HomeDashboard.jsx';
 
 afterEach(cleanup);
@@ -15,18 +16,21 @@ function renderHome(overrides = {}) {
   const onDecodeInputChange = vi.fn();
 
   const view = render(
-    <HomeDashboard
-      config={{ categories }}
-      exportStatus={null}
-      skuToDecode=""
-      decodeData={null}
-      decodeError=""
-      decodeErrorDetails={null}
-      onStart={onStart}
-      onDecode={onDecode}
-      onDecodeInputChange={onDecodeInputChange}
-      {...overrides}
-    />,
+    <MemoryRouter>
+      <HomeDashboard
+        canViewExports
+        config={{ categories }}
+        exportStatus={null}
+        skuToDecode=""
+        decodeData={null}
+        decodeError=""
+        decodeErrorDetails={null}
+        onStart={onStart}
+        onDecode={onDecode}
+        onDecodeInputChange={onDecodeInputChange}
+        {...overrides}
+      />
+    </MemoryRouter>,
   );
 
   return { ...view, onStart, onDecode, onDecodeInputChange };
