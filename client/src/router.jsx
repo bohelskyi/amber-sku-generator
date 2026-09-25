@@ -14,14 +14,13 @@ const RolesPage = lazy(() => import('./pages/RolesPage.jsx'));
 const AuditPage = lazy(() => import('./pages/AuditPage.jsx'));
 const ExportTemplatesPage = lazy(() => import('./pages/ExportTemplatesPage.jsx'));
 const ExportsPage = lazy(() => import('./pages/ExportsPage.jsx'));
-const ExportSessionsPage = lazy(() => import('./pages/ExportSessionsPage.jsx'));
 
 export default function AppRouter() {
   const [router] = useState(() => createBrowserRouter([{ path: '*', element: <Workspace /> }]));
   return <RouterProvider router={router} />;
 }
 
-function Workspace() {
+export function Workspace() {
   return (
       <ExportWorkflowProvider>
       <div className="app-shell">
@@ -36,9 +35,8 @@ function Workspace() {
             <Route path="/admin/users" element={<UsersPage />} />
             <Route path="/admin/roles" element={<RolesPage />} />
             <Route path="/admin/audit" element={<AuditPage />} />
-            <Route path="/admin/export-templates" element={<ExportTemplatesPage />} />
-            <Route path="/exports" element={<ExportsPage />} />
-            <Route path="/exports/sessions/:sessionId?" element={<ExportSessionsPage />} />
+            <Route path="/admin/export-templates/*" element={<ExportTemplatesPage />} />
+            <Route path="/exports/*" element={<ExportsPage />} />
           </Routes>
         </Suspense>
       </div>

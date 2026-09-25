@@ -27,6 +27,7 @@ const canReceiveFocus = (element) => Boolean(
 );
 
 export function useDialogAccessibility({
+  beforeFocusRestore,
   closeDisabled = false,
   containerRef,
   initialFocusRef,
@@ -56,11 +57,12 @@ export function useDialogAccessibility({
     return () => {
       window.cancelAnimationFrame(focusFrame);
       document.body.style.overflow = previousOverflow;
+      beforeFocusRestore?.();
       if (previousActiveElement?.isConnected) {
         previousActiveElement.focus({ preventScroll: true });
       }
     };
-  }, [containerRef, initialFocusRef, isOpen]);
+  }, [beforeFocusRestore, containerRef, initialFocusRef, isOpen]);
 
   useEffect(() => {
     if (!isOpen || !isInteractionEnabled) return undefined;

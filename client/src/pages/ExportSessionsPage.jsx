@@ -1,6 +1,6 @@
 import { ArtifactTables } from '../components/export-templates/PreviewTable';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/auth-context';
 import { exportSessionsApi as api } from '../api/export-sessions-api';
 import { exportsApi } from '../api/exports-api';
@@ -9,6 +9,9 @@ import { PreviewSummary, ReadinessProblems, SnapshotFiles } from '../components/
 import { useDirtyNavigation } from '../hooks/useDirtyNavigation';
 import { getApiError } from '../lib/http-error';
 import { downloadBlob } from '../lib/download';
+import { ExportWorkspaceShell } from '../components/workspace/ExportWorkspaceShell';
+import { WorkspaceToolbar } from '../components/workspace/WorkspacePrimitives';
+import { Notice } from '../components/app/UiPrimitives';
 
 const freshSettings = () => ({ requestContract: 'template-v1', mode: 'new', selection: { mode: 'active' } });
 const stateLabels = { prepared: 'Підготовлено — очікує явного створення', executing: 'Створення виконується', interrupted: 'Виконання перервано — можна повторити ту саму спробу', failed: 'Спроба завершилася помилкою', succeeded: 'Збережені файли готові', superseded: 'Спробу замінено', 'not-ready': 'Потрібні виправлення' };
@@ -69,12 +72,12 @@ function NewSession({ canActivate, onCreated, register }) {
   const current = useLifetime(); const [value, setValue] = useState({ title: '', settings: freshSettings() }); const [error, setError] = useState('');
   const [busy, setBusy] = useState(false); const [submitted, setSubmitted] = useState(false); const pending = useRef(null); const loading = useRef(false);
   const dirty = Boolean(value.title || value.settings.mode !== 'new' || value.settings.selection.mode !== 'active');
-  const save = useCallback(async () => {
+  const save = useCallback(async (openAfterSave = true) => {
     if (!current() || loading.current) return false;
     if (!value.title.trim()) { setError('Вкажіть назву експорту.'); return false; }
     if (!pending.current) { pending.current = { ...value, creationKey: crypto.randomUUID() }; setSubmitted(true); }
     loading.current = true; setBusy(true); setError('');
-    try { const { data } = await api.create(pending.current); if (!current()) return false; onCreated(data.id); return true; }
+    try { const { data } = await api.create(pending.current); if (!current()) return false; if (openAfterSave) onCreated(data.id); return true; }
     catch (e) {
       if (current()) {
         if (e.response?.status === 422) { pending.current = null; setSubmitted(false); setError(getApiError(e)); }
@@ -84,7 +87,7 @@ function NewSession({ canActivate, onCreated, register }) {
     }
     finally { loading.current = false; if (current()) setBusy(false); }
   }, [value, current, onCreated]);
-  useEffect(() => { register({ dirty, busy, save, discard: () => setValue({ title: '', settings: freshSettings() }) }); }, [dirty, busy, save, register]);
+  useEffect(() => { register({ dirty, busy, save: () => save(false), discard: () => setValue({ title: '', settings: freshSettings() }) }); }, [dirty, busy, save, register]);
   return <section className="card p-4 space-y-3"><h2 className="font-semibold">Створити свій експорт</h2>
     <p>Спочатку приватний: доступ маєте лише ви. Створення зберігає налаштування, але не створює файлів і не резервує товари.</p>
     <Settings value={value} onChange={setValue} canActivate={canActivate} disabled={busy || submitted} />
@@ -190,55 +193,111 @@ function SessionDetail({ id, canCreate, canActivate, register, onLost }) {
     </div>
   </section>;
 }
-function SessionWorkspace({ canCreate, canActivate }) {
-  const current = useLifetime(); const { sessionId } = useParams(); const [scope, setScope] = useState('owned'); const [items, setItems] = useState([]); const [next, setNext] = useState(null);
-  const [selected, setSelected] = useState(null); const [openedLifetime, setOpenedLifetime] = useState(0); const [newSession, setNewSession] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
-  const [form, setForm] = useState({ dirty: false, busy: false }); const [knownId, setKnownId] = useState(''); const [known, setKnown] = useState(''); const listTicket = useRef(0);
+function SessionWorkspace({ canCreate, canActivate, scope = 'owned', create = false }) {
+  const current = useLifetime(); const { sessionId } = useParams();
+  const location = useLocation(); const navigate = useNavigate();
+  const [items, setItems] = useState([]); const [next, setNext] = useState(null);
+  const [selected, setSelected] = useState(null); const [openedLifetime, setOpenedLifetime] = useState(0);
+  const [error, setError] = useState(''); const [notice, setNotice] = useState('');
+  const [form, setForm] = useState({ dirty: false, busy: false });
+  const [knownId, setKnownId] = useState(''); const [known, setKnown] = useState('');
+  const listTicket = useRef(0); const cache = useRef({});
+  // Openings belong to this mounted principal, never to history state or storage.
+  const opened = useRef(new Set()); const requestedOpen = useRef(null);
   const register = useCallback((state) => setForm(state), []);
   const navigation = useDirtyNavigation(form);
+  const listing = !sessionId && !create;
   const list = useCallback(async (after = '') => {
     if (!current()) return; const ticket = ++listTicket.current;
-    try { const { data } = await api.list(scope, after); if (!current() || ticket !== listTicket.current) return; setItems((old) => after ? [...old, ...data.items] : data.items); setNext(data.next); }
-    catch (e) { if (current() && ticket === listTicket.current) setError(getApiError(e)); }
+    try {
+      const { data } = await api.list(scope, after);
+      if (!current() || ticket !== listTicket.current) return;
+      const entries = after ? [...(cache.current[scope]?.items || []), ...data.items] : data.items;
+      cache.current[scope] = { ...cache.current[scope], items: entries, next: data.next };
+      setItems(entries); setNext(data.next);
+    } catch (e) { if (current() && ticket === listTicket.current) setError(getApiError(e)); }
   }, [scope, current]);
-  useEffect(() => { const initial = window.setTimeout(() => { void list(); }, 0); const focus = () => { void list(); }; window.addEventListener('focus', focus); return () => { window.clearTimeout(initial); window.removeEventListener('focus', focus); }; }, [list]);
+  useEffect(() => {
+    if (!listing) return undefined;
+    const ticketRef = listTicket;
+    const initial = window.setTimeout(() => { void list(); }, 0);
+    const focus = () => { void list(); }; window.addEventListener('focus', focus);
+    return () => { ticketRef.current++; window.clearTimeout(initial); window.removeEventListener('focus', focus); };
+  }, [list, listing]);
   useEffect(() => { if (!form.dirty) return undefined; const warn = (e) => { e.preventDefault(); e.returnValue = ''; }; window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn); }, [form.dirty]);
-  const open = useCallback((id) => { if (!current()) return; setForm({ dirty: false, busy: false }); setSelected(id); setOpenedLifetime((n) => n + 1); setNewSession(false); setKnown(''); setNotice(''); }, [current]);
-  const lost = useCallback(() => { setSelected(null); setKnown(''); setForm({ dirty: false, busy: false }); setNotice('Доступ до цього експорту втрачено. Дані закрито; відкрийте доступний експорт через поточний обліковий запис.'); void list(); }, [list]);
-  const newOwn = () => navigation.request(() => { setForm({ dirty: false, busy: false }); setSelected(null); setKnown(''); setOpenedLifetime((n) => n + 1); setNewSession(true); });
+  const syncRoute = useEffectEvent(() => {
+    setForm({ dirty: false, busy: false }); setKnown(''); setNotice(''); setError('');
+    setOpenedLifetime((n) => n + 1);
+    if (sessionId && requestedOpen.current === sessionId) opened.current.add(location.key);
+    requestedOpen.current = null;
+    setSelected(sessionId && opened.current.has(location.key) ? sessionId : null);
+    const saved = cache.current[scope]; setItems(saved?.items || []); setNext(saved?.next || null);
+    if (listing && saved?.scrollY != null) window.requestAnimationFrame(() => window.scrollTo(0, saved.scrollY));
+  });
+  useEffect(() => {
+    // The router owns the address; one controller survives its local destinations.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    syncRoute();
+  }, [location.key]);
+  const open = useCallback((id) => {
+    if (!current()) return;
+    requestedOpen.current = id;
+    navigate('/exports/sessions/' + encodeURIComponent(id), { state: { returnTo: scope === 'shared' || scope === 'invitations' ? '/exports/shared' : '/exports/sessions' } });
+  }, [current, navigate, scope]);
+  const { commit } = navigation;
+  const created = useCallback((id) => commit(() => open(id)), [commit, open]);
+  const lost = useCallback(() => {
+    opened.current.clear(); setSelected(null); setKnown(''); setForm({ dirty: false, busy: false });
+    setNotice('Доступ до цього експорту втрачено. Дані закрито; відкрийте доступний експорт через поточний обліковий запис.');
+  }, []);
+  const newOwn = () => navigation.request(() => navigate('/exports/new/template'));
   const respond = (invite, action) => navigation.request(async () => {
     if (!current()) return;
-    try { await api.membership(invite.id, { action, expectedAccessEpoch: invite.accessEpoch }); if (!current()) return; if (action === 'accept') open(invite.id); void list(); }
+    try { await api.membership(invite.id, { action, expectedAccessEpoch: invite.accessEpoch }); if (!current()) return; if (action === 'accept') open(invite.id); else void list(); }
     catch (e) { if (current()) setError(getApiError(e)); }
   });
-  return <main className="app-page"><div className="mx-auto max-w-5xl p-4 sm:p-6 space-y-5">
-    {navigation.prompt}<Link to="/exports" className="underline">Звичайний експорт та sku,price</Link><h1 className="text-2xl font-semibold">Мої та спільні експорти за шаблоном</h1>
-    <p>Кожний експорт — окрема приватна або явно спільна операція за опублікованим шаблоном. Чернетки шаблонів не передаються учасникам.</p>
-    {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    <div className="flex flex-wrap gap-3">{canCreate && <button className="btn btn-primary px-3" onClick={newOwn}>Створити свій експорт</button>}
-      <button className="btn btn-outline px-3" onClick={() => { void list(); }}>Оновити список</button></div>
-    <div className="card p-4 space-y-3"><label className="block">Список експортів<select className="input" value={scope} onChange={(e) => setScope(e.target.value)}>
-      <option value="owned">Мої експорти</option><option value="invitations">Запрошення</option><option value="shared">Спільні зі мною</option></select></label>
-      {scope === 'invitations' && <p>Ваші поточні права: {canCreate ? 'читати, створювати файли та явно підтверджувати результат' : 'лише читати й завантажувати; створення та підтвердження недоступні'}. Приєднання не надає нових дозволів. Ви також можете створити свій незалежний експорт.</p>}
+  const titles = { owned: 'Мої експорти', shared: 'Спільні зі мною', invitations: 'Запрошення' };
+  const returnTo = location.state?.returnTo === '/exports/shared' ? '/exports/shared' : '/exports/sessions';
+  return <div className="space-y-5">
+    {navigation.prompt}
+    {error && <Notice>{error}</Notice>}{notice && <Notice tone="warning">{notice}</Notice>}
+    <WorkspaceToolbar label="Дії експорту">
+      {(sessionId || create) && <Link className="underline" to={returnTo}>{returnTo === '/exports/shared' ? '← До спільних експортів' : '← До моїх експортів'}</Link>}
+      {canCreate && <button className="btn btn-outline px-3" onClick={newOwn}>Створити свій експорт</button>}
+      {listing && <button className="btn btn-outline px-3" onClick={() => { void list(); }}>Оновити список</button>}
+    </WorkspaceToolbar>
+    {listing && <section className="space-y-3" aria-label={titles[scope]}>
+      <h2 className="text-xl font-semibold">{titles[scope]}</h2>
+      {scope === 'invitations' && <p>Ваші поточні права: {canCreate ? 'читати, створювати файли та явно підтверджувати результат' : 'лише читати й завантажувати; створення та підтвердження недоступні'}. Приєднання не надає нових дозволів.</p>}
       {!items.length && <p>У цьому списку поки немає експортів.</p>}
-      <ul className="space-y-3">{items.map((s) => <li key={s.id} className="rounded border p-3"><strong>{s.title}</strong><p>Власник: {s.ownerName || s.ownerUserId}{s.configurationRevision ? ` · ревізія ${s.configurationRevision} · ${s.snapshotId ? 'файли готові' : s.currentAttemptId ? 'спроба збережена' : 'налаштування'}` : ''}</p>
-        {s.template && <p>{s.template.displayName} · v{s.template.versionNumber}</p>}{s.createdAt && <p className="text-xs">Створено: {new Date(s.createdAt).toLocaleString('uk-UA')}</p>}
+      <ul className="divide-y divide-slate-200">{items.map((s) => <li key={s.id} className="py-3"><strong>{s.title}</strong><p>Власник: {s.ownerName || s.ownerUserId}</p>
         {scope === 'invitations' ? <div className="flex flex-wrap gap-3"><button className="underline" onClick={() => respond(s, 'accept')}>Приєднатися до експорту користувача {s.ownerName || s.ownerUserId}</button><button className="underline" onClick={() => respond(s, 'decline')}>Відхилити запрошення</button></div>
-          : <button className="underline" onClick={() => navigation.request(() => open(s.id))}>Відкрити / продовжити {s.title}</button>}</li>)}</ul>
+          : <>
+            {s.configurationRevision && <p>Ревізія {s.configurationRevision} · {s.snapshotId ? 'Файли готові' : s.currentAttemptId ? 'Перевірку збережено' : 'Налаштування'}</p>}
+            {s.template && <p>{s.template.displayName} · v{s.template.versionNumber}</p>}
+            {s.createdAt && <p className="text-xs">Створено: {new Date(s.createdAt).toLocaleString('uk-UA')}</p>}
+            <Link className="underline" to={'/exports/sessions/' + encodeURIComponent(s.id)} state={{ returnTo: scope === 'shared' ? '/exports/shared' : '/exports/sessions' }} onClick={(event) => {
+              // Preserve native open-in-new-tab behavior; that tab explicitly opens through its account.
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              cache.current[scope] = { ...cache.current[scope], scrollY: window.scrollY };
+              requestedOpen.current = s.id;
+            }}>Відкрити / продовжити {s.title}</Link>
+          </>}</li>)}</ul>
       {next && <button className="underline" onClick={() => { void list(next); }}>Наступні експорти</button>}
-    </div>
-    {sessionId && <button className="btn btn-outline px-3 break-all" onClick={() => navigation.request(() => open(sessionId))}>Відкрити експорт із посилання через мій обліковий запис</button>}
-    {newSession && <NewSession key={openedLifetime} canActivate={canActivate} onCreated={open} register={register} />}
-    {selected && <SessionDetail key={`${selected}:${openedLifetime}`} id={selected} canCreate={canCreate} canActivate={canActivate} register={register} onLost={lost} />}
-    <details className="card p-4"><summary>Відкрити відомий історичний знімок</summary><p className="my-3 text-sm">Потрібен точний ID. Невідомі операції, створені до збережених сесій, автоматично не зіставляються.</p>
+    </section>}
+    {sessionId && !selected && <button className="btn btn-outline px-3 break-all" onClick={() => navigation.request(() => open(sessionId))}>Відкрити експорт із посилання через мій обліковий запис</button>}
+    {create && (canCreate ? <NewSession key={openedLifetime} canActivate={canActivate} onCreated={created} register={register} /> : <p>Немає дозволу на створення експорту. Доступні перегляд і завантаження.</p>)}
+    {selected === sessionId && selected && <SessionDetail key={`${selected}:${openedLifetime}`} id={selected} canCreate={canCreate} canActivate={canActivate} register={register} onLost={lost} />}
+    {!create && <details className="border-t pt-4"><summary>Відкрити відомий історичний знімок</summary><p className="my-3 text-sm">Потрібен точний ID. Невідомі операції, створені до збережених сесій, автоматично не зіставляються.</p>
       <label className="block">ID збереженого знімка<input className="input" value={knownId} maxLength={200} onChange={(e) => setKnownId(e.target.value)} /></label>
-      <button className="btn btn-outline px-3" disabled={!knownId.trim()} onClick={() => navigation.request(() => { setForm({ dirty: false, busy: false }); setSelected(null); setNewSession(false); setOpenedLifetime((n) => n + 1); setKnown(knownId.trim()); })}>Прочитати знімок без підтвердження</button>
-    </details>
+      <button className="btn btn-outline px-3" disabled={!knownId.trim()} onClick={() => navigation.request(() => { setForm({ dirty: false, busy: false }); setSelected(null); setOpenedLifetime((n) => n + 1); setKnown(knownId.trim()); })}>Прочитати знімок без підтвердження</button>
+    </details>}
     {known && <StoredResult key={`${known}:${openedLifetime}`} id={known} canCreate={canCreate} onDenied={lost} />}
-  </div></main>;
+  </div>;
 }
-export default function ExportSessionsPage() {
+export default function ExportSessionsPage({ embedded = false, scope = 'owned', create = false }) {
   const { permissions, applicationUser } = useAuth();
-  if (!permissions.includes('exports.view')) return <main className="app-page p-6">Немає дозволу на перегляд експорту</main>;
-  return <SessionWorkspace key={`${applicationUser?.id}:${permissions.includes('exports.create')}`} canCreate={permissions.includes('exports.create')} canActivate={permissions.includes('export_templates.activate')} />;
+  if (!permissions.includes('exports.view')) return <p>Немає дозволу на перегляд експорту</p>;
+  const content = <SessionWorkspace key={`${applicationUser?.id}:${permissions.includes('exports.create')}`} scope={scope} create={create} canCreate={permissions.includes('exports.create')} canActivate={permissions.includes('export_templates.activate')} />;
+  return embedded ? content : <ExportWorkspaceShell>{content}</ExportWorkspaceShell>;
 }

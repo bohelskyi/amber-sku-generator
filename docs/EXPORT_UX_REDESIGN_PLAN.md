@@ -1,10 +1,10 @@
 # Export UX/UI Redesign Plan
 
-**Status: Proposed — UX/UI redesign plan; implementation not started.**
+**Status: Approved plan — UX-1 checkpoint 1 implemented; manual visual/parity acceptance pending. Checkpoint 2 has not started.**
 
 Document: `docs/EXPORT_UX_REDESIGN_PLAN.md`.
 
-**Planning closeout:** the approved plan is saved with the four approved amendments below. Only this documentation file is added by the closeout task. UX-1 and the redesign implementation have not started.
+**Historical planning closeout:** the approved plan was saved with the four approved amendments below. Sections 1–15 record that planning inspection and its then-uncommitted functional baseline. The current UX-1 checkpoint 1 implementation record is in section 16; the approved later-phase architecture remains unchanged.
 
 ## 1. Repository baseline and evidence
 
@@ -1373,3 +1373,58 @@ No runtime code, tests, migrations, dependencies, database state or existing use
 **Не можна допустити регресій:** серверна авторитетність, CAS, історична підтримка NM/AR і справжнього нуля, незмінність публікацій/файлів, точність Main/EN, права учасників, відновлення початкової операції, окреме підтвердження, монотонний курсор і незалежні ревізії `sku,price`.
 
 Редизайн не реалізовано. Додано лише `docs/EXPORT_UX_REDESIGN_PLAN.md` з чотирма погодженими поправками. UX-1 не розпочато.
+
+## 16. UX-1 checkpoint 1 implementation — 2026-09-25
+
+**Implementation complete; stop for manual acceptance. UX-1 checkpoint 2 is NOT implemented.**
+
+### Verified starting point
+
+- Checkout: `D:\Work\артикул\amber-app`, branch `feature/magento-export-constructor`.
+- HEAD: `b0baf53ef60ec69a4a7d1b8623469ee52b5c3d5d`; initial `git status --short` empty.
+- Accepted functional baseline is committed in `f7b7eaefa31debb18b0a4b7121f2bbe8825e2ca0`; the separate RBAC-test correction is `1494133`. The plan itself is committed in HEAD.
+- Previous routes: `/` → `AppPage` with `ExportTools`; `/exports` → `ExportsPage` with `ExportTools`; `/exports/sessions/:sessionId?` → `ExportSessionsPage`; `/admin/export-templates` → `ExportTemplatesPage` with local screen/tab state. Other routes are unchanged.
+- Provider placement remains `AuthProvider → AuthGate → RouterProvider → Workspace → ExportWorkflowProvider → global navigation / Suspense / route pages`. Neither the provider nor `useProductExportController` moved or changed.
+
+### Actual routes and components
+
+| Address | Checkpoint 1 behavior |
+|---|---|
+| `/exports` | Primary New export landing; existing system workflow and explicit link to published-template creation |
+| `/exports/new/template` | Existing private-session form; only explicit creation persists metadata |
+| `/exports/sessions` | Existing owned-session API, now a dedicated list |
+| `/exports/shared` | Existing accepted-shared-session API |
+| `/exports/invitations` | Existing minimal invitation list and explicit accept/decline |
+| `/exports/sessions/:sessionId` | Compatible permalink; list clicks open through the current principal; direct/reloaded links retain explicit current-account opening |
+| `/exports/prices` | Existing price controller/action unchanged, including its current create/download/confirm sequence |
+| `/admin/export-templates` | Existing shared registry |
+| `/admin/export-templates/system` | Read-only system profile |
+| `/admin/export-templates/new` | Existing candidate/copy and draft-creation form |
+| `/admin/export-templates/:familyId` | Existing table/editor |
+| `/admin/export-templates/:familyId/check` | Existing validation, source support and sample workflow |
+| `/admin/export-templates/:familyId/versions` | Existing publication and candidate-selection controls |
+| `?version=:versionId` on family views | Addressable immutable publication; no tokens/proofs/operation keys in URLs |
+
+`ExportWorkspaceShell`, `TemplateWorkspaceShell`, `WorkspaceLocalNav`, `WorkspaceHeader`, `WorkspaceToolbar` and `WorkspaceDialog` are in `client/src/components/workspace/`. They reuse application tokens, `AppPageHeader`, `StatusBadge`, `Notice` and `useDialogAccessibility`. Local destinations are native links with `aria-current="page"`, visible focus and wrapping narrow layouts. The dirty dialog contains focus, makes its background inert and restores focus on Stay/Escape. Existing grids, column dialogs and Advanced remain unchanged.
+
+One existing template controller and the existing per-open session controllers remain authoritative client adapters. Complete template draft/inspector selection survives same-family table/check/versions navigation without a reload. Unfinished inspector input, another family/publication, leaving the workspace and history transitions that would discard state retain Save / Discard / Stay; failed saves keep the requested navigation blocked. Session forms use the same guard, original revision and existing retry descriptor. List scope is addressable; return links and in-memory list scroll state support the list/session round trip. List ordering/pagination APIs remain unchanged.
+
+### Parity and bounded deviations
+
+- `AppPage` is unchanged and still renders the full product-page `ExportTools`, including archive controls. Both ordinary export surfaces still use the single principal-scoped provider. A presentation-only recovery button now exposes its existing original-operation retry in the durable-session composition; it neither creates a replacement key nor changes the handler.
+- No history destination is rendered: truthful cross-stream file browsing requires UX-3. Known-ID snapshot opening remains available as a secondary capability.
+- This checkpoint uses current list metadata and ordering; it does not implement UX-4 list projections or recency. Pending invitations render only their existing minimal identity/owner information and explicit response actions.
+- Controller extraction is limited to reusable shells and route orchestration. No second controller/state library, server change, migration, dependency, browser storage, history API, evaluator or price-workflow redesign was introduced.
+- Effective permissions gate all route mounts and controls. Ordinary exporters issue no template administration reads; publish and activate remain independent of manage. A direct session URL is never membership authority.
+
+### Verification and remaining acceptance
+
+- Before editing: existing auth, controlled-export, Magento, session and template rendered suites passed **106/106** on Node **20.20.2**.
+- `client/test/export-workspace-routes.test.jsx` exercises the real route tree: non-mutating mounts/navigation; product/workspace pending-operation round trips; list/session/history identity; template dirty Save/Discard/Stay and inspector protection; principal A → B / A → B → A fencing; same-user refresh; export permission loss; view-only and denied routes; independent publish/activate; minimal invitations; old deep links; keyboard-reachable native navigation and focus restoration.
+- Existing rendered regressions retain their business assertions and use the new native links/addresses. Final `npm test`: **137/137 Node tests + 208/208 rendered tests (20 files)**, including **17 workspace-route cases**. The final focused workspace/column-dialog check passed **28/28**. `npm run lint`, `npm run build` and tracked/untracked whitespace checks passed. A temporary preload guard verified the exact Node **20.20.2** executable in npm and child processes; no persistent runtime configuration changed. Server/DB checks were not run because no server files changed.
+- **Visual acceptance pending:** no safe authenticated browser session was available through the supplied tooling. No browser stack was installed, authentication bypassed or useful database accessed. Rendered DOM tests are not pixel/browser acceptance.
+- Required manual comparison remains desktop about 1440 px and narrow about 390 px; old `/` versus new `/exports`; direct/reloaded URLs and browser back/forward; dirty template/session forms; view-only/create-capable and ordinary non-admin exporters; session reopening; keyboard navigation, modal focus and responsive overflow.
+
+Checkpoint 2 requires a later explicit acceptance task. No staging, commit, push or branch operation is part of this implementation.
+
+Final working-tree scope: **10 modified tracked files, 6 new files; nothing staged**. Modified: `client/src/router.jsx`; the three export/template/session pages; `client/src/components/app/ExportTools.jsx`; `client/src/hooks/useDirtyNavigation.jsx`; `client/src/hooks/useDialogAccessibility.js`; the existing template/session rendered tests; this plan. New: the five workspace shell/primitive/style files and `client/test/export-workspace-routes.test.jsx`. All changes were inspected; branch and HEAD remain at the starting point. `AppPage`, export provider/controller, auth, server, migrations, dependencies and deployment files are unchanged.

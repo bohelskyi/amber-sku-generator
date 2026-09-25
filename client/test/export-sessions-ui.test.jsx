@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { createMemoryRouter, RouterProvider } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider, Routes, Route } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ExportSessionsPage from '../src/pages/ExportSessionsPage';
 import { AuthContext } from '../src/auth/auth-context';
@@ -15,10 +15,10 @@ const own = { id: 'session-a', title: 'Сесія A', settings, configurationRev
 const attempt = { id: 'attempt-a', state: 'prepared', preview: { mode: 'new', representedCount: 1, readyCount: 1, errors: [], artifacts: [] } };
 const snapshot = { id: 'snapshot-a', sessionId: 'session-a', accessEpoch: 'owner', status: 'generated', artifacts: [{ groupCode: 'BR', fileName: 'stored.csv', rowCount: 2, productCount: 1 }] };
 const deferred = () => { let resolve; let reject; const promise = new Promise((a,b) => { resolve=a; reject=b; }); return { promise,resolve,reject }; };
-const click = (name) => fireEvent.click(screen.getByRole('button', { name }));
+const click = (name) => fireEvent.click(screen.queryByRole('button', { name }) || screen.getByRole('link', { name }));
 function page(id = 1, path = '/exports/sessions') {
   const auth = { applicationUser: { id }, permissions: ['exports.view','exports.create'], principalLifetime: { id, valid: true } };
-  const router = createMemoryRouter([{ path: '/exports/sessions/:sessionId?', element: <ExportSessionsPage /> }, { path: '/exports', element: <p>Legacy workspace</p> }], { initialEntries: [path] });
+  const router = createMemoryRouter([{ path: '/exports/*', element: <Routes><Route path="sessions/:sessionId?" element={<ExportSessionsPage />} /><Route path="new/template" element={<ExportSessionsPage create />} /><Route path="invitations" element={<ExportSessionsPage scope="invitations" />} /><Route path="shared" element={<ExportSessionsPage scope="shared" />} /><Route index element={<p>Legacy workspace</p>} /></Routes> }], { initialEntries: [path] });
   return { ...render(<AuthContext.Provider value={auth}><RouterProvider router={router} /></AuthContext.Provider>), auth, router };
 }
 beforeEach(() => {
@@ -75,7 +75,7 @@ it('invitation explicitly joins the same export, does not clone or generate, and
   const invite = { id: own.id, title: own.title, ownerName: 'Олена', accessEpoch: '1' };
   api.list.mockImplementation(async (scope) => response({ items: scope === 'invitations' ? [invite] : [], next: null }));
   api.membership.mockResolvedValue(response({ state: 'accepted', epoch: '2' })); api.get.mockResolvedValue(response({ ...own, isOwner: false, accessEpoch: '2' }));
-  page(2); fireEvent.change(screen.getByLabelText('Список експортів'), { target: { value: 'invitations' } });
+  page(2); fireEvent.click(screen.getByRole('link', { name: 'Запрошення' }));
   await screen.findByText('Сесія A'); expect(api.get).not.toHaveBeenCalled(); expect(screen.getByText(/Ваші поточні права/)).toBeTruthy();
   click('Приєднатися до експорту користувача Олена'); await screen.findByRole('heading', { name: 'Сесія A' });
   expect(api.membership).toHaveBeenCalledWith('session-a', { action: 'accept', expectedAccessEpoch: '1' }); expect(api.create).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
@@ -85,7 +85,7 @@ it('dirty session conflict preserves exact fields and Stay/Discard protect openi
   page(); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A'); await screen.findByLabelText('Назва експорту');
   fireEvent.change(screen.getByLabelText('Назва експорту'), { target: { value: '  local title ' } });
   api.save.mockRejectedValue({ response: { status: 409, data: { error: 'revision conflict', code: 'EXPORT_SESSION_CONFLICT' } } });
-  fireEvent.click(screen.getByText('Звичайний експорт та sku,price')); await screen.findByRole('dialog'); click('Зберегти й перейти');
+  fireEvent.click(screen.getByRole('link', { name: 'Новий експорт' })); await screen.findByRole('dialog'); click('Зберегти й перейти');
   await screen.findByText('revision conflict'); expect(screen.getByRole('dialog')).toBeTruthy();
   // The form registers its settled busy state with the navigation guard in an effect.
   await waitFor(() => expect(screen.getByRole('button', { name: 'Залишитися' }).disabled).toBe(false));
@@ -107,7 +107,7 @@ it('revoked membership clears data on authoritative refresh and fences a late cr
 });
 
 it('deep link requires explicit current-user opening and known snapshot reading never confirms', async () => {
-  page(2, '/exports/sessions/session-a'); await screen.findByText('Сесія A'); expect(api.get).not.toHaveBeenCalled();
+  page(2, '/exports/sessions/session-a'); await screen.findByRole('button', { name: 'Відкрити експорт із посилання через мій обліковий запис' }); expect(api.get).not.toHaveBeenCalled();
   click('Відкрити експорт із посилання через мій обліковий запис'); await screen.findByRole('heading', { name: 'Сесія A' });
   fireEvent.change(screen.getByLabelText('ID збереженого знімка'), { target: { value: 'historical-id' } }); click('Прочитати знімок без підтвердження');
   await screen.findByText(/Файли Magento готові/); expect(exportsApi.getSnapshot).toHaveBeenCalledWith('historical-id'); expect(exportsApi.confirmSnapshot).not.toHaveBeenCalled();
@@ -120,7 +120,7 @@ it('principal switch during stored download discards bytes, and B must explicitl
   first.auth.principalLifetime.valid = false;
   first.rerender(<AuthContext.Provider value={{ applicationUser: { id: 2 }, permissions: ['exports.view','exports.create'], principalLifetime: { id: 2, valid: true } }}><RouterProvider router={first.router} /></AuthContext.Provider>);
   await act(async () => late.resolve(response('private bytes'))); expect(downloadBlob).not.toHaveBeenCalled(); expect(screen.queryByText(/Файли Magento готові/)).toBeNull();
-  expect(api.get).toHaveBeenCalledTimes(1); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A'); await screen.findByText(/Файли Magento готові/); expect(api.get).toHaveBeenCalledTimes(2);
+  expect(api.get).toHaveBeenCalledTimes(1); await screen.findByRole('button', { name: 'Відкрити експорт із посилання через мій обліковий запис' }); click('Відкрити експорт із посилання через мій обліковий запис'); await screen.findByText(/Файли Magento готові/); expect(api.get).toHaveBeenCalledTimes(2);
 });
 
 const gridArtifact = { groupCode: 'BR', rowCount: 2, productCount: 1, csvContent: 'sku,store_view_code,synthetic_target\r\nS,,Original\r\nS,en,English\r\n' };

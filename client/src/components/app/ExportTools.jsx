@@ -423,6 +423,7 @@ export function ExportTools({
   pendingCreate,
   canActivateTemplate = false,
   durableSessions = false,
+  surface = 'all',
 }) {
   const [manualNameProduct, setManualNameProduct] = useState(null);
   const [problemsExpanded, setProblemsExpanded] = useState(false);
@@ -446,7 +447,7 @@ export function ExportTools({
 
   return (
     <section className="fade-up stagger-2 space-y-4">
-      {canViewExport && (
+      {canViewExport && surface !== 'prices' && (
         <div className="card overflow-hidden">
           <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
             <p className="eyebrow">Magento Products v1</p>
@@ -454,7 +455,13 @@ export function ExportTools({
             <p className="section-subtitle mt-1">Перевірте нові товари, створіть файли та завершіть експорт після завантаження.</p>
           </div>
 
-          {durableSessions ? <div className="p-4 border-b"><Link className="underline" to="/exports/sessions">Мої експорти · Запрошення · Створити свій експорт за шаблоном</Link><p className="text-xs mt-2">Нижче — звичайний Magento v1. Експорт за опублікованим шаблоном — окрема збережена операція; учасників можна запросити явно.</p></div> : setTemplateMode && <ControlledExportOptions templateMode={templateMode} setTemplateMode={setTemplateMode}
+          {durableSessions ? <>
+            {surface === 'all' && <div className="p-4 border-b"><Link className="underline" to="/exports/sessions">Мої експорти · Запрошення · Створити свій експорт за шаблоном</Link><p className="text-xs mt-2">Нижче — звичайний Magento v1. Експорт за опублікованим шаблоном — окрема збережена операція; учасників можна запросити явно.</p></div>}
+            {pendingCreate && <div className="notice notice-warning m-4" role="status"><div>
+              <p>Результат створення ще не підтверджено. Повтор збереже початкову операцію.</p>
+              <button className="btn btn-primary mt-2 px-3" disabled={isExportLoading || !canCreateExport} onClick={onCreateSnapshot}>Повторити початкове створення</button>
+            </div></div>}
+          </> : setTemplateMode && <ControlledExportOptions templateMode={templateMode} setTemplateMode={setTemplateMode}
             templateSelection={templateSelection} setTemplateSelection={setTemplateSelection}
             pendingCreate={pendingCreate} isExportLoading={isExportLoading || !canCreateExport}
             onRetry={onCreateSnapshot} evidence={exportSnapshot || exportPreview} canActivate={canActivateTemplate} />}
@@ -543,7 +550,7 @@ export function ExportTools({
         </div>
       )}
 
-      {canCreateExport && (
+      {(canCreateExport || (canViewExport && surface === 'prices')) && surface !== 'products' && (
         <div className="field-group">
           <h3 className="text-lg font-semibold text-slate-900">Оновлення цін Magento</h3>
           {!priceExportStatus ? (
@@ -557,7 +564,7 @@ export function ExportTools({
                 <p className="mt-1 text-xs text-slate-500">Виключено з експорту: {priceExportStatus.excludedPendingCount}.</p>
               )}
               <button type="button" onClick={onPriceExportCsv}
-                className="btn btn-primary mt-4 px-5" disabled={isPriceExportLoading}>
+                className="btn btn-primary mt-4 px-5" disabled={isPriceExportLoading || !canCreateExport}>
                 {isPriceExportLoading ? 'Експортуємо ціни…' : 'Експортувати зміни цін'}
               </button>
             </>
