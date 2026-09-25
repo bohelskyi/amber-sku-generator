@@ -10,7 +10,7 @@ const { loadSourceEvidence, validateSourceReferences, getSourceRegistry } = requ
 const { loadDraftPreviewProducts } = require('./draft-inputs');
 const { validateDraftSampleSources } = require('./draft-source-scope');
 const displayReads = require('./display-reads');
-const { upgradeSourceSupport } = require('./source-support');
+const { upgradeSourceSupport, sourceSupportUpdate } = require('./source-support');
 const { loadSupportInputs } = require('./support-inputs');
 
 const error = (status, code, message, details) => new PublicHttpError(status, message, { code, details });
@@ -75,7 +75,8 @@ function prepareDraft(definition) {
 function draftView(row) {
   return { templateId: row.template_id, baseVersionId: row.base_version_id,
     revision: row.revision, definition: row.definition, definitionHash: hashJsonData(row.definition),
-    state: 'draft', modifiedByUserId: row.modified_by_user_id, modifiedAt: row.modified_at };
+    state: 'draft', modifiedByUserId: row.modified_by_user_id, modifiedAt: row.modified_at,
+    sourceSupportUpdate: sourceSupportUpdate(row.definition) };
 }
 function versionView(row) {
   return { id: row.id, templateId: row.template_id, versionNumber: row.version_number,
@@ -155,7 +156,15 @@ async function validateStored(client, row) {
 async function listTemplates(options = {}) {
   const result = await (options.databasePool || pool).query(`
     SELECT t.*, d.revision AS draft_revision,
-      (SELECT count(*)::int FROM export_template_versions v WHERE v.template_id = t.id) AS publication_count
+      (SELECT count(*)::int FROM export_template_versions v WHERE v.template_id = t.id) AS publication_count,
+      (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'id', v.id, 'versionNumber', v.version_number::text,
+        'sourceDraftRevision', v.source_draft_revision::text, 'publishedAt', v.published_at)
+        ORDER BY v.version_number DESC), '[]'::jsonb)
+        FROM export_template_versions v WHERE v.template_id = t.id) AS version_summaries,
+      (SELECT a.template_version_id FROM export_template_activation a
+        JOIN export_template_versions v ON v.id = a.template_version_id
+        WHERE a.id = 1 AND v.template_id = t.id) AS selected_version_id
     FROM export_templates t JOIN export_template_drafts d ON d.template_id = t.id
     ORDER BY t.template_key`);
   return result.rows;
@@ -226,7 +235,8 @@ async function upgradeDraft(templateId, input, options = {}) {
 }
 
 async function systemProfile(options = {}) {
-  const candidate = await prepareMagentoCandidate(options);
+  // Describes the unchanged ordinary exporter, not a new template definition.
+  const candidate = await captureMagentoCandidate(options, false);
   const { HEADERS } = require('../magento-products-v1');
   return { ...candidate, kind: 'system', systemKey: 'magento-legacy',
     displayName: 'Magento — поточний системний', effectiveExporter: 'legacy',
@@ -242,6 +252,7 @@ async function supportProposal(client, row) {
   const preparationHash = require('./snapshot-binding').fingerprint({ expectedRevision, expectedDefinitionHash, definitionHash, evidence });
   return { expectedRevision, expectedDefinitionHash, preparationHash, definition, definitionHash,
     changed: definitionHash !== expectedDefinitionHash,
+    sourceSupportUpdate: sourceSupportUpdate(row.definition),
     diagnostics: validateSourceReferences(definition, evidence),
     changes: definition.sourceSupport.sources };
 }
@@ -387,6 +398,9 @@ async function listSources(options = {}) {
 // Candidate preparation is read-only. Capture rules and reference evidence in one
 // coherent snapshot; never substitute the seed catalog or publish on first use.
 async function prepareMagentoCandidate(options = {}) {
+  return captureMagentoCandidate(options, true);
+}
+async function captureMagentoCandidate(options, attachCurrentSupport) {
   if (options.supportPolicy !== undefined && options.supportPolicy !== require('./source-support').VERSION) {
     throw error(400, 'TEMPLATE_COMMAND_INVALID', 'Unknown source support policy');
   }
@@ -402,7 +416,9 @@ async function prepareMagentoCandidate(options = {}) {
     });
     const catalog = await loadMagentoCatalog(client);
     let definition = pureCall(() => materializeMagentoV1(catalog));
-    if (options.supportPolicy) definition = pureCall(() => upgradeSourceSupport(definition, evidence));
+    // Only explicit current-candidate creation uses this default. Stored drafts,
+    // publication clones and the read-only system profile are never rewritten.
+    if (attachCurrentSupport) definition = pureCall(() => upgradeSourceSupport(definition, evidence));
     const diagnostics = validateSourceReferences(definition, evidence);
     return { definition, definitionHash: hashJsonData(definition), diagnostics,
       candidateOnly: true, capturedRules: true, productionAcceptanceVerified: false };

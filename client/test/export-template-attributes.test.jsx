@@ -21,29 +21,32 @@ function Editor({ loadSource = vi.fn().mockResolvedValue({ data: details }), ini
 const field = (code) => fireEvent.click(screen.getByRole('button', { name: 'Налаштувати колонку ' + code, exact: true }));
 it('normal NM controls expose exact zero/empty mappings with verified labels, local changes and frozen diagnostics', async () => {
   render(<Editor />); const hash = hashJsonData(current);
-  fireEvent.change(screen.getByLabelText('Категорія'), { target: { value: '1' } }); field('dodatkovo_namysta');
-  const panel = screen.getByRole('region', { name: 'Відповідності характеристики' });
-  expect(within(panel).getByLabelText('Текст для ID 0').value).toBe('');
+  fireEvent.click(screen.getByRole('tab', { name: 'Намиста' })); field('dodatkovo_namysta');
+  const panel = screen.getByRole('region', { name: 'Редактор поля' });
+  expect(within(panel).getByLabelText('Значення у CSV: Значення №0 — назву не підтверджено').value).toBe('');
   expect(within(panel).getByText('Порожня клітинка')).toBeTruthy();
   await screen.findByText('Назва з каталогу');
-  expect(within(panel).getByText('ID 0').parentElement.textContent).toContain('Назва джерела не підтверджена');
-  expect(within(panel).getByText('Непідтверджені ID: 0')).toBeTruthy();
+  expect(within(panel).getByText('Значення №0 — назву не підтверджено')).toBeTruthy();
+  expect(screen.queryByText('Непідтверджені value_id: 0')).toBeNull();
+  expect(screen.getByText('Джерело потрібно перевірити перед публікацією.')).toBeTruthy();
   expect(hashJsonData(current)).toBe(hash);
   const frozen = structuredClone(current.questionContracts); const original = structuredClone(current);
-  fireEvent.change(screen.getByLabelText('Текст для ID 1'), { target: { value: 'Локальний текст' } });
+  fireEvent.change(screen.getByLabelText('Значення у CSV: Назва з каталогу'), { target: { value: 'Локальний текст' } }); fireEvent.click(screen.getByRole('button', { name: 'Застосувати до чернетки' })); field('dodatkovo_namysta');
   expect(current.questionContracts).toEqual(frozen); expect(current.groups.slice(2)).toEqual(original.groups.slice(2));
   expect(current.tables.nmExtra['0']).toBe('');
-  fireEvent.click(screen.getByText('Переглянути джерело'));
-  expect(screen.getByText('Поточний каталог')).toBeTruthy(); expect(screen.getByText('Історичні SKU-схеми')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Технічні подробиці', exact: true }));
+  expect(await screen.findByText('Поточний каталог')).toBeTruthy(); expect(screen.getByText('Історичні SKU-схеми')).toBeTruthy();
   expect(screen.queryByLabelText('Спільне правило')).toBeNull();
 });
 it('normal AR size shows mappings, absent 29/30/31 and source failures without the advanced tree', async () => {
   const read = vi.fn().mockRejectedValue({ response: { status: 403, data: { error: 'Немає дозволу' } } }); render(<Editor loadSource={read} />);
-  fireEvent.change(screen.getByLabelText('Категорія'), { target: { value: '4' } }); field('rozmir_kartyny');
-  expect(screen.getByLabelText('Текст для ID 1').value).toBe('10×15');
-  expect(screen.getByText('Непідтверджені ID: 29, 30, 31')).toBeTruthy();
+  fireEvent.click(screen.getByRole('tab', { name: 'Картини' })); field('rozmir_kartyny');
+  expect(screen.getByLabelText('Значення у CSV: Значення №1 — назву не підтверджено').value).toBe('10×15');
+  expect(screen.queryByText('Непідтверджені value_id: 29, 30, 31')).toBeNull();
+  expect(screen.getByText('Джерело потрібно перевірити перед публікацією.')).toBeTruthy();
   expect(screen.getAllByText('Відповідності немає')).toHaveLength(3);
-  fireEvent.click(screen.getByText('Переглянути джерело')); await screen.findByText(/Не вдалося прочитати джерело/);
+  fireEvent.click(screen.getByRole('button', { name: 'Технічні подробиці', exact: true })); await screen.findByText(/Не вдалося прочитати джерело/);
+  expect(screen.getByText('Непідтверджені value_id: 29, 30, 31')).toBeTruthy();
   expect(screen.queryByLabelText('Спільне правило')).toBeNull();
 });
 it('SKU selection deduplicates, supports pages and rejects late/cancelled search responses', async () => {
@@ -76,10 +79,10 @@ it('SKU selection keeps limit and permission errors; table preserves quoted comm
 it('null and invalid mappings remain distinct and untouched; sparse EN and identity cells remain protected', () => {
   const d = materializeMagentoV1(officeCatalog()); d.tables.nmExtra['2'] = null; d.tables.nmExtra['4'] = 42; delete d.tables.nmExtra['1'];
   const hash = hashJsonData(d); render(<Editor initial={d} />);
-  fireEvent.change(screen.getByLabelText('Категорія'), { target: { value: '1' } }); field('dodatkovo_namysta');
+  fireEvent.click(screen.getByRole('tab', { name: 'Намиста' })); field('dodatkovo_namysta');
   expect(screen.getByText('null — не порожній текст')).toBeTruthy(); expect(screen.getByText('Відповідності немає')).toBeTruthy();
   expect(screen.getAllByText(/Некоректний тип відповідності/)).toHaveLength(2);
-  fireEvent.change(screen.getByLabelText('Мова'), { target: { value: '1' } });
+  fireEvent.click(screen.getByRole('button', { name: 'NM / dodatkovo_namysta / EN' }));
   expect(screen.getByText('Порожня комірка. Значення з основного рядка не підставляється.')).toBeTruthy();
   field('sku'); expect(screen.getByText('Захищене ідентифікаційне поле: sku.')).toBeTruthy();
   expect(hashJsonData(current)).toBe(hash);

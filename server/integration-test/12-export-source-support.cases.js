@@ -47,6 +47,8 @@ test('SUPPORT HTTP existing HOME-v2 draft: detached prepare/CAS/audit, full vali
   const candidate = await request('/api/admin/export-templates/candidate?supportPolicy=historical-source-support-v1', { authentication: actor });
   assert.equal(candidate.response.status, 200, candidate.text);
   assert.equal(candidate.data.definition.evaluatorVersion, 'magento-declarative-2');
+  const current = await request('/api/admin/export-templates/candidate', { authentication: actor });
+  assert.deepEqual(current.data, candidate.data, 'new current candidates require no explicit policy flag');
   const system = await request('/api/admin/export-templates/system', { authentication: actor });
   assert.equal(system.data.definition.sourceSupport, undefined);
   assert.equal(system.data.definition.evaluatorVersion, 'magento-declarative-1');
@@ -110,6 +112,107 @@ test('SUPPORT HTTP existing HOME-v2 draft: detached prepare/CAS/audit, full vali
   assert.equal((await exportsService.createExportSnapshot({ ...input, previewToken: preview.previewToken, idempotencyKey: key }, options)).id, capture.id);
   assert.deepEqual(await exportsService.getMagentoArtifacts(capture.id, { ...options, includeRows: true }), artifacts);
   assert.equal((await sessions.generate(s.id, { ...command(s), attemptId: attempt.id }, options)).id, sessionCapture.id);
+});
+
+test('SUPPORT lifecycle current candidate/system-copy drafts start current; catalog drift cannot offer a no-op upgrade', async () => {
+  const actor = await authenticateApplicationSession(); const options = opts(actor);
+  await installGoldenEvidence();
+  const root = '/api/admin/export-templates';
+  const candidate = await request(root + '/candidate', { authentication: actor });
+  assert.equal(candidate.response.status, 200, candidate.text);
+  assert.deepEqual(candidate.data.diagnostics, []);
+  assert.equal(candidate.data.definition.sourceSupport.version, 'historical-source-support-v1');
+  assert.equal(candidate.data.definitionHash, compileDefinition(candidate.data.definition).hash);
+  const system = await request(root + '/system', { authentication: actor });
+  assert.equal(system.data.definition.sourceSupport, undefined, 'ordinary profile is not relabelled');
+  for (const boundary of ['new-current', 'current-system-copy']) {
+    // Both explicit client creation paths request the authoritative current candidate.
+    const created = await request(root, { authentication: actor, method: 'POST', body: {
+      key: boundary + '-' + crypto.randomUUID(), displayName: boundary, definition: candidate.data.definition,
+    } });
+    assert.equal(created.response.status, 201, created.text);
+    const f = created.data; const before = await templates.getTemplate(f.id);
+    assert.equal(f.draft.sourceSupportUpdate.status, 'current');
+    assert.deepEqual(f.draft.definition, candidate.data.definition);
+    assert.equal((await templates.validateDraft(f.id, pre(f.draft))).valid, true);
+    const proposal = await templates.prepareSourceSupport(f.id, pre(f.draft));
+    assert.equal(proposal.changed, false); assert.equal(proposal.sourceSupportUpdate.status, 'current');
+    assert.deepEqual(await templates.getTemplate(f.id), before, 'reads/preparation/validation never rewrite');
+    assert.deepEqual(await templates.applySourceSupport(f.id, apply(proposal), options), before.draft, 'old no-op callers retain revision/actor/time');
+    const q = (await pool.query("SELECT id,label FROM questions WHERE category_code='BR' AND key='color'")).rows[0];
+    await pool.query('UPDATE questions SET label=$2 WHERE id=$1', [q.id, 'Synthetic renamed characteristic']);
+    const option = (await pool.query(`INSERT INTO options(question_id,value_id,sku_code,label,archived)
+      VALUES($1,999999,'999999','Synthetic later option',false) RETURNING id`, [q.id])).rows[0];
+    try {
+      const afterCatalog = await templates.prepareSourceSupport(f.id, pre(f.draft));
+      assert.equal(afterCatalog.changed, false);
+      assert.equal(afterCatalog.sourceSupportUpdate.status, 'current');
+      assert.equal(afterCatalog.definitionHash, f.draft.definitionHash);
+      assert.deepEqual(afterCatalog.definition, f.draft.definition);
+      assert.deepEqual(await templates.getTemplate(f.id), before);
+    } finally {
+      await pool.query('DELETE FROM options WHERE id=$1', [option.id]);
+      await pool.query('UPDATE questions SET label=$2 WHERE id=$1', [q.id, q.label]);
+    }
+  }
+});
+
+test('SUPPORT lifecycle old/current publication clones stay exact; explicit draft upgrade alone changes support metadata', async () => {
+  const actor = await authenticateApplicationSession(); const options = opts(actor);
+  await installGoldenEvidence();
+  const original = homeDefinition();
+  // Publishable historical membership; the separately tested deferred mappings remain stored.
+  const { catalog } = require('../test/fixtures/magento-v1/contract');
+  const { materializeMagentoV1 } = require('../src/services/export-templates/magento-v1-definition');
+  original.questionContracts['AR.size'].allowed = materializeMagentoV1(catalog()).questionContracts['AR.size'].allowed;
+  original.tables.localColor = { ...original.tables.color4, 4: '  Custom frozen color\n ' };
+  original.groups[0].rows[0].cells.test_export_color.table = 'localColor';
+  original.groups[0].rows[1].cells.test_export_note = { op: 'literal', value: 'Independent EN' };
+  const f = await templates.createTemplate({ key: 'clone-policy-' + crypto.randomUUID(), displayName: 'Synthetic legacy publication', definition: original }, options);
+  assert.equal(f.draft.sourceSupportUpdate.status, 'available');
+  assert.deepEqual(await templates.saveDraft(f.id, { expectedRevision: f.draft.revision, definition: original }, options), f.draft);
+  const oldVersion = await templates.publishTemplate(f.id, pre(f.draft), options);
+  assert.deepEqual(oldVersion.definition, original);
+  const modified = structuredClone(original); modified.tables.localColor['4'] = 'Unrelated draft work';
+  const edited = await templates.saveDraft(f.id, { expectedRevision: f.draft.revision, definition: modified }, options);
+  const clone = await templates.cloneDraft(f.id, { expectedRevision: edited.revision, versionId: oldVersion.id }, options);
+  assert.deepEqual(clone.definition, original);
+  assert.equal(clone.definitionHash, oldVersion.definitionHash);
+  assert.equal(clone.baseVersionId, oldVersion.id);
+  assert.equal(clone.sourceSupportUpdate.status, 'available');
+  const before = await templates.getTemplate(f.id);
+  const proposal = await templates.prepareSourceSupport(f.id, pre(clone));
+  assert.equal(proposal.changed, true); assert.equal(proposal.sourceSupportUpdate.status, 'available');
+  assert.deepEqual(await templates.getTemplate(f.id), before);
+  const upgraded = await templates.applySourceSupport(f.id, apply(proposal), options);
+  assert.equal(upgraded.sourceSupportUpdate.status, 'current');
+  assert.equal(upgraded.revision, String(BigInt(clone.revision) + 1n));
+  const restored = structuredClone(upgraded.definition);
+  delete restored.sourceSupport; restored.evaluatorVersion = original.evaluatorVersion;
+  assert.deepEqual(restored, original, 'all columns/order/mappings/Main/EN/contracts/bindings/readiness remain exact');
+  assert.notEqual(upgraded.definitionHash, clone.definitionHash);
+  assert.deepEqual(evaluateBatch(compileDefinition(upgraded.definition), [product('BR', { color: 4 })]),
+    evaluateBatch(compileDefinition(original), [product('BR', { color: 4 })]));
+  const noOp = await templates.prepareSourceSupport(f.id, pre(upgraded));
+  assert.equal(noOp.changed, false); assert.equal(noOp.sourceSupportUpdate.status, 'current');
+  const currentVersion = await templates.publishTemplate(f.id, pre(upgraded), options);
+  const currentClone = await templates.cloneDraft(f.id, { expectedRevision: upgraded.revision, versionId: currentVersion.id }, options);
+  assert.deepEqual(currentClone.definition, currentVersion.definition);
+  assert.equal(currentClone.definitionHash, currentVersion.definitionHash);
+  assert.equal(currentClone.sourceSupportUpdate.status, 'current');
+  assert.equal((await templates.prepareSourceSupport(f.id, pre(currentClone))).changed, false);
+  await assert.rejects(pool.query('UPDATE export_template_versions SET definition=definition WHERE id=$1', [oldVersion.id]), /immutable/);
+  const versions = (await templates.getTemplate(f.id)).versions;
+  assert.deepEqual(versions, [oldVersion, currentVersion]);
+  const future = structuredClone(currentClone.definition); future.sourceSupport.version = 'future-policy';
+  const unknown = await templates.saveDraft(f.id, { expectedRevision: currentClone.revision, definition: future }, options);
+  assert.equal(unknown.sourceSupportUpdate.status, 'unsupported');
+  const unknownBefore = await templates.getTemplate(f.id);
+  assert.deepEqual(unknownBefore.draft.definition, future);
+  await assert.rejects(templates.prepareSourceSupport(f.id, pre(unknown)), { code: 'TEMPLATE_INVALID' });
+  await assert.rejects(templates.applySourceSupport(f.id, { ...pre(unknown), preparationHash: proposal.preparationHash }, options), { code: 'TEMPLATE_INVALID' });
+  await assert.rejects(templates.publishTemplate(f.id, pre(unknown), options), { code: 'TEMPLATE_INVALID' });
+  assert.deepEqual(await templates.getTemplate(f.id), unknownBefore);
 });
 
 test('SUPPORT stale evidence/permission changes conflict; invalid represented products roll back whole direct/session capture', async () => {

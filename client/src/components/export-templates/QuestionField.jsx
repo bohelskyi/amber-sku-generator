@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { optionEvidence } from '../../lib/export-template-attributes';
 import { sourceLabel } from '../../lib/export-template-presentation';
 import { SourceDiagnostics } from './SourceDiagnostics';
 import { getApiError } from '../../lib/http-error';
+import { SourceSupportStatus, SourceSupportEvidence } from './SourceSupportStatus';
 
 function ruleText(rule, definition, registry) {
   return Object.entries(rule || {}).map(([key, value]) => key === '$and' || key === '$or'
@@ -19,7 +19,7 @@ function expressionText(node, definition, registry) {
   if (node.op === 'error') return 'помилка готовності';
   return 'зафіксоване правило (подробиці у джерелі)';
 }
-export function QuestionField({ lens, context, mappingComponent, loadSource, diagnostics, openSource }) {
+export function QuestionField({ lens, context, mappingComponent, loadSource, diagnostics }) {
   const Mapping = mappingComponent;
   const [evidence, setEvidence] = useState(null);
   const [error, setError] = useState(null);
@@ -35,14 +35,19 @@ export function QuestionField({ lens, context, mappingComponent, loadSource, dia
   const ownDiagnostics = diagnostics.filter((d) => d.sourceId === lens.sourceId);
   const frozen = lens.contract;
   return <section aria-label="Відповідності характеристики" className="et-question">
-    <p><strong>Характеристика товару:</strong> {sourceLabel(context.definition, lens.sourceId, context.registry)} <code>{source.key}</code></p>
+    <p><strong>Характеристика товару:</strong> {sourceLabel(context.definition, lens.sourceId, context.registry)}</p>
     {!frozen.exists && <p>У шаблоні зафіксовано відсутність питання: застосовується збережена діагностика.</p>}
-    <p>Коли заповнюється: {ruleText(frozen.rule, context.definition, context.registry)}. Приховане питання дає порожню клітинку.</p>
-    <p>{frozen.required ? 'Відсутня відповідь: помилка готовності.' : 'Відсутня відповідь: порожня клітинка.'} Нуль — окреме збережене значення, не відсутня відповідь.</p>
-    {lens.guards.map((guard, i) => <p key={i}>Додаткова умова: {expressionText(guard.if, context.definition, context.registry)}. Інакше: {expressionText(guard.else || guard.error, context.definition, context.registry)}.</p>)}
-    <p>Перевірки допустимих ID і готовності залишаються чинними. Порожній текст може бути відхилений додатковою перевіркою готовності.</p>
-    <SourceDiagnostics diagnostics={ownDiagnostics} definition={context.definition} registry={context.registry} />
-    <details open={openSource ? true : undefined} className="et-source-panel"><summary>Переглянути джерело</summary>
+    <Mapping node={lens.lookup} trail={lens.trail} context={{ ...context, question: lens, sourceEvidence: evidence }} />
+    <SourceSupportStatus definition={context.definition} sourceId={lens.sourceId} diagnostics={diagnostics} showDetails={false} />
+    <details className="et-source-panel"><summary>Подробиці джерела</summary>
+      <SourceSupportEvidence policy={context.definition.sourceSupport?.sources?.[`${source.category}.${source.key}`]} />
+      <p>{Object.keys(frozen.rule || {}).length ? 'Заповнення залежить від інших характеристик товару.' : 'Заповнюється зі збереженої відповіді товару.'} Приховане питання дає порожню клітинку.</p>
+      <p>{frozen.required ? 'Відсутня відповідь: помилка готовності.' : 'Відсутня відповідь: порожня клітинка.'} Нуль — окреме збережене значення, не відсутня відповідь.</p>
+      {lens.guards.length > 0 && <p>Застосовуються додаткові перевірки готовності товару. Редагування тексту їх не скасовує.</p>}
+      <p>Коли заповнюється: {ruleText(frozen.rule, context.definition, context.registry)}.</p>
+      {lens.guards.map((guard, i) => <p key={i}>Додаткова умова: {expressionText(guard.if, context.definition, context.registry)}. Інакше: {expressionText(guard.else || guard.error, context.definition, context.registry)}.</p>)}
+      <p>Перевірки допустимих ID і готовності залишаються чинними. Порожній текст може бути відхилений додатковою перевіркою готовності.</p>
+      <SourceDiagnostics diagnostics={ownDiagnostics} definition={context.definition} registry={context.registry} />
       <p>Збережена характеристика: <code>details.answers.{source.key}</code>. Відповіді товарів тут не редагуються.</p>
       {error ? <p role="alert">Не вдалося прочитати джерело: {getApiError(error)}</p> : !evidence ? <p>Метадані джерела ще не завантажено.</p> : <>
         <h3>Поточний каталог</h3>
@@ -52,18 +57,12 @@ export function QuestionField({ lens, context, mappingComponent, loadSource, dia
         {!evidence.historical.length && <p>У доступному історичному свідченні питання відсутнє.</p>}
         {evidence.historical.map((q, i) => <p key={i}>Версія {q.version} · {q.status} · {q.label}. ID: {q.options.map((o) => o.value_id).join(', ') || 'немає'}.</p>)}
         {evidence.truncated && <p>Показано обмежений набір метаданих. Відсутність ID у цьому поданні не доводить відсутності історичного свідчення.</p>}
+        <pre>{JSON.stringify(evidence, null, 2)}</pre>
       </>}
       <h3>Зафіксовані правила шаблону</h3>
       <p>Допустимі ID: {frozen.allowed.join(', ') || 'немає'}. Ці правила не оновлюються з каталогу автоматично.</p>
       <details><summary>Контракт, умови й діагностики — лише читання</summary><pre>{JSON.stringify({ contract: frozen, guards: lens.guards, missingQuestion: lens.question.missingQuestion, missingAnswer: lens.question.missingAnswer, unmapped: lens.lookup.otherwise }, null, 2)}</pre></details>
       <p>Текст у файлі нижче — окремі відповідності шаблону. Вони не підтверджують історичне значення ID.</p>
     </details>
-    <Mapping node={lens.lookup} trail={lens.trail} context={{ ...context, question: lens, sourceEvidence: evidence }} />
   </section>;
-}
-export function OptionLabel({ evidence, id }) {
-  const { current, historical } = optionEvidence(evidence, id);
-  return <>{current.length ? current.map((o, i) => <div key={i}>{o.label || 'Назва не надана'} <small>поточний каталог · SKU-код {o.sku_code ?? 'не вказано'}</small></div>)
-    : historical.length ? <div>{historical[0].label || 'Назва не надана'} <small>історична схема v{historical[0].version}</small></div> : <div>Назва джерела не підтверджена</div>}
-    <small>ID {id}{historical.length ? ' · є історичні метадані' : ''}</small></>;
 }

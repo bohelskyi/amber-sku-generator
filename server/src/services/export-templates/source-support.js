@@ -65,6 +65,19 @@ function upgradeSourceSupport(definition, evidence) {
   return next;
 }
 
+// Availability is about the frozen contract, never current catalog contents.
+// Check the closed upgrade shape too: a valid legacy source may use an alias
+// that this policy cannot support. Empty history here establishes only shape,
+// never semantic authority; actual prepare/apply always read server evidence.
+// The detached result is discarded. No stored definition is changed.
+function sourceSupportUpdate(definition) {
+  try { upgradeSourceSupport(definition, { schemas: [] }); } catch (cause) {
+    if (cause.code !== 'TEMPLATE_INVALID') throw cause;
+    return { status: 'unsupported', currentPolicy: VERSION, code: cause.code };
+  }
+  return { status: definition.sourceSupport ? 'current' : 'available', currentPolicy: VERSION };
+}
+
 // Server loaders supply the immutable schemas separately. JSON from a request or
 // product.details cannot manufacture an association in this private WeakMap.
 function projectSupportProducts(products, schemas) {
@@ -120,4 +133,4 @@ function sourceSupportChecker(definition, product) {
   return (descriptor, raw) => checkSourceSupport(definition, descriptor, product, raw, context);
 }
 
-module.exports = { VERSION, EVALUATOR, validateSupport, upgradeSourceSupport, policyFor, projectSupportProducts, sourceSupportChecker };
+module.exports = { VERSION, EVALUATOR, validateSupport, upgradeSourceSupport, sourceSupportUpdate, policyFor, projectSupportProducts, sourceSupportChecker };

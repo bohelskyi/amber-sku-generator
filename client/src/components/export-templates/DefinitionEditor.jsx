@@ -1,352 +1,106 @@
-import { useRef, useState, useEffect, useLayoutEffect, useId } from 'react';
-import { questionField, editQuestionMapping } from '../../lib/export-template-attributes';
-import { QuestionField, OptionLabel } from './QuestionField';
-import { SourceDiagnostics } from './SourceDiagnostics';
-import { AdvancedDefinitionEditor, Scalar } from './AdvancedDefinitionEditor';
-import { fieldLabels, moveItem, protectedCells, renameSlot, removeSlot, slotNameError } from '../../lib/export-template-editor';
-import { at, affectedFields, editField, editMapping, fieldSection, insertCharacteristic, mappingsForSource, resolveNode, sourceLabel, sourceOf, summary } from '../../lib/export-template-presentation';
-import { OutputGrid } from './OutputGrid';
-import { COLUMN_CONTRACT, requiredColumns, codeError, columnChange, directColumn, applyDirectColumn } from '../../lib/export-template-columns';
-import { ColumnDialog, ColumnValueForm, NewColumnDialog } from './ColumnForm';
+import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState } from 'react';
+import { COLUMN_CONTRACT, codeError, columnChange } from '../../lib/export-template-columns';
+import { ColumnDialog, NewColumnDialog } from './ColumnForm';
+import { ColumnInspector } from './ColumnInspector';
+import { CategoryTabs, TemplateDesignGrid } from './TemplateDesignGrid';
+import { columnIntent } from '../../lib/export-template-intent';
 import './export-template-editor.css';
 
-const label = (key) => fieldLabels[key] || key;
-const record = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
-const groupNames = { BR: 'Браслети', NM: 'Намиста', KL: 'Кулони', CH: 'Чотки', AR: 'Картини', SV: 'Сувеніри' };
-
-function Scope({ context, trail, table }) {
-  if (context.readOnly) return null;
-  if (context.localOnly) return <p className="et-muted">Редагування тексту відокремить відповідності лише для цієї колонки. Інші споживачі залишаться без змін.</p>;
-  const affected = affectedFields(context.definition, context.cellPath, trail, table);
-  const readable = context.question ? affected.map((value) => {
-    const [group, row, column] = value.split(' / ');
-    return `${groupNames[group] || group} — ${column ? label(column) + (row === 'EN' ? ' (EN)' : '') : row}`;
-  }) : affected;
-  return <div className="et-scope">
-    <label>Область зміни<select className="input" value={context.scope} onChange={(e) => context.setScope(e.target.value)}>
-      <option value="local">Лише для цього поля</option><option value="shared">Для всіх полів, які використовують це правило</option>
-    </select></label>
-    {context.scope === 'shared' ? <p role="note">Зміна вплине на: {readable.join('; ')}.</p>
-      : <p>Зміниться лише це поле{context.question ? ' та пов’язана перевірка його готовності' : ''}. Потрібні правила й відповідності копіюються під час редагування.</p>}
-  </div>;
-}
-
-function CharacteristicPicker({ node, onInsert, context }) {
-  const [source, setSource] = useState('');
-  const [table, setTable] = useState('');
-  const sources = Object.entries(context.definition.sources).filter(([, value]) => (value.kind === 'product' || value.category === context.group) && value.type !== 'boolean');
-  const mappings = mappingsForSource(context.definition, source);
-  return <div className="et-source-picker">
-    <label>Характеристика<select className="input" value={source} onChange={(e) => { setSource(e.target.value); setTable(''); }}>
-      <option value="">Оберіть характеристику</option>{sources.map(([id]) => <option key={id} value={id}>{sourceLabel(context.definition, id, context.registry)}</option>)}
-    </select></label>
-    <label>Як записувати у файлі<select className="input" value={table} onChange={(e) => setTable(e.target.value)}>
-      <option value="">Збережене значення без заміни</option>{mappings.map((id) => <option key={id} value={id}>Відповідності: {Object.values(context.definition.tables[id]).slice(0, 3).join(' / ')} ({id})</option>)}
-    </select></label>
-    <button type="button" className="btn btn-primary px-3" disabled={!source || Object.keys(node.slots).length >= 16} onClick={() => onInsert(source, table)}>Вставити характеристику</button>
-    {Object.keys(node.slots).length >= 16 && <p>Досягнуто межу: 16 характеристик.</p>}
-  </div>;
-}
-
-function TextComposer({ node, trail, context }) {
-  const [selected, setSelected] = useState('');
-  const [adding, setAdding] = useState(false);
-  const [renamed, setRenamed] = useState('');
-  const input = useRef(null);
-  const selection = useRef(null);
-  const used = [...node.template.matchAll(/\{([A-Za-z0-9_]+)\}/g)].map((match) => match[1]);
-  const invalid = used.some((slot) => !Object.hasOwn(node.slots, slot)) || Object.keys(node.slots).some((slot) => !used.includes(slot)) || /[{}]/.test(node.template.replace(/\{[A-Za-z0-9_]+\}/g, ''));
-  const update = (transform) => context.update(trail, transform);
-  return <div className="et-composer">
-    <Scope context={context} trail={trail} />
-    <label>Текст у файлі<textarea ref={(element) => { input.current = element; element?.setCustomValidity(invalid ? 'Перевірте характеристики у фігурних дужках.' : ''); }} className="input et-text" rows={3} disabled={context.readOnly}
-      value={node.template} aria-invalid={invalid} aria-describedby="et-text-help" onSelect={(e) => { selection.current = [e.target.selectionStart, e.target.selectionEnd]; }}
-      onChange={(e) => update((value) => ({ ...value, template: e.target.value }))} /></label>
-    <p id="et-text-help" className="et-muted">Текст і розділові знаки зберігаються точно. Характеристики у {'{дужках}'} сервер замінить значеннями товару.</p>
-    {invalid && <p role="alert">Використайте всі додані характеристики, без невідомих назв чи незакритих дужок. Для вилучення скористайтеся кнопкою характеристики.</p>}
-    <div className="et-tokens" aria-label="Характеристики в тексті">{Object.entries(node.slots).map(([slot, value]) => <button key={slot} type="button" className="et-token" aria-pressed={selected === slot} onClick={() => { setSelected(selected === slot ? '' : slot); setRenamed(slot); setAdding(false); }}>
-      {fieldLabels[slot] || sourceLabel(context.definition, sourceOf(context.definition, value), context.registry) || slot}<span>{`{${slot}}`}</span>
-    </button>)}
-      {!context.readOnly && <button type="button" className="btn btn-outline px-3" onClick={() => { setAdding(!adding); setSelected(''); }}>+ Додати характеристику</button>}
-    </div>
-    {adding && <CharacteristicPicker node={node} context={context} onInsert={(source, table) => {
-      update((value) => insertCharacteristic(value, source, table, selection.current)); setAdding(false); input.current?.focus();
-    }} />}
-    {selected && Object.hasOwn(node.slots, selected) && <section className="et-slot" aria-label="Налаштування характеристики">
-      <div className="et-row"><h3>{label(selected)}</h3><button type="button" className="et-link" onClick={() => setSelected('')}>Закрити</button></div>
-      <TaskValue node={node.slots[selected]} trail={[...trail, 'slots', selected]} context={context} />
-      {!context.readOnly && <details className="et-secondary"><summary>Назва та вилучення характеристики</summary>
-        <label>Назва підстановки<input className="input" value={renamed} onChange={(e) => setRenamed(e.target.value)} /></label>
-        <button type="button" className="et-link" disabled={Boolean(slotNameError(renamed, node.slots, selected)) || renamed === selected} onClick={() => { update((value) => renameSlot(value, selected, renamed)); setSelected(renamed); }}>Перейменувати й оновити текст</button>
-        <button type="button" className="et-link" onClick={() => { update((value) => removeSlot({ ...value, template: value.template.split(`{${selected}}`).join('') }, selected)); setSelected(''); }}>Вилучити характеристику та її позначки з тексту</button>
-        {renamed && slotNameError(renamed, node.slots, selected) && <p role="alert">{slotNameError(renamed, node.slots, selected)}</p>}
-      </details>}
-    </section>}
-  </div>;
-}
-
-function Mapping({ node, trail, context }) {
-  const [newId, setNewId] = useState('');
-  const sourceId = sourceOf(context.definition, node.input);
-  const table = context.definition.tables[node.table];
-  if (!table) return <p role="alert">Таблицю відповідностей не знайдено. Відкрийте розширені правила.</p>;
-  const update = (transform) => context.question ? context.questionMapping(transform) : context.mapping(trail, transform);
-  const ids = [...new Set([...Object.keys(table), ...(context.question?.contract.allowed || [])])];
-  return <div className="et-mapping">
-    <p><strong>Звідки брати значення:</strong> {sourceLabel(context.definition, sourceId, context.registry)}</p>
-    <Scope context={context} trail={trail} table={node.table} />
-    <h3>Як записувати у файлі</h3><p className="et-muted">ID — збережене значення характеристики. Текст праворуч потрапить у файл.</p>
-    <div className="et-table-scroll"><table><thead><tr><th>Значення характеристики</th><th>Текст у файлі</th>{!context.readOnly && <th><span className="sr-only">Дії</span></th>}</tr></thead>
-      <tbody>{ids.map((id) => <tr key={id}><th scope="row">{context.localOnly ? <span>ID {id}</span> : <OptionLabel evidence={context.sourceEvidence} id={id} />}</th><td>{Object.hasOwn(table, id) ? <>
-        {context.question && typeof table[id] !== 'string' ? <p>Некоректний тип відповідності: <code>{JSON.stringify(table[id])}</code>. Збережено без перетворення; виправлення — у розширених правилах.</p>
-          : <Scalar disabled={context.readOnly} fixedType value={table[id]} label={`Текст для ID ${id}`} onChange={(next) => update((entries) => ({ ...entries, [id]: next }))} />}
-        {table[id] === '' && <span>Порожня клітинка</span>}{table[id] === null && <span>null — не порожній текст</span>}</> : <span>Відповідності немає</span>}</td>
-        {!context.readOnly && <td>{Object.hasOwn(table, id) ? <button type="button" className="et-link" aria-label={`Вилучити відповідність ${id}`} onClick={() => update((entries) => Object.fromEntries(Object.entries(entries).filter(([key]) => key !== id)))}>Вилучити</button>
-          : <button type="button" onClick={() => update((entries) => ({ ...entries, [id]: '' }))}>Додати текст для ID {id}</button>}</td>}</tr>)}</tbody></table></div>
-    {!context.readOnly && <details><summary>Додати відповідність</summary><label>ID характеристики<input className="input" value={newId} onChange={(e) => setNewId(e.target.value)} /></label>
-      <button type="button" className="btn btn-outline px-3" disabled={!newId || Object.hasOwn(table, newId) || ['__proto__', 'constructor', 'prototype'].includes(newId)} onClick={() => { update((entries) => ({ ...entries, [newId]: '' })); setNewId(''); }}>Додати відповідність</button></details>}
-    {context.question || context.localOnly ? <p>Немає відповідності: {node.otherwise?.op === 'literal' && node.otherwise.value === '' ? 'порожній текст; подальші перевірки готовності збережено.' : 'збережена діагностика шаблону; товар може бути не готовим.'}</p> : <>
-      {node.otherwise && <details><summary>Якщо значення відсутнє або немає відповідності</summary><TaskValue node={node.otherwise} trail={[...trail, 'otherwise']} context={context} /></details>}
-      <details className="et-secondary"><summary>Змінити характеристику</summary><TaskValue node={node.input} trail={[...trail, 'input']} context={context} /></details></>}
-    <details className="et-secondary"><summary>Джерело та ID таблиці</summary><code>{sourceId} → {node.table}</code></details>
-  </div>;
-}
-
-function TaskValue({ node: original, trail: originalTrail = [], context }) {
-  const [branch, setBranch] = useState('');
-  const resolved = resolveNode(context.definition, original, originalTrail);
-  const { node, trail } = resolved;
-  const update = (transform) => context.update(trail, transform);
-  if (resolved.problem || !node || typeof node !== 'object') return <p>{resolved.problem || 'Власне значення. Доступне в розширених правилах.'}</p>;
-  if ((node.op === 'interpolate' && (typeof node.template !== 'string' || !record(node.slots)))
-    || (node.op === 'in' && !Array.isArray(node.values))
-    || (node.op === 'numericBand' && (!Array.isArray(node.bands) || node.bands.some((band) => !record(band))))) return <p role="note">Непідтримувана структура «{node.op}». Визначення збережено без змін; відкрийте розширені правила.</p>;
-  if (trail.some((step) => step.ref === 'sku')) return <p>Артикул береться зі збереженого товару. Ідентифікаційне правило захищено.</p>;
-  if (node.op === 'literal' && Object.hasOwn(node, 'value')) return <><Scope context={context} trail={trail} /><Scalar disabled={context.readOnly} value={node.value} label="Значення" onChange={(value) => update((current) => ({ ...current, value }))} /></>;
-  if (node.op === 'interpolate' && typeof node.template === 'string' && node.slots && !Array.isArray(node.slots)) return <TextComposer node={node} trail={trail} context={context} />;
-  if (['when', 'require'].includes(node.op)) {
-    const primary = node.op === 'when' ? 'then' : 'value';
-    const selected = branch || primary;
-    return <div><div className="et-branches" aria-label="Умовне значення">{[[primary, 'Основний текст'], ['if', 'Умова'], [node.op === 'when' ? 'else' : 'error', node.op === 'when' ? 'Інакше' : 'Якщо перевірку не пройдено']].map(([key, title]) =>
-      <button type="button" key={key} aria-pressed={selected === key} onClick={() => setBranch(key)}>{title}</button>)}</div>
-      <TaskValue key={selected} node={node[selected]} trail={[...trail, selected]} context={context} />
-      <p className="et-muted et-guard">Умова та запасна гілка зберігаються під час редагування тексту.</p></div>;
-  }
-  if (node.op === 'lookup') return <Mapping node={node} trail={trail} context={context} />;
-  if (node.op === 'source') return <><Scope context={context} trail={trail} /><label>Звідки брати значення<select className="input" disabled={context.readOnly} value={node.id} onChange={(e) => update((value) => ({ ...value, id: e.target.value }))}>
-    <option value={node.id}>{sourceLabel(context.definition, node.id, context.registry)}</option>{Object.entries(context.definition.sources).filter(([id, source]) => id !== node.id && (source.kind === 'product' || source.category === context.group)).map(([id]) => <option key={id} value={id}>{sourceLabel(context.definition, id, context.registry)}</option>)}
-  </select></label></>;
-  if (['text', 'semanticKey', 'numberText', 'decimalText', 'present', 'not'].includes(node.op) && node.input) return <>
-    {['present', 'not'].includes(node.op) && <p>{node.op === 'present' ? 'Значення має бути заповнене' : 'Зворотна умова'}</p>}
-    <TaskValue node={node.input} trail={[...trail, 'input']} context={context} />
-    <details className="et-secondary"><summary>Формат і обробка значення</summary><p>{node.format || node.policy || 'Збережений формат'}</p>
-      {Object.hasOwn(node, 'trim') && <Scalar disabled={context.readOnly} value={node.trim} fixedType label="Прибирати крайні пробіли" onChange={(trim) => update((value) => ({ ...value, trim }))} />}
-      {node.error && <TaskValue node={node.error} trail={[...trail, 'error']} context={context} />}</details></>;
-  if (['firstPresent', 'join', 'all', 'any'].includes(node.op) && Array.isArray(node.items)) return <>
-    <Scope context={context} trail={trail} /><p>{({ firstPresent: 'Використати перше заповнене значення, зверху вниз.', join: 'Об’єднати значення в цьому порядку.', all: 'Мають виконуватися всі умови.', any: 'Достатньо однієї умови.' })[node.op]}</p>
-    {node.items.map((item, index) => <details key={index} className="et-sequence"><summary>{index + 1}. {summary(context.definition, item)}</summary>
-      <TaskValue node={item} trail={[...trail, 'items', index]} context={context} />
-      {!context.readOnly && <div className="et-actions"><button type="button" disabled={!index} onClick={() => update((value) => ({ ...value, items: moveItem(value.items, index, -1) }))}>Вище</button><button type="button" disabled={index === node.items.length - 1} onClick={() => update((value) => ({ ...value, items: moveItem(value.items, index, 1) }))}>Нижче</button></div>}
-    </details>)}{node.op === 'join' && <Scalar disabled={context.readOnly} fixedType value={node.delimiter} label="Роздільник" onChange={(delimiter) => update((value) => ({ ...value, delimiter }))} />}</>;
-  if (node.op === 'numericBand' && Array.isArray(node.bands)) return <><Scope context={context} trail={trail} /><TaskValue node={node.input} trail={[...trail, 'input']} context={context} />
-    {node.bands.map((band, index) => <details key={index} className="et-sequence"><summary>Діапазон {index + 1}: {band.min ?? '−∞'} … {band.max ?? '+∞'}</summary>
-      {Object.entries(band).map(([key, value]) => <Scalar disabled={context.readOnly} key={key} value={value} label={label(key)} onChange={(next) => context.update([...trail, 'bands', index], (current) => ({ ...current, [key]: next }))} />)}
-    </details>)}{node.outside && <details><summary>Поза діапазонами</summary><TaskValue node={node.outside} trail={[...trail, 'outside']} context={context} /></details>}</>;
-  if (node.op === 'eq') return <><p>Значення повинні збігатися</p><TaskValue node={node.left} trail={[...trail, 'left']} context={context} /><TaskValue node={node.right} trail={[...trail, 'right']} context={context} /></>;
-  if (node.op === 'in') return <><TaskValue node={node.input} trail={[...trail, 'input']} context={context} />{node.values.map((value, index) => <Scalar disabled={context.readOnly} key={index} fixedType value={value} label={`Допустиме значення ${index + 1}`} onChange={(next) => update((current) => ({ ...current, values: current.values.map((entry, i) => i === index ? next : entry) }))} />)}</>;
-  if (node.op === 'error') return <><p>Повідомлення, якщо товар не готовий:</p><TaskValue node={node.message} trail={[...trail, 'message']} context={context} /></>;
-  return <div role="note">Власне правило «{node.op || 'невідоме'}» збережено без змін. Для перегляду всіх властивостей відкрийте «Розширені правила».</div>;
-}
-
-function FieldInspector({ definition, cellPath, onChange, registry, readOnly, loadSource, diagnostics, openSource }) {
-  const [scope, setScope] = useState('local');
-  const [error, setError] = useState('');
-  const column = cellPath[5];
-  const group = definition.groups[cellPath[1]];
-  const row = group.rows[cellPath[3]];
-  const lens = questionField(definition, cellPath);
-  const apply = (action) => { if (readOnly) return; try { onChange(action()); setError(''); } catch (e) { setError(e.message); } };
-  const context = { definition, cellPath, scope, setScope, registry, readOnly, group: group.route,
-    update: (trail, transform) => apply(() => editField(definition, cellPath, trail, scope, transform)),
-    mapping: (trail, transform) => apply(() => editMapping(definition, cellPath, trail, scope, transform)),
-    questionMapping: (transform) => apply(() => editQuestionMapping(definition, cellPath, scope, transform)) };
-  return <section className="et-inspector" aria-label="Редактор поля">
-    <header className="et-inspector-heading"><div><p className="et-eyebrow">{fieldSection(column)}</p><h2>{label(column)}</h2><code>{column}</code></div>
-      {!readOnly && <details><summary>Порядок у файлі</summary><div className="et-actions">
-        <button type="button" disabled={group.columns.indexOf(column) <= 0} onClick={() => onChange({ ...definition, groups: definition.groups.map((item, i) => i === cellPath[1] ? { ...item, columns: moveItem(item.columns, item.columns.indexOf(column), -1) } : item) })}>Перемістити колонку вище</button>
-        <button type="button" disabled={group.columns.indexOf(column) === group.columns.length - 1} onClick={() => onChange({ ...definition, groups: definition.groups.map((item, i) => i === cellPath[1] ? { ...item, columns: moveItem(item.columns, item.columns.indexOf(column), 1) } : item) })}>Перемістити колонку нижче</button>
-      </div></details>}
-    </header>{error && <p role="alert" className="danger-panel p-3">{error}</p>}
-    {!lens && openSource && definition.sources[openSource] && <details open className="et-source-panel"><summary>Переглянути джерело</summary>
-      <p>Характеристика товару: {sourceLabel(definition, openSource, registry)} · {openSource}. Значення читається зі збереженого товару.</p>
-      <h3>Поточний каталог</h3><p>{registry?.references?.questions?.filter((q) => q.category_code === definition.sources[openSource].category && q.key === definition.sources[openSource].key).map((q) => `${q.label}: ID ${q.value_ids.join(', ')}`).join('; ') || 'Метадані поточного питання не надано.'}</p>
-      <h3>Історичні SKU-схеми</h3><p>{registry?.references?.schemas?.filter((s) => s.category_code === definition.sources[openSource].category).flatMap((s) => s.questions.filter((q) => q.key === definition.sources[openSource].key).map((q) => `v${s.version}: ID ${q.value_ids.join(', ')}`)).join('; ') || 'Історичні метадані питання не надано.'}</p>
-      <SourceDiagnostics diagnostics={diagnostics.filter((d) => d.sourceId === openSource)} definition={definition} registry={registry} />
-      <details><summary>Зафіксоване джерело — лише читання</summary><pre>{JSON.stringify(definition.sources[openSource], null, 2)}</pre></details>
-      <p>Відповідності тексту не є доказом значення джерела. Каталог і відповіді товарів тут не редагуються.</p>
-    </details>}
-    <div className="et-field-value">
-      {protectedCells.has(column) ? <p>Захищене ідентифікаційне поле: {column}.</p> : lens ? <QuestionField lens={lens} context={context} mappingComponent={Mapping} loadSource={loadSource} diagnostics={diagnostics} openSource={openSource} /> : Object.hasOwn(row.cells, column) ? <TaskValue node={at(definition, cellPath)} context={context} /> : <>
-        <p>Порожня комірка. Значення з основного рядка не підставляється.</p>{!readOnly && <button type="button" className="btn btn-outline px-3" onClick={() => context.update([], () => ({ op: 'literal', value: '' }))}>Додати текст у цю комірку</button>}</>}
-    </div></section>;
-}
-
-function ColumnStructure({ definition, groupIndex, column, onChange, onSelect, onCreate, readOnly, onPendingChange }) {
+function ColumnOperation({ definition, groupIndex, column, action, onApply, onCancel, onPendingChange, suspended }) {
   const group = definition.groups[groupIndex];
-  const [code, setCode] = useState(column);
-  const [newCode, setNewCode] = useState('');
-  const [problem, setProblem] = useState('');
-  const id = useId();
-  const renameError = codeError(code, group.columns, column);
-  const duplicateError = newCode ? codeError(newCode, group.columns) : '';
-  const pending = code !== column || Boolean(newCode);
-  useEffect(() => { onPendingChange(pending); return () => onPendingChange(false); }, [pending, onPendingChange]);
-  const change = (action, value, target = column) => {
-    try { const next = columnChange(definition, groupIndex, action, target, value); if (onChange(next) === false) return; setProblem('');
-      if (['add', 'duplicate', 'rename'].includes(action)) onSelect(value);
-      if (action === 'remove') onSelect(next.groups[groupIndex].columns[0]);
-    } catch (e) { setProblem(e.message); }
-  };
-  return <section className="et-column-actions" aria-label="Дії колонки">
-    {problem && <p role="alert">{problem}</p>}
-    {definition.outputContract !== COLUMN_CONTRACT ? <p>Фіксований історичний контракт. Для додавання чи видалення колонок явно оновіть збережену чернетку.</p> : <>
-      <label>Назва для редактора<input className="input" disabled={readOnly} maxLength={160} value={group.columnLabels?.[column] || ''} onChange={(e) => change('label', e.target.value)} /></label>
-      <details><summary>Код, порядок та інші дії</summary>
-      <label>Код колонки CSV<input className="input" disabled={readOnly || requiredColumns.has(column)} value={code} aria-invalid={Boolean(renameError)} aria-describedby={renameError ? id + '-rename' : undefined} onChange={(e) => setCode(e.target.value)} /></label>
-      {renameError && <p id={id + '-rename'} role="alert">{renameError}</p>}
-      <button type="button" disabled={readOnly || requiredColumns.has(column) || Boolean(codeError(code, group.columns, column))} onClick={() => change('rename', code)}>Змінити код колонки</button>
-      <p className="et-muted">Це код атрибута Magento, окремий від джерела. Існування й прийнятність Magento не перевірено; атрибут тут не створюється.</p>
-      <label>Код нової колонки<input className="input" disabled={readOnly} value={newCode} aria-invalid={Boolean(duplicateError)} aria-describedby={duplicateError ? id + '-duplicate' : undefined} onChange={(e) => setNewCode(e.target.value)} placeholder="custom_attribute" /></label>
-      {duplicateError && <p id={id + '-duplicate'} role="alert">{duplicateError}</p>}
-      <div className="et-actions">
-        <button type="button" disabled={readOnly} onClick={() => onCreate(column)}>Додати колонку ліворуч</button>
-        <button type="button" disabled={readOnly} onClick={() => onCreate(group.columns[group.columns.indexOf(column) + 1] ?? null)}>Додати колонку праворуч</button>
-        <button type="button" disabled={readOnly || Boolean(codeError(newCode, group.columns))} onClick={() => change('duplicate', newCode)}>Дублювати</button>
-      </div>
-      <label>Перемістити на позицію<select className="input" disabled={readOnly} value={group.columns.indexOf(column)} onChange={(e) => change('move', Number(e.target.value))}>{group.columns.map((c, i) => <option key={c} value={i}>{i + 1} · {c}</option>)}</select></label>
-      <button type="button" disabled={readOnly || requiredColumns.has(column)} onClick={() => change('remove')}>Видалити колонку</button>
-      {requiredColumns.has(column) && <p>Захищено сервером: ідентичність товару, base/EN або мінімальне значення full-product імпорту.</p>}
-      </details>
-    </>}
-  </section>;
-}
-
-function ColumnSource({ definition, registry, groupIndex, rowIndex, column, onChange, readOnly, onPendingChange }) {
-  const path = ['groups', groupIndex, 'rows', rowIndex, 'cells', column];
-  const lens = directColumn(definition, path);
-  const [value, setValue] = useState(lens);
+  const [code, setCode] = useState(action === 'rename' ? column : '');
+  const [position, setPosition] = useState(group.columns.indexOf(column));
   const [error, setError] = useState('');
+  const submitted = useRef(false);
   const id = useId();
-  const pending = JSON.stringify(value) !== JSON.stringify(lens);
-  useEffect(() => { onPendingChange(pending); return () => onPendingChange(false); }, [pending, onPendingChange]);
-  const node = resolveNode(definition, at(definition, path));
-  const context = { definition, cellPath: path, scope: 'local', setScope: () => {}, registry, readOnly,
-    mapping: (trail, transform) => onChange(editMapping(definition, path, trail, 'local', transform)),
-    update: (trail, transform) => onChange(editField(definition, path, trail, 'local', transform)) };
-  return <section aria-label="Заповнення колонки">
-    <ColumnValueForm definition={definition} registry={registry} group={definition.groups[groupIndex].route} value={value} onChange={setValue} readOnly={readOnly} preview={pending} errorId={error ? id : undefined} />
-    {error && <p id={id} role="alert">{error}</p>}
-    {!readOnly && pending && <div className="et-actions"><button type="button" className="btn btn-primary px-3" aria-describedby={error ? id : undefined} onClick={() => {
+  useEffect(() => { onPendingChange(true); return () => onPendingChange(false); }, [onPendingChange]);
+  const title = ({ rename: 'Перейменувати колонку', duplicate: 'Дублювати колонку', move: 'Перемістити колонку', remove: 'Видалити колонку' })[action];
+  return <ColumnDialog title={title} onCancel={onCancel} firstInput suspended={suspended}>
+    <p><strong>{group.columnLabels?.[column] || column}</strong> · <code>{column}</code></p>
+    {['duplicate', 'rename'].includes(action) && <label>Код у CSV<input className="input" value={code} aria-invalid={Boolean(error)} aria-describedby={error ? id : undefined} onChange={(e) => setCode(e.target.value)} /></label>}
+    {action === 'move' && <label>Перемістити на позицію<select className="input" value={position} onChange={(e) => setPosition(Number(e.target.value))}>{group.columns.map((entry, i) => <option key={entry} value={i}>{i + 1} · {i < group.columns.indexOf(column) ? 'Перед' : 'Після'} {entry}</option>)}</select></label>}
+    {action === 'duplicate' && <p>Буде скопійовано обидва наявні правила: Основний та EN, разом із локальними відповідностями.</p>}
+    {action === 'remove' && <p>Буде вилучено колонку «{column}» та обидва її правила — Основний і EN. Характеристика SKU Manager, дані товарів і глобальні історичні свідчення залишаються.</p>}
+    {error && <p role="alert" id={id}>{error}</p>}
+    <footer className="et-actions"><button type="button" className="btn btn-primary px-3" onClick={() => {
+      if (submitted.current) return;
       try {
-        const next = applyDirectColumn(definition, groupIndex, rowIndex, column, value, registry);
-        if (onChange(next) === false) return;
-        setValue(directColumn(next, path)); onPendingChange(false); setError('');
+        if (['duplicate', 'rename'].includes(action)) { const problem = codeError(code, group.columns, action === 'rename' ? column : undefined); if (problem) throw new Error(problem); }
+        const next = columnChange(definition, groupIndex, action, column, action === 'move' ? position : code);
+        submitted.current = true;
+        if (onApply(next) === false) { submitted.current = false; setError('Чернетка змінилася. Відкрийте дію знову.'); }
       } catch (e) { setError(e.message); }
-    }}>Застосувати заповнення</button><button type="button" onClick={() => { setValue(lens); setError(''); }}>Скасувати заповнення</button></div>}
-    {!pending && node.node?.op === 'lookup' && <Mapping node={node.node} trail={node.trail} context={{ ...context, localOnly: true }} />}
-  </section>;
+    }}>{action === 'remove' ? 'Видалити колонку' : 'Застосувати до чернетки'}</button><button type="button" className="btn btn-outline px-3" onClick={onCancel}>Скасувати</button></footer>
+  </ColumnDialog>;
 }
 
-export function DefinitionEditor({ definition, onChange, registry, readOnly = false, loadSource, diagnostics = [], focusField, onFieldSelect, onPendingChange }) {
+const record = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+export function DefinitionEditor({ definition, onChange, registry, readOnly = false, loadSource, diagnostics = [], focusField, onFieldSelect, onPendingChange, onEditingChange, visible = true }) {
   const [groupIndex, setGroupIndex] = useState(0);
-  const [rowIndex, setRowIndex] = useState(0);
-  const [column, setColumn] = useState('name');
-  const [, setQuery] = useState('');
-  const [inspector, setInspector] = useState(false);
-  const [overlay, setOverlay] = useState(() => window.matchMedia?.('(max-width: 1400px)').matches || false);
-  useEffect(() => {
-    const media = window.matchMedia?.('(max-width: 1400px)');
-    const update = () => setOverlay(media.matches);
-    media?.addEventListener('change', update);
-    return () => media?.removeEventListener('change', update);
-  }, []);
+  const [selection, setSelection] = useState(null);
   const [creation, setCreation] = useState(null);
+  const [operation, setOperation] = useState(null);
   const [panelPending, setPanelPending] = useState(false);
-  const [structurePending, setStructurePending] = useState(false);
-  const [createPending, setCreatePending] = useState(false);
+  const [dialogPending, setDialogPending] = useState(false);
   const [transition, setTransition] = useState(null);
-  const [panelEpoch, setPanelEpoch] = useState(0);
-  const active = useRef(null);
-  const identity = JSON.stringify([definition?.groups?.[groupIndex]?.route, definition?.groups?.[groupIndex]?.rows?.[rowIndex]?.id, column, inspector, panelEpoch]);
-  useLayoutEffect(() => { active.current = { identity, definition, readOnly }; return () => { active.current = null; }; }, [identity, definition, readOnly, creation]);
-  const guardedChange = (next) => { if (!readOnly && active.current?.identity === identity && active.current.definition === definition && !active.current.readOnly) { onChange(next); return true; } return false; };
-  const request = (action) => { if (panelPending || structurePending) setTransition(() => action); else action(); };
-  useEffect(() => { onPendingChange?.(panelPending || createPending || structurePending); return () => onPendingChange?.(false); }, [panelPending, createPending, structurePending, onPendingChange]);
-  useEffect(() => { if (!panelPending && !createPending && !structurePending) return; const warn = (e) => { e.preventDefault(); e.returnValue = ''; }; window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn); }, [panelPending, createPending, structurePending]);
-  const drawer = useRef(null);
-  const trigger = useRef(null);
-  const closeInspector = () => request(() => { setInspector(false); trigger.current?.focus(); });
+  const [overlay, setOverlay] = useState(() => window.innerWidth < 1270);
+  const root = useRef(null); const active = useRef(null); const trigger = useRef(null); const epoch = useRef(0);
+  const panelId = useId();
+  useLayoutEffect(() => { active.current = { definition, selection, creation, operation, readOnly }; return () => { active.current = null; }; }, [definition, selection, creation, operation, readOnly]);
+  const guardedChange = (next, base = definition) => {
+    if (!active.current || active.current.readOnly || readOnly || active.current.definition !== base || active.current.selection !== selection || active.current.creation !== creation || active.current.operation !== operation) return false;
+    if (JSON.stringify(next) !== JSON.stringify(base)) onChange(next);
+    return true;
+  };
+  const close = () => { setSelection(null); setPanelPending(false); trigger.current?.focus(); };
+  const request = (action) => { if (panelPending) setTransition(() => action); else action(); };
+  const select = (column, rowIndex, sourceId) => { trigger.current = document.activeElement; setSelection({ column, rowIndex, sourceId, epoch: ++epoch.current }); };
+  const openCreation = (anchor = null) => { if (readOnly || creation) return; request(() => { close(); setCreation({ groupIndex, rowIndex: selection?.rowIndex || 0, anchor }); }); };
   useEffect(() => {
-    if (!inspector) return;
-    if (!trigger.current?.isConnected) trigger.current = [...(drawer.current?.closest('form')?.querySelectorAll('button[aria-label]') || [])].find((button) => button.getAttribute('aria-label') === 'Налаштувати колонку ' + column);
-    drawer.current?.focus();
-  }, [inspector, column]);
-  const [advanced, setAdvanced] = useState(false);
-  const [seenFocus, setSeenFocus] = useState(null);
-  if (focusField !== seenFocus) {
-    setSeenFocus(focusField);
-    if (focusField) {
-      const focus = () => { setGroupIndex(focusField.groupIndex); setRowIndex(focusField.rowIndex); setColumn(focusField.column); setQuery(''); setAdvanced(false); setInspector(true); };
-      if (panelPending || structurePending) setTransition(() => focus); else focus();
-    }
-  }
-  useEffect(() => { onFieldSelect?.({ groupIndex, rowIndex, column }); }, [groupIndex, rowIndex, column, onFieldSelect]);
+    const update = () => { const width = root.current?.getBoundingClientRect().width || window.innerWidth - 48; setOverlay(width < 1220); };
+    update(); const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null;
+    if (root.current) observer?.observe(root.current);
+    window.addEventListener('resize', update);
+    return () => { observer?.disconnect(); window.removeEventListener('resize', update); };
+  }, []);
+  useEffect(() => { onPendingChange?.(panelPending || dialogPending); return () => onPendingChange?.(false); }, [panelPending, dialogPending, onPendingChange]);
+  useEffect(() => { onEditingChange?.(Boolean(selection || creation || operation)); return () => onEditingChange?.(false); }, [selection, creation, operation, onEditingChange]);
+  useEffect(() => { if (!panelPending && !dialogPending) return; const warn = (e) => { e.preventDefault(); e.returnValue = ''; }; window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn); }, [panelPending, dialogPending]);
+  useEffect(() => { if (selection) onFieldSelect?.({ groupIndex, rowIndex: selection.rowIndex, column: selection.column }); }, [groupIndex, selection, onFieldSelect]);
+  const reveal = useEffectEvent(() => {
+    if (focusField) request(() => { setGroupIndex(focusField.groupIndex); select(focusField.column, focusField.rowIndex, focusField.sourceId); });
+  });
+  useEffect(() => {
+    // An explicit issue-navigation request must retain the mounted transaction
+    // until the user resolves it, rather than remounting the whole editor.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    reveal();
+  }, [focusField]);
   const supported = definition?.formatVersion === 1 && ['magento-declarative-1', 'magento-declarative-2'].includes(definition.evaluatorVersion) && ['magento-products-v1', COLUMN_CONTRACT].includes(definition.outputContract)
     && Array.isArray(definition.groups) && Array.isArray(definition.bindings) && definition.bindings.every((binding) => record(binding) && typeof binding.id === 'string' && record(binding.value))
-    && record(definition.sources) && Object.values(definition.sources).every(record)
-    && record(definition.tables) && Object.values(definition.tables).every(record)
-    && definition.groups.every((item) => record(item) && Array.isArray(item.columns) && item.columns.every((key) => typeof key === 'string') && Array.isArray(item.rows) && item.rows.every((entry) => record(entry) && record(entry.cells)));
-  const group = definition?.groups?.[groupIndex];
-  const row = group?.rows?.[rowIndex];
-  if (!supported || !Array.isArray(group?.columns) || !row?.cells) return <div role="note">Цей формат ще не підтримується формами. Визначення збережено без змін.<details><summary>Технічне визначення</summary><pre>{JSON.stringify(definition, null, 2)}</pre></details></div>;
-  if (advanced) return <div className="et-advanced"><div className="et-row"><button type="button" className="et-link" onClick={() => setAdvanced(false)}>← Поля експорту</button><span>{groupNames[group.route] || group.name} / {label(column)} / Розширені правила</span></div>
-    <AdvancedDefinitionEditor definition={definition} onChange={onChange} registry={registry} readOnly={readOnly} initialGroup={groupIndex} initialRow={rowIndex} initialColumn={column} /></div>;
-  const selectedColumn = group.columns.includes(column) ? column : group.columns[0];
-  const openCreation = (anchor = null) => { if (readOnly || creation) return; request(() => { setCreation({ groupIndex, rowIndex, anchor }); }); };
-  const simple = !protectedCells.has(selectedColumn) && definition.outputContract === COLUMN_CONTRACT && directColumn(definition, ['groups', groupIndex, 'rows', rowIndex, 'cells', selectedColumn]);
-  return <form id="template-definition-form" className="et-fields" onSubmit={(e) => e.preventDefault()}>
-    <div className="et-filters"><label>Категорія<select className="input" value={groupIndex} onChange={(e) => { const value = Number(e.target.value); request(() => { setGroupIndex(value); setQuery(''); }); }}>{definition.groups.map((item, i) => <option key={item.route} value={i}>{groupNames[item.route] || item.name}</option>)}</select></label>
-      <label>Мова<select className="input" value={rowIndex} onChange={(e) => { const value = Number(e.target.value); request(() => setRowIndex(value)); }}>{group.rows.map((item, i) => <option key={item.id} value={i}>{item.id === 'english' ? 'English' : 'Українська / основний рядок'}</option>)}</select></label>
-      <p className="et-muted">Показано поля однієї категорії. Шаблон зберігає всі {definition.groups.length} категорій.</p></div>
-    <div className="et-tabs" role="group" aria-label="Категорії файлів">{definition.groups.map((item, i) => <button type="button" key={item.route} aria-pressed={i === groupIndex} onClick={() => request(() => { setGroupIndex(i); setInspector(false); })}>{groupNames[item.route] || item.name}</button>)}</div>
-    <div className={inspector ? 'et-design-layout et-design-with-panel' : 'et-design-layout'}>
-      <OutputGrid columns={group.columns} labels={group.columnLabels} revealColumn={inspector ? selectedColumn : null}
-        title={group.name + ' · структура CSV'}
-        rules={Object.fromEntries(group.columns.map((key) => [key, summary(definition, row.cells[key])]))}
-        rows={[{ label: 'Основний · макет', placeholder: true }, { label: 'EN · макет', placeholder: true }]}
-        onColumn={(key) => request(() => { trigger.current = document.activeElement; setColumn(key); setInspector(true); })}>
-        {!readOnly && definition.outputContract === COLUMN_CONTRACT && <button type="button" className="btn btn-outline px-3" onClick={() => openCreation()}>+ Колонка</button>}
-      </OutputGrid>
-      {inspector && !creation && <aside className="et-column-drawer" role={overlay ? 'dialog' : undefined} ref={drawer} tabIndex={-1} aria-label="Налаштування колонки" onKeyDown={(e) => {
-        if (e.key === 'Escape') { e.preventDefault(); closeInspector(); }
-        if (!overlay || e.key !== 'Tab') return;
-        const fields = [...drawer.current.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary')].filter((field) => field.getClientRects().length);
-        if (e.shiftKey && (document.activeElement === fields[0] || document.activeElement === drawer.current)) { e.preventDefault(); fields.at(-1)?.focus(); }
-        else if (!e.shiftKey && (document.activeElement === fields.at(-1) || document.activeElement === drawer.current)) { e.preventDefault(); fields[0]?.focus(); }
-      }}>
-        <button type="button" className="et-link" onClick={closeInspector}>Закрити налаштування</button>
-        <h2>Редагування колонки <code>{selectedColumn}</code></h2><p>{group.route} · {rowIndex === 1 ? 'EN' : 'Основний рядок'}</p>
-        <ColumnStructure key={group.route + '/' + selectedColumn + '/' + panelEpoch} definition={definition} groupIndex={groupIndex} column={selectedColumn} onChange={guardedChange} onSelect={setColumn} onCreate={openCreation} readOnly={readOnly || panelPending} onPendingChange={setStructurePending} />
-        {simple ? <ColumnSource key={identity + JSON.stringify(row.cells[selectedColumn])} definition={definition} registry={registry} groupIndex={groupIndex} rowIndex={rowIndex} column={selectedColumn} onChange={guardedChange} readOnly={readOnly} onPendingChange={setPanelPending} /> : <>
-          <p className="et-muted">{protectedCells.has(selectedColumn) ? 'Захищене правило.' : 'Чим заповнювати: збережене складне правило. Умови й перевірки редагуються нижче без заміни всього правила.'}</p>
-          <FieldInspector key={identity} definition={definition} cellPath={['groups', groupIndex, 'rows', rowIndex, 'cells', selectedColumn]} onChange={guardedChange} registry={registry} readOnly={readOnly} loadSource={loadSource} diagnostics={diagnostics} openSource={focusField?.sourceId && focusField.groupIndex === groupIndex && focusField.column === selectedColumn ? focusField.sourceId : null} />
-        </>}
-        <button type="button" className="et-link" onClick={() => request(() => setAdvanced(true))}>Розширені правила цієї колонки</button>
-      </aside>}
+    && record(definition.sources) && Object.values(definition.sources).every(record) && record(definition.tables) && Object.values(definition.tables).every(record)
+    && definition.groups.every((group) => record(group) && Array.isArray(group.columns) && group.columns.every((key) => typeof key === 'string') && Array.isArray(group.rows) && group.rows.every((row) => record(row) && record(row.cells)));
+  if (!supported || !definition.groups[groupIndex]) return <div role="note">Цей формат ще не підтримується формами. Визначення збережено без змін.<details><summary>Технічне визначення</summary><pre>{JSON.stringify(definition, null, 2)}</pre></details></div>;
+  const inspectorOverlay = overlay || Boolean(selection && columnIntent(definition, ['groups', groupIndex, 'rows', selection.rowIndex, 'cells', selection.column]) === 'condition');
+  return <div ref={root} className="et-fields">
+    <CategoryTabs groups={definition.groups} selected={groupIndex} panelId={panelId} onSelect={(index) => request(() => { close(); setGroupIndex(index); })} />
+    <div role="tabpanel" id={panelId} aria-label={definition.groups[groupIndex].name} className={selection && !inspectorOverlay ? 'et-design-layout et-design-with-panel' : 'et-design-layout'}>
+      <TemplateDesignGrid definition={definition} groupIndex={groupIndex} registry={registry} selected={selection} readOnly={readOnly} onCreate={() => openCreation()} onSelect={(code, row) => request(() => select(code, row))} onAction={(action, code) => {
+        if (action === 'configure') { request(() => select(code, 0)); return; }
+        if (action === 'left' || action === 'right') { const columns = definition.groups[groupIndex].columns; openCreation(action === 'left' ? code : columns[columns.indexOf(code) + 1] ?? null); return; }
+        request(() => { close(); setOperation({ groupIndex, column: code, action }); });
+      }} />
+      {selection && <ColumnInspector key={groupIndex + '/' + selection.epoch} definition={definition} {...selection} groupIndex={groupIndex} registry={registry} readOnly={readOnly} loadSource={loadSource} diagnostics={diagnostics} overlay={inspectorOverlay} suspended={Boolean(transition) || !visible}
+        onPendingChange={setPanelPending} onCancel={close} onRequestClose={() => request(close)} onApply={(next, base) => { if (!guardedChange(next, base)) return false; close(); return true; }} />}
     </div>
-    <p className="et-muted">Макет без товарів. Правила — метадані редактора, не рядки CSV. Категорія змінює лише вигляд; експорт охоплює весь вибраний діапазон.</p>
-    <footer className="et-editor-footer"><button type="button" className="et-link" onClick={() => request(() => setAdvanced(true))}>Розширені правила</button><span>Умови, спільні правила, джерела та технічне визначення</span></footer>
-    {creation && <NewColumnDialog definition={definition} registry={registry} {...creation} readOnly={readOnly} onPendingChange={setCreatePending} onCancel={() => setCreation(null)} onCreate={(next, code) => { if (!guardedChange(next)) return false; trigger.current = null; setGroupIndex(creation.groupIndex); setRowIndex(creation.rowIndex); setCreation(null); setColumn(code); setInspector(true); return true; }} />}
-    {transition && <ColumnDialog title="Незастосоване заповнення" onCancel={() => setTransition(null)}><p>Застосуйте введені налаштування або явно відкиньте їх перед зміною колонки.</p><div className="et-actions"><button type="button" onClick={() => setTransition(null)}>Залишитися</button><button type="button" onClick={() => { setPanelPending(false); setStructurePending(false); setPanelEpoch((v) => v + 1); setTransition(null); transition(); }}>Відкинути заповнення й перейти</button></div></ColumnDialog>}
-  </form>;
+    <p className="et-design-caption">Основний і EN — незалежні правила, не приклади значень товарів. Категорія змінює лише вигляд.</p>
+    {creation && <NewColumnDialog suspended={!visible} {...creation} definition={definition} registry={registry} loadSource={loadSource} readOnly={readOnly} onPendingChange={setDialogPending} onCancel={() => setCreation(null)} onCreate={(next, code) => {
+      if (!guardedChange(next)) return false;
+      setCreation(null); setGroupIndex(creation.groupIndex); setSelection(null);
+      requestAnimationFrame(() => root.current?.querySelector(`[aria-label="Налаштувати колонку ${code}"]`)?.focus());
+      return true;
+    }} />}
+    {operation && <ColumnOperation suspended={!visible} {...operation} definition={definition} onPendingChange={setDialogPending} onCancel={() => setOperation(null)} onApply={(next) => { if (!guardedChange(next)) return false; setOperation(null); return true; }} />}
+    {transition && <ColumnDialog title="Незастосоване заповнення" onCancel={() => setTransition(null)}><p>Спочатку застосуйте або скасуйте введені налаштування. Інші локальні зміни чернетки збережено.</p><div className="et-actions"><button type="button" className="btn btn-primary px-3" onClick={() => setTransition(null)}>Залишитися</button><button type="button" className="btn btn-outline px-3" onClick={() => { const proceed = transition; setTransition(null); close(); proceed(); }}>Відкинути заповнення й перейти</button></div></ColumnDialog>}
+  </div>;
 }

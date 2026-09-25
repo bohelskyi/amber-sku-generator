@@ -82,7 +82,7 @@ export function optionEvidence(details, id) {
   return { current, historical };
 }
 
-export function fieldsForSource(definition, sourceId) {
+export function fieldsForSource(definition, sourceId, includeDependencies = false) {
   const fields = []; const dependent = [];
   const ruleUses = (rule) => rule && typeof rule === 'object' && Object.entries(rule).some(([key, value]) => key === sourceId
     || (['$and', '$or'].includes(key) && Array.isArray(value) && value.some(ruleUses)));
@@ -102,5 +102,5 @@ export function fieldsForSource(definition, sourceId) {
     if (questionField(definition, cellPath)?.sourceId === sourceId) fields.push({ groupIndex: gi, rowIndex: ri, column });
     else if (uses(row.cells[column])) dependent.push({ groupIndex: gi, rowIndex: ri, column });
   })));
-  return fields.length ? fields : dependent;
+  return includeDependencies ? [...fields, ...dependent] : fields.length ? fields : dependent;
 }

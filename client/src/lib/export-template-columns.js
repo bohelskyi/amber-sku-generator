@@ -1,4 +1,4 @@
-import { at, editField, mappingsForSource, resolveNode, sourceOf } from './export-template-presentation.js';
+import { at, editField, editMapping, mappingsForSource, resolveNode, sourceOf } from './export-template-presentation.js';
 
 export const COLUMN_CONTRACT = 'magento-products-columns-v2';
 export const requiredColumns = new Set(['sku', 'store_view_code', 'name', 'attribute_set_code', 'product_type', 'price']);
@@ -8,7 +8,7 @@ export function codeError(code, columns, previous) {
   return '';
 }
 export function columnChange(definition, groupIndex, action, code, value) {
-  if (definition.outputContract !== COLUMN_CONTRACT) throw new Error('Спочатку явно оновіть контракт колонок.');
+  if (definition.outputContract !== COLUMN_CONTRACT && !(definition.outputContract === 'magento-products-v1' && action === 'move')) throw new Error('Спочатку явно оновіть контракт колонок.');
   const next = structuredClone(definition); const g = next.groups[groupIndex];
   if (!g || (action === 'add' ? code != null && !g.columns.includes(code) : !g.columns.includes(code))) throw new Error('Колонку або позицію вже змінено. Відкрийте налаштування знову.');
   if (['remove', 'rename'].includes(action) && requiredColumns.has(code)) throw new Error('Захищена колонка full-product імпорту.');
@@ -109,6 +109,16 @@ export function availableSources(registry, group) {
   }
   return result;
 }
+// Preserve a stored descriptor/identity when it represents an authorized source.
+// Presentation must not require the operator to replace generated local IDs.
+export function columnSourceChoices(definition, registry, group, selectedId) {
+  const choices = availableSources(registry, group);
+  if (choices.some((choice) => choice.id === selectedId)) return choices;
+  const stored = definition.sources[selectedId];
+  if (!stored) return choices;
+  const authorized = choices.find((choice) => ['kind', 'category', 'key', 'field', 'type'].every((key) => choice.descriptor[key] === stored[key]));
+  return authorized ? choices.map((choice) => choice === authorized ? { ...choice, id: selectedId, descriptor: stored } : choice) : choices;
+}
 export function bindColumnSource(definition, gi, ri, code, selected, mode = 'text', existingTable) {
   const next = structuredClone(definition);
   if (requiredColumns.has(code) && ['sku', 'store_view_code', 'product_type'].includes(code)) throw new Error('Захищене правило.');
@@ -159,14 +169,19 @@ export function applyDirectColumn(definition, gi, ri, code, form, registry) {
   const lens = directColumn(definition, path);
   if (!lens) throw new Error('Складне правило: скористайтеся наявним редактором правил.');
   if (form.mode === 'literal') return editField(definition, path, lens.trail, 'local', () => ({ op: 'literal', value: form.text }));
-  const selected = availableSources(registry, definition.groups[gi].route).find((s) => s.id === form.source);
+  if (form.output === 'mapping' && form.source === lens.source && form.table === lens.table && form.mappingEntries !== undefined) {
+    return editMapping(definition, path, lens.trail, 'local', () => structuredClone(form.mappingEntries));
+  }
+  const selected = columnSourceChoices(definition, registry, definition.groups[gi].route, form.source).find((s) => s.id === form.source);
   if (!selected) throw new Error('Оберіть перевірену характеристику.');
   if (!['raw', 'mapping'].includes(form.output)) throw new Error('Оберіть, як записувати значення.');
-  if (form.output === 'mapping' && !mappingsForSource(definition, selected.id).includes(form.table)) throw new Error('Оберіть сумісну таблицю відповідностей.');
+  if (form.output === 'mapping' && form.mappingEntries === undefined && !mappingsForSource(definition, selected.id).includes(form.table)) throw new Error('Оберіть сумісну таблицю відповідностей.');
   // Reuse the expression builder, but keep checks and detach only the selected
   // dependency path via the existing adapter, rather than retiring output checks.
-  const built = bindColumnSource(definition, gi, ri, code, selected, form.output === 'raw' ? 'text' : 'lookup', form.table);
-  return editField({ ...definition, sources: built.sources }, path, lens.trail, 'local', () => built.groups[gi].rows[ri].cells[code]);
+  const built = bindColumnSource(definition, gi, ri, code, selected, form.output === 'raw' ? 'text' : 'lookup', form.mappingEntries === undefined ? form.table : undefined);
+  const rule = built.groups[gi].rows[ri].cells[code];
+  if (form.output === 'mapping' && form.mappingEntries !== undefined) built.tables[rule.table] = structuredClone(form.mappingEntries);
+  return editField({ ...definition, sources: built.sources, tables: built.tables }, path, lens.trail, 'local', () => rule);
 }
 
 export function createColumn(definition, gi, ri, before, form, registry) {

@@ -26,7 +26,10 @@ test('OFFICE valid-name unresolved draft creates, saves and reopens; publication
   assert.equal(candidate.response.status, 200, candidate.text);
   assert.deepEqual(await state(), before);
   // Remain genuinely unresolved even after other serialized tests add golden evidence.
-  const d = structuredClone(candidate.data.definition);
+  // This regression intentionally exercises an old, strict, policy-free draft.
+  // The current candidate now includes support; the system read stays legacy.
+  const legacy = await request(`${root}/system`, { authentication: admin });
+  const d = structuredClone(legacy.data.definition);
   d.sources['NM.extra'].key = 'office_unknown_extra';
   compileDefinition(d);
   const key = `office-${crypto.randomUUID()}`;

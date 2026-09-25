@@ -96,7 +96,7 @@ All endpoints below are relative to `/api/admin/export-templates` and retain aut
 | `GET /` | Family list with draft revisions and publication counts | `export_templates.view` |
 | `GET /:id` | Family, current draft, and complete immutable versions | `export_templates.view` |
 | `GET /sources` | Approved product fields, operations, limits, units and safe current/historical reference hints; no product rows | `export_templates.view` |
-| `GET /candidate` | Read-only Magento v1 candidate captured from the actual catalog, canonical hash, reference diagnostics; no persistence/publication/selection | `export_templates.view` **and** `export_templates.manage` |
+| `GET /candidate` | Read-only current Magento candidate captured from the actual catalog, including current source-support policy before final compilation/hash; no persistence/publication/selection | `export_templates.view` **and** `export_templates.manage` |
 | `GET /activation` | Selection generation/version and metadata-only status | `export_templates.view` |
 | `POST /` | `{key,displayName,definition?}`; creates family and revision `1`; omitted definition is `{}` | `export_templates.manage` |
 | `PUT /:id/draft` | `{expectedRevision,definition}`; returns draft/revision/canonical hash | `export_templates.manage` |
@@ -420,8 +420,11 @@ for exact contract, source-support boundary, migration and visual-QA limitations
 `evaluatorVersion: magento-declarative-2`, independently of either fixed
 `magento-products-v1` or editable `magento-products-columns-v2` output. Definitions
 without the extension keep evaluator 1, their original strict claims, hashes and
-execution. This is new opt-in behavior, not retroactive parity with the ten legacy
-goldens or a change to the system exporter / dedicated price stream.
+execution. The separately approved 2026-09-25 lifecycle correction makes this
+policy the default only for explicit new definitions based on the current
+candidate/system rules. Existing definitions still require explicit opt-in;
+this is not retroactive parity with the ten legacy goldens or a change to the
+system exporter / dedicated price stream.
 
 The closed `sourceSupport.sources` object declares the storage identities
 `NM.extra` and `AR.size` when present. Each has `semanticValues`, `deferredValues`
@@ -456,8 +459,8 @@ still controls readiness. The support update never writes mappings: approved
 29→75×78, 30→74×80, 31→70×70 entries are retained **if present**, including exact
 whitespace; missing entries remain ordinary editable mapping/readiness work.
 
-Normal UI for an existing saved draft: **Перевірка → Підготувати оновлення
-підтримки джерел → Застосувати оновлення підтримки джерел**. Save/cancel local
+Normal UI for an eligible existing saved draft: **Перевірка → Переглянути зміни
+→ Застосувати до чернетки**, under **Доступне оновлення правил сумісності шаблону**. Save/cancel local
 column work first. Preparation is read-only and displays a detached summary;
 application requires the original revision/hash and preparation fingerprint,
 rechecks coherent evidence, then uses the existing authorized CAS/audit transaction.
@@ -465,16 +468,42 @@ Stale evidence conflicts; repeated preparation/application of an unchanged polic
 does not increment revisions or promote new live options. Successful application
 invalidates preview evidence. Output contract, dynamic order, labels, custom
 base/EN cells, names, mappings, local references and readiness relationships remain
-exact. Published definitions require cloning into a draft first. New candidates
-offer the explicit **Історична підтримка NM / AR** checkbox; the read-only system
-profile continues describing evaluator 1 / the unchanged legacy exporter.
+exact. Published definitions require cloning into a draft first. A publication
+clone initially preserves its exact evaluator/policy, output structure and
+definition hash, including policy absence; only subsequent explicit draft
+prepare/apply can upgrade it. No GET, validation, publication, startup or no-op
+save attaches support to existing definitions.
+
+New-template and editable-current-system-copy actions request the same server
+`/candidate` capture. It materializes the current catalog and applies the current
+policy using authoritative evidence within the same read-only transaction,
+before final diagnostics and hashing. The old creation checkbox is removed.
+The read-only `/system` profile still describes evaluator 1 and the unchanged
+ordinary exporter; copying it explicitly requests a new current candidate.
+The generic create/save commands preserve supplied definitions (including safe
+incomplete drafts); they do not reinterpret imported/legacy definitions.
+
+Draft responses add `sourceSupportUpdate: {status, currentPolicy, code?}`.
+`available` means a policy-free definition can accept the closed support contract
+and has a support/evaluator delta; `current` means its valid current policy is already attached; `unsupported`
+means compilation cannot establish an upgrade path, including unknown/newer
+policies and incompatible legacy aliases. This read model checks only the frozen
+contract/upgrade shape, not source proof or catalog drift.
+Only server-reported `available` renders the upgrade action. Prepare adds the
+same status while retaining `changed`, complete definition, hash and preparation
+fingerprint for existing callers. A no-op response offers no application UI;
+old callers can still apply it without a revision/audit change. Unsupported
+preparation remains `422 TEMPLATE_INVALID`; stale revision/hash/evidence remains
+`409 TEMPLATE_DRAFT_CONFLICT`. Catalog labels/options or new historical schemas
+do not turn a current policy into an update or promote its deferred membership.
 
 API commands are POST `/:id/draft/source-support/prepare` with saved
 `expectedRevision` / `expectedDefinitionHash`, and POST
 `/:id/draft/source-support/apply` with those fields plus `preparationHash`, below
 `/api/admin/export-templates`. Both require `export_templates.manage` and the
-existing active-user/CSRF boundary. GET `/candidate?supportPolicy=historical-source-support-v1`
-prepares a detached new candidate without writing. Preparation is not validation
+existing active-user/CSRF boundary. GET `/candidate` defaults to current support;
+the existing explicit `?supportPolicy=historical-source-support-v1` remains
+compatible. Both prepare a detached new candidate without writing. Preparation is not validation
 or publication. Unknown policy versions fail closed.
 
 Draft samples retain selected-group source scope. Published preview, direct capture

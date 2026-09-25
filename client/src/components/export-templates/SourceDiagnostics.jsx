@@ -1,5 +1,6 @@
 import { sourceLabel } from '../../lib/export-template-presentation';
 import { fieldsForSource } from '../../lib/export-template-attributes';
+import { fieldLabels } from '../../lib/export-template-editor';
 
 const requirements = {
   category: 'Потрібна наявна категорія каталогу.',
@@ -13,28 +14,29 @@ const requirements = {
 };
 const categories = { BR: 'Браслети', NM: 'Намиста', KL: 'Кулони', CH: 'Чотки', AR: 'Картини', SV: 'Сувеніри' };
 
-export function SourceDiagnostics({ diagnostics = [], definition, registry, canSave = false, onOpenSource }) {
+export function SourceDiagnostics({ diagnostics = [], definition, registry, canSave = false, onOpenSource, showHeading = true }) {
   if (!diagnostics.length) return null;
-  const groups = new Map();
-  for (const diagnostic of diagnostics) {
+  const issues = diagnostics.map((diagnostic) => {
     const source = definition?.sources?.[diagnostic.sourceId];
     const category = diagnostic.category || source?.category;
     const key = diagnostic.key || source?.key;
     const dimension = (category === 'KL' && ['exact_size', 'pedant_size'].includes(key)) || (category === 'AR' && key === 'size');
-    const label = dimension ? 'розмір' : source ? sourceLabel(definition, diagnostic.sourceId, registry) : key || diagnostic.sourceId;
-    const title = categories[category] ? `${categories[category]} — ${label}` : label;
-    if (!groups.has(title)) groups.set(title, []);
-    groups.get(title).push(diagnostic);
-  }
+    const readable = source ? sourceLabel(definition, diagnostic.sourceId, registry) : null;
+    const label = dimension ? 'розмір' : readable && readable !== key && readable !== diagnostic.sourceId ? readable : 'Характеристика без підтвердженої назви';
+    const title = categories[category] ? `${categories[category]} → ${label}` : label;
+    return { title, entries: [diagnostic] };
+  });
   const count = new Set(diagnostics.map((d) => d.sourceId)).size;
   const noun = count % 10 === 1 && count % 100 !== 11 ? 'джерело'
     : [2, 3, 4].includes(count % 10) && ![12, 13, 14].includes(count % 100) ? 'джерела' : 'джерел';
   return <div role="alert" className="danger-panel p-3 space-y-2">
+    {showHeading && <p>Шаблон ще не готовий до публікації.</p>}
     <p>{canSave ? 'Чернетку можна зберегти. ' : ''}Перед публікацією потрібно перевірити {count} {noun}.</p>
-    {[...groups].map(([title, entries]) => <div key={title}><p className="font-semibold">{title}</p>
-      <p>Джерело не підтверджено для публікації.</p>
-      {entries.some((d) => d.unresolvedValueIds?.length) && <p>Непідтверджені ID: {[...new Set(entries.flatMap((d) => d.unresolvedValueIds || []))].join(', ')}</p>}
-      {onOpenSource && [...new Set(entries.map((d) => d.sourceId))].filter((id) => fieldsForSource(definition, id).length).map((id) => <button type="button" className="et-link" key={id} onClick={() => onOpenSource(id)}>Відкрити поле та джерело {id}</button>)}
+    {issues.map(({ title, entries }, index) => <div key={index}><p className="font-semibold">{title}</p>
+      <p>Джерело потрібно перевірити перед публікацією.</p>
+      {onOpenSource && [...new Set(entries.map((d) => d.sourceId))].flatMap((id) => fieldsForSource(definition, id, true).map((field) => <button type="button" className="et-link et-issue-target" key={`${id}/${field.groupIndex}/${field.rowIndex}/${field.column}`} onClick={() => onOpenSource(id, field)}>
+        {categories[definition.groups[field.groupIndex].route]} → {fieldLabels[field.column] || field.column} · {field.rowIndex === 1 ? 'EN' : 'Основний'} · {sourceLabel(definition, id, registry)}
+      </button>))}
       <details><summary>Технічні подробиці</summary>{entries.map((d, index) => <div key={index} className="text-sm break-words space-y-1">
         <p>Джерело: {d.sourceId}{d.key ? ` · ключ: ${d.key}` : ''}</p>
         <p>{requirements[d.requirement] || 'Перевірте наявність джерела та підтвердження його семантичних значень.'}</p>

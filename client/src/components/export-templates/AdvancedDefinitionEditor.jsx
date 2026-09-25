@@ -5,14 +5,14 @@ const labelFor = (key) => fieldLabels[key] || key;
 const fixedFields = new Set(['op', 'format', 'policy', 'onAbsent', 'onInvalid', 'field', 'code', 'question']);
 const record = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
-export function Scalar({ value, label, onChange, fixedType = false, validationError = '', disabled = false }) {
+export function Scalar({ value, label, onChange, fixedType = false, validationError = '', disabled = false, labelHidden = false }) {
   const type = value === null ? 'null' : typeof value;
   const [invalid, setInvalid] = useState('');
   const control = useRef(null);
   const messageId = useId();
   useEffect(() => { control.current?.setCustomValidity(invalid ? 'Введіть скінченне число' : validationError); }, [invalid, validationError, type]);
   return <fieldset disabled={disabled} className="space-y-1">
-    <label className="block text-sm">{label}
+    <label className="block text-sm"><span className={labelHidden ? 'sr-only' : undefined}>{label}</span>
       {type === 'boolean' ? <select className="input" value={String(value)} onChange={(e) => onChange(e.target.value === 'true')}>
         <option value="true">Так</option><option value="false">Ні</option>
       </select> : type === 'null' ? <span className="block text-slate-500">null — відсутнє значення</span>

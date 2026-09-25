@@ -25,5 +25,5 @@ export function useDirtyNavigation({ dirty, save, discard, busy = false, shouldB
         <button className="btn btn-outline px-3" disabled={busy} onClick={stay}>Залишитися</button>
       </div>
   </WorkspaceDialog>;
-  return { request, prompt, commit };
+  return { request, prompt, commit, blocked };
 }

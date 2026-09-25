@@ -1485,7 +1485,13 @@ explicitly **Застосувати оновлення підтримки дже
 writes. Apply checks original revision/hash and freshly recomputed evidence,
 uses authorized CAS/audit and clears old preview evidence. No-op repeats do not
 increment revisions. Published versions must first be cloned. The new-candidate
-checkbox opts in without rewriting the read-only legacy system profile. No output
+checkbox opts in without rewriting the read-only legacy system profile. **Historical
+record:** the separately approved 2026-09-25 lifecycle correction supersedes that
+creation choice: current candidates/system copies include current support by
+default, while publication clones preserve their exact definition and may be
+explicitly upgraded afterward. No-op upgrade actions are hidden using server
+status; catalog drift is not a policy upgrade. See the current contract in
+`EXPORTS.md` and the decision record in `EXPORT_UX_REDESIGN_PLAN.md`. No output
 mapping is filled/normalized as a side effect: missing AR output entries remain
 separate editable/readiness work, and present text/whitespace remains exact.
 

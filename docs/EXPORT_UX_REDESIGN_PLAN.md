@@ -1,10 +1,10 @@
 # Export UX/UI Redesign Plan
 
-**Status: UX-1 implementation complete — checkpoint 1 manually accepted on OFFICE; checkpoint 2 implemented, with its final visual checks pending. UX-2 / UX-3 / UX-4 have not started.**
+**Status: UX-1 completed, manually accepted by the operator and committed. UX-2 functional behavior is manually accepted; the focused operator-language / frozen-name-copy polish is recorded in section 19 and awaits visual acceptance. UX-3 / UX-4 have not started.**
 
 Document: `docs/EXPORT_UX_REDESIGN_PLAN.md`.
 
-**Historical planning closeout:** the approved plan was saved with the four approved amendments below. Sections 1–15 record that planning inspection and its then-uncommitted functional baseline. The UX-1 implementation records are in sections 16–17; the approved later-phase architecture remains unchanged.
+**Historical planning closeout:** the approved plan was saved with the four approved amendments below. Sections 1–15 record that planning inspection and its then-uncommitted functional baseline. Sections 16–17 retain the original UX-1 checkpoint reports, including their then-pending acceptance. The operator's subsequent acceptance and UX-2 implementation are recorded in section 18; the approved later-phase architecture remains unchanged.
 
 ## 1. Repository baseline and evidence
 
@@ -1445,3 +1445,239 @@ Final working-tree scope: **10 modified tracked files, 6 new files; nothing stag
 **Remaining manual checks:** inspect the compact product panel at about 1440 px and 390 px, including page overflow, text wrapping and keyboard focus/activation; follow both links and browser Back/Forward with a pending operation; verify view-only/no-export users and the retained archive form. No safe authenticated browser was available through the supplied tooling; no browser stack was installed or application bootstrapped. Checkpoint 2 visual acceptance remains pending.
 
 UX-1 implementation is complete. UX-2 / UX-3 / UX-4 are not started. No server files, business semantics, dependencies, migrations or database operations changed. No staging, commit, push or branch operation was performed.
+
+## 18. UX-2 implementation — 2026-09-25
+
+**Acceptance boundary:** the operator explicitly confirmed that all of UX-1 is manually accepted and committed. `/exports` and the compact product handoff are the accepted baseline. This supersedes the pending-acceptance statements in the historical checkpoint reports above. UX-2 is implemented for manual acceptance; UX-3 and UX-4 are not started.
+
+### Recorded starting state and unchanged contracts
+
+- Branch: `feature/magento-export-constructor`; HEAD: `f41c2d0f41714ed0465933418d574773ed25d91d`; `git status --short` was empty before editing. No staging, commits, pushes, destructive Git operations or branch changes.
+- Existing routes retained: `/admin/export-templates`, `/system`, `/new`, `/:familyId`, `/:familyId/check`, `/:familyId/versions`, and the `?version=:versionId` selection. Here the shorter paths are relative to `/admin/export-templates`. UX-1 export/session/price routes and product handoff are unchanged.
+- Accepted identifiers retained: `formatVersion: 1`, `magento-declarative-1`, `magento-declarative-2`, `magento-products-v1`, `magento-products-columns-v2`, `historical-source-support-v1`, `numeric-zero-v1`. No definition regeneration, upgrade, source refresh or hash change occurs on open.
+- No evaluator, source proof, column validation, publication/CAS, activation, session, snapshot/token/idempotency, export cursor/revision/exposure, price export, CSV serialization or formula neutralization semantics changed. Original oracle/golden files, dependencies and migrations are untouched.
+
+### Implemented component structure
+
+| Component / module | Responsibility |
+|---|---|
+| `ExportTemplatesPage` + existing `TemplateWorkspaceShell` | Existing route/controller, draft CAS, distinct Save/Validate/Test/Publish/Select actions, compact tray, compatibility proposal and publish review dialogs |
+| `TemplateRegistry` | Permanent read-only system entry; shared family lifecycle summaries; All/Drafts/Published views; display-name search; separate candidate badge |
+| `DefinitionEditor` | One category tab strip, selected column/row, transaction transitions, create/edit separation and measured-width layout |
+| `TemplateDesignGrid` | Exact CSV order, Main/EN summaries, required-header versus locked-rule indicators, keyboard cells and header menu |
+| `ColumnInspector` | Detached complete local transaction, Apply/Cancel, original-definition fence; 480 px aside only with at least 720 px table space, otherwise shared modal |
+| `ColumnForm` | Separate new-column transaction, readable name/code/source/output/position/row sequence; explicit optional independent second row |
+| `SourcePicker` + `useTemplateSourceEvidence` | Searchable authorized source metadata and identity-fenced label evidence; stored local source IDs remain intact and readable |
+| `MappingTableEditor` | Verified label hints, explicit local mapping/preset choice, exact missing/empty/null/number/string/whitespace distinctions |
+| `RuleEditor` + existing `QuestionField` | Typed literals, readable characteristic tokens, mapping, fallback, conditions, numeric boundaries and retained question guards |
+| Existing `AdvancedDefinitionEditor` | Technical/lossless editing within the same inspector transaction; explicit shared scope lists consumers before changes |
+| `SourceSupportStatus` + `SourceDiagnostics` | Separate semantic zero, own-schema historical placeholder, deferred values and unresolved evidence; exact category/column/Main-or-EN/source links |
+| Existing `SampleProducts`, `PreviewTable`, `OutputGrid` | Authorized sample search and existing server-result presenter; no UX-3 diagnostic-cell projection |
+| Existing `WorkspaceDialog`, `useDialogAccessibility`, `useDirtyNavigation` | Shared focus containment/restoration, suspended inspector while navigation is blocked, Save/Discard/Stay |
+
+Normal editing does not require binding IDs, question-value wrappers or mapping-table IDs. Text tokens are readable presentation labels translated back to the original slot identities. Local mapping changes reuse dependency-copy/detach adapters. Complex/custom structures stay intact; unsupported structures lead to Advanced rather than being flattened. An unknown operation is preserved in the save payload, but remains subject to the unchanged authoritative server validation.
+
+Only explicit inspector Apply changes the local definition. Page Save rejects unfinished inspector input. Cancel preserves other already-dirty changes. Clean no-op Save does not invalidate an open inspector; conflicts preserve local work without overwrite/rebase. Header duplicate clones both existing row rules and dependencies; rename/delete retain required-column restrictions. Historical fixed definitions retain explicit structural upgrade and their already-supported ordering operation.
+
+### Bounded deviations / API evidence
+
+The existing registry list returned only `draft_revision` and `publication_count`; it could not identify the latest publication or associate an older selected version with its family without loading complete definitions. The **same existing read-only list query** now also returns `version_summaries` (ID, version number, source revision, publication timestamp) and `selected_version_id`. Counters remain strings. No new endpoint, permission, persistence model, command or migration was added. A PostgreSQL regression asserts that listing returns no definitions and changes no template, activation, audit or business data.
+
+The design table is a dedicated `TemplateDesignGrid`; the accepted `OutputGrid` remains the result presenter. This avoids placing editor metadata into authoritative sample CSV values. The normal layout uses up to 1800 px; switching to a dialog uses available content width rather than only viewport width. There is no alternate normal category dropdown.
+
+Source-support preparation remains read-only; explicit application uses the existing saved-revision/hash/preparation-hash command. Publication review calls the authoritative publish command directly, including for publish-without-manage users. Candidate selection remains independent and does not replace the system exporter.
+
+### Regression and verification record
+
+| Acceptance scenarios | Executable coverage |
+|---|---|
+| A–C: registry/system/copy | `export-template-ui.test.jsx`; list-summary read-only PostgreSQL case |
+| D–G: one navigation, exact Main/EN, sparse EN | `export-builder-ux2.test.jsx`, `export-template-ui.test.jsx` |
+| H–N: local mapping, shared consumers, protection, operations, stale callbacks | `export-column-form.test.jsx`, `export-grid.test.jsx`, template UI and existing column/presentation model tests |
+| O–Q: custom/no-op preservation and source-support distinctions/proposal | Builder, template attributes/UI tests; unchanged source-support server regressions |
+| R–S: exact issue target including dependent EN; sample versus publication blockers | Template UI tests and existing server draft-source-scope tests |
+| T–Y: dirty transitions, CAS conflict, independent capabilities, denied reads | Template UI and workspace-route rendered tests; existing authorization/integration suite |
+| Z: `test_export_note` / `test_export_color`, exact outputs/order | Rendered form-produced definitions compiled/evaluated through server pure modules; unchanged server oracle/parity/column/source-support suites |
+
+- Runtime: Node **20.20.2**, explicit cached executable and temporary preload guard verifying the exact executable in npm and every child process. Tooling/logs live outside the repository.
+- Focused final builder/column workflows: **21/21** passed; the additional five UX-2 registry/publication/save/issue-navigation cases passed. Existing template, column, source-support and route workflows are included in the full run.
+- Full client `npm test -- --maxWorkers=2`: **137/137 model tests + 227/227 rendered tests (21 files)** passed. Client lint, production build and `git diff --check` passed. An earlier unconstrained parallel run hit UI timeouts; the final complete two-worker run passed. No expected golden output was updated.
+- PostgreSQL: **195/195** integration tests passed against canonical disposable `postgres-test` at `127.0.0.1:55432/amber_test`; the service was stopped afterward. No useful developer database was contacted. Windows shell wildcard issues were resolved by explicitly expanding the existing test-file list, not by changing database environments.
+- Server: **506/506** unit/evaluator/parity tests passed. Server lint passed with the two pre-existing unused-variable warnings in unchanged `product-timeline.js`.
+
+### Changed-file manifest
+
+- New files under `client/src/components/export-templates/`: `ColumnInspector.jsx`, `MappingTableEditor.jsx`, `RuleEditor.jsx`, `SourcePicker.jsx`, `SourceSupportStatus.jsx`, `TemplateDesignGrid.jsx`, `TemplateRegistry.jsx`.
+- Modified in that directory: `ColumnForm.jsx`, `DefinitionEditor.jsx`, `QuestionField.jsx`, `SourceDiagnostics.jsx`, `export-template-editor.css`.
+- New client support files: `client/src/hooks/useTemplateSourceEvidence.js`, `client/src/lib/export-template-categories.js`.
+- Modified client support: `client/src/components/workspace/TemplateWorkspaceShell.jsx`, `client/src/components/workspace/WorkspaceDialog.jsx`, `client/src/hooks/useDialogAccessibility.js`, `client/src/hooks/useDirtyNavigation.jsx`, `client/src/lib/export-template-attributes.js`, `client/src/lib/export-template-columns.js`, `client/src/lib/export-template-presentation.js`, `client/src/pages/ExportTemplatesPage.jsx`.
+- Tests: new `client/test/export-builder-ux2.test.jsx`; modified `client/test/export-column-form.test.jsx`, `client/test/export-grid.test.jsx`, `client/test/export-template-attributes.test.jsx`, `client/test/export-template-ui.test.jsx`, `client/test/export-workspace-routes.test.jsx`.
+- Server: `server/src/services/export-templates/template.service.js` (read-only summary query only), `server/integration-test/12-export-templates.cases.js`.
+- Documentation: this plan. Final working tree: **21 modified tracked files + 10 new untracked files**, all UX-2 work; nothing staged. Branch and HEAD remain the recorded starting values.
+
+**Manual acceptance still required:** no safe browser tooling was available and no browser stack was installed. Rendered jsdom tests cover composition, focus/keyboard and content-width switching, not visual overflow. On approximately **1440 / 1920 / 390 px**, inspect registry, read-only system/copy, table and Main/EN inspector, creation/local mapping, long labels/values, horizontal table scrolling, validation/sample tray, compatibility proposal and publish/version/candidate flows. Verify focus containment/restoration and narrow-page overflow in the real application. Stop here for operator acceptance; UX-3/UX-4, deployment and product-page redesign remain excluded.
+
+## 19. UX-2 acceptance polish — 2026-09-25
+
+The operator manually accepted UX-2 functionality (registry/system/table, one category strip, independent Main/EN, column operations, server evaluation, dirty navigation and responsive behavior). Remaining feedback concerned developer terminology in ordinary attribute authoring. This record supersedes section 18's functional-acceptance-pending statement without changing its historical verification record.
+
+- Starting state: `feature/magento-export-constructor`, HEAD `f41c2d0f41714ed0465933418d574773ed25d91d`; **21 modified tracked + 10 untracked files** from the accepted UX-2 work. Those changes are preserved. The existing server changes belong to section 18; this polish changes no server code, API, permission, database, dependency or migration.
+- `ColumnValueForm` now asks **Як записувати значення**: **Як названо в характеристиці** or **Задати свої значення** for semantic options. Choosing either explicitly prepares editable CSV rows from available current names; opening a source alone does not copy anything. Existing stored mappings always display their actual outputs. Informational/product values default to **Використати значення як є** after explicit source selection.
+- **Frozen authoring copy:** `export-template-option-labels` copies exact, unambiguous current labels from the existing authorized source-details read. The form previews these strings before local application. Existing mapping inspectors use `OptionNamesCopy` and the existing local/shared dependency adapters. Outputs are persisted in ordinary definition tables, with no new evaluator operation or runtime catalog lookup. Later catalog renames cannot refresh saved output. This explicitly requested authoring action is the sole extension to earlier “labels are hints” guidance; labels still provide no historical/source authorization.
+- Missing, blank or conflicting labels, and ambiguous current questions, produce **Значення №… — назву не підтверджено**. The helper creates no output for them; existing outputs remain exact and an absent output requires explicit entry. Historical labels remain technical evidence, not an invented current label. Null, missing, empty text, numeric/string zero and whitespace remain distinct.
+- Raw semantic output remains available as **Вивести внутрішній ID варіанта** under **Розширені налаштування виводу**, with the integration warning. It is never selected automatically for a new semantic source, including text-token insertion. Advanced complex-rule editing remains available and lossless.
+- Mapping rows prioritize characteristic names, editable CSV text and actions. One **Подробиці джерела** disclosure replaces repeated **Свідчення** controls. IDs, SKU codes and historical records stay reachable there. **Де застосувати зміни** defaults to **Лише ця колонка**; explicit shared edits retain the affected-consumer list. Unresolved, historical-empty, genuine-zero and deferred support retain distinct explanations. Machine validation codes stay in **Технічні подробиці**. No blocker or server check is removed.
+- Component scope: `ColumnForm`, `MappingTableEditor`, `RuleEditor`, `QuestionField`, `SourcePicker`, `SourceSupportStatus`, `SourceDiagnostics`, page diagnostics; `Scalar` only gains an accessible visually hidden label option. New helper/component: `export-template-option-labels.js`, `OptionNamesCopy.jsx`. Existing column, builder, attributes, grid and page rendered regressions are updated; new `export-option-names.test.js` and `export-operator-mapping.test.jsx` cover explicit copy, catalog rename, save/load/server output, custom text, EN, raw IDs, free text, ambiguous labels, unchanged source authorization and secondary technical evidence.
+
+Verification: Node **20.20.2**, with an external preload guard checking the exact npm/child executable. Focused mapping/attributes/builder/column/grid/page tests passed **78/78**; the final full client run includes one additional custom-mode cancellation case and the page-code disclosure assertion. Full `npm test -- --maxWorkers=1` passed **138/138 model + 234/234 rendered tests (22 files)** with standard timeouts. An earlier two-worker run concurrent with the production build hit three 5-second workflow timeouts; the final sequential run passed without relaxing assertions or timeouts. Client lint and production build passed. Relevant unchanged server pure evaluator/parity/columns/source-support/Magento suites passed **246/246**. No expected golden is rewritten. No useful database is accessed; PostgreSQL integration is unnecessary for this client-only polish.
+
+This pass touches **19 files**, including four new files named above. Final tree, including the preserved accepted UX-2 work: **22 modified tracked + 14 untracked files**, nothing staged; branch and HEAD unchanged. The two pre-existing server files were compared with the starting SHA-256 inventory and remain byte-identical. `git diff --check` passes; new untracked files are also checked for whitespace errors.
+
+**Manual visual acceptance remains required:** no browser tool is available and none was installed. Inspect new/existing mapped columns, **Світлий → Світлий UX2**, source details, validation details and the 390 px form. Acceptance question: can an operator add **Браслети → Колір** and choose current names or custom names without understanding `value_id`, `color4` or lookup terminology? UX-3 / UX-4, deployment and UX-1 redesign remain excluded. No staging, commits, pushes or branch operations.
+
+## 20. Final UX-2 manual-acceptance correction — 2026-09-25
+
+The operator accepted the functional UX-2 baseline and the improved mapping authoring, but found existing conditional columns (especially AR SEO description) unintuitive. This correction presents ordinary conditional output as an ordered business rule list, while retaining the existing evaluator and authoring transaction.
+
+- Starting branch/HEAD: `feature/magento-export-constructor`, `f41c2d0f41714ed0465933418d574773ed25d91d`. Starting tree: **22 modified tracked + 14 untracked files**, all preserved accepted UX-2/polish work; nothing staged. A temporary SHA-256 inventory distinguishes this correction from the earlier changes.
+- `ConditionComposer` shows **Коли виконуються умови**, readable characteristic/value selectors, **Додати умову**, keyboard-accessible move/remove buttons, and an explicit **Інакше** result. Reordering restores focus to the moved rule. Rows stack vertically and fit the existing narrow inspector dialog; no second category or language selector is introduced.
+- `export-template-conditions.js` is a lossless authoring lens over existing `when`/nested `else` expressions and references. Normal predicates cover exact equality, membership, presence and absence (`eq`, `in`, `present`, `not`). Numeric/text comparisons retain exact types; semantic options display authorized catalog labels but store the original semantic IDs. Labels provide no source authorization. Unknown predicates or expression properties remain intact and expose **Розширені правила**; ordinary results of those predicates can still be edited separately.
+- Multiple rules serialize through existing nested `when` nodes. Only explicit edits construct nodes; opening/cancelling/no-op application does not rewrite bindings, expressions, hashes or source support. A newly added branch initially copies the explicit fallback, preserving its output type/guards; its condition must be configured before applying. Local/shared edits use the existing dependency adapters and consumer warnings. Main and EN remain independent.
+- `RuleEditor` reuses ordinary interpolation, literal, mapping and fallback controls inside results. A plain text result can insert readable characteristic tokens directly. AR SEO's outer computed-presence guard stays separate, including its otherwise result; `require` readiness checks stay separate as well. Neither is flattened into a new decision rule. Complex/custom children remain available through Advanced without simplification.
+- Raw semantic output is now **Внутрішній ID варіанта**, only inside collapsed **Технічні налаштування**, with the integration explanation. It is never automatically enabled. Existing raw-ID definitions and frozen label copies retain their earlier behavior.
+- Source status is compact and follows ordinary input. Repeated source evidence within the same condition list is consolidated. **Подробиці джерела** stays collapsed, including after issue navigation. Historical placeholder, deferred values, unresolved sources and genuine zero retain distinct meanings. Unchecked sources are not falsely labelled confirmed merely because labels are available; support/publish checks remain authoritative.
+- Validation prioritizes **Шаблон ще не готовий до публікації** and readable category/characteristic issues. Codes, raw keys, ID sets, schema evidence and original machine messages remain in **Технічні подробиці**. Distinct diagnostics are no longer merged by display label, and the tray counts distinct diagnostics. Issue links retain exact category/column/Main-or-EN/source navigation. Sample messages likewise separate readable explanations from exact technical records; no diagnostic-cell projection or UX-3 review grid is added.
+
+Changed files in this correction (20; earlier accepted changes elsewhere are preserved):
+
+- New: `client/src/lib/export-template-conditions.js`, `client/src/components/export-templates/ConditionComposer.jsx`, `client/test/export-conditions.test.js`, `client/test/export-conditions.test.jsx`.
+- Components: `ColumnForm.jsx`, `ColumnInspector.jsx`, `RuleEditor.jsx`, `QuestionField.jsx`, `SourcePicker.jsx`, `MappingTableEditor.jsx`, `SourceSupportStatus.jsx`, `SourceDiagnostics.jsx`, and `export-template-editor.css`, all under `client/src/components/export-templates/`.
+- Page: `client/src/pages/ExportTemplatesPage.jsx`.
+- Existing rendered regressions under `client/test/`: `export-builder-ux2.test.jsx`, `export-column-form.test.jsx`, `export-operator-mapping.test.jsx`, `export-template-attributes.test.jsx`, `export-template-ui.test.jsx`.
+- This plan document.
+
+Verification: Node **20.20.2**, with the existing external preload guard checking the exact executable of npm and child Node processes. New deterministic coverage (**4 model + 10 rendered tests**) includes the actual AR Landscape/Icon/default workflow, existing and referenced chains, reorder/remove/focus, branch token insertion, independent EN, untouched outer AR guard, no-op/custom round-trips, typed comparisons, lazy errors, local/shared consumers, exact issue targets, secondary technical evidence and narrow dialog composition. Form-produced definitions are compiled/evaluated by the existing server pure evaluator. Original CSV goldens are not changed.
+
+- Focused conditional/page regression run: **52/52** passed. The final full `npm test -- --maxWorkers=1` run passed **142/142 model + 244/244 rendered tests across 23 rendered files**, with standard assertions and timeouts. An earlier full run exposed the duplicate source disclosure after issue navigation; it was fixed and tested. A subsequent run had two transient failures in the unchanged repricing-autosave and expired-preview tests; both files passed **35/35** independently, then the entire suite passed without changing those files or relaxing tests.
+- Client lint and production build passed. Relevant server pure evaluator/parity/columns/source-support/Magento suites passed **246/246**. No server implementation change was made in this correction, so no PostgreSQL integration or useful-database access was needed.
+- `git diff --check` and whitespace checks for all correction files, including new untracked files, passed. Final tree: **22 modified tracked + 18 untracked files**, including the earlier accepted work; nothing staged. Branch and HEAD unchanged. Both pre-existing server files remain byte-identical to the starting SHA-256 inventory.
+
+**Manual visual acceptance remains pending:** no browser tool is available and no browser stack was installed. Check AR SEO with Landscape/Icon/another type and fallback text, token insertion, reorder focus, Main/EN, ordinary versus technical source details, validation links and the approximately 390 px layout in the actual application. jsdom verifies controls and dialog composition, not real overflow or visual appearance. UX-3 and UX-4 remain **not started**. No useful database, migrations, dependencies, RBAC, runtime export/evaluator/source-support semantics or UX-1 product handoff are changed. No staging, commits, pushes or branch operations.
+
+## 21. Final structural UX-2 request: lifecycle audit and mandatory stop — 2026-09-25
+
+**Structural redesign is blocked, not implemented.** The operator found that ordinary column editing still mixes business rules with technical evidence. The requested replacement is one intent mode (constant, characteristic, text with characteristics, conditions, first available value, or complex rule), with separate Technical and Advanced surfaces. These changes, including the AR SEO task surface, remain outstanding; they are not merely visual polish deferred to UX-5.
+
+Starting state: branch `feature/magento-export-constructor`, HEAD `f41c2d0f41714ed0465933418d574773ed25d91d`, **22 modified tracked + 18 untracked files**, nothing staged. All earlier UX-2 work is preserved. The mandatory audit found that the requested new-copy default conflicts with the accepted explicit opt-in contract documented in section 4 and `EXPORTS.md` (Opt-in historical source support). The task explicitly requires stopping if correcting that default changes support semantics.
+
+### Code-grounded source-support lifecycle audit
+
+| Question | Actual behavior and evidence |
+|---|---|
+| A. Generic upgrade or targeted repair? | `source-support.js` declares one closed version, `historical-source-support-v1`, targeting `NM.extra` and `AR.size`. `upgradeSourceSupport` upgrades an absent policy and returns an existing policy unchanged. It is a version-labelled, explicitly selected compatibility extension, not a general successive-version migration framework or a recurring catalog repair. Unknown versions fail compilation. |
+| B. New templates/copies already use it? | **No, not by default.** `prepareMagentoCandidate` calls the legacy factory and upgrades only with explicit `supportPolicy`. The system route supplies no policy. Client new/system-copy flows pass that original definition unchanged; the creation checkbox defaults off. `createTemplate` preserves the supplied definition. `cloneDraft` copies the published definition exactly, including presence/absence of its policy. |
+| C. Only an older/missing policy needs updating? | In the current implementation, only a missing policy produces a changed definition. There is no older-version migration branch. New drafts without the opt-in are also eligible immediately; eligibility does not imply that the draft was created under an older application release. |
+| D. Can ordinary catalog changes cause recurrence? | An existing policy is never refreshed or promoted by preparation, even after new historical evidence appears. Evidence changes can invalidate a previously prepared application fingerprint. Separately, `ExportTemplatesPage` always renders the prepare button for a manageable draft, even when the proposal would report `changed: false`; it is not an availability indicator. |
+| E. Where are NM/AR rules encoded? | The two targets, numeric-zero exception and allowed deferred IDs 29/30/31 are hardcoded, narrowly scoped policy rules centralized in `source-support.js`; the approved registry also describes them. Generic loading, source validation and lazy evaluator reads call this policy module. They are not a data-driven general upgrade registry, nor scattered UI-driven product repairs. |
+| F. What does application preserve? | The pure transformation changes only `evaluatorVersion` and `sourceSupport`. Columns/order/labels, Main/EN, custom mappings, bindings, captured question contracts, readiness and output contract remain exact. The command then updates draft revision/hash/audit through existing CAS, with a fresh evidence/fingerprint check. |
+| G. Can it mutate a publication? | No. Prepare/apply load the draft; `replaceDraft` updates only `export_template_drafts`. From-version copying reads/verifies the publication and changes the draft. Migration 035 independently prohibits publication UPDATE/DELETE/TRUNCATE. No published-version upgrade endpoint exists. This persistence conclusion was inspected in code; integration tests were not rerun. |
+
+Consequently, the proposed explanation that every eligible draft was created under an older policy would be false. A fresh default system copy can immediately receive a changed proposal. Automatically adding support to new templates/copies would change their evaluator version, canonical hash, publication source validation and consumed-value support requirements. This requires a separate engineering decision about default policy and exact-copy behavior. No such semantic change or cosmetic disguise was made. Under the current contract, the meaningful action is explicit opt-in for a saved policy-free draft; an already supported draft produces no upgrade, irrespective of later catalog additions.
+
+### Verification and scope
+
+- Node **20.20.2**, using the external launcher/preload guard to verify the exact executable in child processes.
+- Existing server pure suites `export-source-support`, `export-template-definition`, `export-template-parity`, `export-template-office`, and `export-template-persistence`: **148/148 passed**. This includes placeholder/genuine-zero/deferred, lazy-read, canonical-hash and original parity coverage; no expected output was rewritten.
+- Existing rendered `export-template-ui.test.jsx -t SUPPORT --maxWorkers=1`: **3/3 passed** (39 unrelated cases filtered out), covering explicit new-candidate opt-in, detached prepare/apply, and conflict/local-input preservation.
+- An external synthetic audit additionally verified a custom local mapping and independent EN: only the two expected definition keys change, BR evaluated output/CSV stays exact, the input hash is untouched, and repeated preparation after new historical evidence retains the same hash and deferred membership. Own-schema proof remains required. No product/catalog or database writes occurred.
+- Only this appended documentation record changes in this task. No runtime/test implementation, dependency, migration or configuration change; full client tests/lint/build and PostgreSQL integration were not rerun because implementation stopped at the semantic boundary. Browser acceptance was not performed. `git diff --check` passes; the before/after SHA-256 inventory confirms all other tracked and untracked files are unchanged. Final status remains **22 modified tracked + 18 untracked**, nothing staged, with the same branch/HEAD.
+
+Technical/Advanced separation and the six focused modes remain UX-2 work pending that decision. UX-5 can handle later purely visual refinements but cannot substitute for this unimplemented structural acceptance requirement. UX-3 and UX-4 remain **not started**. No staging, commits, pushes, resets or branch operations.
+
+## 22. Separately approved source-support lifecycle correction — 2026-09-25
+
+The operator explicitly approved the semantic decision requested by section 21 and limited this task to lifecycle/default attachment. **The structural UX-2 editor redesign is not resumed.** This decision supersedes section 4's explicit opt-in requirement only for creating a new definition from current Magento rules; all existing-definition boundaries remain intact.
+
+Starting state: `feature/magento-export-constructor`, HEAD `f41c2d0f41714ed0465933418d574773ed25d91d`, **22 modified tracked + 18 untracked files**, nothing staged. The accepted UX-2 implementation/polish and the preceding audit record are preserved.
+
+Before editing, code inspection confirmed: candidate preparation attached support only with an explicit query option; both system-copy entries used the legacy system definition; create/save preserved supplied definitions; publication cloning copied exact stored content; support preparation/application were detached-read/CAS operations; validation/publication never attached policy; and the upgrade action rendered even for already-current drafts. Baseline audit verification was 148 server pure tests and 3 rendered support tests, all passing under the old opt-in behavior.
+
+| Boundary | Approved implementation |
+|---|---|
+| New current template | Existing `/candidate` defaults to `historical-source-support-v1` and its required evaluator. Current catalog and authoritative evidence are captured in one read-only transaction; support is attached before final compilation/hash/diagnostics. Explicit existing `supportPolicy` callers remain compatible; unknown policy requests fail closed. |
+| New editable system copy | Both registry and system-view copy actions request that same current candidate. The read-only `/system` response remains an honest legacy exporter description and writes nothing. No creation checkbox is needed. |
+| Existing draft/create/save/read | Exact supplied definition remains authoritative, including safe incomplete/legacy definitions. No refresh or attachment on GET, render, save, validate, publish or startup. Generic create is not an implicit import/migration operation. |
+| Publication clone | Exact definition/evaluator/policy presence or absence, output contract, mappings, columns/order, Main/EN and definition hash are preserved. Only normal draft identity/revision/base-version metadata changes. A legacy clone can subsequently receive an explicit upgrade; a current clone has no upgrade action. |
+| Upgrade availability | Additive server `sourceSupportUpdate` metadata distinguishes `available`, `current`, and `unsupported`; it depends on compilation of the frozen contract, not catalog changes. Prepare preserves its previous response fields and adds this status. Unknown/newer/malformed policies are not rewritten; prepare/publish reject them. Conflicts retain existing 409 behavior. |
+| Explicit apply / no-op | Read-only review and explicit apply retain revision/hash/preparation-fingerprint checks and authority. Application preserves all output/user structure. Repeated no-op application remains compatible without revision/audit changes, but no-op actions are hidden in normal UI. |
+
+The check view now displays **Доступне оновлення правил сумісності шаблону** only for server-reported availability, explains **Цю чернетку можна оновити до поточних правил перевірки джерел. Перегляньте зміни перед застосуванням.**, and offers **Переглянути зміни** followed by explicit application. Policy identifier and NM/AR implementation explanation are secondary technical details. Catalog drift, mapping edits and support-policy upgrades remain distinct. A changed preparation response is still a proposal, not publication approval.
+
+Only one current policy is supported; no general migration engine, new endpoint, permission, dependency or migration was introduced. Centralized NM own-schema numeric-placeholder proof, genuine semantic zero, AR deferred membership, lazy evaluation and readiness are unchanged. Old definitions/goldens keep their interpretation and identity. No product/catalog repair or useful-database access is part of this task.
+
+Implementation scope: `server/src/services/export-templates/{source-support.js,template.service.js}`, new `server/test/export-source-support-lifecycle.test.js`, `server/integration-test/{12-export-source-support.cases.js,12-export-template-editor.cases.js}`, `client/src/pages/ExportTemplatesPage.jsx`, `client/test/export-template-ui.test.jsx`, this plan, `docs/EXPORTS.md`, and the superseding note in the historical `docs/EXPORT_TEMPLATES_PR4.md` record. The existing OFFICE unresolved-draft regression now explicitly starts from the legacy system definition, retaining its old strict-draft purpose instead of accidentally testing today's supported candidate.
+
+Verification on Node **20.20.2**, with the external preload guard checking the exact executable in npm and child processes:
+
+- Focused support/lifecycle pure tests: **13/13** (including five new lifecycle cases); focused rendered creation/copy/availability/apply cases: **8/8**. An additional assertion verifies that a valid legacy alias unsupported by the closed policy reports `unsupported`, without rewriting it.
+- Final complete server unit/pure suite: **511/511**, including unchanged evaluator, source-support, old hashes and goldens. Server lint passes with the two pre-existing unused-variable warnings in unchanged `product-timeline.js`.
+- Final complete PostgreSQL integration suite: **197/197**, using only canonical disposable `postgres-test` / `127.0.0.1:55432/amber_test`; the service was stopped afterward. An initial new assertion compared an HTTP timestamp string to a service `Date`; it was corrected to compare the same server representation, then the complete suite passed. The final suite was rerun after the alias-availability guard. No useful database was accessed.
+- Full client `npm test -- --maxWorkers=1`: **142/142 model + 248/248 rendered tests (23 files)**, with normal assertions/timeouts. Client lint and production build pass. No expected output golden was changed.
+- `git diff --check` and the new regression-file whitespace check pass. A SHA-256 comparison of the 485 starting files confirms exactly **9 existing files changed**, plus **1 new regression file** listed above; all other earlier work is byte-identical. The preceding plan text is preserved exactly, with this record appended. Final status: **27 modified tracked + 19 untracked files**, including the preserved earlier work; nothing staged. Branch/HEAD unchanged.
+
+No unresolved semantic decision remains for this bounded lifecycle correction. Browser visual acceptance is not claimed. UX-3 and UX-4 remain **not started**; the large column-inspector redesign remains a separate unfinished UX-2 task and was not resumed here. No staging, commits, pushes or branch operations.
+
+## 23. Final structural UX-2 editor — resumed after the accepted lifecycle fix, 2026-09-25
+
+The operator resumed the structural work paused in section 21 after accepting section 22. The remaining problem was the engine-first existing-column inspector: business text, conditions, mappings, contracts and proof were mixed into one long surface. **The intent-based structure is now implemented for manual acceptance.** UX-3/UX-4 remain not started.
+
+Starting state: `feature/magento-export-constructor`, HEAD `f41c2d0f41714ed0465933418d574773ed25d91d`, **27 modified tracked + 19 untracked files**, nothing staged. Earlier UX-2 and source-support lifecycle work is preserved. An external SHA-256 inventory and backup were taken before editing.
+
+### Operator structure and actual components
+
+`ColumnInspector` owns one detached transaction and separates the normal task surface from two independently opened `WorkspaceDialog` surfaces. The normal sequence is column/category/Main-or-EN context, **Як формується значення**, relevant settings, **Короткий підсумок**, Apply/Cancel, then compact status and secondary tools. The display name can be changed explicitly from the header. Simple direct rules can switch between constant and characteristic using the existing direct-column adapter; other modes are recognized from their saved shape, not regenerated by selecting a generic engine operation.
+
+| Recognized mode | Normal controls |
+|---|---|
+| Постійне значення | Value and, where applicable, exact scalar type. No characteristic/mapping/evidence controls. Empty string, null, numeric zero and string zero remain distinct. |
+| Значення характеристики | Approved characteristic and applicable output settings. Semantic options offer an explicit frozen copy of current names or custom stored outputs; ordinary rows show names and CSV values. Informational text offers as-is output. Numeric ranges keep their inclusive/exclusive boundaries. |
+| Текст із характеристиками | Focused textarea, readable tokens and characteristic insertion. Selecting a token opens its relevant value controls; internal slot renaming lives in Technical. Unsupported interpolation shapes use Advanced. |
+| Значення залежить від умов | The existing ordered `ConditionComposer`, ordinary result editors and explicit otherwise result. Complex predicates/results have their own Advanced entry without being flattened. |
+| Перше доступне значення | Ordered entries with explicit add, move and remove. The existing presence/error behavior stays intact; exact policy is available separately. |
+| Складне правило | Concise preserved-rule summary and an Advanced button. No partially rendered recursive engine editor underneath. |
+
+`export-template-intent.js` supplies read-only shape lenses and source discovery within the existing definition. `RuleEditor` renders focused controls only for recognized shapes, retaining its technical editing path. `ColumnValueForm`, `MappingTableEditor`, `SourcePicker` and `ConditionComposer` share their existing builders/adapters with this focused presentation. `RuleSummary` describes the pending rule; it never evaluates products. `ColumnTechnicalDetails` loads authorized source evidence only when the separate technical surface opens.
+
+**Технічні подробиці** contains source keys, semantic/SKU IDs, table identities, contracts, current/historical evidence, exact diagnostics, raw-ID output and compatibility controls. Shared editing still requires explicit scope and lists consumers. **Розширені правила** opens `AdvancedDefinitionEditor` separately. Closing either returns to the same column/category/row with the normal controls and pending transaction preserved. Both reuse the existing focus containment/restoration helper. The suspended normal surface rejects stale callbacks; cancel discards only this transaction, and page Save still cannot bypass unfinished editor input.
+
+For AR SEO the operator edits Landscape → landscape text, Icon → icon text, and Otherwise → default text, including readable characteristic tokens. These remain existing nested lazy `when` expressions. The actual AR computed-presence guard, its alternate result, readiness dependencies, mappings and independent EN are preserved. Synthetic fixture strings remain in tests only.
+
+Normal validation prioritizes **Шаблон ще не готовий до публікації** and **Джерело потрібно перевірити перед публікацією**, with the original exact category/column/row/source targets. Machine codes and proof remain secondary technical content. The normal inspector has no inline JSON/evidence arrays; confirmed approved sources and exceptional placeholder/deferred/unresolved states use compact wording. Labels never authorize semantic values, and source status is not full-template publication approval.
+
+Simple editors retain the table on sufficiently wide layouts. Conditions use a focused dialog (up to 880 px); narrow normal/Technical/Advanced surfaces use the viewport rather than squeezing the table. Business text can scroll; technical strings scroll within the technical surface. Apply/Cancel remain sticky and keyboard reachable.
+
+### Preserved lifecycle and scope
+
+Section 22 remains authoritative and unchanged: current candidates/system copies start with the current policy, old drafts are not rewritten, publication clones retain exact semantics, catalog drift is not an upgrade, real server-reported availability controls the action, and publications stay immutable. This task changes no server implementation, policy, evaluator, readiness, snapshot, CSV, RBAC, migration, dependency or UX-1 handoff. No useful database was accessed, and no integration run is required for these client changes.
+
+Files changed in this structural task (earlier modifications in other files are preserved):
+
+- New: `client/src/lib/export-template-intent.js`, `client/src/components/export-templates/ColumnTechnicalDetails.jsx`, `client/src/components/export-templates/RuleSummary.jsx`, `client/test/export-intent-editor.test.jsx`.
+- Existing components under `client/src/components/export-templates/`: `ColumnInspector.jsx`, `DefinitionEditor.jsx`, `RuleEditor.jsx`, `ConditionComposer.jsx`, `ColumnForm.jsx`, `MappingTableEditor.jsx`, `SourcePicker.jsx`, `SourceSupportStatus.jsx`, `SourceDiagnostics.jsx`, `export-template-editor.css`.
+- Existing tests under `client/test/`: `export-builder-ux2.test.jsx`, `export-column-form.test.jsx`, `export-conditions.test.jsx`, `export-grid.test.jsx`, `export-operator-mapping.test.jsx`, `export-template-attributes.test.jsx`, `export-template-ui.test.jsx`.
+- This plan record; preceding planning/acceptance history remains intact.
+
+### Verification and remaining manual acceptance
+
+Verification results are recorded below after the final checks. Manual browser acceptance is pending: no browser tool was available and no browser stack was installed. Check the real 1440/1920 px and 390 px application, two/three AR SEO conditions and tokens, ordinary mappings, separate Technical/Advanced, long values, internal scrolling and keyboard return focus. UX-5 may refine spacing, density and visual treatment after acceptance; it does not replace this implemented structural UX-2 work. No staging, commits, pushes or branch operations.
+
+Final verification on Node **20.20.2**, with the external preload guard verifying the exact executable in npm and child processes:
+
+- **12 new structural regressions**, including read-only intent detection, constant/scalar types, frozen/custom mapping and as-is text, readable interpolation, ordered/lazy fallback, opaque rule preservation, exact issue context, separate technical evidence/raw-ID controls, shared transaction across all three surfaces, suspended-callback rejection, and focus restoration at 390 px. Existing AR Landscape/Icon/default, token insertion, condition add/move/remove, Main/EN, local/shared mapping, dirty navigation, CAS conflicts and permission cases remain green.
+- Final complete client `npm test -- --maxWorkers=1`: **142/142 model + 260/260 rendered tests, 24 rendered files**. This includes all **126** tests in the nine focused UX-2 editor/source/route/grid files. The earlier focused pass exposed old assumptions about inline evidence and an always-present side drawer; those tests now exercise explicit Technical opening and both appropriate surface types, without changing evaluator expectations or relaxing timeouts.
+- Client lint and production build pass. Full server unit/pure suite: **511/511**, including original evaluator/parity/CSV goldens, legacy hashes, editable-column behavior and accepted source-support lifecycle/placeholder/zero/deferred cases. UI-produced definitions are compiled and evaluated through the existing server pure evaluator in the client regressions. No output golden was rewritten.
+- No PostgreSQL integration or useful-database access: server implementation and persistence are unchanged in this structural task.
+- `git diff --check` passes; new files were checked separately for whitespace. The final SHA-256 inventory confirms **18 existing files changed + 4 new files**, matching the manifest above; all other starting files, including every server file and the UX-1 product handoff, remain byte-identical. The preceding plan text is preserved exactly.
+- Final status: **27 modified tracked + 23 untracked files**, including all preserved earlier work; **nothing staged**. Branch and HEAD unchanged. No staging, commits, pushes or branch operations.
+
+Implementation and automated verification are complete. Stop here for operator manual acceptance; the browser/layout checks above remain open. UX-3/UX-4 have not started.

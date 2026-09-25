@@ -537,6 +537,35 @@ test('PR2 injected audit failure rolls back create, draft, publish and metadata 
   }
 });
 
+test('UX2 registry summaries expose all immutable version identities and older candidate selection without definitions or writes', async () => {
+  const f = await family();
+  const v1 = await templates.publishTemplate(f.id, precondition(f.draft), options());
+  const updated = await templates.saveDraft(f.id, { expectedRevision: f.draft.revision, definition: definition('UX2 next revision') }, options());
+  const v2 = await templates.publishTemplate(f.id, precondition(updated), options());
+  const previous = await templates.getActivation();
+  const selected = await templates.updateActivation({ expectedGeneration: previous.generation, implementation: 'template', templateVersionId: v1.id }, options());
+  const before = await templates.getTemplate(f.id);
+  const auditCount = (await pool.query('SELECT count(*)::int AS n FROM audit_events')).rows[0].n;
+  const business = await businessState();
+  try {
+    const response = await request(root, { authentication: admin });
+    assert.equal(response.response.status, 200);
+    const summary = response.data.templates.find((item) => item.id === f.id);
+    assert.equal(summary.draft_revision, updated.revision);
+    assert.equal(summary.selected_version_id, v1.id);
+    assert.deepEqual(summary.version_summaries.map((v) => [v.id, v.versionNumber, v.sourceDraftRevision]),
+      [[v2.id, '2', updated.revision], [v1.id, '1', f.draft.revision]]);
+    assert.ok(summary.version_summaries.every((v) => v.publishedAt && !Object.hasOwn(v, 'definition')));
+    assert.equal(Object.hasOwn(summary, 'definition'), false);
+    assert.deepEqual(await templates.getTemplate(f.id), before);
+    assert.deepEqual(await templates.getActivation(), selected);
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM audit_events')).rows[0].n, auditCount);
+    assert.deepEqual(await businessState(), business);
+  } finally {
+    await templates.updateActivation({ expectedGeneration: selected.generation, implementation: previous.implementation, templateVersionId: previous.templateVersionId }, options());
+  }
+});
+
 test('PR2 migration 034 checkpoint, transactional failure rollback and repeated startup', async () => {
   const name = 'amber_pr2_upgrade_test'; const url = await recreateTestDatabase(name);
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-pr2-migrations-'));

@@ -37,7 +37,10 @@ export function sourceLabel(definition, id, registry) {
   const source = definition.sources[id];
   if (!source) return id || 'Власне правило';
   const matches = registry?.references?.questions?.filter((q) => q.category_code === source.category && q.key === source.key) || [];
-  return (matches.length === 1 && matches[0].label) || fieldLabels[source.field || source.key] || source.key || source.field;
+  const historical = [...new Set((registry?.references?.schemas || []).filter((s) => s.category_code === source.category)
+    .flatMap((s) => s.questions.filter((q) => q.key === source.key).map((q) => q.label)).filter(Boolean))];
+  const names = { raw_type: 'Матеріал', processing: 'Обробка', extra: 'Додатково', size: 'Розмір', exact_size: 'Точний розмір', is_calibrated: 'Калібрування' };
+  return (matches.length === 1 && matches[0].label) || (historical.length === 1 && historical[0]) || fieldLabels[source.field || source.key] || names[source.key] || source.key || source.field;
 }
 export function summary(definition, value) {
   const { node } = outputNode(definition, value);

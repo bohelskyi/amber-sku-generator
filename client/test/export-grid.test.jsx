@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createRequire } from 'node:module';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { DefinitionEditor } from '../src/components/export-templates/DefinitionEditor';
 import { PreviewTable } from '../src/components/export-templates/PreviewTable';
@@ -11,6 +11,7 @@ const { compileDefinition } = require('../../server/src/services/export-template
 const { evaluateBatch } = require('../../server/src/services/export-templates/evaluate');
 const { catalog, product } = require('../../server/test/fixtures/magento-v1/contract');
 afterEach(cleanup);
+beforeEach(() => { window.innerWidth = 1600; });
 let current;
 function Editor() {
   const [d, set] = useState(() => upgradeColumns(materializeMagentoV1(catalog())));
@@ -22,35 +23,34 @@ const change = (name, value) => fireEvent.change(screen.getByLabelText(name, { e
 it('rendered grid task adds an approved-source target, keeps EN blank, duplicates, renames, moves and deletes', () => {
   render(<Editor />);
   expect(screen.getByRole('table')).toBeTruthy();
-  expect(screen.getByText('Основний · макет')).toBeTruthy();
+  expect(screen.getByRole('rowheader', { name: 'Основний' })).toBeTruthy();
   expect(screen.queryByText(product('BR').full_sku)).toBeNull();
   click('+ Колонка');
-  change('Код колонки CSV', 'synthetic_target');
-  change('Чим заповнювати', 'source'); change('Характеристика', 'weight'); change('Як записувати', 'raw'); click('Додати колонку');
+  change('Код у CSV', 'synthetic_target');
+  change('Звідки брати значення', 'source'); change('Характеристика', 'weight'); change('Як записувати значення', 'raw'); click('Додати колонку');
   expect(evaluateBatch(compileDefinition(current), [product('BR')]).status).toBe('ready');
   expect(current.groups[0].rows[1].cells.synthetic_target).toEqual({ op: 'literal', value: '' });
-  fireEvent.click(screen.getByText('Код, порядок та інші дії'));
-  change('Код нової колонки', 'synthetic_copy'); click('Дублювати');
-  fireEvent.click(screen.getByText('Код, порядок та інші дії'));
-  change('Код колонки CSV', 'synthetic_renamed'); click('Змінити код колонки');
-  fireEvent.click(screen.getByText('Код, порядок та інші дії'));
-  change('Перемістити на позицію', '0');
+  const menu = (code, action) => { click('Дії колонки ' + code); fireEvent.click(screen.getByRole('menuitem', { name: action, exact: true })); };
+  menu('synthetic_target', 'Дублювати'); change('Код у CSV', 'synthetic_copy'); click('Застосувати до чернетки');
+  menu('synthetic_copy', 'Перейменувати…'); change('Код у CSV', 'synthetic_renamed'); click('Застосувати до чернетки');
+  menu('synthetic_renamed', 'Перемістити…'); change('Перемістити на позицію', '0'); click('Застосувати до чернетки');
   expect(current.groups[0].columns[0]).toBe('synthetic_renamed');
-  click('Видалити колонку');
+  menu('synthetic_renamed', 'Видалити…'); click('Видалити колонку');
   expect(current.groups[0].columns).not.toContain('synthetic_renamed');
   expect(current.groups[0].rows[0].cells.synthetic_renamed).toBeUndefined();
-  click('Налаштувати колонку sku');
-  fireEvent.click(screen.getByText('Код, порядок та інші дії'));
-  expect(screen.getByRole('button', { name: 'Видалити колонку' }).disabled).toBe(true);
+  click('Дії колонки sku');
+  expect(screen.getByRole('menuitem', { name: 'Видалити…' }).disabled).toBe(true);
 });
-it('header is keyboard reachable, drawer focus is explicit and Escape restores header focus', () => {
+it('headers open the appropriate task surface, with contained focus and Escape restoring header focus', () => {
   render(<Editor />);
-  const header = screen.getByRole('button', { name: 'Налаштувати колонку name' });
-  header.focus(); fireEvent.click(header);
-  const panel = screen.getByRole('complementary', { name: 'Налаштування колонки' });
-  expect(document.activeElement).toBe(panel);
-  fireEvent.keyDown(panel, { key: 'Escape' });
-  expect(document.activeElement).toBe(header);
+  for (const [column, role] of [['meta_title', 'complementary'], ['name', 'dialog']]) {
+    const header = screen.getByRole('button', { name: 'Налаштувати колонку ' + column });
+    header.focus(); fireEvent.click(header);
+    const panel = screen.getByRole(role, { name: 'Налаштування колонки' });
+    expect(panel.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement, { key: 'Escape' });
+    expect(document.activeElement).toBe(header);
+  }
 });
 it('preview paginates the same CSV and reveals long quoted/formula-neutralized values without changing order', () => {
   const rows = Array.from({ length: 104 }, (_, i) => 'BR' + i + ',en,"\\u0027=formula, ""quoted""\\nlong"');

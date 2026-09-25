@@ -242,11 +242,12 @@ it.each(['publish', 'activate'])('%s-only template capability retains independen
 
 it('dirty draft survives local back/forward; Stay, failed Save, successful Save and Discard guard definition changes', async () => {
   const { router } = mount('/admin/export-templates/family-a', admin);
-  await screen.findByLabelText('Категорія'); button('Налаштувати колонку meta_title');
-  fireEvent.change(screen.getByLabelText('Значення', { exact: true }), { target: { value: '  точний текст\n' } });
+  await screen.findByRole('tablist', { name: 'Категорії файлів' }); button('Налаштувати колонку meta_title');
+  fireEvent.change(screen.getByLabelText('Значення', { exact: true }), { target: { value: '  точний текст\n' } }); button('Застосувати до чернетки');
   link('Перевірка', 'Розділи шаблону'); link('Версії', 'Розділи шаблону');
   await navigate(router, -1); await navigate(router, -1); await navigate(router, 1); await navigate(router, -1);
-  expect(screen.getByLabelText('Значення', { exact: true }).value).toBe('  точний текст\n');
+  button('Налаштувати колонку meta_title'); expect(screen.getByLabelText('Значення', { exact: true }).value).toBe('  точний текст\n');
+  button('Закрити налаштування');
   const leave = screen.getByRole('link', { name: 'Експорт', exact: true }); leave.focus(); fireEvent.click(leave);
   const dialog = await screen.findByRole('dialog', { name: 'Незбережені зміни' });
   await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
@@ -263,7 +264,7 @@ it('dirty draft survives local back/forward; Stay, failed Save, successful Save 
   templates.save.mockImplementation(async (_id, body) => response({ ...family.draft, definition: body.definition, revision: '10' }));
   fireEvent.click(leave); button('Зберегти й перейти'); await screen.findByRole('navigation', { name: 'Розділи експорту' });
   expect(templates.save.mock.calls[1][1].definition.groups[0].rows[0].cells.meta_title.value).toBe('  точний текст\n');
-  await navigate(router, -1); await screen.findByLabelText('Категорія'); button('Налаштувати колонку meta_title');
+  await navigate(router, -1); await screen.findByRole('tablist', { name: 'Категорії файлів' }); button('Налаштувати колонку meta_title');
   fireEvent.change(screen.getByLabelText('Значення', { exact: true }), { target: { value: 'discard this' } });
   await navigate(router, 1); await screen.findByRole('dialog'); button('Відкинути й перейти');
   await screen.findByRole('navigation', { name: 'Розділи експорту' }); expect(templates.save).toHaveBeenCalledTimes(2);
@@ -274,14 +275,14 @@ it('pending column input blocks local deep links and browser back without losing
   const { upgradeColumns } = require('../../server/src/services/export-templates/column-contract');
   family.draft.definition = upgradeColumns(family.draft.definition);
   const { router } = mount('/admin/export-templates/family-a', admin);
-  await screen.findByLabelText('Категорія');
-  link('Перевірка', 'Розділи шаблону'); link('Поля експорту', 'Розділи шаблону'); button('+ Колонка');
-  fireEvent.change(screen.getByLabelText('Код колонки CSV'), { target: { value: 'pending_note' } });
+  await screen.findByRole('tablist', { name: 'Категорії файлів' });
+  link('Перевірка', 'Розділи шаблону'); link('Таблиця', 'Розділи шаблону'); button('+ Колонка');
+  fireEvent.change(screen.getByLabelText('Код у CSV'), { target: { value: 'pending_note' } });
   await navigate(router, -1); await screen.findByRole('dialog', { name: 'Незбережені зміни' }); button('Залишитися');
-  expect(screen.getByLabelText('Код колонки CSV').value).toBe('pending_note');
+  expect(screen.getByLabelText('Код у CSV').value).toBe('pending_note');
   await navigate(router, '/admin/export-templates/family-a/versions'); button('Зберегти й перейти');
   await screen.findByText(/Спочатку застосуйте або скасуйте/); expect(templates.save).not.toHaveBeenCalled();
-  button('Залишитися'); expect(screen.getByLabelText('Код колонки CSV').value).toBe('pending_note');
+  button('Залишитися'); expect(screen.getByLabelText('Код у CSV').value).toBe('pending_note');
   await navigate(router, '/admin/export-templates/family-a/check'); button('Відкинути й перейти');
   await screen.findByRole('heading', { name: 'Перевірка шаблону' }); noMutations();
 });

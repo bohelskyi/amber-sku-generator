@@ -6,6 +6,7 @@ const FOCUSABLE_SELECTOR = [
   'input:not([disabled])',
   'select:not([disabled])',
   'textarea:not([disabled])',
+  'summary',
   '[contenteditable="true"]',
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
@@ -52,6 +53,7 @@ export function useDialogAccessibility({
         : getFocusableElements(container)[0] || container;
       focusTarget?.focus({ preventScroll: true });
     };
+    focusInitialElement();
     const focusFrame = window.requestAnimationFrame(focusInitialElement);
 
     return () => {
