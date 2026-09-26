@@ -1,3 +1,4 @@
+const { insertProductFixture } = require('./product-fixture');
 const { test, assert, pool, crypto, request, authenticateApplicationSession, Pool, fs, path, os, serverRoot, runNodeInDatabase, recreateTestDatabase, dropTestDatabase } = require('./suite-context');
 const templates = require('../src/services/export-templates/template.service');
 const exportsService = require('../src/services/export.service');
@@ -31,7 +32,7 @@ test('GRID system view is read-only; CAS upgrade, custom source, published/sessi
   await assert.rejects(templates.saveDraft(f.id, { expectedRevision: draft.revision, definition: malformed }, opts), (e) => e.code === 'TEMPLATE_INVALID');
   const v = await templates.publishTemplate(f.id, pre(draft), opts);
   const sku = ('BR-GRID-' + crypto.randomUUID()).toUpperCase();
-  const p = (await pool.query("INSERT INTO products(full_sku,base_sku,category,weight,total_price_uah,details) VALUES($1,$1,'BR',12,450,$2::jsonb) RETURNING *", [sku, JSON.stringify({ answers: { synthetic_grid_note: `=SUM(1,2)
+  const p = (await insertProductFixture(pool,"INSERT INTO products(full_sku,base_sku,category,weight,total_price_uah,details) VALUES($1,$1,'BR',12,450,$2::jsonb) RETURNING *", [sku, JSON.stringify({ answers: { synthetic_grid_note: `=SUM(1,2)
 "literal"` } })])).rows[0];
   const input = { requestContract: 'template-v1', fromSku: sku, toSku: sku, selection: { mode: 'explicit', templateId: f.id, versionId: v.id } };
   const preview = await exportsService.previewExport(input, opts);
@@ -62,7 +63,7 @@ test('GRID legacy preview expectation rejects changed product and preserves orig
   const admin = await authenticateApplicationSession(); const opts = { mutationContext: { actorUserId: admin.applicationUser.id } };
   await installGoldenEvidence();
   const p = product('BR'); const sku = ('BR-GRID-LEGACY-' + crypto.randomUUID()).toUpperCase();
-  const row = (await pool.query("INSERT INTO products(full_sku,base_sku,category,weight,total_price_uah,details) VALUES($1,$1,'BR',$2,$3,$4::jsonb) RETURNING *", [sku,p.weight,p.total_price_uah,JSON.stringify(p.details)])).rows[0];
+  const row = (await insertProductFixture(pool,"INSERT INTO products(full_sku,base_sku,category,weight,total_price_uah,details) VALUES($1,$1,'BR',$2,$3,$4::jsonb) RETURNING *", [sku,p.weight,p.total_price_uah,JSON.stringify(p.details)])).rows[0];
   const input = { fromSku: sku, toSku: sku };
   const preview = await exportsService.previewExport(input, opts);
   assert.equal(preview.errors.length, 0); assert.ok(preview.previewExpectation);

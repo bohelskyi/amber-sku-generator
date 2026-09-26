@@ -1,3 +1,4 @@
+const { insertProductFixture } = require('./product-fixture');
 const { test, assert, pool, crypto, request, authenticateApplicationSession, authenticateIdentitySession, roleIdForKey } = require('./suite-context');
 const exportsService = require('../src/services/export.service');
 const prices = require('../src/services/price-export.service');
@@ -16,7 +17,7 @@ async function effects() {
 }
 async function insertProduct(group, answers = {}, overrides = {}) {
   const fixture = product(group, answers, overrides); const sku = `${group}-UX3-${crypto.randomUUID()}`.toUpperCase();
-  return (await pool.query('INSERT INTO products(full_sku,base_sku,category,weight,total_price_uah,details) VALUES($1,$1,$2,$3,$4,$5::jsonb) RETURNING *',
+  return (await insertProductFixture(pool,'INSERT INTO products(full_sku,base_sku,category,weight,total_price_uah,details) VALUES($1,$1,$2,$3,$4,$5::jsonb) RETURNING *',
     [sku, group, fixture.weight, fixture.total_price_uah, JSON.stringify(fixture.details)])).rows[0];
 }
 

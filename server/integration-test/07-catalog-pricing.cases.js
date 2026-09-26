@@ -1,3 +1,4 @@
+const { insertProductFixture } = require('./product-fixture');
 const suite = require('./suite-context');
 const {
   assert,
@@ -517,7 +518,7 @@ test('question-key updates rewrite every live reference while published schemas 
      ORDER BY sq.question_key, so.value_id`,
     [schemaVersionId]
   );
-  await pool.query(
+  await insertProductFixture(pool,
     `INSERT INTO products
        (full_sku, base_sku, sequence_number, category, weight, total_price,
         total_price_uah, price_per_gram, uah_rate, details, sku_schema_version_id)
@@ -629,7 +630,7 @@ test('used option semantic values are rejected without partially changing the op
     method: 'POST',
   });
   assert.equal(publication.response.status, 200, publication.text);
-  await pool.query(
+  await insertProductFixture(pool,
     `INSERT INTO products
        (full_sku, base_sku, sequence_number, category, weight, total_price,
         total_price_uah, price_per_gram, uah_rate, details, sku_schema_version_id)

@@ -1,3 +1,4 @@
+const { insertProductFixture } = require('./product-fixture');
 const suite = require('./suite-context');
 const { assert, test, pool, Pool, TEST_DATABASE_URL, crypto, request, authenticateApplicationSession,
   authenticateIdentitySession, fs, path, os, serverRoot, runNodeInDatabase, recreateTestDatabase, dropTestDatabase } = suite;
@@ -30,7 +31,7 @@ async function select(v) {
     implementation: v ? 'template' : 'legacy', templateVersionId: v?.id || null }, opts());
 }
 async function insert(p = product('BR'), sku = `BR-PR3-${crypto.randomUUID()}`.toUpperCase()) {
-  return (await pool.query(`INSERT INTO products
+  return (await insertProductFixture(pool,`INSERT INTO products
     (full_sku, base_sku, category, weight, total_price_uah, details, magento_name_subject_ua, magento_name_subject_en)
     VALUES ($1,$1,$2,$3,$4,$5::jsonb,$6,$7) RETURNING *`, [sku, p.category, p.weight, p.total_price_uah,
     JSON.stringify(p.details), p.magento_name_subject_ua || null, p.magento_name_subject_en || null])).rows[0];
@@ -707,7 +708,7 @@ test('PR3 output-limit failure during transactional capture leaves no parent, ar
   const v = await publish(definition('x'.repeat(4096)));
   const row = await insert(); const input = { ...command(row, explicit(v)), toSku: null };
   const p = await preview(input);
-  await pool.query(`INSERT INTO products (full_sku,base_sku,category,weight,total_price_uah,details)
+  await insertProductFixture(pool,`INSERT INTO products (full_sku,base_sku,category,weight,total_price_uah,details)
     SELECT 'BR-PR3-LIMIT-' || n,'BR-PR3-LIMIT','BR',10,100,'{"answers":{}}'::jsonb FROM generate_series(1,8200) n`);
   const before = await exportState();
   await assert.rejects(create(input, p), { code: 'EVALUATION_LIMIT' });

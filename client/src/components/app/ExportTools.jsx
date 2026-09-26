@@ -54,6 +54,7 @@ const FIELD_LABELS = {
 };
 
 function getIssueLabel(field) {
+  if (field.code === 'manual_name_review_required') return 'Потрібна перевірка успадкованих назв';
   if (field.code === 'manual_name_required' || field.field === 'name') {
     return 'Потрібно вказати назву';
   }
@@ -108,6 +109,18 @@ export function ManualMagentoNameEditor({ product, onClose, onSaved,
   const [isSaving, setIsSaving] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [suggestionAttempt, setSuggestionAttempt] = useState(0);
+  const [review, setReview] = useState(null);
+
+  useEffect(() => {
+    if (!product.reviewRequired) return undefined;
+    let live = true;
+    exportsApi.previewMagentoName({ productId: product.productId }).then(({ data }) => {
+      if (!live || principalLifetime?.valid === false) return;
+      setSubjectUa(data.subjectUa || ''); setSubjectEn(data.subjectEn || '');
+      setEnEdited(true); setReview(data);
+    }).catch((error) => { if (live) setSaveError(getApiError(error)); });
+    return () => { live = false; };
+  }, [product.productId, product.reviewRequired, principalLifetime]);
 
   useEffect(() => {
     const ua = subjectUa.trim();
@@ -131,14 +144,18 @@ export function ManualMagentoNameEditor({ product, onClose, onSaved,
   }, [subjectUa, enEdited, product.productId, suggestionAttempt,
     translationSuggestionAvailable]);
 
-  const save = async () => {
+  const save = async (confirmUnchanged = false) => {
     if (!current() || isSaving) return;
     setSaveError('');
     setIsSaving(true);
     try {
       const payload = { productId: product.productId,
-        subjectUa: subjectUa.trim(), subjectEn: subjectEn.trim() };
-      const preview = await exportsApi.previewMagentoName(payload);
+        subjectUa: confirmUnchanged ? subjectUa : subjectUa.trim(),
+        subjectEn: confirmUnchanged ? subjectEn : subjectEn.trim(),
+        ...(confirmUnchanged ? { confirmUnchanged: true } : {}) };
+      // Confirmation consumes the evidence displayed when the pair was loaded.
+      // Re-previewing here would silently accept lifecycle drift while reviewing.
+      const preview = confirmUnchanged ? { data: review } : await exportsApi.previewMagentoName(payload);
       if (!current()) return;
       await exportsApi.applyMagentoName({ ...payload,
         previewToken: preview.data.previewToken });
@@ -154,9 +171,10 @@ export function ManualMagentoNameEditor({ product, onClose, onSaved,
   return (
     <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-4">
       <p className="font-semibold">Назва для {product.sku}</p>
+      {review?.reviewRequired && <p className="font-semibold text-amber-900">Потрібна перевірка успадкованих назв</p>}
       <p className="text-xs text-slate-600">Збереження назви не змінить SKU, ціну чи характеристики товару.</p>
       <label className="mt-3 block text-sm font-medium" htmlFor="magento-subject-ua">Українська назва</label>
-      <input id="magento-subject-ua" className="input mt-1" value={subjectUa}
+      <input id="magento-subject-ua" className="input mt-1" value={subjectUa} disabled={product.reviewRequired && !review}
         onChange={(event) => {
           setSubjectUa(event.target.value);
           setSuggestionError('');
@@ -164,7 +182,7 @@ export function ManualMagentoNameEditor({ product, onClose, onSaved,
         }}
         maxLength={200} />
       <label className="mt-3 block text-sm font-medium" htmlFor="magento-subject-en">English name</label>
-      <input id="magento-subject-en" className="input mt-1" value={subjectEn}
+      <input id="magento-subject-en" className="input mt-1" value={subjectEn} disabled={product.reviewRequired && !review}
         onChange={(event) => {
           setSubjectEn(event.target.value);
           setEnEdited(true);
@@ -194,10 +212,15 @@ export function ManualMagentoNameEditor({ product, onClose, onSaved,
         ? `Amber ${subjectEn.trim()}. Art: ${product.sku}` : '—'}</p>
       {saveError && <p className="mt-2 text-sm text-red-700" role="alert">{saveError}</p>}
       <div className="mt-3 flex gap-2">
-        <button className="btn btn-primary px-4" onClick={save}
+        <button className="btn btn-primary px-4" onClick={() => save()}
           disabled={isSaving || !subjectUa.trim() || !subjectEn.trim()}>
           {isSaving ? 'Зберігаємо…' : 'Зберегти назви'}
         </button>
+        {review?.canConfirmUnchanged && review.previewToken && subjectUa === review.subjectUa && subjectEn === review.subjectEn && (
+          <button className="btn btn-outline px-4" onClick={() => save(true)} disabled={isSaving}>
+            Підтвердити без змін
+          </button>
+        )}
         <button className="btn px-4" onClick={onClose}>Скасувати</button>
       </div>
     </div>
@@ -255,7 +278,8 @@ export function ReadinessProblems({ errors, expanded, showAll, onToggle, onShowA
           <div className="divide-y divide-slate-200">
             {visibleErrors.map((product) => {
               const problems = getProductProblems(product);
-              const canEditName = Boolean(onEditName) && product.fields?.some((field) => field.code === 'manual_name_required');
+              const reviewRequired = product.fields?.some((field) => field.code === 'manual_name_review_required');
+              const canEditName = Boolean(onEditName) && (reviewRequired || product.fields?.some((field) => field.code === 'manual_name_required'));
               return (
                 <div key={`${product.productId}-${product.sku}`}
                   className="grid gap-1 px-3 py-3 text-sm sm:grid-cols-[minmax(120px,0.7fr)_minmax(260px,2fr)_minmax(130px,0.8fr)] sm:items-center sm:gap-3">
@@ -263,8 +287,8 @@ export function ReadinessProblems({ errors, expanded, showAll, onToggle, onShowA
                   <span className="text-slate-700">{problems.join(' · ')}</span>
                   {canEditName ? (
                     <button type="button" className="justify-self-start font-semibold text-slate-800 underline decoration-amber-400 underline-offset-4"
-                      onClick={() => onEditName({ productId: product.productId, sku: product.sku })}>
-                      Заповнити назву
+                      onClick={() => onEditName({ productId: product.productId, sku: product.sku, ...(reviewRequired ? { reviewRequired: true } : {}) })}>
+                      {reviewRequired ? 'Перевірити назви' : 'Заповнити назву'}
                     </button>
                   ) : <span className="text-xs text-slate-500">Виправити дані товару</span>}
                 </div>

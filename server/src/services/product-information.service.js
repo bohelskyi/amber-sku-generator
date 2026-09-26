@@ -5,6 +5,7 @@ const { createMutationContext } = require('../audit/mutation-context');
 const { getRuleDependencies } = require('../utils/rules');
 const { isQuestionVisibleForSku } = require('./product/product-answers');
 const { getProductStateSignature } = require('./product/product-signatures');
+const { readFullProductStates, advanceFullProductRevision } = require('./full-product-export.service');
 
 // Version 1 contains only Magento output inputs that do not define a SKU or a price.
 // SV.weight is deliberately absent: it is an axis of an active pricing scenario.
@@ -156,12 +157,14 @@ async function evaluate(client, product, patch, lockCatalog = false) {
     changes.push({ key, before, after: value });
   }
   if (!changes.length) throw informationError('Інформаційні відповіді не змінилися.', 422, 'NO_CHANGE');
+  const [lifecycle] = await readFullProductStates(client, [product.id], { lock: lockCatalog });
   const token = crypto.createHash('sha256').update(JSON.stringify({
-    version: 1,
+    version: 2,
     sourceSignature: getProductStateSignature(product),
+    revision: lifecycle.revision, deliveryVersion: lifecycle.delivery_version,
     patch: Object.entries(patch).sort(([a], [b]) => a.localeCompare(b)),
   })).digest('hex');
-  return { changes, newAnswers, previewToken: token,
+  return { changes, newAnswers, previewToken: token, fullRevision: lifecycle.revision,
     exportGuidance: await getExportGuidance(client, product) };
 }
 
@@ -173,7 +176,7 @@ async function previewProductInformation(payload = {}) {
   const patch = normalizePatch(payload.answersPatch);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN READ ONLY');
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const result = await client.query('SELECT * FROM products WHERE id = $1', [productId]);
     const product = result.rows[0];
     const preview = await evaluate(client, product, patch);
@@ -196,7 +199,7 @@ async function applyProductInformation(payload = {}, options = {}) {
   const token = String(payload.previewToken || '').trim();
   if (!token) throw informationError('Потрібен актуальний previewToken.');
   const mutationContext = createMutationContext(options.mutationContext);
-  const client = await pool.connect();
+  const client = await (options.databasePool || pool).connect();
   try {
     await client.query('BEGIN');
     const result = await client.query('SELECT * FROM products WHERE id = $1 FOR UPDATE', [productId]);
@@ -212,6 +215,7 @@ async function applyProductInformation(payload = {}, options = {}) {
        WHERE id = $2`,
       [JSON.stringify(preview.newAnswers), productId]
     );
+    const lifecycle = await advanceFullProductRevision(client, productId, preview.fullRevision);
     await writeAuditEvent(client, {
       mutationContext,
       eventKey: 'product_information.updated',
@@ -222,7 +226,7 @@ async function applyProductInformation(payload = {}, options = {}) {
     });
     await client.query('COMMIT');
     return { productId, sku: product.full_sku, changes: preview.changes,
-      exportGuidance: preview.exportGuidance };
+      exportGuidance: preview.exportGuidance, fullRevision: lifecycle.revision };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;

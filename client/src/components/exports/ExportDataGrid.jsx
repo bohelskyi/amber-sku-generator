@@ -7,7 +7,8 @@ import './export-data-grid.css';
 const defaultWidth = (code) => /name|meta_|categories|description/.test(code) ? 320 : /sku|code|price|qty/.test(code) ? 140 : 200;
 const targetsColumn = (issue, column) => issue.target?.column === column || issue.target?.columns?.includes(column);
 const fileName = (file) => file.groupName || ({ BR: 'Браслети', NM: 'Намиста', KL: 'Кулони', CH: 'Чотки', AR: 'Картини', SV: 'Сувеніри', prices: 'Ціни' })[file.groupCode] || file.groupCode;
-const issueLabel = (issue) => issue.code === 'manual_name_required' ? 'Потрібно вказати назву'
+const issueLabel = (issue) => issue.code === 'manual_name_review_required' ? 'Потрібна перевірка успадкованих назв'
+  : issue.code === 'manual_name_required' ? 'Потрібно вказати назву'
   : ['decor_weight', 'vaha_vyrobu'].includes(issue.field || issue.target?.column) ? 'Потрібно перевірити вагу виробу'
     : (issue.field || issue.target?.column) === 'categories' ? 'Потрібно перевірити категорію Magento'
   : issue.field === 'price' ? 'Потрібно перевірити ціну'
@@ -117,7 +118,8 @@ export function ExportDataGrid({ files = [], identity, stored = false, loadFile,
     {detail && <WorkspaceDialog title="Повне значення та проблеми" onClose={() => setDetail(null)}><h3>{detailRow.sku} · {detailRow.language === 'en' ? 'EN' : 'Основний'}{detail.column !== undefined && ` · ${parsed.headers[detail.column]}`}</h3>
       {issues.map((issue, index) => <p className="text-lg font-semibold" key={index}>{issueLabel(issue)}</p>)}
       {!!issues.length && <div className="flex flex-wrap gap-3">
-        {onEditName && issues.some((issue) => issue.code === 'manual_name_required') && <button className="btn btn-primary px-3" onClick={() => { setDetail(null); onEditName({ productId: detailRow.productId, sku: detailRow.sku }); }}>Заповнити назву</button>}
+        {onEditName && issues.some((issue) => ['manual_name_required', 'manual_name_review_required'].includes(issue.code)) && <button className="btn btn-primary px-3" onClick={() => { setDetail(null); onEditName({ productId: detailRow.productId, sku: detailRow.sku,
+          ...(issues.some((issue) => issue.code === 'manual_name_review_required') ? { reviewRequired: true } : {}) }); }}>{issues.some((issue) => issue.code === 'manual_name_review_required') ? 'Перевірити назви' : 'Заповнити назву'}</button>}
         {canDecode && <Link className="btn btn-outline px-3" to={`/?exportSku=${encodeURIComponent(detailRow.sku)}`} onClick={() => onHandoff?.({ sku: detailRow.sku, reason: issues.map(issueLabel).join('; ') })}>Відкрити товар</Link>}
         <button className="underline" onClick={async () => { try { await navigator.clipboard.writeText(detailRow.sku); setNotice('SKU скопійовано'); } catch { setNotice('Скопіюйте SKU з повного значення.'); } }}>Копіювати SKU</button>
       </div>}

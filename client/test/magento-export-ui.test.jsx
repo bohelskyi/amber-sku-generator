@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { ExportTools } from '../src/components/app/ExportTools.jsx';
+import { ExportTools, ManualMagentoNameEditor } from '../src/components/app/ExportTools.jsx';
 
 vi.mock('../src/api/exports-api', () => ({ exportsApi: {
   suggestMagentoName: vi.fn(),
@@ -12,6 +12,53 @@ vi.mock('../src/api/exports-api', () => ({ exportsApi: {
 import { exportsApi } from '../src/api/exports-api';
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+it('phase2 loads inherited names and confirms the exact displayed pair with its original lifecycle proof', async () => {
+  exportsApi.previewMagentoName.mockResolvedValue({ data: { subjectUa: ' Фігура ', subjectEn: ' Figurine ',
+    reviewRequired: true, canConfirmUnchanged: true, previewToken: 'reviewed-pair-proof' } });
+  exportsApi.applyMagentoName.mockResolvedValue({ data: { reviewRequired: false, fullRevision: '1' } });
+  const onSaved = vi.fn();
+  render(<ManualMagentoNameEditor product={{ productId: 70, sku: 'SV70', reviewRequired: true }} onSaved={onSaved} onClose={vi.fn()} />);
+  const confirm = await screen.findByRole('button', { name: 'Підтвердити без змін' });
+  expect(screen.getByLabelText('Українська назва').value).toBe(' Фігура ');
+  expect(screen.getByLabelText('English name').value).toBe(' Figurine ');
+  expect(screen.getByText('Потрібна перевірка успадкованих назв')).toBeTruthy();
+  fireEvent.click(confirm);
+  await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+  expect(exportsApi.previewMagentoName).toHaveBeenCalledTimes(1);
+  expect(exportsApi.applyMagentoName).toHaveBeenCalledWith({ productId: 70, subjectUa: ' Фігура ', subjectEn: ' Figurine ',
+    confirmUnchanged: true, previewToken: 'reviewed-pair-proof' });
+});
+
+it('phase2 editing the inherited pair hides unchanged confirmation and saves through normal name preview', async () => {
+  exportsApi.previewMagentoName.mockResolvedValueOnce({ data: { subjectUa: 'Фігура', subjectEn: 'Figurine',
+    reviewRequired: true, canConfirmUnchanged: true, previewToken: 'old-proof' } }).mockResolvedValue({ data: { previewToken: 'edit-proof' } });
+  exportsApi.applyMagentoName.mockResolvedValue({ data: {} });
+  render(<ManualMagentoNameEditor product={{ productId: 71, sku: 'SV71', reviewRequired: true }} onSaved={vi.fn()} onClose={vi.fn()} />);
+  await screen.findByRole('button', { name: 'Підтвердити без змін' });
+  fireEvent.change(screen.getByLabelText('English name'), { target: { value: 'New figurine' } });
+  expect(screen.queryByRole('button', { name: 'Підтвердити без змін' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти назви' }));
+  await waitFor(() => expect(exportsApi.applyMagentoName).toHaveBeenCalledWith({ productId: 71, subjectUa: 'Фігура', subjectEn: 'New figurine', previewToken: 'edit-proof' }));
+});
+
+it('phase2 stale review confirmation requires operator refresh and never silently renews proof', async () => {
+  exportsApi.previewMagentoName.mockResolvedValue({ data: { subjectUa: 'Фігура', subjectEn: 'Figurine',
+    reviewRequired: true, canConfirmUnchanged: true, previewToken: 'old-proof' } });
+  exportsApi.applyMagentoName.mockRejectedValue({ response: { status: 409, data: { error: 'Назви змінилися. Оновіть дані.' } } });
+  const onSaved = vi.fn();
+  render(<ManualMagentoNameEditor product={{ productId: 72, sku: 'SV72', reviewRequired: true }} onSaved={onSaved} onClose={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Підтвердити без змін' }));
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Назви змінилися. Оновіть дані.');
+  expect(onSaved).not.toHaveBeenCalled(); expect(exportsApi.previewMagentoName).toHaveBeenCalledTimes(1);
+});
+
+it('phase2 inherited-review readiness offers the existing name workflow', () => {
+  renderTools({ exportPreview: { mode: 'manual', representedCount: 1, readyCount: 0,
+    errors: [issue(73, 'name', 'manual_name_review_required')], artifacts: [] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Показати проблемні товари' }));
+  expect(screen.getByRole('button', { name: 'Перевірити назви' })).toBeTruthy();
+});
 
 const defaults = {
   exportFromSku: '',

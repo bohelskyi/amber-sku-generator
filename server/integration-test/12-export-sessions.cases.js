@@ -1,3 +1,4 @@
+const { insertProductFixture } = require('./product-fixture');
 const suite = require('./suite-context');
 const { test, assert, pool, request, crypto, authenticateApplicationSession, authenticateIdentitySession, Pool, TEST_DATABASE_URL,
   fs, os, path, serverRoot, recreateTestDatabase, dropTestDatabase, runNodeInDatabase } = suite;
@@ -37,7 +38,7 @@ async function setup() {
 }
 async function workspace() {
   const f = await setup(); const sku = `BR-SHARED-${crypto.randomUUID()}`.toUpperCase();
-  const p = (await pool.query("INSERT INTO products(full_sku,base_sku,category,weight,total_price_uah,details) VALUES($1,$1,'BR',10,100,'{\"answers\":{}}') RETURNING *", [sku])).rows[0];
+  const p = (await insertProductFixture(pool,"INSERT INTO products(full_sku,base_sku,category,weight,total_price_uah,details) VALUES($1,$1,'BR',10,100,'{\"answers\":{}}') RETURNING *", [sku])).rows[0];
   const input = { title: 'Мій приватний експорт', creationKey: crypto.randomUUID(), settings: { requestContract: 'template-v1', fromSku: sku, toSku: sku, selection: { mode: 'active' } } };
   const created = await http(root, f.a, 'POST', input); assert.equal(created.response.status, 201, created.text);
   return { ...f, p, input, s: created.data };

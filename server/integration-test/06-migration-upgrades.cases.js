@@ -27,7 +27,7 @@ test('migration 029 enables rounding for categories created before the upgrade',
     const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
       .filter((fileName) => fileName.endsWith('.sql')
         && !fileName.startsWith('029_') && !fileName.startsWith('030_')
-        && !fileName.startsWith('031_') && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_'));
+        && !fileName.startsWith('031_') && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_'));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
       path.resolve(preRoundingDirectory, fileName)
@@ -68,7 +68,7 @@ test('migration 031 preserves existing export snapshots and adds immutable revis
   try {
     const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
       .filter((fileName) => fileName.endsWith('.sql')
-        && !fileName.startsWith('031_') && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_'));
+        && !fileName.startsWith('031_') && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_'));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName), path.resolve(oldDirectory, fileName)
     )));
@@ -124,7 +124,7 @@ test('migration 032 marks generated legacy exposure without confirming its captu
   const pre032Directory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-pre-price-export-'));
   try {
     const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
-      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_'));
+      .filter((fileName) => fileName.endsWith('.sql') && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_'));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName), path.resolve(pre032Directory, fileName)
     )));
@@ -217,7 +217,7 @@ test('migration 030 preserves legacy requests and advances Manager permission ve
     const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
       .filter((fileName) => fileName.endsWith('.sql')
         && !fileName.startsWith('030_') && !fileName.startsWith('031_')
-        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_'));
+        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_'));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName), path.resolve(oldDirectory, fileName)
     )));
@@ -538,7 +538,7 @@ test('migration 023 rolls back its audit schema and permission grant together', 
         && !fileName.startsWith('029_')
         && !fileName.startsWith('030_')
         && !fileName.startsWith('031_')
-        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_')
+        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -692,7 +692,7 @@ test('fresh, pre-checksum, and checkpoint upgrade paths produce equivalent datab
          && !fileName.startsWith('029_')
          && !fileName.startsWith('030_')
          && !fileName.startsWith('031_')
-         && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_')
+         && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_')
       ))
       .map((fileName) => fs.copyFile(
         path.resolve(serverRoot, 'migrations', fileName),
@@ -806,7 +806,7 @@ test('migrations 020-024 upgrade a database at migration 019 and repeated startu
         && !fileName.startsWith('029_')
         && !fileName.startsWith('030_')
         && !fileName.startsWith('031_')
-        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_')
+        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -848,9 +848,9 @@ test('migrations 020-024 upgrade a database at migration 019 and repeated startu
             + '(SELECT count(*) FROM roles)::int AS roles, '
             + '(SELECT count(*) FROM role_permissions)::int AS mappings'
         );
-        if (counts.rows[0].permissions !== 32
+        if (counts.rows[0].permissions !== 33
             || counts.rows[0].roles !== 3
-            || counts.rows[0].mappings !== 58) {
+            || counts.rows[0].mappings !== 59) {
           throw new Error('Unexpected RBAC seed counts: ' + JSON.stringify(counts.rows[0]));
         }
         await db.end();
@@ -883,7 +883,7 @@ test('migration 021 adds business capabilities and corrects built-in mappings on
         && !fileName.startsWith('029_')
         && !fileName.startsWith('030_')
         && !fileName.startsWith('031_')
-        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_')
+        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -969,7 +969,7 @@ test('migration 022 removes Manager correction processing without changing other
         && !fileName.startsWith('029_')
         && !fileName.startsWith('030_')
         && !fileName.startsWith('031_')
-        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_')
+        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -1088,7 +1088,7 @@ test('first-Administrator bootstrap is verified, transactional, concurrent-safe,
     assert.equal(access.roles[0].key, 'administrator');
     assert.equal(access.roles[0].displayName, 'Administrator');
     assert.equal(Number.isSafeInteger(access.roles[0].id), true);
-    assert.equal(access.permissions.length, 32);
+    assert.equal(access.permissions.length, 33);
     const state = await bootstrapPool.query(
       `SELECT administrator_user_id, completed_at IS NOT NULL AS completed
        FROM security_bootstrap_state WHERE singleton = TRUE`
@@ -1128,7 +1128,7 @@ test('legacy in-progress correction requests survive through migration 025 witho
         && !fileName.startsWith('029_')
         && !fileName.startsWith('030_')
         && !fileName.startsWith('031_')
-        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_')
+        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
@@ -1285,7 +1285,7 @@ test('legacy zero prices upgrade without repricing products or blocking edits', 
   );
   try {
     const migrationFiles = (await fs.readdir(path.resolve(serverRoot, 'migrations')))
-      .filter((fileName) => fileName.endsWith('.sql') && !/^(014|015|016|029|030|031|032|035|036|037|038)_/.test(fileName));
+      .filter((fileName) => fileName.endsWith('.sql') && !/^(014|015|016|029|030|031|032|035|036|037|038|039)_/.test(fileName));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(serverRoot, 'migrations', fileName),
       path.resolve(preCompatibilityDirectory, fileName)
@@ -1341,7 +1341,7 @@ test('legacy zero prices upgrade without repricing products or blocking edits', 
       const db = require('./src/db/pool');
       const { runMigrations } = require('./src/db/run-migrations');
       const { ensureLegacySkuSchemas } = require('./src/services/sku-schema.service');
-      const { applyProductRecount, decodeSku } = require('./src/services/product.service');
+      const { applyProductRecount, buildProductRecountPreview, decodeSku } = require('./src/services/product.service');
       (async () => {
         await runMigrations();
         await ensureLegacySkuSchemas();
@@ -1356,6 +1356,7 @@ test('legacy zero prices upgrade without repricing products or blocking edits', 
         );
 
         const correction = await applyProductRecount({
+          sourceStateSignature: (await buildProductRecountPreview({ sourceSku: 'LX1001', answers: { kind: 2 }, manualPriceUah: 500 })).source.stateSignature,
           sourceSku: 'LX1001',
           answers: { kind: 2 },
           reason: 'still editable',

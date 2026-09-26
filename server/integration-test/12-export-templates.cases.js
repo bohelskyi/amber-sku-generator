@@ -1,3 +1,4 @@
+const { insertProductFixture } = require('./product-fixture');
 const suite = require('./suite-context'); // Sets DATABASE_URL before any database-bound import.
 const { assert, test, pool, crypto, request, authenticateApplicationSession, authenticateIdentitySession,
   Pool, TEST_DATABASE_URL, fs, path, os, serverRoot, runNodeInDatabase, recreateTestDatabase, dropTestDatabase } = suite;
@@ -299,7 +300,7 @@ test('PR2 metadata activation CAS, no-op and ABA leave actual exporters and busi
 
 test('PR2 validation and test-preview read only authoritative stored inputs and bind revision/hash', async () => {
   const f = await family();
-  const stored = (await pool.query(`INSERT INTO products (full_sku, base_sku, category, weight, total_price_uah, details)
+  const stored = (await insertProductFixture(pool,`INSERT INTO products (full_sku, base_sku, category, weight, total_price_uah, details)
     VALUES ($1, $1, 'BR', 10, 1234.56, '{"answers":{}}') RETURNING id, full_sku`, [`BR-PR2-${crypto.randomUUID()}`])).rows[0];
   const before = await businessState();
   const audits = (await pool.query('SELECT count(*) FROM audit_events')).rows[0].count;
@@ -326,7 +327,7 @@ test('PR2 validation and test-preview read only authoritative stored inputs and 
 
 test('PR2 template metadata selection leaves normal Magento and dedicated price CSV dispatch unchanged', async () => {
   const input = product('BR');
-  const stored = (await pool.query(`INSERT INTO products (full_sku, base_sku, category, weight, total_price_uah, details)
+  const stored = (await insertProductFixture(pool,`INSERT INTO products (full_sku, base_sku, category, weight, total_price_uah, details)
     VALUES ($1,$1,'BR',10.5,1234.56,$2::jsonb) RETURNING id, full_sku`,
   [`BR-PR2-EXPORT-${crypto.randomUUID()}`.toUpperCase(), JSON.stringify(input.details)])).rows[0];
   async function normalCsv() {

@@ -1,3 +1,4 @@
+const { insertProductFixture } = require('./product-fixture');
 const { test, assert, pool, crypto, schemas, execFileAsync, serverRoot } = require('./suite-context');
 const { loadCorrectionExposureManifest } = require('../src/services/export-exposure.service');
 const { serializeManifest } = require('../src/services/export-exposure/manifest');
@@ -11,7 +12,7 @@ async function withExposureFixture(run) {
   const ids = []; const snapshotId = crypto.randomUUID(); let correctionId;
   try {
     for (const role of ['SOURCE', 'SUCCESSOR']) {
-      const row = (await pool.query(`INSERT INTO products
+      const row = (await insertProductFixture(pool,`INSERT INTO products
         (full_sku,category,weight,total_price_uah,exclude_from_export,details,sku_schema_version_id)
         VALUES ($1,'ZZ',1,100,1,'{"answers":{"size":"1,0"}}'::jsonb,$2) RETURNING id,full_sku`,
       [`ZZ-EVIDENCE-${role}-${suffix}`, schemas.ZZ])).rows[0];
@@ -34,7 +35,9 @@ async function withExposureFixture(run) {
     await pool.query('DELETE FROM export_snapshots WHERE id=$1', [snapshotId]);
     if (correctionId) await pool.query('DELETE FROM product_corrections WHERE id=$1', [correctionId]);
     await pool.query('UPDATE products SET corrected_from_product_id=NULL,corrected_to_product_id=NULL WHERE id=ANY($1::int[])', [ids]);
-    await pool.query('DELETE FROM products WHERE id=ANY($1::int[])', [ids]);
+    await pool.query(`WITH retired AS (UPDATE products SET status='archived', exclude_from_export=1 WHERE id=ANY($1::int[]) RETURNING id)
+      UPDATE product_full_export_state f SET route='retired',hold_reason=NULL,delivery_version=delivery_version+1
+      FROM retired WHERE f.product_id=retired.id AND f.route <> 'retired'`, [ids]);
   }
 }
 

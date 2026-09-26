@@ -37,6 +37,14 @@ function runSupportedProduct(compiled, product, limits, observation) {
   const bindings = new Map(d.bindings.map((b) => [b.id, b.value]));
   const memo = new Map();
   const errors = [];
+  // Product review is domain readiness, independent of editable template rules.
+  // It does not become a template source or rewrite any frozen definition.
+  if (group === 'SV' && own(product, 'magento_name_review_required') === true) {
+    const issue = { field: 'name', code: 'manual_name_review_required',
+      message: 'Успадковані назви потребують перевірки.' };
+    errors.push(issue);
+    if (observation) observation.issues.push({ ...issue, target: { kind: 'column', column: 'name' } });
+  }
   let work = 0;
   function tick() { if (++work > limits.work) fail('EVALUATION_LIMIT', 'Work per product exceeded'); }
   function checkCell(value) {

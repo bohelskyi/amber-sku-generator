@@ -1,3 +1,4 @@
+const { insertProductFixture } = require('./product-fixture');
 const suite = require('./suite-context');
 const {
   assert, crypto, test, pool, request,
@@ -28,7 +29,7 @@ async function insertProduct(category, answers, {
      WHERE category_code = $1 AND status = 'active'
      ORDER BY id DESC LIMIT 1`, [category]
   );
-  const result = await pool.query(
+  const result = await insertProductFixture(pool,
     `INSERT INTO products
        (full_sku, base_sku, sequence_number, category, weight, total_price,
         total_price_uah, price_per_gram, uah_rate, details,
@@ -425,8 +426,15 @@ test('manual souvenir name update and snapshot capture serialize on the product 
     const snapshotPromise = createMagentoSnapshot(product.full_sku);
     await new Promise((resolve) => setTimeout(resolve, 100));
     await blocker.query('COMMIT');
-    const [applied, snapshot] = await Promise.all([applyPromise, snapshotPromise]);
+    const [applied, captured] = await Promise.all([applyPromise, snapshotPromise]);
     assert.equal(applied.response.status, 200, applied.text);
+    // Every capture now uses RR. A product mutation that wins the lock may
+    // invalidate that transaction; a fresh operation captures the complete pair.
+    let snapshot = captured;
+    if (snapshot.response.status === 409) {
+      assert.equal(snapshot.data.code, 'EXPORT_PREVIEW_STALE');
+      snapshot = await createMagentoSnapshot(product.full_sku);
+    }
     assert.equal(snapshot.response.status, 201, snapshot.text);
     const csv = (await artifactCsv(snapshot.data.id, 'SV')).text;
     const oldPair = csv.includes('Перший камінь з бурштину')
@@ -492,8 +500,13 @@ test('snapshot capture and informational apply serialize on the product row', as
     const snapshotPromise = createMagentoSnapshot(product.full_sku);
     await new Promise((resolve) => setTimeout(resolve, 100));
     await blocker.query('COMMIT');
-    const [applied, snapshot] = await Promise.all([appliedPromise, snapshotPromise]);
+    const [applied, captured] = await Promise.all([appliedPromise, snapshotPromise]);
     assert.equal(applied.response.status, 200, applied.text);
+    let snapshot = captured;
+    if (snapshot.response.status === 409) {
+      assert.equal(snapshot.data.code, 'EXPORT_PREVIEW_STALE');
+      snapshot = await createMagentoSnapshot(product.full_sku);
+    }
     assert.equal(snapshot.response.status, 201, snapshot.text);
     const csv = (await artifactCsv(snapshot.data.id, 'CH')).text;
     const oldPair = csv.includes(',9,8,30,');

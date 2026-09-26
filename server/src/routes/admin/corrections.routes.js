@@ -163,6 +163,7 @@ router.post('/admin/correction-requests/:requestId/complete', requirePermission(
   } catch (err) {
     res.status(err.statusCode || 500).json({
       error: err.message,
+      ...(err.publicCode ? { code: err.publicCode } : {}),
       ...(err.details ? { details: err.details } : {}),
     });
   }

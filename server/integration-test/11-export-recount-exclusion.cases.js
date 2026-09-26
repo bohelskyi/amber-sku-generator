@@ -30,6 +30,8 @@ async function installSouvenirFixture() {
   await ensureLegacySkuSchemas();
 }
 
+module.exports = { installSouvenirFixture };
+
 test('recount export exclusion reproduction: comma weight successor misses refreshed and future new exports', async () => {
   // Characterization of the release blocker, not approval of the exclusion policy.
   // Corresponds to local correction 1436: 1260,0 -> 1260, preserved physical weight/price.
@@ -81,7 +83,7 @@ test('recount export exclusion reproduction: comma weight successor misses refre
   const target = await call('/api/recount/preview', correction);
   assert.equal(target.source.answers.weight, '1260,0');
   assert.equal(target.corrected.answers.weight, 1260);
-  const applied = await call('/api/recount/apply', correction);
+  const applied = await call('/api/recount/apply', { ...correction, sourceStateSignature: target.source.stateSignature });
   const successorId = applied.correctedProductId;
   assert.ok(successorId > last.id);
   assert.notEqual(applied.corrected.fullSku, source.full_sku);
@@ -96,8 +98,11 @@ test('recount export exclusion reproduction: comma weight successor misses refre
   assert.equal(pair[1].details.answers.weight, 1260);
   assert.equal(pair[1].weight, pair[0].weight);
   assert.equal(pair[1].total_price_uah, pair[0].total_price_uah);
-  assert.equal(pair[1].magento_name_subject_ua, null);
-  assert.equal(pair[1].magento_name_subject_en, null);
+  // Phase 1 preserves the subjects; every release-blocker exclusion/cursor
+  // assertion below remains unchanged until Phase 4 changes selection.
+  assert.equal(pair[1].magento_name_subject_ua, pair[0].magento_name_subject_ua);
+  assert.equal(pair[1].magento_name_subject_en, pair[0].magento_name_subject_en);
+  assert.equal(pair[1].magento_name_review_required, false);
   const history = (await pool.query('SELECT * FROM product_corrections WHERE source_product_id=$1', [source.id])).rows;
   assert.equal(history.length, 1);
   assert.equal(history[0].corrected_product_id, successorId);
@@ -105,7 +110,7 @@ test('recount export exclusion reproduction: comma weight successor misses refre
   assert.equal(history[0].new_payload.answers.weight, 1260);
   const mappedSuccessor = mapProduct(pair[1], await loadMagentoCatalog(pool));
   assert.equal(mappedSuccessor.base.decor_weight, '1260');
-  assert.ok(mappedSuccessor.errors.some((error) => error.code === 'manual_name_required'));
+  assert.equal(mappedSuccessor.errors.some((error) => error.code === 'manual_name_required'), false);
   assert.equal(mappedSuccessor.errors.some((error) => error.field === 'decor_weight'), false);
 
   // UX-5 repeats the original {mode:'new'} intent; the server resolves membership again.

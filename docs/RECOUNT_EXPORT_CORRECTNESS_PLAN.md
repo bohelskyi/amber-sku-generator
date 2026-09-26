@@ -1,10 +1,10 @@
 # Recount → correction → export correctness plan
 
-**Status:** Proposed — release-blocking recount/export correctness design; implementation in progress incrementally.
+**Status:** Approved architecture; Phases 0–2 implemented. Operator release blocker remains unresolved.
 
 **Intended document:** `D:\Work\amber-sku-generator\docs\RECOUNT_EXPORT_CORRECTNESS_PLAN.md`
 
-**Delivery boundary:** Only Phase 0 is authorized in this implementation. Sections describing ledger, migration, lifecycle, repair, names, requests and UI are the approved future architecture, not implemented behavior. Phase 1 has not started. The current release-blocker regression retains its existing expectations.
+**Delivery boundary:** Phase 2 is complete as recorded in section 20. Sections 1–17 describe the complete approved architecture, including future behavior; sections 18–19 preserve the historical Phase 0/1 results. Phases 3–5 have not started. Export selection still uses the legacy cursor/exclusion path, including recount successor exclusion. **Phase 2 is NOT independently deployable as the full correctness fix.** Final activation must not run mixed old/new writers.
 
 ## 1. Recommendation and decisions
 
@@ -987,3 +987,163 @@ Final worktree inventory: **49 modified tracked files, 16 untracked files, 0 sta
 Useful restored data was read only. No exclusions, lineage, names, prices, correction requests, snapshots, artifacts, cursor, revision state, migrations or production behavior were changed by Phase 0. This evidence does not authorize automatic repair, establish actual Magento import history or make a held product exportable.
 
 **Recommended next implementation scope: Phase 1, separately reviewed — the forward ledger/membership migration and transactional lifecycle primitive.** Use this classifier/manifest as evidence input, preserve the approved lock order and immutable snapshot/price-stream boundaries, and add the planned migration/race tests. Do not use this Phase 0 PR to start that migration, switch selection/confirmation, release a hold or repair the four unexposed lineages. The accepted architecture above remains the design for those later changes.
+
+## 19. Phase 1 actual results — 2026-09-26
+
+### Boundary and recorded baseline
+
+**Phase 1 foundation implemented. Do not deploy Phase 1 independently.** Phases 2, 3, 4 and 5 were not started. Current export selection still uses the legacy cursor/exclusion path. Both recount rows remain excluded, so the confirmed operator release blocker remains until the coordinated later selection switch. Final rollout must not run mixed old/new writers against activated lifecycle semantics.
+
+Before editing: branch `feature/magento-export-constructor`, HEAD `aad9e05cd7a0cf12ce870643f8cb42f45ca888a8`, clean `git status --short`, 39 migration files (`000`–`038`). The complete pre-edit inventory and SHA-256 file hashes were recorded outside the repository. All 39 old migration files remain byte-identical; 039 is the only migration addition. No staging, commit or push was performed.
+
+Repository-targeted parent/child Node was **20.20.2**; the actual canonical test server was **PostgreSQL 16.15**. Destructive checks used only `postgres-test`, the existing external Compose override at loopback port **56432**, and disposable `_test` databases. The actual connection verified `current_database() = 'amber_test'` before destructive setup. No useful/restored database was accessed or repaired during Phase 1. Test service shutdown runs in `finally`, including failed test runs. No workstation Compose/dependency/configuration changes were committed to the worktree.
+
+### Implemented schema and primitives
+
+| Component | Actual Phase 1 behavior |
+|---|---|
+| Migration `039_full_product_export_lifecycle.sql` | Separate full-product state, exact membership, name-review flag, immutable lifecycle provenance, Administrator-initial/delegable `exports.reconcile`; no reconciliation endpoint/UI. |
+| `product_full_export_state` | One permanent product row; positive BIGINT payload revision and delivery version, bounded monotonic confirmation, constrained route/hold reasons, reference-only JSON evidence, optional SHA-256 repair hash, unique correction/resolution keys, timestamps/resolver pair and pending/hold indexes. Routing/evidence changes require a new delivery version. |
+| Existing-row baseline | Corrected/archived or linked-to-successor rows retired; other historical rows held as ambiguous, revision 1/confirmed 0. No cursor-based eligibility guess, exclusion clearing, historical membership or actor/audit synthesis. |
+| `export_snapshot_products` | One immutable row per represented product; exact SKU, full/delivery counters, capture kind/origin, evidence hash and actual insertion time. Main/EN is one member. Compatibility evidence has null counters and cannot acknowledge full revision. UPDATE/DELETE/TRUNCATE rejected. |
+| Provenance and completeness | Historical snapshots retain NULL lifecycle version; new snapshots record immutable version 1. Deferred checks reject products without state and incomplete new snapshot membership. Service validates exact represented CSV membership before commit. |
+| Lifecycle service | Ordered state reads/locks, ordinary initialization, source retirement, successor classification/initialization, internal CAS revision advance, capture validation/membership and captured-revision confirmation. |
+
+Ordinary save inserts revision 1/confirmed 0, `normal`, no hold in the product/SKU/audit transaction. Recount preserves target validation, hidden-answer cleanup, pricing, permanent reservations, lineage and request-finalization semantics. It retires the source and creates an independent successor revision 1 with classification of the complete ancestral chain. Reliably unexposed lifecycle-born ancestry becomes `normal`; generated/confirmed exposure becomes `hold/prior_exposure`; unresolved history, independent exclusion and invalid lineage have distinct holds. Migration-origin ancestry remains unresolved even without exposure flags. The accepted Phase 0 parser/classifier/graph is reused; new immutable membership supplies current exact evidence. Recount takes no historical snapshot locks. Archive retires full-product state as part of its existing transaction.
+
+Manual UA/EN subjects are copied together; useful subjects are never cleared or regenerated from the old SKU. A pending review stays pending. Same known schema/category/physical weight and proven neutral changes may retain approval, including the narrow equal-number comma/dot `SV.weight` case and known non-SKU informational text fields. Semantic/schema/category/physical-weight/calibration changes or unknown safety require review. Exact source subjects and review/exclusion state bind a new recount-specific signature; generic product signatures keep their old meaning. Direct apply sends and revalidates accepted `sourceStateSignature`, including under the product lock. Old/missing proof requires refresh. The final inherited pair/review decision is retained in correction history.
+
+Request completion receives these writes only through the existing shared recount primitive. The client change is limited to sending the accepted source proof. Phase 2 still owns request refresh/delivery presentation, old pending-request compatibility and in-place informational/name full-revision parity. Those edit endpoints do not yet increment full revision. The CAS advance primitive is internal and exercised by later-revision test fixtures only.
+
+### Capture, confirmation and lock proof
+
+All new capture paths now use REPEATABLE READ. Legacy and published preview fingerprints include lifecycle version, revisions and routing state. Capture validates actual immutable internal/legacy/published artifact bytes through the Phase 0 parser, exact product/SKU set, counts and lifecycle state; snapshot/artifacts/members/audit roll back together. Stored-key retries still return the original result without regenerating bytes. Internal-only compatibility capture records null full counters. Historical NULL-version snapshots keep their old behavior and receive no fabricated membership.
+
+Confirmation advances `confirmed_revision = GREATEST(current, captured)` for only the exact full members. Later revision 2 remains pending when revision 1 is confirmed. Out-of-order and repeat confirmation preserve the high-water mark and first confirmer. Retired predecessor membership never acknowledges a successor. Existing cursor advancement and price confirmation remain unchanged; the full ledger does not replace `product_export_revisions` or consume uncaptured/later price changes. CSV goldens are unchanged.
+
+| Operation | Implemented order |
+|---|---|
+| Capture | Existing access/session → idempotency → template selection if applicable → ascending products → ascending full state → ascending price revisions → new-mode cursor → snapshot/artifacts/members/audit |
+| Recount | Source product → existing SKU/sequence/reservation → request finalization if applicable → ascending full state → audit/commit |
+| Confirmation | Snapshot → ascending full state → ascending price revisions → cursor; no current product lock |
+| Internal later-revision fixture | Product → full state → revision CAS |
+
+Eight deterministic real races cover **both winner orders** for recount/capture, recount/confirmation, duplicate recount workers and confirmation/later revision. Each participant uses an independent PostgreSQL connection; barriers hold a real acquired row lock and `pg_blocking_pids` proves the competitor is blocked before release. Assertions inspect final products/lineage, full revisions/routes, exact membership, status/first actor, cursor, price revisions, audit counts and unchanged artifact/internal CSV bytes. No test relies only on HTTP response codes. Universal RR means a concurrent capture can fail with `EXPORT_PREVIEW_STALE` and require a fresh preview; existing name/information capture race tests accept that outcome while still rejecting torn payloads.
+
+### Verification and changed files
+
+| Check | Result |
+|---|---|
+| Focused lifecycle/recount/export unit regressions | 24/24 passed |
+| Focused migration/lifecycle/exclusion PostgreSQL cases | 17/17 selected passed; 208 unrelated skipped only in this focused run |
+| Full server unit suite | 553/553 passed, zero skipped |
+| Server lint | 0 errors; two pre-existing unused-variable warnings in unchanged `src/presenters/product-timeline.js:391` (`sortOrder`, `sourceOrder`) |
+| Full PostgreSQL integration suite | 225/225 passed, zero skipped, including all eight races and existing template/session/idempotency/price coverage |
+| Migration paths | Fresh, checkpoint 038, repeated verification and injected SQL failure rollback passed; 000–038 checksums/bytes, historical snapshots and exclusions preserved |
+| Client | 305/305 tests in 28 files passed; lint and production build passed |
+| CSV goldens | No file changes |
+| Final integrity checks | `git diff --check` passed; all 39 pre-existing migration file hashes unchanged; `postgres-test` stopped with exit 0 |
+
+Node 20 on this Windows shell does not expand the literal `test/*.test.js` passed by the existing npm script. Full server verification used the same runner/setup with an explicitly expanded complete file list; integration used the single serialized entrypoint. No package-script or dependency change was made for this workstation. Logs and pre-edit hashes are external under `%TEMP%/amber-recount-export-phase1-20260926/`.
+
+Implementation files:
+
+- New: `server/migrations/039_full_product_export_lifecycle.sql`, `server/src/services/full-product-export.service.js`, `server/src/services/full-product-export-exposure.js`, `server/src/services/product/recount-name-inheritance.js`.
+- Updated integration points: `server/src/services/product.service.js`, `correction-request.service.js`, `export.service.js`, `product/product-decode.js`, `product/product-signatures.js`, `export-templates/published-capture.js`, `export-exposure/manifest.js` (exports the existing graph), `server/src/routes/public/products.routes.js`, `client/src/hooks/useProductRecount.js`.
+- New regression files: `server/test/full-product-export.test.js`, `server/integration-test/02-full-product-lifecycle-migration.cases.js`, `11-full-product-lifecycle.cases.js`, `product-fixture.js`, `recount-fixture.js`, `client/test/recount-name-binding.test.jsx`.
+- Existing integration harness/cases: `critical-flows.test.js`, `suite-context.js`, `00-export-exposure.cases.js`, `02-migration-foundation.cases.js`, `04-product-access-audit.cases.js`, both `05-product-price-change`/`05-recount`, `06-migration-upgrades`, `07-catalog-pricing`, `08-products-pricing`, `09-corrections-drafts`, `10-repricing`, all three `11-export-recount-exclusion`/`11-exports-schemas`/`11-magento-products`, and the `12-draft-sample`, `12-export-grid`, `12-export-sessions`, `12-export-source-support`, `12-export-template-editor`, `12-export-template-snapshots`, `12-export-templates`, `12-export-ux3`, `12-export-ux4` case modules. Synthetic raw inserts now create explicit fixture lifecycle rows; recount helpers acquire fresh proof; immutable products are retired instead of deleted; migration inventories and permission counts include 039. The release-blocker case retains its exclusion/cursor assertions; only the now-fixed name inheritance and required apply proof change.
+- Documentation: this plan, `RECOUNT_CORRECTIONS.md`, `EXPORTS.md`, `DATABASE_MIGRATIONS.md`.
+
+Final worktree inventory: **37 modified tracked files, 10 new untracked files, 0 staged**. Branch and HEAD remain the recorded baseline. No commit or push was made.
+
+### Remaining blocker and next boundary
+
+No Phase 2/3/4/5 public behavior, repair, queue/reconciliation UI or deployment was implemented. Current information/name edit behavior and current export selection remain unchanged. No useful data was repaired or mutated. Full ledger obligations are durable, but the legacy selector still excludes recount successors and may advance past them. The next separately scoped work is **Phase 2 — request and in-place parity**; Phase 4 must later switch selection atomically. **Do not deploy Phase 1 independently.**
+
+## 20. Phase 2 actual results — 2026-09-26
+
+### Scope and baseline
+
+**Phase 2 implemented; Phases 3/4/5 not started. Phase 2 is NOT independently deployable as the full correctness fix. Normal export selection remains old behavior until Phase 4.** The release blocker remains visible and covered by its unchanged exclusion/cursor regression. No historical exclusions, membership, names or useful data were repaired. No queue, replacement release, reconciliation command, rollout or workstation configuration change was added.
+
+The starting branch was `feature/magento-export-constructor`, HEAD `aad9e05cd7a0cf12ce870643f8cb42f45ca888a8`. `git status --short` contained **37 modified tracked files and 10 untracked files**, all accepted Phase 1 work, with nothing staged. That work was preserved. Migration inventory was **40 files, 000–039**, exactly the inventory recorded above plus the accepted `039_full_product_export_lifecycle.sql`. All 40 migration SHA-256 hashes remain unchanged. No new migration was needed: existing request JSON payloads, the review flag and lifecycle counters provide the complete schema contract. `DATABASE_MIGRATIONS.md` was not edited in Phase 2; its pre-existing Phase 1 changes remain.
+
+The shell default was Node 24.19.0; every verification command explicitly selected repository-targeted **Node 20.20.2**, and a spawned `node` process verified the same version/path. The actual canonical `postgres-test` server reported **PostgreSQL 16.15**. The existing temporary external Compose override used `127.0.0.1:56432`; the actual connection verified `current_database() = 'amber_test'` and the `_test` suffix before destructive setup. No useful restored `amber` connection was made. Each integration invocation stopped `postgres-test` in `finally`, including failed runs.
+
+### Request binding, refresh and parity
+
+`product/recount-evidence.js` is the shared server derivation for all recount entry points. Its version-2 evidence binds:
+
+- Source product state, exact manual pair and review/exclusion state.
+- Complete predecessor links and correction identities.
+- Source/ancestor full revision, confirmed revision, delivery version, route, hold reason and evidence.
+- Phase 0/1 exposure classification and immutable exposure references/hash.
+- Expected successor route, hold reason, paired name inheritance and review outcome.
+
+The existing opaque `source.stateSignature` covers the binding, and existing mode-specific request signatures therefore cover it as well as their prior target/pricing dependencies. New requests store the full server-owned binding in `proposed_payload.recountEvidence`; clients cannot supply the delivery decision. Public preview reads are repeatable-read/read-only. Create revalidates under the source lock. Refresh now locks source → request → ascending lifecycle state and rebuilds current target, pricing, source, lineage, names and delivery evidence on its transaction client. It changes only request evidence/legacy ownership adoption, never product revisions, exclusions, export state or correction lineage. Existing post-claim refresh remains after the claim commit.
+
+The additive request `delivery` projection returns route/hold reason, exposure class and name-review requirement. The existing queue presents normal-language consequences and an old-format refresh notice. Raw evidence is not rendered in the normal workflow.
+
+Old pending/in-progress recount requests lacking `recountEvidence.version=2` fail with **409 `RECOUNT_REFRESH_REQUIRED`**, including old NULL-mode/default-rounding signatures. Refresh is mandatory; no outcome is inferred. Refresh preserves NULL pricing modes and claim epochs and can atomically adopt a valid legacy token claim as before. Claim/release/reclaim, current-user ownership, force-release and completed retry attribution remain unchanged. Completed historical rows take the existing idempotent path before evidence checks, including rows with no ownership audit. A modern completed retry still requires its original user/claim epoch.
+
+Completion uses the same `applyProductRecount()` as direct apply. It retains source → SKU/sequence → request → ascending lifecycle lock ordering, re-reads exposure after lifecycle waits, and compares the reviewed binding before product mutation. The applied route and names come from that validated derivation, not a later independent classifier call. The source correction/retirement, successor revision 1, route/hold, name pair/review flag, history, request finalization and audits commit or roll back together. Existing repricing-draft synchronization remains best effort after commit, without changing that accepted boundary.
+
+Parity regressions compare direct and requested results for normal, generated, confirmed, historically ambiguous and intentionally excluded sources, including semantic-change name review. Stale delivery versions, changed names, new exposure, review confirmation and changed lineage each reject without writes. Refreshed evidence permits completion with the newly reviewed result. Phase 1 direct race expectations now also require refresh when capture/confirmation wins; the release-blocker characterization itself is unchanged.
+
+### In-place changes, review and immutable snapshots
+
+The narrow informational allowlist is unchanged, including the exclusion of `SV.weight`. Valid changed answers advance the full-product revision in the same transaction as `details.answers` and `product_information.updated`. Name changes advance full revision in the same transaction as the pair, pending review resolution and `product_magento_name.updated`. Both preview tokens bind current full revision and delivery version; ordinary no-ops, invalid/stale edits and failures do not advance a counter. Identity, SKU, schema, correction lineage and exclusion remain unchanged.
+
+Explicit unchanged inherited-pair confirmation requires pending review, matching current pair and an up-to-date token. A `productId`-only name preview supplies the pair, eligibility and its confirmation proof. The editor keeps that displayed proof for **Підтвердити без змін**, rather than refreshing it silently on click. Confirmation preserves the exact inherited subjects (including surrounding whitespace), clears review, advances **delivery_version only**, and emits `product_magento_name.reviewed`. It does not fabricate a full payload revision. Formatting-only writes with unchanged rendered name text remain rejected no-ops. An edited inherited pair advances both full revision and delivery version. Review resolution invalidates old name/information/recount/export evidence. Injected audit and lifecycle failures prove complete rollback for information changes, name changes, review confirmation and request completion.
+
+Legacy Magento and the existing frozen-template evaluator treat pending inherited review as `manual_name_review_required` readiness evidence. Draft/published/session loaders carry the flag through existing evaluation paths; no frozen definition, mapper output contract or golden is rewritten. Existing name controls offer review or edit. No new export selector or queue exists.
+
+Real informational and name edits prove both 1/0 → 2/0 before first confirmation and 1/1 → 2/1 after confirmation. Tests generate the actual Phase 1 membership at N, mutate through the public domain command to N+1, and confirm the old file: only N is acknowledged and N+1 stays discoverable through `revision > confirmed_revision`. Repeated confirmations and confirming a newer file before an older unconfirmed file preserve the high-water mark. Main/EN remain one exact member, and artifact bytes remain immutable. Direct and request-completed price-only changes advance only `product_export_revisions`; full counters stay unchanged.
+
+### Deterministic concurrency evidence
+
+Twelve new races use independent PostgreSQL connections/backend PIDs. A query barrier holds a real acquired lock, and `pg_blocking_pids` must show the competitor waiting before release. Assertions inspect committed product/request/lineage state, inherited pair, counters, membership, audits and immutable bytes.
+
+| Race, both orders | Verified result |
+|---|---|
+| Refresh ↔ informational apply | The existing active-request prohibition wins in both orders: no informational write/revision/audit; refresh binds unchanged current state. The guard is not bypassed to manufacture a mutation. |
+| Refresh ↔ name apply | Name-first refresh binds the new pair/revision; refresh-first followed by name change leaves completion stale until refresh. |
+| Completion ↔ name apply | Completion-first creates one successor with reviewed names and rejects the late source edit; name-first rejects stale completion with no successor. |
+| Completion ↔ snapshot generation | Capture-first adds exposure and rejects completion until refresh; completion-first retires/excludes the source and rejects the stale capture. |
+| Completion ↔ snapshot confirmation | Confirmation-first invalidates reviewed lifecycle/exposure; completion-first preserves its held successor while confirmation acknowledges only the retired source. |
+| Release/reclaim ↔ completion | A new committed claim epoch invalidates an already-running completion; completion-first prevents release/reclaim and retains its original completed retry semantics. |
+
+The eight existing Phase 1 lifecycle races remain covered, with direct recount refresh requirements updated for the two exposure-changing winner orders. All existing correction, price, export, template, session and migration checks pass in the complete serialized suite.
+
+### Verification and changed files
+
+| Check | Final result |
+|---|---|
+| Focused Phase 2/lifecycle/correction/name unit tests | **25/25 passed** |
+| Focused new Phase 2 PostgreSQL cases | **40/40 passed**, including all **12** new deterministic races |
+| Full server unit suite | **555/555 passed**, zero skipped |
+| Server lint | **0 errors**, only the two pre-existing unused-variable warnings in `product-timeline.js:391` |
+| Full PostgreSQL integration suite | **265/265 passed**, zero skipped |
+| Focused affected rendered client tests | **42/42 passed** |
+| Full client tests | **149/149 model tests**, **310/310 rendered tests in 28 files**, zero failed |
+| Client lint and production build | Passed |
+| CSV goldens | Unchanged; complete golden regressions pass |
+| Migrations 000–039 | All **40** file hashes unchanged; no schema addition |
+| Final diff/status | `git diff --check` passed; **48 modified tracked files, 14 untracked files, 0 staged** including the preserved Phase 1 work |
+| Test service | `postgres-test` stopped successfully after verification |
+
+The Windows Node 20 shell does not expand the server npm script's literal `test/*.test.js`. As in Phase 1, the full server unit run used the exact runner/setup with every matching file explicitly expanded. Integration used the one serialized `critical-flows.test.js` entrypoint. Parent/child runtime verification and logs are external under `%TEMP%/amber-recount-export-phase2-20260926/`.
+
+An intermediate broad name-filtered integration run skipped shared authentication/catalog prerequisites and was not a valid full-suite result; its remaining test child was stopped and the wrapper stopped the test service. Verification then used the complete serialized suite. The first full run identified the old pre-feature-signature acceptance assertion; it now proves mandatory Phase 2 refresh and retains the rounding-change regression. The final complete run above passed. No alternate PostgreSQL environment or useful database was used.
+
+Client reruns exposed intermittent initial-render timing failures in two existing repricing workflow tests. The shared test render helper now awaits React's asynchronous `act` so initial loading and controller effects settle before user interactions. No repricing production behavior, timeout or assertion was weakened. The final focused and complete client runs passed after this test-only synchronization fix.
+
+Phase 2 changed these **27 paths** (including four new files), in addition to preserving all existing Phase 1 changes:
+
+- New: `server/src/services/product/recount-evidence.js`, `server/test/phase2-parity.test.js`, `server/integration-test/11-phase2-parity.cases.js`, `server/integration-test/11-phase2-races.cases.js`.
+- Server: `product.service.js`, `correction-request.service.js`, `full-product-export.service.js`, `full-product-export-exposure.js`, `product-information.service.js`, `product-magento-name.service.js`, `magento-products-v1.js`, `export.service.js`, `export-templates/draft-inputs.js`, `export-templates/evaluate.js`, `export-templates/published-capture.js`, and `routes/admin/corrections.routes.js`.
+- Existing tests: `server/integration-test/critical-flows.test.js`, `09-corrections-drafts.cases.js`, `11-full-product-lifecycle.cases.js`; `client/test/magento-export-ui.test.jsx`, `client/test/workflow-characterization.test.jsx`.
+- Client: `components/app/ExportTools.jsx`, `components/exports/ExportDataGrid.jsx`, `pages/CorrectionRequestsPage.jsx`.
+- Documentation: this plan, `RECOUNT_CORRECTIONS.md`, `EXPORTS.md`.
+
+Branch and HEAD remain unchanged. Nothing was staged, committed or pushed. The release blocker remains: ordinary New export still uses its old cursor/exclusion path and can skip excluded recount successors. **Phase 3 historical repair, Phase 4 ledger selection/UI and Phase 5 activation remain future, separately scoped work.**

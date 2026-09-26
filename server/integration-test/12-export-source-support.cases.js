@@ -1,3 +1,4 @@
+const { insertProductFixture } = require('./product-fixture');
 const { test, assert, pool, crypto, request, authenticateApplicationSession, authenticateIdentitySession } = require('./suite-context');
 const templates = require('../src/services/export-templates/template.service');
 const exportsService = require('../src/services/export.service');
@@ -26,7 +27,7 @@ async function installSchema(category, modelVersion) {
   return s;
 }
 async function insert(p) {
-  return (await pool.query(`INSERT INTO products(full_sku,base_sku,category,weight,total_price_uah,details,sku_schema_version_id)
+  return (await insertProductFixture(pool,`INSERT INTO products(full_sku,base_sku,category,weight,total_price_uah,details,sku_schema_version_id)
     VALUES($1,$1,$2,$3,$4,$5::jsonb,$6) RETURNING *`, [p.full_sku, p.category, p.weight, p.total_price_uah, JSON.stringify(p.details), p.sku_schema_version_id ?? null])).rows[0];
 }
 async function effects(ids) {

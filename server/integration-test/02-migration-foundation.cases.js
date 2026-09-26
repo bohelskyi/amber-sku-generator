@@ -210,6 +210,7 @@ test('migrations 020-031 create constrained RBAC, audit, and business actor attr
     'export_templates.publish',
     'export_templates.view',
     'exports.create',
+    'exports.reconcile',
     'exports.view',
     'history.view',
     'pricing.manage',
@@ -439,7 +440,7 @@ test('migration 028 aborts without changing unsafe existing RBAC state', async (
         && !fileName.startsWith('028_')
         && !fileName.startsWith('030_')
         && !fileName.startsWith('031_')
-        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_'));
+        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_'));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
       path.resolve(preCustomRoleDirectory, fileName)
@@ -868,7 +869,7 @@ test('migration 024 preserves historical product attribution as null', async () 
         && !fileName.startsWith('028_')
         && !fileName.startsWith('030_')
         && !fileName.startsWith('031_')
-        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_')
+        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -1015,7 +1016,7 @@ test('migration 026 preserves historical repricing attribution as null without a
         && !fileName.startsWith('028_')
         && !fileName.startsWith('030_')
         && !fileName.startsWith('031_')
-        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_')
+        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -1105,7 +1106,7 @@ test('migration 027 preserves historical export and publication attribution as n
         && !fileName.startsWith('028_')
         && !fileName.startsWith('030_')
         && !fileName.startsWith('031_')
-        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_')
+        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),

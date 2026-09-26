@@ -94,7 +94,8 @@ router.post('/recount/apply', requirePermission('products.recount'), async (req,
     });
     res.json(result);
   } catch (err) {
-    res.status(err.statusCode || 400).json({ error: err.message });
+    res.status(err.statusCode || 400).json({ error: err.message,
+      ...(err.publicCode ? { code: err.publicCode } : {}) });
   }
 });
 

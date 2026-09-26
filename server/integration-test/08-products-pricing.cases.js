@@ -1,3 +1,4 @@
+const { requestRecount } = require('./recount-fixture');
 const suite = require('./suite-context');
 const {
   assert,
@@ -275,7 +276,7 @@ test('automatic marketing rounding is persisted through save, decode, and recoun
     assert.equal(recountPreview.data.corrected.calculatedPriceUah, 918);
     assert.equal(recountPreview.data.corrected.autoPriceUah, 900);
     assert.equal(recountPreview.data.corrected.totalPriceUah, 900);
-    const recounted = await request('/api/recount/apply', {
+    const recounted = await requestRecount('/api/recount/apply', {
       method: 'POST',
       body: {
         sourceSku: automatic.data.fullSku,
@@ -374,7 +375,7 @@ test('disabled category rounding stays automatic through save, recount, and corr
     const recountPreview = await request('/api/recount/preview', { method: 'POST', body: recountBody });
     assert.equal(recountPreview.response.status, 200, recountPreview.text);
     assert.equal(recountPreview.data.corrected.autoPriceUah, 918);
-    const recounted = await request('/api/recount/apply', { method: 'POST', body: recountBody });
+    const recounted = await requestRecount('/api/recount/apply', { method: 'POST', body: recountBody });
     assert.equal(recounted.response.status, 200, recounted.text);
     createdProductIds.push(Number(recounted.data.correctedProductId));
     const storedRecount = (await pool.query(
@@ -572,7 +573,7 @@ test('correction applies a manual price when the target configuration has no mat
     assert.equal(preview.response.status, 200, preview.text);
     assert.equal(preview.data.corrected.totalPriceUah, null);
 
-    const zeroManual = await request('/api/recount/apply', {
+    const zeroManual = await requestRecount('/api/recount/apply', {
       method: 'POST',
       body: {
         sourceSku: source.data.fullSku,
@@ -584,7 +585,7 @@ test('correction applies a manual price when the target configuration has no mat
     assert.equal(zeroManual.response.status, 422, zeroManual.text);
     assert.match(zeroManual.data.error, /більшою за 0/);
 
-    const applied = await request('/api/recount/apply', {
+    const applied = await requestRecount('/api/recount/apply', {
       method: 'POST',
       body: {
         sourceSku: source.data.fullSku,

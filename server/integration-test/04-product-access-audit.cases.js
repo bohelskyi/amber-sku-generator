@@ -1,3 +1,4 @@
+const { requestRecount } = require('./recount-fixture');
 const suite = require('./suite-context');
 const {
   assert,
@@ -52,7 +53,7 @@ test('product create, direct recount, and archive share local actor attribution 
     method: 'POST', body: recountPayload,
   });
   assert.equal(recountPreview.response.status, 200, recountPreview.text);
-  const recounted = await request('/api/recount/apply', {
+  const recounted = await requestRecount('/api/recount/apply', {
     method: 'POST',
     headers: { 'X-Request-ID': 'audit-product-recounted' },
     body: recountPayload,
@@ -149,7 +150,7 @@ test('product timeline resolves every actual SKU across corrections and combines
   assert.equal(created.response.status, 200, created.text);
   const skuA = created.data.fullSku;
 
-  const direct = await request('/api/recount/apply', {
+  const direct = await requestRecount('/api/recount/apply', {
     method: 'POST',
     body: { sourceSku: skuA, answers: { kind: 2 }, reason: 'timeline direct correction' },
   });
@@ -282,7 +283,7 @@ test('configuration evolution collapses a persisted weight-only successor into c
   });
   assert.equal(created.response.status, 200, created.text);
 
-  const corrected = await request('/api/recount/apply', {
+  const corrected = await requestRecount('/api/recount/apply', {
     method: 'POST',
     body: {
       sourceSku: created.data.fullSku,
@@ -394,7 +395,7 @@ test('role revocation is reflected immediately without replacing the active sess
     [userId, administratorRole.rows[0].id]
   );
   const restoredMe = await request('/api/auth/me');
-  assert.equal(restoredMe.data.permissions.length, 32);
+  assert.equal(restoredMe.data.permissions.length, 33);
   const permittedAgain = await request('/api/config');
   assert.equal(permittedAgain.response.status, 200, permittedAgain.text);
 });

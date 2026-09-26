@@ -189,4 +189,4 @@ function buildCorrectionExposureManifest(input) {
 
 function serializeManifest(manifest) { return `${JSON.stringify(canonical(manifest), null, 2)}\n`; }
 
-module.exports = { buildCorrectionExposureManifest, serializeManifest, storedDiff };
+module.exports = { buildCorrectionExposureManifest, buildLineageGraph, serializeManifest, storedDiff };

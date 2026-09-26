@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations `000`–`032` are immutable history; whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations `000`–`038` are immutable history; Phase 1 adds forward migration `039`. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -95,6 +95,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `036_export_snapshot_template_binding.sql` | Adds immutable opt-in snapshot request intent, published-version provenance, input fingerprint and effective capture evidence. Composite publication identity FK plus complete/null shape checks; old snapshots stay legacy and unattributed. Extends the existing payload trigger without changing artifact bytes or confirmation attribution rules. |
 | `037_shared_export_sessions.sql` | Durable private/shared controlled sessions, membership epochs, immutable attempt identity/proof, one successful snapshot per session, and deferred atomic reverse-result association. No historical ownership backfill; 000–036 remain immutable. |
 | `038_editable_export_columns.sql` | Adds the distinct editable-column artifact contract and nullable immutable legacy preview fingerprint. Extends complete template binding checks without relabeling old artifacts or publications. No backfill; 000–037 unchanged. |
+| `039_full_product_export_lifecycle.sql` | Separate monotonic full-product state, immutable exact snapshot membership, server-owned name-review flag, immutable nullable snapshot lifecycle version and delegable `exports.reconcile` permission. Conservative historical baseline only; no exposure repair or selection switch. |
 
 Export-template mutations take the existing access-admin advisory lock and recheck the actor's specific capability before locking family then draft. Publication allocates a per-family version number under those locks and inserts attribution and audit atomically. The unique family/source-revision tuple supports completed retries even after the draft advances. Draft base-version ownership uses a composite foreign key; historical source revision is not a foreign key to the mutable draft revision. Selection writers lock the singleton after the access boundary and only read immutable versions; they never lock products, revisions or cursors.
 
@@ -119,9 +120,26 @@ to one immutable publication. The existing payload trigger rejects changing or
 attaching any of this evidence after INSERT. Normal confirmation remains valid.
 The artifact `profile_version` is still the output contract, not template identity.
 
-Template captures use RR with a shared pre-transaction access lock, per-key
-transaction coordination, selection, ascending products, ascending revisions,
-then new-mode cursor. Recovery uses a fresh committed lookup only after rollback;
+All Phase 1 captures use RR with the existing access/session boundary, per-key
+transaction coordination, template selection when applicable, ascending products,
+ascending full-product state, ascending price revisions, then new-mode cursor.
+Recovery uses a fresh committed lookup only after rollback;
 an advisory wait never refreshes RR. See [the complete export contract](EXPORTS.md#published-export-snapshots-pr3).
 
 PostgreSQL integration tests destroy/recreate their target `public` schema and create/drop temporary databases. The harness deliberately refuses a primary database name not ending in `_test`. Never run it against production, staging, or a developer database containing useful data.
+
+## Phase 1 lifecycle schema — migration 039
+
+`product_full_export_state` has one permanent, delete-restricted product row. Positive BIGINT `revision`/`delivery_version` and bounded `confirmed_revision` never regress. Identity, creation time and originating correction are immutable. Route/hold consistency is checked, and changing routing/evidence/resolution fields requires increasing delivery version. Correction and resolution keys have partial unique indexes; pending normal/replacement and hold lookups have partial indexes. Evidence must be a JSON object, optional repair hash must be lowercase SHA-256, and resolver actor/time must both be present or both absent. Resolution columns are a forward contract, not a repair implementation.
+
+The migration initializes every existing row with revision 1/confirmed 0. Corrected, archived or linked-to-successor rows are `retired`; other rows are `hold/historical_ambiguity` with unresolved migration-origin evidence. It does not infer export eligibility from cursor, price revisions or absent snapshots, clear exclusions, index historical membership, fabricate actors/audits or perform Phase 3 repair. A deferred constraint trigger rejects a newly inserted product without lifecycle state at commit. Product/SKU/audit writes and lifecycle initialization therefore share one runtime transaction.
+
+`export_snapshot_products` has a `(snapshot_id, product_id)` primary key and `(product_id, snapshot_id)` index, with delete-restricted FKs. Full captures require positive full/delivery counters and live origin; compatibility evidence requires null counters. Exact SKU, capture/origin codes, SHA-256 evidence hash and actual recording time are permanent. Triggers reject UPDATE, DELETE and TRUNCATE. Deferred checks require lifecycle snapshot membership count to match represented product count and qualifying artifact product totals. The service additionally validates exact CSV membership/SKUs before INSERT. Historical NULL-version snapshots can later receive only verified compatibility sidecars; Phase 1 provides no historical writer.
+
+The other additions are server-owned `products.magento_name_review_required` (false by default), nullable immutable snapshot lifecycle version (current value 1), and `exports.reconcile`. The existing permission trigger grants only Administrator initially; the ordinary editable-role mechanism can delegate it.
+
+Recount locks source product → existing SKU/sequence/reservation resources → request finalization when applicable → ascending full state → audit/commit. It reads historical snapshot evidence without locking snapshot rows. Confirmation locks snapshot → ascending full state → ascending price revisions → cursor and never then locks a product. Future full-revision writers must lock product before full state. Independent-connection races verify both winner orders for capture/recount, confirmation/recount, duplicate recount and confirmation/later revision.
+
+Fresh schema, checkpoint 038, repeated checksum verification and injected 039 failure rollback are covered by `02-full-product-lifecycle-migration.cases.js`; historical checksums, exclusions and immutable snapshot bytes remain unchanged. Runtime save, rollback and membership immutability are also covered in `11-full-product-lifecycle.cases.js`. These checks use only disposable databases on the canonical PostgreSQL 16 test service, including the temporary upgrade database ending in `_test`.
+
+**Do not deploy Phase 1 independently.** The ledger is not yet the production selection authority. The operator release blocker remains, and final rollout must prevent mixed old/new writers against activated lifecycle semantics.

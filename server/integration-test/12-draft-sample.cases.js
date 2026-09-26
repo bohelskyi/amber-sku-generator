@@ -1,3 +1,4 @@
+const { insertProductFixture } = require('./product-fixture');
 const { assert, test, pool, crypto, request, authenticateApplicationSession, authenticateIdentitySession } = require('./suite-context');
 const { officeCatalog } = require('../test/fixtures/magento-v1/office');
 const { product } = require('../test/fixtures/magento-v1/contract');
@@ -60,13 +61,13 @@ test('Draft sample scopes source proof to stored BR products while same draft va
   const stored = {};
   for (const group of ['BR', 'NM', 'AR']) {
     const p = product(group);
-    stored[group] = (await pool.query(`INSERT INTO products (full_sku,base_sku,category,weight,total_price_uah,details)
+    stored[group] = (await insertProductFixture(pool,`INSERT INTO products (full_sku,base_sku,category,weight,total_price_uah,details)
       VALUES ($1,$1,$2,$3,$4,$5::jsonb) RETURNING *`, [`${group}-SAMPLE-${crypto.randomUUID()}`.toUpperCase(), group, p.weight, p.total_price_uah, JSON.stringify(p.details)])).rows[0];
   }
   const command = (action, extra = {}, authentication = admin) => request(`${root}/${id}/${action}`,
     { method: 'POST', authentication, body: { ...precondition, ...extra } });
   const bad = product('BR', { color: 999 });
-  const badId = (await pool.query(`INSERT INTO products (full_sku,base_sku,category,weight,total_price_uah,details)
+  const badId = (await insertProductFixture(pool,`INSERT INTO products (full_sku,base_sku,category,weight,total_price_uah,details)
     VALUES ($1,$1,'BR',10,1234.56,$2::jsonb) RETURNING id`, [`BR-BAD-${crypto.randomUUID()}`.toUpperCase(), JSON.stringify(bad.details)])).rows[0].id;
   const before = await state();
   const searched = await request(`${root}/sample-products?q=${encodeURIComponent(stored.BR.full_sku)}`, { authentication: admin });
@@ -150,7 +151,7 @@ test('Draft sample scopes source proof to stored BR products while same draft va
 test('Draft sample display search paginates exact variant SKUs and retains incomplete/archived candidates', async () => {
   const admin = await authenticateApplicationSession(); const prefix = `BR2/${crypto.randomUUID()}`;
   const ids = [];
-  for (let i = 0; i < 22; i++) ids.push((await pool.query(`INSERT INTO products
+  for (let i = 0; i < 22; i++) ids.push((await insertProductFixture(pool,`INSERT INTO products
     (full_sku,base_sku,category,status,weight,total_price_uah,details) VALUES ($1,$1,'BR',$2,0,1,'{}') RETURNING id`,
   [`${prefix}-${String(i).padStart(3, '0')}`, i === 0 ? 'archived' : 'active'])).rows[0].id);
   const before = await state();

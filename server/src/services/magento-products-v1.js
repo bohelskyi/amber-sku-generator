@@ -216,6 +216,10 @@ function rawName(group, answers, sku, errors, product) {
     return [`${pair[0]}. Арт: ${sku}`, `${pair[1]}. Art: ${sku}`];
   }
   if (group === 'SV') {
+    if (product?.magento_name_review_required === true) {
+      errors.push({ field: 'name', code: 'manual_name_review_required',
+        message: 'Успадковані назви потребують перевірки.' });
+    }
     const manualUa = typeof product?.magento_name_subject_ua === 'string'
       ? product.magento_name_subject_ua.trim() : '';
     const manualEn = typeof product?.magento_name_subject_en === 'string'

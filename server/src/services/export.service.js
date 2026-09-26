@@ -11,6 +11,7 @@ const published = require('./export-templates/published-capture');
 const previewSigner = bindingTools.makeSigner(require('../config/env').sessionSecret);
 const { assertActorStillAuthorized } = require('./access-admin-transaction');
 const sessionAccess = require('./export-session-access');
+const fullExport = require('./full-product-export.service');
 const {
   buildMagentoPayload,
   loadMagentoCatalog,
@@ -168,7 +169,7 @@ async function getExportRows(fromSku, toSku, options = {}) {
     `
       SELECT p.id, p.full_sku, p.category, p.weight, p.total_price_uah,
              p.details, p.created_at, p.magento_name_subject_ua,
-             p.magento_name_subject_en,
+             p.magento_name_subject_en, p.magento_name_review_required,
              ${options.templateInputs ? 'p.sku_schema_version_id, p.exclude_from_export,' : ''}
              ${inRequestedRangeSql} AS in_requested_range
       FROM products p
@@ -310,6 +311,7 @@ async function resolveNewExportRange(queryable) {
 
 function legacyPreviewFingerprint(exportData, catalog, magento, newRange) {
   return bindingTools.fingerprint({ range: exportData.range, cursor: newRange?.cursor ?? null,
+    fullProductLifecycle: exportData.fullProductLifecycle,
     products: exportData.rows, columns: exportData.textColumns,
     catalog: [...catalog].map(([group, questions]) => [group, [...questions]]),
     artifacts: magento.artifacts });
@@ -386,10 +388,10 @@ async function createExportSnapshot(input, options = {}) {
       await published.protectAuthority(client, mutationContext.actorUserId, 'exports.create');
       authorityProtected = true;
     }
-    await client.query(template || expectedLegacy ? 'BEGIN ISOLATION LEVEL REPEATABLE READ' : 'BEGIN');
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
     let resolved = null;
     let binding = null;
-    if (expectedLegacy) {
+    if (!template) {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', ['amber:export-snapshot:v1', key]);
       const second = await lookup(client);
       if (second) { const found = await match(second, client); await client.query('COMMIT'); return found; }
@@ -435,6 +437,7 @@ async function createExportSnapshot(input, options = {}) {
     if (newRange && exportData.rows.length !== newRange.productCount) {
       throw staleNewRangeError();
     }
+    exportData.fullProductLifecycle = await fullExport.captureFullProductStates(client, exportData.rows, { lock: true });
     const catalog = !template && requestedProfile === 'magento-products-v1'
       ? await loadMagentoCatalog(client) : null;
     let magento = catalog
@@ -471,9 +474,9 @@ async function createExportSnapshot(input, options = {}) {
         reexport_revisions, request_contract, template_id, template_version_id,
         template_definition_hash, template_evaluator_version, template_output_contract,
         template_format_version, request_intent, input_fingerprint, binding_evidence,
-        export_session_id, export_attempt_id, legacy_preview_fingerprint)
+        export_session_id, export_attempt_id, legacy_preview_fingerprint, full_product_lifecycle_version)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb,
-         $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21::jsonb, $22, $23, $24)
+         $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21::jsonb, $22, $23, $24, $25)
        RETURNING *`,
       [
         crypto.randomUUID(),
@@ -494,6 +497,7 @@ async function createExportSnapshot(input, options = {}) {
         binding ? JSON.stringify(binding) : null,
         options.sessionAttempt?.sessionId || null, options.sessionAttempt?.attemptId || null,
         expectedLegacy ? legacyFingerprint : null,
+        fullExport.LIFECYCLE_VERSION,
       ]
     );
     const snapshot = result.rows[0];
@@ -507,6 +511,8 @@ async function createExportSnapshot(input, options = {}) {
           artifact.fileName, artifact.csvContent, artifact.productCount, artifact.rowCount]
       );
     }
+    await fullExport.captureSnapshotMembership(client, snapshot, exportData.rows,
+      exportData.fullProductLifecycle, magento.artifacts);
     await writeAuditEvent(client, {
       mutationContext,
       eventKey: 'export_snapshot.created',
@@ -526,15 +532,15 @@ async function createExportSnapshot(input, options = {}) {
   } catch (error) {
     await client.query('ROLLBACK');
     const keyConflict = error?.code === '23505' && error.constraint === 'export_snapshots_idempotency_key_key';
-    if (keyConflict || ((template || expectedLegacy) && (error.code === '40001'
-      || ['EXPORT_PREVIEW_STALE', 'EXPORT_PREVIEW_EXPIRED', 'EXPORT_PREVIEW_REQUIRED', 'TEMPLATE_SOURCE_INVALID'].includes(error.code)
+    if (keyConflict || (error.code === '40001') || ((template || expectedLegacy) && (
+      ['EXPORT_PREVIEW_STALE', 'EXPORT_PREVIEW_EXPIRED', 'EXPORT_PREVIEW_REQUIRED', 'TEMPLATE_SOURCE_INVALID'].includes(error.code)
       || error.publicCode === 'NEW_EXPORT_RANGE_STALE'))) {
       // This connection is now outside its aborted/old RR transaction. A new
       // statement sees a committed winner even when the advisory wait did not.
       const winner = await lookup(client);
       if (winner) return await match(winner, client);
     }
-    if ((template || expectedLegacy) && (error.code === '40001' || error.publicCode === 'NEW_EXPORT_RANGE_STALE')) throw bindingTools.stale();
+    if (error.code === '40001' || ((template || expectedLegacy) && error.publicCode === 'NEW_EXPORT_RANGE_STALE')) throw bindingTools.stale();
     throw error;
   } finally {
     try { if (authorityProtected) await published.releaseAuthority(client); }
@@ -588,6 +594,7 @@ async function previewExport(input, options = {}) {
       newRange?.toSku || toSku,
       { queryable: client, templateInputs: template }
     );
+    exportData.fullProductLifecycle = await fullExport.captureFullProductStates(client, exportData.rows);
     const captured = template ? await published.capturePublished(client, intent, resolved, exportData, newRange, { review: true }) : null;
     const catalog = captured ? null : await loadMagentoCatalog(client);
     const magento = captured ? captured.magento : buildMagentoPayload(exportData.rows, catalog, { review: true });
@@ -703,6 +710,7 @@ async function confirmExportSnapshot(snapshotId, options = {}) {
     if (!snapshot) {
       throw sessionAccess.missing();
     }
+    await fullExport.confirmFullProductRevisions(client, snapshot);
     if (snapshot.status !== 'confirmed') {
       await client.query(
         `UPDATE export_snapshots

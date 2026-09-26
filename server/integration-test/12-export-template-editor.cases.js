@@ -1,3 +1,4 @@
+const { insertProductFixture } = require('./product-fixture');
 const { assert, test, pool, crypto, request, authenticateApplicationSession, authenticateIdentitySession } = require('./suite-context');
 const { installGoldenEvidence, definition } = require('./12-export-templates.cases');
 const { catalog, product } = require('../test/fixtures/magento-v1/contract');
@@ -19,7 +20,7 @@ test('OFFICE valid-name unresolved draft creates, saves and reopens; publication
   const admin = await authenticateApplicationSession();
   // Sample scope now follows the stored category; use an explicit blocked NM fixture.
   const sample = product('NM');
-  const sampleId = (await pool.query(`INSERT INTO products (full_sku,base_sku,category,weight,total_price_uah,details)
+  const sampleId = (await insertProductFixture(pool,`INSERT INTO products (full_sku,base_sku,category,weight,total_price_uah,details)
     VALUES ($1,$1,'NM',$2,$3,$4::jsonb) RETURNING id`, [`NM-OFFICE-${crypto.randomUUID()}`.toUpperCase(), sample.weight, sample.total_price_uah, JSON.stringify(sample.details)])).rows[0].id;
   const before = await state();
   const candidate = await request(`${root}/candidate`, { authentication: admin });
@@ -131,7 +132,7 @@ test('PR4 candidate is read-only, diagnostic, protected; synthetic forms save/lo
   const valid = await request(`${root}/${f.data.id}/validate`, { method: 'POST', authentication: admin, body: expected });
   assert.equal(valid.response.status, 200, valid.text); assert.equal(valid.data.productionAcceptanceVerified, false);
   const p = product('BR');
-  const stored = (await pool.query(`INSERT INTO products (full_sku,base_sku,category,weight,total_price_uah,details)
+  const stored = (await insertProductFixture(pool,`INSERT INTO products (full_sku,base_sku,category,weight,total_price_uah,details)
     VALUES ($1,$1,$2,$3,$4,$5::jsonb) RETURNING *`, [`BR-PR4-${crypto.randomUUID()}`.toUpperCase(), p.category, p.weight, p.total_price_uah, JSON.stringify(p.details)])).rows[0];
   const originalResult = evaluateProduct(compileDefinition(candidate.data.definition), stored);
   const editedResult = evaluateProduct(compileDefinition(edited), stored);

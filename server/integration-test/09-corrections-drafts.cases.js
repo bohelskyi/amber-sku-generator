@@ -1,3 +1,5 @@
+const { requestRecount } = require('./recount-fixture');
+const { insertProductFixture } = require('./product-fixture');
 const suite = require('./suite-context');
 const { getCorrectionPreviewSignature } = require('../src/services/product/product-signatures');
 const {
@@ -15,7 +17,7 @@ const {
   schemas,
 } = suite;
 
-test('pre-feature correction signatures survive the default-on upgrade but stale on a rounding toggle', async () => {
+test('pre-feature correction signatures require Phase 2 refresh and still stale on a rounding toggle', async () => {
   if (!suite.authenticatedSession) {
     suite.authenticatedSession = await authenticateApplicationSession('/admin');
   }
@@ -72,7 +74,7 @@ test('pre-feature correction signatures survive the default-on upgrade but stale
       );
       await pool.query(
         `UPDATE correction_requests
-         SET proposed_payload = proposed_payload - 'pricingContextFingerprint',
+         SET proposed_payload = proposed_payload - 'pricingContextFingerprint' - 'recountEvidence',
              preview_signature = $1,
              pricing_mode = NULL,
              pricing_usd_per_gram = NULL,
@@ -85,6 +87,17 @@ test('pre-feature correction signatures survive the default-on upgrade but stale
       assert.equal((await pool.query(
         'SELECT pricing_mode FROM correction_requests WHERE id = $1', [requestId]
       )).rows[0].pricing_mode, null);
+      const legacyCompletion = await request(`/api/admin/correction-requests/${requestId}/complete`, {
+        method: 'POST', body: { claimVersion },
+      });
+      assert.equal(legacyCompletion.response.status, 409, legacyCompletion.text);
+      assert.equal(legacyCompletion.data.code, 'RECOUNT_REFRESH_REQUIRED');
+      const refreshed = await request(`/api/admin/correction-requests/${requestId}/refresh`, {
+        method: 'POST', body: { claimVersion },
+      });
+      assert.equal(refreshed.response.status, 200, refreshed.text);
+      assert.equal(refreshed.data.request.proposedPayload.recountEvidence.version, 2);
+      assert.equal(refreshed.data.request.claimVersion, claimVersion);
       if (toggle) {
         await pool.query('UPDATE categories SET marketing_rounding_enabled = 0 WHERE code = $1', ['ZZ']);
         const unchangedNumber = await request('/api/recount/preview', {
@@ -190,7 +203,9 @@ test('price-change request stays inert while pending and completes through the i
     }]);
   } finally {
     if (requestId) await pool.query('DELETE FROM correction_requests WHERE id = $1', [requestId]);
-    await pool.query('DELETE FROM products WHERE id = $1', [source.data.id]);
+    await pool.query(`WITH retired AS (UPDATE products SET status='archived', exclude_from_export=1 WHERE id = $1 RETURNING id)
+      UPDATE product_full_export_state f SET route='retired',hold_reason=NULL,delivery_version=delivery_version+1
+      FROM retired WHERE f.product_id=retired.id AND f.route <> 'retired'`, [source.data.id]);
     await pool.query('DELETE FROM sku_registry WHERE full_sku = $1', [source.data.fullSku]);
   }
 });
@@ -655,8 +670,8 @@ test('concurrent correction only applies once after transactional revalidation',
   const preview = await request('/api/recount/preview', { method: 'POST', body: correctionPayload });
   assert.equal(preview.response.status, 200, preview.text);
   const results = await Promise.all([
-    request('/api/recount/apply', { method: 'POST', body: correctionPayload }),
-    request('/api/recount/apply', { method: 'POST', body: correctionPayload }),
+    requestRecount('/api/recount/apply', { method: 'POST', body: correctionPayload }),
+    requestRecount('/api/recount/apply', { method: 'POST', body: correctionPayload }),
   ]);
   assert.deepEqual(results.map((item) => item.response.status).sort(), [200, 409]);
   const sourceState = await pool.query(
@@ -689,7 +704,7 @@ test('active correction requests stay FIFO when another worker claims a newer re
   const skus = ['ZZQUEUE001', 'ZZQUEUE002', 'ZZQUEUE003', 'ZZQUEUE004'];
   let productIds = [];
   try {
-    const products = await pool.query(
+    const products = await insertProductFixture(pool,
       `INSERT INTO products
          (full_sku, base_sku, sequence_number, category, weight, total_price,
           total_price_uah, price_per_gram, uah_rate, details, sku_schema_version_id)
@@ -741,7 +756,9 @@ test('active correction requests stay FIFO when another worker claims a newer re
   } finally {
     if (productIds.length > 0) {
       await pool.query('DELETE FROM correction_requests WHERE source_product_id = ANY($1::int[])', [productIds]);
-      await pool.query('DELETE FROM products WHERE id = ANY($1::int[])', [productIds]);
+      await pool.query(`WITH retired AS (UPDATE products SET status='archived', exclude_from_export=1 WHERE id = ANY($1::int[]) RETURNING id)
+      UPDATE product_full_export_state f SET route='retired',hold_reason=NULL,delivery_version=delivery_version+1
+      FROM retired WHERE f.product_id=retired.id AND f.route <> 'retired'`, [productIds]);
       await pool.query('DELETE FROM sku_registry WHERE full_sku = ANY($1::text[])', [skus]);
     }
   }

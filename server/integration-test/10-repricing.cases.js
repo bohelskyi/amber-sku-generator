@@ -1,3 +1,5 @@
+const { requestRecount } = require('./recount-fixture');
+const { insertProductFixture } = require('./product-fixture');
 const suite = require('./suite-context');
 const { randomUUID } = require('node:crypto');
 const { loadPricingContexts, loadScenarioPricingContext } = require('../src/services/pricing/pricing-context');
@@ -53,7 +55,7 @@ test('protected custom USD basis ignores matrix rounding changes and survives ap
       },
       rateMetadata: { source: 'historical', date: '2026-09-13', fetchedAt: null, stale: false },
     };
-    const inserted = await pool.query(`INSERT INTO products
+    const inserted = await insertProductFixture(pool,`INSERT INTO products
       (full_sku, base_sku, sequence_number, category, weight, total_price,
        total_price_uah, price_per_gram, uah_rate, details, status)
       VALUES ('CU1010', 'CU1', 10, 'CU', 10, 100.5, 3999.9, 10.05, 39.8,
@@ -1038,7 +1040,7 @@ test('apply reports the first later invalid locked product without persisting ea
   try {
     for (let index = 0; index < 3; index += 1) {
       const sku = `ZZ1${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
-      const product = await pool.query(
+      const product = await insertProductFixture(pool,
         `INSERT INTO products
          (full_sku, base_sku, sequence_number, category, weight, total_price,
           total_price_uah, price_per_gram, uah_rate, details, sku_schema_version_id)
@@ -1167,7 +1169,9 @@ test('apply reports the first later invalid locked product without persisting ea
       }
     }
     if (createdProductIds.length > 0) {
-      await pool.query('DELETE FROM products WHERE id = ANY($1::int[])', [createdProductIds]);
+      await pool.query(`WITH retired AS (UPDATE products SET status='archived', exclude_from_export=1 WHERE id = ANY($1::int[]) RETURNING id)
+      UPDATE product_full_export_state f SET route='retired',hold_reason=NULL,delivery_version=delivery_version+1
+      FROM retired WHERE f.product_id=retired.id AND f.route <> 'retired'`, [createdProductIds]);
     }
     await pool.query(
       'UPDATE price_matrix SET price = price - $1 WHERE scenario_id = $2',
@@ -1337,7 +1341,7 @@ test('repricing preview/apply/rollback and correction blocking work', async () =
   await lockClient.query('SELECT id FROM products WHERE full_sku = $1 FOR UPDATE', [
     candidate.rows[0].full_sku,
   ]);
-  const correctionPromise = request('/api/recount/apply', {
+  const correctionPromise = requestRecount('/api/recount/apply', {
       method: 'POST',
       body: { sourceSku: candidate.rows[0].full_sku, answers: { kind: 2 }, reason: 'race repricing' },
   });

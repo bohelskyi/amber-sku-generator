@@ -1,3 +1,4 @@
+const { insertProductFixture } = require('./product-fixture');
 const { test, assert, pool, crypto, request, authenticateApplicationSession, authenticateIdentitySession, roleIdForKey } = require('./suite-context');
 const sessions = require('../src/services/export-sessions.service');
 const exportsService = require('../src/services/export.service');
@@ -28,7 +29,7 @@ async function setup() {
 }
 async function workspace() {
   const f = await setup(); const sku = ('BR-UX4-' + crypto.randomUUID()).toUpperCase();
-  const product = (await pool.query(`INSERT INTO products(full_sku,base_sku,category,weight,total_price_uah,details)
+  const product = (await insertProductFixture(pool,`INSERT INTO products(full_sku,base_sku,category,weight,total_price_uah,details)
     VALUES($1,$1,'BR',10,100,'{"answers":{}}') RETURNING *`, [sku])).rows[0];
   const session = await sessions.createSession({ title: 'Каталог UX4', creationKey: crypto.randomUUID(), settings: {
     requestContract: 'template-v1', fromSku: sku, toSku: sku, selection: { mode: 'active' } } }, options(f.owner));

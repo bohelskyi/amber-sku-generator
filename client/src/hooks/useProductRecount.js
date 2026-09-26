@@ -325,6 +325,7 @@ export function useProductRecount({
         recountManualPriceUah
       ),
     });
+    if (!requestMode) payload.sourceStateSignature = recountPreview?.source?.stateSignature;
     return requestMode && useDecisionPreview
       ? buildCorrectionRequestPayload(payload, pricingDecision, recountPreview?.previewSignature)
       : payload;
