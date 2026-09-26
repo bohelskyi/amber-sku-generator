@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { exportsApi } from '../../api/exports-api';
 import { downloadBlob } from '../../lib/download';
 import { getApiError } from '../../lib/http-error';
+import { subscribeExportReviewChanged } from '../../lib/export-review-events';
+import { createExportViewMemory } from '../../lib/export-view-memory';
+import { usePriceExportController } from './usePriceExportController';
 
 export function useProductExportController({ enabled = true, canCreate = true, principalLifetime } = {}) {
   const [exportStatus, setExportStatus] = useState(null);
@@ -11,9 +14,12 @@ export function useProductExportController({ enabled = true, canCreate = true, p
   const [isExportLoading, setIsExportLoading] = useState(false);
   const [exportPreview, setExportPreview] = useState(null);
   const [exportSnapshot, setExportSnapshot] = useState(null);
+  const [exportReviewStale, setExportReviewStale] = useState(false);
+  const [exportProductChanged, setExportProductChanged] = useState(false);
+  const [exportDisplayMemory] = useState(() => new Map());
+  const [exportReviewView] = useState(createExportViewMemory);
   const [priceExportStatus, setPriceExportStatus] = useState(null);
   const [priceExportError, setPriceExportError] = useState('');
-  const [isPriceExportLoading, setIsPriceExportLoading] = useState(false);
   const [templateMode, setTemplateMode] = useState(false);
   const [templateSelection, setTemplateSelection] = useState({ mode: 'active' });
   const [pendingCreate, setPendingCreate] = useState(null);
@@ -24,8 +30,30 @@ export function useProductExportController({ enabled = true, canCreate = true, p
   const alive = useRef(true);
   const current = useCallback(() => alive.current && enabled && principalLifetime?.valid !== false, [enabled, principalLifetime]);
   const requested = useRef({ templateMode: false, selection: { mode: 'active' }, fromSku: '', toSku: '' });
+  const markExportReviewStale = useCallback((event) => { if (current()) { generation.current++; setExportReviewStale(true); if (event?.kind === 'product') setExportProductChanged(true); } }, [current]);
+  useEffect(() => subscribeExportReviewChanged((event) => {
+    if (!current()) return;
+    markExportReviewStale();
+    if (event?.kind === 'product') {
+      setExportProductChanged(true);
+      for (const view of exportDisplayMemory.values()) view.update({ productChanged: true });
+    }
+  }), [markExportReviewStale, current, exportDisplayMemory]);
+  useEffect(() => {
+    let live = true;
+    const checkIdentity = async () => {
+      const evidence = previewEvidence.current; const ticket = generation.current;
+      if (!current() || !evidence || pending.current || busy.current || exportSnapshot) return;
+      try {
+        const response = await exportsApi.preview(evidence.intent);
+        if (live && current() && ticket === generation.current && response.data.tableFingerprint !== evidence.response.tableFingerprint) markExportReviewStale();
+      } catch { if (live && current() && ticket === generation.current) markExportReviewStale(); }
+    };
+    window.addEventListener('focus', checkIdentity);
+    return () => { live = false; window.removeEventListener('focus', checkIdentity); };
+  }, [current, exportSnapshot, markExportReviewStale]);
 
-  const invalidate = () => { generation.current++; previewEvidence.current = null; setExportPreview(null); };
+  const invalidate = () => { generation.current++; previewEvidence.current = null; exportReviewView.clear(); setExportProductChanged(false); setExportPreview(null); };
   const updateTemplateMode = (value) => { if (!current()) return; requested.current.templateMode = value; setTemplateMode(value); invalidate(); };
   const updateTemplateSelection = (value) => { if (!current()) return; requested.current.selection = { ...value }; setTemplateSelection(value); invalidate(); };
 
@@ -81,7 +109,7 @@ export function useProductExportController({ enabled = true, canCreate = true, p
     busy.current = true;
     setIsExportLoading(true);
     setExportError('');
-    setExportPreview(null);
+    setExportReviewStale(true);
     try {
       const intent = { ...(mode === 'new' ? { mode: 'new' } : getRangePayload()),
         ...(requested.current.templateMode ? { requestContract: 'template-v1', selection: { ...requested.current.selection } } : {}) };
@@ -89,6 +117,8 @@ export function useProductExportController({ enabled = true, canCreate = true, p
       if (!current() || ticket !== generation.current) return;
       previewEvidence.current = { intent, response: response.data };
       setExportPreview(response.data);
+      setExportReviewStale(false);
+      setExportProductChanged(false);
       setExportSnapshot(null);
     } catch (error) {
       if (current() && ticket === generation.current) setExportError(getApiError(error));
@@ -101,14 +131,16 @@ export function useProductExportController({ enabled = true, canCreate = true, p
   const handleCreateSnapshot = async () => {
     if (!current() || !canCreate || busy.current || exportSnapshot) return;
     if (!pending.current) {
+      if (exportReviewStale) return;
       const evidence = previewEvidence.current;
       if (!evidence || evidence.response.errors?.length || !evidence.response.representedCount) return;
       const { intent, response } = evidence;
       if (intent.requestContract === 'template-v1' && !response.previewToken) return;
-      const payload = intent.requestContract === 'template-v1'
+      const requestedPayload = intent.requestContract === 'template-v1'
         ? { ...intent, previewToken: response.previewToken }
         : response.mode === 'new' ? { mode: 'new', fromSku: response.range.fromSku, toSku: response.range.toSku } : intent;
-      if (intent.requestContract !== 'template-v1' && response.previewExpectation) payload.previewExpectation = response.previewExpectation;
+      const payload = { ...requestedPayload, ...(intent.requestContract !== 'template-v1' && response.previewExpectation
+        ? { previewExpectation: response.previewExpectation } : {}) };
       pending.current = { payload, idempotencyKey: globalThis.crypto?.randomUUID?.()
         || `export-${Date.now()}-${Math.random().toString(36).slice(2)}`, evidence: response };
       setPendingCreate(pending.current);
@@ -126,8 +158,8 @@ export function useProductExportController({ enabled = true, canCreate = true, p
       try {
         const stored = await exportsApi.getSnapshot(response.data.id);
         if (current() && stored.data?.id === response.data.id) setExportSnapshot({ ...stored.data, capturedRange: operation.evidence.range });
-      } catch (readError) {
-        if (current()) setExportError('Знімок створено. Не вдалося прочитати збережену таблицю: ' + getApiError(readError));
+      } catch {
+        if (current()) setExportError('Файли створено, але таблицю не вдалося завантажити.');
       }
     } catch (error) {
       if (!current()) return;
@@ -159,6 +191,7 @@ export function useProductExportController({ enabled = true, canCreate = true, p
       downloadBlob(blob, fileNameMatch?.[1] || manifest?.fileName || `magento-${groupCode}.csv`, {
         documentRef: document, urlApi: window.URL,
       });
+      return true;
     } catch (error) {
       if (!current()) return;
       if (error.response?.data instanceof Blob) {
@@ -173,50 +206,14 @@ export function useProductExportController({ enabled = true, canCreate = true, p
       } else {
         setExportError(getApiError(error));
       }
+      return false;
     } finally {
       if (current()) setIsExportLoading(false);
     }
   };
 
-  const handlePriceExportCsv = async () => {
-    if (!current() || !canCreate) return;
-    setIsPriceExportLoading(true);
-    setPriceExportError('');
-    try {
-      const key = globalThis.crypto?.randomUUID?.()
-        || `price-export-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const snapshotResponse = await exportsApi.createPriceSnapshot(key);
-      if (!current()) return;
-      const snapshot = snapshotResponse.data;
-      const response = await exportsApi.downloadPriceSnapshot(snapshot.id);
-      if (!current()) return;
-      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
-      const fileNameMatch = response.headers['content-disposition']?.match(/filename="(.+)"/);
-      downloadBlob(
-        blob,
-        fileNameMatch?.[1] || snapshot.fileName || 'amber-price-export.csv',
-        { documentRef: document, urlApi: window.URL }
-      );
-      await exportsApi.confirmPriceSnapshot(snapshot.id);
-      if (!current()) return;
-      await fetchExportStatus();
-    } catch (error) {
-      if (!current()) return;
-      if (error.response?.data instanceof Blob) {
-        const errorText = await error.response.data.text();
-        if (!current()) return;
-        try {
-          setPriceExportError(JSON.parse(errorText).error || 'Не вдалося експортувати ціни.');
-        } catch {
-          setPriceExportError('Не вдалося експортувати ціни.');
-        }
-      } else {
-        setPriceExportError(getApiError(error));
-      }
-    } finally {
-      if (current()) setIsPriceExportLoading(false);
-    }
-  };
+  const priceWorkflow = usePriceExportController({ current, canCreate, onConfirmed: fetchExportStatus });
+  const handlePriceExportCsv = priceWorkflow.create;
 
   const handleConfirmSnapshot = async () => {
     if (!current() || !canCreate || busy.current || !exportSnapshot?.id || exportSnapshot.status === 'confirmed') return;
@@ -228,6 +225,8 @@ export function useProductExportController({ enabled = true, canCreate = true, p
       await exportsApi.confirmSnapshot(snapshotId);
       if (!current()) return;
       setExportSnapshot((previous) => previous?.id === snapshotId ? { ...previous, status: 'confirmed' } : previous);
+      const stored = await exportsApi.getSnapshot(snapshotId);
+      if (current()) setExportSnapshot(stored.data);
       await fetchExportStatus();
     } catch (error) {
       if (current()) setExportError(getApiError(error));
@@ -238,6 +237,9 @@ export function useProductExportController({ enabled = true, canCreate = true, p
   };
 
   return {
+    exportProductChanged, exportReviewView, exportDisplayMemory,
+    exportReviewStale, markExportReviewStale, priceWorkflow,
+    startNewExport: () => { if (current() && !busy.current && !pending.current) { setExportSnapshot(null); invalidate(); setExportError(''); } },
     templateMode,
     setTemplateMode: updateTemplateMode,
     templateSelection,
@@ -256,7 +258,7 @@ export function useProductExportController({ enabled = true, canCreate = true, p
     handleConfirmSnapshot,
     handlePriceExportCsv,
     isExportLoading,
-    isPriceExportLoading,
+    isPriceExportLoading: priceWorkflow.busy,
     priceExportError,
     priceExportStatus,
     setExportError,

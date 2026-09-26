@@ -55,7 +55,7 @@ function relevantReferences(definition, evidence, products) {
   };
 }
 
-async function capturePublished(client, intent, resolved, exportData, newRange) {
+async function capturePublished(client, intent, resolved, exportData, newRange, presentation = {}) {
   const evidence = await loadSourceEvidence(client);
   const diagnostics = validateSourceReferences(resolved.compiled.definition, evidence);
   if (diagnostics.length) throw error(422, 'TEMPLATE_SOURCE_INVALID', 'Unresolved or conflicting source references', { diagnostics });
@@ -72,7 +72,7 @@ async function capturePublished(client, intent, resolved, exportData, newRange) 
   });
   const binding = { intent, effective: resolved.effective, inputFingerprint,
     range: exportData.range, cursor: newRange ? String(newRange.cursor) : null };
-  return { binding, magento: pureCall(() => evaluateBatch(resolved.compiled, supported.products)) };
+  return { binding, magento: pureCall(() => evaluateBatch(resolved.compiled, supported.products, undefined, presentation)) };
 }
 
 module.exports = { protectAuthority, releaseAuthority, resolvePublished, capturePublished };

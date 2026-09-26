@@ -8,7 +8,12 @@ export function createExportsApi(client = api) {
     createSnapshot: (payload, idempotencyKey) => client.post('/export/snapshots', payload, {
       headers: { 'Idempotency-Key': idempotencyKey },
     }),
-    getSnapshot: (snapshotId) => client.get(`/export/snapshots/${snapshotId}`),
+    getSnapshot: (snapshotId) => client.get(`/export/snapshots/${snapshotId}`, { params: { includeRows: false } }),
+    getHistory: (params) => client.get('/export/history', { params }),
+    readMagentoArtifact: (snapshotId, groupCode) => client.get(`/export/snapshots/${snapshotId}/magento/${groupCode}/csv`, { responseType: 'text' }),
+    readPriceArtifact: (snapshotId) => client.get(`/price-export/snapshots/${snapshotId}/csv`, { responseType: 'text' }),
+    getPriceSnapshot: (snapshotId) => client.get(`/price-export/snapshots/${snapshotId}`),
+    previewPrices: () => client.get('/price-export/preview'),
     downloadMagentoArtifact: (snapshotId, groupCode) => client.get(
       `/export/snapshots/${snapshotId}/magento/${groupCode}/csv`,
       { responseType: 'blob' }

@@ -6,6 +6,7 @@ const destinations = [
   { to: '/exports/shared', label: 'Спільні зі мною' },
   { to: '/exports/invitations', label: 'Запрошення' },
   { to: '/exports/prices', label: 'Оновлення цін' },
+  { to: '/exports/history', label: 'Історія файлів' },
 ];
 
 export function ExportWorkspaceShell({ children }) {

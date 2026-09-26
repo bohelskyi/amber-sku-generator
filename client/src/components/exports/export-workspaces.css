@@ -1,0 +1,21 @@
+.export-workspace-list { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--border); }
+.export-workspace-row { display: grid; grid-template-columns: minmax(220px, 1.1fr) minmax(220px, 1fr) auto; gap: 16px; padding: 18px 4px; border-bottom: 1px solid var(--border); align-items: start; }
+.export-workspace-row h3 { font-weight: 650; font-size: 1rem; margin-bottom: 6px; overflow-wrap: break-word; }
+.export-workspace-row p { margin-top: 5px; }
+.export-workspace-meta, .export-workspace-identity p { font-size: .875rem; color: var(--text-muted); }
+.export-workspace-row > *, .export-session-header > * { min-width: 0; }
+.export-workspace-meta { overflow-wrap: anywhere; }
+.export-workspace-open { display: flex; flex-direction: column; align-items: start; gap: 10px; }
+.export-workspace-open details { max-width: 180px; font-size: .75rem; overflow-wrap: anywhere; }
+.export-workspace-status { display: inline-block; border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; font-size: .8125rem; font-weight: 600; background: var(--canvas, #f8fafc); }
+.export-invitation-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.export-session-header { display: flex; align-items: start; justify-content: space-between; gap: 16px; flex-wrap: wrap; border-bottom: 1px solid var(--border); padding-bottom: 16px; }
+.export-session-header h2 { font-size: 1.25rem; font-weight: 650; overflow-wrap: anywhere; }
+.export-participants { list-style: none; padding: 0; margin: 0; }
+.export-participants li { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding: 12px 0; }
+.export-participants li > div { min-width: 0; overflow-wrap: anywhere; }
+.export-participants button { flex-shrink: 0; }
+.export-recovery { padding: 14px 16px; background: #fffbeb; border-left: 3px solid var(--amber-500); }
+.export-recovery p + p { margin-top: 6px; }
+.export-share-dialog input, .export-share-dialog select { max-width: 100%; }
+@media (max-width: 850px) { .export-workspace-row { grid-template-columns: minmax(0, 1fr); gap: 10px; } .export-workspace-open { flex-direction: row; align-items: center; flex-wrap: wrap; } .export-participants li { align-items: start; flex-wrap: wrap; } }

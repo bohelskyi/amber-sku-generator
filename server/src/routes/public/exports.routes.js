@@ -7,14 +7,21 @@ const { getRequestMutationContext } = require('../../audit/mutation-context');
 const { requirePermission } = require('../../auth/authorization');
 const config = require('../../config/env');
 const { manifestProvenance } = require('../../services/export-templates/snapshot-binding');
+const { snapshotMetadata, getExportHistory } = require('../../services/export-history.service');
 const {
   confirmPriceExportSnapshot,
   createPriceExportSnapshot,
   getPriceExportSnapshot,
   getPriceExportStatus,
+  previewPriceExport,
 } = require('../../services/price-export.service');
 
 const router = express.Router();
+
+router.get('/export/history', requirePermission('exports.view'), async (req, res) => {
+  try { res.json(await getExportHistory(req.query, { mutationContext: getRequestMutationContext(req) })); }
+  catch (err) { res.status(err.statusCode || 400).json({ error: err.message }); }
+});
 
 router.get('/export/template-options', requirePermission('exports.view'), async (req, res) => {
   try {
@@ -90,13 +97,15 @@ router.post('/export/snapshots', requirePermission('exports.create'), async (req
 
 router.get('/export/snapshots/:id', requirePermission('exports.view'), async (req, res) => {
   try {
-    const snapshot = await getExportSnapshot(req.params.id, { mutationContext: getRequestMutationContext(req) });
+    const includeRows = req.query.includeRows !== 'false';
+    const options = { includeRows, mutationContext: getRequestMutationContext(req) };
+    const snapshot = await getExportSnapshot(req.params.id, options);
     res.json({
+      ...snapshotMetadata(snapshot, 'product', await getMagentoArtifacts(snapshot.id, options)),
       id: snapshot.id,
       status: snapshot.status,
       rowCount: Number(snapshot.row_count),
       generatedAt: snapshot.generated_at,
-      artifacts: await getMagentoArtifacts(snapshot.id, { includeRows: true, mutationContext: getRequestMutationContext(req) }),
       ...(snapshot.export_session_id ? { sessionId: snapshot.export_session_id, accessEpoch: snapshot.session_access_epoch } : {}),
       ...(snapshot.template_label ? { templateLabel: snapshot.template_label } : {}),
       ...manifestProvenance(snapshot),
@@ -145,6 +154,16 @@ router.get('/price-export/status', requirePermission('exports.view'), async (_re
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
+});
+
+router.get('/price-export/preview', requirePermission('exports.view'), async (_req, res) => {
+  try { res.json(await previewPriceExport()); }
+  catch (err) { res.status(err.statusCode || 400).json({ error: err.message }); }
+});
+
+router.get('/price-export/snapshots/:id', requirePermission('exports.view'), async (req, res) => {
+  try { res.json(snapshotMetadata(await getPriceExportSnapshot(req.params.id, { includeRows: false }), 'price')); }
+  catch (err) { res.status(err.statusCode || 400).json({ error: err.message }); }
 });
 
 router.post('/price-export/snapshots', requirePermission('exports.create'), async (req, res) => {

@@ -1,6 +1,6 @@
 # Export UX/UI Redesign Plan
 
-**Status: UX-1 completed, manually accepted by the operator and committed. UX-2 functional behavior is manually accepted; the focused operator-language / frozen-name-copy polish is recorded in section 19 and awaits visual acceptance. UX-3 / UX-4 have not started.**
+**Status: UX-1 accepted. UX-2 remains complete for roadmap purposes and was not reopened. The UX-3 PostgreSQL blocker is resolved; its bounded stale-preview continuity fix is included in UX-4. UX-4 lists, sharing, history and recovery are implemented and verified by the full suites, pending manual operator visual acceptance. UX-5 has not started. See section 25 for current evidence; earlier sections retain their historical checkpoint status.**
 
 Document: `docs/EXPORT_UX_REDESIGN_PLAN.md`.
 
@@ -1681,3 +1681,425 @@ Final verification on Node **20.20.2**, with the external preload guard verifyin
 - Final status: **27 modified tracked + 23 untracked files**, including all preserved earlier work; **nothing staged**. Branch and HEAD unchanged. No staging, commits, pushes or branch operations.
 
 Implementation and automated verification are complete. Stop here for operator manual acceptance; the browser/layout checks above remain open. UX-3/UX-4 have not started.
+
+## 24. UX-3 execution record — 2026-09-25
+
+### Roadmap and preserved scope
+
+The operator accepted UX-2 functionality sufficiently to proceed. **UX-2 is
+complete for roadmap purposes.** The known usability debt is explicitly retained
+for integrated final UX/polish: **intent-based rule authoring can still be
+simplified further**. This work does not reopen the Template Builder, alter its
+definitions/rules or change its sample/editor grids. The future Magento
+schema/attribute synchronization idea remains a post-redesign integration epic;
+no Magento API integration is implemented. UX-4 collaboration/list redesign has
+not started and must consume this shared history contract later.
+
+### Inspection before edits
+
+| Item | Recorded baseline |
+| --- | --- |
+| Branch | `feature/magento-export-constructor` |
+| HEAD | `d5847ffedbc594dcd14ff60715ed6ce98cb28c9e` |
+| `git status --short` | Empty; no pre-existing working-tree changes |
+| Migration inventory | 39 migrations, contiguous `000`–`038`; none changed or added |
+| Relevant persisted domains | `013_export_snapshots`, `027_export_and_sku_schema_actor_attribution`, `031_product_price_reexports`, `032_price_change_requests_and_price_exports`, `033_magento_snapshot_artifacts`, `034_product_magento_manual_names`, `035_export_templates`, `036_export_snapshot_template_binding`, `037_shared_export_sessions`, `038_editable_export_columns` |
+| Provider/controller | `AuthProvider → AuthGate → RouterProvider → Workspace → ExportWorkflowProvider → route content`; `useProductExportController` remains above route content |
+| Workspace routes | `/exports`, `/exports/prices`, `/exports/new/template`, `/exports/sessions/:sessionId?`, `/exports/shared`, `/exports/invitations`; minimal product handoff goes to existing `/` |
+| Existing product endpoints inspected | `/api/export/status`, `/template-options`, `/preview`, `/snapshots`, `/snapshots/:id`, `/snapshots/:id/magento/:group/csv`, `/snapshots/:id/csv`, `/snapshots/:id/confirm` (paths after status relative to `/api/export`) |
+| Existing session/price boundaries | Session save, preview, prepare, generate and membership predicates; price status/create/stored CSV/confirm remain separate server commands |
+
+The current implementation, migrations, rendered tests and export/source-support/
+session/price integration suites were inspected alongside the required project,
+RBAC, migration, export and UX-plan documents. Ordinary preview already returned
+authoritative provisional CSV and `tableFingerprint`/`previewExpectation`; it did
+not require a snapshot to display a table. Published binding and session durable
+preparation remained the existing generation authority. Existing legacy failed
+products were omitted from provisional CSV, requiring a separate projection.
+
+### Implemented workspace behavior
+
+- **ПОПЕРЕДНІЙ ПЕРЕГЛЯД** now displays actual server-finalized cells for ordinary
+  export and published/session export. It has checked time, explicit stale state,
+  coherent publication labels/IDs and explicit recheck. Successful relevant writes
+  invalidate review; focus probes compare the existing server fingerprint only.
+- One `ExportDataGrid` supports exact file/header order, Main/EN, a sticky
+  SKU/language/readiness rail, internal horizontal scrolling, SKU and attention/
+  language filters, local keyboard-accessible column widths, 50-row pages, exact
+  long-value dialogs and roving cell focus. No visual sort or request/range changes.
+- The server collects diagnostic values and issue ownership during the existing
+  lazy evaluator/mapper. Failed-only categories/products stay visible without
+  fabricating CSV rows. `final`, `blank`, `provisional` and `not-evaluated` states
+  are distinct. Cell/column evidence marks cells; unknown source/row evidence stays
+  on the row. Issues use one compact summary with details and authorized handoff.
+- Existing manual-name and product/decode workflows are reused. `exportSku` only
+  offers an explicit exact-SKU decode; dirty product work blocks that action.
+  No inline editing, automatic correction or successor substitution is added.
+- Session save/check/prepare/capture remain separate. The next relevant action
+  is visually primary. Replacement of saved preparation stays explicit and
+  secondary; unknown original operations retain their original recovery identity.
+- Successful capture replaces preview with **ЗБЕРЕЖЕНІ ФАЙЛИ**, freezing range,
+  publication and preparation. It shows stored range/provenance/counts/status/
+  attribution and reads selected immutable artifacts lazily. Failed table loading
+  offers only reading retry, never another create action. Historical missing
+  artifacts are not reconstructed. Stored results have no live-refresh control.
+- Selected-file download is separate from confirmation and says only that bytes
+  were handed to the browser. **Завершити експорт** explains actual cursor/revision
+  consequences and explicitly does not assert Magento import success. Confirmation
+  needs no previous download; time/actor come from stored server metadata.
+- `/exports/prices` has no template/range. Explicit queue review → create → stored
+  `sku,price` table → download → **Підтвердити експорт цін** replaces combined
+  orchestration. Review explicitly freezes nothing. A changed stored file is shown
+  with a notice before confirmation; table-read retry never recreates it. Only
+  the existing confirmation command advances captured dedicated revisions.
+- Basic **Історія файлів** at `/exports/history` opens product and price snapshots
+  through `/exports/history/:stream/:snapshotId`. Generated files survive reload
+  through this read model. This is not a second session/collaboration status model.
+
+### Exact read-only API additions
+
+See [Exports — UX-3 contracts](EXPORTS.md#ux-3-authoritative-review-stored-files-and-shared-history)
+for the complete field descriptions and compatibility behavior.
+
+| Contract | Exact boundary |
+| --- | --- |
+| Existing product/session preview | Adds `checkedAt`, `review:{version:"export-review-v1",identity:tableFingerprint,files}` and published `templateLabel` outside binding. Files contain group/name/profile/fileName, exact headers and rows with canonical product/row positions, Main/EN identity, readiness, issues and `{state,value}` cells. Preparation returns this transiently, not in persisted summary. |
+| `GET /api/export/history` | `stream=all|product|price`, `scope=accessible|mine`, `status=all|generated|confirmed`, `limit` default20/max50, opaque `after`; `{items,next}`. Invalid filters/cursors are422. Descending immutable creation time + ID, then stream for cross-table ID ties; microsecond cursor precision and filter binding. |
+| Shared history/result metadata | Stored ID, stream, generated/confirmed status and time, nullable creator/confirmer, product/CSV counts, captured product range, actual profile/publication provenance and available artifact summaries. Unknown historical creator/provenance stays unknown; no audit-derived owners or fake sessions. |
+| `GET /api/export/snapshots/:id?includeRows=false` | Metadata without artifact CSV SQL selection; omitted parameter retains prior response compatibility. Existing stored group CSV route provides selected-file bytes and independently enforces access. |
+| `GET /api/price-export/preview` | `{checkedAt,rowCount,csvContent}` from current eligible queue, product-ID order, exact finalized `sku,price`; no token, mutation or frozen queue. |
+| `GET /api/price-export/snapshots/:id` | Safe stored-result metadata and one `prices` artifact summary; no internal captured revision list. Existing `/:id/csv` remains stored-byte access. |
+
+Every operational read requires authenticated active `exports.view`; create and
+confirm remain `exports.create` plus existing CSRF. History uses canonical tables
+and checks effective authorization in the query. Session-linked rows require owner
+or accepted membership, exactly as direct stored-result reads; administrator is
+not a bypass and pending invitations are insufficient. `mine` filters only recorded
+creator ID, never null history. Opening and every artifact read reauthorize.
+
+These are observational additions. Product-ID normalization/order, exclusions,
+cursor/exposure/revision rules, signed binding/ordinary expectation identity,
+idempotency/retry, immutable publication/snapshot identity, capture lock ordering,
+transactional result/artifact/audit behavior, source support, exact CSV and formula
+neutralization remain in their existing authoritative paths. The observer neither
+eagerly evaluates skipped branches nor supplies capture rows. It fails closed at
+the existing 64 MiB output ceiling without raising limits or splitting ranges.
+
+### Performance evidence
+
+Environment: Windows, AMD Ryzen 9 9950X3D, exact Node **20.20.2**. A preload guard
+outside the repository verified the executable/version in npm and child processes.
+One complete preview remains the consistency boundary; no server paging. Stored
+files parse lazily and memoize within the authorized result/file identity. A
+slice-based review CSV scanner avoids per-character concatenation nodes for long
+quoted values, without changing the Template Builder parser.
+
+Synthetic test data uses two files, Main/EN rows, 100/1,000/5,000 products, 32/64
+columns and long quoted multiline SEO/category values. Total fixture bytes stay
+below the existing ceiling. Standalone measured parsing results:
+
+| Products | 32 columns | 64 columns |
+| --- | --- | --- |
+| 100 | 7.3 ms | 2.9 ms |
+| 1,000 | 36.1 ms | 33.5 ms |
+| 5,000 | 108.3 ms | 126.5 ms |
+
+At 5,000 × 64 across two files: 31,836,694 UTF-8 bytes, cached read0.009ms,
+filter0.40ms; cumulative test-process peak RSS260.5MiB (includes fixture creation,
+both parsed files and prior fixtures; not an isolated browser allocation).
+Chrome development-build React Profiler with 5,000 products/two files/64 columns,
+50 visible rows: initial grid177.8ms, next page68.5ms, SKU filter36.6ms. This does
+not justify virtualization in this change. Operator-machine acceptance remains
+separate from these synthetic measurements.
+
+### Verification and remaining acceptance
+
+- Focused UX-3/ordinary/template/session/workspace rendered set: **74/74**.
+- Complete client: **149/149** model and **272/272** rendered tests, **25** rendered
+  files. Existing UX-1 and UX-2 suites remain included and pass. An earlier full
+  run had one timing failure in the unchanged repricing characterization; its
+  isolated15-test file and the final complete run passed. No repricing code changed.
+- Client lint and production build pass. Full server unit/pure suite **516/516**;
+  server lint has no errors and the two pre-existing unused-variable warnings in
+  `product-timeline.js`. New integration case syntax was checked.
+- New server regressions cover failed-only groups, blank/provisional/unknown cells,
+  finalized formula/quoted text, authority/metrics equality and lazy source support.
+  New integration cases cover readonly effects, immutable metadata/bytes, precise
+  cross-stream pagination, null authors, private-session membership and explicit
+  price creation/download/confirmation with later/out-of-order revisions. Existing
+  direct/template/session rollback/race suites are still in the integration runner.
+- **PostgreSQL integration is NOT verified.** The one canonical
+  `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d postgres-test`
+  failed because Windows forbade binding `127.0.0.1:55432` (“An attempt was made to
+  access a socket in a way forbidden by its access permissions”). No alternative
+  port/instance/database was tried. Canonical `stop postgres-test` completed after
+  the work. No useful HOME/OFFICE/production database was touched.
+- Browser tools were available for DOM/keyboard checks on a temporary offline
+  fixture entry using actual workspace components/controllers, with a fail-closed
+  in-memory API adapter and no DB connection. Widths **1440, 1920, 390** were checked;
+  page scrollWidth did not exceed viewport. Checked ordinary preview/six category
+  tabs, failure filter/cell handoff, long exact value, Escape/focus return, sticky
+  rail during horizontal scroll, stored transition/no live refresh, history, price
+  review/changed stored values and both explicit confirmation dialogs. These are
+  synthetic UI checks, not real API integration or Magento acceptance.
+- Screenshot capture twice timed out in the browser backend; actual visual
+  screenshots could not be inspected. **Manual operator visual acceptance remains
+  required**, particularly density/spacing at all three sizes, real stored sessions,
+  representative production-like diagnostics and full end-to-end flows after the
+  canonical disposable database infrastructure is repaired. Temporary fixture files
+  and server were removed/stopped; browser viewport override was reset.
+- `git diff --check` passes. No migration, dependency, package lock, environment,
+  deployment or configuration file changes. No staging, commits, pushes or branch
+  switching/reset/clean/stash/merge/rebase/cherry-pick operations.
+
+Implementation is handed off for manual operator acceptance with the explicit
+integration infrastructure blocker above. UX-4 remains unstarted. The final
+working-tree inventory is **24 modified tracked files + 16 new files; 0 staged**,
+all on the unchanged baseline branch/HEAD.
+
+Changed-file inventory (repository-relative):
+
+- New client review/stored surfaces: `client/src/components/exports/ExportDataGrid.jsx`,
+  `ExportReview.jsx`, `StoredSnapshot.jsx`, `StoredResult.jsx`,
+  `PriceExportWorkspace.jsx`, `export-data-grid.css` in that same directory.
+- New client controller/read helpers: `client/src/hooks/product/usePriceExportController.js`,
+  `client/src/lib/export-review-events.js`, `client/src/lib/export-review-presentation.js`,
+  `client/src/pages/ExportHistoryPage.jsx`.
+- Existing client integration: `client/src/api/exports-api.js`,
+  `client/src/components/app/ExportTools.jsx`,
+  `client/src/components/workspace/ExportWorkspaceShell.jsx`,
+  `client/src/hooks/product/useProductExportController.js`, `client/src/lib/api.js`,
+  `client/src/pages/AppPage.jsx`, `ExportSessionsPage.jsx`, `ExportsPage.jsx`.
+- New server projections: `server/src/presenters/export-review.js`,
+  `server/src/services/export-history.service.js`.
+- Existing server integration: `server/src/routes/endpoint-manifest.js`,
+  `server/src/routes/public/exports.routes.js`,
+  `server/src/services/export-sessions.service.js`,
+  `server/src/services/export-templates/evaluate.js`,
+  `server/src/services/export-templates/published-capture.js`,
+  `server/src/services/export.service.js`, `server/src/services/magento-products-v1.js`,
+  `server/src/services/price-export.service.js`, `server/src/utils/csv.js`.
+- New tests: `client/test/export-ux3.test.jsx`,
+  `client/test/export-review-performance.test.js`, `server/test/export-review.test.js`,
+  `server/integration-test/12-export-ux3.cases.js`.
+- Updated tests/runner: `client/test/controlled-template-export.test.jsx`,
+  `client/test/export-sessions-ui.test.jsx`, `client/test/export-workspace-routes.test.jsx`,
+  `client/test/magento-export-ui.test.jsx`, `server/integration-test/critical-flows.test.js`.
+- Documentation: `docs/EXPORT_UX_REDESIGN_PLAN.md`, `docs/EXPORTS.md`.
+
+## 25. UX-4 execution record and UX-3 carry-over — 2026-09-25
+
+### Starting evidence and prerequisite verification
+
+The authoritative starting branch was `feature/magento-export-constructor`, HEAD
+`d5847ffedbc594dcd14ff60715ed6ce98cb28c9e`. The working tree already contained
+**24 modified tracked files and 16 new UX-3 files**, with nothing staged. Initial
+status, tracked diff and per-file hashes were recorded outside the repository.
+All existing files were preserved. Migration inventory is still **39 files,
+000–038**; no migration was edited or added. Current code, migrations and tests
+were read alongside AGENTS, PROJECT_CONTEXT, this plan, EXPORTS, AUTH_RBAC,
+OPERATIONS, DATABASE_MIGRATIONS and SHARED_EXPORT_SESSIONS before implementation.
+
+UX-4 began only after the blocked UX-3 full PostgreSQL suite passed **201/201**.
+Windows excluded `55373–55472`, including the unbound port55432. IPv4/IPv6 excluded
+ranges and listeners were inspected; **56432** was outside exclusions and a
+temporary loopback bind succeeded. Docker Compose v5.1.1 supported this external,
+non-committed override, merged after the two existing repository Compose files:
+
+```yaml
+services:
+  postgres-test:
+    ports: !override
+      - "127.0.0.1:56432:5432"
+```
+
+Only `postgres-test` was started, with `--no-deps`; resolved configuration retained
+`postgres:16-alpine`, disposable tmpfs storage and no persistent volumes. The exact
+test connection used throughout was:
+
+```text
+TEST_DATABASE_URL=postgresql://amber_test:amber_test_local_only@127.0.0.1:56432/amber_test
+```
+
+Before imports, the URL suffix and actual `current_database()` were both checked:
+**amber_test**, ending exactly in `_test`; current_user was `amber_test`, server
+PostgreSQL16.15. `DATABASE_URL` in test processes matched the same disposable URL.
+No Windows exclusions, shared Compose configuration, production ports or useful
+database were changed. Readiness was awaited on this same service; there was no
+fallback database. The service was stopped after each integration run.
+
+### Routes, workspace composition and read models
+
+The existing `/exports`, `/exports/prices`, `/exports/sessions`,
+`/exports/sessions/:sessionId`, `/exports/shared`, `/exports/invitations`,
+`/exports/history`, `/exports/history/:stream/:snapshotId` and
+`/exports/new/template` routes remain. UX-1 routes and UX-3 stored-table components
+are reused. Provider placement remains AuthProvider → AuthGate → router Workspace
+→ ExportWorkflowProvider → route content. Session controllers stay local to
+ExportSessionsPage; the provider retains only principal-scoped display memory and
+the existing ordinary/price workflow controllers. No browser storage was added.
+
+- **Мої експорти / Спільні зі мною** use compact responsive list rows: title,
+  human status, owner, accepted participant count, authoritative publication,
+  requested/captured range, available files, confirmation, creation time and last
+  recorded action. UUID/permalink and raw states are secondary details. Shared
+  means accepted membership; opening reads the same durable session.
+- The additive `GET /api/export/sessions?order=recent` mode orders the authorized
+  set by immutable `(created_at DESC,id DESC)`, retaining microseconds in an opaque
+  scope-bound cursor. It limits before metadata projection, default20/max50. The
+  old omitted-order UUID cursor mode remains compatible. There is no page-local
+  sort and mutable activity is never a pagination key. New creations appear after
+  an explicit first-page refresh; intervening activity cannot move existing rows
+  across page boundaries. Membership changes still take effect on each read.
+- `export-session-list.js` projects existing attempts, publication labels,
+  accepted/pending counts, audit/member/attempt/session/confirmation timestamps and
+  safe artifact metadata. **Остання зафіксована дія** is the maximum existing
+  recorded timestamp, not presumed human activity or last read. Pending invitations
+  retain exactly the prior minimal ID/title/owner/epoch/state response, without
+  this private metadata projection.
+- The UX-3 `snapshotMetadata` presenter is reused for list/detail stored results;
+  history continues to use the sole `GET /api/export/history` contract. Product
+  and price identity/status/attribution/artifact availability stay shared. Null
+  creators display **Автор невідомий**; historical unlinked files acquire no
+  session, owner or regenerated artifact. History filters still use that contract.
+
+### Sharing, status and recovery
+
+**Поділитися** opens the existing accessible modal primitive with owner, accepted
+members and pending invitations. The owner searches local users, selects and
+reviews an exact identity, then sends an in-app invitation. Labels are **Власник**,
+**Приєднався**, **Запрошено**. Joining explicitly says it opens the same export,
+creates/confirms no files and grants no global permission. Revoke and leave have
+focused confirmation views explaining future access and irretrievable downloads
+or preservation of the session. Owner-only authority, self-revoke denial, original
+target/access/member epochs and existing leave/reinvite rules are unchanged.
+
+Display mapping is evidence-driven and introduces no persisted status enum:
+
+| Evidence | Display |
+| --- | --- |
+| Unsaved local fields | Чернетка |
+| No current loaded review; stale or unusable saved preparation | Потрібна перевірка |
+| Ready loaded review without saved preparation | Перевірено · перевірку не збережено |
+| Ready loaded table matching saved preparation | Готовий до створення файлів |
+| Executing marker plus current server lock evidence | Створюються файли |
+| Stored generated snapshot | Файли створено |
+| Stored confirmed snapshot | Завершено |
+| Failed/interrupted/uncertain operation, conflict or current errors | Потрібна увага |
+
+Lists do not probe locks: an executing marker alone is attention, not proof that
+generation is running. A held non-generation lock gets neutral workspace wording.
+Opening stays observational. Saved preparation without rows shows recovery and a
+disabled first-create action, rather than a fictitious loading table. Explicit
+read-only review must match before first capture. For prepared state only, detail
+reports `preparationIssue: null|expired|unavailable` from the existing signer; this
+is an observation, never a new command gate, TTL policy or exposed proof. Stale or
+unusable preparations require explicit review and an explicit replacement dialog.
+
+Executing work exposes state/refresh without replacement creation. Interrupted,
+failed or uncertain creation offers **Повторити створення цього експорту**. The
+browser retains the original submitted revision/access epoch/attempt descriptor;
+later reads or preview results cannot replace it. Explicit accepted save or
+replacement remains the existing deliberate abandonment boundary. The server
+remains authoritative and can reject an original operation that was superseded.
+Stored results immediately read their exact saved files without evaluation.
+
+Conflicts retain exact dirty input and show newer saved fields separately. Access
+denial or changed membership clears private detail, tables and cached lists and
+invalidates late continuations. Principal A→B→A, logout/permission changes and
+same-user auth refresh retain their existing lifetimes. Visible/idle ten-second
+detail polling, focus and explicit refresh remain; overlapping reads are fenced.
+Recovery focus, modal containment/restoration and native keyboard list links are
+covered without changing global navigation or Template Builder.
+
+### UX-3 manual finding and bounded continuity fix
+
+The operator's UX-3 acceptance report supplied the concrete two-problem workflow:
+after a successful authorized product/name correction the old diagnostic review
+correctly becomes stale, but the next problem action was hard to recover. This
+carry-over is now implemented without locally patching rows or auto-refreshing:
+
+> Дані товару змінено. Попередній перегляд застарів.
+>
+> Оновіть перевірку, щоб продовжити роботу з актуальними проблемами.
+
+**Оновити перевірку** receives focus after the product editor releases its modal
+focus. Explicit successful recheck preserves only file/category, SKU search,
+attention filter, Main/EN filter, column widths and valid page. The fingerprint
+still remounts the grid so stale cells/details disappear. A shortened result
+clamps the page; an unloaded saved summary cannot reset it. The first fixed issue
+is not recreated, and the second current issue remains actionable. Display memory
+cannot carry preview proof or operation identity and cannot alter range/order or
+eligibility. The grid's existing data/CSV semantics and design were not redesigned.
+
+### Verification and acceptance boundary
+
+- Node **20.20.2** executable and every npm/test child runtime were verified by an
+  external preload guard; no runtime/dependency/configuration change was committed.
+- Final full server unit/pure suite: **516/516**. Server lint: no errors, the same
+  two pre-existing unused-variable warnings in `product-timeline.js`.
+- Focused UX-4 PostgreSQL suite: **4/4**. Final full canonical runner, including
+  new UX-4 cases and existing export/session/history/price/template/source-support,
+  membership/capture/confirmation races and CAS/ABA tests: **205/205**, no skips.
+  It used only port56432 / `amber_test`, verified before destructive imports, and
+  `postgres-test` was stopped afterward. UX-3 PostgreSQL verification is now green.
+- Client UX-4/carry-over: **17/17**; focused session/route/UX-4 set **48/48** before
+  the final additional denied-focus-read regression. Full client: **149/149 model**,
+  **289/289 rendered**, 26 rendered files. Client
+  lint/build pass. Existing UX-2 files/tests remain unchanged from this task's
+  initial hashes and remain included in the green suites.
+  One full run and the first isolated workflow run hit intermittent failures in
+  the unchanged repricing characterization (preview readiness/autosave and newer
+  scenario response). The final isolated workflow file passed **15/15** and the
+  final complete client command passed **149+289** without test or repricing code
+  changes. The failed-run logs were retained alongside the successful evidence.
+- New integration assertions cover private owned/accepted shared lists, minimal
+  pending invitations, same-session acceptance, decline/reinvite epochs,
+  revoke/leave/self-revoke/admin denial, stable microsecond pagination, truthful
+  activity, shared UX-3 metadata equality, absence of read side effects, signer
+  expiry observation, interrupted/non-generation-lock recovery and original retry
+  despite newer review. Existing independent-connection race tests remain included.
+- Rendered coverage includes exact recipient choice, pending/revoke/leave,
+  view-only controls, prepared/expired/executing/interrupted/stored recovery,
+  conflict input, principal changes and late private reads, shared history, and
+  the full two-problem authorized mutation → stale → explicit recheck sequence.
+- Browser DOM/keyboard/geometry checks used the actual shell/components/controllers
+  with a temporary fail-closed in-memory synthetic API adapter, never a useful DB.
+  Checked lists at **1440/1920/390**, sharing/search/select/invite/revoke, join,
+  view-only leave, prepared/executing/interrupted/stored recovery, reload,
+  back/forward route behavior, history and stale-review continuation. Page width
+  stayed within viewport; narrow rows stacked; modal Tab/Escape containment and
+  focus return worked. Browser testing found and fixed the unloaded-summary
+  pseudo-table and post-name-editor focus ordering.
+- Screenshot capture failed twice with a backend `Page.captureScreenshot` timeout.
+  Browser zoom shortcuts did not establish 200% zoom. **Visual pixel inspection,
+  real 200% zoom and final operator acceptance remain pending**, including real
+  representative sessions/roles/files. Synthetic checks are not manual acceptance.
+  Temporary files/server were removed/stopped and viewport override was reset.
+- `git diff --check` passes. No staging, commit, push, branch changes, migration,
+  dependency, shared configuration or useful-database writes. No UX-5 work or
+  weakening of authorization, capture/idempotency/snapshot/cursor/price semantics.
+  UX-4 new-file whitespace checks also pass. A broader no-index audit of inherited
+  untracked UX-3 files reported the pre-existing blank final line in
+  `client/src/lib/export-review-presentation.js`; its initial hash is unchanged
+  and it was preserved rather than changed incidentally.
+
+UX-4 delta relative to the preserved initial UX-3 working tree:
+
+- Client changes: `src/api/export-sessions-api.js`, `src/pages/ExportSessionsPage.jsx`,
+  `src/pages/ExportHistoryPage.jsx`, `src/components/app/ExportTools.jsx`,
+  `src/components/exports/{ExportDataGrid,ExportReview,StoredResult}.jsx`,
+  `src/hooks/product/useProductExportController.js`, `src/lib/api.js`,
+  `src/lib/export-review-events.js`, `test/export-sessions-ui.test.jsx`.
+- New client files: `src/components/exports/{ExportSessionList,SessionSharing}.jsx`,
+  `src/components/exports/export-workspaces.css`,
+  `src/hooks/product/useExportReviewView.js`, `src/lib/export-session-presentation.js`,
+  `src/lib/export-view-memory.js`, `test/export-ux4.test.jsx`.
+- Server changes: `src/services/export-sessions.service.js`,
+  `integration-test/critical-flows.test.js`; new
+  `src/services/export-session-list.js`, `integration-test/12-export-ux4.cases.js`.
+- Documentation: this record, `SHARED_EXPORT_SESSIONS.md` and the bounded continuity
+  clarification in `EXPORTS.md`. The final combined working tree is **26 modified
+  tracked files + 25 new files, 0 staged**, on the unchanged branch/HEAD.
+
+Implementation stops here for manual operator acceptance; UX-5 remains unstarted.

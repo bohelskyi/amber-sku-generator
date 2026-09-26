@@ -94,7 +94,7 @@ it('mounts every export destination without commands or admin reads, with native
   link('Експорт за опублікованим шаблоном'); await screen.findByLabelText('Назва експорту');
   expect(router.state.location.pathname).toBe('/exports/new/template');
   noMutations(); for (const mock of Object.values(templates)) expect(mock).not.toHaveBeenCalled();
-  expect(screen.queryByText('Історія файлів')).toBeNull();
+  expect(screen.getByRole('link', { name: 'Історія файлів' }).getAttribute('href')).toBe('/exports/history');
 });
 
 it.each([390, 1440])('renders one keyboard-reachable product handoff at %i px and navigates without export work', async (width) => {
@@ -177,7 +177,7 @@ it('keeps the original uncertain operation through product → exports → produ
   expect(exports.createSnapshot).toHaveBeenCalledTimes(1); expect(exports.preview).toHaveBeenCalledTimes(1);
   link('Перейти до експорту'); await screen.findByRole('button', { name: 'Повторити початкове створення' });
   expect(exports.createSnapshot).toHaveBeenCalledTimes(1); expect(exports.preview).toHaveBeenCalledTimes(1);
-  button('Повторити початкове створення'); await screen.findByText('Файли Magento готові');
+  button('Повторити початкове створення'); await screen.findByText('ЗБЕРЕЖЕНІ ФАЙЛИ');
   expect(exports.createSnapshot.mock.calls[1]).toEqual(original);
   expect(exports.getStatus).toHaveBeenCalledTimes(1);
   expect(localStorage.length).toBe(0); expect(sessionStorage.length).toBe(0);
@@ -207,8 +207,9 @@ it('old session permalink still requires explicit current-account opening; invit
 
 it('view-only exporter can preview/read but cannot create or confirm; direct admin deep links issue no reads', async () => {
   const { router } = mount('/exports', ['exports.view']); await screen.findByText(/1 новий товар очікує/);
-  button('Перевірити 1 новий товар'); const create = await screen.findByRole('button', { name: 'Створити файли Magento' }); expect(create.disabled).toBe(true);
-  await navigate(router, '/exports/prices'); expect(screen.getByRole('button', { name: 'Експортувати зміни цін' }).disabled).toBe(true);
+  button('Перевірити 1 новий товар'); await screen.findByText('ПОПЕРЕДНІЙ ПЕРЕГЛЯД');
+  expect(screen.queryByRole('button', { name: 'Створити файли Magento' })).toBeNull();
+  await navigate(router, '/exports/prices'); expect(screen.queryByRole('button', { name: 'Створити файл' })).toBeNull(); expect(screen.getByRole('button', { name: 'Оновити / переглянути поточну чергу' })).toBeTruthy();
   await navigate(router, '/exports/new/template'); await screen.findByText(/Немає дозволу на створення/);
   for (const path of ['/admin/export-templates', '/admin/export-templates/system', '/admin/export-templates/family-a/check']) {
     await navigate(router, path); await screen.findByText('Немає дозволу на перегляд шаблонів експорту');
@@ -223,6 +224,17 @@ it('template URLs open table/check/versions and system read-only without publish
   await navigate(router, -1); expect(screen.getByRole('link', { name: 'Перевірка', exact: true }).getAttribute('aria-current')).toBe('page');
   await navigate(router, 1); await navigate(router, '/admin/export-templates/system'); await screen.findByText('Magento — поточний системний');
   expect(templates.get).toHaveBeenCalledTimes(1); expect(templates.system).toHaveBeenCalledTimes(1); noMutations();
+});
+
+it('export SKU handoff opens only the explicitly requested existing decode workflow and respects permission', async () => {
+  const decode = vi.spyOn(api, 'post').mockResolvedValue(response({ sku: 'SV-EXACT', category: 'SV', decoded: [] }));
+  const first = mount('/?exportSku=SV-EXACT', [...exporter, 'products.decode']);
+  await screen.findByRole('button', { name: 'Відкрити товар із експорту' });
+  expect(decode).not.toHaveBeenCalled();
+  button('Відкрити товар із експорту'); await waitFor(() => expect(decode).toHaveBeenCalledWith('/decode', { sku: 'SV-EXACT' }));
+  noMutations(); first.unmount(); decode.mockClear();
+  mount('/?exportSku=SV-EXACT', exporter); await screen.findByText('Amber SKU Manager');
+  expect(screen.queryByRole('button', { name: 'Відкрити товар із експорту' })).toBeNull(); expect(decode).not.toHaveBeenCalled();
 });
 
 it.each(['publish', 'activate'])('%s-only template capability retains independent controls on direct versions URL', async (capability) => {
@@ -315,8 +327,8 @@ it('view-only session result can be reopened, but confirmation remains disabled'
   mount('/exports/sessions/saved-a', ['exports.view']);
   await screen.findByRole('button', { name: 'Відкрити експорт із посилання через мій обліковий запис' });
   button('Відкрити експорт із посилання через мій обліковий запис');
-  await screen.findByText('Файли Magento готові');
-  expect(screen.getByRole('button', { name: 'Завершити експорт' }).disabled).toBe(true);
+  await screen.findByText('ЗБЕРЕЖЕНІ ФАЙЛИ');
+  expect(screen.queryByRole('button', { name: 'Завершити експорт' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Створити свій експорт' })).toBeNull(); noMutations();
 });
 
@@ -343,10 +355,10 @@ it('same-user refresh keeps the original pending request across subroutes; permi
   await act(async () => observedAuth.refresh());
   link('Перейти до експорту'); await screen.findByRole('button', { name: 'Повторити початкове створення' });
   expect(exports.createSnapshot).toHaveBeenCalledTimes(1);
-  button('Повторити початкове створення'); await screen.findByText('Файли Magento готові');
+  button('Повторити початкове створення'); await screen.findByText('ЗБЕРЕЖЕНІ ФАЙЛИ');
   expect(exports.createSnapshot.mock.calls[1]).toEqual(exports.createSnapshot.mock.calls[0]);
   client.get.mockResolvedValue(response(authSession(1, ['exports.view']))); await act(async () => observedAuth.refresh());
-  expect(screen.queryByText('Файли Magento готові')).toBeNull(); noTemplateReads();
+  expect(screen.queryByText('ЗБЕРЕЖЕНІ ФАЙЛИ')).toBeNull(); noTemplateReads();
 });
 function noTemplateReads() { for (const mock of Object.values(templates)) expect(mock).not.toHaveBeenCalled(); }
 it.each([{ ids: [2] }, { ids: [2, 1] }])('principal transition $ids fences a late operation across the new routes', async ({ ids }) => {
@@ -357,6 +369,6 @@ it.each([{ ids: [2] }, { ids: [2, 1] }])('principal transition $ids fences a lat
   await navigate(router, '/');
   for (const id of ids) { client.get.mockResolvedValue(response(authSession(id))); await act(async () => observedAuth.refresh()); }
   await navigate(router, '/exports'); await act(async () => late.resolve(response(snapshot)));
-  expect(screen.queryByText('Файли Magento готові')).toBeNull(); expect(screen.queryByRole('button', { name: 'Повторити початкове створення' })).toBeNull();
+  expect(screen.queryByText('ЗБЕРЕЖЕНІ ФАЙЛИ')).toBeNull(); expect(screen.queryByRole('button', { name: 'Повторити початкове створення' })).toBeNull();
   expect(exports.createSnapshot).toHaveBeenCalledTimes(1); expect(exports.getSnapshot).not.toHaveBeenCalled(); noTemplateReads();
 });

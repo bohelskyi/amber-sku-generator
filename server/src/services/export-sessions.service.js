@@ -6,6 +6,7 @@ const { assertActorStillAuthorized } = require('./access-admin-transaction');
 const published = require('./export-templates/published-capture');
 const binding = require('./export-templates/snapshot-binding');
 const access = require('./export-session-access');
+const { workspaceColumns, workspaceJoins, workspaceMetadata, recentPage, recentCursor } = require('./export-session-list');
 const signer = binding.makeSigner(require('../config/env').sessionSecret);
 const exportsService = () => require('./export.service');
 const normalize = (settings) => {
@@ -31,7 +32,13 @@ function summary(s) {
 }
 function attemptSummary(a, locked) {
   if (!a) return null;
+  let preparationIssue = null;
+  if (a.state === 'prepared') {
+    try { signer.verify(a.preview_proof); }
+    catch (error) { preparationIssue = error.code === 'EXPORT_PREVIEW_EXPIRED' ? 'expired' : 'unavailable'; }
+  }
   return { id: a.id, configurationRevision: a.configuration_revision, state: a.state === 'executing' && locked ? 'interrupted' : a.state,
+    preparationIssue,
     preparedByUserId: a.prepared_by_user_id, initiatedByUserId: a.initiated_by_user_id, preparedAt: a.prepared_at, startedAt: a.started_at,
     snapshotId: a.snapshot_id, lastErrorCode: a.last_error_code, preview: a.preview_summary };
 }
@@ -65,9 +72,33 @@ async function listSessions(input, options = {}) {
   const actor = createMutationContext(options.mutationContext).actorUserId;
   const db = options.databasePool || pool;
   await assertActorStillAuthorized(db, actor, 'exports.view', binding.error);
-  const { limit, after } = pagination(input);
   const scope = input.scope || 'owned';
   if (!['owned','shared','invitations'].includes(scope)) throw binding.error(422, 'EXPORT_SCOPE_INVALID', 'Невідомий список.');
+  if (input.order && !['recent', 'id'].includes(input.order)) throw binding.error(422, 'EXPORT_PAGE_INVALID', 'Некоректний порядок списку.');
+  if (input.order === 'recent') {
+    const { limit, after } = recentPage(input, scope);
+    const result = await db.query(`WITH page AS (
+      SELECT s.*, m.epoch FROM export_sessions s
+      LEFT JOIN export_session_members m ON m.session_id=s.id AND m.user_id=$1
+      WHERE (($2='owned' AND s.owner_user_id=$1) OR ($2='shared' AND m.state='accepted') OR ($2='invitations' AND m.state='pending'))
+        AND EXISTS (SELECT 1 FROM application_users au JOIN user_role_assignments ar ON ar.application_user_id=au.id AND ar.revoked_at IS NULL
+          JOIN roles r ON r.id=ar.role_id AND r.status='active' JOIN role_permissions rp ON rp.role_id=r.id AND rp.permission_key='exports.view'
+          WHERE au.id=$1 AND au.status='active')
+        AND ($3::timestamptz IS NULL OR (s.created_at,s.id)<($3::timestamptz,$4::text))
+      ORDER BY s.created_at DESC,s.id DESC LIMIT $5
+    ) SELECT s.*, u.display_name AS owner_name,u.preferred_username AS owner_username,
+      to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_time
+      ${scope === 'invitations' ? '' : `,${workspaceColumns}`}
+      FROM page s JOIN application_users u ON u.id=s.owner_user_id
+      ${scope === 'invitations' ? '' : workspaceJoins}
+      ORDER BY s.created_at DESC,s.id DESC`, [actor, scope, after?.time || null, after?.id || null, limit + 1]);
+    const rows = result.rows.slice(0, limit);
+    return { items: rows.map((s) => scope === 'invitations'
+      ? { id: s.id, title: s.title, ownerUserId: s.owner_user_id, ownerName: s.owner_name || s.owner_username, accessEpoch: s.epoch, state: 'pending' }
+      : { ...summary({ ...s, owner: String(s.owner_user_id) === String(actor), accessEpoch: String(s.owner_user_id) === String(actor) ? 'owner' : s.epoch }), ...workspaceMetadata(s) }),
+    next: result.rows.length > limit ? recentCursor(rows.at(-1), scope) : null };
+  }
+  const { limit, after } = pagination(input);
   const result = await db.query(`SELECT s.*, u.display_name AS owner_name, u.preferred_username AS owner_username, m.epoch, m.state,
     a.preview_summary->'template' AS attempt_template
     FROM export_sessions s JOIN application_users u ON u.id=s.owner_user_id
@@ -86,7 +117,9 @@ async function detail(id, options = {}) {
     const members = (await client.query(`SELECT m.user_id, m.state, m.epoch, m.invited_at, m.accepted_at, m.ended_at,
       u.display_name, u.preferred_username FROM export_session_members m JOIN application_users u ON u.id=m.user_id WHERE m.session_id=$1
       ORDER BY (m.state IN ('pending','accepted')) DESC,m.invited_at DESC,m.user_id LIMIT 100`, [id])).rows;
-    return { ...summary(s), attempt: attemptSummary(a, locked), participants: members, executing: !locked };
+    const projection = (await client.query(`SELECT s.current_attempt_id,${workspaceColumns}
+      FROM export_sessions s ${workspaceJoins} WHERE s.id=$1`, [id])).rows[0];
+    return { ...summary(s), ...workspaceMetadata(projection), attempt: attemptSummary(a, locked), participants: members, executing: !locked };
   });
 }
 function commandOptions(input, options, write = true) { return { ...options, write, mutate: true, expectedAccessEpoch: input.expectedAccessEpoch }; }
@@ -139,7 +172,7 @@ async function prepare(id, input, options = {}) {
         JSON.stringify(s.settings), JSON.stringify(evidence), p.previewToken, JSON.stringify(safePreview), crypto.randomUUID()])).rows[0];
       await client.query('UPDATE export_sessions SET current_attempt_id=$2,updated_at=CURRENT_TIMESTAMP WHERE id=$1', [id, a.id]);
       await audit(client, context, id, 'prepared', { attemptId: a.id, revision: s.configuration_revision });
-      return { ...attemptSummary(a, true), preview: { ...safePreview, artifacts: p.artifacts, configurationRevision: s.configuration_revision } };
+      return { ...attemptSummary(a, true), preview: { ...safePreview, artifacts: p.artifacts, review: p.review, checkedAt: p.checkedAt, configurationRevision: s.configuration_revision } };
     });
   });
 }

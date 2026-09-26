@@ -493,11 +493,14 @@ async function loadMagentoCatalog(queryable) {
   return catalog;
 }
 
-function buildMagentoPayload(products, catalog) {
+function buildMagentoPayload(products, catalog, { review = false } = {}) {
   const byGroup = new Map();
   const errors = [];
+  const collector = review ? require('../presenters/export-review').reviewCollector(PROFILE_VERSION) : null;
+  let position = 0;
   for (const product of products) {
     const mapped = mapProduct(product, catalog);
+    collector?.add(product, ++position, mapped, HEADERS[mapped.group] || [], GROUPS[mapped.group]);
     if (mapped.errors.length) {
       errors.push({ productId: Number(product.id), sku: mapped.sku,
         group: mapped.group, fields: mapped.errors });
@@ -521,7 +524,7 @@ function buildMagentoPayload(products, catalog) {
       csvContent: buildCsv(rows) });
   }
   return { representedCount: products.length, readyCount: products.length - errors.length,
-    errors, artifacts };
+    errors, artifacts, ...(collector ? { review: collector.result() } : {}) };
 }
 
 module.exports = {

@@ -1,8 +1,12 @@
-function escapeCsvValue(value) {
+function finalizeCsvValue(value) {
   if (value === null || value === undefined) return '';
-  const stringValue = typeof value === 'string' && /^[\t\r ]*[=+\-@]/.test(value)
+  return typeof value === 'string' && /^[\t\r ]*[=+\-@]/.test(value)
     ? `'${value}`
     : String(value);
+}
+
+function escapeCsvValue(value) {
+  const stringValue = finalizeCsvValue(value);
   if (/[",\r\n]/.test(stringValue)) {
     return `"${stringValue.replace(/"/g, '""')}"`;
   }
@@ -18,4 +22,5 @@ function buildCsv(rows) {
 module.exports = {
   buildCsv,
   escapeCsvValue,
+  finalizeCsvValue,
 };

@@ -571,12 +571,15 @@ async function previewExport(input, options = {}) {
       throw error;
     }
     const resolved = template ? await published.resolvePublished(client, intent, actor) : null;
+    const templateLabel = template ? (await client.query(`SELECT t.display_name AS "displayName", v.version_number::text AS "versionNumber"
+      FROM export_template_versions v JOIN export_templates t ON t.id=v.template_id WHERE v.id=$1`, [resolved.effective.versionId])).rows[0] : null;
     const newRange = mode === 'new' ? await resolveNewExportRange(client) : null;
     if (newRange && !newRange.productCount) {
       await client.query('COMMIT');
       return { mode: 'new', range: null, representedCount: 0,
         readyCount: 0, errors: [], artifacts: [],
-        ...(template ? { requestContract: 'template-v1', intent, template: resolved.effective, previewToken: null } : {}) };
+        checkedAt: new Date().toISOString(), review: { version: 'export-review-v1', identity: null, files: [] },
+        ...(template ? { requestContract: 'template-v1', intent, template: resolved.effective, templateLabel, previewToken: null } : {}) };
     }
     if (template && newRange && ((intent.fromSku && intent.fromSku !== newRange.fromSku)
       || (intent.toSku && intent.toSku !== newRange.toSku))) throw bindingTools.stale();
@@ -585,9 +588,9 @@ async function previewExport(input, options = {}) {
       newRange?.toSku || toSku,
       { queryable: client, templateInputs: template }
     );
-    const captured = template ? await published.capturePublished(client, intent, resolved, exportData, newRange) : null;
+    const captured = template ? await published.capturePublished(client, intent, resolved, exportData, newRange, { review: true }) : null;
     const catalog = captured ? null : await loadMagentoCatalog(client);
-    const magento = captured ? captured.magento : buildMagentoPayload(exportData.rows, catalog);
+    const magento = captured ? captured.magento : buildMagentoPayload(exportData.rows, catalog, { review: true });
     const tableFingerprint = captured ? bindingTools.fingerprint(captured.binding) : legacyPreviewFingerprint(exportData, catalog, magento, newRange);
     await client.query('COMMIT');
     return {
@@ -597,9 +600,11 @@ async function previewExport(input, options = {}) {
       readyCount: magento.readyCount,
       errors: magento.errors,
       tableFingerprint,
+      checkedAt: new Date().toISOString(),
+      review: { ...magento.review, identity: tableFingerprint },
       ...(!template ? { recipe: { kind: 'system', name: 'Magento — поточний системний', outputContract: 'magento-products-v1' },
         previewExpectation: magento.errors.length ? null : tableFingerprint } : {}),
-      ...(template ? { requestContract: 'template-v1', intent, template: resolved.effective,
+      ...(template ? { requestContract: 'template-v1', intent, template: resolved.effective, templateLabel,
         previewToken: magento.errors.length || !magento.representedCount ? null : previewSigner.sign(captured.binding),
         represented: magento.represented } : {}),
       artifacts: (magento.provisionalArtifacts || magento.artifacts).map((item) => ({
@@ -622,10 +627,10 @@ async function previewExport(input, options = {}) {
 }
 
 async function getMagentoArtifacts(snapshotId, options = {}) {
-  await getExportSnapshot(snapshotId, options);
+  await getExportSnapshot(snapshotId, { ...options, includeRows: false });
   const result = await (options.databasePool || pool).query(
     `SELECT snapshot_id, profile_version, group_code, file_name,
-            product_count, row_count, csv_content
+            product_count, row_count${options.includeRows ? ', csv_content' : ''}
      FROM magento_export_artifacts WHERE snapshot_id = $1
      ORDER BY CASE group_code WHEN 'BR' THEN 1 WHEN 'NM' THEN 2
        WHEN 'KL' THEN 3 WHEN 'CH' THEN 4 WHEN 'AR' THEN 5 ELSE 6 END`,
@@ -642,7 +647,7 @@ async function getMagentoArtifacts(snapshotId, options = {}) {
 }
 
 async function getMagentoArtifact(snapshotId, groupCode, options = {}) {
-  await getExportSnapshot(snapshotId, options);
+  await getExportSnapshot(snapshotId, { ...options, includeRows: false });
   const group = String(groupCode || '').toUpperCase();
   if (!['BR', 'NM', 'KL', 'CH', 'AR', 'SV'].includes(group)) {
     const error = new Error('Невідома Magento-група.');
@@ -665,7 +670,10 @@ async function getMagentoArtifact(snapshotId, groupCode, options = {}) {
 
 async function getExportSnapshot(snapshotId, options = {}) {
   const database = options.databasePool || pool;
-  const result = await database.query('SELECT * FROM export_snapshots WHERE id = $1', [snapshotId]);
+  const columns = options.includeRows === false
+    ? 'id, status, from_sku, to_sku, resolved_to_sku, exported_to_product_id, row_count, file_name, generated_at, confirmed_at, created_by_user_id, confirmed_by_user_id, request_contract, template_version_id, binding_evidence, input_fingerprint, export_session_id'
+    : '*';
+  const result = await database.query(`SELECT ${columns} FROM export_snapshots WHERE id = $1`, [snapshotId]);
   if (!result.rows[0]) {
     throw sessionAccess.missing();
   }

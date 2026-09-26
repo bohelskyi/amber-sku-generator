@@ -4,6 +4,8 @@ import { ExportTools } from '../components/app/ExportTools';
 import { Link, Route, Routes } from 'react-router-dom';
 import { ExportWorkspaceShell } from '../components/workspace/ExportWorkspaceShell';
 import ExportSessionsPage from './ExportSessionsPage';
+import ExportHistoryPage from './ExportHistoryPage';
+import { PriceExportWorkspace } from '../components/exports/PriceExportWorkspace';
 
 export default function ExportsPage() {
   const { permissions } = useAuth();
@@ -12,7 +14,7 @@ export default function ExportsPage() {
   const tools = (surface) => <ExportTools {...workflow} durableSessions surface={surface}
     onPreviewExport={workflow.handlePreviewExport} onCreateSnapshot={workflow.handleCreateSnapshot}
     onDownloadMagentoArtifact={workflow.handleDownloadMagentoArtifact} onConfirmSnapshot={workflow.handleConfirmSnapshot}
-    onPriceExportCsv={workflow.handlePriceExportCsv} canArchive={false} canViewExport
+    canArchive={false} canViewExport canDecode={permissions.includes('products.decode') && permissions.includes('products.view')}
     canActivateTemplate={permissions.includes('export_templates.activate')}
     canCreateExport={permissions.includes('exports.create')} />;
   return <ExportWorkspaceShell><Routes>
@@ -20,7 +22,9 @@ export default function ExportsPage() {
       <p>Звичайний експорт використовує системний профіль.</p>
       <Link className="btn btn-outline px-4" to="/exports/new/template">Експорт за опублікованим шаблоном</Link>
     </div>{tools('products')}</>} />
-    <Route path="prices" element={<>{!permissions.includes('exports.create') && <p className="mb-3">Лише перегляд. Створення та підтвердження експорту цін недоступні.</p>}{tools('prices')}</>} />
+    <Route path="prices" element={<PriceExportWorkspace workflow={workflow.priceWorkflow} canCreate={permissions.includes('exports.create')} />} />
+    <Route path="history" element={<ExportHistoryPage />} />
+    <Route path="history/:stream/:snapshotId" element={<ExportHistoryPage />} />
     <Route path="sessions/:sessionId?" element={<ExportSessionsPage embedded />} />
     <Route path="shared" element={<ExportSessionsPage embedded scope="shared" />} />
     <Route path="invitations" element={<ExportSessionsPage embedded scope="invitations" />} />

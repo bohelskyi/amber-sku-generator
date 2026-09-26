@@ -15,16 +15,18 @@ function budgets(options = {}) {
   return result;
 }
 
-function runProduct(compiled, product, limits) {
-  try { return runSupportedProduct(compiled, product, limits); }
+function runProduct(compiled, product, limits, observation) {
+  try { return runSupportedProduct(compiled, product, limits, observation); }
   catch (cause) {
     if (cause.code !== 'SOURCE_SUPPORT_INVALID') throw cause;
+    if (observation) observation.issues = [{ code: cause.code, field: 'sourceSupport', message: cause.message,
+      target: observation.target || { kind: 'source', source: observation.source || null } }];
     return { work: 0, mapped: { group: product.category, sku: product.full_sku,
       errors: [{ code: cause.code, field: 'sourceSupport', message: cause.message }] } };
   }
 }
 
-function runSupportedProduct(compiled, product, limits) {
+function runSupportedProduct(compiled, product, limits, observation) {
   const d = compiled.definition;
   const rawGroup = checkCell(identityText(own(product, 'category'), 'category'));
   const group = rawGroup === undefined || rawGroup === null ? '' : String(rawGroup);
@@ -47,6 +49,7 @@ function runSupportedProduct(compiled, product, limits) {
   const checkSupport = sourceSupportChecker(d, product);
   function source(id) {
     if (!sourceMemo.has(id)) {
+      if (observation) observation.source = id;
       const value = checkCell(readSource(d.sources[id], product));
       checkSupport(d.sources[id], value);
       sourceMemo.set(id, value);
@@ -165,20 +168,32 @@ function runSupportedProduct(compiled, product, limits) {
         const diagnostic = { field: n.field, message: evaluate(n.message) };
         if (Object.hasOwn(n, 'code')) diagnostic.code = n.code;
         errors.push(diagnostic);
+        if (observation) observation.issues.push({ ...diagnostic, ...(observation.target ? { target: { ...observation.target } } : {}) });
         return '';
       }
       default: fail('TEMPLATE_INVALID', 'Unknown compiled operation');
     }
   }
   profile.evaluate.forEach(evaluate);
-  (profile.outputChecks || []).forEach((entry) => evaluate(entry.rule));
-  const rows = profile.rows.map((r) => Object.fromEntries(Object.entries(r.cells).map(([k, v]) => [k, evaluate(v)])));
+  (profile.outputChecks || []).forEach((entry) => {
+    if (observation) observation.target = { kind: 'columns', columns: entry.columns };
+    evaluate(entry.rule);
+  });
+  if (observation) observation.target = null;
+  const rows = profile.rows.map((r, index) => Object.fromEntries(Object.entries(r.cells).map(([k, v]) => {
+    if (observation) observation.target = { kind: 'cell', column: k, language: index ? 'en' : 'main' };
+    const value = evaluate(v);
+    if (observation) observation.rows[index ? 'english' : 'base'][k] = value;
+    return [k, value];
+  })));
+  if (observation) observation.target = null;
   if (d.outputContract === 'magento-products-columns-v2') {
     if (rows[0].sku !== identityText(own(product, 'full_sku'), 'full_sku') || rows[1].sku !== rows[0].sku
       || rows[0].store_view_code !== '' || rows[1].store_view_code !== 'en'
       || rows.some((row) => row.product_type !== 'simple' || !present(row.name) || !present(row.attribute_set_code))
       || !Number.isFinite(Number(rows[0].price)) || Number(rows[0].price) <= 0) {
       errors.push({ field: 'sku', message: 'Порушено захищений full-product контракт: SKU, base/EN, назва, набір атрибутів, simple або додатна ціна.' });
+      if (observation) observation.issues.push({ ...errors[errors.length - 1], target: { kind: 'row' } });
     }
   }
   return { mapped: { group, sku: rows[0].sku, errors, base: rows[0], english: rows[1] }, work };
@@ -189,10 +204,11 @@ function evaluateProduct(compiled, product, options) {
   return runProduct(compiled, product, budgets(options)).mapped;
 }
 
-function evaluateBatch(compiled, products, options) {
+function evaluateBatch(compiled, products, options, { review = false } = {}) {
   assertCompiled(compiled);
   if (!Array.isArray(products)) fail('INPUT_INVALID', 'Products must be an array');
   const limits = budgets(options);
+  const collector = review ? require('../../presenters/export-review').reviewCollector(compiled.definition.outputContract, limits.outputBytes) : null;
   const byGroup = new Map();
   const errors = [];
   const represented = [];
@@ -208,7 +224,17 @@ function evaluateBatch(compiled, products, options) {
     bytes += rowBytes;
   }
   for (const product of products) {
-    const { mapped, work } = runProduct(compiled, product, limits);
+    const observation = review ? { rows: { base: {}, english: {} }, issues: [] } : null;
+    const { mapped, work } = runProduct(compiled, product, limits, observation);
+    const reviewProfile = compiled.definition.groups.find((g) => g.route === mapped.group);
+    // Sparse EN intentionally omits cells; after a completed evaluation those are valid blanks.
+    if (observation && mapped.base) {
+      for (const side of ['base', 'english']) for (const column of reviewProfile.columns) {
+        if (!Object.hasOwn(observation.rows[side], column)) observation.rows[side][column] = '';
+      }
+    }
+    if (observation && !observation.issues.length && mapped.errors.length) observation.issues = mapped.errors;
+    collector?.add(product, represented.length + 1, mapped, reviewProfile?.columns || [], reviewProfile?.name, observation);
     const productId = Number(scalar(own(product, 'id'), 'id'));
     represented.push({ productId, group: mapped.group, sku: mapped.sku,
       status: mapped.errors.length ? 'failed' : 'ready', artifactRows: mapped.errors.length ? 0 : 2 });
@@ -242,6 +268,7 @@ function evaluateBatch(compiled, products, options) {
     readyCount: products.length - errors.length, failedCount: errors.length, represented, errors,
     // Failed products never make this a complete export; these are explicitly previews.
     provisionalArtifacts: artifacts, artifacts: errors.length ? [] : artifacts,
+    ...(collector ? { review: collector.result() } : {}),
     metrics: { outputBytes: bytes, maxProductWork } };
 }
 

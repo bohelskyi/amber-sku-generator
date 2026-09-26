@@ -11,7 +11,7 @@ import { AuthGate } from '../src/auth/AuthGate';
 import { useExportWorkflow } from '../src/hooks/product/useExportWorkflow';
 import { exportsApi } from '../src/api/exports-api';
 import { downloadBlob } from '../src/lib/download';
-vi.mock('../src/api/exports-api', () => ({ exportsApi: Object.fromEntries(['getSnapshot', 'getStatus', 'getTemplateOptions', 'getPriceStatus', 'preview', 'createSnapshot', 'confirmSnapshot', 'downloadMagentoArtifact', 'createPriceSnapshot', 'downloadPriceSnapshot', 'confirmPriceSnapshot'].map((key) => [key, vi.fn()])) }));
+vi.mock('../src/api/exports-api', () => ({ exportsApi: Object.fromEntries(['previewPrices', 'getPriceSnapshot', 'readPriceArtifact', 'readMagentoArtifact', 'getSnapshot', 'getStatus', 'getTemplateOptions', 'getPriceStatus', 'preview', 'createSnapshot', 'confirmSnapshot', 'downloadMagentoArtifact', 'createPriceSnapshot', 'downloadPriceSnapshot', 'confirmPriceSnapshot'].map((key) => [key, vi.fn()])) }));
 vi.mock('../src/lib/download', () => ({ downloadBlob: vi.fn() }));
 const response = (data) => ({ data, headers: {} });
 const template = { versionId: 'version-a', templateId: 'family-a', definitionHash: 'a'.repeat(64) };
@@ -48,6 +48,10 @@ beforeEach(() => {
   exportsApi.preview.mockImplementation(async (intent) => response(preview(intent.requestContract ? { requestContract: 'template-v1', intent, template, previewToken: 'opaque-token' } : {})));
   exportsApi.createSnapshot.mockResolvedValue(response(snapshot));
   exportsApi.getSnapshot.mockResolvedValue(response(snapshot));
+  exportsApi.readMagentoArtifact.mockResolvedValue(response('sku,store_view_code,name\nBR1,,Stored'));
+  exportsApi.previewPrices.mockResolvedValue(response({ rowCount: 1, csvContent: 'sku,price\nBR1,123' }));
+  exportsApi.readPriceArtifact.mockResolvedValue(response('sku,price\nBR1,123'));
+  exportsApi.getPriceSnapshot.mockResolvedValue(response({ id: 'price-a', status: 'generated', stream: 'price', artifacts: [] }));
   exportsApi.downloadMagentoArtifact.mockResolvedValue(response('stored csv'));
   exportsApi.confirmSnapshot.mockResolvedValue(response({ status: 'confirmed' }));
 });
@@ -86,7 +90,7 @@ it('uncertain create retains same key/token after selection changes, double clic
   await act(async () => first.reject(new Error('network lost')));
   expect(screen.getByText(/Є незавершена операція/)).toBeTruthy();
   vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 3600000);
-  click('Повторити початкове створення'); await screen.findByText(/Файли Magento готові/);
+  click('Повторити початкове створення'); await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/);
   expect(exportsApi.createSnapshot.mock.calls[1]).toEqual(original);
   expect(exportsApi.preview).toHaveBeenCalledTimes(1);
 });
@@ -94,7 +98,7 @@ it.each(['EXPORT_PREVIEW_STALE', 'EXPORT_PREVIEW_EXPIRED'])('%s requires explici
   exportsApi.createSnapshot.mockRejectedValueOnce({ response: { status: 409, data: { code, error: code } } }).mockResolvedValueOnce(response(snapshot));
   render(<Harness />); await screen.findByText(/1 новий товар очікує/); optIn(); await start(); click(/Створити файли/);
   await screen.findByText(new RegExp(`${code} Оновіть перевірку`)); expect(controller.pendingCreate).toBeNull();
-  expect(exportsApi.preview).toHaveBeenCalledTimes(1); await start(); click(/Створити файли/); await screen.findByText(/Файли Magento готові/);
+  expect(exportsApi.preview).toHaveBeenCalledTimes(1); await start(); click(/Створити файли/); await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/);
   expect(exportsApi.createSnapshot.mock.calls[1][1]).not.toBe(exportsApi.createSnapshot.mock.calls[0][1]);
 });
 it('ambiguous 5xx and idempotency conflict do not get blanket 409 refresh or replacement keys', async () => {
@@ -112,11 +116,11 @@ it('late preview after selector edit cannot bind a new create to stale evidence'
 });
 it('stored download and failed confirmation retry use snapshot ID after mode/selection changes', async () => {
   exportsApi.confirmSnapshot.mockRejectedValueOnce(new Error('confirmation lost')).mockResolvedValueOnce(response({ status: 'confirmed' }));
-  render(<Harness />); await screen.findByText(/1 новий товар очікує/); optIn(); await start(); click(/Створити файли/); await screen.findByText(/Файли Magento готові/);
-  optIn(); await act(async () => controller.setTemplateSelection({ mode: 'explicit', templateId: 'other', versionId: 'other' }));
+  render(<Harness />); await screen.findByText(/1 новий товар очікує/); optIn(); await start(); click(/Створити файли/); await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/);
+  expect(screen.queryByRole('checkbox')).toBeNull(); await act(async () => controller.setTemplateSelection({ mode: 'explicit', templateId: 'other', versionId: 'other' }));
   await act(async () => controller.handleDownloadMagentoArtifact('BR'));
   expect(exportsApi.downloadMagentoArtifact).toHaveBeenCalledWith('snapshot-a', 'BR'); expect(downloadBlob).toHaveBeenCalled(); expect(exportsApi.confirmSnapshot).not.toHaveBeenCalled();
-  click('Завершити експорт'); await screen.findByText('confirmation lost'); click('Завершити експорт'); await screen.findByText('Експорт завершено');
+  click('Завершити експорт'); click('Підтвердити збережений експорт'); await screen.findByText('confirmation lost'); exportsApi.getSnapshot.mockResolvedValue(response({ ...snapshot, status: 'confirmed' })); click('Завершити експорт'); click('Підтвердити збережений експорт'); await screen.findByText('Експорт завершено');
   expect(exportsApi.confirmSnapshot.mock.calls).toEqual([['snapshot-a'], ['snapshot-a']]); expect(exportsApi.createSnapshot).toHaveBeenCalledTimes(1);
 });
 it('uncertain creation survives route navigation in the mounted workflow provider', async () => {
@@ -126,20 +130,26 @@ it('uncertain creation survives route navigation in the mounted workflow provide
   </ExportWorkflowProvider></MemoryRouter></AuthContext.Provider>);
   await screen.findByText(/1 новий товар очікує/); optIn(); await start(); click(/Створити файли/); await screen.findByText(/lost Результат/);
   fireEvent.click(screen.getByText('Інший розділ')); await screen.findByText('Інший екран'); fireEvent.click(screen.getByText('Повернутися'));
-  click('Повторити початкове створення'); await screen.findByText(/Файли Magento готові/);
+  click('Повторити початкове створення'); await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/);
   expect(exportsApi.createSnapshot.mock.calls[1]).toEqual(exportsApi.createSnapshot.mock.calls[0]);
 });
 it('view-only exporters can preview without admin definition calls, create/activation controls remain disabled', async () => {
   render(<AuthContext.Provider value={{ permissions: ['exports.view'] }}><ExportWorkflowProvider><ExportsPage /></ExportWorkflowProvider></AuthContext.Provider>);
-  await screen.findByText(/1 новий товар очікує/); optIn(); await start();
+  await screen.findByText(/1 новий товар очікує/); optIn(); click(/Перевірити 1 новий товар/); await screen.findByText('ПОПЕРЕДНІЙ ПЕРЕГЛЯД');
   expect(screen.queryByRole('option', { name: 'Явно вказана опублікована версія' })).toBeNull();
-  expect(screen.getByRole('button', { name: /Створити файли/ }).disabled).toBe(true); expect(exportsApi.createSnapshot).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: /Створити файли/ })).toBeNull(); expect(exportsApi.createSnapshot).not.toHaveBeenCalled();
 });
-it('dedicated price export retains create → download → confirm sequence without template fields', async () => {
-  exportsApi.getPriceStatus.mockResolvedValue(response({ pendingCount: 1 }));
-  exportsApi.createPriceSnapshot.mockResolvedValue(response({ id: 'price-a' })); exportsApi.downloadPriceSnapshot.mockResolvedValue(response('sku,price')); exportsApi.confirmPriceSnapshot.mockResolvedValue(response({}));
-  render(<Harness />); await screen.findByText(/1 зміна ціни/); optIn(); click('Експортувати зміни цін');
-  await waitFor(() => expect(exportsApi.confirmPriceSnapshot).toHaveBeenCalledWith('price-a'));
+it('dedicated price commands retain their own identity and never confirm on creation/download', async () => {
+  exportsApi.createPriceSnapshot.mockResolvedValue(response({ id: 'price-a', rowCount: 1 }));
+  exportsApi.downloadPriceSnapshot.mockResolvedValue(response('sku,price'));
+  exportsApi.confirmPriceSnapshot.mockResolvedValue(response({}));
+  render(<Harness />); await screen.findByText(/1 новий товар очікує/); optIn();
+  await act(async () => controller.priceWorkflow.check());
+  await act(async () => controller.priceWorkflow.create());
+  expect(exportsApi.confirmPriceSnapshot).not.toHaveBeenCalled(); expect(exportsApi.downloadPriceSnapshot).not.toHaveBeenCalled();
+  await act(async () => controller.priceWorkflow.download()); expect(exportsApi.confirmPriceSnapshot).not.toHaveBeenCalled();
+  await act(async () => controller.priceWorkflow.confirm());
+  expect(exportsApi.confirmPriceSnapshot).toHaveBeenCalledWith('price-a');
   expect(exportsApi.downloadPriceSnapshot).toHaveBeenCalledWith('price-a'); expect(exportsApi.createPriceSnapshot.mock.calls[0]).toHaveLength(1); expect(exportsApi.createSnapshot).not.toHaveBeenCalled();
 });
 it('a delayed correction refresh handler uses the current mode and range, without stale closure binding', async () => {
@@ -179,7 +189,7 @@ it.each(['uncertain', 'known'])('full workflow unmount/remount loses %s operatio
   const locationObject = { pathname: '/exports', assign: vi.fn() };
   const first = render(authenticatedWorkflow(apiClient, bindApiAuth, locationObject));
   await screen.findByText(/1 новий товар очікує/); optIn(); await start(); click(/Створити файли/);
-  await screen.findByText(outcome === 'uncertain' ? /response lost Результат/ : /Файли Magento готові/);
+  await screen.findByText(outcome === 'uncertain' ? /response lost Результат/ : /ЗБЕРЕЖЕНІ ФАЙЛИ/);
   if (outcome === 'uncertain') expect(observedWorkflow.pendingCreate.idempotencyKey).toBe(exportsApi.createSnapshot.mock.calls[0][1]);
   else await waitFor(() => expect(observedWorkflow.exportSnapshot?.id).toBe('snapshot-a'));
   first.unmount();
@@ -223,7 +233,7 @@ it.each([1, 2])('successful logout clears pending state; later user %s cannot re
   await act(async () => retry.resolve(response(snapshot)));
   expect(observedWorkflow.pendingCreate).toBeNull(); expect(observedWorkflow.exportSnapshot).toBeNull();
   expect(observedWorkflow.exportPreview).toBeNull();
-  expect(screen.queryByText(/Файли Magento готові/)).toBeNull();
+  expect(screen.queryByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/)).toBeNull();
   expect(exportsApi.createSnapshot).toHaveBeenCalledTimes(2);
   expect(exportsApi.preview).toHaveBeenCalledTimes(1);
   expect(localStorage.length).toBe(0); expect(sessionStorage.length).toBe(0);
@@ -249,7 +259,7 @@ it('A → B → A never revives the first lifetime, including stale actions and 
   const late = deferred(); exportsApi.downloadMagentoArtifact.mockReturnValue(late.promise);
   const apiClient = { get: vi.fn().mockResolvedValue(response(session(1))), post: vi.fn() };
   render(authenticatedWorkflow(apiClient, () => () => {}, { pathname: '/exports', assign: vi.fn() }));
-  await screen.findByText(/1 новий товар очікує/); await start(); click(/Створити файли/); await screen.findByText(/Файли Magento готові/);
+  await screen.findByText(/1 новий товар очікує/); await start(); click(/Створити файли/); await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/);
   const first = observedWorkflow;
   let downloading; await act(async () => { downloading = first.handleDownloadMagentoArtifact('BR'); });
   for (const id of [2,1]) { apiClient.get.mockResolvedValue(response(session(id))); await act(async () => observedAuth.refresh()); }

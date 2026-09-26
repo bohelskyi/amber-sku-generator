@@ -1,7 +1,7 @@
 import { api } from '../lib/api';
 const root = '/export/sessions';
 export const exportSessionsApi = Object.freeze({
-  list: (scope, after = '') => api.get(root, { params: { scope, after, limit: 20 } }),
+  list: (scope, after = '') => api.get(root, { params: { scope, after, limit: 20, order: 'recent' } }),
   create: (body) => api.post(root, body),
   get: (id) => api.get(`${root}/${id}`),
   save: (id, body) => api.put(`${root}/${id}`, body),

@@ -34,6 +34,7 @@ const defaults = {
   onDownloadMagentoArtifact: vi.fn(),
   onConfirmSnapshot: vi.fn(),
   onPriceExportCsv: vi.fn(),
+  markExportReviewStale: vi.fn(),
   onDelete: vi.fn(),
 };
 
@@ -78,7 +79,7 @@ it('summarizes blocked readiness with human labels and expands products on deman
     onPreviewExport,
   });
 
-  expect(screen.getByText('3').parentElement.textContent).toContain('всього');
+  expect(screen.getByText(/Товарів: 3 · Готові: 1/)).toBeTruthy();
   expect(screen.getByText('2 товари потребують виправлення')).toBeTruthy();
   expect(screen.getByText((_, element) => element.tagName === 'LI'
     && element.textContent === '1 — потрібно вказати назву')).toBeTruthy();
@@ -125,37 +126,18 @@ it('shows the fully ready state and creates files with the existing action', () 
   expect(onCreateSnapshot).toHaveBeenCalledOnce();
 });
 
-it('presents snapshot downloads by group and keeps completion separate', () => {
-  const onDownloadMagentoArtifact = vi.fn();
-  const onConfirmSnapshot = vi.fn();
-  renderTools({ exportSnapshot: {
-    id: 'snapshot-1', status: 'generated', artifacts: [
-      { groupCode: 'BR', fileName: 'amber-magento-BR-magento-products-v1.csv',
-        profileVersion: 'magento-products-v1', productCount: 2 },
-      { groupCode: 'SV', fileName: 'amber-magento-SV-magento-products-v1.csv',
-        profileVersion: 'magento-products-v1', productCount: 30 },
-    ],
-  }, onDownloadMagentoArtifact, onConfirmSnapshot });
-
-  expect(screen.getByText('Файли Magento готові')).toBeTruthy();
-  expect(screen.getByText('Браслети')).toBeTruthy();
-  expect(screen.getByText('2 товари')).toBeTruthy();
-  expect(screen.getByText('Сувеніри')).toBeTruthy();
-  expect(screen.getByText('30 товарів')).toBeTruthy();
-  const downloadButtons = screen.getAllByRole('button', { name: 'Завантажити CSV' });
-  fireEvent.click(downloadButtons[0]);
-  expect(onDownloadMagentoArtifact).toHaveBeenCalledWith('BR');
-  expect(onConfirmSnapshot).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Завершити експорт' }));
-  expect(onConfirmSnapshot).toHaveBeenCalledOnce();
-  expect(screen.getByText(/Це не означає, що Magento вже імпортувала файли/)).toBeTruthy();
-
-  const technicalDetails = screen.getByText('Технічні дані').closest('details');
-  expect(technicalDetails.open).toBe(false);
-  fireEvent.click(screen.getByText('Технічні дані'));
-  expect(technicalDetails.open).toBe(true);
-  expect(screen.getByText('snapshot-1')).toBeTruthy();
-  expect(screen.getByText('amber-magento-BR-magento-products-v1.csv')).toBeTruthy();
+it('presents selected stored download and explicit confirmation dialog, freezing input', async () => {
+  const onDownloadMagentoArtifact = vi.fn(); const onConfirmSnapshot = vi.fn();
+  renderTools({ exportSnapshot: { id: 'snapshot-1', status: 'generated', artifacts: [
+    { groupCode: 'BR', groupName: 'Браслети', csvContent: 'sku,price\nBR,2', fileName: 'br.csv', rowCount: 1 },
+    { groupCode: 'SV', groupName: 'Сувеніри', csvContent: 'sku,price\nSV,3', fileName: 'sv.csv', rowCount: 1 },
+  ] }, onDownloadMagentoArtifact, onConfirmSnapshot });
+  expect(screen.getByText('ЗБЕРЕЖЕНІ ФАЙЛИ')).toBeTruthy(); expect(screen.queryByText('Повторний або вибірковий експорт')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Завантажити CSV' })); expect(onDownloadMagentoArtifact).toHaveBeenCalledWith('BR'); expect(onConfirmSnapshot).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('tab', { name: 'Сувеніри' })); fireEvent.click(screen.getByRole('button', { name: 'Завантажити CSV' })); expect(onDownloadMagentoArtifact).toHaveBeenCalledWith('SV');
+  fireEvent.click(screen.getByRole('button', { name: 'Завершити експорт' })); expect(onConfirmSnapshot).not.toHaveBeenCalled();
+  expect(screen.getByText(/Це не означає, що імпорт у Magento успішний/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Підтвердити збережений експорт' })); await waitFor(() => expect(onConfirmSnapshot).toHaveBeenCalledOnce());
 });
 
 it('keeps custom export collapsed by default and submits the manual range after expansion', () => {
@@ -172,26 +154,15 @@ it('keeps custom export collapsed by default and submits the manual range after 
   expect(onPreviewExport).toHaveBeenCalledWith('manual');
 });
 
-it('shows compact zero and pending price-export states without a disabled zero-state action', () => {
-  const onPriceExportCsv = vi.fn();
-  const view = renderTools({ priceExportStatus: { pendingCount: 0 } });
-  expect(screen.getByText('Оновлення цін Magento')).toBeTruthy();
-  expect(screen.getByText('Немає змін цін для експорту.')).toBeTruthy();
+it('product export surface contains no price create/download/confirm orchestration', () => {
+  renderTools({ priceExportStatus: { pendingCount: 4 } });
+  expect(screen.queryByText('Оновлення цін Magento')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Експортувати зміни цін' })).toBeNull();
-
-  view.rerender(<ExportTools {...defaults}
-    priceExportStatus={{ pendingCount: 4, excludedPendingCount: 1 }}
-    onPriceExportCsv={onPriceExportCsv} />);
-  expect(screen.getByText('4 зміни цін очікують експорту.')).toBeTruthy();
-  expect(screen.getByText('Виключено з експорту: 1.')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'Експортувати зміни цін' }));
-  expect(onPriceExportCsv).toHaveBeenCalledOnce();
 });
 
 it('shows loading states and hides export workflows without create permission', () => {
   const view = renderTools({ exportStatus: null, priceExportStatus: null });
   expect(screen.getByText('Завантаження статусу експорту…')).toBeTruthy();
-  expect(screen.getByText('Завантаження стану цін…')).toBeTruthy();
 
   view.rerender(<ExportTools {...defaults} canCreateExport={false} canArchive />);
   expect(screen.queryByText('Експорт товарів у Magento')).toBeNull();
@@ -225,7 +196,7 @@ it('edits the EN suggestion when translation is configured, then refreshes readi
   await waitFor(() => expect(exportsApi.applyMagentoName).toHaveBeenCalledWith({
     productId: 14, subjectUa: 'Фігурка птаха', subjectEn: 'bird statue', previewToken: 'token',
   }));
-  expect(onPreviewExport).toHaveBeenCalledWith('manual');
+  expect(onPreviewExport).not.toHaveBeenCalled(); expect(defaults.markExportReviewStale).toHaveBeenCalled();
 });
 
 it('hides translation without a key and saves manually entered EN', async () => {
@@ -247,7 +218,7 @@ it('hides translation without a key and saves manually entered EN', async () => 
     productId: 15, subjectUa: 'Камінь', subjectEn: 'stone', previewToken: 'manual-token',
   }));
   expect(exportsApi.suggestMagentoName).not.toHaveBeenCalled();
-  expect(onPreviewExport).toHaveBeenCalledWith('manual');
+  expect(onPreviewExport).not.toHaveBeenCalled(); expect(defaults.markExportReviewStale).toHaveBeenCalled();
 });
 
 it('preserves expanded problem, show-all, and custom-range disclosures after name save refresh', async () => {
@@ -294,6 +265,9 @@ it('preserves expanded problem, show-all, and custom-range disclosures after nam
   });
   fireEvent.click(screen.getByRole('button', { name: 'Зберегти назви' }));
 
+  await waitFor(() => expect(defaults.markExportReviewStale).toHaveBeenCalled());
+  expect(onPreviewExport).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Оновити перевірку' }));
   await waitFor(() => expect(onPreviewExport).toHaveBeenCalledWith('manual'));
   await waitFor(() => expect(screen.getByText('8 товарів потребують виправлення')).toBeTruthy());
   expect(screen.getByRole('button', { name: 'Сховати проблемні товари' })).toBeTruthy();

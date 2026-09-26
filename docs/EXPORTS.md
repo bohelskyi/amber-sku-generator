@@ -13,7 +13,7 @@ The legacy direct CSV endpoint remains disabled with `410`. The operator's full-
 3. download every represented Magento group CSV;
 4. explicitly accept the snapshot as consumed.
 
-Accepting a snapshot advances the product cursor; it does not assert that Magento imported the files. Downloading one file never confirms the snapshot. The existing internal CSV remains stored and downloadable for compatibility, but has no operator export button. The dedicated `sku,price` workflow is separate and unchanged.
+Accepting a snapshot advances the product cursor; it does not assert that Magento imported the files. Downloading one file never confirms the snapshot. The existing internal CSV remains stored and downloadable for compatibility, but has no operator export button. The dedicated `sku,price` stream keeps its existing server rules; UX-3 separates its client review, create, download and confirmation actions (see below).
 
 `GET /api/export/status` supplies the operator's pending eligible-product count and latest confirmed export time. `POST /api/export/preview` with `{ "mode": "new" }` derives the first and last eligible product after the confirmed cursor by product ID and is read-only; it returns an empty preview when none exist. After preview, the client sends those server-resolved anchors with `mode: "new"` to snapshot creation. The server derives the pending range again, rejects stale anchors or a changed cursor, locks and revalidates the products, and creates nothing on a readiness error. The operator can still use the collapsed re-export section with an explicit single SKU or From/To range. That path retains the existing snapshot and idempotency behavior.
 
@@ -371,7 +371,7 @@ server CSV as a table, with unchanged bytes available in a secondary view.
 Published preview is a separate read-only check yielding
 an opaque token. Explicit file creation is a real export and may establish
 exposure. Stored downloads never confirm; normal confirmation remains a separate
-“Завершити експорт” action. The dedicated price-export sequence is unchanged.
+"Завершити експорт" action. The current UX-3 price sequence is documented below.
 
 Create retains its original payload, token, effective evidence and idempotency
 key through rerenders, transport/ambiguous failures and internal navigation.
@@ -513,3 +513,179 @@ the existing fingerprint. Capture rechecks locked products without changing lock
 ordering, atomic result links, exposure or cursors. Failed represented products
 block complete capture. Completed retries/downloads/confirmation continue using
 stored evidence and bytes, never today's policy.
+
+## UX-3: authoritative review, stored files and shared history
+
+`/exports` shows **ПОПЕРЕДНІЙ ПЕРЕГЛЯД** before capture and a separate
+**ЗБЕРЕЖЕНІ ФАЙЛИ** surface after successful capture. Ordinary system preview,
+published/session preview and stored product/price CSV use `ExportDataGrid`.
+Template Builder and its sample/editor grids are unchanged.
+
+Preview is one complete server response, with its existing `tableFingerprint`
+and ordinary `previewExpectation` or published signed binding. `checkedAt` is
+the observation time, not a reservation. Range/publication edits discard the
+review; successful relevant product/template mutations mark it outdated. On
+window focus, the controller compares a new server fingerprint with the displayed
+one and only marks stale; it never patches rows or silently replaces preparation.
+Explicit recheck obtains new evidence. Capture still revalidates under its
+existing locks. Local search, filters, pages and widths never enter requests.
+
+Session actions remain distinct: save settings → **Перевірити товари** (read-only)
+→ **Зберегти перевірку** (durable preparation) → **Створити файли** (capture).
+Replacing saved preparation is an explicit secondary action. Uncertain attempts
+retain their original identity and recovery path, even after a newer check.
+Diagnostic rows are returned transiently by preparation; they are not persisted
+in its bounded `preview_summary` and never become generation authority.
+
+### Read-only API contracts
+
+All paths below are relative to `/api`, authenticated, active-user gated and
+require effective `exports.view`. Existing unsafe methods retain CSRF. Creation
+and confirmation still require `exports.create`; downloading requires no create
+permission. No new permission, migration, dependency or configuration is added.
+
+| Method/path | Contract |
+| --- | --- |
+| `POST /export/preview` | Existing request/response fields and range semantics; adds `checkedAt`, `review`, and published-only `templateLabel` (display name/version number, outside binding identity). Session preview exposes the same transient projection. Empty new-product preview has empty files and null review identity. |
+| `GET /export/snapshots/:id?includeRows=false` | Existing manifest plus immutable metadata below; excludes CSV bodies at SQL selection. Omitting the parameter preserves the previous manifest behavior, including all artifact CSV bodies. |
+| `GET /export/snapshots/:id/magento/:group/csv` | Existing authorized stored bytes, used for both selected-file review and download. Every read checks access; never evaluates current products/templates. |
+| `GET /price-export/preview` | `{checkedAt,rowCount,csvContent}` for the current eligible, non-excluded queue in product-ID order; exact finalized `sku,price` CSV. No token, capture, audit, confirmation or revision mutation. |
+| `GET /price-export/snapshots/:id` | Safe shared metadata plus one `prices` artifact summary. No CSV body, idempotency key or captured per-product revisions. Missing snapshot is `404`. |
+| `GET /price-export/snapshots/:id/csv` | Existing stored `sku,price` bytes. Read/download never confirms. |
+| `GET /export/history` | `{items,next}` for the canonical product and price snapshot tables, using the shared metadata shape below. No audit-log reconstruction or synthetic sessions. |
+
+History query parameters:
+
+- `stream=all|product|price` (default `all`).
+- `scope=accessible|mine` (default `accessible`). `mine` means the actual stored
+  `created_by_user_id` equals the current application user. Historical nulls stay
+  null and are never assigned to the caller, session owner or administrator.
+- `status=all|generated|confirmed` (default `all`).
+- `limit` integer, default **20**, maximum **50**; invalid filters/limits/cursors
+  return `422`.
+- `after` opaque `next` cursor. Ordering is immutable `generated_at DESC, id DESC`,
+  with stream as the final tie-breaker for identical IDs across the two tables.
+  Cursor time retains PostgreSQL microseconds and is bound to stream/scope/status.
+  Each page uses one SQL statement and rechecks current effective access.
+
+The shared metadata shape is `stream`, `id`, `status`, `generatedAt`, `confirmedAt`,
+`createdByUserId`, `confirmedByUserId`, `rowCount` (existing product count),
+`productCount`, `csvRowCount`, `fileName`, `capturedRange`, `recipe`, `artifacts`,
+and, when actually available, `sessionId`, `templateLabel`, `requestContract`,
+`template`, `inputFingerprint`. Product range is the stored
+`{fromSku,toSku,resolvedToSku,exportedToProductId}`; price range is null.
+Artifact summaries contain `groupCode`, `profileVersion`, `fileName`,
+`productCount`, `rowCount`. Product CSV row count is unknown/null if no Magento
+artifact exists. A historical snapshot with no provenance/artifacts is labelled
+**Немає даних**, never regenerated. Current template display name is a label;
+stored version ID/hash remain provenance. Direct session snapshot metadata also
+returns the existing caller-specific `accessEpoch` required by confirmation.
+
+Direct historical product snapshots and price snapshots retain existing
+`exports.view` access. Session-linked product history uses the same owner or
+**accepted** member predicate as direct stored-result access. A pending invitation
+and an administrator role confer no private-session access. History checks current
+active-user/effective permission in its statement; opening/downloading independently
+rechecks authorization. No history or metadata read mutates domain state.
+
+### Diagnostic review projection
+
+`review = {version:"export-review-v1", identity:tableFingerprint, files:[...]}`.
+Each file has `groupCode`, `groupName`, `fileName`, `profileVersion`, exact emitted
+`headers`, and `rows`. A row contains represented `productId`/`sku`, one-based
+canonical `productPosition`, canonical Main/EN `ordinal`, `language` (`main|en`),
+`readiness` (`ready|attention`), `issues`, and header-aligned `cells`.
+
+Cells are `{state,value}`:
+
+- `final`: trustworthy future CSV text, finalized by the existing server serializer.
+- `blank`: intentional valid empty CSV text (`value:""`).
+- `provisional`: evaluated diagnostic text for a failed product, explicitly marked
+  **≈**, including provisional empty values; not an exportable partial row.
+- `not-evaluated`: no trustworthy output (`value:null`), shown as **Не обчислено**.
+
+Issue targets are explicit `cell` (`column`, `language`), `column`, `columns`
+(declared output-check ownership), `row`, or `source`. Only server evidence marks
+cells; unknown fields stay row-level. Failed-only groups remain visible. The
+observer collects values and coordinates during existing lazy evaluation; skipped
+branches are never evaluated for diagnostics. Existing artifacts, readiness,
+work metrics, hashes, token eligibility and capture evaluation stay authoritative.
+The additional review projection is bounded by the existing 64 MiB output ceiling;
+oversize review fails closed without partial output, automatic truncation, range
+splitting or a higher evaluator limit. Finalization uses the same formula
+neutralization as CSV serialization; React only reads finalized text.
+
+The compact attention summary filters affected rows. Detail dialogs show exact
+long text and secondary technical diagnostics. Authorized actions hand off to the
+existing manual-name workflow or an explicit `/?exportSku=...` decode action;
+there is no inline product editing, automatic correction or successor substitution.
+The product screen requires an explicit open and preserves existing dirty work.
+Successful changes require a complete explicit export recheck.
+
+### Stored results and explicit price actions
+
+Stored results freeze range/publication/preparation controls. Metadata loads first;
+only the selected CSV is fetched and parsed, cached by immutable result/file within
+the current authorized surface. Stored reads never use live preview. A table-load
+failure says **Файли створено, але таблицю не вдалося завантажити.** and can retry
+reading, not capture. Download feedback says **Передано браузеру для завантаження**;
+it makes no claim about the user's disk or Magento import.
+
+**Завершити експорт** opens a focused consequence dialog and invokes only the
+existing confirmation command. There is no prior-download requirement. The UI
+displays server confirmation time/actor when available. Existing idempotency,
+original attribution, normal cursor and captured-revision rules are unchanged.
+
+`/exports/prices` has no product range or template selector. Its flow is:
+
+1. **Оновити / переглянути поточну чергу** — read-only current review.
+2. **Створити файл** — existing create command with retained original retry key;
+   creation does not download or confirm.
+3. **ЗБЕРЕЖЕНІ ФАЙЛИ** — read exact stored `sku,price` values.
+4. **Завантажити CSV** — existing stored download, without confirmation.
+5. **Підтвердити експорт цін** — separate dialog and existing confirmation command.
+
+The review explicitly says the server rechecks the current queue during creation;
+it freezes nothing and adds no token protocol. If stored CSV differs from the last
+review, the UI shows the change notice before enabling its confirmation action.
+A failed stored-table read can be retried and compared without recreating a file.
+Generated, unconfirmed files can be reopened from the shared history after reload.
+Only explicit confirmation advances dedicated captured revision high-water marks;
+later price changes stay pending and normal product cursors remain separate.
+
+### Presentation performance and verification
+
+Files parse lazily, with immutable-object memoization; focus/filter/page/width
+changes do not reparse CSV. Local pages render 50 rows, long text is truncated
+until detail opening, and roving keyboard focus avoids thousands of tab stops.
+There is no sort, server preview paging, virtualization or global-state dependency.
+The review CSV scanner uses string slices to avoid retaining a concatenation node
+per character of long quoted cells; exact parsing and malformed-input regression
+tests cover its compatibility. Template Builder's parser is unchanged.
+
+UX-3 coverage: `server/test/export-review.test.js`,
+`server/integration-test/12-export-ux3.cases.js`,
+`client/test/export-ux3.test.jsx`, `client/test/export-review-performance.test.js`,
+and the existing ordinary/template/session/workspace rendered suites. Integration
+cases cover read effects, stored bytes, history pagination/unknown attribution,
+membership and both confirmation streams; they require canonical `postgres-test`.
+See the UX-3 execution record in [the UX plan](EXPORT_UX_REDESIGN_PLAN.md) for
+actual run results and the outstanding infrastructure/manual acceptance limits.
+
+### UX-4 continuity and shared recovery
+
+The UX-3 PostgreSQL infrastructure blocker is resolved; current full-suite evidence
+and remaining manual visual acceptance are in section25 of
+[the UX plan](EXPORT_UX_REDESIGN_PLAN.md). Shared session lists/detail reuse this
+history's snapshot metadata presenter and identity/status contract; they do not
+add another history endpoint. [Shared sessions](SHARED_EXPORT_SESSIONS.md) documents
+recent-first list pagination, participant disclosure and original-operation recovery.
+
+After an authorized product correction initiated from export review, the UI says
+**Дані товару змінено. Попередній перегляд застарів.** and offers the explicit
+**Оновити перевірку** action. It does not patch diagnostic rows or auto-refresh.
+Successful recheck retains display-only file/category, SKU search, attention and
+Main/EN filters, widths and a still-valid page in principal-scoped memory. New
+evidence replaces all old row/detail objects; a resolved issue is not recreated.
+Display context never changes export input/order/eligibility or retained retry
+identity. The next current issue remains actionable after the explicit recheck.

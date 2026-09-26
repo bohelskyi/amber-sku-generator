@@ -7,7 +7,7 @@ import { exportSessionsApi as api } from '../src/api/export-sessions-api';
 import { exportsApi } from '../src/api/exports-api';
 import { downloadBlob } from '../src/lib/download';
 vi.mock('../src/api/export-sessions-api', () => ({ exportSessionsApi: Object.fromEntries(['list','create','get','save','preview','prepare','generate','recipients','invite','membership'].map((k) => [k, vi.fn()])) }));
-vi.mock('../src/api/exports-api', () => ({ exportsApi: Object.fromEntries(['getTemplateOptions','getSnapshot','downloadMagentoArtifact','confirmSnapshot'].map((k) => [k, vi.fn()])) }));
+vi.mock('../src/api/exports-api', () => ({ exportsApi: Object.fromEntries(['readMagentoArtifact','getTemplateOptions','getSnapshot','downloadMagentoArtifact','confirmSnapshot'].map((k) => [k, vi.fn()])) }));
 vi.mock('../src/lib/download', () => ({ downloadBlob: vi.fn() }));
 const response = (data) => ({ data, headers: {} });
 const settings = { requestContract: 'template-v1', mode: 'new', selection: { mode: 'active' } };
@@ -25,6 +25,7 @@ beforeEach(() => {
   for (const mock of [...Object.values(api), ...Object.values(exportsApi)]) mock.mockReset();
   api.list.mockResolvedValue(response({ items: [own], next: null })); api.get.mockResolvedValue(response(own));
   exportsApi.getTemplateOptions.mockResolvedValue(response({ versions: [], activeVersionId: null }));
+  api.preview.mockResolvedValue(response(attempt.preview)); exportsApi.readMagentoArtifact.mockResolvedValue(response('sku,store_view_code,name\nBR1,,Stored'));
   exportsApi.getSnapshot.mockResolvedValue(response(snapshot)); exportsApi.downloadMagentoArtifact.mockResolvedValue(response('stored CSV'));
   exportsApi.confirmSnapshot.mockResolvedValue(response({ success: true }));
 });
@@ -51,10 +52,10 @@ it('explicit private create persists before prepare/generate and a remount resum
   fireEvent.change(screen.getByLabelText('Назва експорту'), { target: { value: 'Приватний' } }); click('Створити приватний експорт');
   await screen.findByRole('heading', { name: 'Сесія A' }); expect(api.create.mock.calls[0][0].title).toBe('Приватний'); expect(api.generate).not.toHaveBeenCalled();
   api.get.mockResolvedValue(response({ ...own, currentAttemptId: attempt.id, attempt }));
-  click('Підготувати збережену спробу'); await screen.findByText(/Підготовлено — очікує/); click('Створити файли цієї спроби'); await screen.findByText('lost response');
+  click('Перевірити товари'); await screen.findByText('ПОПЕРЕДНІЙ ПЕРЕГЛЯД'); click('Зберегти перевірку'); await screen.findByText('Готовий до створення файлів'); click('Створити файли'); await screen.findByText('lost response');
   expect(api.generate.mock.calls[0]).toEqual(['session-a', { expectedRevision: '1', expectedAccessEpoch: 'owner', attemptId: 'attempt-a' }]);
   first.unmount(); page(); await screen.findByText('Сесія A'); expect(exportsApi.getSnapshot).not.toHaveBeenCalled();
-  click('Відкрити / продовжити Сесія A'); await screen.findByText(/Файли Magento готові/);
+  click('Відкрити / продовжити Сесія A'); await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/);
   expect(exportsApi.getSnapshot).toHaveBeenCalledWith('snapshot-a'); expect(api.generate).toHaveBeenCalledTimes(1); expect(exportsApi.confirmSnapshot).not.toHaveBeenCalled();
   expect(localStorage.length).toBe(0); expect(sessionStorage.length).toBe(0);
 });
@@ -77,7 +78,7 @@ it('invitation explicitly joins the same export, does not clone or generate, and
   api.membership.mockResolvedValue(response({ state: 'accepted', epoch: '2' })); api.get.mockResolvedValue(response({ ...own, isOwner: false, accessEpoch: '2' }));
   page(2); fireEvent.click(screen.getByRole('link', { name: 'Запрошення' }));
   await screen.findByText('Сесія A'); expect(api.get).not.toHaveBeenCalled(); expect(screen.getByText(/Ваші поточні права/)).toBeTruthy();
-  click('Приєднатися до експорту користувача Олена'); await screen.findByRole('heading', { name: 'Сесія A' });
+  click('Приєднатися'); await screen.findByRole('heading', { name: 'Сесія A' });
   expect(api.membership).toHaveBeenCalledWith('session-a', { action: 'accept', expectedAccessEpoch: '1' }); expect(api.create).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
 });
 
@@ -97,7 +98,7 @@ it('dirty session conflict preserves exact fields and Stay/Discard protect openi
 
 it('revoked membership clears data on authoritative refresh and fences a late create response', async () => {
   const pending = deferred(); api.get.mockResolvedValue(response({ ...own, currentAttemptId: attempt.id, attempt })); api.generate.mockReturnValue(pending.promise);
-  page(); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A'); await screen.findByText(/Підготовлено — очікує/); click('Створити файли цієї спроби');
+  page(); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A'); await screen.findByText(/Перевірку збережено\./); click('Перевірити товари'); await screen.findByText('Готовий до створення файлів'); click('Створити файли');
   api.get.mockRejectedValue({ response: { status: 404, data: { error: 'not found' } } });
   // A refresh already in flight can receive denial while creation's outcome is unknown.
   fireEvent.focus(window);
@@ -110,17 +111,17 @@ it('deep link requires explicit current-user opening and known snapshot reading 
   page(2, '/exports/sessions/session-a'); await screen.findByRole('button', { name: 'Відкрити експорт із посилання через мій обліковий запис' }); expect(api.get).not.toHaveBeenCalled();
   click('Відкрити експорт із посилання через мій обліковий запис'); await screen.findByRole('heading', { name: 'Сесія A' });
   fireEvent.change(screen.getByLabelText('ID збереженого знімка'), { target: { value: 'historical-id' } }); click('Прочитати знімок без підтвердження');
-  await screen.findByText(/Файли Magento готові/); expect(exportsApi.getSnapshot).toHaveBeenCalledWith('historical-id'); expect(exportsApi.confirmSnapshot).not.toHaveBeenCalled();
+  await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/); expect(exportsApi.getSnapshot).toHaveBeenCalledWith('historical-id'); expect(exportsApi.confirmSnapshot).not.toHaveBeenCalled();
 });
 
 it('principal switch during stored download discards bytes, and B must explicitly open through B requests', async () => {
   api.get.mockResolvedValue(response({ ...own, snapshotId: snapshot.id })); const late = deferred(); exportsApi.downloadMagentoArtifact.mockReturnValue(late.promise);
-  const first = page(); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A'); await screen.findByText(/Файли Magento готові/);
+  const first = page(); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A'); await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/);
   click(/Завантажити/); await waitFor(() => expect(exportsApi.downloadMagentoArtifact).toHaveBeenCalled());
   first.auth.principalLifetime.valid = false;
   first.rerender(<AuthContext.Provider value={{ applicationUser: { id: 2 }, permissions: ['exports.view','exports.create'], principalLifetime: { id: 2, valid: true } }}><RouterProvider router={first.router} /></AuthContext.Provider>);
-  await act(async () => late.resolve(response('private bytes'))); expect(downloadBlob).not.toHaveBeenCalled(); expect(screen.queryByText(/Файли Magento готові/)).toBeNull();
-  expect(api.get).toHaveBeenCalledTimes(1); await screen.findByRole('button', { name: 'Відкрити експорт із посилання через мій обліковий запис' }); click('Відкрити експорт із посилання через мій обліковий запис'); await screen.findByText(/Файли Magento готові/); expect(api.get).toHaveBeenCalledTimes(2);
+  await act(async () => late.resolve(response('private bytes'))); expect(downloadBlob).not.toHaveBeenCalled(); expect(screen.queryByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/)).toBeNull();
+  expect(api.get).toHaveBeenCalledTimes(1); await screen.findByRole('button', { name: 'Відкрити експорт із посилання через мій обліковий запис' }); click('Відкрити експорт із посилання через мій обліковий запис'); await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/); expect(api.get).toHaveBeenCalledTimes(2);
 });
 
 const gridArtifact = { groupCode: 'BR', rowCount: 2, productCount: 1, csvContent: 'sku,store_view_code,synthetic_target\r\nS,,Original\r\nS,en,English\r\n' };
@@ -130,15 +131,15 @@ it('prepared session reload requires a matching authoritative table and mismatch
   api.preview.mockResolvedValueOnce(response({ ...saved.preview, configurationRevision: '1', artifacts: [gridArtifact] }))
     .mockResolvedValueOnce(response({ ...saved.preview, tableFingerprint: 'changed', configurationRevision: '1', artifacts: [{ ...gridArtifact, csvContent: gridArtifact.csvContent.replace('Original','Changed') }] }));
   page(); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A');
-  const create = await screen.findByRole('button', { name: 'Створити файли цієї спроби' });
+  const create = await screen.findByRole('button', { name: 'Створити файли' });
   expect(create.disabled).toBe(true);
-  click('Перевірити збережений діапазон (лише читання)');
+  click('Перевірити товари');
   await screen.findByText('Original');
   await waitFor(() => expect(create.disabled).toBe(false));
-  click('Перевірити збережений діапазон (лише читання)');
+  click('Оновити перевірку');
   await screen.findByText('Changed');
   expect(create.disabled).toBe(true); expect(api.generate).not.toHaveBeenCalled();
-  expect(screen.getByText(/Таблиця застаріла/)).toBeTruthy();
+  expect(screen.getByText(/Збережена перевірка застаріла/)).toBeTruthy();
 });
 
 it('uncertain session recovery keeps the original attempt despite a newer displayed preview', async () => {
@@ -147,10 +148,10 @@ it('uncertain session recovery keeps the original attempt despite a newer displa
   api.preview.mockResolvedValue(response({ ...saved.preview, tableFingerprint: 'newer', configurationRevision: '1', artifacts: [gridArtifact] }));
   api.generate.mockResolvedValue(response(snapshot));
   page(); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A');
-  await screen.findByRole('button', { name: 'Повторити ту саму спробу' });
-  click('Перевірити збережений діапазон (лише читання)'); await screen.findByText('Original');
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Повторити ту саму спробу' }).disabled).toBe(false));
-  click('Повторити ту саму спробу');
+  await screen.findByRole('button', { name: 'Повторити створення цього експорту' });
+  click('Перевірити товари'); await screen.findByText('Original');
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Повторити створення цього експорту' }).disabled).toBe(false));
+  click('Повторити створення цього експорту');
   await waitFor(() => expect(api.generate).toHaveBeenCalledWith('session-a', { expectedRevision: '1', expectedAccessEpoch: 'owner', attemptId: 'attempt-a' }));
   expect(api.prepare).not.toHaveBeenCalled();
 });

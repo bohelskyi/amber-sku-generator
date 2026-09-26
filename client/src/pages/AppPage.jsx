@@ -8,9 +8,12 @@ import { LoadingState } from '../components/app/UiPrimitives.jsx';
 import { useAuth } from '../auth/auth-context.js';
 import { useSkuManager } from '../hooks/useSkuManager';
 import { getPermissionUiState, getRecountUiMode } from '../lib/permission-ui.js';
+import { useSearchParams } from 'react-router-dom';
 
 function AppPage() {
   const auth = useAuth();
+  const [searchParams] = useSearchParams();
+  const exportSku = searchParams.get('exportSku')?.slice(0, 160);
   const permissionUi = getPermissionUiState(auth.permissions);
   const recountMode = getRecountUiMode(permissionUi);
   const sku = useSkuManager({
@@ -37,6 +40,13 @@ function AppPage() {
       <div className="mx-auto max-w-7xl space-y-5 px-4 py-4 sm:px-6 sm:py-6">
         <PageHeader />
         <Toast message={sku.copyMessage} />
+        {exportSku && auth.permissions.includes('products.view') && auth.permissions.includes('products.decode') && <section className="card p-4 space-y-2">
+          <p>Товар із перевірки експорту: <strong>{exportSku}</strong></p>
+          <button className="btn btn-outline px-3" disabled={Boolean(sku.selectedCat || sku.hasRecountChanges || sku.isRecountApplying || sku.isPriceChangeOpen)}
+            onClick={() => sku.handleDecode(exportSku)}>Відкрити товар із експорту</button>
+          {(sku.selectedCat || sku.hasRecountChanges || sku.isPriceChangeOpen) && <p>Спочатку завершіть або скасуйте поточні зміни товару.</p>}
+          <p className="text-sm">Відкриття лише розшифровує цей SKU. Після змін поверніться до експорту й явно повторіть перевірку.</p>
+        </section>}
 
         {!sku.selectedCat && (
           <HomeDashboard

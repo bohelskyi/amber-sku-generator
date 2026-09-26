@@ -6,16 +6,17 @@ This guide describes application behavior, not operational/Magento acceptance.
 
 ## Operator workflow
 
-From **Експорт**, open **Мої експорти · Запрошення · Створити свій експорт за
-шаблоном** (`/exports/sessions`). The product workspace has the same entry.
+From **Експорт**, use **Мої експорти** (`/exports/sessions`), **Спільні зі мною**
+(`/exports/shared`) or **Запрошення** (`/exports/invitations`).
+**Створити свій експорт** opens `/exports/new/template`.
 
 1. **Створити свій експорт**: enter a title, new-products or explicit SKU range,
    and active/pinned published-template selection. **Створити приватний експорт**
    saves metadata only. Only the owner initially has access.
-2. **Перевірити збережений діапазон (лише читання)** reads current readiness.
-   **Підготувати збережену спробу** durably records the exact preview binding and
+2. **Перевірити товари** reads current readiness.
+   **Зберегти перевірку** durably records the exact preview binding and
    operation identity. Neither action reserves/exposes products or confirms anything.
-3. **Створити файли цієї спроби** explicitly invokes the existing snapshot engine.
+3. **Створити файли** explicitly invokes the existing snapshot engine.
    Successful configuration, exact CSV bytes, publication and result association
    become immutable. A different range/template needs a deliberately new session.
 4. Download each stored artifact. **Завершити експорт** separately confirms the
@@ -25,7 +26,7 @@ From **Експорт**, open **Мої експорти · Запрошення 
    two characters), select the exact user → **Надіслати запрошення в застосунку**.
    This creates an in-application invitation, without email or external messaging.
 6. Recipient opens **Запрошення**, sees their current capabilities, and explicitly
-   chooses **Приєднатися до експорту користувача X** or **Відхилити запрошення**.
+   chooses **Приєднатися** or **Відхилити**.
    They can instead choose **Створити свій експорт** for an independent operation.
    Accepted invitations appear under **Спільні зі мною**. Joining preserves the
    same session, attempt and snapshot; it creates no copy and grants no global rights.
@@ -77,7 +78,7 @@ Routes are below `/api/export/sessions`:
 
 | Method/path | Command |
 | --- | --- |
-| `GET /?scope=owned|shared|invitations&after=...&limit=20` | Paginated authorized list |
+| `GET /?scope=owned|shared|invitations&order=recent&after=...&limit=20` | Recent-first authorized workspace list; omitted order retains the old UUID cursor mode |
 | `POST /` | `{creationKey,title,settings}`; retry same original normalized intent returns same session |
 | `GET /:id` | Current saved configuration, bounded members, safe attempt summary/result/status |
 | `PUT /:id` | `{expectedRevision,expectedAccessEpoch,title,settings}`; CAS, invalidates/supersedes old attempt only under lock |
@@ -213,3 +214,52 @@ sparse EN and no-op canonical hashes. Published versions remain immutable.
 
 Verification counts, failing-before isolation evidence, exact files and remaining
 browser/catalog/Magento gates are recorded in [the PR4 report](EXPORT_TEMPLATES_PR4.md).
+
+## UX-4 list and recovery read behavior
+
+Recent lists order by immutable creation time descending, then session ID
+descending, with a scope-bound microsecond cursor. Later edits, invitations and
+confirmation cannot reorder already paginated rows. Each page rechecks current
+authority; newly created rows are discovered by refreshing the first page. Default
+limit20/max50 and the previous UUID pagination mode remain compatible.
+
+Owned and accepted-shared list rows add `participantCount` (owner plus accepted),
+`pendingInvitationCount`, `template`, `attempt`, `snapshot` and
+`lastRecordedActivityAt`. The last field is the greatest recorded session,
+membership, attempt, session-audit or confirmation timestamp; it is not a live
+activity estimate and reading does not update it. Snapshot metadata uses the
+same UX-3 presenter as `/api/export/history` and stored-result reads. Pending
+invitations still expose only their original minimal fields. There is no second
+history endpoint/status model and no persisted display-status enum.
+
+The workspace header shows title, owner, private/shared state, publication, count
+and human status. Sharing uses the existing owner authority in a focused dialog;
+pending and accepted participants stay distinct. Revoke explicitly warns that
+downloaded files cannot be recalled; leave removes future access without deleting
+the export. No roles, ownership transfer or global permission grants were added.
+
+Opening a session is read-only. A stored result opens its exact bytes. A prepared
+session without loaded reviewed rows first requires **Перевірити товари**. The
+detail's observational `attempt.preparationIssue` is null, `expired` or
+`unavailable`, based on the existing signer for a prepared attempt only. It never
+changes stored state, returns a proof or replaces the command's authorization and
+final validation. Expired/stale unused preparation needs explicit review and an
+explicit replacement. Completed snapshots/retries do not depend on preview TTL.
+
+Only a current executing marker plus held-lock evidence is presented as active
+file generation; a held unrelated lock is neutral, and an executing marker whose
+lock can be acquired is interrupted under the existing rule. Lists do not test
+locks and conservatively display attention for raw executing markers.
+**Повторити створення цього експорту** retains the originally submitted operation
+descriptor despite later preview/detail responses. Explicit accepted configuration
+save or explicit replacement remains the existing supersede boundary. Read/poll
+does not create, replace, confirm, audit or advance a cursor.
+
+Dirty conflicts display newer saved fields separately. Denial/changed access epoch
+clears private table/detail/list caches and fences old responses. Reads preserve
+the visible/idle ten-second cadence and overlap guards. Principal lifetime and
+dirty navigation remain above the existing routes. Only allowed display values
+(file/search/readiness/language/page/widths and product-change notice) survive
+review remounts in principal-scoped memory; no private browser storage or retry
+token storage is introduced. See [UX-4 execution evidence](EXPORT_UX_REDESIGN_PLAN.md#25-ux-4-execution-record-and-ux-3-carry-over--2026-09-25)
+for the full disposable-PostgreSQL checks and pending operator visual acceptance.
