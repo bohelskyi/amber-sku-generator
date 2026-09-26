@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations `000`–`038` are immutable history; Phase 1 adds forward migration `039`. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations `000`–`039` are immutable history; Phase 3B adds forward migration `040`. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -96,6 +96,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `037_shared_export_sessions.sql` | Durable private/shared controlled sessions, membership epochs, immutable attempt identity/proof, one successful snapshot per session, and deferred atomic reverse-result association. No historical ownership backfill; 000–036 remain immutable. |
 | `038_editable_export_columns.sql` | Adds the distinct editable-column artifact contract and nullable immutable legacy preview fingerprint. Extends complete template binding checks without relabeling old artifacts or publications. No backfill; 000–037 unchanged. |
 | `039_full_product_export_lifecycle.sql` | Separate monotonic full-product state, immutable exact snapshot membership, server-owned name-review flag, immutable nullable snapshot lifecycle version and delegable `exports.reconcile` permission. Conservative historical baseline only; no exposure repair or selection switch. |
+| `040_full_product_export_cutover.sql` | Distinct legacy baseline and audit FK, typed business/compatibility exclusions, monotonic preparing/active selector gate with immutable audit references, baseline-aware pending index, deferred policy projection checks and writer guards; immutable snapshot selection and explicit replacement binding. No baseline acceptance, exclusion release or activation in migration. |
 
 Export-template mutations take the existing access-admin advisory lock and recheck the actor's specific capability before locking family then draft. Publication allocates a per-family version number under those locks and inserts attribution and audit atomically. The unique family/source-revision tuple supports completed retries even after the draft advances. Draft base-version ownership uses a composite foreign key; historical source revision is not a foreign key to the mutable draft revision. Selection writers lock the singleton after the access boundary and only read immutable versions; they never lock products, revisions or cursors.
 
@@ -143,3 +144,8 @@ Recount locks source product → existing SKU/sequence/reservation resources →
 Fresh schema, checkpoint 038, repeated checksum verification and injected 039 failure rollback are covered by `02-full-product-lifecycle-migration.cases.js`; historical checksums, exclusions and immutable snapshot bytes remain unchanged. Runtime save, rollback and membership immutability are also covered in `11-full-product-lifecycle.cases.js`. These checks use only disposable databases on the canonical PostgreSQL 16 test service, including the temporary upgrade database ending in `_test`.
 
 **Do not deploy Phase 1 independently.** The ledger is not yet the production selection authority. The operator release blocker remains, and final rollout must prevent mixed old/new writers against activated lifecycle semantics.
+
+Migration 040 is the forward cutover contract; 039 remains immutable. Follow the
+[canonical production order and schema details](FULL_PRODUCT_CUTOVER_RUNBOOK.md).
+Current deployment requires both the gate-aware application and actor-approved
+cutover commands; migration alone does not enable the selector.

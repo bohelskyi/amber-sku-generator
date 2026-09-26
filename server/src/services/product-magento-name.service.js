@@ -1,3 +1,4 @@
+const lifecycleGate = require('./full-product-cutover-gate');
 const crypto = require('node:crypto');
 const pool = require('../db/pool');
 const config = require('../config/env');
@@ -83,7 +84,7 @@ async function previewProductMagentoName(payload = {}) {
   const productId = parseProductId(payload.productId);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    await lifecycleGate.begin(client, 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const product = (await client.query('SELECT * FROM products WHERE id = $1', [productId])).rows[0];
     assertEligible(product);
     const [lifecycle] = await readFullProductStates(client, [productId]);
@@ -98,10 +99,10 @@ async function previewProductMagentoName(payload = {}) {
     if (readCurrent && preview.canConfirmUnchanged) {
       preview.previewToken = previewFor(product, preview.subjectUa, preview.subjectEn, lifecycle, true).previewToken;
     }
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return preview;
-  } catch (error) { await client.query('ROLLBACK'); throw error; }
-  finally { client.release(); }
+  } catch (error) { await lifecycleGate.rollback(client); throw error; }
+  finally { await lifecycleGate.release(client); client.release(); }
 }
 
 async function applyProductMagentoName(payload = {}, options = {}) {
@@ -113,7 +114,7 @@ async function applyProductMagentoName(payload = {}, options = {}) {
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await (options.databasePool || pool).connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const result = await client.query('SELECT * FROM products WHERE id = $1 FOR UPDATE', [productId]);
     const product = result.rows[0];
     assertEligible(product);
@@ -149,13 +150,13 @@ async function applyProductMagentoName(payload = {}, options = {}) {
         ...(product.magento_name_review_required ? { inheritedReviewCompleted: true } : {}),
       },
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { ...preview, reviewRequired: false, canConfirmUnchanged: false, fullRevision: fullState.revision };
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 

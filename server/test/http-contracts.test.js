@@ -2,6 +2,9 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { createApp } = require('../src/app');
+const lifecycleGate = require('../src/services/full-product-cutover-gate');
+test.before(()=>test.mock.method(lifecycleGate,'readGate',async()=>({phase:'legacy'})));
+test.after(()=>test.mock.restoreAll());
 
 const identityBase = {
   issuer: 'https://auth.example.invalid/realms/amber',
@@ -220,4 +223,12 @@ test('representative business validation and compatibility errors retain status 
   assert.deepEqual(disabledExport.data, {
     error: 'Прямий CSV-експорт вимкнено. Створіть і підтвердьте immutable export snapshot.',
   });
+});
+
+test('preparing freeze retains authentication/CSRF and returns an explicit retryable business error',async(t)=>{
+  t.mock.method(lifecycleGate,'readGate',async()=>({phase:'preparing'}));
+  const frozen=await request('/api/delete',{subject:'archiver',method:'POST',csrfToken:'known-csrf-token',body:{skuToDelete:'x'}});
+  assert.equal(frozen.response.status,503);assert.equal(frozen.data.code,'EXPORT_CUTOVER_PREPARING');
+  assert.equal((await request('/api/delete',{method:'POST',body:{}})).response.status,401);
+  assert.equal((await request('/api/delete',{subject:'archiver',method:'POST',body:{}})).response.status,403);
 });

@@ -43,6 +43,7 @@ const ENDPOINT_MANIFEST = Object.freeze([
   endpoint('GET', '/products', 'history.view'),
   endpoint('GET', '/product-timeline', 'history.view'),
   endpoint('GET', '/export/status', 'exports.view'),
+  endpoint('GET', '/export/queue', 'exports.view'),
   endpoint('GET', '/export/history', 'exports.view'),
   endpoint('GET', '/export/csv', 'exports.view'),
   endpoint('POST', '/export/preview', 'exports.view'),

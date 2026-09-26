@@ -129,3 +129,40 @@ Informational edits keep the exact existing allowlist and active-request prohibi
 The authorized Magento-name workflow also supports explicit `confirmUnchanged: true` for a current inherited pair with pending review. Reading `/product-magento-name/preview` with only `productId` returns the current pair, review eligibility and its confirmation token when eligible. Confirmation consumes that reviewed token, clears the flag, increments `delivery_version`, and writes `product_magento_name.reviewed` without advancing payload revision. Ordinary unchanged writes remain rejected. Edited names use `product_magento_name.updated`; audit or lifecycle failure rolls back the complete operation. See [exports](EXPORTS.md#phase-2-name-review-and-in-place-full-revisions--2026-09-26) for readiness and snapshot behavior.
 
 **Phase 2 is NOT independently deployable as the full correctness fix. Normal export selection remains old behavior until Phase 4.** No historical repair, exclusion clearing, replacement release or Phase 3/4/5 work is included. [Section 20 of the plan](RECOUNT_EXPORT_CORRECTNESS_PLAN.md#20-phase-2-actual-results--2026-09-26) records verification and race evidence.
+
+## Phase 3A historical repair tooling
+
+The separate backend repair domain now inventories every historical product and
+complete correction lineage in a deterministic version-2 manifest. Only an exact
+reviewed, revalidated terminal-successor entry can mutate its permitted exclusion,
+paired names/review and lifecycle disposition. Corrected/archived products and
+permanent SKU reservations are preserved. Unknown exclusion provenance stays
+held; a lost name pair is restored only as an unexposed first-revision repair,
+with exact source subjects and mandatory review. A backend-only reconciliation
+command can release a reviewed held terminal successor to replacement delivery
+with complete old-SKU and file dispositions. Neither primitive changes recount
+or request behavior, normal export selection, or introduces UI/HTTP workflows.
+
+Useful restored data was read only; apply validation used disposable databases.
+The ordinary-active baseline and multi-entry batch policy still need explicit
+decisions before activation. See [Phase 3A results](RECOUNT_EXPORT_CORRECTNESS_PLAN.md#21-phase-3a-actual-results--2026-09-26).
+
+## Activated exclusion and reconciliation policy — 2026-09-27
+
+The approved cutover is implemented behind migration 040's inactive gate. Future
+ordinary saves have explicit business policy `none`. Recounts preserve/inherit a
+distinct independent or unknown business policy; their legacy compatibility bit
+is recorded separately. After activation a reliably unexposed successor becomes
+a normal pending first delivery without a compatibility exclusion. Exposed or
+ambiguous successors remain held until reviewed reconciliation. Source retirement
+and archive still project exclusion 1. No old cursor rewind is used.
+
+Unknown legacy exclusions require explicit resolution. The four retained-unexposed
+candidates cannot be released before selector activation or merely because no
+other supported writer was found. Lost source name pairs retain exact wording and
+require review. Independent business policy can be changed through the typed,
+audited exclusion command; that action alone never clears a lifecycle hold.
+
+The [canonical cutover runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md) supersedes the
+previously unresolved Phase 3A baseline/batch decisions. Useful `amber` remains
+unchanged at 038; attestations made in the disposable rehearsal are simulations.

@@ -1,3 +1,4 @@
+const lifecycleGate = require('./full-product-cutover-gate');
 const crypto = require('node:crypto');
 const pool = require('../db/pool');
 const { createMutationContext } = require('../audit/mutation-context');
@@ -17,9 +18,9 @@ const normalize = (settings) => {
 };
 function title(value) { if (typeof value !== 'string' || !value.trim() || value.length > 160 || value.includes('\0')) throw binding.error(422, 'EXPORT_TITLE_INVALID', 'Назва має містити 1–160 символів.'); return value.trim(); }
 async function transaction(client, task) {
-  await client.query('BEGIN');
-  try { const result = await task(); await client.query('COMMIT'); return result; }
-  catch (error) { await client.query('ROLLBACK'); throw error; }
+  await lifecycleGate.begin(client);
+  try { const result = await task(); await lifecycleGate.commit(client); return result; }
+  catch (error) { await lifecycleGate.rollback(client); throw error; }
 }
 async function audit(client, context, id, action, details = {}) {
   await writeAuditEvent(client, { mutationContext: context, eventKey: `export_session.${action}`, subjectType: 'export_session', subjectId: id, details });

@@ -7,6 +7,7 @@ for (const modulePath of [
   './01-platform-boundary.cases',
   './02-migration-foundation.cases',
   './02-full-product-lifecycle-migration.cases',
+  './02-cutover-migration.cases',
   './03-authentication-sessions.cases',
   './04-product-access-audit.cases',
   './05-recount.cases',
@@ -32,6 +33,8 @@ for (const modulePath of [
   './12-export-ux3.cases',
   './12-export-ux4.cases',
   './13-sqlite-import.cases',
+  './14-phase3-repair.cases',
+  './15-cutover.cases',
 ]) {
   require(modulePath);
 }

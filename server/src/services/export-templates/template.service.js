@@ -1,3 +1,4 @@
+const lifecycleGate = require('../full-product-cutover-gate');
 const { randomUUID } = require('node:crypto');
 const pool = require('../../db/pool');
 const { PublicHttpError } = require('../../http/errors');
@@ -100,14 +101,14 @@ function verifyVersion(row) {
 async function readTransaction(options, operation) {
   const client = await (options.databasePool || pool).connect();
   try {
-    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    await lifecycleGate.begin(client, 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const result = await operation(client);
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return result;
   } catch (cause) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw cause;
-  } finally { client.release(); }
+  } finally { await lifecycleGate.release(client); client.release(); }
 }
 async function mutation(capability, options, operation) {
   const mutationContext = createMutationContext(options.mutationContext);

@@ -1,3 +1,4 @@
+import { FullProductQueues } from '../exports/FullProductQueues';
 import { ExportReview } from '../exports/ExportReview';
 import { StoredSnapshot } from '../exports/StoredSnapshot';
 import { WorkspaceDialog } from '../workspace/WorkspaceDialog';
@@ -405,6 +406,9 @@ export function ExportTools({
             <p className="section-subtitle mt-1">Перевірте товари, створіть незмінні файли та окремо підтвердьте експорт.</p>
           </div>}
 
+          {exportStatus?.lifecycle?.phase === 'preparing' && <p role="status" className="notice m-4">??????? ????????? ??????????? ??? ???????? ?? ????? ?????.</p>}
+          {exportStatus?.lifecycle?.phase === 'active' && !exportPreview && !exportSnapshot && <FullProductQueues
+            lifecycle={exportStatus.lifecycle} onPreview={startPreview} disabled={isExportLoading || Boolean(pendingCreate)} />}
           {durableSessions ? <>
             {surface === 'all' && <div className="p-4 border-b"><Link className="underline" to="/exports/sessions">Мої експорти · Запрошення · Створити свій експорт за шаблоном</Link><p className="text-xs mt-2">Нижче — звичайний Magento v1. Експорт за опублікованим шаблоном — окрема збережена операція; учасників можна запросити явно.</p></div>}
             {pendingCreate && <div className="notice notice-warning m-4" role="status"><div>

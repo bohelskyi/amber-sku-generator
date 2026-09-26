@@ -71,7 +71,8 @@ test('exposure inventory PostgreSQL uses one read-only repeatable transaction an
     const manifest = await loadCorrectionExposureManifest(observedPool, { expectedDatabase: database });
     assert.equal(connections, 1);
     assert.deepEqual(settings, { read_only: 'on', isolation: 'repeatable read' });
-    assert.equal(queries[0], 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    assert.match(queries[0], /pg_advisory_lock_shared/);
+    assert.equal(queries[1], 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     assert.ok(queries.every((sql) => /^(BEGIN|SET LOCAL|SELECT|COMMIT)/.test(sql) && !/FOR (UPDATE|SHARE)/.test(sql)));
     assert.equal(manifest.correctionPairs.find((p) => p.correctionId === correctionId).lineageExposure.classification, 'generated_exact');
     const repeated = await loadCorrectionExposureManifest(pool, { expectedDatabase: database });

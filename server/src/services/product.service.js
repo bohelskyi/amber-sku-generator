@@ -1,3 +1,4 @@
+const lifecycleGate = require('./full-product-cutover-gate');
 const pool = require('../db/pool');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
@@ -404,14 +405,14 @@ async function buildProductRecountPreview(payload, options = {}) {
   if (options.queryable) return buildRecountPreview(payload, options.queryable, options);
   const client = await (options.databasePool || pool).connect();
   try {
-    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    await lifecycleGate.begin(client, 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const preview = await buildRecountPreview(payload, client, options);
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return preview;
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
-  } finally { client.release(); }
+  } finally { await lifecycleGate.release(client); client.release(); }
 }
 
 async function buildRecountPreview({
@@ -595,7 +596,7 @@ async function applyProductRecount(payload, options = {}) {
   const client = await (options.databasePool || pool).connect();
 
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
 
     const sourceProductId = Number(preview.source.productId);
     const sourceLockResult = await client.query(
@@ -929,7 +930,7 @@ async function applyProductRecount(payload, options = {}) {
       },
     });
 
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
 
     return {
       success: true,
@@ -938,10 +939,10 @@ async function applyProductRecount(payload, options = {}) {
       corrected,
     };
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw normalizeSkuWriteError(err, preview.corrected.fullSku);
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -951,7 +952,7 @@ async function saveProduct(payload, options = {}) {
   let fullSku = '';
 
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     if (!payload.skuSchemaVersionId) {
       throw validationError('Для збереження потрібен skuSchemaVersionId із актуального preview.');
     }
@@ -1070,14 +1071,14 @@ async function saveProduct(payload, options = {}) {
         categoryCode,
       },
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
 
     return { success: true, id: result.rows[0].id, fullSku };
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw normalizeSkuWriteError(err, fullSku);
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -1086,7 +1087,7 @@ async function deleteProductBySku(skuToDelete, options = {}) {
   const normalizedSku = String(skuToDelete || '').trim().toUpperCase();
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const result = await client.query(
       `UPDATE products
        SET status = 'archived', exclude_from_export = 1, archived_by_user_id = $1
@@ -1108,7 +1109,7 @@ async function deleteProductBySku(skuToDelete, options = {}) {
       subjectId: productId,
       details: { fullSku: normalizedSku },
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
 
     return {
       success: true,
@@ -1116,10 +1117,10 @@ async function deleteProductBySku(skuToDelete, options = {}) {
       message: `Артикул ${normalizedSku} перенесено в архів.`,
     };
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 

@@ -64,6 +64,7 @@ async function waitUntilBlockedBy(client, queryFragment, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
   let lastBlocked = [];
   while (Date.now() < deadline) {
+    await client.query('SELECT pg_stat_clear_snapshot()');
     const blocked = await client.query(
       `SELECT pid, query
        FROM pg_stat_activity

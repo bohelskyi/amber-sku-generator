@@ -1,3 +1,4 @@
+const lifecycleGate = require('./full-product-cutover-gate');
 const { buildCorrectionExposureManifest } = require('./export-exposure/manifest');
 
 // Deliberately not imported by business routes or startup. Callers supply the
@@ -5,7 +6,7 @@ const { buildCorrectionExposureManifest } = require('./export-exposure/manifest'
 async function loadCorrectionExposureManifest(databasePool, { expectedDatabase } = {}) {
   const client = await databasePool.connect();
   try {
-    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    await lifecycleGate.begin(client, 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     await client.query("SET LOCAL TIME ZONE 'UTC'");
     const database = (await client.query('SELECT current_database() AS name')).rows[0].name;
     if (expectedDatabase && database !== expectedDatabase) throw new Error('Inventory database does not match expected name');
@@ -36,11 +37,11 @@ async function loadCorrectionExposureManifest(databasePool, { expectedDatabase }
       to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at FROM export_state`)).rows;
     const manifest = buildCorrectionExposureManifest({ database, products, corrections, snapshots,
       artifacts, revisions, events, state });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return manifest;
   } catch (error) {
-    await client.query('ROLLBACK'); throw error;
-  } finally { client.release(); }
+    await lifecycleGate.rollback(client); throw error;
+  } finally { await lifecycleGate.release(client); client.release(); }
 }
 
 module.exports = { loadCorrectionExposureManifest };

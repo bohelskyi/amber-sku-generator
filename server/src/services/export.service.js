@@ -1,3 +1,4 @@
+const lifecycleGate = require('./full-product-cutover-gate');
 const pool = require('../db/pool');
 const crypto = require('node:crypto');
 const { getProductBySku } = require('./product/product-queries');
@@ -12,6 +13,7 @@ const previewSigner = bindingTools.makeSigner(require('../config/env').sessionSe
 const { assertActorStillAuthorized } = require('./access-admin-transaction');
 const sessionAccess = require('./export-session-access');
 const fullExport = require('./full-product-export.service');
+const fullSelection = require('./full-product-selection');
 const {
   buildMagentoPayload,
   loadMagentoCatalog,
@@ -158,11 +160,16 @@ async function getExportRows(fromSku, toSku, options = {}) {
   const startId = idTo !== null ? Math.min(idFrom, idTo) : idFrom;
   const endId = idTo !== null ? Math.max(idFrom, idTo) : null;
 
+  const selectionSql = await fullSelection.predicate(queryable, options.mode, options);
   const params = [startId];
   const rangeClauses = ['p.id >= $1'];
   if (endId !== null) {
     params.push(endId);
     rangeClauses.push(`p.id <= $${params.length}`);
+  }
+  if (options.mode === 'replacement') {
+    params.push(options.productId, String(options.deliveryVersion));
+    rangeClauses.push(`p.id=$${params.length-1} AND f.delivery_version=$${params.length}::bigint`);
   }
   const inRequestedRangeSql = `(${rangeClauses.join(' AND ')})`;
   const result = await queryable.query(
@@ -173,7 +180,8 @@ async function getExportRows(fromSku, toSku, options = {}) {
              ${options.templateInputs ? 'p.sku_schema_version_id, p.exclude_from_export,' : ''}
              ${inRequestedRangeSql} AS in_requested_range
       FROM products p
-      WHERE COALESCE(p.exclude_from_export, 0) = 0
+      ${selectionSql ? 'JOIN product_full_export_state f ON f.product_id=p.id' : ''}
+      WHERE ${selectionSql || 'TRUE'} AND COALESCE(p.exclude_from_export, 0) = 0
         AND ${inRequestedRangeSql}
       ORDER BY p.id ASC
       ${lockProducts ? 'FOR SHARE OF p' : ''}
@@ -291,13 +299,14 @@ async function getConfirmedExportCursor(queryable, lock = false) {
 }
 
 async function resolveNewExportRange(queryable) {
+  const selectionSql = await fullSelection.predicate(queryable, 'new');
   const cursor = await getConfirmedExportCursor(queryable);
   const result = await queryable.query(
-    `SELECT MIN(id)::int AS first_id, MAX(id)::int AS last_id,
+    `SELECT MIN(p.id)::int AS first_id, MAX(p.id)::int AS last_id,
             count(*)::int AS product_count
-     FROM products
-     WHERE id > $1 AND COALESCE(exclude_from_export, 0) = 0`,
-    [cursor]
+     FROM products p ${selectionSql ? 'JOIN product_full_export_state f ON f.product_id=p.id' : ''}
+     WHERE ${selectionSql || 'p.id > $1 AND COALESCE(p.exclude_from_export,0)=0'}`,
+    selectionSql ? [] : [cursor]
   );
   const { first_id: firstId, last_id: lastId, product_count: productCount } = result.rows[0];
   if (!productCount) return { cursor, fromSku: null, toSku: null, productCount: 0 };
@@ -334,7 +343,7 @@ async function createExportSnapshot(input, options = {}) {
     error.statusCode = 422;
     throw error;
   }
-  if (!template && mode && mode !== 'new') {
+  if (!template && mode && !['new','manual','replacement'].includes(mode)) {
     const error = new Error('Невідомий режим вибору товарів для експорту.');
     error.statusCode = 422;
     throw error;
@@ -360,7 +369,12 @@ async function createExportSnapshot(input, options = {}) {
       || snapshot.export_attempt_id !== options.sessionAttempt.attemptId)) throw bindingTools.conflict();
     if (template) return bindingTools.assertCompleted(snapshot, intent, suppliedBinding);
     if (snapshot.request_contract === 'template-v1') throw bindingTools.conflict();
-    assertSnapshotMatchesRequest(snapshot, fromSku, toSku);
+    if (mode === 'replacement') {
+      const captured = snapshot.full_product_selection;
+      if (captured?.mode !== 'replacement' || captured.products?.length !== 1
+        || captured.products[0].productId !== input.productId
+        || String(captured.products[0].deliveryVersion) !== String(input.deliveryVersion)) throw bindingTools.conflict();
+    } else assertSnapshotMatchesRequest(snapshot, fromSku, toSku);
     if (expectedLegacy && snapshot.legacy_preview_fingerprint !== input.previewExpectation) throw bindingTools.conflict();
     await assertSnapshotProfile(snapshot, requestedProfile, queryable);
     return snapshot;
@@ -388,20 +402,21 @@ async function createExportSnapshot(input, options = {}) {
       await published.protectAuthority(client, mutationContext.actorUserId, 'exports.create');
       authorityProtected = true;
     }
-    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+    const activation = await lifecycleGate.begin(client, 'BEGIN ISOLATION LEVEL REPEATABLE READ');
+    if (activation.phase === 'active' && !template && !expectedLegacy) throw bindingTools.error(422, 'EXPORT_PREVIEW_REQUIRED', 'Preview the exact lifecycle selection first');
     let resolved = null;
     let binding = null;
     if (!template) {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', ['amber:export-snapshot:v1', key]);
       const second = await lookup(client);
-      if (second) { const found = await match(second, client); await client.query('COMMIT'); return found; }
+      if (second) { const found = await match(second, client); await lifecycleGate.commit(client); return found; }
     }
     if (template) {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', ['amber:export-snapshot:v1', key]);
       const second = await lookup(client);
       if (second) {
         const found = await match(second, client);
-        await client.query('COMMIT');
+        await lifecycleGate.commit(client);
         return found;
       }
       previewSigner.verify(input.previewToken);
@@ -409,6 +424,7 @@ async function createExportSnapshot(input, options = {}) {
       resolved = await published.resolvePublished(client, intent, mutationContext.actorUserId,
         { lock: true, expected: suppliedBinding.effective });
     }
+    if (mode === 'replacement') ({ fromSku, toSku } = await fullSelection.replacementAnchors(client, input));
     let newRange = null;
     if (mode === 'new') {
       newRange = await resolveNewExportRange(client);
@@ -428,7 +444,7 @@ async function createExportSnapshot(input, options = {}) {
     let exportData;
     try {
       exportData = await getExportRows(fromSku, toSku, {
-        queryable: client, lockProducts: true, templateInputs: template,
+        queryable: client, lockProducts: true, templateInputs: template, mode, productId: input.productId, deliveryVersion: input.deliveryVersion,
       });
     } catch (cause) {
       if (template && !cause.code && !cause.statusCode) throw bindingTools.stale();
@@ -474,9 +490,9 @@ async function createExportSnapshot(input, options = {}) {
         reexport_revisions, request_contract, template_id, template_version_id,
         template_definition_hash, template_evaluator_version, template_output_contract,
         template_format_version, request_intent, input_fingerprint, binding_evidence,
-        export_session_id, export_attempt_id, legacy_preview_fingerprint, full_product_lifecycle_version)
+        export_session_id, export_attempt_id, legacy_preview_fingerprint, full_product_lifecycle_version, full_product_selection)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb,
-         $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21::jsonb, $22, $23, $24, $25)
+         $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21::jsonb, $22, $23, $24, $25, $26::jsonb)
        RETURNING *`,
       [
         crypto.randomUUID(),
@@ -498,6 +514,7 @@ async function createExportSnapshot(input, options = {}) {
         options.sessionAttempt?.sessionId || null, options.sessionAttempt?.attemptId || null,
         expectedLegacy ? legacyFingerprint : null,
         fullExport.LIFECYCLE_VERSION,
+        JSON.stringify({mode:mode || 'manual', ...exportData.fullProductLifecycle}),
       ]
     );
     const snapshot = result.rows[0];
@@ -527,10 +544,10 @@ async function createExportSnapshot(input, options = {}) {
       },
     });
     if (options.linkSessionResult) await options.linkSessionResult(client, snapshot);
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return snapshot;
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     const keyConflict = error?.code === '23505' && error.constraint === 'export_snapshots_idempotency_key_key';
     if (keyConflict || (error.code === '40001') || ((template || expectedLegacy) && (
       ['EXPORT_PREVIEW_STALE', 'EXPORT_PREVIEW_EXPIRED', 'EXPORT_PREVIEW_REQUIRED', 'TEMPLATE_SOURCE_INVALID'].includes(error.code)
@@ -544,7 +561,7 @@ async function createExportSnapshot(input, options = {}) {
     throw error;
   } finally {
     try { if (authorityProtected) await published.releaseAuthority(client); }
-    finally { client.release(); }
+    finally { await lifecycleGate.release(client); client.release(); }
   }
 }
 
@@ -559,7 +576,8 @@ async function assertSnapshotProfile(snapshot, requestedProfile, queryable = poo
 }
 
 async function previewExport(input, options = {}) {
-  const { fromSku, toSku, mode } = input;
+  let { fromSku, toSku } = input;
+  const { mode } = input;
   const template = bindingTools.requestContract(input) === 'template-v1';
   const intent = template ? bindingTools.normalizeIntent(input) : null;
   const actor = template ? createMutationContext(options.mutationContext).actorUserId : null;
@@ -570,8 +588,8 @@ async function previewExport(input, options = {}) {
       await published.protectAuthority(client, actor, 'exports.view');
       authorityProtected = true;
     }
-    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    if (!template && mode && mode !== 'new') {
+    await lifecycleGate.begin(client, 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    if (!template && mode && !['new','manual','replacement'].includes(mode)) {
       const error = new Error('Невідомий режим вибору товарів для експорту.');
       error.statusCode = 422;
       throw error;
@@ -579,9 +597,10 @@ async function previewExport(input, options = {}) {
     const resolved = template ? await published.resolvePublished(client, intent, actor) : null;
     const templateLabel = template ? (await client.query(`SELECT t.display_name AS "displayName", v.version_number::text AS "versionNumber"
       FROM export_template_versions v JOIN export_templates t ON t.id=v.template_id WHERE v.id=$1`, [resolved.effective.versionId])).rows[0] : null;
+    if (mode === 'replacement') ({ fromSku, toSku } = await fullSelection.replacementAnchors(client, input));
     const newRange = mode === 'new' ? await resolveNewExportRange(client) : null;
     if (newRange && !newRange.productCount) {
-      await client.query('COMMIT');
+      await lifecycleGate.commit(client);
       return { mode: 'new', range: null, representedCount: 0,
         readyCount: 0, errors: [], artifacts: [],
         checkedAt: new Date().toISOString(), review: { version: 'export-review-v1', identity: null, files: [] },
@@ -592,14 +611,14 @@ async function previewExport(input, options = {}) {
     const exportData = await getExportRows(
       newRange?.fromSku || fromSku,
       newRange?.toSku || toSku,
-      { queryable: client, templateInputs: template }
+      { queryable: client, templateInputs: template, mode, productId: input.productId, deliveryVersion: input.deliveryVersion }
     );
     exportData.fullProductLifecycle = await fullExport.captureFullProductStates(client, exportData.rows);
     const captured = template ? await published.capturePublished(client, intent, resolved, exportData, newRange, { review: true }) : null;
     const catalog = captured ? null : await loadMagentoCatalog(client);
     const magento = captured ? captured.magento : buildMagentoPayload(exportData.rows, catalog, { review: true });
     const tableFingerprint = captured ? bindingTools.fingerprint(captured.binding) : legacyPreviewFingerprint(exportData, catalog, magento, newRange);
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return {
       mode: mode || 'manual',
       range: exportData.range,
@@ -625,11 +644,11 @@ async function previewExport(input, options = {}) {
       })),
     };
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
   } finally {
     try { if (authorityProtected) await published.releaseAuthority(client); }
-    finally { client.release(); }
+    finally { await lifecycleGate.release(client); client.release(); }
   }
 }
 
@@ -678,7 +697,7 @@ async function getMagentoArtifact(snapshotId, groupCode, options = {}) {
 async function getExportSnapshot(snapshotId, options = {}) {
   const database = options.databasePool || pool;
   const columns = options.includeRows === false
-    ? 'id, status, from_sku, to_sku, resolved_to_sku, exported_to_product_id, row_count, file_name, generated_at, confirmed_at, created_by_user_id, confirmed_by_user_id, request_contract, template_version_id, binding_evidence, input_fingerprint, export_session_id'
+    ? 'id, status, from_sku, to_sku, resolved_to_sku, exported_to_product_id, row_count, file_name, generated_at, confirmed_at, created_by_user_id, confirmed_by_user_id, request_contract, template_version_id, binding_evidence, input_fingerprint, export_session_id, full_product_selection'
     : '*';
   const result = await database.query(`SELECT ${columns} FROM export_snapshots WHERE id = $1`, [snapshotId]);
   if (!result.rows[0]) {
@@ -686,6 +705,9 @@ async function getExportSnapshot(snapshotId, options = {}) {
   }
   const access = await sessionAccess.assertSnapshotAccess(database, result.rows[0], options);
   const snapshot = result.rows[0];
+  snapshot.full_product_warnings = (await database.query(`SELECT m.product_id,m.sku_at_capture,p.status,p.corrected_to_product_id
+    FROM export_snapshot_products m JOIN products p ON p.id=m.product_id
+    WHERE m.snapshot_id=$1 AND (p.status<>'active' OR p.corrected_to_product_id IS NOT NULL) ORDER BY m.product_id`,[snapshotId])).rows;
   const label = snapshot.template_version_id ? (await database.query(`SELECT t.display_name AS "displayName", v.version_number AS "versionNumber"
     FROM export_template_versions v JOIN export_templates t ON t.id=v.template_id WHERE v.id=$1`, [snapshot.template_version_id])).rows[0] : null;
   return { ...snapshot, ...(access ? { session_access_epoch: access.accessEpoch } : {}), ...(label ? { template_label: label } : {}) };
@@ -701,7 +723,7 @@ async function confirmExportSnapshot(snapshotId, options = {}) {
   }
   const client = await (options.databasePool || pool).connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const snapshotResult = await client.query(
       'SELECT * FROM export_snapshots WHERE id = $1 FOR UPDATE',
       [snapshotId]
@@ -777,17 +799,18 @@ async function confirmExportSnapshot(snapshotId, options = {}) {
            updated_at = CURRENT_TIMESTAMP`,
       [Number(snapshot.exported_to_product_id), snapshotId]
     );
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { success: true, snapshotId, status: 'confirmed' };
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
 async function getExportStatus(options = {}) {
+  const lifecycle = await fullSelection.queues(options.databasePool || pool);
   const lastExportResult = await pool.query(
     `
       SELECT COALESCE(s.id, 'legacy-' || e.id::text) AS id,
@@ -825,10 +848,11 @@ async function getExportStatus(options = {}) {
   const latestExportableProductId = Number(totalsResult.rows[0]?.exportable_max_id || 0);
   if (lastExportResult.rows.length === 0) {
     return {
+      lifecycle,
       hasExport: false,
       totalProducts: totalCount,
       exportableProducts: exportableCount,
-      countSinceLastExport: exportableCount,
+      countSinceLastExport: lifecycle.phase === 'active' ? lifecycle.counts.firstDelivery : exportableCount,
       latestProductId,
       latestExportableProductId,
       lastExport: null,
@@ -848,10 +872,11 @@ async function getExportStatus(options = {}) {
   );
 
   return {
+    lifecycle,
     hasExport: true,
     totalProducts: totalCount,
     exportableProducts: exportableCount,
-    countSinceLastExport: Number(sinceResult.rows[0]?.count || 0),
+    countSinceLastExport: lifecycle.phase === 'active' ? lifecycle.counts.firstDelivery : Number(sinceResult.rows[0]?.count || 0),
     latestProductId,
     latestExportableProductId,
     lastExport: privateResult ? { createdAt: lastExport.created_at } : {

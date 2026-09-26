@@ -17,6 +17,8 @@ function reads(definition, evidence = officeEvidence()) {
   const queries = [];
   const client = { release() {}, async query(sql) {
     queries.push(sql);
+    if (/pg_advisory_(lock|unlock)_shared|SET LOCAL amber.lifecycle_writer_version/.test(sql)) return {rows:[]};
+    if (sql.includes("to_regclass('full_product_export_activation')")) return {rows:[{present:false}]};
     if (['BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY', 'COMMIT', 'ROLLBACK'].includes(sql)) return { rows: [] };
     if (sql.includes('FROM export_template_drafts')) return { rows: [row] };
     if (sql.includes('AS categories')) return { rows: [evidence] };

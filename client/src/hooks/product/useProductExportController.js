@@ -135,7 +135,10 @@ export function useProductExportController({ enabled = true, canCreate = true, p
     setExportError('');
     setExportReviewStale(true);
     try {
-      const intent = { ...(mode === 'new' ? { mode: 'new' } : getRangePayload()),
+      const previous = previewEvidence.current;
+      const selection = typeof mode === 'object' ? mode : mode === 'new' ? { mode: 'new' }
+        : previous?.response.mode === mode ? previous.intent : getRangePayload();
+      const intent = { ...selection,
         ...(requested.current.templateMode ? { requestContract: 'template-v1', selection: { ...requested.current.selection } } : {}) };
       const response = await exportsApi.preview(intent);
       if (!current() || ticket !== generation.current) return;
@@ -189,7 +192,7 @@ export function useProductExportController({ enabled = true, canCreate = true, p
       if (!current()) return;
       const code = error.response?.data?.code;
       const definitive = ['NEW_EXPORT_RANGE_STALE', 'EXPORT_PREVIEW_STALE', 'EXPORT_PREVIEW_EXPIRED',
-        'EXPORT_PREVIEW_REQUIRED', 'MAGENTO_NOT_READY'].includes(code);
+        'EXPORT_PREVIEW_REQUIRED', 'REPLACEMENT_SELECTION_STALE', 'EXPORT_CUTOVER_PREPARING', 'MAGENTO_NOT_READY'].includes(code);
       if (definitive) {
         pending.current = null; setPendingCreate(null); invalidate();
         setExportError(`${getApiError(error)} Оновіть перевірку явно перед новим створенням.`);

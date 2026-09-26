@@ -38,7 +38,10 @@ function classifyLineage(input, sourceId, sourceBeforeRecount) {
       sku: m.sku_at_capture, snapshotId: m.snapshot_id, status: m.status,
       kind: m.capture_kind, evidenceHash: m.evidence_hash })));
     issues.push(...(retained?.issues || []));
-    const covered = ['ordinary_save', 'recount'].includes(state?.evidence?.origin);
+    const covered = states.get(sourceId)?.evidence?.historicalCoverage === 'retained_evidence_unexposed'
+      || ['ordinary_save', 'recount', 'reconciliation'].includes(state?.evidence?.origin)
+      || state?.evidence?.historicalCoverage === 'retained_evidence_unexposed';
+    if (Number(state?.cutover_baseline_revision) > 0) indicators.push({ code: 'ACCEPTED_LEGACY_BASELINE', productId: id });
     if (!covered) indicators.push({ code: 'LIFECYCLE_HISTORY_UNRESOLVED', productId: id });
     // Current exact membership replaces cursor/range inference for lifecycle-born
     // products. An unmatched old exposure flag still fails closed.
@@ -48,12 +51,15 @@ function classifyLineage(input, sourceId, sourceBeforeRecount) {
     if (state?.hold_reason === 'invalid_lineage') issues.push({ code: 'PRIOR_INVALID_LINEAGE', productId: id });
   }
   const exposure = classifyExposure({ exact, indicators, issues });
-  const independentExclusion = (Number(sourceBeforeRecount.exclude_from_export) === 1
-      && !states.get(sourceId)?.source_correction_id)
-    || ids.some((id) => states.get(id)?.hold_reason === 'intentional_exclusion');
+  const typed = states.get(sourceId)?.business_exclusion_state;
+  const independentExclusion = typed ? typed === 'excluded' || (typed === 'none' && Number(sourceBeforeRecount.exclude_from_export) === 1 && !states.get(sourceId)?.recount_compatibility_excluded)
+    : (Number(sourceBeforeRecount.exclude_from_export) === 1 && !states.get(sourceId)?.source_correction_id)
+      || ids.some((id) => states.get(id)?.hold_reason === 'intentional_exclusion');
   const invalidLineage = issues.some((i) => /LINEAGE|CORRECTION|PRODUCT_MISSING/.test(i.code));
+  const businessExclusionState = typed === 'unknown' ? 'unknown' : independentExclusion ? 'excluded' : 'none';
   const holdReason = invalidLineage ? 'invalid_lineage'
     : independentExclusion ? 'intentional_exclusion'
+      : businessExclusionState === 'unknown' ? 'historical_ambiguity'
       : exposure.classification === 'historical_ambiguous' ? 'historical_ambiguity'
         : exposure.classification === 'reliably_unexposed' ? null : 'prior_exposure';
   // Reference-only evidence. CSV bytes and large raw inventory payloads stay out.
@@ -63,7 +69,7 @@ function classifyLineage(input, sourceId, sourceBeforeRecount) {
     evidence: { origin: 'recount', classification: exposure.classification,
       primaryReason: exposure.primaryReason, ancestorProductIds: ids,
       snapshotIds: [...new Set(exposure.exact.map((e) => e.snapshotId))].sort(),
-      evidenceHash: hash(stableJson(exposure)), independentExclusion,
+      evidenceHash: hash(stableJson(exposure)), independentExclusion, businessExclusionState,
       issueCodes: [...new Set(exposure.issues.map((e) => e.code))].sort() } };
 }
 

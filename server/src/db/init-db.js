@@ -1,3 +1,4 @@
+const lifecycleGate = require('../services/full-product-cutover-gate');
 const initialConfig = require('../../data_config');
 const pool = require('./pool');
 
@@ -96,7 +97,7 @@ async function migrateData(existingClient = null) {
   const client = existingClient || await pool.connect();
   const ownsClient = !existingClient;
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
 
     for (const [code, category] of Object.entries(initialConfig.categories)) {
       const requiresWeight = code === 'AR' || code === 'DK' || code === 'SK' ? 0 : 1;
@@ -132,12 +133,12 @@ async function migrateData(existingClient = null) {
     }
 
     await migratePricesToDb(client);
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
-    if (ownsClient) client.release();
+    if (ownsClient) { await lifecycleGate.release(client); client.release(); }
   }
 }
 
@@ -476,6 +477,7 @@ async function legacyInitDb() {
 }
 
 async function seedDefaultData() {
+  if ((await lifecycleGate.readGate(pool)).phase === 'preparing') return;
   const client = await pool.connect();
   try {
     await client.query('SELECT pg_advisory_lock(hashtext($1))', ['amber_default_seed']);
@@ -484,17 +486,17 @@ async function seedDefaultData() {
       console.log('Empty DB. Seeding default configuration and prices...');
       await migrateData(client);
     }
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     try {
       await ensureCalibratedQuestions(client);
-      await client.query('COMMIT');
+      await lifecycleGate.commit(client);
     } catch (error) {
-      await client.query('ROLLBACK');
+      await lifecycleGate.rollback(client);
       throw error;
     }
   } finally {
     await client.query('SELECT pg_advisory_unlock(hashtext($1))', ['amber_default_seed']);
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 

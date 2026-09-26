@@ -75,6 +75,21 @@ it('new read after mutation never changes an uncertain original creation payload
   expect(exportsApi.createSnapshot.mock.calls[1]).toEqual(original); expect(result.current.pendingCreate.evidence.tableFingerprint).toBe('first');
 });
 
+it('queue preview refresh preserves its exact Update or replacement selection without range form values', async()=>{
+  const {result}=renderHook(()=>useProductExportController());
+  for(const intent of [{mode:'manual',fromSku:'SV1',toSku:'SV1'}, {mode:'replacement',productId:9,deliveryVersion:'3'}]){
+    exportsApi.preview.mockResolvedValue(response({...preview,mode:intent.mode}));
+    await act(async()=>result.current.handlePreviewExport(intent));
+    act(()=>result.current.markExportReviewStale());
+    await act(async()=>result.current.handlePreviewExport(intent.mode));
+    expect(exportsApi.preview).toHaveBeenLastCalledWith(intent);
+    expect(result.current.exportReviewStale).toBe(false);
+  }
+  act(()=>result.current.setExportFromSku('SV2'));
+  await act(async()=>result.current.handlePreviewExport('manual'));
+  expect(exportsApi.preview).toHaveBeenLastCalledWith({fromSku:'SV2',toSku:'SV2'});
+});
+
 it('late automatic preview cannot cross a principal lifetime', async()=>{
   const life={valid:true}; const {result}=renderHook(()=>useProductExportController({principalLifetime:life})); await act(async()=>result.current.handlePreviewExport());
   const pending=deferred(); exportsApi.preview.mockReturnValueOnce(pending.promise); let recheck;

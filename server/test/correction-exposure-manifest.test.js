@@ -82,8 +82,9 @@ test('manifest loader rejects the wrong database, rolls back and releases its co
   const client = { query: async (sql) => { commands.push(sql); return { rows: [{ name: 'unexpected' }] }; },
     release: () => commands.push('RELEASE') };
   await assert.rejects(loadCorrectionExposureManifest({ connect: async () => client }, { expectedDatabase: 'amber' }), /does not match/);
-  assert.equal(commands[0], 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-  assert.deepEqual(commands.slice(-2), ['ROLLBACK', 'RELEASE']);
+  assert.match(commands[0], /pg_advisory_lock_shared/);
+  assert.equal(commands[1], 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+  assert.deepEqual(commands.slice(-3), ['ROLLBACK', 'SELECT pg_advisory_unlock_shared(hashtext($1))', 'RELEASE']);
 });
 
 test('manifest inventories terminal successors even when correction rows are missing or branching', () => {

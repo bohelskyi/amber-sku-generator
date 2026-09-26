@@ -1,10 +1,10 @@
 # Recount → correction → export correctness plan
 
-**Status:** Approved architecture; Phases 0–2 implemented. Operator release blocker remains unresolved.
+**Status:** Approved architecture; Phases 0?3A complete. Phase 3B + gated Phase 4 implementation is in the working tree; useful-data cutover has not been executed. See section 22 and the canonical runbook.
 
 **Intended document:** `D:\Work\amber-sku-generator\docs\RECOUNT_EXPORT_CORRECTNESS_PLAN.md`
 
-**Delivery boundary:** Phase 2 is complete as recorded in section 20. Sections 1–17 describe the complete approved architecture, including future behavior; sections 18–19 preserve the historical Phase 0/1 results. Phases 3–5 have not started. Export selection still uses the legacy cursor/exclusion path, including recount successor exclusion. **Phase 2 is NOT independently deployable as the full correctness fix.** Final activation must not run mixed old/new writers.
+**Delivery boundary:** Sections 18?21 retain historical checkpoint results. Section 22 records the approved coordinated implementation. Deploy only with the canonical preparing/index/manifest/batch/activation sequence; no mixed old/new writers. Useful restored `amber` remains at migration 038.
 
 ## 1. Recommendation and decisions
 
@@ -1147,3 +1147,346 @@ Phase 2 changed these **27 paths** (including four new files), in addition to pr
 - Documentation: this plan, `RECOUNT_CORRECTIONS.md`, `EXPORTS.md`.
 
 Branch and HEAD remain unchanged. Nothing was staged, committed or pushed. The release blocker remains: ordinary New export still uses its old cursor/exclusion path and can skip excluded recount successors. **Phase 3 historical repair, Phase 4 ledger selection/UI and Phase 5 activation remain future, separately scoped work.**
+
+## 21. Phase 3A actual results — 2026-09-26
+
+**NO USEFUL-DATABASE REPAIR HAS BEEN APPLIED.**
+
+**PHASE 4 HAS NOT STARTED.**
+
+**THE RELEASE BLOCKER REMAINS IN OPERATOR EXPORT SELECTION.**
+
+### Baseline and actual database/schema boundary
+
+Started with a clean worktree on `feature/magento-export-constructor`, HEAD
+`e51c72efe5ca39688b9f60dd2277512057af88bd`. Repository inventory is 40 migrations,
+`000`–`039`; their original file hashes were recorded outside the repository and
+all 40 remain unchanged. No migration 040, dependency, configuration, public HTTP
+route, client production change, staging, commit or push was introduced.
+
+The shell default is Node 24.19.0; implementation verification uses the existing
+repository-targeted **Node 20.20.2**, including child processes. Both inspected
+PostgreSQL servers report **16.15**. Disposable testing uses only the canonical
+`postgres-test` service at loopback **56432**, `amber_test`, and its dedicated
+`amber_phase3_repair_test` child database. The actual connected database name is
+checked before destructive setup. The service is stopped after verification.
+
+Read-only inspection found that useful restored **`amber` has only migrations
+000–038**. Neither lifecycle table nor the name-review column exists there.
+Phase 3A did not run migration 039 on it. The manifest therefore explicitly says
+`schema.baseline="projected_migration_039"`, `lifecyclePresent=false`,
+`applyEligible=false`. Its 1/0/1 counters and baseline routes are a projection of
+the immutable migration, not claims about existing database rows. Apply rejects
+this manifest before acquiring a connection. A fresh actual-state manifest is
+mandatory after separately authorized migration 039. This is an environment
+checkpoint difference, not missing durable schema requiring migration 040.
+
+### Historical indexing
+
+`export-exposure/historical-index.js` reuses the Phase-0 strict CSV parser and
+exposure index. It reads only stored internal CSV and retained artifacts,
+validates row counts, product counts, Main/EN pairing and shared identity fields,
+parent/artifact agreement, exact SKU and permanent registry ownership, snapshot
+metadata, existing sidecars and evidence hashes. Contradictory duplicates,
+unknown SKUs, malformed bytes, identity conflicts and missing promised artifacts
+fail closed. A legitimate old internal-only snapshot can establish compatibility
+exposure; absent historical artifact provenance never proves full delivery.
+
+One proposed sidecar represents one product, irrespective of its Main/EN rows.
+Historical rows use `legacy_compatibility`, `verified_stored_csv`, exact
+snapshot/product/SKU, null full revision and null delivery version. Their hash
+binds stored immutable snapshot metadata and exact file hashes. Confirmation
+metadata is excluded from this permanent evidence hash, but included in the
+apply precondition fingerprint. Thus later confirmation does not invalidate a
+correctly indexed sidecar, while it does stale an unused reviewed manifest.
+`recorded_at` comes from the database INSERT default at indexing time.
+
+Indexing writes only sidecars and the immutable command audit. It never updates
+snapshot status, cursor, creator/confirmer, CSV, artifacts, or full confirmation
+counters. Live membership is also checked against its existing Phase-1 hash
+contract. Any indexing corruption makes proposals conservative and prevents
+index application; failed parsing cannot turn into unexposed classification.
+
+### Manifest v2 and exact apply
+
+`amber-correction-exposure-manifest-v2` extends the Phase-0 format and retains its
+complete product, correction-pair, lineage, snapshot and diagnostic inventory.
+It adds actual/projected schema provenance, indexing proposals/existing rows,
+one repair entry for **every product**, and separate ordinary/successor reports.
+Each entry contains product identity/category/status/exclusion, full counters,
+route/reason, exact manual subjects/review state, originating correction and
+complete connected lineage, terminal descendants, generated/confirmed evidence,
+cursor/range/legacy indicators, exclusion provenance, Phase-0 and repair exposure,
+reason codes, proposed action, exact before fingerprint, expected after state,
+conditional release and reconciliation/architecture-decision flags.
+
+The before fingerprint binds complete product-row hashes, projected fields,
+ancestor products/states/corrections, permanent SKU ownership, price-exposure
+flags, snapshot metadata/bytes/members, cursor/events and classification. It
+also retains the underlying reviewable precondition evidence. Source subjects
+are bound exactly, including whitespace. Canonicalization is recursive with
+ordinal key ordering and stable collection ordering. The semantic SHA-256 excludes
+only `contentSha256`; serialization is canonical UTF-8 JSON with final LF. There
+are no run timestamps, random run IDs, machine paths or process timezone in the
+hashed payload. Stored database timestamps remain evidence.
+
+`recount-repair.service.js` exposes `dryRunRepair(pool,{expectedDatabase})` and
+`applyRepair({manifest,manifestHash,productIds,indexHistorical},options)` as backend
+primitives. There is deliberately no apply CLI or HTTP endpoint. The diagnostic
+CLI is `node scripts/inventory-recount-repair.js --database-name amber`, run from
+`server/`. Capture stdout as UTF-8 outside the repository; PowerShell versions
+that transcode native redirection need a native file descriptor instead.
+
+Dry run uses one `REPEATABLE READ READ ONLY` transaction and a coherent SQL
+evidence read. Apply requires the exact format/version/hash, explicit scope,
+expected database and current active actor with **exports.reconcile**. It takes
+the existing shared authority boundary, command idempotency lock, all affected
+products ascending, then full state ascending. After waits it reads coherent
+current evidence and rebuilds the server-owned proposal. Comparing the complete
+reviewed entry prevents a caller from authorizing arbitrary after-state by
+merely changing JSON and recomputing its hash. Stale product/version/name/lineage/
+snapshot/exclusion/classification rejects with `REPAIR_MANIFEST_STALE`.
+
+No existing snapshot lock is acquired after products/state. Confirmation keeps
+its snapshot → state ordering; capture/recount/name/information keep their prior
+boundaries. Product/state locks protect participating live writers, and the
+post-lock evidence read is the review-validation point. Historic confirmation
+does not acknowledge current revision or release a successor.
+
+For the explicitly requested command, sidecar INSERTs, allowed product fields,
+state route/evidence/hash/delivery version and audit either all commit or all
+roll back. Revisions and confirmed counters do not advance; cursor, SKU
+reservations and corrected/archived sources are untouched. Name restoration is
+limited to verified unexposed first-revision candidates with both successor
+subjects null, and always sets review required. Every routing repair increments
+delivery version. `product.full_export_repaired` records the manifest hash,
+before fingerprint, concise before/after and reasons. The immutable
+`recount_repair.applied` receipt makes identical replay a no-op, including after
+later state changes. A fresh dry run preserves previously reviewed repair or
+reconciliation disposition instead of repeatedly repairing it.
+
+**Unresolved batch decision:** the approved plan does not choose whole-batch
+abort versus independently approved entries. A clarification was requested;
+until an explicit decision is supplied, more than one lifecycle entry in a
+command fails with `REPAIR_BATCH_DECISION_REQUIRED` before mutation. One entry
+plus its explicitly selected indexing scope is atomic. Index-only application
+is atomic across the complete reviewed indexing proposal. This deliberately
+does not infer a production multi-entry/partial-success policy.
+
+### Reconciliation domain primitive
+
+`full-product-reconciliation.service.js` adds a backend-only reviewed replacement
+command. It requires exports.reconcile under the same current authority boundary,
+exact active terminal successor, complete ancestor SKU set, current delivery
+version and before fingerprint, reason, local actor, and resolution key.
+Every ancestor/potentially exposed SKU needs `verified_absent` or
+`retired_reconciled` with evidence. Every retained snapshot bundle needs
+`quarantined_do_not_import` or `consumed_and_reconciled` with evidence; its bound
+fingerprint covers all files, not an arbitrary subset. Ambiguous external history
+and unknown/independent business exclusion each require explicit additional
+resolution evidence. Missing, conflicting or unknown dispositions remain held.
+Corrupt evidence or invalid lineage cannot be overridden by a narrative.
+
+Successful reconciliation releases only `replacement`, clears the successor's
+exclusion, increments delivery version, records resolver/time/key and writes one
+immutable `full_product.reconciled` event with the reviewed dispositions. It
+does not confirm a payload or describe local confirmation as Magento import.
+Exact-key replay preserves the original result/actor/audit; changed command with
+the same key conflicts. Concurrent distinct resolutions and another recount
+cannot reuse a stale release. No operator UI or export-selection integration is
+provided; Phase 4 retains that scope.
+
+### Restored-amber dry run and ordinary active inventory
+
+Two final runs under UTC and Pacific/Honolulu produced byte-identical files,
+**183,660,139 bytes** each:
+
+- Semantic `contentSha256`: `2c9492d55e6710e343b61fa3a6728b9bd0dc3b4aef9673c7ab1f801ce2c6456d`.
+- Complete UTF-8 file SHA-256: `68cbeea8aa29405dbc2e549c0b7148473e41ee0a3bdc2db4ccffccde2eb778ee`.
+- External directory: `%TEMP%/amber-recount-export-phase3a-20260926/`.
+- Full files: `manifest-1.json`, `manifest-2.json`; exact lists/tables and concrete
+  case: `dry-run-summary.json`, `dry-run-report.md`. None is inside the repository.
+
+Inventory covers **4,817 products**: 3,274 active, 1,419 corrected and 124 archived.
+There are **1,436 correction pairs**, **5 snapshots** (4 confirmed, 1 generated),
+**9 artifacts**, **176 proposed historical sidecars** (136 confirmed memberships,
+40 generated memberships), and **zero indexing integrity diagnostics**. Confirmed
+memberships represent 134 distinct SKUs. Cursor remains **4063**.
+
+Ordinary active, non-correction products total **2,277**:
+
+| Retained evidence class | Count | Migration-039 baseline | Phase-3 proposal | Current payload equals historical artifact? |
+|---|---:|---|---|---|
+| Exact confirmed membership | 106 | projected hold, revision 1/confirmed 0 | keep hold; decision required | not proven |
+| Exact generated-only membership | 40 | projected hold, revision 1/confirmed 0 | keep hold; decision required | not proven |
+| Legacy indicators without exact membership | 2,087 | projected hold, revision 1/confirmed 0 | keep hold; decision required | not proven |
+| No retained indicators | 44 | projected hold, revision 1/confirmed 0 | keep hold; decision required | not proven |
+
+The architecture does not establish whether these ordinary historical products
+should receive historical acknowledgment, pending same-SKU update, first delivery,
+or continued hold. **This is a required architecture/business decision before
+Phase 3B/4 activation.** SKU membership is not payload equality; none receives a
+fabricated revision-1 acknowledgment. Their exact IDs are separately listed in
+the external report and every row is present in the full manifest.
+
+### Correction successors and concrete proposal
+
+All **997 active excluded terminal successors** reproduce the Phase-0 classes:
+
+| Category | Confirmed ancestor | Generated-only lineage | Historical ambiguity | Reliably unexposed |
+|---|---:|---:|---:|---:|
+| BR | 0 | 0 | 279 | 0 |
+| CH | 0 | 0 | 131 | 0 |
+| KL | 28 | 0 | 85 | 0 |
+| NM | 0 | 0 | 470 | 1 |
+| SV | 0 | 0 | 0 | 3 |
+| Total | **28** | **0** | **965** | **4** |
+
+The four conditional first-delivery candidates are **4512, 4846, 4847, 4848**
+(corrections **1152, 1434, 1435, 1436**). Their retained exclusion provenance is
+**unknown**: the old payloads do not bind pre-recount exclusion intent. Therefore
+the actual proposal has **0 automatic releases**, keeps all four held as historical
+ambiguity with `EXCLUSION_PROVENANCE_UNPROVEN`, and shows the exact conditional
+normal/first-delivery after-state separately. The classification is unexposed
+within retained evidence, not an assertion about unrecorded Magento operations.
+
+The **28 requiring reviewed replacement reconciliation** are:
+`4557, 4565, 4589, 4595, 4610, 4780, 4781, 4782, 4783, 4784, 4785, 4786,
+4787, 4788, 4789, 4790, 4791, 4793, 4794, 4795, 4796, 4797, 4798, 4799,
+4800, 4801, 4802, 4805`.
+
+All **965 historically ambiguous successor IDs/SKUs** are listed individually in
+`dry-run-report.md` and JSON. They require history investigation before any release;
+the report does not count their unknown exposure as confirmed reconciliation.
+
+Correction **1436**, **4502 / SV23150003 → 4848 / SV23150004**, remains explicit:
+
+- Source 4502 stays corrected, excluded and permanently reserved.
+- Successor 4848 stays active with the same SKU, weight `1260.000`, answer `1260`,
+  final UAH `21700.00`, schema **6**. No new SKU or cursor rewind is proposed.
+- Both successor subjects are null. Exact source UA:
+  `[UX-5 аудит] Бурштинова статуетка «Символіка»`; EN:
+  `[UX-5 audit] Amber symbolic figurine`.
+- Retained exposure remains `reliably_unexposed`; unknown exclusion provenance
+  keeps the executable proposal held. Conditional future repair is normal first
+  delivery, revision 1/confirmed 0, delivery version 2, successor exclusion 0,
+  paired exact source subjects restored and **name review required**.
+- Production wording is not invented. Existing review/readiness must approve or
+  replace the local audit wording before production-facing capture.
+
+Projected Phase-3 scope is **997 lifecycle updates**, **176 sidecar INSERTs**,
+**3,274 active holds**, **2,277 ordinary architecture decisions**, **28 confirmed
+reconciliation cases**, **965 ambiguous successor cases**, and **4 exclusion-proof
+cases**. Corrected/archived rows are preserved. Exact ID lists are in the external
+report; these are projected proposals, not applied rows or an approved batch.
+
+### Disposable validation and verification
+
+The isolated child database keeps intentional malformed fixtures from older
+integration modules out of indexing tests. It is created/dropped on the same
+canonical test server, with `_test` name checks and the real migration runner.
+The existing serialized entrypoint registers its wrapper; no independent
+destructive test process runs concurrently against the primary test schema.
+
+**33 PostgreSQL cases** cover historical indexing, exact apply/replay, read-only
+loading, rehashed manifest tampering, six stale evidence classes, combined
+index/product/audit rollback at audit and lifecycle failures, fail-closed batch
+behavior, independent/unknown exclusions, confirmed/generated/ambiguous holds,
+the exact comma-weight equivalent fixture, paired name restoration/review,
+behind-cursor first delivery, permanent reservations, immutable historical bytes,
+current authority, complete reconciliation dispositions and durable retry.
+
+**14 real races** use separate PostgreSQL connections and deterministic barriers
+after acquired locks, with `pg_blocking_pids` proving contention:
+
+- Repair versus recount, Magento-name edit, informational edit, lifecycle-aware
+  capture, and confirmation: **both winner orders** (10).
+- Reconciliation versus a second reconciliation: same and different keys (2).
+- Reconciliation versus another recount: both winner orders (2).
+
+Assertions inspect final product/lineage/state/counters, exact members, immutable
+artifact bytes and repair/reconciliation audits. The loser is stale where its
+reviewed state changed; late confirmation affects only the represented predecessor.
+No race adds product locks to confirmation or changes the accepted lock order.
+
+| Check | Result |
+|---|---|
+| Focused indexing/manifest unit tests | 16/16 passed |
+| Focused isolated PostgreSQL cases | 33/33 passed, including 14 real races |
+| Full server unit suite | 571/571 passed, zero skipped |
+| Server lint | 0 errors; only the two existing product-timeline unused-variable warnings |
+| Full serialized PostgreSQL suite | 266/266 outer cases passed, zero skipped; includes all 33 isolated cases |
+| Existing recount/export/lifecycle and CSV goldens | Full suites pass; blocker regression and golden files unchanged |
+| Client | No production/test changes; client checks not required for this phase |
+| Migrations | All 40 original hashes unchanged; no 040 |
+| Final diff/status | `git diff --check` passed; 4 modified tracked files, 10 untracked additions, nothing staged |
+| Restored dry-run replay | Identical semantic hash and complete UTF-8 bytes under two timezones |
+| Test service | Stopped after verification |
+
+As in Phases 1–2, Windows Node 20 does not expand the npm script's literal unit
+glob. The full run uses the identical runner/setup with every `test/*.test.js`
+path explicitly expanded. Integration uses the sole serialized entrypoint.
+Intermediate failures were in the new synthetic catalog/barrier harness (missing
+catalog questions, decoded optional placeholder and missing pool query forwarding),
+not repaired useful data. They were fixed without relaxing export readiness or
+race assertions. Logs and original migration hashes remain in the external directory.
+
+### Exact Phase 3B approval boundary
+
+1. This **projected** manifest must not be applied. Separately authorize the
+   migration-039 environment transition and generate a fresh actual-state manifest.
+2. Decide batch atomicity before requesting multiple lifecycle entries. Current
+   code deliberately refuses that request; no partial-success policy is implied.
+3. Review the exact new indexing hash/scope (currently projected 176 sidecars)
+   before any useful-database write. Regenerate after indexing for lifecycle CAS.
+4. Review exact successor holds and resolve ordinary-active baseline semantics.
+   No ordinary historical acknowledgment follows from SKU membership alone.
+5. Do not approve automatic release of the four candidates without exclusion
+   provenance. Review the 28 confirmed lineages separately with complete external
+   SKU/file dispositions; investigate the 965 ambiguous lineages.
+6. Phase 3B may apply only the exact reviewed manifest and explicit approved
+   entries. Snapshot/file/cursor/SKU immutability and review requirements remain.
+   Phase 4 selection/UI and later coordinated deployment are separate approvals.
+
+Only Phase 3A tooling and disposable application have been completed. The useful
+database was accessed exclusively read-only. No exclusions, names, lifecycle rows,
+memberships, snapshots, artifacts or audits were written there.
+
+Changed files: the three domain/plan documents `RECOUNT_EXPORT_CORRECTNESS_PLAN.md`,
+`RECOUNT_CORRECTIONS.md`, `EXPORTS.md`; the existing integration entrypoint; new
+`server/scripts/inventory-recount-repair.js`; new services
+`export-exposure/historical-index.js`, `repair-loader.js`, `repair-manifest.js`,
+`recount-repair.service.js`, `full-product-reconciliation.service.js`; new unit
+`server/test/recount-repair.test.js`; and new integration files
+`14-phase3-repair.cases.js`, `phase3-fixture.js`, `phase3-isolated.cases.js`.
+Final branch/HEAD remain the recorded baseline. Nothing was staged, committed or pushed.
+
+## 22. Approved Phase 3B and gated Phase 4 implementation — 2026-09-27
+
+The user approved implementation and the canonical production order: **039 → 040
+→ preparing gate → fresh indexing manifest → historical indexing → fresh post-index
+cutover manifest → bounded batches → final validation → selector activation**.
+Freeze lasts through activation. Alternative rehearsal ordering is not deployment
+procedure. The accepted recount/correction/export architecture is unchanged.
+
+The approved ordinary policy accepts 2,193 current products as an explicit legacy
+external baseline without advancing confirmed_revision. The 44 retained-unexposed
+products remain pending first delivery; 40 generated-only products remain held
+for controlled file reconciliation or explicit delivery authorization. Separate
+baseline state in 040 makes this distinction durable. Existing 997 successor flags
+stay 1 through activation; the four unexposed candidates require specific operator
+attestations afterward. Prior exposure/ambiguity requires replacement reconciliation.
+
+Implementation adds the forward schema, exclusive/shared transaction gate, old-
+writer guards, actor-authorized operator commands, immutable manifest/approval and
+batch receipts, explicit amendments, complete final validation, queue selection,
+single-product replacement, typed business exclusions and visible Update/replacement/
+held queues. Legacy/template/shared-session preview and capture use the same ledger.
+No useful `amber` writes were made. Earlier phase status statements are historical.
+
+See [FULL_PRODUCT_CUTOVER_RUNBOOK.md](FULL_PRODUCT_CUTOVER_RUNBOOK.md) for all outcome
+tables, exact field meanings, commands, crash/stale handling, schema constraints,
+rollback and the restored-038 rehearsal results. Both indexing and cutover manifests
+must be generated again in the real preparing gate and explicitly approved there.
+The old projected `2c9492d55e6710e343b61fa3a6728b9bd0dc3b4aef9673c7ab1f801ce2c6456d`
+hash is not an apply artifact.

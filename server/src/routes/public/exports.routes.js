@@ -18,6 +18,11 @@ const {
 
 const router = express.Router();
 
+router.get('/export/queue', requirePermission('exports.view'), async (req, res) => {
+  try { res.json(await require('../../services/full-product-selection').list(require('../../db/pool'), req.query)); }
+  catch (err) { res.status(err.statusCode || 400).json({ error: err.message, code: err.code }); }
+});
+
 router.get('/export/history', requirePermission('exports.view'), async (req, res) => {
   try { res.json(await getExportHistory(req.query, { mutationContext: getRequestMutationContext(req) })); }
   catch (err) { res.status(err.statusCode || 400).json({ error: err.message }); }
@@ -52,6 +57,8 @@ router.post('/export/preview', requirePermission('exports.view'), async (req, re
       fromSku: req.body?.fromSku,
       toSku: req.body?.toSku,
       mode: req.body?.mode,
+      productId: req.body?.productId,
+      deliveryVersion: req.body?.deliveryVersion,
       profile: req.body?.profile,
       requestContract: req.body?.requestContract,
       selection: req.body?.selection,
@@ -71,6 +78,8 @@ router.post('/export/snapshots', requirePermission('exports.create'), async (req
       idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey,
       profile: req.body?.profile,
       mode: req.body?.mode,
+      productId: req.body?.productId,
+      deliveryVersion: req.body?.deliveryVersion,
       requestContract: req.body?.requestContract,
       selection: req.body?.selection,
       previewToken: req.body?.previewToken,

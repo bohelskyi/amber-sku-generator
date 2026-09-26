@@ -28,9 +28,10 @@ function normalizeIntent(input, { allowInternalProfile = false } = {}) {
     && !(allowInternalProfile && input.profile === 'internal-legacy')) {
     throw error(422, 'EXPORT_PROFILE_INVALID', 'Template exports require magento-products-v1');
   }
-  if (input.mode !== undefined && !['manual', 'new'].includes(input.mode)) {
+  if (input.mode !== undefined && !['manual', 'new', 'replacement'].includes(input.mode)) {
     throw error(422, 'EXPORT_MODE_INVALID', 'Unsupported export mode');
   }
+  if (input.mode === 'replacement' && (!Number.isSafeInteger(input.productId) || input.productId<=0 || !/^[1-9]\d*$/.test(String(input.deliveryVersion)))) throw error(422,'REPLACEMENT_SELECTION_REQUIRED','Product and delivery version required');
   const s = input.selection === undefined ? { mode: 'active' } : input.selection;
   if (!s || typeof s !== 'object' || Array.isArray(s)
     || !['active', 'explicit'].includes(s.mode)
@@ -40,7 +41,8 @@ function normalizeIntent(input, { allowInternalProfile = false } = {}) {
   const selection = s.mode === 'active' ? { mode: 'active' }
     : { mode: 'explicit', templateId: uuid(s.templateId), versionId: uuid(s.versionId) };
   return { requestContract: 'template-v1', profile: input.profile || 'magento-products-v1', mode: input.mode || 'manual',
-    fromSku: anchor(input.fromSku), toSku: anchor(input.toSku), selection };
+    fromSku: anchor(input.fromSku), toSku: anchor(input.toSku), selection,
+    ...(input.mode === 'replacement' ? {productId:input.productId,deliveryVersion:String(input.deliveryVersion)} : {}) };
 }
 
 // Streaming tagged canonicalization has no definition-size cap. Array order and

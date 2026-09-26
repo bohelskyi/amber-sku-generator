@@ -68,7 +68,7 @@ test('confirmation ignores historical snapshots and confirms only captured bigin
   await confirmFullProductRevisions(client, { id: 'old' });
   assert.equal(queries.length, 0);
   await confirmFullProductRevisions(client, { id: 'new', full_product_lifecycle_version: 1, row_count: 1 });
-  assert.deepEqual(queries.at(-1).values, [1, '9007199254740993']);
+  assert.deepEqual(queries.at(-1).values, [1, '9007199254740993', false]);
   assert.ok(queries.every((q) => !/FROM products\b/i.test(q.sql)));
   await assert.rejects(confirmFullProductRevisions(client, { full_product_lifecycle_version: 2 }), /Unknown/);
 });

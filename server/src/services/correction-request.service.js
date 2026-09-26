@@ -1,3 +1,4 @@
+const lifecycleGate = require('./full-product-cutover-gate');
 const crypto = require('node:crypto');
 const { isDeepStrictEqual } = require('node:util');
 const pool = require('../db/pool');
@@ -266,7 +267,7 @@ async function claimCorrectionRequest(requestId, options = {}) {
   const client = await (options.databasePool || pool).connect();
   let claimedRow;
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const result = await client.query(
       'SELECT * FROM correction_requests WHERE id = $1 FOR UPDATE',
       [Number(requestId)]
@@ -312,12 +313,12 @@ async function claimCorrectionRequest(requestId, options = {}) {
         ...(isLegacyUnowned ? { legacyUnownedClaimAdopted: true } : {}),
       }
     );
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 
   // Refresh only after the atomic claim commits, then guard every write with that
@@ -351,7 +352,7 @@ async function releaseCorrectionRequest(requestId, claimVersion, claimToken, opt
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await (options.databasePool || pool).connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const result = await client.query(
       'SELECT * FROM correction_requests WHERE id = $1 FOR UPDATE',
       [Number(requestId)]
@@ -386,13 +387,13 @@ async function releaseCorrectionRequest(requestId, claimVersion, claimToken, opt
       ...(ownership.legacyAdopted ? { legacyClaimAdopted: true } : {}),
       ...(options.reason ? { reason: options.reason } : {}),
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { success: true, request: normalizeRequestRow(updated.rows[0]) };
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -406,7 +407,7 @@ async function forceReleaseCorrectionRequest(requestId, claimVersion, confirmed 
   const expectedVersion = normalizeClaimVersion(claimVersion);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const result = await client.query(
       'SELECT * FROM correction_requests WHERE id = $1 FOR UPDATE',
       [Number(requestId)]
@@ -444,13 +445,13 @@ async function forceReleaseCorrectionRequest(requestId, claimVersion, confirmed 
         : Number(row.claimed_by_user_id),
       legacyTokenOnlyClaim: row.claimed_by_user_id === null && row.claim_token_hash !== null,
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { success: true, request: normalizeRequestRow(updated.rows[0]) };
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -544,7 +545,7 @@ async function createPriceChangeRequest(payload = {}, options = {}) {
   const productId = Number(payload.productId);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const sourceResult = await client.query(
       `SELECT id, full_sku, category
        FROM products
@@ -628,17 +629,17 @@ async function createPriceChangeRequest(payload = {}, options = {}) {
       currentPriceUah: preview.currentPriceUah,
       resultingPriceUah: preview.resultingPriceUah,
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { success: true, request: normalizeRequestRow(result.rows[0]) };
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     if (error?.code === '23505') {
       error.statusCode = 409;
       error.message = 'Для цього товару вже існує активний запит на виправлення.';
     }
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -682,7 +683,7 @@ async function createCorrectionRequest(payload = {}, options = {}) {
   const client = await pool.connect();
 
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const sourceResult = await client.query(
       `SELECT id, full_sku, status, corrected_to_product_id, details, category, weight,
               total_price, total_price_uah, price_per_gram, uah_rate, sku_schema_version_id,
@@ -748,17 +749,17 @@ async function createCorrectionRequest(payload = {}, options = {}) {
         pricingDecision: decision,
       }
     );
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { success: true, request: normalizeRequestRow(result.rows[0]) };
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     if (error?.code === '23505') {
       error.statusCode = 409;
       error.message = 'Для цього товару вже існує активний запит на виправлення.';
     }
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -775,7 +776,7 @@ async function refreshClaimedPriceChangeRequest(
   );
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const preview = await previewProductPriceChange({
       productId: Number(row.source_product_id),
       pricingDecision,
@@ -847,13 +848,13 @@ async function refreshClaimedPriceChangeRequest(
         legacyClaimAdopted: true,
       });
     }
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return result.rows[0];
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -874,7 +875,7 @@ async function refreshClaimedCorrectionRequest(
   );
   const client = await (options.databasePool || pool).connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     await client.query('SELECT id FROM products WHERE id=$1 FOR UPDATE', [Number(row.source_product_id)]);
     const locked = await client.query(
       'SELECT * FROM correction_requests WHERE id = $1 FOR UPDATE',
@@ -930,13 +931,13 @@ async function refreshClaimedCorrectionRequest(
         legacyClaimAdopted: true,
       });
     }
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return result.rows[0];
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -975,7 +976,7 @@ async function updateCorrectionRequestStatus(
 
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const result = await client.query(
       'SELECT * FROM correction_requests WHERE id = $1 FOR UPDATE',
       [Number(requestId)]
@@ -987,7 +988,7 @@ async function updateCorrectionRequestStatus(
     }
     const row = result.rows[0];
     if (row.status === normalizedStatus) {
-      await client.query('COMMIT');
+      await lifecycleGate.commit(client);
       return { success: true, request: normalizeRequestRow(row) };
     }
     if (!canTransitionCorrectionRequest(row.status, normalizedStatus)) {
@@ -1035,13 +1036,13 @@ async function updateCorrectionRequestStatus(
         ...(ownership?.legacyAdopted ? { legacyClaimAdopted: true } : {}),
       }
     );
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { success: true, request: normalizeRequestRow(updateResult.rows[0]) };
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 

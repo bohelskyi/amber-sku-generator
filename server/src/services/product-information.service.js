@@ -1,3 +1,4 @@
+const lifecycleGate = require('./full-product-cutover-gate');
 const crypto = require('node:crypto');
 const pool = require('../db/pool');
 const { writeAuditEvent } = require('../audit/audit-events');
@@ -103,6 +104,13 @@ function getAnswers(product) {
 }
 
 async function getExportGuidance(client, product) {
+  if ((await lifecycleGate.readGate(client)).phase === 'active') {
+    const [state] = await readFullProductStates(client,[product.id]);
+    if (state.route === 'hold') return {mode:'held',eligible:false,holdReason:state.hold_reason};
+    if (state.route === 'retired' || state.business_exclusion_state !== 'none' || state.recount_compatibility_excluded) return {mode:'excluded',eligible:false};
+    if (state.route === 'replacement') return {mode:'replacement',eligible:true,deliveryVersion:state.delivery_version};
+    return {mode:BigInt(state.confirmed_revision)>0n || BigInt(state.cutover_baseline_revision)>0n ? 'reexport' : 'next_normal_export',eligible:true};
+  }
   if (Number(product.exclude_from_export) === 1) {
     return { mode: 'excluded', eligible: false };
   }
@@ -176,17 +184,17 @@ async function previewProductInformation(payload = {}) {
   const patch = normalizePatch(payload.answersPatch);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    await lifecycleGate.begin(client, 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const result = await client.query('SELECT * FROM products WHERE id = $1', [productId]);
     const product = result.rows[0];
     const preview = await evaluate(client, product, patch);
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { productId, sku: product.full_sku, ...preview, newAnswers: undefined };
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -201,7 +209,7 @@ async function applyProductInformation(payload = {}, options = {}) {
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await (options.databasePool || pool).connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const result = await client.query('SELECT * FROM products WHERE id = $1 FOR UPDATE', [productId]);
     const product = result.rows[0];
     const preview = await evaluate(client, product, patch, true);
@@ -224,14 +232,14 @@ async function applyProductInformation(payload = {}, options = {}) {
       details: { sku: product.full_sku, version: 1, changes: preview.changes,
         reason: String(payload.reason || '').trim() || null },
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { productId, sku: product.full_sku, changes: preview.changes,
       exportGuidance: preview.exportGuidance, fullRevision: lifecycle.revision };
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 

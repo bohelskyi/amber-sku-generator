@@ -11,6 +11,10 @@ export function StoredSnapshot({ snapshot, loading, onDownload, onConfirm, canCo
     : exportsApi.readMagentoArtifact(snapshot.id, group))).data, [snapshot.id, price]);
   const range = snapshot.capturedRange;
   return <section className="p-3 space-y-3" aria-label="Збережений результат">
+    {snapshot.fullProductSelection?.mode === 'replacement' && <p className="notice">Погоджена заміна SKU. Перед обробкою звірте попередній товар і файли.</p>}
+    {snapshot.fullProductWarnings?.length > 0 && <p className="notice notice-warning" role="alert">
+      Файл містить товари, які пізніше виправили або архівували: {snapshot.fullProductWarnings.map((p)=>p.sku_at_capture).join(', ')}. Звірте їх перед імпортом.
+    </p>}
     <h3 className="font-semibold text-lg">ЗБЕРЕЖЕНІ ФАЙЛИ</h3>
     <p>{snapshot.artifacts?.length ? 'Незмінний збережений результат. Таблиця читається зі створеного файлу.' : 'Збережено відомості про експорт. Файли CSV для цього запису недоступні.'}</p>
     <p>Створено: {dateText(snapshot.generatedAt)} · Товарів: {snapshot.productCount ?? snapshot.rowCount ?? 'Немає даних'} · Рядків CSV: {snapshot.csvRowCount ?? (snapshot.artifacts?.length ? snapshot.artifacts.reduce((n, a) => n + Number(a.rowCount || 0), 0) : 'Немає даних')}</p>

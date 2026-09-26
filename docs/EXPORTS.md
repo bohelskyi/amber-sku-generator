@@ -774,3 +774,44 @@ Before first full confirmation, an edit changes revision 1/confirmed 0 to 2/0. A
 Changed text increments full revision and emits `product_magento_name.updated`. Clearing a pending review also increments `delivery_version`. Explicit confirmation of unchanged text clears review and emits `product_magento_name.reviewed`, increments only delivery version, and leaves full/confirmed revisions unchanged. This invalidates outstanding name/information/recount/export evidence without fabricating a payload change. Audit/revision/version failures roll back the entire operation. Name/information preview reads use repeatable-read read-only transactions; translation suggestion remains non-persistent and optional.
 
 **Phase 2 is NOT independently deployable as the full correctness fix. Normal export selection remains old behavior until Phase 4.** Phases 3–5 have not started; no useful restored data, exclusions, historical membership or artifacts were repaired. [Phase 2 verification](RECOUNT_EXPORT_CORRECTNESS_PLAN.md#20-phase-2-actual-results--2026-09-26) includes real edit/snapshot confirmation tests and both orders of request/edit/export/ownership races.
+
+## Phase 3A backend evidence and repair tooling
+
+The backend now provides read-only manifest-v2 generation, strict historical
+compatibility membership indexing, exact-manifest single-entry repair and reviewed
+replacement reconciliation primitives. No new HTTP route, operator workflow or
+export-selection behavior is enabled. All writes were tested only in disposable
+`_test` databases. Historical sidecars have null revision/version and cannot
+acknowledge current payload. Apply revalidates the complete reviewed evidence,
+uses products → full-state lock order, advances delivery version, and audits
+atomically; identical retries do not repeat writes. Multi-entry repair remains
+blocked pending an explicit atomicity decision. Reconciliation requires current
+`exports.reconcile`, complete old-SKU/file dispositions and external/exclusion
+resolution where needed. Local confirmation never proves Magento import.
+
+Useful restored `amber` is still at migration 038 and was read only; its manifest
+projects migration 039 and is deliberately not apply-eligible. No useful data was
+repaired. Phase 4 has not started and the release blocker remains. See
+[Phase 3A results and exact Phase 3B boundary](RECOUNT_EXPORT_CORRECTNESS_PLAN.md#21-phase-3a-actual-results--2026-09-26).
+
+## Phase 3B and gated Phase 4 — 2026-09-27
+
+Migration 040 and the coordinated cutover commands implement the approved 2,193
+legacy baselines, 44 preserved first deliveries and 40 generated-only holds.
+Selection stays legacy until the durable gate becomes active. After activation,
+New uses pending normal rows with delivery floor zero regardless of cursor; Update
+uses a positive floor; replacement requires one product ID and delivery version.
+Holds cannot enter manual ranges. Baseline revision is separate from confirmed
+revision. Historical sidecars never acknowledge a current revision.
+
+The export workspace shows update, replacement and held queues; stored results
+show replacement provenance and warnings for subsequently retired/corrected rows.
+Legacy/template/shared-session capture consumes the same lifecycle selection.
+Confirming a first replacement returns it to normal; later changes appear in Update.
+Operational resolution remains an explicit actor-authorized backend command, not
+a generic exclusion toggle. No useful database has been activated.
+
+Follow the [canonical runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md), including freeze,
+old-process drain, both fresh manifests, bounded batches and final validation.
+The earlier Phase 3A sections describe the historical checkpoint, not the current
+approved cutover procedure.

@@ -5,6 +5,8 @@ function snapshotMetadata(snapshot, stream, artifacts = snapshot.artifacts || []
   const price = stream === 'price';
   return {
     stream, id: snapshot.id, status: snapshot.status,
+    ...(snapshot.full_product_selection ? { fullProductSelection:snapshot.full_product_selection } : {}),
+    ...(snapshot.full_product_warnings ? { fullProductWarnings:snapshot.full_product_warnings } : {}),
     generatedAt: snapshot.generated_at, confirmedAt: snapshot.confirmed_at,
     createdByUserId: snapshot.created_by_user_id ?? null,
     confirmedByUserId: snapshot.confirmed_by_user_id ?? null,

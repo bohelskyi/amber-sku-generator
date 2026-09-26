@@ -3,7 +3,7 @@ const { test, assert, pool, Pool, fs, os, path, serverRoot, runNodeInDatabase,
 
 test('migration 039 fresh schema enforces complete products, counters, routes and immutable membership', async () => {
   const before = (await pool.query('SELECT name, checksum FROM schema_migrations ORDER BY name')).rows;
-  assert.equal(before.length, 40);
+  assert.equal(before.length, 41);
   await runMigrations();
   assert.deepEqual((await pool.query('SELECT name, checksum FROM schema_migrations ORDER BY name')).rows, before);
   const grants = (await pool.query(`SELECT role_key FROM roles r JOIN role_permissions p ON p.role_id=r.id
@@ -91,7 +91,7 @@ test('migration 039 upgrade from 038 is conservative, transactional and repeatab
     try {
       await born.query('BEGIN');
       const p = (await born.query("INSERT INTO products(full_sku,category) VALUES('HX-NEW','HX') RETURNING id")).rows[0];
-      await require('../src/services/full-product-export.service').initializeNewProduct(born, p.id);
+      await born.query(`INSERT INTO product_full_export_state(product_id,route,evidence) VALUES($1,'normal','{"origin":"ordinary_save"}')`,[p.id]);
       await born.query('COMMIT');
       assert.equal((await db.query('SELECT route FROM product_full_export_state WHERE product_id=$1', [p.id])).rows[0].route, 'normal');
     } finally { await born.query('ROLLBACK'); born.release(); }

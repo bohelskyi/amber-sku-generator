@@ -72,3 +72,21 @@ Export-template PR2 adds administrative persistence, revisioned drafts, immutabl
 CI validates Compose, runs scoped server static checks, server unit tests with non-blocking coverage visibility, the serialized destructive PostgreSQL integration suite, client tests with non-blocking coverage visibility, client lint, and the production client build. The container smoke workflow also supports manual execution and runs weekly to detect mutable base-image compatibility drift. Integration tests refuse a database name that does not end in `_test`; use only a disposable database.
 
 The checked-in Compose setup is a development/single-host baseline, not a complete hardened infrastructure design. PostgreSQL is host-exposed by the base Compose file, secrets come from ignored environment configuration, and backup scheduling/retention/encryption/off-host monitoring remain external responsibilities. See [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
+
+### Approved Phase 3B + gated Phase 4 implementation — 2026-09-27
+
+Migration 040 adds explicit cutover baseline, typed exclusion policy, immutable
+capture selection and the durable activation gate. `confirmed_revision` remains
+actual captured/local confirmation; accepting 2,193 ordinary legacy rows instead
+sets baseline revision 1. Preserve the other 84 obligations: 44 normal first
+deliveries, 40 generated-only holds. All 997 historical successor exclusions stay
+set through selector activation and require individual reviewed release.
+
+Canonical procedure: **039 → 040 → preparing → fresh indexing manifest → historical
+indexing → fresh post-index cutover manifest → bounded batches → final validation
+→ selector activation**. Freeze through activation and drain all old writers.
+The new selector and queues are inactive until the gate switches. No useful
+database migration, repair, approval or activation was performed. The restored
+038 rehearsal used only the canonical disposable `_test` environment. See
+[the operator runbook](docs/FULL_PRODUCT_CUTOVER_RUNBOOK.md) for exact commands,
+retries, explicit amendments, operator attestations and rollback boundaries.

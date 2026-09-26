@@ -3,6 +3,7 @@ import { api } from '../lib/api';
 export function createExportsApi(client = api) {
   return Object.freeze({
     getStatus: () => client.get('/export/status'),
+    getQueue: (params) => client.get('/export/queue', { params }),
     getTemplateOptions: () => client.get('/export/template-options'),
     preview: (payload) => client.post('/export/preview', payload),
     createSnapshot: (payload, idempotencyKey) => client.post('/export/snapshots', payload, {

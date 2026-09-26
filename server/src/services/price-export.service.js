@@ -1,3 +1,4 @@
+const lifecycleGate = require('./full-product-cutover-gate');
 const crypto = require('node:crypto');
 const pool = require('../db/pool');
 const { writeAuditEvent } = require('../audit/audit-events');
@@ -82,7 +83,7 @@ async function createPriceExportSnapshot({ idempotencyKey }, options = {}) {
 
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const candidates = await client.query(
       `SELECT revisions.product_id
        FROM product_export_revisions revisions
@@ -159,10 +160,10 @@ async function createPriceExportSnapshot({ idempotencyKey }, options = {}) {
       subjectId: snapshotId,
       details: { rowCount: rowsResult.rows.length },
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return inserted.rows[0];
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     if (error?.code !== '23505') throw error;
     const conflict = await pool.query(
       'SELECT * FROM price_export_snapshots WHERE idempotency_key = $1',
@@ -171,7 +172,7 @@ async function createPriceExportSnapshot({ idempotencyKey }, options = {}) {
     if (!conflict.rows[0]) throw error;
     return conflict.rows[0];
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -198,7 +199,7 @@ async function confirmPriceExportSnapshot(snapshotId, options = {}) {
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const snapshotResult = await client.query(
       'SELECT * FROM price_export_snapshots WHERE id = $1 FOR UPDATE',
       [String(snapshotId)]
@@ -242,13 +243,13 @@ async function confirmPriceExportSnapshot(snapshotId, options = {}) {
         details: { rowCount: Number(snapshot.row_count) },
       });
     }
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { success: true, snapshotId: String(snapshotId), status: 'confirmed' };
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 

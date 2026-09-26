@@ -1,3 +1,4 @@
+const lifecycleGate = require('./full-product-cutover-gate');
 const { hash, stableJson, buildExposureIndex } = require('./export-exposure/evidence');
 const { readLineageExposure } = require('./full-product-export-exposure');
 
@@ -17,8 +18,8 @@ async function readFullProductStates(client, ids, { lock = false } = {}) {
 }
 
 async function initializeNewProduct(client, productId) {
-  await client.query(`INSERT INTO product_full_export_state(product_id, route, evidence)
-    VALUES ($1, 'normal', '{"origin":"ordinary_save"}'::jsonb)`, [productId]);
+  await client.query(`INSERT INTO product_full_export_state(product_id, route, evidence, business_exclusion_state)
+    VALUES ($1, 'normal', '{"origin":"ordinary_save"}'::jsonb, 'none')`, [productId]);
 }
 
 async function retireFullProduct(client, productId) {
@@ -34,10 +35,13 @@ async function initializeRecountSuccessor(client, source, successorId, correctio
   // request finalization. Neither this service nor confirmation locks products.
   await readFullProductStates(client, disposition.productIds, { lock: true });
   await retireFullProduct(client, source.id);
+  const active = (await lifecycleGate.readGate(client)).phase === 'active';
+  const business = disposition.evidence.businessExclusionState || (disposition.evidence.independentExclusion ? 'excluded' : 'none');
   await client.query(`INSERT INTO product_full_export_state
-    (product_id, route, hold_reason, source_correction_id, evidence)
-    VALUES ($1,$2,$3,$4,$5::jsonb)`, [successorId, disposition.route,
-    disposition.holdReason, correctionId, JSON.stringify(disposition.evidence)]);
+    (product_id, route, hold_reason, source_correction_id, evidence, business_exclusion_state, recount_compatibility_excluded)
+    VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7)`, [successorId, disposition.route,
+    disposition.holdReason, correctionId, JSON.stringify(disposition.evidence),business,!active]);
+  if (active) await client.query('UPDATE products SET exclude_from_export=$2 WHERE id=$1', [successorId,business === 'none' ? 0 : 1]);
   return disposition;
 }
 
@@ -66,8 +70,17 @@ async function captureFullProductStates(client, rows, { lock = false } = {}) {
   const states = await readFullProductStates(client, rows.map((p) => p.id), { lock });
   // Holds are recorded, not activated as selection gates in Phase 1. The current
   // cursor/exclusion path remains authoritative until the coordinated Phase 4 switch.
+  const gate = await lifecycleGate.readGate(client);
+  if (gate.phase === 'preparing') throw lifecycleGate.error('EXPORT_CUTOVER_PREPARING', 'Export cutover is preparing', 503);
+  if (gate.phase === 'active' && rows.length) {
+    const ambiguous = await client.query(`SELECT p.id FROM products p LEFT JOIN sku_registry r ON r.full_sku=p.full_sku
+      WHERE p.id=ANY($1::int[]) AND (r.first_product_id IS DISTINCT FROM p.id
+        OR (SELECT count(*) FROM products other WHERE other.full_sku=p.full_sku)<>1) LIMIT 1`, [rows.map((p)=>p.id)]);
+    if (ambiguous.rows.length) throw lifecycleError(`SKU identity requires reconciliation for product ${ambiguous.rows[0].id}`);
+  }
+  if (gate.phase === 'active' && states.some((s) => s.route === 'hold' || s.business_exclusion_state !== 'none' || s.recount_compatibility_excluded)) throw lifecycleError('Held or excluded product cannot be captured');
   if (states.some((s) => s.route === 'retired')) throw lifecycleError('Retired product cannot be captured');
-  return { version: LIFECYCLE_VERSION, products: states.map((s) => ({
+  return { version: LIFECYCLE_VERSION, activation: {phase:gate.phase,generation:gate.generation}, products: states.map((s) => ({
     productId: Number(s.product_id), revision: s.revision, deliveryVersion: s.delivery_version,
     route: s.route, holdReason: s.hold_reason,
   })) };
@@ -130,9 +143,12 @@ async function confirmFullProductRevisions(client, snapshot) {
     // route, acknowledge an uncaptured revision, or follow a successor pointer.
     if (BigInt(member.full_revision) > BigInt(state.revision)
       || BigInt(member.delivery_version) > BigInt(state.delivery_version)) throw lifecycleError('Invalid captured lifecycle counters');
+    const replacementComplete = state.route === 'replacement' && String(member.delivery_version) === String(state.delivery_version);
     await client.query(`UPDATE product_full_export_state
-      SET confirmed_revision=GREATEST(confirmed_revision,$2::bigint), updated_at=CURRENT_TIMESTAMP
-      WHERE product_id=$1 AND confirmed_revision < $2::bigint`, [member.product_id, member.full_revision]);
+      SET route=CASE WHEN $3 THEN 'normal' ELSE route END,
+          delivery_version=delivery_version+CASE WHEN $3 THEN 1 ELSE 0 END,
+          confirmed_revision=GREATEST(confirmed_revision,$2::bigint), updated_at=CURRENT_TIMESTAMP
+      WHERE product_id=$1 AND confirmed_revision < $2::bigint`, [member.product_id, member.full_revision, replacementComplete]);
   }
 }
 
