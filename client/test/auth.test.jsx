@@ -569,6 +569,7 @@ describe('application-user administration UI', () => {
         <MemoryRouter><WorkspaceNav /></MemoryRouter>
       </AuthContext.Provider>
     );
+    fireEvent.click(screen.getByRole('button', { name: /Розділи/ }));
     expect(screen.getByRole('link', { name: /Користувачі/ })).toBeTruthy();
 
     rerender(

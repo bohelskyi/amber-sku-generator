@@ -21,7 +21,7 @@ export function SampleProducts({ search, selected, onChange }) {
     <h3>Обрати товари</h3><label>Пошук за SKU<input type="search" className="input" maxLength={160} value={query} onChange={(e) => changeSearch(e.target.value)} placeholder="Повний SKU або щонайменше 2 символи" /></label>
     <p>Оберіть до 100 товарів. Пошук не перевіряє готовність до експорту й показує також неповні та архівні товари.</p>
     {busy && <p role="status">Пошук…</p>}{error && <p role="alert">Не вдалося знайти товари: {getApiError(error)}</p>}
-    {result && <><ul>{result.products.map((p) => <li key={p.id}><span>{p.full_sku} · {p.category} · {p.status || 'статус не вказано'}</span>
+    {result && <><ul>{result.products.map((p) => <li key={p.id}><span>{p.full_sku} · {p.category} · {({ active: 'Активний', archived: 'Архівний', corrected: 'Переоблікований', generated: 'Створений' })[p.status] || 'Статус не вказано'}</span>
       <button type="button" disabled={selected.some((s) => s.id === p.id) || selected.length >= 100} onClick={() => onChange([...selected, p])}>Обрати {p.full_sku}</button></li>)}</ul>
       {!result.products.length && <p>Товарів за цим SKU не знайдено.</p>}
       <div className="et-actions"><button type="button" disabled={!offset} onClick={() => changeSearch(query, Math.max(0, offset - 20))}>Попередні товари</button>

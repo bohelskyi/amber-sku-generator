@@ -21,7 +21,7 @@ export function TemplateRegistry({ families, manage, busy, error, onRefresh, onC
       </> : found.map((item) => {
         const history = versions(item); const latest = history[0]; const revision = item.draft_revision || item.draft?.revision;
         return <article className="et-template-row" key={item.id}><div><h2>{item.display_name}</h2><div className="et-template-meta">
-          <span>Чернетка · ревізія {revision}{history.some((version) => version.sourceDraftRevision === revision) ? ' · опублікована' : ' · збережена'}</span>
+          <span>Чернетка · редакція {revision}{history.some((version) => version.sourceDraftRevision === revision) ? ' · опублікована' : ' · збережена'}</span>
           {view === 'all' && <span>{latest ? `Остання публікація: v${latest.versionNumber}` : 'Ще не опубліковано'}</span>}
         </div>{item.selected_version_id && <span className="et-badge">Вибрано для експорту за шаблоном{history.find((v) => v.id === item.selected_version_id) ? ' · v' + history.find((v) => v.id === item.selected_version_id).versionNumber : ''}</span>}</div>
           <Link className="btn btn-outline px-4" to={`${base}/${encodeURIComponent(item.id)}`} aria-label={'Відкрити ' + item.display_name}>Відкрити</Link>

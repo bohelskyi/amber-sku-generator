@@ -619,8 +619,9 @@ The compact attention summary filters affected rows. Detail dialogs show exact
 long text and secondary technical diagnostics. Authorized actions hand off to the
 existing manual-name workflow or an explicit `/?exportSku=...` decode action;
 there is no inline product editing, automatic correction or successor substitution.
-The product screen requires an explicit open and preserves existing dirty work.
-Successful changes require a complete explicit export recheck.
+UX-5 automatically decodes the exact handoff SKU read-only after configuration
+and permissions resolve, unless current creation/recount/price work blocks it.
+It never enters edit/recount mode. See the UX-5 continuation below for rechecks.
 
 ### Stored results and explicit price actions
 
@@ -681,11 +682,61 @@ history's snapshot metadata presenter and identity/status contract; they do not
 add another history endpoint. [Shared sessions](SHARED_EXPORT_SESSIONS.md) documents
 recent-first list pagination, participant disclosure and original-operation recovery.
 
-After an authorized product correction initiated from export review, the UI says
-**Дані товару змінено. Попередній перегляд застарів.** and offers the explicit
-**Оновити перевірку** action. It does not patch diagnostic rows or auto-refresh.
+UX-4 originally required an explicit recheck after an authorized correction.
+UX-5 supersedes that interaction with a new authoritative read after confirmed
+success, as described below; it still never patches diagnostic rows locally.
 Successful recheck retains display-only file/category, SKU search, attention and
 Main/EN filters, widths and a still-valid page in principal-scoped memory. New
 evidence replaces all old row/detail objects; a resolved issue is not recreated.
 Display context never changes export input/order/eligibility or retained retry
-identity. The next current issue remains actionable after the explicit recheck.
+identity. The next current issue remains actionable after the successful recheck.
+
+### UX-5 operator workflow (2026-09-26)
+
+Normal column settings offer empty, constant, characteristic, text with
+characteristics, conditions and first-present intents where the existing rule
+can be safely represented. A transformation remains detached until **Застосувати
+до чернетки**. Constant-to-condition retains the exact constant in **Інакше**;
+Cancel retains the original definition. Known enclosing readiness/presence
+guards and output checks survive the existing local dependency-isolation adapter.
+Question contracts keep their dedicated mapping editor. Opaque/custom structures
+are not flattened; Technical details and Advanced remain separate dialogs.
+The shared searchable combobox filters labels but stores only an explicitly
+selected source/semantic value. Labels do not become semantic IDs.
+
+Fresh fixed-structure copies show **Що можна змінювати в копії?** at the table
+boundary. **Також змінювати структуру CSV** explicitly invokes the existing
+authorized upgrade; creation never upgrades silently. Publishing, selecting a
+publication and creating export files remain independent explicit actions.
+
+Category badges count unique attention products from the already loaded review,
+with a separately labelled all-category count. Filters, widths and category
+navigation do not re-evaluate products or alter membership. Empty category,
+filtered-empty, empty shared/invitation lists and an underlying empty price queue
+have distinct copy; zero-row results do not display empty tables/pagination.
+
+An export-origin handoff carries SKU, human reason and a return destination in
+principal-scoped memory. Read-only decode does not mark the review stale. Local
+recount dirty state requires an open recount editor, not merely decoded data.
+Confirmed successful name correction, or a successful product mutation during
+that handoff, requests a NEW authoritative preview and displays **Оновлюємо
+перевірку після зміни товару…**. Category, search, attention, Main/EN, widths and
+valid page survive. Failed reads retain stale evidence and offer **Повторити
+перевірку**. Other changes still invalidate evidence without an unsolicited
+automatic operation. Principal/ticket guards reject late responses.
+
+This new read never saves preparation, changes range/publication, creates or
+confirms a snapshot, or replaces an uncertain original command/payload/retry key.
+Stored results remain immutable. Refresh of an uncertain creation's review and
+retry of the original creation retain separate evidence. Busy/frozen states
+continue to block unsafe actions; a blocked recheck leaves stale/manual recovery.
+
+History adds current human creator/confirmer labels and accessible session title
+through authorized read-only joins. IDs remain the actor identity; labels are
+display metadata, not historical identity changes. Null historical actors remain
+unknown. No new ownership inference, history endpoint, pagination order or access
+bypass is introduced. Direct stored/list presenters can lack display labels and
+must not fabricate names. Dates use the shared local formatter; missing historical
+CSV files are described without claiming that a CSV table was loaded.
+
+Real-browser and full automated evidence: [post-UX-5 acceptance audit](EXPORT_UX_ACCEPTANCE_AUDIT_POST_UX5_2026-09-26.md).

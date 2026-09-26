@@ -42,7 +42,8 @@ function HistoryWorkspace() {
     {visible?.items.length === 0 && <p>Збережених файлів за цими умовами немає.</p>}
     <ul className="export-workspace-list">{visible?.items.map((item) => <li key={`${item.stream}:${item.id}`} className="export-workspace-row">
       <div className="export-workspace-identity"><h3>{item.stream === 'price' ? 'Ціни · sku,price' : 'Товари'}</h3><span className="export-workspace-status">{item.status === 'confirmed' ? 'Завершено' : 'Файли створено'}</span>
-        <p>{item.createdByUserId == null ? 'Автор невідомий' : `Автор: користувач №${item.createdByUserId}`}</p>
+        <p>{item.createdByUserId == null ? 'Автор невідомий' : `Автор: ${item.createdByName || 'ім’я недоступне'}`}</p>
+        {item.sessionId && item.sessionTitle && <Link className="underline" to={'/exports/sessions/' + encodeURIComponent(item.sessionId)}>{item.sessionTitle}</Link>}
         <p>{item.template ? `${item.templateLabel?.displayName || 'Шаблон'} · v${item.templateLabel?.versionNumber || 'Немає даних'}` : item.recipe?.name}</p></div>
       <div className="export-workspace-meta"><p>Створено: {dateText(item.generatedAt)}</p>
         <p>Товарів: {item.productCount} · Рядків CSV: {item.csvRowCount ?? 'Немає даних'}</p>
@@ -50,7 +51,7 @@ function HistoryWorkspace() {
         <p>{item.artifacts.length ? `Доступних файлів: ${item.artifacts.length}` : 'Історичні файли Magento недоступні'}</p>
         <p>{item.confirmedAt ? `Підтверджено: ${dateText(item.confirmedAt)}` : 'Очікує підтвердження'}</p></div>
       <div className="export-workspace-open"><Link className="btn btn-outline px-3" to={`/exports/history/${item.stream}/${encodeURIComponent(item.id)}?${params.toString()}`}>Відкрити {item.stream === 'price' ? 'ціни' : 'товари'} від {dateText(item.generatedAt)}</Link>
-        <details><summary>Технічні подробиці</summary><p>{item.id}</p></details></div>
+        <details><summary>Технічні подробиці</summary><p>{item.id}</p><p>ID автора: {item.createdByUserId ?? 'Немає даних'}</p></details></div>
     </li>)}</ul>
     <div className="flex gap-3">{after && <button onClick={() => filter('scope', scope)}>До початку</button>}{visible?.next && <button onClick={() => { const next = new URLSearchParams(params); next.set('after', visible.next); setData(null); setParams(next); }}>Наступні 20</button>}</div>
   </section>;

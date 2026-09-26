@@ -83,7 +83,7 @@ it('null and invalid mappings remain distinct and untouched; sparse EN and ident
   expect(screen.getByText('null — не порожній текст')).toBeTruthy(); expect(screen.getByText('Відповідності немає')).toBeTruthy();
   expect(screen.getAllByText(/Некоректний тип відповідності/)).toHaveLength(2);
   fireEvent.click(screen.getByRole('button', { name: 'NM / dodatkovo_namysta / EN' }));
-  expect(screen.getByText('Порожня комірка. Значення з основного рядка не підставляється.')).toBeTruthy();
+  expect(screen.getAllByText('Порожня клітинка').length).toBeGreaterThan(0);
   field('sku'); expect(screen.getByText('Захищене ідентифікаційне поле: sku.')).toBeTruthy();
   expect(hashJsonData(current)).toBe(hash);
 });

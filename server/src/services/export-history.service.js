@@ -8,6 +8,8 @@ function snapshotMetadata(snapshot, stream, artifacts = snapshot.artifacts || []
     generatedAt: snapshot.generated_at, confirmedAt: snapshot.confirmed_at,
     createdByUserId: snapshot.created_by_user_id ?? null,
     confirmedByUserId: snapshot.confirmed_by_user_id ?? null,
+    createdByName: snapshot.created_by_user_id == null ? null : snapshot.creator_name || null,
+    confirmedByName: snapshot.confirmed_by_user_id == null ? null : snapshot.confirmer_name || null,
     rowCount: Number(snapshot.row_count), productCount: Number(snapshot.row_count),
     csvRowCount: price ? Number(snapshot.row_count) : artifacts.length ? artifacts.reduce((n, a) => n + Number(a.rowCount), 0) : null,
     fileName: snapshot.file_name,
@@ -16,6 +18,7 @@ function snapshotMetadata(snapshot, stream, artifacts = snapshot.artifacts || []
     artifacts: price ? [{ groupCode: 'prices', fileName: snapshot.file_name,
       rowCount: Number(snapshot.row_count), productCount: Number(snapshot.row_count), profileVersion: 'sku,price' }] : artifacts,
     ...(snapshot.export_session_id ? { sessionId: snapshot.export_session_id,
+      ...(snapshot.session_title ? { sessionTitle: snapshot.session_title } : {}),
       ...(snapshot.session_access_epoch ? { accessEpoch: snapshot.session_access_epoch } : {}) } : {}),
     recipe: price ? { kind: 'price', name: 'Оновлення цін', outputContract: 'sku,price' }
       : snapshot.request_contract === 'template-v1' ? { kind: 'template' }
@@ -77,9 +80,15 @@ async function getExportHistory(input, options = {}) {
     ORDER BY p.generated_at DESC,p.id DESC,p.stream DESC LIMIT $8
   ) SELECT p.*, to_char(p.generated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_time,
     CASE WHEN v.id IS NULL THEN NULL ELSE jsonb_build_object('displayName',t.display_name,'versionNumber',v.version_number::text) END AS template_label,
-    COALESCE(a.artifacts,'[]'::jsonb) AS artifacts
+    COALESCE(a.artifacts,'[]'::jsonb) AS artifacts,
+    COALESCE(NULLIF(creator.display_name,''),creator.preferred_username) AS creator_name,
+    COALESCE(NULLIF(confirmer.display_name,''),confirmer.preferred_username) AS confirmer_name,
+    s.title AS session_title
     FROM page p LEFT JOIN export_template_versions v ON v.id=p.template_version_id
     LEFT JOIN export_templates t ON t.id=v.template_id
+    LEFT JOIN application_users creator ON creator.id=p.created_by_user_id
+    LEFT JOIN application_users confirmer ON confirmer.id=p.confirmed_by_user_id
+    LEFT JOIN export_sessions s ON s.id=p.export_session_id
     LEFT JOIN LATERAL (SELECT jsonb_agg(jsonb_build_object('groupCode',group_code,
       'profileVersion',profile_version,'fileName',file_name,'productCount',product_count,'rowCount',row_count)
       ORDER BY group_code) AS artifacts FROM magento_export_artifacts WHERE snapshot_id=p.id AND p.stream='product') a ON TRUE

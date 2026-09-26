@@ -1,3 +1,4 @@
+import { changeControl } from './helpers/searchable-picker';
 import { useEffect, useState } from 'react';
 import { createRequire } from 'node:module';
 import { act, cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react';
@@ -24,16 +25,16 @@ function Editor({ initial = fixture(), diagnostics = [], focusField }) {
   return <DefinitionEditor definition={definition} onChange={setDefinition} registry={registry} loadSource={loadSource} diagnostics={diagnostics} focusField={focusField} onPendingChange={(value) => { pending = value; }} />;
 }
 const click = (name, scope = screen) => fireEvent.click(scope.getByRole('button', { name, exact: true }));
-const change = (name, value, scope = screen) => fireEvent.change(scope.getByLabelText(name, { exact: true }), { target: { value } });
+const change = (name, value, scope = screen) => changeControl(scope.getByLabelText(name, { exact: true }), value);
 const open = (column = 'meta_title') => click(`BR / ${column} / Основний`);
 const normal = () => document.querySelector('.et-intent-editor');
 beforeEach(() => { window.innerWidth = 1600; pending = false; });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-it('six read-only intent lenses keep accepted definitions and unknown interpolation byte/hash safe', () => {
+it('seven intent choices keep accepted definitions and unknown interpolation byte/hash safe', () => {
   const d = fixture(); const before = JSON.stringify(d); const hash = hashJsonData(d);
   const path = ['groups', 0, 'rows', 0, 'cells', 'meta_title'];
-  expect(Object.values(intentNames)).toHaveLength(6);
+  expect(Object.values(intentNames)).toHaveLength(7);
   expect(columnIntent(d, path)).toBe('literal');
   expect(columnIntent(d, ['groups', 0, 'rows', 0, 'cells', 'kolir'])).toBe('characteristic');
   expect(columnIntent(d, ['groups', 4, 'rows', 0, 'cells', 'meta_description'])).toBe('condition');
@@ -146,7 +147,7 @@ it('issue navigation selects the exact normal row/source and retains machine cod
   expect(normal().textContent).not.toMatch(/SOURCE_REFERENCE|Unverified|unresolvedValueIds/);
   click('Технічні подробиці'); const dialog = screen.getByRole('dialog', { name: 'Технічні подробиці' });
   expect(dialog.textContent).toContain('SOURCE_REFERENCE_UNRESOLVED'); expect(dialog.textContent).toContain('Unverified semantic value IDs');
-  click('← Звичайні налаштування'); expect(screen.getByLabelText('Характеристика').value).toBe('BR.color'); click('Скасувати'); expect(current).toBe(d);
+  click('← Звичайні налаштування'); expect(screen.getByLabelText('Характеристика').value).toBe('Браслети → Колір'); click('Скасувати'); expect(current).toBe(d);
 });
 
 it('normal, Technical and Advanced share one pending transaction and reject callbacks from a suspended surface', () => {

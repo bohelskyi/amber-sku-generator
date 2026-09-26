@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { useEffect } from 'react';
+import { StrictMode, useEffect } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -13,6 +13,7 @@ import { exportTemplatesApi as templates } from '../src/api/export-templates-api
 import { productsApi } from '../src/api/products-api';
 import { api } from '../src/lib/api';
 import { downloadBlob } from '../src/lib/download';
+import { notifyExportReviewChanged } from '../src/lib/export-review-events';
 
 vi.mock('../src/api/exports-api', async (original) => {
   const module = await original(); return { ...module, exportsApi: Object.fromEntries(Object.keys(module.exportsApi).map((key) => [key, vi.fn()])) };
@@ -41,10 +42,11 @@ const deferred = () => { let resolve; let reject; const promise = new Promise((a
 const button = (name) => fireEvent.click(screen.getByRole('button', { name, exact: true }));
 const link = (name, nav) => fireEvent.click((nav ? within(screen.getByRole('navigation', { name: nav })) : screen).getByRole('link', { name, exact: true }));
 const navigate = async (router, to) => { await act(async () => { await router.navigate(to); }); };
-function mount(path = '/exports', permissions = exporter) {
+function mount(path = '/exports', permissions = exporter, strict = false) {
   const auth = { applicationUser: { id: 1 }, principalLifetime: { id: '1', valid: true }, permissions };
   const router = createMemoryRouter([{ path: '*', element: <Workspace /> }], { initialEntries: [path] });
-  return { router, auth, ...render(<AuthContext.Provider value={auth}><RouterProvider router={router} /></AuthContext.Provider>) };
+  const tree = <AuthContext.Provider value={auth}><RouterProvider router={router} /></AuthContext.Provider>;
+  return { router, auth, ...render(strict ? <StrictMode>{tree}</StrictMode> : tree) };
 }
 function noMutations() {
   for (const key of ['createSnapshot', 'confirmSnapshot', 'createPriceSnapshot', 'confirmPriceSnapshot']) expect(exports[key]).not.toHaveBeenCalled();
@@ -194,11 +196,9 @@ it('list → session → list → same session rereads server state and keeps it
   expect(sessions.get.mock.calls).toEqual([['saved-a'], ['saved-a']]); noMutations();
 });
 
-it('old session permalink still requires explicit current-account opening; invitations disclose only minimal metadata', async () => {
+it('session permalink automatically reads through the current account; invitations disclose only minimal metadata', async () => {
   const { router } = mount('/exports/sessions/saved-a');
-  await screen.findByRole('button', { name: 'Відкрити експорт із посилання через мій обліковий запис' });
-  expect(sessions.get).not.toHaveBeenCalled(); noMutations();
-  button('Відкрити експорт із посилання через мій обліковий запис'); await screen.findByLabelText('Назва експорту');
+  await screen.findByLabelText('Назва експорту'); expect(sessions.get).toHaveBeenCalledTimes(1); noMutations();
   await navigate(router, '/exports/invitations'); await screen.findByText(session.title);
   expect(screen.queryByLabelText('Назва експорту')).toBeNull();
   expect(screen.queryByText(/Ревізія 7/)).toBeNull(); expect(screen.queryByText('Учасники')).toBeNull();
@@ -227,14 +227,33 @@ it('template URLs open table/check/versions and system read-only without publish
 });
 
 it('export SKU handoff opens only the explicitly requested existing decode workflow and respects permission', async () => {
-  const decode = vi.spyOn(api, 'post').mockResolvedValue(response({ sku: 'SV-EXACT', category: 'SV', decoded: [] }));
+  const decode = vi.spyOn(api, 'post').mockReturnValue(new Promise(() => {}));
   const first = mount('/?exportSku=SV-EXACT', [...exporter, 'products.decode']);
   await screen.findByRole('button', { name: 'Відкрити товар із експорту' });
-  expect(decode).not.toHaveBeenCalled();
-  button('Відкрити товар із експорту'); await waitFor(() => expect(decode).toHaveBeenCalledWith('/decode', { sku: 'SV-EXACT' }));
+  await waitFor(() => expect(decode).toHaveBeenCalledWith('/decode', { sku: 'SV-EXACT' }));
   noMutations(); first.unmount(); decode.mockClear();
   mount('/?exportSku=SV-EXACT', exporter); await screen.findByText('Amber SKU Manager');
   expect(screen.queryByRole('button', { name: 'Відкрити товар із експорту' })).toBeNull(); expect(decode).not.toHaveBeenCalled();
+});
+
+it('StrictMode preserves export handoff reason until actual departure; viewing is fresh and saving triggers a new read', async () => {
+  vi.spyOn(api, 'post').mockReturnValue(new Promise(() => {}));
+  exports.preview.mockResolvedValue(response({ ...preview, tableFingerprint: 'first', review: { files: [{ groupCode: 'SV', headers: ['name'], rows: [{ ordinal: 1, productId: 1, sku: 'SV-EXACT', language: 'main', readiness: 'attention', issues: [{ code: 'manual_name_required', target: { column: 'name' } }], cells: [{ state: 'not-evaluated', value: null }] }] }] } }));
+  mount('/exports', [...exporter, 'products.decode'], true);
+  button((await screen.findByRole('button', { name: 'Перевірити 1 новий товар' })).textContent);
+  button((await screen.findByRole('button', { name: 'Значення name, рядок 1, потребує уваги' })).getAttribute('aria-label'));
+  link('Відкрити товар');
+  await screen.findByText('Потрібно вказати назву');
+  await waitFor(() => expect(api.post).toHaveBeenCalledWith('/decode', { sku: 'SV-EXACT' }));
+  expect(screen.getByText('Перегляд товару. Зміни не внесено.')).toBeTruthy();
+  expect(exports.preview).toHaveBeenCalledTimes(1);
+  act(() => notifyExportReviewChanged({ kind: 'product' }));
+  await waitFor(() => expect(exports.preview).toHaveBeenCalledTimes(2));
+  expect(screen.getByText(/Зміни товару збережено/)).toBeTruthy();
+  link('Повернутися до перевірки'); await screen.findByRole('region', { name: 'Попередня перевірка' });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); });
+  act(() => notifyExportReviewChanged({ kind: 'product' }));
+  expect(exports.preview).toHaveBeenCalledTimes(2); noMutations();
 });
 
 it.each(['publish', 'activate'])('%s-only template capability retains independent controls on direct versions URL', async (capability) => {
@@ -255,10 +274,10 @@ it.each(['publish', 'activate'])('%s-only template capability retains independen
 it('dirty draft survives local back/forward; Stay, failed Save, successful Save and Discard guard definition changes', async () => {
   const { router } = mount('/admin/export-templates/family-a', admin);
   await screen.findByRole('tablist', { name: 'Категорії файлів' }); button('Налаштувати колонку meta_title');
-  fireEvent.change(screen.getByLabelText('Значення', { exact: true }), { target: { value: '  точний текст\n' } }); button('Застосувати до чернетки');
+  fireEvent.change(screen.getByLabelText('Текст у файлі', { exact: true }), { target: { value: '  точний текст\n' } }); button('Застосувати до чернетки');
   link('Перевірка', 'Розділи шаблону'); link('Версії', 'Розділи шаблону');
   await navigate(router, -1); await navigate(router, -1); await navigate(router, 1); await navigate(router, -1);
-  button('Налаштувати колонку meta_title'); expect(screen.getByLabelText('Значення', { exact: true }).value).toBe('  точний текст\n');
+  button('Налаштувати колонку meta_title'); expect(screen.getByLabelText('Текст у файлі', { exact: true }).value).toBe('  точний текст\n');
   button('Закрити налаштування');
   const leave = screen.getByRole('link', { name: 'Експорт', exact: true }); leave.focus(); fireEvent.click(leave);
   const dialog = await screen.findByRole('dialog', { name: 'Незбережені зміни' });
@@ -277,7 +296,7 @@ it('dirty draft survives local back/forward; Stay, failed Save, successful Save 
   fireEvent.click(leave); button('Зберегти й перейти'); await screen.findByRole('navigation', { name: 'Розділи експорту' });
   expect(templates.save.mock.calls[1][1].definition.groups[0].rows[0].cells.meta_title.value).toBe('  точний текст\n');
   await navigate(router, -1); await screen.findByRole('tablist', { name: 'Категорії файлів' }); button('Налаштувати колонку meta_title');
-  fireEvent.change(screen.getByLabelText('Значення', { exact: true }), { target: { value: 'discard this' } });
+  fireEvent.change(screen.getByLabelText('Текст у файлі', { exact: true }), { target: { value: 'discard this' } });
   await navigate(router, 1); await screen.findByRole('dialog'); button('Відкинути й перейти');
   await screen.findByRole('navigation', { name: 'Розділи експорту' }); expect(templates.save).toHaveBeenCalledTimes(2);
   expect(templates.publish).not.toHaveBeenCalled(); expect(templates.select).not.toHaveBeenCalled();
@@ -325,8 +344,7 @@ it('saving a new session at the dirty guard follows the requested destination an
 it('view-only session result can be reopened, but confirmation remains disabled', async () => {
   sessions.get.mockResolvedValue(response({ ...session, snapshotId: snapshot.id }));
   mount('/exports/sessions/saved-a', ['exports.view']);
-  await screen.findByRole('button', { name: 'Відкрити експорт із посилання через мій обліковий запис' });
-  button('Відкрити експорт із посилання через мій обліковий запис');
+
   await screen.findByText('ЗБЕРЕЖЕНІ ФАЙЛИ');
   expect(screen.queryByRole('button', { name: 'Завершити експорт' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Створити свій експорт' })).toBeNull(); noMutations();

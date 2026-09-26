@@ -1,4 +1,9 @@
 .export-grid { min-width:0; max-width:100%; padding:16px; --review-width:208px; }
+.export-review-heading { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 16px; padding:12px 16px; }
+.export-review-heading p { margin:3px 0; }
+.export-tab-count { display:inline-block; margin-left:8px; padding:0 6px; border-radius:12px; background:#fef3c7; color:#78350f; font-weight:650; }
+.export-grid-empty { padding:24px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; }
+.export-grid-empty button { margin:12px 12px 0 0; }
 .export-grid-tabs { display:flex; overflow-x:auto; gap:8px; padding-bottom:12px; }
 .export-grid-tabs button { white-space:nowrap; padding:8px 12px; border:1px solid #cbd5e1; border-radius:6px; }
 .export-grid-tabs [aria-selected="true"] { background:#172a46; color:white; }

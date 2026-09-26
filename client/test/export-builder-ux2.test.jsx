@@ -54,9 +54,9 @@ it('source discovery searches human labels and exposes only authorized sources w
     { category_code: 'BR', key: 'unpublished', label: 'Неопублікована', include_in_sku: 1 },
   ], schemas: [{ category_code: 'BR', questions: [{ key: 'color' }] }] } };
   const set = vi.fn(); render(<SourcePicker registry={registry} group="BR" value="" onChange={set} />);
-  change('Пошук характеристики', 'колір'); expect(screen.getByRole('option', { name: 'Браслети → Колір' }).value).toBe('BR.color');
+  change('Характеристика', 'колір'); expect(screen.getByRole('option', { name: 'Браслети → Колір' })).toBeTruthy(); expect(set).not.toHaveBeenCalled();
   expect(screen.queryByRole('option', { name: /Неопублікована/ })).toBeNull(); expect(screen.queryByRole('option', { name: /Вага/ })).toBeNull();
-  change('Характеристика', 'BR.color'); expect(set).toHaveBeenCalledWith('BR.color');
+  fireEvent.click(screen.getByRole('option', { name: 'Браслети → Колір' })); expect(set).toHaveBeenCalledWith('BR.color');
 });
 
 it('historical placeholder, deferred catalog values and genuine semantic zero have different explanations without refresh', () => {

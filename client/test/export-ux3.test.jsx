@@ -48,7 +48,7 @@ it('ordinary preview renders exact file headers/Main EN; filters, page and width
   expect(screen.getAllByRole('columnheader').map((e) => e.textContent)).toEqual(['SKU · мова · стан', 'sku', 'store_view_code', 'name', 'price']);
   click('Наступні рядки'); expect(screen.getByText(/51–100/)).toBeTruthy();
   fireEvent.change(screen.getByLabelText('Пошук SKU'), { target: { value: 'BR10' } }); expect(screen.getAllByRole('row')).toHaveLength(6);
-  fireEvent.change(screen.getByLabelText('Готовність'), { target: { value: 'attention' } }); expect(screen.getByText(/За цими фільтрами/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Готовність'), { target: { value: 'attention' } }); expect(screen.getByText(/зараз немає товарів, що потребують уваги/)).toBeTruthy();
   click('Ширина колонок'); fireEvent.change(screen.getByLabelText('Ширина, px'), { target: { value: 420 } }); click('Готово');
   expect(exportsApi.preview).toHaveBeenCalledTimes(1);
   click('Створити файли Magento'); await screen.findByText('ЗБЕРЕЖЕНІ ФАЙЛИ');
@@ -63,7 +63,7 @@ it('failed-only file retains canonical row and source/cell targets without fabri
     issues: [{ code: 'manual_name_required', field: 'name', message: 'Saved subject missing', target: { kind: 'column', column: 'name' } }, { field: 'unknown', message: 'Row only', target: { kind: 'row' } }] };
   const edit = vi.fn();
   render(<MemoryRouter><ExportDataGrid identity="failed" canDecode onEditName={edit} files={[{ groupCode: 'SV', headers: ['sku', 'name', 'description'], rows: [row] }]} /></MemoryRouter>);
-  expect(screen.getByText('1 товар потребує уваги')).toBeTruthy(); expect(screen.getByText('Не обчислено')).toBeTruthy(); expect(screen.getByText('Попередньо порожньо')).toBeTruthy();
+  expect(screen.getByText('1 товар потребує уваги · усі категорії')).toBeTruthy(); expect(screen.getByText('Не обчислено')).toBeTruthy(); expect(screen.getByText('Попередньо порожньо')).toBeTruthy();
   const sku = screen.getByRole('button', { name: 'Значення sku, рядок 11' }); sku.focus(); fireEvent.keyDown(sku, { key: 'ArrowRight' });
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Значення name, рядок 11, потребує уваги' }));
   fireEvent.click(document.activeElement); expect(screen.getByRole('dialog')).toBeTruthy();
@@ -87,7 +87,7 @@ it('stored table loads only selected file, caches bytes, downloads separately an
 it('successful product mutation marks review stale and requires explicit recheck; stored result never offers capture retry on table failure', async () => {
   render(<Harness />); await screen.findByText(/1 новий товар очікує/); click('Перевірити 1 новий товар'); await screen.findByRole('table');
   act(notifyExportReviewChanged); expect(screen.getByText(/ЗАСТАРІЛО/)).toBeTruthy(); click('Створити файли Magento'); expect(exportsApi.createSnapshot).not.toHaveBeenCalled();
-  click('Оновити перевірку'); await waitFor(() => expect(screen.queryByText(/ЗАСТАРІЛО/)).toBeNull());
+  click('Повторити перевірку'); await waitFor(() => expect(screen.queryByText(/ЗАСТАРІЛО/)).toBeNull());
   exportsApi.getSnapshot.mockRejectedValue(new Error('metadata failed')); click('Створити файли Magento');
   await screen.findByText('Файли створено, але таблицю не вдалося завантажити.'); expect(screen.getByText('ЗБЕРЕЖЕНІ ФАЙЛИ')).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Створити файли Magento' })).toBeNull();

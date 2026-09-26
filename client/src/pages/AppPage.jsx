@@ -8,12 +8,15 @@ import { LoadingState } from '../components/app/UiPrimitives.jsx';
 import { useAuth } from '../auth/auth-context.js';
 import { useSkuManager } from '../hooks/useSkuManager';
 import { getPermissionUiState, getRecountUiMode } from '../lib/permission-ui.js';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useContext, useEffect, useEffectEvent, useRef } from 'react';
+import { ExportWorkflowContext } from '../hooks/product/useExportWorkflow';
 
 function AppPage() {
   const auth = useAuth();
   const [searchParams] = useSearchParams();
   const exportSku = searchParams.get('exportSku')?.slice(0, 160);
+  const { exportHandoff, endExportHandoff } = useContext(ExportWorkflowContext) || {};
   const permissionUi = getPermissionUiState(auth.permissions);
   const recountMode = getRecountUiMode(permissionUi);
   const sku = useSkuManager({
@@ -28,6 +31,21 @@ function AppPage() {
     canArchiveProducts,
     canCreateProducts,
   } = permissionUi;
+  const openedSku = useRef(null);
+  const handoffCleanup = useRef(null);
+  const viewOnlyHandoff = useEffectEvent(() => {
+    if (!exportSku || !sku.config || openedSku.current === exportSku || sku.selectedCat || sku.isRecountOpen || sku.isPriceChangeOpen
+      || !auth.permissions.includes('products.view') || !auth.permissions.includes('products.decode')) return;
+    openedSku.current = exportSku;
+    sku.handleDecode(exportSku);
+  });
+  useEffect(() => { viewOnlyHandoff(); }, [exportSku, sku.config]);
+  useEffect(() => {
+    // StrictMode replays setup/cleanup on mount. Clear context only after a
+    // genuine departure, not during that replay while the product opens.
+    window.clearTimeout(handoffCleanup.current);
+    return () => { handoffCleanup.current = window.setTimeout(() => endExportHandoff?.(), 0); };
+  }, [endExportHandoff]);
 
   if (!sku.config) {
     return (
@@ -41,11 +59,14 @@ function AppPage() {
         <PageHeader />
         <Toast message={sku.copyMessage} />
         {exportSku && auth.permissions.includes('products.view') && auth.permissions.includes('products.decode') && <section className="card p-4 space-y-2">
-          <p>Товар із перевірки експорту: <strong>{exportSku}</strong></p>
+          <p>Відкрито з перевірки експорту · <strong>{exportSku}</strong></p>
+          {exportHandoff?.sku === exportSku && <p>{exportHandoff.reason}</p>}
+          <Link className="btn btn-primary px-3" to={exportHandoff?.sku === exportSku ? exportHandoff.returnTo : '/exports'}>Повернутися до перевірки</Link>
+          {sku.decodeData?.sku !== exportSku && <>
           <button className="btn btn-outline px-3" disabled={Boolean(sku.selectedCat || sku.hasRecountChanges || sku.isRecountApplying || sku.isPriceChangeOpen)}
             onClick={() => sku.handleDecode(exportSku)}>Відкрити товар із експорту</button>
-          {(sku.selectedCat || sku.hasRecountChanges || sku.isPriceChangeOpen) && <p>Спочатку завершіть або скасуйте поточні зміни товару.</p>}
-          <p className="text-sm">Відкриття лише розшифровує цей SKU. Після змін поверніться до експорту й явно повторіть перевірку.</p>
+          {(sku.selectedCat || sku.hasRecountChanges || sku.isPriceChangeOpen) && <p>Спочатку завершіть або скасуйте поточні зміни товару.</p>}</>}
+          <p className="text-sm">{sku.hasRecountChanges ? 'Є незбережені зміни товару.' : exportHandoff?.sku === exportSku && exportHandoff.saved ? 'Зміни товару збережено. У перевірці експорту буде показано актуальні дані сервера.' : 'Перегляд товару. Зміни не внесено.'}</p>
         </section>}
 
         {!sku.selectedCat && (

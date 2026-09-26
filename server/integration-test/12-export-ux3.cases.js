@@ -67,6 +67,10 @@ test('UX3 shared history uses precise immutable time+ID pagination, nullable cre
   assert.equal(new Set(found.map((r) => r.stream + ':' + r.id)).size, found.length);
   const old = found.find((r) => r.id === `${prefix}-0` && r.stream === 'product');
   assert.equal(old.createdByUserId, null); assert.equal(old.sessionId, undefined); assert.equal(old.recipe.kind, 'historical');
+  assert.equal(old.createdByName, null);
+  const creator = (await pool.query('SELECT display_name,preferred_username FROM application_users WHERE id=$1', [actor.applicationUser.id])).rows[0];
+  const actorName = creator.display_name || creator.preferred_username;
+  assert.ok(found.filter((r) => r.id.startsWith(prefix) && r.createdByUserId != null).every((r) => r.createdByName === actorName));
   const mine = await getExportHistory({ scope: 'mine', limit: 50 }, options(actor));
   assert.equal(mine.items.some((r) => r.id === old.id && r.stream === 'product'), false);
   assert.ok(mine.items.every((r) => String(r.createdByUserId) === String(actor.applicationUser.id)));
@@ -108,6 +112,8 @@ test('UX3 history and direct metadata share owner/accepted membership; Administr
   assert.equal((await request(`/api/export/snapshots/${snapshot.id}?includeRows=false`, { authentication: other })).response.status, 404);
   await sessions.membership(s.id, { action: 'accept', expectedAccessEpoch: invited.epoch }, options(other));
   assert.equal(await visible(), true);
+  const withContext = (await getExportHistory({ scope: 'mine', stream: 'product', limit: 50 }, options(actor))).items.find((item) => item.id === snapshot.id);
+  assert.equal(withContext.sessionId, s.id); assert.equal(withContext.sessionTitle, 'UX3 private'); assert.ok(withContext.createdByName);
   const before = await effects();
   const manifest = await request(`/api/export/snapshots/${snapshot.id}?includeRows=false`, { authentication: other });
   assert.equal(manifest.response.status, 200, manifest.text); assert.equal(manifest.data.sessionId, s.id);

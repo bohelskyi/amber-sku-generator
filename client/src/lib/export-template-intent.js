@@ -1,12 +1,59 @@
-import { at, resolveNode, sourceOf } from './export-template-presentation.js';
+import { at, editField, resolveNode, sourceOf } from './export-template-presentation.js';
 import { questionField } from './export-template-attributes.js';
-import { computedPresence, conditionInput, exactExpression } from './export-template-conditions.js';
+import { computedPresence, conditionInput, conditionPredicate, exactExpression } from './export-template-conditions.js';
 
 export const intentNames = {
+  empty: 'Порожня клітинка',
   literal: 'Постійне значення', characteristic: 'Значення характеристики',
   text: 'Текст із характеристиками', condition: 'Значення залежить від умов',
   fallback: 'Перше доступне значення', complex: 'Складне правило',
 };
+
+// Locate only an understood value, retaining enclosing readiness/presence guards
+// and the existing local dependency-isolation adapter. Custom nodes are opaque.
+export function ruleTransformTarget(definition, path) {
+  const question = questionField(definition, path);
+  // Question contracts constrain the result and its readiness dependencies;
+  // their dedicated mapping editor remains the lossless editing surface.
+  if (question || columnIntent(definition, path) === 'complex') return null;
+  let result = resolveNode(definition, at(definition, path));
+  while (!result.problem && (result.node?.op === 'require' && exactExpression(result.node, ['op', 'if', 'value', 'error'])
+    || result.node?.op === 'when' && exactExpression(result.node, ['op', 'if', 'then', 'else']) && computedPresence(definition, result.node.if))) {
+    const key = result.node.op === 'require' ? 'value' : 'then';
+    result = resolveNode(definition, result.node[key], [...result.trail, key]);
+  }
+  return !result.problem && (!result.node || transformableValue(definition, result.node)) ? result : null;
+}
+
+function transformableValue(definition, expression, depth = 0) {
+  if (depth > 30 || expressionIntent(definition, expression) === 'complex') return false;
+  const { node, problem } = resolveNode(definition, expression);
+  if (problem) return false;
+  const supported = (value) => transformableValue(definition, value, depth + 1);
+  if (node.op === 'when') return Boolean(conditionPredicate(definition, node.if)
+    || computedPresence(definition, node.if)
+    || exactExpression(node.if, ['op', 'value']) && node.if.op === 'literal' && node.if.value === false)
+    && supported(node.then) && supported(node.else);
+  if (node.op === 'firstPresent') return node.items.every(supported);
+  if (node.op === 'interpolate') return Object.values(node.slots).every((value) =>
+    value?.op === 'ref' && value.id === 'sku' && exactExpression(value, ['op', 'id']) || supported(value));
+  return true;
+}
+
+export function transformColumnRule(definition, path, intent) {
+  const target = ruleTransformTarget(definition, path);
+  if (!target || ['sku', 'store_view_code', 'product_type'].includes(path[5])) throw new Error('Це правило збережено без змін. Скористайтеся розширеними правилами.');
+  const current = target.node || { op: 'literal', value: '' };
+  let next;
+  if (intent === 'condition') next = { op: 'when', if: { op: 'literal', value: false }, then: { op: 'literal', value: '' }, else: structuredClone(current) };
+  else if (intent === 'fallback') next = { op: 'firstPresent', policy: 'answer-v1', items: [structuredClone(current)] };
+  else if (intent === 'text') next = current.op === 'literal' && typeof current.value === 'string' && !/[{}]/.test(current.value)
+    ? { op: 'interpolate', template: current.value, slots: {} }
+    : { op: 'interpolate', template: '{value}', slots: { value: structuredClone(current) } };
+  else if (intent === 'empty' || intent === 'literal' || intent === 'characteristic') next = { op: 'literal', value: intent === 'literal' && current.op === 'literal' ? current.value : '' };
+  else throw new Error('Оберіть підтримуваний спосіб заповнення.');
+  return editField(definition, path, target.trail, 'local', () => next);
+}
 const scalar = (value) => value === null || ['string', 'boolean'].includes(typeof value) || typeof value === 'number' && Number.isFinite(value);
 const shape = (node, required, optional = []) => required.every((key) => Object.hasOwn(node, key)) && Object.keys(node).every((key) => [...required, ...optional].includes(key));
 
@@ -27,7 +74,7 @@ export function expressionIntent(definition, expression, depth = 0) {
   if (node.op === 'interpolate' && exactExpression(node, ['op', 'template', 'slots']) && typeof node.template === 'string'
     && node.slots && typeof node.slots === 'object' && !Array.isArray(node.slots)
     && Object.values(node.slots).every((slot) => slot?.op === 'ref' && slot.id === 'sku' && exactExpression(slot, ['op', 'id'])
-      || ['literal', 'characteristic', 'fallback'].includes(expressionIntent(definition, slot, depth + 1)))) return 'text';
+      || ['literal', 'characteristic', 'fallback', 'condition', 'text'].includes(expressionIntent(definition, slot, depth + 1)))) return 'text';
   if (node.op === 'firstPresent' && exactExpression(node, ['op', 'items', 'policy']) && node.policy === 'answer-v1' && Array.isArray(node.items)) return 'fallback';
   if (node.op === 'lookup' && exactExpression(node, ['op', 'input', 'table', 'otherwise']) && conditionInput(definition, node.input) && definition.tables[node.table]) return 'characteristic';
   if (node.op === 'source' && exactExpression(node, ['op', 'id']) && definition.sources[node.id]) return 'characteristic';

@@ -131,7 +131,12 @@ test('UX4 activity, file identity and confirmation reuse UX3 history metadata; a
   let after; let history;
   do { const page = await getExportHistory({ stream: 'product', limit: 50, ...(after ? { after } : {}) }, options(w.viewer)); history = page.items.find((s) => s.id === made.id); after = page.next; } while (!history && after);
   assert.deepEqual(owned.snapshot, shared.snapshot); assert.deepEqual(detail.snapshot, owned.snapshot);
-  assert.deepEqual(JSON.parse(JSON.stringify(owned.snapshot)), JSON.parse(JSON.stringify(history)));
+  // Optional current display labels enrich history; immutable identity stays shared.
+  const { sessionTitle, createdByName, confirmedByName, ...historyIdentity } = history;
+  const { createdByName: ownCreator, confirmedByName: ownConfirmer, ...ownedIdentity } = owned.snapshot;
+  assert.equal(ownCreator, null); assert.equal(ownConfirmer, null);
+  assert.ok(sessionTitle); assert.ok(createdByName); assert.ok(confirmedByName);
+  assert.deepEqual(JSON.parse(JSON.stringify(ownedIdentity)), JSON.parse(JSON.stringify(historyIdentity)));
   assert.equal(owned.snapshot.status, 'confirmed');
   assert.ok(new Date(owned.lastRecordedActivityAt) >= new Date(owned.snapshot.confirmedAt));
   assert.ok(new Date(owned.lastRecordedActivityAt) > new Date(initial.lastRecordedActivityAt));

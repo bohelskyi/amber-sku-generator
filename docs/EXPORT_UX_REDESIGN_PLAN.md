@@ -2103,3 +2103,86 @@ UX-4 delta relative to the preserved initial UX-3 working tree:
   tracked files + 25 new files, 0 staged**, on the unchanged branch/HEAD.
 
 Implementation stops here for manual operator acceptance; UX-5 remains unstarted.
+
+## 26. UX-5 implementation and acceptance record — 2026-09-26
+
+**Later operator acceptance is blocked:** see the
+[recount/export investigation](EXPORT_RECOUNT_INVESTIGATION_2026-09-26.md).
+The existing recount policy excludes both source and successor; the successor
+does not remain pending for the next export. No semantic fix is authorized by
+this UX milestone. The implementation/test record below remains historical.
+
+This section supersedes the historical UX-5 status above without rewriting the
+UX-1–UX-4 execution records. UX-5 is implemented and ready for final operator
+acceptance. The full evidence, limitations and local audit-data changes are in
+[the post-UX-5 browser audit](EXPORT_UX_ACCEPTANCE_AUDIT_POST_UX5_2026-09-26.md).
+
+Baseline: branch `feature/magento-export-constructor`, HEAD
+`8d5656a6893b4fb165157729c4b89a6914908faa`, clean worktree, 39 migrations
+`000`–`038`. Prior functional phases were committed. No staging/commit/push,
+branch changes, migration, dependency or shared configuration changes were made.
+
+### Implemented operator experience
+
+- A01: seven visible intents for compatible editable columns; detached explicit
+  transformations, exact constant fallback, cancel, unified searchable source/value
+  pickers and sentence-shaped conditional branches. Technical and Advanced remain
+  separate task surfaces. Custom/question contracts retain lossless editors.
+- A02: authenticated private permalinks auto-open by authorized READ; loading,
+  inaccessible/missing and failed-read states preserve principal/response fences.
+- A03: recommended/chosen template wording, actual creation/confirmation
+  consequences, human draft wording and secondary machine evidence. Runtime
+  contract names and captured-price semantics are unchanged.
+- A04–A06: category attention badges from the same review, scoped empty states,
+  SKU/reason/return context, safe automatic read-only decode, correction-first
+  problem dialogs and focus restoration.
+- A07: fresh copies offer an explicit structure decision immediately at the table
+  boundary; the existing upgrade remains opt-in.
+- A08: authorized read-only history metadata adds current human actor names and
+  accessible session titles. Null historical actors stay unknown.
+- A09: first ordinary review row moved from 982.5 to 683 CSS px at 1440×1000;
+  repeated session recipe/help blocks are collapsed/removed (session row 852 px).
+- A10: known successful export-origin mutation requests a new read-only preview;
+  display context survives, failed reads stay stale with manual retry, and original
+  uncertain generation identity/evidence remains intact.
+- A11–A13: distinct empty states, accessible responsive navigation overflow, local
+  publication dates, human sample states and truthful missing-CSV copy.
+
+Browser testing found two additional integration issues and fixed them: StrictMode
+cleanup prematurely removed handoff context; document-level Escape handling closed
+the dialog before an expanded combobox could dismiss its list. Focused regressions
+cover both. No new major operator blocker remains in the exercised workflows.
+
+### Verification and acceptance boundary
+
+Full server unit **516/516**, PostgreSQL integration **205/205** with no skips,
+client model **149/149** and rendered **304/304** are required evidence for this
+record. Client lint/build and Compose validation/build pass; server lint has zero
+errors and its two existing `product-timeline.js` warnings. Existing CSV goldens,
+evaluator definitions and migrations remain unchanged. The test PostgreSQL16
+instance used only the explicit external override at 56432 / `amber_test`, verified
+before destructive tests and stopped afterward. Node20 and npm/test worker
+processes were checked through an external preload log.
+
+Actual local browser screenshots/DOM checks cover 1920×1080, 1440×1000 and
+390×844, normal authoring/review/history/price/private session/sharing surfaces,
+keyboard combobox/navigation/dialog behavior and a real correction followed by
+automatic server review. Production client/server images were rebuilt for final
+cold-load checks on localhost. No Magento connection or automatic import was used.
+
+Final operator acceptance remains separate. Real second-account join/decline,
+accepted member/revoke/leave/view-only/A→B→A and genuine 200% zoom are still manual
+limitations. No users/RBAC were created for them. Executing/interrupted scenarios
+remain covered by established integration/rendered tests, without production
+debug behavior. Zoom shortcuts did not change the in-app browser's width or DPR;
+viewport emulation is not claimed as 200% zoom.
+
+### Next epic: explicit Magento integration
+
+After redesign acceptance, plan a separate integration epic:
+local characteristic ↔ Magento attribute code → compare options → show missing
+options → explicit authorized creation/update → re-verify → optional import and
+result history. Credentials, Magento API/schema access, attribute/option writes
+and automatic imports are outside UX-5. The current components have no coupling
+to a hypothetical API. That epic needs its own authorization, error/retry and
+verification design before implementation.

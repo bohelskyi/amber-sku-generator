@@ -104,24 +104,27 @@ it('revoked membership clears data on authoritative refresh and fences a late cr
   fireEvent.focus(window);
   // Busy operations suppress polling; settle failure, then authoritative focus read.
   await act(async () => pending.reject(new Error('unknown'))); fireEvent.focus(window);
-  await screen.findByText(/Доступ до цього експорту втрачено/); expect(screen.queryByLabelText('Назва експорту')).toBeNull(); expect(exportsApi.getSnapshot).not.toHaveBeenCalled();
+  await screen.findByText(/Доступ до цього експорту втрачено|Експорт не знайдено/); expect(screen.queryByLabelText('Назва експорту')).toBeNull(); expect(exportsApi.getSnapshot).not.toHaveBeenCalled();
 });
 
-it('deep link requires explicit current-user opening and known snapshot reading never confirms', async () => {
-  page(2, '/exports/sessions/session-a'); await screen.findByRole('button', { name: 'Відкрити експорт із посилання через мій обліковий запис' }); expect(api.get).not.toHaveBeenCalled();
-  click('Відкрити експорт із посилання через мій обліковий запис'); await screen.findByRole('heading', { name: 'Сесія A' });
+it('authorized deep link automatically reads through the current account and never prepares or generates', async () => {
+  page(2, '/exports/sessions/session-a'); await screen.findByRole('heading', { name: 'Сесія A' });
+  expect(api.get).toHaveBeenCalledWith('session-a'); expect(api.create).not.toHaveBeenCalled(); expect(api.prepare).not.toHaveBeenCalled(); expect(api.preview).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('ID збереженого знімка'), { target: { value: 'historical-id' } }); click('Прочитати знімок без підтвердження');
   await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/); expect(exportsApi.getSnapshot).toHaveBeenCalledWith('historical-id'); expect(exportsApi.confirmSnapshot).not.toHaveBeenCalled();
 });
 
-it('principal switch during stored download discards bytes, and B must explicitly open through B requests', async () => {
+it('principal switch discards late private bytes and auto-opens only through a new authorized request', async () => {
   api.get.mockResolvedValue(response({ ...own, snapshotId: snapshot.id })); const late = deferred(); exportsApi.downloadMagentoArtifact.mockReturnValue(late.promise);
   const first = page(); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A'); await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/);
   click(/Завантажити/); await waitFor(() => expect(exportsApi.downloadMagentoArtifact).toHaveBeenCalled());
   first.auth.principalLifetime.valid = false;
+  const secondRead = deferred(); api.get.mockReturnValue(secondRead.promise);
   first.rerender(<AuthContext.Provider value={{ applicationUser: { id: 2 }, permissions: ['exports.view','exports.create'], principalLifetime: { id: 2, valid: true } }}><RouterProvider router={first.router} /></AuthContext.Provider>);
   await act(async () => late.resolve(response('private bytes'))); expect(downloadBlob).not.toHaveBeenCalled(); expect(screen.queryByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/)).toBeNull();
-  expect(api.get).toHaveBeenCalledTimes(1); await screen.findByRole('button', { name: 'Відкрити експорт із посилання через мій обліковий запис' }); click('Відкрити експорт із посилання через мій обліковий запис'); await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/); expect(api.get).toHaveBeenCalledTimes(2);
+  await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2)); expect(screen.queryByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/)).toBeNull();
+  await act(async () => secondRead.reject({ response: { status: 403 } })); await screen.findByText(/Доступ до цього експорту втрачено|Експорт не знайдено/);
+  expect(exportsApi.getSnapshot).toHaveBeenCalledTimes(1); expect(api.generate).not.toHaveBeenCalled();
 });
 
 const gridArtifact = { groupCode: 'BR', rowCount: 2, productCount: 1, csvContent: 'sku,store_view_code,synthetic_target\r\nS,,Original\r\nS,en,English\r\n' };

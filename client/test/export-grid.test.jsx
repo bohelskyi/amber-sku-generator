@@ -1,3 +1,4 @@
+import { changeControl } from './helpers/searchable-picker';
 import { useEffect, useState } from 'react';
 import { createRequire } from 'node:module';
 import { afterEach, beforeEach, expect, it } from 'vitest';
@@ -19,7 +20,7 @@ function Editor() {
   return <DefinitionEditor definition={d} registry={{ productFields: ['weight'] }} onChange={set} />;
 }
 const click = (name) => fireEvent.click(screen.getByRole('button', { name, exact: true }));
-const change = (name, value) => fireEvent.change(screen.getByLabelText(name, { exact: true }), { target: { value } });
+const change = (name, value) => changeControl(screen.getByLabelText(name, { exact: true }), value);
 it('rendered grid task adds an approved-source target, keeps EN blank, duplicates, renames, moves and deletes', () => {
   render(<Editor />);
   expect(screen.getByRole('table')).toBeTruthy();

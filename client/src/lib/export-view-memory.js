@@ -7,7 +7,7 @@ export function createExportViewMemory() {
     clear: () => { value = null; },
     update: (next) => {
       const merged = { ...value, ...next };
-      value = Object.fromEntries(['group', 'search', 'attention', 'language', 'page', 'widths', 'productChanged']
+      value = Object.fromEntries(['group', 'search', 'attention', 'language', 'page', 'widths', 'productChanged', 'autoRecheck', 'returnReview']
         .filter((key) => Object.hasOwn(merged, key)).map((key) => [key, merged[key]]));
     },
   });

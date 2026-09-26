@@ -1,3 +1,4 @@
+import { changeControl } from './helpers/searchable-picker';
 import { useEffect, useState } from 'react';
 import { createRequire } from 'node:module';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -35,7 +36,7 @@ const columnName = () => { if (!screen.queryByLabelText('Назва колонк
 const change = (name, value) => {
   if (name === 'Назва колонки') columnName();
   if (name === 'Звідки брати значення' && !screen.queryByLabelText(name, { exact: true })) { name = 'Як формується значення'; value = value === 'source' ? 'characteristic' : value; }
-  fireEvent.change(screen.getByLabelText(name, { exact: true }), { target: { value } });
+  changeControl(screen.getByLabelText(name, { exact: true }), value);
 };
 const open = (code, row = 'Основний', group = 'BR') => click(`${group} / ${code} / ${row}`);
 const apply = () => click('Застосувати до чернетки');
@@ -182,7 +183,7 @@ it('stored local source identities remain readable and editable through approved
   const initial = fixture(true); initial.sources.saved_color_alias = structuredClone(initial.sources['BR.color']);
   initial.groups[0].rows[0].cells.test_export_color = { op: 'text', input: { op: 'source', id: 'saved_color_alias' }, trim: false, format: 'scalar-v1', onAbsent: 'empty' };
   render(<Editor initial={initial} />); open('test_export_color');
-  expect(screen.getByLabelText('Характеристика').selectedOptions[0].textContent).toBe('Браслети → Колір'); expect(current).toBe(initial);
+  expect(screen.getByLabelText('Характеристика').value).toBe('Браслети → Колір'); expect(current).toBe(initial);
   change('Як записувати значення', 'mapping'); click('Додати текст: Значення №1 — назву не підтверджено'); change('Значення у CSV: Значення №1 — назву не підтверджено', '  локальний  '); apply();
   expect(current.sources).toEqual(initial.sources); expect(current.groups[0].rows[0].cells.test_export_color.input.input.id).toBe('saved_color_alias');
   const csv = parsePreviewCsv(evaluateBatch(compileDefinition(current), [product('BR')]).artifacts[0].csvContent);
@@ -193,7 +194,7 @@ it('pending changes guard category/cell/create transitions and separate same-cod
   let initial = fixture(true); initial = columnChange(initial, 1, 'add', null, 'test_export_color'); render(<Editor initial={initial} />);
   open('test_export_color'); change('Звідки брати значення', 'source'); change('Характеристика', 'BR.color'); open('price');
   expect(screen.getByRole('dialog', { name: 'Незастосоване заповнення' })).toBeTruthy(); click('Залишитися');
-  expect(screen.getByLabelText('Характеристика').value).toBe('BR.color'); click('+ Колонка'); click('Залишитися');
+  expect(screen.getByLabelText('Характеристика').value).toBe('Браслети → Колір'); click('+ Колонка'); click('Залишитися');
   fireEvent.click(screen.getByRole('tab', { name: 'Намиста' })); click('Відкинути заповнення й перейти');
   open('test_export_color', 'Основний', 'NM'); change('Назва колонки', 'Лише NM'); apply();
   expect(current.groups[1].columnLabels.test_export_color).toBe('Лише NM'); expect(current.groups[0]).toEqual(initial.groups[0]);

@@ -345,6 +345,9 @@ export function ExportTools({
   exportProductChanged = false,
   exportReviewView,
   markExportReviewStale,
+  refreshAfterProductChange,
+  exportRefreshing,
+  beginExportHandoff,
   startNewExport,
   canDecode = false,
 }) {
@@ -372,11 +375,11 @@ export function ExportTools({
     <section className="fade-up stagger-2 space-y-4">
       {canViewExport && surface !== 'prices' && (
         <div className="card overflow-hidden">
-          <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
+          {!exportPreview && !exportSnapshot && <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
             <p className="eyebrow">Magento Products v1</p>
             <h3 className="section-title-text mt-1">Експорт товарів у Magento</h3>
             <p className="section-subtitle mt-1">Перевірте товари, створіть незмінні файли та окремо підтвердьте експорт.</p>
-          </div>
+          </div>}
 
           {durableSessions ? <>
             {surface === 'all' && <div className="p-4 border-b"><Link className="underline" to="/exports/sessions">Мої експорти · Запрошення · Створити свій експорт за шаблоном</Link><p className="text-xs mt-2">Нижче — звичайний Magento v1. Експорт за опублікованим шаблоном — окрема збережена операція; учасників можна запросити явно.</p></div>}
@@ -415,8 +418,8 @@ export function ExportTools({
 
           {exportPreview && !exportSnapshot && (
             <>
-              <ExportReview preview={exportPreview} stale={exportReviewStale} productChanged={exportProductChanged} viewMemory={exportReviewView} recoveryFocusBlocked={Boolean(manualNameProduct)} busy={isExportLoading || Boolean(pendingCreate)}
-                onRefresh={() => refreshPreview(exportPreview.mode)} canDecode={canDecode} onHandoff={markExportReviewStale}
+              <ExportReview preview={exportPreview} stale={exportReviewStale} productChanged={exportProductChanged} refreshing={exportRefreshing} viewMemory={exportReviewView} recoveryFocusBlocked={Boolean(manualNameProduct)} busy={isExportLoading || Boolean(pendingCreate)}
+                onRefresh={() => refreshPreview(exportPreview.mode)} canDecode={canDecode} onHandoff={(context) => beginExportHandoff?.({ ...context, returnTo: '/exports' })}
                 onEditName={canCreateExport ? setManualNameProduct : undefined} />
               {previewErrors.length > 0 && !exportPreview.review ? (
                 <ReadinessProblems errors={previewErrors} expanded={problemsExpanded}
@@ -427,7 +430,7 @@ export function ExportTools({
                   onEditName={canCreateExport ? setManualNameProduct : null}
                   onCloseName={() => setManualNameProduct(null)}
                   translationSuggestionAvailable={exportStatus?.translationSuggestionAvailable === true}
-                  onSavedName={() => { setManualNameProduct(null); markExportReviewStale?.({ kind: 'product' }); }} />
+                  onSavedName={() => { setManualNameProduct(null); if (refreshAfterProductChange) void refreshAfterProductChange(); else markExportReviewStale?.({ kind: 'product' }); }} />
               ) : !previewErrors.length && Number(exportPreview.representedCount) > 0 ? (
                 <ReadyToCreate canCreate={canCreateExport} count={exportPreview.representedCount}
                   loading={isExportLoading} disabled={isExportLoading || !canCreateExport || exportReviewStale || Boolean(pendingCreate)} onCreate={onCreateSnapshot} />
@@ -445,7 +448,7 @@ export function ExportTools({
           {exportPreview?.review && manualNameProduct && !exportSnapshot && <WorkspaceDialog title="Назва товару Magento" onClose={() => setManualNameProduct(null)}>
             <ManualMagentoNameEditor product={manualNameProduct} onClose={() => setManualNameProduct(null)}
               translationSuggestionAvailable={exportStatus?.translationSuggestionAvailable === true}
-              onSaved={() => { setManualNameProduct(null); markExportReviewStale?.({ kind: 'product' }); }} />
+              onSaved={() => { setManualNameProduct(null); if (refreshAfterProductChange) void refreshAfterProductChange(); else markExportReviewStale?.({ kind: 'product' }); }} />
           </WorkspaceDialog>}
           {exportSnapshot && startNewExport && <button className="btn btn-outline m-4 px-4" onClick={startNewExport}>Новий експорт</button>}
           {exportError && <div className="danger-panel mx-4 mb-4 p-3 text-sm sm:mx-5" role="alert">{exportError}</div>}

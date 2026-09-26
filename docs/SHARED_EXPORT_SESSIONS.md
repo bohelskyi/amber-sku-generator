@@ -263,3 +263,35 @@ dirty navigation remain above the existing routes. Only allowed display values
 review remounts in principal-scoped memory; no private browser storage or retry
 token storage is introduced. See [UX-4 execution evidence](EXPORT_UX_REDESIGN_PLAN.md#25-ux-4-execution-record-and-ux-3-carry-over--2026-09-25)
 for the full disposable-PostgreSQL checks and pending operator visual acceptance.
+
+## UX-5 permalink and review continuation (2026-09-26)
+
+Once AuthGate resolves the current principal, `/exports/sessions/:sessionId`
+automatically performs the existing authorized detail GET. Loading, accessible
+workspace, denied/not-found and retryable read failure are explicit states. There
+is no second manual account-opening gate. A fresh permalink never prepares,
+generates, confirms or retries an operation automatically. Previously saved private
+browser state is not restored. Principal lifetimes, detail tickets, membership
+epochs and denial cleanup remain authoritative; denied detail is not reopened in
+a polling loop. Another explicit navigation/reload can request access again.
+
+The normal workspace collapses settings after a preview loads and removes repeated
+profile/instruction blocks. Recovery warnings remain visible for actual conflicts,
+expired preparation and uncertain/interrupted execution. Preparation replacement
+and original-generation retry stay explicit and retain their existing identities.
+
+Returning from a product handoff re-reads the session and its preview; only a
+confirmed successful product mutation sets the automatic-correction notice.
+Manual-name success in the workspace also requests a new preview. Session display
+memory holds only context/continuation flags (`productChanged`, `autoRecheck`,
+`returnReview`) and the existing view settings. It holds no private preview proof,
+saved preparation or command descriptor. Viewing alone creates no product-change
+notice. Read failure leaves stale/manual recovery; a successful read cannot save
+or replace the original preparation/command. Dirty, executing and frozen states
+keep their existing guards. StrictMode replay does not discard handoff context.
+
+The same authorized history now includes current human actor labels and accessible
+session titles without widening visibility. Empty owned/shared/invitation lists
+have distinct instructions. No users, roles, invitation permissions or membership
+semantics changed. See the [post-UX-5 audit](EXPORT_UX_ACCEPTANCE_AUDIT_POST_UX5_2026-09-26.md)
+for real-browser checks and the still-pending second-account/200% acceptance.

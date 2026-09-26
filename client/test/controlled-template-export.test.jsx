@@ -38,7 +38,7 @@ function Harness() {
     onPriceExportCsv={current.handlePriceExportCsv} />;
 }
 const click = (name) => fireEvent.click(screen.getByRole('button', { name }));
-const optIn = () => fireEvent.click(screen.getByRole('checkbox', { name: /Контрольований експорт/ }));
+const optIn = () => fireEvent.click(screen.getByRole('checkbox', { name: /Експорт за опублікованим шаблоном/ }));
 async function start() { click(/Перевірити 1 новий товар/); await screen.findByRole('button', { name: /Створити файли/ }); }
 beforeEach(() => {
   vi.clearAllMocks(); for (const mock of Object.values(exportsApi)) mock.mockReset();
@@ -72,7 +72,7 @@ it('opt-in active preview binds creation to original intent and opaque token, ne
 });
 it('explicit choice is sent exactly, unavailable selection has no legacy fallback', async () => {
   render(<Harness />); await screen.findByText(/1 новий товар очікує/); optIn();
-  fireEvent.change(screen.getByLabelText('Вибір публікації'), { target: { value: 'explicit' } });
+  fireEvent.change(screen.getByLabelText('Шаблон для експорту'), { target: { value: 'explicit' } });
   fireEvent.change(screen.getByLabelText('ID сімейства шаблону'), { target: { value: 'family-b' } });
   fireEvent.change(screen.getByLabelText('ID опублікованої версії'), { target: { value: 'version-b' } });
   exportsApi.preview.mockRejectedValue({ response: { status: 422, data: { code: 'EXPORT_TEMPLATE_NOT_SELECTED', error: 'Публікація недоступна' } } });

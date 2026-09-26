@@ -65,7 +65,7 @@ it('UX4 invitations hide even supplied private metadata; decline never opens or 
   mount('/exports/invitations', ['exports.view']); await screen.findByText(own.title);
   expect(screen.getByText('Ви приєднаєтесь до того самого експорту, а не створите копію.')).toBeTruthy();
   expect(screen.queryByText(/BR-01|SV-99|Вересневий каталог|PRIVATE MEMBER/)).toBeNull();
-  expect(screen.queryByRole('table')).toBeNull(); click('Відхилити'); await screen.findByText('У цьому списку поки немає експортів.');
+  expect(screen.queryByRole('table')).toBeNull(); click('Відхилити'); await screen.findByText(/Нових запрошень немає/);
   expect(api.membership).toHaveBeenCalledWith(own.id, { action: 'decline', expectedAccessEpoch: '7' });
   expect(api.get).not.toHaveBeenCalled(); expect(api.create).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
 });
@@ -98,7 +98,7 @@ it('UX4 view-only member reads stored result, has no create/confirm/invite and l
   expect(screen.getByRole('button', { name: 'Завантажити CSV' })).toBeTruthy();
   click('Учасники'); expect(screen.queryByLabelText('Ім’я або логін одержувача')).toBeNull(); click('Вийти зі спільного експорту');
   expect(screen.getByRole('dialog').textContent).toContain('Сам експорт не буде видалено'); expect(api.membership).not.toHaveBeenCalled();
-  click('Підтвердити вихід'); await screen.findByText(/Доступ до цього експорту втрачено/);
+  click('Підтвердити вихід'); await screen.findByText(/Доступ до цього експорту втрачено|Експорт не знайдено/);
   expect(api.membership).toHaveBeenCalledWith(own.id, { action: 'leave', expectedAccessEpoch: '8' }); expect(screen.queryByRole('table')).toBeNull();
 });
 
@@ -170,21 +170,21 @@ it('UX4 A → B → A fences late directory data while same-user refresh preserv
   result.switchAuth({ ...result.auth, principalLifetime: { valid: true } });
   await act(async () => late.resolve(response({ users: [{ id: '9', display_name: 'PRIVATE LATE' }] })));
   expect(screen.queryByText('PRIVATE LATE')).toBeNull(); expect(screen.queryByRole('dialog')).toBeNull();
-  expect(api.get).toHaveBeenCalledTimes(1); expect(screen.getByRole('button', { name: 'Відкрити експорт із посилання через мій обліковий запис' })).toBeTruthy();
+  await waitFor(() => expect(api.get.mock.calls.length).toBeGreaterThan(1)); await screen.findByRole('heading', { name: own.title });
 });
 
 it('UX4 revocation during a pending table read clears private content and fences late bytes', async () => {
   const late = deferred(); exportsApi.readMagentoArtifact.mockReturnValue(late.promise);
   api.get.mockResolvedValue(response({ ...own, snapshotId: snapshot.id, snapshot })); mount(); await open(); await screen.findByText('ЗБЕРЕЖЕНІ ФАЙЛИ');
   await waitFor(() => expect(exportsApi.readMagentoArtifact).toHaveBeenCalled());
-  api.get.mockRejectedValue({ response: { status: 404 } }); fireEvent.focus(window); await screen.findByText(/Доступ до цього експорту втрачено/);
+  api.get.mockRejectedValue({ response: { status: 404 } }); fireEvent.focus(window); await screen.findByText(/Доступ до цього експорту втрачено|Експорт не знайдено/);
   await act(async () => late.resolve(response('sku,name\nPRIVATE,LATE'))); expect(screen.queryByText('PRIVATE')).toBeNull(); expect(screen.queryByRole('table')).toBeNull();
 });
 
 it('UX4 denied focus review immediately clears private rows even before an older metadata read resolves', async () => {
   mount(); await open(); click('Перевірити товари'); await screen.findByText('Current');
   const late = deferred(); api.get.mockReturnValue(late.promise); api.preview.mockRejectedValue({ response: { status: 404 } });
-  fireEvent.focus(window); await screen.findByText(/Доступ до цього експорту втрачено/);
+  fireEvent.focus(window); await screen.findByText(/Доступ до цього експорту втрачено|Експорт не знайдено/);
   expect(screen.queryByRole('table')).toBeNull();
   await act(async () => late.resolve(response(own))); expect(screen.queryByRole('heading', { name: own.title })).toBeNull();
   expect(screen.queryByRole('table')).toBeNull();
@@ -213,7 +213,7 @@ function ReviewHarness() {
   const workflow = useProductExportController();
   return <ExportTools {...workflow} canArchive={false} canViewExport canCreateExport surface="products" onPreviewExport={workflow.handlePreviewExport} onCreateSnapshot={workflow.handleCreateSnapshot} />;
 }
-it('UX3 carry-over: fix first of two problems, explicit recheck preserves attention/file/search/language/width and second current issue remains actionable', async () => {
+it('UX5: confirmed correction automatically rechecks, preserving attention/file/search/language/width and the next actionable issue', async () => {
   const issue = { code: 'manual_name_required', field: 'name', target: { kind: 'column', column: 'name' } };
   const row = (id, ready = false) => ({ ordinal: id, productId: id, sku: `SV-${id}`, language: 'main', readiness: ready ? 'ready' : 'attention',
     issues: ready ? [] : [issue], cells: [{ state: 'final', value: `SV-${id}` }, { state: ready ? 'final' : 'not-evaluated', value: ready ? 'Fixed name' : null }] });
@@ -224,20 +224,18 @@ it('UX3 carry-over: fix first of two problems, explicit recheck preserves attent
   exportsApi.previewMagentoName.mockResolvedValue(response({ previewToken: 'name-proof' }));
   const savedName = deferred();
   exportsApi.applyMagentoName.mockImplementation(() => { notifyExportReviewChanged({ kind: 'product' }); return savedName.promise; });
-  render(<ReviewHarness />); await screen.findByText(/2 нові товари очікують/); click('Перевірити 2 нові товари'); await screen.findByRole('table');
+  render(<ReviewHarness />); await screen.findByText(/2 нові товари очікують/); click('Перевірити 2 нові товари'); await screen.findByRole('tab', { name: 'Сувеніри' });
   fireEvent.click(screen.getByRole('tab', { name: 'Сувеніри' })); fireEvent.change(screen.getByLabelText('Пошук SKU'), { target: { value: 'SV-' } });
   fireEvent.change(screen.getByLabelText('Готовність'), { target: { value: 'attention' } }); fireEvent.change(screen.getByLabelText('Мова рядка'), { target: { value: 'main' } });
   click('Ширина колонок'); fireEvent.change(screen.getByLabelText('Ширина, px'), { target: { value: '420' } }); click('Готово');
   click('Значення name, рядок 1, потребує уваги'); click('Заповнити назву');
   fireEvent.change(screen.getByLabelText('Українська назва'), { target: { value: 'Назва' } }); fireEvent.change(screen.getByLabelText('English name'), { target: { value: 'Name' } });
-  click('Зберегти назви'); await screen.findByText('Дані товару змінено. Попередній перегляд застарів.');
-  expect(screen.getByRole('dialog')).toBeTruthy();
+  click('Зберегти назви'); await screen.findByText(/Дані товару змінено. Попередній перегляд застарів/);
+  expect(screen.getByRole('dialog')).toBeTruthy(); expect(exportsApi.preview).toHaveBeenCalledTimes(1);
   await act(async () => savedName.resolve(response({})));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect(exportsApi.preview).toHaveBeenCalledTimes(1); expect(screen.getByText('Оновіть перевірку, щоб продовжити роботу з актуальними проблемами.')).toBeTruthy();
-  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Оновити перевірку' }));
-  click('Значення name, рядок 2, потребує уваги'); expect(screen.queryByRole('button', { name: 'Заповнити назву' })).toBeNull(); click('Закрити значення');
-  click('Оновити перевірку'); await waitFor(() => expect(screen.queryByText('Дані товару змінено. Попередній перегляд застарів.')).toBeNull());
+  await waitFor(() => expect(exportsApi.preview).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.queryByText(/Дані товару змінено. Попередній перегляд застарів/)).toBeNull());
   expect(screen.getByLabelText('Готовність').value).toBe('attention'); expect(screen.getByLabelText('Пошук SKU').value).toBe('SV-'); expect(screen.getByLabelText('Мова рядка').value).toBe('main');
   expect(screen.getByRole('tab', { name: 'Сувеніри' }).getAttribute('aria-selected')).toBe('true'); expect(document.querySelector('colgroup col:nth-child(2)').style.width).toBe('420px');
   expect(screen.queryByText('Fixed name')).toBeNull(); expect(screen.queryByRole('button', { name: 'Значення name, рядок 1, потребує уваги' })).toBeNull();

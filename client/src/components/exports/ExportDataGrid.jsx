@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { parseReviewFile } from '../../lib/export-review-presentation';
 import { WorkspaceDialog } from '../workspace/WorkspaceDialog';
@@ -6,13 +6,17 @@ import './export-data-grid.css';
 
 const defaultWidth = (code) => /name|meta_|categories|description/.test(code) ? 320 : /sku|code|price|qty/.test(code) ? 140 : 200;
 const targetsColumn = (issue, column) => issue.target?.column === column || issue.target?.columns?.includes(column);
+const fileName = (file) => file.groupName || ({ BR: 'Браслети', NM: 'Намиста', KL: 'Кулони', CH: 'Чотки', AR: 'Картини', SV: 'Сувеніри', prices: 'Ціни' })[file.groupCode] || file.groupCode;
 const issueLabel = (issue) => issue.code === 'manual_name_required' ? 'Потрібно вказати назву'
+  : ['decor_weight', 'vaha_vyrobu'].includes(issue.field || issue.target?.column) ? 'Потрібно перевірити вагу виробу'
+    : (issue.field || issue.target?.column) === 'categories' ? 'Потрібно перевірити категорію Magento'
   : issue.field === 'price' ? 'Потрібно перевірити ціну'
     : issue.field === 'name' ? 'Потрібно перевірити назву'
       : issue.code === 'SOURCE_SUPPORT_INVALID' ? 'Ця версія не підтримує дані товару'
         : 'Потрібно перевірити дані товару';
 export function ExportDataGrid({ files = [], identity, stored = false, loadFile, onDownload,
   onDenied, canDecode = false, onEditName, onHandoff, viewMemory }) {
+  const tabsId = useId();
   const [group, setGroup] = useState(() => viewMemory?.read()?.group || ''); const [loaded, setLoaded] = useState({});
   const [loadError, setLoadError] = useState(''); const [retry, setRetry] = useState(0);
   const [search, setSearch] = useState(() => viewMemory?.read()?.search || ''); const [attention, setAttention] = useState(() => viewMemory?.read()?.attention || 'all');
@@ -43,6 +47,7 @@ export function ExportDataGrid({ files = [], identity, stored = false, loadFile,
   const rows = useMemo(() => parsed.rows.filter((row) => row.sku.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())
     && (attention === 'all' || row.readiness === 'attention') && (language === 'all' || language === row.language)), [parsed, search, attention, language]);
   const attentionCount = useMemo(() => new Set(files.flatMap((file) => (file.rows || []).filter((row) => row.readiness === 'attention').map((row) => row.productId ?? row.sku))).size, [files]);
+  const categoryAttention = useMemo(() => Object.fromEntries(files.map((file) => [file.groupCode, new Set((file.rows || []).filter((row) => row.readiness === 'attention').map((row) => row.productId ?? row.sku)).size])), [files]);
   const activePage = Math.min(page, Math.max(0, Math.ceil(rows.length / 50) - 1));
   useEffect(() => {
     viewMemory?.update({ group: selected?.groupCode || '', search, attention, language, page: available ? activePage : page, widths });
@@ -62,13 +67,13 @@ export function ExportDataGrid({ files = [], identity, stored = false, loadFile,
   if (!selected) return <p className="p-4">Немає доступних таблиць. Історичні файли не відтворюються за поточними правилами.</p>;
   return <section className="export-grid" aria-label={stored ? 'Збережені таблиці' : 'Майбутні таблиці'}>
     <div className="export-grid-tabs" role="tablist" aria-label="Файли">
-      {files.map((file, index) => <button type="button" role="tab" key={file.groupCode} aria-selected={file === selected}
+      {files.map((file, index) => <button type="button" role="tab" key={file.groupCode} aria-selected={file === selected} aria-label={fileName(file)} aria-describedby={!stored && categoryAttention[file.groupCode] ? `${tabsId}-${file.groupCode}` : undefined}
         tabIndex={file === selected ? 0 : -1} onClick={() => chooseFile(file)} onKeyDown={(event) => {
           if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
           event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? files.length - 1
             : (index + (event.key === 'ArrowRight' ? 1 : -1) + files.length) % files.length;
           chooseFile(files[next]); event.currentTarget.parentElement.children[next].focus();
-        }}>{file.groupName || ({ BR: 'Браслети', NM: 'Намиста', KL: 'Кулони', CH: 'Чотки', AR: 'Картини', SV: 'Сувеніри', prices: 'Ціни' })[file.groupCode] || file.groupCode}</button>)}
+        }}>{fileName(file)}{!stored && categoryAttention[file.groupCode] > 0 && <span id={`${tabsId}-${file.groupCode}`} className="export-tab-count" aria-label={`${categoryAttention[file.groupCode]} потребують уваги`}>{categoryAttention[file.groupCode]}</span>}</button>)}
     </div>
     <div className="export-grid-toolbar">
       <label>Пошук SKU<input value={search} onChange={(e) => changeFilter(setSearch, e.target.value)} /></label>
@@ -80,13 +85,13 @@ export function ExportDataGrid({ files = [], identity, stored = false, loadFile,
     {!!attentionCount && <button type="button" className="export-issue-summary" onClick={() => {
       const first = files.find((file) => file.rows?.some((row) => row.readiness === 'attention'));
       if (first) chooseFile(first); changeFilter(setAttention, 'attention');
-    }}>{attentionCount} {new Intl.PluralRules('uk').select(attentionCount) === 'one' ? 'товар потребує' : new Intl.PluralRules('uk').select(attentionCount) === 'few' ? 'товари потребують' : 'товарів потребують'} уваги</button>}
-    <p className="export-grid-note">Пошук, фільтри й ширина змінюють лише вигляд. Порядок CSV збережено. Закріплена смуга SKU / мова / стан не входить у CSV.</p>
-    {!stored && attentionCount > 0 && <p className="export-grid-note">≈ Попереднє діагностичне значення · Не обчислено — немає достовірного значення · Порожньо — навмисна порожня клітинка готового рядка.</p>}
+    }}>{attentionCount} {new Intl.PluralRules('uk').select(attentionCount) === 'one' ? 'товар потребує' : new Intl.PluralRules('uk').select(attentionCount) === 'few' ? 'товари потребують' : 'товарів потребують'} уваги · усі категорії</button>}
+    <details className="export-grid-note"><summary>Як читати таблицю</summary><p>Пошук, фільтри й ширина змінюють лише вигляд. Порядок CSV збережено. Закріплена смуга SKU / мова / стан не входить у CSV.</p>
+      {!stored && <p>≈ Попереднє діагностичне значення · Не обчислено — немає достовірного значення · Порожньо — навмисна порожня клітинка готового рядка.</p>}</details>
     {notice && <p role="status">{notice}</p>}
     {loadError || parsed.error ? <div role="alert"><p>{loadError || (stored ? 'Файли створено, але таблицю не вдалося завантажити.' : parsed.error)}</p><button type="button" onClick={() => setRetry((n) => n + 1)}>Повторити завантаження таблиці</button></div>
       : !available ? <p role="status">Завантаження збереженої таблиці…</p> : <>
-        <div className="export-grid-scroll" tabIndex={0} aria-label="Прокручування таблиці"><table ref={table}>
+        {rows.length > 0 && <div className="export-grid-scroll" tabIndex={0} aria-label="Прокручування таблиці"><table ref={table}>
           <caption>{selected.fileName || selected.groupName || selected.groupCode} · {stored ? 'збережений CSV' : 'попередній перегляд'}</caption>
           <colgroup><col className="export-review-col" />{parsed.headers.map((code) => <col key={code} style={{ width: widths[code] || defaultWidth(code) }} />)}</colgroup>
           <thead><tr><th scope="col" className="export-review-rail">SKU · мова · стан</th>{parsed.headers.map((code) => <th scope="col" key={code}>{code}</th>)}</tr></thead>
@@ -102,19 +107,22 @@ export function ExportDataGrid({ files = [], identity, stored = false, loadFile,
                 {cell?.state === 'not-evaluated' ? 'Не обчислено' : cell?.value === '' ? (cell.state === 'provisional' ? 'Попередньо порожньо' : 'Порожньо') : cell?.value?.length > 160 ? `${cell.value.slice(0, 160)}…` : cell?.value}
               </button></td>;
             })}</tr>)}</tbody>
-        </table></div>
-        {!rows.length && <p>За цими фільтрами рядків немає.</p>}
-        <div className="export-grid-toolbar"><button type="button" disabled={!activePage} onClick={() => { setPage(activePage - 1); setFocus([0, 0]); }}>Попередні рядки</button><span>{rows.length ? activePage * 50 + 1 : 0}–{Math.min(rows.length, (activePage + 1) * 50)} / {rows.length} · порядок файлу</span><button type="button" disabled={(activePage + 1) * 50 >= rows.length} onClick={() => { setPage(activePage + 1); setFocus([0, 0]); }}>Наступні рядки</button></div>
+        </table></div>}
+        {!rows.length && <div className="export-grid-empty" role="status">{attention === 'attention' && !categoryAttention[selected.groupCode] ? <><p>У категорії «{fileName(selected)}» зараз немає товарів, що потребують уваги.</p>
+          {files.filter((file) => categoryAttention[file.groupCode] > 0).map((file) => <button className="btn btn-outline px-3" key={file.groupCode} onClick={() => { chooseFile(file); setSearch(''); setLanguage('all'); }}>Переглянути: {fileName(file)} · {categoryAttention[file.groupCode]}</button>)}</>
+          : parsed.rows.length === 0 ? <p>У цій категорії немає товарів у вибраному діапазоні.</p> : <><p>За цими фільтрами рядків немає.</p><button className="underline" onClick={() => { setSearch(''); setAttention('all'); setLanguage('all'); }}>Скинути фільтри</button></>}</div>}
+        {rows.length > 0 && <div className="export-grid-toolbar"><button type="button" disabled={!activePage} onClick={() => { setPage(activePage - 1); setFocus([0, 0]); }}>Попередні рядки</button><span>{activePage * 50 + 1}–{Math.min(rows.length, (activePage + 1) * 50)} / {rows.length} · порядок файлу</span><button type="button" disabled={(activePage + 1) * 50 >= rows.length} onClick={() => { setPage(activePage + 1); setFocus([0, 0]); }}>Наступні рядки</button></div>}
       </>}
     {widthColumn !== null && <WorkspaceDialog title="Ширина колонок" onClose={() => setWidthColumn(null)}><h3>Ширина колонок — лише цей перегляд</h3><label>Колонка<select value={widthColumn} onChange={(e) => setWidthColumn(e.target.value)}>{parsed.headers.map((code) => <option key={code}>{code}</option>)}</select></label><label>Ширина, px<input type="number" min="100" max="640" value={widths[widthColumn] || defaultWidth(widthColumn)} onChange={(e) => { const value = Number(e.target.value); if (value >= 100 && value <= 640) setWidths((w) => ({ ...w, [widthColumn]: value })); }} /></label><button onClick={() => setWidths({})}>Скинути ширину</button><button onClick={() => setWidthColumn(null)}>Готово</button></WorkspaceDialog>}
     {detail && <WorkspaceDialog title="Повне значення та проблеми" onClose={() => setDetail(null)}><h3>{detailRow.sku} · {detailRow.language === 'en' ? 'EN' : 'Основний'}{detail.column !== undefined && ` · ${parsed.headers[detail.column]}`}</h3>
-      {detailCell && <div role="region" aria-label="Повне значення"><p>{({ final: 'Значення CSV', blank: 'Навмисна порожня клітинка', provisional: 'Попереднє діагностичне значення', 'not-evaluated': 'Не обчислено' })[detailCell.state]}</p><pre className="export-exact-value">{detailCell.value ?? 'Не обчислено'}</pre></div>}
-      {issues.map((issue, index) => <div key={index}><p>{issueLabel(issue)}</p><details><summary>Технічні подробиці</summary><p>{issue.message}</p><pre className="export-exact-value">{JSON.stringify({ code: issue.code, field: issue.field, target: issue.target }, null, 2)}</pre></details></div>)}
+      {issues.map((issue, index) => <p className="text-lg font-semibold" key={index}>{issueLabel(issue)}</p>)}
       {!!issues.length && <div className="flex flex-wrap gap-3">
-        {onEditName && issues.some((issue) => issue.code === 'manual_name_required') && <button onClick={() => { setDetail(null); onEditName({ productId: detailRow.productId, sku: detailRow.sku }); }}>Заповнити назву</button>}
-        {canDecode && <Link to={`/?exportSku=${encodeURIComponent(detailRow.sku)}`} onClick={onHandoff}>Відкрити товар</Link>}
-        <button onClick={async () => { try { await navigator.clipboard.writeText(detailRow.sku); setNotice('SKU скопійовано'); } catch { setNotice('Скопіюйте SKU з повного значення.'); } }}>Копіювати SKU</button>
+        {onEditName && issues.some((issue) => issue.code === 'manual_name_required') && <button className="btn btn-primary px-3" onClick={() => { setDetail(null); onEditName({ productId: detailRow.productId, sku: detailRow.sku }); }}>Заповнити назву</button>}
+        {canDecode && <Link className="btn btn-outline px-3" to={`/?exportSku=${encodeURIComponent(detailRow.sku)}`} onClick={() => onHandoff?.({ sku: detailRow.sku, reason: issues.map(issueLabel).join('; ') })}>Відкрити товар</Link>}
+        <button className="underline" onClick={async () => { try { await navigator.clipboard.writeText(detailRow.sku); setNotice('SKU скопійовано'); } catch { setNotice('Скопіюйте SKU з повного значення.'); } }}>Копіювати SKU</button>
       </div>}
+      {detailCell && <div role="region" aria-label="Повне значення"><p>{({ final: 'Значення CSV', blank: 'Навмисна порожня клітинка', provisional: 'Попереднє діагностичне значення', 'not-evaluated': 'Значення ще не обчислено' })[detailCell.state]}</p>{detailCell.value != null && <pre className="export-exact-value">{detailCell.value}</pre>}</div>}
+      {issues.map((issue, index) => <details key={index}><summary>Технічні подробиці</summary><p>{issue.message}</p><pre className="export-exact-value">{JSON.stringify({ code: issue.code, field: issue.field, target: issue.target }, null, 2)}</pre></details>)}
       <button onClick={() => setDetail(null)}>Закрити значення</button>
     </WorkspaceDialog>}
   </section>;

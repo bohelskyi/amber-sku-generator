@@ -71,6 +71,9 @@ export function useDialogAccessibility({
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape' && !closeDisabled) {
+        // An expanded combobox owns the first Escape to dismiss its options.
+        // Let its local handler run before considering closing the dialog.
+        if (event.target instanceof Element && event.target.closest('[role="combobox"][aria-expanded="true"]')) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         onClose?.();

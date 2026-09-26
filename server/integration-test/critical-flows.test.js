@@ -3,6 +3,7 @@
 require('./suite-context');
 
 for (const modulePath of [
+  './00-export-exposure.cases',
   './01-platform-boundary.cases',
   './02-migration-foundation.cases',
   './03-authentication-sessions.cases',
@@ -16,6 +17,7 @@ for (const modulePath of [
   './10-repricing.cases',
   './11-exports-schemas.cases',
   './11-magento-products.cases',
+  './11-export-recount-exclusion.cases',
   './12-rbac-audit.cases',
   './12-export-templates.cases',
   './12-export-template-snapshots.cases',

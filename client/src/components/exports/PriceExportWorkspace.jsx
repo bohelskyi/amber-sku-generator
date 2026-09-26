@@ -14,8 +14,8 @@ export function PriceExportWorkspace({ workflow, canCreate }) {
       <h3 className="font-semibold">ПОПЕРЕДНІЙ ПЕРЕГЛЯД</h3>
       <p>Попередній перегляд показує поточні дані. Під час створення файлу сервер повторно перевірить актуальну чергу.</p>
       <button className="btn btn-outline px-3" disabled={workflow.busy || workflow.pending} onClick={workflow.check}>Оновити / переглянути поточну чергу</button>
-      {workflow.review && <><p>Перевірено: {dateText(workflow.review.checkedAt)} · {workflow.review.rowCount} рядків</p><ExportDataGrid key={workflow.review.checkedAt} files={files} identity={workflow.review.checkedAt} />
-        {!workflow.review.rowCount && <p>Немає змін цін для експорту.</p>}
+      {workflow.review && <><p>Перевірено: {dateText(workflow.review.checkedAt)} · {workflow.review.rowCount} рядків</p>{workflow.review.rowCount > 0 ? <ExportDataGrid key={workflow.review.checkedAt} files={files} identity={workflow.review.checkedAt} />
+        : <p role="status">Немає змін цін, які очікують експорту.</p>}
       </>}
       {canCreate && (workflow.pending || workflow.review?.rowCount > 0) && <button className="btn btn-primary px-4" disabled={workflow.busy} onClick={workflow.create}>{workflow.pending ? 'Повторити початкове створення файлу цін' : 'Створити файл'}</button>}
       {workflow.pending && <p>Результат запиту невідомий. Повтор використовує той самий ключ; нова операція не створюється.</p>}

@@ -3,9 +3,12 @@ import { assembleConditions, buildConditionPredicate, conditionChain, conditionP
 import { availableSources } from '../../lib/export-template-columns';
 import { currentOptionIds, optionDisplayLabel } from '../../lib/export-template-option-labels';
 import { SourcePicker } from './SourcePicker';
+import { SearchablePicker } from './SearchablePicker';
 import { Scalar } from './AdvancedDefinitionEditor';
 import { useSourceEvidence } from '../../hooks/useTemplateSourceEvidence';
 import { SourceSupportStatus, SourceSupportEvidence } from './SourceSupportStatus';
+
+const exactFalse = (node) => node?.op === 'literal' && node.value === false && Object.keys(node).length === 2;
 
 export function AdvancedRule({ context, children }) {
   return <div className="et-custom-rule"><p>{children || 'Це правило має складні налаштування. Їх збережено без змін.'}</p>
@@ -29,7 +32,7 @@ function PredicateEditor({ node, context, onChange, creating, children, showSour
     else { onChange(buildConditionPredicate(next)); setPending(null); }
   };
   if (!initial && !creating && !pending) return <><AdvancedRule context={context}>Умова використовує складну перевірку. Результат нижче можна редагувати окремо.</AdvancedRule>{children}</>;
-  return <div className="et-condition-predicate">
+  return <div className="et-condition-predicate"><div className="et-condition-sentence"><span className="et-if">Якщо</span>
     <SourcePicker registry={context.registry} group={context.group} choices={choices} value={form.source} required disabled={context.readOnly} showDetails={false} onChange={(id) => {
       const semantic = context.definition.sources[id]?.kind === 'semantic';
       const input = { op: 'source', id };
@@ -40,7 +43,7 @@ function PredicateEditor({ node, context, onChange, creating, children, showSour
       semantic: semantic || form.semantic, value: form.value, values: form.values || (form.value !== undefined ? [form.value] : []) })}>
       <option value="eq">дорівнює</option><option value="in">є одним із</option><option value="present">заповнено</option><option value="absent">не заповнено</option>
     </select></label>
-    {['eq', 'in'].includes(form.operator) && (semantic ? <label>{form.operator === 'in' ? 'Значення характеристики (можна кілька)' : 'Значення характеристики'}
+    {semantic && form.operator === 'eq' ? <SearchablePicker label="Значення характеристики" required disabled={context.readOnly} value={form.value === undefined ? '' : JSON.stringify(form.value)} options={ids.map((id) => ({ value: JSON.stringify(id), label: optionDisplayLabel(evidence, id) }))} onChange={(value) => update({ value: JSON.parse(value) })} /> : form.source && ['eq', 'in'].includes(form.operator) && (semantic ? <label>{form.operator === 'in' ? 'Значення характеристики (можна кілька)' : 'Значення характеристики'}
       <select className="input" required disabled={context.readOnly} multiple={form.operator === 'in'} value={form.operator === 'in' ? (form.values || []).map((value) => JSON.stringify(value)) : form.value === undefined ? '' : JSON.stringify(form.value)} onChange={(e) => update(form.operator === 'in' ? { values: [...e.target.selectedOptions].map((option) => JSON.parse(option.value)) } : { value: JSON.parse(e.target.value) })}>
         {form.operator === 'eq' && <option value="" disabled>Оберіть значення</option>}
         {ids.map((id) => <option key={id} value={JSON.stringify(id)}>{optionDisplayLabel(evidence, id)}</option>)}
@@ -50,7 +53,7 @@ function PredicateEditor({ node, context, onChange, creating, children, showSour
       {!form.values?.length && <input className="input" aria-label="Перше значення для порівняння" required value="" disabled={context.readOnly} onChange={(e) => update({ values: [e.target.value] })} />}
       {!context.readOnly && <button type="button" className="et-link" onClick={() => update({ values: [...form.values || [], ''] })}>Додати значення</button>}
     </div>)}
-    {children}
+    </div>{children}
     {showSource && context.openSource !== form.source && <>
       <SourceSupportStatus definition={context.definition} sourceId={form.source} diagnostics={context.diagnostics} showDetails={false} compact={context.focused} exceptionalOnly={context.focused} onDetails={context.onTechnical} />
       {!context.focused && <details><summary>Подробиці джерела</summary><SourceSupportEvidence policy={context.definition.sourceSupport?.sources?.[`${source?.category}.${source?.key}`]} /><pre>{JSON.stringify({ source, evidence }, null, 2)}</pre></details>}
@@ -81,22 +84,22 @@ export function ConditionComposer({ node, trail, context, renderValue }) {
   return <section ref={root} className="et-conditions" aria-labelledby={id}>
     <h3 id={id}>Коли виконуються умови</h3><p className="et-muted">Зверху вниз: використовується перша відповідна умова. Якщо жодна не підходить — результат «Інакше».</p>
     {chain.rows.map((row, index) => <section key={`${epoch}/${index}`} className="et-condition-row" data-condition={index} aria-label={`Умова ${index + 1}`}>
-      <h4>Коли · {index + 1}</h4>
-      <PredicateEditor node={row.node.if} context={context} creating={creating === index} showSource={!sourceIds.slice(0, index).includes(sourceIds[index])} onChange={(predicate) => { context.update([...row.trail, 'if'], () => predicate); setCreating(null); }}>
-        <div className="et-condition-result"><h4>→ Результат</h4>{renderValue(row.node.then, [...row.trail, 'then'])}</div>
+      <h4>Правило {index + 1}</h4>
+      <PredicateEditor node={row.node.if} context={context} creating={creating === index || exactFalse(row.node.if)} showSource={!sourceIds.slice(0, index).includes(sourceIds[index])} onChange={(predicate) => { context.update([...row.trail, 'if'], () => predicate); setCreating(null); }}>
+        <div className="et-condition-result"><h4>Тоді →</h4>{renderValue(row.node.then, [...row.trail, 'then'])}</div>
       </PredicateEditor>
       {!context.readOnly && <div className="et-actions">
-        <button type="button" className="et-link" disabled={index === 0 || creating !== null} onClick={() => { const rows = [...chain.rows]; [rows[index - 1], rows[index]] = [rows[index], rows[index - 1]]; structural(rows, `[data-condition="${index - 1}"] select`); }}>Вище</button>
-        <button type="button" className="et-link" disabled={index === chain.rows.length - 1 || creating !== null} onClick={() => { const rows = [...chain.rows]; [rows[index], rows[index + 1]] = [rows[index + 1], rows[index]]; structural(rows, `[data-condition="${index + 1}"] select`); }}>Нижче</button>
+        <button type="button" className="et-link" disabled={index === 0 || creating !== null} onClick={() => { const rows = [...chain.rows]; [rows[index - 1], rows[index]] = [rows[index], rows[index - 1]]; structural(rows, `[data-condition="${index - 1}"] input[role="combobox"]`); }}>Вище</button>
+        <button type="button" className="et-link" disabled={index === chain.rows.length - 1 || creating !== null} onClick={() => { const rows = [...chain.rows]; [rows[index], rows[index + 1]] = [rows[index + 1], rows[index]]; structural(rows, `[data-condition="${index + 1}"] input[role="combobox"]`); }}>Нижче</button>
         <button type="button" className="et-link" disabled={creating !== null && creating !== index} onClick={() => {
-          if (creating === index) { context.update(trail, () => assembleConditions(chain.rows.filter((_, i) => i !== index), chain.fallback)); setCreating(null); focusAfterEdit.current = '[data-add-condition]'; setEpoch((n) => n + 1); }
+          if (creating === index || exactFalse(row.node.if)) { context.update(trail, () => assembleConditions(chain.rows.filter((_, i) => i !== index), chain.fallback)); setCreating(null); focusAfterEdit.current = '[data-add-condition]'; setEpoch((n) => n + 1); }
           else structural(chain.rows.filter((_, i) => i !== index), '[data-add-condition]');
         }}>Вилучити умову</button>
       </div>}
     </section>)}
     {!context.readOnly && <button type="button" data-add-condition className="btn btn-outline px-3" disabled={creating !== null} onClick={() => {
       // Start with the explicit fallback, preserving its result type and guards.
-      if (structural([...chain.rows, { node: { op: 'when', if: { op: 'literal', value: false }, then: structuredClone(chain.fallback) } }], `[data-condition="${chain.rows.length}"] select`)) setCreating(chain.rows.length);
+      if (structural([...chain.rows, { node: { op: 'when', if: { op: 'literal', value: false }, then: structuredClone(chain.fallback) } }], `[data-condition="${chain.rows.length}"] input[role="combobox"]`)) setCreating(chain.rows.length);
     }}>Додати умову</button>}
     <section className="et-condition-default" aria-label="Інакше"><h4>Інакше → результат за замовчуванням</h4>{renderValue(chain.fallback, chain.fallbackTrail)}</section>
   </section>;

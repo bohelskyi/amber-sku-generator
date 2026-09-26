@@ -1,3 +1,4 @@
+import { changeControl } from './helpers/searchable-picker';
 import { useEffect, useState } from 'react';
 import { createRequire } from 'node:module';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -28,7 +29,7 @@ function Editor({ initial = upgradeSourceSupport(homeDefinition(), officeEvidenc
   return <DefinitionEditor definition={definition} registry={registry} loadSource={read} onChange={(next) => { writes++; setDefinition(next); }} />;
 }
 const click = (name) => fireEvent.click(screen.getByRole('button', { name, exact: true }));
-const change = (name, value) => fireEvent.change(screen.getByLabelText(name, { exact: true }), { target: { value } });
+const change = (name, value) => changeControl(screen.getByLabelText(name, { exact: true }), value);
 const open = (column) => click(`BR / ${column} / Основний`);
 const apply = () => click('Застосувати до чернетки');
 const csvInput = (name) => `Значення у CSV: ${name}`;

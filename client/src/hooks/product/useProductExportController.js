@@ -16,6 +16,9 @@ export function useProductExportController({ enabled = true, canCreate = true, p
   const [exportSnapshot, setExportSnapshot] = useState(null);
   const [exportReviewStale, setExportReviewStale] = useState(false);
   const [exportProductChanged, setExportProductChanged] = useState(false);
+  const [exportRefreshing, setExportRefreshing] = useState(false);
+  const [exportHandoff, setExportHandoff] = useState(null);
+  const handoff = useRef(null);
   const [exportDisplayMemory] = useState(() => new Map());
   const [exportReviewView] = useState(createExportViewMemory);
   const [priceExportStatus, setPriceExportStatus] = useState(null);
@@ -29,16 +32,37 @@ export function useProductExportController({ enabled = true, canCreate = true, p
   const generation = useRef(0);
   const alive = useRef(true);
   const current = useCallback(() => alive.current && enabled && principalLifetime?.valid !== false, [enabled, principalLifetime]);
+  const beginExportHandoff = useCallback((context) => { if (current()) { handoff.current = context; setExportHandoff(context); } }, [current]);
+  const endExportHandoff = useCallback(() => { handoff.current = null; setExportHandoff(null); }, []);
   const requested = useRef({ templateMode: false, selection: { mode: 'active' }, fromSku: '', toSku: '' });
   const markExportReviewStale = useCallback((event) => { if (current()) { generation.current++; setExportReviewStale(true); if (event?.kind === 'product') setExportProductChanged(true); } }, [current]);
+  const refreshAfterProductChange = useCallback(async () => {
+    if (!current()) return;
+    markExportReviewStale({ kind: 'product' });
+    const evidence = previewEvidence.current;
+    if (!evidence || busy.current || exportSnapshot) return;
+    const ticket = ++generation.current;
+    busy.current = true; setIsExportLoading(true); setExportRefreshing(true); setExportError('');
+    try {
+      const { data } = await exportsApi.preview(evidence.intent);
+      if (!current() || ticket !== generation.current) return;
+      previewEvidence.current = { intent: evidence.intent, response: data };
+      setExportPreview(data); setExportReviewStale(false); setExportProductChanged(false);
+      // pending.current retains the original command payload and evidence.
+    } catch (error) { if (current() && ticket === generation.current) setExportError(getApiError(error)); }
+    finally { busy.current = false; if (current()) { setIsExportLoading(false); setExportRefreshing(false); } }
+  }, [current, markExportReviewStale, exportSnapshot]);
   useEffect(() => subscribeExportReviewChanged((event) => {
     if (!current()) return;
     markExportReviewStale();
     if (event?.kind === 'product') {
+      if (handoff.current) { handoff.current = { ...handoff.current, saved: true }; setExportHandoff(handoff.current); }
       setExportProductChanged(true);
       for (const view of exportDisplayMemory.values()) view.update({ productChanged: true });
+      if (handoff.current?.sessionId) exportDisplayMemory.get(handoff.current.sessionId)?.update({ autoRecheck: true });
+      else if (handoff.current) void refreshAfterProductChange();
     }
-  }), [markExportReviewStale, current, exportDisplayMemory]);
+  }), [markExportReviewStale, current, exportDisplayMemory, refreshAfterProductChange]);
   useEffect(() => {
     let live = true;
     const checkIdentity = async () => {
@@ -237,6 +261,8 @@ export function useProductExportController({ enabled = true, canCreate = true, p
   };
 
   return {
+    exportRefreshing, exportHandoff, refreshAfterProductChange,
+    beginExportHandoff, endExportHandoff,
     exportProductChanged, exportReviewView, exportDisplayMemory,
     exportReviewStale, markExportReviewStale, priceWorkflow,
     startNewExport: () => { if (current() && !busy.current && !pending.current) { setExportSnapshot(null); invalidate(); setExportError(''); } },

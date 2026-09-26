@@ -14,6 +14,7 @@ import { TemplateLocalNav, TemplateWorkspaceShell } from '../components/workspac
 import { WorkspaceHeader } from '../components/workspace/WorkspacePrimitives';
 import { WorkspaceDialog } from '../components/workspace/WorkspaceDialog';
 import { TemplateRegistry } from '../components/export-templates/TemplateRegistry';
+import { dateText } from '../lib/export-review-presentation';
 
 const templateBase = '/admin/export-templates';
 function templateRoute(location) {
@@ -43,11 +44,11 @@ function Diagnostics({ error, definition, registry, onOpenSource, showSources = 
 function DraftPreview({ preview, stale, selectedField }) {
   const result = preview.result;
   return <section className="rounded border border-blue-300 bg-blue-50 p-4 space-y-3" aria-label="Тест чернетки">
-    <h2 className="font-semibold">Результат перевірки · ревізія {preview.revision}</h2>
-    <p>Товари: {preview.sampleIds?.join(', ')}. {stale ? 'Застарілий результат — збережіть зміни та повторіть перевірку.' : 'Результат збереженої ревізії. Експорт не створено.'}</p>
+    <h2 className="font-semibold">Результат перевірки · редакція {preview.revision}</h2>
+    <p>Товари: {preview.sampleIds?.join(', ')}. {stale ? 'Застарілий результат — збережіть зміни та повторіть перевірку.' : 'Результат збереженої редакції. Експорт не створено.'}</p>
     {preview.sampleProducts?.map((product) => <p key={product.productId}>{product.productId} · {product.category} · {product.sku}</p>)}
     {preview.globalSourceDiagnostics?.length > 0 && <>
-      <p>{stale ? 'Для перевіреної ревізії:' : 'Результат показано для вибраних товарів.'} У шаблоні залишилися проблеми інших категорій; публікація заблокована.</p>
+      <p>{stale ? 'Для перевіреної редакції:' : 'Результат показано для вибраних товарів.'} У шаблоні залишилися проблеми інших категорій; публікація заблокована.</p>
       <p>Питання до публікації показано окремо в повній перевірці шаблону.</p>
     </>}
     <p>Представлено: {result.representedCount}; готові: {result.readyCount}</p>
@@ -265,15 +266,15 @@ function TemplateWorkspace({ permissions }) {
         {!publishReview && !supportProposal && <Diagnostics error={error} definition={definition} registry={registry} onOpenSource={openSource} showSources={view !== 'check'} />}
         {busy && <p role="status">{busy}…</p>}{message && <p role="status" className="rounded bg-green-50 p-3">{message}</p>}
         <div className="et-title-line"><h1>{family?.display_name || 'Завантаження шаблону…'}</h1><span className="et-badge">{selectedVersion ? 'Опублікована v' + selectedVersion.versionNumber + ' · лише читання' : dirty ? 'Незбережена чернетка' : 'Чернетка'}</span>
-          {family && <span className="et-muted" role="status">{selectedVersion ? 'Незмінна версія' : dirty ? 'Є незбережені зміни' : 'Збережено · ревізія ' + family.draft.revision}</span>}</div>
+          {family && <span className="et-muted" role="status">{selectedVersion ? 'Незмінна версія' : dirty ? 'Є незбережені зміни' : 'Збережено · редакція ' + family.draft.revision}</span>}</div>
         {family && !selectedVersion && !validation?.valid && <p className="et-muted">Готовність до публікації не підтверджено. Збереження чернетки не перевіряє джерела та не створює експорт.</p>}
         <TemplateLocalNav familyId={route.id} versionId={versionId} />
       </header>
       {family?.id === route.id && definition && <>
         <div hidden={view !== 'fields'} className="card et-editor-surface">
-          {manage && !selectedVersion && definition?.outputContract === 'magento-products-v1' && <div className="et-grid-tools"><p>Історична структура колонок. Зміна доступна лише для збереженої чернетки.</p><button className="btn btn-outline px-3" disabled={!exactSaved} onClick={() => run('Оновлення контракту колонок', () => api.upgrade(family.id, precondition()), saved)}>Дозволити додавання й видалення колонок</button></div>}
+          {manage && !selectedVersion && definition?.outputContract === 'magento-products-v1' && <div className="et-grid-tools"><div><h3>Що можна змінювати в копії?</h3><p>Зараз — значення та правила. Ви також можете дозволити додавання й видалення колонок CSV. Поточні правила залишаться збереженими.</p>{!exactSaved && <p>Спочатку збережіть поточну чернетку.</p>}</div><button className="btn btn-outline px-3" disabled={!exactSaved} onClick={() => run('Оновлення контракту колонок', () => api.upgrade(family.id, precondition()), saved)}>Також змінювати структуру CSV</button></div>}
           <DefinitionEditor key={family.id + '/' + versionId + '/' + editorEpoch} visible={view === 'fields' && !navigation.blocked} definition={definition} onChange={edit} onPendingChange={setPanelPending} onEditingChange={setEditing} registry={registry} loadSource={api.sourceDetails} diagnostics={sourceDiagnostics} focusField={focusField} onFieldSelect={setFieldSelection} readOnly={!manage || Boolean(selectedVersion) || (Boolean(busy) && !['Перевірка', 'Тест чернетки'].includes(busy))} />
-          {!selectedVersion && <aside className="et-validation-tray" aria-label="Перевірка та тестові товари"><div><span>Перевірка: {dirty || panelPending ? 'є незбережені зміни' : issueCount ? `${issueCount} питання до публікації` : validation?.valid ? 'збережену ревізію перевірено' : 'ще не виконана'}</span><button className="et-link" onClick={() => setView('check')}>Показати</button></div>
+          {!selectedVersion && <aside className="et-validation-tray" aria-label="Перевірка та тестові товари"><div><span>Перевірка: {dirty || panelPending ? 'є незбережені зміни' : issueCount ? `${issueCount} питання до публікації` : validation?.valid ? 'збережену редакцію перевірено' : 'ще не виконана'}</span><button className="et-link" onClick={() => setView('check')}>Показати</button></div>
             {manage && has('exports.view') && <div><span>Товари для тесту: {selectedSamples.length}{previewStale ? ' · застарілий результат' : preview ? ` · готові ${preview.result.readyCount}/${preview.result.representedCount}` : ''}</span><button className="et-link" onClick={() => setView('check')}>Перевірити на товарах</button></div>}
           </aside>}
         </div>
@@ -294,7 +295,7 @@ function TemplateWorkspace({ permissions }) {
               {supportProposal && <WorkspaceDialog title="Оновлення сумісності джерел" busy={Boolean(busy)} onClose={() => setSupportProposal(null)}>
                 <h2>Оновлення сумісності джерел</h2>
                 <Diagnostics error={error} definition={definition} registry={registry} />
-                <p>Підготовлено для ревізії {supportProposal.expectedRevision}. Чернетку ще не змінено.</p>
+                <p>Підготовлено для редакції {supportProposal.expectedRevision}. Чернетку ще не змінено.</p>
                 <details><summary>Технічні подробиці</summary>
                 <p>{supportProposal.definition?.sourceSupport?.version}</p>
                 <p>NM.extra: числовий 0 дозволено як «Не обрано» лише після відтворення SKU за власною історичною схемою товару та перевірки необов’язкового питання. Рядок «0» не є сумісним placeholder.</p>
@@ -311,8 +312,8 @@ function TemplateWorkspace({ permissions }) {
             {manage && <button className="btn btn-outline px-3" disabled={!exactSaved} onClick={() => run('Перевірка', () => api.validate(family.id, precondition()), setValidation,
               (error) => setValidation({ revision: family.draft.revision, definitionHash: family.draft.definitionHash, error }))}>Перевірити шаблон</button>}
             {(validation || issueCount > 0) && <section aria-label="Повна перевірка шаблону">
-              {validation?.error ? <><p>Повна перевірка · ревізія {validation.revision}</p><Diagnostics error={validation.error} showSources={false} /></>
-                : validation && <p role="status">Сервер перевірив ревізію {validation.revision}.</p>}
+              {validation?.error ? <><p>Повна перевірка · редакція {validation.revision}</p><Diagnostics error={validation.error} showSources={false} /></>
+                : validation && <p role="status">Сервер перевірив редакцію {validation.revision}.</p>}
               <SourceDiagnostics diagnostics={sourceDiagnostics} definition={definition} registry={registry} onOpenSource={openSource} showHeading={!validation?.error} />
             </section>}
             {manage && has('exports.view') && <div className="et-sample space-y-3"><h3>Переглянути результат</h3>
@@ -328,16 +329,16 @@ function TemplateWorkspace({ permissions }) {
           {preview ? <DraftPreview preview={preview} selectedField={fieldSelection.column} stale={previewStale} /> : <p className="et-muted">Результату ще немає. Оберіть товари й запустіть перевірку.</p>}
         </section>}
         {view === 'versions' && <section className="card et-versions space-y-4">
-          <h2>Версії шаблону</h2><label>Версія<select className="input" value={versionId} disabled={Boolean(busy)} onChange={(e) => openVersion(e.target.value)}><option value="">Поточна чернетка · {family.draft.revision}</option>{family.versions.map((v) => <option key={v.id} value={v.id}>Опублікована v{v.versionNumber} · {v.publishedAt}</option>)}</select></label>
+          <h2>Версії шаблону</h2><label>Версія<select className="input" value={versionId} disabled={Boolean(busy)} onChange={(e) => openVersion(e.target.value)}><option value="">Поточна чернетка · {family.draft.revision}</option>{family.versions.map((v) => <option key={v.id} value={v.id}>Опублікована v{v.versionNumber} · {dateText(v.publishedAt)}</option>)}</select></label>
           <p>Публікація зберігає незмінну версію. Вибір для експорту виконується окремо.</p>
           {publish && !selectedVersion && <button className="btn btn-primary px-4" disabled={!exactSaved} onClick={() => { setError(null); setPublishReview(precondition()); }}>Опублікувати версію</button>}
           {publishReview && <WorkspaceDialog title="Перегляд публікації" busy={Boolean(busy)} onClose={() => setPublishReview(null)}>
-            <h2>Опублікувати «{family.display_name}»</h2><p>Збережена ревізія: <strong>{publishReview.expectedRevision}</strong></p>
+            <h2>Опублікувати «{family.display_name}»</h2><p>Збережена редакція: <strong>{publishReview.expectedRevision}</strong></p>
             <p>Результат — незмінна опублікована версія. Подальші зміни виконуються в чернетці. Вибір для експорту — окрема дія.</p>
-            <p>{issueCount ? `Питання до публікації: ${issueCount}. Сервер повторно перевірить джерела.` : validation?.valid ? 'Збережена ревізія пройшла перевірку.' : 'Повну готовність ще не підтверджено. Команда публікації виконає авторитетну перевірку.'}</p>
-            <details><summary>Ідентичність ревізії</summary><code>{publishReview.expectedDefinitionHash}</code></details>
+            <p>{issueCount ? `Питання до публікації: ${issueCount}. Сервер повторно перевірить джерела.` : validation?.valid ? 'Збережена редакція пройшла перевірку.' : 'Повну готовність ще не підтверджено. Команда публікації виконає авторитетну перевірку.'}</p>
+            <details><summary>Ідентичність редакції</summary><code>{publishReview.expectedDefinitionHash}</code></details>
             <Diagnostics error={error} definition={definition} registry={registry} />
-            <div className="et-actions"><button className="btn btn-primary px-4" disabled={!publish || !exactSaved || family.draft.revision !== publishReview.expectedRevision || family.draft.definitionHash !== publishReview.expectedDefinitionHash} onClick={() => run('Публікація ревізії ' + publishReview.expectedRevision, () => api.publish(family.id, publishReview), (version) => {
+            <div className="et-actions"><button className="btn btn-primary px-4" disabled={!publish || !exactSaved || family.draft.revision !== publishReview.expectedRevision || family.draft.definitionHash !== publishReview.expectedDefinitionHash} onClick={() => run('Публікація редакції ' + publishReview.expectedRevision, () => api.publish(family.id, publishReview), (version) => {
             setFamily((f) => ({ ...f, versions: [...f.versions.filter((v) => v.id !== version.id), version] })); setDefinition(version.definition); clearEvidence();
             setFamilies((items) => items?.map((item) => item.id === family.id ? { ...item, publication_count: family.versions.filter((v) => v.id !== version.id).length + 1 } : item));
             setMessage('Опубліковано v' + version.versionNumber + '. Вибір для експорту не змінено.');

@@ -70,7 +70,7 @@ export function useProductRecount({
   const previewRequestIdRef = useRef(0);
   const priceChangeRequestIdRef = useRef(0);
   const hasRecountChanges = Boolean(
-    haveRecountTargetChanged(decodeData, recountAnswers, recountWeight)
+    isRecountOpen && haveRecountTargetChanged(decodeData, recountAnswers, recountWeight)
   );
   const informationPatch = getInformationOnlyPatch(
     decodeData, recountAnswers, recountWeight, submitMode

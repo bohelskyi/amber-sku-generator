@@ -1,4 +1,5 @@
 import { at, editField, editMapping, mappingsForSource, resolveNode, sourceOf } from './export-template-presentation.js';
+import { computedPresence, exactExpression } from './export-template-conditions.js';
 
 export const COLUMN_CONTRACT = 'magento-products-columns-v2';
 export const requiredColumns = new Set(['sku', 'store_view_code', 'name', 'attribute_set_code', 'product_type', 'price']);
@@ -146,10 +147,16 @@ export function bindColumnSource(definition, gi, ri, code, selected, mode = 'tex
   return next;
 }
 
-// Only whole, unguarded common expressions may be replaced by the simple form.
+// Common expressions retain their enclosing readiness/presence guards.
 // Everything else stays with the lossless question/field adapters.
 export function directColumn(definition, path) {
-  const { node, trail, problem } = resolveNode(definition, at(definition, path));
+  let resolved = resolveNode(definition, at(definition, path));
+  while (!resolved.problem && (resolved.node?.op === 'require' && exactExpression(resolved.node, ['op', 'if', 'value', 'error'])
+    || resolved.node?.op === 'when' && exactExpression(resolved.node, ['op', 'if', 'then', 'else']) && computedPresence(definition, resolved.node.if))) {
+    const key = resolved.node.op === 'require' ? 'value' : 'then';
+    resolved = resolveNode(definition, resolved.node[key], [...resolved.trail, key]);
+  }
+  const { node, trail, problem } = resolved;
   if (problem) return null;
   const exact = (value, keys) => value && Object.keys(value).every((key) => keys.includes(key));
   if (!node) return { mode: 'literal', text: '', trail };

@@ -1,3 +1,4 @@
+import { changeControl } from './helpers/searchable-picker';
 import { useEffect, useState } from 'react';
 import { createRequire } from 'node:module';
 import { cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react';
@@ -37,22 +38,43 @@ function Editor({ initial }) {
   return <DefinitionEditor definition={definition} onChange={setDefinition} registry={registry} loadSource={loadSource} />;
 }
 const click = (name, scope = screen) => fireEvent.click(scope.getByRole('button', { name, exact: true }));
-const change = (label, value, scope = screen) => fireEvent.change(scope.getByLabelText(label, { exact: true }), { target: { value } });
+const change = (label, value, scope = screen) => changeControl(scope.getByLabelText(label, { exact: true }), value);
 const row = (index) => within(screen.getByRole('region', { name: `Умова ${index}` }));
 const result = (d, type) => evaluateProduct(compileDefinition(JSON.parse(JSON.stringify(d))), product('AR', { type })).base.meta_description;
 async function open(initial, language = 'Основний') {
   render(<Editor initial={initial} />); fireEvent.click(screen.getByRole('tab', { name: 'Картини' })); click(`AR / meta_description / ${language}`);
-  await waitFor(() => expect(row(1).getByRole('option', { name: 'Пейзаж' })).toBeTruthy());
+  await waitFor(() => expect(row(1).getByLabelText('Значення характеристики').value).not.toBe(''));
 }
 beforeEach(() => { window.innerWidth = 1600; });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+it('UX5 converts constant SEO into two conditions with exact fallback, isolated Main edits and no early mutation', async () => {
+  const d = baseline(); ar(d).rows[0].cells.meta_description = literal('  Original SEO\n'); const original = JSON.stringify(d);
+  render(<Editor initial={d} />); fireEvent.click(screen.getByRole('tab', { name: 'Картини' })); click('AR / meta_description / Основний');
+  expect([...screen.getByLabelText('Як формується значення').options].map((o) => o.value)).toEqual(['empty','literal','characteristic','text','condition','fallback','complex']);
+  change('Як формується значення', 'condition');
+  expect(within(screen.getByRole('region', { name: 'Інакше' })).getByLabelText('Текст у файлі').value).toBe('  Original SEO\n');
+  change('Характеристика', 'AR.type', row(1)); fireEvent.focus(row(1).getByLabelText('Значення характеристики')); await screen.findByRole('option', { name: 'Пейзаж' });
+  change('Значення характеристики', '"2"', row(1)); change('Текст у файлі', landscape, row(1)); click('Додати умову');
+  change('Характеристика', 'AR.type', row(2)); fireEvent.focus(row(2).getByLabelText('Значення характеристики')); await row(2).findByRole('option', { name: 'Ікона' });
+  change('Значення характеристики', '"1"', row(2)); change('Текст у файлі', icon, row(2));
+  expect(JSON.stringify(current)).toBe(original); click('Застосувати до чернетки');
+  expect(result(current, 2)).toBe(landscape); expect(result(current, 1)).toBe(icon); expect(result(current, 3)).toBe('  Original SEO\n');
+  expect(ar(current).rows[1]).toEqual(ar(d).rows[1]); expect(current.bindings).toEqual(d.bindings);
+});
+
+it.each(['empty','characteristic','text','condition','fallback'])('UX5 cancels %s transformation byte-exactly', (intent) => {
+  const d = baseline(); ar(d).rows[0].cells.meta_description = literal('  exact\n'); const hash = hashJsonData(d);
+  render(<Editor initial={d} />); fireEvent.click(screen.getByRole('tab', { name: 'Картини' })); click('AR / meta_description / Основний');
+  change('Як формується значення', intent); expect(current).toBe(d); click('Скасувати'); expect(hashJsonData(current)).toBe(hash);
+});
 
 it('single and nested conditions open as labelled ordered rules with explicit fallback and no mutation', async () => {
   for (const chain of [false, true]) {
     const d = fixture(chain); const hash = hashJsonData(d); await open(d);
     expect(screen.getAllByRole('region', { name: /^Умова / })).toHaveLength(chain ? 2 : 1);
-    expect(row(1).getByLabelText('Характеристика').selectedOptions[0].textContent).toBe('Картини → Тип картини');
-    expect(row(1).getByLabelText('Значення характеристики').selectedOptions[0].textContent).toBe('Пейзаж');
+    expect(row(1).getByLabelText('Характеристика').value).toBe('Картини → Тип картини');
+    expect(row(1).getByLabelText('Значення характеристики').value).toBe('Пейзаж');
     expect(within(screen.getByRole('region', { name: 'Інакше' })).getByLabelText('Текст у файлі').value).toBe(fallback);
     expect(current).toBe(d); click('Скасувати'); expect(hashJsonData(current)).toBe(hash);
     click('AR / meta_description / Основний'); click('Застосувати до чернетки'); expect(current).toBe(d); cleanup();
@@ -62,7 +84,7 @@ it('single and nested conditions open as labelled ordered rules with explicit fa
 it('adds a second condition through readable normal controls, saves exact outputs and leaves EN independent', async () => {
   const d = fixture(); const en = structuredClone(ar(d).rows[1]); await open(d);
   click('Додати умову'); click('Застосувати до чернетки'); expect(current).toBe(d); // unfinished row cannot apply
-  change('Характеристика', 'AR.type', row(2)); await waitFor(() => expect(row(2).getByRole('option', { name: 'Ікона' })).toBeTruthy());
+  change('Характеристика', 'AR.type', row(2)); fireEvent.focus(row(2).getByLabelText('Значення характеристики')); await waitFor(() => expect(row(2).getByRole('option', { name: 'Ікона' })).toBeTruthy());
   change('Значення характеристики', JSON.stringify('1'), row(2)); change('Текст у файлі', icon, row(2));
   expect(current).toBe(d); click('Застосувати до чернетки');
   expect(conditionChain(current, expression(current)).rows).toHaveLength(2);
@@ -81,7 +103,7 @@ it('reordering chooses the first matching branch, removal retains the explicit f
 
 it('a plain branch inserts a readable characteristic token and evaluates using existing interpolation', async () => {
   await open(fixture()); change('Текст у файлі', 'Купити ', row(1)); click('+ Додати характеристику', row(1));
-  const pickers = row(1).getAllByLabelText('Характеристика'); fireEvent.change(pickers[1], { target: { value: 'AR.type' } });
+  const pickers = row(1).getAllByLabelText('Характеристика'); changeControl(pickers[1], 'AR.type');
   const formats = row(1).getByLabelText('Як записувати значення');
   const option = [...formats.options].find((entry) => entry.value !== '__choose');
   expect(option.textContent).not.toMatch(/arType|arSeoSubject/); fireEvent.change(formats, { target: { value: option.value } });
@@ -105,6 +127,7 @@ it('unsupported predicates and custom results stay intact and offer Advanced wit
   expression(d).if = { op: 'all', items: [expression(d).if, literal(true)] };
   const hash = hashJsonData(d); render(<Editor initial={d} />); fireEvent.click(screen.getByRole('tab', { name: 'Картини' })); click('AR / meta_description / Основний');
   expect(screen.getByText(/Умова використовує складну перевірку/)).toBeTruthy();
+  expect([...screen.getByLabelText('Як формується значення').options].map((option) => option.value)).toEqual(['condition', 'complex']);
   expect(row(1).getAllByRole('button', { name: 'Розширені правила' })).toHaveLength(2);
   change('Текст у файлі', 'edited default', within(screen.getByRole('region', { name: 'Інакше' })));
   click('Скасувати'); expect(hashJsonData(current)).toBe(hash);
