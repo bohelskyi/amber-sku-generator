@@ -1140,6 +1140,13 @@ are checked, including media, unknown attributes/extensions, update inventory an
 unproduced scoped EN content. Final acknowledgement also verifies unchanged EN
 values and required website memberships, not merely fields sent in the last request.
 
+UPDATE revalidation restores native timestamp evidence omitted by the minimized
+baseline: `created_at` must match its original preservation hash, while Magento-owned
+`updated_at` is read fresh because saves can advance it. Neither enters a write payload.
+Live required-field validation still rejects missing timestamps; changed creation time
+still fails preservation. This also supports existing immutable jobs without rewriting
+their baseline, intent or plan hash, including retries after verified partial writes.
+
 Operations run in this order, skipping writes already verified as satisfied:
 
 1. Core product repository save; CREATE must have native status 2. UPDATE may not
