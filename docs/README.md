@@ -1,22 +1,50 @@
-# Documentation index
+# Amber SKU Manager documentation
 
-Current server code and PostgreSQL migrations are authoritative for implemented behavior. Deployed configuration and PostgreSQL data determine environment-specific facts. The maintained guides below explain current behavior; [`PROJECT_CONTEXT.md`](../PROJECT_CONTEXT.md) gives an overview, [`README.md`](../README.md) is the quickstart, and archived records are historical evidence.
+This is the canonical documentation index. Current code and PostgreSQL migrations define implemented behavior; deployment data and operator evidence define environment-specific facts. Historical plans do not override the maintained guides.
 
-## Business behavior
+## Start here
 
-- [SKU and catalog](SKU_CATALOG.md)
-- [Pricing](PRICING.md)
-- [Recount and corrections](RECOUNT_CORRECTIONS.md)
-- [Repricing](REPRICING.md)
-- [Exports](EXPORTS.md)
-- [Private and shared controlled export sessions](SHARED_EXPORT_SESSIONS.md)
+1. [Project context](../PROJECT_CONTEXT.md) — architecture, capabilities, implementation/deployment distinction.
+2. [AGENTS](../AGENTS.md) — engineering guardrails and verification/safe test environments.
+3. [Root README](../README.md) — local startup and Docker quickstart.
 
-## Platform
+## Current domain guides
 
-- [Authentication and RBAC](AUTH_RBAC.md)
-- [Database and migrations](DATABASE_MIGRATIONS.md)
-- [Operations](OPERATIONS.md)
+Each guide is the maintained authority for its domain; other documents summarize and link to it.
 
-## Historical evidence
+| Guide | Scope |
+| --- | --- |
+| [SKU and catalog](SKU_CATALOG.md) | Schema versions, semantic IDs, calibration, preview/save/decode, permanent SKU reservation. |
+| [Pricing](PRICING.md) | Matrices/modifiers, rate handling, rounding, calculated/automatic/manual meanings and legacy zeros. |
+| [Recount and corrections](RECOUNT_CORRECTIONS.md) | Target validation, lineage, inherited names/review, request parity/ownership, stale evidence. |
+| [Repricing](REPRICING.md) | Drafts, authoritative preview, atomic apply and exact-state rollback. |
+| [Exports](EXPORTS.md) | Gate-dependent lifecycle queues, immutable membership, acknowledgment, price stream and reconciliation semantics. |
+| [Export templates](EXPORT_TEMPLATES.md) | Administrative API, editor, immutable publications, source support and signed capture binding. |
+| [Shared export sessions](SHARED_EXPORT_SESSIONS.md) | Private/shared workflows, scoped invitations, access epochs, durable attempts and recovery. |
+| [Authentication and RBAC](AUTH_RBAC.md) | OIDC, sessions, active-user/CSRF boundary, permission catalog and administration. |
+| [Database and migrations](DATABASE_MIGRATIONS.md) | Migration/checksum policy, full inventory 000–040 and database protections. |
+| [Operations](OPERATIONS.md) | Topology, ordinary deployments, health, graceful shutdown, backup/restore and integrity audit. |
 
-- [2026 refactor audit and completed roadmap](archive/REFACTOR_2026.md)
+Local technical references: [client development](../client/README.md), [serialized PostgreSQL tests](../server/integration-test/README.md), [synthetic Magento fixture maintenance](../server/test/fixtures/magento-v1/README.md).
+
+## Current operational runbooks
+
+- [Full-product cutover](FULL_PRODUCT_CUTOVER_RUNBOOK.md) — current until production activation and its separately reviewed reconciliations are complete. The machinery through Phase 3B / Phase 4 is implemented; production must use maintenance/freeze and fresh manifests. Rehearsal counts are explicitly separate from production facts.
+
+## Historical archive
+
+[Archive index](archive/README.md) groups export plans, UX audits, investigations and implementation/acceptance records. They preserve dates, old findings, rejected alternatives and test counts as historical evidence, **not current behavior contracts**. Current guides do not require reading them to understand the application.
+
+The [consolidation inventory](archive/implementation/DOCUMENTATION_CONSOLIDATION_2026-09-27.md) classifies every original documentation file and records moves/extractions and the inspection baseline.
+
+## Deferred work and operationally pending items
+
+- **Production cutover and reconciliation:** fresh manifests, explicit baseline approval, activation and per-case external SKU/file/exclusion attestations. Backend tooling and queues are already implemented. See the [runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md).
+- **Historical data quality:** duplicate SKUs, incomplete/ambiguous lineage, unknown exclusions and unapproved name/mapping data remain case-specific work. Cutover does not silently repair them. See [Exports](EXPORTS.md#acceptance-boundary).
+- **Target template/Magento acceptance:** source/alias evidence, frozen business mappings (including KL zero semantics, narrow SV names and deferred AR values), measurement units and fresh controlled Check Data/import decisions. Existing template support, publication and recovery are implemented; an old successful Check Data run is not blanket acceptance.
+- **Manual UX acceptance evidence:** the latest retained browser audit still leaves genuine 200% zoom and second-account collaboration scenarios unverified manually. Automated coverage and implemented UX are separate from this operational evidence gap; see the [audit](archive/ux/EXPORT_UX_ACCEPTANCE_AUDIT_POST_UX5_2026-09-26.md#що-ще-потребує-оператора).
+- **Account-onboarding invitations:** not implemented. Scoped export-session invitations are implemented and grant no global rights; see [RBAC](AUTH_RBAC.md#correction-ownership-and-remaining-gap).
+- **Magento integration and scale:** no attribute/option API synchronization, automated import/result-history workflow or explicit `url_key` generation; full export review is bounded, not server-streamed/windowed. See [Exports](EXPORTS.md).
+- **Infrastructure policy:** production database exposure, runtime/image upgrades and pin/update policy, non-root/read-only container work, backup scheduling/retention/encryption/off-host monitoring remain separate operational work. Current topology and backup boundaries are in [Operations](OPERATIONS.md).
+
+These items do not reopen completed PR/phase implementations. Production provider configuration, acceptance and rehearsal outputs were not independently revalidated by this documentation-only cleanup.

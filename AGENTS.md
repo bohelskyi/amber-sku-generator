@@ -16,6 +16,9 @@
 | Pricing, matrices, modifiers, exchange rates | [`docs/PRICING.md`](docs/PRICING.md) |
 | Product recount and correction requests | [`docs/RECOUNT_CORRECTIONS.md`](docs/RECOUNT_CORRECTIONS.md) |
 | Repricing drafts, apply, rollback | [`docs/REPRICING.md`](docs/REPRICING.md) |
+| Export templates | [`docs/EXPORT_TEMPLATES.md`](docs/EXPORT_TEMPLATES.md) |
+| Shared export sessions | [`docs/SHARED_EXPORT_SESSIONS.md`](docs/SHARED_EXPORT_SESSIONS.md) |
+| Full-product cutover | [`docs/FULL_PRODUCT_CUTOVER_RUNBOOK.md`](docs/FULL_PRODUCT_CUTOVER_RUNBOOK.md) |
 | Export snapshots and CSV | [`docs/EXPORTS.md`](docs/EXPORTS.md) |
 | Database and migrations | [`docs/DATABASE_MIGRATIONS.md`](docs/DATABASE_MIGRATIONS.md) |
 | Deployment, health, backup, restore | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) |
@@ -34,7 +37,7 @@
 
 ## Migration rules
 
-- Migrations `000`–`030` are immutable history. Never edit an already-applied migration; add the next forward migration.
+- Never edit any already-applied migration; add a forward migration. Accepted migrations `000`–`040` are immutable history; see [the migration guide](docs/DATABASE_MIGRATIONS.md).
 - Preserve checksum and line-ending canonicalization. Never rewrite stored checksums to hide a mismatch.
 - Keep each migration transactional and safe for fresh, known upgrade/checkpoint, repeated-startup, and rollback paths as applicable.
 - Migration DDL uses a dedicated no-query-timeout connection. Runtime DDL is not a substitute for migrations.
@@ -53,7 +56,9 @@
 
 ## Required verification
 
-Run the narrow regression first, then all applicable checks before handoff:
+For documentation-only changes, check links/references, migration names and documented contracts against code, then run `git diff --check` and `git status --short`. Run a focused test only if its documentation-path assertion changed.
+
+For implementation changes, run the narrow regression first, then all applicable checks before handoff:
 
 ```text
 cd server

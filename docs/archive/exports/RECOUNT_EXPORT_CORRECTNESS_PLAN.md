@@ -1,3 +1,5 @@
+> Historical record. This document describes the state/planning at the time it was written. Current behavior is defined by current code/migrations and the [maintained domain guides](../../README.md). Dates, findings and acceptance limits below are historical evidence, not current deployment claims.
+
 # Recount → correction → export correctness plan
 
 **Status:** Approved architecture; Phases 0?3A complete. Phase 3B + gated Phase 4 implementation is in the working tree; useful-data cutover has not been executed. See section 22 and the canonical runbook.
@@ -124,7 +126,7 @@ The proposed next migration is `039_full_product_export_lifecycle.sql`, provided
 | Price delivery | `product-price-change.service.js`, `price-export.service.js`; `/api/product-price-change/*`, `/api/price-export/*` |
 | Presentation/history | `magento-products-v1.js`, `export-history.service.js`, correction history and product timeline projections |
 
-Primary code evidence: [recount application](/D:/Work/amber-sku-generator/server/src/services/product.service.js:556), [export selection and exposure](/D:/Work/amber-sku-generator/server/src/services/export.service.js:132), and [snapshot confirmation](/D:/Work/amber-sku-generator/server/src/services/export.service.js:687).
+Primary code evidence: [recount application](../../../server/src/services/product.service.js#L556), [export selection and exposure](../../../server/src/services/export.service.js#L132), and [snapshot confirmation](../../../server/src/services/export.service.js#L687).
 
 Relevant tables are:
 
@@ -1484,7 +1486,7 @@ single-product replacement, typed business exclusions and visible Update/replace
 held queues. Legacy/template/shared-session preview and capture use the same ledger.
 No useful `amber` writes were made. Earlier phase status statements are historical.
 
-See [FULL_PRODUCT_CUTOVER_RUNBOOK.md](FULL_PRODUCT_CUTOVER_RUNBOOK.md) for all outcome
+See [FULL_PRODUCT_CUTOVER_RUNBOOK.md](../../FULL_PRODUCT_CUTOVER_RUNBOOK.md) for all outcome
 tables, exact field meanings, commands, crash/stale handling, schema constraints,
 rollback and the restored-038 rehearsal results. Both indexing and cutover manifests
 must be generated again in the real preparing gate and explicitly approved there.

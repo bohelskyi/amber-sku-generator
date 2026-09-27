@@ -2,7 +2,7 @@
 
 Implemented for the explicitly selected `template-v1` product workflow. Ordinary
 Magento v1 remains the default; dedicated `sku,price` semantics are unchanged.
-This guide describes application behavior, not operational/Magento acceptance.
+This guide owns collaboration, authorization and recovery. [Exports](EXPORTS.md) defines gate-dependent lifecycle selection and acknowledgment; this workflow uses those same rules. This guide does not certify operational/Magento acceptance.
 
 ## Operator workflow
 
@@ -10,7 +10,7 @@ From **Експорт**, use **Мої експорти** (`/exports/sessions`), 
 (`/exports/shared`) or **Запрошення** (`/exports/invitations`).
 **Створити свій експорт** opens `/exports/new/template`.
 
-1. **Створити свій експорт**: enter a title, new-products or explicit SKU range,
+1. **Створити свій експорт**: enter a title, New or an explicit SKU range,
    and active/pinned published-template selection. **Створити приватний експорт**
    saves metadata only. Only the owner initially has access.
 2. **Перевірити товари** reads current readiness.
@@ -40,7 +40,7 @@ username); no issuer, OIDC subject, email, roles/history or administrative direc
 There are at most 100 current pending/accepted participants. Detail prioritizes
 those participants and bounds historical membership display to 100 records.
 
-Opening a deep link is explicit through the current account. It never silently
+After AuthGate resolves the current principal, opening a deep link automatically performs the authorized detail read. It never silently
 replaces a dirty form or auto-generates/confirms. Snapshot IDs, session IDs,
 invitation epochs and operation keys are locators, not authority.
 
@@ -89,18 +89,19 @@ Routes are below `/api/export/sessions`:
 | `POST /:id/invitations` | `{expectedAccessEpoch,userId}` |
 | `POST /:id/membership` | `{action,expectedAccessEpoch}` for accept/decline/leave; revoke also supplies `userId,expectedMemberEpoch` |
 
-Settings reuse PR3 normalization: `requestContract:"template-v1"`, profile
-`magento-products-v1`, new/manual mode, normalized original anchors, and
+Settings reuse published-request normalization: `requestContract:"template-v1"`, profile
+`magento-products-v1`, new/manual/replacement mode, normalized original anchors or exact replacement product/delivery version, and
 `selection:{mode:"active"}` or an explicit family/version pair. Original intent
 is distinct from resolved range and effective capture identity. Decimal-string
 configuration revisions and membership epochs avoid bigint precision loss.
+The session API accepts replacement intent; the current new-session form offers New and manual range only.
 Owners use access epoch `"owner"`; membership epoch advances on every state change,
 including re-invitation/rejoin. An old action never revives through membership ABA.
 
 Session-linked direct `POST /api/export/snapshots/:id/confirm` additionally accepts
 `{expectedAccessEpoch}`. The existing manifest read returns that epoch and session
 ID to authorized members. Completed direct retries still recover existing results;
-a prepared server-owned key is not a second raw capture entrance. Existing PR3
+a prepared server-owned key is not a second raw capture entrance. Existing published-contract
 direct callers remain compatible; the shipped controlled UI starts durable sessions.
 
 ## Durability, atomicity and recovery
@@ -124,7 +125,7 @@ and key are never returned in lists, links, audit or session UI. No product payl
 token or credential is written to localStorage/sessionStorage.
 
 Generation first commits an `executing` metadata marker with immutable first
-initiator/time, then calls PR3's existing capture coordinator on the same connection.
+initiator/time, then calls the existing capture coordinator on the same connection.
 Snapshot, exact artifacts, exposure/revisions, snapshot audit, attempt success,
 session result and generated audit commit in **one** capture transaction. The result
 hook does not commit independently. A deferred database constraint requires the
@@ -140,11 +141,11 @@ Lock order is:
 2. Exclusive session advisory lock **before BEGIN/RR**; fresh current session,
    membership epoch, revision and attempt checks. Creation instead uses an
    owner+creation-key transaction lock before INSERT/retry lookup.
-3. For capture: existing per-key transaction lock/second lookup → selection →
-   ascending products → ascending revisions/exposure → new-mode cursor → immutable
+3. Shared lifecycle activation gate before BEGIN/RR; preparation mode blocks generation/confirmation. For capture: existing per-key transaction lock/second lookup → selection →
+   ascending products → ascending full state → ascending price revisions/exposure → new-mode cursor → immutable
    snapshot/artifacts/audit/result links. Existing RR/fresh-winner rollback handling
    remains authoritative; an advisory wait never refreshes an old RR snapshot.
-4. For confirmation: same access/session prefix → snapshot → ascending revisions →
+4. For confirmation: same access/session prefix → snapshot → ascending full state → ascending price revisions →
    singleton cursor. Edit/join/revoke/leave/reconcile use the same session prefix and
    do not acquire product/cursor locks.
 
@@ -205,17 +206,11 @@ same Save / Discard / Stay prompt; failed/invalid/conflicting save blocks depart
 `beforeunload` remains a separate best-effort real-page-unload warning. Component
 tests of memory-router behavior do not establish browser prompt/keyboard acceptance.
 
-Local interpolation add/rename/remove uses existing literal/text/source/lookup
-expressions. Renaming explicitly updates references; removal stays disabled while
-the text references the slot. Safe names/duplicates and 16-slot bounds are checked
-in forms; existing server compilation enforces types/placeholders/depth/size. Shared
-bindings/tables keep their consumer warnings. Local copies preserve unrelated cells,
-sparse EN and no-op canonical hashes. Published versions remain immutable.
+Template authoring and interpolation rules belong to the [template editor guide](EXPORT_TEMPLATES.md#editable-output-columns); session sharing does not share an unsaved template draft.
 
-Verification counts, failing-before isolation evidence, exact files and remaining
-browser/catalog/Magento gates are recorded in [the PR4 report](EXPORT_TEMPLATES_PR4.md).
+Historical verification and browser/catalog/Magento acceptance records are in the [archive](archive/README.md).
 
-## UX-4 list and recovery read behavior
+## Lists and recovery reads
 
 Recent lists order by immutable creation time descending, then session ID
 descending, with a scope-bound microsecond cursor. Later edits, invitations and
@@ -228,7 +223,7 @@ Owned and accepted-shared list rows add `participantCount` (owner plus accepted)
 `lastRecordedActivityAt`. The last field is the greatest recorded session,
 membership, attempt, session-audit or confirmation timestamp; it is not a live
 activity estimate and reading does not update it. Snapshot metadata uses the
-same UX-3 presenter as `/api/export/history` and stored-result reads. Pending
+same snapshot metadata presenter as `/api/export/history` and stored-result reads. Pending
 invitations still expose only their original minimal fields. There is no second
 history endpoint/status model and no persisted display-status enum.
 
@@ -261,10 +256,9 @@ the visible/idle ten-second cadence and overlap guards. Principal lifetime and
 dirty navigation remain above the existing routes. Only allowed display values
 (file/search/readiness/language/page/widths and product-change notice) survive
 review remounts in principal-scoped memory; no private browser storage or retry
-token storage is introduced. See [UX-4 execution evidence](EXPORT_UX_REDESIGN_PLAN.md#25-ux-4-execution-record-and-ux-3-carry-over--2026-09-25)
-for the full disposable-PostgreSQL checks and pending operator visual acceptance.
+token storage is introduced. Historical execution and manual acceptance limits are recorded in the [UX plan](archive/ux/EXPORT_UX_REDESIGN_PLAN.md).
 
-## UX-5 permalink and review continuation (2026-09-26)
+## Permalinks and review continuation
 
 Once AuthGate resolves the current principal, `/exports/sessions/:sessionId`
 automatically performs the existing authorized detail GET. Loading, accessible
@@ -293,5 +287,5 @@ keep their existing guards. StrictMode replay does not discard handoff context.
 The same authorized history now includes current human actor labels and accessible
 session titles without widening visibility. Empty owned/shared/invitation lists
 have distinct instructions. No users, roles, invitation permissions or membership
-semantics changed. See the [post-UX-5 audit](EXPORT_UX_ACCEPTANCE_AUDIT_POST_UX5_2026-09-26.md)
+semantics changed. See the [post-UX-5 audit](archive/ux/EXPORT_UX_ACCEPTANCE_AUDIT_POST_UX5_2026-09-26.md)
 for real-browser checks and the still-pending second-account/200% acceptance.

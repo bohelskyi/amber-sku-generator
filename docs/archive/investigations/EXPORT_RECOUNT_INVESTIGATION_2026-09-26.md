@@ -1,3 +1,5 @@
+> Historical record. This document describes the state/planning at the time it was written. Current behavior is defined by current code/migrations and the [maintained domain guides](../../README.md). Dates, findings and acceptance limits below are historical evidence, not current deployment claims.
+
 # Зникнення виправленого сувеніра з експорту — 26.09.2026
 
 **CASE C: наявне задокументоване виключення обох записів при recount.**

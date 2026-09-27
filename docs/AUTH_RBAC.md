@@ -39,34 +39,34 @@ Permission keys are stable capabilities stored in `permissions` and mapped to ro
 
 | Area | Permission keys |
 | --- | --- |
-| Products/history | `products.view`, `products.decode`, `products.create`, `products.archive`, `products.recount`, `history.view` |
+| Products/history | `products.view`, `products.decode`, `products.create`, `products.archive`, `products.recount`, `products.price_change`, `history.view` |
 | Corrections | `corrections.view`, `corrections.create`, `corrections.price_override`, `corrections.claim`, `corrections.complete`, `corrections.reject`, `corrections.force_release` |
 | Repricing | `repricing.view`, `repricing.prepare`, `repricing.apply`, `repricing.rollback` |
-| Exports | `exports.view`, `exports.create` |
+| Exports | `exports.view`, `exports.create`, `exports.reconcile` |
 | Export template administration | `export_templates.view`, `export_templates.manage`, `export_templates.publish`, `export_templates.activate` |
 | Catalog/pricing | `catalog.view`, `catalog.manage`, `sku_schemas.publish`, `pricing.view`, `pricing.manage` |
 | Access administration | `users.manage`, `roles.manage` |
 | Audit | `audit.view` |
 
-`products.recount` authorizes both the existing direct recount apply and the separate direct in-place product price-change command, including `POST /api/product-price-change/preview` and `POST /api/product-price-change/apply`. The server enforces that permission independently of client visibility. `corrections.create` and `corrections.price_override` authorize the request-based correction workflow only and do not authorize either direct price-change endpoint.
+`products.recount` authorizes direct recount and the separate approved informational-edit command. Direct price preview/apply use `products.price_change`; request-based decisions use `corrections.create` and, for custom prices, `corrections.price_override`. See [price-change capabilities](#price-change-capabilities).
 
-Initial system-role mappings after migration `030`:
+Initial built-in mappings after migrations through `040`:
 
 | Role | Effective scope |
 | --- | --- |
-| Administrator | Every defined permission, including the explicitly Administrator-only `audit.view`. Full product, catalog, pricing, correction, repricing, export, user, role-management, and future audit-view access. |
+| Administrator | Every defined permission, including the explicitly Administrator-only `audit.view`. Full product, catalog, pricing, correction, repricing, export, user, role-management, and audit-view access. |
 | Manager | Initially product view/decode, history, correction view/create/price-override/reject, repricing view/prepare, pricing view, and export view. Its name, description, permissions, and status are Administrator-editable. |
 | Storekeeper | Initially product view/decode/create/archive/direct recount/direct in-place price change, history, correction view/create/claim/complete/reject, repricing view/prepare, and export view. Its name, description, permissions, and status are Administrator-editable. |
 
 The built-in Administrator role is permanent and immutable and automatically receives every permission inserted into `permissions`. It cannot be renamed, disabled, deleted, or permission-edited. Manager, Storekeeper, and custom roles retain immutable `role_key` and `is_system` identity fields but otherwise use the same editable lifecycle. Roles are never hard-deleted. `users.manage`, `roles.manage`, and `audit.view` are reserved to Administrator and database constraints reject mappings to any other role.
 
-The initial Manager role remains request-only for these operations: it has correction-request creation and price-override permissions but not `products.recount`, so the direct in-place price-change preview and apply remain denied. Adding the direct command does not broaden Manager access; an editable Manager or custom role receives it only when an Administrator explicitly grants `products.recount`.
+The initial Manager role remains request-only for these operations: it has correction-request creation and price-override permissions but not `products.price_change`, so direct in-place price preview/apply remain denied. Adding the direct command does not broaden Manager access; an editable Manager or custom role receives it only when an Administrator explicitly grants `products.price_change`.
 
 The permission-aware client uses only the effective keys from `/api/auth/me`, never role-name checks, to hide unavailable controls. Manager pricing uses the published product catalog projection to select a category and the category pricing endpoint to render matrices/modifiers read-only; this does not grant `catalog.view`.
 
-Migration `035` adds the four export-template capabilities through the existing protected Administrator propagation trigger. Manager, Storekeeper and custom roles receive no incidental grants. These capabilities are delegable through ordinary role administration; they are not reserved permissions and do not require `users.manage`. Template definition/source reads use `view`; draft create/save/from-version/validate use `manage`; draft test-preview requires both `manage` and `exports.view`; publication uses `publish`; selection metadata changes use `activate`. Every template mutation uses `runAccessAdminMutation` with its specific capability, including the access advisory lock and post-lock active-user/permission recheck. See [the export-template API contract](EXPORTS.md#export-template-administration-pr2).
+Migration `035` defines the four export-template capabilities through the existing protected Administrator propagation trigger. Manager, Storekeeper and custom roles receive no incidental grants. These capabilities are delegable through ordinary role administration; they are not reserved permissions and do not require `users.manage`. Template definition/source reads use `view`; draft create/save/from-version/validate use `manage`; draft test-preview requires both `manage` and `exports.view`; publication uses `publish`; selection metadata changes use `activate`. Every template mutation uses `runAccessAdminMutation` with its specific capability, including the access advisory lock and post-lock active-user/permission recheck. See [the export-template API contract](EXPORT_TEMPLATES.md#administrative-api).
 
-PR3 published export preview uses `exports.view`; snapshot create and confirmation
+Published export preview uses `exports.view`; snapshot create and confirmation
 use `exports.create`. Ordinary active-version export does not require template
 view/manage/publish/activate. A new explicit non-active version additionally
 requires `export_templates.activate`; a currently active explicit version uses
@@ -78,7 +78,7 @@ before beginning RR and rechecks the actor; access mutations retain exclusive
 locking, so a prior revocation cannot be hidden by an old transaction snapshot.
 Stored download/confirmation has no template permission or compiler dependency.
 
-PR4 adds `/admin/export-templates` with a `view` mount/navigation gate and separate
+The client provides `/admin/export-templates` with a `view` mount/navigation gate and separate
 controls for each effective template capability. `GET /api/admin/export-templates/candidate`
 requires both `view` and `manage`; it captures actual catalog rules read-only.
 `GET /api/export/template-options` uses `exports.view` and returns only safe selected
@@ -86,8 +86,7 @@ publication identity. Other publication identities require `export_templates.act
 the endpoint never exposes definitions or administrative sources. `/exports` works
 without `products.view` or administrative permissions. View-only exporters can
 preview; create/confirm/manual-name mutations require `exports.create`. These are
-presentation checks backed by the existing authoritative server boundaries; no
-permissions were granted or broadened by PR4. See [PR4](EXPORT_TEMPLATES_PR4.md).
+presentation checks backed by the existing authoritative server boundaries; capabilities remain independently delegable. See [export templates](EXPORT_TEMPLATES.md).
 
 ## First-Administrator bootstrap
 
@@ -128,3 +127,7 @@ audit coverage is described here for access administration and in the domain gui
 ## Price-change capabilities
 
 `products.price_change` authorizes direct in-place price preview and apply independently from `products.recount`. Migration 032 grants it to every editable role that had direct recount at upgrade time, preserving Storekeeper and custom-role behavior; Administrator receives it through the protected permission-catalog trigger. `corrections.create` authorizes recount and price-change requests, while `corrections.price_override` controls Manual UAH and USD/gram decisions in either request type. UI and server behavior use effective permission keys only and never role names.
+
+## Lifecycle reconciliation capability
+
+Migration `039` adds `exports.reconcile`. The protected permission trigger initially grants it only to Administrator; it is delegable to editable roles and is not an Administrator-reserved key. Cutover mutations, status and reconciliation commands revalidate the active local actor and this capability inside their access/transaction boundary. Manifest generation and evidence review are read-only CLI tooling requiring database access; the CLI requires an actor ID, but those read paths do not perform the mutation capability recheck. There is no reconciliation HTTP route or general hold-release UI. See [exports](EXPORTS.md#reconciliation-and-exclusion-provenance) and the [operator runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md).

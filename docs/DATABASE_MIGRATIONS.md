@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations `000`–`039` are immutable history; Phase 3B adds forward migration `040`. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Accepted checked-in migrations `000`–`040` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -100,16 +100,16 @@ New paths touching these resources must follow existing lock order and final-sta
 
 Export-template mutations take the existing access-admin advisory lock and recheck the actor's specific capability before locking family then draft. Publication allocates a per-family version number under those locks and inserts attribution and audit atomically. The unique family/source-revision tuple supports completed retries even after the draft advances. Draft base-version ownership uses a composite foreign key; historical source revision is not a foreign key to the mutable draft revision. Selection writers lock the singleton after the access boundary and only read immutable versions; they never lock products, revisions or cursors.
 
-Publication UPDATE/DELETE/TRUNCATE is rejected by database triggers, including definition, constants, metadata and actor/time. Family identities and draft/selection rows are permanent, with monotonic revision/generation guards. Normal application writes cannot remove this evidence. Privileged integration teardown drops/recreates the disposable schema; it never disables these guards. Definition JSONB has a 512 KiB storage-text backstop (JSONB adds whitespace); the service enforces the stricter PR1B 256 KiB serialized-JSON limit and structural safety before writes.
+Publication UPDATE/DELETE/TRUNCATE is rejected by database triggers, including definition, constants, metadata and actor/time. Family identities and draft/selection rows are permanent, with monotonic revision/generation guards. Normal application writes cannot remove this evidence. Privileged integration teardown drops/recreates the disposable schema; it never disables these guards. Definition JSONB has a 512 KiB storage-text backstop (JSONB adds whitespace); the service enforces the stricter 256 KiB serialized-JSON limit and structural safety before writes.
 
-## Test database safety
+## Snapshot and session schema boundaries
 
 Controlled shared sessions add a pre-transaction session advisory lock after the
 shared access boundary. All membership/configuration/generation/confirmation commands
 use this order; the existing product → revision → cursor and snapshot-confirmation
 order remain intact. See [session locking and recovery](SHARED_EXPORT_SESSIONS.md).
 
-PR3 treats every migration through 035 as immutable. Snapshot additions are
+Migration 036 snapshot additions are
 `request_contract` (mechanical `legacy` default), `template_id`,
 `template_version_id`, `template_definition_hash`, `template_evaluator_version`,
 `template_output_contract`, `template_format_version`, `request_intent`,
@@ -121,21 +121,23 @@ to one immutable publication. The existing payload trigger rejects changing or
 attaching any of this evidence after INSERT. Normal confirmation remains valid.
 The artifact `profile_version` is still the output contract, not template identity.
 
-All Phase 1 captures use RR with the existing access/session boundary, per-key
+All modern full-product captures use RR with the existing access/session boundary, per-key
 transaction coordination, template selection when applicable, ascending products,
 ascending full-product state, ascending price revisions, then new-mode cursor.
 Recovery uses a fresh committed lookup only after rollback;
-an advisory wait never refreshes RR. See [the complete export contract](EXPORTS.md#published-export-snapshots-pr3).
+an advisory wait never refreshes RR. See [the complete export contract](EXPORTS.md#preview-idempotency-and-concurrency).
+
+## Test database safety
 
 PostgreSQL integration tests destroy/recreate their target `public` schema and create/drop temporary databases. The harness deliberately refuses a primary database name not ending in `_test`. Never run it against production, staging, or a developer database containing useful data.
 
-## Phase 1 lifecycle schema — migration 039
+## Full-product lifecycle — migration 039
 
-`product_full_export_state` has one permanent, delete-restricted product row. Positive BIGINT `revision`/`delivery_version` and bounded `confirmed_revision` never regress. Identity, creation time and originating correction are immutable. Route/hold consistency is checked, and changing routing/evidence/resolution fields requires increasing delivery version. Correction and resolution keys have partial unique indexes; pending normal/replacement and hold lookups have partial indexes. Evidence must be a JSON object, optional repair hash must be lowercase SHA-256, and resolver actor/time must both be present or both absent. Resolution columns are a forward contract, not a repair implementation.
+`product_full_export_state` has one permanent, delete-restricted product row. Positive BIGINT `revision`/`delivery_version` and bounded `confirmed_revision` never regress. Identity, creation time and originating correction are immutable. Route/hold consistency is checked, and changing routing/evidence/resolution fields requires increasing delivery version. Correction and resolution keys have partial unique indexes; pending normal/replacement and hold lookups have partial indexes. Evidence must be a JSON object, optional repair hash must be lowercase SHA-256, and resolver actor/time must both be present or both absent. Runtime cutover/reconciliation commands use these resolution fields with immutable audit evidence.
 
-The migration initializes every existing row with revision 1/confirmed 0. Corrected, archived or linked-to-successor rows are `retired`; other rows are `hold/historical_ambiguity` with unresolved migration-origin evidence. It does not infer export eligibility from cursor, price revisions or absent snapshots, clear exclusions, index historical membership, fabricate actors/audits or perform Phase 3 repair. A deferred constraint trigger rejects a newly inserted product without lifecycle state at commit. Product/SKU/audit writes and lifecycle initialization therefore share one runtime transaction.
+The migration initializes every existing row with revision 1/confirmed 0. Corrected, archived or linked-to-successor rows are `retired`; other rows are `hold/historical_ambiguity` with unresolved migration-origin evidence. It does not infer export eligibility from cursor, price revisions or absent snapshots, clear exclusions, index historical membership, fabricate actors/audits or perform historical repair. A deferred constraint trigger rejects a newly inserted product without lifecycle state at commit. Product/SKU/audit writes and lifecycle initialization therefore share one runtime transaction.
 
-`export_snapshot_products` has a `(snapshot_id, product_id)` primary key and `(product_id, snapshot_id)` index, with delete-restricted FKs. Full captures require positive full/delivery counters and live origin; compatibility evidence requires null counters. Exact SKU, capture/origin codes, SHA-256 evidence hash and actual recording time are permanent. Triggers reject UPDATE, DELETE and TRUNCATE. Deferred checks require lifecycle snapshot membership count to match represented product count and qualifying artifact product totals. The service additionally validates exact CSV membership/SKUs before INSERT. Historical NULL-version snapshots can later receive only verified compatibility sidecars; Phase 1 provides no historical writer.
+`export_snapshot_products` has a `(snapshot_id, product_id)` primary key and `(product_id, snapshot_id)` index, with delete-restricted FKs. Full captures require positive full/delivery counters and live origin; compatibility evidence requires null counters. Exact SKU, capture/origin codes, SHA-256 evidence hash and actual recording time are permanent. Triggers reject UPDATE, DELETE and TRUNCATE. Deferred checks require lifecycle snapshot membership count to match represented product count and qualifying artifact product totals. The service additionally validates exact CSV membership/SKUs before INSERT. Historical NULL-version snapshots can later receive only verified compatibility sidecars; the explicit historical indexing command supplies those verified sidecars without changing old artifacts.
 
 The other additions are server-owned `products.magento_name_review_required` (false by default), nullable immutable snapshot lifecycle version (current value 1), and `exports.reconcile`. The existing permission trigger grants only Administrator initially; the ordinary editable-role mechanism can delegate it.
 
@@ -143,9 +145,10 @@ Recount locks source product → existing SKU/sequence/reservation resources →
 
 Fresh schema, checkpoint 038, repeated checksum verification and injected 039 failure rollback are covered by `02-full-product-lifecycle-migration.cases.js`; historical checksums, exclusions and immutable snapshot bytes remain unchanged. Runtime save, rollback and membership immutability are also covered in `11-full-product-lifecycle.cases.js`. These checks use only disposable databases on the canonical PostgreSQL 16 test service, including the temporary upgrade database ending in `_test`.
 
-**Do not deploy Phase 1 independently.** The ledger is not yet the production selection authority. The operator release blocker remains, and final rollout must prevent mixed old/new writers against activated lifecycle semantics.
+## Cutover and activation — migration 040
 
-Migration 040 is the forward cutover contract; 039 remains immutable. Follow the
-[canonical production order and schema details](FULL_PRODUCT_CUTOVER_RUNBOOK.md).
-Current deployment requires both the gate-aware application and actor-approved
-cutover commands; migration alone does not enable the selector.
+Migration 040 adds the distinct one-time `cutover_baseline_revision`/audit reference, typed `business_exclusion_state`, separate `recount_compatibility_excluded`, immutable snapshot selection and replacement binding. The pending index compares revision with `greatest(confirmed_revision, cutover_baseline_revision)`. Baseline acceptance never fabricates captured confirmation.
+
+`full_product_export_activation` starts in `legacy`, selector version 0, required writer contract 1. Monotonic generation, phase/event constraints and immutable audit receipts govern `legacy → preparing → active`; active cannot return to legacy. Deferred checks enforce baseline-event identity, exclusion projection and inactive-product retirement. Statement guards fence unaware writers after preparation; application transactions acquire the gate before BEGIN to avoid stale repeatable-read snapshots after waiting.
+
+The migration itself performs no baseline acceptance, successor release, historical indexing or activation. Deploy both the gate-aware application and the schema, then follow the [canonical cutover runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md). Old/new mixed writers are unsupported; ordinary future deployments and one-time production cutover are distinct operations. Production activation remains pending.

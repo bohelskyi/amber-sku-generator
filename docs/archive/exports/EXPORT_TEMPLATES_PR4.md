@@ -1,3 +1,5 @@
+> Historical record. This document describes the state/planning at the time it was written. Current behavior is defined by current code/migrations and the [maintained domain guides](../../README.md). Dates, findings and acceptance limits below are historical evidence, not current deployment claims.
+
 # PR4: form editor and controlled published export
 
 ## Shared-session execution checklist (recorded before implementation, 2026-09-23)
@@ -47,7 +49,7 @@ This is the current implementation result. The earlier implementation/acceptance
 records below are retained as historical evidence; their statements about unsafe
 principal transitions, unsupported local slots, missing SPA protection and no
 durable recovery describe the **pre-correction** checkout. They are superseded
-by this section and [the current shared-session guide](SHARED_EXPORT_SESSIONS.md).
+by this section and [the current shared-session guide](../../SHARED_EXPORT_SESSIONS.md).
 Browser/business/Magento acceptance remains separate and is not claimed here.
 
 ### Checkpoint A: principal isolation
@@ -93,7 +95,7 @@ and narrow rendering have not been visually verified.
 
 ### Checkpoints C/D: durable operations and explicit sharing
 
-Forward migration [037_shared_export_sessions.sql](../server/migrations/037_shared_export_sessions.sql)
+Forward migration [037_shared_export_sessions.sql](../../../server/migrations/037_shared_export_sessions.sql)
 adds sessions, epoch-versioned invitations/membership, immutable attempt evidence and
 atomic snapshot association. No historical snapshot ownership is invented. Every
 new controlled operation in the shipped UI starts with private durable metadata.
@@ -570,9 +572,9 @@ hash; it does not regenerate bindings. Independently, there is no form action to
 declare a new interpolation slot or a new named binding. Stable IDs are not
 evidence that arbitrary new compositions can be constructed.
 
-Evidence below uses the actual [DefinitionEditor](../client/src/components/export-templates/DefinitionEditor.jsx),
-[structural model](../client/src/lib/export-template-editor.js) and
-[rendered tests](../client/test/export-template-ui.test.jsx).
+Evidence below uses the actual [DefinitionEditor](../../../client/src/components/export-templates/DefinitionEditor.jsx),
+[structural model](../../../client/src/lib/export-template-editor.js) and
+[rendered tests](../../../client/test/export-template-ui.test.jsx).
 Tests use the server baseline factory with synthetic catalog fixtures; network
 adapters are mocked. Pure server compilation/evaluation in a test is explicitly
 not evaluation in the production browser and not a new persisted integration run.
@@ -603,13 +605,13 @@ It was deliberately not implemented in this closeout.
 
 ### Recovery: retained evidence and actual available paths
 
-Code: [controller](../client/src/hooks/product/useProductExportController.js),
-[provider](../client/src/hooks/product/export-workflow-context.jsx),
-[router](../client/src/router.jsx), [AuthProvider](../client/src/auth/AuthProvider.jsx),
-[AuthGate](../client/src/auth/AuthGate.jsx), [API adapter](../client/src/api/exports-api.js),
-[export routes](../server/src/routes/public/exports.routes.js),
-[snapshot service](../server/src/services/export.service.js),
-[binding contract](../server/src/services/export-templates/snapshot-binding.js).
+Code: [controller](../../../client/src/hooks/product/useProductExportController.js),
+[provider](../../../client/src/hooks/product/export-workflow-context.jsx),
+[router](../../../client/src/router.jsx), [AuthProvider](../../../client/src/auth/AuthProvider.jsx),
+[AuthGate](../../../client/src/auth/AuthGate.jsx), [API adapter](../../../client/src/api/exports-api.js),
+[export routes](../../../server/src/routes/public/exports.routes.js),
+[snapshot service](../../../server/src/services/export.service.js),
+[binding contract](../../../server/src/services/export-templates/snapshot-binding.js).
 
 | Evidence | Internal route navigation, same mounted provider | Reload/close or successful logout followed by login | Server after a committed create |
 | --- | --- | --- | --- |
@@ -683,7 +685,7 @@ of authenticated application-user identity and invalidate old responses, while
 preserving same-user internal navigation. Unknown-result reconciliation remains
 necessary for the abandoned operation. Production code was not changed to hide it.
 
-Recovery test evidence is in [controlled-template-export.test.jsx](../client/test/controlled-template-export.test.jsx):
+Recovery test evidence is in [controlled-template-export.test.jsx](../../../client/test/controlled-template-export.test.jsx):
 existing mounted-route navigation, ambiguous failure/same-key/double-click/expiry
 and stored-download/confirmation tests; two new full unmount/remount cases
 (uncertain versus known result); two successful logout/late-response cases
@@ -1463,7 +1465,7 @@ membership and all groups/bindings/tables/names/labels/readiness rules remain ex
 Closed semantic/deferred lists and the NM-only `numeric-zero-v1` policy are hashed,
 compiled and JSONB-stable. Old definitions retain evaluator 1 and original behavior.
 No migration, default mapping, dependency or production configuration change.
-See [the explicit contract](EXPORTS.md#opt-in-historical-source-support--2026-09-24).
+See [the explicit contract](../../EXPORT_TEMPLATES.md#historical-source-support).
 
 The pure support checker runs at consumed source reads, including custom raw cells,
 lookups, refs, renamed descriptors and condition/readiness paths. It reuses the

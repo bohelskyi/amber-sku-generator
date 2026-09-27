@@ -26,4 +26,4 @@ npm run build
 
 `npm test` runs the Node-based pure behavior tests followed by the jsdom/Vitest rendered component and workflow tests. `npm run test:coverage` reports both layers without enforcing a percentage threshold. The production build is emitted to `dist/` and served by nginx in the checked-in container topology.
 
-See the root [`PROJECT_CONTEXT.md`](../PROJECT_CONTEXT.md), [`README.md`](../README.md), and domain documents under [`docs/`](../docs/) for architecture, permissions, deployment, and business invariants.
+See the root [project context](../PROJECT_CONTEXT.md), [quickstart](../README.md), and [documentation index](../docs/README.md) for architecture, permissions, deployment, and business invariants.

@@ -1,3 +1,5 @@
+> Historical record. This document describes the state/planning at the time it was written. Current behavior is defined by current code/migrations and the [maintained domain guides](../../README.md). Dates, findings and acceptance limits below are historical evidence, not current deployment claims.
+
 # Comprehensive refactoring audit and phased plan
 
 > **Historical record — non-authoritative.** This audit began on 2026-09-11 and the 2026 codebase refactor has since been completed and merged. Branch names, test counts, file sizes, open questions, phase instructions, and proposed next steps below describe their original checkpoints, not current work. Current server code, PostgreSQL migrations, and the [maintained documentation](../README.md) take precedence. The original measurements and later completion evidence are preserved without rewriting their results.

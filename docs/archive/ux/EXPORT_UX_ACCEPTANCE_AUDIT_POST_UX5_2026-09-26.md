@@ -1,9 +1,11 @@
+> Historical record. This document describes the state/planning at the time it was written. Current behavior is defined by current code/migrations and the [maintained domain guides](../../README.md). Dates, findings and acceptance limits below are historical evidence, not current deployment claims.
+
 # Повторний браузерний аудит експорту після UX-5 — 26.09.2026
 
 ## Висновок і межа приймання
 
 **Оновлення після фінальної операторської перевірки:** приймання зупинено через
-[recount/exclusion blocker](EXPORT_RECOUNT_INVESTIGATION_2026-09-26.md).
+[recount/exclusion blocker](../investigations/EXPORT_RECOUNT_INVESTIGATION_2026-09-26.md).
 Попередні результати нижче є історичними: перевірене in-place збереження назви
 не охоплювало recount зі створенням нового SKU та виключенням наступника.
 

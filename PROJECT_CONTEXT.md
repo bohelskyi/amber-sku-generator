@@ -1,92 +1,52 @@
 # Amber SKU Manager: project context
 
-## Purpose
+Amber SKU Manager is an internal application for catalog configuration, authoritative SKU and price generation, inventory history, recount/corrections, controlled repricing, and immutable product and price CSV exports. Start here, then use the [documentation index](docs/README.md) for each maintained domain contract. Code and migrations define implementation; deployment and external-system facts require operational evidence.
 
-Amber SKU Manager is an internal application for defining amber-product classifications, generating authoritative SKUs and prices, saving and decoding inventory records, recounting/correcting products, controlled mass repricing, and immutable CSV exports.
+## Architecture
 
-This is a branch-independent overview. Current code and PostgreSQL migrations are authoritative for implemented behavior; deployed configuration and data determine environment-specific facts. The maintained guides are listed in the [documentation index](docs/README.md).
+- React 19/Vite presents workflows and effective permissions. It is not a business or security authority.
+- Node 20/CommonJS Express 5 owns authentication, authorization, validation, SKU allocation, pricing, workflow transactions and CSV capture.
+- PostgreSQL 16 stores catalog configuration, immutable SKU schemas, permanently reserved identifiers, products, sessions/RBAC, audit events, workflow state and immutable export evidence.
+- Docker Compose runs PostgreSQL, the server and an nginx client serving the SPA and proxying `/api/`. Startup verifies/applies migrations before catalog compatibility initialization and listening; preparation mode skips seed/schema writes.
 
-## Current architecture
+Server-owned OIDC Authorization Code with PKCE resolves immutable `issuer` + `sub` links to local application users. Opaque PostgreSQL sessions, active-user checks, current effective permissions and synchronizer-token CSRF protect business routes. Administrator is immutable; Manager, Storekeeper and custom roles are editable. Actor fields use local user IDs. See [authentication and RBAC](docs/AUTH_RBAC.md).
 
-The application is a three-tier system:
+## Business domains
 
-1. React 19/Vite single-page client calling JSON and CSV endpoints under `/api`.
-2. Node 20/CommonJS Express 5 server owning all authentication boundaries and business decisions.
-3. PostgreSQL 16 storing catalog configuration, immutable SKU schemas, products, sessions/RBAC, durable audit events, workflows, exchange-rate cache data, and export snapshots.
+| Domain | Current behavior and authoritative guide |
+| --- | --- |
+| [SKU and catalog](docs/SKU_CATALOG.md) | Server preview/save/decode, immutable published schema versions, semantic option IDs, permanent SKU reservation and distinct calibration states `0`, `1`, `2`. |
+| [Pricing](docs/PRICING.md) | Positive-or-absent matrices, scenario/modifier rules, exchange-rate evidence, separate calculated/automatic/manual values and legacy zero-price compatibility. |
+| [Recount and corrections](docs/RECOUNT_CORRECTIONS.md) | Target-schema validation, source retirement, successor identity/delivery routing, inherited UA/EN names/review, direct/request parity and local-user claims. Narrow information and price changes preserve identity. |
+| [Repricing](docs/REPRICING.md) | Scenario/global drafts, reviewed authoritative previews, atomic apply and exact-state rollback. |
+| [Exports](docs/EXPORTS.md) | Immutable snapshots/artifacts, exact membership, revision acknowledgment, New/Update/Replacement/Held selection after activation, and a separate `sku,price` stream. Confirmation is local acknowledgment, not proof of Magento import. |
+| [Export templates](docs/EXPORT_TEMPLATES.md) | Revisioned drafts, immutable publications, editable columns, source validation and signed published-preview binding. Explicit `template-v1` requests use publications; omitted discriminator uses the system mapper. No automatic template seeding/publication. |
+| [Shared export sessions](docs/SHARED_EXPORT_SESSIONS.md) | Durable private/shared template workspaces, explicit local-user invitations, membership epochs and recovery of the original attempt/result after reload. Invitations grant no global permissions. |
 
-In Docker, nginx serves the client, provides SPA fallback, and proxies `/api/` to the server. Startup runs migrations, seeds only an empty catalog, captures missing legacy V1 schemas, and begins listening only after those phases complete. The client is never a trust boundary.
+Business mutations preserve their transaction, lock-order, stale-evidence, idempotency and audit boundaries. Historical plans are not current behavior contracts.
 
-## Authentication and RBAC state
+## Implementation and deployment status
 
-Server-owned OIDC Authorization Code flow with PKCE, state, and nonce is implemented; the example deployment uses Keycloak. Sessions are opaque, PostgreSQL-backed, fixed/non-rolling, and exposed through a host-only `HttpOnly` `amber.sid` cookie. OIDC tokens and the client secret remain server-side.
+The repository includes migrations **000–040** and the full-product lifecycle/cutover implementation through **Phase 3B / Phase 4**: lifecycle state, exact membership, recount/request parity, information/name revisions, historical indexing, manifest approval, bounded batches, activation gate, typed exclusions, reconciliation and lifecycle queues.
 
-Local application users and exact immutable `issuer` + `sub` identity links are implemented. Users move through `pending`, `active`, and `disabled` states. Every business request resolves current local status, roles, and permissions from PostgreSQL, so disablement and role revocation affect existing sessions immediately.
+**Production cutover has not been performed**, as reported for this documentation handoff. Installing migrations alone does not activate selection. The one-time transition requires maintenance/freeze, draining old writers, fresh production indexing and post-index cutover manifests, explicit approval, batches, validation and activation. Later reconciliations/attestations remain separate operator decisions. Follow the [cutover runbook](docs/FULL_PRODUCT_CUTOVER_RUNBOOK.md).
 
-Stable capability keys guard every business endpoint after authentication, active-user resolution, and method-aware CSRF enforcement. `/api/auth/me` returns safe identity/user data, roles, effective permission keys, and the in-memory synchronizer CSRF token. React navigation and controls use only those effective keys; server-side `403` enforcement remains authoritative.
+A fresh local rehearsal restored from the current production backup completed through activation with 4,978 products. Its reported counts and limits are recorded as **rehearsal evidence** in the runbook; they are not production expectations. Historical duplicate-SKU/data-quality cases remain separate unresolved work. This documentation task did not connect to production or execute a cutover.
 
-The three system roles are Administrator, Manager, and Storekeeper. Administrator is permanent, immutable, and always receives every defined permission. Manager and Storekeeper retain their initial mappings but are editable through role administration like custom roles. `users.manage`, `roles.manage`, and `audit.view` are reserved to Administrator. Exactly one current role may be assigned to each user.
-
-Administrators can create and edit custom roles, edit Manager and Storekeeper, assign any active role, and approve, disable, or re-enable users while retaining assignment history. Role and user mutations share one advisory-lock boundary, optimistic role/assignment conflict detection, last-Administrator protection, and transaction-coupled durable audit. Product, correction, repricing, export, and schema-publication records retain the applicable nullable local-user actor foreign keys. Correction requests record their creator and use local application-user ownership plus a monotonic claim epoch; retained browser capability tokens authorize only one-time adoption of legacy token-only claims. The one-use offline first-Administrator bootstrap and Administrator-only global audit viewer are implemented. Account-onboarding invitations remain pending.
-
-See [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) for the complete boundary and permission model.
-
-## Repository map
+## Repository and verification
 
 | Path | Responsibility |
 | --- | --- |
-| `server/server.js` | Startup ordering, listener, signals, graceful shutdown. |
-| `server/src/app.js` | Express middleware/routes, health, request IDs, structured logging, errors. |
-| `server/src/auth/`, `server/src/routes/auth.routes.js` | OIDC, sessions, local-user resolution, access/permission/CSRF middleware, auth endpoints. |
-| `server/src/audit/` | Local-user mutation context and transaction-scoped durable audit writer. |
-| `server/src/routes/public.routes.js`, `server/src/routes/public/` | Aggregator and domain routers for authenticated product, recount, history, and export APIs; the historical name does not mean unauthenticated. |
-| `server/src/routes/admin.routes.js`, `server/src/routes/admin/` | Aggregator and domain routers for catalog, pricing, corrections, repricing, audit, and access administration. |
-| `server/src/services/`, `server/src/presenters/` | Authoritative domain services, extracted domain modules, and response/CSV presenters. |
-| `server/src/db/`, `server/migrations/` | Pool, startup seed compatibility, migration runner, ordered schema history. |
-| `server/src/utils/` | SKU/rule/pricing helpers, numeric parsing, CSV safety, HTTP/logging utilities. |
-| `server/data_config.js` | Defaults for an empty catalog only; not deployed live configuration after seeding. |
-| `server/test/` | Server unit tests. |
-| `server/integration-test/` | One serialized destructive PostgreSQL entrypoint, ordered domain case modules, shared fixtures, API/migration/upgrade coverage, and real concurrency tests. |
-| `server/scripts/` | Administrator bootstrap, integrity audit, optional SQLite configuration import. |
-| `client/src/auth/` | Memory-only authentication state and AuthGate. |
-| `client/src/hooks/`, `client/src/lib/` | Client orchestration and testable presentation rules. |
-| `client/src/components/`, `client/src/pages/` | React UI. |
-| `client/test/` | Client behavior and regression tests. |
-| `scripts/postgres-*.sh` | Verified backup and explicit transactional restore. |
-| `docker-compose*.yml`, `*/Dockerfile`, `client/nginx.conf` | Runtime and image wiring. |
-| `.github/workflows/ci.yml` | Node 20/PostgreSQL 16 CI. |
+| `server/server.js`, `server/src/app.js` | Startup, middleware, health, request logging and graceful shutdown. |
+| `server/src/auth/`, `server/src/audit/` | Authentication/access boundaries and transaction-coupled audit. |
+| `server/src/routes/public/`, `server/src/routes/admin/` | Authenticated domain APIs; the historical name `public` does not mean unauthenticated. |
+| `server/src/services/`, `server/src/utils/`, `server/src/presenters/` | Authoritative domain logic, helpers and response/CSV presentation. |
+| `server/src/db/`, `server/migrations/` | Pool, migration runner and startup compatibility. |
+| `server/scripts/`, `scripts/` | Offline administration, cutover/evidence commands, integrity audit, optional configuration import and backup/restore. |
+| `client/src/` | AuthGate, permission-aware pages, workflow controllers and presentation. |
+| `server/test/`, `server/integration-test/`, `client/test/` | Unit, serialized destructive PostgreSQL and client/rendered regressions. |
+| `docker-compose*.yml`, `*/Dockerfile`, `.github/workflows/` | Runtime/container wiring and CI. |
 
-## Current behavior
+Use the [root quickstart](README.md), [engineering requirements](AGENTS.md), [migration guide](docs/DATABASE_MIGRATIONS.md) and [operations](docs/OPERATIONS.md). CI uses Node 20/PostgreSQL 16 and checks Compose, server lint/unit/integration, and client tests/lint/build. Windows integration tests use only the canonical disposable `postgres-test`; failure is not permission to try another database.
 
-Authoritative product preview/save/decode, catalog schema versioning, pricing, recount/corrections, narrow in-place informational and price changes, scenario/global repricing, immutable Magento product/price export snapshots, and the Administrator-only audit viewer are implemented. Recount requires a parameter/configuration change and creates correction lineage; informational completion preserves product ID, SKU, price, and schema while auditing old/new answers; price changes preserve product ID, SKU, answers, and schema and support direct permission-driven apply or the existing correction-request lifecycle. Automatic, Manual UAH with optional rounding, and USD/gram modes share authoritative preview/completion semantics. Successful in-place price changes advance an exposure-aware coalescing revision for the dedicated `sku,price` stream; informational changes do not. Normal full-product exports remain separate and the monotonic product cursor never rewinds. Pending price requests mutate neither products nor export state. Product history includes grouped request/price audit events plus a timeline and a `configurationEvolution` projection that never fabricates configuration changes for price requests. See the [recount and corrections guide](docs/RECOUNT_CORRECTIONS.md) and [exports guide](docs/EXPORTS.md).
-
-Server-side authorization and CSRF remain authoritative. `APP_ACCESS_PENDING` and `APP_ACCESS_DISABLED` move the client to the matching AuthGate state; `INSUFFICIENT_PERMISSION` preserves the active session. Durable transaction-coupled audit events cover access administration, catalog/pricing changes, products, correction requests, repricing, exports, and SKU schema publication. Account-onboarding invitations remain unimplemented. Explicit invitations to durable controlled export sessions are implemented separately; they grant no global permissions. See [authentication and RBAC](docs/AUTH_RBAC.md) and [shared export sessions](docs/SHARED_EXPORT_SESSIONS.md).
-
-The completed refactor and its measured performance evidence are [historical records](docs/archive/REFACTOR_2026.md). Live catalog contents and production data quality require operational verification.
-
-Magento souvenir names can use audited, in-place UA/EN manual subjects when an approved semantic name is unavailable. An optional server-only Google Cloud Translation API v2 Basic key provides an editable EN suggestion; export reads only saved subjects. See [exports](docs/EXPORTS.md).
-
-Export-template PR2 adds administrative persistence, revisioned drafts, immutable publications, source-reference validation, read-only draft test-preview, four delegable capabilities and transactional audit. PR3 adds an opt-in `requestContract: "template-v1"` published preview and signed, version-bound snapshot capture using the existing snapshot/artifact store. Omitted discriminators still use the established mapper, regardless of selection metadata; dedicated price exports are unchanged. No template is seeded or automatically published/selected. PR4 adds the form editor, local interpolation composition, principal isolation, dirty navigation protection, and explicit durable private/shared controlled sessions with recoverable attempts (migration 037). Operational acceptance and rollout remain separate. See the [PR4 implementation record](docs/EXPORT_TEMPLATES_PR4.md), [shared-session guide](docs/SHARED_EXPORT_SESSIONS.md), [implemented API contract](docs/EXPORTS.md#published-export-snapshots-pr3) and [plan history](docs/EXPORT_TEMPLATES_V1_PLAN.md).
-
-## Testing and operations summary
-
-CI validates Compose, runs scoped server static checks, server unit tests with non-blocking coverage visibility, the serialized destructive PostgreSQL integration suite, client tests with non-blocking coverage visibility, client lint, and the production client build. The container smoke workflow also supports manual execution and runs weekly to detect mutable base-image compatibility drift. Integration tests refuse a database name that does not end in `_test`; use only a disposable database.
-
-The checked-in Compose setup is a development/single-host baseline, not a complete hardened infrastructure design. PostgreSQL is host-exposed by the base Compose file, secrets come from ignored environment configuration, and backup scheduling/retention/encryption/off-host monitoring remain external responsibilities. See [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
-
-### Approved Phase 3B + gated Phase 4 implementation — 2026-09-27
-
-Migration 040 adds explicit cutover baseline, typed exclusion policy, immutable
-capture selection and the durable activation gate. `confirmed_revision` remains
-actual captured/local confirmation; accepting 2,193 ordinary legacy rows instead
-sets baseline revision 1. Preserve the other 84 obligations: 44 normal first
-deliveries, 40 generated-only holds. All 997 historical successor exclusions stay
-set through selector activation and require individual reviewed release.
-
-Canonical procedure: **039 → 040 → preparing → fresh indexing manifest → historical
-indexing → fresh post-index cutover manifest → bounded batches → final validation
-→ selector activation**. Freeze through activation and drain all old writers.
-The new selector and queues are inactive until the gate switches. No useful
-database migration, repair, approval or activation was performed. The restored
-038 rehearsal used only the canonical disposable `_test` environment. See
-[the operator runbook](docs/FULL_PRODUCT_CUTOVER_RUNBOOK.md) for exact commands,
-retries, explicit amendments, operator attestations and rollback boundaries.
+Current deferrals and pending acceptance are listed in the [index](docs/README.md#deferred-work-and-operationally-pending-items). Completed plans, investigations and audits live in the [archive](docs/archive/README.md).

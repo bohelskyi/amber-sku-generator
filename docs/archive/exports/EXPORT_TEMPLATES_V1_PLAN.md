@@ -1,3 +1,5 @@
+> Historical record. This document describes the state/planning at the time it was written. Current behavior is defined by current code/migrations and the [maintained domain guides](../../README.md). Dates, findings and acceptance limits below are historical evidence, not current deployment claims.
+
 # Configurable Export Templates v1
 
 Status: **Proposed — Phase 0 design; not implemented.**
@@ -1201,7 +1203,7 @@ complete.** The active exporter is unchanged.
 ### Delivered contract and compatibility
 
 Three new test files, reusable synthetic fixtures, ten complete exact-byte CSV
-goldens and the [fixture provenance/compatibility register](../server/test/fixtures/magento-v1/README.md)
+goldens and the [fixture provenance/compatibility register](../../../server/test/fixtures/magento-v1/README.md)
 cover all six groups, all **164 header positions**, all **41 semantic bindings**,
 all 30 V dictionaries plus all 28 AR sizes. There are 157 distinct dictionary
 entries / 196 entries counted per binding, each tested as numeric and string IDs.
@@ -1586,7 +1588,7 @@ AGENTS instructions were present. Migration inventory was `000` through
   builders exclude 035 until their normal upgrade; no historical SQL is edited.
 - Maintained docs: `PROJECT_CONTEXT.md`, `AUTH_RBAC.md`, `DATABASE_MIGRATIONS.md`,
   `EXPORTS.md`, and this appended record. The complete implemented route/body/
-  permission matrix is in [Export-template administration](EXPORTS.md#export-template-administration-pr2).
+  permission matrix is in [Export-template administration](../../EXPORT_TEMPLATES.md#administrative-api).
 
 Definition/source/list/detail/selection reads require `export_templates.view`.
 Create/save/from-version/validate require `export_templates.manage`; test-preview
@@ -1766,7 +1768,7 @@ an implementation checklist, not an additional approval or design phase.
 
 - `036_export_snapshot_template_binding.sql` adds the nine nullable provenance/
   evidence columns and mechanical legacy discriminator documented in
-  [the migration guide](DATABASE_MIGRATIONS.md). A complete/null check and composite
+  [the migration guide](../../DATABASE_MIGRATIONS.md). A complete/null check and composite
   publication FK enforce family/version/hash/evaluator/output/format identity;
   JSON intent/effective/range/cursor/selection evidence is checked for consistency.
   The replacement trigger retains every 031 payload, creator, confirmer and
@@ -1806,7 +1808,7 @@ an implementation checklist, not an additional approval or design phase.
   concise details; no new audit event type or repeated retry event is introduced.
 
 The full implemented body/response examples, errors, signing coverage and retry
-decision table are in [Exports — PR3](EXPORTS.md#published-export-snapshots-pr3).
+decision table are in [Exports — PR3](../../EXPORT_TEMPLATES.md#published-preview-and-snapshot-binding).
 New-mode template callers retain their original anchors (normally null) as intent;
 preview-resolved anchors belong to immutable capture evidence. They must not add
 returned anchors only at create. Existing legacy new-mode callers retain their
@@ -1935,7 +1937,7 @@ Earlier addenda and all oracle/difference registers remain historical records.
 The subsequent PR4 correction/session implementation adds local interpolation-slot
 composition, supported router dirty navigation, principal/dispatch isolation and
 durable private/shared attempts with exact operation recovery. See
-[the focused contract](SHARED_EXPORT_SESSIONS.md) and the final correction addendum
+[the focused contract](../../SHARED_EXPORT_SESSIONS.md) and the final correction addendum
 in the PR4 implementation record. Migration 037 is forward-only; all original pure
 oracles, published mappings, PR3 engine semantics and rollout gates are preserved.
 

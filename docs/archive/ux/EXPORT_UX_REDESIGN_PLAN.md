@@ -1,3 +1,5 @@
+> Historical record. This document describes the state/planning at the time it was written. Current behavior is defined by current code/migrations and the [maintained domain guides](../../README.md). Dates, findings and acceptance limits below are historical evidence, not current deployment claims.
+
 # Export UX/UI Redesign Plan
 
 **Status: UX-1 accepted. UX-2 remains complete for roadmap purposes and was not reopened. The UX-3 PostgreSQL blocker is resolved; its bounded stale-preview continuity fix is included in UX-4. UX-4 lists, sharing, history and recovery are implemented and verified by the full suites, pending manual operator visual acceptance. UX-5 has not started. See section 25 for current evidence; earlier sections retain their historical checkpoint status.**
@@ -64,9 +66,9 @@ The separate existing `client/test/auth.test.jsx` delta corrects asynchronous RB
 
 Primary code references:
 
-- [Template workspace](/D:/Work/amber-sku-generator/client/src/pages/ExportTemplatesPage.jsx), [table editor](/D:/Work/amber-sku-generator/client/src/components/export-templates/DefinitionEditor.jsx), [column form](/D:/Work/amber-sku-generator/client/src/components/export-templates/ColumnForm.jsx).
-- [Export tools](/D:/Work/amber-sku-generator/client/src/components/app/ExportTools.jsx), [session workspace](/D:/Work/amber-sku-generator/client/src/pages/ExportSessionsPage.jsx), [export controller](/D:/Work/amber-sku-generator/client/src/hooks/product/useProductExportController.js).
-- [Export service](/D:/Work/amber-sku-generator/server/src/services/export.service.js), [session service](/D:/Work/amber-sku-generator/server/src/services/export-sessions.service.js), [template evaluator](/D:/Work/amber-sku-generator/server/src/services/export-templates/evaluate.js).
+- [Template workspace](../../../client/src/pages/ExportTemplatesPage.jsx), [table editor](../../../client/src/components/export-templates/DefinitionEditor.jsx), [column form](../../../client/src/components/export-templates/ColumnForm.jsx).
+- [Export tools](../../../client/src/components/app/ExportTools.jsx), [session workspace](../../../client/src/pages/ExportSessionsPage.jsx), [export controller](../../../client/src/hooks/product/useProductExportController.js).
+- [Export service](../../../server/src/services/export.service.js), [session service](../../../server/src/services/export-sessions.service.js), [template evaluator](../../../server/src/services/export-templates/evaluate.js).
 
 ### Permission matrix to preserve
 
@@ -1758,7 +1760,7 @@ products were omitted from provisional CSV, requiring a separate projection.
 
 ### Exact read-only API additions
 
-See [Exports — UX-3 contracts](EXPORTS.md#ux-3-authoritative-review-stored-files-and-shared-history)
+See [Exports — UX-3 contracts](../../EXPORTS.md#read-apis-and-review)
 for the complete field descriptions and compatibility behavior.
 
 | Contract | Exact boundary |
@@ -2107,7 +2109,7 @@ Implementation stops here for manual operator acceptance; UX-5 remains unstarted
 ## 26. UX-5 implementation and acceptance record — 2026-09-26
 
 **Later operator acceptance is blocked:** see the
-[recount/export investigation](EXPORT_RECOUNT_INVESTIGATION_2026-09-26.md).
+[recount/export investigation](../investigations/EXPORT_RECOUNT_INVESTIGATION_2026-09-26.md).
 The existing recount policy excludes both source and successor; the successor
 does not remain pending for the next export. No semantic fix is authorized by
 this UX milestone. The implementation/test record below remains historical.
