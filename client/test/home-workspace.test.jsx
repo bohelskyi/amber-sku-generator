@@ -173,6 +173,8 @@ describe('Home workspace', () => {
     expect(screen.queryByText(/У базі:/)).toBeNull();
     expect(screen.queryByText(/До експорту:/)).toBeNull();
     expect(screen.queryByText(/375/)).toBeNull();
+  });
+  
   it('keeps Інклюз visibly unselected after an unrelated recount edit', () => {
     render(<RecountStateHarness />);
 
