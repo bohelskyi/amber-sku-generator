@@ -45,6 +45,17 @@ test('Google Translation key is optional and remains server-only configuration',
   assert.equal(withKey.googleTranslationApiKey, 'test-server-key');
 });
 
+test('application config accepts absent Magento and rejects partial integration config', () => {
+  const base = withAuth({ DATABASE_URL: validDatabaseUrl });
+  assert.deepEqual(loadConfig(base).magento, { configured: false });
+  assert.deepEqual(loadConfig({ ...base, MAGENTO_BASE_URL: ' ', MAGENTO_ACCESS_TOKEN: '' }).magento,
+    { configured: false });
+  assert.throws(() => loadConfig({ ...base, MAGENTO_ACCESS_TOKEN: 'unit-test-token' }), { code: 'MAGENTO_CONFIG_INVALID' });
+  assert.equal(loadConfig({ ...base, MAGENTO_BASE_URL: 'https://store.example.invalid',
+    MAGENTO_CONSUMER_KEY: 'unit-key', MAGENTO_CONSUMER_SECRET: 'unit-secret',
+    MAGENTO_ACCESS_TOKEN: 'unit-token', MAGENTO_ACCESS_TOKEN_SECRET: 'unit-token-secret' }).magento.configured, true);
+});
+
 test('runtime configuration accepts individual PostgreSQL settings', () => {
   const config = loadConfig(withAuth({
     PGHOST: 'postgres',

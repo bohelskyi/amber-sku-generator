@@ -1,5 +1,6 @@
 const path = require('node:path');
 const dotenv = require('dotenv');
+const { parseMagentoConfig } = require('./magento');
 
 dotenv.config({
   path: path.resolve(__dirname, '../../../.env'),
@@ -166,6 +167,7 @@ function loadConfig(env = process.env) {
     pgStatementTimeoutMs: parseInteger(env, 'PG_STATEMENT_TIMEOUT_MS', 30000),
     nbuRateOverride: parseOptionalPositiveNumber(env, 'NBU_RATE_OVERRIDE'),
     googleTranslationApiKey: readValue(env, 'GOOGLE_TRANSLATION_API_KEY'),
+    magento: parseMagentoConfig(env),
     nbuMaxStaleMs: parseInteger(env, 'NBU_MAX_STALE_MS', DEFAULT_NBU_MAX_STALE_MS, {
       min: 1,
     }),

@@ -8,6 +8,9 @@ Startup applies migrations, seeds only an empty configuration when appropriate, 
 
 Credentials and OIDC/session secrets come from the ignored project-level `.env` or process environment. Changing `.env` does not rotate credentials inside an already-initialized PostgreSQL volume. `VITE_*` variables are public browser configuration and must never contain secrets.
 
+Optional server-only Magento OAuth configuration and the post-deployment GET-only
+probe are documented in [Magento integration Phase 1A](MAGENTO_INTEGRATION.md).
+
 ## OIDC deployment
 
 The repository's example production application locations are:
