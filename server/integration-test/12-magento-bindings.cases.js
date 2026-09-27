@@ -1,0 +1,335 @@
+const suite = require('./suite-context');
+const { test, assert, pool, Pool, crypto, fs, os, path, serverRoot, TEST_DATABASE_URL,
+  authenticateApplicationSession, runNodeInDatabase, recreateTestDatabase, dropTestDatabase } = suite;
+const bindings = require('../src/services/magento/binding.service');
+const templates = require('../src/services/export-templates/template.service');
+const { compareRevision } = require('../src/services/magento/binding-drift');
+const { APPLICATION_USER_ADMIN_LOCK_KEY } = require('../src/services/access-admin-transaction');
+const fixture = require('../test/fixtures/magento-bindings');
+const { getMigrationChecksum } = require('../src/db/run-migrations');
+
+test('Magento binding migration 041: checkpoint 040 rollback, checksum retention, repeated startup and no seeds', async () => {
+  const name = 'amber_magento_binding_migration_test'; const url = await recreateTestDatabase(name);
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-binding-040-')); const db = new Pool({ connectionString: url });
+  const migrate = () => runNodeInDatabase(url, `require('./src/db/run-migrations').runMigrations({directory:${JSON.stringify(directory)}}).catch(e=>{console.error(e);process.exitCode=1;});`);
+  try {
+    for (const file of (await fs.readdir(path.join(serverRoot, 'migrations'))).filter((f) => f.endsWith('.sql') && f < '041')) {
+      await fs.copyFile(path.join(serverRoot, 'migrations', file), path.join(directory, file));
+    }
+    await migrate();
+    const before = (await db.query('SELECT name, checksum FROM schema_migrations ORDER BY name')).rows;
+    const file = '041_magento_binding_revisions.sql'; const sql = await fs.readFile(path.join(serverRoot, 'migrations', file), 'utf8');
+    await fs.writeFile(path.join(directory, file), sql + '\nSELECT 1/0;');
+    await assert.rejects(migrate(), /division by zero/);
+    assert.equal((await db.query("SELECT to_regclass('magento_binding_revisions') AS present")).rows[0].present, null);
+    assert.equal((await db.query("SELECT count(*)::int n FROM pg_type WHERE typname='magento_binding_review'")).rows[0].n, 0);
+    assert.deepEqual((await db.query('SELECT name, checksum FROM schema_migrations ORDER BY name')).rows, before);
+    await fs.writeFile(path.join(directory, file), sql); await migrate(); await migrate();
+    const canonical = sql.replace(/\r\n?/g, '\n');
+    for (const ending of ['\r\n', '\r']) {
+      await fs.writeFile(path.join(directory, file), canonical.replace(/\n/g, ending)); await migrate();
+    }
+    assert.equal((await db.query('SELECT checksum FROM schema_migrations WHERE name=$1', [file])).rows[0].checksum, getMigrationChecksum(canonical));
+    assert.deepEqual((await db.query("SELECT name, checksum FROM schema_migrations WHERE name<'041' ORDER BY name")).rows, before);
+    assert.equal((await db.query('SELECT count(*)::int n FROM magento_binding_revisions')).rows[0].n, 0);
+    assert.equal((await db.query('SELECT count(*)::int n FROM audit_events')).rows[0].n, 0);
+  } finally {
+    await db.end();
+    assert.equal(path.dirname(directory), path.resolve(os.tmpdir()));
+    assert.ok(path.basename(directory).startsWith('amber-binding-040-'));
+    await fs.rm(directory, { recursive: true, force: true }); await dropTestDatabase(name);
+  }
+});
+
+test('Magento binding migration 000 through 041 applies to a fresh disposable database', async () => {
+  const name = 'amber_magento_binding_fresh_test'; const url = await recreateTestDatabase(name);
+  const db = new Pool({ connectionString: url });
+  try {
+    await runNodeInDatabase(url, "require('./src/db/run-migrations').runMigrations().catch(e=>{console.error(e);process.exitCode=1;});");
+    assert.equal((await db.query('SELECT count(*)::int n FROM schema_migrations')).rows[0].n, 42);
+    assert.equal((await db.query("SELECT count(*)::int n FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'magento_binding_%'")).rows[0].n, 10);
+    assert.equal((await db.query('SELECT count(*)::int n FROM magento_binding_revisions')).rows[0].n, 0);
+  } finally { await db.end(); await dropTestDatabase(name); }
+});
+
+test('Magento binding persistence, publication, immutability and real PostgreSQL races', async (t) => {
+  const admin = await authenticateApplicationSession();
+  const options = (databasePool = pool) => ({ databasePool, mutationContext: { actorUserId: Number(admin.applicationUser.id), requestId: 'binding-integration' } });
+  for (const group of ['BR','NM','KL','CH','AR','SV']) await pool.query('INSERT INTO categories(code,name) VALUES($1,$1) ON CONFLICT(code) DO NOTHING', [group]);
+  const questions = (await pool.query(`INSERT INTO questions(category_code,key,label,input_type,include_in_sku,required)
+    VALUES ('BR','binding_test_semantic','Synthetic binding source','options',0,0),
+      ('BR','binding_test_size','Synthetic size source','text',0,0) RETURNING id,key`)).rows;
+  const q = questions.find((q) => q.key === 'binding_test_semantic');
+  await pool.query(`INSERT INTO options(question_id,value_id,sku_code,label)
+    VALUES ($1,7,'91','Local red'),($1,8,'92','Local blue'),($1,9,'93','Different semantic red'),($1,29,'94','Unenumerated current value')`, [q.id]);
+  const definition = fixture.definition(); const schema = fixture.schema();
+  const family = await templates.createTemplate({ key: `binding-${crypto.randomUUID()}`, displayName: 'Synthetic binding template', definition }, options());
+  const version = await templates.publishTemplate(family.id, { expectedRevision: family.draft.revision, expectedDefinitionHash: family.draft.definitionHash }, options());
+  const create = (key = `fixture-${crypto.randomUUID()}`, observation = schema) => bindings.createDraft({ installationKey: key,
+    origin: 'https://binding.example.invalid', templateVersionId: version.id, observedAt: '2026-09-01T00:00:00.000Z', schema: observation }, options());
+  const ready = async (key) => { const d = await create(key); return bindings.updateDraft(d.id, { expectedRevision: d.revision, bindings: fixture.approvedBindings(definition, schema) }, options()); };
+  const publish = (draft, current = null, db = pool) => bindings.publishDraft(draft.id, { expectedRevision: draft.revision, expectedCurrentId: current }, options(db));
+  const countEvents = async (id) => Number((await pool.query("SELECT count(*) n FROM audit_events WHERE subject_id=$1 AND event_key='magento_binding.published'", [id])).rows[0].n);
+
+  await t.test('fresh migration, draft create/read/update, CAS and fail-closed candidates', async () => {
+    assert.equal((await pool.query("SELECT count(*)::int n FROM schema_migrations WHERE name='041_magento_binding_revisions.sql'")).rows[0].n, 1);
+    const draft = await create(); assert.equal(draft.state, 'draft'); assert.equal(draft.versionNumber, null);
+    assert.ok(draft.bindings.routes.every((r) => !r.enabled && r.reviewState === 'review_required' && r.setId === null));
+    assert.equal((await bindings.getRevision(draft.id)).definitionHash, version.definitionHash);
+    assert.equal(await bindings.getCurrentPublished(draft.installationKey), null);
+    assert.equal((await bindings.validateDraft(draft.id)).valid, false);
+    await assert.rejects(publish(draft), { code: 'MAGENTO_BINDING_INVALID' });
+    const candidate = fixture.approvedBindings(); candidate.routes[0].reviewState = 'review_required';
+    const saved = await bindings.updateDraft(draft.id, { expectedRevision: '1', bindings: candidate }, options());
+    assert.equal(saved.revision, '2'); await assert.rejects(publish(saved), { code: 'MAGENTO_BINDING_INVALID' });
+    await assert.rejects(bindings.updateDraft(draft.id, { expectedRevision: '1', bindings: candidate }, options()), { code: 'MAGENTO_BINDING_CONFLICT' });
+    candidate.routes[0].reviewState = 'approved'; candidate.options.find((o) => o.sourceKind === 'semantic').reviewState = 'review_required';
+    const reviewed = await bindings.updateDraft(draft.id, { expectedRevision: '2', bindings: candidate }, options());
+    await assert.rejects(publish(reviewed), { code: 'MAGENTO_BINDING_INVALID' });
+    const semantic = (await pool.query("SELECT value_id,sku_code_evidence,option_id FROM magento_binding_options WHERE revision_id=$1 AND value_id=7", [draft.id])).rows[0];
+    assert.deepEqual(semantic, { value_id: 7, sku_code_evidence: '91', option_id: 'red-id' });
+    assert.equal(await countEvents(draft.id), 0);
+    const duplicate = fixture.approvedBindings(); duplicate.options.push(structuredClone(duplicate.options[0]));
+    await assert.rejects(bindings.updateDraft(draft.id, { expectedRevision: '3', bindings: duplicate }, options()), { code: 'MAGENTO_BINDING_INVALID' });
+    assert.equal((await bindings.getRevision(draft.id)).revision, '3');
+  });
+  await t.test('many-to-one retains both semantic identities; reviewed blocked decisions are publishable', async () => {
+    const draft = await ready(); const b = structuredClone(draft.bindings);
+    const known = b.options.find((o) => o.valueId === '8'); Object.assign(known, { optionId: null, reviewState: 'blocked' });
+    const unenumerated = { ...known, valueId: '29', evaluatedOutput: null }; delete unenumerated.sourceKey;
+    b.options.push(unenumerated);
+    Object.assign(b.policies[0], { policy: 'blocked', reviewState: 'blocked' });
+    const saved = await bindings.updateDraft(draft.id, { expectedRevision: draft.revision, bindings: b }, options());
+    assert.deepEqual((await bindings.validateDraft(saved.id)).diagnostics, []);
+    const published = await publish(saved);
+    const provenance = (await pool.query("SELECT value_id,evaluated_output,option_id FROM magento_binding_options WHERE revision_id=$1 AND option_id='red-id' ORDER BY value_id", [draft.id])).rows;
+    assert.deepEqual(provenance, [7,9].map((value_id) => ({ value_id, evaluated_output: 'Red output', option_id: 'red-id' })));
+    assert.equal(published.bindings.options.filter((o) => o.reviewState === 'blocked').length, 2);
+    assert.equal(published.bindings.routes.find((r) => r.enabled).evaluatorSetName, 'Historical CSV name');
+    assert.equal(published.bindings.routes.find((r) => r.enabled).setId, 8001);
+    const routeBlocked = await create();
+    const routeBindings = structuredClone(routeBlocked.bindings); Object.assign(routeBindings.routes[0], { enabled: true, reviewState: 'blocked' });
+    const blocked = await bindings.updateDraft(routeBlocked.id, { expectedRevision: routeBlocked.revision, bindings: routeBindings }, options());
+    assert.equal((await publish(blocked)).state, 'published');
+  });
+  await t.test('audit failure rolls back publication and all attribution', async () => {
+    const draft = await ready();
+    const failingPool = { connect: async () => {
+      const client = await pool.connect(); return { release: () => client.release(), query: (sql, values) => {
+        if (typeof sql === 'string' && sql.includes('INSERT INTO audit_events')) throw new Error('synthetic audit failure');
+        return client.query(sql, values);
+      } };
+    } };
+    await assert.rejects(publish(draft, null, failingPool), /synthetic audit failure/);
+    const after = await bindings.getRevision(draft.id);
+    assert.equal(after.state, 'draft'); assert.equal(after.revision, draft.revision); assert.equal(after.publishedAt, null);
+    assert.equal(await bindings.getCurrentPublished(draft.installationKey), null); assert.equal(await countEvents(draft.id), 0);
+  });
+  await t.test('current-only SKU identities permit explicit blocking, never invented approvals', async () => {
+    const historical = (await pool.query(`INSERT INTO sku_schema_versions(category_code,version,marker,status,config_hash)
+      SELECT 'BR',coalesce(max(version),0)+1,$1,'archived',$2 FROM sku_schema_versions WHERE category_code='BR' RETURNING id`,
+    [`binding-${crypto.randomUUID()}`, 'a'.repeat(64)])).rows[0];
+    const historicalQuestion = (await pool.query(`INSERT INTO sku_schema_questions(schema_version_id,question_key,label,sku_index)
+      VALUES($1,'binding_test_semantic','Synthetic historical source',0) RETURNING id`, [historical.id])).rows[0];
+    await pool.query(`INSERT INTO sku_schema_options(schema_question_id,value_id,sku_code,label)
+      VALUES($1,7,'91','Historical red'),($1,8,'92','Historical blue')`, [historicalQuestion.id]);
+    await pool.query('UPDATE questions SET include_in_sku=1 WHERE id=$1', [q.id]);
+    try {
+      const draft = await ready(); const b = structuredClone(draft.bindings);
+      assert.ok((await bindings.validateDraft(draft.id)).diagnostics.some((d) => d.code === 'SEMANTIC_IDENTITY_UNRESOLVED' && d.sourceKey.endsWith('value_id:9')));
+      Object.assign(b.options.find((o) => o.valueId === '9'), { reviewState: 'blocked', optionId: null });
+      const extra = { ...b.options.find((o) => o.valueId === '9'), valueId: '29', evaluatedOutput: null }; delete extra.sourceKey;
+      b.options.push(extra);
+      const saved = await bindings.updateDraft(draft.id, { expectedRevision: draft.revision, bindings: b }, options());
+      assert.deepEqual((await bindings.validateDraft(saved.id)).diagnostics, []);
+      assert.equal((await publish(saved)).state, 'published');
+    } finally { await pool.query('UPDATE questions SET include_in_sku=0 WHERE id=$1', [q.id]); }
+  });
+  await t.test('database rejects wrong-attribute options, duplicate option identity and forged source kinds', async () => {
+    const draft = await ready();
+    for (const [sql, expected] of [
+      ["UPDATE magento_binding_options SET option_id='size-id' WHERE revision_id=$1 AND value_id=8", '23503'],
+      ["UPDATE magento_binding_options SET attribute_code='decor_weight' WHERE revision_id=$1 AND value_id=7", '23503'],
+      ["UPDATE magento_binding_options SET option_id='blue-id' WHERE revision_id=$1 AND value_id=7", '23505'],
+      ["UPDATE magento_binding_options SET value_id=7 WHERE revision_id=$1 AND source_kind='evaluated'", '23514'],
+      ["UPDATE magento_binding_options SET source_kind='evaluated' WHERE revision_id=$1 AND value_id=8", '23514'],
+      ["UPDATE magento_binding_options SET attribute_code=NULL,option_id=NULL,review_state='blocked' WHERE revision_id=$1 AND value_id=7", '23503'],
+      ["UPDATE magento_binding_options SET value_id=NULL WHERE revision_id=$1 AND value_id=7", '23514'],
+      ["UPDATE magento_binding_options SET source_key='sku_code:91' WHERE revision_id=$1 AND value_id=7", '23514'],
+      ["UPDATE magento_binding_options SET source_key='BR.binding_test_semantic=value_id:7',value_id=7,option_id=NULL,review_state='blocked' WHERE revision_id=$1 AND value_id=9", '23505'],
+      ["UPDATE magento_binding_options SET domain_key=repeat('a',64) WHERE revision_id=$1 AND value_id=7", '23514'],
+      ["UPDATE magento_binding_options SET output_key=NULL WHERE revision_id=$1 AND source_kind='evaluated'", '23514'],
+      ["UPDATE magento_binding_routes SET route_key='BR:ephemeral' WHERE revision_id=$1 AND amber_group='BR'", '23514'],
+      ["UPDATE magento_binding_field_policies SET store_id=NULL WHERE revision_id=$1 AND store_code='en'", '23514'],
+      ["UPDATE magento_binding_field_policies SET store_id=804 WHERE revision_id=$1 AND store_code='all'", '23514'],
+      ["UPDATE magento_binding_field_policies SET store_id=99999 WHERE revision_id=$1 AND store_code='en'", '23503'],
+      ["UPDATE magento_binding_field_policies SET policy='blocked' WHERE revision_id=$1", '23514'],
+    ]) await assert.rejects(pool.query(sql, [draft.id]), (e) => e.code === expected, sql);
+    assert.deepEqual(await bindings.getRevision(draft.id), draft);
+    const roundtrip = await bindings.updateDraft(draft.id, { expectedRevision: draft.revision, bindings: draft.bindings }, options());
+    assert.deepEqual(roundtrip.bindings, draft.bindings);
+    const repeatable = await pool.connect();
+    try {
+      await repeatable.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+      await assert.rejects(repeatable.query('UPDATE magento_binding_options SET review_state=review_state WHERE revision_id=$1', [draft.id]), /require Read Committed/);
+    } finally { await repeatable.query('ROLLBACK'); repeatable.release(); }
+    const nameBindings = draft.bindings.attributes.filter((a) => a.target === 'name');
+    const base = nameBindings.find((a) => a.rowId === 'base'); const english = nameBindings.find((a) => a.rowId === 'english');
+    await assert.rejects(pool.query(`INSERT INTO magento_binding_field_policies
+      (revision_id,binding_key,route_key,field_target,store_code,store_id,policy,review_state)
+      SELECT revision_id,$2,route_key,field_target,store_code,store_id,policy,review_state
+      FROM magento_binding_field_policies WHERE revision_id=$1 AND binding_key=$3`,
+    [draft.id, base.bindingKey, english.bindingKey]), (e) => e.code === '23505');
+    await assert.rejects(bindings.updateDraft(draft.id, { expectedRevision: roundtrip.revision, bindings: draft.bindings },
+      { databasePool: pool, mutationContext: { actorUserId: 9999999 } }), { code: 'ADMIN_PERMISSION_REVOKED' });
+  });
+  await t.test('revision-scoped foreign keys reject objects observed only in another installation', async () => {
+    const local = await ready(); const foreignSchema = structuredClone(schema);
+    foreignSchema.attributes.push({ attribute_code: 'foreign_only', attribute_id: 9999, frontend_input: 'text', options: [] });
+    foreignSchema.attributes.find((a) => a.attribute_code === 'kolir').options.push({ value: 'foreign-option', label: 'Remote red' });
+    foreignSchema.attributeSets.push({ attribute_set_id: 9999, attribute_set_name: 'Foreign only', attributeCodes: ['foreign_only'] });
+    foreignSchema.storeTopology.storeViews.push({ ...foreignSchema.storeTopology.storeViews[0], id: 9999, code: 'foreign_view' });
+    const foreign = await create(undefined, foreignSchema); assert.notEqual(local.installationKey, foreign.installationKey);
+    for (const sql of [
+      "UPDATE magento_binding_routes SET set_id=9999 WHERE revision_id=$1 AND enabled",
+      "UPDATE magento_binding_options SET option_id='foreign-option' WHERE revision_id=$1 AND value_id=8",
+      "INSERT INTO magento_binding_schema_options VALUES($1,'foreign_only','foreign-option','Remote red')",
+      "INSERT INTO magento_binding_schema_members VALUES($1,8001,'foreign_only')",
+      "UPDATE magento_binding_field_policies SET store_id=9999,store_code='foreign_view' WHERE revision_id=$1 AND store_code='en'",
+    ]) await assert.rejects(pool.query(sql, [local.id]), (e) => e.code === '23503');
+    await assert.rejects(pool.query('UPDATE magento_binding_options SET revision_id=$2 WHERE revision_id=$1', [local.id, foreign.id]), /parent is immutable/);
+    assert.deepEqual(await bindings.getRevision(local.id), local);
+    const predicates = [{ questionKey: 'type', valueId: '2', equal: false }, { questionKey: 'souvenir', valueId: '5', equal: true }];
+    for (const p of [predicates, [...predicates].reverse()]) {
+      assert.equal((await pool.query('SELECT magento_binding_route_key($1,$2::jsonb) AS key', ['SV', JSON.stringify(p)])).rows[0].key,
+        'SV.souvenir=value_id:5&type!=value_id:2');
+    }
+  });
+  await t.test('atomic publish, completed retry, successor publication and complete database immutability', async () => {
+    const draft = await ready(); const publication = await publish(draft);
+    assert.equal(publication.versionNumber, '1'); assert.equal(publication.state, 'published');
+    assert.deepEqual(await publish(draft), publication); assert.equal(await countEvents(draft.id), 1);
+    await assert.rejects(bindings.updateDraft(draft.id, { expectedRevision: publication.revision, bindings: fixture.approvedBindings() }, options()), { code: 'MAGENTO_BINDING_CONFLICT' });
+    await assert.rejects(pool.query('UPDATE magento_binding_revisions SET revision=revision+1 WHERE id=$1', [draft.id]), /immutable/);
+    await assert.rejects(pool.query('DELETE FROM magento_binding_revisions WHERE id=$1', [draft.id]), /permanent/);
+    await assert.rejects(pool.query('TRUNCATE magento_binding_revisions CASCADE'), /truncated|permanent/);
+    const children = ['schema_sets','schema_attributes','schema_options','schema_members','schema_stores','routes','attributes','options','field_policies'];
+    for (const table of children) {
+      const storedColumns = (await pool.query(`SELECT column_name FROM information_schema.columns
+        WHERE table_schema='public' AND table_name=$1 AND is_generated='NEVER' ORDER BY ordinal_position`, [`magento_binding_${table}`])).rows;
+      assert.ok(storedColumns.every((c) => /^[a-z_]+$/.test(c.column_name)));
+      const projection = storedColumns.map((c) => c.column_name).join(',');
+      const columns = `(${projection})`;
+      await assert.rejects(pool.query(`INSERT INTO magento_binding_${table} ${columns}
+        SELECT ${projection} FROM magento_binding_${table} WHERE revision_id=$1 LIMIT 1`, [draft.id]), /immutable/);
+      await assert.rejects(pool.query(`UPDATE magento_binding_${table} SET revision_id=revision_id WHERE revision_id=$1`, [draft.id]), /immutable/);
+      await assert.rejects(pool.query(`DELETE FROM magento_binding_${table} WHERE revision_id=$1`, [draft.id]), /immutable/);
+      await assert.rejects(pool.query(`TRUNCATE magento_binding_${table} CASCADE`), /truncated|permanent/);
+    }
+    await assert.rejects(pool.query(`INSERT INTO magento_binding_schema_sets VALUES($1,8999,'Late observation')`, [draft.id]), /immutable/);
+    const successor = await ready(draft.installationKey);
+    await assert.rejects(publish(successor), { code: 'MAGENTO_BINDING_CONFLICT' });
+    const next = await publish(successor, publication.id); assert.equal(next.versionNumber, '2');
+    assert.equal((await bindings.getCurrentPublished(draft.installationKey)).id, next.id);
+    assert.equal((await bindings.listRevisions(draft.installationKey)).find((r) => r.id === publication.id).lifecycle, 'superseded');
+    assert.deepEqual(await bindings.getRevision(publication.id), publication);
+    assert.deepEqual(await publish(draft), publication);
+  });
+  async function race(first, second) {
+    const a = new Pool({ connectionString: TEST_DATABASE_URL, max: 1 }); const b = new Pool({ connectionString: TEST_DATABASE_URL, max: 1 });
+    const holder = await pool.connect(); const pending = [];
+    try {
+      const apid = (await a.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      const bpid = (await b.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      await holder.query('BEGIN'); await holder.query('SELECT pg_advisory_xact_lock(hashtext($1))', [APPLICATION_USER_ADMIN_LOCK_KEY]);
+      const hpid = (await holder.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      const wait = async (pid) => {
+        for (let n = 0; n < 600; n++) {
+          if ((await pool.query('SELECT $2::int=ANY(pg_blocking_pids($1)) AS blocked', [pid, hpid])).rows[0].blocked) return;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        assert.fail('Independent PostgreSQL writer did not block');
+      };
+      pending.push(first(a)); pending[0].catch(() => {}); await wait(apid);
+      pending.push(second(b)); pending[1].catch(() => {}); await wait(bpid);
+      await holder.query('COMMIT'); return await Promise.allSettled(pending);
+    } finally { await holder.query('ROLLBACK'); holder.release(); await Promise.allSettled(pending); await a.end(); await b.end(); }
+  }
+  await t.test('direct concurrent option writers cannot share an ID with conflicting evaluated outputs', async () => {
+    const observed = structuredClone(schema);
+    observed.attributes.find((a) => a.attribute_code === 'kolir').options.push({ value: 'race-id', label: 'Synthetic race option' });
+    const created = await create(undefined, observed);
+    const draft = await bindings.updateDraft(created.id, { expectedRevision: created.revision, bindings: fixture.approvedBindings(definition, observed) }, options());
+    const first = await pool.connect(); const second = new Pool({ connectionString: TEST_DATABASE_URL, max: 1 });
+    let pending;
+    try {
+      const pid = (await second.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      await first.query('BEGIN');
+      await first.query("UPDATE magento_binding_options SET option_id='race-id',evaluated_output='First output' WHERE revision_id=$1 AND value_id=7", [draft.id]);
+      pending = second.query("UPDATE magento_binding_options SET option_id='race-id',evaluated_output='Different output' WHERE revision_id=$1 AND value_id=8", [draft.id]);
+      pending.catch(() => {});
+      let blocked = false;
+      for (let n = 0; n < 600; n++) {
+        blocked = (await pool.query('SELECT cardinality(pg_blocking_pids($1))>0 AS blocked', [pid])).rows[0].blocked;
+        if (blocked) break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(blocked, true, 'Independent option writer must wait for the revision lock');
+      await first.query('COMMIT');
+      await assert.rejects(pending, (e) => e.code === '23505');
+      assert.deepEqual((await pool.query('SELECT value_id,option_id FROM magento_binding_options WHERE revision_id=$1 AND value_id IN(7,8) ORDER BY value_id', [draft.id])).rows,
+        [{ value_id: 7, option_id: 'race-id' }, { value_id: 8, option_id: 'blue-id' }]);
+    } finally { await first.query('ROLLBACK'); first.release(); await Promise.allSettled(pending ? [pending] : []); await second.end(); }
+  });
+  await t.test('real races: identical publishes, competing drafts, update before publish and publish before update', async () => {
+    const one = await ready(); const identical = await race((db) => publish(one, null, db), (db) => publish(one, null, db));
+    assert.ok(identical.every((r) => r.status === 'fulfilled')); assert.equal(await countEvents(one.id), 1);
+    const a = await ready(); const b = await ready(a.installationKey);
+    const distinct = await race((db) => publish(a, null, db), (db) => publish(b, null, db));
+    assert.equal(distinct[0].status, 'fulfilled'); assert.equal(distinct[1].reason.code, 'MAGENTO_BINDING_CONFLICT');
+    assert.equal((await bindings.getCurrentPublished(a.installationKey)).id, a.id);
+    assert.equal((await bindings.getRevision(b.id)).state, 'draft');
+    assert.deepEqual((await pool.query("SELECT version_number FROM magento_binding_revisions WHERE installation_key=$1 AND state='published'", [a.installationKey])).rows, [{ version_number: '1' }]);
+    assert.equal((await publish(b, a.id)).versionNumber, '2');
+    assert.deepEqual((await pool.query("SELECT version_number FROM magento_binding_revisions WHERE installation_key=$1 AND state='published' ORDER BY version_number", [a.installationKey])).rows, [{ version_number: '1' }, { version_number: '2' }]);
+    for (const updateFirst of [true, false]) {
+      const draft = await ready(); const changed = fixture.approvedBindings(); changed.policies[0].reviewState = 'review_required';
+      const update = (db) => bindings.updateDraft(draft.id, { expectedRevision: draft.revision, bindings: changed }, options(db));
+      const pub = (db) => publish(draft, null, db);
+      const results = await race(updateFirst ? update : pub, updateFirst ? pub : update);
+      assert.equal(results[0].status, 'fulfilled'); assert.equal(results[1].reason.code, 'MAGENTO_BINDING_CONFLICT');
+      const stored = await bindings.getRevision(draft.id);
+      assert.equal(stored.state, updateFirst ? 'draft' : 'published'); assert.equal(await countEvents(draft.id), updateFirst ? 0 : 1);
+      assert.equal(stored.bindings.policies.some((p) => p.reviewState === 'review_required'), updateFirst);
+    }
+  });
+  await t.test('persisted draft drift uses named GETs only and never changes the revision', async () => {
+    const draft = await ready(); const calls = [];
+    const config = { configured: true, baseUrl: 'https://binding.example.invalid', consumerKey: 'fake-key', consumerSecret: 'fake-secret', accessToken: 'fake-token', accessTokenSecret: 'fake-token-secret' };
+    const fetchImpl = async (url, init) => {
+      assert.equal(init.method, 'GET'); assert.equal(init.body, undefined); calls.push(url);
+      const route = new URL(url).pathname.split('/V1/')[1]; let value;
+      if (route === 'store/websites') value = schema.storeTopology.websites;
+      else if (route === 'store/storeGroups') value = schema.storeTopology.storeGroups;
+      else if (route === 'store/storeViews') value = schema.storeTopology.storeViews;
+      else if (route === 'products/attribute-sets/sets/list') value = { items: schema.attributeSets, total_count: 1 };
+      else if (route === 'products/attributes') value = { items: schema.attributes, total_count: schema.attributes.length };
+      else if (route === 'products/attribute-sets/8001/attributes') value = schema.attributes;
+      else if (/^products\/attributes\/\w+\/options$/.test(route)) value = schema.attributes.find((a) => a.attribute_code === route.split('/')[2]).options;
+      else assert.fail(`Unexpected Magento resource: ${route}`);
+      return new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
+    };
+    assert.equal((await compareRevision(draft.id, config, { databasePool: pool, fetchImpl })).drifted, false);
+    assert.ok(calls.length > 0); assert.deepEqual(await bindings.getRevision(draft.id), draft);
+    await assert.rejects(compareRevision(draft.id, { ...config, baseUrl: 'https://other.example.invalid' }, { databasePool: pool, fetchImpl }), { code: 'MAGENTO_BINDING_INSTALLATION_MISMATCH' });
+    const publication = await publish(draft);
+    const changedFetch = async (url, init) => {
+      const response = await fetchImpl(url, init); const body = await response.json();
+      if (new URL(url).pathname.endsWith('/kolir/options')) body.find((o) => o.value === 'red-id').label = 'New remote label';
+      return new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+    };
+    const drift = await compareRevision(draft.id, config, { databasePool: pool, fetchImpl: changedFetch });
+    assert.equal(drift.diagnostics.find((d) => d.code === 'OPTION_ID_LABEL_CHANGED').optionId, 'red-id');
+    assert.deepEqual(await bindings.getRevision(draft.id), publication);
+  });
+});

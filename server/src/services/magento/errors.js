@@ -14,6 +14,12 @@ const MESSAGES = Object.freeze({
   MAGENTO_PRODUCT_AMBIGUOUS: 'Magento returned multiple products for the exact SKU.',
   MAGENTO_PROBE_ARGUMENTS: 'Invalid probe arguments; use --help for supported options.',
   MAGENTO_PROBE_FAILED: 'Magento probe failed.',
+  MAGENTO_AUDIT_ARGUMENTS: 'Invalid schema audit arguments; use --help for supported options.',
+  MAGENTO_AUDIT_FAILED: 'Magento schema audit failed; no complete artifact was produced.',
+  MAGENTO_AUDIT_SENSITIVE_DATA: 'Schema evidence contains sensitive data; no artifact was produced.',
+  MAGENTO_BINDING_EVIDENCE_INVALID: 'Amber binding evidence is incomplete, ambiguous or exceeds the audit limits.',
+  MAGENTO_BINDING_AUDIT_FAILED: 'Magento binding evidence audit failed; no complete artifact was produced.',
+  MAGENTO_BINDING_AUDIT_ARGUMENTS: 'Invalid binding evidence audit arguments; use --help for supported options.',
 });
 
 class MagentoIntegrationError extends Error {
