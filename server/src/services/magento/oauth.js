@@ -8,7 +8,7 @@ function percentEncode(value) {
 
 function compare(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
 
-// Only the two closed wrappers below select a method. JSON bodies are not OAuth parameters.
+// Only closed wrappers below select a method. JSON bodies are not OAuth parameters.
 function signRequest(method, urlString, credentials, {
   nonce = randomBytes(24).toString('hex'),
   timestamp = Math.floor(Date.now() / 1000),
@@ -52,4 +52,12 @@ function signCategoryCreateRequest(url, credentials, options) {
   if (parsed.pathname !== '/rest/all/V1/categories' || parsed.search) throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID');
   return signRequest('POST', url, credentials, options);
 }
-module.exports = { percentEncode, signGetRequest, signCategoryCreateRequest };
+function signSyncRequest(url, credentials, options) {
+  let parsed;
+  try { parsed = new URL(url); } catch { throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID'); }
+  if (parsed.search || !/^\/rest\/(all|en)\/V1\/(products|inventory\/source-items|products\/[^/]+\/websites)$/.test(parsed.pathname)) {
+    throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID');
+  }
+  return signRequest('POST', url, credentials, options);
+}
+module.exports = { percentEncode, signGetRequest, signCategoryCreateRequest, signSyncRequest };

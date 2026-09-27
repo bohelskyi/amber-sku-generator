@@ -41,12 +41,12 @@ test('Magento binding migration 041: checkpoint 040 rollback, checksum retention
   }
 });
 
-test('Magento binding migration 000 through 041 applies to a fresh disposable database', async () => {
+test('Magento binding foundation and current migrations apply to a fresh disposable database', async () => {
   const name = 'amber_magento_binding_fresh_test'; const url = await recreateTestDatabase(name);
   const db = new Pool({ connectionString: url });
   try {
     await runNodeInDatabase(url, "require('./src/db/run-migrations').runMigrations().catch(e=>{console.error(e);process.exitCode=1;});");
-    assert.equal((await db.query('SELECT count(*)::int n FROM schema_migrations')).rows[0].n, 42);
+    assert.equal((await db.query('SELECT count(*)::int n FROM schema_migrations')).rows[0].n, 43);
     assert.equal((await db.query("SELECT count(*)::int n FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'magento_binding_%'")).rows[0].n, 10);
     assert.equal((await db.query('SELECT count(*)::int n FROM magento_binding_revisions')).rows[0].n, 0);
   } finally { await db.end(); await dropTestDatabase(name); }

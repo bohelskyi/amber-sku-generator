@@ -1,5 +1,6 @@
 const { createMagentoClient } = require('./client');
 const { bindingKey } = require('./binding-validation');
+const { hash } = require('./binding-contract');
 
 const present = (v) => v !== undefined && v !== null && String(v).trim() !== '';
 const positiveId = (v) => Number.isSafeInteger(v) && v > 0;
@@ -38,6 +39,9 @@ async function readDomains(config, { client, schema, sku, raw, expected, fetchIm
       const targets = new Set(Object.keys(expected.english));
       for (const a of product.custom_attributes) if (targets.has(a.attribute_code)) fields[a.attribute_code] = a.value;
       evidence.english = { id: product.id, sku: product.sku, fields,
+        preservedFieldHashes: Object.fromEntries(product.custom_attributes.filter((a) => !present(expected.english[a.attribute_code])
+          && schema.attributes.some((s) => s.attribute_code === a.attribute_code && s.scope === 'store'))
+          .map((a) => [a.attribute_code, hash(a.value)])),
         preservedFields: product.custom_attributes.filter((a) => !targets.has(a.attribute_code)).map((a) => a.attribute_code) };
     } catch (cause) { evidence.failures.push({ code: 'STORE_VIEW_READ_UNAVAILABLE', operation: 'storeViews', reason: safeReason(cause) }); }
   }

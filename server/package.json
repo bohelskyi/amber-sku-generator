@@ -8,6 +8,7 @@
     "audit:data": "node scripts/audit-data-integrity.js",
     "magento:probe": "node scripts/magento-probe.js",
     "magento:sync-preview": "node scripts/magento-sync-preview.js",
+    "magento:sync": "node scripts/magento-sync.js",
     "magento:bindings": "node scripts/magento-bindings.js",
     "magento:category": "node scripts/magento-category.js",
     "magento:schema-audit": "node scripts/magento-schema-audit.js",

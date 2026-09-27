@@ -967,8 +967,8 @@ and [stock extension](https://github.com/magento/magento2/blob/2.4.6/app/code/Ma
 
 Inventory, websites and EN now have separate GET-only operation previews in
 `transport` and `sendability.operations.<domain>.plan`. Missing evidence or unapproved
-bindings/policies block that operation without hiding the core payload. No product,
-inventory, website or store-view writer is implemented, even when the plan is sendable.
+bindings/policies block that operation without hiding the core payload. The preview never writes; the separate durable CLI below requires a published binding
+and explicit `--apply`. Sendability alone never dispatches a mutation.
 
 - **Inventory:** approved `qty` and `is_in_stock` identities with
   `initialize_create_only` policies initialize CREATE with quantity 1 and in-stock
@@ -1096,3 +1096,88 @@ the **draft immediately**; publication is not necessary for useful approved evid
 Automated verification uses injected Magento responses and disposable PostgreSQL only.
 It does not execute a live preview. No binding approval, production write or commit is
 part of this milestone.
+
+
+## Durable product-sync jobs ? migration 042
+
+`magento:sync` is the first explicit apply worker. Install migration 042 through the
+normal migration runner/startup before using it. It neither publishes bindings nor
+runs runtime DDL. The existing `magento:sync-preview` remains GET-only.
+
+From `server/`, with an active local user possessing `export_templates.publish`:
+
+```powershell
+# Requires this same UUID to have been explicitly published; a validated draft is rejected.
+npm run magento:sync -- --sku "KL3/11131351005" --binding-revision 4d563554-bfe3-4d01-9df5-225aa5b61d48 --actor-user-id 1
+# Explicit first apply (reuses the bound job):
+npm run magento:sync -- --sku "KL3/11131351005" --binding-revision 4d563554-bfe3-4d01-9df5-225aa5b61d48 --actor-user-id 1 --apply
+# Reconcile/resume one durable job without replacing its plan:
+npm run magento:sync -- --job <JOB_UUID> --actor-user-id 1 --apply
+```
+
+Without `--apply`, the CLI performs live GET discovery/preview and persists the
+reviewable exact operations (`--json` includes them). It performs no Magento mutation.
+Both enqueue and apply require the installation's current published immutable binding;
+a later publication makes an older pending job blocked. Actor checks use the existing
+access-admin boundary. The CLI is trusted local administration, not a new HTTP API.
+
+`magento_sync_jobs` stores the product/SKU, origin hash and installation key, exact
+publication/hash, authoritative product/lifecycle state hash, immutable intended
+operations/hash, minimized baseline and preservation hashes. It records actor,
+attempt count, structured failure, remote product ID and final acknowledgement time.
+`magento_sync_steps` records each operation's committed dispatch marker and verified
+completion. Database triggers prohibit rewriting intent, deleting evidence, resetting
+a dispatch or altering success. Audit events commit with queue/step/state transitions.
+No credentials, authorization headers or full remote response bodies are persisted.
+
+The planner is **the existing sync-preview evaluator and resolver**. Each attempt
+rebuilds its intended operations using current Amber inputs, live schema/category
+identities and the immutable original comparison baseline. This prevents our own
+partial writes from changing the bound intent. A changed intended plan or loss of
+sendability blocks apply. Fresh exact-SKU GETs check identity and each operation's
+remote preconditions. Magento-managed fields are omitted and preservation hashes
+are checked, including media, unknown attributes/extensions, update inventory and
+unproduced scoped EN content. Final acknowledgement also verifies unchanged EN
+values and required website memberships, not merely fields sent in the last request.
+
+Operations run in this order, skipping writes already verified as satisfied:
+
+1. Core product repository save; CREATE must have native status 2. UPDATE may not
+   contain status at all. SKU rename is unsupported.
+2. The planner's exact category links/positions, via a separate product save.
+3. MSI source initialization for CREATE only; UPDATE never resets inventory.
+4. Individual additive website memberships; never a complete replacement list.
+5. Nonempty EN scoped fields, with blanks and unproduced fields preserved.
+
+Product saves use Magento 2.4.6's
+[POST repository save](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Catalog/Model/ProductRepository.php)
+contract, which resolves an existing SKU before merging data. This avoids encoded
+slash product-update paths and preserves omitted status. Categories use its extension
+contract; MSI and website operations use their named native endpoints. The writer
+has no arbitrary URL/method or delete API, follows no redirect and never retries HTTP.
+
+Enqueue is idempotent for installation/product/publication/Amber state, including
+completed retries. A partial unique index prevents competing unfinished SKU jobs.
+Apply uses a per-installation/SKU PostgreSQL session lock (duplicate apply returns
+`MAGENTO_SYNC_BUSY`), access/lifecycle/publication coordination and product then
+lifecycle row locks. These retain local state and publication through remote dispatch;
+ledger commits use an independent connection so dispatch evidence survives crashes.
+No export/cutover state or legacy queue cursor is advanced.
+
+States are `queued -> running -> succeeded`, or `retryable`, `blocked`, `uncertain`.
+A read failure before dispatch can retry safely. Every dispatch marker commits
+**before** the HTTP mutation. A crash, timeout, rejected response or verification
+mismatch leaves that marker in place. Rerun only reads to reconcile that step: if
+its intended result is verified, it advances and can execute later unsent operations;
+otherwise it remains unresolved and sends nothing again. There is no force/reset or
+automatic uncertain-write retry. Unfinished stale/uncertain jobs require operator
+review; the CLI does not discard them to enqueue a replacement. Success requires a
+fresh final GET proving all authoritative intended state and preservation checks.
+
+This is not a cross-system transaction: completed remote steps are not rolled back.
+Magento's APIs do not provide conditional writes or a cross-client idempotency key.
+PostgreSQL coordinates workers using this Amber database; independent Magento admin
+writers or another database are outside that lock. Use an exclusive operator window
+for the first apply. Read verification detects conflicts but cannot undo an external
+race. Encoded-SKU website endpoints can still be rejected by an installation; such a
+response is uncertain until exact membership is verified, never silently replayed.

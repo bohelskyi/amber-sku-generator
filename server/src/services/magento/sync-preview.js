@@ -371,7 +371,7 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
 }
 
 async function previewProduct(config, { databasePool, fetchImpl, storeCode = 'all', now = () => new Date().toISOString(),
-  readAmber = readPreviewProduct, discover = auditMagentoSchema, sensitiveValues = [], ...selection } = {}) {
+  readAmber = readPreviewProduct, discover = auditMagentoSchema, sensitiveValues = [], onObservation, ...selection } = {}) {
   const amber = await readAmber(databasePool, selection);
   if (amber.revision && (amber.revision.originHash !== originHash(config.baseUrl) || amber.revision.schema.storeCode !== storeCode)) {
     throw error(422, 'MAGENTO_BINDING_INSTALLATION_OR_SCOPE_MISMATCH', 'Binding installation or observation scope differs');
@@ -404,6 +404,7 @@ async function previewProduct(config, { databasePool, fetchImpl, storeCode = 'al
     report.sendable = false; report.sendability = sendability(report.blockers, report.candidatePayload, report.transport);
   }
   assertEvidenceSafe(report, config, sensitiveValues);
+  if (onObservation) await onObservation({ amber, schema, raw, categoryNodes: indexTrees(trees), domainEvidence, categoryFailures });
   return report;
 }
 module.exports = { previewProduct, planPreview, comparison };
