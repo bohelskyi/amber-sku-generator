@@ -149,7 +149,7 @@
   .workspace-brand-logo { @apply block h-9 w-auto sm:h-10; }
 
   .workspace-nav-links {
-    @apply flex min-w-0 flex-1 items-center gap-1 overflow-x-auto;
+    @apply flex min-w-0 flex-1 items-center gap-1;
     scrollbar-width: none;
   }
 
@@ -1870,7 +1870,7 @@
     padding-inline: 10px;
   }
 
-  .workspace-nav-link span { display: none; }
+  .workspace-nav-link span { display: inline; }
 
   .workspace-nav-link.is-active::after {
     bottom: -11px;
@@ -1914,4 +1914,16 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+.workspace-more { position:relative; }
+.workspace-more-links { position:absolute; top:calc(100% + 10px); right:0; width:260px; max-height:calc(100dvh - 80px); overflow:auto; padding:8px; background:var(--navy-900); border:1px solid #64748b; border-radius:8px; box-shadow:0 8px 24px #0004; }
+.workspace-more-links .workspace-nav-link { height:auto; min-height:40px; white-space:normal; }
+.workspace-more-links .workspace-menu-primary { display:none; }
+.workspace-more-primary-only { display:none; }
+@media (max-width:1000px) {
+  .workspace-more-primary-only { display:block; }
+  .workspace-nav-links > .workspace-primary-link { display:none; }
+  .workspace-more-links .workspace-menu-primary { display:flex; }
+  .workspace-more-links { right:auto; left:0; max-width:calc(100vw - 100px); }
 }

@@ -27,6 +27,15 @@ function getProductStateSignature(product) {
   return crypto.createHash('sha256').update(JSON.stringify(relevantState)).digest('hex');
 }
 
+// Recount copies subjects; generic pricing/information signatures retain their
+// existing meaning. Old recount previews must refresh this versioned binding.
+function getRecountStateSignature(product) {
+  return hashPayload({ version: 1, product: getProductStateSignature(product),
+    names: [product?.magento_name_subject_ua ?? null, product?.magento_name_subject_en ?? null],
+    reviewRequired: Boolean(product?.magento_name_review_required),
+    excludeFromExport: Number(product?.exclude_from_export || 0) });
+}
+
 function getProductPreviewToken(preview, categoryCode, answers, isCalibrated) {
   const payload = {
     categoryCode,
@@ -51,6 +60,7 @@ function getProductPreviewToken(preview, categoryCode, answers, isCalibrated) {
 
 function getCorrectionPreviewSignature(preview, { legacyDefaultRounding = false } = {}) {
   const snapshot = {
+    ...(preview?.source?.stateSignature ? { recountState: preview.source.stateSignature } : {}),
     source: {
       productId: Number(preview?.source?.productId || 0),
       sku: preview?.source?.sku || null,
@@ -108,5 +118,6 @@ module.exports = {
   getCorrectionDecisionSignature,
   getProductPreviewToken,
   getProductStateSignature,
+  getRecountStateSignature,
   stableAnswerEntries,
 };

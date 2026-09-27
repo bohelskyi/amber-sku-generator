@@ -25,6 +25,19 @@ import { getPermissionUiState, getRecountUiMode } from '../src/lib/permission-ui
 import AdminPage from '../src/pages/AdminPage.jsx';
 import CorrectionRequestsPage from '../src/pages/CorrectionRequestsPage.jsx';
 import { api, createApiClient } from '../src/lib/api.js';
+
+it.each([401,403])('late %s from an invalidated principal cannot change the current authentication gate', async (status) => {
+  const isolated = createApiClient(); const onUnauthorized = vi.fn(); const onAccessStatusChange = vi.fn();
+  let principal = { id: 'A', valid: true }; let csrf = 'csrf-A'; let reject;
+  isolated.configureAuth({ getPrincipalLifetime: () => principal, getCsrfToken: () => csrf, onUnauthorized, onAccessStatusChange });
+  let dispatched;
+  isolated.client.defaults.adapter = (config) => { dispatched = config; return new Promise((_resolve, rejectResponse) => { reject = rejectResponse; }); };
+  const pending = isolated.client.post('/export/preview', {}).catch((error) => error);
+  expect(dispatched.headers.get('X-CSRF-Token')).toBe('csrf-A');
+  principal.valid = false; principal = { id: 'B', valid: true }; csrf = 'csrf-B';
+  reject({ config: dispatched, response: { status, data: { code: 'APP_ACCESS_DISABLED' } } }); await pending;
+  expect(onUnauthorized).not.toHaveBeenCalled(); expect(onAccessStatusChange).not.toHaveBeenCalled();
+});
 import {
   APPLICATION_USER_STATUS_LABELS,
 } from '../src/lib/user-management.js';
@@ -125,7 +138,7 @@ describe('authentication bootstrap and gate', () => {
 
     pending.resolve(response(currentSession));
     await screen.findByText('Protected business app');
-    expect(businessMounts).toBe(1);
+    await waitFor(() => expect(businessMounts).toBe(1));
   });
 
   it('bootstraps an authenticated session and retains only normalized identity fields', async () => {
@@ -556,6 +569,7 @@ describe('application-user administration UI', () => {
         <MemoryRouter><WorkspaceNav /></MemoryRouter>
       </AuthContext.Provider>
     );
+    fireEvent.click(screen.getByRole('button', { name: /Розділи/ }));
     expect(screen.getByRole('link', { name: /Користувачі/ })).toBeTruthy();
 
     rerender(
@@ -583,7 +597,8 @@ describe('application-user administration UI', () => {
       url === '/admin/users' ? { users: managedUsers } : { roles }
     ));
     const post = vi.spyOn(api, 'post').mockResolvedValue(response({}));
-    const put = vi.spyOn(api, 'put').mockResolvedValue(response({}));
+    const roleUpdate = deferred();
+    const put = vi.spyOn(api, 'put').mockReturnValue(roleUpdate.promise);
 
     render(
       <AuthContext.Provider value={authValue()}>
@@ -607,6 +622,7 @@ describe('application-user administration UI', () => {
       '/admin/users/101/approve',
       { roleId: 2 }
     ));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Підтвердити Pending User' }).disabled).toBe(false));
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Роль для Active User' }), {
       target: { value: '2' },
@@ -617,8 +633,14 @@ describe('application-user administration UI', () => {
       { roleId: 2, expectedAssignmentId: 202 }
     ));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Вимкнути доступ для Active User' }));
+    // Observing PUT is not completion: runAction still awaits it and reloads users.
+    const disable = screen.getByRole('button', { name: 'Вимкнути доступ для Active User' });
+    expect(disable.disabled).toBe(true);
+    roleUpdate.resolve(response({}));
+    await waitFor(() => expect(disable.disabled).toBe(false));
+    fireEvent.click(disable);
     await waitFor(() => expect(post).toHaveBeenCalledWith('/admin/users/102/disable', {}));
+    await waitFor(() => expect(disable.disabled).toBe(false));
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Роль для Disabled User' }), {
       target: { value: '3' },

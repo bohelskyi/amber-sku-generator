@@ -620,6 +620,15 @@ export default function CorrectionRequestsPage() {
                         <div className="correction-pricing-line mt-2 border-t border-slate-100 pt-2 text-sm leading-5 text-slate-600">
                           <PricingDecision request={request} />
                         </div>
+                        {request.refreshRequired && <p className="mt-2 text-sm text-amber-900">Потрібно оновити запит перед завершенням.</p>}
+                        {request.delivery && <p className="mt-2 text-sm text-slate-600">
+                          {request.delivery.route === 'normal' ? 'Для наступника передбачено першу доставку.'
+                            : ({ prior_exposure: 'Доставка наступника потребує узгодження попереднього експорту.',
+                              historical_ambiguity: 'Доставка очікуватиме перевірки історії експорту.',
+                              intentional_exclusion: 'Наступник успадкує виключення з доставки.',
+                              invalid_lineage: 'Доставка очікуватиме перевірки історії виправлень.' })[request.delivery.holdReason] || 'Доставка потребує перевірки.'}
+                          {request.delivery.nameReviewRequired && ' Успадковані назви потребують перевірки.'}
+                        </p>}
                         {request.comment && (
                           <div className="mt-3 border-l-2 border-slate-300 pl-3 text-sm leading-6 text-slate-600">
                             {request.comment}
@@ -657,7 +666,7 @@ export default function CorrectionRequestsPage() {
                               {canReject && <button type="button" className="btn btn-outline flex h-10 w-10 items-center justify-center p-0 text-rose-700" onClick={() => updateStatus(request, 'rejected')} disabled={requestBusy} title="Відхилити" aria-label="Відхилити запит">
                                 <XCircle size={16} />
                               </button>}
-                              {canComplete && <button type="button" className="btn btn-primary gap-2" onClick={() => openCompletion(request)} disabled={requestBusy}>
+                              {canComplete && <button type="button" className="btn btn-primary gap-2" onClick={() => openCompletion(request)} disabled={requestBusy || request.refreshRequired}>
                                 <CheckCircle2 size={16} />
                                 Підтвердити
                               </button>}

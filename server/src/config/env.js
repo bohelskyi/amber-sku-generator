@@ -165,6 +165,7 @@ function loadConfig(env = process.env) {
     pgQueryTimeoutMs: parseInteger(env, 'PG_QUERY_TIMEOUT_MS', 30000),
     pgStatementTimeoutMs: parseInteger(env, 'PG_STATEMENT_TIMEOUT_MS', 30000),
     nbuRateOverride: parseOptionalPositiveNumber(env, 'NBU_RATE_OVERRIDE'),
+    googleTranslationApiKey: readValue(env, 'GOOGLE_TRANSLATION_API_KEY'),
     nbuMaxStaleMs: parseInteger(env, 'NBU_MAX_STALE_MS', DEFAULT_NBU_MAX_STALE_MS, {
       min: 1,
     }),

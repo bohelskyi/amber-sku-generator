@@ -1,3 +1,4 @@
+const lifecycleGate = require('./full-product-cutover-gate');
 const pool = require('../db/pool');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
@@ -493,18 +494,18 @@ async function applyProductPriceChangeInTransaction(payload = {}, options = {}) 
 async function applyProductPriceChange(payload = {}, options = {}) {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const result = await applyProductPriceChangeInTransaction(payload, {
       ...options,
       queryable: client,
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return result;
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 

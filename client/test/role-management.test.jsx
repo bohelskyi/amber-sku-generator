@@ -94,6 +94,7 @@ describe('role-management UI', () => {
         <MemoryRouter><WorkspaceNav /><RolesPage /></MemoryRouter>
       </AuthContext.Provider>
     );
+    fireEvent.click(screen.getByRole('button', { name: /Розділи/ }));
     expect(await screen.findByRole('link', { name: /Ролі/ })).toBeTruthy();
     expect(await screen.findByText('Захищена')).toBeTruthy();
     expect(get).toHaveBeenCalledWith('/admin/roles');

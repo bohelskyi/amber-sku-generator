@@ -237,17 +237,22 @@ const repricingPreview = {
   }],
 };
 
-function renderRepricing(permissions = [
+async function renderRepricing(permissions = [
   'repricing.view',
   'repricing.prepare',
   'repricing.apply',
   'repricing.rollback',
 ]) {
-  return render(
-    <AuthContext.Provider value={authValue(permissions)}>
-      <MemoryRouter><RepricingPage /></MemoryRouter>
-    </AuthContext.Provider>
-  );
+  let view;
+  // Flush initial loading and controller effects before driving the workflow.
+  await act(async () => {
+    view = render(
+      <AuthContext.Provider value={authValue(permissions)}>
+        <MemoryRouter><RepricingPage /></MemoryRouter>
+      </AuthContext.Provider>
+    );
+  });
+  return view;
 }
 
 describe('Repricing workflow', () => {
@@ -275,7 +280,7 @@ describe('Repricing workflow', () => {
       throw new Error(`Unexpected POST ${url} ${JSON.stringify(body)}`);
     });
 
-    renderRepricing();
+    await renderRepricing();
     fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
     const priceInput = await screen.findByRole('textbox', { name: 'Нова ціна для BR1001' });
     vi.useFakeTimers();
@@ -343,7 +348,7 @@ describe('Repricing workflow', () => {
       throw new Error(`Unexpected GET ${url}`);
     });
 
-    renderRepricing();
+    await renderRepricing();
     fireEvent.click(await screen.findByRole('button', { name: 'Продовжити чернетку' }));
     expect(await screen.findByText(/Дані або розрахунок змінилися після збереження чернетки/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Прийняти оновлення' })).toBeTruthy();
@@ -372,7 +377,7 @@ describe('Repricing workflow', () => {
       throw new Error(`Unexpected PUT ${url}`);
     });
 
-    renderRepricing();
+    await renderRepricing();
     fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
     const priceInput = await screen.findByRole(
       'textbox',
@@ -471,7 +476,7 @@ describe('Repricing workflow', () => {
     });
     const put = vi.spyOn(api, 'put');
 
-    renderRepricing();
+    await renderRepricing();
     fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
     const firstInput = await screen.findByRole('textbox', { name: 'Нова ціна для BR1001' });
     vi.useFakeTimers();
@@ -553,7 +558,7 @@ describe('Repricing workflow', () => {
       return previewRequestCount === 1 ? firstPreview.promise : secondPreview.promise;
     });
 
-    renderRepricing();
+    await renderRepricing();
     fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
     fireEvent.change(screen.getByRole('combobox', { name: 'Цінова матриця' }), {
       target: { value: '22' },
@@ -597,14 +602,14 @@ describe('Repricing workflow', () => {
       throw new Error(`Unexpected POST ${url}`);
     });
 
-    const firstRender = renderRepricing();
+    const firstRender = await renderRepricing();
     fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
     expect(await screen.findByText('Переоцінку тимчасово заблоковано')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Застосувати переоцінку' }).disabled).toBe(true);
 
     firstRender.unmount();
     activeRequests = [];
-    renderRepricing();
+    await renderRepricing();
     fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Застосувати переоцінку' }));
     const confirmButton = screen.getByRole('button', { name: 'Застосувати' });
@@ -645,7 +650,7 @@ describe('Repricing workflow', () => {
       throw new Error(`Unexpected POST ${url}`);
     });
 
-    renderRepricing(['repricing.view', 'repricing.prepare']);
+    await renderRepricing(['repricing.view', 'repricing.prepare']);
     await screen.findByRole('button', { name: 'Попередній перегляд' });
     expect(screen.queryByRole('button', { name: 'Відкотити переоцінку 31' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Попередній перегляд' }));
@@ -680,7 +685,7 @@ describe('Repricing workflow', () => {
       throw new Error(`Unexpected POST ${url}`);
     });
 
-    renderRepricing();
+    await renderRepricing();
     fireEvent.click(await screen.findByRole('button', { name: 'Відкотити переоцінку 31' }));
     fireEvent.click(screen.getByRole('button', { name: 'Відкотити' }));
 
@@ -730,7 +735,7 @@ describe('Repricing workflow', () => {
       throw new Error(`Unexpected POST ${url}`);
     });
 
-    renderRepricing();
+    await renderRepricing();
     fireEvent.click(await screen.findByRole('button', { name: 'Переоцінити все' }));
     const errorFilter = await screen.findByRole('button', { name: 'Помилки' });
     const applyButton = screen.getByRole('button', { name: 'Застосувати переоцінку' });
@@ -822,7 +827,7 @@ describe('Repricing workflow', () => {
       throw new Error(`Unexpected POST ${url}`);
     });
 
-    renderRepricing();
+    await renderRepricing();
     fireEvent.click(await screen.findByRole('button', { name: 'Переоцінити все' }));
     const applyButton = await screen.findByRole('button', { name: 'Застосувати переоцінку' });
     expect(applyButton.disabled).toBe(true);
@@ -937,6 +942,24 @@ function correctionRequest(id, sourceSku) {
 }
 
 describe('Correction queue polling', () => {
+  it('phase2 presents delivery/review and requires refresh for older pending request evidence', async () => {
+    const request = { ...correctionRequest(50, 'SV-PHASE2'), status: 'in_progress', claimVersion: 4,
+      claimedByUser: { id: 42, displayName: 'Phase One User' }, refreshRequired: true,
+      delivery: { route: 'hold', holdReason: 'prior_exposure', nameReviewRequired: true },
+      proposedPayload: { totalPriceUah: 1250, recountEvidence: { private: 'raw-evidence-not-for-normal-ui' } } };
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/config') return response(builderConfig);
+      if (url === '/admin/correction-requests') return response({ items: [request], summary: { active: 1, inProgress: 1 } });
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    render(<AuthContext.Provider value={authValue(['corrections.view', 'corrections.complete'])}>
+      <MemoryRouter><CorrectionRequestsPage /></MemoryRouter></AuthContext.Provider>);
+    await screen.findByText('Потрібно оновити запит перед завершенням.');
+    expect(screen.getByText(/Доставка наступника потребує узгодження попереднього експорту/).textContent).toContain('Успадковані назви потребують перевірки.');
+    expect(screen.getByRole('button', { name: 'Підтвердити', exact: true }).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: 'Оновити розрахунок' }).disabled).toBe(false);
+    expect(screen.queryByText('raw-evidence-not-for-normal-ui')).toBeNull();
+  });
   it('hides a placeholder-backed no-op while preserving a real calibration change', async () => {
     const correctionConfig = {
       ...builderConfig,

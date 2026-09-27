@@ -1,3 +1,4 @@
+const lifecycleGate = require('../full-product-cutover-gate');
 const pool = require('../../db/pool');
 const { writeAuditEvent } = require('../../audit/audit-events');
 const { createMutationContext } = require('../../audit/mutation-context');
@@ -28,7 +29,7 @@ async function createQuestion(payload, options = {}) {
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const result = await client.query(
       `INSERT INTO questions (category_code, key, label, sku_index, display_order, required, include_in_sku, input_type, sku_separator, visible_if_json)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
@@ -58,13 +59,13 @@ async function createQuestion(payload, options = {}) {
         label: payload.label,
       },
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { id: questionId };
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -85,7 +86,7 @@ async function updateQuestion(payload, options = {}) {
 
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
 
     const currentResult = await client.query(
       `SELECT id, category_code, key, label, sku_index, display_order, required,
@@ -116,7 +117,7 @@ async function updateQuestion(payload, options = {}) {
     });
 
     if (Object.keys(changes).length === 0) {
-      await client.query('COMMIT');
+      await lifecycleGate.commit(client);
       return { key: nextKey };
     }
 
@@ -169,13 +170,13 @@ async function updateQuestion(payload, options = {}) {
       },
     });
 
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { key: nextKey };
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 

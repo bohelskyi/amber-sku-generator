@@ -1,4 +1,3 @@
-import { ExportTools } from '../components/app/ExportTools';
 import { HistoryTable } from '../components/app/HistoryTable';
 import { HomeDashboard } from '../components/app/HomeDashboard';
 import { PageHeader, Toast } from '../components/app/PageHeader';
@@ -9,9 +8,15 @@ import { LoadingState } from '../components/app/UiPrimitives.jsx';
 import { useAuth } from '../auth/auth-context.js';
 import { useSkuManager } from '../hooks/useSkuManager';
 import { getPermissionUiState, getRecountUiMode } from '../lib/permission-ui.js';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useContext, useEffect, useEffectEvent, useRef } from 'react';
+import { ExportWorkflowContext } from '../hooks/product/useExportWorkflow';
 
 function AppPage() {
   const auth = useAuth();
+  const [searchParams] = useSearchParams();
+  const exportSku = searchParams.get('exportSku')?.slice(0, 160);
+  const { exportHandoff, endExportHandoff } = useContext(ExportWorkflowContext) || {};
   const permissionUi = getPermissionUiState(auth.permissions);
   const recountMode = getRecountUiMode(permissionUi);
   const sku = useSkuManager({
@@ -24,9 +29,23 @@ function AppPage() {
   });
   const {
     canArchiveProducts,
-    canCreateExports,
     canCreateProducts,
   } = permissionUi;
+  const openedSku = useRef(null);
+  const handoffCleanup = useRef(null);
+  const viewOnlyHandoff = useEffectEvent(() => {
+    if (!exportSku || !sku.config || openedSku.current === exportSku || sku.selectedCat || sku.isRecountOpen || sku.isPriceChangeOpen
+      || !auth.permissions.includes('products.view') || !auth.permissions.includes('products.decode')) return;
+    openedSku.current = exportSku;
+    sku.handleDecode(exportSku);
+  });
+  useEffect(() => { viewOnlyHandoff(); }, [exportSku, sku.config]);
+  useEffect(() => {
+    // StrictMode replays setup/cleanup on mount. Clear context only after a
+    // genuine departure, not during that replay while the product opens.
+    window.clearTimeout(handoffCleanup.current);
+    return () => { handoffCleanup.current = window.setTimeout(() => endExportHandoff?.(), 0); };
+  }, [endExportHandoff]);
 
   if (!sku.config) {
     return (
@@ -39,6 +58,16 @@ function AppPage() {
       <div className="mx-auto max-w-7xl space-y-5 px-4 py-4 sm:px-6 sm:py-6">
         <PageHeader />
         <Toast message={sku.copyMessage} />
+        {exportSku && auth.permissions.includes('products.view') && auth.permissions.includes('products.decode') && <section className="card p-4 space-y-2">
+          <p>Відкрито з перевірки експорту · <strong>{exportSku}</strong></p>
+          {exportHandoff?.sku === exportSku && <p>{exportHandoff.reason}</p>}
+          <Link className="btn btn-primary px-3" to={exportHandoff?.sku === exportSku ? exportHandoff.returnTo : '/exports'}>Повернутися до перевірки</Link>
+          {sku.decodeData?.sku !== exportSku && <>
+          <button className="btn btn-outline px-3" disabled={Boolean(sku.selectedCat || sku.hasRecountChanges || sku.isRecountApplying || sku.isPriceChangeOpen)}
+            onClick={() => sku.handleDecode(exportSku)}>Відкрити товар із експорту</button>
+          {(sku.selectedCat || sku.hasRecountChanges || sku.isPriceChangeOpen) && <p>Спочатку завершіть або скасуйте поточні зміни товару.</p>}</>}
+          <p className="text-sm">{sku.hasRecountChanges ? 'Є незбережені зміни товару.' : exportHandoff?.sku === exportSku && exportHandoff.saved ? 'Зміни товару збережено. У перевірці експорту буде показано актуальні дані сервера.' : 'Перегляд товару. Зміни не внесено.'}</p>
+        </section>}
 
         {!sku.selectedCat && (
           <HomeDashboard
@@ -50,6 +79,7 @@ function AppPage() {
             decodeError={sku.decodeError}
             decodeErrorDetails={sku.decodeErrorDetails}
             hasRecountChanges={sku.hasRecountChanges}
+            isInformationOnly={sku.isInformationOnly}
             isRecountApplying={sku.isRecountApplying}
             isRecountLoading={sku.isRecountLoading}
             isRecountOpen={sku.isRecountOpen}
@@ -64,6 +94,7 @@ function AppPage() {
             recountValidationAttempt={sku.recountValidationAttempt}
             recountWeight={sku.recountWeight}
             canCreateProducts={canCreateProducts}
+            canViewExports={auth.permissions.includes('exports.view')}
             canStartRecount={Boolean(recountMode)}
             canChangeProductPrice={permissionUi.canApplyDirectPriceChange
               || permissionUi.canCreateCorrectionRequest}
@@ -133,26 +164,17 @@ function AppPage() {
           canArchive={canArchiveProducts}
         />
 
-        {!sku.selectedCat && (canCreateExports || canArchiveProducts) && (
-          <ExportTools
-            exportFromSku={sku.exportFromSku}
-            setExportFromSku={sku.setExportFromSku}
-            exportToSku={sku.exportToSku}
-            setExportToSku={sku.setExportToSku}
-            exportError={sku.exportError}
-            setExportError={sku.setExportError}
-            isExportLoading={sku.isExportLoading}
-            isPriceExportLoading={sku.isPriceExportLoading}
-            priceExportError={sku.priceExportError}
-            priceExportStatus={sku.priceExportStatus}
-            skuToDelete={sku.skuToDelete}
-            setSkuToDelete={sku.setSkuToDelete}
-            onExportCsv={sku.handleExportCsv}
-            onPriceExportCsv={sku.handlePriceExportCsv}
-            onDelete={sku.handleDelete}
-            canArchive={canArchiveProducts}
-            canCreateExport={canCreateExports}
-          />
+        {!sku.selectedCat && canArchiveProducts && (
+          <section className="field-group" aria-label="Архівування">
+            <h3 className="text-lg font-semibold text-slate-900">Архівування</h3>
+            <p className="section-subtitle mt-1">Архівний артикул зберігається в базі, але не потрапляє в історію та експорт.</p>
+            <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+              <input type="text" value={sku.skuToDelete}
+                onChange={(event) => sku.setSkuToDelete(event.target.value)}
+                placeholder="Введіть повний артикул..." aria-label="SKU товару для архівування" className="input" />
+              <button type="button" onClick={() => sku.handleDelete(sku.skuToDelete)} className="btn btn-danger px-6">Архівувати</button>
+            </div>
+          </section>
         )}
       </div>
       <RecountConfirmDialog

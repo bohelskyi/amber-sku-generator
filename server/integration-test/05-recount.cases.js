@@ -1,3 +1,4 @@
+const { requestRecount } = require('./recount-fixture');
 const suite = require('./suite-context');
 const {
   assert,
@@ -97,7 +98,7 @@ test('recount removes a valid inherited size when the target configuration hides
   assert.equal(preview.data.corrected.fullSku, 'LN106021');
   assert.equal(Object.hasOwn(preview.data.corrected.answers, 'size'), false);
 
-  const applied = await request('/api/recount/apply', {
+  const applied = await requestRecount('/api/recount/apply', {
     method: 'POST',
     body: correctionPayload,
   });
@@ -167,7 +168,7 @@ test('legacy hidden size placeholder remains recountable without weakening new-p
   assert.equal(preview.data.corrected.fullSku, 'LN107020');
   assert.equal(Object.hasOwn(preview.data.corrected.answers, 'size'), false);
 
-  const applied = await request('/api/recount/apply', {
+  const applied = await requestRecount('/api/recount/apply', {
     method: 'POST',
     body: correctionPayload,
   });
@@ -238,7 +239,7 @@ test('recount explicitly clears optional answers without weakening real zero or 
   assert.equal(preview.data.corrected.answers.zero_option, 0);
   assert.equal(preview.data.corrected.answers.is_calibrated, 0);
 
-  const applied = await request('/api/recount/apply', {
+  const applied = await requestRecount('/api/recount/apply', {
     method: 'POST',
     body: correctionPayload,
   });

@@ -1,3 +1,4 @@
+const lifecycleGate = require('../full-product-cutover-gate');
 const pool = require('../../db/pool');
 const { writeAuditEvent } = require('../../audit/audit-events');
 const { addAuditChange } = require('../../audit/change-set');
@@ -151,7 +152,7 @@ async function upsertPriceCell({ scenario_id, x_val, y_val, price }, options = {
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const scenarioResult = await client.query(
       `SELECT id, category_code, name
        FROM price_scenarios
@@ -172,7 +173,7 @@ async function upsertPriceCell({ scenario_id, x_val, y_val, price }, options = {
 
     if (!hasPrice) {
       if (currentPrice === null) {
-        await client.query('COMMIT');
+        await lifecycleGate.commit(client);
         return;
       }
       await client.query(
@@ -196,12 +197,12 @@ async function upsertPriceCell({ scenario_id, x_val, y_val, price }, options = {
           newPrice: null,
         },
       });
-      await client.query('COMMIT');
+      await lifecycleGate.commit(client);
       return;
     }
 
     if (currentPrice !== null && currentPrice === normalizedPrice) {
-      await client.query('COMMIT');
+      await lifecycleGate.commit(client);
       return;
     }
 
@@ -228,12 +229,12 @@ async function upsertPriceCell({ scenario_id, x_val, y_val, price }, options = {
         newPrice: normalizedPrice,
       },
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -265,7 +266,7 @@ async function createScenario({
   const client = await pool.connect();
 
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const result = await client.query(
       `INSERT INTO price_scenarios
        (category_code, name, group_name, match_json, axis_x_key, axis_y_key,
@@ -308,13 +309,13 @@ async function createScenario({
         weightBandCount: normalized.weightBands.length,
       },
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { id: scenarioId };
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -346,7 +347,7 @@ async function updateScenario({
   const client = await pool.connect();
 
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const currentResult = await client.query(
       `SELECT id, category_code, name, group_name, match_json, axis_x_key, axis_y_key,
               priority, status, price_mode, apply_modifiers
@@ -419,12 +420,12 @@ async function updateScenario({
         },
       });
     }
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -432,7 +433,7 @@ async function duplicateScenario(id, options = {}) {
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
 
     const sourceScenario = await client.query(
       'SELECT * FROM price_scenarios WHERE id = $1 LIMIT 1',
@@ -517,13 +518,13 @@ async function duplicateScenario(id, options = {}) {
       },
     });
 
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { success: true, id: newScenarioId };
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -570,7 +571,7 @@ async function createModifier(
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const result = await client.query(
       `INSERT INTO price_modifiers (category_code, trigger_key, trigger_val, match_json, factor)
        VALUES ($1, $2, $3, $4::jsonb, $5)
@@ -596,13 +597,13 @@ async function createModifier(
         factor: normalizedFactor,
       },
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { id: modifierId };
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -617,7 +618,7 @@ async function updateModifier(
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const currentResult = await client.query(
       `SELECT id, category_code, trigger_key, trigger_val, match_json, factor
        FROM price_modifiers
@@ -627,7 +628,7 @@ async function updateModifier(
     );
     const current = currentResult.rows[0];
     if (!current) {
-      await client.query('COMMIT');
+      await lifecycleGate.commit(client);
       return;
     }
 
@@ -652,7 +653,7 @@ async function updateModifier(
     addAuditChange(changes, 'matchRule', current.match_json || {}, payload, { sensitive: true });
 
     if (Object.keys(changes).length === 0) {
-      await client.query('COMMIT');
+      await lifecycleGate.commit(client);
       return;
     }
 
@@ -685,12 +686,12 @@ async function updateModifier(
         changes,
       },
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 

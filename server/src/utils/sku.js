@@ -1,5 +1,29 @@
 const { isRuleMatched } = require('./rules');
 
+function parseVersionedSkuPart(skuWithoutCategory) {
+  const source = String(skuWithoutCategory || '');
+  const compactMatch = source.match(/^(\d+)\//);
+  if (compactMatch) {
+    return {
+      version: Number(compactMatch[1]),
+      marker: compactMatch[0],
+      encodedWithSuffix: source.slice(compactMatch[0].length),
+    };
+  }
+
+  // Keep decoding the short-lived pre-release marker format.
+  const legacyVersionMatch = source.match(/^V(\d+)-/i);
+  if (!legacyVersionMatch) {
+    return { version: 1, marker: '', encodedWithSuffix: source };
+  }
+
+  return {
+    version: Number(legacyVersionMatch[1]),
+    marker: legacyVersionMatch[0].toUpperCase(),
+    encodedWithSuffix: source.slice(legacyVersionMatch[0].length),
+  };
+}
+
 function parseVariationSku(skuValue) {
   const normalizedSku = String(skuValue || '').trim().toUpperCase();
   const variationMatch = normalizedSku.match(/^(.*\d{3})-(\d{3})$/);
@@ -683,6 +707,7 @@ function diagnoseSkuAttempts(questions, attempts, options = {}) {
 }
 
 module.exports = {
+  parseVersionedSkuPart,
   appendSkuSuffix,
   buildSkuSuffixDecodeAttempts,
   buildBaseSku,

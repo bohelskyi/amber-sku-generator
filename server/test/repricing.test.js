@@ -247,7 +247,7 @@ test('repricing facade keeps production callers and transaction coordinators tog
     facadeSource.indexOf('async function applyRepricing(')
   );
   const applySteps = [
-    "await client.query('BEGIN')",
+    "await lifecycleGate.begin(client, 'BEGIN')",
     'ORDER BY id\n       FOR UPDATE',
     'getBlockingCorrectionRequests(changedItems, client)',
     'INSERT INTO repricing_batches',
@@ -256,7 +256,7 @@ test('repricing facade keeps production callers and transaction coordinators tog
     'jsonb_to_recordset',
     'RETURNING product_id',
     "eventKey: 'repricing.applied'",
-    "await client.query('COMMIT')",
+    "await lifecycleGate.commit(client)",
   ].map((step) => applySource.indexOf(step));
   assert.ok(applySteps.every((index) => index >= 0));
   assert.deepEqual(applySteps, [...applySteps].sort((first, second) => first - second));
@@ -266,7 +266,7 @@ test('repricing facade keeps production callers and transaction coordinators tog
     facadeSource.indexOf('module.exports =')
   );
   const rollbackSteps = [
-    "await client.query('BEGIN')",
+    "await lifecycleGate.begin(client, 'BEGIN')",
     'WHERE id = $1\n       FOR UPDATE',
     'ORDER BY p.id\n       FOR UPDATE OF p',
     'doesProductMatchRepricingBatch',
@@ -274,7 +274,7 @@ test('repricing facade keeps production callers and transaction coordinators tog
     'UPDATE repricing_batches',
     "eventKey: 'repricing.rolled_back'",
   ].map((step) => rollbackSource.indexOf(step));
-  rollbackSteps.push(rollbackSource.lastIndexOf("await client.query('COMMIT')"));
+  rollbackSteps.push(rollbackSource.lastIndexOf("await lifecycleGate.commit(client)"));
   assert.ok(rollbackSteps.every((index) => index >= 0));
   assert.deepEqual(rollbackSteps, [...rollbackSteps].sort((first, second) => first - second));
 

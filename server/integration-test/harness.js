@@ -23,6 +23,7 @@ process.env.OIDC_REDIRECT_URI = 'http://localhost:5000/api/auth/callback';
 process.env.SESSION_SECRET = 'integration-test-session-secret-0123456789abcdef';
 process.env.SESSION_COOKIE_SECURE = 'false';
 process.env.TRUST_PROXY = 'false';
+process.env.GOOGLE_TRANSLATION_API_KEY = '';
 
 const pool = require('../src/db/pool');
 const { createApp } = require('../src/app');

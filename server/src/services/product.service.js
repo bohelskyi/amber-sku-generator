@@ -1,3 +1,4 @@
+const lifecycleGate = require('./full-product-cutover-gate');
 const pool = require('../db/pool');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
@@ -19,6 +20,7 @@ const {
   getCorrectionDecisionSignature,
   getProductPreviewToken,
   getProductStateSignature,
+  getRecountStateSignature,
 } = require('./product/product-signatures');
 const {
   buildProductAnswerContext,
@@ -38,6 +40,8 @@ const {
 } = require('./product/product-queries');
 const { decodeSku: decodeProductSku } = require('./product/product-decode');
 const { calculateDecisionPricing } = require('./product/correction-pricing-decision');
+const fullExport = require('./full-product-export.service');
+const { buildRecountEvidence, refreshRequired } = require('./product/recount-evidence');
 
 function normalizeSkuWriteError(err, sku) {
   if (err?.code !== '23505') return err;
@@ -397,7 +401,21 @@ async function resolveCorrectionSku(proposedFullSku, queryable = pool) {
   };
 }
 
-async function buildProductRecountPreview({
+async function buildProductRecountPreview(payload, options = {}) {
+  if (options.queryable) return buildRecountPreview(payload, options.queryable, options);
+  const client = await (options.databasePool || pool).connect();
+  try {
+    await lifecycleGate.begin(client, 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const preview = await buildRecountPreview(payload, client, options);
+    await lifecycleGate.commit(client);
+    return preview;
+  } catch (error) {
+    await lifecycleGate.rollback(client);
+    throw error;
+  } finally { await lifecycleGate.release(client); client.release(); }
+}
+
+async function buildRecountPreview({
   sourceSku,
   answers = {},
   isCalibrated,
@@ -405,8 +423,8 @@ async function buildProductRecountPreview({
   reason = '',
   manualPriceUah,
   pricingDecision = null,
-}) {
-  const sourceDecoded = await decodeSku(sourceSku);
+}, queryable, options) {
+  const sourceDecoded = await decodeProductSku(sourceSku, queryable);
   if (!sourceDecoded.existsInDb || !sourceDecoded.product) {
     const err = new Error('Переоблік доступний тільки для артикула, який є в базі');
     err.statusCode = 404;
@@ -454,7 +472,7 @@ async function buildProductRecountPreview({
     throw err;
   }
 
-  const activeSchema = await getActiveSchema(categoryCode);
+  const activeSchema = await getActiveSchema(categoryCode, queryable);
   const correctedAnswers = activeSchema
     ? omitHiddenRecountAnswers(nextAnswers, activeSchema.questions, nextIsCalibrated)
     : nextAnswers;
@@ -464,8 +482,8 @@ async function buildProductRecountPreview({
     weight: correctedWeight,
     isCalibrated: nextIsCalibrated,
     skuSchemaVersionId: activeSchema?.id,
-  }, { pricingDecision });
-  const correctionSku = await resolveCorrectionSku(correctedPreview.fullProposedSku);
+  }, { pricingDecision, queryable });
+  const correctionSku = await resolveCorrectionSku(correctedPreview.fullProposedSku, queryable);
   const previewCalculatedPriceUah = toUahNumber(correctedPreview.calculatedPriceUah);
   const previewAutoPriceUah = toUahNumber(correctedPreview.totalPriceUah);
   const previewManualPrice = pricingDecision?.mode === 'manual_uah'
@@ -499,7 +517,7 @@ async function buildProductRecountPreview({
     && Number.isFinite(newPriceUsd)
     && newPriceUsd > 0;
 
-  return {
+  const result = {
     source: {
       sku: sourceDecoded.sku,
       productId: sourceDecoded.product.id,
@@ -511,7 +529,10 @@ async function buildProductRecountPreview({
       pricePerGramUah: sourceDecoded.pricing?.pricePerGramUah ?? null,
       weight: sourceWeight,
       pricing: sourceDecoded.pricing || null,
-      stateSignature: getProductStateSignature(sourceDecoded.product),
+      nameEvidence: { ua: sourceDecoded.product.magento_name_subject_ua ?? null,
+        en: sourceDecoded.product.magento_name_subject_en ?? null,
+        reviewRequired: Boolean(sourceDecoded.product.magento_name_review_required) },
+      stateSignature: getRecountStateSignature(sourceDecoded.product),
     },
     corrected: {
       categoryCode,
@@ -551,6 +572,13 @@ async function buildProductRecountPreview({
       : null,
     reason: String(reason || '').trim(),
   };
+  const evidence = await buildRecountEvidence(queryable, sourceDecoded.product, result.corrected,
+    sourceDecoded.decodedAnswers, { lock: options.lockLifecycle === true });
+  result.source.stateSignature = evidence.signature;
+  result.corrected.recountEvidence = evidence.binding;
+  result.corrected.nameInheritance = evidence.names;
+  result.corrected.delivery = evidence.delivery;
+  return result;
 }
 
 async function applyProductRecount(payload, options = {}) {
@@ -561,16 +589,21 @@ async function applyProductRecount(payload, options = {}) {
   }
   const mutationContext = createMutationContext(options.mutationContext);
   const preview = await buildProductRecountPreview(payload || {});
-  const client = await pool.connect();
+  if (!payload.sourceStateSignature || payload.sourceStateSignature !== preview.source.stateSignature) {
+    throw Object.assign(new Error('Товар або успадковані назви змінилися. Оновіть preview переобліку.'),
+      { statusCode: 409, publicCode: 'RECOUNT_PREVIEW_STALE' });
+  }
+  const client = await (options.databasePool || pool).connect();
 
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
 
     const sourceProductId = Number(preview.source.productId);
     const sourceLockResult = await client.query(
       `SELECT id, full_sku, category, weight, total_price, total_price_uah,
               price_per_gram, uah_rate, details, status, corrected_to_product_id,
-              sku_schema_version_id
+              sku_schema_version_id, corrected_from_product_id, exclude_from_export, magento_name_subject_ua,
+              magento_name_subject_en, magento_name_review_required
        FROM products
        WHERE id = $1
        FOR UPDATE`,
@@ -588,7 +621,7 @@ async function applyProductRecount(payload, options = {}) {
       err.statusCode = 409;
       throw err;
     }
-    if (getProductStateSignature(lockedSource) !== preview.source.stateSignature) {
+    if (getRecountStateSignature(lockedSource) !== preview.corrected.recountEvidence.sourceState) {
       const err = new Error('Товар змінився після preview. Оновіть дані та повторіть виправлення.');
       err.statusCode = 409;
       throw err;
@@ -658,11 +691,11 @@ async function applyProductRecount(payload, options = {}) {
       ...preview,
       source: {
         ...preview.source,
-        stateSignature: getProductStateSignature(lockedSource),
+        stateSignature: preview.source.stateSignature,
       },
       corrected: authoritativeCorrected,
     };
-    if (payload.pricingDecision
+    if (payload.correctionRequestId
         && getCorrectionDecisionSignature(authoritativePreview, payload.pricingDecision)
           !== payload.correctionRequestSignature) {
       const error = new Error('Ціна або конфігурація виправлення змінилася. Оновіть запит.');
@@ -710,6 +743,19 @@ async function applyProductRecount(payload, options = {}) {
       fullSku: correctionSku.fullSku,
       variation: correctionSku.variation,
     };
+    // Preserve product -> SKU -> request -> lifecycle order. Finalization below
+    // retains its full conditional ownership/signature/epoch check.
+    if (payload.correctionRequestId) {
+      await client.query('SELECT id FROM correction_requests WHERE id=$1 FOR UPDATE',
+        [Number(payload.correctionRequestId)]);
+    }
+    const evidence = await buildRecountEvidence(client, lockedSource, corrected,
+      preview.source.decodedAnswers, { lock: true });
+    if (evidence.signature !== payload.sourceStateSignature) throw refreshRequired();
+    const inheritedNames = evidence.names;
+    corrected.nameInheritance = inheritedNames;
+    corrected.recountEvidence = evidence.binding;
+    corrected.delivery = evidence.delivery;
     const details = {
       answers: corrected.answers,
       isCalibrated: corrected.answers.is_calibrated ?? null,
@@ -746,8 +792,9 @@ async function applyProductRecount(payload, options = {}) {
       `INSERT INTO products
        (full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah,
         price_per_gram, uah_rate, details, status, exclude_from_export, corrected_from_product_id,
-        correction_reason, sku_schema_version_id, created_by_user_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'active', 1, $11, $12, $13, $14)
+        correction_reason, sku_schema_version_id, created_by_user_id,
+        magento_name_subject_ua, magento_name_subject_en, magento_name_review_required)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'active', 1, $11, $12, $13, $14, $15, $16, $17)
        RETURNING id`,
       [
         corrected.fullSku,
@@ -766,6 +813,7 @@ async function applyProductRecount(payload, options = {}) {
         preview.reason || null,
         Number(corrected.skuSchemaVersionId),
         mutationContext.actorUserId,
+        inheritedNames.ua, inheritedNames.en, inheritedNames.reviewRequired,
       ]
     );
     const correctedProductId = Number(insertResult.rows[0].id);
@@ -800,6 +848,7 @@ async function applyProductRecount(payload, options = {}) {
     );
     const productCorrectionId = Number(correctionResult.rows[0].id);
 
+    let completedRequest = null;
     if (payload.correctionRequestId) {
       const requestResult = await client.query(
         `UPDATE correction_requests
@@ -842,6 +891,11 @@ async function applyProductRecount(payload, options = {}) {
         err.statusCode = 409;
         throw err;
       }
+      completedRequest = requestResult.rows[0];
+    }
+
+    await fullExport.initializeRecountSuccessor(client, lockedSource, correctedProductId, productCorrectionId, evidence.disposition);
+    if (completedRequest) {
       await writeAuditEvent(client, {
         mutationContext,
         eventKey: 'correction_request.completed',
@@ -849,7 +903,7 @@ async function applyProductRecount(payload, options = {}) {
         subjectId: payload.correctionRequestId,
         details: {
           claimVersion: Number(payload.correctionRequestClaimVersion),
-          nextClaimVersion: Number(requestResult.rows[0].claim_version),
+          nextClaimVersion: Number(completedRequest.claim_version),
           sourceProductId,
           correctedProductId,
           productCorrectionId,
@@ -876,7 +930,7 @@ async function applyProductRecount(payload, options = {}) {
       },
     });
 
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
 
     return {
       success: true,
@@ -885,10 +939,10 @@ async function applyProductRecount(payload, options = {}) {
       corrected,
     };
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw normalizeSkuWriteError(err, preview.corrected.fullSku);
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -898,7 +952,7 @@ async function saveProduct(payload, options = {}) {
   let fullSku = '';
 
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     if (!payload.skuSchemaVersionId) {
       throw validationError('Для збереження потрібен skuSchemaVersionId із актуального preview.');
     }
@@ -1006,6 +1060,7 @@ async function saveProduct(payload, options = {}) {
       ]
     );
     const productId = Number(result.rows[0].id);
+    await fullExport.initializeNewProduct(client, productId);
     await writeAuditEvent(client, {
       mutationContext,
       eventKey: 'product.created',
@@ -1016,14 +1071,14 @@ async function saveProduct(payload, options = {}) {
         categoryCode,
       },
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
 
     return { success: true, id: result.rows[0].id, fullSku };
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw normalizeSkuWriteError(err, fullSku);
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -1032,7 +1087,7 @@ async function deleteProductBySku(skuToDelete, options = {}) {
   const normalizedSku = String(skuToDelete || '').trim().toUpperCase();
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const result = await client.query(
       `UPDATE products
        SET status = 'archived', exclude_from_export = 1, archived_by_user_id = $1
@@ -1046,6 +1101,7 @@ async function deleteProductBySku(skuToDelete, options = {}) {
       throw err;
     }
     const productId = Number(result.rows[0].id);
+    await fullExport.retireFullProduct(client, productId);
     await writeAuditEvent(client, {
       mutationContext,
       eventKey: 'product.archived',
@@ -1053,7 +1109,7 @@ async function deleteProductBySku(skuToDelete, options = {}) {
       subjectId: productId,
       details: { fullSku: normalizedSku },
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
 
     return {
       success: true,
@@ -1061,10 +1117,10 @@ async function deleteProductBySku(skuToDelete, options = {}) {
       message: `Артикул ${normalizedSku} перенесено в архів.`,
     };
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  formatDateTime,
   formatDecimal,
   formatDecodedSuffix,
   formatUah,
@@ -9,6 +9,7 @@ import {
   formatUsd,
 } from '../../lib/formatters';
 import { getAnswerValueLabel, getQuestionLabel } from '../../lib/answer-labels';
+import { getNewProductCopy } from '../../lib/product-export-copy';
 import {
   getVisibleOptionsForQuestion,
   isQuestionVisible,
@@ -96,6 +97,7 @@ export function HomeDashboard({
   canChangeProductPrice = false,
   canCreateProducts = true,
   canStartRecount = true,
+  canViewExports = false,
   config,
   exportStatus,
   priceExportStatus,
@@ -104,6 +106,7 @@ export function HomeDashboard({
   decodeError,
   decodeErrorDetails,
   hasRecountChanges,
+  isInformationOnly = false,
   isRecountApplying,
   isRecountLoading,
   isRecountOpen,
@@ -129,6 +132,7 @@ export function HomeDashboard({
   onDecode,
   onDecodeInputChange,
 }) {
+  const newProductCopy = getNewProductCopy(exportStatus?.countSinceLastExport);
   return (
     <div className="space-y-5">
       <div className={`home-top-workspace${canCreateProducts ? '' : ' is-decoder-only'}`}>
@@ -186,40 +190,25 @@ export function HomeDashboard({
             )}
           </div>
 
-          <div className="home-export-panel">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold text-slate-700">Повний експорт товарів</p>
-                <p className="mt-0.5 text-xs text-slate-500">
-                  {exportStatus
-                    ? (exportStatus.hasExport
-                      ? `Останній: ${formatDateTime(exportStatus.lastExport?.createdAt)}`
-                      : 'Експортів ще не було')
-                    : 'Завантаження статусу...'}
-                </p>
-              </div>
-              <span className="status-badge is-neutral">
-                {exportStatus ? `${exportStatus.countSinceLastExport} нових` : '...'}
-              </span>
-            </div>
-            {exportStatus && (
-              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
-                <span>У базі: {exportStatus.totalProducts}</span>
-                {exportStatus.exportableProducts !== undefined && <span>До експорту: {exportStatus.exportableProducts}</span>}
-              </div>
-            )}
-            <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-200 pt-3 text-xs">
-              <span className="font-semibold text-slate-700">Експорт змін цін</span>
-              <span className="status-badge is-neutral">
-                {priceExportStatus ? `${priceExportStatus.pendingCount} очікує` : '...'}
-              </span>
-            </div>
-            {Number(priceExportStatus?.excludedPendingCount) > 0 && (
-              <p className="mt-1 text-xs text-slate-500">
-                Виключено з експорту: {priceExportStatus.excludedPendingCount}
+          {canViewExports && (
+            <section className="home-export-panel min-w-0" aria-label="Експорт">
+              <h2 className="text-sm font-semibold text-slate-900">Експорт</h2>
+              <p className="mt-1 text-sm text-slate-700">
+                {exportStatus ? newProductCopy.pendingLabel : 'Завантаження статусу товарів…'}
               </p>
-            )}
-          </div>
+              <Link to="/exports/prices" className="mt-1 inline-block text-xs text-slate-600 underline underline-offset-2">
+                Зміни цін до експорту: {priceExportStatus ? priceExportStatus.pendingCount : 'завантаження…'}
+              </Link>
+              {Number(priceExportStatus?.excludedPendingCount) > 0 && (
+                <p className="mt-1 text-xs text-slate-500">
+                  Виключено з експорту: {priceExportStatus.excludedPendingCount}
+                </p>
+              )}
+              <Link to="/exports" className="btn btn-primary mt-3 w-full whitespace-normal text-center">
+                Перейти до експорту
+              </Link>
+            </section>
+          )}
         </div>
       </div>
 
@@ -228,6 +217,7 @@ export function HomeDashboard({
           config={config}
           decodeData={decodeData}
           hasRecountChanges={hasRecountChanges}
+          isInformationOnly={isInformationOnly}
           isRecountApplying={isRecountApplying}
           isRecountLoading={isRecountLoading}
           isRecountOpen={isRecountOpen}
@@ -263,6 +253,7 @@ export function DecodeWorkspace({
   config,
   decodeData,
   hasRecountChanges,
+  isInformationOnly = false,
   isRecountApplying,
   isRecountLoading,
   isRecountOpen,
@@ -314,6 +305,7 @@ export function DecodeWorkspace({
           canChangeProductPrice={canChangeProductPrice}
           decodeData={decodeData}
           hasRecountChanges={hasRecountChanges}
+          isInformationOnly={isInformationOnly}
           isRecountApplying={isRecountApplying}
           isRecountLoading={isRecountLoading}
           isRecountPreviewCurrent={isRecountPreviewCurrent}
@@ -559,6 +551,7 @@ function RecountPanel({
   config,
   decodeData,
   hasRecountChanges,
+  isInformationOnly = false,
   isRecountApplying,
   isRecountLoading,
   isRecountPreviewCurrent,
@@ -882,6 +875,12 @@ function RecountPanel({
               )}
             </div>
 
+            {isInformationOnly && (
+              <p className="builder-summary-note">
+                Зміняться лише інформаційні характеристики. SKU, товар і ціна залишаться без змін.
+              </p>
+            )}
+
             {isRecountPreviewCurrent && recountPreview?.corrected.variation && (
               <p className="builder-summary-note is-warning">
                 Новий SKU буде варіацією наявного артикула.
@@ -925,7 +924,7 @@ function RecountPanel({
                   : isRecountLoading
                     ? 'Готуємо...'
                     : hasRecountChanges
-                      ? 'Продовжити'
+                      ? (isInformationOnly ? 'Оновити характеристики' : 'Продовжити')
                       : 'Змінити ціну'}
               </button>
             </div>

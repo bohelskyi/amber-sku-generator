@@ -1,3 +1,4 @@
+const lifecycleGate = require('./full-product-cutover-gate');
 const APPLICATION_USER_ADMIN_LOCK_KEY = 'amber_application_user_admin_active_administrators';
 
 async function assertActorStillAuthorized(client, actorUserId, permissionKey, createError) {
@@ -49,14 +50,15 @@ async function runAccessAdminMutation({
       requiredPermission,
       createError
     );
+    await lifecycleGate.enterExisting(client);
     const result = await operation(client);
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return result;
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 

@@ -1,3 +1,4 @@
+const lifecycleGate = require('../full-product-cutover-gate');
 const pool = require('../../db/pool');
 const { writeAuditEvent } = require('../../audit/audit-events');
 const { createMutationContext } = require('../../audit/mutation-context');
@@ -25,7 +26,7 @@ async function createCategory(
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     await client.query(
       'INSERT INTO categories (code, name, requires_weight, skip_hidden_sku_questions, marketing_rounding_enabled) VALUES ($1, $2, $3, $4, $5)',
       [normalizedCode, name, normalizedRequiresWeight, normalizedSkipHidden, normalizedMarketingRounding]
@@ -43,13 +44,13 @@ async function createCategory(
         marketingRoundingEnabled: normalizedMarketingRounding,
       },
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { id: normalizedCode, name };
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -72,7 +73,7 @@ async function updateCategory(
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
 
     const currentResult = await client.query(
       'SELECT * FROM categories WHERE code = $1 FOR UPDATE',
@@ -80,7 +81,7 @@ async function updateCategory(
     );
     if (currentResult.rows.length === 0) {
       if (currentCode === nextCode) {
-        await client.query('COMMIT');
+        await lifecycleGate.commit(client);
         return { code: nextCode };
       }
       const err = new Error('\u041a\u0430\u0442\u0435\u0433\u043e\u0440\u0456\u044e \u043d\u0435 \u0437\u043d\u0430\u0439\u0434\u0435\u043d\u043e');
@@ -102,7 +103,7 @@ async function updateCategory(
     });
 
     if (Object.keys(changes).length === 0) {
-      await client.query('COMMIT');
+      await lifecycleGate.commit(client);
       return { code: nextCode };
     }
 
@@ -118,7 +119,7 @@ async function updateCategory(
         subjectId: nextCode,
         details: { code: nextCode, changes },
       });
-      await client.query('COMMIT');
+      await lifecycleGate.commit(client);
       return { code: nextCode };
     }
 
@@ -175,13 +176,13 @@ async function updateCategory(
       details: { code: nextCode, previousCode: currentCode, changes },
     });
 
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { code: nextCode };
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 

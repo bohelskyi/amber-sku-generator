@@ -1,3 +1,4 @@
+const { insertProductFixture } = require('./product-fixture');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
@@ -425,7 +426,7 @@ test.before(async () => {
     );
     schemas[code] = Number(result.rows[0].id);
   }
-  await pool.query(
+  await insertProductFixture(pool,
     `INSERT INTO products
        (full_sku, base_sku, sequence_number, category, weight, total_price,
         total_price_uah, price_per_gram, uah_rate, details, sku_schema_version_id)
@@ -438,7 +439,7 @@ test.before(async () => {
         $1)`,
     [schemas.LN]
   );
-  await pool.query(
+  await insertProductFixture(pool,
     `INSERT INTO products
        (full_sku, base_sku, sequence_number, category, weight, total_price,
         total_price_uah, price_per_gram, uah_rate, details, sku_schema_version_id)

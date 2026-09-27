@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { HomeDashboard } from '../src/components/app/HomeDashboard.jsx';
 import {
   getDecodedAnswerMap,
@@ -21,18 +22,21 @@ function renderHome(overrides = {}) {
   const onDecodeInputChange = vi.fn();
 
   const view = render(
-    <HomeDashboard
-      config={{ categories }}
-      exportStatus={null}
-      skuToDecode=""
-      decodeData={null}
-      decodeError=""
-      decodeErrorDetails={null}
-      onStart={onStart}
-      onDecode={onDecode}
-      onDecodeInputChange={onDecodeInputChange}
-      {...overrides}
-    />,
+    <MemoryRouter>
+      <HomeDashboard
+        canViewExports
+        config={{ categories }}
+        exportStatus={null}
+        skuToDecode=""
+        decodeData={null}
+        decodeError=""
+        decodeErrorDetails={null}
+        onStart={onStart}
+        onDecode={onDecode}
+        onDecodeInputChange={onDecodeInputChange}
+        {...overrides}
+      />
+    </MemoryRouter>,
   );
 
   return { ...view, onStart, onDecode, onDecodeInputChange };
@@ -161,6 +165,16 @@ describe('Home workspace', () => {
     expect(onDecode).toHaveBeenCalledOnce();
   });
 
+  it('shows an operator-facing new-product count without raw export totals or cursor IDs', () => {
+    renderHome({ exportStatus: { hasExport: true, countSinceLastExport: 25,
+      totalProducts: 400, exportableProducts: 390,
+      lastExport: { createdAt: '2026-09-22T10:00:00.000Z', exportedToProductId: 375 } } });
+    expect(screen.getByText('25 нових товарів очікують експорту')).toBeTruthy();
+    expect(screen.queryByText(/У базі:/)).toBeNull();
+    expect(screen.queryByText(/До експорту:/)).toBeNull();
+    expect(screen.queryByText(/375/)).toBeNull();
+  });
+  
   it('keeps Інклюз visibly unselected after an unrelated recount edit', () => {
     render(<RecountStateHarness />);
 

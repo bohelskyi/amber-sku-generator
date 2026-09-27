@@ -1,3 +1,4 @@
+const lifecycleGate = require('./full-product-cutover-gate');
 const pool = require('../db/pool');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
@@ -196,7 +197,7 @@ async function createRepricingDraft({
   const snapshot = getRepricingPreviewSnapshot(preview);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const result = await client.query(
       `INSERT INTO repricing_drafts
        (scope, scenario_id, category_code, scenario_name, scenario_snapshot,
@@ -233,10 +234,10 @@ async function createRepricingDraft({
       subjectId: result.rows[0].id,
       details: { scope: normalizedScope },
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return getRepricingDraft(result.rows[0].id);
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     if (error.code !== '23505') throw error;
     const concurrent = await pool.query(
       `SELECT id FROM repricing_drafts
@@ -249,7 +250,7 @@ async function createRepricingDraft({
     if (!concurrent.rows[0]) throw error;
     return getRepricingDraft(concurrent.rows[0].id);
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -357,7 +358,7 @@ async function discardRepricingDraft(draftId, options = {}) {
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const result = await client.query(
       `UPDATE repricing_drafts
        SET status = 'discarded', discarded_at = CURRENT_TIMESTAMP,
@@ -379,13 +380,13 @@ async function discardRepricingDraft(draftId, options = {}) {
       subjectId: result.rows[0].id,
       details: { scope: result.rows[0].scope || REPRICING_SCOPE_SCENARIO },
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { success: true, id: Number(result.rows[0].id) };
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -568,7 +569,7 @@ async function applyRepricingScope({
       };
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const lockedProductsResult = await client.query(
       `SELECT id, full_sku, category, weight, total_price, total_price_uah, price_per_gram,
               uah_rate, details, status, exclude_from_export
@@ -629,7 +630,7 @@ async function applyRepricingScope({
     );
 
     if (batchResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await lifecycleGate.rollback(client);
       const batch = await getBatchByPreviewToken(applicationToken);
       if (draft && batch) {
         await pool.query(
@@ -805,7 +806,7 @@ async function applyRepricingScope({
       subjectId: batchId,
       details: draft ? { draftId: Number(draft.id) } : {},
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return {
       success: true,
       alreadyApplied: false,
@@ -820,10 +821,10 @@ async function applyRepricingScope({
       },
     };
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -854,7 +855,7 @@ async function rollbackRepricing(batchId, options = {}) {
 
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const batchResult = await client.query(
       `SELECT id, scope, scenario_id, category_code, scenario_name, status, changed_count,
               applied_at, rolled_back_at
@@ -870,7 +871,7 @@ async function rollbackRepricing(batchId, options = {}) {
     }
     const batch = batchResult.rows[0];
     if (batch.status === 'rolled_back') {
-      await client.query('COMMIT');
+      await lifecycleGate.commit(client);
       return { success: true, alreadyRolledBack: true, batch };
     }
     if (batch.status !== 'completed') {
@@ -978,17 +979,17 @@ async function rollbackRepricing(batchId, options = {}) {
       subjectId: normalizedBatchId,
       details: {},
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return {
       success: true,
       alreadyRolledBack: false,
       batch: rolledBackResult.rows[0],
     };
   } catch (error) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
