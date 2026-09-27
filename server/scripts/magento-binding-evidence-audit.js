@@ -80,4 +80,4 @@ if (require.main === module) {
   require('dotenv').config({ path: path.resolve(__dirname, '../../.env'), override: false, quiet: true });
   runBindingEvidenceAudit({ args: process.argv.slice(2) }).then((code) => { process.exitCode = code; });
 }
-module.exports = { parseArguments, runBindingEvidenceAudit };
+module.exports = { parseArguments, runBindingEvidenceAudit, createReadOnlyPool, databaseSecrets };

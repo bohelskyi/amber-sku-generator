@@ -69,18 +69,28 @@ function assertValid(result) {
   if (!result.valid) throw c.error(422, 'MAGENTO_BINDING_INVALID', 'Binding validation failed', { diagnostics: result.diagnostics });
 }
 async function createDraft(input, options = {}) {
-  c.command(input, ['installationKey','origin','templateVersionId','observedAt','schema']);
+  return mutate('manage', options, (client, context) => createDraftOnClient(client, context, input));
+}
+// Internal: caller owns the authorized transaction, lifecycle gate and permission rechecks.
+async function createDraftOnClient(client, context, input) {
+  c.command(input, ['installationKey','origin','templateVersionId','observedAt','schema'], ['bindings']);
   const key = c.installation(input.installationKey); const origin = c.originHash(input.origin);
   const versionId = c.identity(input.templateVersionId);
   if (typeof input.observedAt !== 'string' || !/^\d{4}-\d\d-\d\dT.*Z$/.test(input.observedAt)
     || !Number.isFinite(Date.parse(input.observedAt))) c.invalid();
   const schema = c.normalizeSchema(input.schema);
-  return mutate('manage', options, async (client, context) => {
+
     await lockInstallation(client, key);
     const existing = (await client.query('SELECT origin_hash FROM magento_binding_revisions WHERE installation_key=$1 LIMIT 1', [key])).rows[0];
     if (existing && existing.origin_hash !== origin) conflict();
     const t = await template(client, versionId);
     const plans = requirements(t.compiled.definition, schema);
+    const seeded = input.bindings ? normalizeBindings(input.bindings) : null;
+    if (seeded) {
+      if (Object.values(seeded).flat().some((r) => r.reviewState === 'approved'
+        || r.evidence?.categories?.some((v) => v.reviewState === 'approved'))) c.invalid();
+      assertValid(validateBindings(seeded, t.compiled.definition, schema));
+    }
     const row = (await client.query(`INSERT INTO magento_binding_revisions
       (id, installation_key, origin_hash, template_id, template_version_id, template_definition_hash,
        evaluator_version, output_contract, format_version, schema_fingerprint, topology_fingerprint,
@@ -91,12 +101,12 @@ async function createDraft(input, options = {}) {
       schema.storeCode, context.actorUserId])).rows[0];
     await repository.insertSchema(client, row.id, schema);
     // Scope starts disabled and unresolved. No schema-label candidate is ever approved here.
-    const bindings = normalizeBindings({ routes: plans.map((p) => ({ routeKey: p.routeKey, enabled: false,
+    const bindings = seeded || normalizeBindings({ routes: plans.map((p) => ({ routeKey: p.routeKey, enabled: false,
       setId: null, reviewState: 'review_required' })), attributes: [], options: [], policies: [] });
     await repository.replaceBindings(client, row.id, bindings, plans);
     await audit(client, context, 'created', row);
     return view(await load(client, row.id));
-  });
+
 }
 async function updateDraft(id, input, options = {}) {
   c.identity(id); c.command(input, ['expectedRevision','bindings']);
@@ -167,7 +177,9 @@ async function publishDraft(id, input, options = {}) {
     return view(loaded);
   });
 }
-async function getRevision(id, options = {}) { c.identity(id); return read(options, async (client) => view(await load(client, id))); }
+// Trusted server readers can include the revision in their own coherent read-only snapshot.
+async function readRevisionOnClient(client, id) { c.identity(id); return view(await load(client, id)); }
+async function getRevision(id, options = {}) { return read(options, (client) => readRevisionOnClient(client, id)); }
 async function getCurrentPublished(key, options = {}) {
   c.installation(key);
   return read(options, async (client) => { const row = await repository.current(client, key); return row ? view(await load(client, row.id)) : null; });
@@ -179,4 +191,4 @@ async function listRevisions(key, options = {}) {
     CASE WHEN state='published' AND version_number < max(version_number) OVER () THEN 'superseded' ELSE state END AS lifecycle
     FROM magento_binding_revisions WHERE installation_key=$1 ORDER BY created_at DESC, id`, [key])).rows);
 }
-module.exports = { createDraft, updateDraft, validateDraft, publishDraft, getRevision, getCurrentPublished, listRevisions };
+module.exports = { createDraftOnClient, createDraft, updateDraft, validateDraft, publishDraft, getRevision, getCurrentPublished, listRevisions, readRevisionOnClient };

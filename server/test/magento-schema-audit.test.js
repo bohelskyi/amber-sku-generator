@@ -64,6 +64,23 @@ function mockFetch(routes, calls = [], storeCode = 'all') {
 }
 const audit = (routes = fixture()) => auditMagentoSchema(config, { fetchImpl: mockFetch(routes) });
 
+test('product-type applicability and source model survive discovery with canonical array comparison', async () => {
+  const routes = fixture();
+  const input = routes['products/attributes'].items[0];
+  input.apply_to = ['simple', 'bundle'];
+  input.source_model = 'Magento\\Eav\\Model\\Entity\\Attribute\\Source\\Boolean';
+  const observed = (await audit(routes)).attributes.find((a) => a.attribute_code === input.attribute_code);
+  assert.deepEqual(observed.apply_to, ['bundle', 'simple']);
+  assert.equal(observed.source_model, input.source_model);
+  for (const apply_to of ['simple', [null], ['../bad'], [1], {}]) {
+    assert.throws(() => normalizeAttribute({ ...input, apply_to }), { code: 'MAGENTO_RESPONSE_INVALID' });
+  }
+  assert.equal(normalizeAttribute({ ...input, apply_to: null }).apply_to, undefined);
+  routes['products/attribute-sets/151/attributes'] = routes['products/attribute-sets/151/attributes']
+    .map((a) => a.attribute_code === input.attribute_code ? { ...a, apply_to: ['downloadable'] } : a);
+  await assert.rejects(audit(routes), { code: 'MAGENTO_RESPONSE_INVALID' });
+});
+
 test('normalizes topology, actual set identities, membership and select/multiselect options', async () => {
   const report = await audit();
   assert.deepEqual(report.storeTopology.websites.map((w) => w.id), [1, 2]);

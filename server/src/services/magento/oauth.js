@@ -8,8 +8,8 @@ function percentEncode(value) {
 
 function compare(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
 
-// Deliberately GET-only. The exact serialized URL passed here is sent by fetch.
-function signGetRequest(urlString, credentials, {
+// Only the two closed wrappers below select a method. JSON bodies are not OAuth parameters.
+function signRequest(method, urlString, credentials, {
   nonce = randomBytes(24).toString('hex'),
   timestamp = Math.floor(Date.now() / 1000),
 } = {}) {
@@ -33,7 +33,7 @@ function signGetRequest(urlString, credentials, {
       .map(([key, value]) => [percentEncode(key), percentEncode(value)])
       .sort((a, b) => compare(a[0], b[0]) || compare(a[1], b[1]))
       .map(([key, value]) => `${key}=${value}`).join('&');
-    const baseString = ['GET', `${url.origin}${url.pathname}`, parameters].map(percentEncode).join('&');
+    const baseString = [method, `${url.origin}${url.pathname}`, parameters].map(percentEncode).join('&');
     const key = `${percentEncode(credentials.consumerSecret)}&${percentEncode(credentials.accessTokenSecret)}`;
     oauth.oauth_signature = createHmac('sha256', key).update(baseString).digest('base64');
     return `OAuth ${Object.entries(oauth).sort(([a], [b]) => compare(a, b))
@@ -44,4 +44,12 @@ function signGetRequest(urlString, credentials, {
   }
 }
 
-module.exports = { percentEncode, signGetRequest };
+function signGetRequest(url, credentials, options) { return signRequest('GET', url, credentials, options); }
+function signCategoryCreateRequest(url, credentials, options) {
+  let parsed;
+  try { parsed = new URL(url); }
+  catch { throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID'); }
+  if (parsed.pathname !== '/rest/all/V1/categories' || parsed.search) throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID');
+  return signRequest('POST', url, credentials, options);
+}
+module.exports = { percentEncode, signGetRequest, signCategoryCreateRequest };

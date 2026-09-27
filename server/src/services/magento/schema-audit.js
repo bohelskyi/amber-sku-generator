@@ -89,6 +89,8 @@ function frontendInput(value) {
 const ATTRIBUTE_METADATA = Object.freeze({
   default_frontend_label: { validate: string, nullable: true },
   backend_type: { validate: string, nullable: true },
+  source_model: { validate: string, nullable: true },
+  apply_to: { validate: (v) => sorted(bounded(v, 100).map(code)), nullable: true },
   is_required: { validate: boolean, nullable: false },
   is_unique: { validate: string, nullable: true },
   is_user_defined: { validate: boolean, nullable: true },
@@ -278,7 +280,8 @@ async function auditMagentoSchema(config, { fetchImpl, storeCode = 'all' } = {})
       for (const attribute of assigned) {
         located('assigned_attribute_membership', 'attribute', attribute, config, () => {
           const known = byCode.get(attribute.attribute_code);
-          if (!known || Object.entries(attribute).some(([key, value]) => Object.hasOwn(known, key) && known[key] !== value)) invalid();
+          if (!known || Object.entries(attribute).some(([key, value]) => Object.hasOwn(known, key)
+            && JSON.stringify(known[key]) !== JSON.stringify(value))) invalid();
           // Some endpoints expose more optional metadata than others. Retain it,
           // but reject conflicting observations instead of silently choosing one.
           Object.assign(known, attribute);

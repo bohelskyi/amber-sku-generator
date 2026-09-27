@@ -36,7 +36,7 @@ function hydrate(rows, historical = false) {
 
 // No application startup, lifecycle gate, advisory locks, seed or migration paths.
 // Finish the local repeatable-read snapshot before making any remote requests.
-async function readAmberEvidence(databasePool, { templateVersionId, mode } = {}) {
+async function readAmberEvidence(databasePool, { templateVersionId, mode, supportSystem = false, sku } = {}) {
   if (mode !== undefined && mode !== 'compatibility') invalid();
   const client = await databasePool.connect();
   try {
@@ -78,7 +78,16 @@ async function readAmberEvidence(databasePool, { templateVersionId, mode } = {})
         || row.output_contract !== compiled.definition.outputContract || row.format_version !== compiled.definition.formatVersion) invalid();
       template = { kind: 'published', versionId: row.id, templateId: row.template_id, versionNumber: row.version_number };
     } else {
-      compiled = compileDefinition(materializeMagentoV1(await loadMagentoCatalog(client)));
+      let definition = materializeMagentoV1(await loadMagentoCatalog(client));
+      if (supportSystem) {
+        const { loadSourceEvidence, validateSourceReferences } = require('../export-templates/source-references');
+        const evidence = await loadSourceEvidence(client);
+        definition = require('../export-templates/source-support').upgradeSourceSupport(definition, evidence);
+        const diagnostics = validateSourceReferences(definition, evidence);
+        if (diagnostics.length) throw require('./binding-contract').error(422, 'TEMPLATE_SOURCE_INVALID',
+          'Unresolved bootstrap evaluator sources', { diagnostics });
+      }
+      compiled = compileDefinition(definition);
       template = { kind: 'system', source: 'code-backed-magento-products-v1' };
     }
     template = { ...template, definitionHash: compiled.hash, evaluatorVersion: compiled.definition.evaluatorVersion,
@@ -109,6 +118,12 @@ async function readAmberEvidence(databasePool, { templateVersionId, mode } = {})
         ORDER BY exposed DESC, uncorrected DESC, exportable DESC, p.id DESC LIMIT $2) p
       ORDER BY r.id, p.exposed DESC, p.uncorrected DESC, p.exportable DESC, p.id DESC`, [JSON.stringify(plans), CANDIDATES_PER_ROUTE]);
     const ids = [...new Set(candidates.map((p) => p.product_id))];
+    if (sku !== undefined) {
+      require('./sync-preview-db').selection({ sku });
+      const selected = (await client.query('SELECT id FROM products WHERE full_sku=$1 ORDER BY id LIMIT 2', [sku])).rows;
+      if (selected.length !== 1) throw require('./binding-contract').error(422, 'MAGENTO_PREVIEW_PRODUCT_NOT_UNIQUE', 'SKU must select one product');
+      if (!ids.includes(selected[0].id)) ids.push(selected[0].id);
+    }
     const { products, missingProductIds } = await loadDraftPreviewProducts(client, ids);
     if (missingProductIds.length) invalid();
     const supported = await loadSupportInputs(client, compiled.definition, products);

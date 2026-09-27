@@ -87,9 +87,12 @@ function requirements(definition, schema) {
   unique(result, (r) => r.routeKey);
   return result;
 }
-function evidence(v) {
+function evidence(v, policy = false) {
   if (v === undefined) return {};
-  command(v, [], ['note','diagnosticCodes','artifactHash','sampleCount','candidateIds']);
+  command(v, [], ['note','diagnosticCodes','artifactHash','sampleCount','candidateIds','categories', ...(policy ? ['createValue'] : [])]);
+  if (v.categories !== undefined) v.categories = require('./binding-categories').normalizeCategories(v.categories);
+  // Leave room for PostgreSQL JSONB whitespace within migration 041's 8192-byte limit.
+  if (Buffer.byteLength(JSON.stringify(v)) > 6500) invalid();
   if (v.note !== undefined && (typeof v.note !== 'string' || v.note.length > 2000)) invalid();
   if (v.artifactHash !== undefined && !/^[a-f0-9]{64}$/.test(v.artifactHash)) invalid();
   if (v.sampleCount !== undefined && (!Number.isSafeInteger(v.sampleCount) || v.sampleCount < 0)) invalid();
@@ -97,7 +100,7 @@ function evidence(v) {
     (!Array.isArray(v[k]) || v[k].length > 100 || v[k].some((s) => typeof s !== 'string' || s.length > 160))) invalid();
   return v;
 }
-function review(row) { if (!STATES.includes(row.reviewState)) invalid(); return evidence(row.evidence); }
+function review(row, policy = false) { if (!STATES.includes(row.reviewState)) invalid(); return evidence(row.evidence, policy); }
 function normalizeBindings(input) {
   input = safeData(input);
   command(input, ['routes','attributes','options','policies']);
@@ -115,6 +118,7 @@ function normalizeBindings(input) {
       || (a.strategy === 'transport_control' ? a.attributeCode !== null : a.transportTarget !== null)
       || (a.unknownOutputPolicy !== undefined && a.unknownOutputPolicy !== 'block')) invalid();
     if (a.bindingKey !== undefined && a.bindingKey !== bindingKey(a.routeKey, a.rowId, a.target)) invalid();
+    if (a.evidence?.categories && (a.target !== 'categories' || a.strategy !== 'transport_control')) invalid();
     return { ...a, bindingKey: bindingKey(a.routeKey, a.rowId, a.target), unknownOutputPolicy: 'block', evidence: review(a) };
   });
   const options = list(input.options).map((o) => {
@@ -144,7 +148,12 @@ function normalizeBindings(input) {
   const policies = list(input.policies, 10000).map((p) => {
     command(p, ['bindingKey','storeCode','policy','reviewState'], ['evidence']);
     if (!attributes.some((a) => a.bindingKey === p.bindingKey) || !code(p.storeCode) || !POLICIES.includes(p.policy)) invalid();
-    return { ...p, evidence: review(p) };
+    if (p.evidence?.createValue !== undefined) {
+      const a = attributes.find((a) => a.bindingKey === p.bindingKey);
+      if (a.target !== 'product_online' || a.rowId !== 'base' || p.policy !== 'initialize_create_only'
+        || p.evidence.createValue !== 2) invalid();
+    }
+    return { ...p, evidence: review(p, true) };
   });
   unique(routes, (r) => r.routeKey); unique(attributes, (a) => a.bindingKey);
   unique(options, (o) => `${o.bindingKey}/${o.sourceKey}`);
@@ -202,6 +211,7 @@ function validateBindings(bindings, definition, schema, { publish = false } = {}
     if (enabled) reviewed(a, { bindingKey: a.bindingKey });
     const needed = enabled && a.reviewState !== 'blocked';
     if (needed) {
+      for (const category of a.evidence?.categories || []) reviewed(category, { bindingKey: a.bindingKey, path: category.requestedPath });
       if (expected.unsupportedSemanticOutput) issue('SEMANTIC_OUTPUT_DOMAIN_UNRESOLVED', { bindingKey: a.bindingKey });
       if (a.strategy === 'dynamic_exact_label_option' && !bindings.options.some((o) => o.bindingKey === a.bindingKey)) issue('DYNAMIC_DOMAIN_BINDING_REQUIRED', { bindingKey: a.bindingKey });
       if (attr && !schema.attributeSets.find((s) => s.attribute_set_id === route.setId)?.attributeCodes.includes(attr.attribute_code)) issue('ATTRIBUTE_NOT_IN_EXPECTED_SET', { bindingKey: a.bindingKey });

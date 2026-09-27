@@ -71,6 +71,150 @@ test('Magento binding persistence, publication, immutability and real PostgreSQL
   const publish = (draft, current = null, db = pool) => bindings.publishDraft(draft.id, { expectedRevision: draft.revision, expectedCurrentId: current }, options(db));
   const countEvents = async (id) => Number((await pool.query("SELECT count(*) n FROM audit_events WHERE subject_id=$1 AND event_key='magento_binding.published'", [id])).rows[0].n);
 
+  await t.test('bootstrap template, publication, candidate bindings and audit commit or roll back together', async () => {
+    const { persistBootstrap } = require('../src/services/magento/binding-bootstrap-persistence');
+    const { buildCandidates } = require('../src/services/magento/binding-bootstrap');
+    const { compileDefinition } = require('../src/services/export-templates/definition');
+    const compiled = compileDefinition(definition);
+    const candidates = buildCandidates({ compiled, products: [], current: [] }, schema, [], { group: 'BR' });
+    const counts = async () => (await pool.query(`SELECT (SELECT count(*) FROM export_templates) AS templates,
+      (SELECT count(*) FROM export_template_drafts) AS drafts, (SELECT count(*) FROM export_template_versions) AS versions,
+      (SELECT count(*) FROM magento_binding_revisions) AS bindings, (SELECT count(*) FROM magento_binding_routes) AS routes,
+      (SELECT count(*) FROM magento_binding_options) AS options, (SELECT count(*) FROM audit_events) AS audit`)).rows[0];
+    const input = { installationKey: `atomic-${crypto.randomUUID()}`, origin: 'https://binding.example.invalid',
+      definition, definitionHash: compiled.hash, observedAt: new Date().toISOString(), schema, bindings: candidates };
+    const before = await counts();
+    await assert.rejects(persistBootstrap({ ...input, definitionHash: '0'.repeat(64) }, options()), { code: 'MAGENTO_BINDING_CONFLICT' });
+    assert.deepEqual(await counts(), before, 'publication and its family/audit roll back');
+    await assert.rejects(persistBootstrap(input, { ...options(), prepareReceipt() { throw new Error('injected receipt failure'); } }), /injected receipt failure/);
+    assert.deepEqual(await counts(), before, 'all candidate rows and audits roll back after the latest possible precommit error');
+    const saved = await persistBootstrap(input, options());
+    assert.equal(saved.state, 'draft'); assert.equal(saved.revision, '1');
+    assert.deepEqual(saved.bindings.options, (await bindings.getRevision(saved.id, options())).bindings.options);
+    const after = await counts();
+    assert.equal(Number(after.templates), Number(before.templates) + 1);
+    assert.equal(Number(after.versions), Number(before.versions) + 1);
+    assert.equal(Number(after.bindings), Number(before.bindings) + 1);
+    assert.equal(Number(after.audit), Number(before.audit) + 3);
+  });
+
+  await t.test('bootstrap seeds proposed identities atomically; explicit review CAS, policies and publish reuse existing guards', async () => {
+    const { buildCandidates } = require('../src/services/magento/binding-bootstrap');
+    const { saveDecision, review } = require('../src/services/magento/binding-review');
+    const { compileDefinition } = require('../src/services/export-templates/definition');
+    const bootstrapDefinition = structuredClone(definition);
+    bootstrapDefinition.groups[0].rows[0].cells.categories = { op: 'literal', value: 'Default/Fixture' };
+    bootstrapDefinition.groups[0].rows[0].cells.product_online = { op: 'literal', value: '1' };
+    const family = await templates.createTemplate({ key: `bootstrap-template-${crypto.randomUUID()}`,
+      displayName: 'Bootstrap category evidence', definition: bootstrapDefinition }, options());
+    const frozen = await templates.publishTemplate(family.id, { expectedRevision: family.draft.revision,
+      expectedDefinitionHash: family.draft.definitionHash }, options());
+    const observed = structuredClone(schema);
+    observed.attributeSets[0].attribute_set_name = 'Historical CSV name';
+    observed.attributes.find((a) => a.attribute_code === 'kolir').options.forEach((o) => {
+      o.label = o.value === 'red-id' ? 'Red output' : 'Blue output';
+    });
+    const amber = { compiled: compileDefinition(bootstrapDefinition), products: [{ id: 1, category: 'BR', full_sku: 'BR/fixture',
+      weight: 5, details: { answers: { binding_test_semantic: 7, binding_test_size: '17' } } }], current: [] };
+    const nodes = [{ categoryId: '9876', path: 'Default/Fixture', normalizedPath: 'Default/Fixture', comparable: true }];
+    const candidates = buildCandidates(amber, observed, nodes, { group: 'BR' });
+    const key = `bootstrap-${crypto.randomUUID()}`;
+    let draft = await bindings.createDraft({ installationKey: key, origin: 'https://binding.example.invalid',
+      templateVersionId: frozen.id, observedAt: new Date().toISOString(), schema: observed, bindings: candidates }, options());
+    assert.equal(draft.revision, '1');
+    assert.ok(review(draft).every((r) => r.reviewState !== 'approved'));
+    assert.ok(draft.bindings.attributes.length > 0);
+    const categories = draft.bindings.attributes.find((a) => a.target === 'categories');
+    assert.equal(categories.evidence.categories[0].categoryId, '9876');
+    assert.equal(categories.evidence.categories[0].reviewState, 'proposed');
+    assert.equal((await pool.query('SELECT count(*)::int n FROM magento_binding_options WHERE revision_id=$1', [draft.id])).rows[0].n, candidates.options.length);
+    const first = draft;
+    draft = (await saveDecision(draft.id, { action: 'approve-exact', group: 'BR', expectedRevision: draft.revision }, options())).revision;
+    assert.equal(draft.bindings.attributes.find((a) => a.target === 'categories').evidence.categories[0].reviewState, 'approved');
+    assert.ok(draft.bindings.policies.every((p) => p.reviewState === 'review_required'));
+    await assert.rejects(saveDecision(draft.id, { action: 'approve-exact', group: 'BR', expectedRevision: first.revision }, options()), { code: 'MAGENTO_BINDING_CONFLICT' });
+    assert.equal((await bindings.validateDraft(draft.id, options())).valid, false);
+    await assert.rejects(publish(draft), { code: 'MAGENTO_BINDING_INVALID' });
+    for (const p of review(draft).filter((e) => e.kind === 'policy')) {
+      draft = (await saveDecision(draft.id, { action: 'approve', binding: p.id, expectedRevision: draft.revision,
+        acceptReview: true, reason: 'Synthetic explicit ownership',
+        ...(p.target === 'product_online' && p.row === 'base'
+          ? { policy: 'initialize_create_only', createValue: '2' } : { policy: 'magento_managed' }) }, options())).revision;
+    }
+    const stored = await bindings.getRevision(draft.id, options());
+    assert.equal(stored.bindings.policies.find((p) => p.evidence.createValue !== undefined).evidence.createValue, 2);
+    assert.equal((await bindings.validateDraft(draft.id, options())).valid, true);
+    const published = await publish(draft);
+    assert.equal(published.state, 'published'); assert.equal(await countEvents(draft.id), 1);
+    const { planPreview } = require('../src/services/magento/sync-preview');
+    const preview = planPreview({ ...amber, product: { ...amber.products[0], status: 'active', exclude_from_export: 0 },
+      revision: published }, observed, null, nodes);
+    assert.equal(preview.attributeSet.status, 'resolved_authoritative');
+    assert.equal(preview.attributes.find((a) => a.target === 'kolir').authority, 'authoritative');
+    assert.equal(preview.categories.requested[0].authority, 'authoritative');
+    assert.equal(preview.candidatePayload.product.status, 2);
+    await assert.rejects(saveDecision(published.id, { action: 'approve-exact', group: 'BR', expectedRevision: published.revision }, options()), { code: 'MAGENTO_BINDING_CONFLICT' });
+    const before = (await pool.query('SELECT count(*)::int n FROM magento_binding_revisions')).rows[0].n;
+    const forbidden = structuredClone(candidates); forbidden.routes.find((r) => r.enabled).reviewState = 'approved';
+    await assert.rejects(bindings.createDraft({ installationKey: `reject-${crypto.randomUUID()}`,
+      origin: 'https://binding.example.invalid', templateVersionId: version.id, observedAt: new Date().toISOString(),
+      schema: observed, bindings: forbidden }, options()), { code: 'MAGENTO_BINDING_INVALID' });
+    assert.equal((await pool.query('SELECT count(*)::int n FROM magento_binding_revisions')).rows[0].n, before);
+  });
+
+  await t.test('sync preview coherently reads an explicit draft and its pinned publication without writes', async () => {
+    const draft = await ready();
+    const { insertProductFixture } = require('./product-fixture');
+    const { readPreviewProduct } = require('../src/services/magento/sync-preview-db');
+    const sku = 'BR/SYNC-BINDING-SYNTH';
+    await insertProductFixture(pool, `INSERT INTO products
+      (full_sku,base_sku,sequence_number,category,weight,total_price,total_price_uah,price_per_gram,uah_rate,details)
+      VALUES ($1,$1,0,'BR',5,1,42,1,42,$2::jsonb)`,
+    [sku, JSON.stringify({ answers: { binding_test_semantic: 7, binding_test_size: '17' } })]);
+    const before = await bindings.getRevision(draft.id);
+    const commands = [];
+    const snapshot = await readPreviewProduct({ connect: async () => {
+      const c = await pool.connect();
+      return { release: () => c.release(), query: async (sql, values) => {
+        assert.match(sql.trim(), /^(SELECT|BEGIN|COMMIT|ROLLBACK)\b/); commands.push(sql);
+        return c.query(sql, values);
+      } };
+    } }, { sku, bindingRevisionId: draft.id });
+    assert.deepEqual(snapshot.revision, before);
+    assert.equal(snapshot.template.versionId, version.id);
+    assert.equal(snapshot.compiled.hash, before.definitionHash);
+    assert.equal(commands.filter((s) => s.startsWith('BEGIN')).length, 1);
+    assert.deepEqual(await bindings.getRevision(draft.id), before);
+    // A legacy delivery hold is not same-SKU Magento UPDATE eligibility. Read
+    // the typed signals through the real snapshot loader and preserve every row.
+    const db = await pool.connect();
+    try {
+      await db.query('BEGIN');
+      await db.query(`UPDATE product_full_export_state SET route='hold', hold_reason='prior_exposure',
+        business_exclusion_state='unknown', recount_compatibility_excluded=FALSE,
+        delivery_version=delivery_version+1 WHERE product_id=$1`, [snapshot.product.id]);
+      await db.query('UPDATE products SET exclude_from_export=1 WHERE id=$1', [snapshot.product.id]);
+      await db.query('COMMIT');
+    } catch (cause) { await db.query('ROLLBACK'); throw cause; } finally { db.release(); }
+    const storedState = async () => (await pool.query(`SELECT p.exclude_from_export, to_jsonb(f) AS lifecycle
+      FROM products p JOIN product_full_export_state f ON f.product_id=p.id WHERE p.id=$1`, [snapshot.product.id])).rows[0];
+    const legacyBefore = await storedState();
+    const { syncEligibility } = require('../src/services/magento/sync-eligibility');
+    const current = (await readPreviewProduct(pool, { sku, bindingRevisionId: draft.id })).product;
+    assert.equal(syncEligibility(current, { sku }).eligible, true);
+    assert.equal(syncEligibility(current, null).eligible, false);
+    assert.deepEqual(await storedState(), legacyBefore);
+    assert.equal(current.exportState.business_exclusion_state, 'unknown');
+    assert.equal(current.exclude_from_export, 1, 'legacy queue exclusion remains unchanged');
+    await pool.query(`UPDATE product_full_export_state SET evidence=evidence || '{"independentExclusion":true}'::jsonb,
+      delivery_version=delivery_version+1 WHERE product_id=$1`, [snapshot.product.id]);
+    const excluded = (await readPreviewProduct(pool, { sku, bindingRevisionId: draft.id })).product;
+    assert.equal(excluded.exportState.independentExclusion, true);
+    assert.equal(syncEligibility(excluded, { sku }).eligible, false);
+    await assert.rejects(readPreviewProduct(pool, { sku, bindingRevisionId: draft.id,
+      templateVersionId: crypto.randomUUID() }), { code: 'MAGENTO_PREVIEW_TEMPLATE_MISMATCH' });
+  });
+
   await t.test('fresh migration, draft create/read/update, CAS and fail-closed candidates', async () => {
     assert.equal((await pool.query("SELECT count(*)::int n FROM schema_migrations WHERE name='041_magento_binding_revisions.sql'")).rows[0].n, 1);
     const draft = await create(); assert.equal(draft.state, 'draft'); assert.equal(draft.versionNumber, null);
@@ -302,6 +446,23 @@ test('Magento binding persistence, publication, immutability and real PostgreSQL
       assert.equal(stored.state, updateFirst ? 'draft' : 'published'); assert.equal(await countEvents(draft.id), updateFirst ? 0 : 1);
       assert.equal(stored.bindings.policies.some((p) => p.reviewState === 'review_required'), updateFirst);
     }
+  });
+  await t.test('category create attempt survives process retry and serializes concurrent revisions before any remote dispatch', async () => {
+    const { reserveAttempt, PATH } = require('../src/services/magento/category-create');
+    const { hash } = require('../src/services/magento/binding-contract');
+    const first = await ready(); const second = await ready(first.installationKey);
+    const operation = { method: 'POST', path: '/rest/all/V1/categories',
+      body: { category: { parent_id: 5, name: 'З інклюзом', is_active: true, include_in_menu: false } } };
+    const attempts = await race((db) => reserveAttempt(first, operation, options(db)),
+      (db) => reserveAttempt(second, operation, options(db)));
+    assert.equal(attempts[0].status, 'fulfilled');
+    assert.equal(attempts[1].reason.code, 'MAGENTO_CATEGORY_PREVIOUS_ATTEMPT_UNRESOLVED');
+    const key = hash({ originHash: first.originHash, path: PATH });
+    const receipts = (await pool.query("SELECT details FROM audit_events WHERE event_key='magento_category.create_attempted' AND subject_id=$1", [key])).rows;
+    assert.equal(receipts.length, 1); assert.deepEqual(receipts[0].details.operation, operation);
+    await assert.rejects(reserveAttempt(first, operation, options()), { code: 'MAGENTO_CATEGORY_PREVIOUS_ATTEMPT_UNRESOLVED' });
+    assert.deepEqual(await bindings.getRevision(first.id), first, 'dispatch reservation never publishes or changes binding approvals');
+    await assert.rejects(reserveAttempt({ ...first, revision: '999' }, operation, options()), { code: 'MAGENTO_BINDING_CONFLICT' });
   });
   await t.test('persisted draft drift uses named GETs only and never changes the revision', async () => {
     const draft = await ready(); const calls = [];

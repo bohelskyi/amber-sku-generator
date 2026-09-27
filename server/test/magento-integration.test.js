@@ -119,6 +119,14 @@ test('GET-only API covers every discovery endpoint with explicit all/store scope
   const cases = [
     ['getWebsites', [], 'store/websites'], ['getStoreGroups', [], 'store/storeGroups'],
     ['getStoreViews', [], 'store/storeViews'], ['getStoreConfigs', [], 'store/storeConfigs'],
+    ['getInventoryStockForWebsite', ['base'], 'inventory/stock-resolver/website/base'],
+    ['getInventorySourcesForStock', [1], 'inventory/get-sources-assigned-to-stock-ordered-by-priority/1'],
+    ['getInventorySourceItemsBySku', ['KL3/11131351005'], 'inventory/source-items?' + new URLSearchParams({
+      'searchCriteria[filter_groups][0][filters][0][field]': 'sku',
+      'searchCriteria[filter_groups][0][filters][0][value]': 'KL3/11131351005',
+      'searchCriteria[filter_groups][0][filters][0][condition_type]': 'eq',
+      'searchCriteria[pageSize]': '100', 'searchCriteria[currentPage]': '1' })],
+    ['getCategoryTree', [17], 'categories?rootCategoryId=17'],
     ['listAttributeSets', [2], 'products/attribute-sets/sets/list?searchCriteria%5BpageSize%5D=100&searchCriteria%5BcurrentPage%5D=2'],
     ['getAttributeSet', [17], 'products/attribute-sets/17'],
     ['getAttributeSetAttributes', [17], 'products/attribute-sets/17/attributes'],

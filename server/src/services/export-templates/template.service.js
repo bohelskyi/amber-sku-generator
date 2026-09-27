@@ -181,13 +181,17 @@ async function getTemplate(templateId, options = {}) {
   });
 }
 async function createTemplate(input, options = {}) {
+  return mutation('manage', options, (client, context) => createTemplateOnClient(client, context, input));
+}
+// Internal: caller owns the authorized transaction, lifecycle gate and permission rechecks.
+async function createTemplateOnClient(client, context, input) {
   command(input, ['key', 'displayName'], ['definition']);
   if (typeof input.key !== 'string' || !/^[a-z][a-z0-9_-]{0,79}$/.test(input.key)
     || typeof input.displayName !== 'string' || !input.displayName.trim() || input.displayName.trim().length > 160) {
     throw error(400, 'TEMPLATE_COMMAND_INVALID', 'Invalid template key/display name');
   }
   const prepared = prepareDraft(Object.hasOwn(input, 'definition') ? input.definition : {});
-  return mutation('manage', options, async (client, context) => {
+
     const id = randomUUID();
     const family = (await client.query(`INSERT INTO export_templates (id, template_key, display_name, created_by_user_id)
       VALUES ($1, $2, $3, $4) RETURNING *`, [id, input.key, input.displayName.trim(), context.actorUserId])).rows[0];
@@ -197,7 +201,7 @@ async function createTemplate(input, options = {}) {
     if (draft.definitionHash !== prepared.hash) throw error(409, 'TEMPLATE_VERSION_INTEGRITY', 'JSONB changed draft identity');
     await audit(client, context, 'created', id, { templateId: id, draftRevision: row.revision, definitionHash: prepared.hash });
     return { ...family, draft };
-  });
+
 }
 async function replaceDraft(client, row, prepared, baseVersionId, context) {
   if (hashJsonData(row.definition) === prepared.hash && row.base_version_id === baseVersionId) return draftView(row);
@@ -335,11 +339,15 @@ async function testPreview(templateId, input, options = {}) {
   });
 }
 async function publishTemplate(templateId, input, options = {}) {
+  return mutation('publish', options, (client, context) => publishTemplateOnClient(client, context, templateId, input));
+}
+// Internal: caller owns the authorized transaction, lifecycle gate and permission rechecks.
+async function publishTemplateOnClient(client, context, templateId, input) {
   templateId = identity(templateId);
   command(input, ['expectedRevision', 'expectedDefinitionHash']);
   const revision = counter(input.expectedRevision);
   const hash = expectedHash(input.expectedDefinitionHash);
-  return mutation('publish', options, async (client, context) => {
+
     const row = await loadDraft(client, templateId, true);
     // Completed retries precede checking today's draft. Preserve original actor/time/version.
     const prior = (await client.query(`SELECT * FROM export_template_versions
@@ -364,7 +372,7 @@ async function publishTemplate(templateId, input, options = {}) {
     await audit(client, context, 'published', templateId, { templateId, templateVersionId: version.id,
       version: version.version_number, draftRevision: revision, definitionHash: hash });
     return versionView(version);
-  });
+
 }
 async function getActivation(options = {}) {
   const row = (await (options.databasePool || pool).query('SELECT * FROM export_template_activation WHERE id = 1')).rows[0];
@@ -441,7 +449,7 @@ async function getExportTemplateOptions({ includeNonActive = false, ...options }
   });
 }
 
-module.exports = { prepareSourceSupport, applySourceSupport, upgradeDraft, systemProfile, prepareDraft, counter, listTemplates, getTemplate, createTemplate, saveDraft, cloneDraft,
+module.exports = { publishTemplateOnClient, createTemplateOnClient, prepareSourceSupport, applySourceSupport, upgradeDraft, systemProfile, prepareDraft, counter, listTemplates, getTemplate, createTemplate, saveDraft, cloneDraft,
   validateDraft, testPreview, publishTemplate, getActivation, updateActivation, listSources,
   loadVersion, verifyVersion, pureCall, prepareMagentoCandidate, getExportTemplateOptions,
   searchSampleProducts: (input, options = {}) => readTransaction(options, (client) => displayReads.searchSampleProducts(client, input)),

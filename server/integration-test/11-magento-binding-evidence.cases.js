@@ -2,6 +2,49 @@ const { test, assert, pool } = require('./suite-context');
 const { readAmberEvidence } = require('../src/services/magento/binding-evidence-db');
 const { PLANS } = require('../src/services/magento/compatibility-evidence-plans');
 const { insertProductFixture } = require('./product-fixture');
+const { readPreviewProduct } = require('../src/services/magento/sync-preview-db');
+
+test('sync preview selects exactly one authoritative product and captures catalog/answers in read-only PostgreSQL', async () => {
+  const sku = 'AR/SYNC-PREVIEW-SYNTH';
+  const inserted = await insertProductFixture(pool, `INSERT INTO products
+    (full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah, price_per_gram, uah_rate, details)
+    VALUES ($1,$1,0,'AR',10,50,2000,5,40,$2::jsonb) RETURNING id`, [sku, JSON.stringify({ answers: { size: 28, type: 1 } })]);
+  const id = inserted.rows[0].id;
+  const fingerprint = async () => (await pool.query(`SELECT
+    (SELECT md5(string_agg(row_to_json(p)::text, ',' ORDER BY id)) FROM products p) AS products,
+    (SELECT md5(string_agg(row_to_json(f)::text, ',' ORDER BY product_id)) FROM product_full_export_state f) AS lifecycle,
+    (SELECT count(*) FROM audit_events) AS audit,
+    (SELECT count(*) FROM export_snapshots) AS exports,
+    (SELECT count(*) FROM magento_binding_revisions) AS bindings`)).rows[0];
+  const before = await fingerprint(); const commands = [];
+  const readOnly = { connect: async () => {
+    const c = await pool.connect();
+    return { release: () => c.release(), query: async (sql, values) => {
+      assert.match(sql.trim(), /^(SELECT|BEGIN|COMMIT|ROLLBACK)\b/); commands.push(sql);
+      const result = await c.query(sql, values);
+      if (sql.startsWith('BEGIN')) {
+        assert.equal((await c.query('SHOW transaction_read_only')).rows[0].transaction_read_only, 'on');
+        assert.equal((await c.query('SHOW transaction_isolation')).rows[0].transaction_isolation, 'repeatable read');
+      }
+      return result;
+    } };
+  } };
+  const bySku = await readPreviewProduct(readOnly, { sku });
+  const byId = await readPreviewProduct(readOnly, { productId: id });
+  assert.deepEqual(bySku.product, byId.product);
+  assert.equal(bySku.product.full_sku, sku); assert.equal(bySku.product.details.answers.size, 28);
+  const state = (await pool.query(`SELECT route, hold_reason, source_correction_id,
+    business_exclusion_state, recount_compatibility_excluded, evidence->'independentExclusion' AS "independentExclusion"
+    FROM product_full_export_state WHERE product_id=$1`, [id])).rows[0];
+  assert.ok(state);
+  assert.deepEqual(bySku.product.exportState, state);
+  assert.equal(bySku.template.kind, 'system'); assert.equal(bySku.revision, null);
+  assert.equal(commands[0], 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+  assert.equal(commands.at(-1), 'COMMIT');
+  await assert.rejects(readPreviewProduct(readOnly, { sku: "' OR TRUE --" }), { code: 'MAGENTO_PREVIEW_PRODUCT_NOT_UNIQUE' });
+  await assert.rejects(readPreviewProduct(readOnly, { sku, productId: id }), { code: 'MAGENTO_PREVIEW_SELECTION_INVALID' });
+  assert.deepEqual(await fingerprint(), before);
+});
 
 test('binding evidence reads real catalog/schema/product SQL inside a read-only snapshot', async () => {
   const counts = async () => (await pool.query(`SELECT (SELECT count(*) FROM products) AS products,

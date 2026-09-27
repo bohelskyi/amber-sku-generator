@@ -104,6 +104,15 @@ function createMagentoClient(config, { fetchImpl = globalThis.fetch, storeCode =
     getStoreGroups: () => get('store/storeGroups'),
     getStoreViews: () => get('store/storeViews'),
     getStoreConfigs: () => get('store/storeConfigs'),
+    getInventoryStockForWebsite: (code) => get(`inventory/stock-resolver/website/${identifier(code)}`),
+    getInventorySourcesForStock: (id) => get(`inventory/get-sources-assigned-to-stock-ordered-by-priority/${positiveInteger(id)}`),
+    getInventorySourceItemsBySku: (sku) => get('inventory/source-items', {
+      'searchCriteria[filter_groups][0][filters][0][field]': 'sku',
+      'searchCriteria[filter_groups][0][filters][0][value]': validatedSku(sku),
+      'searchCriteria[filter_groups][0][filters][0][condition_type]': 'eq',
+      'searchCriteria[pageSize]': String(PAGE_SIZE), 'searchCriteria[currentPage]': '1',
+    }),
+    getCategoryTree: (rootCategoryId) => get('categories', { rootCategoryId: positiveInteger(rootCategoryId) }),
     listAttributeSets: (page) => list('products/attribute-sets/sets/list', page),
     getAttributeSet: (id) => get(`products/attribute-sets/${positiveInteger(id)}`),
     getAttributeSetAttributes: (id) => get(`products/attribute-sets/${positiveInteger(id)}/attributes`),
@@ -116,4 +125,4 @@ function createMagentoClient(config, { fetchImpl = globalThis.fetch, storeCode =
   });
 }
 
-module.exports = { createMagentoClient, PAGE_SIZE, MAX_RESPONSE_BYTES };
+module.exports = { createMagentoClient, PAGE_SIZE, MAX_RESPONSE_BYTES, readJson };
