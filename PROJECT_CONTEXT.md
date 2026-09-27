@@ -27,7 +27,7 @@ Business mutations preserve their transaction, lock-order, stale-evidence, idemp
 
 ## Implementation and deployment status
 
-The repository includes migrations **000–040** and the full-product lifecycle/cutover implementation through **Phase 3B / Phase 4**: lifecycle state, exact membership, recount/request parity, information/name revisions, historical indexing, manifest approval, bounded batches, activation gate, typed exclusions, reconciliation and lifecycle queues.
+The repository includes migrations **000–041** and the full-product lifecycle/cutover implementation through **Phase 3B / Phase 4**: lifecycle state, exact membership, recount/request parity, information/name revisions, historical indexing, manifest approval, bounded batches, activation gate, typed exclusions, reconciliation and lifecycle queues. Magento Phase 1B.2a adds the [persistent binding foundation](docs/MAGENTO_INTEGRATION.md#phase-1b2a-persistent-binding-foundation): revisioned server-side bindings and GET-only drift comparison, with no synchronization, Magento writes, bootstrap or admin UI/API.
 
 **Production cutover has not been performed**, as reported for this documentation handoff. Installing migrations alone does not activate selection. The one-time transition requires maintenance/freeze, draining old writers, fresh production indexing and post-index cutover manifests, explicit approval, batches, validation and activation. Later reconciliations/attestations remain separate operator decisions. Follow the [cutover runbook](docs/FULL_PRODUCT_CUTOVER_RUNBOOK.md).
 
