@@ -5,7 +5,9 @@ const bindings = require('../src/services/magento/binding.service');
 const templates = require('../src/services/export-templates/template.service');
 const fixture = require('../test/fixtures/magento-bindings');
 const { compileDefinition } = require('../src/services/export-templates/definition');
-const { previewProduct } = require('../src/services/magento/sync-preview');
+const { previewProduct, planPreview } = require('../src/services/magento/sync-preview');
+const syncPlan = require('../src/services/magento/sync-job-plan');
+const { hash } = require('../src/services/magento/binding-contract');
 const { enqueue, applyJob } = require('../src/services/magento/sync-job.service');
 const { parseMagentoConfig } = require('../src/config/magento');
 const config = parseMagentoConfig({ MAGENTO_BASE_URL: 'https://sync.example.invalid', MAGENTO_CONSUMER_KEY: 'fake-key',
@@ -172,6 +174,68 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
     const s = await scenario(); const job = await s.enqueue();
     await pool.query('UPDATE products SET weight=weight+1 WHERE id=$1', [s.product.id]);
     const r = await s.apply(job); assert.equal(r.state, 'blocked'); assert.equal(r.failure.code, 'MAGENTO_SYNC_AMBER_CHANGED'); assert.equal(s.writes.length, 0);
+  });
+  await t.test('queued UPDATE replays required native timestamps omitted from its immutable baseline', async () => {
+    const previousSchema = structuredClone(schema);
+    for (const [index, code] of ['created_at', 'updated_at'].entries()) {
+      schema.attributes.push({ attribute_code: code, attribute_id: 1201 + index, scope: 'global',
+        frontend_input: 'date', is_required: true, apply_to: [], options: [] });
+      schema.attributeSets[0].attributeCodes.push(code);
+    }
+    const createdAt = '2026-09-11 10:11:29'; const updatedAt = '2026-09-22 09:43:19';
+    try {
+      for (const variant of ['unchanged', 'resume', 'created_changed', 'created_missing', 'updated_missing']) {
+        const s = await scenario();
+        Object.assign(s.remote(), { created_at: createdAt, updated_at: updatedAt });
+        // As in the real UPDATE, membership and inventory already need no write.
+        s.remote().extension_attributes.website_ids.push(801);
+        const job = await s.enqueue();
+        assert.equal(job.state, 'queued'); assert.equal(s.writes.length, 0);
+        assert.deepEqual(job.intent.operations.map((o) => o.domain), ['coreProduct', 'categories', 'storeViews']);
+        assert.equal(job.baseline.raw.created_at, undefined); assert.equal(job.baseline.raw.updated_at, undefined);
+        assert.equal(job.baseline.preservation['native.created_at'], hash(createdAt));
+        assert.equal(job.baseline.preservation['native.updated_at'], undefined);
+        let observation;
+        const fresh = await s.options.preview(config, { ...s.options, sku: s.input.sku,
+          bindingRevisionId: published.id, onObservation: (value) => { observation = value; } });
+        assert.equal(fresh.sendable, true, JSON.stringify(fresh.blockers));
+        assert.equal(hash(syncPlan.intent(fresh)), job.plan_hash);
+        const minimized = planPreview(observation.amber, observation.schema, job.baseline.raw,
+          observation.categoryNodes, { domainEvidence: job.baseline.domainEvidence });
+        assert.deepEqual(minimized.blockers, ['created_at', 'updated_at'].map((target) => ({
+          code: 'REQUIRED_ATTRIBUTE_VALUE_MISSING', operation: 'coreProduct', target,
+        })));
+        if (variant === 'created_changed') s.remote().created_at = '2026-09-12 10:11:29';
+        if (variant === 'created_missing') delete s.remote().created_at;
+        if (variant === 'updated_missing') delete s.remote().updated_at;
+        // A repository save advances this Magento-owned field between partial steps.
+        s.hooks.afterWrite = async () => {
+          s.remote().updated_at = '2026-09-28 00:00:01';
+          if (variant === 'resume') { s.hooks.readFailure = true; throw new Error('lost response'); }
+        };
+        let result = await s.apply(job);
+        if (variant === 'resume') {
+          assert.equal(result.state, 'uncertain'); assert.equal(s.writes.length, 1);
+          s.hooks.afterWrite = null; s.hooks.readFailure = false;
+          result = await s.apply(job);
+        }
+        if (['unchanged', 'resume'].includes(variant)) {
+          assert.equal(result.state, 'succeeded', JSON.stringify(result.failure));
+          assert.equal(s.remote().created_at, createdAt); assert.equal(s.remote().updated_at, '2026-09-28 00:00:01');
+          assert.equal(s.writes.length, 3);
+          assert.ok(s.writes.every((w) => w.body.product?.created_at === undefined && w.body.product?.updated_at === undefined));
+        } else {
+          assert.equal(result.state, 'blocked'); assert.equal(s.writes.length, 0);
+          assert.equal(result.failure.code, variant === 'updated_missing'
+            ? 'MAGENTO_SYNC_PLAN_NOT_SENDABLE' : 'MAGENTO_SYNC_PRESERVED_FIELD_CHANGED');
+          assert.equal((await pool.query('SELECT count(*)::int n FROM magento_sync_steps WHERE job_id=$1', [job.id])).rows[0].n, 0);
+        }
+        const stored = (await pool.query('SELECT * FROM magento_sync_jobs WHERE id=$1', [job.id])).rows[0];
+        assert.deepEqual(stored.intent, job.intent); assert.deepEqual(stored.baseline, job.baseline);
+        assert.equal(stored.plan_hash, job.plan_hash); assert.equal(stored.binding_hash, job.binding_hash);
+        assert.equal(stored.amber_hash, job.amber_hash);
+      }
+    } finally { Object.assign(schema, previousSchema); }
   });
   await t.test('explicit apply and current active actor authorization are required before dispatch', async () => {
     const s = await scenario(); const job = await s.enqueue();

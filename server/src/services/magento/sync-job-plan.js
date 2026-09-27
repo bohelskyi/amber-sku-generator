@@ -48,7 +48,22 @@ function baseline(observation, report) {
 }
 function replan(job, observation) {
   if (observation.categoryFailures?.length) fail('MAGENTO_SYNC_CATEGORY_READ_FAILED');
-  const report = planPreview(observation.amber, observation.schema, job.baseline.raw, observation.categoryNodes,
+  const raw = job.baseline.raw && { ...job.baseline.raw };
+  if (raw) {
+    // The minimized baseline omits native timestamps which live EAV metadata can
+    // require. Recover creation time only with the original preservation proof.
+    const createdAtHash = job.baseline.preservation['native.created_at'];
+    if (createdAtHash !== undefined) {
+      const createdAt = observation.raw?.created_at;
+      if (createdAt === undefined || hash(createdAt) !== createdAtHash) fail('MAGENTO_SYNC_PRESERVED_FIELD_CHANGED');
+      raw.created_at = createdAt;
+    }
+    // Magento advances updated_at on saves, including our own partial steps. Its
+    // fresh presence must still satisfy required-field validation; never invent it.
+    delete raw.updated_at;
+    if (observation.raw?.updated_at !== undefined) raw.updated_at = observation.raw.updated_at;
+  }
+  const report = planPreview(observation.amber, observation.schema, raw, observation.categoryNodes,
     { domainEvidence: job.baseline.domainEvidence });
   if (!equal(intent(report), job.intent)) fail('MAGENTO_SYNC_PLAN_CHANGED');
 }
