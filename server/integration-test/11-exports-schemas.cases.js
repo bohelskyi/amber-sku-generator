@@ -1,3 +1,4 @@
+const { insertProductFixture } = require('./product-fixture');
 const suite = require('./suite-context');
 const {
   assert,
@@ -12,7 +13,7 @@ const {
 
 async function createReexportProduct({ excludeFromExport = 0, priceUah = 2400 } = {}) {
   const fullSku = `RX${crypto.randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
-  const result = await pool.query(
+  const result = await insertProductFixture(pool,
     `INSERT INTO products
        (full_sku, base_sku, sequence_number, category, weight, total_price,
         total_price_uah, price_per_gram, uah_rate, details, sku_schema_version_id,
@@ -309,7 +310,9 @@ test('in-place price changes coalesce into one dedicated immutable price export'
     )).rows, [{ revision: '2', confirmed_revision: '2' }]);
     assert.equal(await snapshotCsv(initialSnapshot.id), initialCsv);
   } finally {
-    await pool.query('DELETE FROM products WHERE id = ANY($1::int[])', [
+    await pool.query(`WITH retired AS (UPDATE products SET status='archived', exclude_from_export=1 WHERE id = ANY($1::int[]) RETURNING id)
+      UPDATE product_full_export_state f SET route='retired',hold_reason=NULL,delivery_version=delivery_version+1
+      FROM retired WHERE f.product_id=retired.id AND f.route <> 'retired'`, [
       [Number(product.id), Number(nextProduct.id)],
     ]);
   }
@@ -365,7 +368,9 @@ test('normal snapshots establish price exposure without acknowledging unconfirme
       revision: '1', confirmed_revision: '0', has_product_snapshot: true,
     }]);
   } finally {
-    await pool.query('DELETE FROM products WHERE id = ANY($1::int[])', [[
+    await pool.query(`WITH retired AS (UPDATE products SET status='archived', exclude_from_export=1 WHERE id = ANY($1::int[]) RETURNING id)
+      UPDATE product_full_export_state f SET route='retired',hold_reason=NULL,delivery_version=delivery_version+1
+      FROM retired WHERE f.product_id=retired.id AND f.route <> 'retired'`, [[
       Number(changedBeforeSnapshot.id), Number(changedAfterSnapshot.id),
     ]]);
   }
@@ -419,7 +424,9 @@ test('price snapshot confirmation clears only its captured revision under later 
     )).rows, [{ revision: '3', confirmed_revision: '3' }]);
     assert.equal(await priceSnapshotCsv(olderSnapshot.id), olderCsv);
   } finally {
-    await pool.query('DELETE FROM products WHERE id = ANY($1::int[])', [[
+    await pool.query(`WITH retired AS (UPDATE products SET status='archived', exclude_from_export=1 WHERE id = ANY($1::int[]) RETURNING id)
+      UPDATE product_full_export_state f SET route='retired',hold_reason=NULL,delivery_version=delivery_version+1
+      FROM retired WHERE f.product_id=retired.id AND f.route <> 'retired'`, [[
       Number(product.id),
       ...anchors.map((item) => Number(item.id)),
     ]]);
@@ -447,7 +454,9 @@ test('an intentionally excluded exposed product remains pending outside price sn
       [excluded.id]
     )).rows, [{ revision: '1', confirmed_revision: '0' }]);
   } finally {
-    await pool.query('DELETE FROM products WHERE id = ANY($1::int[])', [[
+    await pool.query(`WITH retired AS (UPDATE products SET status='archived', exclude_from_export=1 WHERE id = ANY($1::int[]) RETURNING id)
+      UPDATE product_full_export_state f SET route='retired',hold_reason=NULL,delivery_version=delivery_version+1
+      FROM retired WHERE f.product_id=retired.id AND f.route <> 'retired'`, [[
       Number(excluded.id), Number(anchor.id),
     ]]);
   }

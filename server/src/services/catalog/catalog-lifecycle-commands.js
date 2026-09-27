@@ -1,3 +1,4 @@
+const lifecycleGate = require('../full-product-cutover-gate');
 const pool = require('../../db/pool');
 const { writeAuditEvent } = require('../../audit/audit-events');
 const { createMutationContext } = require('../../audit/mutation-context');
@@ -8,7 +9,7 @@ async function setOptionArchived({ id, archived }, options = {}) {
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const currentOption = await lockOptionWithUsage(client, id);
     if (!currentOption) {
       const err = new Error('\u0412\u0430\u0440\u0456\u0430\u043d\u0442 \u043d\u0435 \u0437\u043d\u0430\u0439\u0434\u0435\u043d\u043e');
@@ -18,7 +19,7 @@ async function setOptionArchived({ id, archived }, options = {}) {
 
     const nextArchived = Boolean(archived);
     if (Boolean(currentOption.archived) === nextArchived) {
-      await client.query('COMMIT');
+      await lifecycleGate.commit(client);
       return;
     }
 
@@ -36,12 +37,12 @@ async function setOptionArchived({ id, archived }, options = {}) {
         label: currentOption.label,
       },
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -78,7 +79,7 @@ async function updateQuestionsOrder({ category_code, questions }, options = {}) 
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     const currentResult = await client.query(
       `SELECT id, display_order, sku_index
        FROM questions
@@ -117,13 +118,13 @@ async function updateQuestionsOrder({ category_code, questions }, options = {}) 
       });
     }
 
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return { success: true };
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -138,7 +139,7 @@ async function deleteCatalogItem(type, id, options = {}) {
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     let event = null;
 
     if (type === 'category') {
@@ -282,12 +283,12 @@ async function deleteCatalogItem(type, id, options = {}) {
     }
 
     if (event) await writeAuditEvent(client, { mutationContext, ...event });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 

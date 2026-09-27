@@ -3,8 +3,11 @@
 require('./suite-context');
 
 for (const modulePath of [
+  './00-export-exposure.cases',
   './01-platform-boundary.cases',
   './02-migration-foundation.cases',
+  './02-full-product-lifecycle-migration.cases',
+  './02-cutover-migration.cases',
   './03-authentication-sessions.cases',
   './04-product-access-audit.cases',
   './05-recount.cases',
@@ -16,8 +19,22 @@ for (const modulePath of [
   './10-repricing.cases',
   './11-exports-schemas.cases',
   './11-magento-products.cases',
+  './11-export-recount-exclusion.cases',
+  './11-full-product-lifecycle.cases',
+  './11-phase2-parity.cases',
+  './11-phase2-races.cases',
   './12-rbac-audit.cases',
+  './12-export-templates.cases',
+  './12-export-template-snapshots.cases',
+  './12-export-template-editor.cases',
+  './12-export-sessions.cases',
+  './12-export-grid.cases',
+  './12-export-source-support.cases',
+  './12-export-ux3.cases',
+  './12-export-ux4.cases',
   './13-sqlite-import.cases',
+  './14-phase3-repair.cases',
+  './15-cutover.cases',
 ]) {
   require(modulePath);
 }

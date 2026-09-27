@@ -6,6 +6,7 @@ const FOCUSABLE_SELECTOR = [
   'input:not([disabled])',
   'select:not([disabled])',
   'textarea:not([disabled])',
+  'summary',
   '[contenteditable="true"]',
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
@@ -27,6 +28,7 @@ const canReceiveFocus = (element) => Boolean(
 );
 
 export function useDialogAccessibility({
+  beforeFocusRestore,
   closeDisabled = false,
   containerRef,
   initialFocusRef,
@@ -51,22 +53,27 @@ export function useDialogAccessibility({
         : getFocusableElements(container)[0] || container;
       focusTarget?.focus({ preventScroll: true });
     };
+    focusInitialElement();
     const focusFrame = window.requestAnimationFrame(focusInitialElement);
 
     return () => {
       window.cancelAnimationFrame(focusFrame);
       document.body.style.overflow = previousOverflow;
+      beforeFocusRestore?.();
       if (previousActiveElement?.isConnected) {
         previousActiveElement.focus({ preventScroll: true });
       }
     };
-  }, [containerRef, initialFocusRef, isOpen]);
+  }, [beforeFocusRestore, containerRef, initialFocusRef, isOpen]);
 
   useEffect(() => {
     if (!isOpen || !isInteractionEnabled) return undefined;
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape' && !closeDisabled) {
+        // An expanded combobox owns the first Escape to dismiss its options.
+        // Let its local handler run before considering closing the dialog.
+        if (event.target instanceof Element && event.target.closest('[role="combobox"][aria-expanded="true"]')) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         onClose?.();

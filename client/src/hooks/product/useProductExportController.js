@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { exportsApi } from '../../api/exports-api';
 import { downloadBlob } from '../../lib/download';
 import { getApiError } from '../../lib/http-error';
+import { subscribeExportReviewChanged } from '../../lib/export-review-events';
+import { createExportViewMemory } from '../../lib/export-view-memory';
+import { usePriceExportController } from './usePriceExportController';
 
-export function useProductExportController() {
+export function useProductExportController({ enabled = true, canCreate = true, principalLifetime } = {}) {
   const [exportStatus, setExportStatus] = useState(null);
   const [exportFromSku, setExportFromSku] = useState('');
   const [exportToSku, setExportToSku] = useState('');
@@ -11,36 +14,113 @@ export function useProductExportController() {
   const [isExportLoading, setIsExportLoading] = useState(false);
   const [exportPreview, setExportPreview] = useState(null);
   const [exportSnapshot, setExportSnapshot] = useState(null);
+  const [exportReviewStale, setExportReviewStale] = useState(false);
+  const [exportProductChanged, setExportProductChanged] = useState(false);
+  const [exportRefreshing, setExportRefreshing] = useState(false);
+  const [exportHandoff, setExportHandoff] = useState(null);
+  const handoff = useRef(null);
+  const [exportDisplayMemory] = useState(() => new Map());
+  const [exportReviewView] = useState(createExportViewMemory);
   const [priceExportStatus, setPriceExportStatus] = useState(null);
   const [priceExportError, setPriceExportError] = useState('');
-  const [isPriceExportLoading, setIsPriceExportLoading] = useState(false);
+  const [templateMode, setTemplateMode] = useState(false);
+  const [templateSelection, setTemplateSelection] = useState({ mode: 'active' });
+  const [pendingCreate, setPendingCreate] = useState(null);
+  const previewEvidence = useRef(null);
+  const pending = useRef(null);
+  const busy = useRef(false);
+  const generation = useRef(0);
+  const alive = useRef(true);
+  const current = useCallback(() => alive.current && enabled && principalLifetime?.valid !== false, [enabled, principalLifetime]);
+  const beginExportHandoff = useCallback((context) => { if (current()) { handoff.current = context; setExportHandoff(context); } }, [current]);
+  const endExportHandoff = useCallback(() => { handoff.current = null; setExportHandoff(null); }, []);
+  const requested = useRef({ templateMode: false, selection: { mode: 'active' }, fromSku: '', toSku: '' });
+  const markExportReviewStale = useCallback((event) => { if (current()) { generation.current++; setExportReviewStale(true); if (event?.kind === 'product') setExportProductChanged(true); } }, [current]);
+  const refreshAfterProductChange = useCallback(async () => {
+    if (!current()) return;
+    markExportReviewStale({ kind: 'product' });
+    const evidence = previewEvidence.current;
+    if (!evidence || busy.current || exportSnapshot) return;
+    const ticket = ++generation.current;
+    busy.current = true; setIsExportLoading(true); setExportRefreshing(true); setExportError('');
+    try {
+      const { data } = await exportsApi.preview(evidence.intent);
+      if (!current() || ticket !== generation.current) return;
+      previewEvidence.current = { intent: evidence.intent, response: data };
+      setExportPreview(data); setExportReviewStale(false); setExportProductChanged(false);
+      // pending.current retains the original command payload and evidence.
+    } catch (error) { if (current() && ticket === generation.current) setExportError(getApiError(error)); }
+    finally { busy.current = false; if (current()) { setIsExportLoading(false); setExportRefreshing(false); } }
+  }, [current, markExportReviewStale, exportSnapshot]);
+  useEffect(() => subscribeExportReviewChanged((event) => {
+    if (!current()) return;
+    markExportReviewStale();
+    if (event?.kind === 'product') {
+      if (handoff.current) { handoff.current = { ...handoff.current, saved: true }; setExportHandoff(handoff.current); }
+      setExportProductChanged(true);
+      for (const view of exportDisplayMemory.values()) view.update({ productChanged: true });
+      if (handoff.current?.sessionId) exportDisplayMemory.get(handoff.current.sessionId)?.update({ autoRecheck: true });
+      else if (handoff.current) void refreshAfterProductChange();
+    }
+  }), [markExportReviewStale, current, exportDisplayMemory, refreshAfterProductChange]);
+  useEffect(() => {
+    let live = true;
+    const checkIdentity = async () => {
+      const evidence = previewEvidence.current; const ticket = generation.current;
+      if (!current() || !evidence || pending.current || busy.current || exportSnapshot) return;
+      try {
+        const response = await exportsApi.preview(evidence.intent);
+        if (live && current() && ticket === generation.current && response.data.tableFingerprint !== evidence.response.tableFingerprint) markExportReviewStale();
+      } catch { if (live && current() && ticket === generation.current) markExportReviewStale(); }
+    };
+    window.addEventListener('focus', checkIdentity);
+    return () => { live = false; window.removeEventListener('focus', checkIdentity); };
+  }, [current, exportSnapshot, markExportReviewStale]);
+
+  const invalidate = () => { generation.current++; previewEvidence.current = null; exportReviewView.clear(); setExportProductChanged(false); setExportPreview(null); };
+  const updateTemplateMode = (value) => { if (!current()) return; requested.current.templateMode = value; setTemplateMode(value); invalidate(); };
+  const updateTemplateSelection = (value) => { if (!current()) return; requested.current.selection = { ...value }; setTemplateSelection(value); invalidate(); };
 
   const updateExportFromSku = (value) => {
+    if (!current()) return;
+    requested.current.fromSku = value;
     setExportFromSku(value);
-    setExportPreview((previous) => previous?.mode === 'manual' ? null : previous);
+    invalidate();
   };
 
   const updateExportToSku = (value) => {
+    if (!current()) return;
+    requested.current.toSku = value;
     setExportToSku(value);
-    setExportPreview((previous) => previous?.mode === 'manual' ? null : previous);
+    invalidate();
   };
 
-  const fetchExportStatus = () => Promise.all([
+  const fetchExportStatus = useCallback(() => !current() ? Promise.resolve(null) : Promise.all([
     exportsApi.getStatus(),
     exportsApi.getPriceStatus(),
   ]).then(([productResponse, priceResponse]) => {
+    if (!current()) return null;
     setExportStatus(productResponse.data);
     setPriceExportStatus(priceResponse.data);
     return productResponse.data;
-  });
+  }), [current]);
 
   useEffect(() => {
-    fetchExportStatus();
-  }, []);
+    alive.current = true;
+    if (enabled) fetchExportStatus().catch((error) => { if (current()) setExportError(getApiError(error)); });
+    return () => { alive.current = false; };
+  }, [enabled, fetchExportStatus, current]);
+
+  useEffect(() => {
+    if (!pendingCreate) return undefined;
+    const warn = (event) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [pendingCreate]);
 
   const getRangePayload = () => {
-    const fromSku = exportFromSku.trim().toUpperCase();
-    const toSku = exportToSku.trim().toUpperCase();
+    const fromSku = requested.current.fromSku.trim().toUpperCase();
+    const toSku = requested.current.toSku.trim().toUpperCase();
     if (!fromSku) {
       throw new Error('Вкажіть артикул, з якого починати експорт.');
     }
@@ -48,69 +128,102 @@ export function useProductExportController() {
   };
 
   const handlePreviewExport = async (mode = 'new') => {
+    if (!current() || pending.current || busy.current) return;
+    const ticket = ++generation.current;
+    busy.current = true;
     setIsExportLoading(true);
     setExportError('');
-    setExportPreview(null);
+    setExportReviewStale(true);
     try {
-      const response = await exportsApi.preview(
-        mode === 'new' ? { mode: 'new' } : getRangePayload()
-      );
+      const previous = previewEvidence.current;
+      const selection = typeof mode === 'object' ? mode : mode === 'new' ? { mode: 'new' }
+        : previous?.response.mode === mode ? previous.intent : getRangePayload();
+      const intent = { ...selection,
+        ...(requested.current.templateMode ? { requestContract: 'template-v1', selection: { ...requested.current.selection } } : {}) };
+      const response = await exportsApi.preview(intent);
+      if (!current() || ticket !== generation.current) return;
+      previewEvidence.current = { intent, response: response.data };
       setExportPreview(response.data);
+      setExportReviewStale(false);
+      setExportProductChanged(false);
       setExportSnapshot(null);
     } catch (error) {
-      setExportError(getApiError(error));
+      if (current() && ticket === generation.current) setExportError(getApiError(error));
     } finally {
-      setIsExportLoading(false);
+      busy.current = false;
+      if (current()) setIsExportLoading(false);
     }
   };
 
   const handleCreateSnapshot = async () => {
-    if (!exportPreview || exportPreview.errors?.length || !exportPreview.representedCount) return;
+    if (!current() || !canCreate || busy.current || exportSnapshot) return;
+    if (!pending.current) {
+      if (exportReviewStale) return;
+      const evidence = previewEvidence.current;
+      if (!evidence || evidence.response.errors?.length || !evidence.response.representedCount) return;
+      const { intent, response } = evidence;
+      if (intent.requestContract === 'template-v1' && !response.previewToken) return;
+      const requestedPayload = intent.requestContract === 'template-v1'
+        ? { ...intent, previewToken: response.previewToken }
+        : response.mode === 'new' ? { mode: 'new', fromSku: response.range.fromSku, toSku: response.range.toSku } : intent;
+      const payload = { ...requestedPayload, ...(intent.requestContract !== 'template-v1' && response.previewExpectation
+        ? { previewExpectation: response.previewExpectation } : {}) };
+      pending.current = { payload, idempotencyKey: globalThis.crypto?.randomUUID?.()
+        || `export-${Date.now()}-${Math.random().toString(36).slice(2)}`, evidence: response };
+      setPendingCreate(pending.current);
+    }
+    const operation = pending.current;
+    busy.current = true;
     setIsExportLoading(true);
     setExportError('');
     try {
-      const idempotencyKey = globalThis.crypto?.randomUUID?.()
-        || `export-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const payload = exportPreview.mode === 'new'
-        ? { mode: 'new', fromSku: exportPreview.range.fromSku,
-          toSku: exportPreview.range.toSku }
-        : getRangePayload();
-      const response = await exportsApi.createSnapshot(payload, idempotencyKey);
-      setExportSnapshot(response.data);
+      const response = await exportsApi.createSnapshot(operation.payload, operation.idempotencyKey);
+      if (!current()) return;
+      setExportSnapshot({ ...response.data, capturedRange: operation.evidence.range });
+      setExportPreview(operation.evidence);
+      pending.current = null; setPendingCreate(null); previewEvidence.current = null;
+      try {
+        const stored = await exportsApi.getSnapshot(response.data.id);
+        if (current() && stored.data?.id === response.data.id) setExportSnapshot({ ...stored.data, capturedRange: operation.evidence.range });
+      } catch {
+        if (current()) setExportError('Файли створено, але таблицю не вдалося завантажити.');
+      }
     } catch (error) {
-      if (error.response?.data?.code === 'NEW_EXPORT_RANGE_STALE') {
-        setExportPreview(null);
-        await fetchExportStatus().catch(() => {});
+      if (!current()) return;
+      const code = error.response?.data?.code;
+      const definitive = ['NEW_EXPORT_RANGE_STALE', 'EXPORT_PREVIEW_STALE', 'EXPORT_PREVIEW_EXPIRED',
+        'EXPORT_PREVIEW_REQUIRED', 'REPLACEMENT_SELECTION_STALE', 'EXPORT_CUTOVER_PREPARING', 'MAGENTO_NOT_READY'].includes(code);
+      if (definitive) {
+        pending.current = null; setPendingCreate(null); invalidate();
+        setExportError(`${getApiError(error)} Оновіть перевірку явно перед новим створенням.`);
+      } else {
+        setExportError(`${getApiError(error)} Результат створення не підтверджено. Повторіть цю саму операцію; новий ключ не створюється.`);
       }
-      if (error.response?.data?.errors) {
-        setExportPreview((previous) => ({
-          ...(previous || {}),
-          errors: error.response.data.errors,
-          readyCount: Math.max(0,
-            Number(previous?.representedCount || 0) - error.response.data.errors.length),
-        }));
-      }
-      setExportError(getApiError(error));
     } finally {
-      setIsExportLoading(false);
+      busy.current = false;
+      if (current()) setIsExportLoading(false);
     }
   };
 
   const handleDownloadMagentoArtifact = async (groupCode) => {
-    if (!exportSnapshot?.id) return;
+    if (!current() || !exportSnapshot?.id) return;
     setIsExportLoading(true);
     setExportError('');
     try {
       const response = await exportsApi.downloadMagentoArtifact(exportSnapshot.id, groupCode);
+      if (!current()) return;
       const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
       const fileNameMatch = response.headers['content-disposition']?.match(/filename="(.+)"/);
       const manifest = exportSnapshot.artifacts?.find((item) => item.groupCode === groupCode);
       downloadBlob(blob, fileNameMatch?.[1] || manifest?.fileName || `magento-${groupCode}.csv`, {
         documentRef: document, urlApi: window.URL,
       });
+      return true;
     } catch (error) {
+      if (!current()) return;
       if (error.response?.data instanceof Blob) {
         const errorText = await error.response.data.text();
+        if (!current()) return;
         try {
           const parsed = JSON.parse(errorText);
           setExportError(parsed.error || 'Не вдалося виконати експорт.');
@@ -120,61 +233,47 @@ export function useProductExportController() {
       } else {
         setExportError(getApiError(error));
       }
+      return false;
     } finally {
-      setIsExportLoading(false);
+      if (current()) setIsExportLoading(false);
     }
   };
 
-  const handlePriceExportCsv = async () => {
-    setIsPriceExportLoading(true);
-    setPriceExportError('');
-    try {
-      const key = globalThis.crypto?.randomUUID?.()
-        || `price-export-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const snapshotResponse = await exportsApi.createPriceSnapshot(key);
-      const snapshot = snapshotResponse.data;
-      const response = await exportsApi.downloadPriceSnapshot(snapshot.id);
-      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
-      const fileNameMatch = response.headers['content-disposition']?.match(/filename="(.+)"/);
-      downloadBlob(
-        blob,
-        fileNameMatch?.[1] || snapshot.fileName || 'amber-price-export.csv',
-        { documentRef: document, urlApi: window.URL }
-      );
-      await exportsApi.confirmPriceSnapshot(snapshot.id);
-      await fetchExportStatus();
-    } catch (error) {
-      if (error.response?.data instanceof Blob) {
-        const errorText = await error.response.data.text();
-        try {
-          setPriceExportError(JSON.parse(errorText).error || 'Не вдалося експортувати ціни.');
-        } catch {
-          setPriceExportError('Не вдалося експортувати ціни.');
-        }
-      } else {
-        setPriceExportError(getApiError(error));
-      }
-    } finally {
-      setIsPriceExportLoading(false);
-    }
-  };
+  const priceWorkflow = usePriceExportController({ current, canCreate, onConfirmed: fetchExportStatus });
+  const handlePriceExportCsv = priceWorkflow.create;
 
   const handleConfirmSnapshot = async () => {
-    if (!exportSnapshot?.id || exportSnapshot.status === 'confirmed') return;
+    if (!current() || !canCreate || busy.current || !exportSnapshot?.id || exportSnapshot.status === 'confirmed') return;
+    const snapshotId = exportSnapshot.id;
+    busy.current = true;
     setIsExportLoading(true);
     setExportError('');
     try {
-      await exportsApi.confirmSnapshot(exportSnapshot.id);
-      setExportSnapshot((previous) => ({ ...previous, status: 'confirmed' }));
+      await exportsApi.confirmSnapshot(snapshotId);
+      if (!current()) return;
+      setExportSnapshot((previous) => previous?.id === snapshotId ? { ...previous, status: 'confirmed' } : previous);
+      const stored = await exportsApi.getSnapshot(snapshotId);
+      if (current()) setExportSnapshot(stored.data);
       await fetchExportStatus();
     } catch (error) {
-      setExportError(getApiError(error));
+      if (current()) setExportError(getApiError(error));
     } finally {
-      setIsExportLoading(false);
+      busy.current = false;
+      if (current()) setIsExportLoading(false);
     }
   };
 
   return {
+    exportRefreshing, exportHandoff, refreshAfterProductChange,
+    beginExportHandoff, endExportHandoff,
+    exportProductChanged, exportReviewView, exportDisplayMemory,
+    exportReviewStale, markExportReviewStale, priceWorkflow,
+    startNewExport: () => { if (current() && !busy.current && !pending.current) { setExportSnapshot(null); invalidate(); setExportError(''); } },
+    templateMode,
+    setTemplateMode: updateTemplateMode,
+    templateSelection,
+    setTemplateSelection: updateTemplateSelection,
+    pendingCreate,
     exportError,
     exportFromSku,
     exportPreview,
@@ -188,7 +287,7 @@ export function useProductExportController() {
     handleConfirmSnapshot,
     handlePriceExportCsv,
     isExportLoading,
-    isPriceExportLoading,
+    isPriceExportLoading: priceWorkflow.busy,
     priceExportError,
     priceExportStatus,
     setExportError,

@@ -1,3 +1,4 @@
+const { insertProductFixture } = require('./product-fixture');
 const suite = require('./suite-context');
 const {
   assert,
@@ -23,7 +24,7 @@ async function createPriceChangeProduct({
 } = {}) {
   const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase();
   const fullSku = `PC${suffix}`;
-  const result = await pool.query(
+  const result = await insertProductFixture(pool,
     `INSERT INTO products
        (full_sku, base_sku, sequence_number, category, weight, total_price,
         total_price_uah, price_per_gram, uah_rate, details, sku_schema_version_id)
@@ -238,7 +239,9 @@ test('automatic pricing rejects unavailable, unchanged, and stale previews autho
 
 async function removeProduct(productId) {
   await pool.query('DELETE FROM correction_requests WHERE source_product_id = $1', [productId]);
-  await pool.query('DELETE FROM products WHERE id = $1', [productId]);
+  await pool.query(`WITH retired AS (UPDATE products SET status='archived', exclude_from_export=1 WHERE id = $1 RETURNING id)
+      UPDATE product_full_export_state f SET route='retired',hold_reason=NULL,delivery_version=delivery_version+1
+      FROM retired WHERE f.product_id=retired.id AND f.route <> 'retired'`, [productId]);
 }
 
 async function preview(productId, pricingDecision) {

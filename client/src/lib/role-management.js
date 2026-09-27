@@ -28,6 +28,10 @@ export const PERMISSION_PRESENTATION = Object.freeze({
   'repricing.rollback': ['Відкат переоцінки', 'Відновлення цін із завершеної партії.'],
   'exports.view': ['Перегляд експорту', 'Перегляд стану та завантаження готових знімків.'],
   'exports.create': ['Створення експорту', 'Створення і підтвердження CSV-знімків.'],
+  'export_templates.view': ['Перегляд шаблонів', 'Визначення, джерела, чернетки та публікації експорту.'],
+  'export_templates.manage': ['Редагування шаблонів', 'Підготовка кандидата, збереження й перевірка чернетки.'],
+  'export_templates.publish': ['Публікація шаблонів', 'Створення незмінної версії зі збереженої чернетки.'],
+  'export_templates.activate': ['Вибір кандидата експорту', 'Вибір публікації для явного контрольованого режиму, без глобального rollout.'],
   'catalog.view': ['Перегляд каталогу', 'Перегляд структури категорій, питань і варіантів.'],
   'catalog.manage': ['Редагування каталогу', 'Зміна чернетки структури каталогу.'],
   'sku_schemas.publish': ['Публікація схеми SKU', 'Публікація нової незмінної версії схеми.'],
@@ -52,7 +56,7 @@ export function getPermissionDomain(permissionKey) {
   }
   if (permissionKey.startsWith('corrections.')) return 'corrections';
   if (permissionKey.startsWith('repricing.')) return 'repricing';
-  if (permissionKey.startsWith('exports.')) return 'exports';
+  if (permissionKey.startsWith('exports.') || permissionKey.startsWith('export_templates.')) return 'exports';
   if (
     permissionKey.startsWith('catalog.')
     || permissionKey.startsWith('pricing.')

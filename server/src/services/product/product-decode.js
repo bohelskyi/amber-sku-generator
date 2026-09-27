@@ -191,7 +191,8 @@ async function decodeSku(skuValue, queryable) {
     `SELECT id, full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah,
             price_per_gram, uah_rate, details, status, exclude_from_export,
             corrected_from_product_id, corrected_to_product_id, correction_reason, created_at,
-            sku_schema_version_id
+            sku_schema_version_id, magento_name_subject_ua, magento_name_subject_en,
+            magento_name_review_required
      FROM products
      WHERE full_sku = $1
      ORDER BY id ASC

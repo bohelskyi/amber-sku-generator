@@ -4,6 +4,7 @@ const adminRoutes = require('./routes/admin.routes');
 const crypto = require('node:crypto');
 const { sendHttpError } = require('./http/errors');
 const pool = require('./db/pool');
+const lifecycleGate = require('./services/full-product-cutover-gate');
 const { trustProxy } = require('./config/env');
 const { createSessionMiddleware } = require('./auth/session');
 const { createAuthRouter } = require('./routes/auth.routes');
@@ -28,6 +29,8 @@ function createApp({
   const app = express();
 
   app.set('trust proxy', trustProxy);
+  // PR1B permits 256 KiB definitions; leave all other routes' parser limits unchanged.
+  app.use('/api/admin/export-templates', express.json({ limit: '272kb' }));
   app.use(express.json());
   app.use((req, res, next) => {
     const requestId = String(req.get('X-Request-ID') || crypto.randomUUID()).slice(0, 128);
@@ -63,6 +66,7 @@ function createApp({
   app.get('/health/ready', async (req, res) => {
     try {
       await pool.query('SELECT 1');
+      res.setHeader('X-Amber-Full-Product-Writer', String(lifecycleGate.WRITER_VERSION));
       res.json({ status: 'ready' });
     } catch (error) {
       logger.error('health.readiness.failed', {
@@ -84,6 +88,14 @@ function createApp({
     getOrCreateApplicationAccess: applicationUserService?.getOrCreateApplicationAccess,
   }));
   app.use('/api', requireCsrfForUnsafeMethods);
+  app.use('/api', async (req, _res, next) => {
+    try {
+      if (!['GET','HEAD','OPTIONS'].includes(req.method) && (await lifecycleGate.readGate(pool)).phase === 'preparing') {
+        throw lifecycleGate.error('EXPORT_CUTOVER_PREPARING', 'Business changes are frozen until export cutover activation', 503);
+      }
+      next();
+    } catch (error) { next(error); }
+  });
   app.use('/api', publicRoutes);
   app.use('/api', adminRoutes);
 
@@ -95,7 +107,7 @@ function createApp({
       error: error.message,
       code: error.code,
     });
-    sendHttpError(res, error);
+    sendHttpError(res, error, { includeCode: error.code === 'EXPORT_CUTOVER_PREPARING' });
   });
 
   return app;

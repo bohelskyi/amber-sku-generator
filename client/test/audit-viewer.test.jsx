@@ -32,6 +32,7 @@ describe('global audit viewer', () => {
   it('uses only audit.view for navigation and page access', async () => {
     vi.spyOn(api, 'get').mockResolvedValue(response([]));
     const { rerender } = render(<AuthContext.Provider value={authValue()}><MemoryRouter><WorkspaceNav /><AuditPage /></MemoryRouter></AuthContext.Provider>);
+    fireEvent.click(screen.getByRole('button', { name: /Розділи/ }));
     expect(screen.getByRole('link', { name: /Аудит/ })).toBeTruthy();
     await waitFor(() => expect(api.get).toHaveBeenCalled());
 

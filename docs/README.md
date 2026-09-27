@@ -9,6 +9,7 @@ Current server code and PostgreSQL migrations are authoritative for implemented 
 - [Recount and corrections](RECOUNT_CORRECTIONS.md)
 - [Repricing](REPRICING.md)
 - [Exports](EXPORTS.md)
+- [Private and shared controlled export sessions](SHARED_EXPORT_SESSIONS.md)
 
 ## Platform
 

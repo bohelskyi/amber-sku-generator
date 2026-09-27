@@ -1,3 +1,4 @@
+const lifecycleGate = require('./full-product-cutover-gate');
 const crypto = require('crypto');
 const pool = require('../db/pool');
 const { getAppConfig } = require('./catalog.service');
@@ -16,29 +17,7 @@ function getVersionMarker(version) {
   return Number(version) === 1 ? '' : `${Number(version)}/`;
 }
 
-function parseVersionedSkuPart(skuWithoutCategory) {
-  const source = String(skuWithoutCategory || '');
-  const compactMatch = source.match(/^(\d+)\//);
-  if (compactMatch) {
-    return {
-      version: Number(compactMatch[1]),
-      marker: compactMatch[0],
-      encodedWithSuffix: source.slice(compactMatch[0].length),
-    };
-  }
-
-  // Keep decoding the short-lived pre-release marker format.
-  const legacyVersionMatch = source.match(/^V(\d+)-/i);
-  if (!legacyVersionMatch) {
-    return { version: 1, marker: '', encodedWithSuffix: source };
-  }
-
-  return {
-    version: Number(legacyVersionMatch[1]),
-    marker: legacyVersionMatch[0].toUpperCase(),
-    encodedWithSuffix: source.slice(legacyVersionMatch[0].length),
-  };
-}
+const { parseVersionedSkuPart } = require('../utils/sku');
 
 function validateSnapshot(questions) {
   for (const question of questions) {
@@ -199,13 +178,14 @@ async function getStoredQuestionKeys(categoryCode, queryable = pool) {
 }
 
 async function ensureLegacySkuSchemas() {
+  if ((await lifecycleGate.readGate(pool)).phase === 'preparing') return;
   const client = await pool.connect();
   try {
     await client.query('SELECT pg_advisory_lock(hashtext($1))', ['amber_legacy_sku_schemas']);
     const categories = await client.query('SELECT code FROM categories ORDER BY code');
 
     for (const category of categories.rows) {
-      await client.query('BEGIN');
+      await lifecycleGate.begin(client, 'BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
         `sku-schema:${category.code}`,
       ]);
@@ -214,7 +194,7 @@ async function ensureLegacySkuSchemas() {
         [category.code]
       );
       if (existing.rows.length > 0) {
-        await client.query('COMMIT');
+        await lifecycleGate.commit(client);
         continue;
       }
       const productCountResult = await client.query(
@@ -249,14 +229,14 @@ async function ensureLegacySkuSchemas() {
          WHERE category = $2 AND sku_schema_version_id IS NULL`,
         [schemaVersion.id, category.code]
       );
-      await client.query('COMMIT');
+      await lifecycleGate.commit(client);
     }
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
     await client.query('SELECT pg_advisory_unlock(hashtext($1))', ['amber_legacy_sku_schemas']);
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 
@@ -383,7 +363,7 @@ async function publishSkuSchema(categoryCode, options = {}) {
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await lifecycleGate.begin(client, 'BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
       `sku-schema:${categoryCode}`,
     ]);
@@ -429,7 +409,7 @@ async function publishSkuSchema(categoryCode, options = {}) {
       subjectId: published.id,
       details: { categoryCode, version: nextVersion },
     });
-    await client.query('COMMIT');
+    await lifecycleGate.commit(client);
     return {
       id: published.id,
       categoryCode,
@@ -437,10 +417,10 @@ async function publishSkuSchema(categoryCode, options = {}) {
       marker: published.marker,
     };
   } catch (err) {
-    await client.query('ROLLBACK');
+    await lifecycleGate.rollback(client);
     throw err;
   } finally {
-    client.release();
+    await lifecycleGate.release(client); client.release();
   }
 }
 

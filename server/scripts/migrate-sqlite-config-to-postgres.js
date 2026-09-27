@@ -1,3 +1,4 @@
+const lifecycleGate = require('../src/services/full-product-cutover-gate');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('node:crypto');
@@ -122,7 +123,7 @@ async function run() {
       `Loaded rows from SQLite: categories=${categories.length}, questions=${questions.length}, options=${options.length}, scenarios=${scenarios.length}, matrix=${matrix.length}, modifiers=${modifiers.length}`
     );
 
-    await pgClient.query('BEGIN');
+    await lifecycleGate.begin(pgClient);
 
     const targetState = await pgClient.query(
       `SELECT
@@ -284,19 +285,19 @@ async function run() {
     await setSequence(pgClient, 'sku_schema_questions', 'id');
     await setSequence(pgClient, 'sku_schema_options', 'id');
 
-    await pgClient.query('COMMIT');
+    await lifecycleGate.commit(pgClient);
 
     console.log('Config migration completed successfully.');
   } catch (err) {
     try {
-      await pgClient.query('ROLLBACK');
+      await lifecycleGate.rollback(pgClient);
     } catch {
       // ignore rollback error
     }
     console.error('Config migration failed:', err.message || err);
     process.exitCode = 1;
   } finally {
-    pgClient.release();
+    await lifecycleGate.release(pgClient); pgClient.release();
     await pgPool.end();
     await sqliteClose(sqliteDb);
   }

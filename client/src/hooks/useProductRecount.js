@@ -70,7 +70,7 @@ export function useProductRecount({
   const previewRequestIdRef = useRef(0);
   const priceChangeRequestIdRef = useRef(0);
   const hasRecountChanges = Boolean(
-    haveRecountTargetChanged(decodeData, recountAnswers, recountWeight)
+    isRecountOpen && haveRecountTargetChanged(decodeData, recountAnswers, recountWeight)
   );
   const informationPatch = getInformationOnlyPatch(
     decodeData, recountAnswers, recountWeight, submitMode
@@ -325,6 +325,7 @@ export function useProductRecount({
         recountManualPriceUah
       ),
     });
+    if (!requestMode) payload.sourceStateSignature = recountPreview?.source?.stateSignature;
     return requestMode && useDecisionPreview
       ? buildCorrectionRequestPayload(payload, pricingDecision, recountPreview?.previewSignature)
       : payload;
@@ -522,6 +523,10 @@ export function useProductRecount({
           const guidance = applied.data.exportGuidance?.mode;
           setRecountSuccess(guidance === 'reexport'
             ? `Характеристики ${sourceSku} оновлено. Для вже представленого товару створіть окремий Magento-знімок цього SKU.`
+            : guidance === 'held'
+              ? `?????????????? ${sourceSku} ????????. ????? ??????????? ? ????? ?????? ????????.`
+              : guidance === 'replacement'
+                ? `?????????????? ${sourceSku} ????????. ????????? ????? ? ????? ?????????? ?????.`
             : guidance === 'excluded'
               ? `Характеристики ${sourceSku} оновлено. Товар виключений з експорту.`
               : `Характеристики ${sourceSku} оновлено. Товар увійде до наступного звичайного експорту.`);
