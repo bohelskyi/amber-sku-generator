@@ -1,5 +1,17 @@
 # Magento integration
 
+The product sync preview and discovery client remain GET-only. A separate,
+explicitly applied single-category command is documented below; it cannot write products.
+
+The binding review CLI supports an explicit disabled-on-create status policy:
+`approve --revision UUID --expected-revision N --actor-user-id ID --binding POLICY_REVIEW_ID --accept-review --reason "Create disabled; preserve update status" --policy initialize_create_only --create-value 2`.
+This option is restricted to the base `product_online` ownership policy and is
+stored in migration 041's existing policy evidence. Approved previews use native
+status `2` on CREATE and omit status on UPDATE, preserving Magento's current value.
+It does not approve inventory, websites, English store views or publish the draft.
+Individual known label differences require explicit binding approval with a reason;
+they never introduce a fuzzy mapping rule. SKU lookup remains exact; rename is unsupported.
+
 Phase 1A provides an isolated **GET-only** connection and discovery layer for
 Magento 2.4.6. It creates no HTTP routes, browser integration, outbox, schema cache,
 or database migrations. Neither the client nor the probe imports PostgreSQL or
@@ -50,6 +62,7 @@ are hard-coded.
 | `getStoreGroups()` | `store/storeGroups` |
 | `getStoreViews()` | `store/storeViews` |
 | `getStoreConfigs()` | `store/storeConfigs` |
+| `getCategoryTree(rootCategoryId)` | `categories?rootCategoryId=...` |
 | `listAttributeSets(page = 1)` | `products/attribute-sets/sets/list` |
 | `getAttributeSet(id)` | `products/attribute-sets/{id}` |
 | `getAttributeSetAttributes(id)` | `products/attribute-sets/{id}/attributes` |
@@ -687,7 +700,7 @@ the semantic ID exists in current or historical Amber evidence. Only such refusa
 may use current-only SKU identity; approved SKU mappings still require historical
 published identity. An arbitrary group/question/value claim or a known output hidden
 behind a null placeholder is rejected. Dynamic sources cannot use these semantic
-placeholders. No bootstrap or label-candidate import operation exists yet.
+placeholders. The Phase 1B.2b CLI below derives these candidates without approving them.
 
 ### Explicit, read-only drift comparison
 
@@ -725,10 +738,361 @@ catalog rules or approval:
 | SV subtype | The bounded local scan found no ready witness. Mappings remain unresolved; absence of a witness proves no broader conclusion. |
 | Store/merchandising | `all` and `ua` often agree, `en` has localized values; equality does not prove inheritance. Names often match BR/NM/KL/CH templates but not universally (notably AR). SEO and description fields often contain richer maintained remote content. Do not choose template overwrite policies from these observations. |
 
-Live IDs above are documentation of one installation, never migration seeds or
-synthetic test decisions. Creation selects none of them. Phase 1B.2b still needs
-explicit route/option approvals or blocked decisions, field/store ownership decisions,
-scope selection, admin/API design and an optional evidence-bootstrap
-workflow. Admin routes, bootstrap/import CLI, successor cloning and any synchronization
-consumer are intentionally deferred. No real binding was created or published as part
-of implementation/verification, and no production database or Magento writes occurred.
+Live IDs above document one installation and are never migration seeds. The Phase
+1B.2b CLI below discovers candidates from current GET evidence; explicit approvals,
+blocked decisions and field/store ownership remain operator actions. Admin routes,
+successor cloning and any synchronization writer remain deferred. Implementation
+verification uses synthetic bindings in disposable PostgreSQL; it does not create or
+publish production bindings or perform Magento writes.
+
+## Single-product synchronization dry run
+
+Sync eligibility is reported separately in `syncEligibility` and the CLI summary.
+An active, current product with an exact existing Magento SKU may UPDATE despite
+the legacy `hold/prior_exposure` route and its `unknown` business marker/projected
+export flag. This exception never applies to CREATE. Archived/corrected products,
+successor-linked predecessors, retired lifecycle rows, explicit business exclusion,
+intentional-exclusion holds, persisted independent-exclusion evidence and recount
+compatibility exclusions still block all operations. Other unresolved holds or
+unexplained exclusions remain fail-closed. The preview reads the authoritative
+typed lifecycle signals without changing them or the old export queue selectors;
+the exact reason and unchanged legacy state remain in the artifact.
+
+The next executable milestone is [`magento:sync-preview`](../server/scripts/magento-sync-preview.js).
+It creates a concrete future ProductRepository-shaped payload and a readable report
+for **one real Amber product**, using live GETs only. It does not create exports,
+acknowledge delivery, change product/lifecycle state, approve bindings, run migrations,
+or call any Magento mutation. There is no `--apply` flag. The earlier foundation's
+no-resolver description refers to that historical phase; this command now consumes
+its existing binding model without changing migration 041.
+
+Run manually from the configured server checkout:
+
+```sh
+cd server
+npm run magento:sync-preview -- --sku "KL3/11131351005"
+# Alternatively select exactly one local ID:
+npm run magento:sync-preview -- --product-id 1234
+# Explicit draft or published binding, with its pinned template:
+npm run magento:sync-preview -- --sku "KL3/11131351005" --binding-revision "<revision UUID>"
+# Explicit immutable template, without a binding revision:
+npm run magento:sync-preview -- --sku "KL3/11131351005" --template-version "<publication UUID>"
+```
+
+The same command can run through `docker compose exec server npm run ...`.
+Default dispatch uses the existing system mapper; selection/activation metadata does
+not silently choose a publication or binding. `--binding-revision` explicitly selects
+a draft or publication, verifies installation origin and observation scope, and uses
+its exact immutable template. If both revision and template are supplied, they must
+agree. IDs are UUIDs. `--store-code CODE` selects the observed REST scope (default
+`all`); it does not translate the evaluator's base row into an English row or approve
+base/EN store ownership. `--help` connects to neither database nor Magento.
+
+The cohesive pipeline is:
+
+1. Select one Amber row by parameterized exact SKU or ID and reject duplicate SKUs.
+   Read product answers, final stored price, catalog, historical support inputs,
+   optional binding revision and pinned template in one repeatable-read **read-only**
+   transaction. Finish that snapshot before remote reads. No startup/seed path runs.
+2. Evaluate with the existing compiled template evaluator; introspect its sources,
+   routes and Phase 1B.2a requirements. Evaluator failures become blockers while
+   available values continue through the preview.
+3. Discover the live bounded Magento schema, compare persisted observation drift,
+   resolve route/attribute/option identities, and exact-query the unmodified SKU.
+   One found counterpart means `UPDATE`; a verified zero result means `CREATE`.
+4. GET the category tree for each distinct discovered store-group root. Resolve
+   template paths and compare current native assignments. Build the REST-shaped
+   candidate, semantic diff, preservation decisions, warnings and blockers.
+5. Exclusively create repository-root
+   `.artifacts/magento/sync-preview-<SKU-safe>-<UTC>.json`. Slash/unsafe filename
+   characters become underscores; the actual SKU remains unchanged. Existing files
+   are never overwritten. Artifacts are ignored operational evidence. In a container,
+   copy the file out before replacing the container.
+
+The terminal summary includes product, CREATE/UPDATE, set ID/name/authority, option
+and category counts, preserved/changed fields, warnings, explicit blockers,
+SENDABLE YES/NO and the artifact path. A successfully produced blocked preview exits
+0; invalid selection, unsafe/malformed evidence, connectivity/schema failure or an
+existing artifact exits 1 with a sanitized error. Category-tree access failures are
+reported as blockers while the attribute preview continues. Raw product records,
+unrelated attribute values, credentials, headers and tokens are not retained.
+
+### Resolution and authority
+
+Attribute sets are independent of catalog categories. The report includes Amber
+group/semantic route, evaluator-predicted name, exact live set-name matches, persisted
+decision, selected candidate and current product set. Without an approved route, an
+exact matching set is only `candidate_only` and blocks sendability. For SV souvenir 5,
+the earlier 20/20 set-151 observation is explicitly historical review evidence; it
+never selects 151 or overrides today's evaluator/persisted route.
+
+Persisted `approved`, `blocked`, `review_required` and `proposed` states are retained.
+Live IDs must still exist; selected-route identity/metadata/label drift requires
+review. A missing approved option is not repaired by a replacement label match.
+Without approval, the existing exact-label/spelling-evidence resolver may populate
+a candidate option ID, always labelled `candidate_only`. Empty/ambiguous/missing
+options stay unresolved. Scalar, semantic, dynamic exact-label, numeric-band and
+native transport strategies reuse the evaluator and binding contract. Semantic
+`value_id`, `sku_code` evidence and Magento IDs remain separate.
+
+Every base output field reports sources, evaluated value, strategy, attribute code/ID,
+option ID/label, current value/resolved label, authority, set applicability and change
+status. Blank outputs do not clear remote fields. KL inclusion typo evidence stays
+candidate-only without persisted approval. AR unsupported sizes block sendability
+without invented IDs. CH uses current Amber dimensions and size text; historical
+reversal/malformed remote size is a legacy mismatch. Comparisons distinguish exact,
+numeric-equivalent formatting, rounded legacy values and semantic differences.
+
+### Taxonomy and safe preservation
+
+#### Explicit KL inclusion category action
+
+`magento:category` supports only `Default/Кулони/З інклюзом`, with the reviewed
+source `KL.addit=value_id:1`. It does not change the frozen export evaluator's
+legacy presence expression. The product preview offers this action for value 1.
+The six existing KL paths retain their individually approved identities.
+
+Run from `server/` to inspect the live exact parent/child lookup and intended POST:
+
+```powershell
+npm run magento:category -- --revision 4d563554-bfe3-4d01-9df5-225aa5b61d48 --path "Default/Кулони/З інклюзом"
+```
+
+Without `--apply` this performs GETs only and changes no local binding. To explicitly
+create/bind, add `--apply --expected-revision <current-counter> --actor-user-id <local-user-id>`.
+It requires a draft for the configured origin/all scope, an approved KL route,
+category ownership, and the approved full-path parent identity. Missing or ambiguous
+parents/children fail closed; no leaf matching, arbitrary names or recursive trees.
+The operation uses Magento's [category repository POST contract](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Catalog/etc/webapi.xml):
+`{category:{parent_id:<live exact ID>,name:"З інклюзом",is_active:true,include_in_menu:false}}`.
+It creates an active category outside navigation; it assigns no products.
+
+Remote dispatch requires the existing `export_templates.publish` capability;
+binding persistence uses `export_templates.manage`. An immutable
+`magento_category.create_attempted` audit record commits before POST, keyed by
+origin/full path and serialized by the existing access-admin database lock.
+Concurrent callers sharing this database, even on different revisions, cannot
+dispatch the operation twice. A second precheck precedes the sole POST. A fresh
+GET of the complete hierarchy must verify the created/existing ID and parent before
+the exact category binding is approved in migration 041's existing evidence.
+Successful retries return the existing ID without another POST or binding update.
+
+A timeout, crash, failed verification or local save failure never causes an automatic
+POST retry. Rerun performs an exact GET lookup and can bind a verified existing child.
+If a prior attempt exists but the child is still absent, it stops with
+`MAGENTO_CATEGORY_PREVIOUS_ATTEMPT_UNRESOLVED`; there is no force/reset flag.
+This favors preventing duplicate dispatch over retrying an uncertain write. Magento
+does not supply a full-path conditional-create/idempotency contract; independent
+admin tools or another Amber database are outside this lock. Do not concurrently
+create this path through another writer. Ambiguous results always remain blocked.
+No category deletion, product write, binding publication or export-state change occurs.
+
+Category paths are compared by complete root-to-node hierarchy with per-segment
+trim/NFC normalization, preserving case and spelling. There are no leaf-name matches,
+guessed root aliases or category-to-attribute-set rules. Duplicate full paths stay
+ambiguous; missing required paths block an authoritative taxonomy update without
+discarding the remaining preview. IDs are Magento installation identities. The
+category transport binding can now hold explicitly reviewed category-ID evidence
+under migration 041's bounded JSON evidence contract. Approved paths become
+authoritative only when the fresh full-path lookup remains unique with the same ID.
+Changed or missing identities block the category operation. Ownership remains separate.
+
+Current assignments use `extension_attributes.category_links` (IDs and positions),
+with `custom_attributes.category_ids` as read evidence when links are absent. Missing
+assignment evidence is unknown, not empty. Contradictory representations fail closed.
+Positions follow Magento's [CategoryLinkInterface](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Catalog/Api/Data/CategoryLinkInterface.php)
+`int|null` contract: negative ordering positions are valid and retained exactly.
+Null/omitted positions remain unknown and block the category payload without aborting
+the other preview domains. Category IDs still require positive identities.
+The report shows requested/current paths, intersection, additions, hypothetical
+full-ownership removals and Magento-only categories. By default those extras are
+`preserve_by_safe_preview`; candidate links are the union, retaining their positions.
+New links have provisional position 0. When positions/assignments are unknown, the
+category payload is omitted. Only an approved persisted `authoritative_create_update`
+policy for the category target allows a full replacement candidate; unresolved IDs
+still block sending it.
+
+Existing `description`, `short_description`, `meta_title` and `meta_description`
+are omitted from the update payload unless an explicit approved field policy permits
+Amber ownership. A different existing `name` is likewise preserved and produces
+`ownership_review_required`; both values remain in the diff. Approved
+`magento_managed` and update-time `initialize_create_only` policies preserve fields;
+blocked policies never produce mutations. New products use the evaluated name and
+show optional template merchandising content separately pending ownership. These
+fallbacks are preview behavior only and are never persisted as approved policies.
+
+### Candidate payload and sendability
+
+`candidatePayload.product` is the exact currently constructible future REST-shaped
+product object. It may contain candidate IDs or fields requiring review; its presence
+is **not approval to send**. Required unresolved values are omitted and diagnosed.
+`sendability` separately reports `{sendable, scope: "complete_sync_plan", blockers}`;
+top-level `sendable`/`blockers` mirror it. Warnings describe preserved content,
+formatting differences and legacy remote evidence, not approval failures.
+
+`sendability.operations` contains `coreProduct`, `categories`, `inventory`, `websites`
+and `storeViews`, each with its own `sendable` and `blockers`; `sendability.overall`
+retains the complete-plan result. Blockers carry an `operation`. Product exclusion
+and non-current-product blockers apply to `all` operations; category and transport
+blockers do not affect core readiness. The core operation includes its
+exact `candidatePayload` with category links omitted; the category operation reports
+its separate `candidateLinks`. The top-level payload remains the combined inspection
+candidate. These are planning results, not executable operations or approvals.
+
+Required EAV fields use live `apply_to` metadata and the candidate product type:
+an empty list applies to all types, and missing metadata never exempts a required
+field. Downloadable/Bundle-only requirements therefore do not block a simple product.
+The report includes `requiredAttributes` with applicability evidence. This follows
+Magento's [product-type applicability contract](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Catalog/Model/Product/Type/AbstractType.php).
+Fixed mapper literals such as `old_product=No` and `is_ownproduction=Yes` use the
+observed standard [Boolean source](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Eav/Model/Entity/Attribute/Source/Boolean.php)
+and verified live option values `0`/`1`, independent of translated labels. This is
+native control translation, not an Amber semantic option binding. Unknown sources,
+missing native values, semantic answers and candidate-only options keep their review
+boundaries; field ownership still applies to changed controls.
+
+`AMBER_PRODUCT_EXCLUDED` includes the exact blocking predicate. `syncEligibility`
+retains the product's persisted export state (business exclusion, route/hold reason
+and recount compatibility), read in the same read-only Amber snapshot. An unknown
+business marker remains visible even when the exact-SKU prior-exposure UPDATE
+exception applies; no historical state or export eligibility is changed.
+
+Native translations include attribute-set ID, simple `type_id`, numeric price/status,
+and visibility (`Catalog, Search` → 4). Options use live Magento values. CSV routing,
+website and stock columns never become fake custom attributes. Category links use
+the native extension contract. See Magento 2.4.6's
+[Catalog REST routes](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Catalog/etc/webapi.xml),
+[product category/website extensions](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Catalog/etc/extension_attributes.xml)
+and [stock extension](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/CatalogInventory/etc/extension_attributes.xml).
+
+Inventory, websites and EN now have separate GET-only operation previews in
+`transport` and `sendability.operations.<domain>.plan`. Missing evidence or unapproved
+bindings/policies block that operation without hiding the core payload. No product,
+inventory, website or store-view writer is implemented, even when the plan is sendable.
+
+- **Inventory:** approved `qty` and `is_in_stock` identities with
+  `initialize_create_only` policies initialize CREATE with quantity 1 and in-stock
+  status. UPDATE always preserves every current source quantity/status, including
+  zero/out-of-stock; it has no inventory mutation payload. Reads use MSI
+  `GET inventory/stock-resolver/website/base`,
+  `GET inventory/get-sources-assigned-to-stock-ordered-by-priority/:stockId`, and
+  exact-SKU `GET inventory/source-items` search criteria. The report distinguishes
+  physical source inventory from reservation-adjusted salable quantity; no reservation
+  is changed or inferred. CREATE needs one uniquely resolved enabled source, no orphan
+  source items, and approved initialization policies. Ambiguous sources, truncated or
+  malformed responses, and failed reads remain blockers. See the
+  [MSI source contracts](https://github.com/magento/inventory/blob/1.2.6/InventoryApi/etc/webapi.xml)
+  and [stock resolver](https://github.com/magento/inventory/blob/1.2.6/InventorySalesApi/etc/webapi.xml).
+- **Websites:** approve `product_websites` and `authoritative_create_update` ownership.
+  Live exact website codes must retain their IDs from the binding schema observation.
+  Current assignments come from product `extension_attributes.website_ids`. The plan
+  ensures required membership with individual `ProductWebsiteLinkRepositoryInterface.save`
+  payloads for missing IDs, preserving every additional assignment. It never replaces
+  the whole website list. An existing `base` membership produces no operation.
+- **EN:** resolve the active exact `en` store view and verify its pinned ID and
+  website/group identity. UPDATE reads the same exact SKU via `/rest/en/V1/products`
+  search criteria and requires the same product ID. Only produced non-empty values
+  with approved identities and `authoritative_create_update` ownership enter the
+  scoped diff. Only live store-scoped text/textarea attributes in the selected set
+  are supported; unknown/global scopes fail closed. Empty/undefined/whitespace values
+  and unproduced fields are preserved. SKU, set, type and store code are identity/
+  routing controls with `magento_managed` EN policies; global writes and rename are
+  excluded from the EN payload. Unchanged fields are omitted. The current KL frozen
+  template produces EN name and `meta_title`; it does not produce `meta_description`,
+  so that Magento value remains untouched.
+
+Use `magento:bindings approve-exact` with explicit group/row/targets for resolved
+identities, then individual `approve --binding POLICY_REVIEW_ID --policy POLICY
+--accept-review --reason "..."` decisions. These reuse migration 041 and the normal
+actor/CAS/audit checks; no new revision or publication is required. Validate the same
+draft and run `npm run magento:sync-preview -- --sku "KL3/11131351005"
+--binding-revision <UUID>` from `server/`. The immutable artifact is still only a plan,
+not a durable job, transaction, acknowledgment or cross-system atomic snapshot.
+
+## Phase 1B.2b binding bootstrap and explicit review
+
+Run these commands from `server/`. `magento:bindings` uses the existing migration 041
+services, active local-user permission checks, transaction-coupled audit events,
+optimistic revision checks and immutable publication guards. No migration or Magento
+write API is added. CLI access is trusted local administration with database access;
+`--actor-user-id` identifies the existing local application user, never an OIDC subject.
+Mutations require `export_templates.manage`; publication requires
+`export_templates.publish`. Freezing a system template requires both capabilities.
+
+Bootstrap reads the current catalog, evaluator and bounded real product samples in
+a read-only snapshot, discovers live Magento schema and category trees through named
+GETs, derives candidates through the existing mapper/requirements/option evidence
+logic, and creates a **new** draft with its candidate rows in one transaction.
+`--sku` adds one exact product witness; it does not change eligibility or exclusion.
+System mode freezes a dedicated immutable template publication because 041 requires
+a publication FK. It uses the existing historical source-support policy for AR.size
+29–31 and NM.extra numeric-zero placeholders; these are not promoted to supported
+semantic identities. Catalog, source evidence and the exact SKU witness are captured
+in one read-only snapshot. Normal publication source validation remains mandatory.
+Template family/draft, publication, binding candidates and their audit events share
+one authorized transaction and all roll back on any precommit failure. No template
+activation or binding approval is performed. Existing revisions are never reused or
+overwritten by bootstrap. Alternatively pass an existing template version UUID.
+Migration 041 must already be installed through the normal migration runner;
+bootstrap checks this before any remote request or local mutation and never applies DDL.
+
+Exact set names, attribute codes and unique option labels become `proposed`.
+Scalar and native-control identities are included. Missing options become `blocked`;
+ambiguous/drift candidates remain `review_required`. KL inclusion stays review-required
+even if a future schema label becomes exact. The known SV souvenir route conflict
+also stays review-required. Numeric question keys outside 041's semantic-key contract
+are retained as an explicitly blocked attribute with source evidence, not renamed.
+No Amber semantic ID is replaced by a Magento ID or inferred from `sku_code`.
+
+Category decisions are typed `evidence.categories` entries on each category transport
+binding. They contain complete requested/normalized paths, live candidate paths/IDs
+and individual review states. They inherit draft CAS, attribution and publication
+immutability. Unknown paths stay blocked; ambiguous paths stay review-required.
+Category/dynamic output evidence covers evaluated ready product samples (three per
+route plus an optional exact SKU), not every hypothetical product combination. An
+unobserved category or dynamic output still fails closed in preview. Evidence exceeds
+041's bounded JSON capacity only by failing explicitly, never truncating candidates.
+
+Ownership policies are separate review-required preservation suggestions. Exact
+batch approval never approves policies, including `product_online` ownership. An
+explicit policy decision needs a policy, review acknowledgment and reason. Single
+drift-candidate approval likewise needs `--accept-review --reason`; missing or
+ambiguous identities cannot be approved without resolved evidence. `block` records
+an explicit unsupported decision. An approved binding identity does not make an
+excluded product, missing category, or deferred transport operation sendable.
+
+Example PowerShell workflow (replace `$actor` with your active local user ID):
+
+```powershell
+$actor = <LOCAL_USER_ID>
+$draft = npm run --silent magento:bindings -- bootstrap --installation amber --template-version system --group KL --sku "KL3/11131351005" --actor-user-id $actor --json | ConvertFrom-Json
+npm run magento:bindings -- review --revision $draft.id --group KL
+
+# Explicit bounded identity approval; no inclusion, category or ownership approval.
+$draft = npm run --silent magento:bindings -- approve-exact --revision $draft.id --expected-revision $draft.revision --actor-user-id $actor --group KL --row base --targets "attribute_set_code,typy_obrobky_burshtynu,vyd_obrobky_kameniu,faktura_kulonu,kolir,vyd_kulonu,rozmir_iuvelirnoho_vyrobu,decor_weight" --json | ConvertFrom-Json
+
+# Individual identity: use its opaque review ID, not a manually entered Magento ID.
+# npm run magento:bindings -- approve --revision $draft.id --expected-revision $draft.revision --actor-user-id $actor --binding "<REVIEW_ID>"
+# Explicit policy choice (never implied by identity approval):
+# npm run magento:bindings -- approve --revision $draft.id --expected-revision $draft.revision --actor-user-id $actor --binding "<POLICY_REVIEW_ID>" --policy magento_managed --accept-review --reason "Preserve maintained Magento content"
+# npm run magento:bindings -- block --revision $draft.id --expected-revision $draft.revision --actor-user-id $actor --binding "<REVIEW_ID>" --reason "Explicitly unsupported pending review"
+
+npm run magento:bindings -- validate --revision $draft.id
+# Publish only after validation succeeds and all enabled-route decisions are reviewed.
+npm run magento:bindings -- publish --revision $draft.id --expected-revision $draft.revision --expected-current none --actor-user-id $actor
+npm run magento:sync-preview -- --sku "KL3/11131351005" --binding-revision $draft.id
+```
+
+Use the returned revision counter after every edit. `review` prints it; `--json`
+returns machine-readable receipts with `ok: true`. On failure stdout contains only
+`{"ok":false}`, sanitized error codes/diagnostics go to stderr, and the process exits 1.
+Check `$LASTEXITCODE` and `$draft.ok` before using the returned ID. `--expected-current none` asserts there is no
+current binding publication; when replacing one, supply its explicit revision UUID.
+`validate` exits 2 for incomplete drafts and lists diagnostics; publication fails
+closed. The bounded KL approval above is intentionally partial: it does not resolve
+other fields, English rows, inclusion, taxonomy or ownership. Sync preview accepts
+the **draft immediately**; publication is not necessary for useful approved evidence.
+
+Automated verification uses injected Magento responses and disposable PostgreSQL only.
+It does not execute a live preview. No binding approval, production write or commit is
+part of this milestone.
