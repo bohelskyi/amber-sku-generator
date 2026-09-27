@@ -121,7 +121,7 @@ async function runProbe({ args = [], env = process.env, fetchImpl, log = logger 
       log.info('magento.probe.attribute', { attributeId: safeInteger(attribute.attribute_id), options: optionCount });
     }
     if (options.sku !== undefined) {
-      const product = await client.getProductBySku(options.sku);
+      const product = await client.findProductBySku(options.sku);
       if (!product || product.sku !== options.sku || safeInteger(product.id) === null) {
         throw new MagentoIntegrationError('MAGENTO_RESPONSE_INVALID');
       }

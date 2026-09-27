@@ -125,9 +125,10 @@ test('GET-only API covers every discovery endpoint with explicit all/store scope
     ['listProductAttributes', [], 'products/attributes?searchCriteria%5BpageSize%5D=100&searchCriteria%5BcurrentPage%5D=1'],
     ['getProductAttribute', ['stone_color'], 'products/attributes/stone_color'],
     ['getProductAttributeOptions', ['stone_color'], 'products/attributes/stone_color/options'],
-    ['getProductBySku', ['KL3/11131351005'], 'products/KL3%2F11131351005'],
+    ['getProductBySkuPathDiagnostic', ['KL3/11131351005'], 'products/KL3%2F11131351005'],
   ];
-  assert.deepEqual(Object.keys(client).sort(), cases.map(([method]) => method).sort());
+  assert.deepEqual(Object.keys(client).sort(), [...cases.map(([method]) => method), 'findProductBySku'].sort());
+  assert.equal(client.getProductBySku, undefined);
   assert.equal(Object.isFrozen(client), true);
   for (const [method, args, path] of cases) {
     await client[method](...args);
@@ -161,7 +162,67 @@ test('SKU URL sent to fetch preserves exactly one encoded route value and matche
       assert.equal(signature, createHmac('sha256', 'test-secret%26&test-token-secret%2F').update(base).digest('base64'));
       return json({ sku });
     } });
-    assert.deepEqual(await client.getProductBySku(sku), { sku });
+    assert.deepEqual(await client.getProductBySkuPathDiagnostic(sku), { sku });
+  }
+});
+
+test('exact SKU lookup sends a query-only eq filter and signs the serialized URL sent to fetch', async () => {
+  const sku = 'KL3/11131351005';
+  const client = createMagentoClient(config, { oauthOptions: fixed, fetchImpl: async (url, options) => {
+    const parsed = new URL(url);
+    assert.equal(parsed.pathname, '/rest/all/V1/products');
+    assert.equal(parsed.pathname.includes(sku), false);
+    assert.equal(parsed.pathname.includes('%2F'), false);
+    assert.equal(parsed.searchParams.get('searchCriteria[filter_groups][0][filters][0][field]'), 'sku');
+    assert.equal(parsed.searchParams.get('searchCriteria[filter_groups][0][filters][0][value]'), sku);
+    assert.equal(parsed.searchParams.get('searchCriteria[filter_groups][0][filters][0][condition_type]'), 'eq');
+    assert.equal(parsed.searchParams.get('searchCriteria[pageSize]'), '2');
+    assert.equal(parsed.searchParams.get('searchCriteria[currentPage]'), '1');
+    assert.match(parsed.search, /KL3%2F11131351005/);
+    assert.equal(options.method, 'GET');
+    assert.equal(options.body, undefined);
+    const oauth = headerFields(options.headers.Authorization);
+    const signature = oauth.oauth_signature;
+    delete oauth.oauth_signature;
+    const pairs = [...parsed.searchParams, ...Object.entries(oauth)]
+      .map(([key, value]) => [percentEncode(key), percentEncode(value)])
+      .sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0);
+    const base = ['GET', parsed.origin + parsed.pathname, pairs.map((pair) => pair.join('=')).join('&')]
+      .map(percentEncode).join('&');
+    assert.equal(signature, createHmac('sha256', 'test-secret%26&test-token-secret%2F').update(base).digest('base64'));
+    return json({ items: [{ sku, id: 42 }], total_count: 1, search_criteria: { ignored: true } });
+  } });
+  assert.deepEqual(await client.findProductBySku(sku), { sku, id: 42 });
+});
+
+test('exact SKU lookup fails closed on no match, duplicates, mismatches and malformed results', async () => {
+  const sku = 'KL3/11131351005';
+  const scenarios = [
+    [{ items: [], total_count: 0 }, 'MAGENTO_PRODUCT_NOT_FOUND'],
+    [{ items: [{ sku }, { sku }], total_count: 2 }, 'MAGENTO_PRODUCT_AMBIGUOUS'],
+    [{ items: [{ sku: 'OTHER' }], total_count: 1 }, 'MAGENTO_RESPONSE_INVALID'],
+    [{ items: [{ sku }, { sku: 'OTHER' }], total_count: 2 }, 'MAGENTO_RESPONSE_INVALID'],
+    [{ items: [{ sku }], total_count: 0 }, 'MAGENTO_RESPONSE_INVALID'],
+    [{ items: [], total_count: 1 }, 'MAGENTO_RESPONSE_INVALID'],
+    [{ items: [{ sku }], total_count: 2 }, 'MAGENTO_RESPONSE_INVALID'],
+    [{ items: [{ sku }, { sku }], total_count: 3 }, 'MAGENTO_RESPONSE_INVALID'],
+    [{ items: [{ sku }], total_count: '1' }, 'MAGENTO_RESPONSE_INVALID'],
+    [{ items: null, total_count: 1 }, 'MAGENTO_RESPONSE_INVALID'],
+    [{ items: { sku }, total_count: 1 }, 'MAGENTO_RESPONSE_INVALID'],
+    [{ items: [null], total_count: 1 }, 'MAGENTO_RESPONSE_INVALID'],
+    [null, 'MAGENTO_RESPONSE_INVALID'],
+  ];
+  for (const [body, code] of scenarios) {
+    let calls = 0;
+    const client = createMagentoClient(config, { fetchImpl: async () => {
+      calls += 1;
+      return json(body === null ? null : { ...body, remoteMessage: JSON.stringify(env) });
+    } });
+    await assert.rejects(client.findProductBySku(sku), (error) => {
+      assert.equal(error.code, code);
+      return noSecrets(error);
+    });
+    assert.equal(calls, 1);
   }
 });
 
@@ -169,7 +230,8 @@ test('request validation prevents path traversal and arbitrary request options',
   let calls = 0;
   const client = createMagentoClient(config, { fetchImpl: () => { calls += 1; throw new Error(); } });
   for (const value of ['', '.', '..', '\ud800', 'x\ny', 'x'.repeat(257), null]) {
-    assert.throws(() => client.getProductBySku(value), { code: 'MAGENTO_INPUT_INVALID' });
+    assert.throws(() => client.getProductBySkuPathDiagnostic(value), { code: 'MAGENTO_INPUT_INVALID' });
+    assert.throws(() => client.findProductBySku(value), { code: 'MAGENTO_INPUT_INVALID' });
   }
   for (const value of ['../evil', 'https://evil.invalid', 'x?override=PUT']) {
     assert.throws(() => client.getProductAttribute(value), { code: 'MAGENTO_INPUT_INVALID' });
@@ -258,6 +320,10 @@ function discoveryFetch(calls, overrides = {}) {
     if (route === 'products/attribute-sets/17/attributes') return json([{ attribute_code: 'stone_color' }]);
     if (route === 'products/attributes/stone_color') return json({ attribute_id: 11, attribute_code: 'stone_color' });
     if (route === 'products/attributes/stone_color/options') return json([{ label: JSON.stringify(env), value: '99' }]);
+    if (route === 'products') return json({ items: [{ id: 42,
+      sku: parsed.searchParams.get('searchCriteria[filter_groups][0][filters][0][value]'),
+      attribute_set_id: 17, status: 1, name: JSON.stringify(env),
+      extension_attributes: { authorization: options.headers.Authorization } }], total_count: 1 });
     if (route.startsWith('products/')) return json({ id: 42, sku: decodeURIComponent(route.slice(9)),
       attribute_set_id: 17, status: 1, name: JSON.stringify(env), extension_attributes: { authorization: options.headers.Authorization } });
     throw new Error('Unexpected endpoint');
@@ -295,6 +361,10 @@ test('explicit product/set/option probe prints safe subset without headers or re
   for (const secret of Object.values(env)) assert.ok(!output.includes(secret));
   assert.ok(!/Authorization|oauth_signature|extension_attributes/.test(output));
   assert.equal(entries.find((entry) => entry.event === 'magento.probe.attribute').options, 1);
+  const productCall = calls.at(-1);
+  assert.equal(new URL(productCall.url).pathname, '/rest/all/V1/products');
+  assert.equal(new URL(productCall.url).searchParams.get('searchCriteria[filter_groups][0][filters][0][value]'),
+    'KL3/11131351005');
 });
 
 test('probe redacts credentials even if explicitly supplied as SKU, and sanitizes errors', async () => {
@@ -340,7 +410,7 @@ test('probe fails on inconsistent/repeated pages, unexpected shapes, or discover
 test('probe does not claim SKU support for a mismatched product response', async () => {
   const { log, entries } = captureLog();
   assert.equal(await runProbe({ env, args: ['--sku', 'KL3/11131351005'], log,
-    fetchImpl: discoveryFetch([], { 'products/KL3%2F11131351005': () => json({ id: 1, sku: 'OTHER' }) }) }), 1);
+    fetchImpl: discoveryFetch([], { products: () => json({ items: [{ id: 1, sku: 'OTHER' }], total_count: 1 }) }) }), 1);
   assert.equal(entries.at(-1).code, 'MAGENTO_RESPONSE_INVALID');
   assert.equal(entries.some((entry) => entry.event === 'magento.probe.product'), false);
 });

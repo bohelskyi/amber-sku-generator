@@ -14,10 +14,11 @@ function positiveInteger(value, max = Number.MAX_SAFE_INTEGER) {
   if (!/^[1-9]\d*$/.test(String(value)) || !Number.isSafeInteger(Number(value)) || Number(value) > max) inputError();
   return String(value);
 }
-function skuSegment(sku) {
+function validatedSku(sku) {
   if (typeof sku !== 'string' || !sku.trim() || sku.length > 256 || /^[.]{1,2}$/.test(sku)
     || /[\u0000-\u001f\u007f]/.test(sku)) inputError();
-  try { return percentEncode(sku); } catch { return inputError(); }
+  try { percentEncode(sku); } catch { return inputError(); }
+  return sku;
 }
 
 async function readJson(response) {
@@ -76,6 +77,27 @@ function createMagentoClient(config, { fetchImpl = globalThis.fetch, storeCode =
       'searchCriteria[currentPage]': positiveInteger(page, 100) });
   }
 
+  function findProductBySku(sku) {
+    const requestedSku = validatedSku(sku);
+    return get('products', {
+      'searchCriteria[filter_groups][0][filters][0][field]': 'sku',
+      'searchCriteria[filter_groups][0][filters][0][value]': requestedSku,
+      'searchCriteria[filter_groups][0][filters][0][condition_type]': 'eq',
+      'searchCriteria[pageSize]': '2',
+      'searchCriteria[currentPage]': '1',
+    }).then((result) => {
+      if (!result || !Array.isArray(result.items) || !Number.isSafeInteger(result.total_count)
+        || result.total_count < 0 || result.total_count > 2
+        || result.items.length !== result.total_count
+        || result.items.some((item) => !item || typeof item !== 'object' || item.sku !== requestedSku)) {
+        throw new MagentoIntegrationError('MAGENTO_RESPONSE_INVALID');
+      }
+      if (result.total_count === 0) throw new MagentoIntegrationError('MAGENTO_PRODUCT_NOT_FOUND');
+      if (result.total_count === 2) throw new MagentoIntegrationError('MAGENTO_PRODUCT_AMBIGUOUS');
+      return result.items[0];
+    });
+  }
+
   // No arbitrary URL, method, headers, body, or public transport escape hatch.
   return Object.freeze({
     getWebsites: () => get('store/websites'),
@@ -88,7 +110,9 @@ function createMagentoClient(config, { fetchImpl = globalThis.fetch, storeCode =
     listProductAttributes: (page) => list('products/attributes', page),
     getProductAttribute: (code) => get(`products/attributes/${identifier(code)}`),
     getProductAttributeOptions: (code) => get(`products/attributes/${identifier(code)}/options`),
-    getProductBySku: (sku) => get(`products/${skuSegment(sku)}`),
+    findProductBySku,
+    // Diagnostic route only: Magento 2.4.6 can reject signed encoded-slash paths.
+    getProductBySkuPathDiagnostic: (sku) => get(`products/${percentEncode(validatedSku(sku))}`),
   });
 }
 

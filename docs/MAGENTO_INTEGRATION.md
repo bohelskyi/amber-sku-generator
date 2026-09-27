@@ -56,7 +56,8 @@ are hard-coded.
 | `listProductAttributes(page = 1)` | `products/attributes` |
 | `getProductAttribute(code)` | `products/attributes/{code}` |
 | `getProductAttributeOptions(code)` | `products/attributes/{code}/options` |
-| `getProductBySku(sku)` | `products/{encodedSku}` |
+| `findProductBySku(sku)` | `products` with an exact `sku` search filter |
+| `getProductBySkuPathDiagnostic(sku)` | `products/{encodedSku}`; path behavior characterization only |
 
 These resources follow the Magento 2.4.6
 [Catalog routes](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Catalog/etc/webapi.xml)
@@ -64,6 +65,13 @@ and [Store routes](https://github.com/magento/magento2/blob/2.4.6/app/code/Magen
 List methods send `searchCriteria[pageSize]=100` and an explicit current page.
 They return the actual JSON metadata for future server-side discovery/binding
 work; they do not persist it or reinterpret Amber semantic `value_id` values.
+The supported product lookup sends one `searchCriteria[filter_groups][0][filters][0]`
+filter with `field=sku`, the unmodified requested SKU as `value`, and
+`condition_type=eq`, plus `pageSize=2` and `currentPage=1`. It returns one
+product only when the response has `total_count=1` and its sole item has the
+exact requested SKU. Zero results return `MAGENTO_PRODUCT_NOT_FOUND`; multiple
+exact results return `MAGENTO_PRODUCT_AMBIGUOUS`; mismatched or inconsistent
+responses fail closed.
 The existing template evaluator and Magento v1 CSV mapper remain unchanged.
 Future bindings and a REST payload adapter must stay separate from those semantic
 identities; future synchronization still requires a local transaction, durable
@@ -111,19 +119,24 @@ attribute-set ID, and status. A mismatching returned SKU fails the probe. Remote
 names, labels, custom attributes, headers, and raw responses are never printed;
 there is no `--json` raw-dump mode. Failure output is fixed and sanitized.
 
-`KL3/11131351005` becomes the single segment `KL3%2F11131351005`;
-`NM4/113120611026-001` becomes `NM4%2F113120611026-001`. The exact serialized URL
-is both signed and passed to fetch; percent signs in that path are encoded again
-only inside the OAuth signature base string. The actual HTTP URL is not double
-encoded, and the SKU itself is never semantically replaced or split.
+The first production probe found that ordinary SKU `SV112423003` succeeds through
+`GET /V1/products/:sku`, while the encoded path
+`GET /V1/products/KL3%2F11131351005` returns HTTP 401 during Magento 2.4.6
+OAuth signature validation. The supported lookup therefore uses
+`GET /V1/products` with an exact SKU query filter. The slash stays in the Amber
+SKU and travels only in the query value. This is a Magento compatibility
+workaround, not an Amber SKU rewrite; SKU rename/update is not implemented.
 
-Unit tests use synthetic credentials and injected fetch only. They prove encoding
-and signing alignment, **not production slash-SKU support**. The controlled
-post-deployment read must still establish actual integration ACL access, scope,
-response shapes, clock alignment, and whether the site's proxy/web server and
-Magento routing preserve encoded slashes. A 404 alone cannot distinguish a
-missing product from a routing problem. Do not work around failures by rewriting
-SKUs or writing test products.
+The path-specific diagnostic method still characterizes URL encoding:
+`KL3/11131351005` becomes one path segment `KL3%2F11131351005`. The signer
+remains unchanged. For both routes, the exact serialized URL is signed and
+passed to fetch.
+
+Unit tests use synthetic credentials and injected fetch only. They prove query
+construction, exact-response validation, and signing alignment, **not production
+success of the query lookup**. After deployment, repeat the read-only SKU probe
+to establish that Magento accepts this query on the actual installation. Do not
+work around failures by rewriting SKUs or writing test products.
 
 Production cutover through 039/040 and selector v1 activation are already complete
 according to the Phase 1A brief. This probe performs no cutover, PostgreSQL writes,

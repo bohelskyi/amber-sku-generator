@@ -10,6 +10,8 @@ const MESSAGES = Object.freeze({
   MAGENTO_RESPONSE_INVALID: 'Magento returned an unexpected JSON response.',
   MAGENTO_RESPONSE_TOO_LARGE: 'Magento response exceeded the size limit.',
   MAGENTO_DISCOVERY_LIMIT: 'Magento discovery exceeded the pagination limit.',
+  MAGENTO_PRODUCT_NOT_FOUND: 'Magento product was not found for the exact SKU.',
+  MAGENTO_PRODUCT_AMBIGUOUS: 'Magento returned multiple products for the exact SKU.',
   MAGENTO_PROBE_ARGUMENTS: 'Invalid probe arguments; use --help for supported options.',
   MAGENTO_PROBE_FAILED: 'Magento probe failed.',
 });
