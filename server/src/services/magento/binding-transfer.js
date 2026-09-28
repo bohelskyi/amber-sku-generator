@@ -75,7 +75,8 @@ async function categoryDrift(config, artifact, options = {}) {
       .map((row) => ({ bindingKey: binding.bindingKey, path: row.normalizedPath, categoryId: row.categoryId })));
   if (!approved.length) return [];
   const client = createMagentoClient(config, { fetchImpl: options.fetchImpl, storeCode: artifact.schema.storeCode });
-  const roots = [...new Set(artifact.schema.storeTopology.storeGroups.map((row) => row.root_category_id).filter(Number.isSafeInteger))];
+  const roots = [...new Set(artifact.schema.storeTopology.storeGroups.map((row) => row.root_category_id)
+    .filter((root) => Number.isSafeInteger(root) && root > 0))];
   const trees = [];
   for (const root of roots) trees.push(await client.getCategoryTree(root));
   const indexed = indexTrees(trees);

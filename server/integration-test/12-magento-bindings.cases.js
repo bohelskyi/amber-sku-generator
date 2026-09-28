@@ -639,6 +639,51 @@ test('Magento binding persistence, publication, immutability and real PostgreSQL
     assert.equal(drift.diagnostics.find((d) => d.code === 'OPTION_ID_LABEL_CHANGED').optionId, 'red-id');
     assert.deepEqual(await bindings.getRevision(draft.id), publication);
   });
+  await t.test('binding transfer category drift ignores admin root zero and still verifies positive catalog roots', async () => {
+    const { hash, normalizeSchema, originHash } = require('../src/services/magento/binding-contract');
+    const observed = structuredClone(schema);
+    observed.storeTopology.websites.unshift({ id: 0, code: 'admin', name: 'Admin', default_group_id: 0 });
+    observed.storeTopology.storeGroups.unshift({ id: 0, name: 'Default', website_id: 0,
+      root_category_id: 0, default_store_id: 0 });
+    const reviewed = fixture.approvedBindings(definition, observed);
+    reviewed.attributes[0].evidence = { categories: [{ normalizedPath: 'Default/Fixture',
+      categoryId: '9876', reviewState: 'approved' }] };
+    const normalized = normalizeSchema(observed);
+    const artifact = { originHash: originHash('https://binding.example.invalid'),
+      source: { revisionId: crypto.randomUUID(), revision: '1', schemaFingerprint: hash(normalized),
+        topologyFingerprint: hash(normalized.storeTopology) }, schema: normalized, bindings: reviewed };
+    const config = { configured: true, baseUrl: 'https://binding.example.invalid', consumerKey: 'fake-key',
+      consumerSecret: 'fake-secret', accessToken: 'fake-token', accessTokenSecret: 'fake-token-secret' };
+    const requestedRoots = [];
+    const fetchImpl = async (url, init) => {
+      assert.equal(init.method, 'GET'); assert.equal(init.body, undefined);
+      const parsed = new URL(url); const route = parsed.pathname.split('/V1/')[1]; let value;
+      if (route === 'store/websites') value = normalized.storeTopology.websites;
+      else if (route === 'store/storeGroups') value = normalized.storeTopology.storeGroups;
+      else if (route === 'store/storeViews') value = normalized.storeTopology.storeViews;
+      else if (route === 'products/attribute-sets/sets/list') value = { items: normalized.attributeSets, total_count: 1 };
+      else if (route === 'products/attributes') value = { items: normalized.attributes, total_count: normalized.attributes.length };
+      else if (route === 'products/attribute-sets/8001/attributes') value = normalized.attributes;
+      else if (/^products\/attributes\/\w+\/options$/.test(route)) value = normalized.attributes.find((a) => a.attribute_code === route.split('/')[2]).options;
+      else if (route === 'categories') {
+        requestedRoots.push(Number(parsed.searchParams.get('rootCategoryId')));
+        value = { id: 803, parent_id: 0, name: 'Default', children_data: [
+          { id: 9876, parent_id: 803, name: 'Fixture', children_data: [] },
+        ] };
+      } else assert.fail(`Unexpected Magento resource: ${route}`);
+      return new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
+    };
+    const exact = await transfer.liveDrift(config, artifact, { fetchImpl });
+    assert.equal(exact.drifted, false); assert.deepEqual(requestedRoots, [803]);
+    const changedFetch = async (url, init) => {
+      const response = await fetchImpl(url, init); const body = await response.json();
+      if (new URL(url).pathname.endsWith('/categories')) body.children_data[0].id = 9999;
+      return new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+    };
+    const changed = await transfer.liveDrift(config, artifact, { fetchImpl: changedFetch });
+    assert.equal(changed.diagnostics.some((item) => item.code === 'CATEGORY_IDENTITY_DRIFT'
+      && item.categoryId === '9876'), true);
+  });
   await t.test('reviewed publication transfer round-trips as a new draft and target drift rolls back', async () => {
     const source = await publish(await ready(`transfer-${crypto.randomUUID()}`));
     const database = (await pool.query('SELECT current_database() name')).rows[0].name;
