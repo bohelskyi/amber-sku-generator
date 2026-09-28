@@ -102,21 +102,67 @@ async function liveDrift(config, artifact, options = {}) {
     diagnostics, drifted: diagnostics.length > 0 };
 }
 
-async function ensureTemplate(client, context, artifact, artifactHash) {
+async function reconcileTargetSourceSupport(client, artifact) {
+  const { loadSourceEvidence, validateSourceReferences } = require('../export-templates/source-references');
+  const { isApprovedDeferredValue } = require('../export-templates/source-support');
+  const evidence = await loadSourceEvidence(client);
+  const diagnostics = validateSourceReferences(artifact.template.definition, evidence);
+  if (!diagnostics.length) failure('MAGENTO_BINDING_SOURCE_RECONCILIATION_NOT_REQUIRED', 'Target source support already matches');
+  const demotions = [];
+  for (const diagnostic of diagnostics) {
+    const key = `${diagnostic.category}.${diagnostic.key}`;
+    if (diagnostic.code !== 'SOURCE_REFERENCE_UNRESOLVED'
+      || diagnostic.requirement !== 'historical_sku_or_current_non_sku_value_ids'
+      || !Array.isArray(diagnostic.unresolvedValueIds) || !diagnostic.unresolvedValueIds.length) {
+      failure('MAGENTO_BINDING_SOURCE_RECONCILIATION_UNSUPPORTED', 'Target source drift is not safely deferrable', { diagnostics });
+    }
+    for (const value of diagnostic.unresolvedValueIds) {
+      if (!isApprovedDeferredValue(key, value)) failure('MAGENTO_BINDING_SOURCE_RECONCILIATION_UNSUPPORTED', 'Target source drift is not safely deferrable', { diagnostics });
+      demotions.push({ key, category: diagnostic.category, questionKey: diagnostic.key, value: String(value) });
+    }
+  }
+  const unique = [...new Map(demotions.map((item) => [`${item.key}:${item.value}`, item])).values()];
+  for (const item of unique) {
+    const current = evidence.questions.filter((q) => q.category_code === item.category && q.key === item.questionKey);
+    const historical = evidence.schemas.filter((s) => s.category_code === item.category)
+      .flatMap((s) => s.questions.filter((q) => q.key === item.questionKey).flatMap((q) => q.value_ids));
+    if (current.length !== 1 || !current[0].value_ids.includes(item.value) || historical.includes(item.value)) {
+      failure('MAGENTO_BINDING_SOURCE_RECONCILIATION_UNSUPPORTED', 'Target evidence does not prove a current-only value');
+    }
+    const usage = await client.query(`SELECT count(*)::int AS count FROM products
+      WHERE status='active' AND category=$1 AND details->'answers'->>$2=$3`, [item.category, item.questionKey, item.value]);
+    if (usage.rows[0].count !== 0) failure('MAGENTO_BINDING_SOURCE_RECONCILIATION_ACTIVE_USAGE', 'Target value has active product usage');
+  }
+  const definition = structuredClone(artifact.template.definition);
+  for (const item of unique) {
+    const policy = definition.sourceSupport?.sources?.[item.key];
+    if (!policy || !policy.semanticValues.includes(item.value) || policy.deferredValues.includes(item.value)) c.invalid();
+    policy.semanticValues = policy.semanticValues.filter((value) => value !== item.value);
+    policy.deferredValues.push(item.value);
+  }
+  const compiled = compileDefinition(definition);
+  const remaining = validateSourceReferences(compiled.definition, evidence);
+  if (remaining.length) failure('MAGENTO_BINDING_SOURCE_RECONCILIATION_UNSUPPORTED', 'Target source drift remains after reconciliation', { diagnostics: remaining });
+  return { definition: compiled.definition, definitionHash: compiled.hash,
+    evaluatorVersion: compiled.definition.evaluatorVersion, outputContract: compiled.definition.outputContract,
+    formatVersion: compiled.definition.formatVersion, demotions: unique };
+}
+
+async function ensureTemplate(client, context, artifactHash, targetTemplate) {
   const key = `magento-transfer-${artifactHash.slice(0, 32)}`;
   let family = (await client.query('SELECT * FROM export_templates WHERE template_key=$1 FOR UPDATE', [key])).rows[0];
   if (!family) family = await templates.createTemplateOnClient(client, context,
-    { key, displayName: `Magento binding transfer ${artifactHash.slice(0, 12)}`, definition: artifact.template.definition });
+    { key, displayName: `Magento binding transfer ${artifactHash.slice(0, 12)}`, definition: targetTemplate.definition });
   const version = (await client.query(`SELECT * FROM export_template_versions WHERE template_id=$1
-    AND definition_hash=$2 ORDER BY version_number LIMIT 1`, [family.id, artifact.template.definitionHash])).rows[0];
+    AND definition_hash=$2 ORDER BY version_number LIMIT 1`, [family.id, targetTemplate.definitionHash])).rows[0];
   if (version) {
-    if (version.evaluator_version !== artifact.template.evaluatorVersion || version.output_contract !== artifact.template.outputContract
-      || version.format_version !== artifact.template.formatVersion) c.invalid();
+    if (version.evaluator_version !== targetTemplate.evaluatorVersion || version.output_contract !== targetTemplate.outputContract
+      || version.format_version !== targetTemplate.formatVersion) c.invalid();
     return version;
   }
   const draft = (await client.query('SELECT * FROM export_template_drafts WHERE template_id=$1 FOR UPDATE', [family.id])).rows[0];
   const compiled = compileDefinition(draft.definition);
-  if (compiled.hash !== artifact.template.definitionHash) failure('MAGENTO_BINDING_TRANSFER_TEMPLATE_CONFLICT', 'Imported template identity conflicts');
+  if (compiled.hash !== targetTemplate.definitionHash) failure('MAGENTO_BINDING_TRANSFER_TEMPLATE_CONFLICT', 'Imported template identity conflicts');
   return templates.publishTemplateOnClient(client, context, family.id,
     { expectedRevision: draft.revision, expectedDefinitionHash: compiled.hash });
 }
@@ -131,15 +177,18 @@ async function importArtifact(wrapper, input, config, options = {}) {
     requiredPermission: 'export_templates.publish', createError: c.error, operation: async (client) => {
       await databaseName(client, input.expectedDatabase);
       await assertActorStillAuthorized(client, context.actorUserId, 'export_templates.manage', c.error);
-      const version = await ensureTemplate(client, context, artifact, wrapper.artifactHash);
+      const targetTemplate = input.reconcileTargetSourceSupport ? await reconcileTargetSourceSupport(client, artifact) : artifact.template;
+      const version = await ensureTemplate(client, context, wrapper.artifactHash, targetTemplate);
       const draft = await bindingService.importReviewedDraftOnClient(client, context, {
         installationKey: artifact.installationKey, origin: config.baseUrl, templateVersionId: version.id,
         observedAt: artifact.observedAt, schema: artifact.schema, bindings: artifact.bindings,
       }, { artifactHash: wrapper.artifactHash, sourceRevisionId: artifact.source.revisionId,
         sourceRevision: artifact.source.revision, sourceVersionNumber: artifact.source.versionNumber,
-        sourceBindingHash: artifact.source.bindingHash });
+        sourceBindingHash: artifact.source.bindingHash, sourceTemplateHash: artifact.template.definitionHash,
+        targetTemplateHash: targetTemplate.definitionHash });
       return { id: draft.id, revision: draft.revision, state: draft.state, installationKey: draft.installationKey,
-        templateVersionId: draft.templateVersionId, artifactHash: wrapper.artifactHash, drift };
+        templateVersionId: draft.templateVersionId, artifactHash: wrapper.artifactHash,
+        targetTemplateHash: targetTemplate.definitionHash, drift };
     } });
 }
 
@@ -156,4 +205,4 @@ async function verifyImported(revisionId, input, config, options = {}) {
     localDiagnostics: local.diagnostics, drift };
 }
 
-module.exports = { exportArtifact, verifyArtifact, liveDrift, importArtifact, verifyImported };
+module.exports = { exportArtifact, verifyArtifact, liveDrift, importArtifact, verifyImported, reconcileTargetSourceSupport };

@@ -5,6 +5,7 @@ const { parseVariationSku, parseVersionedSkuPart, buildSkuSuffixDecodeAttempts, 
 const VERSION = 'historical-source-support-v1';
 const EVALUATOR = 'magento-declarative-2';
 const TARGETS = ['NM.extra', 'AR.size'];
+const DEFERRED = Object.freeze({ 'AR.size': Object.freeze(['29', '30', '31']) });
 const projections = new WeakMap();
 const location = (s) => s?.kind !== 'product' ? `${s.category}.${s.key}` : null;
 const policyFor = (d, s) => d.sourceSupport?.sources[location(s)];
@@ -24,7 +25,7 @@ function validateSupport(d, { check, shape, list, membership }) {
       list(values, 512); membership(values.length);
       check(values.every((v) => typeof v === 'string' && /^(0|[1-9][0-9]*)$/.test(v)) && new Set(values).size === values.length, 'Support value IDs');
     }
-    check(p.deferredValues.every((v) => key === 'AR.size' && ['29', '30', '31'].includes(v)
+    check(p.deferredValues.every((v) => DEFERRED[key]?.includes(v)
       && !p.semanticValues.includes(v)), 'Conflicting or unapproved deferred values');
     for (const [id, s] of Object.entries(d.sources).filter(([, s]) => location(s) === key)) {
       check(s.kind === 'semantic' && s.aliases.length === 0, 'Supported historical source must be semantic and unaliased');
@@ -133,4 +134,7 @@ function sourceSupportChecker(definition, product) {
   return (descriptor, raw) => checkSourceSupport(definition, descriptor, product, raw, context);
 }
 
-module.exports = { VERSION, EVALUATOR, validateSupport, upgradeSourceSupport, sourceSupportUpdate, policyFor, projectSupportProducts, sourceSupportChecker };
+const isApprovedDeferredValue = (key, value) => DEFERRED[key]?.includes(String(value)) === true;
+
+module.exports = { VERSION, EVALUATOR, validateSupport, upgradeSourceSupport, sourceSupportUpdate, policyFor,
+  projectSupportProducts, sourceSupportChecker, isApprovedDeferredValue };

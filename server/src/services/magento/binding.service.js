@@ -192,7 +192,8 @@ async function importReviewedDraftOnClient(client, context, input, provenance) {
     subjectType: 'magento_binding', subjectId: row.id, details: {
       artifactHash: provenance.artifactHash, sourceRevisionId: provenance.sourceRevisionId,
       sourceRevision: provenance.sourceRevision, sourceVersionNumber: provenance.sourceVersionNumber,
-      sourceBindingHash: provenance.sourceBindingHash, templateVersionId: row.template_version_id,
+      sourceBindingHash: provenance.sourceBindingHash, sourceTemplateHash: provenance.sourceTemplateHash,
+      targetTemplateHash: provenance.targetTemplateHash, templateVersionId: row.template_version_id,
       schemaFingerprint: row.schema_fingerprint, bindingsHash: c.hash(result.bindings),
     } });
   return result;

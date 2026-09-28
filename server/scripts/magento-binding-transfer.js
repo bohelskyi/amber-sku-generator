@@ -8,9 +8,9 @@ const { parseMagentoConfig } = require('../src/config/magento');
 const transfer = require('../src/services/magento/binding-transfer');
 
 const HELP = `npm run magento:binding-transfer -- export --revision UUID --expected-revision N --expected-database NAME --output NEW_FILE
-npm run magento:binding-transfer -- import --artifact FILE --expected-hash SHA256 --expected-database NAME --installation KEY --actor-user-id ID
+npm run magento:binding-transfer -- import --artifact FILE --expected-hash SHA256 --expected-database NAME --installation KEY --actor-user-id ID [--reconcile-target-source-support]
 npm run magento:binding-transfer -- verify --revision DRAFT_UUID --expected-database NAME
-Export contains the exact frozen template publication, schema observation and reviewed decisions, but no users, jobs, product state or credentials. Import creates/reuses an audited local template publication and creates only a NEW binding DRAFT. Import/verify perform GET-only live Magento drift checks.`;
+Export contains the exact frozen template publication, schema observation and reviewed decisions, but no users, jobs, product state or credentials. Import creates/reuses an audited local template publication and creates only a NEW binding DRAFT. Import/verify perform GET-only live Magento drift checks. Target source-support reconciliation is opt-in and demotion-only.`;
 
 function parse(args) {
   if (args.length === 1 && args[0] === '--help') return { help: true };
@@ -20,10 +20,14 @@ function parse(args) {
     '--expected-database': 'expectedDatabase', '--output': 'output', '--artifact': 'artifactPath',
     '--expected-hash': 'expectedHash', '--installation': 'installationKey', '--actor-user-id': 'actorUserId' };
   const result = { action };
-  for (let i = 0; i < rest.length; i += 2) {
+  for (let i = 0; i < rest.length;) {
+    if (rest[i] === '--reconcile-target-source-support') {
+      if (action !== 'import' || result.reconcileTargetSourceSupport) throw new Error('INVALID_ARGUMENTS');
+      result.reconcileTargetSourceSupport = true; i += 1; continue;
+    }
     const key = flags[rest[i]]; const value = rest[i + 1];
     if (!key || !value || value.startsWith('--') || Object.hasOwn(result, key)) throw new Error('INVALID_ARGUMENTS');
-    result[key] = value;
+    result[key] = value; i += 2;
   }
   const required = action === 'export' ? ['revisionId','expectedRevision','expectedDatabase','output']
     : action === 'import' ? ['artifactPath','expectedHash','expectedDatabase','installationKey','actorUserId']
