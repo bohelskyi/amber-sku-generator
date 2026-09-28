@@ -6,6 +6,7 @@ const { auditMagentoSchema } = require('./schema-audit');
 const { createMagentoClient } = require('./client');
 const { indexTrees } = require('./sync-preview-categories');
 const { compileDefinition } = require('../export-templates/definition');
+const { requirements } = require('./binding-validation');
 const templates = require('../export-templates/template.service');
 const { createMutationContext } = require('../../audit/mutation-context');
 const { runAccessAdminMutation, assertActorStillAuthorized } = require('../access-admin-transaction');
@@ -148,6 +149,53 @@ async function reconcileTargetSourceSupport(client, artifact) {
     formatVersion: compiled.definition.formatVersion, demotions: unique };
 }
 
+function rebaseEvaluatedOptionIdentities(artifact, targetTemplate) {
+  if (targetTemplate.definitionHash === artifact.template.definitionHash) {
+    return { bindings: artifact.bindings, targetBindingHash: artifact.source.bindingHash, rebased: false };
+  }
+  const sourceDefinition = structuredClone(artifact.template.definition);
+  const targetDefinition = structuredClone(targetTemplate.definition);
+  delete sourceDefinition.sourceSupport; delete targetDefinition.sourceSupport;
+  if (c.hash(sourceDefinition) !== c.hash(targetDefinition)) {
+    failure('MAGENTO_BINDING_EVALUATED_REBASE_UNSUPPORTED', 'Evaluator semantics changed outside source support');
+  }
+  const sourcePlans = requirements(artifact.template.definition, artifact.schema);
+  const targetPlans = requirements(targetTemplate.definition, artifact.schema);
+  const stable = (plans) => plans.map((plan) => ({ routeKey: plan.routeKey, amberGroup: plan.amberGroup,
+    predicates: plan.predicates, evaluatorSetName: plan.evaluatorSetName,
+    attributes: plan.attributes.map((attribute) => ({ ...attribute, domainKey: undefined,
+      options: attribute.options.map((option) => option.sourceKind === 'evaluated'
+        ? { ...option, domainKey: undefined, sourceKey: undefined } : option) })) }));
+  if (c.hash(stable(sourcePlans)) !== c.hash(stable(targetPlans))) {
+    failure('MAGENTO_BINDING_EVALUATED_REBASE_UNSUPPORTED', 'Evaluator requirement cardinality, output or strategy changed');
+  }
+  const flatten = (plans) => new Map(plans.flatMap((plan) => plan.attributes.map((attribute) => [attribute.bindingKey, attribute])));
+  const sourceAttributes = flatten(sourcePlans); const targetAttributes = flatten(targetPlans);
+  const bindings = structuredClone(artifact.bindings);
+  for (const option of bindings.options) {
+    if (option.sourceKind !== 'evaluated') continue;
+    const source = sourceAttributes.get(option.bindingKey); const target = targetAttributes.get(option.bindingKey);
+    if (!source || !target || source.routeKey !== target.routeKey || source.rowId !== target.rowId
+      || source.target !== target.target || source.strategy !== target.strategy) {
+      failure('MAGENTO_BINDING_EVALUATED_REBASE_UNSUPPORTED', 'Evaluated binding ownership changed');
+    }
+    const sourceMatches = source.options.filter((candidate) => candidate.sourceKind === 'evaluated'
+      && candidate.sourceKey === option.sourceKey && candidate.domainKey === option.domainKey
+      && candidate.outputKey === option.outputKey && candidate.evaluatedOutput === option.evaluatedOutput);
+    const targetMatches = target.options.filter((candidate) => candidate.sourceKind === 'evaluated'
+      && candidate.outputKey === option.outputKey && candidate.evaluatedOutput === option.evaluatedOutput);
+    const dynamicSource = source.dynamic && option.domainKey === source.domainKey
+      && option.outputKey === option.evaluatedOutput && option.sourceKey === c.hash({ domainKey: source.domainKey, outputKey: option.outputKey });
+    const dynamicTarget = target.dynamic && option.outputKey === option.evaluatedOutput;
+    if (!((sourceMatches.length === 1 && targetMatches.length === 1) || (dynamicSource && dynamicTarget))) {
+      failure('MAGENTO_BINDING_EVALUATED_REBASE_UNSUPPORTED', 'Evaluated output identity is not one-to-one');
+    }
+    option.domainKey = target.domainKey;
+    option.sourceKey = c.hash({ domainKey: target.domainKey, outputKey: option.outputKey });
+  }
+  return { bindings, targetBindingHash: c.hash(bindings), rebased: true };
+}
+
 async function ensureTemplate(client, context, artifactHash, targetTemplate) {
   const key = `magento-transfer-${artifactHash.slice(0, 32)}`;
   let family = (await client.query('SELECT * FROM export_templates WHERE template_key=$1 FOR UPDATE', [key])).rows[0];
@@ -178,17 +226,21 @@ async function importArtifact(wrapper, input, config, options = {}) {
       await databaseName(client, input.expectedDatabase);
       await assertActorStillAuthorized(client, context.actorUserId, 'export_templates.manage', c.error);
       const targetTemplate = input.reconcileTargetSourceSupport ? await reconcileTargetSourceSupport(client, artifact) : artifact.template;
+      const targetBindings = input.reconcileTargetSourceSupport
+        ? rebaseEvaluatedOptionIdentities(artifact, targetTemplate)
+        : { bindings: artifact.bindings, targetBindingHash: artifact.source.bindingHash, rebased: false };
       const version = await ensureTemplate(client, context, wrapper.artifactHash, targetTemplate);
       const draft = await bindingService.importReviewedDraftOnClient(client, context, {
         installationKey: artifact.installationKey, origin: config.baseUrl, templateVersionId: version.id,
-        observedAt: artifact.observedAt, schema: artifact.schema, bindings: artifact.bindings,
+        observedAt: artifact.observedAt, schema: artifact.schema, bindings: targetBindings.bindings,
       }, { artifactHash: wrapper.artifactHash, sourceRevisionId: artifact.source.revisionId,
         sourceRevision: artifact.source.revision, sourceVersionNumber: artifact.source.versionNumber,
         sourceBindingHash: artifact.source.bindingHash, sourceTemplateHash: artifact.template.definitionHash,
-        targetTemplateHash: targetTemplate.definitionHash });
+        targetTemplateHash: targetTemplate.definitionHash, targetBindingHash: targetBindings.targetBindingHash });
       return { id: draft.id, revision: draft.revision, state: draft.state, installationKey: draft.installationKey,
         templateVersionId: draft.templateVersionId, artifactHash: wrapper.artifactHash,
-        targetTemplateHash: targetTemplate.definitionHash, drift };
+        targetTemplateHash: targetTemplate.definitionHash, targetBindingHash: targetBindings.targetBindingHash,
+        evaluatedIdentitiesRebased: targetBindings.rebased, drift };
     } });
 }
 
@@ -205,4 +257,5 @@ async function verifyImported(revisionId, input, config, options = {}) {
     localDiagnostics: local.diagnostics, drift };
 }
 
-module.exports = { exportArtifact, verifyArtifact, liveDrift, importArtifact, verifyImported, reconcileTargetSourceSupport };
+module.exports = { exportArtifact, verifyArtifact, liveDrift, importArtifact, verifyImported,
+  reconcileTargetSourceSupport, rebaseEvaluatedOptionIdentities };

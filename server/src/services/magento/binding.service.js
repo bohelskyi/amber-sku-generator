@@ -165,13 +165,19 @@ async function importReviewedDraftOnClient(client, context, input, provenance) {
   if (typeof input.observedAt !== 'string' || !Number.isFinite(Date.parse(input.observedAt))) c.invalid();
   const schema = c.normalizeSchema(input.schema); const bindings = normalizeBindings(input.bindings);
   if (!provenance || !/^[a-f0-9]{64}$/.test(provenance.artifactHash)) c.invalid();
+  if (provenance.targetBindingHash !== c.hash(bindings)) c.invalid();
   await lockInstallation(client, key);
   const existingOrigin = (await client.query('SELECT origin_hash FROM magento_binding_revisions WHERE installation_key=$1 LIMIT 1', [key])).rows[0];
   if (existingOrigin && existingOrigin.origin_hash !== origin) conflict();
   const prior = (await client.query(`SELECT subject_id FROM audit_events
     WHERE event_key='magento_binding.imported' AND details->>'artifactHash'=$1
     ORDER BY id DESC LIMIT 1`, [provenance.artifactHash])).rows[0];
-  if (prior) return view(await load(client, prior.subject_id));
+  if (prior) {
+    const loaded = await load(client, prior.subject_id); const existing = view(loaded);
+    if (loaded.row.template_definition_hash !== provenance.targetTemplateHash
+      || c.hash(existing.bindings) !== provenance.targetBindingHash) conflict();
+    return existing;
+  }
   const t = await template(client, versionId);
   const validated = validateBindings(bindings, t.compiled.definition, schema, { publish: true });
   assertValid(validated);
@@ -195,6 +201,7 @@ async function importReviewedDraftOnClient(client, context, input, provenance) {
       sourceBindingHash: provenance.sourceBindingHash, sourceTemplateHash: provenance.sourceTemplateHash,
       targetTemplateHash: provenance.targetTemplateHash, templateVersionId: row.template_version_id,
       schemaFingerprint: row.schema_fingerprint, bindingsHash: c.hash(result.bindings),
+      targetBindingHash: provenance.targetBindingHash,
     } });
   return result;
 }
