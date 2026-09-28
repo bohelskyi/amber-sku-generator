@@ -124,6 +124,36 @@ async function updateDraft(id, input, options = {}) {
     return view(await load(client, id));
   });
 }
+async function clonePublished(id, input, options = {}) {
+  c.identity(id); c.command(input, ['expectedRevision']);
+  const expected = c.counter(input.expectedRevision);
+  return mutate('manage', options, async (client, context) => {
+    const summary = (await client.query('SELECT installation_key FROM magento_binding_revisions WHERE id=$1', [id])).rows[0];
+    if (!summary) throw c.error(404, 'MAGENTO_BINDING_NOT_FOUND', 'Binding revision not found');
+    await lockInstallation(client, summary.installation_key);
+    const source = await load(client, id, true);
+    const current = await repository.current(client, summary.installation_key);
+    if (source.row.state !== 'published' || source.row.revision !== expected || current?.id !== id) conflict();
+    await template(client, source.row.template_version_id);
+    const row = (await client.query(`INSERT INTO magento_binding_revisions
+      (id, installation_key, origin_hash, template_id, template_version_id, template_definition_hash,
+       evaluator_version, output_contract, format_version, schema_fingerprint, topology_fingerprint,
+       observed_at, observation_store_code, created_by_user_id, modified_by_user_id)
+      SELECT $2, installation_key, origin_hash, template_id, template_version_id, template_definition_hash,
+       evaluator_version, output_contract, format_version, schema_fingerprint, topology_fingerprint,
+       observed_at, observation_store_code, $3, $3 FROM magento_binding_revisions WHERE id=$1 RETURNING *`,
+    [id, randomUUID(), context.actorUserId])).rows[0];
+    await repository.copyChildren(client, id, row.id);
+    const result = view(await load(client, row.id));
+    await writeAuditEvent(client, { mutationContext: context, eventKey: 'magento_binding.cloned',
+      subjectType: 'magento_binding', subjectId: row.id, details: { bindingRevision: row.revision,
+        sourceRevisionId: id, sourceRevision: expected, sourceVersionNumber: source.row.version_number,
+        templateVersionId: row.template_version_id, schemaFingerprint: row.schema_fingerprint,
+        bindingsHash: c.hash(result.bindings) } });
+    if (options.prepareReceipt) options.prepareReceipt(result);
+    return result;
+  });
+}
 async function validateStored(client, loaded) {
   const t = await template(client, loaded.row.template_version_id);
   const result = validateBindings(loaded.bindings, t.compiled.definition, loaded.schema, { publish: true });
@@ -191,4 +221,4 @@ async function listRevisions(key, options = {}) {
     CASE WHEN state='published' AND version_number < max(version_number) OVER () THEN 'superseded' ELSE state END AS lifecycle
     FROM magento_binding_revisions WHERE installation_key=$1 ORDER BY created_at DESC, id`, [key])).rows);
 }
-module.exports = { createDraftOnClient, createDraft, updateDraft, validateDraft, publishDraft, getRevision, getCurrentPublished, listRevisions, readRevisionOnClient };
+module.exports = { createDraftOnClient, createDraft, clonePublished, updateDraft, validateDraft, publishDraft, getRevision, getCurrentPublished, listRevisions, readRevisionOnClient };

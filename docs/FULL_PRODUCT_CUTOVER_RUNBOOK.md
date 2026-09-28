@@ -122,6 +122,118 @@ SKU dispositions are `verified_absent` or `retired_reconciled`; file disposition
 are `quarantined_do_not_import` or `consumed_and_reconciled`. These are recorded
 operator assertions. An application cannot revoke a downloaded file.
 
+## Exact Magento SKU evidence: exposure-only reconciliation
+
+Migration 039 initializes existing non-retired products as
+`hold / historical_ambiguity` with `origin: migration_039` and
+`coverage: unresolved_historical`. This means delivery history has not been
+reconciled; it does not prove absence from Magento. Recount can also produce this
+hold when history or exclusion provenance remains ambiguous.
+
+For an ordinary current active product with an exact live Magento SKU counterpart,
+the existing lifecycle state `hold / prior_exposure` expresses confirmed exposure.
+It keeps the CSV route held. The existing Magento sync eligibility rule permits
+an exact-SKU UPDATE in that state; no additional `historical_ambiguity` exception
+is needed. Remote presence does **not** prove that a retained CSV was consumed or
+that the current Amber revision was delivered.
+
+Use the explicit single-product command from `server/` (preview is the default):
+
+```text
+node scripts/magento-reconcile-exposure.js --expected-database DATABASE --sku EXACT_SKU --output NEW_PREVIEW_FILE
+```
+
+Add `--binding-revision UUID` to compute an additional full GET-only sync preview
+against that draft, with the hold reason changed only in a detached in-memory
+product. The artifact contains both actual and hypothetical sendability. Neither
+preview changes lifecycle state, bindings, exports or Magento.
+
+After reviewing the eligible plan and its `planHash`, explicitly apply that one
+plan using an active application user with `exports.reconcile`:
+
+```text
+node scripts/magento-reconcile-exposure.js --apply --expected-database DATABASE --plan PREVIEW_FILE --expected-hash PLAN_HASH --actor-user-id USER_ID --output NEW_RECEIPT_FILE
+```
+
+This command accepts only `hold / historical_ambiguity` with no correction lineage,
+active correction request, legacy exclusion, unknown/independent business
+exclusion, recount compatibility exclusion, duplicate SKU or reservation ownership
+conflict. Missing or erroneous exact remote lookups remain unresolved. Archived,
+retired and intentionally held products are rejected. The bounded bulk wrapper
+below uses exactly this eligibility and transaction implementation for each row.
+
+Apply rechecks actor authority, database and Magento origin, obtains the existing
+access/cutover/product/state locks, compares the full reviewed local fingerprint
+and delivery version, and repeats the exact GET requiring the same Magento ID.
+The only lifecycle policy change is the hold reason. It records remote evidence,
+increments `delivery_version`, attributes the resolution and writes an atomic
+audit receipt (`product.magento_prior_exposure_reconciled`). An identical completed
+retry returns that receipt without rewriting state. Conflicts or audit failure
+roll back. This exposure-only transition is available in `legacy` or `active`
+phase; `preparing` blocks it.
+
+Evidence uses the existing `reconciliation` origin with action
+`magento_prior_exposure` and retains the old evidence as `priorEvidence`. The
+repair planner preserves this reviewed disposition; the initial migration-only
+cutover planner requires a separately reviewed plan for it rather than silently
+reclassifying it as an untouched migration baseline.
+
+Product fields, exclusions, correction links, SKU reservations, payload revisions,
+confirmed revisions, cutover baselines, export snapshots/memberships/cursors and
+Magento sync acknowledgements remain unchanged. The broader `resolve` actions
+above authorize delivery or reconcile correction/file history and are not a
+substitute for this narrow exposure-only operation.
+
+### Bounded bulk exposure planning and resumable apply
+
+Bulk scope must be an explicit JSON candidate file containing `database`,
+`originHash`, `count`, and `candidates`, each with `amberProductId`, exact `sku`
+and `magentoProductId`. Maximum scope is 5,000; duplicate Amber IDs, SKUs or
+Magento IDs are rejected. A prior inventory supplies scope, not authority to
+transition a product. There is no automatic discovery or expansion during apply.
+
+```text
+node scripts/magento-reconcile-exposure.js --bulk --expected-database DATABASE --candidates CANDIDATES_FILE --output NEW_PLAN_FILE
+node scripts/magento-reconcile-exposure.js --bulk --apply --expected-database DATABASE --plan PLAN_FILE --expected-hash PLAN_HASH --actor-user-id USER_ID --output NEW_RECEIPT_DIRECTORY
+```
+
+Preview remains read-only. It reruns every single-product check and exact Magento
+GET, with at most four concurrent GETs, requires the same Amber/Magento identities
+as the candidate file, then rechecks eligible local fingerprints before sealing
+the manifest. The plan contains per-product evidence and eligible/skipped/
+conflicted/failed counts. Already reconciled products are ineligible and skipped.
+Unknown exclusions, correction/identity conflicts and other protected states are
+never released. A changed local fingerprint or remote identity is a conflict.
+
+Apply requires the exact reviewed manifest hash and runs **one transaction per
+eligible product**, sequentially, through the existing single-product command.
+Each transition repeats actor authorization, locks, CAS and the exact live GET.
+A row's failure rolls back only that row; another row can succeed only through
+its own transaction and immutable audit receipt. Authority/database/gate failures
+stop the run, leaving unattempted IDs explicitly pending. SIGINT/SIGTERM stops at
+a product boundary or aborts before the current transition if its GET is still
+pending. A hard process kill is recovered through the same audit receipts.
+
+Before the first mutation and after every outcome, the CLI writes and fsyncs an
+atomic `summary.json` in the new receipt directory. It lists succeeded, skipped,
+conflicted, failed and pending counts **and IDs**, individual reasons/results,
+manifest hash and completion state. Directory entries are fsynced on platforms
+that support it. Use a persistent host/volume directory for container execution;
+do not rely on a disposable container's writable layer. Receipt I/O failure stops
+the run immediately. A commit whose local receipt was lost is not inferred from
+the local file: its PostgreSQL audit is authoritative on retry.
+
+To resume, run the **same plan and hash** with `--apply` and a **new** receipt
+directory. Completed rows return their original database receipt as
+`skipped / ALREADY_APPLIED`, without a GET or another mutation. Remaining rows
+still require the original CAS and a fresh exact counterpart; no automatic
+refresh adopts changed lifecycle evidence. Conflicts and planning failures need
+a newly reviewed preview. A transient apply failure can retry the same plan when
+the local fingerprint is unchanged. A new preview of the original candidate file
+also excludes products already reconciled. Never edit a sealed plan to bypass
+conflicts. Exit code 2 denotes conflicts, failures or an interrupted apply;
+exit code 1 denotes command/receipt infrastructure failure.
+
 ## Failure, amendment and rollback
 
 A stale entry or failed write rolls back the **whole current batch**. It blocks

@@ -595,6 +595,7 @@ policies for the same effective route/target/store scope.
 | Operation | Contract |
 | --- | --- |
 | `createDraft(input, options)` | `{installationKey, origin, templateVersionId, observedAt, schema}`. Creates a new UUID, draft counter `1`, observed schema and all derived routes disabled/review-required, with no chosen set, attribute, option or ownership policy. No network calls. |
+| `clonePublished(id, input, options)` | `{expectedRevision}`. Copies the current installation publication into a new draft at counter `1`, preserving all stored identities, observations, decisions and review evidence exactly. Rejects draft, stale-counter and superseded sources. No network calls. |
 | `getRevision(id, options)` | Coherent repeatable-read view of identity, bindings and detached schema observation. |
 | `updateDraft(id, input, options)` | `{expectedRevision, bindings}` atomically replaces the four decision collections (`routes`, `attributes`, `options`, `policies`), advances the draft counter and audits. Incomplete/review-required decisions may be saved; malformed identities cannot. |
 | `validateDraft(id, options)` | Read-only structural/publication diagnostics plus server-derived route/attribute/option requirements and the checked draft counter. Works for stored publications too. |
@@ -612,8 +613,8 @@ boundaries. `databasePool` is an optional server/test dependency, never client i
 
 The lifecycle is **draft → published → superseded by a later publication**.
 Supersession is computed from version order, without updating the earlier row.
-Changes use a new draft (explicit creation with the intended observation/template).
-There is no clone convenience operation in this phase. Publication increments the
+Changes use a new draft (explicit creation with the intended observation/template,
+or an exact clone of the current publication). Publication increments the
 draft counter once, allocates the next per-installation version and retains all
 reviewed decisions and observations unchanged.
 
@@ -627,6 +628,34 @@ each mutation locks at most one revision. Versions are installation-wide complet
 snapshots, not separate concurrent publications per route/store. The unique
 installation/version constraint backs allocation; the greatest published version is
 the sole current publication, with no mutable current flag.
+Clone takes the same access/lifecycle → installation → revision lock order and
+rechecks the source is current after acquiring the locks. Its transaction copies
+all nine child tables without candidate resolution and records one
+`magento_binding.cloned` event with source ID/counter/version, copied binding hash,
+template ID and schema fingerprint. Audit/receipt failure rolls everything back.
+The clone has new creation attribution and no publication attribution; the source
+keeps its original attribution and immutable content. Clone is explicit creation,
+not an idempotent retry: inspect revision history after an uncertain result before
+invoking it again. Ordinary draft CAS and current-publication CAS still govern
+subsequent updates and publication.
+
+To extend an installation without dropping approved groups:
+
+```sh
+npm run magento:bindings -- clone --revision PUBLISHED_UUID --expected-revision N --actor-user-id ID
+npm run magento:bindings -- extend --revision NEW_DRAFT_UUID --expected-revision 1 --actor-user-id ID --group BR
+```
+
+`extend` uses the draft's pinned evaluator and existing bootstrap/resolver logic.
+It GET-checks the live schema against the frozen fingerprint and rejects drift;
+it never replaces observation rows or refreshes carried Magento IDs. Category
+paths come from current GET evidence. Only selected disabled, unreviewed routes
+with no existing attribute decisions can receive candidates; all other decisions
+remain unchanged. No new candidate or ownership policy is automatically approved.
+The final save uses the original draft counter, so a concurrent edit conflicts.
+Dynamic outputs retain `unknownOutputPolicy=block`; approving one observed size
+never approves other sizes. Review, explicit ownership decisions and GET-only
+full preview follow separately. These commands do not publish or write Magento.
 Publication revalidates source evidence and complete coverage while locked, checks
 the caller's current-publication ID, and commits publication attribution and
 `magento_binding.published` together. Audit failure rolls back the publication.
@@ -785,8 +814,9 @@ universal catalog rules or approval:
 
 Live IDs above document one installation and are never migration seeds. The Phase
 1B.2b CLI below discovers candidates from current GET evidence; explicit approvals,
-blocked decisions and field/store ownership remain operator actions. Admin routes and
-successor cloning remain deferred. The durable CLI synchronization writer is now
+blocked decisions and field/store ownership remain operator actions. Admin routes
+remain deferred; explicit publication cloning and bounded draft extension are
+documented in the lifecycle section above. The durable CLI synchronization writer is now
 implemented below; its first real success is recorded at the top of this guide.
 Automated implementation tests use synthetic bindings in disposable PostgreSQL.
 
@@ -802,6 +832,18 @@ compatibility exclusions still block all operations. Other unresolved holds or
 unexplained exclusions remain fail-closed. The preview reads the authoritative
 typed lifecycle signals without changing them or the old export queue selectors;
 the exact reason and unchanged legacy state remain in the artifact.
+
+For `historical_ambiguity`, use the explicit
+[exposure-only reconciliation command](FULL_PRODUCT_CUTOVER_RUNBOOK.md#exact-magento-sku-evidence-exposure-only-reconciliation).
+An exact live SKU match can justify `hold/prior_exposure` for an otherwise
+unexcluded ordinary current product. Preview is read-only, apply is single-plan
+and audited, and neither operation acknowledges a legacy export. Correction
+lineage, unknown exclusion provenance and conflicting reservations require their
+own reconciliation and remain blocked.
+The same CLI now supports bounded `--bulk --candidates FILE` planning and explicit
+manifest/hash-bound `--bulk --apply`. It delegates every transition to the same
+single-product transaction, checkpoints a durable per-ID summary and resumes
+from immutable audit receipts. See the [bulk operator contract](FULL_PRODUCT_CUTOVER_RUNBOOK.md#bounded-bulk-exposure-planning-and-resumable-apply).
 
 The next executable milestone is [`magento:sync-preview`](../server/scripts/magento-sync-preview.js).
 It creates a concrete future ProductRepository-shaped payload and a readable report

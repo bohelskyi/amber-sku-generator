@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildCandidates, bootstrap } = require('../src/services/magento/binding-bootstrap');
+const { buildCandidates, bootstrap, extendCandidates, extendDraft } = require('../src/services/magento/binding-bootstrap');
 const { review, decide, saveDecision } = require('../src/services/magento/binding-review');
 const { normalizeBindings, validateBindings } = require('../src/services/magento/binding-validation');
 const { resolveCategories } = require('../src/services/magento/sync-preview-categories');
@@ -28,6 +28,74 @@ function setup() {
   const revision = { id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', revision: '1', state: 'draft', schema, bindings };
   return { amber, schema, nodes, revision };
 }
+test('BR extension preserves KL decisions exactly and refuses to replace any reviewed route', () => {
+  const { amber, schema, nodes, revision } = setup();
+  revision.bindings = decide(revision, { action: 'approve-exact', group: 'KL', expectedRevision: '1' }).bindings;
+  const original = structuredClone(revision);
+  const candidates = buildCandidates(amber, schema, nodes, { group: 'BR' });
+  const result = extendCandidates(revision, candidates, { group: 'BR' });
+  assert.deepEqual(revision, original);
+  for (const collection of ['routes', 'attributes', 'options', 'policies']) {
+    const addedKeys = new Set(candidates.attributes.map((a) => a.bindingKey));
+    const kept = (r) => collection === 'routes' ? r.routeKey !== 'BR:all'
+      : collection === 'attributes' ? r.routeKey !== 'BR:all' : !addedKeys.has(r.bindingKey);
+    assert.deepEqual(result[collection].filter(kept), original.bindings[collection].filter(kept));
+  }
+  assert.equal(result.routes.find((r) => r.routeKey === 'BR:all').reviewState, 'proposed');
+  assert.ok(result.policies.filter((p) => candidates.policies.some((c) => c.bindingKey === p.bindingKey))
+    .every((p) => p.reviewState === 'review_required'));
+  assert.ok(result.attributes.every((a) => a.unknownOutputPolicy === 'block'));
+  assert.throws(() => extendCandidates({ ...revision, bindings: result }, candidates, { group: 'BR' }),
+    { code: 'MAGENTO_BINDING_SCOPE_ALREADY_REVIEWED' });
+  for (const reviewState of ['approved', 'blocked']) {
+    const reviewed = structuredClone(revision);
+    reviewed.bindings.routes.find((r) => r.routeKey === 'BR:all').reviewState = reviewState;
+    assert.throws(() => extendCandidates(reviewed, candidates, { group: 'BR' }),
+      { code: 'MAGENTO_BINDING_SCOPE_ALREADY_REVIEWED' });
+  }
+});
+test('extension uses pinned template/schema, GET-only category discovery, and original CAS; drift never writes', async () => {
+  const { amber, schema, revision } = setup();
+  const c = require('../src/services/magento/binding-contract');
+  const config = parseMagentoConfig({ MAGENTO_BASE_URL: 'https://fixture.invalid', MAGENTO_CONSUMER_KEY: 'ck-fixture',
+    MAGENTO_CONSUMER_SECRET: 'cs-fixture', MAGENTO_ACCESS_TOKEN: 'at-fixture', MAGENTO_ACCESS_TOKEN_SECRET: 'ats-fixture' });
+  revision.schema = c.normalizeSchema(schema); revision.schemaFingerprint = c.hash(revision.schema);
+  revision.originHash = c.originHash(config.baseUrl); revision.definitionHash = amber.compiled.hash;
+  revision.templateVersionId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  let writes = 0; let gets = 0;
+  const options = { bindingService: { getRevision: async () => revision, updateDraft: async (id, input) => {
+    assert.equal(id, revision.id); assert.equal(input.expectedRevision, '1'); writes++;
+    return { ...revision, revision: '2', bindings: input.bindings };
+  } }, readAmber: async (_pool, input) => { assert.equal(input.templateVersionId, revision.templateVersionId); return amber; },
+  discover: async () => revision.schema, fetchImpl: async (_url, request) => {
+    assert.equal(request.method, 'GET'); assert.equal(request.body, undefined); gets++;
+    return new Response(JSON.stringify({ id: 803, parent_id: 1, name: 'Default', children_data: [] }),
+      { headers: { 'content-type': 'application/json' } });
+  } };
+  const input = { id: revision.id, expectedRevision: '1', group: 'BR' };
+  assert.equal((await extendDraft(config, input, options)).revision, '2');
+  assert.equal(writes, 1); assert.equal(gets, 1);
+  const drift = structuredClone(revision.schema); drift.attributes[0].attribute_id += 9000;
+  await assert.rejects(extendDraft(config, input, { ...options, discover: async () => drift }),
+    { code: 'MAGENTO_BINDING_OBSERVATION_CHANGED' });
+  await assert.rejects(extendDraft(config, { ...input, expectedRevision: '2' }, options), { code: 'MAGENTO_BINDING_CONFLICT' });
+  await assert.rejects(extendDraft({ ...config, baseUrl: 'https://another.invalid' }, input, options),
+    { code: 'MAGENTO_BINDING_INSTALLATION_MISMATCH' });
+  assert.equal(writes, 1); assert.equal(gets, 1);
+});
+test('clone CLI passes explicit source counter without Magento config; clone and extension reject missing CAS/scope', async () => {
+  const { revision } = setup(); let cloned = false;
+  const args = ['clone', '--revision', revision.id, '--expected-revision', '37', '--actor-user-id', '1', '--json'];
+  assert.equal(await runBindings({ args, env: {}, databasePool: {}, print() {}, service: {
+    clonePublished: async (id, input, options) => {
+      assert.equal(id, revision.id); assert.deepEqual(input, { expectedRevision: '37' });
+      assert.equal(options.mutationContext.actorUserId, '1'); cloned = true; return revision;
+    },
+  } }), 0);
+  assert.equal(cloned, true);
+  for (const invalid of [args.filter((a) => !['--expected-revision', '37'].includes(a)),
+    ['extend', ...args.slice(1)], [...args, '--group', 'BR']]) assert.throws(() => parseArguments(invalid));
+});
 test('KL bootstrap persists real evaluator set/code/options as proposed; scalar fields exist; inclusion remains review-required', () => {
   const { amber, schema, revision } = setup();
   assert.equal(validateBindings(revision.bindings, amber.compiled.definition, schema).valid, true);

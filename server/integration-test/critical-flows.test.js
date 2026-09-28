@@ -34,6 +34,7 @@ for (const modulePath of [
   './12-export-ux3.cases',
   './12-export-ux4.cases',
   './12-magento-bindings.cases',
+  './12-magento-exposure.cases',
   './12-magento-sync.cases',
   './13-sqlite-import.cases',
   './14-phase3-repair.cases',

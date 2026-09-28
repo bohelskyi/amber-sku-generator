@@ -71,6 +71,70 @@ test('Magento binding persistence, publication, immutability and real PostgreSQL
   const publish = (draft, current = null, db = pool) => bindings.publishDraft(draft.id, { expectedRevision: draft.revision, expectedCurrentId: current }, options(db));
   const countEvents = async (id) => Number((await pool.query("SELECT count(*) n FROM audit_events WHERE subject_id=$1 AND event_key='magento_binding.published'", [id])).rows[0].n);
 
+  await t.test('clone copies current publication identities and every decision exactly, audits provenance, and rolls back atomically', async () => {
+    const draft = await ready(); const source = await publish(draft);
+    const clone = (input = { expectedRevision: source.revision }, opts = options()) => bindings.clonePublished(source.id, input, opts);
+    const count = async () => (await pool.query('SELECT count(*)::int n FROM magento_binding_revisions')).rows[0].n;
+    const before = await count();
+    await assert.rejects(clone({ expectedRevision: draft.revision }), { code: 'MAGENTO_BINDING_CONFLICT' });
+    await assert.rejects(bindings.clonePublished((await ready()).id, { expectedRevision: '2' }, options()), { code: 'MAGENTO_BINDING_CONFLICT' });
+    await assert.rejects(clone(undefined, { ...options(), mutationContext: { actorUserId: 9999999 } }), { code: 'ADMIN_PERMISSION_REVOKED' });
+    assert.equal(await count(), before + 1);
+    const failingPool = { connect: async () => {
+      const client = await pool.connect();
+      return { release: () => client.release(), query: (sql, values) => {
+        if (/INSERT INTO audit_events/.test(sql)) throw new Error('clone audit failure');
+        return client.query(sql, values);
+      } };
+    } };
+    await assert.rejects(clone(undefined, options(failingPool)), /clone audit failure/);
+    await assert.rejects(clone(undefined, { ...options(), prepareReceipt() { throw new Error('clone receipt failure'); } }), /clone receipt failure/);
+    assert.equal(await count(), before + 1);
+    const copied = await clone();
+    assert.notEqual(copied.id, source.id); assert.equal(copied.revision, '1'); assert.equal(copied.state, 'draft');
+    assert.equal(copied.versionNumber, null); assert.equal(copied.publishedByUserId, null); assert.equal(copied.publishedAt, null);
+    for (const key of ['installationKey', 'originHash', 'templateId', 'templateVersionId', 'definitionHash',
+      'evaluatorVersion', 'outputContract', 'formatVersion', 'schemaFingerprint', 'topologyFingerprint', 'observedAt', 'schema', 'bindings']) {
+      assert.deepEqual(copied[key], source[key], key);
+    }
+    for (const table of ['schema_sets', 'schema_attributes', 'schema_options', 'schema_members', 'schema_stores',
+      'routes', 'attributes', 'options', 'field_policies']) {
+      const rows = async (id) => (await pool.query(`SELECT to_jsonb(t)-'revision_id' AS value
+        FROM magento_binding_${table} t WHERE revision_id=$1 ORDER BY (to_jsonb(t)-'revision_id')::text`, [id])).rows;
+      assert.deepEqual(await rows(copied.id), await rows(source.id), table);
+    }
+    const audit = (await pool.query("SELECT details FROM audit_events WHERE subject_id=$1 AND event_key='magento_binding.cloned'", [copied.id])).rows;
+    assert.equal(audit.length, 1); assert.equal(audit[0].details.sourceRevisionId, source.id);
+    assert.equal(audit[0].details.sourceRevision, source.revision);
+    assert.equal(audit[0].details.bindingsHash, require('../src/services/magento/binding-contract').hash(source.bindings));
+    const changed = structuredClone(copied.bindings); changed.policies[0].reviewState = 'review_required';
+    await bindings.updateDraft(copied.id, { expectedRevision: copied.revision, bindings: changed }, options());
+    await assert.rejects(bindings.updateDraft(copied.id, { expectedRevision: copied.revision, bindings: copied.bindings }, options()),
+      { code: 'MAGENTO_BINDING_CONFLICT' });
+    assert.deepEqual(await bindings.getRevision(source.id), source);
+    assert.equal((await bindings.getCurrentPublished(source.installationKey)).id, source.id);
+  });
+
+  await t.test('clone versus publication races serialize and reject a superseded source without creating a stale clone', async () => {
+    for (const cloneFirst of [true, false]) {
+      const source = await publish(await ready());
+      const successor = await ready(source.installationKey);
+      const clone = (db) => bindings.clonePublished(source.id, { expectedRevision: source.revision }, options(db));
+      const pub = (db) => publish(successor, source.id, db);
+      const results = await race(cloneFirst ? clone : pub, cloneFirst ? pub : clone);
+      assert.equal(results[0].status, 'fulfilled');
+      if (cloneFirst) {
+        assert.equal(results[1].status, 'fulfilled');
+        assert.deepEqual((await bindings.getRevision(results[0].value.id)).bindings, source.bindings);
+      } else assert.equal(results[1].reason.code, 'MAGENTO_BINDING_CONFLICT');
+      assert.equal((await bindings.getCurrentPublished(source.installationKey)).id, successor.id);
+      assert.deepEqual(await bindings.getRevision(source.id), source);
+      const rows = (await pool.query('SELECT id,state FROM magento_binding_revisions WHERE installation_key=$1', [source.installationKey])).rows;
+      assert.equal(rows.length, cloneFirst ? 3 : 2);
+      assert.equal(rows.filter((r) => r.state === 'draft').length, cloneFirst ? 1 : 0);
+    }
+  });
+
   await t.test('bootstrap template, publication, candidate bindings and audit commit or roll back together', async () => {
     const { persistBootstrap } = require('../src/services/magento/binding-bootstrap-persistence');
     const { buildCandidates } = require('../src/services/magento/binding-bootstrap');

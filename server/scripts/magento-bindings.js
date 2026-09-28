@@ -8,6 +8,8 @@ const { review, saveDecision } = require('../src/services/magento/binding-review
 
 const HELP = `npm run magento:bindings -- COMMAND [options]
 bootstrap --installation KEY --template-version system|UUID --actor-user-id ID [--group KL|--route ROUTE] [--sku SKU]
+clone --revision PUBLISHED_UUID --expected-revision N --actor-user-id ID
+extend --revision DRAFT_UUID --expected-revision N --actor-user-id ID (--group BR|--route ROUTE) [--sku SKU]
 review --revision UUID [--group KL|--route ROUTE] [--row base|english] [--states proposed,review_required,blocked]
 approve-exact --revision UUID --expected-revision N --actor-user-id ID (--group KL|--route ROUTE) [--row base|english] [--targets code,code]
 approve --revision UUID --expected-revision N --actor-user-id ID --binding REVIEW_ID [--accept-review --reason TEXT] [--policy POLICY] [--create-value 2]
@@ -15,6 +17,8 @@ block --revision UUID --expected-revision N --actor-user-id ID --binding REVIEW_
 validate --revision UUID
 publish --revision UUID --expected-revision N --expected-current none|UUID --actor-user-id ID
 All commands accept --json. Bootstrap creates a NEW draft with no approvals.
+Clone copies the CURRENT publication exactly into a new draft, with source audit evidence.
+Extend adds candidates only to untouched disabled routes; schema drift is rejected.
 System mode freezes a dedicated evaluator publication without changing export selection.
 Bulk exact approval excludes ownership policies and review-required/drift candidates.
 Mutation actors must be active local users with existing template manage/publish permissions.
@@ -28,6 +32,8 @@ function parseArguments(args) {
   const [action, ...rest] = args;
   const allowed = {
     bootstrap: ['installationKey', 'templateVersionId', 'actorUserId', 'group', 'routeKey', 'sku'],
+    clone: ['id', 'expectedRevision', 'actorUserId'],
+    extend: ['id', 'expectedRevision', 'actorUserId', 'group', 'routeKey', 'sku'],
     review: ['id', 'group', 'routeKey', 'row', 'states'],
     'approve-exact': ['id', 'expectedRevision', 'actorUserId', 'group', 'routeKey', 'row', 'targets'],
     approve: ['id', 'expectedRevision', 'actorUserId', 'binding', 'acceptReview', 'reason', 'policy', 'createValue'],
@@ -45,7 +51,7 @@ function parseArguments(args) {
     out[key] = value;
   }
   const required = action === 'bootstrap' ? ['installationKey', 'templateVersionId', 'actorUserId'] : ['id',
-    ...(['approve', 'approve-exact', 'block', 'publish'].includes(action) ? ['expectedRevision', 'actorUserId'] : []),
+    ...(['clone', 'extend', 'approve', 'approve-exact', 'block', 'publish'].includes(action) ? ['expectedRevision', 'actorUserId'] : []),
     ...(['approve', 'block'].includes(action) ? ['binding'] : []), ...(action === 'publish' ? ['expectedCurrentId'] : [])];
   if (required.some((k) => !out[k]) || (out.group && out.routeKey)) c.invalid();
   if (out.id) c.identity(out.id);
@@ -56,7 +62,7 @@ function parseArguments(args) {
   if (out.actorUserId && (!/^[1-9][0-9]*$/.test(out.actorUserId) || !Number.isSafeInteger(Number(out.actorUserId)))) c.invalid();
   if (out.group && !['BR', 'NM', 'KL', 'CH', 'AR', 'SV'].includes(out.group)) c.invalid();
   if (out.row && !['base', 'english'].includes(out.row)) c.invalid();
-  if (action === 'approve-exact' && !out.group && !out.routeKey) c.invalid();
+  if (['approve-exact', 'extend'].includes(action) && !out.group && !out.routeKey) c.invalid();
   if (action === 'block' && !out.reason?.trim()) c.invalid();
   if (out.targets) { out.targets = out.targets.split(','); if (!out.targets.length || out.targets.some((v) => !c.code(v))) c.invalid(); }
   if (out.states) { out.states = out.states.split(','); if (out.states.some((s) => !['approved', 'proposed', 'review_required', 'blocked'].includes(s))) c.invalid(); }
@@ -83,6 +89,12 @@ async function runBindings({ args = [], env = process.env, databasePool, fetchIm
       if (!config.configured) throw c.error(422, 'MAGENTO_NOT_CONFIGURED', 'Magento configuration required');
       const create = bootstrap || require('../src/services/magento/binding-bootstrap').bootstrap;
       result = receipt(await create(config, input, options));
+    } else if (input.action === 'clone') {
+      result = receipt(await service.clonePublished(input.id, { expectedRevision: input.expectedRevision }, options));
+    } else if (input.action === 'extend') {
+      const config = parseMagentoConfig(env);
+      if (!config.configured) throw c.error(422, 'MAGENTO_NOT_CONFIGURED', 'Magento configuration required');
+      result = receipt(await require('../src/services/magento/binding-bootstrap').extendDraft(config, input, options));
     } else if (input.action === 'review') {
       const r = await service.getRevision(input.id, options);
       result = { ...receipt(r), entries: review(r, { ...input, states: input.states || ['proposed', 'review_required', 'blocked'] }) };

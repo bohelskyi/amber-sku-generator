@@ -28,6 +28,14 @@ async function insertSchema(client, id, schema) {
   await insertRows(client, id, 'schema_stores', Object.entries(schema.storeTopology).flatMap(([kind, rows]) =>
     rows.map((metadata) => ({ kind, remote_id: metadata.id, code: metadata.code, metadata }))));
 }
+// Copy stored decisions verbatim, including review evidence; never resolve labels again.
+async function copyChildren(client, sourceId, id) {
+  for (const [table, specification] of Object.entries(TABLES)) {
+    const columns = specification.split(', ').map((column) => column.split(' ')[0]).join(', ');
+    await client.query(`INSERT INTO magento_binding_${table} (revision_id, ${columns})
+      SELECT $2, ${columns} FROM magento_binding_${table} WHERE revision_id=$1`, [sourceId, id]);
+  }
+}
 async function replaceBindings(client, id, bindings, requirements) {
   for (const table of ['field_policies','options','attributes','routes']) {
     await client.query(`DELETE FROM magento_binding_${table} WHERE revision_id=$1`, [id]);
@@ -84,4 +92,4 @@ async function current(client, key) {
   return (await client.query(`SELECT * FROM magento_binding_revisions WHERE installation_key=$1 AND state='published'
     ORDER BY version_number DESC LIMIT 1`, [key])).rows[0] || null;
 }
-module.exports = { insertSchema, replaceBindings, load, current };
+module.exports = { insertSchema, copyChildren, replaceBindings, load, current };

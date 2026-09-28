@@ -129,4 +129,60 @@ async function bootstrap(config, input, options = {}) {
     templateVersionId: versionId, definition: amber.compiled.definition, definitionHash: amber.compiled.hash,
     observedAt: new Date().toISOString(), schema, bindings }, options);
 }
-module.exports = { buildCandidates, bootstrap };
+function extendCandidates(revision, candidates, scope) {
+  if (revision.state !== 'draft' || (!scope.group && !scope.routeKey) || (scope.group && scope.routeKey)) c.invalid();
+  const selected = candidates.routes.filter((r) => r.enabled);
+  if (!selected.length || selected.some((r) => scope.group ? !r.routeKey.startsWith(`${scope.group}:`)
+    && !r.routeKey.startsWith(`${scope.group}.`) : r.routeKey !== scope.routeKey)) c.invalid();
+  const keys = new Set(selected.map((r) => r.routeKey));
+  for (const key of keys) {
+    const old = revision.bindings.routes.find((r) => r.routeKey === key);
+    if (!old || old.enabled || ['approved', 'blocked'].includes(old.reviewState)
+      || revision.bindings.attributes.some((a) => a.routeKey === key)) {
+      throw c.error(409, 'MAGENTO_BINDING_SCOPE_ALREADY_REVIEWED', 'Extension requires an untouched disabled route');
+    }
+  }
+  if (Object.values(candidates).flat().some((r) => r.reviewState === 'approved'
+    || r.evidence?.categories?.some((v) => v.reviewState === 'approved'))) c.invalid();
+  const addedAttributes = candidates.attributes.filter((a) => keys.has(a.routeKey));
+  const attributeKeys = new Set(addedAttributes.map((a) => a.bindingKey));
+  return normalizeBindings({
+    routes: revision.bindings.routes.map((r) => keys.has(r.routeKey) ? selected.find((s) => s.routeKey === r.routeKey) : r),
+    attributes: [...revision.bindings.attributes, ...addedAttributes],
+    options: [...revision.bindings.options, ...candidates.options.filter((o) => attributeKeys.has(o.bindingKey))],
+    policies: [...revision.bindings.policies, ...candidates.policies.filter((p) => attributeKeys.has(p.bindingKey))],
+  });
+}
+async function extendDraft(config, input, options = {}) {
+  const service = options.bindingService || require('./binding.service');
+  const revision = await service.getRevision(input.id, options);
+  if (revision.state !== 'draft' || revision.revision !== c.counter(input.expectedRevision)) {
+    throw c.error(409, 'MAGENTO_BINDING_CONFLICT', 'Binding revision changed');
+  }
+  if (c.originHash(config.baseUrl) !== revision.originHash) {
+    throw c.error(422, 'MAGENTO_BINDING_INSTALLATION_MISMATCH', 'Magento installation differs');
+  }
+  const amber = await (options.readAmber || readAmberEvidence)(options.databasePool,
+    { templateVersionId: revision.templateVersionId, sku: input.sku });
+  if (amber.compiled.hash !== revision.definitionHash) c.invalid();
+  const observed = c.normalizeSchema(await (options.discover || auditMagentoSchema)(config,
+    { fetchImpl: options.fetchImpl, storeCode: revision.schema.storeCode }));
+  // Extension must not refresh the frozen observation or reinterpret carried decisions.
+  if (c.hash(observed) !== revision.schemaFingerprint) {
+    throw c.error(409, 'MAGENTO_BINDING_OBSERVATION_CHANGED', 'Schema drift requires separate review');
+  }
+  const client = createMagentoClient(config, { fetchImpl: options.fetchImpl, storeCode: revision.schema.storeCode });
+  const roots = [...new Set(revision.schema.storeTopology.storeGroups.map((g) => g.root_category_id).filter((id) => id > 0))];
+  if (roots.length > 100) c.invalid();
+  const trees = [];
+  for (const id of roots) {
+    const tree = await client.getCategoryTree(id);
+    if (Number(tree?.id) !== id) c.invalid();
+    trees.push(tree);
+  }
+  const candidates = buildCandidates(amber, revision.schema, indexTrees(trees), input);
+  const bindings = extendCandidates(revision, candidates, input);
+  assertEvidenceSafe({ bindings }, config, options.sensitiveValues || []);
+  return service.updateDraft(input.id, { expectedRevision: input.expectedRevision, bindings }, options);
+}
+module.exports = { buildCandidates, bootstrap, extendCandidates, extendDraft };
