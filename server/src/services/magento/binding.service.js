@@ -155,6 +155,48 @@ async function clonePublished(id, input, options = {}) {
     return result;
   });
 }
+// Internal portable-import path. The caller owns the authorized transaction and
+// has already verified the artifact, configured origin and live Magento schema.
+// Imported reviewed decisions are always reconstructed as a new local draft.
+async function importReviewedDraftOnClient(client, context, input, provenance) {
+  c.command(input, ['installationKey','origin','templateVersionId','observedAt','schema','bindings']);
+  const key = c.installation(input.installationKey); const origin = c.originHash(input.origin);
+  const versionId = c.identity(input.templateVersionId);
+  if (typeof input.observedAt !== 'string' || !Number.isFinite(Date.parse(input.observedAt))) c.invalid();
+  const schema = c.normalizeSchema(input.schema); const bindings = normalizeBindings(input.bindings);
+  if (!provenance || !/^[a-f0-9]{64}$/.test(provenance.artifactHash)) c.invalid();
+  await lockInstallation(client, key);
+  const existingOrigin = (await client.query('SELECT origin_hash FROM magento_binding_revisions WHERE installation_key=$1 LIMIT 1', [key])).rows[0];
+  if (existingOrigin && existingOrigin.origin_hash !== origin) conflict();
+  const prior = (await client.query(`SELECT subject_id FROM audit_events
+    WHERE event_key='magento_binding.imported' AND details->>'artifactHash'=$1
+    ORDER BY id DESC LIMIT 1`, [provenance.artifactHash])).rows[0];
+  if (prior) return view(await load(client, prior.subject_id));
+  const t = await template(client, versionId);
+  const validated = validateBindings(bindings, t.compiled.definition, schema, { publish: true });
+  assertValid(validated);
+  const row = (await client.query(`INSERT INTO magento_binding_revisions
+    (id, installation_key, origin_hash, template_id, template_version_id, template_definition_hash,
+     evaluator_version, output_contract, format_version, schema_fingerprint, topology_fingerprint,
+     observed_at, observation_store_code, created_by_user_id, modified_by_user_id)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14) RETURNING *`,
+  [randomUUID(), key, origin, t.row.template_id, versionId, t.row.definition_hash, t.row.evaluator_version,
+    t.row.output_contract, t.row.format_version, c.hash(schema), c.hash(schema.storeTopology), input.observedAt,
+    schema.storeCode, context.actorUserId])).rows[0];
+  await repository.insertSchema(client, row.id, schema);
+  await repository.replaceBindings(client, row.id, bindings, validated.requirements);
+  const loaded = await load(client, row.id);
+  assertValid(await validateStored(client, loaded));
+  const result = view(loaded);
+  await writeAuditEvent(client, { mutationContext: context, eventKey: 'magento_binding.imported',
+    subjectType: 'magento_binding', subjectId: row.id, details: {
+      artifactHash: provenance.artifactHash, sourceRevisionId: provenance.sourceRevisionId,
+      sourceRevision: provenance.sourceRevision, sourceVersionNumber: provenance.sourceVersionNumber,
+      sourceBindingHash: provenance.sourceBindingHash, templateVersionId: row.template_version_id,
+      schemaFingerprint: row.schema_fingerprint, bindingsHash: c.hash(result.bindings),
+    } });
+  return result;
+}
 async function validateStored(client, loaded) {
   const t = await template(client, loaded.row.template_version_id);
   const result = validateBindings(loaded.bindings, t.compiled.definition, loaded.schema, { publish: true });
@@ -225,4 +267,5 @@ async function listRevisions(key, options = {}) {
     CASE WHEN state='published' AND version_number < max(version_number) OVER () THEN 'superseded' ELSE state END AS lifecycle
     FROM magento_binding_revisions WHERE installation_key=$1 ORDER BY created_at DESC, id`, [key])).rows);
 }
-module.exports = { createDraftOnClient, createDraft, clonePublished, updateDraft, validateDraft, publishDraft, getRevision, getCurrentPublished, listRevisions, readRevisionOnClient };
+module.exports = { createDraftOnClient, importReviewedDraftOnClient, createDraft, clonePublished, updateDraft,
+  validateDraft, publishDraft, getRevision, getCurrentPublished, listRevisions, readRevisionOnClient };

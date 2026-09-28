@@ -21,6 +21,12 @@ The [automatic workflow](MAGENTO_AUTOMATIC_SYNC.md) is implemented behind its ow
 default-disabled gate. Final production binding review, activation and reconciled
 export cutover remain explicit operator work.
 
+Migration 045 supplies that explicit one-way cutover. Successful apply enables
+automatic sync for future relevant mutations and permanently rejects creation of
+new `magento-products-v1` artifacts. Existing snapshots, files, sessions,
+confirmations, cursors and audit evidence remain readable and immutable. The
+separate `sku,price` stream is not switched by this product-delivery cutover.
+
 ## Workflow and authority
 
 The operator reviews authoritative current data, explicitly creates an immutable snapshot, downloads stored files and separately confirms the snapshot. Preview/download never acknowledge delivery. Confirmation means local acceptance of the captured export, **not proof of Magento import**. A generated file may already have left the application even when unconfirmed.
@@ -42,9 +48,15 @@ The two selection settings are independent: the lifecycle gate selects **product
 For an active product without a successor, eligibility requires `exclude_from_export=0`, business policy `none` and no recount compatibility exclusion. Define:
 
 ```text
-delivery_floor = greatest(confirmed_revision, cutover_baseline_revision)
+delivery_floor = greatest(confirmed_revision, cutover_baseline_revision, csv_retired_revision)
 pending = revision > delivery_floor
 ```
+
+`csv_retired_revision` starts at zero for all pre-cutover rows. After the explicit
+Magento delivery cutover, a newly created product or later full-payload mutation
+advances this floor with its full revision, so it creates only the durable API sync
+obligation and no new CSV queue obligation. It is not confirmation, import evidence,
+or a rewrite of historical rows.
 
 | Queue | Lifecycle-active meaning | Capture |
 | --- | --- | --- |

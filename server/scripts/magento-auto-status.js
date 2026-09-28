@@ -18,12 +18,15 @@ async function run(args = process.argv.slice(2), env = process.env, print = cons
     if (name !== expected) throw new Error('DATABASE_MISMATCH');
     const installed = (await db.query("SELECT to_regclass('magento_auto_sync_activation') IS NOT NULL AS installed")).rows[0].installed;
     if (!installed) { print(JSON.stringify({ database: name, installed: false })); return 2; }
-    const gate = (await db.query('SELECT enabled,installation_key FROM magento_auto_sync_activation WHERE singleton')).rows[0];
+    const gate = (await db.query(`SELECT enabled,installation_key,actor_user_id,
+      legacy_product_csv_enabled,cutover_at FROM magento_auto_sync_activation WHERE singleton`)).rows[0];
     const counts = (await db.query('SELECT state,count(*)::int AS count FROM magento_product_sync_requests GROUP BY state ORDER BY state')).rows;
     const published = (await db.query(`SELECT id,version_number FROM magento_binding_revisions WHERE installation_key=$1
       AND state='published' ORDER BY version_number DESC LIMIT 1`, [gate.installation_key])).rows[0] || null;
     await db.query('COMMIT');
-    print(JSON.stringify({ database: name, installed: true, enabled: gate.enabled, installationKey: gate.installation_key, published, counts }));
+    print(JSON.stringify({ database: name, installed: true, enabled: gate.enabled, installationKey: gate.installation_key,
+      actorUserId: gate.actor_user_id === null ? null : Number(gate.actor_user_id),
+      legacyProductCsvEnabled: gate.legacy_product_csv_enabled, cutoverAt: gate.cutover_at, published, counts }));
     return args.includes('--expect-disabled') && gate.enabled ? 2 : 0;
   } catch {
     print(JSON.stringify({ code: 'LOCAL_STATUS_VERIFICATION_FAILED' })); return 1;

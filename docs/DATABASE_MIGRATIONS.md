@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`043`. Accepted migrations `000`–`040` and the locally applied `041`/`042` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`045`. Accepted migrations `000`–`044` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -101,6 +101,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `042_magento_sync_jobs.sql` | Durable immutable Magento sync intent, per-operation dispatch/verification ledger, idempotency and unfinished-SKU uniqueness. No seeded jobs, binding publication, remote calls or export-state changes. |
 | `043_magento_literal_question_keys.sql` | Allows literal Amber question keys beginning with a digit in semantic option identities and canonical route predicates, including `SV.2`. Magento code constraints, source proof, composite identity, CAS and publication guards remain unchanged. No row rewrite or alias backfill. |
 | `044_magento_automatic_sync.sql` | Default-disabled automatic gate, transaction-coupled per-product desired/synced generations, active job association, bounded retry state, automatic job generation and guarded undispatched supersession. No enrollment, activation or historical changes. See [automatic sync](MAGENTO_AUTOMATIC_SYNC.md). |
+| `045_magento_delivery_cutover.sql` | One-way retirement state for new Magento-product CSV artifacts, immutable cutover receipt, a database guard for old writers and a separate monotonic per-product CSV-retirement floor for post-cutover mutations. Defaults keep CSV enabled and automatic sync disabled; no activation, enrollment, historical-row change, export deletion or Magento write occurs in the migration. |
 
 The 2026-09-28 read-only check of the local operator database confirmed 041 applied at
 `2026-09-27T20:13:49.840Z` and 042 at `2026-09-27T22:52:43.558Z`. The normal migration

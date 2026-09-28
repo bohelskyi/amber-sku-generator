@@ -403,6 +403,13 @@ async function createExportSnapshot(input, options = {}) {
       authorityProtected = true;
     }
     const activation = await lifecycleGate.begin(client, 'BEGIN ISOLATION LEVEL REPEATABLE READ');
+    if (requestedProfile === 'magento-products-v1') {
+      const delivery = (await client.query(`SELECT legacy_product_csv_enabled
+        FROM magento_auto_sync_activation WHERE singleton FOR SHARE`)).rows[0];
+      if (!delivery?.legacy_product_csv_enabled) {
+        throw bindingTools.error(409, 'MAGENTO_PRODUCT_CSV_RETIRED', 'New Magento product CSV work is retired');
+      }
+    }
     if (activation.phase === 'active' && !template && !expectedLegacy) throw bindingTools.error(422, 'EXPORT_PREVIEW_REQUIRED', 'Preview the exact lifecycle selection first');
     let resolved = null;
     let binding = null;

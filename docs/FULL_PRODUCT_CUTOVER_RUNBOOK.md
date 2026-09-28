@@ -285,3 +285,41 @@ These are user-reported **rehearsal facts**, not a production inventory, product
 The [earlier 4,817-product rehearsal](archive/exports/FULL_PRODUCT_CUTOVER_REHEARSAL_2026-09-27.md) retains its original counts, hashes, timings, test results, four simulated releases and writer-provenance investigation. Do not combine those results with this later rehearsal or use either as fixed production expectations. Duplicate-SKU/data-quality cases remain unresolved by cutover itself.
 
 The checked-in `server/scripts/rehearse-full-product-cutover.js OUTPUT_DIRECTORY` is a **dataset-specific disposable helper**, not the production entrypoint. It requires explicit `DATABASE_URL`, an actual `_test` database and initial checkpoint 038, writes new evidence files, and includes hard-coded simulations for historical IDs 4512/4846/4847/4848 plus old policy wording. Inspect applicability before a disposable run; do not treat those simulations as generic approvals for a new backup. Use only the canonical `postgres-test` environment in [AGENTS.md](../AGENTS.md); if it fails, stop rather than falling back to another PostgreSQL instance. Production uses the explicit commands above.
+
+## Final frozen-dump Magento launch rehearsal
+
+This is the bounded launch sequence after the reviewed transfer artifact has been
+exported from rehearsal. It does not replace the lifecycle commands above when the
+frozen production database still requires that lifecycle cutover.
+
+1. Restore the verified frozen dump to the exact target database. Keep traffic and
+   all old writers stopped.
+2. Build/start the reviewed containers and let normal startup apply forward
+   migrations through 045. Do not run integration tests against this database.
+3. Verify `/health/live`, `/health/ready`, migration checksums and writer header.
+4. Import the reviewed binding artifact with `magento:binding-transfer import`.
+   The result must be a new draft; import must not publish it.
+5. Run `magento:binding-transfer verify` and `magento:bindings validate`. Resolve
+   only reported target catalog or live Magento identity drift; never remap by label.
+6. Explicitly publish the target draft using its returned counter and the target's
+   actual current-publication ID (`none` only when there is no current publication).
+7. Confirm the installation's current publication and GET-only representative
+   previews. No Magento product APPLY is part of this step.
+8. Re-run the exact-SKU historical exposure reconciliation against the fresh dump:
+   generate a fresh bounded bulk plan, review its hash, apply it with the target
+   actor, and retain `summary.json` receipts. Do not reuse rehearsal hashes.
+9. Inspect product snapshots/artifacts, generated-unconfirmed files, current shared
+   attempts, pending normal/replacement queues and Held rows. Reconcile blocking
+   work without deleting or falsely confirming it.
+10. Run `magento:delivery-cutover preflight` to a new file and review every blocker,
+    identity hash, example list and the preserved Held count.
+11. Apply the exact preflight file/hash with `magento:delivery-cutover apply`.
+12. Run `magento:auto-status`; require automatic enabled, the configured installation
+    and actor, the just-published current binding, and product CSV disabled.
+13. Create one controlled new product. Confirm Amber commit succeeds independently,
+    one durable automatic request appears, the worker selects the current publication,
+    Magento CREATE starts disabled where applicable, read-after-write acknowledgement
+    succeeds, and no CSV queue obligation or new Magento artifact appears.
+14. Inspect readiness, structured server logs, worker/request/job state and the
+    successful job's verified steps/acknowledgement.
+15. Release storekeeper traffic. Do not run another broad audit after this sequence.

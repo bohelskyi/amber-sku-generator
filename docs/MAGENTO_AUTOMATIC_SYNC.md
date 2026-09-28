@@ -135,13 +135,27 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml stop postgres-t
 Do not fall back to another PostgreSQL instance if the canonical service fails.
 For all regression suites, use the checks in [AGENTS](../AGENTS.md).
 
-## Final CSV to API cutover remains separate
+## Final CSV to API cutover
 
-Freeze and verify the final production database, publish its own reviewed/current
-installation-wide binding, choose the authorized worker actor, and review all old
-CSV queues/files/held replacements and unresolved jobs. Prepare and approve the
-audited activation/disable procedure and any explicit legacy backfill/requeue.
-Then perform controlled real-endpoint acceptance, monitor acknowledgements and
-only separately authorize CSV retirement. This implementation does none of these
-operational mutations. Migration 044 and the normal worker remain disabled until
-that explicit activation decision.
+Migration 045 adds the explicit operator boundary; it performs no cutover by itself.
+`magento:delivery-cutover preflight` is read-only and reports the current publication,
+worker actor, automatic jobs/requests, generated-unconfirmed product files, current
+shared attempts, pending normal/replacement work and preserved Held count. Apply
+requires the exact reviewed preflight hash and atomically enables automatic sync
+while permanently retiring new Magento-product CSV artifacts. Existing evidence is
+unchanged. Held rows are reported and preserved; deliverable normal/replacement work,
+unconfirmed files and active shared attempts block apply. Price CSV remains separate.
+
+```powershell
+cd server
+$env:DATABASE_URL = '<secret target URL>'
+npm run magento:delivery-cutover -- preflight --expected-database <DB> --installation <KEY> --actor-user-id <USER_ID> --output <NEW_PREFLIGHT_JSON>
+npm run magento:delivery-cutover -- apply --expected-database <DB> --installation <KEY> --actor-user-id <USER_ID> --plan <PREFLIGHT_JSON> --expected-hash <PLAN_HASH>
+npm run magento:auto-status -- --expected-database <DB>
+```
+
+Emergency stop does not reopen CSV:
+
+```powershell
+npm run magento:delivery-cutover -- disable --expected-database <DB> --actor-user-id <USER_ID> --reason "<incident reference>"
+```

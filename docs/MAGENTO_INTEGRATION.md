@@ -651,6 +651,37 @@ npm run magento:bindings -- clone --revision PUBLISHED_UUID --expected-revision 
 npm run magento:bindings -- extend --revision NEW_DRAFT_UUID --expected-revision 1 --actor-user-id ID --group BR
 ```
 
+### Portable reviewed-binding promotion
+
+The ordinary `clone` command remains database-local. For a frozen production dump,
+use the portable transfer command. Export is deterministic and read-only. The
+artifact includes the exact frozen template definition/publication identity, schema
+observation and reviewed binding decisions; it excludes credentials, local users,
+jobs, products, automatic requests and other operational state.
+
+```powershell
+# Rehearsal/source database
+cd server
+$env:DATABASE_URL = '<secret rehearsal URL>'
+npm run magento:binding-transfer -- export --revision 2b1ad531-9ff0-4ad3-85d1-c3a684742aca --expected-revision 255 --expected-database <REHEARSAL_DB> --output <NEW_SECURE_ARTIFACT_JSON>
+
+# Fresh frozen target database, with the production Magento environment configured
+$env:DATABASE_URL = '<secret production URL>'
+npm run magento:binding-transfer -- import --artifact <ARTIFACT_JSON> --expected-hash <ARTIFACT_HASH> --expected-database <PRODUCTION_DB> --installation <INSTALLATION_KEY> --actor-user-id <LOCAL_USER_ID>
+npm run magento:binding-transfer -- verify --revision <IMPORTED_DRAFT_UUID> --expected-database <PRODUCTION_DB>
+npm run magento:bindings -- validate --revision <IMPORTED_DRAFT_UUID>
+npm run magento:bindings -- publish --revision <IMPORTED_DRAFT_UUID> --expected-revision 1 --expected-current none --actor-user-id <LOCAL_USER_ID>
+```
+
+Import uses the target actor/audit boundary, creates or reuses an exact audited
+template publication, and creates a **new binding draft only**. It never publishes
+the binding. Before mutation it GET-verifies the configured origin, relevant live
+schema/topology, approved attribute/option IDs and approved category path/IDs.
+Target catalog/source validation then runs inside the import transaction. Relevant
+remote drift or target semantic drift fails closed and rolls back the import; an
+unrelated schema addition that changes only the global fingerprint is not presented
+as approval drift. IDs are never remapped by label.
+
 `extend` uses the draft's pinned evaluator and existing bootstrap/resolver logic.
 It GET-checks the live schema against the frozen fingerprint and rejects drift;
 it never replaces observation rows or refreshes carried Magento IDs. Category

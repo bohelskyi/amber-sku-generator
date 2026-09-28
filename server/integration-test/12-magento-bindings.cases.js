@@ -4,6 +4,7 @@ const { test, assert, pool, Pool, crypto, fs, os, path, serverRoot, TEST_DATABAS
 const bindings = require('../src/services/magento/binding.service');
 const templates = require('../src/services/export-templates/template.service');
 const { compareRevision } = require('../src/services/magento/binding-drift');
+const transfer = require('../src/services/magento/binding-transfer');
 const { APPLICATION_USER_ADMIN_LOCK_KEY } = require('../src/services/access-admin-transaction');
 const fixture = require('../test/fixtures/magento-bindings');
 const { getMigrationChecksum } = require('../src/db/run-migrations');
@@ -79,7 +80,7 @@ test('Magento binding foundation and current migrations apply to a fresh disposa
   const db = new Pool({ connectionString: url });
   try {
     await runNodeInDatabase(url, "require('./src/db/run-migrations').runMigrations().catch(e=>{console.error(e);process.exitCode=1;});");
-    assert.equal((await db.query('SELECT count(*)::int n FROM schema_migrations')).rows[0].n, 45);
+    assert.equal((await db.query('SELECT count(*)::int n FROM schema_migrations')).rows[0].n, 46);
     assert.equal((await db.query("SELECT count(*)::int n FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'magento_binding_%'")).rows[0].n, 10);
     assert.equal((await db.query('SELECT count(*)::int n FROM magento_binding_revisions')).rows[0].n, 0);
   } finally { await db.end(); await dropTestDatabase(name); }
@@ -637,5 +638,49 @@ test('Magento binding persistence, publication, immutability and real PostgreSQL
     const drift = await compareRevision(draft.id, config, { databasePool: pool, fetchImpl: changedFetch });
     assert.equal(drift.diagnostics.find((d) => d.code === 'OPTION_ID_LABEL_CHANGED').optionId, 'red-id');
     assert.deepEqual(await bindings.getRevision(draft.id), publication);
+  });
+  await t.test('reviewed publication transfer round-trips as a new draft and target drift rolls back', async () => {
+    const source = await publish(await ready(`transfer-${crypto.randomUUID()}`));
+    const database = (await pool.query('SELECT current_database() name')).rows[0].name;
+    const wrapper = await transfer.exportArtifact(source.id, { expectedRevision: source.revision,
+      expectedDatabase: database }, { databasePool: pool });
+    assert.equal(wrapper.artifact.source.bindingHash, require('../src/services/magento/binding-contract').hash(source.bindings));
+    assert.equal(Object.keys(wrapper.artifact).some((key) => /user|actor/i.test(key)), false, 'portable artifact omits local-user fields');
+    const config = { configured: true, baseUrl: 'https://binding.example.invalid', consumerKey: 'fake-key',
+      consumerSecret: 'fake-secret', accessToken: 'fake-token', accessTokenSecret: 'fake-token-secret' };
+    const fetchImpl = async (url, init) => {
+      assert.equal(init.method, 'GET'); assert.equal(init.body, undefined);
+      const route = new URL(url).pathname.split('/V1/')[1]; let value;
+      if (route === 'store/websites') value = schema.storeTopology.websites;
+      else if (route === 'store/storeGroups') value = schema.storeTopology.storeGroups;
+      else if (route === 'store/storeViews') value = schema.storeTopology.storeViews;
+      else if (route === 'products/attribute-sets/sets/list') value = { items: schema.attributeSets, total_count: 1 };
+      else if (route === 'products/attributes') value = { items: schema.attributes, total_count: schema.attributes.length };
+      else if (route === 'products/attribute-sets/8001/attributes') value = schema.attributes;
+      else if (/^products\/attributes\/\w+\/options$/.test(route)) value = schema.attributes.find((a) => a.attribute_code === route.split('/')[2]).options;
+      else assert.fail(`Unexpected Magento resource: ${route}`);
+      return new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
+    };
+    const imported = await transfer.importArtifact(wrapper, { expectedHash: wrapper.artifactHash,
+      expectedDatabase: database, installationKey: source.installationKey, actorUserId: Number(admin.applicationUser.id) },
+    config, { databasePool: pool, fetchImpl, mutationContext: { actorUserId: Number(admin.applicationUser.id), requestId: 'transfer-import' } });
+    assert.equal(imported.state, 'draft'); assert.notEqual(imported.id, source.id);
+    const stored = await bindings.getRevision(imported.id);
+    assert.deepEqual(stored.bindings, source.bindings); assert.equal(stored.state, 'draft');
+    assert.equal((await bindings.validateDraft(imported.id)).valid, true);
+    assert.equal((await pool.query("SELECT count(*)::int n FROM audit_events WHERE event_key='magento_binding.imported' AND subject_id=$1", [imported.id])).rows[0].n, 1);
+    const before = (await pool.query('SELECT count(*)::int n FROM magento_binding_revisions')).rows[0].n;
+    const changedFetch = async (url, init) => {
+      const response = await fetchImpl(url, init); const body = await response.json();
+      if (new URL(url).pathname.endsWith('/kolir/options')) body.find((o) => o.value === 'red-id').label = 'Changed';
+      return new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+    };
+    const altered = structuredClone(wrapper); altered.artifact.source.revisionId = crypto.randomUUID();
+    altered.artifactHash = require('../src/services/magento/binding-contract').hash(altered.artifact);
+    await assert.rejects(transfer.importArtifact(altered, { expectedHash: altered.artifactHash,
+      expectedDatabase: database, installationKey: source.installationKey, actorUserId: Number(admin.applicationUser.id) },
+    config, { databasePool: pool, fetchImpl: changedFetch, mutationContext: { actorUserId: Number(admin.applicationUser.id) } }),
+    { code: 'MAGENTO_BINDING_TARGET_DRIFT' });
+    assert.equal((await pool.query('SELECT count(*)::int n FROM magento_binding_revisions')).rows[0].n, before);
   });
 });

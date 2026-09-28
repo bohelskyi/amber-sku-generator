@@ -1,6 +1,6 @@
 const gate = require('./full-product-cutover-gate');
 const base = "p.status='active' AND p.corrected_to_product_id IS NULL AND COALESCE(p.exclude_from_export,0)=0 AND f.business_exclusion_state='none' AND NOT f.recount_compatibility_excluded";
-const floor = 'GREATEST(f.confirmed_revision,f.cutover_baseline_revision)';
+const floor = 'GREATEST(f.confirmed_revision,f.cutover_baseline_revision,f.csv_retired_revision)';
 const pending = `f.revision>${floor}`;
 const first = `${base} AND f.route='normal' AND ${floor}=0 AND ${pending}`;
 const update = `${base} AND f.route='normal' AND ${floor}>0 AND ${pending}`;
