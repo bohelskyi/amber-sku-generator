@@ -44,12 +44,13 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
   const admin = await authenticateApplicationSession(); const actorUserId = Number(admin.applicationUser.id);
   const mutations = { databasePool: pool, mutationContext: { actorUserId, requestId: 'sync-fixture' } };
   for (const group of ['BR', 'NM', 'KL', 'CH', 'AR', 'SV']) await pool.query('INSERT INTO categories(code,name) VALUES($1,$1) ON CONFLICT(code) DO NOTHING', [group]);
-  const d = structuredClone(fixture.definition()); d.sources = { sku: d.sources.sku }; d.tables = {};
+  const d = structuredClone(fixture.definition()); d.sources = { sku: d.sources.sku,
+    price: { kind: 'product', field: 'total_price_uah', type: 'scalar' } }; d.tables = {};
   for (const g of d.groups) for (const row of g.rows) {
     const sku = row.cells.sku;
     row.cells = { sku, name: literal(row.id === 'base' ? 'Amber name' : 'English name'),
       attribute_set_code: literal('Historical CSV name'), product_type: literal('simple'), store_view_code: literal(row.id === 'base' ? '' : 'en') };
-    if (row.id === 'base') Object.assign(row.cells, { price: literal('42'), product_online: literal('2'), visibility: literal('Catalog, Search'),
+    if (row.id === 'base') Object.assign(row.cells, { price: { op: 'text', input: { op: 'source', id: 'price' }, trim: false, format: 'scalar-v1', onAbsent: 'empty' }, product_online: literal('2'), visibility: literal('Catalog, Search'),
       categories: literal('Default/Fixture'), qty: literal('1'), is_in_stock: literal('1'), product_websites: literal('fixture') });
     else row.cells.meta_title = literal('English SEO');
   }
@@ -285,10 +286,23 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
     assert.deepEqual(job.intent.operations.map((o) => o.domain), ['coreProduct', 'categories', 'inventory', 'websites', 'storeViews']);
     assert.equal(s.writes.at(-1).scope, 'en'); assert.equal(s.english().name, 'English name');
   });
+  await require('./magento-automatic-worker-cases')({ t, suite, scenario, config, published, installationKey, actorUserId, makeDraft });
   await t.test('a newer publication makes the old bound job ineligible before any write', async () => {
     const s = await scenario(); const job = await s.enqueue(); const newer = await makeDraft();
-    await bindings.publishDraft(newer.id, { expectedRevision: newer.revision, expectedCurrentId: published.id }, mutations);
+    await pool.query('UPDATE magento_auto_sync_activation SET enabled=TRUE,installation_key=$1,actor_user_id=$2', [installationKey, actorUserId]);
+    const automaticProduct = await scenario();
+    const automaticJob = await enqueue(config, automaticProduct.input, { ...automaticProduct.options,
+      automatic: { productId: automaticProduct.product.id, generation: '1', installationKey } });
+    const current = await bindings.publishDraft(newer.id, { expectedRevision: newer.revision, expectedCurrentId: published.id }, mutations);
     const result = await s.apply(job);
     assert.equal(result.state, 'blocked'); assert.equal(result.failure.code, 'MAGENTO_SYNC_PUBLISHED_CURRENT_BINDING_REQUIRED'); assert.equal(s.writes.length, 0);
+    try {
+      const worker = require('../src/services/magento/automatic-sync-worker').createAutomaticSyncWorker(config,
+        { databasePool: pool, jobOptions: automaticProduct.options });
+      await worker.runProduct(automaticProduct.product.id);
+      const rows = (await pool.query('SELECT id,state,binding_revision_id FROM magento_sync_jobs WHERE product_id=$1 ORDER BY created_at', [automaticProduct.product.id])).rows;
+      assert.equal(rows[0].id, automaticJob.id); assert.equal(rows[0].state, 'superseded');
+      assert.equal(rows[1].state, 'succeeded'); assert.equal(rows[1].binding_revision_id, current.id);
+    } finally { await pool.query('UPDATE magento_auto_sync_activation SET enabled=FALSE'); }
   });
 });

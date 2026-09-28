@@ -41,6 +41,7 @@ for (const modulePath of [
   './14-phase3-repair.cases',
   './15-cutover.cases',
   './16-sv-create.cases',
+  './17-magento-automatic.cases',
 ]) {
   require(modulePath);
 }

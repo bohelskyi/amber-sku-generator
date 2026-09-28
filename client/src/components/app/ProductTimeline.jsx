@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { MagentoSyncStatus } from './MagentoSyncStatus';
 import {
   AlertTriangle,
   Archive,
@@ -445,6 +446,7 @@ export function ProductTimeline() {
                     {index > 0 && <ArrowRight size={15} className="text-slate-400" />}
                     <span className={`lineage-sku ${product.sku === data.querySku ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-slate-200 bg-white text-slate-700'}`}>
                       <span className="break-all">{product.sku}</span>
+                      <MagentoSyncStatus status={product.magentoSync} />
                       {product.sku === data.lineage.currentSku && <span className="mt-1 font-sans text-[10px] uppercase text-emerald-700">{product.status === 'active' ? 'актуальний' : 'останній'}</span>}
                     </span>
                   </div>

@@ -1,5 +1,10 @@
 # Magento integration
 
+The [automatic product workflow](MAGENTO_AUTOMATIC_SYNC.md) is implemented behind
+migration 044's default-disabled gate. It reuses the durable jobs below, adds local
+transactional requests and product-history status, and does not retire CSV. Dated
+manual receipts and remaining-group observations below retain their original scope.
+
 The product sync preview and discovery client remain GET-only. Separate explicit
 commands handle single-category creation and durable product sync APPLY.
 

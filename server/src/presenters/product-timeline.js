@@ -75,7 +75,7 @@ function firstAudit(audits, eventKey, subjectId) {
   return (audits.get(auditKey(eventKey, String(subjectId))) || [])[0] || null;
 }
 
-function presentProductTimeline(querySku, data) {
+function presentProductTimeline(querySku, data, magentoStatuses) {
   const {
     products,
     corrections,
@@ -415,6 +415,7 @@ function presentProductTimeline(querySku, data) {
       currentSku: currentProduct?.full_sku || null,
       products: graph.ordered.map((product) => ({
         sku: product.full_sku,
+        ...(magentoStatuses ? { magentoSync: magentoStatuses.get(Number(product.id)) } : {}),
         categoryCode: product.category,
         status: product.status || 'active',
         createdAt: product.created_at,

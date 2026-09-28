@@ -41,7 +41,9 @@ async function getProductTimeline(skuValue) {
     );
   }
   const data = await loadProductTimelineData(Number(seedRows[0].id));
-  return presentProductTimeline(querySku, data);
+  const statuses = await require('./magento/automatic-sync-status').readStatuses(
+    require('../db/pool'), data.products.map((p) => Number(p.id)));
+  return presentProductTimeline(querySku, data, statuses);
 }
 
 module.exports = {

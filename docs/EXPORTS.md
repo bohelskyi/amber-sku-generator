@@ -17,8 +17,9 @@ idempotent recovery; a downloaded file may still be imported later. A successful
 direct job does not confirm a CSV snapshot, release a hold, advance
 `product_full_export_state`/`product_export_revisions` acknowledgements or move the
 export cursor. Do not mark old work delivered merely because one same-SKU sync succeeded.
-Remaining group bindings come first, then automated sync workflow/UI and an explicit
-reconciled export cutover; none of those transitions is performed by documentation.
+The [automatic workflow](MAGENTO_AUTOMATIC_SYNC.md) is implemented behind its own
+default-disabled gate. Final production binding review, activation and reconciled
+export cutover remain explicit operator work.
 
 ## Workflow and authority
 
@@ -156,4 +157,4 @@ CSV serialization quotes commas, quotes and line breaks. String formula sigils `
 
 ## Acceptance boundary
 
-The [2026-09-23 six-group Check Data record](archive/exports/MAGENTO_CHECK_DATA_2026-09-23.md) is historical validation, not an import receipt or acceptance of every later template. Target catalog/source mappings, template publications and real Magento acceptance remain deployment-specific. Direct Magento CLI sync now has durable job/verification history and one successful KL UPDATE; automated workflow/UI, explicit `url_key` generation, attribute/option API synchronization and automated CSV import/result reconciliation remain unimplemented. Historical duplicate SKUs and unapproved data/mapping cases remain separate work. See the [current pending-work index](README.md#deferred-work-and-operationally-pending-items).
+The [2026-09-23 six-group Check Data record](archive/exports/MAGENTO_CHECK_DATA_2026-09-23.md) is historical validation, not an import receipt or acceptance of every later template. Target catalog/source mappings, template publications and real Magento acceptance remain deployment-specific. Direct Magento CLI sync has durable job/verification history; the automatic workflow is implemented but disabled until explicit production activation. Explicit `url_key` generation, attribute/option API synchronization and automated CSV import/result reconciliation remain unimplemented. Historical duplicate SKUs and unapproved data/mapping cases remain separate work. See the [current pending-work index](README.md#deferred-work-and-operationally-pending-items).

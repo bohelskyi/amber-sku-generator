@@ -11,6 +11,7 @@ const { assertEvidenceSafe } = require('./binding-evidence-audit');
 const { writeAuditEvent } = require('../../audit/audit-events');
 const { APPLICATION_USER_ADMIN_LOCK_KEY, assertActorStillAuthorized } = require('../access-admin-transaction');
 const gate = require('../full-product-cutover-gate');
+const automatic = require('./automatic-sync-boundary');
 
 async function ledger(db, actorUserId, action, operation) {
   const client = await db.connect();
@@ -54,6 +55,15 @@ async function guard(config, input, options, operation, applying = false) {
     if (!lifecycle) plan.fail('MAGENTO_SYNC_PRODUCT_STATE_MISSING');
     const state = { productId: product.id, amberHash: c.hash(plan.clean({ product, lifecycle })),
       bindingHash: c.hash(plan.clean(revision)), revision };
+    if (options.automatic) {
+      if (state.productId !== options.automatic.productId) plan.fail('MAGENTO_SYNC_AMBER_CHANGED');
+      await automatic.assertEnabled(client, options);
+      await automatic.assertGeneration(client, options);
+      // Keep the SKU session lock, but release every business/access/publication
+      // transaction lock before any remote read or write. Amber saves stay local.
+      await gate.commit(client); await gate.release(client);
+      return await operation(state);
+    }
     const result = await operation(state);
     await gate.commit(client); return result;
   } catch (e) { await gate.rollback(client).catch(() => {}); throw e; }
@@ -86,23 +96,36 @@ async function refresh(config, observation, options) {
 async function enqueue(config, input, options) {
   return guard(config, input, options, async (state) => {
     const existing = (await options.databasePool.query(`SELECT * FROM magento_sync_jobs WHERE origin_hash=$1 AND sku=$2
-      AND (state <> 'succeeded' OR (binding_revision_id=$3 AND amber_hash=$4)) ORDER BY created_at DESC LIMIT 1`,
-    [state.revision.originHash, input.sku, input.bindingRevisionId, state.amberHash])).rows[0];
+      AND state <> 'superseded' AND (state <> 'succeeded' OR (binding_revision_id=$3 AND amber_hash=$4
+        AND ($5::bigint IS NULL OR automatic_generation=$5::bigint))) ORDER BY created_at DESC LIMIT 1`,
+    [state.revision.originHash, input.sku, input.bindingRevisionId, state.amberHash, options.automatic?.generation || null])).rows[0];
     if (existing) {
       if (existing.amber_hash !== state.amberHash) plan.fail('MAGENTO_SYNC_AMBER_CHANGED');
       if (existing.binding_hash !== state.bindingHash) plan.fail('MAGENTO_SYNC_BINDING_CHANGED');
+      if (options.automatic) await ledger(options.databasePool, options.actorUserId, 'attached', async (client) => {
+        await automatic.assertSnapshot(client, state, options);
+        await automatic.attachJob(client, existing, options); return existing;
+      });
       return existing; // Idempotent even after the successful plan changes the remote diff.
     }
     const { observation, report } = await observe(config, input, options);
+    if (options.automatic && (observation.categoryFailures?.length || observation.domainEvidence.failures?.length)) {
+      plan.fail('MAGENTO_SYNC_READ_FAILED');
+    }
     const intent = plan.intent(report); const baseline = plan.baseline(observation, report);
     assertEvidenceSafe({ intent, baseline }, config, options.sensitiveValues || []);
-    return ledger(options.databasePool, options.actorUserId, 'enqueued', async (client) => (await client.query(`
+    return ledger(options.databasePool, options.actorUserId, 'enqueued', async (client) => {
+      if (options.automatic) await automatic.assertSnapshot(client, state, options);
+      const job = (await client.query(`
       INSERT INTO magento_sync_jobs(id,product_id,sku,installation_key,origin_hash,binding_revision_id,
-        binding_hash,amber_hash,plan_hash,intent,baseline,created_by_user_id)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12) RETURNING *`,
+        binding_hash,amber_hash,plan_hash,intent,baseline,created_by_user_id,automatic_generation)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13) RETURNING *`,
     [randomUUID(), state.productId, input.sku, state.revision.installationKey, state.revision.originHash,
       input.bindingRevisionId, state.bindingHash, state.amberHash, c.hash(intent), JSON.stringify(intent),
-      JSON.stringify(baseline), options.actorUserId])).rows[0]);
+      JSON.stringify(baseline), options.actorUserId, options.automatic?.generation || null])).rows[0];
+      if (options.automatic) await automatic.attachJob(client, job, options);
+      return job;
+    });
   });
 }
 async function applyJob(config, id, options) {
@@ -119,6 +142,11 @@ async function applyJob(config, id, options) {
   return guard(config, input, options, async (state) => {
     job = (await options.databasePool.query('SELECT * FROM magento_sync_jobs WHERE id=$1', [id])).rows[0];
     if (job.state === 'succeeded') return job;
+    if (job.state === 'superseded') plan.fail('MAGENTO_SYNC_JOB_SUPERSEDED');
+    if (options.automatic && (job.state === 'uncertain' || (await options.databasePool.query(
+      "SELECT 1 FROM magento_sync_steps WHERE job_id=$1 AND state='dispatched'", [id])).rowCount)) {
+      plan.fail('MAGENTO_SYNC_PREVIOUS_DISPATCH_UNRESOLVED');
+    }
     let activeOrdinal = null;
     try {
       if (job.amber_hash !== state.amberHash || job.product_id !== state.productId) plan.fail('MAGENTO_SYNC_AMBER_CHANGED');
@@ -126,6 +154,12 @@ async function applyJob(config, id, options) {
       if (c.hash(job.intent) !== job.plan_hash) plan.fail('MAGENTO_SYNC_PLAN_INTEGRITY');
       job = await saveState('running');
       let { observation } = await observe(config, input, options);
+      if (options.automatic) {
+        // Reject a mixed snapshot if a save committed during remote discovery.
+        await ledger(options.databasePool, options.actorUserId, 'revalidated', async (client) => {
+          await automatic.assertSnapshot(client, state, options); return job;
+        });
+      }
       plan.replan(job, observation);
       if (observation.domainEvidence.failures?.length) plan.fail('MAGENTO_SYNC_READ_FAILED');
       plan.preflight(job, observation);
@@ -141,6 +175,13 @@ async function applyJob(config, id, options) {
           plan.precondition(job, operation, observation);
           // Committed before HTTP. There is deliberately no path that resets this marker.
           await ledger(options.databasePool, options.actorUserId, 'dispatched', async (client) => {
+            if (options.automatic) {
+              await automatic.assertEnabled(client, options);
+              await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`amber_magento_binding:${job.installation_key}`]);
+              const current = (await client.query(`SELECT id FROM magento_binding_revisions WHERE installation_key=$1
+                AND state='published' ORDER BY version_number DESC LIMIT 1`, [job.installation_key])).rows[0];
+              if (current?.id !== job.binding_revision_id) plan.fail('MAGENTO_SYNC_PUBLISHED_CURRENT_BINDING_REQUIRED');
+            }
             await client.query("INSERT INTO magento_sync_steps(job_id,ordinal,state,dispatched_at) VALUES($1,$2,'dispatched',CURRENT_TIMESTAMP)", [id, ordinal]);
             return job;
           });
@@ -176,4 +217,29 @@ async function applyJob(config, id, options) {
     throw cause;
   });
 }
-module.exports = { enqueue, applyJob };
+async function supersedeUndispatched(config, id, options) {
+  const client = await options.databasePool.connect();
+  let lock;
+  try {
+    const job = (await client.query('SELECT * FROM magento_sync_jobs WHERE id=$1', [id])).rows[0];
+    if (!job) plan.fail('MAGENTO_SYNC_JOB_NOT_FOUND');
+    if (job.origin_hash !== c.originHash(config.baseUrl) || job.product_id !== options.automatic?.productId
+      || job.installation_key !== options.automatic?.installationKey) plan.fail('MAGENTO_SYNC_INSTALLATION_MISMATCH');
+    lock = `amber_magento_sync:${c.originHash(config.baseUrl)}:${job.sku}`;
+    if (!(await client.query('SELECT pg_try_advisory_lock(hashtext($1)) AS held', [lock])).rows[0].held) {
+      lock = null; plan.fail('MAGENTO_SYNC_BUSY');
+    }
+    return await ledger(options.databasePool, options.actorUserId, 'superseded', async (db) => {
+      await automatic.assertEnabled(db, options);
+      const result = await db.query(`UPDATE magento_sync_jobs SET state='superseded',updated_at=CURRENT_TIMESTAMP
+        WHERE id=$1 AND automatic_generation IS NOT NULL AND state IN ('queued','running','retryable','blocked')
+        AND NOT EXISTS(SELECT 1 FROM magento_sync_steps WHERE job_id=$1) RETURNING *`, [id]);
+      if (!result.rowCount) plan.fail('MAGENTO_SYNC_PREVIOUS_DISPATCH_UNRESOLVED');
+      return result.rows[0];
+    });
+  } finally {
+    if (lock) await client.query('SELECT pg_advisory_unlock(hashtext($1))', [lock]).catch(() => {});
+    client.release();
+  }
+}
+module.exports = { enqueue, applyJob, supersedeUndispatched };

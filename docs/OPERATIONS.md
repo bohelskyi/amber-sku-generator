@@ -16,7 +16,9 @@ KL revision and successful real UPDATE of `KL3/11131351005`, job
 [2026-09-28 receipt](MAGENTO_INTEGRATION.md#achieved-state-2026-09-28).
 This does not certify migration installation in another deployment.
 
-There is no automated sync workflow/UI yet. `magento:sync` without `--apply` performs
+The [automatic workflow](MAGENTO_AUTOMATIC_SYNC.md) starts behind a durable,
+default-disabled gate with an isolated worker pool and product-history status.
+It does not activate on migration/startup. `magento:sync` without `--apply` performs
 GET review **and persists a local queued job**; use the existing schema/evidence/preview
 read paths for a strictly read-only review. Product writes require explicit APPLY,
 current published bindings and fresh revalidation; success requires read-after-write
