@@ -114,6 +114,29 @@ test('CREATE uses evaluator name and separates optional merchandising and invent
   assert.equal(r.transport.websites.requested[0].websiteId, 801);
   assert.equal(r.candidatePayload.product.extension_attributes.website_ids, undefined);
 });
+
+test('CREATE recognizes only Magento built-in static timestamps; other required values and UPDATE remain strict', () => {
+  const f = fixture();
+  for (const [i, code] of ['created_at', 'updated_at', 'merchant_date'].entries()) {
+    f.schema.attributes.push({ attribute_id: 9000 + i, attribute_code: code, is_required: true,
+      backend_type: 'static', frontend_input: 'date', is_user_defined: false, is_visible: false, options: [] });
+    f.schema.attributeSets[0].attributeCodes.push(code);
+  }
+  const missing = raw => run(f, raw).blockers.filter(b => b.code === 'REQUIRED_ATTRIBUTE_VALUE_MISSING').map(b => b.target).sort();
+  assert.deepEqual(missing(null), ['merchant_date']);
+  assert.deepEqual(missing(f.raw), ['created_at', 'merchant_date', 'updated_at']);
+  const created = run(f, null);
+  for (const code of ['created_at', 'updated_at']) {
+    assert.equal(created.requiredAttributes.find(a => a.attributeCode === code).valueSource, 'magento_generated_on_create');
+    assert.equal(created.candidatePayload.product[code], undefined);
+    assert.equal(custom(created, code), undefined);
+  }
+  const a = f.schema.attributes.find(a => a.attribute_code === 'created_at');
+  for (const [key, value] of [['backend_type', 'datetime'], ['frontend_input', null], ['is_user_defined', true], ['is_visible', true]]) {
+    const before = a[key]; a[key] = value;
+    assert.ok(missing(null).includes('created_at')); a[key] = before;
+  }
+});
 test('approved semantic, dynamic and numeric-band bindings retain semantic identities and exact option IDs', () => {
   const r = run(fixture({ approved: true }));
   assert.equal(r.attributeSet.status, 'resolved_authoritative');

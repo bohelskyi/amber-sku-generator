@@ -7,11 +7,12 @@ const {
   getCorrectionPreviewSignature,
 } = require('../src/services/correction-request.service');
 
-test('product service keeps its eleven-export compatibility surface', () => {
+test('product service preserves its compatibility surface and exposes the strict creation preview', () => {
   assert.deepEqual(Object.keys(productService), [
     'decodeSku',
     'getNextVariationSku',
     'buildProductPreview',
+    'buildNewProductPreview',
     'buildProductRecountPreview',
     'applyProductRecount',
     'saveProduct',

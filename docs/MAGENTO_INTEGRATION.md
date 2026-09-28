@@ -1033,6 +1033,12 @@ an empty list applies to all types, and missing metadata never exempts a require
 field. Downloadable/Bundle-only requirements therefore do not block a simple product.
 The report includes `requiredAttributes` with applicability evidence. This follows
 Magento's [product-type applicability contract](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Catalog/Model/Product/Type/AbstractType.php).
+CREATE recognizes the built-in static `created_at` and `updated_at` date attributes
+as Magento-generated only when live metadata also says non-user-defined and invisible.
+The report records `valueSource: magento_generated_on_create`; no timestamp is sent.
+Unknown metadata, other required attributes and UPDATE checks remain strict. See the
+Magento [Created](https://github.com/magento/magento2/blob/2.4.7/app/code/Magento/Eav/Model/Entity/Attribute/Backend/Time/Created.php)
+and [Updated](https://github.com/magento/magento2/blob/2.4.7/app/code/Magento/Eav/Model/Entity/Attribute/Backend/Time/Updated.php) backends.
 Fixed mapper literals such as `old_product=No` and `is_ownproduction=Yes` use the
 observed standard [Boolean source](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Eav/Model/Entity/Attribute/Source/Boolean.php)
 and verified live option values `0`/`1`, independent of translated labels. This is

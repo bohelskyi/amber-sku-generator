@@ -117,6 +117,8 @@ function AppPage() {
             config={sku.config}
             selectedCat={sku.selectedCat}
             answers={sku.answers}
+            nameSubjects={sku.nameSubjects}
+            onNameSubject={sku.handleNameSubject}
             weight={sku.weight}
             setWeight={sku.setWeight}
             isWeightRequired={sku.isWeightRequired}

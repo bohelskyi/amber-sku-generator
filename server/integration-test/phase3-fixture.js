@@ -36,10 +36,10 @@ async function setup() {
 }
 const answers={material:2,color:3,souvenir:1,statuette:5,symbolic_stat:1,weight:1260,size:'23/6/30'};
 async function save() {
-  const preview=await products.buildProductPreview({categoryCode:'SV',answers,weight:1260});
-  const p=await products.saveProduct({category:'SV',answers,weight:1260,manualPriceUah:21700,
+  const names={magento_name_subject_ua:'[UX-5 аудит] Символіка',magento_name_subject_en:'[UX-5 audit] Symbolic figurine'};
+  const preview=await products.buildNewProductPreview({categoryCode:'SV',answers,weight:1260,...names});
+  const p=await products.saveProduct({category:'SV',answers,weight:1260,manualPriceUah:21700,...names,
     skuSchemaVersionId:preview.skuSchemaVersionId,previewToken:preview.previewToken},opts());
-  await pool.query("UPDATE products SET magento_name_subject_ua='[UX-5 аудит] Символіка',magento_name_subject_en='[UX-5 audit] Symbolic figurine' WHERE id=$1",[p.id]);
   return product(p.id);
 }
 async function recountInput(p,patch={size:`${crypto.randomUUID()}`}) {

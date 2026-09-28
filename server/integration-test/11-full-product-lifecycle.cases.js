@@ -8,12 +8,12 @@ let actor;
 const opts = (databasePool = pool) => ({ databasePool, mutationContext: {
   actorUserId: actor.applicationUser.id, requestId: 'phase-1-lifecycle' } });
 const answers = { material: 2, color: 3, souvenir: 1, statuette: 5, weight: 1260, size: '23/6/30' };
+const names = { magento_name_subject_ua: 'Фігура', magento_name_subject_en: 'Figurine' };
 async function setup() { actor = await authenticateApplicationSession(); await installSouvenirFixture(); }
 async function save() {
-  const preview = await products.buildProductPreview({ categoryCode: 'SV', answers, weight: 1260 });
-  const saved = await products.saveProduct({ category: 'SV', answers, weight: 1260, manualPriceUah: 21700,
+  const preview = await products.buildNewProductPreview({ categoryCode: 'SV', answers, weight: 1260, ...names });
+  const saved = await products.saveProduct({ category: 'SV', answers, weight: 1260, manualPriceUah: 21700, ...names,
     skuSchemaVersionId: preview.skuSchemaVersionId, previewToken: preview.previewToken }, opts());
-  await pool.query('UPDATE products SET magento_name_subject_ua=$1, magento_name_subject_en=$2 WHERE id=$3', ['Фігура', 'Figurine', saved.id]);
   return (await pool.query('SELECT * FROM products WHERE id=$1', [saved.id])).rows[0];
 }
 async function recountInput(p, patch = { size: '24/6/30' }) {
@@ -85,10 +85,10 @@ test('full lifecycle ordinary save and recount commit independent pending obliga
 
 test('full lifecycle failures roll back ordinary save and entire recount including reservations and audit', async () => {
   await setup(); const p = await save(); const input = await recountInput(p);
-  const preview = await products.buildProductPreview({ categoryCode: 'SV', answers, weight: 1260 });
+  const preview = await products.buildNewProductPreview({ categoryCode: 'SV', answers, weight: 1260, ...names });
   const before = await footprint();
   await failInsert('product_full_export_state', async () => {
-    await assert.rejects(products.saveProduct({ category: 'SV', answers, weight: 1260, manualPriceUah: 21700,
+    await assert.rejects(products.saveProduct({ category: 'SV', answers, weight: 1260, manualPriceUah: 21700, ...names,
       skuSchemaVersionId: preview.skuSchemaVersionId, previewToken: preview.previewToken }, opts()), /phase1 injected failure/);
     await assert.rejects(products.applyProductRecount(input, opts()), /phase1 injected failure/);
   });

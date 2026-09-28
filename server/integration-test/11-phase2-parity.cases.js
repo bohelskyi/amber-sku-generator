@@ -19,8 +19,9 @@ const capture = (p, db = pool) => exportsService.createExportSnapshot({ ...range
 const confirm = (s, db = pool) => exportsService.confirmExportSnapshot(s.id, opts(db));
 async function setup() { actor = await authenticateApplicationSession(); await installSouvenirFixture(); }
 async function save(review = false) {
-  const preview = await products.buildProductPreview({ categoryCode: 'SV', answers, weight: 1260 });
-  const saved = await products.saveProduct({ category: 'SV', answers, weight: 1260, manualPriceUah: 21700,
+  const subjects = { magento_name_subject_ua: 'Фігура', magento_name_subject_en: 'Figurine' };
+  const preview = await products.buildNewProductPreview({ categoryCode: 'SV', answers, weight: 1260, ...subjects });
+  const saved = await products.saveProduct({ category: 'SV', answers, weight: 1260, manualPriceUah: 21700, ...subjects,
     skuSchemaVersionId: preview.skuSchemaVersionId, previewToken: preview.previewToken }, opts());
   // Explicit fixture baseline; tested public name commands start from full revision 1.
   await pool.query(`UPDATE products SET magento_name_subject_ua='Фігура', magento_name_subject_en='Figurine',

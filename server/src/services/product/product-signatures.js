@@ -38,6 +38,7 @@ function getRecountStateSignature(product) {
 
 function getProductPreviewToken(preview, categoryCode, answers, isCalibrated) {
   const payload = {
+    ...(preview.newProductInput ? { newProductInput: preview.newProductInput } : {}),
     categoryCode,
     answers: stableAnswerEntries(answers),
     isCalibrated: Number(answers.is_calibrated ?? isCalibrated ?? 0),

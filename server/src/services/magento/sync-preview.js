@@ -297,8 +297,17 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
   const requiredAttributes = [];
   for (const a of schema.attributes.filter((a) => a.is_required && selected?.attributeCodes.includes(a.attribute_code))) {
     const applicability = typeApplicability(a, payload.type_id || raw?.type_id);
-    requiredAttributes.push({ attributeCode: a.attribute_code, applyTo: a.apply_to ?? null, applicability });
+    // Magento's built-in Time/Created and Time/Updated backends initialize these
+    // static entity timestamps. They are not merchant-supplied CREATE inputs.
+    // Keep UPDATE checks and every other required attribute unchanged; unfamiliar
+    // metadata for even these two codes must still fail closed.
+    const generatedOnCreate = !raw && ['created_at', 'updated_at'].includes(a.attribute_code)
+      && a.backend_type === 'static' && a.frontend_input === 'date'
+      && a.is_user_defined === false && a.is_visible === false;
+    requiredAttributes.push({ attributeCode: a.attribute_code, applyTo: a.apply_to ?? null, applicability,
+      ...(generatedOnCreate ? { valueSource: 'magento_generated_on_create' } : {}) });
     if (applicability === 'not_applicable') continue;
+    if (generatedOnCreate) continue;
     const candidate = payload[a.attribute_code] ?? payload.custom_attributes.find((v) => v.attribute_code === a.attribute_code)?.value;
     if (!populated(candidate) && !populated(values[a.attribute_code])) block('REQUIRED_ATTRIBUTE_VALUE_MISSING', { target: a.attribute_code });
   }

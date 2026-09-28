@@ -40,6 +40,7 @@ for (const modulePath of [
   './13-sqlite-import.cases',
   './14-phase3-repair.cases',
   './15-cutover.cases',
+  './16-sv-create.cases',
 ]) {
   require(modulePath);
 }

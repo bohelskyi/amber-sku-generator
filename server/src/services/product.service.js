@@ -42,6 +42,7 @@ const { decodeSku: decodeProductSku } = require('./product/product-decode');
 const { calculateDecisionPricing } = require('./product/correction-pricing-decision');
 const fullExport = require('./full-product-export.service');
 const { buildRecountEvidence, refreshRequired } = require('./product/recount-evidence');
+const newReadiness = require('./product/new-product-readiness');
 
 function normalizeSkuWriteError(err, sku) {
   if (err?.code !== '23505') return err;
@@ -946,6 +947,20 @@ async function applyProductRecount(payload, options = {}) {
   }
 }
 
+async function buildNewProductPreview(payload, options = {}) {
+  const category = String(payload.categoryCode || '').trim().toUpperCase();
+  const names = newReadiness.subjects(category, payload);
+  const preview = await buildProductPreview(payload, options);
+  if (!names) return preview;
+  await newReadiness.validate({ category, full_sku: preview.fullProposedSku,
+    total_price_uah: preview.totalPriceUah, weight: preview.weightVal,
+    details: { answers: normalizeAnswerMap(payload.answers || {}) },
+    magento_name_subject_ua: names.ua, magento_name_subject_en: names.en }, options.queryable || pool, { allowMissingPrice: true });
+  const result = { ...preview, newProductInput: { version: 1, names } };
+  result.previewToken = getProductPreviewToken(result, category, normalizeAnswerMap(payload.answers || {}), payload.isCalibrated);
+  return result;
+}
+
 async function saveProduct(payload, options = {}) {
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
@@ -971,12 +986,14 @@ async function saveProduct(payload, options = {}) {
       ?? payload.details?.isCalibrated
       ?? answers.is_calibrated
       ?? null;
-    const preview = await buildProductPreview({
+    const preview = await buildNewProductPreview({
       categoryCode,
       answers,
       weight: payload.weight,
       isCalibrated,
       skuSchemaVersionId: payload.skuSchemaVersionId,
+      magento_name_subject_ua: payload.magento_name_subject_ua,
+      magento_name_subject_en: payload.magento_name_subject_en,
     }, { queryable: client, lockSequence: true });
 
     if (!payload.previewToken) {
@@ -1037,12 +1054,16 @@ async function saveProduct(payload, options = {}) {
         stale: Boolean(preview.uahRateStale),
       },
     };
+    const names = preview.newProductInput?.names;
+    await newReadiness.validate({ category: categoryCode, full_sku: fullSku, weight, total_price_uah: totalPriceUah,
+      details, magento_name_subject_ua: names?.ua, magento_name_subject_en: names?.en }, client);
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`sku:${fullSku}`]);
     const result = await client.query(
       `INSERT INTO products
        (full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah,
-        price_per_gram, uah_rate, details, sku_schema_version_id, created_by_user_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12)
+        price_per_gram, uah_rate, details, sku_schema_version_id, created_by_user_id,
+        magento_name_subject_ua, magento_name_subject_en)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13, $14)
        RETURNING id`,
       [
         fullSku,
@@ -1057,6 +1078,8 @@ async function saveProduct(payload, options = {}) {
         JSON.stringify(details),
         Number(preview.skuSchemaVersionId || schemaVersionId),
         mutationContext.actorUserId,
+        names?.ua ?? null,
+        names?.en ?? null,
       ]
     );
     const productId = Number(result.rows[0].id);
@@ -1132,6 +1155,7 @@ module.exports = {
   decodeSku,
   getNextVariationSku,
   buildProductPreview,
+  buildNewProductPreview,
   buildProductRecountPreview,
   applyProductRecount,
   saveProduct,

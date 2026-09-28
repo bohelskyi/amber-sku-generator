@@ -1,7 +1,7 @@
 const express = require('express');
 const { getPublicConfig } = require('../../services/sku-schema.service');
 const { calculatePricing } = require('../../services/pricing.service');
-const { decodeSku, getNextVariationSku, buildProductPreview, buildProductRecountPreview, applyProductRecount, saveProduct, deleteProductBySku } = require('../../services/product.service');
+const { decodeSku, getNextVariationSku, buildNewProductPreview, buildProductRecountPreview, applyProductRecount, saveProduct, deleteProductBySku } = require('../../services/product.service');
 const { getRequestMutationContext } = require('../../audit/mutation-context');
 const { requirePermission } = require('../../auth/authorization');
 const {
@@ -23,7 +23,7 @@ const router = express.Router();
 router.get('/config', requirePermission('products.view'), async (req, res) => {
   try {
     const config = await getPublicConfig();
-    res.json(config);
+    res.json({ ...config, productCreateRequirements: require('../../services/product/new-product-readiness').requirements });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
@@ -31,7 +31,7 @@ router.get('/config', requirePermission('products.view'), async (req, res) => {
 
 router.post('/preview', requirePermission('products.create'), async (req, res) => {
   try {
-    const preview = await buildProductPreview(req.body || {});
+    const preview = await buildNewProductPreview(req.body || {});
     res.json(preview);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });

@@ -197,6 +197,7 @@ async function suggestEnglishSubject(payload = {}, options = {}) {
 }
 
 module.exports = {
+  normalizeSubject,
   applyProductMagentoName,
   previewProductMagentoName,
   suggestEnglishSubject,

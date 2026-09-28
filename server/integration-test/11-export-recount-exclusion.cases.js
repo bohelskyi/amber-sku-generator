@@ -45,12 +45,10 @@ test('recount export exclusion reproduction: comma weight successor misses refre
   };
   const answers = { material: 2, color: 3, souvenir: 1, statuette: 5, weight: 1260, size: '23/6/30' };
   const createProduct = async () => {
-    const preview = await call('/api/preview', { categoryCode: 'SV', answers, weight: 1260 });
-    const saved = await call('/api/save', { category: 'SV', answers, weight: 1260,
+    const names = { magento_name_subject_ua: 'Символіка', magento_name_subject_en: 'symbolic figurine' };
+    const preview = await call('/api/preview', { categoryCode: 'SV', answers, weight: 1260, ...names });
+    const saved = await call('/api/save', { category: 'SV', answers, weight: 1260, ...names,
       skuSchemaVersionId: preview.skuSchemaVersionId, previewToken: preview.previewToken, manualPriceUah: 21700 });
-    // A stored UA/EN pair mirrors the operator's source. This is fixture data only.
-    await pool.query(`UPDATE products SET magento_name_subject_ua=$1,magento_name_subject_en=$2 WHERE id=$3`,
-      ['Символіка', 'symbolic figurine', saved.id]);
     return (await pool.query('SELECT * FROM products WHERE id=$1', [saved.id])).rows[0];
   };
   const capture = (preview) => call('/api/export/snapshots', {
