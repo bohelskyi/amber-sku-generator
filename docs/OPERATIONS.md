@@ -8,8 +8,25 @@ Startup applies migrations, seeds only an empty configuration when appropriate, 
 
 Credentials and OIDC/session secrets come from the ignored project-level `.env` or process environment. Changing `.env` does not rotate credentials inside an already-initialized PostgreSQL volume. `VITE_*` variables are public browser configuration and must never contain secrets.
 
-Optional server-only Magento OAuth configuration and the post-deployment GET-only
-probe are documented in [Magento integration Phase 1A](MAGENTO_INTEGRATION.md).
+Server-only Magento OAuth configuration, GET-only discovery/review, explicit category
+creation and durable CLI sync jobs are documented in [Magento integration](MAGENTO_INTEGRATION.md).
+Migrations 041/042 are installed in the local operator database. The first published
+KL revision and successful real UPDATE of `KL3/11131351005`, job
+`f2253960-527a-40e9-b879-9041bb036453`, are recorded in the
+[2026-09-28 receipt](MAGENTO_INTEGRATION.md#achieved-state-2026-09-28).
+This does not certify migration installation in another deployment.
+
+There is no automated sync workflow/UI yet. `magento:sync` without `--apply` performs
+GET review **and persists a local queued job**; use the existing schema/evidence/preview
+read paths for a strictly read-only review. Product writes require explicit APPLY,
+current published bindings and fresh revalidation; success requires read-after-write
+verification. Keep category creation and binding publication as separate reviewed
+operations. CREATE uses disabled status; UPDATE preserves status/inventory, adds
+website memberships and scopes EN writes. Do not replay uncertain steps blindly.
+
+CSV retirement is planned only after existing queued/export work is reconciled;
+see [the retirement boundary](EXPORTS.md#planned-csv-retirement). Neither first sync
+success nor migrations 041/042 activate the CSV selector or retire its queues.
 
 ## OIDC deployment
 

@@ -2,6 +2,24 @@
 
 This guide defines current product/price delivery, snapshot and acknowledgment semantics. [Export templates](EXPORT_TEMPLATES.md) owns definition/publication and signed binding; [shared export sessions](SHARED_EXPORT_SESSIONS.md) owns collaboration and durable recovery. Production activation is still pending; use the [cutover runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md) for that one-time operation.
 
+## Planned CSV retirement
+
+The first direct Amber → Magento UPDATE without CSV succeeded on 2026-09-28 for
+`KL3/11131351005`, job `f2253960-527a-40e9-b879-9041bb036453`, with acknowledgement
+only after read-after-write verification. See the [Magento receipt and ownership rules](MAGENTO_INTEGRATION.md#achieved-state-2026-09-28).
+Legacy CSV delivery is now planned for retirement; its current contracts below remain
+active until an explicit cutover. This is separate from the migration-040 selector cutover.
+
+Before retirement, reconcile pending product and price queues, generated/downloaded
+but unconfirmed snapshots, shared-session attempts/results, and held/replacement
+lineages with their actual external disposition. Retain immutable artifacts and
+idempotent recovery; a downloaded file may still be imported later. A successful
+direct job does not confirm a CSV snapshot, release a hold, advance
+`product_full_export_state`/`product_export_revisions` acknowledgements or move the
+export cursor. Do not mark old work delivered merely because one same-SKU sync succeeded.
+Remaining group bindings come first, then automated sync workflow/UI and an explicit
+reconciled export cutover; none of those transitions is performed by documentation.
+
 ## Workflow and authority
 
 The operator reviews authoritative current data, explicitly creates an immutable snapshot, downloads stored files and separately confirms the snapshot. Preview/download never acknowledge delivery. Confirmation means local acceptance of the captured export, **not proof of Magento import**. A generated file may already have left the application even when unconfirmed.
@@ -138,4 +156,4 @@ CSV serialization quotes commas, quotes and line breaks. String formula sigils `
 
 ## Acceptance boundary
 
-The [2026-09-23 six-group Check Data record](archive/exports/MAGENTO_CHECK_DATA_2026-09-23.md) is historical validation, not an import receipt or acceptance of every later template. Target catalog/source mappings, template publications and real Magento acceptance remain deployment-specific. Explicit `url_key` generation, Magento attribute/option API synchronization and automated import/result history are not implemented. Historical duplicate SKUs and unapproved data/mapping cases remain separate work. See the [current pending-work index](README.md#deferred-work-and-operationally-pending-items).
+The [2026-09-23 six-group Check Data record](archive/exports/MAGENTO_CHECK_DATA_2026-09-23.md) is historical validation, not an import receipt or acceptance of every later template. Target catalog/source mappings, template publications and real Magento acceptance remain deployment-specific. Direct Magento CLI sync now has durable job/verification history and one successful KL UPDATE; automated workflow/UI, explicit `url_key` generation, attribute/option API synchronization and automated CSV import/result reconciliation remain unimplemented. Historical duplicate SKUs and unapproved data/mapping cases remain separate work. See the [current pending-work index](README.md#deferred-work-and-operationally-pending-items).

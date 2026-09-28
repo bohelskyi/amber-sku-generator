@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Accepted checked-in migrations `000`–`040` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`042`. Accepted migrations `000`–`040` and the locally applied `041`/`042` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -99,6 +99,13 @@ New paths touching these resources must follow existing lock order and final-sta
 | `040_full_product_export_cutover.sql` | Distinct legacy baseline and audit FK, typed business/compatibility exclusions, monotonic preparing/active selector gate with immutable audit references, baseline-aware pending index, deferred policy projection checks and writer guards; immutable snapshot selection and explicit replacement binding. No baseline acceptance, exclusion release or activation in migration. |
 | `041_magento_binding_revisions.sql` | Schema-only Magento binding revisions, normalized schema observations, route/attribute/semantic-or-evaluated option decisions and separate scoped ownership policies. Composite template/option identity FKs, uniqueness, source-kind constraints and publication immutability guards. No live IDs, credentials, candidates, policy seeds or Magento calls. See [the binding contract](MAGENTO_INTEGRATION.md#phase-1b2a-persistent-binding-foundation). |
 | `042_magento_sync_jobs.sql` | Durable immutable Magento sync intent, per-operation dispatch/verification ledger, idempotency and unfinished-SKU uniqueness. No seeded jobs, binding publication, remote calls or export-state changes. |
+
+The 2026-09-28 read-only check of the local operator database confirmed 041 applied at
+`2026-09-27T20:13:49.840Z` and 042 at `2026-09-27T22:52:43.558Z`. The normal migration
+path installed 042 before publication/enqueue; no runtime DDL was used. Stored
+checksums match the checked-in SQL. Publication and the first succeeded job are
+separate runtime evidence, recorded in [Magento integration](MAGENTO_INTEGRATION.md#achieved-state-2026-09-28).
+This is not a claim about migrations or CSV activation in another deployment.
 
 Export-template mutations take the existing access-admin advisory lock and recheck the actor's specific capability before locking family then draft. Publication allocates a per-family version number under those locks and inserts attribution and audit atomically. The unique family/source-revision tuple supports completed retries even after the draft advances. Draft base-version ownership uses a composite foreign key; historical source revision is not a foreign key to the mutable draft revision. Selection writers lock the singleton after the access boundary and only read immutable versions; they never lock products, revisions or cursors.
 
