@@ -185,11 +185,13 @@ async function previewProductInformation(payload = {}) {
   const client = await pool.connect();
   try {
     await lifecycleGate.begin(client, 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const result = await client.query('SELECT * FROM products WHERE id = $1', [productId]);
+    const result = await client.query(`SELECT p.*,i.public_sku FROM products p
+      JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id = $1`, [productId]);
     const product = result.rows[0];
     const preview = await evaluate(client, product, patch);
     await lifecycleGate.commit(client);
-    return { productId, sku: product.full_sku, ...preview, newAnswers: undefined };
+    return { productId, sku: product.full_sku, internalSku: product.full_sku,
+      publicSku: product.public_sku, ...preview, newAnswers: undefined };
   } catch (error) {
     await lifecycleGate.rollback(client);
     throw error;
@@ -210,7 +212,8 @@ async function applyProductInformation(payload = {}, options = {}) {
   const client = await (options.databasePool || pool).connect();
   try {
     await lifecycleGate.begin(client, 'BEGIN');
-    const result = await client.query('SELECT * FROM products WHERE id = $1 FOR UPDATE', [productId]);
+    const result = await client.query(`SELECT p.*,i.public_sku FROM products p
+      JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id = $1 FOR UPDATE OF p`, [productId]);
     const product = result.rows[0];
     const preview = await evaluate(client, product, patch, true);
     if (preview.previewToken !== token) {
@@ -233,7 +236,8 @@ async function applyProductInformation(payload = {}, options = {}) {
         reason: String(payload.reason || '').trim() || null },
     });
     await lifecycleGate.commit(client);
-    return { productId, sku: product.full_sku, changes: preview.changes,
+    return { productId, sku: product.full_sku, internalSku: product.full_sku,
+      publicSku: product.public_sku, changes: preview.changes,
       exportGuidance: preview.exportGuidance, fullRevision: lifecycle.revision };
   } catch (error) {
     await lifecycleGate.rollback(client);

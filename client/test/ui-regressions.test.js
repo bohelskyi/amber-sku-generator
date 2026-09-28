@@ -297,7 +297,8 @@ test('decode result keeps authoritative pricing drivers highlighted in a compact
   assert.match(decodeSource, /decode-readonly-value/);
   assert.match(decodeSource, /builder-summary/);
   assert.match(decodeSource, /sticky-summary-container/);
-  assert.match(decodeSource, /label="SKU"/);
+  assert.match(decodeSource, /label="Артикул"/);
+  assert.match(decodeSource, /label="Внутрішній SKU"/);
   assert.match(decodeSource, /Стан у базі/);
   assert.match(decodeSource, /Розраховано до округлення/);
   assert.match(decodeSource, /Фінальна збережена/);

@@ -380,7 +380,7 @@ function paintingSeo(type, suffix) {
 function mapProduct(product, catalog = new Map()) {
   const group = String(product.category || '');
   if (!HEADERS[group]) {
-    return { group, sku: product.full_sku, errors: [
+    return { group, sku: product.public_sku || product.full_sku, errors: [
       { field: 'attribute_set_code', message: 'Немає Magento-профілю для категорії.' },
     ] };
   }
@@ -388,7 +388,7 @@ function mapProduct(product, catalog = new Map()) {
     ? product.details.answers : {};
   const questions = catalog.get(group) || new Map();
   const errors = [];
-  const sku = String(product.full_sku || '');
+  const sku = String(product.public_sku || product.full_sku || '');
   const attrs = {};
   for (const [field, [key, values]] of Object.entries(ATTRIBUTE[group])) {
     attrs[field] = optionValue(product, answers, questions, field, key, values, errors);

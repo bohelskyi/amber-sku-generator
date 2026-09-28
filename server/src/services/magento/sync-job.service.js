@@ -12,6 +12,7 @@ const { writeAuditEvent } = require('../../audit/audit-events');
 const { APPLICATION_USER_ADMIN_LOCK_KEY, assertActorStillAuthorized } = require('../access-admin-transaction');
 const gate = require('../full-product-cutover-gate');
 const automatic = require('./automatic-sync-boundary');
+const { resolveProductLookup } = require('../product/public-identity');
 
 async function ledger(db, actorUserId, action, operation) {
   const client = await db.connect();
@@ -30,9 +31,12 @@ async function guard(config, input, options, operation, applying = false) {
   if (!Number.isSafeInteger(options.actorUserId) || options.actorUserId <= 0) plan.fail('MAGENTO_SYNC_ACTOR_REQUIRED');
   if (typeof input.sku !== 'string' || !input.sku.trim() || input.sku.length > 256) plan.fail('MAGENTO_SYNC_SKU_REQUIRED');
   const db = options.databasePool; const client = await db.connect();
-  const lock = `amber_magento_sync:${c.originHash(config.baseUrl)}:${input.sku}`;
-  let held = false;
+  let canonicalSku; let lock; let held = false;
   try {
+    const initiallyResolved = await resolveProductLookup(client, input.sku);
+    if (!initiallyResolved.product || initiallyResolved.internalMatchCount > 1) plan.fail('MAGENTO_SYNC_PRODUCT_NOT_UNIQUE');
+    canonicalSku = initiallyResolved.product.public_sku;
+    lock = `amber_magento_sync:${c.originHash(config.baseUrl)}:${canonicalSku}`;
     if (applying) {
       held = (await client.query('SELECT pg_try_advisory_lock(hashtext($1)) AS held', [lock])).rows[0].held;
       if (!held) plan.fail('MAGENTO_SYNC_BUSY');
@@ -48,15 +52,20 @@ async function guard(config, input, options, operation, applying = false) {
       AND state='published' ORDER BY version_number DESC LIMIT 1`, [revision.installationKey])).rows[0];
     if (revision.state !== 'published' || current?.id !== revision.id) plan.fail('MAGENTO_SYNC_PUBLISHED_CURRENT_BINDING_REQUIRED');
     if (revision.originHash !== c.originHash(config.baseUrl) || revision.schema.storeCode !== 'all') plan.fail('MAGENTO_SYNC_INSTALLATION_MISMATCH');
-    const rows = (await client.query('SELECT * FROM products WHERE full_sku=$1 ORDER BY id FOR NO KEY UPDATE', [input.sku])).rows;
-    if (rows.length !== 1) plan.fail('MAGENTO_SYNC_PRODUCT_NOT_UNIQUE');
-    const product = rows[0];
+    const resolved = await resolveProductLookup(client, canonicalSku);
+    if (!resolved.product) plan.fail('MAGENTO_SYNC_PRODUCT_NOT_UNIQUE');
+    const product = (await client.query(`SELECT p.*,i.public_sku FROM products p
+      JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id=$1 FOR NO KEY UPDATE OF p`,
+    [resolved.product.id])).rows[0];
+    if (resolved.internalMatchCount > 1) plan.fail('MAGENTO_SYNC_PRODUCT_NOT_UNIQUE');
     const lifecycle = (await client.query('SELECT * FROM product_full_export_state WHERE product_id=$1 FOR NO KEY UPDATE', [product.id])).rows[0];
     if (!lifecycle) plan.fail('MAGENTO_SYNC_PRODUCT_STATE_MISSING');
-    const state = { productId: product.id, amberHash: c.hash(plan.clean({ product, lifecycle })),
+    const state = { productId: product.id, publicIdentityId: product.public_product_identity_id,
+      publicSku: product.public_sku, amberHash: c.hash(plan.clean({ product, lifecycle })),
       bindingHash: c.hash(plan.clean(revision)), revision };
     if (options.automatic) {
-      if (state.productId !== options.automatic.productId) plan.fail('MAGENTO_SYNC_AMBER_CHANGED');
+      if (state.productId !== options.automatic.productId
+        || String(state.publicIdentityId) !== String(options.automatic.publicIdentityId)) plan.fail('MAGENTO_SYNC_AMBER_CHANGED');
       await automatic.assertEnabled(client, options);
       await automatic.assertGeneration(client, options);
       // Keep the SKU session lock, but release every business/access/publication
@@ -85,7 +94,7 @@ async function observe(config, input, options) {
 async function refresh(config, observation, options) {
   if (options.refresh) return options.refresh(observation);
   const client = createMagentoClient(config, { fetchImpl: options.fetchImpl });
-  const sku = observation.amber.product.full_sku; let raw = null;
+  const sku = observation.amber.product.public_sku || observation.amber.product.full_sku; let raw = null;
   try { raw = await client.findProductBySku(sku); }
   catch (e) { if (e.code !== 'MAGENTO_PRODUCT_NOT_FOUND') throw e; }
   const domainEvidence = await readDomains(config, { client, schema: observation.schema, sku, raw,
@@ -98,7 +107,7 @@ async function enqueue(config, input, options) {
     const existing = (await options.databasePool.query(`SELECT * FROM magento_sync_jobs WHERE origin_hash=$1 AND sku=$2
       AND state <> 'superseded' AND (state <> 'succeeded' OR (binding_revision_id=$3 AND amber_hash=$4
         AND ($5::bigint IS NULL OR automatic_generation=$5::bigint))) ORDER BY created_at DESC LIMIT 1`,
-    [state.revision.originHash, input.sku, input.bindingRevisionId, state.amberHash, options.automatic?.generation || null])).rows[0];
+    [state.revision.originHash, state.publicSku, input.bindingRevisionId, state.amberHash, options.automatic?.generation || null])).rows[0];
     if (existing) {
       if (existing.amber_hash !== state.amberHash) plan.fail('MAGENTO_SYNC_AMBER_CHANGED');
       if (existing.binding_hash !== state.bindingHash) plan.fail('MAGENTO_SYNC_BINDING_CHANGED');
@@ -108,7 +117,8 @@ async function enqueue(config, input, options) {
       });
       return existing; // Idempotent even after the successful plan changes the remote diff.
     }
-    const { observation, report } = await observe(config, input, options);
+    const externalInput = { ...input, sku: state.publicSku };
+    const { observation, report } = await observe(config, externalInput, options);
     if (options.automatic && (observation.categoryFailures?.length || observation.domainEvidence.failures?.length)) {
       plan.fail('MAGENTO_SYNC_READ_FAILED');
     }
@@ -117,10 +127,10 @@ async function enqueue(config, input, options) {
     return ledger(options.databasePool, options.actorUserId, 'enqueued', async (client) => {
       if (options.automatic) await automatic.assertSnapshot(client, state, options);
       const job = (await client.query(`
-      INSERT INTO magento_sync_jobs(id,product_id,sku,installation_key,origin_hash,binding_revision_id,
+      INSERT INTO magento_sync_jobs(id,product_id,public_product_identity_id,sku,installation_key,origin_hash,binding_revision_id,
         binding_hash,amber_hash,plan_hash,intent,baseline,created_by_user_id,automatic_generation)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13) RETURNING *`,
-    [randomUUID(), state.productId, input.sku, state.revision.installationKey, state.revision.originHash,
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14) RETURNING *`,
+    [randomUUID(), state.productId, state.publicIdentityId, state.publicSku, state.revision.installationKey, state.revision.originHash,
       input.bindingRevisionId, state.bindingHash, state.amberHash, c.hash(intent), JSON.stringify(intent),
       JSON.stringify(baseline), options.actorUserId, options.automatic?.generation || null])).rows[0];
       if (options.automatic) await automatic.attachJob(client, job, options);
@@ -223,7 +233,8 @@ async function supersedeUndispatched(config, id, options) {
   try {
     const job = (await client.query('SELECT * FROM magento_sync_jobs WHERE id=$1', [id])).rows[0];
     if (!job) plan.fail('MAGENTO_SYNC_JOB_NOT_FOUND');
-    if (job.origin_hash !== c.originHash(config.baseUrl) || job.product_id !== options.automatic?.productId
+    if (job.origin_hash !== c.originHash(config.baseUrl)
+      || String(job.public_product_identity_id) !== String(options.automatic?.publicIdentityId)
       || job.installation_key !== options.automatic?.installationKey) plan.fail('MAGENTO_SYNC_INSTALLATION_MISMATCH');
     lock = `amber_magento_sync:${c.originHash(config.baseUrl)}:${job.sku}`;
     if (!(await client.query('SELECT pg_try_advisory_lock(hashtext($1)) AS held', [lock])).rows[0].held) {

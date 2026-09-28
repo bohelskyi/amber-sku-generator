@@ -16,7 +16,9 @@ function fixture() {
     revisions: [], events: [], state: [{ exported_to_product_id: 0 }], members: [], lifecycle: [{ product_id: 1,
       revision: '9007199254740993', confirmed_revision: '0', delivery_version: '1', route: 'normal', hold_reason: null,
       source_correction_id: null, evidence: { origin: 'ordinary_save' } }] };
+  let publicSkuActivation = false;
   const client = { async query(sql) {
+    if (sql.includes('FROM public_sku_activation')) return { rows: [{ enabled: publicSkuActivation }] };
     if (sql.includes('AS members')) return { rows: [input] };
     if (sql.includes('FROM product_full_export_state')) return { rows: input.lifecycle };
     if (sql.includes('FROM sku_schema_versions')) return { rows: [{ id: 9, version: 1 }] };
@@ -24,11 +26,12 @@ function fixture() {
     if (sql.includes('FROM questions')) return { rows: [{ key: 'size', include_in_sku: 0, input_type: 'text' }] };
     throw new Error(`Unexpected evidence query: ${sql}`);
   } };
-  return { source, target, input, derive: () => buildRecountEvidence(client, source, target, []) };
+  return { source, target, input, setPublicSkuActivation: (value) => { publicSkuActivation = value; },
+    derive: () => buildRecountEvidence(client, source, target, []) };
 }
 
-test('phase2 shared evidence preserves bigint counters and binds lifecycle, names, review and exposure in every pricing mode', async () => {
-  for (const change of ['revision','delivery','names','review','exposure','target']) {
+test('phase2 shared evidence preserves bigint counters and binds lifecycle, names, review, exposure and public-SKU activation in every pricing mode', async () => {
+  for (const change of ['revision','delivery','names','review','exposure','target','public-sku-activation']) {
     const f = fixture(); const before = await f.derive();
     assert.equal(before.binding.lifecycle[0].revision, '9007199254740993');
     assert.equal(before.delivery.route, 'normal'); assert.equal(before.names.reviewRequired, false);
@@ -37,6 +40,7 @@ test('phase2 shared evidence preserves bigint counters and binds lifecycle, name
     if (change === 'names') f.source.magento_name_subject_en = 'Updated';
     if (change === 'review') f.source.magento_name_review_required = true;
     if (change === 'target') f.target.answers.kind = 2;
+    if (change === 'public-sku-activation') f.setPublicSkuActivation(true);
     if (change === 'exposure') f.input.members.push({ product_id: 1, sku_at_capture: 'SV1', snapshot_id: 's',
       capture_kind: 'full_product', evidence_hash: 'hash', status: 'generated' });
     const after = await f.derive(); assert.notEqual(after.signature, before.signature, change);

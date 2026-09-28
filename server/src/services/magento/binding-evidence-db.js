@@ -78,7 +78,7 @@ async function readAmberEvidence(databasePool, { templateVersionId, mode, suppor
         || row.output_contract !== compiled.definition.outputContract || row.format_version !== compiled.definition.formatVersion) invalid();
       template = { kind: 'published', versionId: row.id, templateId: row.template_id, versionNumber: row.version_number };
     } else {
-      let definition = materializeMagentoV1(await loadMagentoCatalog(client));
+      let definition = materializeMagentoV1(await loadMagentoCatalog(client), { publicSku: true });
       if (supportSystem) {
         const { loadSourceEvidence, validateSourceReferences } = require('../export-templates/source-references');
         const evidence = await loadSourceEvidence(client);
@@ -120,9 +120,9 @@ async function readAmberEvidence(databasePool, { templateVersionId, mode, suppor
     const ids = [...new Set(candidates.map((p) => p.product_id))];
     if (sku !== undefined) {
       require('./sync-preview-db').selection({ sku });
-      const selected = (await client.query('SELECT id FROM products WHERE full_sku=$1 ORDER BY id LIMIT 2', [sku])).rows;
-      if (selected.length !== 1) throw require('./binding-contract').error(422, 'MAGENTO_PREVIEW_PRODUCT_NOT_UNIQUE', 'SKU must select one product');
-      if (!ids.includes(selected[0].id)) ids.push(selected[0].id);
+      const selected = await require('../product/public-identity').resolveProductLookup(client, sku);
+      if (!selected.product || selected.internalMatchCount > 1) throw require('./binding-contract').error(422, 'MAGENTO_PREVIEW_PRODUCT_NOT_UNIQUE', 'SKU must select one product');
+      if (!ids.includes(selected.product.id)) ids.push(selected.product.id);
     }
     const { products, missingProductIds } = await loadDraftPreviewProducts(client, ids);
     if (missingProductIds.length) invalid();

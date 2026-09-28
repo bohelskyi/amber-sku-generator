@@ -137,7 +137,21 @@ For all regression suites, use the checks in [AGENTS](../AGENTS.md).
 
 ## Final CSV to API cutover
 
-Migration 045 adds the explicit operator boundary; it performs no cutover by itself.
+Migration 045 adds the explicit operator boundary; it performs no cutover by itself. Migration 046 separately changes the durable request key from product revision ID to immutable public-product identity while retaining `product_id` on each request/job as the exact desired revision that produced the generation. A recount therefore replaces the desired revision for one remote SKU rather than creating a second remote identity. Source retirement does not enqueue a competing request.
+
+An undispatched predecessor automatic job can be superseded only through the existing zero-step-evidence guard. Any dispatched/uncertain predecessor remains `needs_attention/reconciliation_required`. Generation acknowledgement is conditional: a successful older attached job advances only its own generation and leaves a newer successor generation pending.
+
+The stable-public-SKU activation and delivery cutover remain distinct audited commands. The required production ordering is: freeze all business writers; verify zero pending normal/replacement legacy product CSV work and zero generated-unconfirmed product artifacts; apply the reviewed `public-sku:activation` preflight; establish, validate and explicitly publish the reviewed public-SKU-aware successor Magento template/binding; run a fresh delivery-cutover preflight; apply the separate one-way delivery cutover; verify automatic status and product CSV retirement; only then resume ordinary product/recount writes. Migration 046's database guard rejects product writes in the interval between stable-SKU activation and delivery cutover. Do not use the hazardous legacy `magento-products-v1` UPDATE CSV in that interval: its `product_online=2` can disable an existing Magento product.
+
+```powershell
+cd server
+$env:DATABASE_URL = '<secret target URL>'
+npm run public-sku:activation -- preflight --expected-database <DB> --actor-user-id <USER_ID> --output <NEW_PUBLIC_SKU_PREFLIGHT_JSON>
+npm run public-sku:activation -- apply --expected-database <DB> --actor-user-id <USER_ID> --plan <PUBLIC_SKU_PREFLIGHT_JSON> --expected-hash <PLAN_HASH>
+```
+
+These commands are not part of normal startup and were not run by this implementation.
+
 `magento:delivery-cutover preflight` is read-only and reports the current publication,
 worker actor, automatic jobs/requests, generated-unconfirmed product files, current
 shared attempts, pending normal/replacement work and preserved Held count. Apply

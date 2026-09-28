@@ -1,5 +1,15 @@
 # Magento integration
 
+## Stable public SKU boundary
+
+Migration 046 separates the externally addressed Magento article from the encoded configuration/history SKU. Exact product GET, CREATE/UPDATE payload `sku`, category, website, inventory and store-view operations, read-after-write verification, durable job remote identity and generated `Art: {sku}` names use `public_sku`. The exact product revision remains captured by product ID, internal `full_sku`, lifecycle state and job hash. Existing legacy products backfill `public_sku = full_sku`, so no Magento rename is implied. Installing the migration alone retains legacy recount identity; after the separately audited stable-public-SKU activation, recount successors inherit the same public identity and are delivered as UPDATEs of that remote product.
+
+Generic API fields named `sku`, `fullSku` or `full_sku` retain their prior encoded/internal meaning. New response fields explicitly expose `publicSku` and `internalSku`; only contracts whose purpose is Magento/product article identity switch their value to public SKU.
+
+The fixed code-backed mapper consumes public SKU directly. Immutable template publications are not reinterpreted: `full_sku` remains internal in evaluator versions 1 and 2. Evaluator `magento-declarative-3` with source contract `public-product-identity-v1` adds the distinct `public_sku` source for a future reviewed successor publication. No existing publication or binding is mutated automatically.
+
+The later successor review must also consider the post-publication Magento option `rozmir_kartyny`: label `15×15`, option ID `6060`, Amber semantic `AR.size` value `28`. This is candidate evidence only; migration 046 does not approve, publish or bind it.
+
 The [automatic product workflow](MAGENTO_AUTOMATIC_SYNC.md) is implemented behind
 migration 044's default-disabled gate. It reuses the durable jobs below, adds local
 transactional requests and product-history status, and does not retire CSV. Dated

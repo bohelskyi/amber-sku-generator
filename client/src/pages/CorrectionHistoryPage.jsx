@@ -45,9 +45,9 @@ function SkuTransition({ item }) {
         <div className="text-xs font-semibold uppercase text-slate-500">Було</div>
         <div className="mt-1 flex min-w-0 items-center gap-2">
           <span className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-slate-800">
-            {item.sourceSku}
+            {item.sourcePublicSku || item.sourceSku}
           </span>
-          <CopyButton label="Скопіювати старий артикул" value={item.sourceSku} />
+          <CopyButton label="Скопіювати старий артикул" value={item.sourcePublicSku || item.sourceSku} />
         </div>
       </div>
       <ArrowRight size={16} className="hidden text-slate-400 sm:block" />
@@ -55,9 +55,9 @@ function SkuTransition({ item }) {
         <div className="text-xs font-semibold uppercase text-[#8a5f2b]">Стало</div>
         <div className="mt-1 flex min-w-0 items-center gap-2">
           <span className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-slate-900">
-            {item.correctedSku}
+            {item.correctedPublicSku || item.correctedSku}
           </span>
-          <CopyButton label="Скопіювати новий артикул" value={item.correctedSku} />
+          <CopyButton label="Скопіювати новий артикул" value={item.correctedPublicSku || item.correctedSku} />
         </div>
       </div>
     </div>
@@ -285,7 +285,7 @@ function CorrectionReport() {
                     </div>
                     <div className="flex items-center gap-2">
                       {item.reason && <span className="text-sm text-slate-600">{item.reason}</span>}
-                      <Link to={`/admin/corrections/history?sku=${encodeURIComponent(item.sourceSku)}`} className="btn btn-outline btn-compact-md">Історія товару</Link>
+                      <Link to={`/admin/corrections/history?sku=${encodeURIComponent(item.sourcePublicSku || item.sourceSku)}`} className="btn btn-outline btn-compact-md">Історія товару</Link>
                     </div>
                   </div>
 

@@ -2,13 +2,14 @@
 // state. Delivery history is evidence, not the Magento same-SKU UPDATE selector.
 function syncEligibility(product, currentMagento) {
   const state = product.exportState;
+  const publicSku = product.public_sku || product.full_sku;
   const mode = currentMagento ? 'update' : 'create';
   const reasons = [];
   const deny = (code, rule) => reasons.push({ code, rule });
   if (product.status !== 'active') deny('AMBER_PRODUCT_NOT_CURRENT', `products.status = ${product.status ?? 'unknown'}`);
   if (product.corrected_to_product_id != null) deny('AMBER_PRODUCT_NOT_CURRENT', 'products.corrected_to_product_id IS NOT NULL');
   if (state?.route === 'retired') deny('AMBER_PRODUCT_NOT_CURRENT', 'product_full_export_state.route = retired');
-  if (currentMagento && currentMagento.sku !== product.full_sku) deny('AMBER_SYNC_IDENTITY_MISMATCH', 'Magento SKU must exactly equal products.full_sku; rename is unsupported');
+  if (currentMagento && currentMagento.sku !== publicSku) deny('AMBER_SYNC_IDENTITY_MISMATCH', 'Magento SKU must exactly equal the stable public SKU; rename is unsupported');
 
   // These are the independent exclusion signals already used by the lifecycle
   // repair classifier. They win even if a stale product flag says not excluded.
@@ -17,7 +18,7 @@ function syncEligibility(product, currentMagento) {
   if (state?.independentExclusion === true) deny('AMBER_PRODUCT_EXCLUDED', 'product_full_export_state.evidence.independentExclusion = true');
   if (state?.recount_compatibility_excluded) deny('AMBER_PRODUCT_EXCLUDED', 'product_full_export_state.recount_compatibility_excluded = true');
 
-  const priorExposureUpdate = mode === 'update' && currentMagento.sku === product.full_sku
+  const priorExposureUpdate = mode === 'update' && currentMagento.sku === publicSku
     && state?.route === 'hold' && state.hold_reason === 'prior_exposure'
     && ['none', 'unknown'].includes(state.business_exclusion_state);
   if (state?.route === 'hold' && !priorExposureUpdate && state.hold_reason !== 'intentional_exclusion') {

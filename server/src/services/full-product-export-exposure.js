@@ -6,7 +6,9 @@ const { buildLineageGraph } = require('./export-exposure/manifest');
 async function readLineageExposure(client, sourceId, sourceBeforeRecount) {
   const { rows: [input] } = await client.query(`SELECT
     (SELECT COALESCE(jsonb_agg(p ORDER BY id), '[]') FROM
-      (SELECT id, full_sku, status, corrected_from_product_id, corrected_to_product_id FROM products) p) AS products,
+      (SELECT p.id, p.full_sku, i.public_sku, p.status, p.corrected_from_product_id,
+        p.corrected_to_product_id FROM products p
+        JOIN public_product_identities i ON i.id=p.public_product_identity_id) p) AS products,
     (SELECT COALESCE(jsonb_agg(c ORDER BY id), '[]') FROM
       (SELECT id, source_product_id, corrected_product_id, source_sku, corrected_sku FROM product_corrections) c) AS corrections,
     (SELECT COALESCE(jsonb_agg(s ORDER BY id), '[]') FROM

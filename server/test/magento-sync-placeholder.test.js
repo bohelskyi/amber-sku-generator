@@ -72,12 +72,13 @@ test('database sync-preview loader retains authoritative historical support for 
     const f = fixture(value); const compiled = f.amber.compiled;
     const client = { release() {}, async query(sql) {
       if (/^BEGIN|^COMMIT|^ROLLBACK/.test(sql)) return { rows: [] };
-      if (sql.includes('SELECT id, full_sku, status')) return { rows: [f.product] };
+      if (sql.includes('public_match')) return { rows: [{ ...f.product, public_sku: f.product.full_sku,
+        public_match: true, internal_match: true }] };
       if (sql.includes('SELECT id FROM products')) return { rows: [{ id: f.product.id }] };
       if (sql.includes('SELECT * FROM export_template_versions')) return { rows: [{ id: 'synthetic',
         definition: f.definition, definition_hash: compiled.hash, evaluator_version: f.definition.evaluatorVersion,
         output_contract: f.definition.outputContract, format_version: f.definition.formatVersion }] };
-      if (sql.includes('FROM products WHERE id = ANY')) return { rows: [f.product] };
+      if (sql.includes('WHERE p.id = ANY')) return { rows: [{ ...f.product, public_sku: f.product.full_sku }] };
       if (sql.includes('FROM sku_schema_versions')) return { rows: [f.historical] };
       if (sql.includes('FROM product_full_export_state')) return { rows: [] };
       if (sql.includes('transaction_timestamp')) return { rows: [{ observed_at: new Date() }] };

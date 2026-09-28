@@ -73,7 +73,7 @@ test('Draft sample scopes source proof to stored BR products while same draft va
   const searched = await request(`${root}/sample-products?q=${encodeURIComponent(stored.BR.full_sku)}`, { authentication: admin });
   assert.equal(searched.response.status, 200, searched.text);
   assert.deepEqual(searched.data.products.map((p) => p.id), [stored.BR.id]);
-  assert.deepEqual(Object.keys(searched.data.products[0]).sort(), ['category', 'full_sku', 'id', 'status']);
+  assert.deepEqual(Object.keys(searched.data.products[0]).sort(), ['category', 'full_sku', 'id', 'public_sku', 'status']);
   const source = await request(`${root}/source-details?category=NM&key=extra`, { authentication: admin });
   assert.equal(source.response.status, 200, source.text);
   assert.ok(source.data.historical.some((q) => q.options.some((o) => o.value_id === '1' && o.sku_code === '901' && o.label === 'Synthetic semantic option')));
@@ -91,7 +91,8 @@ test('Draft sample scopes source proof to stored BR products while same draft va
   assert.equal(preview.response.status, 200, preview.text); // Fails before fix with exact NM/AR source diagnostics.
   assert.equal(preview.data.draftOnly, true); assert.equal(preview.data.publicationReady, false);
   assert.deepEqual(preview.data.globalSourceDiagnostics, validation.data.details.diagnostics);
-  assert.deepEqual(preview.data.sampleProducts, [{ productId: stored.BR.id, sku: stored.BR.full_sku, category: 'BR' }]);
+  assert.deepEqual(preview.data.sampleProducts, [{ productId: stored.BR.id, sku: stored.BR.full_sku,
+    internalSku: stored.BR.full_sku, publicSku: stored.BR.full_sku, category: 'BR' }]);
   assert.equal(preview.data.previewToken, undefined);
   assert.equal(preview.data.result.readyCount, 1);
   const expectedName = `[ТЕСТ] Браслет з натурального бурштину. Колір: Світлий. Арт: ${stored.BR.full_sku}`;

@@ -69,7 +69,7 @@ test('phase2 new requests bind lifecycle, complete lineage, inherited names and 
   await setup(); const p = await save(); const before = await state(p.id);
   const r = await claimed(p, { symbolic_stat: 1 });
   const stored = await requestRow(r.id); const evidence = stored.proposed_payload.recountEvidence;
-  assert.equal(evidence.version, 2); assert.deepEqual(evidence.names, { ua: 'Фігура', en: 'Figurine', reviewRequired: true });
+  assert.equal(evidence.version, 3); assert.deepEqual(evidence.names, { ua: 'Фігура', en: 'Figurine', reviewRequired: true });
   assert.equal(evidence.lifecycle[0].deliveryVersion, '1'); assert.equal(evidence.exposure.classification, 'reliably_unexposed');
   assert.equal(r.delivery.route, 'normal'); assert.equal(r.delivery.nameReviewRequired, true); assert.equal(r.refreshRequired, false);
   const unchanged = await refresh(r); assert.deepEqual(unchanged.request.proposedPayload.recountEvidence, evidence);

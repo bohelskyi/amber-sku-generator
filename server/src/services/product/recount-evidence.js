@@ -5,7 +5,7 @@ const { getSchemaVersionById } = require('../sku-schema.service');
 const { readLineageExposure } = require('../full-product-export-exposure');
 const { readFullProductStates } = require('../full-product-export.service');
 
-const RECOUNT_EVIDENCE_VERSION = 2;
+const RECOUNT_EVIDENCE_VERSION = 3;
 
 function refreshRequired() {
   return Object.assign(new Error('Товар, назви або стан доставки змінилися. Оновіть запит або preview переобліку.'),
@@ -16,6 +16,10 @@ function refreshRequired() {
 // All callers use this derivation. A write caller already owns the source product
 // and any existing request/SKU locks before acquiring ascending lifecycle locks.
 async function buildRecountEvidence(client, source, target, decodedAnswers, { lock = false } = {}) {
+  const activation = (await client.query(
+    `SELECT enabled FROM public_sku_activation WHERE singleton${lock ? ' FOR SHARE' : ''}`
+  )).rows[0];
+  if (!activation) throw new Error('Stable public SKU activation state is unavailable');
   let disposition = await readLineageExposure(client, Number(source.id), source);
   const states = await readFullProductStates(client, disposition.productIds, { lock });
   // Confirmation never locks products. Re-read its exposure after the lifecycle
@@ -26,6 +30,7 @@ async function buildRecountEvidence(client, source, target, decodedAnswers, { lo
     FROM questions WHERE category_code=$1 ORDER BY id`, [target.categoryCode])).rows;
   const names = inheritRecountNames(source, target, schema, questions, decodedAnswers);
   const binding = { version: RECOUNT_EVIDENCE_VERSION,
+    publicSkuActivation: Boolean(activation.enabled),
     sourceState: getRecountStateSignature(source),
     lifecycle: states.map((s) => ({ productId: Number(s.product_id), revision: String(s.revision),
       confirmedRevision: String(s.confirmed_revision), deliveryVersion: String(s.delivery_version),

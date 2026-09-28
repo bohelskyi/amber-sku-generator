@@ -216,7 +216,7 @@ function AppPage() {
         marketingRoundingEnabled={sku.priceChangeMarketingRounding}
         mode={sku.priceChangeMode}
         preview={sku.priceChangePreview}
-        sku={sku.decodeData?.sku}
+        sku={sku.decodeData?.publicSku || sku.decodeData?.sku}
         usdPerGram={sku.priceChangeUsdPerGram}
         onCancel={sku.handleCancelPriceChange}
         onConfirm={sku.handleConfirmPriceChange}

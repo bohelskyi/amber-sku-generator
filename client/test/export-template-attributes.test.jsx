@@ -51,16 +51,17 @@ it('normal AR size shows mappings, absent 29/30/31 and source failures without t
 });
 it('SKU selection deduplicates, supports pages and rejects late/cancelled search responses', async () => {
   let resolve; const late = new Promise((r) => { resolve = r; });
-  const search = vi.fn().mockReturnValueOnce(late).mockResolvedValue({ data: { products: [{ id: 21, full_sku: 'BR2/EXACT-001', category: 'BR', status: 'active' }], nextOffset: 20 } });
+  const search = vi.fn().mockReturnValueOnce(late).mockResolvedValue({ data: { products: [{ id: 21, full_sku: 'BR2/EXACT-001', public_sku: 'AG-000021', category: 'BR', status: 'active' }], nextOffset: 20 } });
   function Picker() { const [selected, setSelected] = useState([]); return <SampleProducts search={search} selected={selected} onChange={setSelected} />; }
   render(<Picker />);
   fireEvent.change(screen.getByLabelText('Пошук за SKU'), { target: { value: 'OLD' } }); await waitFor(() => expect(search).toHaveBeenCalledTimes(1));
   fireEvent.change(screen.getByLabelText('Пошук за SKU'), { target: { value: 'BR2/EXACT-001' } });
   expect(search.mock.calls[0][1].aborted).toBe(true);
-  await screen.findByRole('button', { name: 'Обрати BR2/EXACT-001' });
+  await screen.findByRole('button', { name: 'Обрати AG-000021' });
   resolve({ data: { products: [{ id: 99, full_sku: 'OLD', category: 'AR' }], nextOffset: null } });
-  fireEvent.click(screen.getByRole('button', { name: 'Обрати BR2/EXACT-001' }));
-  expect(screen.getByRole('button', { name: 'Обрати BR2/EXACT-001' }).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Обрати AG-000021' }));
+  expect(screen.getByRole('button', { name: 'Обрати AG-000021' }).disabled).toBe(true);
+  expect(screen.getAllByText(/BR2\/EXACT-001/).length).toBeGreaterThan(0);
   expect(screen.getByText('Вибрано: 1 / 100')).toBeTruthy(); expect(screen.queryByRole('button', { name: 'Обрати OLD' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Наступні товари' })); await waitFor(() => expect(search).toHaveBeenLastCalledWith({ q: 'BR2/EXACT-001', offset: 20 }, expect.any(AbortSignal)));
 });

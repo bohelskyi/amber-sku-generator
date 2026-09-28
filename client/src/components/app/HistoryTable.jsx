@@ -2,6 +2,7 @@ import { formatDecimal, formatUah, formatUsd } from '../../lib/formatters';
 import { Link } from 'react-router-dom';
 
 export function HistoryTable({ history, config, selectedCat, onCopyText, onDecode, onDelete, canArchive = true }) {
+  const article = (item) => item.public_sku || item.full_sku;
   return (
     <section className="fade-up">
       <details className="collapsible">
@@ -31,7 +32,10 @@ export function HistoryTable({ history, config, selectedCat, onCopyText, onDecod
               <tbody className="divide-y divide-slate-200">
                 {history.map((item) => (
                   <tr key={item.id} className="hover:bg-slate-50">
-                    <td className="table-cell whitespace-nowrap text-sm font-mono font-semibold text-slate-800">{item.full_sku}</td>
+                    <td className="table-cell whitespace-nowrap text-sm font-mono font-semibold text-slate-800">
+                      <div>{article(item)}</div>
+                      {article(item) !== item.full_sku && <div className="text-xs font-normal text-slate-500">Внутрішній: {item.full_sku}</div>}
+                    </td>
                     <td className="table-cell whitespace-nowrap text-sm text-slate-500">{config.categories[item.category]?.name}</td>
                     <td className="table-cell whitespace-nowrap text-sm text-slate-500">{item.weight > 0 ? `${formatDecimal(item.weight)}г` : '-'}</td>
                     <td className="table-cell whitespace-nowrap text-sm text-slate-500">
@@ -40,9 +44,9 @@ export function HistoryTable({ history, config, selectedCat, onCopyText, onDecod
                     <td className="table-cell whitespace-nowrap text-sm">
                       {!selectedCat && (
                         <div className="flex flex-wrap gap-2">
-                          <button onClick={() => onCopyText(item.full_sku, 'SKU')} className="btn btn-outline text-xs px-2 py-1">Копіювати SKU</button>
-                          <button onClick={() => onDecode(item.full_sku)} className="btn btn-outline text-xs px-2 py-1">Розшифрувати</button>
-                          <Link to={`/admin/corrections/history?sku=${encodeURIComponent(item.full_sku)}`} className="btn btn-outline text-xs px-2 py-1">Історія</Link>
+                          <button onClick={() => onCopyText(article(item), 'SKU')} className="btn btn-outline text-xs px-2 py-1">Копіювати SKU</button>
+                          <button onClick={() => onDecode(article(item))} className="btn btn-outline text-xs px-2 py-1">Розшифрувати</button>
+                          <Link to={`/admin/corrections/history?sku=${encodeURIComponent(article(item))}`} className="btn btn-outline text-xs px-2 py-1">Історія</Link>
                           <button
                             onClick={() => item.total_price_uah
                               ? onCopyText(formatUah(item.total_price_uah), 'Ціну')
@@ -51,7 +55,7 @@ export function HistoryTable({ history, config, selectedCat, onCopyText, onDecod
                           >
                             Копіювати ціну
                           </button>
-                          {canArchive && <button onClick={() => onDelete(item.full_sku)} className="btn btn-danger text-xs px-2 py-1">Архівувати</button>}
+                          {canArchive && <button onClick={() => onDelete(article(item))} className="btn btn-danger text-xs px-2 py-1">Архівувати</button>}
                         </div>
                       )}
                     </td>

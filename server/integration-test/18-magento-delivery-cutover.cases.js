@@ -42,13 +42,15 @@ suite.test('Magento delivery cutover is previewed, atomic, persistent and perman
     const before = (await db.query('SELECT * FROM magento_auto_sync_activation')).rows[0];
     const blocked = await service.preflight(input, { databasePool: db });
     assert.ok(blocked.blockers.some((item) => item.code === 'MAGENTO_CUTOVER_PUBLICATION_REQUIRED'));
+    assert.ok(blocked.blockers.some((item) => item.code === 'MAGENTO_CUTOVER_PUBLIC_SKU_ACTIVATION_REQUIRED'));
     assert.deepEqual((await db.query('SELECT * FROM magento_auto_sync_activation')).rows[0], before, 'preflight is mutation-free');
     await assert.rejects(service.apply({ ...input, planHash: blocked.planHash }, { databasePool: db,
       mutationContext: { actorUserId: Number(actor.id) } }), { code: 'MAGENTO_CUTOVER_BLOCKED' });
     assert.deepEqual((await db.query('SELECT * FROM magento_auto_sync_activation')).rows[0], before, 'failed apply changes neither mechanism');
 
     const templateId = crypto.randomUUID(); const versionId = crypto.randomUUID(); const bindingId = crypto.randomUUID();
-    const definition = { formatVersion: 1, evaluatorVersion: 'test-v1', outputContract: 'test-v1' };
+    const definition = { formatVersion: 1, evaluatorVersion: 'magento-declarative-3',
+      outputContract: 'magento-products-v1', sourceContractVersion: 'public-product-identity-v1' };
     const definitionHash = contract.hash(definition);
     await db.query(`INSERT INTO export_templates(id,template_key,display_name,created_by_user_id)
       VALUES($1,'cutover-test','Cutover test',$2)`, [templateId, actor.id]);
@@ -56,16 +58,22 @@ suite.test('Magento delivery cutover is previewed, atomic, persistent and perman
       VALUES($1,$2::jsonb,$3)`, [templateId, JSON.stringify(definition), actor.id]);
     await db.query(`INSERT INTO export_template_versions(id,template_id,version_number,source_draft_revision,definition,definition_hash,
         format_version,evaluator_version,output_contract,published_by_user_id)
-      VALUES($4,$1,1,1,$2::jsonb,$5,1,'test-v1','test-v1',$3)`,
+      VALUES($4,$1,1,1,$2::jsonb,$5,1,'magento-declarative-3','magento-products-v1',$3)`,
     [templateId, JSON.stringify(definition), actor.id, versionId, definitionHash]);
     await db.query(`INSERT INTO magento_binding_revisions(id,installation_key,origin_hash,template_id,template_version_id,
       template_definition_hash,evaluator_version,output_contract,format_version,schema_fingerprint,topology_fingerprint,
       observed_at,observation_store_code,created_by_user_id,modified_by_user_id)
-      VALUES($1,'production',$2,$3,$4,$5,'test-v1','test-v1',1,$6,$6,CURRENT_TIMESTAMP,'all',$7,$7)`,
+      VALUES($1,'production',$2,$3,$4,$5,'magento-declarative-3','magento-products-v1',1,$6,$6,CURRENT_TIMESTAMP,'all',$7,$7)`,
     [bindingId, contract.originHash(input.origin), templateId, versionId, definitionHash, '0'.repeat(64), actor.id]);
     await db.query(`UPDATE magento_binding_revisions SET state='published',revision=2,version_number=1,
       published_by_user_id=$2,published_at=CURRENT_TIMESTAMP,modified_by_user_id=$2,modified_at=CURRENT_TIMESTAMP WHERE id=$1`,
     [bindingId, actor.id]);
+    const publicService = require('../src/services/public-sku-activation.service');
+    const publicPreflight = await publicService.preflight({ expectedDatabase: name, actorUserId: Number(actor.id) },
+      { databasePool: db });
+    assert.deepEqual(publicPreflight.blockers, []);
+    await publicService.apply({ expectedDatabase: name, actorUserId: Number(actor.id), planHash: publicPreflight.planHash },
+      { databasePool: db, mutationContext: { actorUserId: Number(actor.id), requestId: 'public-sku-cutover-test' } });
     const ready = await service.preflight(input, { databasePool: db });
     assert.deepEqual(ready.blockers, []);
     const applied = await service.apply({ ...input, planHash: ready.planHash }, { databasePool: db,

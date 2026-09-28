@@ -43,6 +43,7 @@ const { calculateDecisionPricing } = require('./product/correction-pricing-decis
 const fullExport = require('./full-product-export.service');
 const { buildRecountEvidence, refreshRequired } = require('./product/recount-evidence');
 const newReadiness = require('./product/new-product-readiness');
+const { resolveProductLookup } = require('./product/public-identity');
 
 function normalizeSkuWriteError(err, sku) {
   if (err?.code !== '23505') return err;
@@ -485,6 +486,12 @@ async function buildRecountPreview({
     skuSchemaVersionId: activeSchema?.id,
   }, { pricingDecision, queryable });
   const correctionSku = await resolveCorrectionSku(correctedPreview.fullProposedSku, queryable);
+  const publicSkuActivation = await queryable.query(
+    'SELECT enabled FROM public_sku_activation WHERE singleton'
+  );
+  const correctedPublicSku = publicSkuActivation.rows[0]?.enabled
+    ? sourceDecoded.publicSku
+    : correctionSku.fullSku;
   const previewCalculatedPriceUah = toUahNumber(correctedPreview.calculatedPriceUah);
   const previewAutoPriceUah = toUahNumber(correctedPreview.totalPriceUah);
   const previewManualPrice = pricingDecision?.mode === 'manual_uah'
@@ -521,6 +528,8 @@ async function buildRecountPreview({
   const result = {
     source: {
       sku: sourceDecoded.sku,
+      internalSku: sourceDecoded.sku,
+      publicSku: sourceDecoded.publicSku,
       productId: sourceDecoded.product.id,
       answers: previousAnswers,
       decodedAnswers: sourceDecoded.decodedAnswers,
@@ -542,6 +551,8 @@ async function buildRecountPreview({
       skuSchemaMarker: correctedPreview.skuSchemaMarker,
       answers: correctedAnswers,
       fullSku: correctionSku.fullSku,
+      internalSku: correctionSku.fullSku,
+      publicSku: correctedPublicSku,
       proposedFullSku: correctedPreview.fullProposedSku,
       baseSku: correctedPreview.baseSku,
       nextSeq: correctedPreview.nextSeq,
@@ -601,12 +612,13 @@ async function applyProductRecount(payload, options = {}) {
 
     const sourceProductId = Number(preview.source.productId);
     const sourceLockResult = await client.query(
-      `SELECT id, full_sku, category, weight, total_price, total_price_uah,
+      `SELECT p.id, p.full_sku, p.category, p.weight, p.total_price, p.total_price_uah,
               price_per_gram, uah_rate, details, status, corrected_to_product_id,
               sku_schema_version_id, corrected_from_product_id, exclude_from_export, magento_name_subject_ua,
-              magento_name_subject_en, magento_name_review_required
-       FROM products
-       WHERE id = $1
+              magento_name_subject_en, magento_name_review_required,
+              p.public_product_identity_id, i.public_sku
+       FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
+       WHERE p.id = $1
        FOR UPDATE`,
       [sourceProductId]
     );
@@ -739,9 +751,16 @@ async function applyProductRecount(payload, options = {}) {
       preview.corrected.proposedFullSku,
       client
     );
+    const publicSkuActivation = await client.query(
+      'SELECT enabled FROM public_sku_activation WHERE singleton'
+    );
     const corrected = {
       ...preview.corrected,
       fullSku: correctionSku.fullSku,
+      internalSku: correctionSku.fullSku,
+      publicSku: publicSkuActivation.rows[0]?.enabled
+        ? lockedSource.public_sku
+        : correctionSku.fullSku,
       variation: correctionSku.variation,
     };
     // Preserve product -> SKU -> request -> lifecycle order. Finalization below
@@ -796,7 +815,7 @@ async function applyProductRecount(payload, options = {}) {
         correction_reason, sku_schema_version_id, created_by_user_id,
         magento_name_subject_ua, magento_name_subject_en, magento_name_review_required)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'active', 1, $11, $12, $13, $14, $15, $16, $17)
-       RETURNING id`,
+       RETURNING id, public_product_identity_id`,
       [
         corrected.fullSku,
         corrected.baseSku,
@@ -818,6 +837,11 @@ async function applyProductRecount(payload, options = {}) {
       ]
     );
     const correctedProductId = Number(insertResult.rows[0].id);
+    const insertedPublicIdentity = await client.query(
+      'SELECT public_sku FROM public_product_identities WHERE id = $1',
+      [insertResult.rows[0].public_product_identity_id]
+    );
+    corrected.publicSku = insertedPublicIdentity.rows[0].public_sku;
 
     await client.query(
       `UPDATE products
@@ -922,6 +946,7 @@ async function applyProductRecount(payload, options = {}) {
       subjectId: sourceProductId,
       details: {
         sourceSku: preview.source.sku,
+        publicSku: lockedSource.public_sku,
         correctedProductId,
         correctedSku: corrected.fullSku,
         productCorrectionId,
@@ -1064,7 +1089,7 @@ async function saveProduct(payload, options = {}) {
         price_per_gram, uah_rate, details, sku_schema_version_id, created_by_user_id,
         magento_name_subject_ua, magento_name_subject_en)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13, $14)
-       RETURNING id`,
+       RETURNING id, public_product_identity_id`,
       [
         fullSku,
         preview.baseSku,
@@ -1083,6 +1108,10 @@ async function saveProduct(payload, options = {}) {
       ]
     );
     const productId = Number(result.rows[0].id);
+    const publicSku = (await client.query(
+      'SELECT public_sku FROM public_product_identities WHERE id=$1',
+      [result.rows[0].public_product_identity_id]
+    )).rows[0].public_sku;
     await fullExport.initializeNewProduct(client, productId);
     await writeAuditEvent(client, {
       mutationContext,
@@ -1091,12 +1120,14 @@ async function saveProduct(payload, options = {}) {
       subjectId: productId,
       details: {
         fullSku,
+        publicSku,
         categoryCode,
       },
     });
     await lifecycleGate.commit(client);
 
-    return { success: true, id: result.rows[0].id, fullSku };
+    return { success: true, id: result.rows[0].id, fullSku,
+      internalSku: fullSku, publicSku };
   } catch (err) {
     await lifecycleGate.rollback(client);
     throw normalizeSkuWriteError(err, fullSku);
@@ -1111,12 +1142,18 @@ async function deleteProductBySku(skuToDelete, options = {}) {
   const client = await pool.connect();
   try {
     await lifecycleGate.begin(client, 'BEGIN');
+    const resolved = await resolveProductLookup(client, normalizedSku);
+    if (!resolved.product) {
+      const err = new Error('РђСЂС‚РёРєСѓР» РЅРµ Р·РЅР°Р№РґРµРЅРѕ Р°Р±Рѕ РІР¶Рµ Р°СЂС…С–РІРѕРІР°РЅРѕ.');
+      err.statusCode = 404;
+      throw err;
+    }
     const result = await client.query(
       `UPDATE products
        SET status = 'archived', exclude_from_export = 1, archived_by_user_id = $1
-       WHERE full_sku = $2 AND COALESCE(status, 'active') <> 'archived'
+       WHERE id = $2 AND COALESCE(status, 'active') <> 'archived'
        RETURNING id`,
-      [mutationContext.actorUserId, normalizedSku]
+      [mutationContext.actorUserId, resolved.product.id]
     );
     if (result.rowCount === 0) {
       const err = new Error('Артикул не знайдено або вже архівовано.');
@@ -1130,7 +1167,7 @@ async function deleteProductBySku(skuToDelete, options = {}) {
       eventKey: 'product.archived',
       subjectType: 'product',
       subjectId: productId,
-      details: { fullSku: normalizedSku },
+      details: { fullSku: resolved.product.full_sku, publicSku: resolved.product.public_sku },
     });
     await lifecycleGate.commit(client);
 

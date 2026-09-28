@@ -87,7 +87,7 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
     const sku = `BR/SYNC-${crypto.randomUUID()}`.toUpperCase();
     const product = (await insertProductFixture(pool, `INSERT INTO products
       (full_sku,base_sku,sequence_number,category,weight,total_price,total_price_uah,price_per_gram,uah_rate,details)
-      VALUES ($1,$1,0,'BR',5,10,42,2,40,'{"answers":{}}') RETURNING id`, [sku])).rows[0];
+      VALUES ($1,$1,0,'BR',5,10,42,2,40,'{"answers":{}}') RETURNING id,public_product_identity_id`, [sku])).rows[0];
     await pool.query("UPDATE product_full_export_state SET business_exclusion_state='none',delivery_version=delivery_version+1 WHERE product_id=$1", [product.id]);
     const initial = { id: product.id + 100000, sku, attribute_set_id: 8001, name: 'Old name', type_id: 'simple', price: 40,
       status: 1, visibility: 4, custom_attributes: [{ attribute_code: 'unknown_attribute', value: 'Keep me' }], media_gallery_entries: [{ id: 100 }],
@@ -292,14 +292,15 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
     await pool.query('UPDATE magento_auto_sync_activation SET enabled=TRUE,installation_key=$1,actor_user_id=$2', [installationKey, actorUserId]);
     const automaticProduct = await scenario();
     const automaticJob = await enqueue(config, automaticProduct.input, { ...automaticProduct.options,
-      automatic: { productId: automaticProduct.product.id, generation: '1', installationKey } });
+      automatic: { publicIdentityId: automaticProduct.product.public_product_identity_id,
+        productId: automaticProduct.product.id, generation: '1', installationKey } });
     const current = await bindings.publishDraft(newer.id, { expectedRevision: newer.revision, expectedCurrentId: published.id }, mutations);
     const result = await s.apply(job);
     assert.equal(result.state, 'blocked'); assert.equal(result.failure.code, 'MAGENTO_SYNC_PUBLISHED_CURRENT_BINDING_REQUIRED'); assert.equal(s.writes.length, 0);
     try {
       const worker = require('../src/services/magento/automatic-sync-worker').createAutomaticSyncWorker(config,
         { databasePool: pool, jobOptions: automaticProduct.options });
-      await worker.runProduct(automaticProduct.product.id);
+      await worker.runProduct(automaticProduct.product.public_product_identity_id);
       const rows = (await pool.query('SELECT id,state,binding_revision_id FROM magento_sync_jobs WHERE product_id=$1 ORDER BY created_at', [automaticProduct.product.id])).rows;
       assert.equal(rows[0].id, automaticJob.id); assert.equal(rows[0].state, 'superseded');
       assert.equal(rows[1].state, 'succeeded'); assert.equal(rows[1].binding_revision_id, current.id);

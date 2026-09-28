@@ -114,9 +114,10 @@ async function createPriceExportSnapshot({ idempotencyKey }, options = {}) {
       [productIds]
     );
     const rowsResult = await client.query(
-      `SELECT products.id, products.full_sku, products.total_price_uah, revisions.revision
+      `SELECT products.id, products.full_sku, identities.public_sku, products.total_price_uah, revisions.revision
        FROM products
        JOIN product_export_revisions revisions ON revisions.product_id = products.id
+       JOIN public_product_identities identities ON identities.id=products.public_product_identity_id
        WHERE products.id = ANY($1::int[])
          AND revisions.has_product_snapshot = TRUE
          AND revisions.confirmed_revision < revisions.revision
@@ -130,12 +131,14 @@ async function createPriceExportSnapshot({ idempotencyKey }, options = {}) {
     const capturedRevisions = rowsResult.rows.map((row) => ({
       productId: Number(row.id),
       revision: Number(row.revision),
+      internalSku: row.full_sku,
+      publicSku: row.public_sku,
     }));
     const snapshotId = crypto.randomUUID();
     const fileName = `amber-price-export-${snapshotId}.csv`;
     const csvContent = buildCsv([
       ['sku', 'price'],
-      ...rowsResult.rows.map((row) => [row.full_sku, toUahNumber(row.total_price_uah)]),
+      ...rowsResult.rows.map((row) => [row.public_sku, toUahNumber(row.total_price_uah)]),
     ]);
     const inserted = await client.query(
       `INSERT INTO price_export_snapshots
@@ -177,13 +180,14 @@ async function createPriceExportSnapshot({ idempotencyKey }, options = {}) {
 }
 
 async function previewPriceExport() {
-  const result = await pool.query(`SELECT products.id, products.full_sku, products.total_price_uah,
+  const result = await pool.query(`SELECT products.id, products.full_sku, identities.public_sku, products.total_price_uah,
     statement_timestamp() AS checked_at
     FROM products JOIN product_export_revisions revisions ON revisions.product_id=products.id
+    JOIN public_product_identities identities ON identities.id=products.public_product_identity_id
     WHERE revisions.has_product_snapshot=TRUE AND revisions.confirmed_revision<revisions.revision
       AND COALESCE(products.exclude_from_export,0)=0 ORDER BY products.id`);
   return { checkedAt: result.rows[0]?.checked_at || new Date().toISOString(), rowCount: result.rows.length,
-    csvContent: buildCsv([['sku', 'price'], ...result.rows.map((r) => [r.full_sku, toUahNumber(r.total_price_uah)])]) };
+    csvContent: buildCsv([['sku', 'price'], ...result.rows.map((r) => [r.public_sku, toUahNumber(r.total_price_uah)])]) };
 }
 
 async function getPriceExportSnapshot(snapshotId, { includeRows = true } = {}) {

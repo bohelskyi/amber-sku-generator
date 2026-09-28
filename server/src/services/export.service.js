@@ -174,12 +174,14 @@ async function getExportRows(fromSku, toSku, options = {}) {
   const inRequestedRangeSql = `(${rangeClauses.join(' AND ')})`;
   const result = await queryable.query(
     `
-      SELECT p.id, p.full_sku, p.category, p.weight, p.total_price_uah,
+      SELECT p.id, p.full_sku, i.public_sku, p.public_product_identity_id,
+             p.category, p.weight, p.total_price_uah,
              p.details, p.created_at, p.magento_name_subject_ua,
              p.magento_name_subject_en, p.magento_name_review_required,
              ${options.templateInputs ? 'p.sku_schema_version_id, p.exclude_from_export,' : ''}
              ${inRequestedRangeSql} AS in_requested_range
       FROM products p
+      JOIN public_product_identities i ON i.id=p.public_product_identity_id
       ${selectionSql ? 'JOIN product_full_export_state f ON f.product_id=p.id' : ''}
       WHERE ${selectionSql || 'TRUE'} AND COALESCE(p.exclude_from_export, 0) = 0
         AND ${inRequestedRangeSql}
@@ -210,9 +212,9 @@ async function getExportRows(fromSku, toSku, options = {}) {
     ...(options.templateInputs ? { internalCatalog: [...nonSkuQuestionMaps].map(([category, questions]) =>
       [category, [...questions].map(([key, question]) => [key, { ...question, optionLabels: [...question.optionLabels] }])]) } : {}),
     range: {
-      fromSku: fromProduct.full_sku,
-      toSku: toProduct ? toProduct.full_sku : null,
-      resolvedToSku: lastRequestedRangeRow?.full_sku || fromProduct.full_sku,
+      fromSku: fromProduct.public_sku,
+      toSku: toProduct ? toProduct.public_sku : null,
+      resolvedToSku: lastRequestedRangeRow?.public_sku || fromProduct.public_sku,
       exportedToProductId: lastRequestedRangeRow ? Number(lastRequestedRangeRow.id) : 0,
     },
   };
@@ -311,10 +313,12 @@ async function resolveNewExportRange(queryable) {
   const { first_id: firstId, last_id: lastId, product_count: productCount } = result.rows[0];
   if (!productCount) return { cursor, fromSku: null, toSku: null, productCount: 0 };
   const anchors = await queryable.query(
-    'SELECT id, full_sku FROM products WHERE id = ANY($1::int[])',
+    `SELECT p.id, i.public_sku FROM products p
+     JOIN public_product_identities i ON i.id=p.public_product_identity_id
+     WHERE p.id = ANY($1::int[])`,
     [[firstId, lastId]]
   );
-  const byId = new Map(anchors.rows.map((row) => [Number(row.id), row.full_sku]));
+  const byId = new Map(anchors.rows.map((row) => [Number(row.id), row.public_sku]));
   return { cursor, fromSku: byId.get(firstId), toSku: byId.get(lastId), productCount };
 }
 

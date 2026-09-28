@@ -69,7 +69,9 @@ export function RepricingTable({
                 className={`border-t border-slate-100 ${isReviewed ? 'bg-emerald-50/45' : ''}`}
               >
                 <td className="table-cell min-w-48 text-xs text-slate-800">
-                  <div className="font-mono font-semibold">{item.sku}</div>
+                  <div className="font-mono font-semibold">{item.publicSku || item.sku}</div>
+                  {item.publicSku && item.publicSku !== item.sku
+                    && <div className="text-xs text-slate-500">Внутрішній: {item.internalSku || item.sku}</div>}
                   <div className="mt-1 flex flex-wrap gap-1">
                     <span className={`status-badge ${
                       item.status === 'error'
@@ -111,7 +113,7 @@ export function RepricingTable({
                         className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 hover:text-slate-900"
                         onClick={() => setRecountTarget({
                           productId: Number(item.productId),
-                          sku: item.sku,
+                          sku: item.publicSku || item.sku,
                           mode: 'request',
                         })}
                       >
@@ -203,7 +205,7 @@ export function RepricingTable({
                           <input
                             className={`input-sm w-28 pr-7 text-right font-semibold ${invalidManualPriceIds.has(item.productId) ? 'border-rose-400 focus:border-rose-500' : ''}`}
                             inputMode="decimal"
-                            aria-label={`Нова ціна для ${item.sku}`}
+                            aria-label={`Нова ціна для ${item.publicSku || item.sku}`}
                             value={hasManualOverride
                               ? manualPrices[item.productId]
                               : (hasAutomaticResolution
@@ -225,7 +227,7 @@ export function RepricingTable({
                             className="btn btn-outline btn-icon"
                             onClick={() => resetManualPrice(item.productId)}
                             title="Повернути розраховану ціну"
-                            aria-label={`Скинути ручну ціну для ${item.sku}`}
+                            aria-label={`Скинути ручну ціну для ${item.publicSku || item.sku}`}
                           >
                             <RotateCcw size={14} />
                           </button>

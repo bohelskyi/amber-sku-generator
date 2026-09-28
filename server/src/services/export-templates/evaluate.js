@@ -21,17 +21,19 @@ function runProduct(compiled, product, limits, observation) {
     if (cause.code !== 'SOURCE_SUPPORT_INVALID') throw cause;
     if (observation) observation.issues = [{ code: cause.code, field: 'sourceSupport', message: cause.message,
       target: observation.target || { kind: 'source', source: observation.source || null } }];
-    return { work: 0, mapped: { group: product.category, sku: product.full_sku,
+    const identityField = compiled.definition.evaluatorVersion === 'magento-declarative-3' ? 'public_sku' : 'full_sku';
+    return { work: 0, mapped: { group: product.category, sku: product[identityField],
       errors: [{ code: cause.code, field: 'sourceSupport', message: cause.message }] } };
   }
 }
 
 function runSupportedProduct(compiled, product, limits, observation) {
   const d = compiled.definition;
+  const identityField = d.evaluatorVersion === 'magento-declarative-3' ? 'public_sku' : 'full_sku';
   const rawGroup = checkCell(identityText(own(product, 'category'), 'category'));
   const group = rawGroup === undefined || rawGroup === null ? '' : String(rawGroup);
   const profile = d.groups.find((g) => g.route === group);
-  if (!profile) return { mapped: { group, sku: checkCell(identityText(own(product, 'full_sku'), 'full_sku')), errors: [
+  if (!profile) return { mapped: { group, sku: checkCell(identityText(own(product, identityField), identityField)), errors: [
     { field: 'attribute_set_code', message: 'Немає Magento-профілю для категорії.' },
   ] }, work: 0 };
   const bindings = new Map(d.bindings.map((b) => [b.id, b.value]));
@@ -196,7 +198,7 @@ function runSupportedProduct(compiled, product, limits, observation) {
   })));
   if (observation) observation.target = null;
   if (d.outputContract === 'magento-products-columns-v2') {
-    if (rows[0].sku !== identityText(own(product, 'full_sku'), 'full_sku') || rows[1].sku !== rows[0].sku
+    if (rows[0].sku !== identityText(own(product, identityField), identityField) || rows[1].sku !== rows[0].sku
       || rows[0].store_view_code !== '' || rows[1].store_view_code !== 'en'
       || rows.some((row) => row.product_type !== 'simple' || !present(row.name) || !present(row.attribute_set_code))
       || !Number.isFinite(Number(rows[0].price)) || Number(rows[0].price) <= 0) {

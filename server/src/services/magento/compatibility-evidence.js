@@ -52,14 +52,15 @@ async function compatibilityEvidence(config, amber, schema, analysis, { fetchImp
   let productGetCount = 0;
   const maxProductGets = PLANS.reduce((sum, p) => sum + p.attempts, 0) + 20;
   async function get(product, scope = 'all') {
-    if (allSkus.has(product.full_sku) && allSkus.get(product.full_sku) !== product.id) invalid();
-    allSkus.set(product.full_sku, product.id);
-    const key = `${scope}:${product.full_sku}`;
+    const publicSku = product.public_sku || product.full_sku;
+    if (allSkus.has(publicSku) && allSkus.get(publicSku) !== product.id) invalid();
+    allSkus.set(publicSku, product.id);
+    const key = `${scope}:${publicSku}`;
     if (!cache.has(key)) {
       if (++productGetCount > maxProductGets) invalid();
       try {
         const scoped = scope === 'all' ? client : createMagentoClient(config, { fetchImpl, storeCode: scope });
-        cache.set(key, productEvidence(await scoped.findProductBySku(product.full_sku), scope === 'all' ? TARGETS : new Set(SCOPE_FIELDS)));
+        cache.set(key, productEvidence(await scoped.findProductBySku(publicSku), scope === 'all' ? TARGETS : new Set(SCOPE_FIELDS)));
       } catch (cause) {
         if (cause.code !== 'MAGENTO_PRODUCT_NOT_FOUND') throw cause;
         cache.set(key, null);
@@ -88,7 +89,8 @@ async function compatibilityEvidence(config, amber, schema, analysis, { fetchImp
       const selected = matches.length === 1 ? matches[0] : null;
       const sourceKeys = [...new Set(Object.values(amber.compiled.definition.sources)
         .filter((s) => s.category === product.category).map((s) => s.key))].sort();
-      const record = { localProductId: product.id, sku: product.full_sku, amberGroup: product.category,
+      const record = { localProductId: product.id, sku: product.full_sku, internalSku: product.full_sku,
+        publicSku: product.public_sku || product.full_sku, amberGroup: product.category,
         localStatus: candidate.local_status ?? null,
         evaluation: { ready: expected.ready, issueFields: expected.issueFields, provisional: !expected.ready },
         sourceAnswers: Object.fromEntries(sourceKeys.filter((key) => Object.hasOwn(product.details?.answers || {}, key))

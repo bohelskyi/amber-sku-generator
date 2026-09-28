@@ -1,5 +1,5 @@
 // Closed access to supplied data only. Validation is lazy: hidden answers are not read.
-const PRODUCT_FIELDS = Object.freeze(['id', 'full_sku', 'category', 'weight',
+const PRODUCT_FIELDS = Object.freeze(['id', 'full_sku', 'public_sku', 'category', 'weight',
   'total_price_uah', 'magento_name_subject_ua', 'magento_name_subject_en', 'sku_schema_version_id']);
 function own(object, key) {
   if (object == null || !Object.hasOwn(object, key)) return undefined;

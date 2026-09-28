@@ -12,7 +12,8 @@ function reviewProduct(product, position, mapped, headers, observation) {
   return ['base', 'english'].map((side, rowIndex) => {
     const values = observation?.rows?.[side] || mapped[side];
     return {
-      productId: Number(product.id), sku: String(product.full_sku), productPosition: position,
+      productId: Number(product.id), sku: String(mapped.sku), internalSku: String(product.full_sku),
+      publicSku: String(product.public_sku || product.full_sku), productPosition: position,
       ordinal: (position - 1) * 2 + rowIndex + 1,
       language: rowIndex ? 'en' : 'main', readiness: ready ? 'ready' : 'attention',
       issues: issues.filter((issue) => !issue.target.language || issue.target.language === (rowIndex ? 'en' : 'main')),

@@ -104,7 +104,8 @@ function snapshotFileHashes(snapshot, artifacts) {
 
 function membershipEvidence(snapshot, product, state, artifacts, qualifying, files = snapshotFileHashes(snapshot, artifacts)) {
   return { version: LIFECYCLE_VERSION, snapshotId: snapshot.id, productId: Number(product.id),
-    sku: product.full_sku, fullRevision: qualifying ? state.revision : null,
+    sku: product.full_sku, internalSku: product.full_sku, publicSku: product.public_sku || product.full_sku,
+    fullRevision: qualifying ? state.revision : null,
     deliveryVersion: qualifying ? state.deliveryVersion : null,
     captureKind: qualifying ? 'full_product' : 'legacy_compatibility',
     csvHash: files.csvHash, artifacts: files.artifacts.filter((a) => a.group === product.category) };
@@ -133,9 +134,10 @@ async function captureSnapshotMembership(client, snapshot, rows, captured, artif
     const member = membershipEvidence(snapshot, row, state, artifacts, qualifying, files);
     await client.query(`INSERT INTO export_snapshot_products
       (snapshot_id, product_id, sku_at_capture, full_revision, delivery_version,
-       capture_kind, evidence_origin, evidence_hash)
-      VALUES ($1,$2,$3,$4,$5,$6,'live_capture',$7)`, [snapshot.id, row.id, row.full_sku,
-      member.fullRevision, member.deliveryVersion, member.captureKind, hash(stableJson(member))]);
+       capture_kind, evidence_origin, evidence_hash, identity_contract,
+       internal_sku_at_capture, public_sku_at_capture)
+      VALUES ($1,$2,$3,$4,$5,$6,'live_capture',$7,1,$3,$8)`, [snapshot.id, row.id, row.full_sku,
+      member.fullRevision, member.deliveryVersion, member.captureKind, hash(stableJson(member)), row.public_sku]);
   }
 }
 

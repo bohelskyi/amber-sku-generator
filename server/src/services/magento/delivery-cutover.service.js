@@ -10,6 +10,7 @@ const REQUIRED_MIGRATIONS = Object.freeze([
   '043_magento_literal_question_keys.sql',
   '044_magento_automatic_sync.sql',
   '045_magento_delivery_cutover.sql',
+  '046_stable_public_product_sku.sql',
 ]);
 
 function fail(code, message, details) {
@@ -45,17 +46,21 @@ async function inspectClient(client, { expectedDatabase, installationKey, actorU
   const migrations = (await client.query('SELECT name FROM schema_migrations WHERE name=ANY($1::text[]) ORDER BY name', [REQUIRED_MIGRATIONS])).rows.map((r) => r.name);
   const missingMigrations = REQUIRED_MIGRATIONS.filter((name) => !migrations.includes(name));
   const gatePresent = (await client.query("SELECT to_regclass('magento_auto_sync_activation') IS NOT NULL AS present")).rows[0].present;
-  if (!gatePresent || missingMigrations.includes('045_magento_delivery_cutover.sql')) return { database, installationKey: installation, expectedOriginHash, missingMigrations,
+  if (!gatePresent || missingMigrations.includes('045_magento_delivery_cutover.sql')
+    || missingMigrations.includes('046_stable_public_product_sku.sql')) return { database, installationKey: installation, expectedOriginHash, missingMigrations,
     blockers: [{ code: 'MAGENTO_CUTOVER_SCHEMA_NOT_READY' }] };
   const gate = (await client.query('SELECT * FROM magento_auto_sync_activation WHERE singleton')).rows[0];
-  const published = (await client.query(`SELECT id,revision,version_number,origin_hash,template_version_id
-    FROM magento_binding_revisions WHERE installation_key=$1 AND state='published'
+  const publicActivation = (await client.query('SELECT * FROM public_sku_activation WHERE singleton')).rows[0];
+  const published = (await client.query(`SELECT r.id,r.revision,r.version_number,r.origin_hash,r.template_version_id,
+      v.evaluator_version,v.definition->>'sourceContractVersion' AS source_contract_version
+    FROM magento_binding_revisions r JOIN export_template_versions v ON v.id=r.template_version_id
+    WHERE r.installation_key=$1 AND r.state='published'
     ORDER BY version_number DESC LIMIT 1`, [installation])).rows[0] || null;
   const actor = await actorState(client, actorUserId);
   const automaticJobs = await idSummary(client, `SELECT id FROM magento_sync_jobs
     WHERE automatic_generation IS NOT NULL AND state NOT IN ('succeeded','superseded') ORDER BY id`);
-  const automaticRequests = await idSummary(client, `SELECT product_id AS id FROM magento_product_sync_requests
-    WHERE state<>'synced' ORDER BY product_id`);
+  const automaticRequests = await idSummary(client, `SELECT public_product_identity_id AS id FROM magento_product_sync_requests
+    WHERE state<>'synced' ORDER BY public_product_identity_id`);
   const generatedProductSnapshots = await idSummary(client, `SELECT DISTINCT s.id
     FROM export_snapshots s JOIN magento_export_artifacts a ON a.snapshot_id=s.id
     WHERE s.status<>'confirmed' ORDER BY s.id`);
@@ -73,6 +78,11 @@ async function inspectClient(client, { expectedDatabase, installationKey, actorU
   if (missingMigrations.length) blockers.push({ code: 'MAGENTO_CUTOVER_SCHEMA_NOT_READY', missingMigrations });
   if (!published) blockers.push({ code: 'MAGENTO_CUTOVER_PUBLICATION_REQUIRED' });
   else if (published.origin_hash !== expectedOriginHash) blockers.push({ code: 'MAGENTO_CUTOVER_ORIGIN_MISMATCH' });
+  else if (published.evaluator_version !== 'magento-declarative-3'
+    || published.source_contract_version !== 'public-product-identity-v1') {
+    blockers.push({ code: 'MAGENTO_CUTOVER_PUBLIC_SKU_PUBLICATION_REQUIRED' });
+  }
+  if (!publicActivation?.enabled) blockers.push({ code: 'MAGENTO_CUTOVER_PUBLIC_SKU_ACTIVATION_REQUIRED' });
   if (!actor || actor.status !== 'active' || !actor.authorized) blockers.push({ code: 'MAGENTO_CUTOVER_WORKER_ACTOR_INVALID' });
   if (automaticJobs.count || automaticRequests.count) blockers.push({ code: 'MAGENTO_CUTOVER_AUTOMATIC_WORK_UNRESOLVED' });
   if (generatedProductSnapshots.count) blockers.push({ code: 'MAGENTO_CUTOVER_UNCONFIRMED_PRODUCT_FILES' });
@@ -87,7 +97,9 @@ async function inspectClient(client, { expectedDatabase, installationKey, actorU
       cutoverAt: gate.cutover_at, cutoverByUserId: gate.cutover_by_user_id === null ? null : Number(gate.cutover_by_user_id),
       cutoverEventId: gate.cutover_event_id === null ? null : Number(gate.cutover_event_id) },
     published: published ? { id: published.id, revision: published.revision, versionNumber: published.version_number,
-      templateVersionId: published.template_version_id } : null,
+      templateVersionId: published.template_version_id, evaluatorVersion: published.evaluator_version,
+      sourceContractVersion: published.source_contract_version } : null,
+    publicSkuActivation: { enabled: Boolean(publicActivation?.enabled), activatedAt: publicActivation?.activated_at || null },
     actor: actor ? { active: actor.status === 'active', authorized: actor.authorized } : null,
     fullProductGate,
     legacy: { generatedProductSnapshots, activeSessionAttempts,

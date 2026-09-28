@@ -115,6 +115,7 @@ function presentProductTimeline(querySku, data, magentoStatuses) {
       ...eventTimestamp(product.created_at),
       actor: actorFromAudit(audit, product.created_by_user_id),
       sku: product.full_sku,
+      publicSku: product.public_sku || product.full_sku,
       summary: 'Product created',
       details: { categoryCode: product.category },
       changes: [],
@@ -145,6 +146,7 @@ function presentProductTimeline(querySku, data, magentoStatuses) {
       label: 'latest_stored_proposal',
       sourceSku: request.source_sku,
       proposedSku: request.proposed_sku,
+      publicSku: sourceProduct?.public_sku || request.old_payload?.publicSku || request.source_sku,
       comment: request.comment || '',
       changes: normalizeStoredChanges({
         oldPayload: request.old_payload,
@@ -170,6 +172,7 @@ function presentProductTimeline(querySku, data, magentoStatuses) {
         ...eventTimestamp(audit.occurred_at),
         actor: actorFromAudit(audit, null),
         sku: request.source_sku,
+        publicSku: sourceProduct?.public_sku || request.old_payload?.publicSku || request.source_sku,
         summary: `${requestEventNames.get(audit.event_key)} (${request.request_type === 'price_change' ? 'price change' : 'recount'})`,
         details: audit.event_key === 'correction_request.created'
           ? { requestType: request.request_type || 'recount', latestProposal }
@@ -186,6 +189,7 @@ function presentProductTimeline(querySku, data, magentoStatuses) {
         ...eventTimestamp(request.created_at),
         actor: actorFromAudit(null, request.created_by_user_id),
         sku: request.source_sku,
+        publicSku: sourceProduct?.public_sku || request.old_payload?.publicSku || request.source_sku,
         summary: 'Correction request created',
         details: { latestProposal },
         changes: [],
@@ -202,6 +206,7 @@ function presentProductTimeline(querySku, data, magentoStatuses) {
         ...eventTimestamp(request.claimed_at),
         actor: actorFromAudit(null, request.claimed_by_user_id),
         sku: request.source_sku,
+        publicSku: sourceProduct?.public_sku || request.old_payload?.publicSku || request.source_sku,
         summary: 'Correction request claimed',
         details: {}, changes: [], sortOrder: 30,
       });
@@ -218,6 +223,7 @@ function presentProductTimeline(querySku, data, magentoStatuses) {
         ...eventTimestamp(request.completed_at),
         actor: actorFromAudit(null, null),
         sku: request.source_sku,
+        publicSku: sourceProduct?.public_sku || request.old_payload?.publicSku || request.source_sku,
         summary: 'Correction request completed',
         details: {}, changes: [], internalGroup: group, sortOrder: 50,
       });
@@ -232,6 +238,7 @@ function presentProductTimeline(querySku, data, magentoStatuses) {
         ...eventTimestamp(request.rejected_at),
         actor: actorFromAudit(null, null),
         sku: request.source_sku,
+        publicSku: sourceProduct?.public_sku || request.old_payload?.publicSku || request.source_sku,
         summary: 'Correction request rejected',
         details: {}, changes: [], sortOrder: 40,
       });
@@ -259,10 +266,12 @@ function presentProductTimeline(querySku, data, magentoStatuses) {
       ...eventTimestamp(correction.created_at),
       actor: actorFromAudit(audit, correction.performed_by_user_id),
       sku: source.full_sku,
+      publicSku: source.public_sku || source.full_sku,
       summary: request ? 'Correction request completed and product corrected' : 'Product corrected',
       details: {
         sourceSku: correction.source_sku,
         correctedSku: correction.corrected_sku,
+        publicSku: source.public_sku || source.full_sku,
         reason: correction.reason || '',
         applicationMode: request ? 'request' : (audit ? 'direct' : 'not_recorded'),
         price: {
@@ -299,6 +308,7 @@ function presentProductTimeline(querySku, data, magentoStatuses) {
       ...eventTimestamp(audit.occurred_at),
       actor: actorFromAudit(audit, null),
       sku: details.fullSku || product.full_sku,
+      publicSku: details.publicSku || product.public_sku || product.full_sku,
       summary: 'Product price changed in place',
       details: {
         applicationMode: details.applicationMode || 'direct',
@@ -325,11 +335,13 @@ function presentProductTimeline(querySku, data, magentoStatuses) {
     const applyAudit = firstAudit(audits, 'repricing.applied', item.batch_id);
     const oldPayload = asObject(item.old_payload);
     const newPayload = asObject(item.new_payload);
+    const product = productById.get(Number(item.product_id));
     pushEvent({
       type: 'repricing.applied',
       ...eventTimestamp(item.applied_at || item.created_at),
       actor: actorFromAudit(applyAudit, item.applied_by_user_id),
       sku: item.sku,
+      publicSku: product?.public_sku || item.sku,
       summary: 'Price changed by repricing',
       details: {
         scope: item.scope || 'scenario',
@@ -352,6 +364,7 @@ function presentProductTimeline(querySku, data, magentoStatuses) {
         ...eventTimestamp(item.rolled_back_at),
         actor: actorFromAudit(rollbackAudit, item.rolled_back_by_user_id),
         sku: item.sku,
+        publicSku: product?.public_sku || item.sku,
         summary: 'Repricing rolled back',
         details: {
           scope: item.scope || 'scenario',
@@ -374,6 +387,7 @@ function presentProductTimeline(querySku, data, magentoStatuses) {
       ...eventTimestamp(audit?.occurred_at || null),
       actor: actorFromAudit(audit, product.archived_by_user_id),
       sku: product.full_sku,
+      publicSku: product.public_sku || product.full_sku,
       summary: 'Product archived',
       details: {}, changes: [], sortOrder: 90,
     });
@@ -413,8 +427,13 @@ function presentProductTimeline(querySku, data, magentoStatuses) {
       warnings: graph.warnings,
       rootSku: graph.roots.length === 1 ? graph.roots[0].full_sku : null,
       currentSku: currentProduct?.full_sku || null,
+      rootPublicSku: graph.roots.length === 1
+        ? graph.roots[0].public_sku || graph.roots[0].full_sku : null,
+      currentPublicSku: currentProduct?.public_sku || currentProduct?.full_sku || null,
       products: graph.ordered.map((product) => ({
         sku: product.full_sku,
+        internalSku: product.full_sku,
+        publicSku: product.public_sku || product.full_sku,
         ...(magentoStatuses ? { magentoSync: magentoStatuses.get(Number(product.id)) } : {}),
         categoryCode: product.category,
         status: product.status || 'active',

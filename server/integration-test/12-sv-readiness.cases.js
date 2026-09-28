@@ -90,10 +90,13 @@ test('SV representation repair: authoritative target, preserved pricing/ledgers,
     // Reproduce a pre-registry legacy duplicate only in this disposable fixture.
     const c = await pool.connect(); let duplicate;
     try {
-      await c.query('BEGIN'); await c.query('ALTER TABLE products DISABLE TRIGGER products_reserve_sku');
+      await c.query('BEGIN');
+      await c.query('ALTER TABLE products DISABLE TRIGGER products_reserve_sku');
+      await c.query('ALTER TABLE products DISABLE TRIGGER products_one_current_public_revision');
       duplicate = (await insertProductFixture(c, `INSERT INTO products(full_sku,base_sku,sequence_number,category,weight,total_price,total_price_uah,price_per_gram,uah_rate,details)
         SELECT full_sku,base_sku,sequence_number,category,weight,total_price,total_price_uah,price_per_gram,uah_rate,details FROM products WHERE id=$1 RETURNING id`, [p.id])).rows[0];
       await c.query('SET CONSTRAINTS ALL IMMEDIATE');
+      await c.query('ALTER TABLE products ENABLE TRIGGER products_one_current_public_revision');
       await c.query('ALTER TABLE products ENABLE TRIGGER products_reserve_sku'); await c.query('COMMIT');
     } finally { await c.query('ROLLBACK'); c.release(); }
     const plan = await repair.preview({ ...options(), bindingRevisionId: binding.id });

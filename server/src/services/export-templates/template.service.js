@@ -240,11 +240,11 @@ async function upgradeDraft(templateId, input, options = {}) {
 }
 
 async function systemProfile(options = {}) {
-  // Describes the unchanged ordinary exporter, not a new template definition.
-  const candidate = await captureMagentoCandidate(options, false);
+  // Describes current code-backed behavior. Stored publications remain immutable.
+  const candidate = await captureMagentoCandidate(options, true);
   const { HEADERS } = require('../magento-products-v1');
   return { ...candidate, kind: 'system', systemKey: 'magento-legacy',
-    displayName: 'Magento — поточний системний', effectiveExporter: 'legacy',
+    displayName: 'Magento — поточний системний', effectiveExporter: 'stable-public-sku',
     ...(HEADERS ? { headers: HEADERS } : {}) };
 }
 
@@ -334,7 +334,8 @@ async function testPreview(templateId, input, options = {}) {
       { diagnostics, globalSourceDiagnostics });
     const supported = await loadSupportInputs(client, compiled.definition, products);
     return { revision, definitionHash: compiled.hash, draftOnly: true, publicationReady: false, globalSourceDiagnostics,
-      sampleProducts: products.map((product) => ({ productId: Number(product.id), sku: product.full_sku, category: product.category })),
+      sampleProducts: products.map((product) => ({ productId: Number(product.id), sku: product.full_sku,
+        internalSku: product.full_sku, publicSku: product.public_sku, category: product.category })),
       result: pureCall(() => evaluateBatch(compiled, supported.products)) };
   });
 }
@@ -424,7 +425,7 @@ async function captureMagentoCandidate(options, attachCurrentSupport) {
         code: 'SOURCE_REFERENCE_AMBIGUOUS', message: 'Duplicate current question key' })),
     });
     const catalog = await loadMagentoCatalog(client);
-    let definition = pureCall(() => materializeMagentoV1(catalog));
+    let definition = pureCall(() => materializeMagentoV1(catalog, { publicSku: attachCurrentSupport }));
     // Only explicit current-candidate creation uses this default. Stored drafts,
     // publication clones and the read-only system profile are never rewritten.
     if (attachCurrentSupport) definition = pureCall(() => upgradeSourceSupport(definition, evidence));

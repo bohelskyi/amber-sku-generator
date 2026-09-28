@@ -3,6 +3,7 @@ const { repairTransaction, lockRepairProducts, receipt } = require('../recount-r
 const { writeAuditEvent } = require('../../audit/audit-events');
 const { hash, originHash, error, safeData } = require('./binding-contract');
 const { createMagentoClient } = require('./client');
+const { resolveProductLookup } = require('../product/public-identity');
 
 const FORMAT = 'magento-prior-exposure-v1';
 const EVENT = 'product.magento_prior_exposure_reconciled';
@@ -13,6 +14,8 @@ const fail = (code = 'EXPOSURE_RECONCILIATION_CONFLICT') => { throw error(409, c
 // Also bind incoming lineage links, active correction requests and permanent SKU
 // ownership. The apply reader runs again after the ordinary product/state locks.
 async function readState(client, sku) {
+  const resolved = await resolveProductLookup(client, sku);
+  if (!resolved.product || resolved.internalMatchCount > 1) fail('EXPOSURE_PRODUCT_NOT_UNIQUE');
   const rows = (await client.query(`SELECT to_jsonb(p) AS product,
     CASE WHEN f.product_id IS NULL THEN NULL ELSE to_jsonb(f) || jsonb_build_object(
       'revision',f.revision::text,'confirmed_revision',f.confirmed_revision::text,
@@ -21,7 +24,9 @@ async function readState(client, sku) {
     EXISTS(SELECT 1 FROM product_corrections c WHERE c.source_product_id=p.id OR c.corrected_product_id=p.id) AS correction,
     EXISTS(SELECT 1 FROM products q WHERE q.corrected_from_product_id=p.id OR q.corrected_to_product_id=p.id) AS linked,
     EXISTS(SELECT 1 FROM correction_requests c WHERE c.source_product_id=p.id AND c.status IN ('pending','in_progress')) AS active_request
-    FROM products p LEFT JOIN product_full_export_state f ON f.product_id=p.id WHERE p.full_sku=$1 ORDER BY p.id LIMIT 2`, [sku])).rows;
+    FROM (SELECT p.*,i.public_sku FROM products p JOIN public_product_identities i
+      ON i.id=p.public_product_identity_id WHERE p.id=$1) p
+    LEFT JOIN product_full_export_state f ON f.product_id=p.id`, [resolved.product.id])).rows;
   if (rows.length !== 1) fail('EXPOSURE_PRODUCT_NOT_UNIQUE');
   return { ...rows[0], gate: await gate.readGate(client) };
 }
@@ -65,10 +70,12 @@ async function observe(config, sku, options) {
 }
 async function preview(config, sku, options) {
   const { database, state } = await snapshot(options.databasePool, options.expectedDatabase, sku);
-  const remote = await observe(config, sku, options);
+  const publicSku = state.product.public_sku || state.product.full_sku;
+  const remote = await observe(config, publicSku, options);
   const reasons = blockers(state);
   if (remote.status !== 'found') reasons.push(remote.status === 'not_found' ? 'MAGENTO_PRODUCT_NOT_FOUND' : 'MAGENTO_LOOKUP_ERROR');
-  const plan = { format: FORMAT, database, originHash: originHash(config.baseUrl), productId: state.product.id, sku,
+  const plan = { format: FORMAT, database, originHash: originHash(config.baseUrl), productId: state.product.id, sku: publicSku,
+    internalSku: state.product.full_sku, publicSku,
     beforeFingerprint: hash(state), deliveryVersion: String(state.lifecycle?.delivery_version),
     transition, remote, blockers: reasons, eligible: reasons.length === 0, generatedAt: new Date().toISOString() };
   safeData(plan, options.sensitiveValues);

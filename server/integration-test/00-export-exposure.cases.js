@@ -58,7 +58,7 @@ test('exposure inventory PostgreSQL uses one read-only repeatable transaction an
       connections += 1; const client = await pool.connect();
       return { release: () => client.release(), async query(sql, args) {
         queries.push(sql);
-        if (sql.includes('FROM products ORDER BY id')) {
+        if (sql.includes('FROM products p JOIN public_product_identities')) {
           settings = (await client.query(`SELECT current_setting('transaction_read_only') AS read_only,
             current_setting('transaction_isolation') AS isolation`)).rows[0];
           await client.query('SAVEPOINT prove_read_only');
@@ -89,7 +89,7 @@ test('exposure inventory PostgreSQL keeps a consistent view across a concurrent 
         const reader = await pool.connect();
         return { release: () => reader.release(), async query(sql, args) {
           const result = await reader.query(sql, args);
-          if (sql.includes('FROM products ORDER BY id')) {
+          if (sql.includes('FROM products p JOIN public_product_identities')) {
             // Barrier: the reader has read products, but not the snapshots.
             // Commit both writer changes while the reader transaction remains open.
             const readerPid = (await reader.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;

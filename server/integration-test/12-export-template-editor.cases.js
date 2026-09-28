@@ -31,6 +31,11 @@ test('OFFICE valid-name unresolved draft creates, saves and reopens; publication
   // The current candidate now includes support; the system read stays legacy.
   const legacy = await request(`${root}/system`, { authentication: admin });
   const d = structuredClone(legacy.data.definition);
+  d.evaluatorVersion = 'magento-declarative-1';
+  delete d.sourceContractVersion;
+  delete d.sourceSupport;
+  delete d.sources.public_sku;
+  d.bindings.find((binding) => binding.id === 'sku').value.input.id = 'full_sku';
   d.sources['NM.extra'].key = 'office_unknown_extra';
   compileDefinition(d);
   const key = `office-${crypto.randomUUID()}`;
@@ -134,6 +139,7 @@ test('PR4 candidate is read-only, diagnostic, protected; synthetic forms save/lo
   const p = product('BR');
   const stored = (await insertProductFixture(pool,`INSERT INTO products (full_sku,base_sku,category,weight,total_price_uah,details)
     VALUES ($1,$1,$2,$3,$4,$5::jsonb) RETURNING *`, [`BR-PR4-${crypto.randomUUID()}`.toUpperCase(), p.category, p.weight, p.total_price_uah, JSON.stringify(p.details)])).rows[0];
+  stored.public_sku = stored.full_sku;
   const originalResult = evaluateProduct(compileDefinition(candidate.data.definition), stored);
   const editedResult = evaluateProduct(compileDefinition(edited), stored);
   assert.equal(editedResult.base.meta_title, '  PR4 новий заголовок  ');

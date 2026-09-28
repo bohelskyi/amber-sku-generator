@@ -85,6 +85,8 @@ Successful allowed informational/name edits advance full `revision` in the produ
 
 Full-product members bind exact product ID/SKU, full revision, delivery version, `capture_kind=full_product`, `evidence_origin=live_capture` and a SHA-256 evidence hash. The service parses actual internal/artifact CSV and verifies exact membership, group, row shape and counts before insertion. Snapshot, artifacts, membership, price exposure and audit commit or roll back together. Membership and artifacts reject UPDATE/DELETE/TRUNCATE; snapshot payload/provenance cannot be rewritten. `full_product_selection` additionally freezes mode, captured route/counters and gate generation.
 
+Migration 046 leaves `sku_at_capture` with its historical internal-SKU meaning and adds `identity_contract=1`, `internal_sku_at_capture` and `public_sku_at_capture` for future lifecycle-aware membership. New evidence therefore retains both the stable external identity and the exact configuration revision identity. Historical membership rows keep the additive fields null, and no stored CSV/artifact is rewritten.
+
 After activation, capture fails closed if any represented SKU is duplicated anywhere in products or its permanent registry reservation points to another product. This includes one-product manual selection. Cutover baseline acceptance does not repair historical duplicate SKUs; it retains diagnostics for separate data-quality work. No rename, merge or reuse is automatic.
 
 Internal-only compatibility snapshots use `capture_kind=legacy_compatibility` and null full/delivery counters, so they cannot acknowledge a full revision. The operator UI does not offer that profile. New active-gate creation requires Magento preview evidence, so `internal-legacy` is a pre-activation compatibility creation path; authorized existing snapshots remain readable/retryable.
@@ -142,6 +144,8 @@ Optional server-only `GOOGLE_TRANSLATION_API_KEY` enables an editable EN suggest
 `product_export_revisions` tracks coalescing in-place price changes independently of full-product revision. Direct and request-completed price changes advance it atomically with product/audit writes; pending requests do not mutate products or either export stream. Price-only changes never move the full-product cursor or create a full payload revision.
 
 Dedicated `price_export_snapshots` contain exactly `sku,price`, using final stored UAH. Eligibility requires `has_product_snapshot=true`, a pending price revision and exclusion flag 0. Full snapshot generation can establish exposure; generation alone does not confirm captured revisions. Initial full confirmation can consume its captured initial price evidence, while after established exposure dedicated price snapshots consume price revisions. An older full/price confirmation cannot clear a newer price change.
+
+For snapshots generated after migration 046, the dedicated `sku,price` stream writes the stable public SKU because that file identifies the Magento product. Its captured revision evidence records product ID, exact internal/configuration SKU and public SKU. Historical price files remain byte-for-byte unchanged.
 
 Price creation captures the current eligible queue, with no range/template or product cursor change. Excluded pending rows are reported separately without losing their revision. Price confirmation advances only captured revisions with `GREATEST`, preserving first attribution and idempotency. A duplicate price update is preferable to losing a change while initial full exposure remains unconfirmed.
 

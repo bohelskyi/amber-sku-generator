@@ -74,9 +74,12 @@ function freeze(value) {
 
 function inspectDefinition(d) {
   const definitionBytes = preflight(d);
-  shape(d, ['formatVersion', 'evaluatorVersion', 'outputContract', 'sources', 'tables', 'questionContracts', 'bindings', 'groups'], ['sourceSupport']);
-  check(d.formatVersion === 1 && ['magento-declarative-1', 'magento-declarative-2'].includes(d.evaluatorVersion)
+  shape(d, ['formatVersion', 'evaluatorVersion', 'outputContract', 'sources', 'tables', 'questionContracts', 'bindings', 'groups'], ['sourceSupport', 'sourceContractVersion']);
+  check(d.formatVersion === 1 && ['magento-declarative-1', 'magento-declarative-2', 'magento-declarative-3'].includes(d.evaluatorVersion)
     && ['magento-products-v1', CONTRACT].includes(d.outputContract), 'Unsupported version/contract');
+  if (d.evaluatorVersion === 'magento-declarative-3') {
+    check(d.sourceContractVersion === 'public-product-identity-v1', 'Public product source contract required');
+  } else check(d.sourceContractVersion === undefined, 'Public product source contract requires evaluator 3');
   const editableColumns = d.outputContract === CONTRACT;
   check(record(d.sources) && Object.keys(d.sources).length <= LIMITS.sources, 'Source limit');
   for (const [name, s] of Object.entries(d.sources)) {
@@ -84,7 +87,8 @@ function inspectDefinition(d) {
     if (s.kind === 'product') {
       shape(s, ['kind', 'field', 'type']);
       check(PRODUCT_FIELDS.includes(s.field)
-        && s.type === (['full_sku', 'category'].includes(s.field) ? 'text' : 'scalar'), 'Product source');
+        && s.type === (['full_sku', 'public_sku', 'category'].includes(s.field) ? 'text' : 'scalar')
+        && (s.field !== 'public_sku' || d.evaluatorVersion === 'magento-declarative-3'), 'Product source');
     } else {
       shape(s, ['kind', 'category', 'key', 'type', 'provenance', 'aliases']);
       check(['semantic', 'information'].includes(s.kind) && s.type === 'scalar', 'Answer kind/type');

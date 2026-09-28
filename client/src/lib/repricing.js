@@ -188,7 +188,8 @@ export function filterRepricingItems(items = [], {
     const isReviewed = reviewedIds.has(Number(item.productId));
     if (reviewFilter === 'pending' && isReviewed) return false;
     if (reviewFilter === 'reviewed' && !isReviewed) return false;
-    return !normalizedSearch || String(item.sku || '').toUpperCase().includes(normalizedSearch);
+    return !normalizedSearch || [item.publicSku, item.internalSku, item.sku]
+      .some((value) => String(value || '').toUpperCase().includes(normalizedSearch));
   });
 }
 

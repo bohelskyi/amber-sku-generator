@@ -125,6 +125,11 @@ function normalizeRequestRow(row) {
     categoryCode: row.category_code,
     sourceSku: row.source_sku,
     proposedSku: row.proposed_sku,
+    sourceInternalSku: row.source_sku,
+    proposedInternalSku: row.proposed_sku,
+    sourcePublicSku: row.source_public_sku || row.old_payload?.publicSku || row.source_sku,
+    proposedPublicSku: row.corrected_public_sku || row.proposed_payload?.publicSku
+      || row.old_payload?.publicSku || row.source_sku,
     oldPayload: row.old_payload || {},
     proposedPayload: row.proposed_payload || {},
     finalPayload: row.final_payload || null,
@@ -484,7 +489,8 @@ async function getCorrectionRequests({ status, search, limit } = {}) {
   }
   if (normalizedSearch) {
     values.push(`%${normalizedSearch}%`);
-    where.push(`(cr.source_sku ILIKE $${values.length} OR cr.proposed_sku ILIKE $${values.length})`);
+    where.push(`(cr.source_sku ILIKE $${values.length} OR cr.proposed_sku ILIKE $${values.length}
+      OR identities.public_sku ILIKE $${values.length})`);
   }
   values.push(normalizedLimit);
 
@@ -494,8 +500,11 @@ async function getCorrectionRequests({ status, search, limit } = {}) {
               creator.display_name AS created_by_display_name,
               creator.preferred_username AS created_by_preferred_username,
               owner.display_name AS claimed_by_display_name,
-              owner.preferred_username AS claimed_by_preferred_username
+              owner.preferred_username AS claimed_by_preferred_username,
+              identities.public_sku AS source_public_sku
        FROM correction_requests cr
+       LEFT JOIN products source_product ON source_product.id=cr.source_product_id
+       LEFT JOIN public_product_identities identities ON identities.id=source_product.public_product_identity_id
        LEFT JOIN application_users creator ON creator.id = cr.created_by_user_id
        LEFT JOIN application_users owner ON owner.id = cr.claimed_by_user_id
        ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}

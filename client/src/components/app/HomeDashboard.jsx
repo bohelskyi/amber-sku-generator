@@ -384,7 +384,9 @@ export function DecodeWorkspace({
 
           <div className="builder-summary-body">
             <div className="builder-summary-group first">
-              <DecodeSummaryRow label="SKU" value={decodeData.sku} mono strong />
+              <DecodeSummaryRow label="Артикул" value={decodeData.publicSku || decodeData.sku} mono strong />
+              {decodeData.publicSku && decodeData.publicSku !== decodeData.sku
+                && <DecodeSummaryRow label="Внутрішній SKU" value={decodeData.internalSku || decodeData.sku} mono />}
               <DecodeSummaryRow label="Стан у базі" value={productStatus} />
             </div>
 
@@ -822,8 +824,14 @@ function RecountPanel({
               </div>
               <RecountComparisonRow
                 label="SKU"
-                current={decodeData.sku}
-                next={correctedPricing?.fullSku}
+                current={decodeData.publicSku || decodeData.sku}
+                next={correctedPricing?.publicSku || decodeData.publicSku || decodeData.sku}
+                mono
+              />
+              <RecountComparisonRow
+                label="Внутрішній SKU"
+                current={decodeData.internalSku || decodeData.sku}
+                next={correctedPricing?.internalSku || correctedPricing?.fullSku}
                 mono
               />
               <RecountComparisonRow

@@ -74,11 +74,12 @@ function optionLabels(attribute, value) {
 
 function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', generatedAt = new Date().toISOString(), domainEvidence } = {}) {
   const { product, revision } = amber;
+  const publicSku = product.public_sku || product.full_sku;
   const expected = evaluate(amber, product);
   const base = expected.base; const mode = raw ? 'update' : 'create';
   const blockers = []; const warnings = [];
   const block = (code, details = {}) => blockers.push({ code, operation: blockerOperation(code, details), ...details });
-  if (raw && raw.sku !== product.full_sku) block('CURRENT_PRODUCT_SKU_MISMATCH');
+  if (raw && raw.sku !== publicSku) block('CURRENT_PRODUCT_SKU_MISMATCH');
   const warn = (code, details = {}) => warnings.push({ code, ...details });
   const definition = amber.compiled.definition;
   const mapper = describeMapper(definition);
@@ -132,7 +133,7 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
       else warn('BINDING_SCHEMA_DRIFT', { diagnostic: d });
     }
   }
-  const payload = { sku: product.full_sku, custom_attributes: [] };
+  const payload = { sku: publicSku, custom_attributes: [] };
   const attributes = []; const diff = []; const fieldOwnership = [];
   const group = definition.groups.find((g) => g.route === product.category);
   const values = current?.fields || {};
@@ -198,7 +199,7 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
             : target === 'product_online' ? ['1', '2'].includes(String(value)) ? Number(value) : null : value;
         if ((target === 'price' && (candidate === null || candidate <= 0)) || (target === 'weight' && (candidate === null || candidate < 0))
           || (target === 'product_type' && candidate !== 'simple')
-          || (target === 'sku' && candidate !== product.full_sku) || candidate === null) {
+          || (target === 'sku' && candidate !== publicSku) || candidate === null) {
           candidate = null; authority = 'unresolved'; fail('INVALID_NATIVE_VALUE');
         } else authority = target === 'attribute_set_code' ? setStatus
           : binding?.reviewState === 'approved' ? 'authoritative' : 'scalar';
@@ -345,7 +346,7 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
       ? categories.wouldAdd.length || (taxonomyOwned && categories.wouldRemoveIfAuthoritative.length) ? 'would_update' : 'unchanged' : 'unresolved',
     includedInPayload: Boolean(payload.extension_attributes?.category_links) });
   const transportReport = planDomains({ expected, schema, revision, routeKey: route?.routeKey,
-    raw, sku: product.full_sku, evidence: domainEvidence, block });
+    raw, sku: publicSku, evidence: domainEvidence, block });
   for (const target of ['qty', 'is_in_stock', 'product_websites']) {
     const entry = diff.find((d) => d.target === target);
     const domain = target === 'product_websites' ? transportReport.websites : transportReport.inventory;
@@ -379,6 +380,7 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
   const dedup = (items) => [...new Map(items.map((x) => [JSON.stringify(x), x])).values()];
   const finalBlockers = dedup(blockers);
   return { reportVersion: 1, generatedAt, mode, amberProduct: { id: product.id, sku: product.full_sku,
+    internalSku: product.full_sku, publicSku,
     group: product.category, status: product.status, schemaVersionId: product.sku_schema_version_id ?? null,
     sourceAnswers: Object.fromEntries(Object.values(definition.sources).filter((s) => s.category === product.category)
       .map((s) => [s.key, product.details?.answers?.[s.key] ?? null])) },
@@ -403,8 +405,9 @@ async function previewProduct(config, { databasePool, fetchImpl, storeCode = 'al
   }
   const schema = await discover(config, { fetchImpl, storeCode });
   const client = createMagentoClient(config, { fetchImpl, storeCode });
+  const publicSku = amber.product.public_sku || amber.product.full_sku;
   let raw = null;
-  try { raw = await client.findProductBySku(amber.product.full_sku); }
+  try { raw = await client.findProductBySku(publicSku); }
   catch (cause) { if (cause.code !== 'MAGENTO_PRODUCT_NOT_FOUND') throw cause; }
   const roots = [...new Set(schema.storeTopology.storeGroups.map((g) => g.root_category_id).filter((id) => id > 0))];
   if (roots.length > 100) throw error(422, 'MAGENTO_PREVIEW_CATEGORY_LIMIT', 'Too many category roots');
@@ -420,7 +423,7 @@ async function previewProduct(config, { databasePool, fetchImpl, storeCode = 'al
     if (Number(tree?.id) !== id) throw error(422, 'MAGENTO_PREVIEW_CATEGORIES_INVALID', 'Category root differs');
     trees.push(tree);
   }
-  const domainEvidence = await readDomains(config, { client, schema, sku: amber.product.full_sku, raw,
+  const domainEvidence = await readDomains(config, { client, schema, sku: publicSku, raw,
     expected: evaluate(amber, amber.product), fetchImpl });
   const report = planPreview(amber, schema, raw, indexTrees(trees), { storeCode, generatedAt: now(), domainEvidence });
   if (categoryFailures.length) {

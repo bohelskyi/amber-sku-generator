@@ -283,7 +283,12 @@ function TimelineCard({ events }) {
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="font-semibold text-slate-900">{title}</h3>
-          <div className="mt-1 font-mono text-sm text-slate-600">{event.sku}</div>
+          <div className="mt-1 font-mono text-sm text-slate-600">{event.publicSku || event.sku}</div>
+          {event.publicSku && event.publicSku !== event.sku && (
+            <div className="mt-0.5 font-mono text-xs text-slate-500">
+              Внутрішній SKU: {event.sku}
+            </div>
+          )}
         </div>
         <div className="text-right text-xs leading-5 text-slate-500">
           <div>{timeLabel(event)}</div>
@@ -444,8 +449,13 @@ export function ProductTimeline() {
                 {data.lineage.products.map((product, index) => (
                   <div key={product.sku} className="lineage-node">
                     {index > 0 && <ArrowRight size={15} className="text-slate-400" />}
-                    <span className={`lineage-sku ${product.sku === data.querySku ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-slate-200 bg-white text-slate-700'}`}>
-                      <span className="break-all">{product.sku}</span>
+                    <span className={`lineage-sku ${[product.sku, product.publicSku].includes(data.querySku) ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-slate-200 bg-white text-slate-700'}`}>
+                      <span className="break-all">{product.publicSku || product.sku}</span>
+                      {product.publicSku && product.publicSku !== product.sku && (
+                        <span className="mt-1 break-all font-sans text-[10px] text-slate-500">
+                          Внутрішній SKU: <span className="font-mono">{product.sku}</span>
+                        </span>
+                      )}
                       <MagentoSyncStatus status={product.magentoSync} />
                       {product.sku === data.lineage.currentSku && <span className="mt-1 font-sans text-[10px] uppercase text-emerald-700">{product.status === 'active' ? 'актуальний' : 'останній'}</span>}
                     </span>

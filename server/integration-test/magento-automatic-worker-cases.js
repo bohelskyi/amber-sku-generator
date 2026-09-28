@@ -7,8 +7,9 @@ module.exports = async function automaticCases({ t, suite, scenario, config, pub
   const disable = () => pool.query('UPDATE magento_auto_sync_activation SET enabled=FALSE');
   const worker = (s, db = pool) => createAutomaticSyncWorker(config, { databasePool: db, jobOptions: s.options });
   const edit = (id, db = pool) => db.query('UPDATE products SET total_price_uah=total_price_uah+1 WHERE id=$1', [id]);
+  const identity = (s) => s.product.public_product_identity_id;
   const automatic = (s, generation) => ({ ...s.options,
-    automatic: { productId: s.product.id, generation, installationKey } });
+    automatic: { publicIdentityId: identity(s), productId: s.product.id, generation, installationKey } });
 
   await t.test('automatic disabled records no obligation and does no remote work, while manual enqueue works', async () => {
     await disable(); const s = await scenario(); await edit(s.product.id);
@@ -46,7 +47,7 @@ module.exports = async function automaticCases({ t, suite, scenario, config, pub
         assert.equal(blocked, true, 'independent writer must actually wait on the first transaction');
         await connection.query('COMMIT'); await racing;
         assert.equal((await state(s.product.id)).desired_generation, '3');
-        await worker(s).runProduct(s.product.id);
+        await worker(s).runProduct(identity(s));
         const row = await state(s.product.id);
         assert.equal(row.state, 'synced'); assert.equal(row.synced_generation, '3');
         assert.equal(s.remote().price, 44, 'planner must dispatch the latest authoritative price');
@@ -55,7 +56,7 @@ module.exports = async function automaticCases({ t, suite, scenario, config, pub
     });
     await t.test('automatic worker uses published current revision while a newer draft exists', async () => {
       const s = await scenario(); await makeDraft();
-      await worker(s).runProduct(s.product.id);
+      await worker(s).runProduct(identity(s));
       const job = (await pool.query('SELECT * FROM magento_sync_jobs WHERE product_id=$1', [s.product.id])).rows[0];
       assert.equal(job.binding_revision_id, published.id); assert.equal(job.state, 'succeeded');
       const response = await suite.request('/api/product-timeline?sku=' + encodeURIComponent(s.input.sku),
@@ -64,13 +65,13 @@ module.exports = async function automaticCases({ t, suite, scenario, config, pub
       assert.deepEqual(response.data.lineage.products[0].magentoSync, { state: 'synced', reason: null });
     });
     await t.test('automatic A to B to A is a new generation, never an old successful receipt', async () => {
-      const s = await scenario(); await worker(s).runProduct(s.product.id);
+      const s = await scenario(); await worker(s).runProduct(identity(s));
       const original = (await pool.query('SELECT total_price_uah FROM products WHERE id=$1', [s.product.id])).rows[0].total_price_uah;
       await edit(s.product.id);
-      await worker(s).runProduct(s.product.id);
+      await worker(s).runProduct(identity(s));
       assert.equal(s.remote().price, 43);
       await pool.query('UPDATE products SET total_price_uah=$2 WHERE id=$1', [s.product.id, original]);
-      await worker(s).runProduct(s.product.id);
+      await worker(s).runProduct(identity(s));
       const row = await state(s.product.id);
       assert.equal(row.synced_generation, '3'); assert.equal(row.state, 'synced');
       assert.equal(s.remote().price, 42);
@@ -79,27 +80,27 @@ module.exports = async function automaticCases({ t, suite, scenario, config, pub
     await t.test('automatic missing publication and blocked product become needs_attention without writes', async () => {
       const s = await scenario();
       await pool.query("UPDATE magento_auto_sync_activation SET installation_key='missing-test-publication'");
-      await worker(s).runProduct(s.product.id); assert.equal((await state(s.product.id)).state, 'needs_attention');
+      await worker(s).runProduct(identity(s)); assert.equal((await state(s.product.id)).state, 'needs_attention');
       await enable();
       await pool.query("UPDATE products SET exclude_from_export=1 WHERE id=$1", [s.product.id]);
-      await worker(s).runProduct(s.product.id);
+      await worker(s).runProduct(identity(s));
       assert.equal((await state(s.product.id)).state, 'needs_attention'); assert.equal(s.writes.length, 0);
     });
     await t.test('automatic Magento outage does not roll back a save and retries only pre-dispatch', async () => {
       const s = await scenario(); s.hooks.readFailure = true; await edit(s.product.id);
-      await worker(s).runProduct(s.product.id);
+      await worker(s).runProduct(identity(s));
       assert.equal((await state(s.product.id)).desired_generation, '2');
       assert.equal((await state(s.product.id)).state, 'pending'); assert.equal(s.writes.length, 0);
       assert.equal((await suite.request('/health/ready', { authentication: null })).response.status, 200);
-      s.hooks.readFailure = false; await worker(s).runProduct(s.product.id);
+      s.hooks.readFailure = false; await worker(s).runProduct(identity(s));
       assert.equal((await state(s.product.id)).state, 'synced');
     });
     await t.test('automatic disable fences the next dispatch and re-enable resumes only unsent steps', async () => {
       const s = await scenario();
       s.hooks.afterWrite = async () => { s.hooks.afterWrite = null; await disable(); };
-      await worker(s).runProduct(s.product.id); assert.equal(s.writes.length, 1);
-      await worker(s).runProduct(s.product.id); assert.equal(s.writes.length, 1);
-      await enable(); await worker(s).runProduct(s.product.id);
+      await worker(s).runProduct(identity(s)); assert.equal(s.writes.length, 1);
+      await worker(s).runProduct(identity(s)); assert.equal(s.writes.length, 1);
+      await enable(); await worker(s).runProduct(identity(s));
       assert.equal((await state(s.product.id)).state, 'synced');
       assert.equal(s.writes.filter((w) => w.body.product?.name === 'Amber name').length, 1);
     });
@@ -108,16 +109,16 @@ module.exports = async function automaticCases({ t, suite, scenario, config, pub
       const arrival = new Promise((r) => { entered = r; }); const hold = new Promise((r) => { release = r; });
       s.hooks.beforeWrite = async () => { entered(); await hold; };
       const other = new Pool({ connectionString: TEST_DATABASE_URL, statement_timeout: 1500 });
-      const running = worker(s).runProduct(s.product.id); await arrival;
+      const running = worker(s).runProduct(identity(s)); await arrival;
       try {
         await edit(s.product.id, other);
-        await worker(s, other).runProduct(s.product.id); // another replica cannot dispatch
+        await worker(s, other).runProduct(identity(s)); // another replica cannot dispatch
         assert.equal(s.writes.length, 1);
       } finally { release(); await running; await other.end(); }
       const row = await state(s.product.id);
       assert.equal(row.desired_generation, '2'); assert.equal(row.synced_generation, '1'); assert.equal(row.state, 'pending');
       assert.equal(s.remote().price, 42);
-      s.hooks.beforeWrite = null; await worker(s).runProduct(s.product.id);
+      s.hooks.beforeWrite = null; await worker(s).runProduct(identity(s));
       assert.equal((await state(s.product.id)).synced_generation, '2');
       assert.equal(s.remote().price, 43);
     });
@@ -126,13 +127,13 @@ module.exports = async function automaticCases({ t, suite, scenario, config, pub
       const job = await require('../src/services/magento/sync-job.service').enqueue(config, s.input, automatic(s, '1'));
       await edit(s.product.id);
       const restartedPool = new Pool({ connectionString: TEST_DATABASE_URL });
-      try { await worker(s, restartedPool).runProduct(s.product.id); } finally { await restartedPool.end(); }
+      try { await worker(s, restartedPool).runProduct(identity(s)); } finally { await restartedPool.end(); }
       assert.equal((await pool.query('SELECT state FROM magento_sync_jobs WHERE id=$1', [job.id])).rows[0].state, 'superseded');
       assert.equal((await state(s.product.id)).synced_generation, '2');
     });
     await t.test('automatic uncertain dispatch survives process restart and later edits without resend', async () => {
       const s = await scenario(); s.hooks.noMutation = true;
-      await worker(s).runProduct(s.product.id); const row = await state(s.product.id);
+      await worker(s).runProduct(identity(s)); const row = await state(s.product.id);
       assert.equal(row.reason_code, 'reconciliation_required'); assert.equal(s.writes.length, 1);
       await edit(s.product.id); assert.equal((await state(s.product.id)).state, 'needs_attention');
       await suite.runNodeInDatabase(TEST_DATABASE_URL, `
@@ -141,7 +142,7 @@ module.exports = async function automaticCases({ t, suite, scenario, config, pub
         let calls=0;
         const worker=createAutomaticSyncWorker(${JSON.stringify(config)}, {databasePool:pool,
           jobOptions:{fetchImpl:async()=>{calls++;throw new Error('network forbidden');}}});
-        worker.runProduct(${s.product.id}).then(async()=>{
+        worker.runProduct(${identity(s)}).then(async()=>{
           assert.equal(calls,0);
           const r=(await pool.query('SELECT state,desired_generation FROM magento_product_sync_requests WHERE product_id=$1',[${s.product.id}])).rows[0];
           assert.equal(r.state,'needs_attention');assert.equal(r.desired_generation,'2');
@@ -151,20 +152,20 @@ module.exports = async function automaticCases({ t, suite, scenario, config, pub
     await t.test('automatic worker refuses an existing uncertain manual job and a crash left at dispatched', async () => {
       const s = await scenario(); const manual = await s.enqueue(); s.hooks.noMutation = true;
       assert.equal((await s.apply(manual)).state, 'uncertain');
-      await worker(s).runProduct(s.product.id);
+      await worker(s).runProduct(identity(s));
       assert.equal((await state(s.product.id)).reason_code, 'reconciliation_required'); assert.equal(s.writes.length, 1);
       const crashed = await scenario(); crashed.hooks.noMutation = true;
-      await worker(crashed).runProduct(crashed.product.id);
+      await worker(crashed).runProduct(identity(crashed));
       const row = await state(crashed.product.id);
       await pool.query("UPDATE magento_sync_jobs SET state='running' WHERE id=$1", [row.active_job_id]);
-      await worker(crashed).runProduct(crashed.product.id);
+      await worker(crashed).runProduct(identity(crashed));
       assert.equal((await state(crashed.product.id)).reason_code, 'reconciliation_required'); assert.equal(crashed.writes.length, 1);
     });
     await t.test('automatic recovery acknowledges only the generation attached to an already succeeded job', async () => {
       const s = await scenario(); const service = require('../src/services/magento/sync-job.service');
       const opts = automatic(s, '1'); const job = await service.enqueue(config, s.input, opts);
       assert.equal((await service.applyJob(config, job.id, opts)).state, 'succeeded');
-      await edit(s.product.id); await worker(s).runProduct(s.product.id);
+      await edit(s.product.id); await worker(s).runProduct(identity(s));
       const row = await state(s.product.id);
       assert.equal(row.synced_generation, '1'); assert.equal(row.desired_generation, '2'); assert.equal(row.state, 'pending');
     });

@@ -39,11 +39,17 @@ function buildExposureIndex(input) {
   const products = [...input.products].sort(byId);
   const byProduct = new Map(products.map((p) => [Number(p.id), p]));
   const skuProducts = new Map();
+  const publicSkuProducts = new Map();
   for (const product of products) {
     // Match the serializer's exact spelling, never strip an arbitrary apostrophe.
     for (const key of new Set([product.full_sku, finalizeCsvValue(product.full_sku)])) {
       if (!skuProducts.has(key)) skuProducts.set(key, []);
       skuProducts.get(key).push(product);
+    }
+    const publicSku = product.public_sku || product.full_sku;
+    for (const key of new Set([publicSku, finalizeCsvValue(publicSku)])) {
+      if (!publicSkuProducts.has(key)) publicSkuProducts.set(key, []);
+      publicSkuProducts.get(key).push(product);
     }
   }
   const productEvidence = new Map(products.map((p) => [Number(p.id), { exact: [], indicators: [], issues: [] }]));
@@ -125,12 +131,12 @@ function buildExposureIndex(input) {
       rows.forEach((row, index) => {
         if (row.length !== headers.length) issues.push({ code: 'CSV_COLUMN_COUNT_MISMATCH', ...identity, csvRecord: index + 2 });
         const sku = row[skuIndex];
-        const matches = skuProducts.get(sku) || [];
+        const matches = (kind === 'artifact' ? publicSkuProducts : skuProducts).get(sku) || [];
         if (matches.length !== 1) {
           issues.push({ code: 'CSV_SKU_UNRESOLVED', ...identity, sku, csvRecord: index + 2 }); return;
         }
         const product = matches[0];
-        const member = { productId: Number(product.id), sku: product.full_sku,
+        const member = { productId: Number(product.id), sku,
           snapshotId: snapshot.id, status: snapshot.status, ...identity, csvRecord: index + 2 };
         members.push(member); fileEvidence.members.push(member);
         if (!grouped.has(member.productId)) grouped.set(member.productId, []);

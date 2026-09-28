@@ -93,9 +93,9 @@ async function getDraftOverrideConflicts(resolutions, preview) {
 
   const productIds = unavailable.map((item) => item.productId);
   const result = await pool.query(
-    `SELECT id, full_sku, status, total_price_uah
-     FROM products
-     WHERE id = ANY($1::int[])`,
+    `SELECT p.id,p.full_sku,i.public_sku,p.status,p.total_price_uah
+     FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
+     WHERE p.id = ANY($1::int[])`,
     [productIds]
   );
   const products = new Map(result.rows.map((row) => [Number(row.id), row]));
@@ -104,6 +104,8 @@ async function getDraftOverrideConflicts(resolutions, preview) {
     return {
       ...override,
       sku: product?.full_sku || `#${override.productId}`,
+      internalSku: product?.full_sku || null,
+      publicSku: product?.public_sku || product?.full_sku || `#${override.productId}`,
       status: product?.status || 'missing',
       currentPriceUah: product?.total_price_uah === null || product?.total_price_uah === undefined
         ? null
@@ -571,12 +573,12 @@ async function applyRepricingScope({
   try {
     await lifecycleGate.begin(client, 'BEGIN');
     const lockedProductsResult = await client.query(
-      `SELECT id, full_sku, category, weight, total_price, total_price_uah, price_per_gram,
-              uah_rate, details, status, exclude_from_export
-       FROM products
-       WHERE id = ANY($1::int[])
-       ORDER BY id
-       FOR UPDATE`,
+      `SELECT p.id,p.full_sku,i.public_sku,p.category,p.weight,p.total_price,p.total_price_uah,p.price_per_gram,
+              p.uah_rate,p.details,p.status,p.exclude_from_export
+       FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
+       WHERE p.id = ANY($1::int[])
+       ORDER BY p.id
+       FOR UPDATE OF p`,
       [changedItems.map((item) => item.productId)]
     );
     const lockedProducts = new Map(

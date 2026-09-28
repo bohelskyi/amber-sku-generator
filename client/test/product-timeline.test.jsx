@@ -173,6 +173,27 @@ describe('product timeline', () => {
     await waitFor(() => expect(get).toHaveBeenCalledWith('/product-timeline', { params: { sku: 'SKU-B' } }));
   });
 
+  it('presents public article identity while retaining internal revision SKUs', async () => {
+    const publicTimeline = structuredClone(timeline);
+    publicTimeline.querySku = 'AG-000123';
+    publicTimeline.lineage.currentPublicSku = 'AG-000123';
+    publicTimeline.lineage.products = publicTimeline.lineage.products.map((product) => ({
+      ...product,
+      publicSku: 'AG-000123',
+      internalSku: product.sku,
+    }));
+    publicTimeline.events = publicTimeline.events.map((event) => ({
+      ...event,
+      publicSku: 'AG-000123',
+    }));
+    vi.spyOn(api, 'get').mockResolvedValue({ data: publicTimeline });
+    render(<MemoryRouter initialEntries={['/admin/corrections/history?sku=AG-000123']}><ProductTimeline /></MemoryRouter>);
+
+    await waitFor(() => expect(screen.getAllByText('AG-000123').length).toBeGreaterThan(0));
+    expect(screen.getAllByText(/Внутрішній SKU:/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('SKU-A').length).toBeGreaterThan(0);
+  });
+
   it('renders a vertical logical evolution with changes-only default and full-state toggle', async () => {
     vi.spyOn(api, 'get').mockResolvedValue({ data: timeline });
     render(<MemoryRouter initialEntries={['/admin/corrections/history?sku=SKU-B']}><ProductTimeline /></MemoryRouter>);

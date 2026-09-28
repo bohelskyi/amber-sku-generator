@@ -23,6 +23,7 @@ const {
   haveSameDecodedAnswers,
 } = require('./product-answers');
 const { getContextualOption } = require('./product-validation');
+const { resolveProductLookup } = require('./public-identity');
 
 async function getAllCategories(queryable) {
   const result = await queryable.query(
@@ -169,7 +170,9 @@ function getDecodedPricingPayload({
 }
 
 async function decodeSku(skuValue, queryable) {
-  const { normalizedSku, baseFullSku, variationNumber } = parseVariationSku(skuValue);
+  const lookup = await resolveProductLookup(queryable, skuValue);
+  const internalLookupSku = lookup.product?.full_sku || skuValue;
+  const { normalizedSku, baseFullSku, variationNumber } = parseVariationSku(internalLookupSku);
   if (!normalizedSku) {
     throw new Error('Введіть артикул для розшифровки');
   }
@@ -187,19 +190,7 @@ async function decodeSku(skuValue, queryable) {
     throw err;
   }
 
-  const productResult = await queryable.query(
-    `SELECT id, full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah,
-            price_per_gram, uah_rate, details, status, exclude_from_export,
-            corrected_from_product_id, corrected_to_product_id, correction_reason, created_at,
-            sku_schema_version_id, magento_name_subject_ua, magento_name_subject_en,
-            magento_name_review_required
-     FROM products
-     WHERE full_sku = $1
-     ORDER BY id ASC
-     LIMIT 1`,
-    [normalizedSku]
-  );
-  const product = productResult.rows[0] || null;
+  const product = lookup.product || null;
   const parsedSchema = parseVersionedSkuPart(baseFullSku.slice(category.code.length));
   const schema = await getSchemaVersion(category.code, parsedSchema.version, queryable);
   if (!schema) {
@@ -272,6 +263,9 @@ async function decodeSku(skuValue, queryable) {
 
     return {
       sku: normalizedSku,
+      internalSku: normalizedSku,
+      publicSku: product?.public_sku || null,
+      lookupKind: lookup.lookupKind,
       decodeSource: usesStoredHistory ? 'stored_history' : 'versioned_schema',
       skuSchema: {
         id: Number(schema.id),
@@ -312,7 +306,7 @@ async function decodeSku(skuValue, queryable) {
             suffix: `-${String(variationNumber).padStart(3, '0')}`,
           }
         : null,
-      existsInDb: productResult.rows.length > 0,
+      existsInDb: Boolean(product),
       product,
     };
   }

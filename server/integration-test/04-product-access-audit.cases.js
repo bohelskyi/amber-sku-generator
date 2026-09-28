@@ -41,7 +41,7 @@ test('product create, direct recount, and archive share local actor attribution 
     event_key: 'product.created',
     actor_user_id: String(actorUserId),
     request_id: 'audit-product-created',
-    details: { fullSku: created.data.fullSku, categoryCode: 'ZZ' },
+    details: { fullSku: created.data.fullSku, publicSku: created.data.publicSku, categoryCode: 'ZZ' },
   }]);
 
   const recountPayload = {
@@ -92,6 +92,7 @@ test('product create, direct recount, and archive share local actor attribution 
     request_id: 'audit-product-recounted',
     details: {
       sourceSku: created.data.fullSku,
+      publicSku: created.data.publicSku,
       correctedProductId,
       correctedSku: recounted.data.corrected.fullSku,
       productCorrectionId,
@@ -117,7 +118,7 @@ test('product create, direct recount, and archive share local actor attribution 
     event_key: 'product.archived',
     actor_user_id: String(actorUserId),
     request_id: 'audit-product-archived',
-    details: { fullSku: recounted.data.corrected.fullSku },
+    details: { fullSku: recounted.data.corrected.fullSku, publicSku: recounted.data.corrected.publicSku },
   }]);
 
   const repeatedArchive = await request('/api/delete', {

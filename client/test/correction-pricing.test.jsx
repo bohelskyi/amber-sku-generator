@@ -58,6 +58,19 @@ it('shows all three request pricing modes only with override permission', () => 
   expect(screen.queryByRole('radiogroup', { name: 'Режим ціни' })).toBeNull();
 });
 
+it('presents the stable public article and retains internal recount SKUs as context', () => {
+  renderDialog({
+    preview: {
+      ...preview,
+      source: { ...preview.source, publicSku: 'AG-000123', internalSku: 'BR1001' },
+      corrected: { ...preview.corrected, publicSku: 'AG-000123', internalSku: 'BR1002' },
+    },
+  });
+  expect(screen.getAllByText('AG-000123')).toHaveLength(2);
+  expect(screen.getByText(/Внутрішній SKU: BR1001/)).toBeTruthy();
+  expect(screen.getByText(/Внутрішній SKU: BR1002/)).toBeTruthy();
+});
+
 it('selects each pricing segment and shows only its matching inputs', () => {
   function DialogWithModes() {
     const [pricingMode, setPricingMode] = useState('system_auto');

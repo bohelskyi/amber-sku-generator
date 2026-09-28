@@ -10,12 +10,12 @@ async function loadCorrectionExposureManifest(databasePool, { expectedDatabase }
     await client.query("SET LOCAL TIME ZONE 'UTC'");
     const database = (await client.query('SELECT current_database() AS name')).rows[0].name;
     if (expectedDatabase && database !== expectedDatabase) throw new Error('Inventory database does not match expected name');
-    const products = (await client.query(`SELECT id, full_sku, category, status, exclude_from_export,
-      corrected_from_product_id, corrected_to_product_id, sku_schema_version_id,
-      weight, total_price_uah, magento_name_subject_ua, magento_name_subject_en,
-      details->'answers' AS stored_answers,
-      to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS.US') AS created_at
-      FROM products ORDER BY id`)).rows;
+    const products = (await client.query(`SELECT p.id, p.full_sku, i.public_sku, p.category, p.status, p.exclude_from_export,
+      p.corrected_from_product_id, p.corrected_to_product_id, p.sku_schema_version_id,
+      p.weight, p.total_price_uah, p.magento_name_subject_ua, p.magento_name_subject_en,
+      p.details->'answers' AS stored_answers,
+      to_char(p.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.US') AS created_at
+      FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id ORDER BY p.id`)).rows;
     const corrections = (await client.query(`SELECT id, source_product_id, corrected_product_id,
       source_sku, corrected_sku, old_payload, new_payload, reason, price_delta_uah,
       performed_by_user_id, to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS.US') AS created_at

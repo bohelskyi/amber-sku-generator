@@ -42,6 +42,16 @@ Weight categories append rounded weight. Non-weight categories allocate a per-ba
 
 `sku_registry` is the permanent uniqueness ledger. Product inserts normalize and reserve the exact identifier. Archive and correction never release a SKU, because a historical identifier must never later identify another product.
 
+## Stable public product identity
+
+Migration `046_stable_public_product_sku.sql` adds `public_product_identities` as a separate immutable external identity. `products.full_sku` remains the encoded configuration/history SKU permanently; its schema markers, semantic `value_id` versus encoded `sku_code` behavior, decode contract and `sku_registry` reservation are unchanged. APIs keep `fullSku`/`full_sku` in that meaning and add `publicSku` plus explicit `internalSku` where useful.
+
+Upgrade backfill creates one legacy public identity for each exact distinct stored `full_sku` and attaches every historical product row to it. Equal legacy external strings share an identity, but correction traversal still follows product IDs and explicit correction links; it never merges histories by public identity. Migration aborts if one identity has multiple current active/uncorrected revisions.
+
+The activation gate defaults off. Before activation, ordinary creates and recount successors retain compatibility by receiving a legacy public identity equal to their normalized internal SKU. After the audited activation command, ordinary creates allocate `AG-000001`, `AG-000002`, and so on from a dedicated non-cycling BIGINT sequence, while recount successors inherit the source identity. Formatting uses at least six digits and naturally grows past `AG-999999`. Exact legacy values matching `AG-[0-9]{6,}` advance the sequence floor. `nextval` gaps after rollback are intentional; identity rows, allocation numbers and product identity references cannot be changed, deleted, truncated or reused.
+
+A deferrable database constraint trigger permits the existing recount transaction to insert its successor before retiring the source, but requires at commit that each public identity have at most one current active/uncorrected revision. Public lookup returns only that unique current revision and fails closed on ambiguity. Historical internal-SKU lookup retains existing duplicate ambiguity. A public `AG-...` value is never decoded as attribute data: decode first resolves stored product context, then decodes that revision's internal `full_sku`.
+
 Sequence allocation, variation resolution, and exact reservation are serialized and backed by database uniqueness/trigger protections. Preserve the existing lock order and final reservation check.
 
 ## Calibration

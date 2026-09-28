@@ -43,6 +43,8 @@ async function buildCustomUsdRepricingItem(product, details, answers, rateInfo) 
   return {
     productId: Number(product.id),
     sku: product.full_sku,
+    internalSku: product.full_sku,
+    publicSku: product.public_sku || product.full_sku,
     categoryCode: product.category,
     weight: toNullableNumber(product.weight),
     answers,

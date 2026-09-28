@@ -4,6 +4,7 @@ const { loadSupportInputs } = require('../export-templates/support-inputs');
 const { materializeMagentoV1 } = require('../export-templates/magento-v1-definition');
 const { compileDefinition } = require('../export-templates/definition');
 const { error, identity } = require('./binding-contract');
+const { resolveProductLookup } = require('../product/public-identity');
 
 function selection({ sku, productId }) {
   if ((sku !== undefined) === (productId !== undefined)
@@ -18,13 +19,19 @@ async function readPreviewProduct(databasePool, options) {
   const client = await databasePool.connect();
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const selected = (await client.query(`SELECT id, full_sku, status, corrected_to_product_id, exclude_from_export
-      FROM products WHERE ${options.sku !== undefined ? 'full_sku=$1' : 'id=$1'} ORDER BY id LIMIT 2`,
-    [options.sku ?? options.productId])).rows;
-    if (selected.length !== 1) throw error(422, 'MAGENTO_PREVIEW_PRODUCT_NOT_UNIQUE', 'Product selection must match exactly one Amber product');
-    // An ID must not hide historical duplicate SKUs.
-    const duplicates = (await client.query('SELECT id FROM products WHERE full_sku=$1 ORDER BY id LIMIT 2', [selected[0].full_sku])).rows;
-    if (duplicates.length !== 1) throw error(422, 'MAGENTO_PREVIEW_PRODUCT_NOT_UNIQUE', 'Amber SKU is not unique');
+    const resolved = options.sku !== undefined ? await resolveProductLookup(client, options.sku) : null;
+    const selected = options.sku !== undefined
+      ? resolved.product
+      : (await client.query(`SELECT p.*, i.public_sku FROM products p
+          JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id=$1`,
+      [options.productId])).rows[0];
+    if (!selected) throw error(422, 'MAGENTO_PREVIEW_PRODUCT_NOT_UNIQUE', 'Product selection must match exactly one Amber product');
+    // An ID or an internal-SKU lookup must not hide historical duplicates. A
+    // public lookup is intentionally resolved through the one-current invariant.
+    if (options.productId !== undefined || resolved.lookupKind === 'internal') {
+      const duplicates = (await client.query('SELECT id FROM products WHERE full_sku=$1 ORDER BY id LIMIT 2', [selected.full_sku])).rows;
+      if (duplicates.length !== 1) throw error(422, 'MAGENTO_PREVIEW_PRODUCT_NOT_UNIQUE', 'Amber SKU is not unique');
+    }
     const revision = options.bindingRevisionId
       ? await require('./binding.service').readRevisionOnClient(client, options.bindingRevisionId) : null;
     if (revision && options.templateVersionId && options.templateVersionId !== revision.templateVersionId) {
@@ -44,18 +51,18 @@ async function readPreviewProduct(databasePool, options) {
       }
       template = { kind: 'published', versionId, definitionHash: compiled.hash };
     } else {
-      compiled = compileDefinition(materializeMagentoV1(await loadMagentoCatalog(client)));
+      compiled = compileDefinition(materializeMagentoV1(await loadMagentoCatalog(client), { publicSku: true }));
       template = { kind: 'system', definitionHash: compiled.hash };
     }
-    const loaded = await loadDraftPreviewProducts(client, [selected[0].id]);
+    const loaded = await loadDraftPreviewProducts(client, [selected.id]);
     const supported = await loadSupportInputs(client, compiled.definition, loaded.products);
     const exportState = (await client.query(`SELECT route, hold_reason, source_correction_id,
       business_exclusion_state, recount_compatibility_excluded,
       evidence->'independentExclusion' AS "independentExclusion"
-      FROM product_full_export_state WHERE product_id=$1`, [selected[0].id])).rows[0] || null;
+      FROM product_full_export_state WHERE product_id=$1`, [selected.id])).rows[0] || null;
     // Preserve the loader's private historical-schema association. Spreading this
     // object discards source-support proof, including NM's optional zero placeholder.
-    const product = Object.assign(supported.products[0], selected[0], { exportState });
+    const product = Object.assign(supported.products[0], selected, { exportState });
     const observedAt = (await client.query('SELECT transaction_timestamp() AS observed_at')).rows[0].observed_at.toISOString();
     await client.query('COMMIT');
     return { product, compiled, template, revision, observedAt };

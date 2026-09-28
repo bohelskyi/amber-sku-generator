@@ -110,7 +110,7 @@ export function useProductRecount({
   ]);
   const recountPreviewPayload = useMemo(() => {
     const basePayload = buildRecountPreviewPayload({
-      sourceSku: decodeData?.sku,
+      sourceSku: decodeData?.publicSku || decodeData?.sku,
       answers: recountAnswers,
       isCalibrated: recountAnswers.is_calibrated ?? null,
       weight: recountWeight,
@@ -118,7 +118,7 @@ export function useProductRecount({
     if (!useDecisionPreview) return basePayload;
     const { manualPriceUah: _legacyManualPrice, ...decisionPayload } = basePayload;
     return { ...decisionPayload, pricingDecision };
-  }, [decodeData?.sku, recountAnswers, recountWeight, useDecisionPreview, pricingDecision]);
+  }, [decodeData?.publicSku, decodeData?.sku, recountAnswers, recountWeight, useDecisionPreview, pricingDecision]);
   const previewPath = useDecisionPreview
     ? '/admin/correction-requests/preview' : '/recount/preview';
   const requiresRecountWeight = Number(decodeData?.category?.requires_weight) === 1;
@@ -622,7 +622,7 @@ export function useProductRecount({
     if (!canApplyDirectPriceChange) return;
     if (!decodeData?.product?.id || !priceChangePreview?.previewToken
         || priceChangePreview.unchanged || isPriceChangeLoading || isPriceChangeApplying) return;
-    const sourceSku = decodeData.sku;
+    const sourceSku = decodeData.publicSku || decodeData.sku;
     setIsPriceChangeApplying(true);
     setPriceChangeError('');
     api.post('/product-price-change/apply', {
@@ -714,7 +714,7 @@ export function useProductRecount({
           return;
         }
 
-        const correctedSku = res.data.corrected.fullSku;
+        const correctedSku = res.data.corrected.publicSku || sourceSku;
         setRecountSuccess(`Створено коригувальний артикул ${correctedSku}. Він не потрапить в експорт.`);
         Promise.resolve(onApplied?.({ result: res.data, sourceSku, correctedSku })).catch(() => {});
         handleDecode(correctedSku);

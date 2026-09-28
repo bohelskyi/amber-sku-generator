@@ -16,14 +16,17 @@ async function assertEnabled(client, options) {
 }
 
 async function assertGeneration(client, options) {
-  const row = (await client.query('SELECT desired_generation FROM magento_product_sync_requests WHERE product_id=$1',
-    [options.automatic.productId])).rows[0];
-  if (row?.desired_generation !== String(options.automatic.generation)) plan.fail('MAGENTO_SYNC_AMBER_CHANGED');
+  const row = (await client.query(`SELECT product_id,desired_generation FROM magento_product_sync_requests
+    WHERE public_product_identity_id=$1`, [options.automatic.publicIdentityId])).rows[0];
+  if (Number(row?.product_id) !== Number(options.automatic.productId)
+    || row?.desired_generation !== String(options.automatic.generation)) plan.fail('MAGENTO_SYNC_AMBER_CHANGED');
 }
 
 async function assertSnapshot(client, state, options) {
   await assertEnabled(client, options);
-  const product = (await client.query('SELECT * FROM products WHERE id=$1 FOR NO KEY UPDATE', [state.productId])).rows[0];
+  const product = (await client.query(`SELECT p.*,i.public_sku FROM products p
+    JOIN public_product_identities i ON i.id=p.public_product_identity_id
+    WHERE p.id=$1 FOR NO KEY UPDATE OF p`, [state.productId])).rows[0];
   const lifecycle = (await client.query('SELECT * FROM product_full_export_state WHERE product_id=$1 FOR NO KEY UPDATE', [state.productId])).rows[0];
   if (c.hash(plan.clean({ product, lifecycle })) !== state.amberHash) plan.fail('MAGENTO_SYNC_AMBER_CHANGED');
   await assertGeneration(client, options);
@@ -31,7 +34,7 @@ async function assertSnapshot(client, state, options) {
 
 async function attachJob(client, job, options) {
   await client.query(`UPDATE magento_product_sync_requests SET active_job_id=$2,active_generation=$3,
-    state='syncing',reason_code=NULL,updated_at=CURRENT_TIMESTAMP WHERE product_id=$1`,
-  [options.automatic.productId, job.id, options.automatic.generation]);
+    state='syncing',reason_code=NULL,updated_at=CURRENT_TIMESTAMP WHERE public_product_identity_id=$1`,
+  [options.automatic.publicIdentityId, job.id, options.automatic.generation]);
 }
 module.exports = { assertEnabled, assertGeneration, assertSnapshot, attachJob };

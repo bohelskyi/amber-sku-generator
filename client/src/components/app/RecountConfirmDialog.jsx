@@ -56,6 +56,10 @@ export function RecountConfirmDialog({
 
   const oldPrice = preview.source.totalPriceUah;
   const newPrice = preview.corrected.totalPriceUah;
+  const sourceArticle = preview.source.publicSku || preview.source.sku;
+  const correctedArticle = preview.corrected.publicSku || sourceArticle;
+  const sourceInternalSku = preview.source.internalSku || preview.source.sku;
+  const correctedInternalSku = preview.corrected.internalSku || preview.corrected.fullSku;
   const priceDelta = Number(preview.priceDeltaUah || 0);
   const isChoiceMode = mode === 'choice';
   const isRequestMode = mode === 'request';
@@ -167,11 +171,11 @@ export function RecountConfirmDialog({
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Було</div>
               <div className="mt-2 flex min-w-0 items-start gap-2">
                 <div className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-slate-900">
-                  {preview.source.sku}
+                  {sourceArticle}
                 </div>
                 <button
                   type="button"
-                  onClick={() => copyPlainText(preview.source.sku)}
+                  onClick={() => copyPlainText(sourceArticle)}
                   className="btn btn-outline btn-icon"
                   aria-label="Скопіювати старий артикул"
                   title="Скопіювати артикул"
@@ -179,17 +183,22 @@ export function RecountConfirmDialog({
                   <Copy size={15} aria-hidden="true" />
                 </button>
               </div>
+              {sourceInternalSku && sourceInternalSku !== sourceArticle && (
+                <div className="mt-1 break-all font-mono text-xs text-slate-500">
+                  Внутрішній SKU: {sourceInternalSku}
+                </div>
+              )}
               <div className="mt-1 text-sm text-slate-600">{formatUah(oldPrice)}</div>
             </div>
             <div className="rounded-lg border border-[rgba(221,151,74,0.55)] bg-[rgba(221,151,74,0.12)] p-4">
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#8a5f2b]">Стане</div>
               <div className="mt-2 flex min-w-0 items-start gap-2">
                 <div className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-slate-900">
-                  {preview.corrected.fullSku}
+                  {correctedArticle}
                 </div>
                 <button
                   type="button"
-                  onClick={() => copyPlainText(preview.corrected.fullSku)}
+                  onClick={() => copyPlainText(correctedArticle)}
                   className="btn btn-outline btn-icon"
                   aria-label="Скопіювати новий артикул"
                   title="Скопіювати артикул"
@@ -197,6 +206,11 @@ export function RecountConfirmDialog({
                   <Copy size={15} aria-hidden="true" />
                 </button>
               </div>
+              {correctedInternalSku && correctedInternalSku !== correctedArticle && (
+                <div className="mt-1 break-all font-mono text-xs text-slate-500">
+                  Внутрішній SKU: {correctedInternalSku}
+                </div>
+              )}
               <div className="mt-2 flex items-center gap-2">
                 <div className="min-w-0 flex-1 text-sm font-semibold text-slate-900">
                   {showTargetPrice ? formatUah(newPrice) : '—'}

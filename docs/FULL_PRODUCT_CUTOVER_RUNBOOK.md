@@ -295,23 +295,30 @@ frozen production database still requires that lifecycle cutover.
 1. Restore the verified frozen dump to the exact target database. Keep traffic and
    all old writers stopped.
 2. Build/start the reviewed containers and let normal startup apply forward
-   migrations through 045. Do not run integration tests against this database.
+   migrations through 046. Do not run integration tests against this database.
 3. Verify `/health/live`, `/health/ready`, migration checksums and writer header.
-4. Import the reviewed binding artifact with `magento:binding-transfer import`.
-   The result must be a new draft; import must not publish it.
-5. Run `magento:binding-transfer verify` and `magento:bindings validate`. Resolve
-   only reported target catalog or live Magento identity drift; never remap by label.
-6. Explicitly publish the target draft using its returned counter and the target's
-   actual current-publication ID (`none` only when there is no current publication).
-7. Confirm the installation's current publication and GET-only representative
-   previews. No Magento product APPLY is part of this step.
-8. Re-run the exact-SKU historical exposure reconciliation against the fresh dump:
+4. Keep all business writers frozen. Verify `pending_normal=0`,
+   `pending_replacement=0`, no generated-unconfirmed product snapshot, no active
+   shared generation attempt and no unresolved automatic request/job. Historical
+   Held products remain Held.
+5. Run a fresh `public-sku:activation preflight`, review its new file/hash and
+   apply that exact plan. This audited one-way step does not publish or call Magento.
+   The database keeps product/recount writers blocked until delivery cutover.
+6. Import or create the public-SKU-aware successor binding/template draft. Run
+   `magento:binding-transfer verify` and `magento:bindings validate`; explicitly
+   review `AR.size=28` against `rozmir_kartyny` option `6060` (`15×15`). Never
+   mutate the existing publication or approve an option by label alone.
+7. Explicitly publish the reviewed evaluator-3/public-SKU successor using its
+   returned counter and the target's actual current-publication ID (`none` only
+   when there is no current publication). Confirm GET-only representative previews.
+   No Magento product APPLY is part of this step.
+8. Re-run the exact-public-SKU historical exposure reconciliation against the fresh dump:
    generate a fresh bounded bulk plan, review its hash, apply it with the target
    actor, and retain `summary.json` receipts. Do not reuse rehearsal hashes.
 9. Inspect product snapshots/artifacts, generated-unconfirmed files, current shared
    attempts, pending normal/replacement queues and Held rows. Reconcile blocking
    work without deleting or falsely confirming it.
-10. Run `magento:delivery-cutover preflight` to a new file and review every blocker,
+10. Run a fresh `magento:delivery-cutover preflight` to a new file and review every blocker,
     identity hash, example list and the preserved Held count.
 11. Apply the exact preflight file/hash with `magento:delivery-cutover apply`.
 12. Run `magento:auto-status`; require automatic enabled, the configured installation
@@ -322,4 +329,8 @@ frozen production database still requires that lifecycle cutover.
     succeeds, and no CSV queue obligation or new Magento artifact appears.
 14. Inspect readiness, structured server logs, worker/request/job state and the
     successful job's verified steps/acknowledgement.
-15. Release storekeeper traffic. Do not run another broad audit after this sequence.
+15. Only after all checks pass, release ordinary product/recount/storekeeper traffic.
+    Do not resume writers between stable-SKU activation and delivery cutover, and
+    do not run the legacy Add/Update product CSV there: its `product_online=2`
+    value can disable an existing Magento product. Do not run another broad audit
+    after this sequence.

@@ -52,11 +52,13 @@ async function sampleProducts(config, amber, schema, analysis, { fetchImpl } = {
     if (!candidates.length) review('LOCAL_SAMPLE_NOT_FOUND', { routeId: plan.id, amberGroup: plan.amberGroup });
     for (const candidate of candidates) {
       const product = amber.products.find((p) => p.id === candidate.product_id);
+      const publicSku = product.public_sku || product.full_sku;
       const expected = evaluate(amber, product);
       const predicted = expected.base.attribute_set_code || null;
       const sets = schema.attributeSets.filter((s) => s.attribute_set_name === predicted);
       const selected = sets.length === 1 ? sets[0] : null;
-      const context = { localProductId: product.id, sku: product.full_sku, amberGroup: product.category, routeId: plan.id };
+      const context = { localProductId: product.id, sku: product.full_sku, internalSku: product.full_sku,
+        publicSku, amberGroup: product.category, routeId: plan.id };
       const sample = { ...context, predictedAttributeSet: predicted, predictedAttributeSetId: selected?.attribute_set_id ?? null,
         evaluation: { ready: expected.ready, issueFields: expected.issueFields, provisional: !expected.ready },
         sourceAnswers: Object.fromEntries(Object.values(amber.compiled.definition.sources)
@@ -65,9 +67,9 @@ async function sampleProducts(config, amber, schema, analysis, { fetchImpl } = {
       if (!expected.ready) review('PRODUCT_EVALUATION_NOT_READY', { localProductId: product.id });
       let observed;
       try {
-        if (!remote.has(product.full_sku)) remote.set(product.full_sku,
-          productEvidence(await client.findProductBySku(product.full_sku), targets));
-        observed = remote.get(product.full_sku);
+        if (!remote.has(publicSku)) remote.set(publicSku,
+          productEvidence(await client.findProductBySku(publicSku), targets));
+        observed = remote.get(publicSku);
       } catch (cause) {
         if (cause.code !== 'MAGENTO_PRODUCT_NOT_FOUND') throw cause;
         review('MAGENTO_PRODUCT_NOT_FOUND', { localProductId: product.id, routeId: plan.id });
@@ -126,7 +128,7 @@ async function sampleProducts(config, amber, schema, analysis, { fetchImpl } = {
       }
       try {
         const scoped = productEvidence(await createMagentoClient(config, { fetchImpl, storeCode: scope })
-          .findProductBySku(result.sku), new Set(fields));
+          .findProductBySku(result.publicSku), new Set(fields));
         if (scoped.magentoProductId !== result.magentoProductId) invalid();
         scopes[scope] = Object.fromEntries(fields.map((field) => [field, scoped.fields[field] ?? null]));
       } catch (cause) {
