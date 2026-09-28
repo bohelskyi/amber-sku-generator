@@ -12,6 +12,27 @@ const { catalog, product } = require('./fixtures/magento-v1/contract');
 const { parseMagentoConfig } = require('../src/config/magento');
 const fixture = require('./fixtures/magento-bindings');
 
+test('AR glass binds its finite semantic lookup and absent-source literal without fabricating an absence identity', () => {
+  const { amber, schema } = setup();
+  const b = buildCandidates(amber, schema, [], { group: 'AR' });
+  const glass = b.attributes.find((a) => a.target === 'sklo');
+  assert.equal(glass.strategy, 'constant_option');
+  const values = b.options.filter((o) => o.bindingKey === glass.bindingKey);
+  assert.deepEqual(values.map((o) => o.evaluatedOutput).sort(), ['Без скла', 'Зі склом'].sort());
+  assert.ok(values.every((o) => o.sourceKind === 'evaluated' && !Object.hasOwn(o, 'valueId') && o.optionId));
+  assert.equal(validateBindings(b, amber.compiled.definition, schema).valid, true);
+  for (const change of [
+    (d) => { d.questionContracts['AR.glass'].allowed = []; },
+    (d) => { d.tables.arGlass['9'] = 'Unexpected glass'; },
+  ]) {
+    const d = structuredClone(amber.compiled.definition); change(d);
+    const candidate = buildCandidates({ ...amber, compiled: compileDefinition(d) }, schema, [], { group: 'AR' });
+    assert.equal(candidate.attributes.find((a) => a.target === 'sklo').strategy, 'semantic_option');
+    assert.ok(validateBindings(candidate, d, schema, { publish: true }).diagnostics
+      .some((x) => x.code === 'SEMANTIC_OUTPUT_DOMAIN_UNRESOLVED'));
+  }
+});
+
 function setup() {
   const compiled = compileDefinition(materializeMagentoV1(catalog()));
   const mapper = describeMapper(compiled.definition);

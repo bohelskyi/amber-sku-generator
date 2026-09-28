@@ -251,6 +251,47 @@ test('CH reversed legacy dimensions are a diff; evaluator semantics and valid si
   assert.equal(r.diff.find((d) => d.target === 'dovzhyna_namystyny').compatibility, 'legacy_remote_mismatch');
   assert.ok(r.warnings.some((w) => w.code === 'LEGACY_REMOTE_DIMENSIONS_REVERSED'));
 });
+
+test('CH.texture=8 reviewed dictionary refusal still blocks emission if a product later uses it', () => {
+  const f = systemFixture('CH', { texture: 8, bead_length: '12.5', bead_width: '8.2', rosary_length: '32' });
+  const bindings = require('../src/services/magento/binding-bootstrap').buildCandidates({
+    ...f.amber, products: [], current: [],
+  }, f.schema, [], { group: 'CH' });
+  const refusal = bindings.options.find((o) => o.questionKey === 'texture' && o.valueId === '8');
+  Object.assign(refusal, { reviewState: 'blocked', evidence: { note: 'Dictionary-only refusal' } });
+  f.amber.revision = { schema: f.schema, schemaFingerprint: hash(f.schema),
+    topologyFingerprint: hash(f.schema.storeTopology), bindings };
+  const r = run(f);
+  assert.equal(r.sendable, false);
+  assert.ok(r.blockers.some((b) => b.code === 'MAPPING_EXPLICITLY_BLOCKED' && b.target === 'faktura_namystyn'));
+  assert.equal(custom(r, 'faktura_namystyn'), undefined);
+});
+
+test('AR glass empty-source fallback and glass=1 require separate exact approvals; unknown glass stays blocked', () => {
+  for (const glass of [undefined, 1, 9]) {
+    const f = systemFixture('AR', { glass });
+    const bindings = require('../src/services/magento/binding-bootstrap').buildCandidates({ ...f.amber,
+      products: [], current: [] }, f.schema, [], { group: 'AR' });
+    const attribute = bindings.attributes.find((a) => a.target === 'sklo');
+    attribute.reviewState = 'approved';
+    const options = bindings.options.filter((o) => o.bindingKey === attribute.bindingKey);
+    options.forEach((o) => { o.reviewState = 'approved'; });
+    f.amber.revision = { schema: f.schema, schemaFingerprint: hash(f.schema),
+      topologyFingerprint: hash(f.schema.storeTopology), bindings };
+    const r = run(f);
+    if (glass === 9) {
+      assert.equal(r.sendable, false); assert.equal(r.evaluation.ready, false);
+      assert.equal(custom(r, 'sklo'), undefined);
+    } else {
+      const expected = options.find((o) => o.evaluatedOutput === (glass === 1 ? 'Зі склом' : 'Без скла'));
+      assert.equal(custom(r, 'sklo'), expected.optionId);
+      expected.reviewState = 'blocked';
+      const blocked = run(f);
+      assert.ok(blocked.blockers.some((b) => b.code === 'MAPPING_EXPLICITLY_BLOCKED' && b.target === 'sklo'));
+      assert.equal(custom(blocked, 'sklo'), undefined);
+    }
+  }
+});
 test('AR size 28 has no invented option; unused 29–31 also fail closed; AR maintained name is preserved', () => {
   for (const size of [28, 29, 30, 31]) {
     const f = systemFixture('AR', { size });

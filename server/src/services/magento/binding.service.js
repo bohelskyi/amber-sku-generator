@@ -8,6 +8,7 @@ const { loadSourceEvidence, validateSourceReferences } = require('../export-temp
 const c = require('./binding-contract');
 const { normalizeBindings, requirements, validateBindings } = require('./binding-validation');
 const repository = require('./binding-repository');
+const { unusedDictionaryRefusal } = require('./binding-source-refusal');
 
 const conflict = () => { throw c.error(409, 'MAGENTO_BINDING_CONFLICT', 'Binding revision or current publication changed'); };
 async function read(options, operation) {
@@ -168,7 +169,10 @@ async function validateStored(client, loaded) {
       || evidence.schemas.some((s) => s.category_code === option.amberGroup && s.questions.some((q) => q.key === option.questionKey && q.value_ids.includes(option.valueId))));
     const enabled = loaded.bindings.routes.some((r) => r.enabled && r.reviewState !== 'blocked'
       && loaded.bindings.attributes.some((a) => a.routeKey === r.routeKey && a.bindingKey === option.bindingKey && a.reviewState !== 'blocked'));
-    if (!known && (enabled || ['approved','blocked'].includes(option.reviewState))) sourceDiagnostics.push({ code: 'SEMANTIC_IDENTITY_UNRESOLVED', bindingKey: option.bindingKey, sourceKey: option.sourceKey });
+    if (!known && (enabled || ['approved','blocked'].includes(option.reviewState))
+      && !await unusedDictionaryRefusal(client, option, t.compiled.definition, result.requirements, evidence)) {
+      sourceDiagnostics.push({ code: 'SEMANTIC_IDENTITY_UNRESOLVED', bindingKey: option.bindingKey, sourceKey: option.sourceKey });
+    }
   }
   result.diagnostics.push(...sourceDiagnostics);
   result.valid = result.diagnostics.length === 0;

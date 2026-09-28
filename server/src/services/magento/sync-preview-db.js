@@ -53,7 +53,9 @@ async function readPreviewProduct(databasePool, options) {
       business_exclusion_state, recount_compatibility_excluded,
       evidence->'independentExclusion' AS "independentExclusion"
       FROM product_full_export_state WHERE product_id=$1`, [selected[0].id])).rows[0] || null;
-    const product = { ...supported.products[0], ...selected[0], exportState };
+    // Preserve the loader's private historical-schema association. Spreading this
+    // object discards source-support proof, including NM's optional zero placeholder.
+    const product = Object.assign(supported.products[0], selected[0], { exportState });
     const observedAt = (await client.query('SELECT transaction_timestamp() AS observed_at')).rows[0].observed_at.toISOString();
     await client.query('COMMIT');
     return { product, compiled, template, revision, observedAt };

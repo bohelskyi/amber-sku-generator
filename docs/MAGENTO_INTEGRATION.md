@@ -1185,6 +1185,29 @@ It does not execute a live preview. No binding approval, production write or com
 part of this milestone.
 
 
+### Reviewed dictionary-only refusals
+
+A blocked semantic option with an explicit review note can represent a refusal
+without claiming an Amber identity when its exact source/output is enumerated by
+the pinned evaluator, every matching frozen question contract excludes the value,
+the source has no aliases, and neither current nor historical catalogs contain it.
+Validation also reads current active-product usage in its own transaction; any use
+keeps `SEMANTIC_IDENTITY_UNRESOLVED`. Missing contracts, conflicting catalogs,
+unreviewed/approved mappings and reachable values cannot use this exception.
+The existing `CH.texture=value_id:8` refusal is such a dictionary-only entry.
+Its remote candidate is never approval. Runtime resolution remains blocked if a
+product later supplies the value, including after publication. Known but unsupported
+values (such as AR size 28) retain the ordinary explicit blocked-option contract.
+No catalog identity, option, migration or evaluator output is manufactured.
+
+AR glass uses the existing evaluated `constant_option` domain for its closed
+optional lookup: `glass=1` emits `Зі склом`, while absent glass emits `Без скла`.
+Both require separate exact option approvals. This classification requires a
+literal absence branch, the same semantic source in the presence check and
+question/lookup, error-on-unknown lookup behavior, and captured membership for
+every dictionary key. Ordinary publication source validation remains required;
+unknown values/outputs remain blocked. Absence never gets a fabricated value ID.
+
 ## Durable product-sync jobs — migration 042
 
 `magento:sync` is the first explicit apply worker. Install migration 042 through the
@@ -1295,7 +1318,7 @@ exact labels alone do not prove all numeric values are supported.
 | Group / route | Set | Exact option rows | Review-required / missing / compatibility |
 | --- | --- | --- | --- |
 | BR:all | 142 / Браслети | 29 | No unresolved finite option candidate; dynamic bracelet length only observed as Безрозмірний → 5989. Seven sampled category paths exact. Ownership still undecided. |
-| NM:all | 143 / Намиста | 35 | Archived `extra=0` (Не обрано) has no evaluated output/option; bootstrap leaves a blocked placeholder. This is an absent-selection semantic decision, not proof of a missing Magento option. Eleven sampled category paths exact. |
+| NM:all | 143 / Намиста | 35 | Archived `extra=0` (Не обрано) has no evaluated output/option; bootstrap leaves a blocked placeholder. Preview omits this field only for numeric zero proven by the frozen `numeric-zero-v1` contract and the product's own immutable schema, with empty evaluator output and null binding output/option. The emission decision stays blocked; failed reconstruction, genuine/string zero and emitted values are not exempt. Eleven sampled category paths exact. |
 | CH:all | 150 / Чотки | 26 | `count=9` emits `?`, no Magento option. Seven sampled category paths exact. 10/10 remote samples reverse dimensions; 9/10 round weight, and malformed size text occurs. Preserve Amber semantics; historical reversal/rounding is not an approved transform. |
 | AR:all | 152 / Картини | 38 | `size=28` → `15×15` missing; two current products, both absent remotely. Current-only `29=75/78`, `30=74x80`, `31=70х70` have no published historical identity, enumerated output or option candidate, and zero current usage. Four sampled category paths exact. |
 | SV souvenir≠5 | 151 / Сувеніри | 41 | Numeric source `SV.2` cannot be represented by migration 041 semantic keys: `tematyka_vyrobu` blocked despite exact metadata/labels. Zero ready category witnesses among the three bootstrap samples. Existing provisional paths below match. |

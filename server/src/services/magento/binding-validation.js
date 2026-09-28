@@ -26,6 +26,26 @@ function requirements(definition, schema) {
   const mapper = describeMapper(definition);
   const references = new Map(definition.bindings.map((b) => [b.id, b.value]));
   const dereference = (node) => node?.op === 'ref' ? dereference(references.get(node.id)) : node;
+  // A finite optional lookup (AR glass) also emits a literal for an absent
+  // source. Bind both exact evaluated outputs under the frozen cell domain,
+  // without inventing a semantic ID for absence. Every dictionary key must
+  // still have captured source membership, validated by publication normally.
+  function finiteOptionalLookup(cell) {
+    const node = dereference(cell);
+    const condition = dereference(node?.if);
+    const source = dereference(condition?.input);
+    const yes = dereference(node?.then); const no = dereference(node?.else);
+    const q = definition.questionContracts[yes?.question];
+    const lookup = dereference(yes?.value); const key = dereference(lookup?.input);
+    const input = dereference(key?.input);
+    return node?.op === 'when' && condition?.op === 'present' && source?.op === 'source'
+      && definition.sources[source.id]?.kind === 'semantic' && definition.sources[source.id].aliases.length === 0
+      && yes?.op === 'questionValue' && q?.source === source.id
+      && no?.op === 'literal' && typeof no.value === 'string' && no.value !== ''
+      && lookup?.op === 'lookup' && key?.op === 'semanticKey' && input?.op === 'source' && input.id === source.id
+      && dereference(lookup.otherwise)?.op === 'error'
+      && Object.keys(definition.tables[lookup.table]).every((value) => q.allowed.includes(value));
+  }
   function semanticLookupProof(node, table, sourceId, seen = new Set()) {
     if (!node || typeof node !== 'object' || seen.has(node)) return false;
     seen.add(node);
@@ -53,7 +73,8 @@ function requirements(definition, schema) {
       const semantics = values.filter((v) => v.kind === 'dictionary' && v.sourceIds?.some((id) => definition.sources[id]?.kind === 'semantic'));
       const strategy = transport(target, observed) ? 'transport_control' : !OPTION_INPUTS.has(observed?.frontend_input) ? 'scalar'
         : values.some((v) => v.kind === 'numeric_band') ? 'numeric_band_option'
-          : semantics.length ? 'semantic_option' : usage.dynamicOutput ? 'dynamic_exact_label_option' : 'constant_option';
+          : semantics.length ? (!usage.dynamicOutput && finiteOptionalLookup(cell) ? 'constant_option' : 'semantic_option')
+            : usage.dynamicOutput ? 'dynamic_exact_label_option' : 'constant_option';
       // Domain identity binds exact template + cell expression. Output identity is the
       // evaluator's exact string, not a remote option label or a fabricated value_id.
       const domainKey = hash({ definitionHash: hash(definition), group: group.route, row: row.id, target, cell });

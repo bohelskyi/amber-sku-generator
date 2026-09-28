@@ -12,6 +12,7 @@ const { populated, numeric, numericComparison, orientation } = require('./compat
 const { indexTrees, currentAssignments, resolveCategories } = require('./sync-preview-categories');
 const { syncEligibility } = require('./sync-eligibility');
 const { readDomains, planDomains } = require('./sync-preview-domains');
+const { sourceSupportChecker } = require('../export-templates/source-support');
 
 const MERCHANDISING = ['description', 'short_description', 'meta_title', 'meta_description'];
 const NATIVE = { sku: 'sku', name: 'name', price: 'price', weight: 'weight', product_type: 'type_id',
@@ -173,7 +174,22 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
       if (matches.length === 1) optionDecision = matches[0];
       else if (matches.length > 1) fail('OPTION_SOURCE_AMBIGUOUS');
     }
-    if ((blocked && populated(value)) || optionDecision?.reviewState === 'blocked') {
+    // The frozen source-support contract proves numeric NM.extra=0 against the
+    // product's own immutable schema during evaluation. Its null-output binding
+    // refuses emission; it must not prevent intentional omission. Genuine zero,
+    // failed reconstruction, changed output and other blocked sources stay closed.
+    const extraSupport = definition.sourceSupport?.sources['NM.extra'];
+    let placeholderOmission = expected.ready && product.category === 'NM' && target === 'dodatkovo_namysta'
+      && product.details?.answers?.extra === 0 && value === ''
+      && extraSupport?.placeholder === 'numeric-zero-v1' && !extraSupport.semanticValues.includes('0')
+      && optionDecision?.sourceKind === 'semantic' && optionDecision.amberGroup === 'NM'
+      && optionDecision.questionKey === 'extra' && optionDecision.valueId === '0'
+      && optionDecision.evaluatedOutput === null && optionDecision.optionId === null;
+    if (placeholderOmission) {
+      try { sourceSupportChecker(definition, product)({ kind: 'semantic', category: 'NM', key: 'extra' }, 0); }
+      catch { placeholderOmission = false; }
+    }
+    if ((blocked && populated(value)) || (optionDecision?.reviewState === 'blocked' && !placeholderOmission)) {
       authority = 'blocked'; fail('MAPPING_EXPLICITLY_BLOCKED');
     } else if (populated(value)) {
       if (native) {

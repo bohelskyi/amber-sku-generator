@@ -353,6 +353,33 @@ test('Magento binding persistence, publication, immutability and real PostgreSQL
       assert.equal((await publish(saved)).state, 'published');
     } finally { await pool.query('UPDATE questions SET include_in_sku=0 WHERE id=$1', [q.id]); }
   });
+  await t.test('dictionary-only refusal validates without invented identity, but fresh active usage blocks publication', async () => {
+    const d = structuredClone(definition);
+    d.tables.fixtureColors['999'] = 'Red output';
+    d.questionContracts.color = { source: 'color', exists: true, required: false,
+      rule: {}, allowed: ['7', '8', '9', '29'] };
+    const f = await templates.createTemplate({ key: `refusal-${crypto.randomUUID()}`, displayName: 'Dictionary refusal', definition: d }, options());
+    const v = await templates.publishTemplate(f.id, { expectedRevision: f.draft.revision, expectedDefinitionHash: f.draft.definitionHash }, options());
+    const draft = await bindings.createDraft({ installationKey: `refusal-${crypto.randomUUID()}`,
+      origin: 'https://binding.example.invalid', templateVersionId: v.id, observedAt: '2026-09-01T00:00:00.000Z', schema }, options());
+    const b = fixture.approvedBindings(d, schema);
+    const refused = b.options.find((o) => o.valueId === '999');
+    Object.assign(refused, { reviewState: 'blocked', evidence: { note: 'Dictionary-only, not an Amber semantic identity' } });
+    const saved = await bindings.updateDraft(draft.id, { expectedRevision: draft.revision, bindings: b }, options());
+    assert.equal((await bindings.validateDraft(saved.id)).valid, true);
+    const sku = `REFUSAL-${crypto.randomUUID()}`;
+    const { insertProductFixture } = require('./product-fixture');
+    const p = (await insertProductFixture(pool, `INSERT INTO products
+      (full_sku,base_sku,sequence_number,category,weight,total_price,total_price_uah,price_per_gram,uah_rate,details)
+      VALUES($1,$1,0,'BR',5,1,42,1,42,$2::jsonb) RETURNING id`, [sku, JSON.stringify({ answers: { binding_test_semantic: 999 } })])).rows[0];
+    assert.ok((await bindings.validateDraft(saved.id)).diagnostics.some((x) => x.code === 'SEMANTIC_IDENTITY_UNRESOLVED' && x.sourceKey.endsWith(':999')));
+    await assert.rejects(publish(saved), { code: 'MAGENTO_BINDING_INVALID' });
+    assert.equal((await bindings.getRevision(saved.id)).state, 'draft');
+    assert.equal(await countEvents(saved.id), 0);
+    await pool.query("UPDATE products SET status='archived' WHERE id=$1", [p.id]);
+    assert.equal((await bindings.validateDraft(saved.id)).valid, true);
+    assert.equal((await publish(saved)).state, 'published');
+  });
   await t.test('database rejects wrong-attribute options, duplicate option identity and forged source kinds', async () => {
     const draft = await ready();
     for (const [sql, expected] of [
