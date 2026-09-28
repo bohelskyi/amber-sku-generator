@@ -934,10 +934,12 @@ numeric-equivalent formatting, rounded legacy values and semantic differences.
 
 #### Explicit KL inclusion category action
 
-`magento:category` supports only `Default/Кулони/З інклюзом`, with the reviewed
+`magento:category` supports `Default/Кулони/З інклюзом`, with the reviewed
 source `KL.addit=value_id:1`. It does not change the frozen export evaluator's
 legacy presence expression. The product preview offers this action for value 1.
 The six existing KL paths retain their individually approved identities.
+The separate closed SV stone action is documented under
+[literal SV identity and controlled stone category](#literal-sv-identity-and-controlled-stone-category).
 
 Run from `server/` to inspect the live exact parent/child lookup and intended POST:
 
@@ -1127,8 +1129,9 @@ Exact set names, attribute codes and unique option labels become `proposed`.
 Scalar and native-control identities are included. Missing options become `blocked`;
 ambiguous/drift candidates remain `review_required`. KL inclusion stays review-required
 even if a future schema label becomes exact. The known SV souvenir route conflict
-also stays review-required. Numeric question keys outside 041's semantic-key contract
-are retained as an explicitly blocked attribute with source evidence, not renamed.
+also stays review-required. Forward migration 043 permits literal numeric Amber
+question keys such as `SV.2`; install it before persisting those candidates.
+The separate Magento attribute/store-code contract still requires a leading letter.
 No Amber semantic ID is replaced by a Magento ID or inferred from `sku_code`.
 
 Category decisions are typed `evidence.categories` entries on each category transport
@@ -1207,6 +1210,43 @@ literal absence branch, the same semantic source in the presence check and
 question/lookup, error-on-unknown lookup behavior, and captured membership for
 every dictionary key. Ordinary publication source validation remains required;
 unknown values/outputs remain blocked. Absence never gets a fabricated value ID.
+
+### Literal SV identity and controlled stone category
+
+Migration `043_magento_literal_question_keys.sql` extends only the Amber question-key
+grammar in option identities and canonical route predicates. `SV.2=value_id:2`
+retains the literal question key `2`; no friendly alias, label-derived source or
+frozen template/schema rewrite is involved. Existing source-proof checks, exact
+option foreign keys, route membership, CAS/audit and publication immutability stay
+in force. Apply through the normal migration runner; migration 041 is unchanged.
+
+The reviewed installed convention uses set **151 / Сувеніри** for both SV routes,
+including `SV.souvenir=value_id:5`. This is an explicit draft route decision, never
+a new bootstrap default or evaluator change. Stone taxonomy remains under
+`Default/Камінь`; set routing does not select category taxonomy.
+
+The closed `magento:category` flow supports exactly the existing KL inclusion path
+and **Default/Камінь/Камінь сувенірний** for the stone SV route. Preview is GET-only:
+
+```sh
+npm run magento:category -- --revision UUID --path "Default/Камінь/Камінь сувенірний"
+# Explicit create/bind only after reviewing preview and current draft counter:
+npm run magento:category -- --revision UUID --path "Default/Камінь/Камінь сувенірний" --apply --expected-revision N --actor-user-id ID
+```
+
+The route, category ownership and exact parent binding must already be approved.
+Fresh full-hierarchy GETs verify parent ID/path and child uniqueness; no arbitrary
+path, leaf match or recursive creation is accepted. Durable per-origin/path attempt
+reservation precedes POST, and read-after-write verifies identity before the draft
+CAS save. Existing exact children are bound without POST; uncertain attempts never
+automatically repeat POST, including after a local save failure. No product write,
+publication or export acknowledgment is part of this command.
+
+Binding review does not waive SV product readiness. The frozen evaluator requires
+saved UA/EN name subjects except for automatic keychains (`souvenir=6`), plus its
+existing required characteristics. Missing legacy data stays a product blocker even
+when every applicable binding is approved. Category-cell paths can be independently
+reviewed against the exact live tree without claiming the whole product is ready.
 
 ## Durable product-sync jobs — migration 042
 
@@ -1300,6 +1340,10 @@ race. Encoded-SKU website endpoints can still be rejected by an installation; su
 response is uncertain until exact membership is verified, never silently replayed.
 
 ## Remaining-group review 2026-09-28
+
+This section records the earlier candidate-only audit. Its SV numeric-key and
+set-routing blockers are superseded by migration 043 and the explicit set-151
+decision documented above; its IDs remain evidence, not automatic approval.
 
 This bounded review reused `readAmberEvidence`, `auditMagentoSchema`, the pure
 `buildCandidates` bootstrap function, `resolveCategories` and the existing compatibility

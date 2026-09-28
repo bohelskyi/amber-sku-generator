@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`042`. Accepted migrations `000`–`040` and the locally applied `041`/`042` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`043`. Accepted migrations `000`–`040` and the locally applied `041`/`042` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -99,6 +99,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `040_full_product_export_cutover.sql` | Distinct legacy baseline and audit FK, typed business/compatibility exclusions, monotonic preparing/active selector gate with immutable audit references, baseline-aware pending index, deferred policy projection checks and writer guards; immutable snapshot selection and explicit replacement binding. No baseline acceptance, exclusion release or activation in migration. |
 | `041_magento_binding_revisions.sql` | Schema-only Magento binding revisions, normalized schema observations, route/attribute/semantic-or-evaluated option decisions and separate scoped ownership policies. Composite template/option identity FKs, uniqueness, source-kind constraints and publication immutability guards. No live IDs, credentials, candidates, policy seeds or Magento calls. See [the binding contract](MAGENTO_INTEGRATION.md#phase-1b2a-persistent-binding-foundation). |
 | `042_magento_sync_jobs.sql` | Durable immutable Magento sync intent, per-operation dispatch/verification ledger, idempotency and unfinished-SKU uniqueness. No seeded jobs, binding publication, remote calls or export-state changes. |
+| `043_magento_literal_question_keys.sql` | Allows literal Amber question keys beginning with a digit in semantic option identities and canonical route predicates, including `SV.2`. Magento code constraints, source proof, composite identity, CAS and publication guards remain unchanged. No row rewrite or alias backfill. |
 
 The 2026-09-28 read-only check of the local operator database confirmed 041 applied at
 `2026-09-27T20:13:49.840Z` and 042 at `2026-09-27T22:52:43.558Z`. The normal migration

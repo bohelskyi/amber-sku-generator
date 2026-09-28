@@ -11,6 +11,8 @@ const canonical = (v) => Array.isArray(v) ? v.map(canonical) : v && typeof v ===
 const hash = (v) => createHash('sha256').update(JSON.stringify(canonical(v))).digest('hex');
 const originHash = (origin) => hash(validateBaseUrl(origin));
 const code = (v) => typeof v === 'string' && /^[a-zA-Z][a-zA-Z0-9_]{0,99}$/.test(v);
+// Amber question keys are literal identities, not Magento attribute codes (SV.2).
+const questionKey = (v) => typeof v === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_]{0,99}$/.test(v);
 const positive = (v) => Number.isSafeInteger(v) && v > 0;
 const semanticId = (v) => typeof v === 'string' && /^(0|-?[1-9][0-9]*)$/.test(v)
   && Number.isSafeInteger(Number(v)) && Number(v) >= -2147483648 && Number(v) <= 2147483647;
@@ -98,5 +100,5 @@ function normalizeSchema(report, secrets = []) {
   return { storeCode: report.storeCode, attributes, attributeSets, storeTopology };
 }
 
-module.exports = { error, invalid, hash, originHash, code, positive, semanticId, command, counter, identity,
+module.exports = { error, invalid, hash, originHash, code, questionKey, positive, semanticId, command, counter, identity,
   installation, safeData, unique, list, normalizeSchema };

@@ -52,13 +52,12 @@ function buildCandidates(amber, schema, categoryNodes, { group, routeKey } = {})
         if (!paths.length) { a.reviewState = 'review_required'; a.evidence.diagnosticCodes.push('CATEGORY_OUTPUT_NOT_OBSERVED'); }
       }
       bindings.attributes.push(a);
-      const unsupportedSources = req.options.filter((o) => o.sourceKind === 'semantic' && !c.code(o.questionKey));
+      const unsupportedSources = req.options.filter((o) => o.sourceKind === 'semantic' && !c.questionKey(o.questionKey));
       if (unsupportedSources.length) {
         a.reviewState = 'blocked';
         a.evidence.diagnosticCodes.push('SEMANTIC_SOURCE_OUTSIDE_BINDING_CONTRACT');
         a.evidence.note = JSON.stringify(unsupportedSources.map((o) => ({ source: o.sourceKey, output: o.evaluatedOutput })));
-        // Migration 041 cannot encode numeric question keys. Retain the refusal
-        // and source evidence rather than fabricate a different semantic identity.
+        // Unsupported literal keys remain refusals; never fabricate an alias.
         continue;
       }
       const outputs = [...req.options];

@@ -2,16 +2,18 @@ const { validateBaseUrl } = require('../../config/magento');
 const { signCategoryCreateRequest } = require('./oauth');
 const { readJson } = require('./client');
 const { error } = require('./binding-contract');
+const { TARGETS, PATH } = require('./category-create-target');
 
 // Deliberately separate from the GET-only product/schema client. No arbitrary
 // path, HTTP method, category name, update, or recursive tree creation API.
-async function createInclusionCategory(config, body, { apply, fetchImpl = globalThis.fetch } = {}) {
+async function createReviewedCategory(config, body, { path, apply, fetchImpl = globalThis.fetch } = {}) {
   if (apply !== true) throw error(422, 'MAGENTO_CATEGORY_APPLY_REQUIRED', 'Explicit apply required');
   if (!config?.configured) throw error(422, 'MAGENTO_NOT_CONFIGURED', 'Configuration required');
   const category = body?.category;
+  const target = TARGETS.find((t) => t.path === path);
   if (JSON.stringify(Object.keys(body || {}).sort()) !== '["category"]'
     || JSON.stringify(Object.keys(category || {}).sort()) !== '["include_in_menu","is_active","name","parent_id"]'
-    || category.name !== 'З інклюзом' || category.is_active !== true || category.include_in_menu !== false
+    || !target || category.name !== target.name || category.is_active !== true || category.include_in_menu !== false
     || !Number.isSafeInteger(category.parent_id) || category.parent_id <= 0) {
     throw error(422, 'MAGENTO_CATEGORY_OPERATION_INVALID', 'Invalid category operation');
   }
@@ -33,4 +35,5 @@ async function createInclusionCategory(config, body, { apply, fetchImpl = global
     if (response?.body && !response.body.locked) await response.body.cancel().catch(() => {});
   }
 }
-module.exports = { createInclusionCategory };
+const createInclusionCategory = (config, body, options) => createReviewedCategory(config, body, { ...options, path: PATH });
+module.exports = { createInclusionCategory, createReviewedCategory };

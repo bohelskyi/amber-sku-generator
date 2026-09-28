@@ -303,6 +303,28 @@ test('AR size 28 has no invented option; unused 29–31 also fail closed; AR mai
     if (size === 28) assert.equal(field(r, 'rozmir_kartyny').evaluatedValue, '15×15');
   }
 });
+test('SV literal question 2 resolves only its exact reviewed identity and explicit set override preserves evaluator semantics', () => {
+  for (const souvenir of [1, 5]) {
+    const f = systemFixture('SV', { souvenir, statuette: 1, '2': 2, bird: 4, weight: '12', size: '3/4' });
+    const bindings = require('../src/services/magento/binding-bootstrap').buildCandidates({ ...f.amber,
+      products: [], current: [] }, f.schema, [], { group: 'SV' });
+    const set = f.schema.attributeSets.find((s) => s.attribute_set_name === 'Сувеніри');
+    bindings.routes.filter((r) => r.enabled).forEach((r) => { r.setId = set.attribute_set_id; r.reviewState = 'approved'; });
+    const attribute = bindings.attributes.find((a) => a.target === 'tematyka_vyrobu'
+      && a.routeKey === `SV.souvenir${souvenir === 5 ? '=' : '!='}value_id:5`);
+    attribute.reviewState = 'approved';
+    const option = bindings.options.find((o) => o.bindingKey === attribute.bindingKey && o.valueId === '2');
+    assert.equal(option.sourceKey, 'SV.2=value_id:2'); option.reviewState = 'approved';
+    f.amber.revision = { schema: f.schema, schemaFingerprint: hash(f.schema), topologyFingerprint: hash(f.schema.storeTopology), bindings };
+    const r = run(f);
+    assert.equal(custom(r, 'tematyka_vyrobu'), option.optionId);
+    assert.equal(r.candidatePayload.product.attribute_set_id, set.attribute_set_id);
+    assert.equal(evaluate(f.amber, f.amber.product).base.attribute_set_code, souvenir === 5 ? 'Камінь' : 'Сувеніри');
+    option.reviewState = 'blocked';
+    assert.equal(custom(run(f), 'tematyka_vyrobu'), undefined);
+  }
+});
+
 test('KL typo evidence stays candidate-only and SV compatibility statistics never choose a route', () => {
   const f = systemFixture('KL', { addit: 1 });
   f.schema.attributes.find((a) => a.attribute_code === 'kulony_dodatkovo').options = [{ value: '6047', label: 'Інзклюз', isEmpty: false }];

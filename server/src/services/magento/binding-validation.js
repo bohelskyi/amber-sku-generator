@@ -1,7 +1,7 @@
 const { routeTools } = require('./binding-evidence-routes');
 const { describeMapper } = require('./mapper-schema');
 const { transport, OPTION_INPUTS } = require('./binding-evidence-analysis');
-const { hash, code, semanticId, command, invalid, safeData, unique, list } = require('./binding-contract');
+const { hash, code, questionKey, semanticId, command, invalid, safeData, unique, list } = require('./binding-contract');
 
 const STATES = ['proposed','review_required','approved','blocked'];
 const STRATEGIES = ['scalar','semantic_option','dynamic_exact_label_option','numeric_band_option','constant_option','transport_control'];
@@ -11,7 +11,7 @@ const predicateKey = (p) => `${p.questionKey}${p.equal ? '=' : '!='}value_id:${p
 function stableRoute(plan) {
   if (plan.analysis) invalid(); // Unsupported routing expressions require a later contract, never a guessed route.
   const predicates = plan.predicates.map((p) => {
-    if (!code(p.key) || !semanticId(p.value) || typeof p.equal !== 'boolean') invalid();
+    if (!questionKey(p.key) || !semanticId(p.value) || typeof p.equal !== 'boolean') invalid();
     return { questionKey: p.key, valueId: p.value, equal: p.equal };
   }).sort((a, b) => predicateKey(a) < predicateKey(b) ? -1 : predicateKey(a) > predicateKey(b) ? 1 : 0);
   unique(predicates, predicateKey);
@@ -153,7 +153,7 @@ function normalizeBindings(input) {
     let sourceKey;
     if (o.sourceKind === 'semantic') {
       if (a.strategy !== 'semantic_option' || !['BR','NM','KL','CH','AR','SV'].includes(o.amberGroup)
-        || !code(o.questionKey) || !semanticId(o.valueId) || Object.hasOwn(o, 'domainKey') || Object.hasOwn(o, 'outputKey')
+        || !questionKey(o.questionKey) || !semanticId(o.valueId) || Object.hasOwn(o, 'domainKey') || Object.hasOwn(o, 'outputKey')
         || (o.skuCodeEvidence !== undefined && (typeof o.skuCodeEvidence !== 'string' || !/^[0-9]{1,100}$/.test(o.skuCodeEvidence)))) invalid();
       sourceKey = `${o.amberGroup}.${o.questionKey}=value_id:${o.valueId}`;
     } else if (o.sourceKind === 'evaluated') {

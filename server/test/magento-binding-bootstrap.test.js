@@ -12,6 +12,25 @@ const { catalog, product } = require('./fixtures/magento-v1/contract');
 const { parseMagentoConfig } = require('../src/config/magento');
 const fixture = require('./fixtures/magento-bindings');
 
+test('SV thematic options preserve literal numeric Amber question key 2, distinct from Magento codes', () => {
+  const { amber, schema } = setup();
+  const b = buildCandidates(amber, schema, [], { group: 'SV' });
+  const thematic = b.attributes.filter((a) => a.target === 'tematyka_vyrobu');
+  assert.equal(thematic.length, 2);
+  for (const a of thematic) {
+    const values = b.options.filter((o) => o.bindingKey === a.bindingKey);
+    assert.equal(values.length, 6);
+    assert.ok(values.every((o) => o.questionKey === '2' && o.sourceKey === `SV.2=value_id:${o.valueId}`));
+    assert.ok(b.policies.some((p) => p.bindingKey === a.bindingKey));
+  }
+  const { questionKey, code } = require('../src/services/magento/binding-contract');
+  assert.equal(questionKey('2'), true); assert.equal(code('2'), false);
+  assert.equal(questionKey(2), false);
+  for (const key of ['', '2=3', '2.3', '2&3', '2/3', ' 2', '2\n']) assert.equal(questionKey(key), false);
+  const { stableRoute } = require('../src/services/magento/binding-validation');
+  assert.equal(stableRoute({ amberGroup: 'SV', predicates: [{ key: '2', value: '3', equal: true }] }).routeKey, 'SV.2=value_id:3');
+});
+
 test('AR glass binds its finite semantic lookup and absent-source literal without fabricating an absence identity', () => {
   const { amber, schema } = setup();
   const b = buildCandidates(amber, schema, [], { group: 'AR' });

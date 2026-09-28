@@ -3,9 +3,11 @@ const { randomUUID } = require('node:crypto');
 const c = require('../src/services/magento/binding-contract');
 const { parseMagentoConfig } = require('../src/config/magento');
 const { createCategory, PATH } = require('../src/services/magento/category-create');
+const { TARGETS } = require('../src/services/magento/category-create-target');
 const { assertEvidenceSafe } = require('../src/services/magento/binding-evidence-audit');
 const HELP = `npm run magento:category -- --revision UUID --path "${PATH}" [--json]
 Add --apply --expected-revision N --actor-user-id ID to create/bind this one category.
+Supported paths: ${TARGETS.map((t) => t.path).join('; ')}.
 Default: GET-only preview. No recursive creation, product writes or publication.
 Apply uses existing template publish permission for remote dispatch and manage for binding persistence.
 Uncertain prior attempts are never automatically repeated; rerun to look up the exact path.`;
@@ -23,7 +25,7 @@ function parseArguments(args) {
     input[key] = value;
   }
   c.identity(input.id);
-  if (input.path !== PATH) c.invalid();
+  if (!TARGETS.some((t) => t.path === input.path)) c.invalid();
   if (input.apply && (!input.expectedRevision || !input.actorUserId)) c.invalid();
   if (input.expectedRevision) c.counter(input.expectedRevision);
   if (input.actorUserId && (!/^[1-9]\d*$/.test(input.actorUserId) || !Number.isSafeInteger(Number(input.actorUserId)))) c.invalid();

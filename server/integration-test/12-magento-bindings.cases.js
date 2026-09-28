@@ -41,12 +41,45 @@ test('Magento binding migration 041: checkpoint 040 rollback, checksum retention
   }
 });
 
+test('Magento migration 043 upgrades 042 atomically, retains checksums and literal route identities on rerun', async () => {
+  const name = 'amber_magento_numeric_migration_test'; const url = await recreateTestDatabase(name);
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-binding-042-')); const db = new Pool({ connectionString: url });
+  const migrate = () => runNodeInDatabase(url, `require('./src/db/run-migrations').runMigrations({directory:${JSON.stringify(directory)}}).catch(e=>{console.error(e);process.exitCode=1;});`);
+  const predicate = JSON.stringify([{ questionKey: '2', valueId: '3', equal: true }]);
+  const route = () => db.query("SELECT magento_binding_route_key('SV',$1::jsonb) key", [predicate]);
+  try {
+    for (const file of (await fs.readdir(path.join(serverRoot, 'migrations'))).filter((f) => f.endsWith('.sql') && f < '043')) {
+      await fs.copyFile(path.join(serverRoot, 'migrations', file), path.join(directory, file));
+    }
+    await migrate();
+    const before = (await db.query('SELECT name,checksum FROM schema_migrations ORDER BY name')).rows;
+    const constraint = async () => (await db.query("SELECT pg_get_constraintdef(oid) definition FROM pg_constraint WHERE conname='magento_binding_options_question_key_check'")).rows;
+    const oldConstraint = await constraint();
+    await assert.rejects(route(), /invalid binding route predicate/);
+    const file = '043_magento_literal_question_keys.sql'; const sql = await fs.readFile(path.join(serverRoot, 'migrations', file), 'utf8');
+    await fs.writeFile(path.join(directory, file), sql + '\nSELECT 1/0;');
+    await assert.rejects(migrate(), /division by zero/);
+    assert.deepEqual(await constraint(), oldConstraint);
+    await assert.rejects(route(), /invalid binding route predicate/);
+    assert.deepEqual((await db.query('SELECT name,checksum FROM schema_migrations ORDER BY name')).rows, before);
+    await fs.writeFile(path.join(directory, file), sql); await migrate(); await migrate();
+    assert.equal((await route()).rows[0].key, 'SV.2=value_id:3');
+    assert.deepEqual((await db.query("SELECT name,checksum FROM schema_migrations WHERE name<'043' ORDER BY name")).rows, before);
+    assert.equal((await db.query('SELECT checksum FROM schema_migrations WHERE name=$1', [file])).rows[0].checksum, getMigrationChecksum(sql));
+    for (const key of ['2.3', '2&3', '2=3', '']) await assert.rejects(db.query("SELECT magento_binding_route_key('SV',$1::jsonb)", [JSON.stringify([{ questionKey: key, valueId: '3', equal: true }])]));
+  } finally {
+    await db.end(); assert.equal(path.dirname(directory), path.resolve(os.tmpdir()));
+    assert.ok(path.basename(directory).startsWith('amber-binding-042-'));
+    await fs.rm(directory, { recursive: true, force: true }); await dropTestDatabase(name);
+  }
+});
+
 test('Magento binding foundation and current migrations apply to a fresh disposable database', async () => {
   const name = 'amber_magento_binding_fresh_test'; const url = await recreateTestDatabase(name);
   const db = new Pool({ connectionString: url });
   try {
     await runNodeInDatabase(url, "require('./src/db/run-migrations').runMigrations().catch(e=>{console.error(e);process.exitCode=1;});");
-    assert.equal((await db.query('SELECT count(*)::int n FROM schema_migrations')).rows[0].n, 43);
+    assert.equal((await db.query('SELECT count(*)::int n FROM schema_migrations')).rows[0].n, 44);
     assert.equal((await db.query("SELECT count(*)::int n FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'magento_binding_%'")).rows[0].n, 10);
     assert.equal((await db.query('SELECT count(*)::int n FROM magento_binding_revisions')).rows[0].n, 0);
   } finally { await db.end(); await dropTestDatabase(name); }
@@ -70,6 +103,23 @@ test('Magento binding persistence, publication, immutability and real PostgreSQL
   const ready = async (key) => { const d = await create(key); return bindings.updateDraft(d.id, { expectedRevision: d.revision, bindings: fixture.approvedBindings(definition, schema) }, options()); };
   const publish = (draft, current = null, db = pool) => bindings.publishDraft(draft.id, { expectedRevision: draft.revision, expectedCurrentId: current }, options(db));
   const countEvents = async (id) => Number((await pool.query("SELECT count(*) n FROM audit_events WHERE subject_id=$1 AND event_key='magento_binding.published'", [id])).rows[0].n);
+
+  await t.test('numeric semantic keys round trip literally, validate and retain publication immutability', async () => {
+    const numeric = (await pool.query("INSERT INTO questions(category_code,key,label,input_type,include_in_sku,required) VALUES('BR','2','Numeric identity','options',0,0) RETURNING id")).rows[0];
+    await pool.query("INSERT INTO options(question_id,value_id,sku_code,label) VALUES($1,7,'7','Red'),($1,8,'8','Blue'),($1,9,'9','Red again')", [numeric.id]);
+    const d = structuredClone(definition); d.sources.color.key = '2';
+    const f = await templates.createTemplate({ key: `numeric-${crypto.randomUUID()}`, displayName: 'Numeric identity', definition: d }, options());
+    const v = await templates.publishTemplate(f.id, { expectedRevision: f.draft.revision, expectedDefinitionHash: f.draft.definitionHash }, options());
+    const draft = await bindings.createDraft({ installationKey: `numeric-${crypto.randomUUID()}`, origin: 'https://binding.example.invalid', templateVersionId: v.id, observedAt: '2026-09-01T00:00:00.000Z', schema }, options());
+    const saved = await bindings.updateDraft(draft.id, { expectedRevision: draft.revision, bindings: fixture.approvedBindings(d, schema) }, options());
+    const rows = (await pool.query("SELECT question_key,source_key,value_id FROM magento_binding_options WHERE revision_id=$1 AND source_kind='semantic' ORDER BY value_id", [draft.id])).rows;
+    assert.equal(rows.length, 3);
+    assert.ok(rows.every((o) => o.question_key === '2' && o.source_key === `BR.2=value_id:${o.value_id}`));
+    assert.equal((await bindings.validateDraft(saved.id)).valid, true);
+    assert.equal((await publish(saved)).state, 'published');
+    await assert.rejects(pool.query("UPDATE magento_binding_options SET question_key='friendly_alias' WHERE revision_id=$1", [draft.id]));
+    assert.deepEqual((await pool.query("SELECT question_key,source_key,value_id FROM magento_binding_options WHERE revision_id=$1 AND source_kind='semantic' ORDER BY value_id", [draft.id])).rows, rows);
+  });
 
   await t.test('clone copies current publication identities and every decision exactly, audits provenance, and rolls back atomically', async () => {
     const draft = await ready(); const source = await publish(draft);
@@ -539,21 +589,25 @@ test('Magento binding persistence, publication, immutability and real PostgreSQL
     }
   });
   await t.test('category create attempt survives process retry and serializes concurrent revisions before any remote dispatch', async () => {
-    const { reserveAttempt, PATH } = require('../src/services/magento/category-create');
+    const { reserveAttempt } = require('../src/services/magento/category-create');
+    const { TARGETS } = require('../src/services/magento/category-create-target');
     const { hash } = require('../src/services/magento/binding-contract');
     const first = await ready(); const second = await ready(first.installationKey);
-    const operation = { method: 'POST', path: '/rest/all/V1/categories',
-      body: { category: { parent_id: 5, name: 'З інклюзом', is_active: true, include_in_menu: false } } };
-    const attempts = await race((db) => reserveAttempt(first, operation, options(db)),
-      (db) => reserveAttempt(second, operation, options(db)));
-    assert.equal(attempts[0].status, 'fulfilled');
-    assert.equal(attempts[1].reason.code, 'MAGENTO_CATEGORY_PREVIOUS_ATTEMPT_UNRESOLVED');
-    const key = hash({ originHash: first.originHash, path: PATH });
-    const receipts = (await pool.query("SELECT details FROM audit_events WHERE event_key='magento_category.create_attempted' AND subject_id=$1", [key])).rows;
-    assert.equal(receipts.length, 1); assert.deepEqual(receipts[0].details.operation, operation);
-    await assert.rejects(reserveAttempt(first, operation, options()), { code: 'MAGENTO_CATEGORY_PREVIOUS_ATTEMPT_UNRESOLVED' });
-    assert.deepEqual(await bindings.getRevision(first.id), first, 'dispatch reservation never publishes or changes binding approvals');
-    await assert.rejects(reserveAttempt({ ...first, revision: '999' }, operation, options()), { code: 'MAGENTO_BINDING_CONFLICT' });
+    for (const target of TARGETS) {
+      const operation = { method: 'POST', path: '/rest/all/V1/categories',
+        body: { category: { parent_id: 5, name: target.name, is_active: true, include_in_menu: false } } };
+      const attempts = await race((db) => reserveAttempt(first, operation, options(db), target),
+        (db) => reserveAttempt(second, operation, options(db), target));
+      assert.equal(attempts[0].status, 'fulfilled');
+      assert.equal(attempts[1].reason.code, 'MAGENTO_CATEGORY_PREVIOUS_ATTEMPT_UNRESOLVED');
+      const key = hash({ originHash: first.originHash, path: target.path });
+      const receipts = (await pool.query("SELECT details FROM audit_events WHERE event_key='magento_category.create_attempted' AND subject_id=$1", [key])).rows;
+      assert.equal(receipts.length, 1); assert.deepEqual(receipts[0].details.operation, operation);
+      assert.equal(receipts[0].details.source, target.source);
+      await assert.rejects(reserveAttempt(first, operation, options(), target), { code: 'MAGENTO_CATEGORY_PREVIOUS_ATTEMPT_UNRESOLVED' });
+      assert.deepEqual(await bindings.getRevision(first.id), first, 'dispatch reservation never publishes or changes binding approvals');
+      await assert.rejects(reserveAttempt({ ...first, revision: '999' }, operation, options(), target), { code: 'MAGENTO_BINDING_CONFLICT' });
+    }
   });
   await t.test('persisted draft drift uses named GETs only and never changes the revision', async () => {
     const draft = await ready(); const calls = [];

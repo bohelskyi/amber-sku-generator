@@ -5,6 +5,7 @@ const { createCategory, PATH, PARENT } = require('../src/services/magento/catego
 const { createInclusionCategory } = require('../src/services/magento/category-create-client');
 const { signCategoryCreateRequest, signGetRequest } = require('../src/services/magento/oauth');
 const { runCategory, parseArguments } = require('../scripts/magento-category');
+const { TARGETS } = require('../src/services/magento/category-create-target');
 const { originHash } = require('../src/services/magento/binding-contract');
 
 const config = { configured: true, baseUrl: 'https://category.example.invalid', consumerKey: 'key', consumerSecret: 'cs',
@@ -12,19 +13,19 @@ const config = { configured: true, baseUrl: 'https://category.example.invalid', 
 const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const request = { id, path: PATH, expectedRevision: '1', apply: true };
 const response = (v) => new Response(JSON.stringify(v), { headers: { 'Content-Type': 'application/json' } });
-function fixture({ exists = false, timeout = false, visible = true, failSave = false } = {}) {
+function fixture({ exists = false, timeout = false, visible = true, failSave = false, target = TARGETS[0] } = {}) {
   let revision = { id, state: 'draft', revision: '1', originHash: originHash(config.baseUrl), schema: { storeCode: 'all' },
-    bindings: { routes: [{ routeKey: 'KL:all', enabled: true, reviewState: 'approved' }], attributes: [{ bindingKey: 'key', routeKey: 'KL:all',
+    bindings: { routes: [{ routeKey: target.routeKey, enabled: true, reviewState: 'approved' }], attributes: [{ bindingKey: 'key', routeKey: target.routeKey,
       rowId: 'base', target: 'categories', reviewState: 'approved', evidence: { categories: [
-        { requestedPath: PARENT, normalizedPath: PARENT, categoryId: '5', reviewState: 'approved' },
-        { requestedPath: PATH, normalizedPath: PATH, categoryId: null, candidates: [], reviewState: 'blocked' },
+        { requestedPath: target.parent, normalizedPath: target.parent, categoryId: '5', reviewState: 'approved' },
+        { requestedPath: target.path, normalizedPath: target.path, categoryId: null, candidates: [], reviewState: 'blocked' },
       ] } }], policies: [{ bindingKey: 'key', storeCode: 'all', policy: 'authoritative_create_update', reviewState: 'approved' }] } };
   let reserved = false; let creates = 0; let saves = 0;
   const trees = () => ({ id: 2, name: 'Default', parent_id: 1, children_data: [
-    { id: 5, name: 'Кулони', parent_id: 2, children_data: exists ? [{ id: 99, name: 'З інклюзом', parent_id: 5, children_data: [] }] : [] },
-    { id: 6, name: 'Other', parent_id: 2, children_data: [{ id: 77, name: 'З інклюзом', parent_id: 6, children_data: [] }] },
+    { id: 5, name: target.parent.split('/').at(-1), parent_id: 2, children_data: exists ? [{ id: 99, name: target.name, parent_id: 5, children_data: [] }] : [] },
+    { id: 6, name: 'Other', parent_id: 2, children_data: [{ id: 77, name: target.name, parent_id: 6, children_data: [] }] },
   ] });
-  const f = { config, request, trees, calls: [], options: {
+  const f = { config, request: { ...request, path: target.path }, trees, calls: [], options: {
     reserveAttempt: async () => {
       if (reserved) throw Object.assign(new Error(), { code: 'MAGENTO_CATEGORY_PREVIOUS_ATTEMPT_UNRESOLVED' });
       reserved = true;
@@ -42,10 +43,10 @@ function fixture({ exists = false, timeout = false, visible = true, failSave = f
       if (init.method === 'POST') {
         assert.equal(reserved, true, 'intent is durable before dispatch'); creates++;
         assert.equal(url, config.baseUrl + '/rest/all/V1/categories');
-        assert.deepEqual(JSON.parse(init.body), { category: { parent_id: 5, name: 'З інклюзом', is_active: true, include_in_menu: false } });
+        assert.deepEqual(JSON.parse(init.body), { category: { parent_id: 5, name: target.name, is_active: true, include_in_menu: false } });
         exists = visible;
         if (timeout) throw new Error('sensitive server error');
-        return response({ id: 99, name: 'З інклюзом', parent_id: 5 });
+        return response({ id: 99, name: target.name, parent_id: 5 });
       }
       assert.equal(init.method, 'GET');
       return response(url.includes('store/storeGroups') ? [{ root_category_id: 2 }] : f.trees());
@@ -53,6 +54,33 @@ function fixture({ exists = false, timeout = false, visible = true, failSave = f
   }, stats: () => ({ creates, saves, reserved }), revision: () => revision };
   return f;
 }
+
+test('SV stone category is a closed exact-path preview/apply with read-after-write, CAS recovery and no repeat POST', async () => {
+  const target = TARGETS[1];
+  assert.equal(parseArguments(['--revision', id, '--path', target.path]).apply, undefined);
+  for (const flags of [{}, { timeout: true }, { exists: true }, { failSave: true }]) {
+    const f = fixture({ ...flags, target });
+    const preview = await createCategory(config, { ...f.request, apply: false }, f.options);
+    assert.equal(preview.source, 'SV.souvenir=value_id:5');
+    assert.equal(preview.parentPath, 'Default/Камінь');
+    assert.deepEqual(f.stats(), { creates: 0, saves: 0, reserved: false });
+    if (!flags.exists) assert.equal(preview.operation.body.category.name, 'Камінь сувенірний');
+    if (flags.failSave) await assert.rejects(createCategory(config, f.request, f.options), { code: 'MAGENTO_BINDING_CONFLICT' });
+    const applied = await createCategory(config, f.request, f.options);
+    assert.equal(applied.categoryId, '99');
+    await createCategory(config, f.request, f.options);
+    assert.equal(f.stats().creates, flags.exists ? 0 : 1);
+  }
+  const wrongParent = fixture({ target }); const tree = wrongParent.trees();
+  tree.children_data[0].name = 'Other'; wrongParent.trees = () => tree;
+  await assert.rejects(createCategory(config, wrongParent.request, wrongParent.options), { code: 'MAGENTO_CATEGORY_PARENT_NOT_EXACT' });
+  assert.equal(wrongParent.stats().creates, 0);
+  const f = fixture({ target, timeout: true, visible: false });
+  await assert.rejects(createCategory(config, f.request, f.options), { code: 'MAGENTO_CATEGORY_CREATE_UNCERTAIN' });
+  await assert.rejects(createCategory(config, f.request, f.options), { code: 'MAGENTO_CATEGORY_PREVIOUS_ATTEMPT_UNRESOLVED' });
+  assert.equal(f.stats().creates, 1);
+  await assert.rejects(createCategory(config, { ...f.request, path: 'Default/Сувеніри/Камінь сувенірний' }, f.options), { code: 'MAGENTO_CATEGORY_PATH_UNSUPPORTED' });
+});
 
 test('default category command previews exact create, with no local or Magento writes; leaf in other branch is ignored', async () => {
   const f = fixture();
