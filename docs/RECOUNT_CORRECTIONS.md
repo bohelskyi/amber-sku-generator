@@ -20,6 +20,27 @@ Changing only an informational answer through normal recount still creates a suc
 
 Informational apply locks the active source product, rejects an active correction request or stale preview token, validates the changed fields, and writes only `details.answers` on the product. Other historically missing fields may remain incomplete. The same transaction advances the separate full-product revision and includes one durable `product_information.updated` audit event with old/new values. Product ID, SKU, weight, calibration (including legacy `3`), schema, price, SKU reservation, correction history, price-export revision, and export exclusion are unchanged. Existing price and repricing previews become stale through their complete product-state signatures. The client uses the existing recount form as a presentation hint, but the two server commands remain separate. Mixed/SKU/weight/calibration changes continue through normal recount.
 
+### SV saved-weight representation repair
+
+`node scripts/sv-readiness-repair.js --expected-database NAME --binding-revision UUID --output NEW_PLAN.json`
+is a bounded read-only preview of at most 1,000 active/current SV rows. The only repair is an existing positive
+`details.answers.weight` string matching `digits,digits` to the exact same digits with a decimal point.
+This is not a weight-entry command: absent answers, physical `products.weight`, names, dimensions and semantic
+options are never inferred or copied from Magento. The frozen evaluator and normal product validation are unchanged.
+
+The plan binds the exact stored answer, complete product/lifecycle/identity evidence, binding counter, template,
+current weight-question metadata and pricing context. It re-evaluates the target, requires the weight error to
+disappear without changing other errors, and rejects changed pricing results. Other readiness failures remain explicit.
+Duplicate SKU identity, mismatched reservation, correction lineage or an active correction request blocks repair.
+
+`node scripts/sv-readiness-repair.js --apply --expected-database NAME --plan REVIEWED_PLAN.json --expected-hash SHA256 --actor-user-id ID --output NEW_RECEIPT_DIRECTORY`
+requires both `exports.reconcile` and `products.recount`, rechecked inside each product transaction. Product/lifecycle
+locks and complete evidence CAS reject stale plans. Apply re-reads and evaluates the persisted target, advances only
+its full-product content revision, and writes an atomic immutable audit receipt. Prices, SKU, reservations, exclusions,
+delivery acknowledgements, snapshots and cursors are preserved. No Magento client is used. Each outcome is checkpointed
+to a durable summary; a same-plan retry skips committed receipts, while a fresh preview excludes normalized rows.
+An error never credits a different row. No startup, HTTP or automatic repair hook exists.
+
 ## Direct apply
 
 Recount apply is one authoritative transaction that:
