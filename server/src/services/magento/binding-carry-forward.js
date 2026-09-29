@@ -8,9 +8,14 @@ const bindingService = require('./binding.service');
 const repository = require('./binding-repository');
 const { entries } = require('./binding-review');
 const { normalizeBindings, requirements, validateBindings } = require('./binding-validation');
+const { createMagentoClient } = require('./client');
+const { normalizeAttribute, normalizeOptions } = require('./schema-audit');
+const { indexTrees } = require('./sync-preview-categories');
 
 const FORMAT = 'amber-magento-binding-reviewed-carry-forward-v1';
 const EVENT = 'magento_binding.review_carried_forward';
+const LIVE_FORMAT = 'amber-magento-binding-reviewed-carry-forward-live-v1';
+const MAX_LIVE_IDENTITIES = 100;
 
 function fail(code, message, details, status = 409) {
   throw c.error(status, code, message, details);
@@ -102,6 +107,113 @@ function sameRemoteOption(source, target, sourceAttribute, targetAttribute, sour
   return Boolean(sourceRemote && targetRemote && sourceRemote.label === targetRemote.label);
 }
 
+function sameRemoteOptionId(source, target, sourceAttribute, targetAttribute, sourceSchema, targetSchema) {
+  if (source.optionId === null || source.optionId !== target.optionId
+    || !sameRemoteAttribute(sourceAttribute, targetAttribute, sourceSchema, targetSchema)
+    || sourceAttribute.attributeCode === null) return false;
+  return Boolean(sourceSchema.attributes.find((row) => row.attribute_code === sourceAttribute.attributeCode)
+    ?.options.some((row) => row.value === source.optionId)
+    && targetSchema.attributes.find((row) => row.attribute_code === targetAttribute.attributeCode)
+      ?.options.some((row) => row.value === target.optionId));
+}
+
+function requirementAttributes(targetDefinition, targetSchema) {
+  return new Map(requirements(targetDefinition, targetSchema).flatMap((route) =>
+    route.attributes.map((attribute) => [attribute.bindingKey, attribute])));
+}
+
+function liveRequests(source, target, targetDefinition) {
+  const sourceBindings = normalizeBindings(source.bindings);
+  const targetBindings = normalizeBindings(target.bindings);
+  const targetAttributes = new Map(targetBindings.attributes.map((row) => [stableAttributeKey(row), row]));
+  const targetRequirements = requirementAttributes(targetDefinition, target.schema);
+  const categories = [];
+  const dynamicOptions = [];
+  for (const sourceAttribute of sourceBindings.attributes) {
+    const targetAttribute = targetAttributes.get(stableAttributeKey(sourceAttribute));
+    const requirement = targetAttribute && targetRequirements.get(targetAttribute.bindingKey);
+    if (targetAttribute && requirement?.target === 'categories'
+      && requirement.strategy === 'transport_control' && targetAttribute.strategy === sourceAttribute.strategy) {
+      const targetCategories = targetAttribute.evidence?.categories || [];
+      for (const category of (sourceAttribute.evidence?.categories || []).filter((row) => row.reviewState === 'approved')) {
+        if (!targetCategories.some((row) => row.normalizedPath === category.normalizedPath)) {
+          categories.push({ bindingKey: targetAttribute.bindingKey, requestedPath: category.requestedPath,
+            normalizedPath: category.normalizedPath, categoryId: category.categoryId });
+        }
+      }
+    }
+    if (!targetAttribute || requirement?.strategy !== 'dynamic_exact_label_option'
+      || !requirement.dynamic || sourceAttribute.strategy !== targetAttribute.strategy
+      || !sameRemoteAttribute(sourceAttribute, targetAttribute, source.schema, target.schema)) continue;
+    const targetOptions = targetBindings.options.filter((row) => row.bindingKey === targetAttribute.bindingKey);
+    for (const option of sourceBindings.options.filter((row) => row.bindingKey === sourceAttribute.bindingKey
+      && row.reviewState === 'approved' && row.sourceKind === 'evaluated')) {
+      if (!targetOptions.some((row) => sameOptionMeaning(option, row))) {
+        dynamicOptions.push({ bindingKey: targetAttribute.bindingKey, attributeCode: targetAttribute.attributeCode,
+          attributeId: target.schema.attributes.find((row) => row.attribute_code === targetAttribute.attributeCode)?.attribute_id ?? null,
+          outputKey: option.outputKey, evaluatedOutput: option.evaluatedOutput, optionId: option.optionId });
+      }
+    }
+  }
+  const uniqueCategories = [...new Map(categories.map((row) =>
+    [`${row.bindingKey}/${row.normalizedPath}`, row])).values()];
+  const uniqueOptions = [...new Map(dynamicOptions.map((row) =>
+    [`${row.bindingKey}/${row.outputKey}`, row])).values()];
+  if (uniqueCategories.length > MAX_LIVE_IDENTITIES || uniqueOptions.length > MAX_LIVE_IDENTITIES) {
+    fail('MAGENTO_BINDING_CARRY_LIVE_LIMIT', 'Carry-forward live verification exceeds its bounded identity limit');
+  }
+  return { categories: uniqueCategories, dynamicOptions: uniqueOptions };
+}
+
+async function collectLiveVerification(source, target, targetDefinition, config, options = {}) {
+  const requested = liveRequests(source, target, targetDefinition);
+  const result = { format: LIVE_FORMAT, originHash: target.originHash,
+    storeCode: target.schema.storeCode, categories: [], dynamicOptions: [] };
+  if (!requested.categories.length && !requested.dynamicOptions.length) return result;
+  if (!config?.configured || c.originHash(config.baseUrl) !== target.originHash
+    || source.originHash !== target.originHash) {
+    fail('MAGENTO_BINDING_CARRY_INSTALLATION_MISMATCH', 'Configured Magento origin differs from the binding installation');
+  }
+  const client = options.magentoClient || createMagentoClient(config,
+    { fetchImpl: options.fetchImpl, storeCode: target.schema.storeCode });
+  if (requested.categories.length) {
+    const roots = [...new Set(target.schema.storeTopology.storeGroups.map((row) => row.root_category_id)
+      .filter((id) => Number.isSafeInteger(id) && id > 0))];
+    if (!roots.length || roots.length > MAX_LIVE_IDENTITIES) {
+      fail('MAGENTO_BINDING_CARRY_LIVE_LIMIT', 'Carry-forward category roots are unavailable or exceed the bound');
+    }
+    const trees = [];
+    for (const root of roots) {
+      const tree = await client.getCategoryTree(root);
+      if (Number(tree?.id) !== root) fail('MAGENTO_BINDING_CARRY_LIVE_INVALID', 'Magento category root identity changed');
+      trees.push(tree);
+    }
+    const indexed = indexTrees(trees);
+    result.categories = requested.categories.map((request) => ({ ...request,
+      matches: indexed.filter((row) => row.comparable && row.normalizedPath === request.normalizedPath)
+        .map(({ categoryId, path }) => ({ categoryId, path })) }));
+  }
+  const byAttribute = new Map();
+  for (const request of requested.dynamicOptions) {
+    if (!byAttribute.has(request.attributeCode)) byAttribute.set(request.attributeCode, []);
+    byAttribute.get(request.attributeCode).push(request);
+  }
+  if (byAttribute.size > MAX_LIVE_IDENTITIES) {
+    fail('MAGENTO_BINDING_CARRY_LIVE_LIMIT', 'Carry-forward option attributes exceed the bound');
+  }
+  for (const [attributeCode, requests] of byAttribute) {
+    const attribute = normalizeAttribute(await client.getProductAttribute(attributeCode));
+    const optionsFound = normalizeOptions(await client.getProductAttributeOptions(attributeCode));
+    for (const request of requests) result.dynamicOptions.push({ ...request,
+      observedAttributeId: attribute.attribute_id, observedAttributeCode: attribute.attribute_code,
+      optionById: optionsFound.filter((row) => row.value === request.optionId)
+        .map(({ value, label }) => ({ value, label })),
+      outputMatches: optionsFound.filter((row) => !row.isEmpty && row.label === request.evaluatedOutput)
+        .map(({ value, label }) => ({ value, label })) });
+  }
+  return result;
+}
+
 function markCarried(state, kind, id, sourceState, detail = {}) {
   state.carried.push({ kind, id, reviewState: sourceState, ...detail });
   state.carriedIds.add(id);
@@ -124,11 +236,15 @@ function uniqueMatch(rows, predicate, state, kind, id, approved) {
   return matches.length === 1 ? matches[0] : null;
 }
 
-function carryReviewedBindings(source, target, targetDefinition) {
+function carryReviewedBindings(source, target, targetDefinition, liveVerification = {
+  format: LIVE_FORMAT, originHash: target.originHash, storeCode: target.schema.storeCode,
+  categories: [], dynamicOptions: [],
+}) {
   const result = normalizeBindings(structuredClone(target.bindings));
   const sourceBindings = normalizeBindings(source.bindings);
   const state = { carried: [], skipped: [], blockers: [], carriedIds: new Set(), skippedIds: new Set() };
   const targetAttributes = new Map(result.attributes.map((row) => [stableAttributeKey(row), row]));
+  const targetRequirements = requirementAttributes(targetDefinition, target.schema);
 
   for (const sourceRoute of sourceBindings.routes.filter((row) => ['approved', 'blocked'].includes(row.reviewState))) {
     const id = `route:${sourceRoute.routeKey}`;
@@ -189,22 +305,61 @@ function carryReviewedBindings(source, target, targetDefinition) {
       continue;
     }
     const candidates = result.options.filter((row) => row.bindingKey === targetAttribute.bindingKey);
-    const targetOption = uniqueMatch(candidates, (row) => sameOptionMeaning(sourceOption, row), state,
-      'option', id, sourceOption.reviewState === 'approved');
+    const matches = candidates.filter((row) => sameOptionMeaning(sourceOption, row));
+    if (matches.length > 1) {
+      blocker(state, 'AMBIGUOUS_TARGET_MATCH', 'option', id);
+      continue;
+    }
+    let targetOption = matches.length === 1 ? matches[0] : null;
     if (!targetOption) {
       if (candidates.some((row) => sameOptionBaseMeaning(sourceOption, row))) {
         blocker(state, 'OPTION_SEMANTICS_CHANGED', 'option', id, { sourceMeaning: meaning });
+      } else if (sourceOption.reviewState === 'approved' && sourceOption.sourceKind === 'evaluated'
+        && sourceAttribute.strategy === 'dynamic_exact_label_option'
+        && targetAttribute.strategy === sourceAttribute.strategy) {
+        const requirement = targetRequirements.get(targetAttribute.bindingKey);
+        const storedAttribute = target.schema.attributes.find((row) => row.attribute_code === targetAttribute.attributeCode);
+        const storedMatches = storedAttribute?.options.filter((row) => !row.isEmpty
+          && row.label === sourceOption.evaluatedOutput) || [];
+        const live = liveVerification.dynamicOptions.find((row) => row.bindingKey === targetAttribute.bindingKey
+          && row.outputKey === sourceOption.outputKey && row.evaluatedOutput === sourceOption.evaluatedOutput);
+        const safe = requirement?.dynamic && requirement.strategy === 'dynamic_exact_label_option'
+          && requirement.domainKey && storedMatches.length === 1 && storedMatches[0].value === sourceOption.optionId
+          && live?.observedAttributeCode === targetAttribute.attributeCode
+          && live.observedAttributeId === live.attributeId && live.attributeId === storedAttribute?.attribute_id
+          && live.optionById.length === 1 && live.optionById[0].label === sourceOption.evaluatedOutput
+          && live.outputMatches.length === 1 && live.outputMatches[0].value === sourceOption.optionId;
+        if (safe) {
+          targetOption = { bindingKey: targetAttribute.bindingKey, sourceKind: 'evaluated',
+            domainKey: requirement.domainKey, outputKey: sourceOption.outputKey,
+            evaluatedOutput: sourceOption.evaluatedOutput, optionId: sourceOption.optionId,
+            reviewState: 'approved', evidence: { diagnosticCodes: ['CARRIED_LIVE_VERIFIED_DYNAMIC_OUTPUT'],
+              candidateIds: [sourceOption.optionId], ...(sourceOption.evidence?.note ? { note: sourceOption.evidence.note } : {}) } };
+          result.options.push(targetOption);
+          markCarried(state, 'option', id, 'approved', { optionId: sourceOption.optionId, synthesized: true });
+        } else blocker(state, 'DYNAMIC_OPTION_LIVE_IDENTITY_CHANGED', 'option', id,
+          { optionId: sourceOption.optionId });
+      } else if (sourceOption.reviewState === 'approved') {
+        blocker(state, 'APPROVED_TARGET_MISSING', 'option', id);
       } else if (sourceOption.reviewState === 'blocked') skipped(state, 'BLOCKED_TARGET_ABSENT', 'option', id);
       continue;
     }
     if (sourceOption.reviewState === 'approved') {
       if (!sameRemoteOption(sourceOption, targetOption, sourceAttribute, targetAttribute,
         source.schema, target.schema)) {
-        blocker(state, 'REMOTE_OPTION_IDENTITY_CHANGED', 'option', id, { optionId: sourceOption.optionId });
+        if (sourceOption.sourceKind === 'semantic'
+          && sameRemoteOptionId(sourceOption, targetOption, sourceAttribute, targetAttribute,
+            source.schema, target.schema)) {
+          targetOption.reviewState = 'review_required';
+          skipped(state, 'SEMANTIC_REMOTE_EVIDENCE_CHANGED_REVIEW_REQUIRED', 'option', id,
+            { optionId: sourceOption.optionId });
+        } else blocker(state, 'REMOTE_OPTION_IDENTITY_CHANGED', 'option', id, { optionId: sourceOption.optionId });
         continue;
       }
-      targetOption.reviewState = 'approved';
-      markCarried(state, 'option', id, 'approved', { optionId: sourceOption.optionId });
+      if (!state.carriedIds.has(id)) {
+        targetOption.reviewState = 'approved';
+        markCarried(state, 'option', id, 'approved', { optionId: sourceOption.optionId });
+      }
     } else if (targetOption.reviewState === 'blocked' && targetOption.optionId === sourceOption.optionId
       && unsupportedSignature(targetOption) === unsupportedSignature(sourceOption)) {
       markCarried(state, 'option', id, 'blocked');
@@ -223,10 +378,33 @@ function carryReviewedBindings(source, target, targetDefinition) {
         continue;
       }
       const targets = targetAttribute.evidence?.categories || [];
-      const targetCategory = uniqueMatch(targets, (row) => row.normalizedPath === sourceCategory.normalizedPath,
-        state, 'category', id, sourceCategory.reviewState === 'approved');
+      const matches = targets.filter((row) => row.normalizedPath === sourceCategory.normalizedPath);
+      if (matches.length > 1) {
+        blocker(state, 'AMBIGUOUS_TARGET_MATCH', 'category', id);
+        continue;
+      }
+      let targetCategory = matches.length === 1 ? matches[0] : null;
       if (!targetCategory) {
-        if (sourceCategory.reviewState === 'blocked') skipped(state, 'BLOCKED_TARGET_ABSENT', 'category', id);
+        if (sourceCategory.reviewState === 'approved') {
+          const requirement = targetRequirements.get(targetAttribute.bindingKey);
+          const live = liveVerification.categories.find((row) => row.bindingKey === targetAttribute.bindingKey
+            && row.normalizedPath === sourceCategory.normalizedPath);
+          const exact = requirement?.target === 'categories' && requirement.strategy === 'transport_control'
+            && targetAttribute.strategy === 'transport_control' && live?.matches.length === 1
+            && live.matches[0].categoryId === sourceCategory.categoryId;
+          if (exact) {
+            targetCategory = { requestedPath: sourceCategory.requestedPath,
+              normalizedPath: sourceCategory.normalizedPath, categoryId: sourceCategory.categoryId,
+              candidates: live.matches, reviewState: 'approved',
+              ...(sourceCategory.note ? { note: sourceCategory.note } : {}) };
+            if (!targetAttribute.evidence.categories) targetAttribute.evidence.categories = [];
+            targetAttribute.evidence.categories.push(targetCategory);
+            markCarried(state, 'category', id, 'approved',
+              { categoryId: sourceCategory.categoryId, synthesized: true });
+          } else blocker(state, live?.matches.length > 1 ? 'LIVE_CATEGORY_AMBIGUOUS'
+            : live?.matches.length === 1 ? 'LIVE_CATEGORY_ID_CHANGED' : 'LIVE_CATEGORY_MISSING',
+          'category', id, { categoryId: sourceCategory.categoryId });
+        } else skipped(state, 'BLOCKED_TARGET_ABSENT', 'category', id);
         continue;
       }
       const sourceCandidate = sourceCategory.candidates.find((row) => row.categoryId === sourceCategory.categoryId);
@@ -236,7 +414,8 @@ function carryReviewedBindings(source, target, targetDefinition) {
       if (sourceCategory.reviewState === 'approved') {
         if (!sameIdentity) { blocker(state, 'REMOTE_CATEGORY_IDENTITY_CHANGED', 'category', id); continue; }
         targetCategory.reviewState = 'approved';
-        markCarried(state, 'category', id, 'approved', { categoryId: sourceCategory.categoryId });
+        if (!state.carriedIds.has(id)) markCarried(state, 'category', id, 'approved',
+          { categoryId: sourceCategory.categoryId });
       } else if (targetCategory.reviewState === 'blocked'
         && sourceCategory.categoryId === targetCategory.categoryId
         && c.hash(sourceCategory.candidates) === c.hash(targetCategory.candidates)) {
@@ -330,7 +509,7 @@ async function templateDefinition(client, revision) {
   return compiled.definition;
 }
 
-async function inspectClient(client, input) {
+async function loadContextClient(client, input) {
   c.identity(input.sourceId); c.identity(input.targetId);
   const sourceRevision = c.counter(input.sourceRevision); const targetRevision = c.counter(input.targetRevision);
   if (typeof input.expectedDatabase !== 'string' || !/^[A-Za-z0-9_-]{1,63}$/.test(input.expectedDatabase)
@@ -359,12 +538,17 @@ async function inspectClient(client, input) {
     blockers.push({ code: 'TARGET_PUBLIC_SKU_CONTRACT_REQUIRED' });
   }
   if (!actor || actor.status !== 'active' || !actor.authorized) blockers.push({ code: 'ACTOR_UNAUTHORIZED' });
-  const carry = carryReviewedBindings(source, target, targetDefinition);
-  blockers.push(...carry.blockers);
+  return { database, actorUserId: input.actorUserId, source, target, targetDefinition, blockers };
+}
+
+function inspectContext(context, liveVerification) {
+  const { database, actorUserId, source, target, targetDefinition } = context;
+  const carry = carryReviewedBindings(source, target, targetDefinition, liveVerification);
+  const blockers = [...context.blockers, ...carry.blockers];
   const plan = {
     format: FORMAT,
     database,
-    actorUserId: input.actorUserId,
+    actorUserId,
     installationKey: target.installationKey,
     source: { id: source.id, revision: source.revision, versionNumber: source.versionNumber,
       bindingHash: c.hash(source.bindings), templateVersionId: source.templateVersionId,
@@ -373,6 +557,7 @@ async function inspectClient(client, input) {
       templateVersionId: target.templateVersionId, definitionHash: target.definitionHash,
       evaluatorVersion: target.evaluatorVersion, sourceContractVersion: targetDefinition.sourceContractVersion,
       schemaFingerprint: target.schemaFingerprint },
+    liveVerification,
     resultBindingHash: c.hash(carry.bindings),
     carried: carry.carried,
     skipped: carry.skipped,
@@ -381,16 +566,29 @@ async function inspectClient(client, input) {
   return { plan, blockers, resultBindings: carry.bindings };
 }
 
+async function inspectClient(client, input, options = {}) {
+  const context = await loadContextClient(client, input);
+  const liveVerification = options.liveVerification || await collectLiveVerification(context.source,
+    context.target, context.targetDefinition, options.config, options);
+  return inspectContext(context, liveVerification);
+}
+
 async function preflight(input, options = {}) {
   const client = await (options.databasePool || pool).connect();
+  let context;
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const inspected = await inspectClient(client, input);
+    context = await loadContextClient(client, input);
     await client.query('COMMIT');
-    return { artifactVersion: 1, kind: 'amber-magento-binding-reviewed-carry-forward-preflight',
-      checkedAt: new Date().toISOString(), plan: inspected.plan, planHash: c.hash(inspected.plan), blockers: inspected.blockers };
   } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
   finally { client.release(); }
+  const liveVerification = context.blockers.length
+    ? { format: LIVE_FORMAT, originHash: context.target.originHash, storeCode: context.target.schema.storeCode,
+      categories: [], dynamicOptions: [] }
+    : await collectLiveVerification(context.source, context.target, context.targetDefinition, options.config, options);
+  const inspected = inspectContext(context, liveVerification);
+  return { artifactVersion: 1, kind: 'amber-magento-binding-reviewed-carry-forward-preflight',
+    checkedAt: new Date().toISOString(), plan: inspected.plan, planHash: c.hash(inspected.plan), blockers: inspected.blockers };
 }
 
 async function completedReceipt(client, targetId, planHash) {
@@ -406,6 +604,23 @@ async function apply(input, options = {}) {
     || input.plan.actorUserId !== input.actorUserId || input.planHash !== c.hash(input.plan)
     || !/^[a-f0-9]{64}$/.test(input.planHash || '')) c.invalid();
   const context = createMutationContext(options.mutationContext || { actorUserId: input.actorUserId });
+  const previous = await runAccessAdminMutation({ databasePool: options.databasePool || pool,
+    actorUserId: context.actorUserId, requiredPermission: 'export_templates.manage', createError: c.error,
+    operation: async (client) => {
+      const database = (await client.query('SELECT current_database() AS name')).rows[0].name;
+      if (database !== input.expectedDatabase) {
+        fail('MAGENTO_BINDING_CARRY_DATABASE_MISMATCH', 'Target database differs');
+      }
+      return completedReceipt(client, input.plan.target.id, input.planHash);
+    } });
+  if (previous) return { ...previous, alreadyApplied: true };
+  const refreshed = await preflight({ expectedDatabase: input.expectedDatabase, actorUserId: input.actorUserId,
+    sourceId: input.plan.source.id, sourceRevision: input.plan.source.revision,
+    targetId: input.plan.target.id, targetRevision: input.plan.target.revision }, options);
+  if (refreshed.blockers.length || refreshed.planHash !== input.planHash) {
+    fail('MAGENTO_BINDING_CARRY_PREFLIGHT_STALE', 'Binding carry-forward preflight changed',
+      { blockers: refreshed.blockers });
+  }
   return runAccessAdminMutation({ databasePool: options.databasePool || pool, actorUserId: context.actorUserId,
     requiredPermission: 'export_templates.manage', createError: c.error, operation: async (client) => {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',
@@ -416,7 +631,8 @@ async function apply(input, options = {}) {
         ORDER BY id FOR UPDATE`, [[input.plan.source.id, input.plan.target.id]]);
       const inspected = await inspectClient(client, { expectedDatabase: input.expectedDatabase,
         actorUserId: input.actorUserId, sourceId: input.plan.source.id, sourceRevision: input.plan.source.revision,
-        targetId: input.plan.target.id, targetRevision: input.plan.target.revision });
+        targetId: input.plan.target.id, targetRevision: input.plan.target.revision },
+      { liveVerification: refreshed.plan.liveVerification });
       if (inspected.blockers.length || c.hash(inspected.plan) !== input.planHash
         || c.hash(inspected.resultBindings) !== input.plan.resultBindingHash) {
         fail('MAGENTO_BINDING_CARRY_PREFLIGHT_STALE', 'Binding carry-forward preflight changed',
@@ -441,4 +657,5 @@ async function apply(input, options = {}) {
     } });
 }
 
-module.exports = { FORMAT, EVENT, carryReviewedBindings, inspectClient, preflight, apply };
+module.exports = { FORMAT, EVENT, LIVE_FORMAT, liveRequests, collectLiveVerification,
+  carryReviewedBindings, inspectClient, preflight, apply };

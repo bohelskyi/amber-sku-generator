@@ -1,15 +1,16 @@
-// Local reviewed-decision carry-forward. Both commands are database-only and
-// never publish a binding, activate delivery, or make a Magento HTTP request.
+// Local reviewed-decision carry-forward. Remote access is restricted to bounded
+// Magento GET verification; no command publishes, activates, or writes Magento.
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { Pool } = require('pg');
 const c = require('../src/services/magento/binding-contract');
+const { parseMagentoConfig } = require('../src/config/magento');
 const service = require('../src/services/magento/binding-carry-forward');
 
 const HELP = `npm run magento:binding-carry-forward -- preflight --expected-database NAME --actor-user-id ID --source UUID --source-revision N --target UUID --target-revision N --output NEW_FILE
 npm run magento:binding-carry-forward -- apply --expected-database NAME --actor-user-id ID --plan FILE --expected-hash SHA256
-Preflight is read-only. Apply updates only the reviewed target draft and writes an audit receipt. Neither command publishes, activates delivery, or calls Magento.`;
+Preflight is read-only and may perform bounded Magento GET verification. Apply repeats that GET verification, updates only the reviewed target draft, and writes an audit receipt. Neither command publishes, activates delivery, or writes Magento.`;
 
 function parse(args) {
   if (args.length === 1 && args[0] === '--help') return { help: true };
@@ -49,15 +50,17 @@ async function readJson(file) {
 }
 
 async function run({ args = process.argv.slice(2), env = process.env, print = console.log,
-  printError = console.error, databasePool } = {}) {
+  printError = console.error, databasePool, fetchImpl } = {}) {
   let owned;
   try {
     const input = parse(args);
     if (input.help) { print(HELP); return 0; }
     if (!env.DATABASE_URL) throw new Error('DATABASE_URL_REQUIRED');
     if (!databasePool) { owned = new Pool({ connectionString: env.DATABASE_URL, max: 2 }); databasePool = owned; }
+    const config = parseMagentoConfig(env);
+    if (!config.configured) throw new Error('MAGENTO_NOT_CONFIGURED');
     if (input.action === 'preflight') {
-      const artifact = await service.preflight(input, { databasePool });
+      const artifact = await service.preflight(input, { databasePool, config, fetchImpl });
       await fs.writeFile(path.resolve(input.output), `${JSON.stringify(artifact, null, 2)}\n`, { flag: 'wx' });
       print(JSON.stringify({ ok: artifact.blockers.length === 0, planHash: artifact.planHash,
         summary: artifact.plan.summary, blockers: artifact.blockers, output: path.resolve(input.output) }));
@@ -71,7 +74,7 @@ async function run({ args = process.argv.slice(2), env = process.env, print = co
       throw new Error('MAGENTO_BINDING_CARRY_PLAN_INVALID');
     }
     const receipt = await service.apply({ expectedDatabase: input.expectedDatabase,
-      actorUserId: input.actorUserId, plan: artifact.plan, planHash: input.planHash }, { databasePool,
+      actorUserId: input.actorUserId, plan: artifact.plan, planHash: input.planHash }, { databasePool, config, fetchImpl,
       mutationContext: { actorUserId: input.actorUserId, requestId: `magento-binding-carry-${randomUUID()}` } });
     print(JSON.stringify({ ok: true, ...receipt }));
     return 0;

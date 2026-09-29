@@ -716,12 +716,24 @@ hashes remain those of the target v3 draft. Reviewed blocked decisions carry onl
 when the target represents the same unsupported case and diagnostics; a formerly
 blocked value that now has a resolved candidate remains new review work.
 
+When current ready samples omitted an approved historical category or dynamic
+output, preflight uses bounded named Magento GETs only. A category is synthesized
+only when the target still has the same category transport requirement and the live
+full tree uniquely returns the approved normalized path and ID. A dynamic evaluated
+option is synthesized only under the target requirement's domain identity when the
+target observation and a fresh attribute/options GET uniquely retain its exact
+output and option ID. Relevant GET evidence is part of the plan hash and is fetched
+again before APPLY takes mutation locks. Missing, ambiguous or changed identities
+remain blockers. A semantic candidate retaining its option ID but changing label
+evidence remains `review_required` and is reported as skipped instead of inheriting
+approval.
+
 Apply locks and revalidates the current source publication, both revision counters,
 both binding hashes and the complete planned target result before replacing the
 target draft decisions. Its audit receipt reports carried approvals, blocks and
 policies, deliberate skips and blockers. A retry of the same completed plan is
 idempotent. The command does not mutate the published source, publish the draft,
-activate public SKUs, create sync work or call Magento.
+activate public SKUs, create sync work or perform a Magento mutation.
 
 `extend` uses the draft's pinned evaluator and existing bootstrap/resolver logic.
 It GET-checks the live schema against the frozen fingerprint and rejects drift;

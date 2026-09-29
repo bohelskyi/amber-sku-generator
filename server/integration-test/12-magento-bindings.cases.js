@@ -760,6 +760,50 @@ test('Magento binding persistence, publication, immutability and real PostgreSQL
     { databasePool: pool, mutationContext: { actorUserId: Number(admin.applicationUser.id) } }),
     { code: 'MAGENTO_BINDING_CARRY_PREFLIGHT_STALE' });
     assert.equal((await bindings.getRevision(staleSource.target.id)).revision, staleSource.target.revision);
+
+    const live = await pair('carry-live-evidence');
+    const dynamicAttribute = live.target.bindings.attributes.find((row) => row.strategy === 'dynamic_exact_label_option');
+    assert.ok(dynamicAttribute);
+    const missingDynamic = live.target.bindings.options.find((row) => row.bindingKey === dynamicAttribute.bindingKey
+      && row.sourceKind === 'evaluated');
+    assert.ok(missingDynamic);
+    const withoutDynamic = fixture.editable(live.target.bindings);
+    withoutDynamic.options = withoutDynamic.options.filter((row) => !(row.bindingKey === dynamicAttribute.bindingKey
+      && row.sourceKind === 'evaluated' && row.outputKey === missingDynamic.outputKey));
+    const updatedTarget = await bindings.updateDraft(live.target.id,
+      { expectedRevision: live.target.revision, bindings: withoutDynamic }, options());
+    const liveInput = { ...live.input, targetRevision: updatedTarget.revision };
+    const config = { configured: true, baseUrl: 'https://binding.example.invalid' };
+    let liveOptions = [{ value: missingDynamic.optionId, label: missingDynamic.evaluatedOutput }];
+    const magentoClient = {
+      getProductAttribute: async (code) => ({ attribute_id: schema.attributes.find((row) => row.attribute_code === code).attribute_id,
+        attribute_code: code, frontend_input: 'select' }),
+      getProductAttributeOptions: async () => structuredClone(liveOptions),
+    };
+    const liveArtifact = await carryForward.preflight(liveInput,
+      { databasePool: pool, config, magentoClient });
+    assert.deepEqual(liveArtifact.blockers, []);
+    assert.equal(liveArtifact.plan.liveVerification.dynamicOptions.length, 1);
+    assert.equal(liveArtifact.plan.liveVerification.dynamicOptions[0].optionById[0].value, missingDynamic.optionId);
+    const targetBeforeStaleApply = await bindings.getRevision(live.target.id);
+    liveOptions = [];
+    await assert.rejects(carryForward.apply({ expectedDatabase: liveArtifact.plan.database,
+      actorUserId: liveArtifact.plan.actorUserId, plan: liveArtifact.plan, planHash: liveArtifact.planHash },
+    { databasePool: pool, config, magentoClient,
+      mutationContext: { actorUserId: Number(admin.applicationUser.id) } }),
+    { code: 'MAGENTO_BINDING_CARRY_PREFLIGHT_STALE' });
+    assert.deepEqual(await bindings.getRevision(live.target.id), targetBeforeStaleApply);
+    liveOptions = [{ value: missingDynamic.optionId, label: missingDynamic.evaluatedOutput }];
+    const liveReceipt = await carryForward.apply({ expectedDatabase: liveArtifact.plan.database,
+      actorUserId: liveArtifact.plan.actorUserId, plan: liveArtifact.plan, planHash: liveArtifact.planHash },
+    { databasePool: pool, config, magentoClient,
+      mutationContext: { actorUserId: Number(admin.applicationUser.id), requestId: 'binding-carry-live-apply' } });
+    assert.equal(liveReceipt.alreadyApplied, false);
+    const liveChanged = await bindings.getRevision(live.target.id);
+    const restoredDynamic = liveChanged.bindings.options.find((row) => row.bindingKey === dynamicAttribute.bindingKey
+      && row.sourceKind === 'evaluated' && row.optionId === missingDynamic.optionId);
+    assert.ok(restoredDynamic);
+    assert.equal(restoredDynamic.domainKey, missingDynamic.domainKey);
   });
   await t.test('reviewed publication transfer round-trips as a new draft and target drift rolls back', async () => {
     const source = await publish(await ready(`transfer-${crypto.randomUUID()}`));
