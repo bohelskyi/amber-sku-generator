@@ -1,5 +1,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { compileDefinition } = require('../src/services/export-templates/definition');
+const { materializeMagentoV1 } = require('../src/services/export-templates/magento-v1-definition');
+const { evaluateProduct } = require('../src/services/export-templates/evaluate');
 const { mapProduct } = require('../src/services/magento-products-v1');
 const { product, catalog, dictionaries } = require('./fixtures/magento-v1/contract');
 const { cases } = require('./fixtures/magento-v1/expected-rows');
@@ -65,7 +68,7 @@ test('natural/pressed UA and EN names across all four jewelry groups', () => {
   }
 });
 
-test('NM extra path and CH genuine count zero through all accepted counts', () => {
+test('NM extra path and exact CH taxonomy paths through all accepted counts', () => {
   const nm = cases.find((c) => c.id === 'NM').base.categories;
   for (const [extra, suffix] of [[0, ''], ['0', ''], [1, ',Default/Намиста/Намиста з підвісками'], [2, '']]) {
     const mapped = mapProduct(product('NM', { extra }), catalog());
@@ -73,10 +76,22 @@ test('NM extra path and CH genuine count zero through all accepted counts', () =
     assert.equal(mapped.base.categories, nm + suffix);
   }
   const prefix = cases.find((c) => c.id === 'CH').base.categories.split(',').slice(0, -1).join(',');
-  for (const [count, beads] of [[0, '30'], ['0', '30'], [1, '33'], [2, '39'], [3, '45'], [4, '51'], [5, '66'], [6, '75'], [7, '99']]) {
+  const compiled = compileDefinition(materializeMagentoV1(catalog()));
+  for (const [count, category] of [
+    [0, 'Чотки на 30 намистин'],
+    ['0', 'Чотки на 30 намистин'],
+    [1, 'Чотки на 33 намистини'],
+    [2, 'Чотки на 39 намистин'],
+    [3, 'Чотки на 45 намистин'],
+    [4, 'Чотки на 51 намистин'],
+    [5, 'Чотки на 66 намистин'],
+    [6, 'Чотки на 75 намистин'],
+    [7, 'Чотки на 99 намистин'],
+  ]) {
     const mapped = mapProduct(product('CH', { count }), catalog());
     assert.deepEqual(mapped.errors, []);
-    assert.equal(mapped.base.categories, `${prefix},Default/Чотки/Чотки на ${beads} намистин`);
+    assert.equal(mapped.base.categories, `${prefix},Default/Чотки/${category}`);
+    assert.equal(evaluateProduct(compiled, product('CH', { count })).base.categories, mapped.base.categories);
   }
 });
 

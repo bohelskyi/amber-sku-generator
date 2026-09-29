@@ -349,6 +349,7 @@ function categoryPaths(group, answers, attrs, errors) {
   const shape = { 1: 'кулі', 2: 'бочки', 3: 'оливки' }[String(answers.shape)];
   const religion = { 1: 'Мусульманські', 2: 'Християнські' }[String(answers.religion)];
   const count = V.chCount[String(answers.count)];
+  const countCategory = count === '33' ? 'Чотки на 33 намистини' : `Чотки на ${count} намистин`;
   if (![texture, color, shape, religion, count].every(Boolean) || count === '?') {
     errors.push({ field: 'categories', message: 'Немає мапінгу однієї з характеристик категорії.' });
   }
@@ -357,7 +358,7 @@ function categoryPaths(group, answers, attrs, errors) {
     `${base}/Чотки ${color} кольору`,
     `${base}/Чотки з намистинами у формі ${shape}`,
     `${base}/${religion} чотки`,
-    count !== '?' ? `${base}/Чотки на ${count} намистин` : ''
+    count !== '?' ? `${base}/${countCategory}` : ''
   ].filter(Boolean).join(',');
 }
 

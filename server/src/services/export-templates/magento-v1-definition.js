@@ -239,7 +239,8 @@ function materializeMagentoV1(catalog, { publicSku = false } = {}) {
       } else {
         paths.push(path('Чотки з {texture} намистинами', { texture }), path('Чотки {color} кольору', { color }),
           path('Чотки з намистинами у формі {shape}', { shape }), path('{religion} чотки', { religion }),
-          when(not(eq(count, '?')), path('Чотки на {count} намистин', { count })));
+          when(not(eq(count, '?')), when(eq(count, '33'), path('Чотки на 33 намистини'),
+            path('Чотки на {count} намистин', { count }))));
       }
     }
     if (paths) cell('categories', join(paths));
