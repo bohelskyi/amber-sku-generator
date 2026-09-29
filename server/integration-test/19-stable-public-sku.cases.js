@@ -184,3 +184,67 @@ suite.test('stable public SKU migration refuses non-canonical legacy SKU values 
     await db.end(); await fs.rm(directory, { recursive: true, force: true }); await dropTestDatabase(name);
   }
 });
+
+suite.test('migration runner upgrades an active lifecycle database through stable public SKU migration', async () => {
+  const { assert, Pool, crypto, fs, os, path, serverRoot, recreateTestDatabase,
+    dropTestDatabase, runNodeInDatabase } = suite;
+  const name = 'amber_public_sku_active_upgrade_test'; const url = await recreateTestDatabase(name);
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-public-sku-active-045-'));
+  const db = new Pool({ connectionString: url });
+  const migrate = () => runNodeInDatabase(url,
+    `require('./src/db/run-migrations').runMigrations({directory:${JSON.stringify(directory)}}).catch(e=>{console.error(e);process.exitCode=1;});`);
+  try {
+    for (const file of (await fs.readdir(path.join(serverRoot, 'migrations')))
+      .filter((file) => file.endsWith('.sql') && file < '046')) {
+      await fs.copyFile(path.join(serverRoot, 'migrations', file), path.join(directory, file));
+    }
+    await migrate();
+    await db.query("INSERT INTO categories(code,name) VALUES('ZZ','Active upgrade')");
+    const product = (await insertProductFixture(db, `INSERT INTO products(full_sku,category,total_price_uah)
+      VALUES('ZZ-ACTIVE-UPGRADE','ZZ',100) RETURNING id`)).rows[0];
+    await db.query(`UPDATE product_full_export_state SET business_exclusion_state='none',
+      delivery_version=delivery_version+1
+      WHERE product_id=$1`, [product.id]);
+    const actor = (await db.query(`INSERT INTO application_users(status,display_name,activated_at)
+      VALUES('active','Migration runner actor',CURRENT_TIMESTAMP) RETURNING id`)).rows[0];
+    const auditEvent = async (eventKey) => (await db.query(`INSERT INTO audit_events
+      (event_key,actor_user_id,actor_snapshot,subject_type,subject_id,request_id)
+      VALUES($1,$2,'{"displayName":"Migration runner actor","preferredUsername":null}'::jsonb,
+        'cutover','singleton',$3) RETURNING id`, [eventKey, actor.id, crypto.randomUUID()])).rows[0].id;
+    const approvalEventId = await auditEvent('full_product_cutover.approved');
+    const activationEventId = await auditEvent('full_product_cutover.activated');
+    await db.query('BEGIN');
+    try {
+      await db.query("SET LOCAL amber.lifecycle_maintenance = 'on'");
+      await db.query("UPDATE full_product_export_activation SET phase='preparing',generation=generation+1 WHERE singleton");
+      await db.query(`UPDATE full_product_export_activation SET manifest_hash=$1,approval_event_id=$2,
+        generation=generation+1 WHERE singleton`, ['a'.repeat(64), approvalEventId]);
+      await db.query(`UPDATE full_product_export_activation SET phase='active',selector_version=1,
+        activation_event_id=$1,generation=generation+1 WHERE singleton`, [activationEventId]);
+      await db.query('COMMIT');
+    } catch (error) {
+      await db.query('ROLLBACK');
+      throw error;
+    }
+    const beforeProduct = (await db.query('SELECT full_sku,status FROM products WHERE id=$1', [product.id])).rows[0];
+    const beforeLifecycle = (await db.query('SELECT * FROM product_full_export_state WHERE product_id=$1', [product.id])).rows[0];
+
+    await fs.copyFile(path.join(serverRoot, 'migrations', '046_stable_public_product_sku.sql'),
+      path.join(directory, '046_stable_public_product_sku.sql'));
+    await migrate();
+    assert.equal((await db.query(`SELECT count(*)::int AS count FROM schema_migrations
+      WHERE name='046_stable_public_product_sku.sql'`)).rows[0].count, 1);
+    assert.deepEqual((await db.query('SELECT full_sku,status FROM products WHERE id=$1', [product.id])).rows[0], beforeProduct);
+    assert.deepEqual((await db.query('SELECT * FROM product_full_export_state WHERE product_id=$1', [product.id])).rows[0], beforeLifecycle);
+    assert.deepEqual((await db.query(`SELECT i.public_sku,i.origin FROM products p
+      JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id=$1`, [product.id])).rows[0],
+    { public_sku: 'ZZ-ACTIVE-UPGRADE', origin: 'legacy' });
+    assert.equal((await db.query('SELECT phase FROM full_product_export_activation WHERE singleton')).rows[0].phase, 'active');
+
+    await migrate();
+    assert.equal((await db.query(`SELECT count(*)::int AS count FROM schema_migrations
+      WHERE name='046_stable_public_product_sku.sql'`)).rows[0].count, 1);
+  } finally {
+    await db.end(); await fs.rm(directory, { recursive: true, force: true }); await dropTestDatabase(name);
+  }
+});

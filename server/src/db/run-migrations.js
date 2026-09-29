@@ -71,6 +71,7 @@ async function runMigrations({ directory = migrationsDirectory } = {}) {
 
       await migrationQuery(client, 'BEGIN');
       try {
+        await migrationQuery(client, "SET LOCAL amber.lifecycle_writer_version = '1'");
         await migrationQuery(client, sql);
         await migrationQuery(
           client,
