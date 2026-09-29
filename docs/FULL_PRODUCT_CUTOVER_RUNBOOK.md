@@ -294,10 +294,19 @@ frozen production database still requires that lifecycle cutover.
 
 1. Restore the verified frozen dump to the exact target database. Keep traffic and
    all old writers stopped.
-2. Build/start the reviewed containers and let normal startup apply forward
-   migrations through 046. Do not run integration tests against this database.
+2. Before normal startup, inspect the schema-045 frozen database for current internal-SKU
+   collisions. If any exist, run the read-only `legacy-sku-repair preflight`, review
+   its explicit decisions and SHA-256 plan, then run `stage` with that exact plan/hash.
+   Do not auto-classify rows or reuse a rehearsal decision artifact. Build/start the
+   reviewed containers and let normal startup apply forward migrations through 047.
+   Migration 047 restores the same explicitly split product rows under new `AG-`
+   public identities; reviewed duplicate rows remain retired. Do not run integration
+   tests against this database.
 3. Verify `/health/live`, `/health/ready`, migration checksums and writer header.
-4. Keep all business writers frozen. Verify `pending_normal=0`,
+4. Keep all business writers frozen. Verify any migration-047 split restoration and
+   retain its audit evidence; record each split row as requiring a separately reviewed
+   post-cutover Magento CREATE/requeue. Do not rename the keeper's legacy remote product
+   or create a job during this migration step. Verify `pending_normal=0`,
    `pending_replacement=0`, no generated-unconfirmed product snapshot, no active
    shared generation attempt and no unresolved automatic request/job. Historical
    Held products remain Held.

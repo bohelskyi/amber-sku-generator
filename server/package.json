@@ -12,6 +12,7 @@
     "magento:auto-status": "node scripts/magento-auto-status.js",
     "magento:delivery-cutover": "node scripts/magento-delivery-cutover.js",
     "public-sku:activation": "node scripts/public-sku-activation.js",
+    "legacy-sku-repair": "node scripts/legacy-sku-repair.js",
     "magento:bindings": "node scripts/magento-bindings.js",
     "magento:binding-transfer": "node scripts/magento-binding-transfer.js",
     "magento:category": "node scripts/magento-category.js",

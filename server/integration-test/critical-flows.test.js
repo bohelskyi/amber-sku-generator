@@ -44,6 +44,7 @@ for (const modulePath of [
   './17-magento-automatic.cases',
   './18-magento-delivery-cutover.cases',
   './19-stable-public-sku.cases',
+  './20-legacy-sku-repair.cases',
 ]) {
   require(modulePath);
 }

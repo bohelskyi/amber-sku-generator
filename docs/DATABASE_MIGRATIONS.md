@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`046`. Accepted migrations `000`–`045` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`047`. Accepted migrations `000`–`046` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -104,6 +104,46 @@ New paths touching these resources must follow existing lock order and final-sta
 | `044_magento_automatic_sync.sql` | Default-disabled automatic gate, transaction-coupled per-product desired/synced generations, active job association, bounded retry state, automatic job generation and guarded undispatched supersession. No enrollment, activation or historical changes. See [automatic sync](MAGENTO_AUTOMATIC_SYNC.md). |
 | `045_magento_delivery_cutover.sql` | One-way retirement state for new Magento-product CSV artifacts, immutable cutover receipt, a database guard for old writers and a separate monotonic per-product CSV-retirement floor for post-cutover mutations. Defaults keep CSV enabled and automatic sync disabled; no activation, enrollment, historical-row change, export deletion or Magento write occurs in the migration. |
 | `046_stable_public_product_sku.sql` | Immutable public-product identities and non-cycling `AG-` allocation, exact legacy backfill, post-activation recount inheritance and deferred one-current-revision enforcement; additive dual-SKU snapshot/job evidence, public-identity automatic requests and a separate default-off audited activation gate. Existing internal SKUs, snapshots and artifacts are not rewritten. |
+| `047_finalize_legacy_sku_repair.sql` | Fail-closed finalization of only immutable schema-045 `legacy_sku_repair.staged` evidence. It requires 046 to be recorded, independently verifies the versioned PostgreSQL-canonical receipt and all nested plan/product/lifecycle hashes, allocates a new `AG-` public identity for each explicitly staged real collision, restores that same product row to its prior business lifecycle state, and leaves reviewed duplicate rows retired. It does not change internal SKU reservations, activate public SKU delivery, enqueue Magento work or leave a runtime identity-mutation bypass. |
+
+## Schema-045 legacy full-SKU collision repair
+
+Migration 046 intentionally aborts when retained legacy data has more than one current active/uncorrected product for one internal `full_sku`. Do not edit 046 or merge/recreate rows to bypass that invariant. With all business writers frozen, use the explicit operator workflow while the database is still exactly at schema 045:
+
+```powershell
+cd server
+$env:DATABASE_URL = '<secret target URL>'
+npm run legacy-sku-repair -- preflight --expected-database <DB> --actor-user-id <USER_ID> --decisions <DECISIONS_JSON> --output <NEW_PLAN_JSON>
+npm run legacy-sku-repair -- stage --expected-database <DB> --actor-user-id <USER_ID> --plan <PLAN_JSON> --expected-hash <SHA256>
+```
+
+The decision file is data-only and must not be committed for a production or rehearsal database. Its exact version-1 shape is:
+
+```json
+{
+  "version": 1,
+  "groups": [
+    {
+      "sku": "EXACT-CANONICAL-SKU",
+      "action": "deduplicate",
+      "keeperProductId": 123,
+      "retireProductIds": [124, 125],
+      "reason": "Reviewed operator decision"
+    },
+    {
+      "sku": "ANOTHER-CANONICAL-SKU",
+      "action": "split_public_identity",
+      "keeperProductId": 200,
+      "splitProductIds": [201],
+      "reason": "Reviewed materially separate product"
+    }
+  ]
+}
+```
+
+The version-1 decision artifact must classify every affected group explicitly as `deduplicate` or `split_public_identity`; hashes are evidence only and never auto-classify a row. Deduplication comparison covers the complete `products` business row and ignores only row identity `id` and insertion timestamp `created_at`. Preflight is read-only and binds the exact current products, lifecycle rows, registry ownership, lineage, immutable exposure evidence and relevant Magento evidence into a normalized SHA-256 plan. Stage revalidates that exact state under database locks and atomically uses the normal retirement primitive. Reviewed duplicates remain retired. A split target is temporarily retired without changing its product ID, internal `full_sku`, reservation or correction lineage; immutable audit evidence records its exact original and staged state.
+
+Normal migration startup then applies 046 followed by 047; 047 raises and cannot be recorded if 046 is absent. Staging stores a version-2 canonical receipt whose bytes are PostgreSQL 16 `jsonb::text` encoded as UTF-8 and SHA-256 hashed. The receipt contains the complete preflight plan, actor/database binding, registry evidence, decisions and exact original/staged product and lifecycle rows. Migration 047 reparses and reserializes those bytes, recomputes the receipt, plan, group, product and lifecycle hashes, and compares the live locked state before accepting the handoff. It also requires activation/delivery/cutover gates to remain safe, allocates the split row's new public identity from `public_product_sku_sequence`, and restores the same product row. Its lifecycle `delivery_version` advances for both the staging retirement and restoration while the original business lifecycle fields are restored. The final strict public-identity immutability trigger is restored before commit. Keep the decision, plan, plan hash and stage receipt with the change record. Split rows require a separately reviewed post-cutover Magento CREATE/requeue; neither the operator command nor 047 performs or enqueues it.
 
 The 2026-09-28 read-only check of the local operator database confirmed 041 applied at
 `2026-09-27T20:13:49.840Z` and 042 at `2026-09-27T22:52:43.558Z`. The normal migration
