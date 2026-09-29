@@ -5,7 +5,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { Pool } = require('pg');
 const { parseMagentoConfig } = require('../src/config/magento');
-const service = require('../src/services/magento/delivery-cutover.service');
+const deliveryCutoverService = require('../src/services/magento/delivery-cutover.service');
 
 const HELP = `npm run magento:delivery-cutover -- preflight --expected-database NAME --installation KEY --actor-user-id ID --output NEW_FILE
 npm run magento:delivery-cutover -- apply --expected-database NAME --installation KEY --actor-user-id ID --plan FILE --expected-hash SHA256
@@ -41,7 +41,7 @@ async function readJson(file) {
 }
 
 async function run({ args = process.argv.slice(2), env = process.env, print = console.log, printError = console.error,
-  databasePool } = {}) {
+  databasePool, service = deliveryCutoverService } = {}) {
   let owned;
   try {
     const input = parse(args);
@@ -62,7 +62,9 @@ async function run({ args = process.argv.slice(2), env = process.env, print = co
       if (artifact?.kind !== 'amber-magento-delivery-cutover-preflight' || artifact.planHash !== input.planHash
         || artifact.plan?.database !== input.expectedDatabase || artifact.plan?.installationKey !== input.installationKey
         || artifact.plan?.actor?.authorized !== true) throw new Error('INVALID_PLAN');
-      const result = await service.apply({ ...input, origin: config.baseUrl }, { databasePool,
+      const result = await service.apply({ expectedDatabase: input.expectedDatabase,
+        installationKey: input.installationKey, actorUserId: input.actorUserId,
+        origin: config.baseUrl, planHash: input.planHash }, { databasePool,
         mutationContext: { actorUserId: input.actorUserId, requestId: `magento-delivery-cutover-${randomUUID()}` } });
       print(JSON.stringify({ ok: true, ...result })); return 0;
     }
