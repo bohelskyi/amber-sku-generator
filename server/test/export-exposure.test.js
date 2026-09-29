@@ -38,6 +38,55 @@ test('exposure cursor, flag and snapshot range do not establish exact membership
   ]));
 });
 
+test('historical internal-SKU snapshot range anchors still resolve exactly', () => {
+  const p = product(12, 'SV-INTERNAL-12');
+  const data = emptyEvidence({ products: [p], snapshots: [snapshot('internal-range', [p], 'generated')] });
+  const range = buildExposureIndex(data).productEvidence.get(p.id).indicators
+    .find((indicator) => indicator.code === 'SNAPSHOT_RANGE_INFERENCE');
+  assert.equal(range.rangeResolved, true);
+  assert.equal(range.startId, 12);
+  assert.equal(range.endId, 12);
+});
+
+test('future public-SKU snapshot range anchors resolve to their product', () => {
+  const p = product(13, 'SV-INTERNAL-13', { public_sku: 'AG-000001' });
+  const data = emptyEvidence({ products: [p], snapshots: [snapshot('public-range', [p], 'generated', {
+    from_sku: 'AG-000001', to_sku: 'AG-000001',
+  })] });
+  const range = buildExposureIndex(data).productEvidence.get(p.id).indicators
+    .find((indicator) => indicator.code === 'SNAPSHOT_RANGE_INFERENCE');
+  assert.equal(range.rangeResolved, true);
+  assert.equal(range.startId, 13);
+  assert.equal(range.endId, 13);
+});
+
+test('conflicting internal and public range-anchor identities remain unresolved', () => {
+  const internal = product(14, 'AG-000001', { public_sku: 'LEGACY-14' });
+  const publicProduct = product(15, 'SV-INTERNAL-15', { public_sku: 'AG-000001' });
+  const data = emptyEvidence({ products: [internal, publicProduct], snapshots: [snapshot('conflict', [internal], 'generated', {
+    from_sku: 'AG-000001', to_sku: 'AG-000001', exported_to_product_id: 15,
+  })] });
+  const range = buildExposureIndex(data).productEvidence.get(internal.id).indicators
+    .find((indicator) => indicator.code === 'SNAPSHOT_RANGE_INFERENCE');
+  assert.equal(range.rangeResolved, false);
+  assert.equal(range.startId, null);
+});
+
+test('conflicting explicit snapshot upper anchor does not fall back to exported product ID', () => {
+  const from = product(16, 'SV-FROM-16', { public_sku: 'AG-000016' });
+  const internal = product(17, 'AG-000099', { public_sku: 'LEGACY-17' });
+  const publicProduct = product(18, 'SV-INTERNAL-18', { public_sku: 'AG-000099' });
+  const data = emptyEvidence({ products: [from, internal, publicProduct],
+    snapshots: [snapshot('upper-conflict', [from], 'generated', {
+      from_sku: 'SV-FROM-16', to_sku: 'AG-000099', exported_to_product_id: 18,
+    })] });
+  const range = buildExposureIndex(data).productEvidence.get(from.id).indicators
+    .find((indicator) => indicator.code === 'SNAPSHOT_RANGE_INFERENCE');
+  assert.equal(range.rangeResolved, false);
+  assert.equal(range.startId, 16);
+  assert.equal(range.endId, null);
+});
+
 test('exposure has_product_snapshot alone is not confirmed exposure', () => {
   const data = emptyEvidence({ products: [product(5)], revisions: [{ product_id: 5, has_product_snapshot: true, revision: '2', confirmed_revision: '2' }] });
   assert.equal(exposure(data, 5).classification, 'historical_ambiguous');

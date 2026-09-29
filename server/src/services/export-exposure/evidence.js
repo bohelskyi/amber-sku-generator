@@ -76,12 +76,25 @@ function buildExposureIndex(input) {
       revision: String(revision.revision), confirmedRevision: String(revision.confirmed_revision),
     });
   }
-  function addRange(row, code, key) {
-    const from = skuProducts.get(row.from_sku);
-    const to = row.to_sku ? skuProducts.get(row.to_sku) : null;
+  function resolveRangeAnchor(sku, allowPublicSku) {
+    if (!sku) return null;
+    const internalMatches = skuProducts.get(sku) || [];
+    const publicMatches = allowPublicSku ? (publicSkuProducts.get(sku) || []) : [];
+    const internalIds = new Set(internalMatches.map((product) => Number(product.id)));
+    const publicIds = new Set(publicMatches.map((product) => Number(product.id)));
+    if (internalIds.size > 1 || publicIds.size > 1) return null;
+    if (internalIds.size && publicIds.size
+        && [...internalIds][0] !== [...publicIds][0]) return null;
+    if (internalIds.size) return internalMatches.find((product) => Number(product.id) === [...internalIds][0]);
+    if (publicIds.size) return publicMatches.find((product) => Number(product.id) === [...publicIds][0]);
+    return null;
+  }
+  function addRange(row, code, key, allowPublicSku = false) {
+    const from = resolveRangeAnchor(row.from_sku, allowPublicSku);
+    const to = row.to_sku ? resolveRangeAnchor(row.to_sku, allowPublicSku) : null;
     const upper = Number(row.exported_to_product_id);
-    const start = from?.length === 1 ? Number(from[0].id) : null;
-    const end = to?.length === 1 ? Number(to[0].id) : upper;
+    const start = from ? Number(from.id) : null;
+    const end = to ? Number(to.id) : (allowPublicSku && row.to_sku ? null : upper);
     const complete = start !== null && Number.isSafeInteger(end) && end >= 0;
     for (const product of products) {
       const id = Number(product.id);
@@ -100,7 +113,7 @@ function buildExposureIndex(input) {
     artifactsBySnapshot.get(artifact.snapshot_id).push(artifact);
   }
   for (const snapshot of [...input.snapshots].sort((a, b) => compare(a.id, b.id))) {
-    addRange(snapshot, 'SNAPSHOT_RANGE_INFERENCE', 'snapshotId');
+    addRange(snapshot, 'SNAPSHOT_RANGE_INFERENCE', 'snapshotId', true);
     const issues = [];
     const members = [];
     const files = [];
