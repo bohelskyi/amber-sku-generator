@@ -15,6 +15,7 @@
     "legacy-sku-repair": "node scripts/legacy-sku-repair.js",
     "magento:bindings": "node scripts/magento-bindings.js",
     "magento:binding-transfer": "node scripts/magento-binding-transfer.js",
+    "magento:binding-carry-forward": "node scripts/magento-binding-carry-forward.js",
     "magento:category": "node scripts/magento-category.js",
     "magento:schema-audit": "node scripts/magento-schema-audit.js",
     "magento:binding-evidence-audit": "node scripts/magento-binding-evidence-audit.js",

@@ -694,6 +694,35 @@ remote drift or target semantic drift fails closed and rolls back the import; an
 unrelated schema addition that changes only the global fingerprint is not presented
 as approval drift. IDs are never remapped by label.
 
+### Reviewed decisions into a public-SKU draft
+
+When the current published binding and a separately bootstrapped
+`magento-declarative-3` / `public-product-identity-v1` draft describe the same
+installation, carry reviewed decisions forward with an immutable preflight plan:
+
+```powershell
+cd server
+$env:DATABASE_URL = '<secret database URL>'
+npm run magento:binding-carry-forward -- preflight --expected-database <DATABASE_NAME> --actor-user-id <LOCAL_USER_ID> --source <CURRENT_PUBLISHED_UUID> --source-revision <N> --target <V3_DRAFT_UUID> --target-revision <N> --output <NEW_SECURE_PLAN_JSON>
+npm run magento:binding-carry-forward -- apply --expected-database <DATABASE_NAME> --actor-user-id <LOCAL_USER_ID> --plan <PLAN_JSON> --expected-hash <PLAN_SHA256>
+```
+
+Preflight is read-only. It matches route, row, target, Amber semantic value or exact
+evaluated output, store scope and stable Magento IDs; display labels are checked as
+identity evidence rather than used for remapping. An approved source route may
+replace a different unreviewed bootstrap set candidate only when that exact set ID
+and set name remain present in both frozen observations. Template/domain/source
+hashes remain those of the target v3 draft. Reviewed blocked decisions carry only
+when the target represents the same unsupported case and diagnostics; a formerly
+blocked value that now has a resolved candidate remains new review work.
+
+Apply locks and revalidates the current source publication, both revision counters,
+both binding hashes and the complete planned target result before replacing the
+target draft decisions. Its audit receipt reports carried approvals, blocks and
+policies, deliberate skips and blockers. A retry of the same completed plan is
+idempotent. The command does not mutate the published source, publish the draft,
+activate public SKUs, create sync work or call Magento.
+
 `extend` uses the draft's pinned evaluator and existing bootstrap/resolver logic.
 It GET-checks the live schema against the frozen fingerprint and rejects drift;
 it never replaces observation rows or refreshes carried Magento IDs. Category

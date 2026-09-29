@@ -5,6 +5,7 @@ const bindings = require('../src/services/magento/binding.service');
 const templates = require('../src/services/export-templates/template.service');
 const { compareRevision } = require('../src/services/magento/binding-drift');
 const transfer = require('../src/services/magento/binding-transfer');
+const carryForward = require('../src/services/magento/binding-carry-forward');
 const { APPLICATION_USER_ADMIN_LOCK_KEY } = require('../src/services/access-admin-transaction');
 const fixture = require('../test/fixtures/magento-bindings');
 const { getMigrationChecksum } = require('../src/db/run-migrations');
@@ -683,6 +684,82 @@ test('Magento binding persistence, publication, immutability and real PostgreSQL
     const changed = await transfer.liveDrift(config, artifact, { fetchImpl: changedFetch });
     assert.equal(changed.diagnostics.some((item) => item.code === 'CATEGORY_IDENTITY_DRIFT'
       && item.categoryId === '9876'), true);
+  });
+  await t.test('reviewed decision carry-forward is atomic, idempotent and rejects stale source or target revisions', async () => {
+    const publicDefinition = structuredClone(definition);
+    publicDefinition.evaluatorVersion = 'magento-declarative-3';
+    publicDefinition.sourceContractVersion = 'public-product-identity-v1';
+    publicDefinition.sources.sku.field = 'public_sku';
+    const publicFamily = await templates.createTemplate({ key: `binding-public-${crypto.randomUUID()}`,
+      displayName: 'Synthetic public identity binding', definition: publicDefinition }, options());
+    const publicVersion = await templates.publishTemplate(publicFamily.id, { expectedRevision: publicFamily.draft.revision,
+      expectedDefinitionHash: publicFamily.draft.definitionHash }, options());
+    const resetBindings = () => {
+      const candidate = fixture.approvedBindings(publicDefinition, schema);
+      for (const route of candidate.routes) route.reviewState = route.setId === null ? 'review_required' : 'proposed';
+      for (const attribute of candidate.attributes) attribute.reviewState = 'proposed';
+      for (const option of candidate.options) option.reviewState = option.optionId === null ? 'blocked' : 'proposed';
+      for (const policy of candidate.policies) {
+        policy.policy = 'magento_managed'; policy.reviewState = 'review_required'; policy.evidence = {};
+      }
+      return candidate;
+    };
+    async function pair(prefix) {
+      const source = await publish(await ready(`${prefix}-${crypto.randomUUID()}`));
+      const target = await bindings.createDraft({ installationKey: source.installationKey,
+        origin: 'https://binding.example.invalid', templateVersionId: publicVersion.id,
+        observedAt: '2026-09-01T00:00:00.000Z', schema, bindings: resetBindings() }, options());
+      const database = (await pool.query('SELECT current_database() name')).rows[0].name;
+      const input = { expectedDatabase: database, actorUserId: Number(admin.applicationUser.id),
+        sourceId: source.id, sourceRevision: source.revision, targetId: target.id, targetRevision: target.revision };
+      return { source, target, input };
+    }
+
+    const exact = await pair('carry-exact');
+    const artifact = await carryForward.preflight(exact.input, { databasePool: pool });
+    assert.deepEqual(artifact.blockers, []);
+    const receipt = await carryForward.apply({ expectedDatabase: artifact.plan.database,
+      actorUserId: artifact.plan.actorUserId, plan: artifact.plan, planHash: artifact.planHash },
+    { databasePool: pool, mutationContext: { actorUserId: Number(admin.applicationUser.id),
+      requestId: 'binding-carry-apply' } });
+    assert.equal(receipt.alreadyApplied, false);
+    const changed = await bindings.getRevision(exact.target.id);
+    assert.equal(changed.state, 'draft');
+    assert.equal(changed.templateVersionId, publicVersion.id);
+    assert.equal(changed.evaluatorVersion, 'magento-declarative-3');
+    assert.equal(changed.revision, String(BigInt(exact.target.revision) + 1n));
+    assert.deepEqual(changed.bindings.policies.map((row) => [row.policy, row.reviewState]),
+      exact.source.bindings.policies.map((row) => [row.policy, row.reviewState]));
+    assert.deepEqual(await bindings.getRevision(exact.source.id), exact.source);
+    assert.equal((await bindings.getCurrentPublished(exact.source.installationKey)).id, exact.source.id);
+    const retry = await carryForward.apply({ expectedDatabase: artifact.plan.database,
+      actorUserId: artifact.plan.actorUserId, plan: artifact.plan, planHash: artifact.planHash },
+    { databasePool: pool, mutationContext: { actorUserId: Number(admin.applicationUser.id),
+      requestId: 'binding-carry-retry' } });
+    assert.equal(retry.alreadyApplied, true);
+    assert.equal((await pool.query(`SELECT count(*)::int n FROM audit_events
+      WHERE event_key='magento_binding.review_carried_forward' AND subject_id=$1`, [exact.target.id])).rows[0].n, 1);
+
+    const staleTarget = await pair('carry-stale-target');
+    const targetArtifact = await carryForward.preflight(staleTarget.input, { databasePool: pool });
+    const edited = structuredClone(staleTarget.target.bindings);
+    edited.policies[0].evidence = { note: 'Independent review after preflight' };
+    await bindings.updateDraft(staleTarget.target.id,
+      { expectedRevision: staleTarget.target.revision, bindings: edited }, options());
+    await assert.rejects(carryForward.apply({ expectedDatabase: targetArtifact.plan.database,
+      actorUserId: targetArtifact.plan.actorUserId, plan: targetArtifact.plan, planHash: targetArtifact.planHash },
+    { databasePool: pool, mutationContext: { actorUserId: Number(admin.applicationUser.id) } }),
+    { code: 'MAGENTO_BINDING_CARRY_PREFLIGHT_STALE' });
+
+    const staleSource = await pair('carry-stale-source');
+    const sourceArtifact = await carryForward.preflight(staleSource.input, { databasePool: pool });
+    const successor = await ready(staleSource.source.installationKey);
+    await publish(successor, staleSource.source.id);
+    await assert.rejects(carryForward.apply({ expectedDatabase: sourceArtifact.plan.database,
+      actorUserId: sourceArtifact.plan.actorUserId, plan: sourceArtifact.plan, planHash: sourceArtifact.planHash },
+    { databasePool: pool, mutationContext: { actorUserId: Number(admin.applicationUser.id) } }),
+    { code: 'MAGENTO_BINDING_CARRY_PREFLIGHT_STALE' });
+    assert.equal((await bindings.getRevision(staleSource.target.id)).revision, staleSource.target.revision);
   });
   await t.test('reviewed publication transfer round-trips as a new draft and target drift rolls back', async () => {
     const source = await publish(await ready(`transfer-${crypto.randomUUID()}`));
