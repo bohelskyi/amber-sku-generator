@@ -130,14 +130,23 @@ async function productEvidence(client, productId) {
       magentoRequest: sync.rows[0].request,
     },
   };
-  result.external.independentlyRepresented = Boolean(
+  const exactIndependentEvidence = Boolean(
     result.external.exact_memberships.length
     || result.external.reexport_snapshots.length
     || result.external.price_snapshots.length
-    || result.external.priceRevision?.has_product_snapshot
     || result.external.magentoJobs.length
     || result.external.magentoRequest
   );
+  const strongerRevisionEvidence = Boolean(
+    Number(result.external.priceRevision?.revision || 0) > 0
+    || Number(result.external.priceRevision?.confirmed_revision || 0) > 0
+  );
+  result.external.coarseLegacyExposure = Boolean(
+    result.external.priceRevision?.has_product_snapshot
+    && !strongerRevisionEvidence
+    && !exactIndependentEvidence
+  );
+  result.external.independentlyRepresented = exactIndependentEvidence || strongerRevisionEvidence;
   return result;
 }
 

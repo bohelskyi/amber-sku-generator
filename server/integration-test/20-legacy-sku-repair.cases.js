@@ -324,6 +324,87 @@ suite.test('legacy SKU repair stages mixed explicit decisions and 047 restores t
   } finally { await cleanup(fixture); }
 });
 
+suite.test('legacy SKU repair distinguishes coarse migration-032 exposure from independent evidence', async () => {
+  const { assert } = suite;
+  const fixture = await setup045('amber_legacy_sku_repair_evidence_test');
+  fixture.name = 'amber_legacy_sku_repair_evidence_test';
+  const { db, actorId } = fixture;
+  async function duplicateGroup(sku) {
+    const keeper = await insertProduct(db, sku);
+    const target = await withSkuTriggerDisabled(db, () => insertDuplicate(db, keeper.id));
+    return { sku, keeper, target };
+  }
+  async function preflight(group) {
+    return repair.preflight({ expectedDatabase: fixture.name, actorUserId: actorId,
+      decisions: { version: 1, groups: [{ sku: group.sku, action: 'deduplicate',
+        keeperProductId: Number(group.keeper.id), retireProductIds: [Number(group.target.id)],
+        reason: 'Reviewed exact duplicate evidence classification' }] } }, { databasePool: db });
+  }
+  function targetEvidence(artifact, group) {
+    return artifact.plan.decisions[0].products.find((product) => product.id === Number(group.target.id)).external;
+  }
+  try {
+    const coarse = await duplicateGroup('ZZ-EVIDENCE-COARSE');
+    const exact = await duplicateGroup('ZZ-EVIDENCE-EXACT');
+    const reexport = await duplicateGroup('ZZ-EVIDENCE-REEXPORT');
+    const price = await duplicateGroup('ZZ-EVIDENCE-PRICE');
+    const job = await duplicateGroup('ZZ-EVIDENCE-JOB');
+    const request = await duplicateGroup('ZZ-EVIDENCE-REQUEST');
+    const revision = await duplicateGroup('ZZ-EVIDENCE-REVISION');
+    const confirmation = await duplicateGroup('ZZ-EVIDENCE-CONFIRMED');
+
+    await db.query(`INSERT INTO product_export_revisions(product_id,revision,confirmed_revision,has_product_snapshot)
+      VALUES($1,0,0,TRUE),($2,1,0,TRUE),($3,1,1,TRUE)`,
+    [coarse.target.id, revision.target.id, confirmation.target.id]);
+
+    await db.query(`INSERT INTO export_snapshots
+      (id,idempotency_key,from_sku,resolved_to_sku,exported_to_product_id,row_count,file_name,csv_content)
+      VALUES('legacy-repair-exact','legacy-repair-exact','ZZ-EVIDENCE-EXACT','ZZ-EVIDENCE-EXACT',0,1,
+        'exact.csv','sku')`);
+    await db.query(`INSERT INTO export_snapshot_products
+      (snapshot_id,product_id,sku_at_capture,capture_kind,evidence_origin,evidence_hash)
+      VALUES('legacy-repair-exact',$1,'ZZ-EVIDENCE-EXACT','legacy_compatibility','verified_stored_csv',$2)`,
+    [exact.target.id, 'a'.repeat(64)]);
+
+    await db.query(`INSERT INTO export_snapshots
+      (id,idempotency_key,from_sku,resolved_to_sku,exported_to_product_id,row_count,file_name,csv_content,
+        reexport_revisions)
+      VALUES('legacy-repair-reexport','legacy-repair-reexport','ZZ-EVIDENCE-REEXPORT','ZZ-EVIDENCE-REEXPORT',
+        0,1,'reexport.csv','sku',$1::jsonb)`,
+    [JSON.stringify([{ productId: Number(reexport.target.id), revision: 1 }])]);
+
+    await db.query(`INSERT INTO price_export_snapshots
+      (id,idempotency_key,row_count,file_name,csv_content,captured_revisions,created_by_user_id)
+      VALUES('legacy-repair-price','legacy-repair-price',1,'price.csv','sku',$1::jsonb,$2)`,
+    [JSON.stringify([{ productId: Number(price.target.id), revision: 1 }]), actorId]);
+
+    const bindingId = await publishPublicBinding(db, actorId, 'legacy-evidence',
+      'https://legacy-evidence.example.invalid');
+    await db.query(`INSERT INTO magento_sync_jobs
+      (id,product_id,sku,installation_key,origin_hash,binding_revision_id,binding_hash,amber_hash,plan_hash,
+        intent,baseline,created_by_user_id)
+      VALUES('legacy-repair-job',$1,$2,'legacy-evidence',$3,$4,$5,$5,$5,'{}'::jsonb,'{}'::jsonb,$6)`,
+    [job.target.id, job.sku, contract.originHash('https://legacy-evidence.example.invalid'), bindingId,
+      'b'.repeat(64), actorId]);
+    await db.query('INSERT INTO magento_product_sync_requests(product_id) VALUES($1)', [request.target.id]);
+    await activateLifecycle(db, actorId);
+
+    const coarseArtifact = await preflight(coarse);
+    assert.deepEqual(coarseArtifact.blockers, []);
+    assert.equal(targetEvidence(coarseArtifact, coarse).priceRevision.has_product_snapshot, true);
+    assert.equal(targetEvidence(coarseArtifact, coarse).coarseLegacyExposure, true);
+    assert.equal(targetEvidence(coarseArtifact, coarse).independentlyRepresented, false);
+
+    for (const group of [exact, reexport, price, job, request, revision, confirmation]) {
+      const artifact = await preflight(group);
+      assert.ok(artifact.blockers.some((item) => item.code === 'LEGACY_SKU_REPAIR_EXTERNAL_EVIDENCE'),
+        `${group.sku} must retain independent-evidence blocking`);
+      assert.equal(targetEvidence(artifact, group).coarseLegacyExposure, false);
+      assert.equal(targetEvidence(artifact, group).independentlyRepresented, true);
+    }
+  } finally { await cleanup(fixture); }
+});
+
 suite.test('legacy SKU repair preflight rejects registry, equality, external evidence, and stale state', async () => {
   const { assert } = suite;
   const fixture = await setup045('amber_legacy_sku_repair_preflight_test');
@@ -354,7 +435,11 @@ suite.test('legacy SKU repair preflight rejects registry, equality, external evi
     await db.query('COMMIT');
     result = await repair.preflight({ expectedDatabase: fixture.name, actorUserId: actorId,
       decisions: decision }, { databasePool: db });
-    assert.ok(result.blockers.some((item) => item.code === 'LEGACY_SKU_REPAIR_EXTERNAL_EVIDENCE'));
+    assert.equal(result.blockers.some((item) => item.code === 'LEGACY_SKU_REPAIR_EXTERNAL_EVIDENCE'), false);
+    const coarseEvidence = result.plan.decisions[0].products
+      .find((product) => product.id === Number(different.id)).external;
+    assert.equal(coarseEvidence.coarseLegacyExposure, true);
+    assert.equal(coarseEvidence.independentlyRepresented, false);
 
     const splitDecision = { version: 1, groups: [{ sku: 'ZZ-PREFLIGHT', action: 'split_public_identity',
       keeperProductId: Number(keeper.id), splitProductIds: [Number(different.id)], reason: 'Real split' }] };
