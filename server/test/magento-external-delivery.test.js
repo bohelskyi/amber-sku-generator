@@ -36,3 +36,22 @@ test('external delivery candidate scope is exact, bounded and operator-evidenced
   assert.throws(() => service.validateCandidates({ format: service.CANDIDATE_FORMAT, database: 'other', entries: [entry] }, 'amber'),
     { code: 'EXTERNAL_DELIVERY_CANDIDATES_INVALID' });
 });
+
+test('external delivery candidates preserve an omitted Magento ID without an undefined property', () => {
+  const entry = { productId: 1, internalSku: 'BR-1', publicSku: 'AG-000001',
+    resolutionKey: 'change-1/product-1', reason: 'Reviewed historical import', evidence: 'Magento inventory ticket 1' };
+  const source = (entries) => ({ format: service.CANDIDATE_FORMAT, database: 'amber', entries });
+  const [normalized] = service.validateCandidates(source([entry]), 'amber');
+  assert.deepEqual(normalized, entry);
+  assert.equal(Object.hasOwn(normalized, 'magentoProductId'), false);
+  assert.equal(service.validateCandidates(source([{ ...entry, magentoProductId: 2 }]), 'amber')[0].magentoProductId, 2);
+  for (const invalid of [0, -1, 1.5, '2', true]) {
+    assert.throws(() => service.validateCandidates(source([{ ...entry, magentoProductId: invalid }]), 'amber'),
+      { code: 'EXTERNAL_DELIVERY_CANDIDATES_INVALID' });
+  }
+  assert.throws(() => service.validateCandidates(source([
+    { ...entry, magentoProductId: 2 },
+    { ...entry, productId: 2, internalSku: 'BR-2', publicSku: 'AG-000002',
+      resolutionKey: 'change-1/product-2', magentoProductId: 2 },
+  ]), 'amber'), { code: 'EXTERNAL_DELIVERY_CANDIDATES_INVALID' });
+});

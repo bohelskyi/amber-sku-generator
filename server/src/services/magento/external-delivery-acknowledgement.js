@@ -30,7 +30,7 @@ function validateCandidates(source, database) {
     productId: entry.productId,
     internalSku: entry.internalSku,
     publicSku: entry.publicSku,
-    magentoProductId: entry.magentoProductId,
+    ...(entry.magentoProductId == null ? {} : { magentoProductId: entry.magentoProductId }),
     resolutionKey: entry.resolutionKey,
     reason: entry.reason,
     evidence: entry.evidence,

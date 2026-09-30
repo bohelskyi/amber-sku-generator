@@ -142,8 +142,14 @@ suite.test('external Magento delivery acknowledgement is exact, audited, fail-cl
   const cutoverInput = { expectedDatabase: database, installationKey: 'external-test', actorUserId,
     origin: config.baseUrl };
   const pendingBefore = (await deliveryCutover.preflight(cutoverInput, { databasePool: pool })).plan.legacy;
-  const plan = await service.preview(config, source(reviewed), options(fetchImpl));
+  const candidates = source(reviewed);
+  delete candidates.entries[0].magentoProductId;
+  const plan = await service.preview(config, candidates, options(fetchImpl));
   assert.deepEqual(plan.summary, { eligible: 2, skipped: 0, conflicted: 0, failed: 0 });
+  assert.equal(Object.hasOwn(plan.entries[0].candidate, 'magentoProductId'), false);
+  assert.equal(plan.entries[0].remote.id, normal.magentoProductId);
+  assert.equal(plan.entries[1].candidate.magentoProductId, replacement.magentoProductId);
+  service.verify(JSON.parse(JSON.stringify(plan)), plan.planHash, config, database);
   assert.equal((await state(normal.id)).externally_delivered_revision, '0', 'preview is read-only');
   const result = await service.apply(config, plan, plan.planHash, options(fetchImpl));
   assert.deepEqual(result.counts, { succeeded: 2, skipped: 0, conflicted: 0, failed: 0, pending: 0 });
