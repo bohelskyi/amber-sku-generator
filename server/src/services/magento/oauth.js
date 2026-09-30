@@ -52,12 +52,16 @@ function signCategoryCreateRequest(url, credentials, options) {
   if (parsed.pathname !== '/rest/all/V1/categories' || parsed.search) throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID');
   return signRequest('POST', url, credentials, options);
 }
-function signSyncRequest(url, credentials, options) {
+function signSyncRequest(url, credentials, method = 'POST', options) {
   let parsed;
   try { parsed = new URL(url); } catch { throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID'); }
-  if (parsed.search || !/^\/rest\/(all|en)\/V1\/(products|inventory\/source-items|products\/[^/]+\/websites)$/.test(parsed.pathname)) {
+  const ordinary = /^\/rest\/(all|en)\/V1\/(products|inventory\/source-items|products\/[^/]+\/websites)$/.test(parsed.pathname);
+  const categorySave = /^\/rest\/all\/V1\/categories\/[1-9][0-9]*\/products$/.test(parsed.pathname);
+  const categoryDelete = /^\/rest\/all\/V1\/categories\/[1-9][0-9]*\/products\/[^/]+$/.test(parsed.pathname);
+  if (parsed.search || !((ordinary && method === 'POST') || (categorySave && method === 'POST')
+    || (categoryDelete && method === 'DELETE'))) {
     throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID');
   }
-  return signRequest('POST', url, credentials, options);
+  return signRequest(method, url, credentials, options);
 }
 module.exports = { percentEncode, signGetRequest, signCategoryCreateRequest, signSyncRequest };

@@ -9,19 +9,37 @@ const links = (v) => [...v].sort((a, b) => String(a.category_id).localeCompare(S
 function fields(raw) {
   return { ...raw, ...Object.fromEntries((raw?.custom_attributes || []).map((a) => [a.attribute_code, a.value])) };
 }
-function intent(report) {
+function intent(report, version = 2) {
+  if (![1, 2].includes(version)) fail('MAGENTO_SYNC_PLAN_VERSION_UNSUPPORTED');
   if (!report.sendable) fail('MAGENTO_SYNC_PLAN_NOT_SENDABLE');
   const core = clean(report.sendability.operations.coreProduct.candidatePayload);
   if (report.mode === 'create' && core.product.status !== 2) fail('MAGENTO_SYNC_CREATE_MUST_BE_DISABLED');
   if (report.mode === 'update' && Object.hasOwn(core.product, 'status')) fail('MAGENTO_SYNC_UPDATE_STATUS_MUST_BE_PRESERVED');
   const operations = [{ domain: 'coreProduct', payload: core }];
   const categoryLinks = report.sendability.operations.categories.candidateLinks;
-  if (categoryLinks) operations.push({ domain: 'categories', payload: { product: { sku: core.product.sku,
+  if (categoryLinks && version === 1) operations.push({ domain: 'categories', payload: { product: { sku: core.product.sku,
     extension_attributes: { category_links: links(categoryLinks) } } } });
+  if (categoryLinks && version === 2) {
+    let current = links(report.categories.current.map((c) => ({ category_id: c.categoryId, position: c.position })));
+    const desired = links(categoryLinks);
+    for (const link of current.filter((c) => !desired.some((d) => d.category_id === c.category_id))) {
+      const afterLinks = current.filter((c) => c.category_id !== link.category_id);
+      operations.push({ domain: 'categoryLinkDelete', payload: { sku: core.product.sku, categoryId: link.category_id },
+        beforeLinks: current, afterLinks });
+      current = afterLinks;
+    }
+    for (const link of desired.filter((d) => !current.some((c) => c.category_id === d.category_id && c.position === d.position))) {
+      const afterLinks = links([...current.filter((c) => c.category_id !== link.category_id), link]);
+      operations.push({ domain: 'categoryLinkSave', payload: { productLink: { sku: core.product.sku,
+        category_id: link.category_id, position: link.position } }, beforeLinks: current, afterLinks });
+      current = afterLinks;
+    }
+  }
   if (report.transport.inventory.candidatePayload) operations.push({ domain: 'inventory', payload: report.transport.inventory.candidatePayload });
   for (const w of report.transport.websites.operations) operations.push({ domain: 'websites', payload: w.candidatePayload });
   if (report.transport.storeViews.candidatePayload) operations.push({ domain: 'storeViews', payload: report.transport.storeViews.candidatePayload });
-  return clean({ version: 1, mode: report.mode, operations,
+  return clean({ version, mode: report.mode, operations,
+    ...(version === 2 && categoryLinks ? { categoryLinks: links(categoryLinks) } : {}),
     websiteIds: report.transport.websites.requested.map((w) => w.websiteId).sort((a, b) => a - b),
     englishValues: Object.fromEntries(report.transport.storeViews.diff.filter((d) => d.authority === 'authoritative')
       .map((d) => [d.target, d.candidate])) });
@@ -65,7 +83,7 @@ function replan(job, observation) {
   }
   const report = planPreview(observation.amber, observation.schema, raw, observation.categoryNodes,
     { domainEvidence: job.baseline.domainEvidence });
-  if (!equal(intent(report), job.intent)) fail('MAGENTO_SYNC_PLAN_CHANGED');
+  if (!equal(intent(report, job.intent.version), job.intent)) fail('MAGENTO_SYNC_PLAN_CHANGED');
 }
 function matchesProduct(payload, raw, schema) {
   if (!raw) return false;
@@ -85,12 +103,26 @@ function currentLinks(raw) {
 function matches(operation, observation) {
   const { raw, domainEvidence } = observation;
   if (!raw) return false;
+  if (['categoryLinkDelete', 'categoryLinkSave'].includes(operation.domain)) {
+    const current = currentLinks(raw);
+    if (current === null) return false;
+    const categoryId = operation.domain === 'categoryLinkDelete' ? operation.payload.categoryId
+      : operation.payload.productLink.category_id;
+    const link = current.find((c) => c.category_id === categoryId);
+    return operation.domain === 'categoryLinkDelete' ? !link
+      : link?.position === operation.payload.productLink.position;
+  }
   if (operation.domain === 'inventory') return operation.payload.sourceItems.every((i) => domainEvidence.inventory?.sourceItems.some((s) =>
     s.sourceCode === i.source_code && s.qty === i.quantity && Number(s.isInStock) === i.status));
   if (operation.domain === 'websites') return raw.extension_attributes?.website_ids?.includes(operation.payload.productWebsiteLink.website_id) === true;
   if (operation.domain === 'storeViews') return matchesProduct(operation.payload,
     domainEvidence.english ? { sku: domainEvidence.english.sku, ...domainEvidence.english.fields } : null);
   return matchesProduct(operation.payload, raw, observation.schema);
+}
+function verifyStep(operation, observation) {
+  if (!['categoryLinkDelete', 'categoryLinkSave'].includes(operation.domain)) return matches(operation, observation);
+  const current = currentLinks(observation.raw);
+  return current !== null && equal(links(current), operation.afterLinks);
 }
 function preserve(job, observation) {
   if (!observation.raw) { if (job.intent.mode === 'update') fail('MAGENTO_SYNC_REMOTE_IDENTITY_CHANGED'); return; }
@@ -113,6 +145,11 @@ function preserve(job, observation) {
 }
 function precondition(job, operation, observation) {
   if (matches(operation, observation)) return;
+  if (['categoryLinkDelete', 'categoryLinkSave'].includes(operation.domain)) {
+    const current = currentLinks(observation.raw);
+    if (current === null || !equal(links(current), operation.beforeLinks)) fail('MAGENTO_SYNC_REMOTE_STATE_CHANGED');
+    return;
+  }
   if (operation.domain === 'inventory') {
     if (job.intent.mode !== 'create' || observation.raw?.status !== 2
       || observation.domainEvidence.inventory?.sourceItems.some((s) => s.qty !== 0)) fail('MAGENTO_SYNC_REMOTE_STATE_CHANGED');
@@ -135,6 +172,10 @@ function precondition(job, operation, observation) {
 }
 function verifyAll(job, observation) {
   preserve(job, observation);
+  if (job.intent.version === 2 && job.intent.categoryLinks) {
+    const current = currentLinks(observation.raw);
+    if (current === null || !equal(links(current), job.intent.categoryLinks)) fail('MAGENTO_SYNC_VERIFICATION_MISMATCH');
+  }
   if (!job.intent.operations.every((op) => matches(op, observation))) fail('MAGENTO_SYNC_VERIFICATION_MISMATCH');
   if (!job.intent.websiteIds.every((id) => observation.raw?.extension_attributes?.website_ids?.includes(id))) fail('MAGENTO_SYNC_VERIFICATION_MISMATCH');
   for (const [k, value] of Object.entries(job.intent.englishValues)) {
@@ -143,9 +184,19 @@ function verifyAll(job, observation) {
 }
 function preflight(job, observation) {
   preserve(job, observation);
+  if (job.intent.version === 2 && job.intent.categoryLinks && observation.raw) {
+    const current = currentLinks(observation.raw);
+    const categorySteps = job.intent.operations.filter((op) => ['categoryLinkDelete', 'categoryLinkSave'].includes(op.domain));
+    const permitted = categorySteps.length ? [categorySteps[0].beforeLinks, ...categorySteps.map((op) => op.afterLinks)]
+      : [job.intent.categoryLinks];
+    if (current === null || !permitted.some((expected) => equal(links(current), expected))) fail('MAGENTO_SYNC_REMOTE_STATE_CHANGED');
+  }
   if (job.intent.mode !== 'update') return;
   // A new remote difference must not expand an already bound operation plan.
-  for (const operation of job.intent.operations) precondition(job, operation, observation);
+  for (const operation of job.intent.operations) {
+    if (['categoryLinkDelete', 'categoryLinkSave'].includes(operation.domain)) continue;
+    precondition(job, operation, observation);
+  }
   const en = job.intent.operations.find((op) => op.domain === 'storeViews');
   const enWrites = fields(en?.payload.product);
   for (const [k, value] of Object.entries(job.intent.englishValues)) if (!Object.hasOwn(enWrites, k)
@@ -153,4 +204,4 @@ function preflight(job, observation) {
   for (const id of job.intent.websiteIds) if (!job.intent.operations.some((op) => op.domain === 'websites' && op.payload.productWebsiteLink.website_id === id)
     && !observation.raw?.extension_attributes?.website_ids?.includes(id)) fail('MAGENTO_SYNC_REMOTE_STATE_CHANGED');
 }
-module.exports = { intent, baseline, replan, matches, preserve, precondition, preflight, verifyAll, fail, clean };
+module.exports = { intent, baseline, replan, matches, verifyStep, preserve, precondition, preflight, verifyAll, fail, clean };

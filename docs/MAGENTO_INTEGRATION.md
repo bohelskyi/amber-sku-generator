@@ -20,6 +20,16 @@ manual receipts and remaining-group observations below retain their original sco
 The product sync preview and discovery client remain GET-only. Separate explicit
 commands handle single-category creation and durable product sync APPLY.
 
+New sync intents use one durable operation per changed category membership. Under
+reviewed authoritative ownership, the planner removes stale links with Magento's
+`DELETE /V1/categories/:categoryId/products/:sku`, then saves missing links or
+reviewed position changes with `POST /V1/categories/:categoryId/products`. Each
+write has its own dispatched marker and exact read-after-write category-link
+verification. Preserve ownership retains Magento-only links; an already exact
+assignment needs no category write. CREATE verifies the disabled core product
+before adding category links. Earlier version-1 jobs retain their immutable
+product-POST category intent for reconciliation; they are not converted or reset.
+
 Migration 048 and `magento:external-delivery` provide a separate operator-only
 acknowledgement for an exact pending Amber revision known to have been delivered to
 an exact Magento SKU outside Amber before API delivery cutover. It uses GET-only

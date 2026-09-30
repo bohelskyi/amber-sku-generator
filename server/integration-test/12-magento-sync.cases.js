@@ -83,7 +83,7 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
   const draft = await makeDraft();
   const published = await bindings.publishDraft(draft.id, { expectedRevision: draft.revision, expectedCurrentId: null }, mutations);
 
-  async function scenario({ create = false } = {}) {
+  async function scenario({ create = false, initialLinks = [] } = {}) {
     const sku = `BR/SYNC-${crypto.randomUUID()}`.toUpperCase();
     const product = (await insertProductFixture(pool, `INSERT INTO products
       (full_sku,base_sku,sequence_number,category,weight,total_price,total_price_uah,price_per_gram,uah_rate,details)
@@ -91,7 +91,7 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
     await pool.query("UPDATE product_full_export_state SET business_exclusion_state='none',delivery_version=delivery_version+1 WHERE product_id=$1", [product.id]);
     const initial = { id: product.id + 100000, sku, attribute_set_id: 8001, name: 'Old name', type_id: 'simple', price: 40,
       status: 1, visibility: 4, custom_attributes: [{ attribute_code: 'unknown_attribute', value: 'Keep me' }], media_gallery_entries: [{ id: 100 }],
-      extension_attributes: { category_links: [], website_ids: [999] } };
+      extension_attributes: { category_links: initialLinks, website_ids: [999] } };
     let remote = create ? null : structuredClone(initial);
     let english = create ? null : { ...structuredClone(initial), name: 'Old English', custom_attributes: [{ attribute_code: 'meta_title', value: 'Old SEO' }] };
     let sourceItems = create ? [] : [{ sku, source_code: 'default', quantity: 0, status: 0 }];
@@ -114,11 +114,23 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
         if (route === 'inventory/source-items') return response({ items: sourceItems, total_count: sourceItems.length });
         throw new Error(`Unexpected route ${route}`);
       }
-      assert.equal(init.method, 'POST'); assert.equal(init.redirect, 'manual');
-      const body = JSON.parse(init.body); writes.push({ route, scope: u.pathname.split('/')[2], body });
+      assert.ok(['POST', 'DELETE'].includes(init.method)); assert.equal(init.redirect, 'manual');
+      const body = init.body ? JSON.parse(init.body) : null;
+      writes.push({ route, method: init.method, scope: u.pathname.split('/')[2], body });
       if (hooks.beforeWrite) await hooks.beforeWrite(writes.at(-1));
       if (hooks.noMutation) return response(true);
-      if (route === 'inventory/source-items') sourceItems = body.sourceItems;
+      if (hooks.noCategoryMutation && route.startsWith('categories/')) return response(true);
+      if (route.startsWith('categories/')) {
+        const categoryId = route.split('/')[1];
+        if (init.method === 'DELETE') remote.extension_attributes.category_links = remote.extension_attributes.category_links
+          .filter((link) => link.category_id !== categoryId);
+        else {
+          assert.equal(body.productLink.category_id, categoryId);
+          remote.extension_attributes.category_links = remote.extension_attributes.category_links
+            .filter((link) => link.category_id !== categoryId);
+          remote.extension_attributes.category_links.push({ category_id: categoryId, position: body.productLink.position });
+        }
+      } else if (route === 'inventory/source-items') sourceItems = body.sourceItems;
       else if (route.endsWith('/websites')) remote.extension_attributes.website_ids.push(body.productWebsiteLink.website_id);
       else {
         assert.equal(route, 'products'); const p = body.product;
@@ -192,7 +204,7 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
         s.remote().extension_attributes.website_ids.push(801);
         const job = await s.enqueue();
         assert.equal(job.state, 'queued'); assert.equal(s.writes.length, 0);
-        assert.deepEqual(job.intent.operations.map((o) => o.domain), ['coreProduct', 'categories', 'storeViews']);
+        assert.deepEqual(job.intent.operations.map((o) => o.domain), ['coreProduct', 'categoryLinkSave', 'storeViews']);
         assert.equal(job.baseline.raw.created_at, undefined); assert.equal(job.baseline.raw.updated_at, undefined);
         assert.equal(job.baseline.preservation['native.created_at'], hash(createdAt));
         assert.equal(job.baseline.preservation['native.updated_at'], undefined);
@@ -269,6 +281,33 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
     assert.equal(failed.acknowledged_at, null); s.hooks.noMutation = false;
     assert.equal((await s.apply(job)).state, 'uncertain'); assert.equal(s.writes.length, 1);
   });
+  await t.test('category replacement has independent dispatch steps and an unresolved removal blocks the later add', async () => {
+    const s = await scenario({ initialLinks: [{ category_id: '375', position: 0 }] });
+    const job = await s.enqueue();
+    assert.deepEqual(job.intent.operations.map((o) => o.domain),
+      ['coreProduct', 'categoryLinkDelete', 'categoryLinkSave', 'websites', 'storeViews']);
+    s.hooks.noCategoryMutation = true;
+    let result = await s.apply(job);
+    assert.equal(result.state, 'uncertain');
+    assert.equal(result.failure.code, 'MAGENTO_SYNC_VERIFICATION_MISMATCH');
+    assert.equal(result.failure.ordinal, 1);
+    assert.deepEqual(s.writes.map((w) => w.method), ['POST', 'DELETE']);
+    let steps = (await pool.query('SELECT ordinal,state FROM magento_sync_steps WHERE job_id=$1 ORDER BY ordinal', [job.id])).rows;
+    assert.deepEqual(steps.map((v) => [v.ordinal, v.state]), [[0, 'verified'], [1, 'dispatched']]);
+    s.hooks.noCategoryMutation = false;
+    result = await s.apply(job);
+    assert.equal(result.state, 'uncertain');
+    assert.equal(s.writes.length, 2, 'unresolved deletion is never resent and the add is not dispatched');
+    assert.deepEqual(s.remote().extension_attributes.category_links, [{ category_id: '375', position: 0 }]);
+    s.remote().extension_attributes.category_links = []; // Operator reconciliation in a disposable fake only.
+    result = await s.apply(job);
+    assert.equal(result.state, 'succeeded', JSON.stringify(result.failure));
+    assert.deepEqual(s.remote().extension_attributes.category_links, [{ category_id: '9001', position: 0 }]);
+    steps = (await pool.query('SELECT ordinal,state FROM magento_sync_steps WHERE job_id=$1 ORDER BY ordinal', [job.id])).rows;
+    assert.deepEqual(steps.map((v) => [v.ordinal, v.state]),
+      [[0, 'verified'], [1, 'verified'], [2, 'verified'], [3, 'verified'], [4, 'verified']]);
+    assert.equal(s.writes.filter((w) => w.method === 'DELETE').length, 1);
+  });
   await t.test('partial success and lost response recover only by GET verification, then continue unsent steps', async () => {
     const s = await scenario(); const job = await s.enqueue();
     s.hooks.afterWrite = async () => { s.hooks.readFailure = true; throw new Error('lost response'); };
@@ -283,7 +322,7 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
     assert.equal(job.intent.operations[0].payload.product.status, 2);
     const done = await s.apply(job); assert.equal(done.state, 'succeeded', JSON.stringify(done.failure));
     assert.equal(s.remote().status, 2); assert.equal(s.sources()[0].quantity, 1); assert.equal(s.sources()[0].status, 1);
-    assert.deepEqual(job.intent.operations.map((o) => o.domain), ['coreProduct', 'categories', 'inventory', 'websites', 'storeViews']);
+    assert.deepEqual(job.intent.operations.map((o) => o.domain), ['coreProduct', 'categoryLinkSave', 'inventory', 'websites', 'storeViews']);
     assert.equal(s.writes.at(-1).scope, 'en'); assert.equal(s.english().name, 'English name');
   });
   await require('./magento-automatic-worker-cases')({ t, suite, scenario, config, published, installationKey, actorUserId, makeDraft });

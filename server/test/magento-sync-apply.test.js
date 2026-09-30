@@ -51,6 +51,11 @@ test('separate write transport gates apply, uses native bounded routes and never
   for (const path of ['/rest/all/V1/categories', '/rest/all/V1/products/X', '/rest/ua/V1/products', '/rest/en/V1/products?secret=1']) {
     assert.throws(() => signSyncRequest(config.baseUrl + path, config), { code: 'MAGENTO_INPUT_INVALID' });
   }
+  for (const [method, path] of [['DELETE', '/rest/all/V1/products'],
+    ['DELETE', '/rest/all/V1/categories/375/products'], ['POST', '/rest/all/V1/categories/375/products/X'],
+    ['POST', '/rest/all/V1/categories/0/products']]) {
+    assert.throws(() => signSyncRequest(config.baseUrl + path, config, method), { code: 'MAGENTO_INPUT_INVALID' });
+  }
 });
 test('bound plan refuses enabled CREATE and status-setting UPDATE; verification is semantic but never accepts legacy rounding', () => {
   const r = { sendable: true, mode: 'create', sendability: { operations: {
@@ -64,4 +69,58 @@ test('bound plan refuses enabled CREATE and status-setting UPDATE; verification 
   observation.raw.custom_attributes[0].value = '5'; assert.equal(matches(op, observation), false);
   assert.throws(() => verifyAll({ sku: 'X', intent: { mode: 'create', operations: [op] }, baseline: { preservation: {}, domainEvidence: {} } }, observation),
     { code: 'MAGENTO_SYNC_VERIFICATION_MISMATCH' });
+});
+
+test('authoritative category replacement uses independent native links and rejects the old additive product result', async () => {
+  const link = (category_id, position = 0) => ({ category_id, position });
+  const baseline = [link('10'), link('375')];
+  const desired = [link('10'), link('377')];
+  const report = { sendable: true, mode: 'update', sendability: { operations: {
+    coreProduct: { candidatePayload: { product: { sku: 'AG-000002' } } }, categories: { candidateLinks: desired },
+  } }, categories: { current: baseline.map((v) => ({ categoryId: v.category_id, position: v.position })) },
+  transport: { inventory: {}, websites: { operations: [], requested: [] }, storeViews: { diff: [] } } };
+  const legacy = intent(report, 1);
+  const raw = (category_links) => ({ id: 5794, sku: 'AG-000002', extension_attributes: { category_links } });
+  const observed = (category_links) => ({ raw: raw(category_links), domainEvidence: { inventory: null } });
+  assert.equal(matches(legacy.operations[1], observed([...baseline, link('377')])), false);
+  assert.throws(() => verifyAll({ sku: 'AG-000002', intent: legacy,
+    baseline: { preservation: {}, domainEvidence: { inventory: null } } }, observed([...baseline, link('377')])),
+  { code: 'MAGENTO_SYNC_VERIFICATION_MISMATCH' });
+  const next = intent(report);
+  assert.equal(next.version, 2);
+  assert.deepEqual(next.operations.map((o) => o.domain), ['coreProduct', 'categoryLinkDelete', 'categoryLinkSave']);
+  assert.deepEqual(next.operations[1].beforeLinks, baseline);
+  assert.deepEqual(next.operations[1].afterLinks, [link('10')]);
+  assert.deepEqual(next.operations[2].afterLinks, desired);
+  const remote = [...baseline]; const calls = [];
+  for (const operation of next.operations.slice(1)) {
+    await dispatch(config, operation, { apply: true, fetchImpl: async (url, options) => {
+      calls.push([options.method, new URL(url).pathname]);
+      const categoryId = operation.domain === 'categoryLinkDelete' ? operation.payload.categoryId
+        : operation.payload.productLink.category_id;
+      const index = remote.findIndex((v) => v.category_id === categoryId);
+      if (options.method === 'DELETE') remote.splice(index, 1);
+      else remote.push({ category_id: categoryId, position: operation.payload.productLink.position });
+      return new Response('true', { headers: { 'content-type': 'application/json' } });
+    } });
+    assert.equal(matches(operation, observed(remote)), true);
+  }
+  assert.deepEqual(calls, [['DELETE', '/rest/all/V1/categories/375/products/AG-000002'],
+    ['POST', '/rest/all/V1/categories/377/products']]);
+  assert.deepEqual(remote, desired);
+  verifyAll({ sku: 'AG-000002', intent: next, baseline: { preservation: {}, domainEvidence: { inventory: null } } }, observed(remote));
+  assert.equal(intent({ ...report, categories: { current: desired.map((v) => ({ categoryId: v.category_id, position: v.position })) } })
+    .operations.length, 1);
+  const casePlan = (current, target) => intent({ ...report,
+    categories: { current: current.map((v) => ({ categoryId: v.category_id, position: v.position })) },
+    sendability: { operations: { ...report.sendability.operations, categories: { candidateLinks: target } } } });
+  assert.deepEqual(casePlan([link('10')], desired).operations.map((o) => o.domain), ['coreProduct', 'categoryLinkSave']);
+  assert.deepEqual(casePlan([link('10'), link('375')], [link('10')]).operations.map((o) => o.domain),
+    ['coreProduct', 'categoryLinkDelete']);
+  assert.deepEqual(casePlan(baseline, [...baseline, link('377')]).operations.map((o) => o.domain),
+    ['coreProduct', 'categoryLinkSave'], 'preserved Magento-only category has no delete');
+  const positionPlan = casePlan([link('10', 3)], [link('10', 5)]);
+  assert.deepEqual(positionPlan.operations.map((o) => o.domain), ['coreProduct', 'categoryLinkSave']);
+  assert.equal(matches(positionPlan.operations[1], observed([link('10', 3)])), false);
+  assert.equal(matches(positionPlan.operations[1], observed([link('10', 5)])), true);
 });

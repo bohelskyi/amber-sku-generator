@@ -200,8 +200,9 @@ async function applyJob(config, id, options) {
           catch { uncertain = true; }
           observation = await refresh(config, observation, options);
           plan.preserve(job, observation);
-          if (!plan.matches(operation, observation)) plan.fail(uncertain ? 'MAGENTO_SYNC_MUTATION_UNCERTAIN' : 'MAGENTO_SYNC_VERIFICATION_MISMATCH');
+          if (!plan.verifyStep(operation, observation)) plan.fail(uncertain ? 'MAGENTO_SYNC_MUTATION_UNCERTAIN' : 'MAGENTO_SYNC_VERIFICATION_MISMATCH');
         }
+        if (step?.state !== 'verified' && !plan.verifyStep(operation, observation)) plan.fail('MAGENTO_SYNC_VERIFICATION_MISMATCH');
         if (step?.state !== 'verified') job = await ledger(options.databasePool, options.actorUserId, 'verified', async (client) => {
           await client.query(`INSERT INTO magento_sync_steps(job_id,ordinal,state,verified_at) VALUES($1,$2,'verified',CURRENT_TIMESTAMP)
             ON CONFLICT(job_id,ordinal) DO UPDATE SET state='verified',verified_at=CURRENT_TIMESTAMP`, [id, ordinal]);
