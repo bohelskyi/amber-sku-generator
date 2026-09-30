@@ -30,8 +30,8 @@ async function inspect(client, input) {
     WHERE status='active' AND corrected_to_product_id IS NULL
     GROUP BY public_product_identity_id HAVING count(*)>1) d`)).rows[0].count;
   const lifecycle = (await client.query(`SELECT
-    count(*) FILTER (WHERE f.route='normal' AND f.revision>GREATEST(f.confirmed_revision,f.cutover_baseline_revision,f.csv_retired_revision))::int AS pending_normal,
-    count(*) FILTER (WHERE f.route='replacement' AND f.revision>GREATEST(f.confirmed_revision,f.cutover_baseline_revision,f.csv_retired_revision))::int AS pending_replacement
+    count(*) FILTER (WHERE f.route='normal' AND f.revision>GREATEST(f.confirmed_revision,f.cutover_baseline_revision,f.externally_delivered_revision,f.csv_retired_revision))::int AS pending_normal,
+    count(*) FILTER (WHERE f.route='replacement' AND f.revision>GREATEST(f.confirmed_revision,f.cutover_baseline_revision,f.externally_delivered_revision,f.csv_retired_revision))::int AS pending_replacement
     FROM product_full_export_state f JOIN products p ON p.id=f.product_id
     WHERE p.status='active' AND p.corrected_to_product_id IS NULL`)).rows[0];
   const generated = (await client.query(`SELECT count(DISTINCT s.id)::int AS count

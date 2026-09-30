@@ -109,7 +109,9 @@ async function getExportGuidance(client, product) {
     if (state.route === 'hold') return {mode:'held',eligible:false,holdReason:state.hold_reason};
     if (state.route === 'retired' || state.business_exclusion_state !== 'none' || state.recount_compatibility_excluded) return {mode:'excluded',eligible:false};
     if (state.route === 'replacement') return {mode:'replacement',eligible:true,deliveryVersion:state.delivery_version};
-    return {mode:BigInt(state.confirmed_revision)>0n || BigInt(state.cutover_baseline_revision)>0n ? 'reexport' : 'next_normal_export',eligible:true};
+    return {mode:BigInt(state.confirmed_revision)>0n || BigInt(state.cutover_baseline_revision)>0n
+      || BigInt(state.externally_delivered_revision)>0n || BigInt(state.csv_retired_revision)>0n
+      ? 'reexport' : 'next_normal_export',eligible:true};
   }
   if (Number(product.exclude_from_export) === 1) {
     return { mode: 'excluded', eligible: false };

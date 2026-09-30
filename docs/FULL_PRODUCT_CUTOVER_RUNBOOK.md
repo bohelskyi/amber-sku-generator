@@ -234,6 +234,84 @@ also excludes products already reconciled. Never edit a sealed plan to bypass
 conflicts. Exit code 2 denotes conflicts, failures or an interrupted apply;
 exit code 1 denotes command/receipt infrastructure failure.
 
+## Pre-API external-delivery acknowledgement
+
+Use this workflow only for a pending `normal` or `replacement` revision that an
+authorized operator has determined was delivered to Magento outside Amber before
+the API delivery cutover. No existing mechanism has this meaning: snapshot
+confirmation requires real immutable membership, the cutover baseline is a
+preparing-only legacy assertion, exposure reconciliation keeps a row held, and
+`csv_retired_revision` belongs to mutations after delivery cutover.
+
+Migration 048 adds `externally_delivered_revision` plus its exact immutable audit
+reference. The floor participates in pending selection without changing
+`confirmed_revision`, `cutover_baseline_revision` or `csv_retired_revision`.
+Acknowledging a reviewed replacement also changes `replacement -> normal` and
+increments `delivery_version`; a normal row keeps its route/version. Any later full
+revision exceeds the external floor again. Held, excluded, retired, non-current,
+duplicate/conflicting-identity and already-acknowledged rows are never eligible.
+
+Create an explicit bounded candidate file outside the repository. Do not derive or
+expand it during apply. Maximum scope is 500:
+
+```json
+{
+  "format": "amber-external-delivery-candidates-v1",
+  "database": "EXACT_TARGET_NAME",
+  "entries": [
+    {
+      "productId": 4085,
+      "internalSku": "EXACT_INTERNAL_SKU",
+      "publicSku": "EXACT_MAGENTO_SKU",
+      "magentoProductId": 12345,
+      "resolutionKey": "CHANGE-123/product-4085/revision-1",
+      "reason": "Reviewed historical Magento import disposition",
+      "evidence": "Ticket, inventory artifact, and operator review reference"
+    }
+  ]
+}
+```
+
+`magentoProductId` may be omitted when the bounded candidate inventory has not yet
+recorded it; preview discovers and seals the exact positive ID. When supplied, it is
+an additional expected-identity assertion. Duplicate discovered IDs conflict.
+
+From `server/`, with the exact target `DATABASE_URL` and Magento credentials in the
+server environment, generate a new read-only plan:
+
+```powershell
+npm run magento:external-delivery -- preview --expected-database <DB> --candidates <CANDIDATES_JSON> --output <NEW_PLAN_JSON>
+```
+
+Preview reads Amber in repeatable-read/read-only mode, performs only exact SKU GETs,
+and seals database identity, product/internal/public identity, route, full and
+confirmed revision, delivery version, exclusions/holds, public identity/reservation,
+lifecycle phase/generation, stable-public-SKU state, Magento delivery gate, retained
+membership and price/automatic-work evidence, exact Magento product ID/SKU, and the
+operator reason/evidence. Review every entry and the returned `planHash`.
+
+Only after review, apply that exact plan/hash with an active local actor holding
+`exports.reconcile`, writing receipts to a new persistent directory:
+
+```powershell
+npm run magento:external-delivery -- apply --expected-database <DB> --actor-user-id <USER_ID> --plan <PLAN_JSON> --expected-hash <PLAN_SHA256> --output <NEW_RECEIPT_DIRECTORY>
+```
+
+Apply runs sequentially with one transaction per eligible product. It reacquires
+the access/lifecycle/product/state lock order, revalidates the complete fingerprint,
+repeats the exact Magento GET and atomically writes the audit event and floor. A
+replacement CAS binds its exact reviewed revision and delivery version. The same
+completed resolution key/plan is idempotent without another GET; changed reuse
+conflicts. Per-product results and pending IDs are fsynced to `summary.json` before
+the first mutation and after every outcome. Resume only with the same plan/hash and
+a new receipt directory. Any skipped, conflicted or failed candidate makes the CLI
+exit nonzero; review it explicitly rather than treating a partial scope as success.
+
+This command performs no Magento mutation and creates no snapshot, membership,
+cursor, price revision, automatic request or sync job. It does not prove Magento
+payload equality or silently waive Held products. Once product CSV is retired, the
+database guard permanently rejects further use of this pre-cutover acknowledgement.
+
 ## Failure, amendment and rollback
 
 A stale entry or failed write rolls back the **whole current batch**. It blocks
@@ -298,7 +376,7 @@ frozen production database still requires that lifecycle cutover.
    collisions. If any exist, run the read-only `legacy-sku-repair preflight`, review
    its explicit decisions and SHA-256 plan, then run `stage` with that exact plan/hash.
    Do not auto-classify rows or reuse a rehearsal decision artifact. Build/start the
-   reviewed containers and let normal startup apply forward migrations through 047.
+   reviewed containers and let normal startup apply forward migrations through 048.
    Migration 047 restores the same explicitly split product rows under new `AG-`
    public identities; reviewed duplicate rows remain retired. Do not run integration
    tests against this database.
@@ -306,7 +384,9 @@ frozen production database still requires that lifecycle cutover.
 4. Keep all business writers frozen. Verify any migration-047 split restoration and
    retain its audit evidence; record each split row as requiring a separately reviewed
    post-cutover Magento CREATE/requeue. Do not rename the keeper's legacy remote product
-   or create a job during this migration step. Verify `pending_normal=0`,
+   or create a job during this migration step. Where frozen historical products were
+   already delivered outside Amber, use the separate migration-048 external-delivery
+   preview/review/apply workflow above. Then verify `pending_normal=0`,
    `pending_replacement=0`, no generated-unconfirmed product snapshot, no active
    shared generation attempt and no unresolved automatic request/job. Historical
    Held products remain Held.

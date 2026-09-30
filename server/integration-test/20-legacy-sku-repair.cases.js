@@ -259,6 +259,8 @@ suite.test('legacy SKU repair stages mixed explicit decisions and 047 restores t
       WHERE full_sku=ANY($1::text[]) ORDER BY full_sku`, [['ZZ-DUPLICATE', 'ZZ-REAL-COLLISION']])).rows, registryBefore);
     assert.equal((await db.query('SELECT count(*)::int AS count FROM magento_product_sync_requests')).rows[0].count, 0);
     assert.equal((await db.query('SELECT count(*)::int AS count FROM magento_sync_jobs')).rows[0].count, 0);
+    await copyMigration(directory, '048_external_magento_delivery_acknowledgement.sql');
+    await migrationRunner(url, directory);
     const queues = await fullSelection.queues(db);
     assert.deepEqual(queues.counts, { firstDelivery: 0, fullUpdate: 0, replacementReady: 0, held: 0 });
     const retiredIds = duplicateTargets.map((row) => Number(row.id));

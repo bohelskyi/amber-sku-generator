@@ -44,6 +44,10 @@ function classifyLineage(input, sourceId, sourceBeforeRecount) {
       || ['ordinary_save', 'recount', 'reconciliation'].includes(state?.evidence?.origin)
       || state?.evidence?.historicalCoverage === 'retained_evidence_unexposed';
     if (Number(state?.cutover_baseline_revision) > 0) indicators.push({ code: 'ACCEPTED_LEGACY_BASELINE', productId: id });
+    if (Number(state?.externally_delivered_revision) > 0) indicators.push({
+      code: 'EXTERNAL_DELIVERY_ACKNOWLEDGED', productId: id,
+      revision: String(state.externally_delivered_revision),
+    });
     if (!covered) indicators.push({ code: 'LIFECYCLE_HISTORY_UNRESOLVED', productId: id });
     // Current exact membership replaces cursor/range inference for lifecycle-born
     // products. An unmatched old exposure flag still fails closed.

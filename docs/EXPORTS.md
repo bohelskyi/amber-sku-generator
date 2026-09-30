@@ -48,7 +48,8 @@ The two selection settings are independent: the lifecycle gate selects **product
 For an active product without a successor, eligibility requires `exclude_from_export=0`, business policy `none` and no recount compatibility exclusion. Define:
 
 ```text
-delivery_floor = greatest(confirmed_revision, cutover_baseline_revision, csv_retired_revision)
+delivery_floor = greatest(confirmed_revision, cutover_baseline_revision,
+                          externally_delivered_revision, csv_retired_revision)
 pending = revision > delivery_floor
 ```
 
@@ -57,6 +58,15 @@ Magento delivery cutover, a newly created product or later full-payload mutation
 advances this floor with its full revision, so it creates only the durable API sync
 obligation and no new CSV queue obligation. It is not confirmation, import evidence,
 or a rewrite of historical rows.
+
+`externally_delivered_revision` is separate pre-cutover operator evidence: an
+authorized operator attested that the exact reviewed Amber revision already had an
+exact Magento SKU counterpart after delivery outside Amber. It does not confirm a
+snapshot, prove payload equality, claim automatic-sync success or waive any later
+revision. Its audit pointer is mandatory. The workflow is available only while the
+lifecycle selector is active and Magento-product CSV delivery has not been retired.
+A replacement acknowledgement also performs the same route completion invariant as
+a genuine replacement confirmation, without changing `confirmed_revision`.
 
 | Queue | Lifecycle-active meaning | Capture |
 | --- | --- | --- |

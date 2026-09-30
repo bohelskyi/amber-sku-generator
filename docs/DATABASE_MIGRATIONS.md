@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`047`. Accepted migrations `000`–`046` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`048`. Accepted migrations `000`–`047` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -105,6 +105,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `045_magento_delivery_cutover.sql` | One-way retirement state for new Magento-product CSV artifacts, immutable cutover receipt, a database guard for old writers and a separate monotonic per-product CSV-retirement floor for post-cutover mutations. Defaults keep CSV enabled and automatic sync disabled; no activation, enrollment, historical-row change, export deletion or Magento write occurs in the migration. |
 | `046_stable_public_product_sku.sql` | Immutable public-product identities and non-cycling `AG-` allocation, exact legacy backfill, post-activation recount inheritance and deferred one-current-revision enforcement; additive dual-SKU snapshot/job evidence, public-identity automatic requests and a separate default-off audited activation gate. Existing internal SKUs, snapshots and artifacts are not rewritten. |
 | `047_finalize_legacy_sku_repair.sql` | Fail-closed finalization of only immutable schema-045 `legacy_sku_repair.staged` evidence. It requires 046 to be recorded, independently verifies the versioned PostgreSQL-canonical receipt and all nested plan/product/lifecycle hashes, allocates a new `AG-` public identity for each explicitly staged real collision, restores that same product row to its prior business lifecycle state, and leaves reviewed duplicate rows retired. It does not change internal SKU reservations, activate public SKU delivery, enqueue Magento work or leave a runtime identity-mutation bypass. |
+| `048_external_magento_delivery_acknowledgement.sql` | Adds a distinct monotonic exact-revision external-delivery floor and immutable audit reference for reviewed deliveries that occurred outside Amber before API cutover. The migration acknowledges no rows. A database guard restricts advances to the active lifecycle, pre-delivery-cutover command boundary and enforces the normal/replacement route transition. |
 
 ## Schema-045 legacy full-SKU collision repair
 

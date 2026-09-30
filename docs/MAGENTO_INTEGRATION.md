@@ -20,6 +20,13 @@ manual receipts and remaining-group observations below retain their original sco
 The product sync preview and discovery client remain GET-only. Separate explicit
 commands handle single-category creation and durable product sync APPLY.
 
+Migration 048 and `magento:external-delivery` provide a separate operator-only
+acknowledgement for an exact pending Amber revision known to have been delivered to
+an exact Magento SKU outside Amber before API delivery cutover. It uses GET-only
+remote verification and never calls the Magento writer. This evidence is not a sync
+job receipt, snapshot confirmation or payload-equality proof. See the
+[cutover workflow](FULL_PRODUCT_CUTOVER_RUNBOOK.md#pre-api-external-delivery-acknowledgement).
+
 ## Achieved state 2026-09-28
 
 The first real direct **Amber → Magento product UPDATE without CSV** succeeded.

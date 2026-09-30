@@ -11,6 +11,7 @@ const REQUIRED_MIGRATIONS = Object.freeze([
   '044_magento_automatic_sync.sql',
   '045_magento_delivery_cutover.sql',
   '046_stable_public_product_sku.sql',
+  '048_external_magento_delivery_acknowledgement.sql',
 ]);
 
 function fail(code, message, details) {
@@ -68,8 +69,8 @@ async function inspectClient(client, { expectedDatabase, installationKey, actorU
     JOIN export_sessions s ON s.current_attempt_id=a.id
     WHERE a.state NOT IN ('succeeded','superseded') ORDER BY a.id`);
   const lifecycle = (await client.query(`SELECT
-    count(*) FILTER (WHERE f.route='normal' AND f.revision>GREATEST(f.confirmed_revision,f.cutover_baseline_revision,f.csv_retired_revision))::int AS pending_normal,
-    count(*) FILTER (WHERE f.route='replacement' AND f.revision>GREATEST(f.confirmed_revision,f.cutover_baseline_revision,f.csv_retired_revision))::int AS pending_replacement,
+    count(*) FILTER (WHERE f.route='normal' AND f.revision>GREATEST(f.confirmed_revision,f.cutover_baseline_revision,f.externally_delivered_revision,f.csv_retired_revision))::int AS pending_normal,
+    count(*) FILTER (WHERE f.route='replacement' AND f.revision>GREATEST(f.confirmed_revision,f.cutover_baseline_revision,f.externally_delivered_revision,f.csv_retired_revision))::int AS pending_replacement,
     count(*) FILTER (WHERE f.route='hold' OR f.business_exclusion_state<>'none' OR f.recount_compatibility_excluded)::int AS held
     FROM product_full_export_state f JOIN products p ON p.id=f.product_id
     WHERE p.status='active' AND p.corrected_to_product_id IS NULL`)).rows[0];

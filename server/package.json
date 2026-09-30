@@ -11,6 +11,7 @@
     "magento:sync": "node scripts/magento-sync.js",
     "magento:auto-status": "node scripts/magento-auto-status.js",
     "magento:delivery-cutover": "node scripts/magento-delivery-cutover.js",
+    "magento:external-delivery": "node scripts/magento-external-delivery.js",
     "public-sku:activation": "node scripts/public-sku-activation.js",
     "legacy-sku-repair": "node scripts/legacy-sku-repair.js",
     "magento:bindings": "node scripts/magento-bindings.js",
