@@ -2,6 +2,7 @@ const { routeTools } = require('./binding-evidence-routes');
 const { describeMapper } = require('./mapper-schema');
 const { transport, OPTION_INPUTS } = require('./binding-evidence-analysis');
 const { hash, code, questionKey, semanticId, command, invalid, safeData, unique, list } = require('./binding-contract');
+const { isIntegrationCategoryCode } = require('../export-templates/version-contract');
 
 const STATES = ['proposed','review_required','approved','blocked'];
 const STRATEGIES = ['scalar','semantic_option','dynamic_exact_label_option','numeric_band_option','constant_option','transport_control'];
@@ -152,7 +153,7 @@ function normalizeBindings(input) {
     if (!a || (o.strategy !== undefined && o.strategy !== a.strategy)) invalid();
     let sourceKey;
     if (o.sourceKind === 'semantic') {
-      if (a.strategy !== 'semantic_option' || !['BR','NM','KL','CH','AR','SV'].includes(o.amberGroup)
+      if (a.strategy !== 'semantic_option' || !isIntegrationCategoryCode(o.amberGroup)
         || !questionKey(o.questionKey) || !semanticId(o.valueId) || Object.hasOwn(o, 'domainKey') || Object.hasOwn(o, 'outputKey')
         || (o.skuCodeEvidence !== undefined && (typeof o.skuCodeEvidence !== 'string' || !/^[0-9]{1,100}$/.test(o.skuCodeEvidence)))) invalid();
       sourceKey = `${o.amberGroup}.${o.questionKey}=value_id:${o.valueId}`;

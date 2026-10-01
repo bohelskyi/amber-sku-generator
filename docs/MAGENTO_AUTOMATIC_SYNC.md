@@ -3,7 +3,9 @@
 Migration `044_magento_automatic_sync.sql` adds a separate, durable activation gate.
 It starts **disabled** and enrolls no historical products. Installation of the code
 or migration does not activate sync or retire CSV. The restored operator dump is
-not the final frozen production database; no binding UUID from it is a default.
+not a deployment default; no binding UUID from it is a default.
+
+As reported by the production operator on 2026-10-01, Wave 1 is deployed at PR #19 / `daf627fc2458e5215cbf52735a8f186a3777361f`, with migrations through `050_test_product_deletion.sql`. Stable public `AG-*` identities, the reviewed production binding and automatic Amber → Magento synchronization are active. Magento product CSV delivery is retired; the separate price-export stream and immutable historical evidence remain supported. Historical delivery/collision cutover is complete and the operational freeze has been lifted. This documentation update did not query production or Magento.
 
 ## Local transaction boundary
 
@@ -209,7 +211,7 @@ Migration 047, when immutable schema-045 legacy-collision staging evidence exist
 
 An undispatched predecessor automatic job can be superseded only through the existing zero-step-evidence guard. Any dispatched/uncertain predecessor remains `needs_attention/reconciliation_required`. Generation acknowledgement is conditional: a successful older attached job advances only its own generation and leaves a newer successor generation pending.
 
-The stable-public-SKU activation and delivery cutover remain distinct audited commands. The required production ordering is: freeze all business writers; reconcile pending normal/replacement legacy product CSV work, including any separately reviewed migration-048 external-delivery acknowledgements; verify zero pending normal/replacement work and zero generated-unconfirmed product artifacts; apply the reviewed `public-sku:activation` preflight; establish, validate and explicitly publish the reviewed public-SKU-aware successor Magento template/binding; run a fresh delivery-cutover preflight; apply the separate one-way delivery cutover; verify automatic status and product CSV retirement; only then resume ordinary product/recount writes. Migration 046's database guard rejects product writes in the interval between stable-SKU activation and delivery cutover. Do not use the hazardous legacy `magento-products-v1` UPDATE CSV in that interval: its `product_online=2` can disable an existing Magento product.
+The stable-public-SKU activation and delivery cutover remain distinct audited commands. For a new installation that has not completed cutover, the required ordering is: freeze all business writers; reconcile pending normal/replacement legacy product CSV work, including any separately reviewed migration-048 external-delivery acknowledgements; verify zero pending normal/replacement work and zero generated-unconfirmed product artifacts; apply the reviewed `public-sku:activation` preflight; establish, validate and explicitly publish the reviewed public-SKU-aware successor Magento template/binding; run a fresh delivery-cutover preflight; apply the separate one-way delivery cutover; verify automatic status and product CSV retirement; only then resume ordinary product/recount writes. Migration 046's database guard rejects product writes in the interval between stable-SKU activation and delivery cutover. Do not use the hazardous legacy `magento-products-v1` UPDATE CSV in that interval: its `product_online=2` can disable an existing Magento product.
 
 ```powershell
 cd server

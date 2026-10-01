@@ -209,7 +209,7 @@ async function validateStored(client, loaded) {
   const t = await template(client, loaded.row.template_version_id);
   const result = validateBindings(loaded.bindings, t.compiled.definition, loaded.schema, { publish: true });
   // Reuse authoritative repository semantic evidence. No SKU-digit or label inference.
-  const evidence = await loadSourceEvidence(client);
+  const evidence = await loadSourceEvidence(client, t.compiled.definition);
   const sourceDiagnostics = validateSourceReferences(t.compiled.definition, evidence);
   for (const option of loaded.bindings.options.filter((o) => o.sourceKind === 'semantic')) {
     const current = evidence.questions.filter((q) => q.category_code === option.amberGroup && q.key === option.questionKey);

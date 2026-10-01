@@ -106,7 +106,7 @@ async function liveDrift(config, artifact, options = {}) {
 async function reconcileTargetSourceSupport(client, artifact) {
   const { loadSourceEvidence, validateSourceReferences } = require('../export-templates/source-references');
   const { isApprovedDeferredValue } = require('../export-templates/source-support');
-  const evidence = await loadSourceEvidence(client);
+  const evidence = await loadSourceEvidence(client, compileDefinition(artifact.template.definition).definition);
   const diagnostics = validateSourceReferences(artifact.template.definition, evidence);
   if (!diagnostics.length) failure('MAGENTO_BINDING_SOURCE_RECONCILIATION_NOT_REQUIRED', 'Target source support already matches');
   const demotions = [];

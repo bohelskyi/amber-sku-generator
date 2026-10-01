@@ -2,6 +2,7 @@ const { buildCsv, escapeCsvValue } = require('../../utils/csv');
 const { LIMITS, assertCompiled } = require('./definition');
 const { readSource, own, fail, scalar, identityText } = require('./input-projection');
 const { sourceSupportChecker } = require('./source-support');
+const { isPublicEvaluator } = require('./version-contract');
 
 const present = (v) => v !== undefined && v !== null && String(v).trim() !== '';
 function budgets(options = {}) {
@@ -21,7 +22,7 @@ function runProduct(compiled, product, limits, observation) {
     if (cause.code !== 'SOURCE_SUPPORT_INVALID') throw cause;
     if (observation) observation.issues = [{ code: cause.code, field: 'sourceSupport', message: cause.message,
       target: observation.target || { kind: 'source', source: observation.source || null } }];
-    const identityField = compiled.definition.evaluatorVersion === 'magento-declarative-3' ? 'public_sku' : 'full_sku';
+    const identityField = isPublicEvaluator(compiled.definition.evaluatorVersion) ? 'public_sku' : 'full_sku';
     return { work: 0, mapped: { group: product.category, sku: product[identityField],
       errors: [{ code: cause.code, field: 'sourceSupport', message: cause.message }] } };
   }
@@ -29,7 +30,7 @@ function runProduct(compiled, product, limits, observation) {
 
 function runSupportedProduct(compiled, product, limits, observation) {
   const d = compiled.definition;
-  const identityField = d.evaluatorVersion === 'magento-declarative-3' ? 'public_sku' : 'full_sku';
+  const identityField = isPublicEvaluator(d.evaluatorVersion) ? 'public_sku' : 'full_sku';
   const rawGroup = checkCell(identityText(own(product, 'category'), 'category'));
   const group = rawGroup === undefined || rawGroup === null ? '' : String(rawGroup);
   const profile = d.groups.find((g) => g.route === group);

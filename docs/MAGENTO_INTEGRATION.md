@@ -1,5 +1,7 @@
 # Magento integration
 
+As reported by the production operator on 2026-10-01, Wave 1 is deployed at PR #19 / `daf627fc2458e5215cbf52735a8f186a3777361f`, with migrations through `050_test_product_deletion.sql`. Stable public `AG-*` identities, the reviewed production binding and automatic Amber → Magento synchronization are active. Magento product CSV delivery is retired; the separate price-export stream and immutable historical evidence remain supported. Historical delivery/collision cutover is complete and the operational freeze has been lifted. This documentation update did not query production or Magento.
+
 ## Stable public SKU boundary
 
 Migration 046 separates the externally addressed Magento article from the encoded configuration/history SKU. Exact product GET, CREATE/UPDATE payload `sku`, category, website, inventory and store-view operations, read-after-write verification, durable job remote identity and generated `Art: {sku}` names use `public_sku`. The exact product revision remains captured by product ID, internal `full_sku`, lifecycle state and job hash. Existing legacy products backfill `public_sku = full_sku`, so no Magento rename is implied. Installing the migration alone retains legacy recount identity; after the separately audited stable-public-SKU activation, recount successors inherit the same public identity and are delivered as UPDATEs of that remote product.
@@ -8,9 +10,9 @@ The schema-045 legacy collision repair does not call Magento, rename a legacy re
 
 Generic API fields named `sku`, `fullSku` or `full_sku` retain their prior encoded/internal meaning. New response fields explicitly expose `publicSku` and `internalSku`; only contracts whose purpose is Magento/product article identity switch their value to public SKU.
 
-The fixed code-backed mapper consumes public SKU directly. Immutable template publications are not reinterpreted: `full_sku` remains internal in evaluator versions 1 and 2. Evaluator `magento-declarative-3` with source contract `public-product-identity-v1` adds the distinct `public_sku` source for a future reviewed successor publication. No existing publication or binding is mutated automatically.
+The fixed code-backed mapper consumes public SKU directly. Immutable template publications are not reinterpreted: `full_sku` remains internal in evaluator versions 1 and 2. Evaluator `magento-declarative-3` with source contract `public-product-identity-v1` adds the distinct `public_sku` source for an explicitly reviewed successor publication. No existing publication or binding is mutated automatically.
 
-The later successor review must also consider the post-publication Magento option `rozmir_kartyny`: label `15×15`, option ID `6060`, Amber semantic `AR.size` value `28`. This is candidate evidence only; migration 046 does not approve, publish or bind it.
+The historical migration-046 successor review recorded the post-publication Magento option `rozmir_kartyny`: label `15×15`, option ID `6060`, Amber semantic `AR.size` value `28`. That dated discovery was candidate evidence only; migration 046 did not approve, publish or bind it. It is not a claim about current production coverage.
 
 The [automatic product workflow](MAGENTO_AUTOMATIC_SYNC.md) is implemented behind
 migration 044's default-disabled gate. It reuses the durable jobs below, adds local
@@ -82,12 +84,11 @@ before saving its draft binding decision. `649 / Default/Кулони/З інк�
 that flow before publication and was included in the successful product update.
 Category creation, category assignment and binding publication remain separate actions.
 
-Legacy CSV export is planned for retirement, but no export workflow has been disabled.
+Historical 2026-09-28 state: legacy CSV export was planned for retirement. Current production has since completed product-CSV retirement; price export remains supported.
 Reconcile existing product/price queues, generated/downloaded unconfirmed files and
 held/replacement work before cutover. Sync success does not confirm CSV snapshots or
-advance export revision/cursor state; see [export retirement](EXPORTS.md#planned-csv-retirement).
-Next work is BR/NM/CH/AR/SV bindings, followed by automated sync workflow/UI and export
-cutover. The immutable KL publication remains unchanged.
+advance export revision/cursor state; see [export retirement](EXPORTS.md#product-csv-retirement).
+At that date, next work was BR/NM/CH/AR/SV bindings, followed by automatic sync/UI and product-CSV cutover. Those Wave 1 stages have since completed in production; the old immutable KL publication remains historical evidence.
 
 The binding review CLI supports an explicit disabled-on-create status policy:
 `approve --revision UUID --expected-revision N --actor-user-id ID --binding POLICY_REVIEW_ID --accept-review --reason "Create disabled; preserve update status" --policy initialize_create_only --create-value 2`.

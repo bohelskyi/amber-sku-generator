@@ -102,3 +102,7 @@ Historical placeholder `0` or a missing stored value can represent an omitted SK
 `ensureLegacySkuSchemas()` creates V1 snapshots and links unversioned products during upgrade. For categories with products, it combines stored answer keys with currently required SKU keys so later draft structure is not retroactively imposed on old identifiers.
 
 Legacy products with `total_price_uah=0` retain that stored value and `legacy_uah_price_unset=true`; see [`PRICING.md`](PRICING.md). They remain decodable and recountable, while new products still require a positive final price.
+
+## Integration category contract
+
+Wave 2 H0 adds an opt-in [v4 integration contract](EXPORT_TEMPLATES.md#extensible-v4-integration-contract) for declared future category/source scopes. It does not change catalog/SKU algorithms, schema publication, used semantic IDs, permanent internal-SKU reservations or stable public identity allocation. Configuring an Amber category is separate from Magento readiness and does not change an existing published binding. Readiness UI and reviewed successor publication remain later Wave 2 work. Current production stable public allocation is active; fresh-install gates remain default-off.

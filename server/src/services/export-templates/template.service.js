@@ -149,7 +149,7 @@ function assertDraft(row, revision, hash) {
 }
 async function validateStored(client, row) {
   const compiled = pureCall(() => compileDefinition(row.definition));
-  const diagnostics = validateSourceReferences(compiled.definition, await loadSourceEvidence(client));
+  const diagnostics = validateSourceReferences(compiled.definition, await loadSourceEvidence(client, compiled.definition));
   if (diagnostics.length) throw error(422, 'TEMPLATE_SOURCE_INVALID', 'Unresolved or unsupported source references', { diagnostics });
   return compiled;
 }
@@ -249,7 +249,8 @@ async function systemProfile(options = {}) {
 }
 
 async function supportProposal(client, row) {
-  const evidence = await loadSourceEvidence(client);
+  const compiled = pureCall(() => compileDefinition(row.definition));
+  const evidence = await loadSourceEvidence(client, compiled.definition);
   const definition = pureCall(() => upgradeSourceSupport(row.definition, evidence));
   const definitionHash = hashJsonData(definition);
   const expectedRevision = row.revision;
@@ -328,7 +329,7 @@ async function testPreview(templateId, input, options = {}) {
     const compiled = pureCall(() => compileDefinition(row.definition));
     const { products, missingProductIds } = await loadDraftPreviewProducts(client, input.productIds);
     if (missingProductIds.length) throw error(422, 'TEMPLATE_PRODUCTS_MISSING', 'Requested products not found', { missingProductIds });
-    const evidence = await loadSourceEvidence(client);
+    const evidence = await loadSourceEvidence(client, compiled.definition);
     const { diagnostics, globalSourceDiagnostics } = pureCall(() => validateDraftSampleSources(compiled, evidence, products));
     if (diagnostics.length) throw error(422, 'TEMPLATE_SOURCE_INVALID', 'Unresolved or unsupported sample source references',
       { diagnostics, globalSourceDiagnostics });

@@ -1,6 +1,7 @@
 // Closed, opt-in source policy. Captured questionContracts.allowed remains catalog
 // membership; mappings never confer authority. No DB access or client proof flags.
 const { fail } = require('./input-projection');
+const { EXTENSIBLE_EVALUATOR, isPublicEvaluator } = require('./version-contract');
 const { parseVariationSku, parseVersionedSkuPart, buildSkuSuffixDecodeAttempts, decodeStoredSkuAnswers } = require('../../utils/sku');
 const VERSION = 'historical-source-support-v1';
 const EVALUATOR = 'magento-declarative-2';
@@ -13,7 +14,7 @@ const policyFor = (d, s) => d.sourceSupport?.sources[location(s)];
 
 function validateSupport(d, { check, shape, list, membership }) {
   if (!Object.hasOwn(d, 'sourceSupport')) { check(d.evaluatorVersion !== EVALUATOR, 'Source support policy required'); return; }
-  check([EVALUATOR, PUBLIC_EVALUATOR].includes(d.evaluatorVersion), 'Source support evaluator required');
+  check([EVALUATOR, PUBLIC_EVALUATOR, EXTENSIBLE_EVALUATOR].includes(d.evaluatorVersion), 'Source support evaluator required');
   shape(d.sourceSupport, ['version', 'sources']);
   check(d.sourceSupport.version === VERSION, 'Unknown source support version');
   const expected = TARGETS.filter((key) => Object.values(d.sources).some((s) => location(s) === key));
@@ -47,7 +48,7 @@ function upgradeSourceSupport(definition, evidence) {
   const next = structuredClone(definition);
   // Repeated preparation never promotes newly published live values.
   if (next.sourceSupport) return next;
-  if (next.evaluatorVersion !== PUBLIC_EVALUATOR) next.evaluatorVersion = EVALUATOR;
+  if (!isPublicEvaluator(next.evaluatorVersion)) next.evaluatorVersion = EVALUATOR;
   next.sourceSupport = { version: VERSION, sources: {} };
   for (const key of TARGETS) {
     const descriptors = Object.entries(next.sources).filter(([, s]) => location(s) === key);

@@ -26,13 +26,11 @@ verification. Keep category creation and binding publication as separate reviewe
 operations. CREATE uses disabled status; UPDATE preserves status/inventory, adds
 website memberships and scopes EN writes. Do not replay uncertain steps blindly.
 
-CSV retirement is planned only after existing queued/export work is reconciled;
-see [the retirement boundary](EXPORTS.md#planned-csv-retirement). Neither first sync
-success nor migrations 041/042 activate the CSV selector or retire its queues.
+Current production completed Wave 1 activation/cutover through migration 050 (PR #19, 2026-10-01 operator receipt). Automatic sync and stable public identities are active; product CSV delivery is retired after historical delivery/collision reconciliation. See [the retirement boundary](EXPORTS.md#product-csv-retirement). Fresh installations retain default-off gates; a first sync or migration installation alone never activates the selector or retires its queues.
 
 ## Deploying the test-product deletion hotfix (050)
 
-These are operator steps after review; implementation verification uses only fake
+Current production completed this hotfix (PR #19); these steps remain the upgrade procedure for installations without 050. Implementation verification uses only fake
 Magento HTTP and the canonical disposable PostgreSQL service.
 
 1. Deploy the reviewed hotfix commit as one server/client release. Freeze business
@@ -90,7 +88,7 @@ Earlier real-environment verification covered Keycloak plus `amber.local` AD log
 
 ## One-time full-product lifecycle cutover
 
-Ordinary future deployments verify/apply forward migrations and start a compatible application. They are separate from the one-time full-product lifecycle cutover implemented through migrations 039/040. Production activation remains pending; migration installation alone does not switch the selector.
+Ordinary future deployments verify/apply forward migrations and start a compatible application. They are separate from the one-time full-product lifecycle cutover implemented through migrations 039/040. Current production activation is complete; migration installation alone does not switch the selector in other installations.
 
 Follow the [canonical cutover runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md): maintain the traffic/background-work freeze, drain all old writers, and generate fresh indexing and post-index manifests against the exact production database. Rehearsal hashes/counts must never be reused as production approvals. Reconciliations and attestations after activation require separate operator review. Backup/restore rules below are unchanged.
 

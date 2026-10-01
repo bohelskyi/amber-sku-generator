@@ -47,6 +47,7 @@ for (const modulePath of [
   './20-legacy-sku-repair.cases',
   './21-external-delivery.cases',
   './22-test-product-deletion.cases',
+  './23-magento-v4.cases',
 ]) {
   require(modulePath);
 }

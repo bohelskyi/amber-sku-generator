@@ -2,6 +2,7 @@ const { LIMITS } = require('./definition');
 const { PRODUCT_FIELDS } = require('./input-projection');
 const { HEADERS } = require('./magento-v1-data');
 const { policyFor, EVALUATOR, PUBLIC_EVALUATOR } = require('./source-support');
+const { EXTENSIBLE_EVALUATOR } = require('./version-contract');
 
 // Approved stored-information contract, not a cross-key alias or inferred lineage.
 // The original Magento mapper and docs/EXPORTS.md retain this exact legacy key
@@ -18,7 +19,12 @@ const OPERATIONS = Object.freeze(['literal', 'source', 'ref', 'text', 'present',
 // One statement gives publication a coherent MVCC source snapshot even at READ COMMITTED.
 // Preview calls this inside its existing-style REPEATABLE READ READ ONLY transaction.
 // No live labels/rules/options are substituted into the frozen definition.
-async function loadSourceEvidence(client) {
+async function loadSourceEvidence(client, definition) {
+  // Only compiled v4 callers expand the evidence scope. Legacy callers retain
+  // the original six-category snapshot and canonical preview fingerprints.
+  const categories = definition?.evaluatorVersion === EXTENSIBLE_EVALUATOR
+    ? [...new Set([...definition.groups.map((g) => g.route), ...Object.values(definition.sources).filter((s) => s.kind !== 'product').map((s) => s.category)])].sort()
+    : Object.keys(HEADERS);
   const { rows } = await client.query(`
     SELECT
       (SELECT COALESCE(jsonb_agg(code ORDER BY code), '[]') FROM categories
@@ -38,7 +44,7 @@ async function loadSourceEvidence(client) {
             FROM sku_schema_questions q WHERE q.schema_version_id = v.id
           ) q) AS questions
         FROM sku_schema_versions v WHERE v.category_code = ANY($1::text[])
-      ) s) AS schemas`, [Object.keys(HEADERS)]);
+      ) s) AS schemas`, [categories]);
   return rows[0];
 }
 
@@ -74,7 +80,7 @@ function validateSourceReferences(definition, evidence) {
       && source.type === 'scalar' && source.provenance === 'supplied-stored-answers-v1' && source.aliases.length === 0
       && HISTORICAL_INFORMATION_SOURCES.some((entry) => entry.category === source.category && entry.key === source.key
         && [entry.outputContract, 'magento-products-columns-v2'].includes(definition.outputContract)
-        && [entry.evaluatorVersion, EVALUATOR, PUBLIC_EVALUATOR].includes(definition.evaluatorVersion));
+        && [entry.evaluatorVersion, EVALUATOR, PUBLIC_EVALUATOR, EXTENSIBLE_EVALUATOR].includes(definition.evaluatorVersion));
     if (!matches.length && !approvedLegacyInformation) {
       report(sourceId, 'SOURCE_REFERENCE_UNRESOLVED', source.kind === 'information'
         ? 'Current non-SKU question metadata required' : 'Historical SKU or current non-SKU question evidence required',

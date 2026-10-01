@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`050`. Migrations `000`–`049` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`051`. Migrations `000`–`050` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -108,6 +108,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `048_external_magento_delivery_acknowledgement.sql` | Adds a distinct monotonic exact-revision external-delivery floor and immutable audit reference for reviewed deliveries that occurred outside Amber before API cutover. The migration acknowledges no rows. A database guard restricts advances to the active lifecycle, pre-delivery-cutover command boundary and enforces the normal/replacement route transition. |
 | `049_shared_names_and_repricing_sync.sql` | Shared-authority full-name observations/baselines and repricing item sync generation evidence. |
 | `050_test_product_deletion.sql` | Dedicated immutable test-deletion intent/progress, `voided` tombstones and request terminalization, Administrator-only capability and business-write fences. |
+| `051_magento_extensible_categories.sql` | Bounded category syntax in binding routes/options; new categories require an exact declared group in the pinned immutable v4 template. No seeds, data rewrite or publication. |
 
 ## Test deletion migration
 
@@ -220,8 +221,14 @@ Migration 040 adds the distinct one-time `cutover_baseline_revision`/audit refer
 
 `full_product_export_activation` starts in `legacy`, selector version 0, required writer contract 1. Monotonic generation, phase/event constraints and immutable audit receipts govern `legacy → preparing → active`; active cannot return to legacy. Deferred checks enforce baseline-event identity, exclusion projection and inactive-product retirement. Statement guards fence unaware writers after preparation; application transactions acquire the gate before BEGIN to avoid stale repeatable-read snapshots after waiting.
 
-The migration itself performs no baseline acceptance, successor release, historical indexing or activation. Deploy both the gate-aware application and the schema, then follow the [canonical cutover runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md). Old/new mixed writers are unsupported; ordinary future deployments and one-time production cutover are distinct operations. Production activation remains pending.
+The migration itself performs no baseline acceptance, successor release, historical indexing or activation. Deploy both the gate-aware application and the schema, then follow the [canonical cutover runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md). Old/new mixed writers are unsupported; ordinary future deployments and one-time production cutover are distinct operations. Current production completed activation/cutover through migration 050 (2026-10-01 operator receipt, PR #19). This procedure remains required for other installations; migration 051 does not activate or publish anything.
 
 ## Migration 049: shared names and batch sync evidence
 
 `049_shared_names_and_repricing_sync.sql` adds exact generated/full-name overrides, origin/public-identity name baselines and reviewed conflict state, a bounded durable discovery cursor, safe automatic-request diagnostics, and each repricing item's nullable captured sync generation. It extends the existing product-input projection without modifying prior migrations, SKU allocation, published bindings or historical jobs/snapshots. Existing records receive no guessed baseline or batch synchronization proof. Fresh installation and repeated startup use the migration runner transaction/checksum contract.
+
+## Migration 051: extensible integration categories
+
+`051_magento_extensible_categories.sql` changes only the category-code checks on `magento_binding_routes` and `magento_binding_options`, from the historical six-code list to bounded uppercase codes (`^[A-Z][A-Z0-9_]{0,31}$`). Additional BEFORE INSERT/UPDATE guards require any category outside the historical six to be declared in the immutable evaluator-4 template pinned by the owning binding revision. Existing six-category rules, composite identity/observation FKs, publication immutability and audit/permission boundaries remain intact.
+
+There is no table/backfill, catalog seed, activation, automatic upgrade, publication or remote call. The schema runner transaction rolls back both constraints and guards on failure; repeated startup verifies the same checksum. Disposable regression coverage upgrades checkpoint 050 with real published evaluator-1/2/3 templates and bindings, compares their stored records and gate/audit evidence before/after, checks rollback and rerun, and persists a v4 future-category binding with distinct semantic/SKU/remote identities. Fresh installation is covered by the complete migration suite. This is H0 only; the [v4 contract](EXPORT_TEMPLATES.md#extensible-v4-integration-contract) does not implement later readiness/editor/publication orchestration.
