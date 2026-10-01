@@ -4,9 +4,12 @@ import { AdminStructureEditor } from '../components/admin/AdminStructureEditor';
 import { ValidationIssues } from '../components/admin/ValidationIssues';
 import { LoadingState, Notice } from '../components/app/UiPrimitives.jsx';
 import { useAdminPanel } from '../hooks/useAdminPanel';
+import { Link } from 'react-router-dom';
+import { useAuth } from '../auth/auth-context.js';
 
 export default function AdminPage() {
   const admin = useAdminPanel();
+  const { permissions } = useAuth();
 
   if (!admin.config) {
     return (
@@ -23,6 +26,7 @@ export default function AdminPage() {
         <nav className="admin-section-nav" aria-label="Розділи налаштувань">
           {admin.canViewCatalog && <a href="#catalog-structure">Структура каталогу</a>}
           {admin.canViewPricing && <a href="#catalog-pricing">Матриці та модифікатори</a>}
+          {permissions.includes('export_templates.view') && <Link to="/admin/magento">Інтеграція Magento</Link>}
         </nav>
         {!admin.canViewCatalog && admin.canViewPricing && (
           <section className="catalog-category-context" aria-label="Категорія для перегляду цін">

@@ -5,7 +5,7 @@ import { AppPageHeader } from '../components/app/UiPrimitives.jsx';
 
 export default function SettingsPage() {
   const { permissions } = useAuth();
-  const destinations = new Set(['/admin', '/admin/users', '/admin/roles', '/admin/audit', '/admin/corrections/history']);
+  const destinations = new Set(['/admin', '/admin/magento', '/admin/users', '/admin/roles', '/admin/audit', '/admin/corrections/history']);
   return <main className="app-page"><div className="mx-auto max-w-7xl space-y-5 px-4 py-6 sm:px-6">
     <AppPageHeader title="Налаштування" description="Каталог, ціни та адміністрування доступу." />
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{allowedWorkspaceNavigation(permissions)

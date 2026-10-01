@@ -2,10 +2,10 @@ const initialConfig = require('../../../data_config');
 const pool = require('../../db/pool');
 const { startPhase } = require('../../observability/performance-metrics');
 
-async function getAppConfig() {
+async function getAppConfig(queryable = pool) {
   const config = { categories: {}, questions: {}, extraConfig: initialConfig.extraConfig };
 
-  const categories = await pool.query(
+  const categories = await queryable.query(
     `SELECT c.*,
             NOT (
               EXISTS (SELECT 1 FROM products p WHERE p.category = c.code)
@@ -34,7 +34,7 @@ async function getAppConfig() {
     };
   }
 
-  const questions = await pool.query(`
+  const questions = await queryable.query(`
     SELECT
       q.id AS q_db_id,
       q.category_code,

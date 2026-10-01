@@ -13,6 +13,10 @@ function endpoint(method, path, permission, response = 'json') {
 }
 
 const ENDPOINT_MANIFEST = Object.freeze([
+  endpoint('GET', '/admin/magento-integration', 'export_templates.view'),
+  endpoint('POST', '/admin/magento-integration/discovery', 'export_templates.view'),
+  endpoint('POST', '/admin/magento-integration/product-preview', 'export_templates.manage'),
+  endpoint('POST', '/admin/magento-integration/create-preview', 'export_templates.manage'),
   endpoint('GET', '/export/template-options', 'exports.view'),
   endpoint('GET', '/export/sessions', 'exports.view'),
   endpoint('POST', '/export/sessions', 'exports.create'),

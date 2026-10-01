@@ -1,5 +1,32 @@
 # Magento integration
 
+## Self-service integration workspace (Wave 2)
+
+Settings → **Інтеграція Magento** (`/admin/magento`) reads every configured Amber
+category, its published SKU schema, the current publication or a selected frozen
+binding draft, semantic mappings and local product evaluation counts. New unsupported
+categories explicitly show **Категорія ще не готова до Magento**. This does not
+prohibit ordinary product saves or publish any later layer automatically.
+
+The authenticated `/api/admin/magento-integration` overview is a repeatable-read
+local snapshot. Discovery is an explicit CSRF-protected GET-only remote operation
+(`POST .../discovery`), bounded to 512 requests and 60 seconds per invocation;
+limit/failure never produces a complete-success receipt. Attribute sets, membership,
+attributes/options and full category paths are observations, not approved bindings.
+Equal labels remain candidates and semantic `value_id` remains distinct from the
+Magento option ID. Frozen observations retain their timestamps.
+
+Local evaluation checks at most 100 current products per overview and reports
+the unchecked count separately; it does not claim remote sendability. Current-product
+and prospective CREATE previews reuse the authoritative builder/evaluator/planner.
+The hypothetical `AG-PREVIEW` identity never reserves a SKU, allocates an article,
+saves a product or enqueues a job. Remote verification is sequential point-in-time
+GET evidence, not an atomic Magento snapshot or a persistent reporting subsystem.
+
+Read/discovery requires `export_templates.view`; product previews require both
+`export_templates.manage` and `exports.view`. Existing role grants, auth, active-user,
+CSRF and lifecycle boundaries are unchanged. The browser never calls Magento.
+
 As reported by the production operator on 2026-10-01, Wave 1 is deployed at PR #19 / `daf627fc2458e5215cbf52735a8f186a3777361f`, with migrations through `050_test_product_deletion.sql`. Stable public `AG-*` identities, the reviewed production binding and automatic Amber → Magento synchronization are active. Magento product CSV delivery is retired; the separate price-export stream and immutable historical evidence remain supported. Historical delivery/collision cutover is complete and the operational freeze has been lifted. This documentation update did not query production or Magento.
 
 ## Stable public SKU boundary
