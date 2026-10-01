@@ -50,6 +50,7 @@ for (const modulePath of [
   './23-magento-v4.cases',
   './24-magento-editor.cases',
   './25-magento-configuration.cases',
+  './26-magento-options.cases',
 ]) {
   require(modulePath);
 }

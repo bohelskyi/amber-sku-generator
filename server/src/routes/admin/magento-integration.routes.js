@@ -6,6 +6,7 @@ const config = require('../../config/env').magento;
 const { getRequestMutationContext } = require('../../audit/mutation-context');
 const category = require('../../services/magento/configuration-category');
 const actions = require('../../services/magento/configuration-actions');
+const option = require('../../services/magento/configuration-option');
 const router = express.Router();
 const root = '/admin/magento-integration';
 const handle = (operation) => async (req, res) => {
@@ -16,6 +17,10 @@ router.get(root, requirePermission('export_templates.view'), handle((req) => edi
 router.post(`${root}/discovery`, requirePermission('export_templates.view'), handle(() => editor.discovery(config)));
 router.get(`${root}/actions`, requirePermission('export_templates.view'), handle(() => actions.list(config)));
 router.get(`${root}/actions/:id`, requirePermission('export_templates.view'), handle(async (req) => actions.receipt(await actions.get(config, req.params.id))));
+for (const [name, operation] of [['inspect',option.inspect],['attest',option.attest],['preview',option.preview],['apply',option.apply],['reconcile',option.reconcile]]) {
+  router.post(`${root}/options/${name}`,requirePermission('export_templates.manage'),requirePermission('export_templates.publish'),
+    handle((req) => operation(config,req.body,{mutationContext:getRequestMutationContext(req)})));
+}
 for (const [name, operation] of [['preview', category.preview], ['apply', category.apply], ['reconcile', category.reconcile]]) {
   router.post(`${root}/categories/${name}`, requirePermission('export_templates.manage'), requirePermission('export_templates.publish'),
     handle((req) => operation(config, req.body, { mutationContext: getRequestMutationContext(req) })));

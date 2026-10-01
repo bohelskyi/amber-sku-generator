@@ -153,7 +153,7 @@ The legacy inherited-name preview/apply endpoints remain available for existing 
 
 Historical indexing, manifest approval, bounded cutover batches, activation and reviewed reconciliation are implemented. They do not bypass target validation, request ownership or permanent SKU reservation. Unknown exclusion provenance and ambiguous lineage remain held until explicitly resolved; accepting ordinary legacy inventory as a cutover baseline does not release successor holds or repair duplicate SKUs.
 
-Use [Exports](EXPORTS.md#reconciliation-and-exclusion-provenance) for delivery/typed exclusion rules and the [cutover runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md) for fresh manifests, operator attestations and activation. Production cutover is pending; local rehearsal approvals do not authorize production changes. Historical phase results remain in the [correctness plan](archive/exports/RECOUNT_EXPORT_CORRECTNESS_PLAN.md).
+Use [Exports](EXPORTS.md#reconciliation-and-exclusion-provenance) for delivery/typed exclusion rules and the [cutover runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md) for fresh manifests, operator attestations and activation. Production cutover is complete (Wave 1 operator receipt); fresh-install and later reconciliation approvals remain separate. Historical phase results remain in the [correctness plan](archive/exports/RECOUNT_EXPORT_CORRECTNESS_PLAN.md).
 
 ## Direct recount pricing
 

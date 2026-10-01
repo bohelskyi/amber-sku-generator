@@ -15,6 +15,7 @@ async function mutate(options, operation) {
 }
 async function seal(config, preview, options = {}) {
   return mutate(options, async (client, context) => {
+    if (preview.kind === 'option') await require('./configuration-option').checkedAttestation(client, config, preview, context.actorUserId);
     const revision = (await client.query('SELECT state,revision FROM magento_binding_revisions WHERE id=$1 FOR UPDATE', [preview.bindingRevisionId])).rows[0];
     if (revision?.state !== 'draft' || revision.revision !== preview.expectedRevision) {
       throw c.error(409, 'MAGENTO_BINDING_CONFLICT', 'Draft changed after preview');
@@ -27,10 +28,10 @@ async function seal(config, preview, options = {}) {
       throw c.error(409, 'MAGENTO_CONFIGURATION_RECONCILIATION_REQUIRED', 'Previous dispatched work cannot be resent', { actionId: prior.id, state: prior.state });
     }
     const row = (await client.query(`INSERT INTO magento_configuration_actions
-      (id,kind,origin_hash,resource_key,binding_revision_id,binding_revision,actor_user_id,preview_hash,intent)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) RETURNING *`,
+      (id,kind,origin_hash,resource_key,binding_revision_id,binding_revision,actor_user_id,preview_hash,intent,attestation_id)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10) RETURNING *`,
     [randomUUID(), preview.kind, origin, resourceKey, preview.bindingRevisionId, preview.expectedRevision,
-      context.actorUserId, preview.previewToken, JSON.stringify(c.safeData(preview))])).rows[0];
+      context.actorUserId, preview.previewToken, JSON.stringify(c.safeData(preview)),preview.attestationId || null])).rows[0];
     await writeAuditEvent(client, { mutationContext: context, eventKey: 'magento_configuration.sealed',
       subjectType: 'magento_configuration_action', subjectId: row.id, details: { kind: row.kind, previewHash: row.preview_hash } });
     return row;
@@ -42,6 +43,7 @@ async function transition(id, from, to, input, options = {}) {
     const action = (await client.query('SELECT * FROM magento_configuration_actions WHERE id=$1 FOR UPDATE', [id])).rows[0];
     if (!action || action.state !== from) throw c.error(409, 'MAGENTO_CONFIGURATION_RECONCILIATION_REQUIRED', 'Action is no longer eligible for this transition');
     if (from === 'sealed') {
+      if (action.kind === 'option') await require('./configuration-option').checkedAttestation(client, { baseUrl: action.intent.origin }, action.intent, context.actorUserId);
       const revision = (await client.query('SELECT state,revision FROM magento_binding_revisions WHERE id=$1 FOR UPDATE', [action.binding_revision_id])).rows[0];
       if (revision?.state !== 'draft' || revision.revision !== action.binding_revision) throw c.error(409, 'MAGENTO_BINDING_CONFLICT', 'Draft changed before dispatch');
     }
@@ -64,6 +66,7 @@ async function get(config, id, options = {}) {
 function receipt(row) {
   return { id: row.id, kind: row.kind, state: row.state, remoteId: row.remote_id,
     path: row.intent.path ?? null,
+    attributeCode: row.intent.target?.attributeCode ?? null, label: row.intent.label ?? null,
     createdAt: row.created_at, verifiedAt: row.verified_at, bound: false,
     canReconcile: row.state === 'returned',
     message: row.state === 'verified' ? 'Створено, зв’язок ще не підтверджено'

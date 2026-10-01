@@ -52,28 +52,36 @@ equal-label/path discovery is insufficient attribution: the action remains expli
 uncertain and no automatic POST retry is available. This new workflow leaves the
 historical two-path CLI behavior unchanged.
 
-### H4 capability characterization blocker
+### Reviewed option creation (H4)
 
-Option creation is not implemented. The current bounded attribute normalization
-cannot distinguish an ordinary user-defined `select` from a visual/text swatch with
-otherwise identical metadata. `frontend_input`, `is_user_defined` and the ordinary
-table source model are insufficient proof. Equal normalized observations are
-covered by `server/test/magento-option-capability-gap.test.js`.
+Option creation is bounded to one existing user-defined select/multiselect with
+ordinary standard-table source metadata. System, custom-source, unknown and
+explicitly observed swatch types fail closed. REST absence of swatch metadata is
+never proof that the attribute is ordinary. Migration
+`053_magento_option_attestations.sql` records an actual Administrator's reviewed
+capability attestation for the exact origin/installation, attribute ID/code and
+fingerprint of all bounded observable non-option metadata.
 
-Magento 2.4.6's [attribute REST interface](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Eav/Api/Data/AttributeInterface.php)
-does not guarantee a swatch classification field. Its
-[SwatchAttributeType](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Swatches/Model/SwatchAttributeType.php)
-reads `swatch_input_type` from `additional_data`; the
-[option-add plugin](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Swatches/Plugin/Eav/Model/Entity/Attribute/OptionManagement.php)
-can introduce swatch-specific writes. Absence of metadata must not be interpreted
-as evidence that an attribute is ordinary or safe to mutate.
+Attestations are immutable, action-specific, actor-bound, valid for ten minutes
+and consumed by one sealed intent. Every option action requires renewed manual
+classification review, including acknowledgment that hidden swatch changes may
+have no visible REST signal. Observable identity/metadata drift invalidates review.
+This is an explicit reviewed risk boundary, not permanent non-swatch certification.
 
-H4 requires an agreed authoritative capability source bound to the installation
-and exact attribute identity, with stale/drift checks. A GET-only remote capability
-contract or reviewed offline capability manifest needs separate design agreement.
-No generic option writer, option auto-approval or H3 successor-publication workflow
-has been added while this safety requirement remains unresolved. Existing product
-sync, category creation and read-only discovery retain their accepted boundaries.
+The global label comes from the exact non-archived Amber semantic option. SKU
+values must already exist in the active published SKU schema. Optional EN is an
+explicit Administrator-confirmed authoritative Amber value captured in immutable
+attestation/action evidence, never a generated translation. The reviewed preview
+shows global/EN intent; fresh code `en` discovery resolves its exact store ID.
+
+Typed `POST .../options/inspect`, `/attest`, `/preview`, `/apply` and
+`/reconcile` retain manage+publish, authentication and CSRF. Attestation/apply
+also require the actual immutable Administrator role. Metadata/options and local
+source/revision are rechecked before committed dispatch. POST uses only the closed
+option route, initializes no default, and persists the exact returned option ID
+before GET verification in global and optional EN scopes. A lost response remains
+uncertain; equal labels cannot recover attribution or authorize another POST.
+Creation never approves a semantic binding. Returned-ID recovery remains GET-only.
 
 As reported by the production operator on 2026-10-01, Wave 1 is deployed at PR #19 / `daf627fc2458e5215cbf52735a8f186a3777361f`, with migrations through `050_test_product_deletion.sql`. Stable public `AG-*` identities, the reviewed production binding and automatic Amber → Magento synchronization are active. Magento product CSV delivery is retired; the separate price-export stream and immutable historical evidence remain supported. Historical delivery/collision cutover is complete and the operational freeze has been lifted. This documentation update did not query production or Magento.
 

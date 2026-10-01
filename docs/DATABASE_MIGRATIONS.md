@@ -244,3 +244,7 @@ intent, reset dispatch, replace a returned ID or change verified evidence; DELET
 and TRUNCATE are denied. No category, binding approval, publication, product, job,
 activation or remote mutation is created by installation. Existing migration files,
 published bindings and product-sync intent interpretations remain unchanged.
+
+## 053 — reviewed option capability attestations
+
+`053_magento_option_attestations.sql` adds immutable Administrator evidence with exact observable attribute identity, action target, expiry and a unique action-use reference. Configuration actions admit the option kind only with this reference. Existing category receipts, published bindings and migration checksums remain unchanged.
