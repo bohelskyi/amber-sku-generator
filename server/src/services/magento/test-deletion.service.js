@@ -50,17 +50,18 @@ async function eligible(client, productId, origin) {
     EXISTS(SELECT 1 FROM correction_requests WHERE source_product_id=$1 OR corrected_product_id=$1) AS corrections,
     EXISTS(SELECT 1 FROM product_corrections WHERE source_product_id=$1 OR corrected_product_id=$1
       OR source_sku=$2 OR corrected_sku=$2) AS lineage,
-    EXISTS(SELECT 1 FROM repricing_items WHERE product_id=$1 OR sku=$2 OR sku=$5) AS repricing,
-    EXISTS(SELECT 1 FROM repricing_drafts WHERE status='draft' AND (category_code=$3 OR scope='global')) AS draft,
+    EXISTS(SELECT 1 FROM repricing_items WHERE product_id=$1 OR sku=$2 OR sku=$4) AS repricing,
+    EXISTS(SELECT 1 FROM repricing_drafts d, jsonb_array_elements(d.preview_snapshot->'items') item
+      WHERE d.status='draft' AND item->>'productId'=$3) AS draft,
     EXISTS(SELECT 1 FROM product_export_revisions WHERE product_id=$1) AS price,
     EXISTS(SELECT 1 FROM export_snapshot_products WHERE product_id=$1) AS exported,
     EXISTS(SELECT 1 FROM price_export_snapshots s, jsonb_array_elements(s.captured_revisions) e
-      WHERE e->>'productId'=$4 OR e->>'sku'=$2 OR e->>'sku'=$5
-        OR e->>'internalSku'=$2 OR e->>'publicSku'=$5) AS price_delivery,
-    EXISTS(SELECT 1 FROM audit_events WHERE subject_type='product' AND subject_id=$4
+      WHERE e->>'productId'=$3 OR e->>'sku'=$2 OR e->>'sku'=$4
+        OR e->>'internalSku'=$2 OR e->>'publicSku'=$4) AS price_delivery,
+    EXISTS(SELECT 1 FROM audit_events WHERE subject_type='product' AND subject_id=$3
       AND event_key NOT IN ('product.created','product.test_delete_sealed','product.test_delete_dispatched',
         'product.test_delete_verified')) AS history`,
-  [productId, product.full_sku, product.category, String(productId), product.public_sku])).rows[0];
+  [productId, product.full_sku, String(productId), product.public_sku])).rows[0];
   if (Object.values(business).some(Boolean)) fail('TEST_DELETE_BUSINESS_EVIDENCE');
   const exposure = await readLineageExposure(client, productId, product);
   if (exposure.evidence.classification !== 'reliably_unexposed') fail('TEST_DELETE_EXPORT_EVIDENCE');
