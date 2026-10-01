@@ -52,6 +52,29 @@ equal-label/path discovery is insufficient attribution: the action remains expli
 uncertain and no automatic POST retry is available. This new workflow leaves the
 historical two-path CLI behavior unchanged.
 
+### H4 capability characterization blocker
+
+Option creation is not implemented. The current bounded attribute normalization
+cannot distinguish an ordinary user-defined `select` from a visual/text swatch with
+otherwise identical metadata. `frontend_input`, `is_user_defined` and the ordinary
+table source model are insufficient proof. Equal normalized observations are
+covered by `server/test/magento-option-capability-gap.test.js`.
+
+Magento 2.4.6's [attribute REST interface](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Eav/Api/Data/AttributeInterface.php)
+does not guarantee a swatch classification field. Its
+[SwatchAttributeType](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Swatches/Model/SwatchAttributeType.php)
+reads `swatch_input_type` from `additional_data`; the
+[option-add plugin](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Swatches/Plugin/Eav/Model/Entity/Attribute/OptionManagement.php)
+can introduce swatch-specific writes. Absence of metadata must not be interpreted
+as evidence that an attribute is ordinary or safe to mutate.
+
+H4 requires an agreed authoritative capability source bound to the installation
+and exact attribute identity, with stale/drift checks. A GET-only remote capability
+contract or reviewed offline capability manifest needs separate design agreement.
+No generic option writer, option auto-approval or H3 successor-publication workflow
+has been added while this safety requirement remains unresolved. Existing product
+sync, category creation and read-only discovery retain their accepted boundaries.
+
 As reported by the production operator on 2026-10-01, Wave 1 is deployed at PR #19 / `daf627fc2458e5215cbf52735a8f186a3777361f`, with migrations through `050_test_product_deletion.sql`. Stable public `AG-*` identities, the reviewed production binding and automatic Amber → Magento synchronization are active. Magento product CSV delivery is retired; the separate price-export stream and immutable historical evidence remain supported. Historical delivery/collision cutover is complete and the operational freeze has been lifted. This documentation update did not query production or Magento.
 
 ## Stable public SKU boundary
