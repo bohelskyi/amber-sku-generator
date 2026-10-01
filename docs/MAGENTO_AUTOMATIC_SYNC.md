@@ -108,7 +108,9 @@ No browser-supplied remote ID, URL, credential or arbitrary DELETE route is acce
 Eligibility requires one active/current ordinary-save revision with an allocated
 public identity and its exact permanent internal reservation; normal unexcluded
 lifecycle; no correction/request history, price revision/delivery, repricing history
-or applicable active repricing draft; no immutable export exposure or other product
+or active repricing draft containing the exact product ID in stored
+`preview_snapshot.items[].productId` (category/global scope alone does not establish
+membership); no immutable export exposure or other product
 business audit history; no unfinished sync job/unverified step or pending generation;
 and one succeeded CREATE with a consistent known remote identity. Normal succeeded
 CREATE/UPDATE evidence remains immutable and does not itself block eligibility.

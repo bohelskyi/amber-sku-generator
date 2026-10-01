@@ -188,6 +188,45 @@ suite.test('test deletion ledger safety and recovery with fake Magento only', as
       await assert.rejects(db.query('DELETE FROM public_product_identities WHERE id=$1',[row.public_product_identity_id]),/immutable/);
       await assert.rejects(db.query("UPDATE magento_test_deletions SET state='sealed' WHERE product_id=$1",[row.id]),/immutable/);
     });
+    for (const scope of ['scenario', 'global']) {
+      for (const containsTarget of [false, true]) {
+        await t.test(`${scope} draft ${containsTarget ? 'containing the exact product blocks' : 'containing only another product allows'} test deletion`, async () => {
+          const s = await scenario(); const other = await scenario();
+          const snapshot = require('../src/services/repricing/tokens').getRepricingPreviewSnapshot({
+            scope, items: [{ productId: containsTarget ? s.product.id : other.product.id }],
+          });
+          const draft = (await db.query(`INSERT INTO repricing_drafts
+            (scope,category_code,scenario_name,preview_fingerprint,preview_snapshot)
+            VALUES($1,$2,'Test membership','test',$3::jsonb) RETURNING id`,
+          [scope, scope === 'global' ? '*' : s.product.category, JSON.stringify(snapshot)])).rows[0];
+          try {
+            if (containsTarget) {
+              await assert.rejects(s.preview(), { code: 'TEST_DELETE_BUSINESS_EVIDENCE' });
+              assert.equal(s.state.writes, 0);
+              assert.equal((await db.query('SELECT 1 FROM magento_test_deletions WHERE product_id=$1', [s.product.id])).rowCount, 0);
+            } else {
+              assert.equal((await s.apply(await s.preview())).state, 'finalized');
+              assert.equal(s.state.writes, 1);
+            }
+            assert.deepEqual((await db.query('SELECT preview_snapshot FROM repricing_drafts WHERE id=$1', [draft.id])).rows[0].preview_snapshot,
+              JSON.parse(JSON.stringify(snapshot)));
+          } finally { await db.query("UPDATE repricing_drafts SET status='discarded' WHERE id=$1", [draft.id]); }
+        });
+      }
+    }
+    await t.test('draft membership added after preview blocks apply before sealing or dispatch', async () => {
+      const s = await scenario(); const p = await s.preview();
+      const draft = (await db.query(`INSERT INTO repricing_drafts
+        (scope,category_code,scenario_name,preview_fingerprint,preview_snapshot)
+        VALUES('global','*','Test membership','test',$1::jsonb) RETURNING id`,
+      [JSON.stringify({ items: [{ productId: s.product.id }] })])).rows[0];
+      try {
+        await assert.rejects(s.apply(p), { code: 'TEST_DELETE_BUSINESS_EVIDENCE' });
+        assert.equal(s.state.writes, 0);
+        assert.equal((await db.query('SELECT 1 FROM magento_test_deletions WHERE product_id=$1', [s.product.id])).rowCount, 0);
+        assert.equal((await db.query('SELECT status FROM products WHERE id=$1', [s.product.id])).rows[0].status, 'active');
+      } finally { await db.query("UPDATE repricing_drafts SET status='discarded' WHERE id=$1", [draft.id]); }
+    });
     await t.test('lost DELETE response is sticky across attempts; later exact absence safely finalizes', async () => {
       const s = await scenario(); const p = await s.preview(); s.state.loseWrite = true;
       const result = await s.apply(p); assert.equal(result.state,'dispatched'); assert.equal(result.reconciliationRequired,true);
