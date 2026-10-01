@@ -28,7 +28,7 @@ async function createCategory(
   try {
     await lifecycleGate.begin(client, 'BEGIN');
     await client.query(
-      'INSERT INTO categories (code, name, requires_weight, skip_hidden_sku_questions, marketing_rounding_enabled) VALUES ($1, $2, $3, $4, $5)',
+      "INSERT INTO categories (code, name, requires_weight, skip_hidden_sku_questions, marketing_rounding_enabled, sku_publication_mode) VALUES ($1, $2, $3, $4, $5, 'explicit')",
       [normalizedCode, name, normalizedRequiresWeight, normalizedSkipHidden, normalizedMarketingRounding]
     );
     await writeAuditEvent(client, {

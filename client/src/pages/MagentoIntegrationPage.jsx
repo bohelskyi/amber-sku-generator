@@ -6,6 +6,7 @@ import { EmptyState, LoadingState, Notice, StatusBadge } from '../components/app
 import { WorkspaceHeader, WorkspaceLocalNav } from '../components/workspace/WorkspacePrimitives.jsx';
 import MagentoCategoryActions from '../components/workspace/MagentoCategoryActions.jsx';
 import MagentoOptionActions from '../components/workspace/MagentoOptionActions.jsx';
+import MagentoBindingReview from '../components/workspace/MagentoBindingReview.jsx';
 
 const root = '/admin/magento-integration';
 const states = { approved: 'Підтверджено', candidate: 'Кандидат', missing: 'Відсутній зв’язок',
@@ -20,6 +21,7 @@ export default function MagentoIntegrationPage() {
   const [weight, setWeight] = useState(''); const [price, setPrice] = useState('');
   const [subjectUa, setSubjectUa] = useState(''); const [subjectEn, setSubjectEn] = useState('');
   const [productId, setProductId] = useState(''); const sequence = useRef(0);
+  const [reload, setReload] = useState(0);
   const canPreview = permissions.includes('export_templates.manage') && permissions.includes('exports.view');
   useEffect(() => {
     const controller = new AbortController(); const current = ++sequence.current;
@@ -28,7 +30,7 @@ export default function MagentoIntegrationPage() {
       .catch((cause) => { if (!controller.signal.aborted && current === sequence.current) setError(cause.response?.data?.error || 'Не вдалося прочитати стан інтеграції.'); })
       .finally(() => { if (current === sequence.current) setBusy(false); });
     return () => { controller.abort(); };
-  }, [revisionId]);
+  }, [revisionId, reload]);
   async function action(path, payload, setter) {
     const current = ++sequence.current; setBusy(true); setError('');
     try { const result = await api.post(`${root}/${path}`, payload); if (current === sequence.current) setter(result.data); }
@@ -71,6 +73,7 @@ export default function MagentoIntegrationPage() {
         </>}
       </section>
       <MagentoCategoryActions key={data.revision?.id || 'none'} revision={data.revision} observation={observation} />
+      <MagentoBindingReview key={data.revision?.id || 'none'} revision={data.revision} templateVersions={data.templateVersions} onChanged={(r) => { ++sequence.current; setBusy(true); setData(null); setPreview(null); setObservation(null); setRevisionId(r.id); setReload((n) => n + 1); }} />
       <MagentoOptionActions key={`${data.revision?.id || 'none'}:${category?.code}`} revision={data.revision} category={category} observation={observation} />
       {canPreview && data.revision && category && <section className="card space-y-4 p-5"><h2 className="font-semibold">Перевірка товару</h2>
         <p className="text-sm">Preview виконує лише читання. Товар, артикул і завдання доставки не створюються.</p>

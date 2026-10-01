@@ -15,7 +15,7 @@ const matchProduct = (route, product) => product.category === route.amberGroup &
   (String(product.details?.answers?.[p.questionKey] ?? '') === p.valueId) === p.equal);
 const evidence = (code, ids = []) => ({ diagnosticCodes: [code], candidateIds: ids.map(String) });
 
-function buildCandidates(amber, schema, categoryNodes, { group, routeKey } = {}) {
+function buildCandidates(amber, schema, categoryNodes, { group, routeKey, includeStaticCategories = false } = {}) {
   const plans = requirements(amber.compiled.definition, schema);
   const selected = plans.filter((p) => (!group || p.amberGroup === group) && (!routeKey || p.routeKey === routeKey));
   if (!selected.length) throw c.error(422, 'MAGENTO_BINDING_SCOPE_EMPTY', 'No matching Amber route');
@@ -44,6 +44,17 @@ function buildCandidates(amber, schema, categoryNodes, { group, routeKey } = {})
         evidence: evidence(exact ? native ? 'NATIVE_CONTROL' : 'EXACT_ATTRIBUTE_CODE' : 'ATTRIBUTE_MEMBERSHIP_OR_IDENTITY_UNRESOLVED', attr ? [attr.attribute_id] : []) };
       if (req.target === 'categories') {
         const paths = [...new Set(samples.flatMap((p) => String(p.result[req.rowId]?.categories || '').split(',').filter(Boolean)))];
+        if (includeStaticCategories) {
+          const group = amber.compiled.definition.groups.find((g) => g.route === plan.amberGroup);
+          let node = group?.rows.find((r) => r.id === req.rowId)?.cells.categories;
+          const seen = new Set();
+          while (node?.op === 'ref' && !seen.has(node.id)) { seen.add(node.id); node = amber.compiled.definition.bindings.find((b) => b.id === node.id)?.value; }
+          // An explicit literal is authoritative without inventing a product.
+          // Dynamic rules still require real/representative evaluator evidence.
+          if (node?.op === 'literal' && typeof node.value === 'string') {
+            for (const path of node.value.split(',').filter(Boolean)) if (!paths.includes(path)) paths.push(path);
+          }
+        }
         const resolved = resolveCategories(paths.join(','), categoryNodes, { known: true, source: 'bootstrap', links: [] });
         a.evidence.categories = resolved.requested.map((r) => ({ requestedPath: r.requestedPath, normalizedPath: r.normalizedPath,
           categoryId: r.categoryId, candidates: r.exactCandidates,

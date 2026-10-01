@@ -101,6 +101,8 @@ Historical placeholder `0` or a missing stored value can represent an omitted SK
 
 `ensureLegacySkuSchemas()` creates V1 snapshots and links unversioned products during upgrade. For categories with products, it combines stored answer keys with currently required SKU keys so later draft structure is not retroactively imposed on old identifiers.
 
+Migration 054 preserves this bootstrap for existing/seeded categories. New categories created through Amber have `sku_publication_mode=explicit`: restart does not publish their draft automatically. Configure questions/options/pricing and use the existing explicit SKU publication command. This distinction adds no database prohibition on ordinary product saves and does not change historical schemas or SKU allocation.
+
 Legacy products with `total_price_uah=0` retain that stored value and `legacy_uah_price_unset=true`; see [`PRICING.md`](PRICING.md). They remain decodable and recountable, while new products still require a positive final price.
 
 ## Integration category contract

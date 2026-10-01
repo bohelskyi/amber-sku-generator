@@ -3,7 +3,7 @@ const { test, assert, pool, Pool, fs, os, path, serverRoot, runNodeInDatabase,
 
 test('migration 039 fresh schema enforces complete products, counters, routes and immutable membership', async () => {
   const before = (await pool.query('SELECT name, checksum FROM schema_migrations ORDER BY name')).rows;
-  assert.equal(before.length, 54);
+  assert.equal(before.length, 55);
   await runMigrations();
   assert.deepEqual((await pool.query('SELECT name, checksum FROM schema_migrations ORDER BY name')).rows, before);
   const grants = (await pool.query(`SELECT role_key FROM roles r JOIN role_permissions p ON p.role_id=r.id

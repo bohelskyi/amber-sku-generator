@@ -248,3 +248,12 @@ published bindings and product-sync intent interpretations remain unchanged.
 ## 053 — reviewed option capability attestations
 
 `053_magento_option_attestations.sql` adds immutable Administrator evidence with exact observable attribute identity, action target, expiry and a unique action-use reference. Configuration actions admit the option kind only with this reference. Existing category receipts, published bindings and migration checksums remain unchanged.
+
+### 054 — explicit first category SKU publication
+
+`054_explicit_category_sku_publication.sql` adds a category publication mode.
+Existing rows and compatibility seeds retain `legacy_bootstrap`; future categories
+created by the authoritative Amber command use `explicit`. Restart therefore does
+not silently publish an unfinished new category. Existing schema publication,
+identity/reservation algorithms, historical publications and normal save boundaries
+are unchanged. No remote access, enrollment or activation occurs in the migration.

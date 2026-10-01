@@ -1762,3 +1762,33 @@ observations for provisional evaluator paths, not approved/sendable category pla
 | --- | --- | --- |
 | Normal | `Default/Сувеніри` → 10; `Default/Сувеніри/Статуетки` → 38; `Default/Сувеніри/Статуетки/Тварини` → 39; `Default/Сувеніри/Статуетки/Символіка` → 610 | None among these provisional paths; other subtypes unexamined. |
 | Stone | `Default/Камінь` → 380; `Default/Камінь/Полірований` → 640 | `Default/Камінь/Камінь сувенірний` |
+
+## H3a successor preparation and review
+
+Settings → Magento separates the immutable current publication, exact clone, and
+successor preparation against a separately published template and fresh GET-only
+schema/category observation. Preparation evaluates at most 100 selected/current
+products and is not installation-wide publication safety or proof of sendability.
+Literal category paths can be discovered without inventing a representative product;
+dynamic paths require evaluator evidence. Existing CREATE/current-product previews
+remain separate and allocate no identities or jobs.
+
+Reviewed carry reuses the existing carry machinery only after checking transitive
+expression/source/table/contracts, routing, attribute metadata, remote identities
+and store policy scope. Changed cases remain unapproved. Equal labels are candidates.
+Choosing a set, option or category is separate from approval; unresolved template
+outputs must be fixed in the template, never by changing Amber semantic IDs.
+Draft CAS and final local evidence revalidation protect preparation/review; remote
+GETs finish before mutation transactions. Publication and handoff belong to H3b.
+
+The normal template grid supports evaluators 1–4. A public-identity columns-v2 draft
+can explicitly opt into v4 and add a category using reviewed UA/EN names, set name
+and category path. Initial simple products are disabled and visible in Catalog/Search;
+these rules remain a draft for review, not a Magento schema creation command.
+Sources and columns use the existing form editor. Saving/publishing a template never
+publishes a Magento binding or activates the exporter.
+
+HTTP `/api/admin/magento-integration`: GET `bindings/:id`; POST
+`bindings/:id/clone`, `bindings/:id/select`, `bindings/:id/decision`,
+`successor/prepare`, `successor/apply`. Existing view/manage permissions apply with
+normal active-user, authentication and CSRF boundaries; no RBAC changes.

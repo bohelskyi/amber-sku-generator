@@ -15,6 +15,12 @@ function endpoint(method, path, permission, response = 'json') {
 const ENDPOINT_MANIFEST = Object.freeze([
   endpoint('GET', '/admin/magento-integration', 'export_templates.view'),
   endpoint('POST', '/admin/magento-integration/discovery', 'export_templates.view'),
+  endpoint('GET', '/admin/magento-integration/bindings/:id', 'export_templates.view'),
+  endpoint('POST', '/admin/magento-integration/bindings/:id/clone', 'export_templates.manage'),
+  endpoint('POST', '/admin/magento-integration/bindings/:id/decision', 'export_templates.manage'),
+  endpoint('POST', '/admin/magento-integration/bindings/:id/select', 'export_templates.manage'),
+  endpoint('POST', '/admin/magento-integration/successor/prepare', 'export_templates.manage'),
+  endpoint('POST', '/admin/magento-integration/successor/apply', 'export_templates.manage'),
   Object.freeze({ ...endpoint('POST', '/admin/magento-integration/product-preview', 'export_templates.manage'), additionalPermissions: Object.freeze(['exports.view']) }),
   Object.freeze({ ...endpoint('POST', '/admin/magento-integration/create-preview', 'export_templates.manage'), additionalPermissions: Object.freeze(['exports.view']) }),
   Object.freeze({ ...endpoint('POST', '/admin/magento-integration/options/inspect', 'export_templates.manage'), additionalPermissions: Object.freeze(['export_templates.publish']) }),

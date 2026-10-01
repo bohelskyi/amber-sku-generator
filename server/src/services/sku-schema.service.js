@@ -182,7 +182,7 @@ async function ensureLegacySkuSchemas() {
   const client = await pool.connect();
   try {
     await client.query('SELECT pg_advisory_lock(hashtext($1))', ['amber_legacy_sku_schemas']);
-    const categories = await client.query('SELECT code FROM categories ORDER BY code');
+    const categories = await client.query("SELECT code FROM categories WHERE sku_publication_mode='legacy_bootstrap' ORDER BY code");
 
     for (const category of categories.rows) {
       await lifecycleGate.begin(client, 'BEGIN');

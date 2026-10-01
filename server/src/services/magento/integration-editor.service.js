@@ -52,6 +52,8 @@ async function overview(config, input = {}, options = {}) {
     const revisions = (await client.query(`SELECT id,state,revision,version_number,template_version_id,observed_at
       FROM magento_binding_revisions WHERE origin_hash=$1 ORDER BY created_at DESC LIMIT 100`,
     [config.configured ? c.originHash(config.baseUrl) : ''])).rows;
+    const templateVersions = (await client.query(`SELECT v.id,v.template_id,v.version_number,v.evaluator_version,t.display_name
+      FROM export_template_versions v JOIN export_templates t ON t.id=v.template_id ORDER BY v.published_at DESC LIMIT 100`)).rows;
     const totals = (await client.query(`SELECT category,count(*)::int AS total FROM products
       WHERE status='active' AND exclude_from_export=0 GROUP BY category ORDER BY category`)).rows;
     const samples = (await client.query(`SELECT id FROM products WHERE status='active' AND exclude_from_export=0
@@ -66,7 +68,7 @@ async function overview(config, input = {}, options = {}) {
       }
     }
     const observedAt = (await client.query('SELECT transaction_timestamp() AS at')).rows[0].at.toISOString();
-    return { observedAt, configured: config.configured, revision, revisions,
+    return { observedAt, configured: config.configured, revision, revisions, templateVersions,
       categories: semanticReadiness(catalog, schemas, revision, amber?.compiled.definition), catalog,
       products: totals.map((t) => ({ category: t.category, total: t.total,
         ...(local[t.category] || { checked: 0, evaluated: 0, blocked: 0 }),
