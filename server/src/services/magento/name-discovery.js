@@ -59,6 +59,7 @@ function createNameDiscovery(config, { databasePool: db, fetchImpl, logger = { e
       const products = (await lane.query(`SELECT r.*,i.public_sku FROM magento_product_sync_requests r
         JOIN public_product_identities i ON i.id=r.public_product_identity_id JOIN products p ON p.id=r.product_id
         WHERE i.id>$1 AND p.status='active' AND p.corrected_to_product_id IS NULL
+          AND NOT EXISTS(SELECT 1 FROM magento_test_deletions d WHERE d.public_product_identity_id=i.id)
           AND (EXISTS(SELECT 1 FROM magento_sync_jobs j WHERE j.public_product_identity_id=i.id
             AND j.origin_hash=$2 AND j.remote_product_id IS NOT NULL)
             OR EXISTS(SELECT 1 FROM magento_name_sync_states n WHERE n.public_product_identity_id=i.id
@@ -74,6 +75,8 @@ function createNameDiscovery(config, { databasePool: db, fetchImpl, logger = { e
           if (!identityHeld) break; // Do not skip a busy identity permanently on restart.
           skuHeld = (await lane.query('SELECT pg_try_advisory_lock(hashtext($1)) AS held', [skuLock])).rows[0].held;
           if (!skuHeld) break;
+          if ((await lane.query('SELECT 1 FROM magento_test_deletions WHERE public_product_identity_id=$1',
+            [product.public_product_identity_id])).rowCount) continue;
           if (!await unresolvedDispatch(lane, origin, product.public_sku)) {
             const amber = await readPreviewProduct(db, { productId: Number(product.product_id), bindingRevisionId: binding.id });
             const observation = await readNames(config, amber, { fetchImpl });

@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`049`. Accepted migrations `000`–`047` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`050`. Migrations `000`–`049` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -106,6 +106,20 @@ New paths touching these resources must follow existing lock order and final-sta
 | `046_stable_public_product_sku.sql` | Immutable public-product identities and non-cycling `AG-` allocation, exact legacy backfill, post-activation recount inheritance and deferred one-current-revision enforcement; additive dual-SKU snapshot/job evidence, public-identity automatic requests and a separate default-off audited activation gate. Existing internal SKUs, snapshots and artifacts are not rewritten. |
 | `047_finalize_legacy_sku_repair.sql` | Fail-closed finalization of only immutable schema-045 `legacy_sku_repair.staged` evidence. It requires 046 to be recorded, independently verifies the versioned PostgreSQL-canonical receipt and all nested plan/product/lifecycle hashes, allocates a new `AG-` public identity for each explicitly staged real collision, restores that same product row to its prior business lifecycle state, and leaves reviewed duplicate rows retired. It does not change internal SKU reservations, activate public SKU delivery, enqueue Magento work or leave a runtime identity-mutation bypass. |
 | `048_external_magento_delivery_acknowledgement.sql` | Adds a distinct monotonic exact-revision external-delivery floor and immutable audit reference for reviewed deliveries that occurred outside Amber before API cutover. The migration acknowledges no rows. A database guard restricts advances to the active lifecycle, pre-delivery-cutover command boundary and enforces the normal/replacement route transition. |
+| `049_shared_names_and_repricing_sync.sql` | Shared-authority full-name observations/baselines and repricing item sync generation evidence. |
+| `050_test_product_deletion.sql` | Dedicated immutable test-deletion intent/progress, `voided` tombstones and request terminalization, Administrator-only capability and business-write fences. |
+
+## Test deletion migration
+
+Migration `050_test_product_deletion.sql` adds `products.status='voided'`, the permanent
+`magento_test_deletions` ledger, Administrator-reserved `products.delete_test`, and a
+distinct terminal automatic-request state `voided`. It preserves all existing jobs,
+steps, SKU reservations, public identities, sequence values and audit history.
+Installation performs no Magento operation, allocation or product retirement.
+Sealed intent is immutable; dispatch/absence/finalization timestamps only advance.
+Product and lifecycle fences prevent business mutations during pending deletion or
+after finalization. Reference guards prevent new correction/export/price/repricing
+evidence for a sealed product. See [test deletion](MAGENTO_AUTOMATIC_SYNC.md#test-product-deletion).
 
 ## Schema-045 legacy full-SKU collision repair
 

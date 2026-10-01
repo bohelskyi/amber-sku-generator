@@ -9,6 +9,7 @@ const RESERVED_PERMISSION_KEYS = Object.freeze([
   'users.manage',
   'roles.manage',
   'audit.view',
+  'products.delete_test',
 ]);
 const RESERVED_PERMISSION_KEY_SET = new Set(RESERVED_PERMISSION_KEYS);
 const PERMISSION_KEY_PATTERN = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;

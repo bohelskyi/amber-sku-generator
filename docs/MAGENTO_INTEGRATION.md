@@ -37,6 +37,14 @@ remote verification and never calls the Magento writer. This evidence is not a s
 job receipt, snapshot confirmation or payload-equality proof. See the
 [cutover workflow](FULL_PRODUCT_CUTOVER_RUNBOOK.md#pre-api-external-delivery-acknowledgement).
 
+## Test-product deletion
+
+Migration 050 adds a separate Administrator-only test-product DELETE ledger and
+closed `AG-` transport. Normal archive and CREATE/UPDATE sync jobs retain their
+contracts. Every DELETE has committed intent/dispatch evidence and exact GET
+absence verification; uncertain DELETE is never blindly resent. See
+[test-product deletion](MAGENTO_AUTOMATIC_SYNC.md#test-product-deletion).
+
 ## Achieved state 2026-09-28
 
 The first real direct **Amber → Magento product UPDATE without CSV** succeeded.

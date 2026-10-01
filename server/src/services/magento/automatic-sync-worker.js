@@ -26,6 +26,7 @@ function createAutomaticSyncWorker(config, { databasePool: db, jobOptions = {}, 
       held = (await client.query('SELECT pg_try_advisory_lock(hashtext($1)) AS held',
         [`amber_magento_public_identity:${publicIdentityId}`])).rows[0].held;
       if (!held || stopping) return;
+      if ((await client.query('SELECT 1 FROM magento_test_deletions WHERE public_product_identity_id=$1', [publicIdentityId])).rowCount) return;
       const gate = (await client.query('SELECT * FROM magento_auto_sync_activation WHERE singleton')).rows[0];
       if (!gate?.enabled) return;
       request = (await client.query(`SELECT * FROM magento_product_sync_requests

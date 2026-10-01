@@ -82,6 +82,15 @@ Save locks sequence allocation when required, validates a positive automatic or 
 
 Archiving retains the existing product row and permanent SKU reservation, sets nullable `archived_by_user_id`, excludes the product from export, and appends one `product.archived` event in the same transaction. A missing or already archived SKU remains a failed/no-op path and does not create a success event.
 
+## Test-product retirement
+
+Administrator-only test deletion is distinct from archive. After durable Magento
+DELETE and exact absence verification, migration-050 products become terminal
+`voided` technical tombstones, excluded from ordinary operational lookup/history.
+The row, `sku_registry`, public identity, allocation number and immutable audit/jobs
+remain permanent. Voiding `AG-000002` cannot make it available again; the sequence
+continues at `AG-000003` or higher. See [eligibility and recovery](MAGENTO_AUTOMATIC_SYNC.md#test-product-deletion).
+
 ## Decode and legacy compatibility
 
 Decode finds the category by longest prefix, resolves the historical schema marker, parses encoded answers and suffix/variation, and overlays stored product context only where required for compatibility. Stored answers are accepted only when they reproduce the SKU; arbitrary stored details cannot redefine an identifier.

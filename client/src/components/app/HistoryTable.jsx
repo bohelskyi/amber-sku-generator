@@ -1,7 +1,7 @@
 import { formatDecimal, formatUah, formatUsd } from '../../lib/formatters';
 import { Link } from 'react-router-dom';
 
-export function HistoryTable({ history, config, selectedCat, onCopyText, onDecode, onDelete, canArchive = true, canDecode = true }) {
+export function HistoryTable({ history, config, selectedCat, onCopyText, onDecode, onDelete, onDeleteTest, canArchive = true, canDecode = true }) {
   const article = (item) => item.public_sku || item.full_sku;
   return (
     <section className="fade-up">
@@ -56,6 +56,7 @@ export function HistoryTable({ history, config, selectedCat, onCopyText, onDecod
                             Копіювати ціну
                           </button>
                           {canArchive && <button onClick={() => onDelete(article(item))} className="btn btn-danger text-xs px-2 py-1">Архівувати</button>}
+                          {onDeleteTest && item.status === 'active' && <button onClick={() => onDeleteTest(item)} className="btn btn-danger text-xs px-2 py-1">Видалити тестовий товар</button>}
                         </div>
                       )}
                     </td>

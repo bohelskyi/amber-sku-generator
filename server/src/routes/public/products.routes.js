@@ -20,6 +20,15 @@ const {
 
 const router = express.Router();
 
+for (const action of ['preview', 'apply']) {
+  router.post(`/products/test-delete/${action}`, requirePermission('products.delete_test'), async (req, res) => {
+    try {
+      res.json(await require('../../services/magento/test-deletion.service')[action](
+        require('../../config/env').magento, req.body || {}, { mutationContext: getRequestMutationContext(req) }));
+    } catch (error) { require('../../http/errors').sendHttpError(res, error, { includeCode: true }); }
+  });
+}
+
 router.get('/magento/summary', requirePermission('products.view'), async (req, res, next) => {
   try { res.json(await require('../../services/magento/sync-problems').summary()); } catch (error) { next(error); }
 });

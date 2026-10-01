@@ -1,0 +1,62 @@
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { TestProductDeletion } from '../src/components/app/TestProductDeletion.jsx';
+import { HistoryTable } from '../src/components/app/HistoryTable.jsx';
+import { productsApi } from '../src/api/products-api.js';
+import AppPage from '../src/pages/AppPage.jsx';
+import { useSkuManager } from '../src/hooks/useSkuManager.js';
+vi.mock('../src/hooks/useSkuManager.js',()=>({useSkuManager:vi.fn()}));
+vi.mock('../src/auth/auth-context.js',()=>({useAuth:()=>({permissions:['products.view','history.view','products.delete_test']})}));
+vi.mock('../src/components/app/HomeDashboard.jsx',()=>({HomeDashboard:()=>null}));
+vi.mock('../src/api/products-api.js',()=>({productsApi:{previewTestDeletion:vi.fn(),applyTestDeletion:vi.fn()}}));
+const product={id:12,public_sku:'AG-000123',full_sku:'ZZ-INTERNAL',status:'active',category:'ZZ'};
+const preview={productId:12,publicSku:product.public_sku,previewHash:'reviewed',state:'preview'};
+beforeEach(()=>{vi.resetAllMocks();productsApi.previewTestDeletion.mockResolvedValue({data:preview});});
+afterEach(cleanup);
+it('requires eligibility and exact public SKU confirmation then refreshes after verified completion',async()=>{
+  const done=vi.fn();const close=vi.fn();productsApi.applyTestDeletion.mockResolvedValue({data:{state:'finalized'}});
+  render(<TestProductDeletion product={product} onDeleted={done} onClose={close}/>);
+  expect(screen.getByText(/технічний запис і журнал аудиту/)).toBeTruthy();
+  expect(screen.queryByRole('textbox')).toBeNull();
+  fireEvent.click(screen.getByText('Перевірити можливість видалення'));
+  const input=await screen.findByRole('textbox');const apply=screen.getByText('Назавжди видалити з Magento');
+  fireEvent.change(input,{target:{value:product.full_sku}});expect(apply.disabled).toBe(true);
+  fireEvent.change(input,{target:{value:product.public_sku}});fireEvent.click(apply);
+  await waitFor(()=>expect(done).toHaveBeenCalledTimes(1));expect(close).toHaveBeenCalledTimes(1);
+  expect(productsApi.applyTestDeletion).toHaveBeenCalledWith({productId:12,previewHash:'reviewed',confirmation:product.public_sku});
+});
+it('uncertainty keeps the product visible and reuses the sealed intent for read-only recovery',async()=>{
+  const done=vi.fn();productsApi.applyTestDeletion.mockResolvedValue({data:{state:'dispatched',reconciliationRequired:true}});
+  render(<TestProductDeletion product={product} onDeleted={done} onClose={vi.fn()}/>);
+  fireEvent.click(screen.getByText('Перевірити можливість видалення'));
+  fireEvent.change(await screen.findByRole('textbox'),{target:{value:product.public_sku}});
+  fireEvent.click(screen.getByText('Назавжди видалити з Magento'));
+  expect(await screen.findByRole('status')).toBeTruthy();expect(done).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText('Перевірити результат видалення'));
+  await waitFor(()=>expect(productsApi.applyTestDeletion).toHaveBeenCalledTimes(2));
+  expect(productsApi.applyTestDeletion.mock.calls[0]).toEqual(productsApi.applyTestDeletion.mock.calls[1]);
+});
+it('ordinary archive remains separate and no delete-test action is shown without permission callback',()=>{
+  const archive=vi.fn();const props={history:[product],config:{categories:{}},onDelete:archive};
+  const view=render(<MemoryRouter><HistoryTable {...props}/></MemoryRouter>);
+  expect(screen.queryByText('Видалити тестовий товар')).toBeNull();fireEvent.click(screen.getByText('Архівувати'));
+  expect(archive).toHaveBeenCalledWith(product.public_sku);
+  view.rerender(<MemoryRouter><HistoryTable {...props} onDeleteTest={vi.fn()}/></MemoryRouter>);
+  expect(screen.getByText('Видалити тестовий товар')).toBeTruthy();
+});
+it('verified deletion immediately removes the recent row and saved notice even if refresh has not completed',async()=>{
+  const fetchHistory=vi.fn(()=>new Promise(()=>{})); const clearDecode=vi.fn();
+  useSkuManager.mockReturnValue({config:{categories:{}},history:[product],savedProduct:{publicSku:product.public_sku},
+    fetchHistory,handleDecodeInputChange:clearDecode});
+  productsApi.applyTestDeletion.mockResolvedValue({data:{state:'finalized',publicSku:product.public_sku}});
+  render(<MemoryRouter><AppPage/></MemoryRouter>);
+  expect(screen.getByText(/Товар збережено/)).toBeTruthy();
+  fireEvent.click(screen.getByText('Видалити тестовий товар'));
+  fireEvent.click(screen.getByText('Перевірити можливість видалення'));
+  fireEvent.change(await screen.findByRole('textbox'),{target:{value:product.public_sku}});
+  fireEvent.click(screen.getByText('Назавжди видалити з Magento'));
+  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+  expect(screen.queryByText(product.public_sku)).toBeNull();expect(screen.queryByText(/Товар збережено/)).toBeNull();
+  expect(fetchHistory).toHaveBeenCalledTimes(1);expect(clearDecode).toHaveBeenCalledWith('');
+});

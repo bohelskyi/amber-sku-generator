@@ -25,7 +25,7 @@ Each guide is the maintained authority for its domain; other documents summarize
 | [Export templates](EXPORT_TEMPLATES.md) | Administrative API, editor, immutable publications, source support and signed capture binding. |
 | [Shared export sessions](SHARED_EXPORT_SESSIONS.md) | Private/shared workflows, scoped invitations, access epochs, durable attempts and recovery. |
 | [Authentication and RBAC](AUTH_RBAC.md) | OIDC, sessions, active-user/CSRF boundary, permission catalog and administration. |
-| [Database and migrations](DATABASE_MIGRATIONS.md) | Migration/checksum policy, full inventory 000–048 and database protections. |
+| [Database and migrations](DATABASE_MIGRATIONS.md) | Migration/checksum policy, full inventory 000–050 and database protections. |
 | [Operations](OPERATIONS.md) | Topology, ordinary deployments, health, graceful shutdown, backup/restore and integrity audit. |
 
 Local technical references: [client development](../client/README.md), [serialized PostgreSQL tests](../server/integration-test/README.md), [synthetic Magento fixture maintenance](../server/test/fixtures/magento-v1/README.md).

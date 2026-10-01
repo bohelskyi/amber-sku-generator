@@ -7,7 +7,7 @@ async function getRecentProducts(queryable) {
     `SELECT p.*, i.public_sku
      FROM products p
      JOIN public_product_identities i ON i.id=p.public_product_identity_id
-     WHERE COALESCE(status, 'active') <> 'archived'
+     WHERE COALESCE(status, 'active') NOT IN ('archived','voided')
      ORDER BY p.created_at DESC
      LIMIT 15`,
     []

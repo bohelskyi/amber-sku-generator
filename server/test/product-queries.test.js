@@ -38,6 +38,6 @@ test('recent-product read preserves database order and archived filtering', asyn
 
   assert.equal(await getRecentProducts(queryable), rows);
   assert.deepEqual(call.params, []);
-  assert.match(call.sql, /COALESCE\(status, 'active'\) <> 'archived'/);
+  assert.match(call.sql, /COALESCE\(status, 'active'\) NOT IN \('archived','voided'\)/);
   assert.match(call.sql, /ORDER BY p.created_at DESC\s+LIMIT 15/);
 });

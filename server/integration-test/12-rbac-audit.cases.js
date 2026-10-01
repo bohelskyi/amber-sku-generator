@@ -699,7 +699,7 @@ test('roles.manage API provides protected Administrator and editable versioned r
     permissionsResponse.data.permissions
       .filter((permission) => permission.reserved)
       .map((permission) => permission.key),
-    ['audit.view', 'roles.manage', 'users.manage']
+    ['audit.view', 'products.delete_test', 'roles.manage', 'users.manage']
   );
 
   let rolesResponse = await request('/api/admin/roles');

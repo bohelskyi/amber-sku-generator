@@ -32,7 +32,7 @@ async function resolveProductLookup(queryable, value) {
      FROM products p
      JOIN public_product_identities i ON i.id = p.public_product_identity_id
      WHERE (i.public_sku = $1 AND p.status = 'active' AND p.corrected_to_product_id IS NULL)
-        OR p.full_sku = $1
+        OR (p.full_sku = $1 AND p.status <> 'voided')
      ORDER BY p.id`,
     [sku]
   )).rows;

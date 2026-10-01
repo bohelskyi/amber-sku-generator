@@ -59,6 +59,8 @@ async function guard(config, input, options, operation, applying = false) {
       JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id=$1 FOR NO KEY UPDATE OF p`,
     [resolved.product.id])).rows[0];
     if (resolved.internalMatchCount > 1) plan.fail('MAGENTO_SYNC_PRODUCT_NOT_UNIQUE');
+    if ((await client.query('SELECT 1 FROM magento_test_deletions WHERE public_product_identity_id=$1',
+      [product.public_product_identity_id])).rowCount) plan.fail('MAGENTO_SYNC_TEST_DELETION');
     const lifecycle = (await client.query('SELECT * FROM product_full_export_state WHERE product_id=$1 FOR NO KEY UPDATE', [product.id])).rows[0];
     if (!lifecycle) plan.fail('MAGENTO_SYNC_PRODUCT_STATE_MISSING');
     const state = { productId: product.id, publicIdentityId: product.public_product_identity_id,
