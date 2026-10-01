@@ -21,7 +21,7 @@ it('phase2 loads inherited names and confirms the exact displayed pair with its 
   render(<ManualMagentoNameEditor product={{ productId: 70, sku: 'SV70', reviewRequired: true }} onSaved={onSaved} onClose={vi.fn()} />);
   const confirm = await screen.findByRole('button', { name: 'Підтвердити без змін' });
   expect(screen.getByLabelText('Українська назва').value).toBe(' Фігура ');
-  expect(screen.getByLabelText('English name').value).toBe(' Figurine ');
+  expect(screen.getByLabelText('Англійська назва (EN)').value).toBe(' Figurine ');
   expect(screen.getByText('Потрібна перевірка успадкованих назв')).toBeTruthy();
   fireEvent.click(confirm);
   await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
@@ -36,9 +36,10 @@ it('phase2 editing the inherited pair hides unchanged confirmation and saves thr
   exportsApi.applyMagentoName.mockResolvedValue({ data: {} });
   render(<ManualMagentoNameEditor product={{ productId: 71, sku: 'SV71', reviewRequired: true }} onSaved={vi.fn()} onClose={vi.fn()} />);
   await screen.findByRole('button', { name: 'Підтвердити без змін' });
-  fireEvent.change(screen.getByLabelText('English name'), { target: { value: 'New figurine' } });
+  fireEvent.change(screen.getByLabelText('Англійська назва (EN)'), { target: { value: 'New figurine' } });
   expect(screen.queryByRole('button', { name: 'Підтвердити без змін' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Зберегти назви' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Переглянути зміни' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Зберегти назви' }));
   await waitFor(() => expect(exportsApi.applyMagentoName).toHaveBeenCalledWith({ productId: 71, subjectUa: 'Фігура', subjectEn: 'New figurine', previewToken: 'edit-proof' }));
 });
 
@@ -66,7 +67,7 @@ const defaults = {
   exportToSku: '',
   setExportToSku: vi.fn(),
   exportError: '',
-  exportStatus: { countSinceLastExport: 0, translationSuggestionAvailable: false },
+  exportStatus: { delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false }, countSinceLastExport: 0, translationSuggestionAvailable: false },
   exportPreview: null,
   exportSnapshot: null,
   setExportError: vi.fn(),
@@ -100,7 +101,7 @@ function issue(productId, field, code) {
 
 it('shows the initial pending state with one clear next action', () => {
   const onPreviewExport = vi.fn();
-  renderTools({ exportStatus: { countSinceLastExport: 3 }, onPreviewExport });
+  renderTools({ exportStatus: { delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false }, countSinceLastExport: 3 }, onPreviewExport });
 
   expect(screen.getByText('Експорт товарів у Magento')).toBeTruthy();
   expect(screen.getByText('3 нові товари очікують експорту')).toBeTruthy();
@@ -112,7 +113,7 @@ it('shows the initial pending state with one clear next action', () => {
 it('summarizes blocked readiness with human labels and expands products on demand', () => {
   const onPreviewExport = vi.fn();
   renderTools({
-    exportStatus: { countSinceLastExport: 3 },
+    exportStatus: { delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false }, countSinceLastExport: 3 },
     exportPreview: {
       mode: 'new', representedCount: 3, readyCount: 1, artifacts: [],
       errors: [
@@ -209,7 +210,7 @@ it('product export surface contains no price create/download/confirm orchestrati
 
 it('shows loading states and hides export workflows without create permission', () => {
   const view = renderTools({ exportStatus: null, priceExportStatus: null });
-  expect(screen.getByText('Завантаження статусу експорту…')).toBeTruthy();
+  expect(screen.getByText('Перевіряємо доступність експорту товарів')).toBeTruthy();
 
   view.rerender(<ExportTools {...defaults} canCreateExport={false} canArchive />);
   expect(screen.queryByText('Експорт товарів у Magento')).toBeNull();
@@ -223,23 +224,26 @@ it('edits the EN suggestion when translation is configured, then refreshes readi
   exportsApi.applyMagentoName.mockResolvedValue({ data: { productId: 14 } });
   const onPreviewExport = vi.fn();
   renderTools({
-    exportStatus: { countSinceLastExport: 0, translationSuggestionAvailable: true },
+    exportStatus: { delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false }, countSinceLastExport: 0, translationSuggestionAvailable: true },
     exportPreview: { mode: 'manual', representedCount: 1, readyCount: 0,
       errors: [issue(14, 'name', 'manual_name_required')], artifacts: [] },
     onPreviewExport,
   });
   fireEvent.click(screen.getByRole('button', { name: 'Показати проблемні товари' }));
   fireEvent.click(screen.getByRole('button', { name: 'Заповнити назву' }));
+  await waitFor(() => expect(screen.getByLabelText('Українська назва').disabled).toBe(false));
   fireEvent.change(screen.getByLabelText('Українська назва'), {
     target: { value: 'Фігурка птаха' },
   });
   expect(screen.getByRole('button', { name: 'Запропонувати переклад' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Запропонувати переклад' }));
   await waitFor(() => expect(exportsApi.suggestMagentoName).toHaveBeenCalledWith({
     productId: 14, subjectUa: 'Фігурка птаха',
   }));
-  await waitFor(() => expect(screen.getByLabelText('English name').value).toBe('bird figurine'));
-  fireEvent.change(screen.getByLabelText('English name'), { target: { value: 'bird statue' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Зберегти назви' }));
+  await waitFor(() => expect(screen.getByLabelText('Англійська назва (EN)').value).toBe('bird figurine'));
+  fireEvent.change(screen.getByLabelText('Англійська назва (EN)'), { target: { value: 'bird statue' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Переглянути зміни' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Зберегти назви' }));
   await waitFor(() => expect(exportsApi.applyMagentoName).toHaveBeenCalledWith({
     productId: 14, subjectUa: 'Фігурка птаха', subjectEn: 'bird statue', previewToken: 'token',
   }));
@@ -257,10 +261,12 @@ it('hides translation without a key and saves manually entered EN', async () => 
   });
   fireEvent.click(screen.getByRole('button', { name: 'Показати проблемні товари' }));
   fireEvent.click(screen.getByRole('button', { name: 'Заповнити назву' }));
+  await waitFor(() => expect(screen.getByLabelText('Українська назва').disabled).toBe(false));
   fireEvent.change(screen.getByLabelText('Українська назва'), { target: { value: 'Камінь' } });
   expect(screen.queryByRole('button', { name: 'Запропонувати переклад' })).toBeNull();
-  fireEvent.change(screen.getByLabelText('English name'), { target: { value: 'stone' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Зберегти назви' }));
+  fireEvent.change(screen.getByLabelText('Англійська назва (EN)'), { target: { value: 'stone' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Переглянути зміни' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Зберегти назви' }));
   await waitFor(() => expect(exportsApi.applyMagentoName).toHaveBeenCalledWith({
     productId: 15, subjectUa: 'Камінь', subjectEn: 'stone', previewToken: 'manual-token',
   }));
@@ -304,13 +310,15 @@ it('preserves expanded problem, show-all, and custom-range disclosures after nam
   expect(customDetails.open).toBe(true);
 
   fireEvent.click(screen.getByRole('button', { name: 'Заповнити назву' }));
+  await waitFor(() => expect(screen.getByLabelText('Українська назва').disabled).toBe(false));
   fireEvent.change(screen.getByLabelText('Українська назва'), {
     target: { value: 'Фігурка' },
   });
-  fireEvent.change(screen.getByLabelText('English name'), {
+  fireEvent.change(screen.getByLabelText('Англійська назва (EN)'), {
     target: { value: 'figurine' },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Зберегти назви' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Переглянути зміни' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Зберегти назви' }));
 
   await waitFor(() => expect(defaults.markExportReviewStale).toHaveBeenCalled());
   expect(onPreviewExport).not.toHaveBeenCalled();

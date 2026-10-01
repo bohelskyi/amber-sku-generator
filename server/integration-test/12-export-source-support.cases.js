@@ -47,12 +47,14 @@ test('SUPPORT HTTP existing HOME-v2 draft: detached prepare/CAS/audit, full vali
   const countBefore = (await pool.query('SELECT count(*) FROM export_templates')).rows[0].count;
   const candidate = await request('/api/admin/export-templates/candidate?supportPolicy=historical-source-support-v1', { authentication: actor });
   assert.equal(candidate.response.status, 200, candidate.text);
-  assert.equal(candidate.data.definition.evaluatorVersion, 'magento-declarative-2');
+  assert.equal(candidate.data.definition.evaluatorVersion, 'magento-declarative-3');
+  assert.equal(candidate.data.definition.sourceContractVersion, 'public-product-identity-v1');
   const current = await request('/api/admin/export-templates/candidate', { authentication: actor });
   assert.deepEqual(current.data, candidate.data, 'new current candidates require no explicit policy flag');
   const system = await request('/api/admin/export-templates/system', { authentication: actor });
-  assert.equal(system.data.definition.sourceSupport, undefined);
-  assert.equal(system.data.definition.evaluatorVersion, 'magento-declarative-1');
+  assert.equal(system.data.definition.sourceSupport.version, 'historical-source-support-v1');
+  assert.equal(system.data.definition.evaluatorVersion, 'magento-declarative-3');
+  assert.equal(system.data.definition.sourceContractVersion, 'public-product-identity-v1');
   assert.equal((await pool.query('SELECT count(*) FROM export_templates')).rows[0].count, countBefore);
   assert.equal((await request('/api/admin/export-templates/candidate?supportPolicy=unknown', { authentication: actor })).response.status, 400);
   const original = homeDefinition();
@@ -125,7 +127,8 @@ test('SUPPORT lifecycle current candidate/system-copy drafts start current; cata
   assert.equal(candidate.data.definition.sourceSupport.version, 'historical-source-support-v1');
   assert.equal(candidate.data.definitionHash, compileDefinition(candidate.data.definition).hash);
   const system = await request(root + '/system', { authentication: actor });
-  assert.equal(system.data.definition.sourceSupport, undefined, 'ordinary profile is not relabelled');
+  assert.equal(system.data.definition.sourceSupport.version, 'historical-source-support-v1');
+  assert.equal(system.data.definition.evaluatorVersion, 'magento-declarative-3');
   for (const boundary of ['new-current', 'current-system-copy']) {
     // Both explicit client creation paths request the authoritative current candidate.
     const created = await request(root, { authentication: actor, method: 'POST', body: {

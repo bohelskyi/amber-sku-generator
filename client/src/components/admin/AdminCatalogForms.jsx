@@ -98,7 +98,7 @@ export function QuestionForm({ config, currentCatQuestions, excludeQuestionId, f
         </div>
         {canUseSkuSettings ? (
           <div className="catalog-compact-form-grid">
-            <FieldControl label="SKU index" hint="Позиція значення в артикулі.">
+            <FieldControl label="Позиція у внутрішньому SKU" hint="Позиція значення у внутрішньому SKU.">
               <div className="catalog-inline-control">
                 <input className="input-sm" type="number" placeholder="1" value={question.sku_index} onChange={(event) => onChange({ ...question, sku_index: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
                 {isNew && <button type="button" onClick={fillNextSkuIndex} className="btn btn-outline whitespace-nowrap px-3 py-2 text-xs">Наступний</button>}
@@ -142,7 +142,7 @@ export function OptionForm({ config, currentCatQuestions, excludeQuestionId, isN
         <FieldControl label="Внутрішнє значення" hint={isNew ? 'Нове унікальне значення для цін та умов.' : 'Використовується у цінах, умовах і модифікаторах.'}>
           <input className="input-sm" type="number" placeholder="6" value={option.value_id} onChange={(event) => onChange({ ...option, value_id: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
         </FieldControl>
-        <FieldControl label="Код у SKU" hint={isNew ? 'Цифри, які потраплять в артикул після публікації.' : 'Може повторно використовувати код з попередньої версії.'}>
+        <FieldControl label="Код у SKU" hint={isNew ? 'Цифри внутрішнього SKU після публікації схеми.' : 'Може повторно використовувати код з попередньої версії.'}>
           <input className="input-sm font-mono" inputMode="numeric" placeholder="3" value={option.sku_code} onChange={(event) => onChange({ ...option, sku_code: event.target.value.replace(/\D/g, '') })} />
         </FieldControl>
       </div>
@@ -158,7 +158,7 @@ export function OptionForm({ config, currentCatQuestions, excludeQuestionId, isN
   );
 }
 
-export function OptionRow({ archived = false, config, currentCatQuestions, onArchive, onDelete, onEdit, option }) {
+export function OptionRow({ canManage = true, archived = false, config, currentCatQuestions, onArchive, onDelete, onEdit, option }) {
   const visibleSummary = formatConditionSummary(option.visible_if_json, currentCatQuestions, config);
   const hiddenSummary = formatConditionSummary(option.hidden_if_json, currentCatQuestions, config, 'Ніколи');
   const hasConditions = visibleSummary !== 'Завжди' || hiddenSummary !== 'Ніколи';
@@ -173,9 +173,9 @@ export function OptionRow({ archived = false, config, currentCatQuestions, onArc
         </div>
       </div>
       <div className="catalog-row-actions">
-        <button type="button" onClick={() => onEdit(option)} className="catalog-icon-button" title="Редагувати" aria-label={`Редагувати ${option.label}`}><Pencil size={14} /></button>
-        <button type="button" onClick={() => onArchive(option, !archived)} className="catalog-icon-button" title={archived ? 'Відновити з архіву' : 'Архівувати'} aria-label={`${archived ? 'Відновити' : 'Архівувати'} ${option.label}`}>{archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}</button>
-        <button type="button" onClick={() => onDelete('option', option.db_id)} className="catalog-icon-button is-danger" title="Видалити" aria-label={`Видалити ${option.label}`}><Trash2 size={15} /></button>
+        <button type="button" disabled={!canManage} onClick={() => onEdit(option)} className="catalog-icon-button" title="Редагувати" aria-label={`Редагувати ${option.label}`}><Pencil size={14} /></button>
+        <button type="button" disabled={!canManage} onClick={() => onArchive(option, !archived)} className="catalog-icon-button" title={archived ? 'Відновити з архіву' : 'Архівувати'} aria-label={`${archived ? 'Відновити' : 'Архівувати'} ${option.label}`}>{archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}</button>
+        <button type="button" disabled={!canManage} onClick={() => onDelete('option', option.db_id)} className="catalog-icon-button is-danger" title="Видалити" aria-label={`Видалити ${option.label}`}><Trash2 size={15} /></button>
       </div>
     </div>
   );

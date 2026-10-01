@@ -4,7 +4,7 @@ import { PageHeader, Toast } from '../components/app/PageHeader';
 import { ProductBuilder } from '../components/app/ProductBuilder';
 import { ProductPriceChangeDialog } from '../components/app/ProductPriceChangeDialog';
 import { RecountConfirmDialog } from '../components/app/RecountConfirmDialog';
-import { LoadingState } from '../components/app/UiPrimitives.jsx';
+import { LoadingState, Notice } from '../components/app/UiPrimitives.jsx';
 import { useAuth } from '../auth/auth-context.js';
 import { useSkuManager } from '../hooks/useSkuManager';
 import { getPermissionUiState, getRecountUiMode } from '../lib/permission-ui.js';
@@ -16,10 +16,12 @@ function AppPage() {
   const auth = useAuth();
   const [searchParams] = useSearchParams();
   const exportSku = searchParams.get('exportSku')?.slice(0, 160);
+  const selectedArticle = exportSku || searchParams.get('article')?.slice(0, 160);
   const { exportHandoff, endExportHandoff } = useContext(ExportWorkflowContext) || {};
   const permissionUi = getPermissionUiState(auth.permissions);
   const recountMode = getRecountUiMode(permissionUi);
   const sku = useSkuManager({
+    canViewHistory: auth.permissions.includes('history.view'),
     canChangeProductPrice: permissionUi.canApplyDirectPriceChange
       || permissionUi.canCreateCorrectionRequest,
     canApplyDirectPriceChange: permissionUi.canApplyDirectPriceChange,
@@ -34,12 +36,12 @@ function AppPage() {
   const openedSku = useRef(null);
   const handoffCleanup = useRef(null);
   const viewOnlyHandoff = useEffectEvent(() => {
-    if (!exportSku || !sku.config || openedSku.current === exportSku || sku.selectedCat || sku.isRecountOpen || sku.isPriceChangeOpen
+    if (!selectedArticle || !sku.config || openedSku.current === selectedArticle || sku.selectedCat || sku.isRecountOpen || sku.isPriceChangeOpen
       || !auth.permissions.includes('products.view') || !auth.permissions.includes('products.decode')) return;
-    openedSku.current = exportSku;
-    sku.handleDecode(exportSku);
+    openedSku.current = selectedArticle;
+    sku.handleDecode(selectedArticle);
   });
-  useEffect(() => { viewOnlyHandoff(); }, [exportSku, sku.config]);
+  useEffect(() => { viewOnlyHandoff(); }, [selectedArticle, sku.config]);
   useEffect(() => {
     // StrictMode replays setup/cleanup on mount. Clear context only after a
     // genuine departure, not during that replay while the product opens.
@@ -49,7 +51,8 @@ function AppPage() {
 
   if (!sku.config) {
     return (
-      <div className="app-page"><LoadingState label="Підтягуємо конфігурацію та історію…" /></div>
+      <div className="app-page p-6">{sku.configError ? <Notice tone="error"><p>{sku.configError}</p><button className="btn btn-outline" onClick={sku.retryConfig}>Спробувати ще раз</button></Notice>
+        : <LoadingState label="Підтягуємо конфігурацію та історію…" />}</div>
     );
   }
 
@@ -58,6 +61,7 @@ function AppPage() {
       <div className="mx-auto max-w-7xl space-y-5 px-4 py-4 sm:px-6 sm:py-6">
         <PageHeader />
         <Toast message={sku.copyMessage} />
+        {sku.savedProduct && <Notice tone="success">Товар збережено. Артикул: <strong>{sku.savedProduct.publicSku || sku.savedProduct.fullSku}</strong>.</Notice>}
         {exportSku && auth.permissions.includes('products.view') && auth.permissions.includes('products.decode') && <section className="card p-4 space-y-2">
           <p>Відкрито з перевірки експорту · <strong>{exportSku}</strong></p>
           {exportHandoff?.sku === exportSku && <p>{exportHandoff.reason}</p>}
@@ -71,6 +75,7 @@ function AppPage() {
 
         {!sku.selectedCat && (
           <HomeDashboard
+            canDecodeProducts={auth.permissions.includes('products.decode')}
             config={sku.config}
             exportStatus={sku.exportStatus}
             priceExportStatus={sku.priceExportStatus}
@@ -105,6 +110,7 @@ function AppPage() {
             onRecountReasonChange={sku.setRecountReason}
             onRecountTextAnswer={sku.handleRecountTextAnswer}
             onRecountWeightChange={sku.handleRecountWeightChange}
+            onRecountNameChange={sku.handleRecountNameChange}
             onStart={sku.resetProductFlow}
             onStartRecount={sku.handleStartRecount}
             onDecode={sku.handleDecode}
@@ -117,6 +123,8 @@ function AppPage() {
             config={sku.config}
             selectedCat={sku.selectedCat}
             answers={sku.answers}
+            nameSubjects={sku.nameSubjects}
+            onNameSubject={sku.handleNameSubject}
             weight={sku.weight}
             setWeight={sku.setWeight}
             isWeightRequired={sku.isWeightRequired}
@@ -154,7 +162,8 @@ function AppPage() {
           />
         )}
 
-        <HistoryTable
+        {sku.historyError && auth.permissions.includes('history.view') && <Notice tone="warning">Не вдалося завантажити останні товари: {sku.historyError}</Notice>}
+        {auth.permissions.includes('history.view') && <HistoryTable
           history={sku.history}
           config={sku.config}
           selectedCat={sku.selectedCat}
@@ -162,7 +171,8 @@ function AppPage() {
           onDecode={sku.handleDecode}
           onDelete={sku.handleDelete}
           canArchive={canArchiveProducts}
-        />
+          canDecode={auth.permissions.includes('products.decode')}
+        />}
 
         {!sku.selectedCat && canArchiveProducts && (
           <section className="field-group" aria-label="Архівування">
@@ -178,6 +188,7 @@ function AppPage() {
         )}
       </div>
       <RecountConfirmDialog
+        config={sku.config}
         canPriceOverride={permissionUi.canPriceOverrideCorrections}
         error={sku.recountError}
         isApplying={sku.isRecountApplying}
@@ -214,7 +225,7 @@ function AppPage() {
         marketingRoundingEnabled={sku.priceChangeMarketingRounding}
         mode={sku.priceChangeMode}
         preview={sku.priceChangePreview}
-        sku={sku.decodeData?.sku}
+        sku={sku.decodeData?.publicSku || sku.decodeData?.sku}
         usdPerGram={sku.priceChangeUsdPerGram}
         onCancel={sku.handleCancelPriceChange}
         onConfirm={sku.handleConfirmPriceChange}

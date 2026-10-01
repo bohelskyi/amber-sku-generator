@@ -1,15 +1,15 @@
+import { ProductMagentoNameReview as ManualMagentoNameEditor } from './ProductMagentoNameReview';
+export { ProductMagentoNameReview as ManualMagentoNameEditor } from './ProductMagentoNameReview';
 import { FullProductQueues } from '../exports/FullProductQueues';
 import { ExportReview } from '../exports/ExportReview';
 import { StoredSnapshot } from '../exports/StoredSnapshot';
 import { WorkspaceDialog } from '../workspace/WorkspaceDialog';
-import { useContext, useEffect, useRef, useState } from 'react';
-import { AuthContext } from '../../auth/auth-context';
+import { useState } from 'react';
 import { AlertTriangle, CheckCircle2, RefreshCw } from 'lucide-react';
-import { exportsApi } from '../../api/exports-api';
-import { getApiError } from '../../lib/http-error';
 import { getNewProductCopy } from '../../lib/product-export-copy';
 import { ControlledExportOptions } from './ControlledExportOptions';
 import { Link } from 'react-router-dom';
+import { Notice } from './UiPrimitives.jsx';
 
 const INITIAL_PROBLEM_ROWS = 6;
 
@@ -95,137 +95,6 @@ function problemsHeading(rawCount) {
   const phrase = plural === 'one' ? 'товар потребує'
     : plural === 'few' ? 'товари потребують' : 'товарів потребують';
   return `${count} ${phrase} виправлення`;
-}
-
-export function ManualMagentoNameEditor({ product, onClose, onSaved,
-  translationSuggestionAvailable }) {
-  const { principalLifetime } = useContext(AuthContext) || {}; const alive = useRef(true);
-  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  const current = () => alive.current && principalLifetime?.valid !== false;
-  const [subjectUa, setSubjectUa] = useState('');
-  const [subjectEn, setSubjectEn] = useState('');
-  const [enEdited, setEnEdited] = useState(false);
-  const [suggestionError, setSuggestionError] = useState('');
-  const [saveError, setSaveError] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [isSuggesting, setIsSuggesting] = useState(false);
-  const [suggestionAttempt, setSuggestionAttempt] = useState(0);
-  const [review, setReview] = useState(null);
-
-  useEffect(() => {
-    if (!product.reviewRequired) return undefined;
-    let live = true;
-    exportsApi.previewMagentoName({ productId: product.productId }).then(({ data }) => {
-      if (!live || principalLifetime?.valid === false) return;
-      setSubjectUa(data.subjectUa || ''); setSubjectEn(data.subjectEn || '');
-      setEnEdited(true); setReview(data);
-    }).catch((error) => { if (live) setSaveError(getApiError(error)); });
-    return () => { live = false; };
-  }, [product.productId, product.reviewRequired, principalLifetime]);
-
-  useEffect(() => {
-    const ua = subjectUa.trim();
-    if (!translationSuggestionAvailable || !ua || enEdited) return undefined;
-    let current = true;
-    const timeout = setTimeout(async () => {
-      setIsSuggesting(true);
-      setSuggestionError('');
-      try {
-        const response = await exportsApi.suggestMagentoName({
-          productId: product.productId, subjectUa: ua,
-        });
-        if (current) setSubjectEn(response.data.subjectEn);
-      } catch (error) {
-        if (current) setSuggestionError(getApiError(error));
-      } finally {
-        if (current) setIsSuggesting(false);
-      }
-    }, 500);
-    return () => { current = false; clearTimeout(timeout); };
-  }, [subjectUa, enEdited, product.productId, suggestionAttempt,
-    translationSuggestionAvailable]);
-
-  const save = async (confirmUnchanged = false) => {
-    if (!current() || isSaving) return;
-    setSaveError('');
-    setIsSaving(true);
-    try {
-      const payload = { productId: product.productId,
-        subjectUa: confirmUnchanged ? subjectUa : subjectUa.trim(),
-        subjectEn: confirmUnchanged ? subjectEn : subjectEn.trim(),
-        ...(confirmUnchanged ? { confirmUnchanged: true } : {}) };
-      // Confirmation consumes the evidence displayed when the pair was loaded.
-      // Re-previewing here would silently accept lifecycle drift while reviewing.
-      const preview = confirmUnchanged ? { data: review } : await exportsApi.previewMagentoName(payload);
-      if (!current()) return;
-      await exportsApi.applyMagentoName({ ...payload,
-        previewToken: preview.data.previewToken });
-      if (!current()) return;
-      onSaved();
-    } catch (error) {
-      if (current()) setSaveError(getApiError(error));
-    } finally {
-      if (current()) setIsSaving(false);
-    }
-  };
-
-  return (
-    <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-4">
-      <p className="font-semibold">Назва для {product.sku}</p>
-      {review?.reviewRequired && <p className="font-semibold text-amber-900">Потрібна перевірка успадкованих назв</p>}
-      <p className="text-xs text-slate-600">Збереження назви не змінить SKU, ціну чи характеристики товару.</p>
-      <label className="mt-3 block text-sm font-medium" htmlFor="magento-subject-ua">Українська назва</label>
-      <input id="magento-subject-ua" className="input mt-1" value={subjectUa} disabled={product.reviewRequired && !review}
-        onChange={(event) => {
-          setSubjectUa(event.target.value);
-          setSuggestionError('');
-          setIsSuggesting(false);
-        }}
-        maxLength={200} />
-      <label className="mt-3 block text-sm font-medium" htmlFor="magento-subject-en">English name</label>
-      <input id="magento-subject-en" className="input mt-1" value={subjectEn} disabled={product.reviewRequired && !review}
-        onChange={(event) => {
-          setSubjectEn(event.target.value);
-          setEnEdited(true);
-          setIsSuggesting(false);
-        }}
-        maxLength={200} />
-      {translationSuggestionAvailable && subjectUa.trim() && (
-        <button className="mt-2 text-sm underline" onClick={() => {
-          setEnEdited(false);
-          setSuggestionAttempt((current) => current + 1);
-        }}>Запропонувати переклад</button>
-      )}
-      {translationSuggestionAvailable && isSuggesting
-        && <p className="text-xs text-slate-600">Пропонуємо переклад…</p>}
-      {translationSuggestionAvailable && suggestionError && (
-        <div className="text-sm text-amber-900" role="alert">
-        {suggestionError} Англійську назву можна ввести вручну.
-        <button className="ml-2 underline" onClick={() => {
-          setEnEdited(false);
-          setSuggestionAttempt((current) => current + 1);
-        }}>Спробувати переклад ще раз</button>
-        </div>
-      )}
-      <p className="mt-3 text-sm">UA: {subjectUa.trim()
-        ? `${subjectUa.trim()} з бурштину. Арт: ${product.sku}` : '—'}</p>
-      <p className="text-sm">EN: {subjectEn.trim()
-        ? `Amber ${subjectEn.trim()}. Art: ${product.sku}` : '—'}</p>
-      {saveError && <p className="mt-2 text-sm text-red-700" role="alert">{saveError}</p>}
-      <div className="mt-3 flex gap-2">
-        <button className="btn btn-primary px-4" onClick={() => save()}
-          disabled={isSaving || !subjectUa.trim() || !subjectEn.trim()}>
-          {isSaving ? 'Зберігаємо…' : 'Зберегти назви'}
-        </button>
-        {review?.canConfirmUnchanged && review.previewToken && subjectUa === review.subjectUa && subjectEn === review.subjectEn && (
-          <button className="btn btn-outline px-4" onClick={() => save(true)} disabled={isSaving}>
-            Підтвердити без змін
-          </button>
-        )}
-        <button className="btn px-4" onClick={onClose}>Скасувати</button>
-      </div>
-    </div>
-  );
 }
 
 export function PreviewSummary({ preview, loading, onRefresh }) {
@@ -344,6 +213,7 @@ export function ExportTools({
   setExportToSku,
   exportError,
   exportStatus,
+  fetchExportStatus,
   exportPreview,
   exportSnapshot,
   setExportError,
@@ -383,6 +253,7 @@ export function ExportTools({
   const newProductCount = Number(exportStatus?.countSinceLastExport || 0);
   const newProductCopy = getNewProductCopy(newProductCount);
   const previewErrors = exportPreview?.errors || [];
+  const legacyEnabled = exportStatus?.delivery?.legacyProductCsvEnabled === true;
 
   const startPreview = (mode) => {
     setProblemsExpanded(false);
@@ -396,6 +267,18 @@ export function ExportTools({
     onPreviewExport(mode);
   };
 
+  if (canViewExport && surface !== 'prices' && !legacyEnabled && !exportSnapshot && !pendingCreate) {
+    return <Notice tone={exportStatus ? 'info' : 'warning'}>
+      <p className="font-semibold">{exportStatus?.delivery?.legacyProductCsvEnabled === false ? 'Доставку товарів через CSV вимкнено' : 'Перевіряємо доступність експорту товарів'}</p>
+      {exportStatus?.delivery?.legacyProductCsvEnabled === false && <p>{exportStatus.delivery.automaticSyncEnabled
+        ? 'Товари доставляються до Magento автоматично. Стан окремого товару доступний в його історії.'
+        : 'Автоматичну синхронізацію призупинено. Зверніться до адміністратора.'}</p>}
+      {exportError && <p role="alert">{exportError}</p>}
+      <p>Історичні файли та окремий експорт цін залишаються доступними.</p>
+      {fetchExportStatus && <button className="btn btn-outline mt-2" onClick={() => { void fetchExportStatus(); }}>Оновити стан</button>}
+    </Notice>;
+  }
+
   return (
     <section className="fade-up stagger-2 space-y-4">
       {canViewExport && surface !== 'prices' && (
@@ -406,7 +289,7 @@ export function ExportTools({
             <p className="section-subtitle mt-1">Перевірте товари, створіть незмінні файли та окремо підтвердьте експорт.</p>
           </div>}
 
-          {exportStatus?.lifecycle?.phase === 'preparing' && <p role="status" className="notice m-4">??????? ????????? ??????????? ??? ???????? ?? ????? ?????.</p>}
+          {exportStatus?.lifecycle?.phase === 'preparing' && <p role="status" className="notice m-4">Триває підготовка переходу до доставки повних товарів.</p>}
           {exportStatus?.lifecycle?.phase === 'active' && !exportPreview && !exportSnapshot && <FullProductQueues
             lifecycle={exportStatus.lifecycle} onPreview={startPreview} disabled={isExportLoading || Boolean(pendingCreate)} />}
           {durableSessions ? <>
@@ -460,8 +343,8 @@ export function ExportTools({
                   translationSuggestionAvailable={exportStatus?.translationSuggestionAvailable === true}
                   onSavedName={() => { setManualNameProduct(null); if (refreshAfterProductChange) void refreshAfterProductChange(); else markExportReviewStale?.({ kind: 'product' }); }} />
               ) : !previewErrors.length && Number(exportPreview.representedCount) > 0 ? (
-                <ReadyToCreate canCreate={canCreateExport} count={exportPreview.representedCount}
-                  loading={isExportLoading} disabled={isExportLoading || !canCreateExport || exportReviewStale || Boolean(pendingCreate)} onCreate={onCreateSnapshot} />
+                <ReadyToCreate canCreate={canCreateExport && legacyEnabled} count={exportPreview.representedCount}
+                  loading={isExportLoading} disabled={isExportLoading || !canCreateExport || !legacyEnabled || exportReviewStale || Boolean(pendingCreate)} onCreate={onCreateSnapshot} />
               ) : !previewErrors.length ? (
                 <div className="px-4 py-5 text-sm text-slate-600 sm:px-5">У вибраному діапазоні немає товарів для експорту.</div>
               ) : null}
@@ -478,7 +361,7 @@ export function ExportTools({
               translationSuggestionAvailable={exportStatus?.translationSuggestionAvailable === true}
               onSaved={() => { setManualNameProduct(null); if (refreshAfterProductChange) void refreshAfterProductChange(); else markExportReviewStale?.({ kind: 'product' }); }} />
           </WorkspaceDialog>}
-          {exportSnapshot && startNewExport && <button className="btn btn-outline m-4 px-4" onClick={startNewExport}>Новий експорт</button>}
+          {exportSnapshot && startNewExport && legacyEnabled && <button className="btn btn-outline m-4 px-4" onClick={startNewExport}>Новий експорт</button>}
           {exportError && <div className="danger-panel mx-4 mb-4 p-3 text-sm sm:mx-5" role="alert">{exportError}</div>}
 
           {!exportSnapshot && <details className="border-t border-slate-200 px-4 py-3 sm:px-5"
@@ -511,7 +394,7 @@ export function ExportTools({
       {canArchive && (
         <div className="field-group">
           <h3 className="text-lg font-semibold text-slate-900">Архівування</h3>
-          <p className="section-subtitle mt-1">Архівний артикул зберігається в базі, але не потрапляє в історію та експорт.</p>
+          <p className="section-subtitle mt-1">Архівний товар зберігається в базі та історії, але не входить до списку активних товарів.</p>
           <div className="mt-3 flex flex-col gap-3 sm:flex-row">
             <input type="text" value={skuToDelete}
               onChange={(event) => setSkuToDelete(event.target.value)}

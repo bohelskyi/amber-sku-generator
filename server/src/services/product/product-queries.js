@@ -1,18 +1,14 @@
 async function getProductBySku(queryable, fullSku) {
-  const result = await queryable.query(
-    'SELECT id, full_sku, created_at FROM products WHERE full_sku = $1 ORDER BY id ASC LIMIT 1',
-    [String(fullSku || '').trim().toUpperCase()]
-  );
-
-  return result.rows[0] || null;
+  return (await require('./public-identity').resolveProductLookup(queryable, fullSku)).product;
 }
 
 async function getRecentProducts(queryable) {
   const result = await queryable.query(
-    `SELECT *
-     FROM products
+    `SELECT p.*, i.public_sku
+     FROM products p
+     JOIN public_product_identities i ON i.id=p.public_product_identity_id
      WHERE COALESCE(status, 'active') <> 'archived'
-     ORDER BY created_at DESC
+     ORDER BY p.created_at DESC
      LIMIT 15`,
     []
   );

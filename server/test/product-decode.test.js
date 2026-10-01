@@ -12,6 +12,7 @@ test('decode reads through its supplied queryable and preserves unknown-category
   const queryable = {
     async query(sql, params) {
       calls.push({ sql, params });
+      if (sql.includes('public_product_identities')) return { rows: [] };
       return { rows: [{ code: 'NM', name: 'Necklace', requires_weight: 0 }] };
     },
   };
@@ -22,8 +23,8 @@ test('decode reads through its supplied queryable and preserves unknown-category
       && error.details.type === 'unknown_category'
       && error.details.received === 'XX'
   );
-  assert.equal(calls.length, 1);
-  assert.match(calls[0].sql, /FROM categories/);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].sql, /FROM categories/);
 });
 
 test('decode labels contextual semantic values without replacing their SKU-independent ID', () => {

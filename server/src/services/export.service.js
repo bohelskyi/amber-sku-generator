@@ -174,12 +174,14 @@ async function getExportRows(fromSku, toSku, options = {}) {
   const inRequestedRangeSql = `(${rangeClauses.join(' AND ')})`;
   const result = await queryable.query(
     `
-      SELECT p.id, p.full_sku, p.category, p.weight, p.total_price_uah,
+      SELECT p.id, p.full_sku, i.public_sku, p.public_product_identity_id,
+             p.category, p.weight, p.total_price_uah,
              p.details, p.created_at, p.magento_name_subject_ua,
              p.magento_name_subject_en, p.magento_name_review_required,
              ${options.templateInputs ? 'p.sku_schema_version_id, p.exclude_from_export,' : ''}
              ${inRequestedRangeSql} AS in_requested_range
       FROM products p
+      JOIN public_product_identities i ON i.id=p.public_product_identity_id
       ${selectionSql ? 'JOIN product_full_export_state f ON f.product_id=p.id' : ''}
       WHERE ${selectionSql || 'TRUE'} AND COALESCE(p.exclude_from_export, 0) = 0
         AND ${inRequestedRangeSql}
@@ -210,9 +212,9 @@ async function getExportRows(fromSku, toSku, options = {}) {
     ...(options.templateInputs ? { internalCatalog: [...nonSkuQuestionMaps].map(([category, questions]) =>
       [category, [...questions].map(([key, question]) => [key, { ...question, optionLabels: [...question.optionLabels] }])]) } : {}),
     range: {
-      fromSku: fromProduct.full_sku,
-      toSku: toProduct ? toProduct.full_sku : null,
-      resolvedToSku: lastRequestedRangeRow?.full_sku || fromProduct.full_sku,
+      fromSku: fromProduct.public_sku,
+      toSku: toProduct ? toProduct.public_sku : null,
+      resolvedToSku: lastRequestedRangeRow?.public_sku || fromProduct.public_sku,
       exportedToProductId: lastRequestedRangeRow ? Number(lastRequestedRangeRow.id) : 0,
     },
   };
@@ -311,10 +313,12 @@ async function resolveNewExportRange(queryable) {
   const { first_id: firstId, last_id: lastId, product_count: productCount } = result.rows[0];
   if (!productCount) return { cursor, fromSku: null, toSku: null, productCount: 0 };
   const anchors = await queryable.query(
-    'SELECT id, full_sku FROM products WHERE id = ANY($1::int[])',
+    `SELECT p.id, i.public_sku FROM products p
+     JOIN public_product_identities i ON i.id=p.public_product_identity_id
+     WHERE p.id = ANY($1::int[])`,
     [[firstId, lastId]]
   );
-  const byId = new Map(anchors.rows.map((row) => [Number(row.id), row.full_sku]));
+  const byId = new Map(anchors.rows.map((row) => [Number(row.id), row.public_sku]));
   return { cursor, fromSku: byId.get(firstId), toSku: byId.get(lastId), productCount };
 }
 
@@ -403,6 +407,13 @@ async function createExportSnapshot(input, options = {}) {
       authorityProtected = true;
     }
     const activation = await lifecycleGate.begin(client, 'BEGIN ISOLATION LEVEL REPEATABLE READ');
+    if (requestedProfile === 'magento-products-v1') {
+      const delivery = (await client.query(`SELECT legacy_product_csv_enabled
+        FROM magento_auto_sync_activation WHERE singleton FOR SHARE`)).rows[0];
+      if (!delivery?.legacy_product_csv_enabled) {
+        throw bindingTools.error(409, 'MAGENTO_PRODUCT_CSV_RETIRED', 'New Magento product CSV work is retired');
+      }
+    }
     if (activation.phase === 'active' && !template && !expectedLegacy) throw bindingTools.error(422, 'EXPORT_PREVIEW_REQUIRED', 'Preview the exact lifecycle selection first');
     let resolved = null;
     let binding = null;
@@ -810,8 +821,14 @@ async function confirmExportSnapshot(snapshotId, options = {}) {
 }
 
 async function getExportStatus(options = {}) {
-  const lifecycle = await fullSelection.queues(options.databasePool || pool);
-  const lastExportResult = await pool.query(
+  const databasePool = options.databasePool || pool;
+  const deliveryRow = (await databasePool.query(
+    'SELECT enabled, legacy_product_csv_enabled FROM magento_auto_sync_activation WHERE singleton'
+  )).rows[0];
+  const delivery = { legacyProductCsvEnabled: deliveryRow?.legacy_product_csv_enabled === true,
+    automaticSyncEnabled: deliveryRow?.enabled === true };
+  const lifecycle = await fullSelection.queues(databasePool);
+  const lastExportResult = await databasePool.query(
     `
       SELECT COALESCE(s.id, 'legacy-' || e.id::text) AS id,
              COALESCE(s.from_sku, e.from_sku) AS from_sku,
@@ -833,7 +850,7 @@ async function getExportStatus(options = {}) {
       LIMIT 1
     `
   );
-  const totalsResult = await pool.query(
+  const totalsResult = await databasePool.query(
     `SELECT
        count(*)::int AS total_count,
        COALESCE(MAX(id), 0)::int AS max_id,
@@ -849,6 +866,7 @@ async function getExportStatus(options = {}) {
   if (lastExportResult.rows.length === 0) {
     return {
       lifecycle,
+      delivery,
       hasExport: false,
       totalProducts: totalCount,
       exportableProducts: exportableCount,
@@ -862,17 +880,18 @@ async function getExportStatus(options = {}) {
   const lastExport = lastExportResult.rows[0];
   let privateResult = false;
   if (lastExport.export_session_id) {
-    try { await sessionAccess.assertSnapshotAccess(pool, lastExport, options); }
+    try { await sessionAccess.assertSnapshotAccess(databasePool, lastExport, options); }
     catch (error) { if ([403,404].includes(error.statusCode)) privateResult = true; else throw error; }
   }
   const exportedToId = Number(lastExport.exported_to_product_id || 0);
-  const sinceResult = await pool.query(
+  const sinceResult = await databasePool.query(
     'SELECT count(*)::int AS count FROM products WHERE id > $1 AND COALESCE(exclude_from_export, 0) = 0',
     [exportedToId]
   );
 
   return {
     lifecycle,
+    delivery,
     hasExport: true,
     totalProducts: totalCount,
     exportableProducts: exportableCount,

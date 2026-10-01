@@ -13,10 +13,13 @@ async function loadCorrectionHistoryReport(filters, pagination, database = pool)
 
   const [itemsResult, summaryResult, categoriesResult] = await Promise.all([
     database.query(
-      `SELECT pc.*, ${where.categoryExpression} AS category_code
+      `SELECT pc.*, ${where.categoryExpression} AS category_code,
+              spi.public_sku AS source_public_sku, cpi.public_sku AS corrected_public_sku
        FROM product_corrections pc
        LEFT JOIN products sp ON sp.id = pc.source_product_id
        LEFT JOIN products cp ON cp.id = pc.corrected_product_id
+       LEFT JOIN public_product_identities spi ON spi.id=sp.public_product_identity_id
+       LEFT JOIN public_product_identities cpi ON cpi.id=cp.public_product_identity_id
        ${where.sql}
        ORDER BY pc.created_at DESC, pc.id DESC
        ${paginationSql}`,
@@ -34,6 +37,8 @@ async function loadCorrectionHistoryReport(filters, pagination, database = pool)
        FROM product_corrections pc
        LEFT JOIN products sp ON sp.id = pc.source_product_id
        LEFT JOIN products cp ON cp.id = pc.corrected_product_id
+       LEFT JOIN public_product_identities spi ON spi.id=sp.public_product_identity_id
+       LEFT JOIN public_product_identities cpi ON cpi.id=cp.public_product_identity_id
        ${where.sql}`,
       where.values
     ),
@@ -42,6 +47,8 @@ async function loadCorrectionHistoryReport(filters, pagination, database = pool)
        FROM product_corrections pc
        LEFT JOIN products sp ON sp.id = pc.source_product_id
        LEFT JOIN products cp ON cp.id = pc.corrected_product_id
+       LEFT JOIN public_product_identities spi ON spi.id=sp.public_product_identity_id
+       LEFT JOIN public_product_identities cpi ON cpi.id=cp.public_product_identity_id
        GROUP BY ${where.categoryExpression}
        ORDER BY category_code`
     ),

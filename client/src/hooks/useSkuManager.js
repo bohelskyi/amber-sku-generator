@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { productsApi } from '../api/products-api';
+import { createRequirements } from '../lib/product-create-readiness';
 import { useProductRecount } from './useProductRecount';
 import { useCopyFeedback } from './product/useCopyFeedback';
 import { useExportWorkflow } from './product/useExportWorkflow';
@@ -56,17 +57,22 @@ export function useSkuManager({
   canApplyDirectPriceChange = canChangeProductPrice,
   canCreatePriceChangeRequest = false,
   canPriceOverride = false,
+  canViewHistory = true,
   submitMode = 'apply',
 } = {}) {
   const [config, setConfig] = useState(null);
+  const [configError, setConfigError] = useState('');
+  const [configAttempt, setConfigAttempt] = useState(0);
   const [selectedCat, setSelectedCat] = useState(null);
   const [answers, setAnswers] = useState({});
+  const [nameSubjects, setNameSubjects] = useState({ magento_name_subject_ua: '', magento_name_subject_en: '' });
   const [weight, setWeight] = useState('');
   const [livePriceData, setLivePriceData] = useState(null);
   const [livePriceError, setLivePriceError] = useState('');
   const [isLivePriceLoading, setIsLivePriceLoading] = useState(false);
   const [previewData, setPreviewData] = useState(null);
   const [saveError, setSaveError] = useState('');
+  const [savedProduct, setSavedProduct] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [displaySku, setDisplaySku] = useState('');
   const [variationData, setVariationData] = useState(null);
@@ -75,7 +81,7 @@ export function useSkuManager({
   const [manualPriceUah, setManualPriceUah] = useState('');
   const [isManualPriceEditing, setIsManualPriceEditing] = useState(false);
   const productExport = useExportWorkflow();
-  const records = useProductRecordsController({ onArchived: productExport.fetchExportStatus });
+  const records = useProductRecordsController({ canViewHistory, onArchived: productExport.fetchExportStatus });
   const copyFeedback = useCopyFeedback();
 
   const {
@@ -94,6 +100,7 @@ export function useSkuManager({
     handleRecountAnswer,
     handleRecountTextAnswer,
     handleRecountWeightChange,
+    handleRecountNameChange,
     handleStartRecount,
     hasRecountChanges,
     isInformationOnly,
@@ -151,8 +158,11 @@ export function useSkuManager({
   });
 
   useEffect(() => {
-    productsApi.getConfig().then((res) => setConfig(res.data));
-  }, []);
+    let live = true;
+    productsApi.getConfig().then((res) => { if (live) setConfig(res.data); })
+      .catch((error) => { if (live) setConfigError(getApiError(error)); });
+    return () => { live = false; };
+  }, [configAttempt]);
 
   const isCalibrated = answers.is_calibrated ?? null;
 
@@ -166,15 +176,16 @@ export function useSkuManager({
   const visibleQuestionsForSelected = questionsForSelected.filter((question) =>
     getQuestionVisibility(question)
   );
+  const createRules = createRequirements(config, selectedCat, answers);
   const requiredQuestions = visibleQuestionsForSelected
-    .filter((question) => question.required === 1)
+    .filter((question) => question.required === 1 || createRules.requiredAnswers.includes(question.id))
     .filter((question) => isTextQuestion(question) || getVisibleOptions(question).length > 0);
-  const requiredCount = requiredQuestions.length;
+  const requiredCount = requiredQuestions.length + (createRules.namesRequired ? 2 : 0);
   const answeredRequiredCount = requiredQuestions.filter((question) => {
     const value = answers[question.id];
     if (isTextQuestion(question)) return value !== undefined && String(value).trim() !== '';
     return value !== undefined;
-  }).length;
+  }).length + (createRules.namesRequired ? Object.values(nameSubjects).filter(v => v.trim()).length : 0);
   const progressPercent = selectedCat
     ? (requiredCount === 0 ? 100 : Math.round((answeredRequiredCount / requiredCount) * 100))
     : 0;
@@ -219,6 +230,7 @@ export function useSkuManager({
   };
 
   const resetProductFlow = (catCode) => {
+    setNameSubjects({ magento_name_subject_ua: '', magento_name_subject_en: '' });
     setSelectedCat(catCode);
     setAnswers({});
     setPreviewData(null);
@@ -236,6 +248,9 @@ export function useSkuManager({
 
   const handleAnswer = (questionId, valueId) => {
     invalidateProductPreview();
+    if (questionId === config?.productCreateRequirements?.[selectedCat]?.automaticName?.question) {
+      setNameSubjects({ magento_name_subject_ua: '', magento_name_subject_en: '' });
+    }
     const selectedValue = Number.parseInt(valueId, 10);
     setAnswers((prevAnswers) => {
       const nextAnswers = { ...prevAnswers };
@@ -270,6 +285,10 @@ export function useSkuManager({
     invalidateProductPreview();
     setWeight(value);
     beginLivePriceRefresh();
+  };
+  const handleNameSubject = (field, value) => {
+    invalidateProductPreview();
+    setNameSubjects(previous => ({ ...previous, [field]: value }));
   };
 
   useEffect(() => {
@@ -348,6 +367,7 @@ export function useSkuManager({
     }
 
     return productsApi.preview({
+      ...nameSubjects,
       categoryCode: selectedCat,
       answers,
       weight: isWeightRequired ? weight : 0,
@@ -375,6 +395,7 @@ export function useSkuManager({
     setSaveError('');
 
     productsApi.save({
+      ...nameSubjects,
       skuSchemaVersionId: previewData.skuSchemaVersionId,
       previewToken: previewData.previewToken,
       category: selectedCat,
@@ -383,7 +404,8 @@ export function useSkuManager({
       weight: isWeightRequired ? weight : previewData.weightVal || 0,
       manualPriceUah: hasManualPrice ? effectiveTotalPriceUah : null,
       useVariation: Boolean(variationData),
-    }).then(() => {
+    }).then((response) => {
+      setSavedProduct(response.data);
       records.fetchHistory();
       productExport.fetchExportStatus();
       resetProductFlow(null);
@@ -440,12 +462,16 @@ export function useSkuManager({
   };
 
   return {
+    nameSubjects,
+    handleNameSubject,
     ...copyFeedback,
     ...productExport,
     ...records,
     answers,
     answeredRequiredCount,
     config,
+    configError,
+    retryConfig: () => { setConfigError(''); setConfigAttempt((value) => value + 1); },
     decodeData,
     decodeError,
     decodeErrorDetails,
@@ -469,6 +495,7 @@ export function useSkuManager({
     handleRecountAnswer,
     handleRecountTextAnswer,
     handleRecountWeightChange,
+    handleRecountNameChange,
     handleResetManualPrice,
     handleSave,
     handleStartManualPriceEdit,
@@ -523,6 +550,7 @@ export function useSkuManager({
     priceChangePreview,
     priceChangeUsdPerGram,
     saveError,
+    savedProduct,
     resetProductFlow,
     selectedCat,
     setSelectedCat,

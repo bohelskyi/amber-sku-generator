@@ -8,9 +8,11 @@ async function searchSampleProducts(client, input) {
     || (input.offset !== undefined && (!['string', 'number'].includes(typeof input.offset)
       || !/^(0|[1-9][0-9]{0,5})$/.test(String(input.offset))))) invalid();
   const offset = Number(input.offset || 0);
-  const { rows } = await client.query(`SELECT id, full_sku, category, status
-    FROM products WHERE strpos(lower(full_sku), lower($1)) > 0
-    ORDER BY (lower(full_sku) = lower($1)) DESC, id DESC LIMIT $2 OFFSET $3`, [input.q.trim(), 21, offset]);
+  const { rows } = await client.query(`SELECT p.id,p.full_sku,i.public_sku,p.category,p.status
+    FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
+    WHERE strpos(lower(p.full_sku),lower($1))>0 OR strpos(lower(i.public_sku),lower($1))>0
+    ORDER BY (lower(i.public_sku)=lower($1)) DESC,(lower(p.full_sku)=lower($1)) DESC,p.id DESC
+    LIMIT $2 OFFSET $3`, [input.q.trim(), 21, offset]);
   return { products: rows.slice(0, 20), nextOffset: rows.length > 20 ? offset + 20 : null };
 }
 

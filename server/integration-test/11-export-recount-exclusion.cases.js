@@ -2,9 +2,9 @@ const { test, assert, pool, crypto, request, authenticateApplicationSession } = 
 const { ensureLegacySkuSchemas } = require('../src/services/sku-schema.service');
 const { loadMagentoCatalog, mapProduct } = require('../src/services/magento-products-v1');
 
-async function installSouvenirFixture() {
+async function installSouvenirFixture(queryable = pool, { ensureSchemas = true } = {}) {
   // Disposable catalog only. Run before the template modules add archived SV schemas.
-  await pool.query(`INSERT INTO categories(code,name,requires_weight,skip_hidden_sku_questions)
+  await queryable.query(`INSERT INTO categories(code,name,requires_weight,skip_hidden_sku_questions)
     VALUES('SV','Сувеніри',0,0) ON CONFLICT(code) DO NOTHING`);
   const definitions = [
     ['material', null, 2], ['color', null, 3], ['souvenir', null, 1],
@@ -14,20 +14,20 @@ async function installSouvenirFixture() {
     ['stone_processing', { souvenir: 5 }, 1], ['additional_stone', { souvenir: 5 }, 1],
   ];
   for (const [index, [key, visible, value]] of definitions.entries()) {
-    let q = (await pool.query('SELECT id FROM questions WHERE category_code=$1 AND key=$2', ['SV', key])).rows[0];
-    if (!q) q = (await pool.query(`INSERT INTO questions
+    let q = (await queryable.query('SELECT id FROM questions WHERE category_code=$1 AND key=$2', ['SV', key])).rows[0];
+    if (!q) q = (await queryable.query(`INSERT INTO questions
       (category_code,key,label,sku_index,display_order,required,include_in_sku,input_type,visible_if_json)
       VALUES('SV',$1,$1,$2::int,$2::int,$3,1,'options',$4::jsonb) RETURNING id`,
     [key, index + 1, index < 4 ? 1 : 0, visible ? JSON.stringify(visible) : null])).rows[0];
-    await pool.query(`INSERT INTO options(question_id,value_id,sku_code,label)
+    await queryable.query(`INSERT INTO options(question_id,value_id,sku_code,label)
       SELECT $1,$2,$3,$3 WHERE NOT EXISTS(SELECT 1 FROM options WHERE question_id=$1 AND value_id=$2)`,
     [q.id, value, String(value)]);
   }
-  for (const key of ['weight', 'size']) await pool.query(`INSERT INTO questions
+  for (const key of ['weight', 'size']) await queryable.query(`INSERT INTO questions
     (category_code,key,label,sku_index,display_order,required,include_in_sku,input_type)
     SELECT 'SV',$1,$1,0,99,0,0,'text'
     WHERE NOT EXISTS(SELECT 1 FROM questions WHERE category_code='SV' AND key=$1)`, [key]);
-  await ensureLegacySkuSchemas();
+  if (ensureSchemas) await ensureLegacySkuSchemas();
 }
 
 module.exports = { installSouvenirFixture };
@@ -45,12 +45,10 @@ test('recount export exclusion reproduction: comma weight successor misses refre
   };
   const answers = { material: 2, color: 3, souvenir: 1, statuette: 5, weight: 1260, size: '23/6/30' };
   const createProduct = async () => {
-    const preview = await call('/api/preview', { categoryCode: 'SV', answers, weight: 1260 });
-    const saved = await call('/api/save', { category: 'SV', answers, weight: 1260,
+    const names = { magento_name_subject_ua: 'Символіка', magento_name_subject_en: 'symbolic figurine' };
+    const preview = await call('/api/preview', { categoryCode: 'SV', answers, weight: 1260, ...names });
+    const saved = await call('/api/save', { category: 'SV', answers, weight: 1260, ...names,
       skuSchemaVersionId: preview.skuSchemaVersionId, previewToken: preview.previewToken, manualPriceUah: 21700 });
-    // A stored UA/EN pair mirrors the operator's source. This is fixture data only.
-    await pool.query(`UPDATE products SET magento_name_subject_ua=$1,magento_name_subject_en=$2 WHERE id=$3`,
-      ['Символіка', 'symbolic figurine', saved.id]);
     return (await pool.query('SELECT * FROM products WHERE id=$1', [saved.id])).rows[0];
   };
   const capture = (preview) => call('/api/export/snapshots', {

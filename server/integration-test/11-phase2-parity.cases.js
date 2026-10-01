@@ -19,8 +19,9 @@ const capture = (p, db = pool) => exportsService.createExportSnapshot({ ...range
 const confirm = (s, db = pool) => exportsService.confirmExportSnapshot(s.id, opts(db));
 async function setup() { actor = await authenticateApplicationSession(); await installSouvenirFixture(); }
 async function save(review = false) {
-  const preview = await products.buildProductPreview({ categoryCode: 'SV', answers, weight: 1260 });
-  const saved = await products.saveProduct({ category: 'SV', answers, weight: 1260, manualPriceUah: 21700,
+  const subjects = { magento_name_subject_ua: 'Фігура', magento_name_subject_en: 'Figurine' };
+  const preview = await products.buildNewProductPreview({ categoryCode: 'SV', answers, weight: 1260, ...subjects });
+  const saved = await products.saveProduct({ category: 'SV', answers, weight: 1260, manualPriceUah: 21700, ...subjects,
     skuSchemaVersionId: preview.skuSchemaVersionId, previewToken: preview.previewToken }, opts());
   // Explicit fixture baseline; tested public name commands start from full revision 1.
   await pool.query(`UPDATE products SET magento_name_subject_ua='Фігура', magento_name_subject_en='Figurine',
@@ -68,9 +69,9 @@ test('phase2 new requests bind lifecycle, complete lineage, inherited names and 
   await setup(); const p = await save(); const before = await state(p.id);
   const r = await claimed(p, { symbolic_stat: 1 });
   const stored = await requestRow(r.id); const evidence = stored.proposed_payload.recountEvidence;
-  assert.equal(evidence.version, 2); assert.deepEqual(evidence.names, { ua: 'Фігура', en: 'Figurine', reviewRequired: true });
+  assert.equal(evidence.version, 5); assert.deepEqual(evidence.names, { ua: 'Фігура', en: 'Figurine', reviewRequired: false });
   assert.equal(evidence.lifecycle[0].deliveryVersion, '1'); assert.equal(evidence.exposure.classification, 'reliably_unexposed');
-  assert.equal(r.delivery.route, 'normal'); assert.equal(r.delivery.nameReviewRequired, true); assert.equal(r.refreshRequired, false);
+  assert.equal(r.delivery.route, 'normal'); assert.equal(r.delivery.nameReviewRequired, false); assert.equal(r.refreshRequired, false);
   const unchanged = await refresh(r); assert.deepEqual(unchanged.request.proposedPayload.recountEvidence, evidence);
   assert.deepEqual(await state(p.id), before); assert.deepEqual(await product(p.id), p);
   assert.equal((await pool.query('SELECT * FROM product_corrections WHERE source_product_id=$1', [p.id])).rows.length, 0);
@@ -83,7 +84,7 @@ test('phase2 new requests bind lifecycle, complete lineage, inherited names and 
   assert.notEqual((await requestRow(r.id)).preview_signature, stored.preview_signature);
   const done = await complete(refreshed);
   assert.equal((await state(done.recount.correctedProductId)).hold_reason, 'prior_exposure');
-  assert.equal((await product(done.recount.correctedProductId)).magento_name_review_required, true);
+  assert.equal((await product(done.recount.correctedProductId)).magento_name_review_required, false);
   assert.equal((await state(p.id)).revision, '2');
   await confirm(s); assert.equal((await state(done.recount.correctedProductId)).confirmed_revision, '0');
 });
@@ -196,6 +197,7 @@ for (const kind of ['information', 'name']) for (const previouslyConfirmed of [f
 
 test('phase2 inherited pair confirmation is explicit, versioned, audited, stale-safe and payload-revision neutral', async () => {
   await setup(); const source = await save(); const successor = await direct(source, { symbolic_stat: 1 });
+  await pool.query('UPDATE products SET magento_name_review_required=TRUE WHERE id=$1', [successor.correctedProductId]);
   const p = await product(successor.correctedProductId); assert.equal(p.magento_name_review_required, true);
   const input = await nameInput(p, true);
   const metadata = await names.previewProductMagentoName({ productId: p.id }); assert.equal(metadata.canConfirmUnchanged, true);

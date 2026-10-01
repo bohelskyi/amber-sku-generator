@@ -19,6 +19,7 @@ for (const modulePath of [
   './10-repricing.cases',
   './11-exports-schemas.cases',
   './11-magento-products.cases',
+  './11-magento-binding-evidence.cases',
   './11-export-recount-exclusion.cases',
   './11-full-product-lifecycle.cases',
   './11-phase2-parity.cases',
@@ -32,9 +33,19 @@ for (const modulePath of [
   './12-export-source-support.cases',
   './12-export-ux3.cases',
   './12-export-ux4.cases',
+  './12-magento-bindings.cases',
+  './12-magento-exposure.cases',
+  './12-sv-readiness.cases',
+  './12-magento-sync.cases',
   './13-sqlite-import.cases',
   './14-phase3-repair.cases',
   './15-cutover.cases',
+  './16-sv-create.cases',
+  './17-magento-automatic.cases',
+  './18-magento-delivery-cutover.cases',
+  './19-stable-public-sku.cases',
+  './20-legacy-sku-repair.cases',
+  './21-external-delivery.cases',
 ]) {
   require(modulePath);
 }

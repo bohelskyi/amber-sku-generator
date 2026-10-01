@@ -10,6 +10,8 @@ async function start() {
   await runMigrations();
   await seedDefaultData();
   await ensureLegacySkuSchemas();
+  const automaticSync = require('./src/services/magento/automatic-sync-runtime')
+    .startAutomaticSync(require('./src/config/env'), logger);
   const server = app.listen(PORT, () => {
     logger.info('server.started', { port: PORT });
   });
@@ -17,6 +19,7 @@ async function start() {
   const shutdown = async (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
+    const workerStopped = automaticSync.stop();
     logger.info('server.shutdown.started', { signal });
     const forceTimer = setTimeout(() => {
       logger.error('server.shutdown.timeout', { timeoutMs: 10000 });
@@ -26,6 +29,7 @@ async function start() {
     server.close(async (error) => {
       if (error) logger.error('server.http.close_failed', { error: error.message });
       try {
+        await workerStopped;
         await pool.end();
         clearTimeout(forceTimer);
         logger.info('server.shutdown.completed', { signal });

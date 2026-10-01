@@ -159,6 +159,9 @@ function applyManualOverridesToPreview(
     }
     const isResolvableManualPriceError = item.status === 'error'
       && ['price_missing', 'manual_price'].includes(item.errorCode);
+    if (item.manualPreserved) {
+      throw Object.assign(new Error('Ручну ціну змінюють окремою зміною ціни товару.'), { statusCode: 422 });
+    }
     if (item.status === 'error' && !isResolvableManualPriceError) {
       const error = new Error(`Для товару ${item.sku} спочатку потрібно усунути помилку розрахунку.`);
       error.statusCode = 422;
@@ -175,7 +178,7 @@ function applyManualOverridesToPreview(
     }
     const automaticPriceUah = toUahNumber(item.automaticPriceUah ?? item.newPriceUah);
     const hasAutomaticPrice = preview.scope === REPRICING_SCOPE_GLOBAL
-      && item.errorCode === 'manual_price'
+      && (item.manualPreserved || item.errorCode === 'manual_price')
       && item.pricingDetails?.matrix
       && automaticPriceUah !== null
       && automaticPriceUah > 0;
@@ -195,6 +198,8 @@ function applyManualOverridesToPreview(
         priceDeltaUah: newPriceUah - Number(item.oldPriceUah || 0),
         status: 'changed',
         manualOverride: false,
+        manualPreserved: false,
+        errorCode: null,
         useAutomatic: true,
         resolvedManualPrice: true,
         pricingState: 'automatic',
@@ -241,6 +246,10 @@ function applyManualOverridesToPreview(
       changedCount: items.filter((item) => item.status === 'changed').length,
       unchangedCount: items.filter((item) => item.status === 'unchanged').length,
       errorCount: items.filter((item) => item.status === 'error').length,
+      manualPreservedCount: items.filter((item) => item.manualPreserved).length,
+      currentCount: items.filter((item) => item.status === 'unchanged' && !item.manualPreserved).length,
+      categories: [...new Set(items.filter((item) => item.status === 'changed').map((item) => item.categoryCode))]
+        .map((code) => ({ code, count: items.filter((item) => item.status === 'changed' && item.categoryCode === code).length })),
     },
     items,
   };

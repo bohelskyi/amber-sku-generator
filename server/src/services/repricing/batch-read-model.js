@@ -49,6 +49,26 @@ async function getRepricingBatches(limit = 20) {
   }));
 }
 
+async function getBatchSyncStatus(batchId, db = pool) {
+  const id = Number(batchId);
+  if (!Number.isSafeInteger(id) || id <= 0) throw Object.assign(new Error('Некоректна переоцінка.'), { statusCode: 422 });
+  const batch = (await db.query('SELECT id,status,changed_count FROM repricing_batches WHERE id=$1', [id])).rows[0];
+  if (!batch) throw Object.assign(new Error('Переоцінку не знайдено.'), { statusCode: 404 });
+  const rows = (await db.query(`SELECT ri.magento_sync_generation,r.synced_generation,r.state
+    FROM repricing_items ri JOIN products p ON p.id=ri.product_id
+    LEFT JOIN magento_product_sync_requests r ON r.public_product_identity_id=p.public_product_identity_id
+    WHERE ri.batch_id=$1`, [id])).rows;
+  const result = { batchId: id, status: batch.status, total: Number(batch.changed_count),
+    synced: 0, pending: 0, needsAttention: 0, notTracked: 0 };
+  for (const row of rows) {
+    if (!row.magento_sync_generation) result.notTracked++;
+    else if (BigInt(row.synced_generation || 0) >= BigInt(row.magento_sync_generation)) result.synced++;
+    else if (row.state === 'needs_attention') result.needsAttention++;
+    else result.pending++;
+  }
+  return result;
+}
+
 async function getRepricingBatchItems(batchId) {
   const batchResult = await pool.query(
     'SELECT id, scenario_name, applied_at FROM repricing_batches WHERE id = $1 LIMIT 1',
@@ -127,6 +147,7 @@ async function getRepricingRollbackItems(batchId) {
 }
 
 module.exports = {
+  getBatchSyncStatus,
   getRepricingBatchItems,
   getRepricingBatches,
   getRepricingRollbackItems,

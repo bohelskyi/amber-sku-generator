@@ -216,8 +216,9 @@ for(const sameKey of [true,false])test(`active reconciliation serializes two ind
 
 test('active recount first delivery and a real capture-before-recount race preserve the successor obligation',async()=>{
   const products=require('../src/services/product.service');const sample=await f.product(generated.id);
-  const preview=await products.buildProductPreview({categoryCode:'SV',answers:sample.details.answers,weight:1260});
-  const created=await products.saveProduct({category:'SV',answers:sample.details.answers,weight:1260,manualPriceUah:21700,
+  const names={magento_name_subject_ua:sample.magento_name_subject_ua,magento_name_subject_en:sample.magento_name_subject_en};
+  const preview=await products.buildNewProductPreview({categoryCode:'SV',answers:sample.details.answers,weight:1260,...names});
+  const created=await products.saveProduct({category:'SV',answers:sample.details.answers,weight:1260,manualPriceUah:21700,...names,
     skuSchemaVersionId:preview.skuSchemaVersionId,previewToken:preview.previewToken},f.opts());
   await fixtureMutation(c=>c.query("UPDATE products SET magento_name_subject_ua='Фігура',magento_name_subject_en='Figurine' WHERE id=$1",[created.id]));
   const first=await f.recount(await f.recountInput(await f.product(created.id)));const p=await f.product(first.correctedProductId);

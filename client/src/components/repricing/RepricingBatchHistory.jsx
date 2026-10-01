@@ -1,3 +1,5 @@
+import { RepricingSyncProgress } from './RepricingSyncProgress.jsx';
+import { useState } from 'react';
 import { Download, Undo2 } from 'lucide-react';
 
 const formatDate = (value) => (
@@ -6,6 +8,13 @@ const formatDate = (value) => (
       .format(new Date(value))
     : '-'
 );
+function BatchSyncDetails({ batchId }) {
+  const [open, setOpen] = useState(false);
+  return <details className="mt-2" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary className="cursor-pointer text-xs">Magento</summary>
+    {open && <RepricingSyncProgress batchId={batchId} />}
+  </details>;
+}
 
 export function RepricingBatchHistory({ canRollbackRepricing, controller }) {
   const {
@@ -54,7 +63,7 @@ export function RepricingBatchHistory({ canRollbackRepricing, controller }) {
                     </span>
                   )}
                 </td>
-                <td className="table-cell text-right text-sm">{batch.changed_count}</td>
+                <td className="table-cell text-right text-sm">{batch.changed_count}<BatchSyncDetails batchId={batch.id} /></td>
                 <td className="table-cell text-right">
                   <div className="flex justify-end gap-1.5">
                     <button

@@ -43,7 +43,7 @@ export function RepricingScopePanel({ controller }) {
             ? <FilePenLine size={16} />
             : <RefreshCw size={16} className={previewing ? 'animate-spin' : ''} />}
           {previewing
-            ? 'Розрахунок...'
+            ? 'Готуємо переоцінку…'
             : selectedDraft
               ? 'Продовжити чернетку'
               : 'Попередній перегляд'}

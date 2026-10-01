@@ -166,10 +166,11 @@ describe('Home workspace', () => {
   });
 
   it('shows an operator-facing new-product count without raw export totals or cursor IDs', () => {
-    renderHome({ exportStatus: { hasExport: true, countSinceLastExport: 25,
+    renderHome({ exportStatus: { delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false }, hasExport: true, countSinceLastExport: 25,
       totalProducts: 400, exportableProducts: 390,
       lastExport: { createdAt: '2026-09-22T10:00:00.000Z', exportedToProductId: 375 } } });
-    expect(screen.getByText('25 нових товарів очікують експорту')).toBeTruthy();
+    expect(screen.queryByText('25 нових товарів очікують експорту')).toBeNull();
+    expect(screen.getByText('Magento')).toBeTruthy();
     expect(screen.queryByText(/У базі:/)).toBeNull();
     expect(screen.queryByText(/До експорту:/)).toBeNull();
     expect(screen.queryByText(/375/)).toBeNull();

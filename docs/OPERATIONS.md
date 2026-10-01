@@ -8,6 +8,28 @@ Startup applies migrations, seeds only an empty configuration when appropriate, 
 
 Credentials and OIDC/session secrets come from the ignored project-level `.env` or process environment. Changing `.env` does not rotate credentials inside an already-initialized PostgreSQL volume. `VITE_*` variables are public browser configuration and must never contain secrets.
 
+Server-only Magento OAuth configuration, GET-only discovery/review, explicit category
+creation and durable CLI sync jobs are documented in [Magento integration](MAGENTO_INTEGRATION.md).
+Migrations 041/042 are installed in the local operator database. The first published
+KL revision and successful real UPDATE of `KL3/11131351005`, job
+`f2253960-527a-40e9-b879-9041bb036453`, are recorded in the
+[2026-09-28 receipt](MAGENTO_INTEGRATION.md#achieved-state-2026-09-28).
+This does not certify migration installation in another deployment.
+
+The [automatic workflow](MAGENTO_AUTOMATIC_SYNC.md) starts behind a durable,
+default-disabled gate with an isolated worker pool and product-history status.
+It does not activate on migration/startup. `magento:sync` without `--apply` performs
+GET review **and persists a local queued job**; use the existing schema/evidence/preview
+read paths for a strictly read-only review. Product writes require explicit APPLY,
+current published bindings and fresh revalidation; success requires read-after-write
+verification. Keep category creation and binding publication as separate reviewed
+operations. CREATE uses disabled status; UPDATE preserves status/inventory, adds
+website memberships and scopes EN writes. Do not replay uncertain steps blindly.
+
+CSV retirement is planned only after existing queued/export work is reconciled;
+see [the retirement boundary](EXPORTS.md#planned-csv-retirement). Neither first sync
+success nor migrations 041/042 activate the CSV selector or retire its queues.
+
 ## OIDC deployment
 
 The repository's example production application locations are:
@@ -66,6 +88,23 @@ sh ./scripts/postgres-restore.sh /secure/local/backup/path/amber-YYYYMMDDTHHMMSS
 ```
 
 Before restore, verify both dump path and target environment. Keep backups outside the repository, copy them to monitored off-host storage, and regularly test restores in a disposable environment. Scheduling, retention, encryption, off-host transfer, monitoring, and disaster-recovery orchestration are external infrastructure responsibilities.
+
+## Client nginx and server replacement
+
+The client nginx template resolves its API upstream at request time through Docker embedded DNS (`127.0.0.11`, `valid=1s`, IPv6 lookup disabled). The variable upstream forwards `$request_uri` unchanged, including `/api/`, encoded values, repeated query parameters and OIDC callback parameters. Explicit proxy redirect handling preserves the previous upstream-relative redirect behavior. Host, real IP, forwarded chain/protocol and cookies keep their existing behavior; OIDC callback access-log redaction remains enabled.
+
+Keep Compose `NGINX_ENVSUBST_FILTER=^SERVER_`: only `SERVER_HOST`/`SERVER_PORT` are substituted; nginx runtime variables must remain intact. Deploying the changed nginx configuration initially requires the normal client image deployment. Later server-container replacements do not require a client restart or nginx reload. A one-server deployment can still have an outage while its upstream is absent; DNS recovery is bounded after the new server becomes ready.
+
+Validate without starting or replacing real application services:
+
+```text
+docker compose -f docker-compose.yml -f docker-compose.local.yml config --quiet
+docker compose build client
+node scripts/test-nginx-dns.mjs amber-app-client
+node scripts/test-nginx-dns.mjs amber-app-client --negative-control
+```
+
+The smoke owns its uniquely named containers/network, uses a mock server, verifies different server IPs and unchanged nginx process/container identity, and cleans up its resources. It also checks nginx syntax, URI/header/cookie/redirect transport, callback-log redaction, real asset caching, missing asset 404 and SPA fallback. No database or Magento service is involved. The image argument must identify the just-built client image; Compose's image name can differ with its project name.
 
 ## Integrity audit and SQLite import
 

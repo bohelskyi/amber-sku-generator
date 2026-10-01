@@ -109,7 +109,9 @@ async function getExportGuidance(client, product) {
     if (state.route === 'hold') return {mode:'held',eligible:false,holdReason:state.hold_reason};
     if (state.route === 'retired' || state.business_exclusion_state !== 'none' || state.recount_compatibility_excluded) return {mode:'excluded',eligible:false};
     if (state.route === 'replacement') return {mode:'replacement',eligible:true,deliveryVersion:state.delivery_version};
-    return {mode:BigInt(state.confirmed_revision)>0n || BigInt(state.cutover_baseline_revision)>0n ? 'reexport' : 'next_normal_export',eligible:true};
+    return {mode:BigInt(state.confirmed_revision)>0n || BigInt(state.cutover_baseline_revision)>0n
+      || BigInt(state.externally_delivered_revision)>0n || BigInt(state.csv_retired_revision)>0n
+      ? 'reexport' : 'next_normal_export',eligible:true};
   }
   if (Number(product.exclude_from_export) === 1) {
     return { mode: 'excluded', eligible: false };
@@ -185,11 +187,13 @@ async function previewProductInformation(payload = {}) {
   const client = await pool.connect();
   try {
     await lifecycleGate.begin(client, 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const result = await client.query('SELECT * FROM products WHERE id = $1', [productId]);
+    const result = await client.query(`SELECT p.*,i.public_sku FROM products p
+      JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id = $1`, [productId]);
     const product = result.rows[0];
     const preview = await evaluate(client, product, patch);
     await lifecycleGate.commit(client);
-    return { productId, sku: product.full_sku, ...preview, newAnswers: undefined };
+    return { productId, sku: product.full_sku, internalSku: product.full_sku,
+      publicSku: product.public_sku, ...preview, newAnswers: undefined };
   } catch (error) {
     await lifecycleGate.rollback(client);
     throw error;
@@ -210,7 +214,8 @@ async function applyProductInformation(payload = {}, options = {}) {
   const client = await (options.databasePool || pool).connect();
   try {
     await lifecycleGate.begin(client, 'BEGIN');
-    const result = await client.query('SELECT * FROM products WHERE id = $1 FOR UPDATE', [productId]);
+    const result = await client.query(`SELECT p.*,i.public_sku FROM products p
+      JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id = $1 FOR UPDATE OF p`, [productId]);
     const product = result.rows[0];
     const preview = await evaluate(client, product, patch, true);
     if (preview.previewToken !== token) {
@@ -233,7 +238,8 @@ async function applyProductInformation(payload = {}, options = {}) {
         reason: String(payload.reason || '').trim() || null },
     });
     await lifecycleGate.commit(client);
-    return { productId, sku: product.full_sku, changes: preview.changes,
+    return { productId, sku: product.full_sku, internalSku: product.full_sku,
+      publicSku: product.public_sku, changes: preview.changes,
       exportGuidance: preview.exportGuidance, fullRevision: lifecycle.revision };
   } catch (error) {
     await lifecycleGate.rollback(client);

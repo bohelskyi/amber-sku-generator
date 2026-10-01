@@ -7,6 +7,7 @@ import {
   formatWholeUah,
 } from '../../lib/formatters';
 import { handleNumberKeyDown, handleNumberWheel } from '../../lib/number-input';
+import { createRequirements } from '../../lib/product-create-readiness';
 
 const hasAnswer = (value) =>
   value !== undefined && value !== null && String(value).trim() !== '';
@@ -31,6 +32,8 @@ export function ProductBuilder({
   config,
   selectedCat,
   answers,
+  nameSubjects = {},
+  onNameSubject,
   weight,
   setWeight,
   isWeightRequired,
@@ -71,6 +74,7 @@ export function ProductBuilder({
   const [verificationError, setVerificationError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const category = config.categories[selectedCat];
+  const createRules = createRequirements(config, selectedCat, answers);
   const isVerified = Boolean(previewData);
   const visibleQuestions = (config.questions[selectedCat] || []).filter((question) =>
     isQuestionVisible(question, answers)
@@ -83,7 +87,7 @@ export function ProductBuilder({
     const visibleOptions = getVisibleOptionsForQuestion(question, answers);
     const hasAvailableControl = textQuestion || visibleOptions.length > 0;
 
-    if (question.required === 1 && hasAvailableControl && !hasAnswer(value)) {
+    if ((question.required === 1 || createRules.requiredAnswers.includes(question.id)) && hasAvailableControl && !hasAnswer(value)) {
       blockers.push({
         fieldId: question.id,
         message: `Заповніть поле «${question.label}».`,
@@ -98,8 +102,17 @@ export function ProductBuilder({
         message: `Значення у полі «${question.label}» недоступне.`,
       });
     }
+    if (question.id === 'weight' && createRules.requiredAnswers.includes('weight') && hasAnswer(value)
+      && (!Number.isFinite(Number(value)) || Number(value) <= 0)) {
+      blockers.push({ fieldId: question.id, message: 'Вкажіть додатну вагу; для дробової частини використовуйте крапку.' });
+    }
     return blockers;
   }, []);
+  if (createRules.namesRequired) {
+    for (const [field, label] of [['magento_name_subject_ua', 'Назва предмета українською'], ['magento_name_subject_en', 'Назва предмета англійською']]) {
+      if (!hasAnswer(nameSubjects[field])) fieldBlockers.push({ fieldId: field, message: `Заповніть поле «${label}».` });
+    }
+  }
 
   if (!hasValidWeight) {
     fieldBlockers.push({
@@ -193,7 +206,7 @@ export function ProductBuilder({
           {visibleQuestions.map((question) => {
             const visibleOptions = getVisibleOptionsForQuestion(question, answers);
             const textQuestion = isTextQuestion(question);
-            const isRequired = question.required === 1
+            const isRequired = (question.required === 1 || createRules.requiredAnswers.includes(question.id))
               && (textQuestion || visibleOptions.length > 0);
             const blocker = blockerByFieldId.get(question.id);
             const blockerMessageId = `builder-blocker-${question.id}`;
@@ -217,6 +230,7 @@ export function ProductBuilder({
                     <input
                       id={`builder-${question.id}`}
                       type="text"
+                      required={isRequired}
                       className="input builder-text-input"
                       value={answers[question.id] || ''}
                       onChange={(event) => {
@@ -267,6 +281,26 @@ export function ProductBuilder({
             );
           })}
 
+          {createRules.namesRequired && <>
+            <p className="text-sm text-slate-600">Вкажіть лише назву предмета. «З бурштину» та артикул додаються автоматично.</p>
+            {[['magento_name_subject_ua', 'Назва предмета українською'], ['magento_name_subject_en', 'Назва предмета англійською']].map(([field, label]) => (
+              <div key={field} className={`builder-field-row ${blockerByFieldId.has(field) ? 'is-invalid' : ''}`}
+                data-builder-blocker={blockerByFieldId.has(field) ? 'true' : undefined} tabIndex={blockerByFieldId.has(field) ? -1 : undefined}>
+                <div className="builder-field-label">
+                  <label htmlFor={`builder-${field}`}>{label}<span className="required-marker" aria-label="обов’язкове поле">*</span></label>
+                </div>
+                <div className="min-w-0">
+                  <input id={`builder-${field}`} className="input builder-text-input" required maxLength={200}
+                    value={nameSubjects[field] || ''} disabled={isVerifying}
+                    aria-invalid={blockerByFieldId.has(field) ? 'true' : undefined}
+                    aria-describedby={blockerByFieldId.has(field) ? `builder-blocker-${field}` : undefined}
+                    onChange={event => { prepareForEdit(); onNameSubject(field, event.target.value); }} />
+                  {blockerByFieldId.has(field) && <p id={`builder-blocker-${field}`} className="builder-field-error" role="alert">{blockerByFieldId.get(field).message}</p>}
+                </div>
+              </div>
+            ))}
+          </>}
+
           {isWeightRequired && (
             <WeightField
               blocker={blockerByFieldId.get('weight')}
@@ -299,7 +333,10 @@ export function ProductBuilder({
                   : 'Не потрібна'}
                 danger={validationFailed && isWeightRequired && !hasValidWeight}
               />
-              <SummaryRow label="SKU" value={isVerified ? finalSku : '—'} strong={isVerified} mono />
+              <details className="mt-2 text-xs"><summary className="cursor-pointer text-slate-500">Технічні деталі</summary>
+                <SummaryRow label="Внутрішній SKU" value={isVerified ? finalSku : '—'} mono />
+              </details>
+              <p className="text-xs text-slate-500">Артикул буде призначено сервером після збереження товару.</p>
               {isVerified && isVariationActive && (
                 <p className="builder-summary-note">
                   Варіація #{String(variationData.variationNumber).padStart(3, '0')}

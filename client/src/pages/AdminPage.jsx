@@ -2,7 +2,7 @@ import { AdminHeader } from '../components/admin/AdminHeader';
 import { AdminPricingEditor } from '../components/admin/AdminPricingEditor';
 import { AdminStructureEditor } from '../components/admin/AdminStructureEditor';
 import { ValidationIssues } from '../components/admin/ValidationIssues';
-import { LoadingState } from '../components/app/UiPrimitives.jsx';
+import { LoadingState, Notice } from '../components/app/UiPrimitives.jsx';
 import { useAdminPanel } from '../hooks/useAdminPanel';
 
 export default function AdminPage() {
@@ -10,7 +10,8 @@ export default function AdminPage() {
 
   if (!admin.config) {
     return (
-      <div className="app-page"><LoadingState label="Збираємо конфігурацію та цінові сценарії…" /></div>
+      <div className="app-page p-6">{admin.configError ? <Notice tone="error"><p>{admin.configError}</p><button className="btn btn-outline" onClick={admin.retryConfig}>Спробувати ще раз</button></Notice>
+        : <LoadingState label="Збираємо конфігурацію та цінові сценарії…" />}</div>
     );
   }
 
@@ -46,6 +47,7 @@ export default function AdminPage() {
         )}
         {admin.canViewCatalog && <section id="catalog-structure" className="admin-anchor-section">
           <AdminStructureEditor
+            canManage={admin.canManageCatalog}
             config={admin.config}
           selectedCat={admin.selectedCat}
           selectedQuestion={admin.selectedQuestion}

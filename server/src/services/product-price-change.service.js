@@ -18,9 +18,9 @@ const {
 } = require('./repricing/pricing-state');
 const { roundAutomaticUah, toUahNumber } = require('../utils/money');
 
-const PRODUCT_COLUMNS = `id, full_sku, category, weight, total_price, total_price_uah,
-  price_per_gram, uah_rate, details, status, corrected_to_product_id,
-  sku_schema_version_id`;
+const PRODUCT_COLUMNS = `p.id,p.full_sku,i.public_sku,p.category,p.weight,p.total_price,p.total_price_uah,
+  p.price_per_gram,p.uah_rate,p.details,p.status,p.corrected_to_product_id,
+  p.sku_schema_version_id`;
 
 function commandError(message, statusCode = 422, code = null) {
   const error = new Error(message);
@@ -235,6 +235,8 @@ function buildPreviewResponse(product, decision, projected) {
   return {
     productId: Number(product.id),
     sku: product.full_sku,
+    internalSku: product.full_sku,
+    publicSku: product.public_sku || product.full_sku,
     pricingDecision: decision,
     currentPriceUah,
     resultingPriceUah,
@@ -252,9 +254,9 @@ function buildPreviewResponse(product, decision, projected) {
 async function loadProduct(productId, queryable, { lock = false } = {}) {
   const result = await queryable.query(
     `SELECT ${PRODUCT_COLUMNS}
-     FROM products
-     WHERE id = $1
-     ${lock ? 'FOR UPDATE' : ''}`,
+     FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
+     WHERE p.id = $1
+     ${lock ? 'FOR UPDATE OF p' : ''}`,
     [productId]
   );
   return result.rows[0] || null;
@@ -480,6 +482,8 @@ async function applyProductPriceChangeInTransaction(payload = {}, options = {}) 
       success: true,
       productId,
       sku: product.full_sku,
+      internalSku: product.full_sku,
+      publicSku: product.public_sku || product.full_sku,
       pricingDecision: decision,
       currentPriceUah: authoritativePreview.currentPriceUah,
       resultingPriceUah: authoritativePreview.resultingPriceUah,

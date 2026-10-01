@@ -204,7 +204,7 @@ test('product builder uses compact ordered rows and keeps operational status in 
   assert.match(builderSource, /label="Розрахункова"/);
   assert.match(builderSource, /label="Фінальна"/);
   assert.match(builderSource, /Змінити ціну/);
-  assert.match(builderSource, /label="SKU"/);
+  assert.match(builderSource, /label="Внутрішній SKU"/);
   assert.match(builderSource, /verificationAttempt > 0/);
   assert.match(builderSource, /validationVisible \? fieldBlockers : \[\]/);
   assert.match(builderSource, /Не перевірено/);
@@ -297,7 +297,8 @@ test('decode result keeps authoritative pricing drivers highlighted in a compact
   assert.match(decodeSource, /decode-readonly-value/);
   assert.match(decodeSource, /builder-summary/);
   assert.match(decodeSource, /sticky-summary-container/);
-  assert.match(decodeSource, /label="SKU"/);
+  assert.match(decodeSource, /label="Артикул"/);
+  assert.match(decodeSource, /label="Внутрішній SKU"/);
   assert.match(decodeSource, /Стан у базі/);
   assert.match(decodeSource, /Розраховано до округлення/);
   assert.match(decodeSource, /Фінальна збережена/);
@@ -307,7 +308,7 @@ test('decode result keeps authoritative pricing drivers highlighted in a compact
   assert.match(decodeSource, /label="Матриця"/);
   assert.match(decodeSource, /label="Вага"/);
   assert.match(decodeSource, /<details className="decode-details">/);
-  assert.match(decodeSource, /Деталі розрахунку/);
+  assert.match(decodeSource, /Технічні деталі/);
   assert.ok(
     decodeSource.indexOf('Деталі розрахунку') < decodeSource.indexOf('item.value_id'),
     'internal option values must remain inside calculation details'
@@ -405,7 +406,7 @@ test('recount uses a Builder-aligned editor with one authoritative comparison su
   assert.match(recountSource, /Після/);
   assert.match(
     recountSource,
-    /label="SKU"[\s\S]*label="Ціна виробу"[\s\S]*label="Ціна за грам"[\s\S]*label="Матриця"[\s\S]*className="recount-comparison-difference"[\s\S]*Різниця в ціні/
+    /label="Артикул"[\s\S]*label="Ціна виробу"[\s\S]*label="Ціна за грам"[\s\S]*label="Матриця"[\s\S]*className="recount-comparison-difference"[\s\S]*Різниця в ціні/
   );
   assert.doesNotMatch(recountSource, /label="Джерело"/);
   assert.match(recountSource, /Різниця в ціні/);

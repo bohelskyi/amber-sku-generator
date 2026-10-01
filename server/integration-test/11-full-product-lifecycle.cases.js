@@ -8,12 +8,22 @@ let actor;
 const opts = (databasePool = pool) => ({ databasePool, mutationContext: {
   actorUserId: actor.applicationUser.id, requestId: 'phase-1-lifecycle' } });
 const answers = { material: 2, color: 3, souvenir: 1, statuette: 5, weight: 1260, size: '23/6/30' };
-async function setup() { actor = await authenticateApplicationSession(); await installSouvenirFixture(); }
+const names = { magento_name_subject_ua: 'Фігура', magento_name_subject_en: 'Figurine' };
+async function setup() {
+  actor = await authenticateApplicationSession();
+  const gate = require('../src/services/full-product-cutover-gate'); const client = await pool.connect();
+  try {
+    await gate.begin(client, 'BEGIN');
+    await installSouvenirFixture(client, { ensureSchemas: false });
+    await gate.commit(client);
+  } catch (error) { await gate.rollback(client); throw error; }
+  finally { await gate.release(client); client.release(); }
+  await require('../src/services/sku-schema.service').ensureLegacySkuSchemas();
+}
 async function save() {
-  const preview = await products.buildProductPreview({ categoryCode: 'SV', answers, weight: 1260 });
-  const saved = await products.saveProduct({ category: 'SV', answers, weight: 1260, manualPriceUah: 21700,
+  const preview = await products.buildNewProductPreview({ categoryCode: 'SV', answers, weight: 1260, ...names });
+  const saved = await products.saveProduct({ category: 'SV', answers, weight: 1260, manualPriceUah: 21700, ...names,
     skuSchemaVersionId: preview.skuSchemaVersionId, previewToken: preview.previewToken }, opts());
-  await pool.query('UPDATE products SET magento_name_subject_ua=$1, magento_name_subject_en=$2 WHERE id=$3', ['Фігура', 'Figurine', saved.id]);
   return (await pool.query('SELECT * FROM products WHERE id=$1', [saved.id])).rows[0];
 }
 async function recountInput(p, patch = { size: '24/6/30' }) {
@@ -85,17 +95,17 @@ test('full lifecycle ordinary save and recount commit independent pending obliga
 
 test('full lifecycle failures roll back ordinary save and entire recount including reservations and audit', async () => {
   await setup(); const p = await save(); const input = await recountInput(p);
-  const preview = await products.buildProductPreview({ categoryCode: 'SV', answers, weight: 1260 });
+  const preview = await products.buildNewProductPreview({ categoryCode: 'SV', answers, weight: 1260, ...names });
   const before = await footprint();
   await failInsert('product_full_export_state', async () => {
-    await assert.rejects(products.saveProduct({ category: 'SV', answers, weight: 1260, manualPriceUah: 21700,
+    await assert.rejects(products.saveProduct({ category: 'SV', answers, weight: 1260, manualPriceUah: 21700, ...names,
       skuSchemaVersionId: preview.skuSchemaVersionId, previewToken: preview.previewToken }, opts()), /phase1 injected failure/);
     await assert.rejects(products.applyProductRecount(input, opts()), /phase1 injected failure/);
   });
   assert.deepEqual(await footprint(), before);
 });
 
-test('full lifecycle inherited names require identity review and stale or missing source evidence refreshes', async () => {
+test('full lifecycle inherits name subjects without review and stale or missing source evidence refreshes', async () => {
   await setup(); const p = await save(); const stale = await recountInput(p);
   await pool.query("UPDATE products SET magento_name_subject_en='Updated figurine' WHERE id=$1", [p.id]);
   await assert.rejects(products.applyProductRecount(stale, opts()), /назви змінилися/);
@@ -104,14 +114,84 @@ test('full lifecycle inherited names require identity review and stale or missin
   const changed = await products.applyProductRecount(unknown, opts());
   const row = (await pool.query('SELECT * FROM products WHERE id=$1', [changed.correctedProductId])).rows[0];
   assert.equal(row.magento_name_subject_en, 'Updated figurine');
-  assert.equal(row.magento_name_review_required, true);
+  assert.equal(row.magento_name_review_required, false);
   const semanticSource = await save();
   const semantic = await products.applyProductRecount(await recountInput(semanticSource, { symbolic_stat: 1 }), opts());
   const semanticRow = (await pool.query('SELECT * FROM products WHERE id=$1', [semantic.correctedProductId])).rows[0];
   assert.equal(semanticRow.details.answers.symbolic_stat, 1);
-  assert.equal(semanticRow.magento_name_review_required, true);
-  assert.equal(semantic.corrected.nameInheritance.reviewRequired, true);
+  assert.equal(semanticRow.magento_name_review_required, false);
+  assert.equal(semantic.corrected.nameInheritance.reviewRequired, false);
 });
+
+async function assertRecountExactNames() {
+  await setup();
+  const activation = (await pool.query('SELECT enabled FROM public_sku_activation WHERE singleton')).rows[0];
+  const config = { configured: true, baseUrl: 'https://recount-names.example.invalid' };
+  const nameService = require('../src/services/magento/product-names.service');
+  const nameState = require('../src/services/magento/name-state');
+  const origin = require('../src/services/magento/binding-contract').originHash(config.baseUrl);
+  const previewOptions = { magentoConfig: config };
+  const applyOptions = { ...opts(), magentoConfig: config, authorizedNameChange: true };
+  const previewFor = (p, nameChange) => products.buildProductRecountPreview({ sourceSku: p.full_sku,
+    answers: { symbolic_stat: 1 }, manualPriceUah: 21700, ...(nameChange ? { nameChange } : {}) }, previewOptions);
+  const apply = (p, preview, nameChange) => products.applyProductRecount({ sourceSku: p.full_sku,
+    answers: { symbolic_stat: 1 }, manualPriceUah: 21700, sourceStateSignature: preview.source.stateSignature,
+    ...(nameChange ? { nameChange } : {}) }, applyOptions);
+  const source = await save(); const original = (await nameService.read(source.id, { config })).names;
+  const baseline = { ...original };
+  await nameState.saveObservation(pool, origin, source, 5794, { action: 'confirm', amber: original, remote: original }, baseline);
+  const inherited = await previewFor(source); assert.equal(inherited.nameChanges, null);
+  const successor = await apply(source, inherited);
+  if (activation.enabled) assert.equal(successor.corrected.publicSku,
+    (await pool.query('SELECT public_sku FROM public_product_identities WHERE id=$1', [source.public_product_identity_id])).rows[0].public_sku);
+  assert.deepEqual((await nameService.read(successor.correctedProductId, { config })).names, original);
+  const row = (await pool.query('SELECT * FROM products WHERE id=$1', [successor.correctedProductId])).rows[0];
+  assert.deepEqual([row.magento_name_subject_ua, row.magento_name_subject_en, row.magento_name_review_required], ['Фігура', 'Figurine', false]);
+  const editedSource = await save(); const editedOriginal = (await nameService.read(editedSource.id, { config })).names;
+  await nameState.saveObservation(pool, origin, editedSource, 5795, { action: 'confirm', amber: editedOriginal, remote: editedOriginal }, editedOriginal);
+  const edited = { all: 'Довільна точна назва українською', en: 'Exact arbitrary English name' };
+  const reviewed = await previewFor(editedSource, edited);
+  assert.deepEqual(reviewed.nameChanges, { from: editedOriginal, to: edited });
+  const before = await footprint();
+  await pool.query('UPDATE magento_name_sync_states SET version=version+1 WHERE public_product_identity_id=$1', [editedSource.public_product_identity_id]);
+  await assert.rejects(apply(editedSource, reviewed, edited), /назви|назв|preview/);
+  assert.deepEqual(await footprint(), before, 'stale names leave the entire recount untouched');
+  const fresh = await previewFor(editedSource, edited);
+  let raced = false;
+  const racingPool = { connect: async () => {
+    const connection = await pool.connect(); const query = connection.query.bind(connection); const release = connection.release.bind(connection);
+    connection.query = async (sql, values) => {
+      if (!raced && sql.includes('FOR UPDATE') && sql.includes('p.full_sku')) {
+        raced = true;
+        await pool.query('UPDATE magento_name_sync_states SET version=version+1 WHERE public_product_identity_id=$1', [editedSource.public_product_identity_id]);
+      }
+      return query(sql, values);
+    };
+    connection.release = () => { connection.query = query; connection.release = release; release(); };
+    return connection;
+  } };
+  const raceBefore = await footprint();
+  await assert.rejects(products.applyProductRecount({ sourceSku: editedSource.full_sku, answers: { symbolic_stat: 1 }, manualPriceUah: 21700,
+    nameChange: edited, sourceStateSignature: fresh.source.stateSignature }, { ...applyOptions, databasePool: racingPool }), /назв|назви|preview/);
+  assert.equal(raced, true); assert.deepEqual(await footprint(), raceBefore);
+  const reviewedAgain = await previewFor(editedSource, edited);
+  const changed = await apply(editedSource, reviewedAgain, edited);
+  assert.deepEqual((await nameService.read(changed.correctedProductId, { config })).names, edited);
+  const changedRow = (await pool.query('SELECT * FROM products WHERE id=$1', [changed.correctedProductId])).rows[0];
+  assert.deepEqual(changedRow.magento_name_override.values, edited);
+  assert.deepEqual([changedRow.magento_name_subject_ua, changedRow.magento_name_subject_en, changedRow.magento_name_review_required], ['Фігура', 'Figurine', false]);
+  assert.deepEqual((await pool.query('SELECT baseline_names FROM magento_name_sync_states WHERE public_product_identity_id=$1', [editedSource.public_product_identity_id])).rows[0].baseline_names, editedOriginal);
+  const conflicting = await save(); const conflictOriginal = (await nameService.read(conflicting.id, { config })).names;
+  await nameState.saveObservation(pool, origin, conflicting, 5796,
+    { action: 'conflict', amber: conflictOriginal, remote: { ...conflictOriginal, all: 'Remote conflict' } }, conflictOriginal);
+  assert.equal((await nameService.read(conflicting.id, { config })).nameConflict, true);
+  await assert.rejects(previewFor(conflicting, edited), { code: 'RECOUNT_NAME_CONFLICT' });
+  const safe = await previewFor(conflicting); const conflictSuccessor = await apply(conflicting, safe);
+  if (activation.enabled) assert.equal((await nameService.read(conflictSuccessor.correctedProductId, { config })).nameConflict, true);
+  assert.equal((await pool.query('SELECT state FROM magento_name_sync_states WHERE public_product_identity_id=$1', [conflicting.public_product_identity_id])).rows[0].state, 'conflict');
+}
+test('full lifecycle recount exact names inherit, change atomically, reject shared-state drift and preserve conflicts', assertRecountExactNames);
+module.exports = { assertRecountExactNames };
 
 test('full lifecycle successor holds preserve generated/confirmed ancestors, historical ambiguity and independent exclusion', async () => {
   await setup();
@@ -345,4 +425,26 @@ for (const confirmWins of [true, false]) test(`full lifecycle real race confirma
     await assertCapturedState(p, snap, bytes, true);
     assert.equal(await cursor(), p.id);
   } finally { g.release(); await Promise.all([first, second]); await a.db.end(); await b.db.end(); }
+});
+
+ test('acceptance direct recount accepts normalized supported pricing choices with stale binding and atomic revalidation', async () => {
+  await setup();
+  for (const pricingDecision of [{ mode: 'manual_uah', manualPriceUah: 1200 },
+    { mode: 'usd_per_gram', usdPerGram: 2, marketingRoundingEnabled: false }]) {
+    const p = await save(); const input = { sourceSku: p.full_sku, answers: { size: 'changed' }, pricingDecision };
+    const preview = await products.buildProductRecountPreview(input);
+    const payload = { ...input, sourceStateSignature: preview.source.stateSignature, previewToken: preview.previewToken };
+    await assert.rejects(products.applyProductRecount(payload, opts()), { statusCode: 403 });
+    await assert.rejects(products.applyProductRecount({ ...payload, pricingDecision: { mode: 'manual_uah', manualPriceUah: 1 } },
+      { ...opts(), authorizedDirectDecision: true }), { publicCode: 'RECOUNT_PREVIEW_STALE' });
+    const applied = await products.applyProductRecount(payload, { ...opts(), authorizedDirectDecision: true });
+    const successor = (await pool.query('SELECT * FROM products WHERE id=$1', [applied.correctedProductId])).rows[0];
+    assert.equal(Number(successor.total_price_uah), Number(preview.corrected.totalPriceUah));
+    assert.equal(successor.magento_name_review_required, false);
+    if (pricingDecision.mode === 'manual_uah') assert.equal(successor.details.manualPriceUah, 1200);
+    else assert.deepEqual(successor.details.customUsdPerGramBasis, { usdPerGram: 2, marketingRoundingEnabled: false });
+  }
+  const p = await save();
+  await assert.rejects(products.applyProductRecount({ sourceSku: p.full_sku, answers: { size: 'changed' },
+    pricingDecision: { mode: 'manual_uah', manualPriceUah: -1 } }, { ...opts(), authorizedDirectDecision: true }), { statusCode: 422 });
 });

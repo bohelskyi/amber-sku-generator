@@ -73,6 +73,8 @@ function buildErrorItem(product, details, answers, code, message) {
   return {
     productId: Number(product.id),
     sku: product.full_sku,
+    internalSku: product.full_sku,
+    publicSku: product.public_sku || product.full_sku,
     weight: product.weight === null ? null : Number(product.weight),
     answers,
     oldPriceUah: product.total_price_uah === null ? null : Number(product.total_price_uah),
@@ -111,12 +113,12 @@ async function buildRepricingPreviewState(scenarioId) {
   }
   const scenarioRule = asRuleObject(scenario.match_json);
   const productsResult = await pool.query(
-    `SELECT id, full_sku, category, weight, total_price, total_price_uah,
-            price_per_gram, uah_rate, details, status, exclude_from_export
-     FROM products
-     WHERE category = $1
-       AND COALESCE(status, 'active') = 'active'
-     ORDER BY id`,
+    `SELECT p.id,p.full_sku,i.public_sku,p.category,p.weight,p.total_price,p.total_price_uah,
+            p.price_per_gram,p.uah_rate,p.details,p.status,p.exclude_from_export
+     FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
+     WHERE p.category = $1
+       AND COALESCE(p.status, 'active') = 'active'
+     ORDER BY p.id`,
     [scenario.category_code]
   );
 
@@ -223,6 +225,8 @@ async function buildRepricingPreviewState(scenarioId) {
       items.push({
         productId: Number(product.id),
         sku: product.full_sku,
+        internalSku: product.full_sku,
+        publicSku: product.public_sku || product.full_sku,
         weight: product.weight === null ? null : Number(product.weight),
         answers,
         oldPriceUah,
@@ -313,11 +317,11 @@ async function buildRepricingPreview(scenarioId) {
 
 async function buildGlobalRepricingPreview() {
   const productsResult = await pool.query(
-    `SELECT id, full_sku, category, weight, total_price, total_price_uah,
-            price_per_gram, uah_rate, details, status, exclude_from_export
-     FROM products
-     WHERE COALESCE(status, 'active') = 'active'
-     ORDER BY id`
+    `SELECT p.id,p.full_sku,i.public_sku,p.category,p.weight,p.total_price,p.total_price_uah,
+            p.price_per_gram,p.uah_rate,p.details,p.status,p.exclude_from_export
+     FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
+     WHERE COALESCE(p.status, 'active') = 'active'
+     ORDER BY p.id`
   );
   const finishProjection = startPhase('repricing.projection_and_tokens');
   const categoryCodes = [...new Set(productsResult.rows.map((product) => product.category))]
@@ -372,6 +376,8 @@ async function buildGlobalRepricingPreview() {
       productId: Number(product.id),
       productStateToken: getProductRepricingStateToken(product),
       sku: product.full_sku,
+      internalSku: product.full_sku,
+      publicSku: product.public_sku || product.full_sku,
       categoryCode: product.category,
       weight: toNullableNumber(product.weight),
       answers,
@@ -450,9 +456,12 @@ async function buildGlobalRepricingPreview() {
       if (hasManualPrice(details)) {
         items.push({
           ...calculated,
-          status: 'error',
-          errorCode: 'manual_price',
-          message: 'Товар має ручну ціну. Підтвердьте або змініть її явно.',
+          status: 'unchanged',
+          newPriceUah: oldPriceUah,
+          priceDeltaUah: 0,
+          manualPreserved: true,
+          errorCode: null,
+          message: 'Ручну ціну збережено без змін.',
           pricingState: 'manual',
         });
         continue;
@@ -482,12 +491,13 @@ async function buildGlobalRepricingPreview() {
         scenarioId: null,
         scenarioName: null,
         matrixName: null,
-        newPriceUah: null,
+        newPriceUah: hasManualPrice(details) ? oldPriceUah : null,
         calculatedPriceUah: null,
-        priceDeltaUah: null,
-        status: 'error',
-        errorCode: 'calculation_failed',
-        message: error.message || 'Помилка розрахунку ціни.',
+        priceDeltaUah: hasManualPrice(details) ? 0 : null,
+        status: hasManualPrice(details) ? 'unchanged' : 'error',
+        manualPreserved: hasManualPrice(details),
+        errorCode: hasManualPrice(details) ? null : 'calculation_failed',
+        message: hasManualPrice(details) ? 'Ручну ціну збережено без змін.' : error.message || 'Помилка розрахунку ціни.',
         pricingState: hasManualPrice(details) ? 'manual' : 'missing',
       });
     }
@@ -507,6 +517,11 @@ async function buildGlobalRepricingPreview() {
       unchangedCount: items.filter((item) => item.status === 'unchanged').length,
       skippedCount: items.filter((item) => item.status === 'skipped').length,
       errorCount: items.filter((item) => item.status === 'error').length,
+      manualPreservedCount: items.filter((item) => item.manualPreserved).length,
+      currentCount: items.filter((item) => item.status === 'unchanged' && !item.manualPreserved).length,
+      categories: categoryCodes.map((code) => ({ code,
+        count: items.filter((item) => item.categoryCode === code && item.status === 'changed').length }))
+        .filter((item) => item.count > 0),
     },
     items,
     blockingCorrectionRequests,

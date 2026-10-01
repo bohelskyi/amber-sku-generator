@@ -6,9 +6,10 @@ const {
 const { analyzeLineage } = require('./product-timeline/lineage-analysis');
 const {
   loadProductTimelineData,
-  loadTimelineSeedRows,
 } = require('./product-timeline/product-timeline-query');
 const { presentProductTimeline } = require('../presenters/product-timeline');
+const pool = require('../db/pool');
+const { resolveProductLookup } = require('./product/public-identity');
 
 const MAX_SKU_LENGTH = 256;
 
@@ -29,19 +30,21 @@ function normalizeTimelineSku(value) {
 
 async function getProductTimeline(skuValue) {
   const querySku = normalizeTimelineSku(skuValue);
-  const seedRows = await loadTimelineSeedRows(querySku);
-  if (seedRows.length === 0) {
+  const resolved = await resolveProductLookup(pool, querySku);
+  if (!resolved.product) {
     throw timelineError('Товар з таким артикулом не знайдено.', 404, 'SKU_HISTORY_NOT_FOUND');
   }
-  if (seedRows.length > 1) {
+  if (resolved.lookupKind === 'internal' && resolved.internalMatchCount > 1) {
     throw timelineError(
       'Артикул відповідає кільком історичним товарам.',
       409,
       'AMBIGUOUS_HISTORICAL_SKU'
     );
   }
-  const data = await loadProductTimelineData(Number(seedRows[0].id));
-  return presentProductTimeline(querySku, data);
+  const data = await loadProductTimelineData(Number(resolved.product.id));
+  const statuses = await require('./magento/automatic-sync-status').readStatuses(
+    require('../db/pool'), data.products.map((p) => Number(p.id)));
+  return presentProductTimeline(querySku, data, statuses);
 }
 
 module.exports = {

@@ -98,7 +98,7 @@ export function columnChange(definition, groupIndex, action, code, value) {
 // Picker descriptors derive only from authorized registry metadata. Server source
 // proof remains mandatory; current SKU-only draft questions are deliberately absent.
 export function availableSources(registry, group) {
-  const result = (registry?.productFields || []).map((field) => ({ id: field, label: field, descriptor: { kind: 'product', field, type: ['full_sku', 'category'].includes(field) ? 'text' : 'scalar' } }));
+  const result = (registry?.productFields || []).map((field) => ({ id: field, label: field, descriptor: { kind: 'product', field, type: ['full_sku', 'public_sku', 'category'].includes(field) ? 'text' : 'scalar' } }));
   const questions = registry?.references?.questions || [];
   const historical = (registry?.references?.schemas || []).filter((s) => s.category_code === group).flatMap((s) => s.questions);
   const keys = new Set([...historical.map((q) => q.key), ...questions.filter((q) => q.category_code === group && Number(q.include_in_sku) === 0).map((q) => q.key)]);

@@ -62,7 +62,7 @@ test('Storekeeper UI keeps product and correction processing but hides final adm
   assert.equal(ui.canApplyRepricing, false);
   assert.equal(ui.canRollbackRepricing, false);
   assert.equal(ui.canPriceOverrideCorrections, false);
-  assert.equal(getRecountUiMode(ui), 'choice');
+  assert.equal(getRecountUiMode(ui), 'apply');
 });
 
 test('Administrator effective permissions expose every guarded UI action', () => {
@@ -86,7 +86,7 @@ test('Administrator effective permissions expose every guarded UI action', () =>
   ]);
 
   assert.equal(Object.values(ui).every(Boolean), true);
-  assert.equal(getRecountUiMode(ui), 'choice');
+  assert.equal(getRecountUiMode(ui), 'apply');
 });
 
 test('correction mutation controls are wired to effective permission flags', () => {

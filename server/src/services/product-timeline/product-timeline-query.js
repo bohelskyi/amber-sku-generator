@@ -36,8 +36,9 @@ async function loadProductTimelineData(seedId, database = pool) {
        FROM lineage l
        JOIN edges e ON e.source_id = l.id OR e.corrected_id = l.id
      )
-     SELECT p.*
+     SELECT p.*, i.public_sku
      FROM products p
+     JOIN public_product_identities i ON i.id=p.public_product_identity_id
      JOIN lineage l ON l.id = p.id`,
     [seedId]
   );

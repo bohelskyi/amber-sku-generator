@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { materializeMagentoV1 } = require('../src/services/export-templates/magento-v1-definition');
 const { compileDefinition, hashJsonData } = require('../src/services/export-templates/definition');
-const { sourceSupportUpdate, upgradeSourceSupport, VERSION, EVALUATOR } = require('../src/services/export-templates/source-support');
+const { sourceSupportUpdate, upgradeSourceSupport, VERSION, EVALUATOR, PUBLIC_EVALUATOR } = require('../src/services/export-templates/source-support');
 const { prepareMagentoCandidate, systemProfile, prepareSourceSupport, prepareDraft } = require('../src/services/export-templates/template.service');
 const { officeCatalog, officeEvidence } = require('./fixtures/magento-v1/office');
 const { homeDefinition } = require('./fixtures/export-source-support');
@@ -31,19 +31,21 @@ function reads(definition, evidence = officeEvidence()) {
     pre: { expectedRevision: row.revision, expectedDefinitionHash: hashJsonData(definition) } };
 }
 
-test('SUPPORT lifecycle current candidate starts coherent/current; ordinary system profile stays legacy/read-only', async () => {
+test('SUPPORT lifecycle current candidate and code-backed profile use the additive public-SKU contract', async () => {
   const legacy = materializeMagentoV1(officeCatalog()); const before = structuredClone(legacy);
   const db = reads(legacy);
   const current = await prepareMagentoCandidate(db.options);
   assert.equal(current.definition.sourceSupport.version, VERSION);
-  assert.equal(current.definition.evaluatorVersion, EVALUATOR);
+  assert.equal(current.definition.evaluatorVersion, PUBLIC_EVALUATOR);
+  assert.equal(current.definition.sourceContractVersion, 'public-product-identity-v1');
   assert.equal(current.definitionHash, compileDefinition(current.definition).hash);
   assert.deepEqual(current.diagnostics, []);
   assert.equal(sourceSupportUpdate(current.definition).status, 'current');
   const system = await systemProfile(db.options);
-  assert.deepEqual(system.definition, legacy);
-  assert.equal(system.definition.sourceSupport, undefined);
-  assert.equal(system.definitionHash, hashJsonData(legacy));
+  assert.deepEqual(system.definition, current.definition);
+  assert.equal(system.definition.sources.full_sku.field, 'full_sku');
+  assert.equal(system.definition.sources.public_sku.field, 'public_sku');
+  assert.equal(system.definitionHash, current.definitionHash);
   const explicit = await prepareMagentoCandidate({ ...db.options, supportPolicy: VERSION });
   assert.deepEqual(explicit, current, 'existing explicit callers remain compatible');
   assert.deepEqual(legacy, before);

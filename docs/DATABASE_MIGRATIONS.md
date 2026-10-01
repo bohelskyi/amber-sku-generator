@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Accepted checked-in migrations `000`–`040` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`049`. Accepted migrations `000`–`047` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -37,6 +37,7 @@ Important database protections are layered:
 - schema publication uses a per-category advisory lock and row lock;
 - duplicate question writes use a transaction advisory lock plus trigger;
 - SKU sequence, variation, and reservation use locks plus permanent uniqueness;
+- stable public allocation uses a separate non-cycling BIGINT sequence; immutable identity rows and a deferred constraint trigger enforce permanent non-reuse and one current revision per identity without changing recount lock order;
 - save rebuilds authoritative preview inside its transaction;
 - recount/correction locks and signs source state;
 - active correction requests and active repricing drafts use partial unique indexes;
@@ -97,6 +98,60 @@ New paths touching these resources must follow existing lock order and final-sta
 | `038_editable_export_columns.sql` | Adds the distinct editable-column artifact contract and nullable immutable legacy preview fingerprint. Extends complete template binding checks without relabeling old artifacts or publications. No backfill; 000–037 unchanged. |
 | `039_full_product_export_lifecycle.sql` | Separate monotonic full-product state, immutable exact snapshot membership, server-owned name-review flag, immutable nullable snapshot lifecycle version and delegable `exports.reconcile` permission. Conservative historical baseline only; no exposure repair or selection switch. |
 | `040_full_product_export_cutover.sql` | Distinct legacy baseline and audit FK, typed business/compatibility exclusions, monotonic preparing/active selector gate with immutable audit references, baseline-aware pending index, deferred policy projection checks and writer guards; immutable snapshot selection and explicit replacement binding. No baseline acceptance, exclusion release or activation in migration. |
+| `041_magento_binding_revisions.sql` | Schema-only Magento binding revisions, normalized schema observations, route/attribute/semantic-or-evaluated option decisions and separate scoped ownership policies. Composite template/option identity FKs, uniqueness, source-kind constraints and publication immutability guards. No live IDs, credentials, candidates, policy seeds or Magento calls. See [the binding contract](MAGENTO_INTEGRATION.md#phase-1b2a-persistent-binding-foundation). |
+| `042_magento_sync_jobs.sql` | Durable immutable Magento sync intent, per-operation dispatch/verification ledger, idempotency and unfinished-SKU uniqueness. No seeded jobs, binding publication, remote calls or export-state changes. |
+| `043_magento_literal_question_keys.sql` | Allows literal Amber question keys beginning with a digit in semantic option identities and canonical route predicates, including `SV.2`. Magento code constraints, source proof, composite identity, CAS and publication guards remain unchanged. No row rewrite or alias backfill. |
+| `044_magento_automatic_sync.sql` | Default-disabled automatic gate, transaction-coupled per-product desired/synced generations, active job association, bounded retry state, automatic job generation and guarded undispatched supersession. No enrollment, activation or historical changes. See [automatic sync](MAGENTO_AUTOMATIC_SYNC.md). |
+| `045_magento_delivery_cutover.sql` | One-way retirement state for new Magento-product CSV artifacts, immutable cutover receipt, a database guard for old writers and a separate monotonic per-product CSV-retirement floor for post-cutover mutations. Defaults keep CSV enabled and automatic sync disabled; no activation, enrollment, historical-row change, export deletion or Magento write occurs in the migration. |
+| `046_stable_public_product_sku.sql` | Immutable public-product identities and non-cycling `AG-` allocation, exact legacy backfill, post-activation recount inheritance and deferred one-current-revision enforcement; additive dual-SKU snapshot/job evidence, public-identity automatic requests and a separate default-off audited activation gate. Existing internal SKUs, snapshots and artifacts are not rewritten. |
+| `047_finalize_legacy_sku_repair.sql` | Fail-closed finalization of only immutable schema-045 `legacy_sku_repair.staged` evidence. It requires 046 to be recorded, independently verifies the versioned PostgreSQL-canonical receipt and all nested plan/product/lifecycle hashes, allocates a new `AG-` public identity for each explicitly staged real collision, restores that same product row to its prior business lifecycle state, and leaves reviewed duplicate rows retired. It does not change internal SKU reservations, activate public SKU delivery, enqueue Magento work or leave a runtime identity-mutation bypass. |
+| `048_external_magento_delivery_acknowledgement.sql` | Adds a distinct monotonic exact-revision external-delivery floor and immutable audit reference for reviewed deliveries that occurred outside Amber before API cutover. The migration acknowledges no rows. A database guard restricts advances to the active lifecycle, pre-delivery-cutover command boundary and enforces the normal/replacement route transition. |
+
+## Schema-045 legacy full-SKU collision repair
+
+Migration 046 intentionally aborts when retained legacy data has more than one current active/uncorrected product for one internal `full_sku`. Do not edit 046 or merge/recreate rows to bypass that invariant. With all business writers frozen, use the explicit operator workflow while the database is still exactly at schema 045:
+
+```powershell
+cd server
+$env:DATABASE_URL = '<secret target URL>'
+npm run legacy-sku-repair -- preflight --expected-database <DB> --actor-user-id <USER_ID> --decisions <DECISIONS_JSON> --output <NEW_PLAN_JSON>
+npm run legacy-sku-repair -- stage --expected-database <DB> --actor-user-id <USER_ID> --plan <PLAN_JSON> --expected-hash <SHA256>
+```
+
+The decision file is data-only and must not be committed for a production or rehearsal database. Its exact version-1 shape is:
+
+```json
+{
+  "version": 1,
+  "groups": [
+    {
+      "sku": "EXACT-CANONICAL-SKU",
+      "action": "deduplicate",
+      "keeperProductId": 123,
+      "retireProductIds": [124, 125],
+      "reason": "Reviewed operator decision"
+    },
+    {
+      "sku": "ANOTHER-CANONICAL-SKU",
+      "action": "split_public_identity",
+      "keeperProductId": 200,
+      "splitProductIds": [201],
+      "reason": "Reviewed materially separate product"
+    }
+  ]
+}
+```
+
+The version-1 decision artifact must classify every affected group explicitly as `deduplicate` or `split_public_identity`; hashes are evidence only and never auto-classify a row. Deduplication comparison covers the complete `products` business row and ignores only row identity `id` and insertion timestamp `created_at`. Preflight is read-only and binds the exact current products, lifecycle rows, registry ownership, lineage, immutable exposure evidence and relevant Magento evidence into a normalized SHA-256 plan. Stage revalidates that exact state under database locks and atomically uses the normal retirement primitive. Reviewed duplicates remain retired. A split target is temporarily retired without changing its product ID, internal `full_sku`, reservation or correction lineage; immutable audit evidence records its exact original and staged state.
+
+Normal migration startup then applies 046 followed by 047; 047 raises and cannot be recorded if 046 is absent. Staging stores a version-2 canonical receipt whose bytes are PostgreSQL 16 `jsonb::text` encoded as UTF-8 and SHA-256 hashed. The receipt contains the complete preflight plan, actor/database binding, registry evidence, decisions and exact original/staged product and lifecycle rows. Migration 047 reparses and reserializes those bytes, recomputes the receipt, plan, group, product and lifecycle hashes, and compares the live locked state before accepting the handoff. It also requires activation/delivery/cutover gates to remain safe, allocates the split row's new public identity from `public_product_sku_sequence`, and restores the same product row. Its lifecycle `delivery_version` advances for both the staging retirement and restoration while the original business lifecycle fields are restored. The final strict public-identity immutability trigger is restored before commit. Keep the decision, plan, plan hash and stage receipt with the change record. Split rows require a separately reviewed post-cutover Magento CREATE/requeue; neither the operator command nor 047 performs or enqueues it.
+
+The 2026-09-28 read-only check of the local operator database confirmed 041 applied at
+`2026-09-27T20:13:49.840Z` and 042 at `2026-09-27T22:52:43.558Z`. The normal migration
+path installed 042 before publication/enqueue; no runtime DDL was used. Stored
+checksums match the checked-in SQL. Publication and the first succeeded job are
+separate runtime evidence, recorded in [Magento integration](MAGENTO_INTEGRATION.md#achieved-state-2026-09-28).
+This is not a claim about migrations or CSV activation in another deployment.
 
 Export-template mutations take the existing access-admin advisory lock and recheck the actor's specific capability before locking family then draft. Publication allocates a per-family version number under those locks and inserts attribution and audit atomically. The unique family/source-revision tuple supports completed retries even after the draft advances. Draft base-version ownership uses a composite foreign key; historical source revision is not a foreign key to the mutable draft revision. Selection writers lock the singleton after the access boundary and only read immutable versions; they never lock products, revisions or cursors.
 
@@ -152,3 +207,7 @@ Migration 040 adds the distinct one-time `cutover_baseline_revision`/audit refer
 `full_product_export_activation` starts in `legacy`, selector version 0, required writer contract 1. Monotonic generation, phase/event constraints and immutable audit receipts govern `legacy → preparing → active`; active cannot return to legacy. Deferred checks enforce baseline-event identity, exclusion projection and inactive-product retirement. Statement guards fence unaware writers after preparation; application transactions acquire the gate before BEGIN to avoid stale repeatable-read snapshots after waiting.
 
 The migration itself performs no baseline acceptance, successor release, historical indexing or activation. Deploy both the gate-aware application and the schema, then follow the [canonical cutover runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md). Old/new mixed writers are unsupported; ordinary future deployments and one-time production cutover are distinct operations. Production activation remains pending.
+
+## Migration 049: shared names and batch sync evidence
+
+`049_shared_names_and_repricing_sync.sql` adds exact generated/full-name overrides, origin/public-identity name baselines and reviewed conflict state, a bounded durable discovery cursor, safe automatic-request diagnostics, and each repricing item's nullable captured sync generation. It extends the existing product-input projection without modifying prior migrations, SKU allocation, published bindings or historical jobs/snapshots. Existing records receive no guessed baseline or batch synchronization proof. Fresh installation and repeated startup use the migration runner transaction/checksum contract.

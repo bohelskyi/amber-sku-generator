@@ -1,3 +1,4 @@
+import SettingsPage from '../src/pages/SettingsPage.jsx';
 import { useEffect } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import {
@@ -566,15 +567,15 @@ describe('application-user administration UI', () => {
   it('shows the navigation entry only when users.manage is effective', () => {
     const { rerender } = render(
       <AuthContext.Provider value={authValue()}>
-        <MemoryRouter><WorkspaceNav /></MemoryRouter>
+        <MemoryRouter><WorkspaceNav /><SettingsPage /></MemoryRouter>
       </AuthContext.Provider>
     );
-    fireEvent.click(screen.getByRole('button', { name: /Розділи/ }));
+    expect(screen.getByRole('link', { name: 'Налаштування' })).toBeTruthy();
     expect(screen.getByRole('link', { name: /Користувачі/ })).toBeTruthy();
 
     rerender(
       <AuthContext.Provider value={authValue(['products.view'])}>
-        <MemoryRouter><WorkspaceNav /></MemoryRouter>
+        <MemoryRouter><WorkspaceNav /><SettingsPage /></MemoryRouter>
       </AuthContext.Provider>
     );
     expect(screen.queryByRole('link', { name: /Користувачі/ })).toBeNull();
@@ -811,7 +812,7 @@ describe('permission-aware business UI', () => {
     expect(screen.queryByRole('button', { name: 'Експорт CSV' })).toBeNull();
 
     expect(getRecountUiMode(managerUi)).toBe('request');
-    expect(getRecountUiMode(storekeeperUi)).toBe('choice');
+    expect(getRecountUiMode(storekeeperUi)).toBe('apply');
   });
 
   it('renders only the correction-request confirmation for Manager recounts', () => {

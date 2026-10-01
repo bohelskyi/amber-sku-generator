@@ -41,6 +41,8 @@ function buildHistoryWhere(filters) {
     where.push(`(
       pc.source_sku ILIKE $${values.length}
       OR pc.corrected_sku ILIKE $${values.length}
+      OR spi.public_sku ILIKE $${values.length}
+      OR cpi.public_sku ILIKE $${values.length}
       OR COALESCE(pc.reason, '') ILIKE $${values.length}
     )`);
   }

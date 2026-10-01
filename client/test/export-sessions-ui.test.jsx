@@ -1,3 +1,4 @@
+import { ExportWorkflowContext } from '../src/hooks/product/useExportWorkflow';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider, Routes, Route } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -19,7 +20,7 @@ const click = (name) => fireEvent.click(screen.queryByRole('button', { name }) |
 function page(id = 1, path = '/exports/sessions') {
   const auth = { applicationUser: { id }, permissions: ['exports.view','exports.create'], principalLifetime: { id, valid: true } };
   const router = createMemoryRouter([{ path: '/exports/*', element: <Routes><Route path="sessions/:sessionId?" element={<ExportSessionsPage />} /><Route path="new/template" element={<ExportSessionsPage create />} /><Route path="invitations" element={<ExportSessionsPage scope="invitations" />} /><Route path="shared" element={<ExportSessionsPage scope="shared" />} /><Route index element={<p>Legacy workspace</p>} /></Routes> }], { initialEntries: [path] });
-  return { ...render(<AuthContext.Provider value={auth}><RouterProvider router={router} /></AuthContext.Provider>), auth, router };
+  return { ...render(<AuthContext.Provider value={auth}><ExportWorkflowContext.Provider value={{ exportStatus: { delivery: { legacyProductCsvEnabled: true } } }}><RouterProvider router={router} /></ExportWorkflowContext.Provider></AuthContext.Provider>), auth, router };
 }
 beforeEach(() => {
   for (const mock of [...Object.values(api), ...Object.values(exportsApi)]) mock.mockReset();
@@ -86,7 +87,7 @@ it('dirty session conflict preserves exact fields and Stay/Discard protect openi
   page(); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A'); await screen.findByLabelText('Назва експорту');
   fireEvent.change(screen.getByLabelText('Назва експорту'), { target: { value: '  local title ' } });
   api.save.mockRejectedValue({ response: { status: 409, data: { error: 'revision conflict', code: 'EXPORT_SESSION_CONFLICT' } } });
-  fireEvent.click(screen.getByRole('link', { name: 'Новий експорт' })); await screen.findByRole('dialog'); click('Зберегти й перейти');
+  fireEvent.click(screen.getByRole('link', { name: 'Огляд' })); await screen.findByRole('dialog'); click('Зберегти й перейти');
   await screen.findByText('revision conflict'); expect(screen.getByRole('dialog')).toBeTruthy();
   // The form registers its settled busy state with the navigation guard in an effect.
   await waitFor(() => expect(screen.getByRole('button', { name: 'Залишитися' }).disabled).toBe(false));

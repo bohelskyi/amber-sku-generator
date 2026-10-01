@@ -42,6 +42,18 @@ Weight categories append rounded weight. Non-weight categories allocate a per-ba
 
 `sku_registry` is the permanent uniqueness ledger. Product inserts normalize and reserve the exact identifier. Archive and correction never release a SKU, because a historical identifier must never later identify another product.
 
+## Stable public product identity
+
+Migration `046_stable_public_product_sku.sql` adds `public_product_identities` as a separate immutable external identity. `products.full_sku` remains the encoded configuration/history SKU permanently; its schema markers, semantic `value_id` versus encoded `sku_code` behavior, decode contract and `sku_registry` reservation are unchanged. APIs keep `fullSku`/`full_sku` in that meaning and add `publicSku` plus explicit `internalSku` where useful.
+
+Upgrade backfill creates one legacy public identity for each exact distinct stored `full_sku` and attaches every historical product row to it. Equal legacy external strings share an identity, but correction traversal still follows product IDs and explicit correction links; it never merges histories by public identity. Migration aborts if one identity has multiple current active/uncorrected revisions.
+
+For retained schema-045 collisions, this abort is repaired only through the explicit `legacy-sku-repair` preflight/plan/stage workflow documented in [Database and migrations](DATABASE_MIGRATIONS.md#schema-045-legacy-full-sku-collision-repair). An operator must decide whether each target is an exact accidental duplicate to retire or a materially separate product to split; the software never infers that destructive decision from hashes. Split staging preserves the existing product row, its internal `full_sku` and the keeper-owned `sku_registry` reservation. Migration 047 gives that same row a newly allocated `AG-` public identity and restores its prior business lifecycle state. Deduplicated rows remain retained but retired.
+
+The activation gate defaults off. Before activation, ordinary creates and recount successors retain compatibility by receiving a legacy public identity equal to their normalized internal SKU. After the audited activation command, ordinary creates allocate `AG-000001`, `AG-000002`, and so on from a dedicated non-cycling BIGINT sequence, while recount successors inherit the source identity. Formatting uses at least six digits and naturally grows past `AG-999999`. Exact legacy values matching `AG-[0-9]{6,}` advance the sequence floor. `nextval` gaps after rollback are intentional; identity rows, allocation numbers and product identity references cannot be changed, deleted, truncated or reused.
+
+A deferrable database constraint trigger permits the existing recount transaction to insert its successor before retiring the source, but requires at commit that each public identity have at most one current active/uncorrected revision. Public lookup returns only that unique current revision and fails closed on ambiguity. Historical internal-SKU lookup retains existing duplicate ambiguity. A public `AG-...` value is never decoded as attribute data: decode first resolves stored product context, then decodes that revision's internal `full_sku`.
+
 Sequence allocation, variation resolution, and exact reservation are serialized and backed by database uniqueness/trigger protections. Preserve the existing lock order and final reservation check.
 
 ## Calibration
@@ -61,6 +73,8 @@ The published Necklaces `size` rule shows and requires size for natural calibrat
 ## Authoritative preview and save
 
 `buildProductPreview()` validates category/schema ownership, required weight, visible questions, option existence, visibility, and archive state. Depending on `skip_hidden_sku_questions`, hidden SKU questions are omitted from encoding or represented through the historical placeholder model.
+
+Public creation preview and save use `buildNewProductPreview()` in addition to these checks. For SV, the existing Magento v1 evaluator input contract is mandatory: size, positive numeric saved weight, and valid route-dependent answers. Normal and stone routes also require both `magento_name_subject_ua` and `magento_name_subject_en` (non-empty plain text, at most 200 characters each). Keychains (`souvenir=6`) retain the automatic bilingual name and require size. No subject or dimension is invented. `/config` exposes the creation requirements to the form, which shows the paired subject inputs and required size/weight. Subject changes invalidate the preview token; save revalidates and persists the pair atomically with the new product. Manual price remains independently enterable after preview and must be positive at save. These creation checks do not rewrite legacy products or change the internal recount compatibility path. Existing-product subject completion remains in the separately authorized Magento name preview/apply workflow.
 
 Preview returns a `previewToken` binding normalized answers/calibration, weight, schema version, base SKU and mode, raw and category-selected automatic prices, authoritative pricing-context fingerprint, and effective exchange-rate context. Save requires the schema-version ID and token, then rebuilds preview inside its transaction. Any real answer, weight, schema, pricing, or rate change causes a stale-preview conflict.
 

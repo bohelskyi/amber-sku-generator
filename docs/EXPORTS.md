@@ -2,6 +2,31 @@
 
 This guide defines current product/price delivery, snapshot and acknowledgment semantics. [Export templates](EXPORT_TEMPLATES.md) owns definition/publication and signed binding; [shared export sessions](SHARED_EXPORT_SESSIONS.md) owns collaboration and durable recovery. Production activation is still pending; use the [cutover runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md) for that one-time operation.
 
+## Planned CSV retirement
+
+The first direct Amber → Magento UPDATE without CSV succeeded on 2026-09-28 for
+`KL3/11131351005`, job `f2253960-527a-40e9-b879-9041bb036453`, with acknowledgement
+only after read-after-write verification. See the [Magento receipt and ownership rules](MAGENTO_INTEGRATION.md#achieved-state-2026-09-28).
+Legacy CSV delivery is now planned for retirement; its current contracts below remain
+active until an explicit cutover. This is separate from the migration-040 selector cutover.
+
+Before retirement, reconcile pending product and price queues, generated/downloaded
+but unconfirmed snapshots, shared-session attempts/results, and held/replacement
+lineages with their actual external disposition. Retain immutable artifacts and
+idempotent recovery; a downloaded file may still be imported later. A successful
+direct job does not confirm a CSV snapshot, release a hold, advance
+`product_full_export_state`/`product_export_revisions` acknowledgements or move the
+export cursor. Do not mark old work delivered merely because one same-SKU sync succeeded.
+The [automatic workflow](MAGENTO_AUTOMATIC_SYNC.md) is implemented behind its own
+default-disabled gate. Final production binding review, activation and reconciled
+export cutover remain explicit operator work.
+
+Migration 045 supplies that explicit one-way cutover. Successful apply enables
+automatic sync for future relevant mutations and permanently rejects creation of
+new `magento-products-v1` artifacts. Existing snapshots, files, sessions,
+confirmations, cursors and audit evidence remain readable and immutable. The
+separate `sku,price` stream is not switched by this product-delivery cutover.
+
 ## Workflow and authority
 
 The operator reviews authoritative current data, explicitly creates an immutable snapshot, downloads stored files and separately confirms the snapshot. Preview/download never acknowledge delivery. Confirmation means local acceptance of the captured export, **not proof of Magento import**. A generated file may already have left the application even when unconfirmed.
@@ -23,9 +48,25 @@ The two selection settings are independent: the lifecycle gate selects **product
 For an active product without a successor, eligibility requires `exclude_from_export=0`, business policy `none` and no recount compatibility exclusion. Define:
 
 ```text
-delivery_floor = greatest(confirmed_revision, cutover_baseline_revision)
+delivery_floor = greatest(confirmed_revision, cutover_baseline_revision,
+                          externally_delivered_revision, csv_retired_revision)
 pending = revision > delivery_floor
 ```
+
+`csv_retired_revision` starts at zero for all pre-cutover rows. After the explicit
+Magento delivery cutover, a newly created product or later full-payload mutation
+advances this floor with its full revision, so it creates only the durable API sync
+obligation and no new CSV queue obligation. It is not confirmation, import evidence,
+or a rewrite of historical rows.
+
+`externally_delivered_revision` is separate pre-cutover operator evidence: an
+authorized operator attested that the exact reviewed Amber revision already had an
+exact Magento SKU counterpart after delivery outside Amber. It does not confirm a
+snapshot, prove payload equality, claim automatic-sync success or waive any later
+revision. Its audit pointer is mandatory. The workflow is available only while the
+lifecycle selector is active and Magento-product CSV delivery has not been retired.
+A replacement acknowledgement also performs the same route completion invariant as
+a genuine replacement confirmation, without changing `confirmed_revision`.
 
 | Queue | Lifecycle-active meaning | Capture |
 | --- | --- | --- |
@@ -53,6 +94,8 @@ Successful allowed informational/name edits advance full `revision` in the produ
 `export_snapshots` stores the compatibility CSV, request identity and immutable provenance. `magento_export_artifacts` stores exact per-group Magento bytes. Every modern snapshot has `full_product_lifecycle_version=1` and `export_snapshot_products` membership: one member per represented product, even though its Magento artifact contains Main and EN rows.
 
 Full-product members bind exact product ID/SKU, full revision, delivery version, `capture_kind=full_product`, `evidence_origin=live_capture` and a SHA-256 evidence hash. The service parses actual internal/artifact CSV and verifies exact membership, group, row shape and counts before insertion. Snapshot, artifacts, membership, price exposure and audit commit or roll back together. Membership and artifacts reject UPDATE/DELETE/TRUNCATE; snapshot payload/provenance cannot be rewritten. `full_product_selection` additionally freezes mode, captured route/counters and gate generation.
+
+Migration 046 leaves `sku_at_capture` with its historical internal-SKU meaning and adds `identity_contract=1`, `internal_sku_at_capture` and `public_sku_at_capture` for future lifecycle-aware membership. New evidence therefore retains both the stable external identity and the exact configuration revision identity. Historical membership rows keep the additive fields null, and no stored CSV/artifact is rewritten.
 
 After activation, capture fails closed if any represented SKU is duplicated anywhere in products or its permanent registry reservation points to another product. This includes one-product manual selection. Cutover baseline acceptance does not repair historical duplicate SKUs; it retains diagnostics for separate data-quality work. No rename, merge or reuse is automatic.
 
@@ -112,11 +155,15 @@ Optional server-only `GOOGLE_TRANSLATION_API_KEY` enables an editable EN suggest
 
 Dedicated `price_export_snapshots` contain exactly `sku,price`, using final stored UAH. Eligibility requires `has_product_snapshot=true`, a pending price revision and exclusion flag 0. Full snapshot generation can establish exposure; generation alone does not confirm captured revisions. Initial full confirmation can consume its captured initial price evidence, while after established exposure dedicated price snapshots consume price revisions. An older full/price confirmation cannot clear a newer price change.
 
+For snapshots generated after migration 046, the dedicated `sku,price` stream writes the stable public SKU because that file identifies the Magento product. Its captured revision evidence records product ID, exact internal/configuration SKU and public SKU. Historical price files remain byte-for-byte unchanged.
+
 Price creation captures the current eligible queue, with no range/template or product cursor change. Excluded pending rows are reported separately without losing their revision. Price confirmation advances only captured revisions with `GREATEST`, preserving first attribution and idempotency. A duplicate price update is preferable to losing a change while initial full exposure remains unconfirmed.
 
 The UI separates review → create → stored read/download → explicit price confirmation. Price preview has no reservation/token protocol; create rechecks the queue. A changed stored result is shown before confirmation. Generated files can be reopened from history without recapture.
 
 ## Read APIs and review
+
+`GET /export/status` exposes only two delivery-state flags: `delivery.legacyProductCsvEnabled` and `delivery.automaticSyncEnabled`. The UI hides new product CSV creation when the legacy flag is false or status is unavailable, while retaining stored artifacts, history, and the separate price stream. An uncertain original generation command retains its original retry identity; the server remains authoritative for cutover and recovery checks. Disabling automatic sync after cutover does not reopen product CSV creation.
 
 | Endpoint under `/api` | Meaning |
 | --- | --- |
@@ -138,4 +185,4 @@ CSV serialization quotes commas, quotes and line breaks. String formula sigils `
 
 ## Acceptance boundary
 
-The [2026-09-23 six-group Check Data record](archive/exports/MAGENTO_CHECK_DATA_2026-09-23.md) is historical validation, not an import receipt or acceptance of every later template. Target catalog/source mappings, template publications and real Magento acceptance remain deployment-specific. Explicit `url_key` generation, Magento attribute/option API synchronization and automated import/result history are not implemented. Historical duplicate SKUs and unapproved data/mapping cases remain separate work. See the [current pending-work index](README.md#deferred-work-and-operationally-pending-items).
+The [2026-09-23 six-group Check Data record](archive/exports/MAGENTO_CHECK_DATA_2026-09-23.md) is historical validation, not an import receipt or acceptance of every later template. Target catalog/source mappings, template publications and real Magento acceptance remain deployment-specific. Direct Magento CLI sync has durable job/verification history; the automatic workflow is implemented but disabled until explicit production activation. Explicit `url_key` generation, attribute/option API synchronization and automated CSV import/result reconciliation remain unimplemented. Historical duplicate SKUs and unapproved data/mapping cases remain separate work. See the [current pending-work index](README.md#deferred-work-and-operationally-pending-items).

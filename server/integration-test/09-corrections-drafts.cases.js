@@ -96,7 +96,7 @@ test('pre-feature correction signatures require Phase 2 refresh and still stale 
         method: 'POST', body: { claimVersion },
       });
       assert.equal(refreshed.response.status, 200, refreshed.text);
-      assert.equal(refreshed.data.request.proposedPayload.recountEvidence.version, 2);
+      assert.equal(refreshed.data.request.proposedPayload.recountEvidence.version, 5);
       assert.equal(refreshed.data.request.claimVersion, claimVersion);
       if (toggle) {
         await pool.query('UPDATE categories SET marketing_rounding_enabled = 0 WHERE code = $1', ['ZZ']);

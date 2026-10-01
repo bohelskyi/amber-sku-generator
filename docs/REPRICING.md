@@ -30,18 +30,13 @@ An active repricing draft does not block a direct in-place product price change,
 
 ## Explicit manual resolutions
 
-Manual-priced rows are never silently converted:
+Global repricing preserves existing Manual UAH prices unchanged, including when automatic pricing is unavailable. They require no resolution and are not blockers. Point price-change remains the place to change their manual amount. A valid authoritative automatic result permits explicit per-product `automaticProductIds` opt-in; it never happens silently.
 
-- a positive manual override equal to the stored price explicitly keeps manual pricing;
-- a different positive manual override explicitly sets a new manual price;
-- a row without usable automatic pricing requires a positive manual resolution;
-- in global scope only, a manual-priced row with a valid authoritative automatic result may explicitly switch to automatic through `automaticProductIds`, clearing `manualPriceUah` and selecting the category-selected automatic result.
-
-A product cannot receive both manual and automatic resolutions. Missing-price rows cannot switch to nonexistent automatic pricing, and unrelated calculation errors cannot be resolved through either mechanism.
+Scenario-specific legacy manual-resolution behavior remains available. A previously automatic row without usable automatic pricing remains a genuine blocker requiring a valid resolution. Protected custom USD/gram bases remain independent. A product cannot receive both manual and automatic resolutions.
 
 ## Atomic apply
 
-Apply requires `repricing.apply`. It re-previews and rejects stale configuration/product state, unsaved draft resolutions, unresolved errors, and products with active correction requests.
+Apply requires `repricing.apply`. It re-previews and rejects stale configuration/product state, unsaved draft resolutions, unresolved errors, and changed products with active correction requests. Preserved manual rows do not block the global operation through an unrelated correction request; opting them into automatic restores final changed-product validation.
 
 Changed products are locked in stable ID order. The completed batch, authenticated local-user apply attribution, every product update, old/new item payloads, normal draft transition to applied, and one `repricing.applied` audit event commit in one transaction. An audit or mid-apply failure leaves no completed batch and no partial product changes. Idempotent retries return the existing completed batch without another event.
 
@@ -66,3 +61,7 @@ Correction completion may synchronize active drafts only after the correction tr
 | Storekeeper | View and prepare drafts/previews; Apply and Rollback are denied and hidden. |
 
 Manager and Storekeeper permissions are Administrator-editable, so these rows describe the initial built-in mappings, not a guarantee about a deployed user's current access. The UI uses effective permission keys from `/api/auth/me`; route middleware remains authoritative.
+
+## Durable Magento progress
+
+Amber APPLY remains one atomic transaction. After commit the UI reports the actual committed count. Migration `049` adds nullable `repricing_items.magento_sync_generation`: each changed item captures its automatic-sync obligation in the same transaction. GET `/api/admin/repricing/batches/:batchId/sync-status` uses `repricing.view` and compares exact bigint generations with acknowledged sync evidence. Later product changes do not erase proof that the batch generation was synchronized. Old batches and disabled delivery have no invented proof and appear as untracked. Batch history restores this view after leaving/reloading; local status reads poll while waiting or requiring attention. No incremental product commits or separate orchestration engine are introduced.

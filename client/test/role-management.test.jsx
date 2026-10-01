@@ -1,3 +1,4 @@
+import SettingsPage from '../src/pages/SettingsPage.jsx';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -91,10 +92,10 @@ describe('role-management UI', () => {
     ));
     render(
       <AuthContext.Provider value={authValue()}>
-        <MemoryRouter><WorkspaceNav /><RolesPage /></MemoryRouter>
+        <MemoryRouter><WorkspaceNav /><SettingsPage /><RolesPage /></MemoryRouter>
       </AuthContext.Provider>
     );
-    fireEvent.click(screen.getByRole('button', { name: /Розділи/ }));
+    expect(screen.getByRole('link', { name: 'Налаштування' })).toBeTruthy();
     expect(await screen.findByRole('link', { name: /Ролі/ })).toBeTruthy();
     expect(await screen.findByText('Захищена')).toBeTruthy();
     expect(get).toHaveBeenCalledWith('/admin/roles');
@@ -103,12 +104,12 @@ describe('role-management UI', () => {
     get.mockClear();
     render(
       <AuthContext.Provider value={authValue(['products.view'])}>
-        <MemoryRouter><WorkspaceNav /><RolesPage /></MemoryRouter>
+        <MemoryRouter><WorkspaceNav /><SettingsPage /><RolesPage /></MemoryRouter>
       </AuthContext.Provider>
     );
     expect(screen.queryByRole('link', { name: /Ролі/ })).toBeNull();
     expect(screen.getByRole('alert').textContent).toContain('Недостатньо прав');
-    expect(get).not.toHaveBeenCalled();
+    expect(get.mock.calls.some(([url]) => url.startsWith('/admin/roles'))).toBe(false);
   });
 
   it('presents selectable roles as one list with status, protection, and counts', async () => {

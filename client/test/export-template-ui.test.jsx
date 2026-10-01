@@ -715,7 +715,7 @@ it('UX2 registry separates system, draft, latest publication and an older select
   ];
   api.list.mockResolvedValue(response({ templates: summaries })); page();
   await screen.findByRole('link', { name: 'Відкрити Каталог прикрас' });
-  expect(screen.getByText('Системний профіль · лише перегляд')).toBeTruthy(); expect(screen.getByText('Використовується звичайним експортом.')).toBeTruthy();
+  expect(screen.getByText('Системний профіль · лише перегляд')).toBeTruthy(); expect(screen.getByText(/Профіль історичного CSV\. Створення файлів залежить від стану доставки\./)).toBeTruthy();
   expect(screen.getByText('Остання публікація: v2')).toBeTruthy(); expect(screen.getByText('Вибрано для експорту за шаблоном · v1')).toBeTruthy();
   click('Чернетки'); expect(screen.getByText('Чернетка · редакція 7 · збережена')).toBeTruthy(); expect(screen.queryByText('Остання публікація: v2')).toBeNull();
   choose('Пошук за назвою', 'прикрас'); expect(screen.queryByRole('link', { name: 'Відкрити Картини' })).toBeNull();

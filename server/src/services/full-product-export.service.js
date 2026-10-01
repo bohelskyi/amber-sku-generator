@@ -18,8 +18,10 @@ async function readFullProductStates(client, ids, { lock = false } = {}) {
 }
 
 async function initializeNewProduct(client, productId) {
-  await client.query(`INSERT INTO product_full_export_state(product_id, route, evidence, business_exclusion_state)
-    VALUES ($1, 'normal', '{"origin":"ordinary_save"}'::jsonb, 'none')`, [productId]);
+  const csv = (await client.query(`SELECT legacy_product_csv_enabled FROM magento_auto_sync_activation
+    WHERE singleton FOR SHARE`)).rows[0];
+  await client.query(`INSERT INTO product_full_export_state(product_id, route, evidence, business_exclusion_state,csv_retired_revision)
+    VALUES ($1, 'normal', '{"origin":"ordinary_save"}'::jsonb, 'none',$2)`, [productId, csv?.legacy_product_csv_enabled === false ? 1 : 0]);
 }
 
 async function retireFullProduct(client, productId) {
@@ -36,11 +38,15 @@ async function initializeRecountSuccessor(client, source, successorId, correctio
   await readFullProductStates(client, disposition.productIds, { lock: true });
   await retireFullProduct(client, source.id);
   const active = (await lifecycleGate.readGate(client)).phase === 'active';
+  const csv = (await client.query(`SELECT legacy_product_csv_enabled FROM magento_auto_sync_activation
+    WHERE singleton FOR SHARE`)).rows[0];
   const business = disposition.evidence.businessExclusionState || (disposition.evidence.independentExclusion ? 'excluded' : 'none');
   await client.query(`INSERT INTO product_full_export_state
-    (product_id, route, hold_reason, source_correction_id, evidence, business_exclusion_state, recount_compatibility_excluded)
-    VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7)`, [successorId, disposition.route,
-    disposition.holdReason, correctionId, JSON.stringify(disposition.evidence),business,!active]);
+    (product_id, route, hold_reason, source_correction_id, evidence, business_exclusion_state,
+     recount_compatibility_excluded,csv_retired_revision)
+    VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8)`, [successorId, disposition.route,
+    disposition.holdReason, correctionId, JSON.stringify(disposition.evidence),business,!active,
+    csv?.legacy_product_csv_enabled === false ? 1 : 0]);
   if (active) await client.query('UPDATE products SET exclude_from_export=$2 WHERE id=$1', [successorId,business === 'none' ? 0 : 1]);
   return disposition;
 }
@@ -48,10 +54,14 @@ async function initializeRecountSuccessor(client, source, successorId, correctio
 // Caller must already hold its product lock. CAS protects reviewed mutations.
 async function advanceFullProductRevision(client, productId, expectedRevision) {
   await readFullProductStates(client, [productId], { lock: true });
+  const csv = (await client.query(`SELECT legacy_product_csv_enabled FROM magento_auto_sync_activation
+    WHERE singleton FOR SHARE`)).rows[0];
   const result = await client.query(`UPDATE product_full_export_state
-    SET revision=revision+1, updated_at=CURRENT_TIMESTAMP
+    SET revision=revision+1,
+        csv_retired_revision=CASE WHEN $3 THEN revision+1 ELSE csv_retired_revision END,
+        updated_at=CURRENT_TIMESTAMP
     WHERE product_id=$1 AND revision=$2::bigint AND route <> 'retired' RETURNING *`,
-  [productId, String(expectedRevision)]);
+  [productId, String(expectedRevision), csv?.legacy_product_csv_enabled === false]);
   if (!result.rows.length) throw lifecycleError('Full-product revision changed');
   return result.rows[0];
 }
@@ -94,7 +104,8 @@ function snapshotFileHashes(snapshot, artifacts) {
 
 function membershipEvidence(snapshot, product, state, artifacts, qualifying, files = snapshotFileHashes(snapshot, artifacts)) {
   return { version: LIFECYCLE_VERSION, snapshotId: snapshot.id, productId: Number(product.id),
-    sku: product.full_sku, fullRevision: qualifying ? state.revision : null,
+    sku: product.full_sku, internalSku: product.full_sku, publicSku: product.public_sku || product.full_sku,
+    fullRevision: qualifying ? state.revision : null,
     deliveryVersion: qualifying ? state.deliveryVersion : null,
     captureKind: qualifying ? 'full_product' : 'legacy_compatibility',
     csvHash: files.csvHash, artifacts: files.artifacts.filter((a) => a.group === product.category) };
@@ -123,9 +134,10 @@ async function captureSnapshotMembership(client, snapshot, rows, captured, artif
     const member = membershipEvidence(snapshot, row, state, artifacts, qualifying, files);
     await client.query(`INSERT INTO export_snapshot_products
       (snapshot_id, product_id, sku_at_capture, full_revision, delivery_version,
-       capture_kind, evidence_origin, evidence_hash)
-      VALUES ($1,$2,$3,$4,$5,$6,'live_capture',$7)`, [snapshot.id, row.id, row.full_sku,
-      member.fullRevision, member.deliveryVersion, member.captureKind, hash(stableJson(member))]);
+       capture_kind, evidence_origin, evidence_hash, identity_contract,
+       internal_sku_at_capture, public_sku_at_capture)
+      VALUES ($1,$2,$3,$4,$5,$6,'live_capture',$7,1,$3,$8)`, [snapshot.id, row.id, row.full_sku,
+      member.fullRevision, member.deliveryVersion, member.captureKind, hash(stableJson(member)), row.public_sku]);
   }
 }
 

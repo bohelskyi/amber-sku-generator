@@ -5,6 +5,7 @@ function getRepricingProductIds(previewOrItems = []) {
     ? previewOrItems
     : previewOrItems?.items || [];
   return [...new Set(items
+    .filter((item) => !item.manualPreserved)
     .map((item) => Number(item.productId))
     .filter((productId) => Number.isInteger(productId) && productId > 0))]
     .sort((first, second) => first - second);

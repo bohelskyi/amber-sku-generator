@@ -8,7 +8,7 @@ export function TemplateRegistry({ families, manage, busy, error, onRefresh, onC
   const found = families?.filter((item) => item.display_name.toLocaleLowerCase('uk').includes(query.toLocaleLowerCase('uk')));
   const versions = (item) => item.version_summaries || [...(item.versions || [])].sort((a, b) => Number(b.versionNumber) - Number(a.versionNumber));
   return <section className="et-template-list" aria-label="Шаблони">
-    <article className="et-template-row"><div><h2>Magento — поточний системний</h2><p>Системний профіль · лише перегляд</p><p className="et-muted">Використовується звичайним експортом.</p></div>
+    <article className="et-template-row"><div><h2>Magento — поточний системний</h2><p>Системний профіль · лише перегляд</p><p className="et-muted">Профіль історичного CSV. Створення файлів залежить від стану доставки. Вибір шаблону для CSV не змінює опублікований зв’язок автоматичної інтеграції.</p></div>
       <div className="et-actions"><Link className="btn btn-outline px-4" to={base + '/system'}>Переглянути</Link>{manage && <button className="et-link" disabled={busy} onClick={onCopy}>Створити редаговану копію</button>}</div>
     </article>
     <div className="et-registry-controls"><div className="et-registry-views" role="group" aria-label="Види реєстру">{[['all', 'Усі шаблони'], ['drafts', 'Чернетки'], ['published', 'Опубліковані версії']].map(([key, label]) => <button type="button" key={key} aria-pressed={view === key} onClick={() => setView(key)}>{label}</button>)}</div>

@@ -248,7 +248,7 @@ test('repricing facade keeps production callers and transaction coordinators tog
   );
   const applySteps = [
     "await lifecycleGate.begin(client, 'BEGIN')",
-    'ORDER BY id\n       FOR UPDATE',
+    'ORDER BY p.id\n       FOR UPDATE OF p',
     'getBlockingCorrectionRequests(changedItems, client)',
     'INSERT INTO repricing_batches',
     'getProductRepricingStateToken(product)',

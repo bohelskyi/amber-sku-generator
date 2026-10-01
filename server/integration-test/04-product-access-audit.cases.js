@@ -9,6 +9,31 @@ const {
   schemas,
 } = suite;
 
+test('custom recount roles can preview through either permission without gaining apply or request authority', async () => {
+  if (!suite.authenticatedSession) suite.authenticatedSession = await authenticateApplicationSession('/');
+  const userId = suite.authenticatedSession.applicationUser.id;
+  const roleIds = [];
+  try {
+    for (const [suffix, keys] of [['apply', ['products.recount']], ['request', ['corrections.create']], ['both', ['products.recount', 'corrections.create']]]) {
+      const key = `wave1_recount_${suffix}`;
+      const role = (await pool.query(`INSERT INTO roles(role_key,display_name,description,is_system)
+        VALUES($1,$1,'Disposable recount coverage',FALSE) RETURNING id`, [key])).rows[0];
+      roleIds.push(role.id);
+      for (const permission of keys) await pool.query('INSERT INTO role_permissions(role_id,permission_key) VALUES($1,$2)', [role.id, permission]);
+      await suite.replaceActiveRoleForTest(userId, key);
+      const preview = await request('/api/recount/preview', { method: 'POST', body: {} });
+      assert.equal(preview.response.status, 400, preview.text, 'authorized preview still performs authoritative validation');
+      const apply = await request('/api/recount/apply', { method: 'POST', body: {} });
+      assert.equal(apply.response.status, keys.includes('products.recount') ? 400 : 403, apply.text);
+      const create = await request('/api/admin/correction-requests', { method: 'POST', body: {} });
+      assert.equal(create.response.status, keys.includes('corrections.create') ? 400 : 403, create.text);
+    }
+  } finally {
+    await suite.replaceActiveRoleForTest(userId, 'administrator');
+    await pool.query("UPDATE roles SET status = 'disabled' WHERE id = ANY($1::bigint[])", [roleIds]);
+  }
+});
+
 test('product create, direct recount, and archive share local actor attribution and audit', async () => {
   const actorUserId = suite.authenticatedSession.applicationUser.id;
   const preview = await request('/api/preview', {
@@ -41,7 +66,7 @@ test('product create, direct recount, and archive share local actor attribution 
     event_key: 'product.created',
     actor_user_id: String(actorUserId),
     request_id: 'audit-product-created',
-    details: { fullSku: created.data.fullSku, categoryCode: 'ZZ' },
+    details: { fullSku: created.data.fullSku, publicSku: created.data.publicSku, categoryCode: 'ZZ' },
   }]);
 
   const recountPayload = {
@@ -92,6 +117,7 @@ test('product create, direct recount, and archive share local actor attribution 
     request_id: 'audit-product-recounted',
     details: {
       sourceSku: created.data.fullSku,
+      publicSku: created.data.publicSku,
       correctedProductId,
       correctedSku: recounted.data.corrected.fullSku,
       productCorrectionId,
@@ -117,7 +143,7 @@ test('product create, direct recount, and archive share local actor attribution 
     event_key: 'product.archived',
     actor_user_id: String(actorUserId),
     request_id: 'audit-product-archived',
-    details: { fullSku: recounted.data.corrected.fullSku },
+    details: { fullSku: recounted.data.corrected.fullSku, publicSku: recounted.data.corrected.publicSku },
   }]);
 
   const repeatedArchive = await request('/api/delete', {

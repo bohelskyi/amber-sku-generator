@@ -41,9 +41,9 @@ const click = (name, scope = screen) => fireEvent.click(scope.getByRole('button'
 const change = (label, value, scope = screen) => changeControl(scope.getByLabelText(label, { exact: true }), value);
 const row = (index) => within(screen.getByRole('region', { name: `Умова ${index}` }));
 const result = (d, type) => evaluateProduct(compileDefinition(JSON.parse(JSON.stringify(d))), product('AR', { type })).base.meta_description;
-async function open(initial, language = 'Основний') {
+async function open(initial, language = 'Основний', expectedLabel = 'Пейзаж') {
   render(<Editor initial={initial} />); fireEvent.click(screen.getByRole('tab', { name: 'Картини' })); click(`AR / meta_description / ${language}`);
-  await waitFor(() => expect(row(1).getByLabelText('Значення характеристики').value).not.toBe(''));
+  await waitFor(() => expect(row(1).getByLabelText('Значення характеристики').value).toBe(expectedLabel));
 }
 beforeEach(() => { window.innerWidth = 1600; });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -113,7 +113,7 @@ it('a plain branch inserts a readable characteristic token and evaluates using e
 });
 
 it('real AR SEO keeps its computed-presence guard and readiness dependencies when editing an ordinary branch', async () => {
-  const d = baseline(); const original = structuredClone(d); await open(d);
+  const d = baseline(); const original = structuredClone(d); await open(d, 'Основний', 'Значення №7 — назву не підтверджено');
   expect(screen.getByText(/Заповнюється, коли для характеристики/)).toBeTruthy();
   change('Текст у файлі', 'Мозаїка UX2', row(1)); click('Застосувати до чернетки');
   expect(result(current, 7)).toBe('Мозаїка UX2'); expect(result(current, 2)).toBe(result(original, 2));

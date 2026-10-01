@@ -349,6 +349,7 @@ function categoryPaths(group, answers, attrs, errors) {
   const shape = { 1: 'кулі', 2: 'бочки', 3: 'оливки' }[String(answers.shape)];
   const religion = { 1: 'Мусульманські', 2: 'Християнські' }[String(answers.religion)];
   const count = V.chCount[String(answers.count)];
+  const countCategory = count === '33' ? 'Чотки на 33 намистини' : `Чотки на ${count} намистин`;
   if (![texture, color, shape, religion, count].every(Boolean) || count === '?') {
     errors.push({ field: 'categories', message: 'Немає мапінгу однієї з характеристик категорії.' });
   }
@@ -357,7 +358,7 @@ function categoryPaths(group, answers, attrs, errors) {
     `${base}/Чотки ${color} кольору`,
     `${base}/Чотки з намистинами у формі ${shape}`,
     `${base}/${religion} чотки`,
-    count !== '?' ? `${base}/Чотки на ${count} намистин` : ''
+    count !== '?' ? `${base}/${countCategory}` : ''
   ].filter(Boolean).join(',');
 }
 
@@ -380,7 +381,7 @@ function paintingSeo(type, suffix) {
 function mapProduct(product, catalog = new Map()) {
   const group = String(product.category || '');
   if (!HEADERS[group]) {
-    return { group, sku: product.full_sku, errors: [
+    return { group, sku: product.public_sku || product.full_sku, errors: [
       { field: 'attribute_set_code', message: 'Немає Magento-профілю для категорії.' },
     ] };
   }
@@ -388,7 +389,7 @@ function mapProduct(product, catalog = new Map()) {
     ? product.details.answers : {};
   const questions = catalog.get(group) || new Map();
   const errors = [];
-  const sku = String(product.full_sku || '');
+  const sku = String(product.public_sku || product.full_sku || '');
   const attrs = {};
   for (const [field, [key, values]] of Object.entries(ATTRIBUTE[group])) {
     attrs[field] = optionValue(product, answers, questions, field, key, values, errors);

@@ -158,12 +158,12 @@ function CompletionDialog({ busy, request, onCancel, onConfirm }) {
         <div className="dialog-body space-y-4 px-5 py-5 sm:px-6">
           <div className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="min-w-0 flex-1 break-all font-mono font-semibold">{request.sourceSku}</span>
+              <span className="min-w-0 flex-1 break-all font-mono font-semibold">{request.sourcePublicSku || request.sourceSku}</span>
               {request.requestType === 'price_change' ? (
                 <span className="text-xs font-semibold text-slate-500">той самий товар</span>
               ) : <>
                 <ArrowRight size={15} className="shrink-0 text-slate-400" />
-                <span className="min-w-0 flex-1 break-all text-right font-mono font-semibold">{request.proposedSku}</span>
+                <span className="min-w-0 flex-1 break-all text-right font-mono font-semibold">{request.proposedPublicSku || request.proposedSku}</span>
               </>}
             </div>
             <div className="text-right font-semibold text-slate-900">
@@ -296,8 +296,8 @@ export default function CorrectionRequestsPage() {
     const normalizedSearch = search.trim().toUpperCase();
     if (!normalizedSearch) return orderedRequests;
     return orderedRequests.filter((request) => (
-      request.sourceSku.includes(normalizedSearch)
-      || request.proposedSku.includes(normalizedSearch)
+      [request.sourcePublicSku, request.proposedPublicSku, request.sourceSku, request.proposedSku]
+        .some((value) => String(value || '').includes(normalizedSearch))
       || request.comment.toUpperCase().includes(normalizedSearch)
     ));
   }, [claims, currentUserId, filter, requests, search]);
@@ -427,7 +427,7 @@ export default function CorrectionRequestsPage() {
         getClaimHeaders(request)
       );
       await loadRequests(filter);
-      setSuccess(`Запит #${request.id} оновлено. Повторно звірте SKU та ціну на сайті.`);
+      setSuccess(`Запит #${request.id} оновлено. Перевірте актуальні параметри й ціну перед виконанням.`);
     } catch (requestError) {
       if (isCorrectionClaimConflict(requestError)) clearClaim(request.id);
       await loadRequests(filter).catch(() => {});
@@ -556,7 +556,7 @@ export default function CorrectionRequestsPage() {
                       <div className="correction-record-identity">
                         <StatusBadge status={request.status} />
                         <RequestTypeBadge requestType={request.requestType} />
-                        <Link to={`/admin/corrections/history?sku=${encodeURIComponent(request.sourceSku)}`} className="btn btn-outline btn-compact-md">
+                        <Link to={`/admin/corrections/history?sku=${encodeURIComponent(request.sourcePublicSku || request.sourceSku)}`} className="btn btn-outline btn-compact-md">
                           Історія товару
                         </Link>
                         <strong className="correction-record-number">Запит #{request.id}</strong>
@@ -582,16 +582,16 @@ export default function CorrectionRequestsPage() {
                           <div>
                             <div className="text-xs font-semibold uppercase text-slate-500">Було</div>
                             <div className="mt-1 flex min-w-0 items-center gap-2">
-                              <span className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-slate-800">{request.sourceSku}</span>
-                              <CopyButton label="Скопіювати старий артикул" value={request.sourceSku} />
+                              <span className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-slate-800">{request.sourcePublicSku || request.sourceSku}</span>
+                              <CopyButton label="Скопіювати старий артикул" value={request.sourcePublicSku || request.sourceSku} />
                             </div>
                             <div className="mt-1 text-sm text-slate-600">{formatUah(request.oldPayload?.totalPriceUah)}</div>
                           </div>
                           <div>
                             <div className="text-xs font-semibold uppercase text-[#8a5f2b]">Стане</div>
                             <div className="mt-1 flex min-w-0 items-center gap-2">
-                              <span className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-slate-900">{request.proposedSku}</span>
-                              <CopyButton label="Скопіювати новий артикул" value={request.proposedSku} />
+                              <span className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-slate-900">{request.proposedPublicSku || request.proposedSku}</span>
+                              <CopyButton label="Скопіювати новий артикул" value={request.proposedPublicSku || request.proposedSku} />
                             </div>
                             <div className="mt-1 flex items-center gap-2">
                               <span className="min-w-0 flex-1 text-sm font-semibold text-slate-900">{formatUah(proposedPrice)}</span>

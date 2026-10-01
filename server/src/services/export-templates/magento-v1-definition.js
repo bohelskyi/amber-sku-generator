@@ -32,14 +32,17 @@ function catalogProperty(object, key) {
 
 // Materialization consumes an explicit captured catalog, never a database/default catalog.
 // Helpers below build JSON syntax; no helper accepts or evaluates a product.
-function materializeMagentoV1(catalog) {
+function materializeMagentoV1(catalog, { publicSku = false } = {}) {
   if (!(catalog instanceof Map)) fail('TEMPLATE_INVALID', 'Explicit catalog Map required');
-  const d = { formatVersion: 1, evaluatorVersion: 'magento-declarative-1', outputContract: 'magento-products-v1',
+  const d = { formatVersion: 1, evaluatorVersion: publicSku ? 'magento-declarative-3' : 'magento-declarative-1',
+    outputContract: 'magento-products-v1',
+    ...(publicSku ? { sourceContractVersion: 'public-product-identity-v1' } : {}),
     sources: {}, tables: { ...V, arSize: AR_SIZE }, questionContracts: {}, bindings: [], groups: [] };
   for (const field of ['full_sku', 'total_price_uah', 'weight', 'magento_name_subject_ua', 'magento_name_subject_en']) {
     d.sources[field] = { kind: 'product', field, type: field === 'full_sku' ? 'text' : 'scalar' };
   }
-  d.bindings.push({ id: 'sku', group: '*', value: text(source('full_sku'), false) });
+  if (publicSku) d.sources.public_sku = { kind: 'product', field: 'public_sku', type: 'text' };
+  d.bindings.push({ id: 'sku', group: '*', value: text(source(publicSku ? 'public_sku' : 'full_sku'), false) });
   d.tables.materialCategory = table(['цільного каменю', 'формованого']);
   d.tables.materialUa = table(['натурального', 'формованого']);
   d.tables.materialEn = table(['Natural', 'Pressed']);
@@ -236,7 +239,8 @@ function materializeMagentoV1(catalog) {
       } else {
         paths.push(path('Чотки з {texture} намистинами', { texture }), path('Чотки {color} кольору', { color }),
           path('Чотки з намистинами у формі {shape}', { shape }), path('{religion} чотки', { religion }),
-          when(not(eq(count, '?')), path('Чотки на {count} намистин', { count })));
+          when(not(eq(count, '?')), when(eq(count, '33'), path('Чотки на 33 намистини'),
+            path('Чотки на {count} намистин', { count }))));
       }
     }
     if (paths) cell('categories', join(paths));

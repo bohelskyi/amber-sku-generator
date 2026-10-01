@@ -93,9 +93,9 @@ async function getDraftOverrideConflicts(resolutions, preview) {
 
   const productIds = unavailable.map((item) => item.productId);
   const result = await pool.query(
-    `SELECT id, full_sku, status, total_price_uah
-     FROM products
-     WHERE id = ANY($1::int[])`,
+    `SELECT p.id,p.full_sku,i.public_sku,p.status,p.total_price_uah
+     FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
+     WHERE p.id = ANY($1::int[])`,
     [productIds]
   );
   const products = new Map(result.rows.map((row) => [Number(row.id), row]));
@@ -104,6 +104,8 @@ async function getDraftOverrideConflicts(resolutions, preview) {
     return {
       ...override,
       sku: product?.full_sku || `#${override.productId}`,
+      internalSku: product?.full_sku || null,
+      publicSku: product?.public_sku || product?.full_sku || `#${override.productId}`,
       status: product?.status || 'missing',
       currentPriceUah: product?.total_price_uah === null || product?.total_price_uah === undefined
         ? null
@@ -571,12 +573,12 @@ async function applyRepricingScope({
   try {
     await lifecycleGate.begin(client, 'BEGIN');
     const lockedProductsResult = await client.query(
-      `SELECT id, full_sku, category, weight, total_price, total_price_uah, price_per_gram,
-              uah_rate, details, status, exclude_from_export
-       FROM products
-       WHERE id = ANY($1::int[])
-       ORDER BY id
-       FOR UPDATE`,
+      `SELECT p.id,p.full_sku,i.public_sku,p.category,p.weight,p.total_price,p.total_price_uah,p.price_per_gram,
+              p.uah_rate,p.details,p.status,p.exclude_from_export
+       FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
+       WHERE p.id = ANY($1::int[])
+       ORDER BY p.id
+       FOR UPDATE OF p`,
       [changedItems.map((item) => item.productId)]
     );
     const lockedProducts = new Map(
@@ -749,9 +751,9 @@ async function applyRepricingScope({
     const itemInsertResult = await client.query(
       `INSERT INTO repricing_items
        (batch_id, product_id, sku, old_price_uah, new_price_uah, price_delta_uah,
-        old_payload, new_payload)
+        old_payload, new_payload, magento_sync_generation)
        SELECT $1, item.product_id, item.sku, item.old_price_uah, item.new_price_uah,
-              item.price_delta_uah, item.old_payload, item.new_payload
+              item.price_delta_uah, item.old_payload, item.new_payload, request.desired_generation
        FROM jsonb_to_recordset($2::jsonb) AS item(
          ordinal INTEGER,
          product_id INTEGER,
@@ -762,6 +764,9 @@ async function applyRepricingScope({
          old_payload JSONB,
          new_payload JSONB
        )
+       JOIN products p ON p.id=item.product_id
+       LEFT JOIN magento_product_sync_requests request ON request.public_product_identity_id=p.public_product_identity_id
+         AND (SELECT enabled FROM magento_auto_sync_activation WHERE singleton)
        ORDER BY item.ordinal
        RETURNING product_id`,
       [batchId, JSON.stringify(repricingItemRecords)]

@@ -26,7 +26,7 @@ test('PR1A replay: every original mapping, branch and negative assertion execute
   }
   for (const group of Object.keys(headers)) assert.ok(total.maps[group] > 20 && total.batches[group] > 20, group);
   assert.deepEqual(Object.keys(total.differences).sort(), differences.cases.map((c) => c.id).sort());
-  assert.match(result.stdout, /# pass 83/);
+  assert.match(result.stdout, /(?:#|ℹ) pass 83/);
   t.diagnostic(JSON.stringify(total));
 });
 

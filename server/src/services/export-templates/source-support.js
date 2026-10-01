@@ -4,14 +4,16 @@ const { fail } = require('./input-projection');
 const { parseVariationSku, parseVersionedSkuPart, buildSkuSuffixDecodeAttempts, decodeStoredSkuAnswers } = require('../../utils/sku');
 const VERSION = 'historical-source-support-v1';
 const EVALUATOR = 'magento-declarative-2';
+const PUBLIC_EVALUATOR = 'magento-declarative-3';
 const TARGETS = ['NM.extra', 'AR.size'];
+const DEFERRED = Object.freeze({ 'AR.size': Object.freeze(['29', '30', '31']) });
 const projections = new WeakMap();
 const location = (s) => s?.kind !== 'product' ? `${s.category}.${s.key}` : null;
 const policyFor = (d, s) => d.sourceSupport?.sources[location(s)];
 
 function validateSupport(d, { check, shape, list, membership }) {
   if (!Object.hasOwn(d, 'sourceSupport')) { check(d.evaluatorVersion !== EVALUATOR, 'Source support policy required'); return; }
-  check(d.evaluatorVersion === EVALUATOR, 'Source support evaluator required');
+  check([EVALUATOR, PUBLIC_EVALUATOR].includes(d.evaluatorVersion), 'Source support evaluator required');
   shape(d.sourceSupport, ['version', 'sources']);
   check(d.sourceSupport.version === VERSION, 'Unknown source support version');
   const expected = TARGETS.filter((key) => Object.values(d.sources).some((s) => location(s) === key));
@@ -24,7 +26,7 @@ function validateSupport(d, { check, shape, list, membership }) {
       list(values, 512); membership(values.length);
       check(values.every((v) => typeof v === 'string' && /^(0|[1-9][0-9]*)$/.test(v)) && new Set(values).size === values.length, 'Support value IDs');
     }
-    check(p.deferredValues.every((v) => key === 'AR.size' && ['29', '30', '31'].includes(v)
+    check(p.deferredValues.every((v) => DEFERRED[key]?.includes(v)
       && !p.semanticValues.includes(v)), 'Conflicting or unapproved deferred values');
     for (const [id, s] of Object.entries(d.sources).filter(([, s]) => location(s) === key)) {
       check(s.kind === 'semantic' && s.aliases.length === 0, 'Supported historical source must be semantic and unaliased');
@@ -45,7 +47,7 @@ function upgradeSourceSupport(definition, evidence) {
   const next = structuredClone(definition);
   // Repeated preparation never promotes newly published live values.
   if (next.sourceSupport) return next;
-  next.evaluatorVersion = EVALUATOR;
+  if (next.evaluatorVersion !== PUBLIC_EVALUATOR) next.evaluatorVersion = EVALUATOR;
   next.sourceSupport = { version: VERSION, sources: {} };
   for (const key of TARGETS) {
     const descriptors = Object.entries(next.sources).filter(([, s]) => location(s) === key);
@@ -133,4 +135,7 @@ function sourceSupportChecker(definition, product) {
   return (descriptor, raw) => checkSourceSupport(definition, descriptor, product, raw, context);
 }
 
-module.exports = { VERSION, EVALUATOR, validateSupport, upgradeSourceSupport, sourceSupportUpdate, policyFor, projectSupportProducts, sourceSupportChecker };
+const isApprovedDeferredValue = (key, value) => DEFERRED[key]?.includes(String(value)) === true;
+
+module.exports = { VERSION, EVALUATOR, PUBLIC_EVALUATOR, validateSupport, upgradeSourceSupport, sourceSupportUpdate, policyFor,
+  projectSupportProducts, sourceSupportChecker, isApprovedDeferredValue };

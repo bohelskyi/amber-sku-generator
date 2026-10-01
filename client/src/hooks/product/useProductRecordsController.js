@@ -1,19 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { productsApi } from '../../api/products-api';
 import { getApiError } from '../../lib/http-error';
 
-export function useProductRecordsController({ onArchived }) {
+export function useProductRecordsController({ onArchived, canViewHistory = true }) {
   const [history, setHistory] = useState([]);
   const [skuToDelete, setSkuToDelete] = useState('');
+  const [historyError, setHistoryError] = useState('');
 
-  const fetchHistory = () => productsApi.getRecent().then((response) => {
+  const fetchHistory = useCallback(() => !canViewHistory ? Promise.resolve([]) : productsApi.getRecent().then((response) => {
     setHistory(response.data);
+    setHistoryError('');
     return response.data;
-  });
+  }).catch((error) => { setHistoryError(getApiError(error)); return []; }), [canViewHistory]);
 
   useEffect(() => {
     fetchHistory();
-  }, []);
+  }, [fetchHistory]);
 
   const handleDelete = (sku) => {
     if (!sku) return;
@@ -35,6 +37,7 @@ export function useProductRecordsController({ onArchived }) {
     fetchHistory,
     handleDelete,
     history,
+    historyError,
     setSkuToDelete,
     skuToDelete,
   };

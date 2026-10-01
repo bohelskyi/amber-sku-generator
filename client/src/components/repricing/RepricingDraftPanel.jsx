@@ -106,7 +106,7 @@ export function RepricingDraftPanel({ controller }) {
             <AlertTriangle size={18} className="mt-0.5 shrink-0" />
             <span>
               {draftConflicts.length} ручних цін більше не належать цій переоцінці:
-              {' '}{draftConflicts.map((item) => item.sku).join(', ')}.
+              {' '}{draftConflicts.map((item) => item.publicSku || item.sku).join(', ')}.
             </span>
           </div>
           <button type="button" className="btn btn-outline" onClick={removeDraftConflicts}>

@@ -42,7 +42,7 @@ const optIn = () => fireEvent.click(screen.getByRole('checkbox', { name: /Екс
 async function start() { click(/Перевірити 1 новий товар/); await screen.findByRole('button', { name: /Створити файли/ }); }
 beforeEach(() => {
   vi.clearAllMocks(); for (const mock of Object.values(exportsApi)) mock.mockReset();
-  exportsApi.getStatus.mockResolvedValue(response({ countSinceLastExport: 1, activation: { implementation: 'template', templateVersionId: 'selected' } }));
+  exportsApi.getStatus.mockResolvedValue(response({ delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false }, countSinceLastExport: 1, activation: { implementation: 'template', templateVersionId: 'selected' } }));
   exportsApi.getPriceStatus.mockResolvedValue(response({ pendingCount: 0 }));
   exportsApi.getTemplateOptions.mockResolvedValue(response({ activeVersionId: 'version-a', versions: [{ versionId: 'version-a', templateId: 'family-a', displayName: 'Кандидат A', versionNumber: '2' }] }));
   exportsApi.preview.mockImplementation(async (intent) => response(preview(intent.requestContract ? { requestContract: 'template-v1', intent, template, previewToken: 'opaque-token' } : {})));

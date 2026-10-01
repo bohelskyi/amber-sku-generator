@@ -62,7 +62,7 @@ function previewFor(product, subjectUa, subjectEn, lifecycle, confirmUnchanged =
   if (sameOutput && !confirmUnchanged) {
     throw nameError('Назви не змінилися.', 422, 'NO_CHANGE');
   }
-  const sku = product.full_sku;
+  const sku = product.public_sku || product.full_sku;
   const previewToken = crypto.createHash('sha256').update(JSON.stringify({
     version: 2,
     productState: getProductStateSignature(product),
@@ -72,7 +72,8 @@ function previewFor(product, subjectUa, subjectEn, lifecycle, confirmUnchanged =
     after: [subjectUa, subjectEn],
   })).digest('hex');
   return {
-    productId: Number(product.id), sku, subjectUa, subjectEn, previewToken,
+    productId: Number(product.id), sku: product.full_sku, internalSku: product.full_sku,
+    publicSku: sku, subjectUa, subjectEn, previewToken,
     reviewRequired, canConfirmUnchanged: unchanged && reviewRequired,
     action: unchanged ? 'confirm_inherited' : 'change',
     nameUa: `${subjectUa} з бурштину. Арт: ${sku}`,
@@ -85,11 +86,13 @@ async function previewProductMagentoName(payload = {}) {
   const client = await pool.connect();
   try {
     await lifecycleGate.begin(client, 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const product = (await client.query('SELECT * FROM products WHERE id = $1', [productId])).rows[0];
+    const product = (await client.query(`SELECT p.*,i.public_sku FROM products p
+      JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id = $1`, [productId])).rows[0];
     assertEligible(product);
     const [lifecycle] = await readFullProductStates(client, [productId]);
     const readCurrent = !Object.hasOwn(payload, 'subjectUa') && !Object.hasOwn(payload, 'subjectEn');
-    const preview = readCurrent ? { productId, sku: product.full_sku,
+    const preview = readCurrent ? { productId, sku: product.full_sku, internalSku: product.full_sku,
+      publicSku: product.public_sku,
       subjectUa: product.magento_name_subject_ua, subjectEn: product.magento_name_subject_en,
       reviewRequired: product.magento_name_review_required,
       canConfirmUnchanged: product.magento_name_review_required === true
@@ -115,7 +118,8 @@ async function applyProductMagentoName(payload = {}, options = {}) {
   const client = await (options.databasePool || pool).connect();
   try {
     await lifecycleGate.begin(client, 'BEGIN');
-    const result = await client.query('SELECT * FROM products WHERE id = $1 FOR UPDATE', [productId]);
+    const result = await client.query(`SELECT p.*,i.public_sku FROM products p
+      JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id = $1 FOR UPDATE OF p`, [productId]);
     const product = result.rows[0];
     assertEligible(product);
     const [lifecycle] = await readFullProductStates(client, [productId], { lock: true });
@@ -197,6 +201,7 @@ async function suggestEnglishSubject(payload = {}, options = {}) {
 }
 
 module.exports = {
+  normalizeSubject,
   applyProductMagentoName,
   previewProductMagentoName,
   suggestEnglishSubject,

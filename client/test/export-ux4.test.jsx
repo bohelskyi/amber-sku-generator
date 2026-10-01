@@ -1,3 +1,4 @@
+import { ExportWorkflowContext } from '../src/hooks/product/useExportWorkflow';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider, Routes, Route } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -36,8 +37,8 @@ function mount(path = '/exports/sessions', permissions = ['exports.view', 'expor
     <Route path="sessions/:sessionId?" element={<ExportSessionsPage />} /><Route path="shared" element={<ExportSessionsPage scope="shared" />} />
     <Route path="invitations" element={<ExportSessionsPage scope="invitations" />} /><Route path="history/:stream?/:snapshotId?" element={<ExportHistoryPage />} />
   </Routes> }], { initialEntries: [path] });
-  const result = render(<AuthContext.Provider value={auth}><RouterProvider router={router} /></AuthContext.Provider>);
-  return { ...result, auth, router, switchAuth: (next) => result.rerender(<AuthContext.Provider value={next}><RouterProvider router={router} /></AuthContext.Provider>) };
+  const result = render(<AuthContext.Provider value={auth}><ExportWorkflowContext.Provider value={{ exportStatus: { delivery: { legacyProductCsvEnabled: true } } }}><RouterProvider router={router} /></ExportWorkflowContext.Provider></AuthContext.Provider>);
+  return { ...result, auth, router, switchAuth: (next) => result.rerender(<AuthContext.Provider value={next}><ExportWorkflowContext.Provider value={{ exportStatus: { delivery: { legacyProductCsvEnabled: true } } }}><RouterProvider router={router} /></ExportWorkflowContext.Provider></AuthContext.Provider>) };
 }
 beforeEach(() => {
   for (const mock of [...Object.values(api), ...Object.values(exportsApi)]) mock.mockReset();
@@ -219,7 +220,7 @@ it('UX5: confirmed correction automatically rechecks, preserving attention/file/
     issues: ready ? [] : [issue], cells: [{ state: 'final', value: `SV-${id}` }, { state: ready ? 'final' : 'not-evaluated', value: ready ? 'Fixed name' : null }] });
   const review = (fixed = false) => ({ mode: 'new', tableFingerprint: fixed ? 'new' : 'old', representedCount: 2, readyCount: fixed ? 1 : 0, errors: [issue],
     review: { files: [{ groupCode: 'BR', groupName: 'Браслети', headers: ['sku', 'name'], rows: [] }, { groupCode: 'SV', groupName: 'Сувеніри', headers: ['sku', 'name'], rows: [row(1, fixed), row(2)] }] } });
-  exportsApi.getStatus.mockResolvedValue(response({ countSinceLastExport: 2 })); exportsApi.getPriceStatus.mockResolvedValue(response({ pendingCount: 0 }));
+  exportsApi.getStatus.mockResolvedValue(response({ delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false }, countSinceLastExport: 2 })); exportsApi.getPriceStatus.mockResolvedValue(response({ pendingCount: 0 }));
   exportsApi.preview.mockResolvedValueOnce(response(review())).mockResolvedValue(response(review(true)));
   exportsApi.previewMagentoName.mockResolvedValue(response({ previewToken: 'name-proof' }));
   const savedName = deferred();
@@ -229,8 +230,9 @@ it('UX5: confirmed correction automatically rechecks, preserving attention/file/
   fireEvent.change(screen.getByLabelText('Готовність'), { target: { value: 'attention' } }); fireEvent.change(screen.getByLabelText('Мова рядка'), { target: { value: 'main' } });
   click('Ширина колонок'); fireEvent.change(screen.getByLabelText('Ширина, px'), { target: { value: '420' } }); click('Готово');
   click('Значення name, рядок 1, потребує уваги'); click('Заповнити назву');
-  fireEvent.change(screen.getByLabelText('Українська назва'), { target: { value: 'Назва' } }); fireEvent.change(screen.getByLabelText('English name'), { target: { value: 'Name' } });
-  click('Зберегти назви'); await screen.findByText(/Дані товару змінено. Попередній перегляд застарів/);
+  await waitFor(() => expect(screen.getByLabelText('Українська назва').disabled).toBe(false));
+  fireEvent.change(screen.getByLabelText('Українська назва'), { target: { value: 'Назва' } }); fireEvent.change(screen.getByLabelText('Англійська назва (EN)'), { target: { value: 'Name' } });
+  click('Переглянути зміни'); await screen.findByRole('button', { name: 'Зберегти назви' }); click('Зберегти назви'); await screen.findByText(/Дані товару змінено. Попередній перегляд застарів/);
   expect(screen.getByRole('dialog')).toBeTruthy(); expect(exportsApi.preview).toHaveBeenCalledTimes(1);
   await act(async () => savedName.resolve(response({})));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -239,6 +241,6 @@ it('UX5: confirmed correction automatically rechecks, preserving attention/file/
   expect(screen.getByLabelText('Готовність').value).toBe('attention'); expect(screen.getByLabelText('Пошук SKU').value).toBe('SV-'); expect(screen.getByLabelText('Мова рядка').value).toBe('main');
   expect(screen.getByRole('tab', { name: 'Сувеніри' }).getAttribute('aria-selected')).toBe('true'); expect(document.querySelector('colgroup col:nth-child(2)').style.width).toBe('420px');
   expect(screen.queryByText('Fixed name')).toBeNull(); expect(screen.queryByRole('button', { name: 'Значення name, рядок 1, потребує уваги' })).toBeNull();
-  click('Значення name, рядок 2, потребує уваги'); click('Заповнити назву'); expect(within(screen.getByRole('dialog')).getByText('Назва для SV-2')).toBeTruthy();
+  click('Значення name, рядок 2, потребує уваги'); click('Заповнити назву'); expect(within(screen.getByRole('dialog')).getByText('Назви для Magento · SV-2')).toBeTruthy();
   expect(exportsApi.preview.mock.calls).toEqual([[{ mode: 'new' }], [{ mode: 'new' }]]); expect(exportsApi.createSnapshot).not.toHaveBeenCalled();
 });

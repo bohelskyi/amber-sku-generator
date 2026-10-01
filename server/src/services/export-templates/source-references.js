@@ -1,7 +1,7 @@
 const { LIMITS } = require('./definition');
 const { PRODUCT_FIELDS } = require('./input-projection');
 const { HEADERS } = require('./magento-v1-data');
-const { policyFor, EVALUATOR } = require('./source-support');
+const { policyFor, EVALUATOR, PUBLIC_EVALUATOR } = require('./source-support');
 
 // Approved stored-information contract, not a cross-key alias or inferred lineage.
 // The original Magento mapper and docs/EXPORTS.md retain this exact legacy key
@@ -74,7 +74,7 @@ function validateSourceReferences(definition, evidence) {
       && source.type === 'scalar' && source.provenance === 'supplied-stored-answers-v1' && source.aliases.length === 0
       && HISTORICAL_INFORMATION_SOURCES.some((entry) => entry.category === source.category && entry.key === source.key
         && [entry.outputContract, 'magento-products-columns-v2'].includes(definition.outputContract)
-        && [entry.evaluatorVersion, EVALUATOR].includes(definition.evaluatorVersion));
+        && [entry.evaluatorVersion, EVALUATOR, PUBLIC_EVALUATOR].includes(definition.evaluatorVersion));
     if (!matches.length && !approvedLegacyInformation) {
       report(sourceId, 'SOURCE_REFERENCE_UNRESOLVED', source.kind === 'information'
         ? 'Current non-SKU question metadata required' : 'Historical SKU or current non-SKU question evidence required',
@@ -116,6 +116,8 @@ async function getSourceRegistry(client) {
   return {
     formatVersion: 1, evaluatorVersion: 'magento-declarative-1', outputContract: 'magento-products-v1',
     productFields: PRODUCT_FIELDS, operations: OPERATIONS, limits: { ...LIMITS, previewProducts: 100 },
+    productSourceContracts: [{ version: 'public-product-identity-v1', evaluatorVersion: PUBLIC_EVALUATOR,
+      publicSource: 'public_sku', internalSource: 'full_sku' }],
     units: { weight: 'stored grams', total_price_uah: 'stored final UAH', answers: 'stored values; no unit conversion' },
     aliasPolicy: 'No repository-verifiable cross-key lineage; aliases fail publication with explicit diagnostics',
     historicalInformationSources: HISTORICAL_INFORMATION_SOURCES,

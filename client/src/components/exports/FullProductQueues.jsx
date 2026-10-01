@@ -24,11 +24,11 @@ export function FullProductQueues({ lifecycle, onPreview, disabled }) {
     {error && <p role="alert">{error}</p>}
     {page?.items.length === 0 && <p className="text-sm text-slate-600">У цій черзі немає товарів.</p>}
     <ul className="divide-y">{page?.items.map((p) => <li key={p.id} className="py-2 flex flex-wrap gap-3 justify-between text-sm">
-      <span>{p.full_sku}{p.magento_name_review_required ? ' · Потрібна перевірка назв' : ''}</span>
+      <span>{p.public_sku || p.full_sku}{p.public_sku && p.public_sku !== p.full_sku ? ` · внутрішній ${p.full_sku}` : ''}{p.magento_name_review_required ? ' · Потрібна перевірка назв' : ''}</span>
       {queue === 'hold' ? <span>{reasons[p.hold_reason] || 'Потрібне рішення щодо виключення'}</span>
         : <button className="btn btn-outline px-3" disabled={disabled} onClick={() => onPreview(queue === 'replacement'
           ? { mode:'replacement', productId:p.id, deliveryVersion:p.delivery_version }
-          : { fromSku:p.full_sku, toSku:p.full_sku })}>Перевірити товар</button>}
+          : { fromSku:p.public_sku || p.full_sku, toSku:p.public_sku || p.full_sku })}>Перевірити товар</button>}
     </li>)}</ul>
     {after > 0 && <button className="btn px-3" onClick={() => { setAfter(0); setPage(null); }}>На початок</button>}
     {page?.next && <button className="btn px-3" onClick={() => { setAfter(page.next); setPage(null); }}>Наступні</button>}

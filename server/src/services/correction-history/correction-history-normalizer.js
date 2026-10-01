@@ -105,6 +105,10 @@ function normalizeCorrectionRow(row, config) {
     categoryName: config?.categories?.[categoryCode]?.name || categoryCode,
     sourceSku: row.source_sku,
     correctedSku: row.corrected_sku,
+    sourceInternalSku: row.source_sku,
+    correctedInternalSku: row.corrected_sku,
+    sourcePublicSku: row.source_public_sku || row.source_sku,
+    correctedPublicSku: row.corrected_public_sku || row.corrected_sku,
     oldPriceUah,
     newPriceUah,
     priceDeltaUah: Number.isFinite(storedDelta)
