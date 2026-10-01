@@ -163,6 +163,8 @@ The UI separates review → create → stored read/download → explicit price c
 
 ## Read APIs and review
 
+`GET /export/status` exposes only two delivery-state flags: `delivery.legacyProductCsvEnabled` and `delivery.automaticSyncEnabled`. The UI hides new product CSV creation when the legacy flag is false or status is unavailable, while retaining stored artifacts, history, and the separate price stream. An uncertain original generation command retains its original retry identity; the server remains authoritative for cutover and recovery checks. Disabling automatic sync after cutover does not reopen product CSV creation.
+
 | Endpoint under `/api` | Meaning |
 | --- | --- |
 | `POST /export/preview` | Authoritative current product review; no durable capture or acknowledgment. |

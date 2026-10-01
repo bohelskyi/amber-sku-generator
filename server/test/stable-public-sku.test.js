@@ -114,7 +114,7 @@ test('recount evidence signature binds whether stable public SKU allocation is a
 
   const before = await evidenceFor(false);
   const after = await evidenceFor(true);
-  assert.equal(before.binding.version, 3);
+  assert.equal(before.binding.version, 5);
   assert.equal(before.binding.publicSkuActivation, false);
   assert.equal(after.binding.publicSkuActivation, true);
   assert.notEqual(before.signature, after.signature);

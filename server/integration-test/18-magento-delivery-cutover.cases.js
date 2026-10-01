@@ -36,6 +36,9 @@ suite.test('Magento delivery cutover is previewed, atomic, persistent and perman
     await db.query(`INSERT INTO user_role_assignments(application_user_id,role_id)
       SELECT $1,id FROM roles WHERE role_key='administrator'`, [actor.id]);
     const service = require('../src/services/magento/delivery-cutover.service');
+    const exportService = require('../src/services/export.service');
+    assert.deepEqual((await exportService.getExportStatus({ databasePool: db })).delivery,
+      { legacyProductCsvEnabled: true, automaticSyncEnabled: false });
     const contract = require('../src/services/magento/binding-contract');
     const input = { expectedDatabase: name, installationKey: 'production', actorUserId: Number(actor.id),
       origin: 'https://cutover.example.invalid' };
@@ -103,5 +106,8 @@ suite.test('Magento delivery cutover is previewed, atomic, persistent and perman
       { databasePool: db, mutationContext: { actorUserId: Number(actor.id) } });
     const disabled = (await db.query('SELECT enabled,legacy_product_csv_enabled FROM magento_auto_sync_activation')).rows[0];
     assert.deepEqual(disabled, { enabled: false, legacy_product_csv_enabled: false });
+    const presentation = await exportService.getExportStatus({ databasePool: db });
+    assert.deepEqual(presentation.delivery, { legacyProductCsvEnabled: false, automaticSyncEnabled: false });
+    assert.deepEqual(Object.keys(presentation.delivery).sort(), ['automaticSyncEnabled', 'legacyProductCsvEnabled']);
   } finally { await db.end(); await dropTestDatabase(name); }
 });

@@ -31,8 +31,16 @@ function productEvidence(raw, targets) {
 }
 function evaluate(amber, product) {
   try {
-    const mapped = evaluateProduct(amber.compiled, product);
+    // The legacy CSV review flag is not the shared-authority name gate. Keep the
+    // original object so historical source-support associations remain intact.
+    const review = product.magento_name_review_required;
+    const ownedReview = Object.hasOwn(product, 'magento_name_review_required');
+    let mapped;
+    try { product.magento_name_review_required = false; mapped = evaluateProduct(amber.compiled, product); }
+    finally { if (ownedReview) product.magento_name_review_required = review; else delete product.magento_name_review_required; }
+    const generatedNames = require('./name-reconciliation').applyNameOverride(mapped, product);
     return { base: mapped.base || {}, english: mapped.english || {}, ready: mapped.errors.length === 0,
+      generatedNames,
       issueFields: [...new Set(mapped.errors.map((e) => e.field).filter((f) => /^[a-zA-Z][a-zA-Z0-9_]{0,99}$/.test(f)))] };
   } catch {
     return { base: {}, english: {}, ready: false, issueFields: [], failed: true };

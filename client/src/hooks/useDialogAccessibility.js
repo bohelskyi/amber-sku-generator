@@ -45,6 +45,17 @@ export function useDialogAccessibility({
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      beforeFocusRestore?.();
+      if (previousActiveElement?.isConnected) {
+        previousActiveElement.focus({ preventScroll: true });
+      }
+    };
+  }, [beforeFocusRestore, containerRef, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
     const focusInitialElement = () => {
       const container = containerRef.current;
       const initialElement = initialFocusRef?.current;
@@ -55,16 +66,8 @@ export function useDialogAccessibility({
     };
     focusInitialElement();
     const focusFrame = window.requestAnimationFrame(focusInitialElement);
-
-    return () => {
-      window.cancelAnimationFrame(focusFrame);
-      document.body.style.overflow = previousOverflow;
-      beforeFocusRestore?.();
-      if (previousActiveElement?.isConnected) {
-        previousActiveElement.focus({ preventScroll: true });
-      }
-    };
-  }, [beforeFocusRestore, containerRef, initialFocusRef, isOpen]);
+    return () => window.cancelAnimationFrame(focusFrame);
+  }, [containerRef, initialFocusRef, isOpen]);
 
   useEffect(() => {
     if (!isOpen || !isInteractionEnabled) return undefined;

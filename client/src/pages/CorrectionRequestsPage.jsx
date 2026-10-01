@@ -427,7 +427,7 @@ export default function CorrectionRequestsPage() {
         getClaimHeaders(request)
       );
       await loadRequests(filter);
-      setSuccess(`Запит #${request.id} оновлено. Повторно звірте SKU та ціну на сайті.`);
+      setSuccess(`Запит #${request.id} оновлено. Перевірте актуальні параметри й ціну перед виконанням.`);
     } catch (requestError) {
       if (isCorrectionClaimConflict(requestError)) clearClaim(request.id);
       await loadRequests(filter).catch(() => {});

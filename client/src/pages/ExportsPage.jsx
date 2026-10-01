@@ -18,8 +18,8 @@ export default function ExportsPage() {
     canActivateTemplate={permissions.includes('export_templates.activate')}
     canCreateExport={permissions.includes('exports.create')} />;
   return <ExportWorkspaceShell><Routes>
-    <Route index element={<><div className="export-review-heading"><h2 className="text-xl font-semibold">Новий експорт</h2>
-      <Link className="underline" to="/exports/new/template">Експорт за опублікованим шаблоном</Link>
+    <Route index element={<><div className="export-review-heading"><h2 className="text-xl font-semibold">Огляд доставки й експорту</h2>
+      {workflow.exportStatus?.delivery?.legacyProductCsvEnabled === true && <Link className="underline" to="/exports/new/template">Експорт за опублікованим шаблоном</Link>}
     </div>{tools('products')}</>} />
     <Route path="prices" element={<PriceExportWorkspace workflow={workflow.priceWorkflow} canCreate={permissions.includes('exports.create')} />} />
     <Route path="history" element={<ExportHistoryPage />} />

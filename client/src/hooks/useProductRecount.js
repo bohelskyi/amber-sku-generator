@@ -40,6 +40,7 @@ export function useProductRecount({
   const recountAnswers = recountTarget.answers;
   const [recountWeight, setRecountWeight] = useState('');
   const [recountReason, setRecountReason] = useState('');
+  const [recountNameChange, setRecountNameChange] = useState(null);
   const [recountManualPriceUah, setRecountManualPriceUah] = useState('');
   const [recountPricingMode, setRecountPricingMode] = useState('system_auto');
   const [recountUsdPerGram, setRecountUsdPerGram] = useState('');
@@ -70,13 +71,13 @@ export function useProductRecount({
   const previewRequestIdRef = useRef(0);
   const priceChangeRequestIdRef = useRef(0);
   const hasRecountChanges = Boolean(
-    isRecountOpen && haveRecountTargetChanged(decodeData, recountAnswers, recountWeight)
+    isRecountOpen && (haveRecountTargetChanged(decodeData, recountAnswers, recountWeight) || recountNameChange)
   );
   const informationPatch = getInformationOnlyPatch(
     decodeData, recountAnswers, recountWeight, submitMode
   );
-  const isInformationOnly = Boolean(informationPatch);
-  const useDecisionPreview = canPriceOverride && submitMode !== 'apply';
+  const isInformationOnly = Boolean(informationPatch) && !recountNameChange;
+  const useDecisionPreview = submitMode === 'apply' || canPriceOverride;
   const pricingDecision = useMemo(() => {
     if (recountPricingMode === 'usd_per_gram') return {
       mode: 'usd_per_gram',
@@ -114,12 +115,14 @@ export function useProductRecount({
       answers: recountAnswers,
       isCalibrated: recountAnswers.is_calibrated ?? null,
       weight: recountWeight,
+      ...(recountNameChange ? { nameChange: recountNameChange } : {}),
     });
+    if (recountNameChange) basePayload.nameChange = recountNameChange;
     if (!useDecisionPreview) return basePayload;
     const { manualPriceUah: _legacyManualPrice, ...decisionPayload } = basePayload;
     return { ...decisionPayload, pricingDecision };
-  }, [decodeData?.publicSku, decodeData?.sku, recountAnswers, recountWeight, useDecisionPreview, pricingDecision]);
-  const previewPath = useDecisionPreview
+  }, [decodeData?.publicSku, decodeData?.sku, recountAnswers, recountWeight, recountNameChange, useDecisionPreview, pricingDecision]);
+  const previewPath = useDecisionPreview && submitMode !== 'apply'
     ? '/admin/correction-requests/preview' : '/recount/preview';
   const requiresRecountWeight = Number(decodeData?.category?.requires_weight) === 1;
   const recountBlockers = recountValidationActive
@@ -151,6 +154,13 @@ export function useProductRecount({
     setRecountValidationAttempt((attempt) => attempt + 1);
   };
 
+  const resetRecountPricingDecision = () => {
+    setRecountPricingMode('system_auto');
+    setRecountManualPriceUah('');
+    setRecountUsdPerGram('');
+    setRecountMarketingRounding(getCorrectionMarketingRoundingDefault(config, decodeData?.category?.code));
+  };
+
   const handleDecode = (skuValue = skuToDecode) => {
     const normalizedSku = String(skuValue || '').trim().toUpperCase();
     if (!normalizedSku) {
@@ -164,6 +174,7 @@ export function useProductRecount({
     priceChangeRequestIdRef.current += 1;
     api.post('/decode', { sku: normalizedSku })
       .then((res) => {
+        resetRecountPricingDecision();
         setSkuToDecode(normalizedSku);
         setDecodeData(res.data);
         setDecodeError('');
@@ -187,6 +198,7 @@ export function useProductRecount({
   };
 
   const handleDecodeInputChange = (value) => {
+    resetRecountPricingDecision();
     previewRequestGateRef.current.invalidate();
     priceChangeRequestIdRef.current += 1;
     setSkuToDecode(value.toUpperCase());
@@ -207,6 +219,8 @@ export function useProductRecount({
   };
 
   const handleStartRecount = () => {
+    previewRequestIdRef.current = previewRequestGateRef.current.invalidate();
+    setRecountNameChange(null);
     if (!decodeData?.existsInDb) {
       setRecountError('Переоблік доступний тільки для артикула, який є в базі.');
       return;
@@ -218,13 +232,7 @@ export function useProductRecount({
     });
     setRecountWeight(String(getRecountSourceWeight(decodeData) || ''));
     setRecountReason('');
-    setRecountManualPriceUah('');
-    setRecountPricingMode('system_auto');
-    setRecountUsdPerGram('');
-    setRecountMarketingRounding(getCorrectionMarketingRoundingDefault(
-      config,
-      decodeData?.category?.code
-    ));
+    resetRecountPricingDecision();
     setRecountPreview(null);
     setIsRecountPreviewCurrent(false);
     setIsRecountPreviewUnavailable(false);
@@ -238,6 +246,8 @@ export function useProductRecount({
   };
 
   const handleCancelRecount = () => {
+    resetRecountPricingDecision();
+    setRecountNameChange(null);
     previewRequestGateRef.current.invalidate();
     priceChangeRequestIdRef.current += 1;
     setIsRecountOpen(false);
@@ -326,6 +336,11 @@ export function useProductRecount({
       ),
     });
     if (!requestMode) payload.sourceStateSignature = recountPreview?.source?.stateSignature;
+    if (!requestMode && recountNameChange) payload.nameChange = recountNameChange;
+    if (!requestMode && useDecisionPreview) {
+      const { manualPriceUah: _legacyPrice, ...direct } = payload;
+      return { ...direct, pricingDecision, previewToken: recountPreview?.previewToken };
+    }
     return requestMode && useDecisionPreview
       ? buildCorrectionRequestPayload(payload, pricingDecision, recountPreview?.previewSignature)
       : payload;
@@ -520,16 +535,7 @@ export function useProductRecount({
             reason: recountReason,
           });
           setIsRecountOpen(false);
-          const guidance = applied.data.exportGuidance?.mode;
-          setRecountSuccess(guidance === 'reexport'
-            ? `Характеристики ${sourceSku} оновлено. Для вже представленого товару створіть окремий Magento-знімок цього SKU.`
-            : guidance === 'held'
-              ? `?????????????? ${sourceSku} ????????. ????? ??????????? ? ????? ?????? ????????.`
-              : guidance === 'replacement'
-                ? `?????????????? ${sourceSku} ????????. ????????? ????? ? ????? ?????????? ?????.`
-            : guidance === 'excluded'
-              ? `Характеристики ${sourceSku} оновлено. Товар виключений з експорту.`
-              : `Характеристики ${sourceSku} оновлено. Товар увійде до наступного звичайного експорту.`);
+          setRecountSuccess(`Характеристики ${decodeData.publicSku || decodeData.product?.public_sku || sourceSku} оновлено. Стан Magento можна перевірити в історії товару.`);
           Promise.resolve(onApplied?.({ result: applied.data, sourceSku,
             correctedSku: sourceSku, informationOnly: true })).catch(() => {});
           handleDecode(sourceSku);
@@ -566,7 +572,21 @@ export function useProductRecount({
   };
 
   const handleCancelRecountConfirmation = () => {
-    if (!isRecountApplying) setIsRecountConfirmOpen(false);
+    if (isRecountApplying) return;
+    setIsRecountConfirmOpen(false);
+    if (submitMode !== 'apply') return;
+    // Leaving the direct price decision discards it. Keep the characteristics,
+    // then obtain a fresh automatic preview instead of reusing an abandoned
+    // custom decision or an in-flight response from its confirmation.
+    resetRecountPricingDecision();
+    previewRequestIdRef.current = previewRequestGateRef.current.invalidate();
+    setRecountPreview(null);
+    setIsRecountPreviewCurrent(false);
+    setIsRecountPreviewUnavailable(false);
+    setIsRecountLoading(hasRecountChanges && !isInformationOnly);
+    setRecountError('');
+    setRecountValidationActive(false);
+    setRecountValidationMessage('');
   };
 
   const handleCancelPriceChange = () => {
@@ -714,8 +734,8 @@ export function useProductRecount({
           return;
         }
 
-        const correctedSku = res.data.corrected.publicSku || sourceSku;
-        setRecountSuccess(`Створено коригувальний артикул ${correctedSku}. Він не потрапить в експорт.`);
+        const correctedSku = res.data.corrected.publicSku || res.data.corrected.sku || res.data.corrected.fullSku;
+        setRecountSuccess(`Переоблік застосовано. Артикул: ${correctedSku}. Стан Magento можна перевірити в історії товару.`);
         Promise.resolve(onApplied?.({ result: res.data, sourceSku, correctedSku })).catch(() => {});
         handleDecode(correctedSku);
       })
@@ -776,6 +796,18 @@ export function useProductRecount({
     recountSuccess,
     recountValidationAttempt,
     recountWeight,
+    handleRecountNameChange: (names) => {
+      // Edit-mode toggles and cancellation of an unchanged name do not change
+      // the effective payload. Invalidating here would leave no effect to
+      // replace the request or settle loading.
+      if (names?.all === recountNameChange?.all && names?.en === recountNameChange?.en) return;
+      setRecountNameChange(names);
+      previewRequestIdRef.current = previewRequestGateRef.current.invalidate();
+      setIsRecountConfirmOpen(false); setIsRecountPreviewCurrent(false); setIsRecountPreviewUnavailable(false);
+      const needsPreview = Boolean(names || (haveRecountTargetChanged(decodeData, recountAnswers, recountWeight) && !informationPatch));
+      setIsRecountLoading(needsPreview); setRecountError('');
+      if (!needsPreview) setRecountPreview(null);
+    },
     setRecountReason,
     setRecountManualPriceUah,
     setRecountPricingMode,

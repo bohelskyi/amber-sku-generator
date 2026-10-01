@@ -9,7 +9,7 @@ import {
   formatUsd,
 } from '../../lib/formatters';
 import { getAnswerValueLabel, getQuestionLabel } from '../../lib/answer-labels';
-import { getNewProductCopy } from '../../lib/product-export-copy';
+import { useMagentoSummary } from '../../hooks/useMagentoSummary.js';
 import {
   getVisibleOptionsForQuestion,
   isQuestionVisible,
@@ -24,6 +24,8 @@ import {
   getRecountPricingDependencyState,
 } from '../../lib/product-recount';
 import { handleNumberKeyDown, handleNumberWheel } from '../../lib/number-input';
+import { ProductMagentoState } from './ProductMagentoState.jsx';
+import { RecountNameFields } from './RecountNameFields.jsx';
 
 function getPricingSourceLabel(source) {
   return source === 'stored' ? 'Збережена в базі' : 'Перерахована зараз';
@@ -94,13 +96,11 @@ export function DecodeErrorPanel({ details, message }) {
 }
 
 export function HomeDashboard({
+  canDecodeProducts = true,
   canChangeProductPrice = false,
   canCreateProducts = true,
   canStartRecount = true,
-  canViewExports = false,
   config,
-  exportStatus,
-  priceExportStatus,
   skuToDecode,
   decodeData,
   decodeError,
@@ -127,19 +127,20 @@ export function HomeDashboard({
   onRecountReasonChange,
   onRecountTextAnswer,
   onRecountWeightChange,
+  onRecountNameChange,
   onStart,
   onStartRecount,
   onDecode,
   onDecodeInputChange,
 }) {
-  const newProductCopy = getNewProductCopy(exportStatus?.countSinceLastExport);
+  const { summary: magentoSummary } = useMagentoSummary();
   return (
     <div className="space-y-5">
       <div className={`home-top-workspace${canCreateProducts ? '' : ' is-decoder-only'}`}>
         {canCreateProducts && <section className="home-workspace-panel home-create-panel card fade-up stagger-1">
           <div className="home-create-heading section-title">
             <div>
-              <p className="eyebrow">Створити SKU</p>
+              <p className="eyebrow">Створити товар</p>
               <h2 className="section-title-text">Оберіть категорію</h2>
             </div>
           </div>
@@ -166,9 +167,9 @@ export function HomeDashboard({
 
         <div className="home-side-workspace home-workspace-panel card fade-up stagger-2">
           <div className="home-decode-panel px-4 py-3">
-            <p className="eyebrow">Розшифрувати SKU</p>
+            <p className="eyebrow">Пошук товару</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Знайти та перевірити товар</h2>
-            <div className="home-decode-actions mt-3 flex flex-col gap-2 sm:flex-row lg:flex-col">
+            {canDecodeProducts ? <div className="home-decode-actions mt-3 flex flex-col gap-2 sm:flex-row lg:flex-col">
               <input
                 type="text"
                 value={skuToDecode}
@@ -176,45 +177,34 @@ export function HomeDashboard({
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') onDecode();
                 }}
-                placeholder="Наприклад, BN123456001"
+                placeholder="Введіть артикул"
                 aria-label="Артикул для розшифрування"
                 className="input min-w-0"
               />
               <button onClick={() => onDecode()} className="btn btn-primary shrink-0">
                 Розшифрувати
               </button>
-            </div>
+            </div> : <p className="mt-2 text-sm text-slate-600">Для пошуку товарів потрібен дозвіл на перегляд їхніх характеристик.</p>}
 
             {decodeError && (
               <DecodeErrorPanel details={decodeErrorDetails} message={decodeError} />
             )}
           </div>
 
-          {canViewExports && (
-            <section className="home-export-panel min-w-0" aria-label="Експорт">
-              <h2 className="text-sm font-semibold text-slate-900">Експорт</h2>
-              <p className="mt-1 text-sm text-slate-700">
-                {exportStatus ? newProductCopy.pendingLabel : 'Завантаження статусу товарів…'}
-              </p>
-              <Link to="/exports/prices" className="mt-1 inline-block text-xs text-slate-600 underline underline-offset-2">
-                Зміни цін до експорту: {priceExportStatus ? priceExportStatus.pendingCount : 'завантаження…'}
-              </Link>
-              {Number(priceExportStatus?.excludedPendingCount) > 0 && (
-                <p className="mt-1 text-xs text-slate-500">
-                  Виключено з експорту: {priceExportStatus.excludedPendingCount}
-                </p>
-              )}
-              <Link to="/exports" className="btn btn-primary mt-3 w-full whitespace-normal text-center">
-                Перейти до експорту
-              </Link>
-            </section>
-          )}
+          <section className="home-export-panel min-w-0" aria-label="Magento">
+            <h2 className="text-sm font-semibold">Magento</h2>
+            <p className="mt-1 text-sm">{!magentoSummary ? 'Стан синхронізації недоступний'
+              : magentoSummary.problemCount > 0 ? `● Є проблеми синхронізації · ${magentoSummary.problemCount}`
+                : magentoSummary.enabled ? '● Автоматичну синхронізацію ввімкнено' : 'Автоматичну синхронізацію призупинено'}</p>
+            {magentoSummary?.problemCount > 0 && <Link to="/sync-problems" className="mt-2 inline-block text-sm underline">Переглянути проблеми</Link>}
+          </section>
         </div>
       </div>
 
       {decodeData && (
         <DecodeWorkspace
           config={config}
+          onDecode={onDecode}
           decodeData={decodeData}
           hasRecountChanges={hasRecountChanges}
           isInformationOnly={isInformationOnly}
@@ -240,6 +230,7 @@ export function HomeDashboard({
           onRecountReasonChange={onRecountReasonChange}
           onRecountTextAnswer={onRecountTextAnswer}
           onRecountWeightChange={onRecountWeightChange}
+          onRecountNameChange={onRecountNameChange}
           onStartRecount={onStartRecount}
         />
       )}
@@ -248,6 +239,7 @@ export function HomeDashboard({
 }
 
 export function DecodeWorkspace({
+  onDecode,
   canChangeProductPrice = false,
   canStartRecount = true,
   config,
@@ -273,6 +265,7 @@ export function DecodeWorkspace({
   onRecountReasonChange,
   onRecountTextAnswer,
   onRecountWeightChange,
+  onRecountNameChange,
   onStartRecount,
   recountMode = 'apply',
 }) {
@@ -323,6 +316,7 @@ export function DecodeWorkspace({
           onRecountReasonChange={onRecountReasonChange}
           onRecountTextAnswer={onRecountTextAnswer}
           onRecountWeightChange={onRecountWeightChange}
+          onRecountNameChange={onRecountNameChange}
           recountMode={recountMode}
         />
       </section>
@@ -332,6 +326,11 @@ export function DecodeWorkspace({
   return (
     <section className="operational-split-layout decode-result-workspace fade-up stagger-3">
       <div className="decode-workspace builder-workspace card overflow-hidden">
+        <ProductMagentoState key={decodeData.product?.id || decodeData.sku} product={{ productId: decodeData.product?.id,
+          publicSku: decodeData.publicSku || decodeData.sku, sku: decodeData.sku,
+          categoryCode: decodeData.category.code, status: decodeData.product?.status || 'active',
+          magentoNameReviewRequired: decodeData.product?.magento_name_review_required === true }}
+          onSaved={() => onDecode?.(decodeData.publicSku || decodeData.sku)} />
         <header className="builder-header">
           <div className="min-w-0">
             <h2 className="section-title-text">{decodeData.category.name}</h2>
@@ -385,8 +384,6 @@ export function DecodeWorkspace({
           <div className="builder-summary-body">
             <div className="builder-summary-group first">
               <DecodeSummaryRow label="Артикул" value={decodeData.publicSku || decodeData.sku} mono strong />
-              {decodeData.publicSku && decodeData.publicSku !== decodeData.sku
-                && <DecodeSummaryRow label="Внутрішній SKU" value={decodeData.internalSku || decodeData.sku} mono />}
               <DecodeSummaryRow label="Стан у базі" value={productStatus} />
             </div>
 
@@ -430,8 +427,8 @@ export function DecodeWorkspace({
             </div>
 
             <details className="decode-details">
-              <summary>Деталі розрахунку</summary>
-              <div className="decode-details-body">
+              <summary>Технічні деталі</summary>
+              <div className="decode-details-body"><DecodeSummaryRow label="Внутрішній SKU" value={decodeData.internalSku || decodeData.sku} mono />
                 <DecodeSummaryRow label="Базовий SKU" value={decodeData.baseSku} mono />
                 <DecodeSummaryRow
                   label={decodeData.variation
@@ -571,6 +568,7 @@ function RecountPanel({
   onRecountReasonChange,
   onRecountTextAnswer,
   onRecountWeightChange,
+  onRecountNameChange,
   recountMode = 'apply',
 }) {
   const panelRef = useRef(null);
@@ -787,6 +785,7 @@ function RecountPanel({
               </div>
             );
           })}
+          <RecountNameFields productId={decodeData.product?.id} mode={recountMode} busy={isRecountApplying} onChange={onRecountNameChange} />
         </div>
 
         <div className="border-t border-slate-200 px-5 py-4 sm:px-6">
@@ -823,15 +822,9 @@ function RecountPanel({
                 <span>Після</span>
               </div>
               <RecountComparisonRow
-                label="SKU"
+                label="Артикул"
                 current={decodeData.publicSku || decodeData.sku}
                 next={correctedPricing?.publicSku || decodeData.publicSku || decodeData.sku}
-                mono
-              />
-              <RecountComparisonRow
-                label="Внутрішній SKU"
-                current={decodeData.internalSku || decodeData.sku}
-                next={correctedPricing?.internalSku || correctedPricing?.fullSku}
                 mono
               />
               <RecountComparisonRow
@@ -891,7 +884,7 @@ function RecountPanel({
 
             {isRecountPreviewCurrent && recountPreview?.corrected.variation && (
               <p className="builder-summary-note is-warning">
-                Новий SKU буде варіацією наявного артикула.
+                Переоблік застосує вибрані характеристики товару.
               </p>
             )}
 

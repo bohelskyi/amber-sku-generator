@@ -81,6 +81,13 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
   const block = (code, details = {}) => blockers.push({ code, operation: blockerOperation(code, details), ...details });
   if (raw && raw.sku !== publicSku) block('CURRENT_PRODUCT_SKU_MISMATCH');
   const warn = (code, details = {}) => warnings.push({ code, ...details });
+  if (raw && Object.hasOwn(amber, 'nameState')) {
+    const nameDecision = require('./name-state').decisionFor({ amber, raw, domainEvidence });
+    const codes = { conflict: 'NAME_CONFLICT', baseline_required: 'NAME_BASELINE_REQUIRED',
+      accept_external: 'NAME_EXTERNAL_CHANGE_PENDING', unavailable: 'NAME_READ_UNAVAILABLE',
+      identity_changed: 'NAME_REMOTE_IDENTITY_CHANGED' };
+    if (codes[nameDecision.action]) block(codes[nameDecision.action]);
+  }
   const definition = amber.compiled.definition;
   const mapper = describeMapper(definition);
   let plans = [];

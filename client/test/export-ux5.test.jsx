@@ -19,7 +19,7 @@ const deferred = () => { let resolve, reject; const promise = new Promise((a,b) 
 const preview = { mode:'new', tableFingerprint:'first', representedCount:1, readyCount:1, errors:[], range:{fromSku:'SV1',toSku:'SV1'}, previewExpectation:'first' };
 beforeEach(() => {
   Object.values(exportsApi).forEach((fn) => fn.mockReset());
-  exportsApi.getStatus.mockResolvedValue(response({countSinceLastExport:1})); exportsApi.getPriceStatus.mockResolvedValue(response({pendingCount:0}));
+  exportsApi.getStatus.mockResolvedValue(response({ delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false },countSinceLastExport:1})); exportsApi.getPriceStatus.mockResolvedValue(response({pendingCount:0}));
   exportsApi.preview.mockResolvedValue(response(preview));
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -105,11 +105,13 @@ it('empty price queue has no grid, filters or pagination; absent stored artifact
   expect(screen.getByText(/Файли CSV для цього запису недоступні/)).toBeTruthy(); expect(screen.queryByText(/Таблиця читається зі створеного файлу/)).toBeNull();
 });
 
-it('navigation overflow keeps permission filtering, keyboard access and Escape restores its trigger',()=>{
+it('daily navigation keeps permission filtering and native keyboard links without an oversized menu',()=>{
   render(<AuthContext.Provider value={{permissions:['exports.view','audit.view'],identity:{},logout:vi.fn()}}><MemoryRouter><WorkspaceNav/></MemoryRouter></AuthContext.Provider>);
-  const trigger=screen.getByRole('button',{name:/Розділи/}); fireEvent.click(trigger);
-  const audit=screen.getByRole('link',{name:'Аудит'});audit.focus();expect(screen.queryByRole('link',{name:'Користувачі'})).toBeNull();
-  fireEvent.keyDown(audit,{key:'Escape'});expect(screen.queryByRole('link',{name:'Аудит'})).toBeNull();expect(document.activeElement).toBe(trigger);
+  const settings=screen.getByRole('link',{name:'Налаштування'}); settings.focus();
+  expect(document.activeElement).toBe(settings); expect(settings.tabIndex).toBe(0);
+  expect(screen.queryByRole('link',{name:'Користувачі'})).toBeNull();
+  expect(screen.queryByRole('link',{name:'Експорт'})).toBeNull();
+  expect(screen.queryByRole('button',{name:/Розділи/})).toBeNull();
 });
 
 it('history shows only authoritative names and accessible session context, with local dates and unknown historical authors',async()=>{

@@ -134,14 +134,14 @@ describe('product timeline', () => {
     render(<MemoryRouter initialEntries={['/admin/corrections/history?sku=SKU-B']}><ProductTimeline /></MemoryRouter>);
 
     await waitFor(() => expect(screen.getAllByText('SKU-A').length).toBeGreaterThan(0));
-    expect(api.get).toHaveBeenCalledWith('/product-timeline', { params: { sku: 'SKU-B' } });
+    expect(api.get).toHaveBeenCalledWith('/product-timeline', { params: { sku: 'SKU-B' }, signal: expect.any(AbortSignal) });
     expect(screen.getByText('Stored history is incomplete.')).toBeTruthy();
-    expect(screen.getByText('Запит виконано та товар виправлено')).toBeTruthy();
+    expect(screen.getByText('Запит виконано та переоблік застосовано')).toBeTruthy();
     expect(screen.queryByText('Запит виконано')).toBeNull();
     expect(screen.getAllByText('Виконавця не записано').length).toBeGreaterThan(0);
     expect(screen.getByText('Час не записано')).toBeTruthy();
     expect(screen.getAllByText('Калібрування').length).toBeGreaterThan(0);
-    expect(screen.getByText('50%')).toBeTruthy();
+    expect(screen.getAllByText('50%').length).toBeGreaterThan(0);
     expect(screen.getByText('Не вказано')).toBeTruthy();
     expect(screen.getAllByText('Бурштин').length).toBeGreaterThan(0);
     expect(screen.getByText('8')).toBeTruthy();
@@ -156,7 +156,8 @@ describe('product timeline', () => {
     expect(document.querySelector('.timeline-card').className).not.toContain('shadow');
     expect(document.querySelector('.timeline-snapshot').className).not.toContain('shadow');
     expect(document.querySelector('.timeline-change-list')).toBeTruthy();
-    expect(transitions).toHaveLength(2);
+    expect(transitions).toHaveLength(1);
+    expect(transitions[0].closest('details')?.open).toBe(false);
     for (const transition of transitions) {
       expect(transition.textContent).toBe('SKU-BSKU-C');
       expect(transition.className).toContain('justify-start');
@@ -168,9 +169,9 @@ describe('product timeline', () => {
   it('normalizes exact SKU searches into the URL-driven request', async () => {
     const get = vi.spyOn(api, 'get').mockResolvedValue({ data: timeline });
     render(<MemoryRouter initialEntries={['/admin/corrections/history']}><ProductTimeline /></MemoryRouter>);
-    fireEvent.change(screen.getByPlaceholderText('Введіть точний SKU'), { target: { value: ' sku-b ' } });
+    fireEvent.change(screen.getByPlaceholderText('Артикул'), { target: { value: ' sku-b ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Показати історію' }));
-    await waitFor(() => expect(get).toHaveBeenCalledWith('/product-timeline', { params: { sku: 'SKU-B' } }));
+    await waitFor(() => expect(get).toHaveBeenCalledWith('/product-timeline', { params: { sku: 'SKU-B' }, signal: expect.any(AbortSignal) }));
   });
 
   it('presents public article identity while retaining internal revision SKUs', async () => {
@@ -211,7 +212,7 @@ describe('product timeline', () => {
     expect(within(cards[1]).queryByText('Бурштин')).toBeNull();
     expect(within(cards[1]).getByText('Останній')).toBeTruthy();
     expect(within(cards[1]).getByText('SKU-B')).toBeTruthy();
-    expect(within(cards[1]).getByText(/Поточний SKU:/)).toBeTruthy();
+    expect(within(cards[1]).getByText(/Поточний внутрішній SKU:/)).toBeTruthy();
     expect(within(cards[1]).getByText('SKU-C')).toBeTruthy();
     expect(within(cards[1]).getByText('Схема V1')).toBeTruthy();
     expect(within(cards[1]).getByText(/Поточна схема: V2/)).toBeTruthy();
@@ -227,7 +228,7 @@ describe('product timeline', () => {
     const eventTimeline = screen.getByLabelText('Хронологія подій');
     expect(skuChain.compareDocumentPosition(evolution) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(evolution.compareDocumentPosition(eventTimeline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByText('Запит виконано та товар виправлено')).toBeTruthy();
+    expect(screen.getByText('Запит виконано та переоблік застосовано')).toBeTruthy();
   });
 
   it('renders explicit partial and unavailable evolution states', async () => {

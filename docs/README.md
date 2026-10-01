@@ -1,5 +1,7 @@
 # Amber SKU Manager documentation
 
+The current pre-production UI/runtime review boundary is documented in [Wave 1 UX/runtime cleanup](UX_RUNTIME_WAVE_1.md). Catalog + Magento self-service remains the separately reviewed Wave 2.
+
 This is the canonical documentation index. Current code and PostgreSQL migrations define implemented behavior; deployment data and operator evidence define environment-specific facts. Historical plans do not override the maintained guides.
 
 ## Start here

@@ -66,7 +66,7 @@ function NewSession({ canActivate, onCreated, register }) {
     {error && <p role="alert">{error}</p>}<button className="btn btn-primary px-3" disabled={busy} onClick={save}>{submitted ? 'Повторити створення цього експорту' : 'Створити приватний експорт'}</button>
   </section>;
 }
-function SessionDetail({ id, canCreate, canActivate, register, onLost }) {
+function SessionDetail({ id, canCreate, canCreateFiles, canActivate, register, onLost }) {
   const principalCurrent = useLifetime(); const accessible = useRef(true);
   const current = useCallback(() => principalCurrent() && accessible.current, [principalCurrent]);
   const [session, setSession] = useState(null); const [value, setValue] = useState(null); const [dirty, setDirty] = useState(false);
@@ -209,9 +209,9 @@ function SessionDetail({ id, canCreate, canActivate, register, onLost }) {
         {!preview && (refreshing ? <p role="status">Оновлюємо перевірку після зміни товару…</p> : productChanged && <div role="status"><p>Дані товару змінено. Попередній перегляд застарів.</p><p>Повторіть перевірку, щоб продовжити роботу з актуальними проблемами.</p></div>)}
         <div className="flex flex-wrap gap-3">
           {!session.executing && !preview && <button className={`btn ${!dirty && !recovering ? 'btn-primary' : 'btn-outline'} px-3`} disabled={busy || dirty} onClick={() => check()}>{productChanged ? 'Повторити перевірку' : 'Перевірити товари'}</button>}
-          {!session.executing && canCreate && ready && (!session.currentAttemptId || !preparationMatches || preparationIssue || recovering) && <button className={`btn ${!session.currentAttemptId ? 'btn-primary' : 'btn-outline'} px-3`} disabled={busy || dirty}
+          {!session.executing && canCreateFiles && ready && (!session.currentAttemptId || !preparationMatches || preparationIssue || recovering) && <button className={`btn ${!session.currentAttemptId ? 'btn-primary' : 'btn-outline'} px-3`} disabled={busy || dirty}
             onClick={() => session.currentAttemptId ? setReplace(true) : prepare()}>{session.currentAttemptId ? 'Оновити та замінити збережену перевірку' : 'Зберегти перевірку'}</button>}
-          {!session.executing && canCreate && session.currentAttemptId && <button className="btn btn-primary px-3" disabled={busy || dirty || (!recovering && (!tableCurrent || !tableAvailable || !ready))} onClick={generate}>
+          {!session.executing && canCreate && (canCreateFiles || originalOperation) && session.currentAttemptId && <button className="btn btn-primary px-3" disabled={busy || dirty || (!recovering && (!tableCurrent || !tableAvailable || !ready))} onClick={generate}>
             {recovering ? 'Повторити створення цього експорту' : 'Створити файли'}</button>}
           <button className="btn btn-outline px-3" disabled={busy} onClick={refresh}>Оновити стан із сервера</button>
         </div>
@@ -235,7 +235,7 @@ function SessionDetail({ id, canCreate, canActivate, register, onLost }) {
       <p>Стан: {session.attempt?.state || '—'} · Код: {session.attempt?.lastErrorCode || '—'}</p></details>
   </section>;
 }
-function SessionWorkspace({ canCreate, canActivate, scope = 'owned', create = false }) {
+function SessionWorkspace({ canCreate, canCreateFiles, canActivate, scope = 'owned', create = false }) {
   const current = useLifetime(); const { sessionId } = useParams();
   const location = useLocation(); const navigate = useNavigate();
   const [items, setItems] = useState([]); const [next, setNext] = useState(null);
@@ -308,7 +308,7 @@ function SessionWorkspace({ canCreate, canActivate, scope = 'owned', create = fa
     {error && <Notice>{error}</Notice>}{notice && <Notice tone="warning">{notice}</Notice>}
     <WorkspaceToolbar label="Дії експорту">
       {(sessionId || create) && <Link className="underline" to={returnTo}>{returnTo === '/exports/shared' ? '← До спільних експортів' : '← До моїх експортів'}</Link>}
-      {canCreate && <button className="btn btn-outline px-3" onClick={newOwn}>Створити свій експорт</button>}
+      {canCreateFiles && <button className="btn btn-outline px-3" onClick={newOwn}>Створити свій експорт</button>}
       {listing && <button className="btn btn-outline px-3" disabled={listBusy} onClick={() => { void list(); }}>Оновити список</button>}
     </WorkspaceToolbar>
     {listing && <section className="space-y-3" aria-label={titles[scope]}>
@@ -323,8 +323,8 @@ function SessionWorkspace({ canCreate, canActivate, scope = 'owned', create = fa
       {next && <button className="underline" disabled={listBusy} onClick={() => { void list(next); }}>Наступні експорти</button>}
     </section>}
     {sessionId && !selected && !notice && <p role="status">Завантажуємо експорт…</p>}
-    {create && (canCreate ? <NewSession key={openedLifetime} canActivate={canActivate} onCreated={created} register={register} /> : <p>Немає дозволу на створення експорту. Доступні перегляд і завантаження.</p>)}
-    {selected === sessionId && selected && <SessionDetail key={`${selected}:${openedLifetime}`} id={selected} canCreate={canCreate} canActivate={canActivate} register={register} onLost={lost} />}
+    {create && (canCreateFiles ? <NewSession key={openedLifetime} canActivate={canActivate} onCreated={created} register={register} /> : <p>Створення CSV товарів недоступне. Історичні файли та експорт цін залишаються доступними.</p>)}
+    {selected === sessionId && selected && <SessionDetail key={`${selected}:${openedLifetime}`} id={selected} canCreate={canCreate} canCreateFiles={canCreateFiles} canActivate={canActivate} register={register} onLost={lost} />}
     {!create && <details className="border-t pt-4"><summary>Відкрити відомий історичний знімок</summary><p className="my-3 text-sm">Потрібен точний ID. Невідомі операції, створені до збережених сесій, автоматично не зіставляються.</p>
       <label className="block">ID збереженого знімка<input className="input" value={knownId} maxLength={200} onChange={(e) => setKnownId(e.target.value)} /></label>
       <button className="btn btn-outline px-3" disabled={!knownId.trim()} onClick={() => navigation.request(() => { setForm({ dirty: false, busy: false }); setSelected(null); setOpenedLifetime((n) => n + 1); setKnown(knownId.trim()); })}>Прочитати знімок без підтвердження</button>
@@ -334,7 +334,9 @@ function SessionWorkspace({ canCreate, canActivate, scope = 'owned', create = fa
 }
 export default function ExportSessionsPage({ embedded = false, scope = 'owned', create = false }) {
   const { permissions, applicationUser } = useAuth();
+  const workflow = useContext(ExportWorkflowContext);
+  const canCreateFiles = permissions.includes('exports.create') && workflow?.exportStatus?.delivery?.legacyProductCsvEnabled === true;
   if (!permissions.includes('exports.view')) return <p>Немає дозволу на перегляд експорту</p>;
-  const content = <SessionWorkspace key={`${applicationUser?.id}:${permissions.includes('exports.create')}`} scope={scope} create={create} canCreate={permissions.includes('exports.create')} canActivate={permissions.includes('export_templates.activate')} />;
+  const content = <SessionWorkspace key={`${applicationUser?.id}:${permissions.includes('exports.create')}`} scope={scope} create={create} canCreateFiles={canCreateFiles} canCreate={permissions.includes('exports.create')} canActivate={permissions.includes('export_templates.activate')} />;
   return embedded ? content : <ExportWorkspaceShell>{content}</ExportWorkspaceShell>;
 }

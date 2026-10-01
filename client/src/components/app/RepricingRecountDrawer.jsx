@@ -61,13 +61,13 @@ export function RepricingRecountDrawer({
       className="fixed inset-0 z-40 overflow-y-auto bg-[#f4f5f7]/95 backdrop-blur-sm"
     >
       <div className="drawer-header sticky top-0 z-10 border-b border-white/10 bg-[#14203b] text-white shadow-md">
-        <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
           <ScanSearch size={19} className="shrink-0 text-[#dd974a]" />
           <div className="min-w-0 flex-1">
-            <div id="repricing-recount-drawer-title" className="text-sm font-semibold text-slate-900">Декодер і переоблік</div>
-            <div className="truncate text-xs text-slate-500">{recount.skuToDecode || 'Артикул не обрано'}</div>
+            <div id="repricing-recount-drawer-title" className="text-sm font-semibold text-white">Товар і переоблік</div>
+            <div className="truncate text-xs text-slate-300">{recount.skuToDecode || 'Артикул не обрано'}</div>
           </div>
-          <div className="hidden rounded-md bg-slate-100 p-1 sm:flex">
+          <div className="order-3 flex basis-full flex-wrap rounded-md bg-slate-100 p-1 sm:order-none sm:basis-auto">
             {canCreateRequest && <button
               type="button"
               className={`flex h-8 items-center gap-1.5 rounded px-3 text-xs font-semibold ${mode === 'request' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
@@ -75,7 +75,7 @@ export function RepricingRecountDrawer({
               disabled={recount.isRecountApplying}
             >
               <ClipboardList size={14} />
-              Створити запит
+              Передати на розгляд
             </button>}
             {canApplyRecount && <button
               type="button"
@@ -174,6 +174,7 @@ export function RepricingRecountDrawer({
             onRecountReasonChange={recount.setRecountReason}
             onRecountTextAnswer={recount.handleRecountTextAnswer}
             onRecountWeightChange={recount.handleRecountWeightChange}
+            onRecountNameChange={recount.handleRecountNameChange}
             onStartRecount={recount.handleStartRecount}
             recountMode={mode}
           />

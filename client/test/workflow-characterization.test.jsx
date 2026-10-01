@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthContext } from '../src/auth/auth-context.js';
@@ -238,6 +239,7 @@ const repricingPreview = {
 };
 
 async function renderRepricing(permissions = [
+  'corrections.view',
   'repricing.view',
   'repricing.prepare',
   'repricing.apply',
@@ -256,6 +258,24 @@ async function renderRepricing(permissions = [
 }
 
 describe('Repricing workflow', () => {
+  for (const hasGlobalDraft of [false, true]) it(`page header exposes only global repricing (saved draft: ${hasGlobalDraft})`, async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/config') return response(repricingConfig);
+      if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
+      if (url === '/admin/repricing/batches') return response([]);
+      if (url === '/admin/repricing/drafts') return response(hasGlobalDraft ? [{ id: 77, scope: 'global' }] : []);
+      if (url === '/admin/correction-requests') return response({ items: [] });
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    await renderRepricing(['repricing.view', 'repricing.prepare', 'products.recount', 'corrections.create', 'corrections.view', 'catalog.view', 'pricing.view']);
+    const header = screen.getByRole('heading', { name: 'Масова переоцінка' }).closest('header');
+    expect(within(header).getAllByRole('button').map((button) => button.textContent.trim())).toEqual(['Переоцінити все']);
+    expect(within(header).queryAllByRole('link')).toHaveLength(0);
+    expect(within(header).queryByText('Декодер')).toBeNull(); expect(within(header).queryByText(/^Запити/)).toBeNull();
+    expect(within(header).queryByText('До адмін-панелі')).toBeNull();
+    if (hasGlobalDraft) expect(within(header).getByRole('button').title).toBe('Продовжити збережену загальну чернетку');
+  });
+
   it('autosaves edited resolutions after the established debounce with the complete draft state', async () => {
     let savedDraft = null;
     vi.spyOn(api, 'get').mockImplementation(async (url) => {
@@ -623,7 +643,7 @@ describe('Repricing workflow', () => {
       }));
       await Promise.resolve();
     });
-    expect(await screen.findByText('Оновлено товарів: 1')).toBeTruthy();
+    expect(await screen.findByText('В Amber оновлено 1 із 1 товарів.')).toBeTruthy();
   });
 
   it('keeps apply and rollback controls hidden without their effective permissions', async () => {
@@ -797,19 +817,20 @@ describe('Repricing workflow', () => {
     expect(screen.getByRole('button', { name: 'Переглянуті · 0' })).toBeTruthy();
   });
 
-  it('preserves explicit automatic and manual resolution cycles in a global draft', async () => {
+  it('preserves manual prices and requires explicit automatic opt-in in a global draft', async () => {
     const manualPreview = {
       ...repricingPreview,
       scope: 'global',
       scenario: null,
-      summary: { ...repricingPreview.summary, changedCount: 0, errorCount: 1 },
+      summary: { ...repricingPreview.summary, changedCount: 0, errorCount: 0, manualPreservedCount: 1 },
       items: [{
         ...repricingPreview.items[0],
         oldPriceUah: 1000,
-        newPriceUah: 1200,
+        newPriceUah: 1000,
+        hasManualPrice: true, manualPreserved: true, pricingDetails: { matrix: {} },
         automaticPriceUah: 1200,
-        status: 'error',
-        errorCode: 'manual_price',
+        status: 'unchanged',
+        errorCode: null,
         pricingState: 'manual',
         message: 'Товар має ручну ціну.',
       }],
@@ -833,7 +854,7 @@ describe('Repricing workflow', () => {
     expect(applyButton.disabled).toBe(true);
 
     fireEvent.click(screen.getByRole('button', { name: 'Усі' }));
-    fireEvent.click(screen.getByRole('button', { name: /Застосувати автоматичну ціну/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Перейти на автоматичну ціну/ }));
     expect(screen.getByText('Автоматичну ціну підтверджено')).toBeTruthy();
     expect(screen.getByRole('textbox', { name: 'Нова ціна для BR1001' }).value).toBe('1200');
     expect(applyButton.disabled).toBe(false);
@@ -842,10 +863,8 @@ describe('Repricing workflow', () => {
     expect(screen.queryByText('Автоматичну ціну підтверджено')).toBeNull();
     expect(applyButton.disabled).toBe(true);
 
-    fireEvent.click(screen.getByRole('button', { name: /Залишити ручну ціну/ }));
-    expect(screen.getByText('Ручну ціну підтверджено')).toBeTruthy();
+    expect(screen.getByText('Ручну ціну збережено без змін.')).toBeTruthy();
     expect(screen.getByRole('textbox', { name: 'Нова ціна для BR1001' }).value).toBe('1000');
-    expect(applyButton.disabled).toBe(false);
   });
 });
 

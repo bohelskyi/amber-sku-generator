@@ -8,6 +8,7 @@ import { CategoryForm, MetaRow, OptionForm, OptionRow, QuestionForm } from './Ad
 const EMPTY_EDIT_OPTION = { id: null, value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false };
 const isEnabled = (value) => value === 1 || value === true;
 export function AdminStructureEditor({
+  canManage = true,
   config, selectedCat, selectedQuestion, currentCatQuestions, currentOptions,
   selectedQuestionInputType, schemaStatus, schemaPublishState, editCat, setEditCat,
   editQuestion, setEditQuestion, newCat, setNewCat, newQuest, setNewQuest, newOpt,
@@ -114,7 +115,7 @@ export function AdminStructureEditor({
       <section className="catalog-category-context">
         <div className="catalog-category-heading">
           <div><h2>Структура каталогу</h2><p>Категорії, питання та варіанти</p></div>
-          <button type="button" onClick={() => { setIsCategoryEditOpen(false); setIsNewCategoryOpen((isOpen) => !isOpen); }} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Plus size={14} />Категорія</button>
+          <button type="button" disabled={!canManage} onClick={() => { setIsCategoryEditOpen(false); setIsNewCategoryOpen((isOpen) => !isOpen); }} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Plus size={14} />Категорія</button>
         </div>
         <div className="catalog-category-tabs" role="tablist" aria-label="Категорії каталогу">
           {Object.values(config.categories).map((category) => (
@@ -135,11 +136,11 @@ export function AdminStructureEditor({
                 )}
               </div>
               <div className="catalog-category-actions">
-                <button type="button" onClick={() => { setIsNewCategoryOpen(false); setIsCategoryEditOpen((isOpen) => !isOpen); }} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Pencil size={14} />Категорія</button>
-                <button type="button" onClick={publishSkuSchema} disabled={!schemaStatus?.draftChanged || schemaPublishState.loading} className="btn btn-primary flex items-center gap-1.5 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45">
+                <button type="button" disabled={!canManage} onClick={() => { setIsNewCategoryOpen(false); setIsCategoryEditOpen((isOpen) => !isOpen); }} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Pencil size={14} />Категорія</button>
+                <button type="button" onClick={publishSkuSchema} disabled={!canManage || !schemaStatus?.draftChanged || schemaPublishState.loading} className="btn btn-primary flex items-center gap-1.5 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45">
                   <Send size={14} />{schemaPublishState.loading ? 'Публікуємо...' : schemaStatus?.nextVersion ? `Опублікувати V${schemaStatus.nextVersion}` : 'Опублікувати'}
                 </button>
-                <button type="button" onClick={() => deleteItem('category', selectedCat.code)} className="catalog-icon-button is-danger" title="Видалити категорію" aria-label={`Видалити категорію ${selectedCat.name}`}><Trash2 size={15} /></button>
+                <button type="button" disabled={!canManage} onClick={() => deleteItem('category', selectedCat.code)} className="catalog-icon-button is-danger" title="Видалити категорію" aria-label={`Видалити категорію ${selectedCat.name}`}><Trash2 size={15} /></button>
               </div>
             </div>
             {schemaPublishState.error && <p className="catalog-context-error" role="alert">{schemaPublishState.error}</p>}
@@ -155,9 +156,9 @@ export function AdminStructureEditor({
           <aside className="catalog-master">
             <div className="catalog-pane-header">
               <div><h3>Питання</h3><p>{currentCatQuestions.length} у поточній категорії</p></div>
-              <button type="button" onClick={openNewQuestion} className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs"><Plus size={14} />Додати</button>
+              <button type="button" disabled={!canManage} onClick={openNewQuestion} className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs"><Plus size={14} />Додати</button>
             </div>
-            <button type="button" onClick={autoAssignSkuIndexes} className="catalog-master-utility">Переіндексувати SKU</button>
+            <button type="button" disabled={!canManage} onClick={autoAssignSkuIndexes} className="catalog-master-utility">Переіндексувати SKU</button>
             <div className="catalog-question-list">
               {currentCatQuestions.map((question) => {
                 const isConditional = formatConditionSummary(question.visible_if_json, currentCatQuestions, config) !== 'Завжди';
@@ -165,12 +166,24 @@ export function AdminStructureEditor({
                 return (
                   <div
                     key={question.q_db_id}
-                    draggable
+                    draggable={canManage}
                     role="button"
                     tabIndex={0}
                     aria-pressed={isSelected}
                     onClick={() => selectQuestion(question)}
-                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') selectQuestion(question); }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectQuestion(question); }
+                      if (canManage && event.altKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
+                        event.preventDefault();
+                        const index = currentCatQuestions.indexOf(question);
+                        const next = index + (event.key === 'ArrowUp' ? -1 : 1);
+                        if (next < 0 || next >= currentCatQuestions.length) return;
+                        const ordered = [...currentCatQuestions];
+                        [ordered[index], ordered[next]] = [ordered[next], ordered[index]];
+                        reorderQuestions(ordered);
+                      }
+                    }}
+                    title={canManage ? 'Alt + ↑ / ↓: змінити порядок питання' : undefined}
                     onDragStart={(event) => handleQuestionDragStart(event, question)}
                     onDragOver={(event) => handleQuestionDragOver(event, question)}
                     onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setQuestionDropTarget({ id: null, position: null }); }}
@@ -205,8 +218,8 @@ export function AdminStructureEditor({
                 <div className="catalog-detail-header">
                   <div className="min-w-0"><h3>{selectedQuestion.label}</h3><p>{(selectedQuestion.input_type || 'options') === 'text' ? 'Текстове поле' : 'Поле з варіантами'}</p></div>
                   <div className="catalog-row-actions">
-                    {!isQuestionEditOpen && <button type="button" onClick={openQuestionEdit} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Pencil size={14} />Редагувати</button>}
-                    <button type="button" onClick={() => deleteItem('question', selectedQuestion.q_db_id)} className="catalog-icon-button is-danger" title="Видалити питання" aria-label={`Видалити питання ${selectedQuestion.label}`}><Trash2 size={15} /></button>
+                    {!isQuestionEditOpen && <button type="button" disabled={!canManage} onClick={openQuestionEdit} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Pencil size={14} />Редагувати</button>}
+                    <button type="button" disabled={!canManage} onClick={() => deleteItem('question', selectedQuestion.q_db_id)} className="catalog-icon-button is-danger" title="Видалити питання" aria-label={`Видалити питання ${selectedQuestion.label}`}><Trash2 size={15} /></button>
                   </div>
                 </div>
                 {isQuestionEditOpen ? (
@@ -226,7 +239,7 @@ export function AdminStructureEditor({
                       <div className="catalog-technical-details-body">
                         <MetaRow label="Ключ" value={selectedQuestion.id} />
                         <MetaRow label="Порядок" value={selectedQuestion.display_order ?? selectedQuestion.sku_index ?? '—'} />
-                        {isEnabled(selectedQuestion.include_in_sku) && <MetaRow label="SKU index" value={selectedQuestion.sku_index ?? '—'} />}
+                        {isEnabled(selectedQuestion.include_in_sku) && <MetaRow label="Позиція у внутрішньому SKU" value={selectedQuestion.sku_index ?? '—'} />}
                         {isEnabled(selectedQuestion.include_in_sku) && <MetaRow label="Розділювач" value={selectedQuestion.sku_separator || 'Немає'} />}
                       </div>
                     </details>
@@ -236,20 +249,20 @@ export function AdminStructureEditor({
                 <section className="catalog-variants-section">
                   <div className="catalog-variants-header">
                     <div><h4>Варіанти</h4><p>{activeOptions.length} активних{archivedOptions.length ? ` · ${archivedOptions.length} в архіві` : ''}</p></div>
-                    {selectedQuestionInputType !== 'text' && <button type="button" onClick={openNewOption} className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs"><Plus size={14} />Додати варіант</button>}
+                    {selectedQuestionInputType !== 'text' && <button type="button" disabled={!canManage} onClick={openNewOption} className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs"><Plus size={14} />Додати варіант</button>}
                   </div>
                   {editOpt.id && <OptionForm config={config} currentCatQuestions={currentCatQuestions} excludeQuestionId={selectedQuestion.id} onCancel={resetOptionEdit} onChange={setEditOpt} onSave={updateOption} option={editOpt} />}
                   {isNewOptionOpen && selectedQuestionInputType !== 'text' && <OptionForm config={config} currentCatQuestions={currentCatQuestions} excludeQuestionId={selectedQuestion.id} isNew onCancel={() => setIsNewOptionOpen(false)} onChange={setNewOpt} onSave={addOption} option={newOpt} />}
                   {selectedQuestionInputType === 'text' ? <p className="catalog-empty-state">Для текстового питання варіанти не використовуються.</p> : (
                     <div className="catalog-option-list">
-                      {activeOptions.map((option) => <OptionRow key={option.db_id} option={option} config={config} currentCatQuestions={currentCatQuestions} onArchive={archiveOption} onDelete={deleteItem} onEdit={openOptionEdit} />)}
+                      {activeOptions.map((option) => <OptionRow canManage={canManage} key={option.db_id} option={option} config={config} currentCatQuestions={currentCatQuestions} onArchive={archiveOption} onDelete={deleteItem} onEdit={openOptionEdit} />)}
                       {activeOptions.length === 0 && <p className="catalog-empty-state">Активних варіантів немає.</p>}
                     </div>
                   )}
                   {archivedOptions.length > 0 && (
                     <div className="catalog-archived-section">
                       <button type="button" onClick={() => setIsArchivedOptionsOpen((isOpen) => !isOpen)}><span><Archive size={14} />Архівні варіанти ({archivedOptions.length})</span><ChevronDown size={16} className={isArchivedOptionsOpen ? 'rotate-180' : ''} /></button>
-                      {isArchivedOptionsOpen && <div className="catalog-option-list">{archivedOptions.map((option) => <OptionRow key={option.db_id} archived option={option} config={config} currentCatQuestions={currentCatQuestions} onArchive={archiveOption} onDelete={deleteItem} onEdit={openOptionEdit} />)}</div>}
+                      {isArchivedOptionsOpen && <div className="catalog-option-list">{archivedOptions.map((option) => <OptionRow canManage={canManage} key={option.db_id} archived option={option} config={config} currentCatQuestions={currentCatQuestions} onArchive={archiveOption} onDelete={deleteItem} onEdit={openOptionEdit} />)}</div>}
                     </div>
                   )}
                 </section>

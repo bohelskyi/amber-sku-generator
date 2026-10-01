@@ -57,9 +57,12 @@ export function useSkuManager({
   canApplyDirectPriceChange = canChangeProductPrice,
   canCreatePriceChangeRequest = false,
   canPriceOverride = false,
+  canViewHistory = true,
   submitMode = 'apply',
 } = {}) {
   const [config, setConfig] = useState(null);
+  const [configError, setConfigError] = useState('');
+  const [configAttempt, setConfigAttempt] = useState(0);
   const [selectedCat, setSelectedCat] = useState(null);
   const [answers, setAnswers] = useState({});
   const [nameSubjects, setNameSubjects] = useState({ magento_name_subject_ua: '', magento_name_subject_en: '' });
@@ -69,6 +72,7 @@ export function useSkuManager({
   const [isLivePriceLoading, setIsLivePriceLoading] = useState(false);
   const [previewData, setPreviewData] = useState(null);
   const [saveError, setSaveError] = useState('');
+  const [savedProduct, setSavedProduct] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [displaySku, setDisplaySku] = useState('');
   const [variationData, setVariationData] = useState(null);
@@ -77,7 +81,7 @@ export function useSkuManager({
   const [manualPriceUah, setManualPriceUah] = useState('');
   const [isManualPriceEditing, setIsManualPriceEditing] = useState(false);
   const productExport = useExportWorkflow();
-  const records = useProductRecordsController({ onArchived: productExport.fetchExportStatus });
+  const records = useProductRecordsController({ canViewHistory, onArchived: productExport.fetchExportStatus });
   const copyFeedback = useCopyFeedback();
 
   const {
@@ -96,6 +100,7 @@ export function useSkuManager({
     handleRecountAnswer,
     handleRecountTextAnswer,
     handleRecountWeightChange,
+    handleRecountNameChange,
     handleStartRecount,
     hasRecountChanges,
     isInformationOnly,
@@ -153,8 +158,11 @@ export function useSkuManager({
   });
 
   useEffect(() => {
-    productsApi.getConfig().then((res) => setConfig(res.data));
-  }, []);
+    let live = true;
+    productsApi.getConfig().then((res) => { if (live) setConfig(res.data); })
+      .catch((error) => { if (live) setConfigError(getApiError(error)); });
+    return () => { live = false; };
+  }, [configAttempt]);
 
   const isCalibrated = answers.is_calibrated ?? null;
 
@@ -396,7 +404,8 @@ export function useSkuManager({
       weight: isWeightRequired ? weight : previewData.weightVal || 0,
       manualPriceUah: hasManualPrice ? effectiveTotalPriceUah : null,
       useVariation: Boolean(variationData),
-    }).then(() => {
+    }).then((response) => {
+      setSavedProduct(response.data);
       records.fetchHistory();
       productExport.fetchExportStatus();
       resetProductFlow(null);
@@ -461,6 +470,8 @@ export function useSkuManager({
     answers,
     answeredRequiredCount,
     config,
+    configError,
+    retryConfig: () => { setConfigError(''); setConfigAttempt((value) => value + 1); },
     decodeData,
     decodeError,
     decodeErrorDetails,
@@ -484,6 +495,7 @@ export function useSkuManager({
     handleRecountAnswer,
     handleRecountTextAnswer,
     handleRecountWeightChange,
+    handleRecountNameChange,
     handleResetManualPrice,
     handleSave,
     handleStartManualPriceEdit,
@@ -538,6 +550,7 @@ export function useSkuManager({
     priceChangePreview,
     priceChangeUsdPerGram,
     saveError,
+    savedProduct,
     resetProductFlow,
     selectedCat,
     setSelectedCat,

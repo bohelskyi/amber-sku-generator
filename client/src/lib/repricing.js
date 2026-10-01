@@ -77,7 +77,7 @@ export function applyManualPrices(items = [], manualPrices = {}, automaticProduc
   return items.map((item) => {
     if (automaticProductIdSet.has(Number(item.productId))) {
       const newPriceUah = parseAutomaticPrice(item.automaticPriceUah ?? item.newPriceUah);
-      const canUseAutomatic = item.errorCode === 'manual_price' && newPriceUah !== null;
+      const canUseAutomatic = (item.manualPreserved || item.errorCode === 'manual_price') && item.pricingDetails?.matrix && newPriceUah !== null;
       if (!canUseAutomatic) return item;
       const oldPriceUah = item.oldPriceUah === null ? null : Number(item.oldPriceUah);
       const reasonCodes = (item.pricingChange?.reasonCodes || [])
@@ -93,6 +93,8 @@ export function applyManualPrices(items = [], manualPrices = {}, automaticProduc
         priceDeltaUah: newPriceUah - Number(oldPriceUah || 0),
         status: 'changed',
         manualOverride: false,
+        manualPreserved: false,
+        errorCode: null,
         useAutomatic: true,
         resolvedManualPrice: true,
         pricingState: 'automatic',
@@ -199,6 +201,10 @@ export function getRepricingSummary(baseSummary, items = []) {
     changedCount: items.filter((item) => item.status === 'changed').length,
     unchangedCount: items.filter((item) => item.status === 'unchanged').length,
     errorCount: items.filter((item) => item.status === 'error').length,
+    manualPreservedCount: items.filter((item) => item.manualPreserved).length,
+    currentCount: items.filter((item) => item.status === 'unchanged' && !item.manualPreserved).length,
+    categories: [...new Set(items.filter((item) => item.status === 'changed').map((item) => item.categoryCode))]
+      .map((code) => ({ code, count: items.filter((item) => item.status === 'changed' && item.categoryCode === code).length })),
   };
 }
 

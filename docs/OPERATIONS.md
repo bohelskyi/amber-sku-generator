@@ -89,6 +89,23 @@ sh ./scripts/postgres-restore.sh /secure/local/backup/path/amber-YYYYMMDDTHHMMSS
 
 Before restore, verify both dump path and target environment. Keep backups outside the repository, copy them to monitored off-host storage, and regularly test restores in a disposable environment. Scheduling, retention, encryption, off-host transfer, monitoring, and disaster-recovery orchestration are external infrastructure responsibilities.
 
+## Client nginx and server replacement
+
+The client nginx template resolves its API upstream at request time through Docker embedded DNS (`127.0.0.11`, `valid=1s`, IPv6 lookup disabled). The variable upstream forwards `$request_uri` unchanged, including `/api/`, encoded values, repeated query parameters and OIDC callback parameters. Explicit proxy redirect handling preserves the previous upstream-relative redirect behavior. Host, real IP, forwarded chain/protocol and cookies keep their existing behavior; OIDC callback access-log redaction remains enabled.
+
+Keep Compose `NGINX_ENVSUBST_FILTER=^SERVER_`: only `SERVER_HOST`/`SERVER_PORT` are substituted; nginx runtime variables must remain intact. Deploying the changed nginx configuration initially requires the normal client image deployment. Later server-container replacements do not require a client restart or nginx reload. A one-server deployment can still have an outage while its upstream is absent; DNS recovery is bounded after the new server becomes ready.
+
+Validate without starting or replacing real application services:
+
+```text
+docker compose -f docker-compose.yml -f docker-compose.local.yml config --quiet
+docker compose build client
+node scripts/test-nginx-dns.mjs amber-app-client
+node scripts/test-nginx-dns.mjs amber-app-client --negative-control
+```
+
+The smoke owns its uniquely named containers/network, uses a mock server, verifies different server IPs and unchanged nginx process/container identity, and cleans up its resources. It also checks nginx syntax, URI/header/cookie/redirect transport, callback-log redaction, real asset caching, missing asset 404 and SPA fallback. No database or Magento service is involved. The image argument must identify the just-built client image; Compose's image name can differ with its project name.
+
 ## Integrity audit and SQLite import
 
 `npm run audit:data` in `server/` is read-only and reports missing/duplicate SKUs and products without a saved UAH price; `--json` emits machine-readable output.

@@ -28,7 +28,7 @@ export function RepricingWorkspace({
       {preview && (
         <>
           <RepricingDraftPanel controller={controller} />
-          <RepricingSummary controller={controller} />
+          <RepricingSummary config={controller.config} controller={controller} />
           <RepricingFilters controller={controller} />
           <RepricingTable
             canApplyDirectRecount={canApplyDirectRecount}

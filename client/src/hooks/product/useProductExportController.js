@@ -157,6 +157,10 @@ export function useProductExportController({ enabled = true, canCreate = true, p
 
   const handleCreateSnapshot = async () => {
     if (!current() || !canCreate || busy.current || exportSnapshot) return;
+    if (!pending.current && exportStatus?.delivery?.legacyProductCsvEnabled !== true) {
+      setExportError('Створення CSV товарів зараз недоступне. Оновіть стан доставки.');
+      return;
+    }
     if (!pending.current) {
       if (exportReviewStale) return;
       const evidence = previewEvidence.current;

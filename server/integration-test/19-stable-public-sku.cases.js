@@ -25,6 +25,13 @@ suite.test('stable public SKU migration backfills exact legacy identity and enfo
     const migration = '046_stable_public_product_sku.sql';
     await fs.copyFile(path.join(serverRoot, 'migrations', migration), path.join(directory, migration));
     await migrate(); await migrate();
+    // Current recount evidence also binds the shared-name state. Upgrade the
+    // fixture to the current runtime schema before exercising that service.
+    for (const file of (await fs.readdir(path.join(serverRoot, 'migrations')))
+      .filter((file) => file.endsWith('.sql') && file > migration)) {
+      await fs.copyFile(path.join(serverRoot, 'migrations', file), path.join(directory, file));
+    }
+    await migrate();
     const evidenceSource = (await db.query(`SELECT p.*,i.public_sku FROM products p
       JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id=$1`, [activatedSource.id])).rows[0];
     const evidenceTarget = { categoryCode: 'ZZ', skuSchemaVersionId: null, answers: {}, weight: 0 };

@@ -294,6 +294,14 @@ function presentProductTimeline(querySku, data, magentoStatuses) {
   }
 
   for (const audit of auditRows) {
+    if (['product_magento_name.reviewed', 'product_magento_name.updated', 'product_information.updated', 'product.magento_name_external_accepted', 'product.magento_name_conflict_resolved', 'product.magento_name_amber_changed'].includes(audit.event_key)) {
+      const product = productById.get(Number(audit.subject_id));
+      if (!product) continue;
+      pushEvent({ type: audit.event_key, ...eventTimestamp(audit.occurred_at),
+        actor: actorFromAudit(audit, null), sku: product.full_sku,
+        publicSku: product.public_sku || product.full_sku,
+        summary: audit.event_key, details: {}, changes: [], sortOrder: 65 });
+    }
     if (audit.event_key !== 'product.price_changed') continue;
     const product = productById.get(Number(audit.subject_id));
     if (!product) continue;
@@ -431,6 +439,8 @@ function presentProductTimeline(querySku, data, magentoStatuses) {
         ? graph.roots[0].public_sku || graph.roots[0].full_sku : null,
       currentPublicSku: currentProduct?.public_sku || currentProduct?.full_sku || null,
       products: graph.ordered.map((product) => ({
+        productId: Number(product.id),
+        magentoNameReviewRequired: Boolean(product.magento_name_review_required),
         sku: product.full_sku,
         internalSku: product.full_sku,
         publicSku: product.public_sku || product.full_sku,

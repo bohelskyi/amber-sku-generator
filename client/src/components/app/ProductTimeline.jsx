@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MagentoSyncStatus } from './MagentoSyncStatus';
+
 import {
   AlertTriangle,
   Archive,
@@ -25,7 +26,12 @@ const EVENT_META = {
   'correction_request.rejected': { label: 'Запит відхилено', icon: AlertTriangle, toneClass: 'text-rose-700' },
   'correction_request.reopened': { label: 'Запит відкрито повторно', icon: ClipboardList, toneClass: 'text-blue-700' },
   'correction_request.completed': { label: 'Запит виконано', icon: CheckCircle2, toneClass: 'text-emerald-700' },
-  'product.corrected': { label: 'Товар виправлено', icon: History, toneClass: 'text-amber-700' },
+  'product.corrected': { label: 'Переоблік застосовано', icon: History, toneClass: 'text-amber-700' },
+  'product.magento_name_external_accepted': { label: 'Назву оновлено з Magento', icon: History, toneClass: 'text-blue-700' },
+  'product.magento_name_amber_changed': { label: 'Назву товару змінено', icon: History, toneClass: 'text-blue-700' },
+  'product.magento_name_conflict_resolved': { label: 'Конфлікт назв узгоджено', icon: CheckCircle2, toneClass: 'text-emerald-700' },
+  'product_magento_name.updated': { label: 'Назви для Magento змінено', icon: History, toneClass: 'text-blue-700' },
+  'product_information.updated': { label: 'Інформаційні характеристики оновлено', icon: History, toneClass: 'text-blue-700' },
   'product.price_changed': { label: 'Ціну товару змінено', icon: History, toneClass: 'text-blue-700' },
   'repricing.applied': { label: 'Ціну змінено переоцінкою', icon: History, toneClass: 'text-blue-700' },
   'repricing.rolled_back': { label: 'Переоцінку відкочено', icon: Undo2, toneClass: 'text-amber-700' },
@@ -218,7 +224,7 @@ function ConfigurationEvolution({ evolution }) {
                 {(currentSkuDiffers || currentSchemaDiffers) && (
                   <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
                     {currentSkuDiffers && (
-                      <span>Поточний SKU: <strong className="font-mono">{snapshot.currentSku}</strong></span>
+                      <span>Поточний внутрішній SKU: <strong className="font-mono">{snapshot.currentSku}</strong></span>
                     )}
                     {currentSchemaDiffers && (
                       <span>{schemaVersionLabel(snapshot.currentSchemaVersion, 'Поточна схема:')}</span>
@@ -266,13 +272,13 @@ function SkuTransition({ sourceSku, targetSku, className = '', strong = false })
 function TimelineCard({ events }) {
   const correction = events.find((event) => event.type === 'product.corrected');
   const event = correction || events[events.length - 1];
-  const meta = EVENT_META[event.type] || EVENT_META['correction_request.created'];
+  const meta = EVENT_META[event.type] || { label: 'Подія товару', icon: History, toneClass: 'text-slate-700' };
   const Icon = meta.icon;
   const correctionDetails = event.type === 'product.corrected';
   const proposal = events.find((item) => item.details?.latestProposal)?.details.latestProposal;
   const hasExpandable = correctionDetails || proposal;
   const title = correction && events.some((item) => item.type === 'correction_request.completed')
-    ? 'Запит виконано та товар виправлено'
+    ? 'Запит виконано та переоблік застосовано'
     : meta.label;
 
   return (
@@ -284,11 +290,7 @@ function TimelineCard({ events }) {
         <div>
           <h3 className="font-semibold text-slate-900">{title}</h3>
           <div className="mt-1 font-mono text-sm text-slate-600">{event.publicSku || event.sku}</div>
-          {event.publicSku && event.publicSku !== event.sku && (
-            <div className="mt-0.5 font-mono text-xs text-slate-500">
-              Внутрішній SKU: {event.sku}
-            </div>
-          )}
+
         </div>
         <div className="text-right text-xs leading-5 text-slate-500">
           <div>{timeLabel(event)}</div>
@@ -298,12 +300,7 @@ function TimelineCard({ events }) {
 
       {correctionDetails && (
         <div className="mt-4 space-y-3">
-          <SkuTransition
-            sourceSku={event.details.sourceSku}
-            targetSku={event.details.correctedSku}
-            className="text-sm"
-            strong
-          />
+          <TimelineChanges changes={event.changes} />
           <PriceChange price={event.details.price} />
           {event.details.reason && <p className="text-sm text-slate-600">Причина: {event.details.reason}</p>}
         </div>
@@ -328,7 +325,7 @@ function TimelineCard({ events }) {
 
       {hasExpandable && (
         <details className="mt-4 border-t border-slate-100 pt-3">
-          <summary className="cursor-pointer text-sm font-semibold text-slate-700 hover:text-slate-900">Деталі</summary>
+          <summary className="cursor-pointer text-sm font-semibold text-slate-700 hover:text-slate-900">Технічні деталі події</summary>
           <div className="mt-3 space-y-3">
             {proposal && (
               <div className="space-y-2 border-l-2 border-amber-300 pl-3">
@@ -338,7 +335,6 @@ function TimelineCard({ events }) {
                 <TimelineChanges changes={proposal.changes} />
               </div>
             )}
-            {correctionDetails && <TimelineChanges changes={event.changes} />}
           </div>
         </details>
       )}
@@ -368,19 +364,22 @@ export function ProductTimeline() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [refresh, setRefresh] = useState(0);
+  const loadedSku = useRef(null);
 
   useEffect(() => {
     if (!requestedSku) return undefined;
     let cancelled = false;
+    const controller = new AbortController();
     const load = async () => {
-      setLoading(true);
+      if (loadedSku.current !== requestedSku) setLoading(true);
       setError('');
       try {
-        const response = await api.get('/product-timeline', { params: { sku: requestedSku } });
-        if (!cancelled) setData(response.data);
+        const response = await api.get('/product-timeline', { params: { sku: requestedSku }, signal: controller.signal });
+        if (!cancelled) { setData(response.data); loadedSku.current = requestedSku; }
       } catch (requestError) {
         if (!cancelled) {
-          setData(null);
+          if (loadedSku.current !== requestedSku) setData(null);
           setError(getApiError(requestError));
         }
       } finally {
@@ -388,10 +387,20 @@ export function ProductTimeline() {
       }
     };
     void load();
-    return () => { cancelled = true; };
-  }, [requestedSku]);
+    return () => { cancelled = true; controller.abort(); };
+  }, [requestedSku, refresh]);
 
-  const groups = useMemo(() => groupEvents(data?.events || []), [data]);
+  const currentProduct = data?.lineage.products.find((product) => product.sku === data.lineage.currentSku);
+  const waiting = ['pending', 'syncing'].includes(currentProduct?.magentoSync?.state);
+  useEffect(() => {
+    if (!requestedSku) return undefined;
+    const update = () => { if (!document.hidden) setRefresh((value) => value + 1); };
+    const timer = waiting ? window.setInterval(update, 5000) : null;
+    window.addEventListener('focus', update);
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', update); };
+  }, [requestedSku, waiting]);
+
+  const groups = useMemo(() => groupEvents((data?.events || []).filter((event) => event.type !== 'product_magento_name.reviewed')), [data]);
   const submit = (event) => {
     event.preventDefault();
     const sku = input.trim().toUpperCase();
@@ -412,15 +421,15 @@ export function ProductTimeline() {
         <AppPageHeader
           eyebrow="Журнал"
           title="Історія товару"
-          description="Повна бізнес-історія за поточним або історичним SKU."
+          description="Характеристики, ціни та події товару за артикулом."
           actions={<Link to="/admin/corrections/history?mode=report" className="btn btn-outline">Звіт про виправлення</Link>}
         />
 
         <form className="card flex flex-col gap-3 p-4 sm:flex-row" onSubmit={submit}>
           <label className="relative min-w-0 flex-1">
-            <span className="sr-only">Точний SKU</span>
+            <span className="sr-only">Артикул</span>
             <Search size={16} className="absolute left-3 top-3 text-slate-400" />
-            <input className="input-sm pl-9 font-mono" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Введіть точний SKU" />
+            <input className="input-sm pl-9 font-mono" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Артикул" />
           </label>
           <button type="submit" className="btn btn-primary" disabled={loading}>Показати історію</button>
         </form>
@@ -428,7 +437,7 @@ export function ProductTimeline() {
         {error && <Notice>{error}</Notice>}
         {loading && <LoadingState label="Завантажуємо історію товару…" />}
         {!loading && !requestedSku && (
-          <div className="card p-0"><EmptyState>Введіть точний SKU, щоб переглянути весь ланцюжок товару.</EmptyState></div>
+          <div className="card p-0"><EmptyState>Введіть артикул, щоб переглянути історію товару.</EmptyState></div>
         )}
 
         {!loading && requestedSku && data && (
@@ -439,9 +448,10 @@ export function ProductTimeline() {
               </div>
             )}
 
-            <section className="card p-4 sm:p-5">
+            <details className="card p-4 sm:p-5"><summary className="cursor-pointer font-semibold">Технічні деталі та версії</summary>
+            <section className="mt-3">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ланцюжок SKU</div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Версії товару · {data.lineage.currentPublicSku || data.lineage.currentSku}</div>
                 <StatusBadge>{data.lineage.products.length} версій · {groups.length} подій</StatusBadge>
               </div>
               <div className="lineage-scroll" tabIndex={data.lineage.products.length > 3 ? 0 : undefined} aria-label="Ланцюжок версій SKU">
@@ -450,13 +460,13 @@ export function ProductTimeline() {
                   <div key={product.sku} className="lineage-node">
                     {index > 0 && <ArrowRight size={15} className="text-slate-400" />}
                     <span className={`lineage-sku ${[product.sku, product.publicSku].includes(data.querySku) ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-slate-200 bg-white text-slate-700'}`}>
-                      <span className="break-all">{product.publicSku || product.sku}</span>
+                      <span className="break-all">{product.sku === data.lineage.currentSku ? product.publicSku || product.sku : product.sku}</span>
                       {product.publicSku && product.publicSku !== product.sku && (
                         <span className="mt-1 break-all font-sans text-[10px] text-slate-500">
                           Внутрішній SKU: <span className="font-mono">{product.sku}</span>
                         </span>
                       )}
-                      <MagentoSyncStatus status={product.magentoSync} />
+                      {product.sku === data.lineage.currentSku && <MagentoSyncStatus status={product.magentoSync} />}
                       {product.sku === data.lineage.currentSku && <span className="mt-1 font-sans text-[10px] uppercase text-emerald-700">{product.status === 'active' ? 'актуальний' : 'останній'}</span>}
                     </span>
                   </div>
@@ -465,7 +475,11 @@ export function ProductTimeline() {
               </div>
             </section>
 
+
+            <button type="button" className="btn btn-outline" onClick={() => setRefresh((value) => value + 1)} disabled={loading}>Оновити стан</button>
+
             <ConfigurationEvolution evolution={data.configurationEvolution} />
+            </details>
 
             <section className="timeline-list" aria-label="Хронологія подій">
               {groups.map((group) => <TimelineCard key={group.key} events={group.events} />)}

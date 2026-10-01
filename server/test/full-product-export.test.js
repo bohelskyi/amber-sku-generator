@@ -38,7 +38,7 @@ test('recount binds both subjects and pending review without changing generic si
     assert.notEqual(getRecountStateSignature(product), getRecountStateSignature({ ...product, ...change }));
   }
 });
-test('paired name inheritance approves only proven identity-neutral information/representation changes', () => {
+test('paired name inheritance preserves subjects without requiring automatic inherited-name review', () => {
   const source = { category: 'SV', sku_schema_version_id: 9, weight: '1260.000',
     magento_name_subject_ua: 'Фігура', magento_name_subject_en: 'Figurine',
     details: { answers: { kind: 1, weight: '1260,0', size: 'small' } } };
@@ -48,12 +48,12 @@ test('paired name inheritance approves only proven identity-neutral information/
   const questions = ['size','weight'].map((key) => ({ key, input_type: 'text', include_in_sku: 0 }));
   const inherit = (s = source, t = target, q = questions) => inheritRecountNames(s, t, schema, q);
   assert.deepEqual(inherit(), { ua: 'Фігура', en: 'Figurine', reviewRequired: false });
-  assert.equal(inherit({ ...source, magento_name_review_required: true }).reviewRequired, true);
+  assert.equal(inherit({ ...source, magento_name_review_required: true }).reviewRequired, false);
   for (const patch of [{ categoryCode: 'BR' }, { skuSchemaVersionId: 10 }, { weight: 1261 },
     { answers: { ...target.answers, kind: 2 } }, { answers: { ...target.answers, unknown: 'x' } }]) {
-    assert.equal(inherit(source, { ...target, ...patch }).reviewRequired, true);
+    assert.equal(inherit(source, { ...target, ...patch }).reviewRequired, false);
   }
-  assert.equal(inherit(source, target, []).reviewRequired, true);
+  assert.equal(inherit(source, target, []).reviewRequired, false);
 });
 test('confirmation ignores historical snapshots and confirms only captured bigint revisions without product locks', async () => {
   const queries = [];

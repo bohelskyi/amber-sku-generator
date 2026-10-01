@@ -30,8 +30,9 @@ function getProductStateSignature(product) {
 // Recount copies subjects; generic pricing/information signatures retain their
 // existing meaning. Old recount previews must refresh this versioned binding.
 function getRecountStateSignature(product) {
-  return hashPayload({ version: 1, product: getProductStateSignature(product),
+  return hashPayload({ version: 2, product: getProductStateSignature(product),
     names: [product?.magento_name_subject_ua ?? null, product?.magento_name_subject_en ?? null],
+    fullNameOverride: product?.magento_name_override ?? null,
     reviewRequired: Boolean(product?.magento_name_review_required),
     excludeFromExport: Number(product?.exclude_from_export || 0) });
 }

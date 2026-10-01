@@ -10,6 +10,23 @@ const {
 } = require('../src/services/product-timeline.service');
 const { presentProductTimeline } = require('../src/presenters/product-timeline');
 
+test('timeline projects actionable name review and durable reviewed events without raw operational details', () => {
+  const product = { id: 7, full_sku: 'SV227002', public_sku: 'AG-000002', category: 'SV', status: 'active',
+    magento_name_review_required: true, created_at: '2026-01-01T00:00:00Z' };
+  const data = { products: [product], corrections: [], requests: [], repricingItems: [], schemaRows: [],
+    audits: [{ id: 9, event_key: 'product_magento_name.reviewed', subject_type: 'product', subject_id: '7',
+      occurred_at: '2026-01-02T00:00:00Z', details: { credential: 'must not project', rawPayload: { secret: true } } }] };
+  const result = presentProductTimeline('AG-000002', data);
+  assert.equal(result.lineage.products[0].productId, 7);
+  assert.equal(result.lineage.products[0].magentoNameReviewRequired, true);
+  assert.equal(result.lineage.products[0].publicSku, 'AG-000002');
+  assert.equal(result.lineage.products[0].internalSku, 'SV227002');
+  assert.equal(result.events.filter((event) => event.type === 'product_magento_name.reviewed').length, 1);
+  assert.doesNotMatch(JSON.stringify(result), /must not project|rawPayload|credential/);
+  const unrecorded = presentProductTimeline('AG-000002', { ...data, audits: [] });
+  assert.equal(unrecorded.events.filter((event) => event.type === 'product_magento_name.reviewed').length, 0);
+});
+
 test('timeline SKU lookup normalizes exact product identifiers and rejects invalid input', () => {
   assert.equal(normalizeTimelineSku(' br2/123-001 '), 'BR2/123-001');
   assert.throws(() => normalizeTimelineSku(''), (error) => (

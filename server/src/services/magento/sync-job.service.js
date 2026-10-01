@@ -19,6 +19,7 @@ async function ledger(db, actorUserId, action, operation) {
   try {
     await client.query('BEGIN');
     const job = await operation(client);
+    if (action === 'succeeded') await require('./name-state').confirmJobNames(client, job);
     await writeAuditEvent(client, { mutationContext: { actorUserId, requestId: `magento-sync-${randomUUID()}` },
       eventKey: `magento_sync.${action}`, subjectType: 'magento_sync_job', subjectId: job.id,
       details: { state: job.state, planHash: job.plan_hash } });
@@ -119,6 +120,12 @@ async function enqueue(config, input, options) {
     }
     const externalInput = { ...input, sku: state.publicSku };
     const { observation, report } = await observe(config, externalInput, options);
+    if (options.automatic && Object.hasOwn(observation.amber, 'nameState')) {
+      const nameResult = await require('./name-state').reconcileObservation(config, observation, options);
+      if (nameResult.action === 'accept_external') plan.fail('MAGENTO_SYNC_AMBER_CHANGED');
+    }
+    if (options.automatic) await require('./sync-problems').saveDiagnostics(options.databasePool,
+      options.automatic, report.blockers);
     if (options.automatic && (observation.categoryFailures?.length || observation.domainEvidence.failures?.length)) {
       plan.fail('MAGENTO_SYNC_READ_FAILED');
     }

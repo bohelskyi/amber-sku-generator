@@ -333,7 +333,10 @@ export function ProductBuilder({
                   : 'Не потрібна'}
                 danger={validationFailed && isWeightRequired && !hasValidWeight}
               />
-              <SummaryRow label="SKU" value={isVerified ? finalSku : '—'} strong={isVerified} mono />
+              <details className="mt-2 text-xs"><summary className="cursor-pointer text-slate-500">Технічні деталі</summary>
+                <SummaryRow label="Внутрішній SKU" value={isVerified ? finalSku : '—'} mono />
+              </details>
+              <p className="text-xs text-slate-500">Артикул буде призначено сервером після збереження товару.</p>
               {isVerified && isVariationActive && (
                 <p className="builder-summary-note">
                   Варіація #{String(variationData.variationNumber).padStart(3, '0')}

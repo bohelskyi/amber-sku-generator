@@ -456,9 +456,12 @@ async function buildGlobalRepricingPreview() {
       if (hasManualPrice(details)) {
         items.push({
           ...calculated,
-          status: 'error',
-          errorCode: 'manual_price',
-          message: 'Товар має ручну ціну. Підтвердьте або змініть її явно.',
+          status: 'unchanged',
+          newPriceUah: oldPriceUah,
+          priceDeltaUah: 0,
+          manualPreserved: true,
+          errorCode: null,
+          message: 'Ручну ціну збережено без змін.',
           pricingState: 'manual',
         });
         continue;
@@ -488,12 +491,13 @@ async function buildGlobalRepricingPreview() {
         scenarioId: null,
         scenarioName: null,
         matrixName: null,
-        newPriceUah: null,
+        newPriceUah: hasManualPrice(details) ? oldPriceUah : null,
         calculatedPriceUah: null,
-        priceDeltaUah: null,
-        status: 'error',
-        errorCode: 'calculation_failed',
-        message: error.message || 'Помилка розрахунку ціни.',
+        priceDeltaUah: hasManualPrice(details) ? 0 : null,
+        status: hasManualPrice(details) ? 'unchanged' : 'error',
+        manualPreserved: hasManualPrice(details),
+        errorCode: hasManualPrice(details) ? null : 'calculation_failed',
+        message: hasManualPrice(details) ? 'Ручну ціну збережено без змін.' : error.message || 'Помилка розрахунку ціни.',
         pricingState: hasManualPrice(details) ? 'manual' : 'missing',
       });
     }
@@ -513,6 +517,11 @@ async function buildGlobalRepricingPreview() {
       unchangedCount: items.filter((item) => item.status === 'unchanged').length,
       skippedCount: items.filter((item) => item.status === 'skipped').length,
       errorCount: items.filter((item) => item.status === 'error').length,
+      manualPreservedCount: items.filter((item) => item.manualPreserved).length,
+      currentCount: items.filter((item) => item.status === 'unchanged' && !item.manualPreserved).length,
+      categories: categoryCodes.map((code) => ({ code,
+        count: items.filter((item) => item.categoryCode === code && item.status === 'changed').length }))
+        .filter((item) => item.count > 0),
     },
     items,
     blockingCorrectionRequests,

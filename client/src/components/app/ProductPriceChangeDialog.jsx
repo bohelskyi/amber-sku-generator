@@ -91,7 +91,7 @@ export function ProductPriceChangeDialog({
         <div className="dialog-body space-y-5 px-5 py-5 sm:px-6">
           <dl className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
             <div>
-              <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">SKU</dt>
+              <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Артикул</dt>
               <dd className="mt-1 break-all font-mono text-sm font-semibold text-slate-900">{sku}</dd>
             </div>
             <div>

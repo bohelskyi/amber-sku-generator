@@ -696,7 +696,7 @@ async function createCorrectionRequest(payload = {}, options = {}) {
     const sourceResult = await client.query(
       `SELECT id, full_sku, status, corrected_to_product_id, details, category, weight,
               total_price, total_price_uah, price_per_gram, uah_rate, sku_schema_version_id,
-              exclude_from_export, magento_name_subject_ua, magento_name_subject_en, magento_name_review_required
+              exclude_from_export, magento_name_subject_ua, magento_name_subject_en, magento_name_review_required, magento_name_override
        FROM products
        WHERE id = $1
        FOR UPDATE`,

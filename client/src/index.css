@@ -46,7 +46,7 @@
   html { background: var(--canvas); }
 
   body {
-    min-width: 320px;
+    min-width: 0;
     min-height: 100vh;
     margin: 0;
     color: var(--text);
@@ -1561,6 +1561,12 @@
   .input-sm { @apply px-3 py-2 text-sm; }
   .input-xs { @apply px-2 py-1.5 text-xs; }
 
+  .input.input-readonly {
+    color: var(--text-muted);
+    background: var(--surface-muted);
+    border-color: var(--border);
+  }
+
   .input:hover,
   .input-sm:hover,
   .input-xs:hover { border-color: #aab2bf; }
@@ -1920,10 +1926,50 @@
 .workspace-more-links { position:absolute; top:calc(100% + 10px); right:0; width:260px; max-height:calc(100dvh - 80px); overflow:auto; padding:8px; background:var(--navy-900); border:1px solid #64748b; border-radius:8px; box-shadow:0 8px 24px #0004; }
 .workspace-more-links .workspace-nav-link { height:auto; min-height:40px; white-space:normal; }
 .workspace-more-links .workspace-menu-primary { display:none; }
+.workspace-more-links .workspace-nav-link.is-active::after { content:none; }
+.workspace-menu-group-label { padding:10px 12px 4px; font-size:11px; color:#cbd5e1; }
+.workspace-narrow-menu-label { display:none !important; }
 .workspace-more-primary-only { display:none; }
-@media (max-width:1000px) {
+@media (max-width:1023px) {
   .workspace-more-primary-only { display:block; }
   .workspace-nav-links > .workspace-primary-link { display:none; }
-  .workspace-more-links .workspace-menu-primary { display:flex; }
-  .workspace-more-links { right:auto; left:0; max-width:calc(100vw - 100px); }
+  .workspace-more-links .workspace-menu-primary { display:block; }
+  .workspace-more-links .workspace-nav-link.workspace-menu-primary { display:flex; }
+  .workspace-more-links { right:auto; left:0; max-width:calc(100vw - 32px); }
+  .workspace-desktop-menu-label { display:none !important; }
+  .workspace-narrow-menu-label { display:inline !important; }
+}
+@media (max-width:479px) {
+  .workspace-nav-inner { gap:8px; padding-inline:12px; }
+  .workspace-brand-logo { height:28px; }
+  .workspace-logout span { display:none; }
+  .workspace-more-links { position:fixed; top:var(--workspace-nav-height); left:12px; right:12px; width:auto; }
+}
+.workspace-nav button:focus-visible, .workspace-nav a:focus-visible { outline:2px solid var(--amber-500); outline-offset:3px; }
+/* Daily navigation uses the existing workspace shell and shared controls. */
+.daily-navigation .workspace-nav-inner { display: flex; gap: 1rem; min-width: 0; }
+.daily-navigation .daily-links { display: flex; flex: 1; gap: .25rem; min-width: 0; }
+.daily-navigation .workspace-nav-link { white-space: nowrap; padding: .6rem .7rem; font-size: .8rem; }
+.navigation-count { border-radius: 999px; padding: .05rem .35rem; background: #f59e0b; color: #1c1917; font-size: .7rem; }
+.daily-navigation .navigation-label-short { display: none; }
+.product-sync-state { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; border-bottom: 1px solid var(--border); }
+.sync-refresh { display: inline-flex; padding: .25rem; border-radius: .3rem; color: #64748b; }
+.sync-refresh:focus-visible { outline: 2px solid #d97706; outline-offset: 2px; }
+@media (max-width: 1050px) {
+  .daily-navigation .workspace-user-name { max-width: 6rem; }
+  .daily-navigation .workspace-nav-link { padding: .5rem; font-size: .75rem; }
+}
+@media (max-width: 760px) {
+  .daily-navigation .workspace-nav-inner { flex-wrap: wrap; gap: .25rem; padding: .4rem .75rem; }
+  .daily-navigation .workspace-brand { flex: 1; }
+  .daily-navigation .workspace-brand-logo { height: 28px; width: auto; }
+  .daily-navigation .workspace-user { margin-left: auto; }
+  .daily-navigation .workspace-user-name { max-width: 8rem; }
+  .daily-navigation .daily-links { order: 3; flex: 1 0 100%; width: 100%; justify-content: space-between; }
+  .daily-navigation .daily-links .workspace-nav-link { position: relative; display: inline-flex; flex: 1 1 0; min-width: 0; height: auto; min-height: 40px; flex-direction: column; gap: .15rem; font-size: .66rem; line-height: 1.15; padding: .3rem .1rem; white-space: normal; text-align: center; }
+  .daily-navigation .daily-links .navigation-count { position: absolute; top: 0; right: 0; }
+  .daily-navigation .daily-links .workspace-nav-link svg { width: 14px; }
+  .daily-navigation .daily-links .workspace-nav-link span:not(.navigation-count) { max-width: 100%; overflow-wrap: anywhere; }
+  .daily-navigation .navigation-label-long { display: none; }
+  .daily-navigation .navigation-label-short { display: inline; }
 }

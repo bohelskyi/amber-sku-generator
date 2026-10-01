@@ -64,10 +64,27 @@ function requirePermission(permissionKey) {
   return requirePermissionMiddleware;
 }
 
+function requireAnyPermission(permissionKeys) {
+  if (!Array.isArray(permissionKeys) || !permissionKeys.length
+    || permissionKeys.some((key) => typeof key !== 'string' || !PERMISSION_KEY_PATTERN.test(key))) {
+    throw new Error('Invalid permission keys');
+  }
+  const keys = Object.freeze([...new Set(permissionKeys)]);
+  const middleware = (req, res, next) => {
+    if (Array.isArray(req.permissions) && keys.some((key) => req.permissions.includes(key))) return next();
+    res.set('Cache-Control', 'no-store');
+    return res.status(403).json({ code: 'INSUFFICIENT_PERMISSION', error: INSUFFICIENT_PERMISSION_ERROR,
+      requiredPermissions: keys });
+  };
+  Object.defineProperty(middleware, 'permissionKeys', { value: keys });
+  return middleware;
+}
+
 module.exports = {
   ACCESS_ERROR_BY_STATUS,
   INSUFFICIENT_PERMISSION_ERROR,
   createRequireActiveApplicationUser,
   requireActiveApplicationUser,
   requirePermission,
+  requireAnyPermission,
 };

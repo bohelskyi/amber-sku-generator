@@ -67,7 +67,7 @@ beforeEach(() => {
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   productsApi.getConfig.mockResolvedValue(response({ categories: {}, questions: {}, options: {} }));
   productsApi.getRecent.mockResolvedValue(response([]));
-  exports.getStatus.mockResolvedValue(response({ countSinceLastExport: 1 }));
+  exports.getStatus.mockResolvedValue(response({ delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false }, countSinceLastExport: 1 }));
   exports.getPriceStatus.mockResolvedValue(response({ pendingCount: 1 }));
   exports.getTemplateOptions.mockResolvedValue(response({ versions: [], activeVersionId: null }));
   exports.preview.mockResolvedValue(response(preview));
@@ -87,50 +87,41 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it('mounts every export destination without commands or admin reads, with native active navigation', async () => {
   const { router } = mount(); await screen.findByText(/1 новий товар очікує/, {}, { timeout: 10000 });
-  for (const [title, path] of [['Мої експорти', '/exports/sessions'], ['Спільні зі мною', '/exports/shared'], ['Запрошення', '/exports/invitations'], ['Оновлення цін', '/exports/prices'], ['Новий експорт', '/exports']]) {
-    const item = within(screen.getByRole('navigation', { name: 'Розділи експорту' })).getByRole('link', { name: title });
+  for (const [title, path, nav] of [['Робочі експорти', '/exports/sessions', 'Розділи експорту'], ['Спільні зі мною', '/exports/shared', 'Робочі експорти'], ['Запрошення', '/exports/invitations', 'Робочі експорти'], ['Оновлення цін', '/exports/prices', 'Розділи експорту'], ['Огляд', '/exports', 'Розділи експорту']]) {
+    const item = within(screen.getByRole('navigation', { name: nav })).getByRole('link', { name: title });
     item.focus(); expect(document.activeElement).toBe(item); expect(item.tabIndex).toBe(0);
     fireEvent.click(item); await waitFor(() => expect(router.state.location.pathname).toBe(path));
     expect(item.getAttribute('aria-current')).toBe('page');
+    if (['/exports/sessions', '/exports/shared', '/exports/invitations'].includes(path)) {
+      expect(within(screen.getByRole('navigation', { name: 'Розділи експорту' })).getByRole('link', { name: 'Робочі експорти' }).getAttribute('aria-current')).toBe('page');
+    }
   }
   link('Експорт за опублікованим шаблоном'); await screen.findByLabelText('Назва експорту');
   expect(router.state.location.pathname).toBe('/exports/new/template');
+  expect(within(screen.getByRole('navigation', { name: 'Розділи експорту' })).getByRole('link', { name: 'Робочі експорти' }).getAttribute('aria-current')).toBe('page');
   noMutations(); for (const mock of Object.values(templates)) expect(mock).not.toHaveBeenCalled();
   expect(screen.getByRole('link', { name: 'Історія файлів' }).getAttribute('href')).toBe('/exports/history');
 });
 
-it.each([390, 1440])('renders one keyboard-reachable product handoff at %i px and navigates without export work', async (width) => {
-  // jsdom checks composition and focus at both widths; actual CSS overflow needs browser acceptance.
+it.each([390, 1440])('keeps Magento summary on products and legacy exports accessible by deep link at %i px', async (width) => {
   vi.stubGlobal('innerWidth', width);
-  exports.getStatus.mockResolvedValue(response({ countSinceLastExport: 24 }));
-  exports.getPriceStatus.mockResolvedValue(response({ pendingCount: 0 }));
   const { router } = mount('/');
-  const summary = within(await screen.findByRole('region', { name: 'Експорт' }));
-  expect(summary.getByText('24 нові товари очікують експорту')).toBeTruthy();
-  expect(summary.getByRole('link', { name: 'Зміни цін до експорту: 0' }).getAttribute('href')).toBe('/exports/prices');
-  expect(screen.queryByRole('heading', { name: 'Експорт товарів у Magento' })).toBeNull();
-  expect(screen.queryByRole('button', { name: /Перевірити .*товар|Створити файли|Експортувати зміни цін|Завершити експорт/ })).toBeNull();
-  const handoff = screen.getByRole('link', { name: 'Перейти до експорту' });
-  expect(handoff.getAttribute('href')).toBe('/exports');
-  handoff.focus(); expect(document.activeElement).toBe(handoff); expect(handoff.tabIndex).toBe(0);
-  noExportWork(); fireEvent.click(handoff);
-  await screen.findByRole('heading', { name: 'Експорт товарів у Magento' });
-  expect(router.state.location.pathname).toBe('/exports');
-  expect(screen.getByRole('button', { name: 'Перевірити 24 нові товари' }).disabled).toBe(false);
+  await screen.findByRole('heading', { name: 'Товари' });
+  expect(screen.queryByRole('region', { name: 'Експорт' })).toBeNull();
+  expect(screen.queryByRole('link', { name: 'Перейти до експорту' })).toBeNull();
   noExportWork();
-  await navigate(router, -1);
-  link('Зміни цін до експорту: 0');
-  await screen.findByRole('heading', { name: 'Оновлення цін Magento' });
-  expect(router.state.location.pathname).toBe('/exports/prices'); noExportWork();
+  await navigate(router, '/exports');
+  await screen.findByRole('heading', { name: 'Експорт товарів у Magento' });
+  noExportWork();
+  await navigate(router, '/exports/prices');
+  await screen.findByRole('heading', { name: 'Оновлення цін Magento' }); noExportWork();
 });
-
-it('keeps a zero-count handoff for view-only exporters without create or archive authority', async () => {
-  exports.getStatus.mockResolvedValue(response({ countSinceLastExport: 0 }));
-  exports.getPriceStatus.mockResolvedValue(response({ pendingCount: 0 }));
-  mount('/', ['products.view', 'exports.view']);
-  await screen.findByText('0 нових товарів очікують експорту');
+it('keeps view-only legacy export deep links without create or archive authority', async () => {
+  exports.getStatus.mockResolvedValue(response({ delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false }, countSinceLastExport: 0 }));
+  const { router } = mount('/', ['products.view', 'exports.view']);
+  await screen.findByRole('heading', { name: 'Товари' });
   expect(screen.queryByRole('button', { name: 'Архівувати' })).toBeNull();
-  link('Перейти до експорту'); await screen.findByRole('heading', { name: 'Експорт товарів у Magento' });
+  await navigate(router, '/exports'); await screen.findByRole('heading', { name: 'Експорт товарів у Magento' });
   noExportWork();
   expect(screen.queryByRole('button', { name: 'Створити файли Magento' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Завершити експорт' })).toBeNull();
@@ -145,7 +136,7 @@ it('keeps product creation, history, decode, recount and archive available witho
   }));
   vi.spyOn(window, 'confirm').mockReturnValue(true);
   vi.spyOn(window, 'alert').mockImplementation(() => {});
-  mount('/', ['products.view', 'products.create', 'products.decode', 'products.archive', 'products.recount']);
+  mount('/', ['products.view', 'history.view', 'products.create', 'products.decode', 'products.archive', 'products.recount']);
   await screen.findByRole('heading', { name: 'Оберіть категорію' });
   expect(screen.getByRole('heading', { name: 'Останні збережені' })).toBeTruthy();
   expect(screen.queryByRole('region', { name: 'Експорт' })).toBeNull();
@@ -167,17 +158,17 @@ it('keeps product creation, history, decode, recount and archive available witho
 
 it('keeps the original uncertain operation through product → exports → product → exports', async () => {
   exports.createSnapshot.mockRejectedValueOnce(new Error('response lost')).mockResolvedValueOnce(response(snapshot));
-  const { router } = mount('/'); await screen.findByRole('link', { name: 'Перейти до експорту' });
-  link('Перейти до експорту'); await screen.findByRole('heading', { name: 'Експорт товарів у Magento' });
+  const { router } = mount('/'); await screen.findByRole('heading', { name: 'Товари' });
+  await navigate(router, '/exports'); await screen.findByRole('heading', { name: 'Експорт товарів у Magento' });
   button('Перевірити 1 новий товар'); await screen.findByRole('button', { name: 'Створити файли Magento' });
   button('Створити файли Magento'); await screen.findByText(/response lost/);
   const original = exports.createSnapshot.mock.calls[0];
   expect(screen.getByRole('button', { name: 'Повторити початкове створення' })).toBeTruthy();
-  await navigate(router, -1); await screen.findByRole('heading', { name: 'Amber SKU Manager' });
-  expect(screen.getByRole('region', { name: 'Експорт' })).toBeTruthy();
+  await navigate(router, -1); await screen.findByRole('heading', { name: 'Товари' });
+  expect(screen.queryByRole('region', { name: 'Експорт' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Повторити початкове створення' })).toBeNull();
   expect(exports.createSnapshot).toHaveBeenCalledTimes(1); expect(exports.preview).toHaveBeenCalledTimes(1);
-  link('Перейти до експорту'); await screen.findByRole('button', { name: 'Повторити початкове створення' });
+  await navigate(router, '/exports'); await screen.findByRole('button', { name: 'Повторити початкове створення' });
   expect(exports.createSnapshot).toHaveBeenCalledTimes(1); expect(exports.preview).toHaveBeenCalledTimes(1);
   button('Повторити початкове створення'); await screen.findByText('ЗБЕРЕЖЕНІ ФАЙЛИ');
   expect(exports.createSnapshot.mock.calls[1]).toEqual(original);
@@ -210,16 +201,16 @@ it('view-only exporter can preview/read but cannot create or confirm; direct adm
   button('Перевірити 1 новий товар'); await screen.findByText('ПОПЕРЕДНІЙ ПЕРЕГЛЯД');
   expect(screen.queryByRole('button', { name: 'Створити файли Magento' })).toBeNull();
   await navigate(router, '/exports/prices'); expect(screen.queryByRole('button', { name: 'Створити файл' })).toBeNull(); expect(screen.getByRole('button', { name: 'Оновити / переглянути поточну чергу' })).toBeTruthy();
-  await navigate(router, '/exports/new/template'); await screen.findByText(/Немає дозволу на створення/);
+  await navigate(router, '/exports/new/template'); await screen.findByText(/Створення CSV товарів недоступне/);
   for (const path of ['/admin/export-templates', '/admin/export-templates/system', '/admin/export-templates/family-a/check']) {
-    await navigate(router, path); await screen.findByText('Немає дозволу на перегляд шаблонів експорту');
+    await navigate(router, path); await screen.findByText('Немає доступу до цього розділу.');
   }
   for (const mock of Object.values(templates)) expect(mock).not.toHaveBeenCalled(); noMutations();
 });
 
 it('template URLs open table/check/versions and system read-only without publish/activation on mount', async () => {
   const { router } = mount('/admin/export-templates/family-a/check', admin);
-  await screen.findByRole('heading', { name: 'Перевірка шаблону' });
+  await screen.findByRole('heading', { name: 'Перевірка шаблону' }, { timeout: 10000 });
   link('Версії', 'Розділи шаблону'); await screen.findByRole('heading', { name: 'Версії шаблону' });
   await navigate(router, -1); expect(screen.getByRole('link', { name: 'Перевірка', exact: true }).getAttribute('aria-current')).toBe('page');
   await navigate(router, 1); await navigate(router, '/admin/export-templates/system'); await screen.findByText('Magento — поточний системний');
@@ -232,7 +223,7 @@ it('export SKU handoff opens only the explicitly requested existing decode workf
   await screen.findByRole('button', { name: 'Відкрити товар із експорту' });
   await waitFor(() => expect(decode).toHaveBeenCalledWith('/decode', { sku: 'SV-EXACT' }));
   noMutations(); first.unmount(); decode.mockClear();
-  mount('/?exportSku=SV-EXACT', exporter); await screen.findByText('Amber SKU Manager');
+  mount('/?exportSku=SV-EXACT', exporter); await screen.findByRole('heading', { name: 'Товари' });
   expect(screen.queryByRole('button', { name: 'Відкрити товар із експорту' })).toBeNull(); expect(decode).not.toHaveBeenCalled();
 });
 
@@ -279,7 +270,7 @@ it('dirty draft survives local back/forward; Stay, failed Save, successful Save 
   await navigate(router, -1); await navigate(router, -1); await navigate(router, 1); await navigate(router, -1);
   button('Налаштувати колонку meta_title'); expect(screen.getByLabelText('Текст у файлі', { exact: true }).value).toBe('  точний текст\n');
   button('Закрити налаштування');
-  const leave = screen.getByRole('link', { name: 'Експорт', exact: true }); leave.focus(); fireEvent.click(leave);
+  const leave = screen.getByRole('link', { name: 'Товари', exact: true }); leave.focus(); fireEvent.click(leave);
   const dialog = await screen.findByRole('dialog', { name: 'Незбережені зміни' });
   await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
   const background = leave.closest('.app-shell').parentElement;
@@ -293,12 +284,12 @@ it('dirty draft survives local back/forward; Stay, failed Save, successful Save 
   expect(router.state.location.pathname).toBe('/admin/export-templates/family-a');
   button('Залишитися');
   templates.save.mockImplementation(async (_id, body) => response({ ...family.draft, definition: body.definition, revision: '10' }));
-  fireEvent.click(leave); button('Зберегти й перейти'); await screen.findByRole('navigation', { name: 'Розділи експорту' });
+  fireEvent.click(leave); button('Зберегти й перейти'); await screen.findByRole('heading', { name: 'Товари' });
   expect(templates.save.mock.calls[1][1].definition.groups[0].rows[0].cells.meta_title.value).toBe('  точний текст\n');
   await navigate(router, -1); await screen.findByRole('tablist', { name: 'Категорії файлів' }); button('Налаштувати колонку meta_title');
   fireEvent.change(screen.getByLabelText('Текст у файлі', { exact: true }), { target: { value: 'discard this' } });
   await navigate(router, 1); await screen.findByRole('dialog'); button('Відкинути й перейти');
-  await screen.findByRole('navigation', { name: 'Розділи експорту' }); expect(templates.save).toHaveBeenCalledTimes(2);
+  await screen.findByRole('heading', { name: 'Товари' }); expect(templates.save).toHaveBeenCalledTimes(2);
   expect(templates.publish).not.toHaveBeenCalled(); expect(templates.select).not.toHaveBeenCalled();
 });
 
@@ -315,7 +306,7 @@ it('pending column input blocks local deep links and browser back without losing
   await screen.findByText(/Спочатку застосуйте або скасуйте/); expect(templates.save).not.toHaveBeenCalled();
   button('Залишитися'); expect(screen.getByLabelText('Код у CSV').value).toBe('pending_note');
   await navigate(router, '/admin/export-templates/family-a/check'); button('Відкинути й перейти');
-  await screen.findByRole('heading', { name: 'Перевірка шаблону' }); noMutations();
+  await screen.findByRole('heading', { name: 'Перевірка шаблону' }, { timeout: 10000 }); noMutations();
 });
 
 it('dirty session navigation keeps revision and fields until explicit Save or Discard', async () => {
@@ -325,7 +316,7 @@ it('dirty session navigation keeps revision and fields until explicit Save or Di
   await navigate(router, -1); await screen.findByRole('dialog'); button('Залишитися');
   expect(screen.getByLabelText('Назва експорту').value).toBe('  local session  ');
   sessions.save.mockResolvedValue(response({ ...session, title: '  local session  ', configurationRevision: '8' }));
-  link('Спільні зі мною', 'Розділи експорту'); button('Зберегти й перейти');
+  link('Спільні зі мною', 'Робочі експорти'); button('Зберегти й перейти');
   await waitFor(() => expect(router.state.location.pathname).toBe('/exports/shared'));
   expect(sessions.save).toHaveBeenCalledWith('saved-a', { title: '  local session  ', settings: session.settings, expectedRevision: '7', expectedAccessEpoch: 'owner' });
   expect(sessions.prepare).not.toHaveBeenCalled(); expect(sessions.generate).not.toHaveBeenCalled();
@@ -335,7 +326,7 @@ it('saving a new session at the dirty guard follows the requested destination an
   sessions.create.mockResolvedValue(response(session));
   const { router } = mount('/exports/new/template'); await screen.findByLabelText('Назва експорту');
   fireEvent.change(screen.getByLabelText('Назва експорту'), { target: { value: 'Explicit saved draft' } });
-  link('Мої експорти', 'Розділи експорту'); await screen.findByRole('dialog'); button('Зберегти й перейти');
+  link('Мої експорти', 'Робочі експорти'); await screen.findByRole('dialog'); button('Зберегти й перейти');
   await waitFor(() => expect(router.state.location.pathname).toBe('/exports/sessions'));
   expect(sessions.create).toHaveBeenCalledTimes(1); expect(sessions.get).not.toHaveBeenCalled();
   expect(sessions.prepare).not.toHaveBeenCalled(); expect(sessions.generate).not.toHaveBeenCalled();
@@ -351,7 +342,7 @@ it('view-only session result can be reopened, but confirmation remains disabled'
 });
 
 it('export denied routes fetch no status, private session or template metadata', async () => {
-  const { router } = mount('/exports/sessions/saved-a', []); await screen.findByText('Немає дозволу на перегляд експорту');
+  const { router } = mount('/exports/sessions/saved-a', []); await screen.findByText('Немає доступу до цього розділу.');
   await navigate(router, '/exports/invitations'); await navigate(router, '/exports');
   for (const api of [exports, sessions, templates]) for (const mock of Object.values(api)) expect(mock).not.toHaveBeenCalled();
 });
@@ -371,7 +362,7 @@ it('same-user refresh keeps the original pending request across subroutes; permi
   button('Перевірити 1 новий товар'); await screen.findByRole('button', { name: 'Створити файли Magento' }); button('Створити файли Magento'); await screen.findByText(/unknown/);
   await navigate(router, '/exports/prices'); await navigate(router, '/');
   await act(async () => observedAuth.refresh());
-  link('Перейти до експорту'); await screen.findByRole('button', { name: 'Повторити початкове створення' });
+  await navigate(router, '/exports'); await screen.findByRole('button', { name: 'Повторити початкове створення' });
   expect(exports.createSnapshot).toHaveBeenCalledTimes(1);
   button('Повторити початкове створення'); await screen.findByText('ЗБЕРЕЖЕНІ ФАЙЛИ');
   expect(exports.createSnapshot.mock.calls[1]).toEqual(exports.createSnapshot.mock.calls[0]);

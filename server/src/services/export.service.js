@@ -821,8 +821,14 @@ async function confirmExportSnapshot(snapshotId, options = {}) {
 }
 
 async function getExportStatus(options = {}) {
-  const lifecycle = await fullSelection.queues(options.databasePool || pool);
-  const lastExportResult = await pool.query(
+  const databasePool = options.databasePool || pool;
+  const deliveryRow = (await databasePool.query(
+    'SELECT enabled, legacy_product_csv_enabled FROM magento_auto_sync_activation WHERE singleton'
+  )).rows[0];
+  const delivery = { legacyProductCsvEnabled: deliveryRow?.legacy_product_csv_enabled === true,
+    automaticSyncEnabled: deliveryRow?.enabled === true };
+  const lifecycle = await fullSelection.queues(databasePool);
+  const lastExportResult = await databasePool.query(
     `
       SELECT COALESCE(s.id, 'legacy-' || e.id::text) AS id,
              COALESCE(s.from_sku, e.from_sku) AS from_sku,
@@ -844,7 +850,7 @@ async function getExportStatus(options = {}) {
       LIMIT 1
     `
   );
-  const totalsResult = await pool.query(
+  const totalsResult = await databasePool.query(
     `SELECT
        count(*)::int AS total_count,
        COALESCE(MAX(id), 0)::int AS max_id,
@@ -860,6 +866,7 @@ async function getExportStatus(options = {}) {
   if (lastExportResult.rows.length === 0) {
     return {
       lifecycle,
+      delivery,
       hasExport: false,
       totalProducts: totalCount,
       exportableProducts: exportableCount,
@@ -873,17 +880,18 @@ async function getExportStatus(options = {}) {
   const lastExport = lastExportResult.rows[0];
   let privateResult = false;
   if (lastExport.export_session_id) {
-    try { await sessionAccess.assertSnapshotAccess(pool, lastExport, options); }
+    try { await sessionAccess.assertSnapshotAccess(databasePool, lastExport, options); }
     catch (error) { if ([403,404].includes(error.statusCode)) privateResult = true; else throw error; }
   }
   const exportedToId = Number(lastExport.exported_to_product_id || 0);
-  const sinceResult = await pool.query(
+  const sinceResult = await databasePool.query(
     'SELECT count(*)::int AS count FROM products WHERE id > $1 AND COALESCE(exclude_from_export, 0) = 0',
     [exportedToId]
   );
 
   return {
     lifecycle,
+    delivery,
     hasExport: true,
     totalProducts: totalCount,
     exportableProducts: exportableCount,

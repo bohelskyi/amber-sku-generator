@@ -28,7 +28,7 @@ function Harness({ prices = false, canCreate = true, principalLifetime }) {
 const click = (name) => fireEvent.click(screen.getByRole('button', { name, exact: true }));
 beforeEach(() => {
   for (const fn of Object.values(exportsApi)) fn.mockReset();
-  exportsApi.getStatus.mockResolvedValue(response({ countSinceLastExport: 1 })); exportsApi.getPriceStatus.mockResolvedValue(response({ pendingCount: 1 }));
+  exportsApi.getStatus.mockResolvedValue(response({ delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false }, countSinceLastExport: 1 })); exportsApi.getPriceStatus.mockResolvedValue(response({ pendingCount: 1 }));
   exportsApi.preview.mockResolvedValue(response({ mode: 'new', representedCount: 1, readyCount: 1, errors: [], tableFingerprint: 'original', previewExpectation: 'original', checkedAt: price.generatedAt, range: snapshot.capturedRange, artifacts: [artifact] }));
   exportsApi.createSnapshot.mockResolvedValue(response(snapshot)); exportsApi.getSnapshot.mockResolvedValue(response(snapshot));
   exportsApi.readMagentoArtifact.mockResolvedValue(response(csv)); exportsApi.downloadMagentoArtifact.mockResolvedValue(response(csv));

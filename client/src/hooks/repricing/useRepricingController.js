@@ -57,7 +57,7 @@ function normalizeDraftPayload(data) {
   };
 }
 
-export function useRepricingController() {
+export function useRepricingController({ canViewCorrections = true } = {}) {
   const [state, dispatch] = useRepricingControllerState();
   const stateRef = useRef(state);
   const activeDraftRef = useRef(state.activeDraft);
@@ -102,7 +102,7 @@ export function useRepricingController() {
       repricingApi.listScenarios(),
       repricingApi.listBatches(),
       repricingApi.listDrafts(),
-      correctionsApi.listRequests('active'),
+      canViewCorrections ? correctionsApi.listRequests('active') : Promise.resolve({ data: { items: [] } }),
     ])
       .then(([
         configResponse,
@@ -136,7 +136,7 @@ export function useRepricingController() {
       mountedRef.current = false;
       workflowGenerationRef.current += 1;
     };
-  }, [patch]);
+  }, [patch, canViewCorrections]);
 
   const selectedScenario = state.scenarios.find(
     (item) => Number(item.id) === Number(state.scenarioId)
@@ -152,23 +152,6 @@ export function useRepricingController() {
     )),
     [state.correctionRequests]
   );
-  const blockingCorrectionRequests = useMemo(() => {
-    if (!state.preview) return [];
-    const candidateProductIds = new Set(
-      (state.preview.items || []).map((item) => Number(item.productId))
-    );
-    const requestsById = new Map();
-    for (const request of state.preview.blockingCorrectionRequests || []) {
-      requestsById.set(Number(request.id), request);
-    }
-    for (const request of state.correctionRequests) {
-      if (candidateProductIds.has(Number(request.sourceProductId))) {
-        requestsById.set(Number(request.id), request);
-      }
-    }
-    return [...requestsById.values()]
-      .sort((first, second) => Number(first.id) - Number(second.id));
-  }, [state.correctionRequests, state.preview]);
   const effectiveItems = useMemo(
     () => applyManualPrices(
       state.preview?.items || [],
@@ -177,6 +160,23 @@ export function useRepricingController() {
     ),
     [state.automaticProductIds, state.manualPrices, state.preview]
   );
+  const blockingCorrectionRequests = useMemo(() => {
+    if (!state.preview) return [];
+    const candidateProductIds = new Set(
+      effectiveItems.filter((item) => !item.manualPreserved).map((item) => Number(item.productId))
+    );
+    const requestsById = new Map();
+    for (const request of state.preview.blockingCorrectionRequests || []) {
+      if (candidateProductIds.has(Number(request.sourceProductId))) requestsById.set(Number(request.id), request);
+    }
+    for (const request of state.correctionRequests) {
+      if (candidateProductIds.has(Number(request.sourceProductId))) {
+        requestsById.set(Number(request.id), request);
+      }
+    }
+    return [...requestsById.values()]
+      .sort((first, second) => Number(first.id) - Number(second.id));
+  }, [effectiveItems, state.correctionRequests, state.preview]);
   const effectiveSummary = useMemo(
     () => getRepricingSummary(state.preview?.summary || {}, effectiveItems),
     [effectiveItems, state.preview]

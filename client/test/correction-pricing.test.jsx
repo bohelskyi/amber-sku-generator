@@ -58,7 +58,7 @@ it('shows all three request pricing modes only with override permission', () => 
   expect(screen.queryByRole('radiogroup', { name: 'Режим ціни' })).toBeNull();
 });
 
-it('presents the stable public article and retains internal recount SKUs as context', () => {
+it('presents the stable public article without internal recount identifiers', () => {
   renderDialog({
     preview: {
       ...preview,
@@ -67,8 +67,8 @@ it('presents the stable public article and retains internal recount SKUs as cont
     },
   });
   expect(screen.getAllByText('AG-000123')).toHaveLength(2);
-  expect(screen.getByText(/Внутрішній SKU: BR1001/)).toBeTruthy();
-  expect(screen.getByText(/Внутрішній SKU: BR1002/)).toBeTruthy();
+  expect(screen.queryByText(/Внутрішній SKU/)).toBeNull();
+  expect(screen.queryByText('BR1002')).toBeNull();
 });
 
 it('selects each pricing segment and shows only its matching inputs', () => {
@@ -129,15 +129,12 @@ it('edits an exact manual UAH request decision', () => {
   expect(handlers.onManualPriceChange).toHaveBeenCalledWith('4021.50');
 });
 
-it.each(['usd_per_gram', 'manual_uah'])(
-  'keeps direct apply visible but disabled for %s request pricing',
-  (pricingMode) => {
-    renderDialog({ mode: 'choice', pricingMode, usdPerGram: '10', manualPriceUah: '4020' });
-    expect(screen.getByRole('button', { name: 'Створити запит' }).disabled).toBe(false);
-    expect(screen.getByRole('button', { name: 'Створити коригувальний артикул' }).disabled).toBe(true);
-    expect(screen.getByText(/Індивідуальна ціна діє лише для запитів на виправлення/)).toBeTruthy();
-  }
-);
+it.each(['usd_per_gram', 'manual_uah'])('direct apply offers the existing supported pricing controls for %s', (pricingMode) => {
+  renderDialog({ mode: 'apply', pricingMode, usdPerGram: '10', manualPriceUah: '4020' });
+  expect(screen.getByRole('button', { name: 'Застосувати переоблік' }).disabled).toBe(false);
+  expect(screen.queryByRole('button', { name: 'Створити запит' })).toBeNull();
+  expect(screen.getByRole('radiogroup', { name: 'Режим ціни' })).toBeTruthy();
+});
 
 it('formats the UAH price difference to the stored money scale', () => {
   renderDialog({ preview: { ...preview, priceDeltaUah: 7620.5599999999995 } });
@@ -164,7 +161,7 @@ it('waits for a new preview after switching to a valid custom decision', () => {
       <button type="button" onClick={() => setCurrentPreview({ ...preview })}>Оновити прев’ю</button>
       <RecountConfirmDialog
         canPriceOverride isOpen isApplying={false} preview={currentPreview}
-        previewCurrent mode="choice" pricingMode={pricingMode} manualPriceUah="4020"
+        previewCurrent mode="request" pricingMode={pricingMode} manualPriceUah="4020"
         onPricingModeChange={setPricingMode} onManualPriceChange={vi.fn()}
         onCancel={vi.fn()} onConfirm={vi.fn()}
       />
@@ -180,5 +177,5 @@ it('waits for a new preview after switching to a valid custom decision', () => {
   fireEvent.click(screen.getByRole('button', { name: 'Оновити прев’ю' }));
   expect(screen.getByText('4020 ₴')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Створити запит' }).disabled).toBe(false);
-  expect(screen.getByRole('button', { name: 'Створити коригувальний артикул' }).disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Застосувати переоблік' })).toBeNull();
 });

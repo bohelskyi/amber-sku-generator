@@ -1,7 +1,7 @@
 import { formatDecimal, formatUah, formatUsd } from '../../lib/formatters';
 import { Link } from 'react-router-dom';
 
-export function HistoryTable({ history, config, selectedCat, onCopyText, onDecode, onDelete, canArchive = true }) {
+export function HistoryTable({ history, config, selectedCat, onCopyText, onDecode, onDelete, canArchive = true, canDecode = true }) {
   const article = (item) => item.public_sku || item.full_sku;
   return (
     <section className="fade-up">
@@ -44,8 +44,8 @@ export function HistoryTable({ history, config, selectedCat, onCopyText, onDecod
                     <td className="table-cell whitespace-nowrap text-sm">
                       {!selectedCat && (
                         <div className="flex flex-wrap gap-2">
-                          <button onClick={() => onCopyText(article(item), 'SKU')} className="btn btn-outline text-xs px-2 py-1">Копіювати SKU</button>
-                          <button onClick={() => onDecode(article(item))} className="btn btn-outline text-xs px-2 py-1">Розшифрувати</button>
+                          <button onClick={() => onCopyText(article(item), 'Артикул')} className="btn btn-outline text-xs px-2 py-1">Копіювати артикул</button>
+                          {canDecode && <button onClick={() => onDecode(article(item))} className="btn btn-outline text-xs px-2 py-1">Розшифрувати</button>}
                           <Link to={`/admin/corrections/history?sku=${encodeURIComponent(article(item))}`} className="btn btn-outline text-xs px-2 py-1">Історія</Link>
                           <button
                             onClick={() => item.total_price_uah

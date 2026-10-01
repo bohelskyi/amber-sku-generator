@@ -2078,12 +2078,12 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
     const manualOnlyPreviewItem = initial.data.items.find((item) => (
       Number(item.productId) === Number(manualProduct.id)
     ));
-    assert.equal(manualOnlyPreviewItem?.errorCode, 'manual_price');
+    assert.equal(manualOnlyPreviewItem?.status, 'unchanged'); assert.equal(manualOnlyPreviewItem?.manualPreserved, true);
     assert.equal(manualOnlyPreviewItem?.calculatedPriceUah, null);
     const switchPreviewItem = initial.data.items.find((item) => (
       Number(item.productId) === Number(automaticSwitchProduct.id)
     ));
-    assert.equal(switchPreviewItem?.errorCode, 'manual_price');
+    assert.equal(switchPreviewItem?.status, 'unchanged'); assert.equal(switchPreviewItem?.manualPreserved, true);
     assert.ok(Number(switchPreviewItem?.calculatedPriceUah) > 0);
     assert.ok(Number(switchPreviewItem?.automaticPriceUah) > 0);
     assert.notEqual(
@@ -2098,15 +2098,15 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
 
     const automaticProductIds = [Number(automaticSwitchProduct.id)];
     const initialOverrides = overridesFor(initial.data, automaticProductIds);
-    assert.ok(initialOverrides.length >= 2);
+    assert.ok(initialOverrides.length >= 1);
     const invalidOverrides = initialOverrides.map((override) => (
-      Number(override.productId) === Number(manualProduct.id)
+      Number(override.productId) === Number(missingProduct.id)
         ? { ...override, newPriceUah: 0 }
         : override
     ));
     assert.equal(
       invalidOverrides.find((override) => (
-        Number(override.productId) === Number(manualProduct.id)
+        Number(override.productId) === Number(missingProduct.id)
       ))?.newPriceUah,
       0
     );
@@ -2207,18 +2207,10 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
           ? { ...override, newPriceUah: Number(override.newPriceUah) + 25 }
           : override
       ));
-    const keptManualOverride = manualOverrides.find((override) => (
-      Number(override.productId) === Number(manualProduct.id)
-    ));
-    assert.equal(keptManualOverride?.newPriceUah, Number(
-      finalPreview.data.items.find((item) => (
-        Number(item.productId) === Number(manualProduct.id)
-      )).oldPriceUah
-    ));
     const changedProductIds = finalPreview.data.items
       .filter((item) => (
         item.status === 'changed'
-        || ['manual_price', 'price_missing'].includes(item.errorCode)
+        || ['manual_price', 'price_missing'].includes(item.errorCode) || automaticProductIds.includes(Number(item.productId))
       ))
       .map((item) => Number(item.productId))
       .sort((first, second) => first - second);
@@ -2304,12 +2296,7 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
     assert.equal(draft.data.draft.scenarioId, null);
     assert.deepEqual(draft.data.draft.automaticProductIds, automaticProductIds);
     assert.equal(draft.data.draft.uiState.scenarioFilter, String(schemas.ZZScenario));
-    assert.equal(
-      draft.data.draft.manualOverrides.find((override) => (
-        Number(override.productId) === Number(manualProduct.id)
-      ))?.newPriceUah,
-      keptManualOverride.newPriceUah
-    );
+    assert.equal(draft.data.draft.manualOverrides.some((override) => Number(override.productId) === Number(manualProduct.id)), false);
     assert.equal(
       draft.data.draft.reviewedProductIds.includes(Number(manualProduct.id)),
       true
@@ -2323,12 +2310,7 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
     const reopenedDraft = await request(`/api/admin/repricing/drafts/${activeDraftId}`);
     assert.equal(reopenedDraft.response.status, 200, reopenedDraft.text);
     assert.deepEqual(reopenedDraft.data.automaticProductIds, automaticProductIds);
-    assert.equal(
-      reopenedDraft.data.manualOverrides.find((override) => (
-        Number(override.productId) === Number(manualProduct.id)
-      ))?.newPriceUah,
-      keptManualOverride.newPriceUah
-    );
+    assert.equal(reopenedDraft.data.manualOverrides.some((override) => Number(override.productId) === Number(manualProduct.id)), false);
     assert.equal(
       reopenedDraft.data.draft.reviewedProductIds.includes(Number(manualProduct.id)),
       true
@@ -2436,16 +2418,9 @@ test('global repricing is authoritative, atomic, unique per product, and fully r
         Number(item.productId) === Number(automaticSwitchProduct.id)
       )).automaticPriceUah
     ));
-    const keptManualProduct = appliedItems.rows.find((item) => (
-      Number(item.product_id) === Number(manualProduct.id)
-    ));
-    assert.equal(Number(keptManualProduct.manual_price_uah), 700);
-    assert.equal(keptManualProduct.manual_override, 'true');
-    const changedManual = appliedItems.rows.find((item) => (
-      Number(item.product_id) === Number(changedManualProduct.id)
-    ));
-    assert.equal(Number(changedManual.manual_price_uah), 775);
-    assert.equal(Number(changedManual.new_price_uah), 775);
+    const preserved = (await pool.query('SELECT id,total_price_uah,details FROM products WHERE id=ANY($1::int[]) ORDER BY id', [[manualProduct.id, changedManualProduct.id]])).rows;
+    assert.deepEqual(preserved.map((row) => Number(row.total_price_uah)), [700, 750]);
+    assert.ok(preserved.every((row) => !row.details.repricing));
 
     await pool.query(
       'UPDATE products SET total_price_uah = total_price_uah + 1 WHERE id = $1',

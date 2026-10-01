@@ -48,7 +48,7 @@ Permission keys are stable capabilities stored in `permissions` and mapped to ro
 | Access administration | `users.manage`, `roles.manage` |
 | Audit | `audit.view` |
 
-`products.recount` authorizes direct recount and the separate approved informational-edit command. Direct price preview/apply use `products.price_change`; request-based decisions use `corrections.create` and, for custom prices, `corrections.price_override`. See [price-change capabilities](#price-change-capabilities).
+`products.recount` authorizes direct recount and the separate approved informational-edit command. The shared recount preview accepts `products.recount` or `corrections.create`; this does not authorize either mutation. Apply still requires `products.recount`, and request creation still requires `corrections.create`. The UI defaults to direct apply when available and offers request submission separately. Direct price preview/apply use `products.price_change`; request-based decisions use `corrections.create` and, for custom prices, `corrections.price_override`. See [price-change capabilities](#price-change-capabilities).
 
 Initial built-in mappings after migrations through `040`:
 
@@ -131,3 +131,7 @@ audit coverage is described here for access administration and in the domain gui
 ## Lifecycle reconciliation capability
 
 Migration `039` adds `exports.reconcile`. The protected permission trigger initially grants it only to Administrator; it is delegable to editable roles and is not an Administrator-reserved key. Cutover mutations, status and reconciliation commands revalidate the active local actor and this capability inside their access/transaction boundary. Manifest generation and evidence review are read-only CLI tooling requiring database access; the CLI requires an actor ID, but those read paths do not perform the mutation capability recheck. There is no reconciliation HTTP route or general hold-release UI. See [exports](EXPORTS.md#reconciliation-and-exclusion-provenance) and the [operator runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md).
+
+## Synchronization presentation and names
+
+Daily Magento summary/problems/product-status reads require `products.view`. Repricing batch synchronization progress requires `repricing.view`. Reviewed name-conflict preview/apply reuse `exports.create` with active-user/CSRF and final actor revalidation. Direct recount pricing uses `products.recount`; request-only custom decisions retain `corrections.price_override`. No built-in role permissions or new legacy-navigation capability were added.

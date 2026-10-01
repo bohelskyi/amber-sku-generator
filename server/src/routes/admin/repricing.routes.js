@@ -6,6 +6,10 @@ const { sendCsvDownload } = require('../../presenters/csv-download');
 const { requirePermission } = require('../../auth/authorization');
 
 const router = express.Router();
+router.get('/admin/repricing/batches/:batchId/sync-status', requirePermission('repricing.view'), async (req, res) => {
+  try { res.json(await require('../../services/repricing/batch-read-model').getBatchSyncStatus(req.params.batchId)); }
+  catch (error) { res.status(error.statusCode || 500).json({ error: error.message }); }
+});
 
 router.get('/admin/repricing/scenarios', requirePermission('repricing.view'), async (req, res) => {
   try {

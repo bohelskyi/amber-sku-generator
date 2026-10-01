@@ -95,6 +95,10 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
     let remote = create ? null : structuredClone(initial);
     let english = create ? null : { ...structuredClone(initial), name: 'Old English', custom_attributes: [{ attribute_code: 'meta_title', value: 'Old SEO' }] };
     let sourceItems = create ? [] : [{ sku, source_code: 'default', quantity: 0, status: 0 }];
+    if (!create) await require('../src/services/magento/name-state').saveObservation(pool,
+      require('../src/services/magento/binding-contract').originHash(config.baseUrl), product, initial.id,
+      { action: 'confirm', amber: { all: 'Old name', en: 'Old English' }, remote: { all: 'Old name', en: 'Old English' } },
+      { all: 'Old name', en: 'Old English' });
     const writes = []; const hooks = {};
     const response = (body) => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
     const fetchImpl = async (url, init) => {
@@ -270,6 +274,7 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
   });
   await t.test('remote changes that expand the bound plan block all writes at preflight', async () => {
     const s = await scenario();
+    await pool.query("UPDATE magento_name_sync_states SET baseline_names=jsonb_set(baseline_names,'{en}','\"English name\"') WHERE public_product_identity_id=$1", [s.product.public_product_identity_id]);
     s.english().name = 'English name'; // Initially satisfied, therefore absent from the scoped write payload.
     const job = await s.enqueue(); s.english().name = 'Concurrent merchandising edit';
     const result = await s.apply(job); assert.equal(result.state, 'blocked');
@@ -324,6 +329,129 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
     assert.equal(s.remote().status, 2); assert.equal(s.sources()[0].quantity, 1); assert.equal(s.sources()[0].status, 1);
     assert.deepEqual(job.intent.operations.map((o) => o.domain), ['coreProduct', 'categoryLinkSave', 'inventory', 'websites', 'storeViews']);
     assert.equal(s.writes.at(-1).scope, 'en'); assert.equal(s.english().name, 'English name');
+  });
+  await t.test('acceptance shared names establish CREATE common baseline and discover external edits without Magento writes', async () => {
+    await pool.query('UPDATE magento_auto_sync_activation SET enabled=TRUE,installation_key=$1,actor_user_id=$2', [installationKey, actorUserId]);
+    try {
+      const s = await scenario({ create: true });
+      const worker = require('../src/services/magento/automatic-sync-worker').createAutomaticSyncWorker(config, { databasePool: pool, jobOptions: s.options });
+      const state = async () => (await pool.query('SELECT * FROM magento_product_sync_requests WHERE product_id=$1', [s.product.id])).rows[0];
+      const nameState = async () => (await pool.query('SELECT * FROM magento_name_sync_states WHERE public_product_identity_id=$1', [s.product.public_product_identity_id])).rows[0];
+      await worker.runProduct(s.product.public_product_identity_id);
+      assert.equal((await state()).state, 'synced');
+      assert.deepEqual((await nameState()).baseline_names, { all: 'Amber name', en: 'English name' });
+      s.remote().name = 'Назва з Magento без відновлюваних підметів'; s.english().name = 'External English name';
+      const writes = s.writes.length; let gets = 0;
+      const discovery = require('../src/services/magento/name-discovery').createNameDiscovery(config, { databasePool: pool,
+        fetchImpl: async (...args) => { assert.equal(args[1].method, 'GET'); gets++; return s.options.fetchImpl(...args); }, batchSize: 1 });
+      const origin = require('../src/services/magento/binding-contract').originHash(config.baseUrl);
+      await pool.query(`INSERT INTO magento_name_discovery_cursors(origin_hash,after_identity_id) VALUES($1,$2)
+        ON CONFLICT(origin_hash) DO UPDATE SET after_identity_id=$2,next_scan_at=CURRENT_TIMESTAMP`, [origin, Number(s.product.public_product_identity_id)-1]);
+      await discovery.tick();
+      assert.equal(gets, 2); assert.equal(s.writes.length, writes);
+      assert.deepEqual((await nameState()).baseline_names, { all: s.remote().name, en: s.english().name });
+      const imported = (await pool.query('SELECT magento_name_override,magento_name_subject_ua FROM products WHERE id=$1', [s.product.id])).rows[0];
+      assert.equal(imported.magento_name_override.values.all, s.remote().name); assert.equal(imported.magento_name_subject_ua, null);
+      await discovery.tick(); assert.equal(gets, 2, 'durable due time bounds repeated/restarted scans');
+      const importedVersion = (await nameState()).version;
+      await pool.query('UPDATE magento_name_discovery_cursors SET after_identity_id=$2,next_scan_at=CURRENT_TIMESTAMP WHERE origin_hash=$1',
+        [origin, Number(s.product.public_product_identity_id)-1]);
+      await discovery.tick();
+      assert.equal((await nameState()).version, importedVersion, 'equal name observations do not create false preview staleness');
+      const restarted = require('../src/services/magento/name-discovery').createNameDiscovery(config, { databasePool: pool,
+        fetchImpl: async () => { throw new Error('restart must honor durable due time'); } });
+      await restarted.tick();
+      const productNames = require('../src/services/magento/product-names.service');
+      const editOptions = { ...s.options, config, mutationContext: { actorUserId, requestId: 'exact-name-edit' } };
+      const currentNames = await productNames.read(s.product.id, editOptions);
+      assert.deepEqual(currentNames.names, { all: s.remote().name, en: s.english().name });
+      assert.deepEqual(Object.keys(currentNames).sort(), ['nameConflict', 'names', 'previewToken', 'productId']);
+      await assert.rejects(productNames.save({ productId: s.product.id, names: { all: '', en: 'English' },
+        previewToken: currentNames.previewToken }, editOptions), { code: 'PRODUCT_NAMES_INVALID' });
+      await assert.rejects(productNames.save({ productId: s.product.id, names: { all: 'Denied', en: 'Denied EN' },
+        previewToken: currentNames.previewToken }, { ...editOptions, mutationContext: { actorUserId: 999999999 } }), { code: 'ADMIN_PERMISSION_REVOKED' });
+      const editWrites = s.writes.length; const commonBeforeEdit = (await nameState()).baseline_names;
+      await productNames.save({ productId: s.product.id, names: { all: 'Amber changed', en: 'Exact Amber English' },
+        previewToken: currentNames.previewToken }, editOptions);
+      assert.equal((await state()).state, 'pending'); assert.equal(s.writes.length, editWrites);
+      assert.deepEqual((await nameState()).baseline_names, commonBeforeEdit, 'local edit cannot confirm the remote baseline');
+      assert.equal((await pool.query('SELECT magento_name_subject_ua FROM products WHERE id=$1', [s.product.id])).rows[0].magento_name_subject_ua, null);
+      await assert.rejects(productNames.save({ productId: s.product.id, names: { all: 'Stale', en: 'Stale EN' },
+        previewToken: currentNames.previewToken }, editOptions), { code: 'PRODUCT_NAMES_STALE' });
+      await worker.runProduct(s.product.public_product_identity_id);
+      assert.equal((await state()).state, 'synced'); assert.equal(s.remote().name, 'Amber changed');
+      assert.equal(s.english().name, 'Exact Amber English');
+      assert.equal((await nameState()).baseline_names.all, 'Amber changed');
+      await pool.query(`UPDATE products SET magento_name_override=jsonb_set(magento_name_override,'{values,all}','"Concurrent Amber"') WHERE id=$1`, [s.product.id]);
+      s.remote().name = 'Concurrent Magento'; const beforeConflict = s.writes.length;
+      await worker.runProduct(s.product.public_product_identity_id);
+      assert.equal((await state()).state, 'needs_attention'); assert.equal((await nameState()).state, 'conflict');
+      assert.equal(s.writes.length, beforeConflict); assert.equal(s.remote().name, 'Concurrent Magento');
+      const conflictingNames = await productNames.read(s.product.id, editOptions);
+      await productNames.save({ productId: s.product.id, names: { ...conflictingNames.names, en: 'Edited while conflicting' },
+        previewToken: conflictingNames.previewToken }, editOptions);
+      await worker.runProduct(s.product.public_product_identity_id);
+      assert.equal((await nameState()).state, 'conflict'); assert.equal((await state()).state, 'needs_attention');
+      assert.equal(s.writes.length, beforeConflict, 'ordinary name editing never approves a conflict');
+      const resolution = require('../src/services/magento/name-resolution.service');
+      const options = { ...s.options, config, mutationContext: { actorUserId, requestId: 'name-resolution-test' } };
+      const preview = await resolution.preview({ productId: s.product.id, choice: 'amber' }, options);
+      s.remote().name = 'Later Magento';
+      await assert.rejects(resolution.apply({ productId: s.product.id, choice: 'amber', previewToken: preview.previewToken }, options), { code: 'MAGENTO_NAME_PREVIEW_STALE' });
+      const fresh = await resolution.preview({ productId: s.product.id, choice: 'amber' }, options);
+      await resolution.apply({ productId: s.product.id, choice: 'amber', previewToken: fresh.previewToken }, options);
+      assert.equal(s.writes.length, beforeConflict, 'review itself never mutates Magento');
+      await worker.runProduct(s.product.public_product_identity_id);
+      assert.equal((await state()).state, 'synced'); assert.equal(s.remote().name, 'Concurrent Amber');
+      assert.equal((await nameState()).baseline_names.all, 'Concurrent Amber');
+      await pool.query(`UPDATE products SET magento_name_override=jsonb_set(magento_name_override,'{values,all}','"Both chose Amber"') WHERE id=$1`, [s.product.id]);
+      s.remote().name = 'Different remote'; await worker.runProduct(s.product.public_product_identity_id);
+      assert.equal((await state()).state, 'needs_attention');
+      s.remote().name = 'Both chose Amber'; const beforeEqual = s.writes.length;
+      await pool.query('UPDATE magento_name_discovery_cursors SET after_identity_id=$2,next_scan_at=CURRENT_TIMESTAMP WHERE origin_hash=$1',
+        [origin, Number(s.product.public_product_identity_id)-1]);
+      await discovery.tick();
+      assert.equal((await nameState()).state, 'common'); assert.equal((await state()).state, 'pending');
+      assert.equal(s.writes.length, beforeEqual, 'equal discovery resolves the blocker without a Magento mutation');
+      await worker.runProduct(s.product.public_product_identity_id); assert.equal((await state()).state, 'synced');
+      const unknown = await scenario();
+      await pool.query('DELETE FROM magento_name_sync_states WHERE public_product_identity_id=$1', [unknown.product.public_product_identity_id]);
+      const unknownWorker = require('../src/services/magento/automatic-sync-worker').createAutomaticSyncWorker(config,
+        { databasePool: pool, jobOptions: unknown.options });
+      await unknownWorker.runProduct(unknown.product.public_product_identity_id);
+      assert.equal((await pool.query('SELECT state FROM magento_name_sync_states WHERE public_product_identity_id=$1', [unknown.product.public_product_identity_id])).rows[0].state, 'baseline_required');
+      unknown.remote().name = 'Amber name'; unknown.english().name = 'English name';
+      await pool.query('UPDATE magento_name_discovery_cursors SET after_identity_id=$2,next_scan_at=CURRENT_TIMESTAMP WHERE origin_hash=$1',
+        [origin, Number(unknown.product.public_product_identity_id)-1]);
+      await require('../src/services/magento/name-discovery').createNameDiscovery(config, { databasePool: pool,
+        fetchImpl: unknown.options.fetchImpl, batchSize: 1 }).tick();
+      assert.equal(unknown.writes.length, 0);
+      assert.equal((await pool.query('SELECT state FROM magento_product_sync_requests WHERE product_id=$1', [unknown.product.id])).rows[0].state, 'pending');
+      await unknownWorker.runProduct(unknown.product.public_product_identity_id);
+      assert.equal((await pool.query('SELECT state FROM magento_product_sync_requests WHERE product_id=$1', [unknown.product.id])).rows[0].state, 'synced');
+      const uncertain = await scenario();
+      uncertain.hooks.afterWrite = async () => { uncertain.hooks.readFailure = true; throw new Error('lost response'); };
+      const uncertainWorker = require('../src/services/magento/automatic-sync-worker').createAutomaticSyncWorker(config,
+        { databasePool: pool, jobOptions: uncertain.options });
+      await uncertainWorker.runProduct(uncertain.product.public_product_identity_id);
+      assert.equal((await pool.query('SELECT reason_code FROM magento_product_sync_requests WHERE product_id=$1', [uncertain.product.id])).rows[0].reason_code, 'reconciliation_required');
+      await pool.query('UPDATE magento_name_discovery_cursors SET after_identity_id=$2,next_scan_at=CURRENT_TIMESTAMP WHERE origin_hash=$1',
+        [origin, Number(uncertain.product.public_product_identity_id)-1]);
+      let unsafeReads = 0;
+      await require('../src/services/magento/name-discovery').createNameDiscovery(config, { databasePool: pool,
+        fetchImpl: async () => { unsafeReads++; throw new Error('uncertain work must not be rediscovered'); }, batchSize: 1 }).tick();
+      assert.equal(unsafeReads, 0);
+      await assert.rejects(resolution.preview({ productId: uncertain.product.id, choice: 'amber' },
+        { ...uncertain.options, config }), { code: 'MAGENTO_SYNC_PREVIOUS_DISPATCH_UNRESOLVED' });
+      const uncertainOptions = { ...uncertain.options, config, mutationContext: { actorUserId } };
+      const uncertainNames = await productNames.read(uncertain.product.id, uncertainOptions);
+      const uncertainWrites = uncertain.writes.length;
+      await productNames.save({ productId: uncertain.product.id, names: { ...uncertainNames.names, all: 'Local change while uncertain' },
+        previewToken: uncertainNames.previewToken }, uncertainOptions);
+      await uncertainWorker.runProduct(uncertain.product.public_product_identity_id);
+      assert.equal(uncertain.writes.length, uncertainWrites);
+      assert.equal((await pool.query('SELECT reason_code FROM magento_product_sync_requests WHERE product_id=$1', [uncertain.product.id])).rows[0].reason_code, 'reconciliation_required');
+    } finally { await pool.query('UPDATE magento_auto_sync_activation SET enabled=FALSE'); }
   });
   await require('./magento-automatic-worker-cases')({ t, suite, scenario, config, published, installationKey, actorUserId, makeDraft });
   await t.test('a newer publication makes the old bound job ineligible before any write', async () => {

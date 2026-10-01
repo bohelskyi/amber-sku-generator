@@ -39,7 +39,7 @@ const {
   getRecentProducts: queryRecentProducts,
 } = require('./product/product-queries');
 const { decodeSku: decodeProductSku } = require('./product/product-decode');
-const { calculateDecisionPricing } = require('./product/correction-pricing-decision');
+const { calculateDecisionPricing, normalizePricingDecision } = require('./product/correction-pricing-decision');
 const fullExport = require('./full-product-export.service');
 const { buildRecountEvidence, refreshRequired } = require('./product/recount-evidence');
 const newReadiness = require('./product/new-product-readiness');
@@ -404,6 +404,9 @@ async function resolveCorrectionSku(proposedFullSku, queryable = pool) {
 }
 
 async function buildProductRecountPreview(payload, options = {}) {
+  payload = { ...payload, ...(payload?.pricingDecision ? {
+    pricingDecision: normalizePricingDecision(payload.pricingDecision),
+  } : {}) };
   if (options.queryable) return buildRecountPreview(payload, options.queryable, options);
   const client = await (options.databasePool || pool).connect();
   try {
@@ -425,6 +428,7 @@ async function buildRecountPreview({
   reason = '',
   manualPriceUah,
   pricingDecision = null,
+  nameChange,
 }, queryable, options) {
   const sourceDecoded = await decodeProductSku(sourceSku, queryable);
   if (!sourceDecoded.existsInDb || !sourceDecoded.product) {
@@ -468,7 +472,7 @@ async function buildRecountPreview({
   if (requiresWeight && correctedWeight !== sourceWeight) {
     changes.push({ key: 'weight', from: sourceWeight, to: correctedWeight });
   }
-  if (changes.length === 0) {
+  if (changes.length === 0 && nameChange === undefined) {
     const err = new Error('Для переобліку змініть хоча б один параметр виробу.');
     err.statusCode = 422;
     throw err;
@@ -585,22 +589,39 @@ async function buildRecountPreview({
     reason: String(reason || '').trim(),
   };
   const evidence = await buildRecountEvidence(queryable, sourceDecoded.product, result.corrected,
-    sourceDecoded.decodedAnswers, { lock: options.lockLifecycle === true });
+    sourceDecoded.decodedAnswers, { lock: options.lockLifecycle === true, nameChange, nameConfig: options.magentoConfig });
+  if (changes.length === 0 && !evidence.exactNames?.changed) throw validationError('Для переобліку змініть хоча б один параметр виробу або назву.');
+  result.source.exactNames = evidence.exactNames?.source ?? null;
+  result.corrected.exactNames = evidence.exactNames?.next ?? null;
+  result.nameChanges = evidence.exactNames?.changed ? { from: evidence.exactNames.source, to: evidence.exactNames.next } : null;
   result.source.stateSignature = evidence.signature;
   result.corrected.recountEvidence = evidence.binding;
   result.corrected.nameInheritance = evidence.names;
   result.corrected.delivery = evidence.delivery;
+  if (pricingDecision) result.previewToken = getCorrectionDecisionSignature(result, pricingDecision);
   return result;
 }
 
 async function applyProductRecount(payload, options = {}) {
-  if (payload?.pricingDecision && options.trustedCorrectionDecision !== true) {
-    const error = new Error('Рішення про ціну застосовується тільки через запит на виправлення.');
+  if (payload?.nameChange !== undefined && options.authorizedNameChange !== true) {
+    throw Object.assign(new Error('Немає дозволу змінювати назву.'), { statusCode: 403 });
+  }
+  if (payload?.pricingDecision && options.trustedCorrectionDecision !== true
+      && options.authorizedDirectDecision !== true) {
+    const error = new Error('Немає дозволу застосувати рішення про ціну.');
     error.statusCode = 403;
     throw error;
   }
+  payload = { ...payload, ...(payload?.pricingDecision ? {
+    pricingDecision: normalizePricingDecision(payload.pricingDecision),
+  } : {}) };
   const mutationContext = createMutationContext(options.mutationContext);
-  const preview = await buildProductRecountPreview(payload || {});
+  const preview = await buildProductRecountPreview(payload || {}, { databasePool: options.databasePool, magentoConfig: options.magentoConfig });
+  if (payload.pricingDecision && !payload.correctionRequestId
+      && payload.previewToken !== preview.previewToken) {
+    throw Object.assign(new Error('Ціна або характеристики змінилися. Перегляньте переоблік ще раз.'),
+      { statusCode: 409, publicCode: 'RECOUNT_PREVIEW_STALE' });
+  }
   if (!payload.sourceStateSignature || payload.sourceStateSignature !== preview.source.stateSignature) {
     throw Object.assign(new Error('Товар або успадковані назви змінилися. Оновіть preview переобліку.'),
       { statusCode: 409, publicCode: 'RECOUNT_PREVIEW_STALE' });
@@ -608,14 +629,21 @@ async function applyProductRecount(payload, options = {}) {
   const client = await (options.databasePool || pool).connect();
 
   try {
-    await lifecycleGate.begin(client, 'BEGIN');
+    if (payload.nameChange !== undefined) {
+      const access = require('./access-admin-transaction'); const createError = require('./magento/binding-contract').error;
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [access.APPLICATION_USER_ADMIN_LOCK_KEY]);
+      await access.assertActorStillAuthorized(client, mutationContext.actorUserId, 'products.recount', createError);
+      await access.assertActorStillAuthorized(client, mutationContext.actorUserId, 'exports.create', createError);
+      await lifecycleGate.enterExisting(client);
+    } else await lifecycleGate.begin(client, 'BEGIN');
 
     const sourceProductId = Number(preview.source.productId);
     const sourceLockResult = await client.query(
       `SELECT p.id, p.full_sku, p.category, p.weight, p.total_price, p.total_price_uah,
               price_per_gram, uah_rate, details, status, corrected_to_product_id,
               sku_schema_version_id, corrected_from_product_id, exclude_from_export, magento_name_subject_ua,
-              magento_name_subject_en, magento_name_review_required,
+              magento_name_subject_en, magento_name_review_required, magento_name_override,
               p.public_product_identity_id, i.public_sku
        FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
        WHERE p.id = $1
@@ -708,6 +736,11 @@ async function applyProductRecount(payload, options = {}) {
       },
       corrected: authoritativeCorrected,
     };
+    if (payload.pricingDecision && !payload.correctionRequestId
+        && getCorrectionDecisionSignature(authoritativePreview, payload.pricingDecision) !== payload.previewToken) {
+      throw Object.assign(new Error('Ціна або характеристики змінилися. Перегляньте переоблік ще раз.'),
+        { statusCode: 409, publicCode: 'RECOUNT_PREVIEW_STALE' });
+    }
     if (payload.correctionRequestId
         && getCorrectionDecisionSignature(authoritativePreview, payload.pricingDecision)
           !== payload.correctionRequestSignature) {
@@ -770,12 +803,13 @@ async function applyProductRecount(payload, options = {}) {
         [Number(payload.correctionRequestId)]);
     }
     const evidence = await buildRecountEvidence(client, lockedSource, corrected,
-      preview.source.decodedAnswers, { lock: true });
+      preview.source.decodedAnswers, { lock: true, nameChange: payload.nameChange, nameConfig: options.magentoConfig });
     if (evidence.signature !== payload.sourceStateSignature) throw refreshRequired();
     const inheritedNames = evidence.names;
     corrected.nameInheritance = inheritedNames;
     corrected.recountEvidence = evidence.binding;
     corrected.delivery = evidence.delivery;
+    corrected.exactNames = evidence.exactNames?.next ?? null;
     const details = {
       answers: corrected.answers,
       isCalibrated: corrected.answers.is_calibrated ?? null,
@@ -788,7 +822,7 @@ async function applyProductRecount(payload, options = {}) {
         customUsdPerGramBasis: {
           usdPerGram: payload.pricingDecision.usdPerGram,
           marketingRoundingEnabled: payload.pricingDecision.marketingRoundingEnabled,
-          correctionRequestId: Number(payload.correctionRequestId),
+          ...(payload.correctionRequestId ? { correctionRequestId: Number(payload.correctionRequestId) } : {}),
         },
       } : {}),
       rateMetadata: {
@@ -813,8 +847,8 @@ async function applyProductRecount(payload, options = {}) {
        (full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah,
         price_per_gram, uah_rate, details, status, exclude_from_export, corrected_from_product_id,
         correction_reason, sku_schema_version_id, created_by_user_id,
-        magento_name_subject_ua, magento_name_subject_en, magento_name_review_required)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'active', 1, $11, $12, $13, $14, $15, $16, $17)
+        magento_name_subject_ua, magento_name_subject_en, magento_name_review_required, magento_name_override)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'active', 1, $11, $12, $13, $14, $15, $16, $17, $18::jsonb)
        RETURNING id, public_product_identity_id`,
       [
         corrected.fullSku,
@@ -834,6 +868,7 @@ async function applyProductRecount(payload, options = {}) {
         Number(corrected.skuSchemaVersionId),
         mutationContext.actorUserId,
         inheritedNames.ua, inheritedNames.en, inheritedNames.reviewRequired,
+        evidence.exactNames?.override ? JSON.stringify(evidence.exactNames.override) : null,
       ]
     );
     const correctedProductId = Number(insertResult.rows[0].id);

@@ -281,5 +281,8 @@ suite.test('external Magento delivery acknowledgement is exact, audited, fail-cl
     assert.equal(after.csv_retired_revision, '2'); assert.equal(await csvPending(normal.id), false);
     assert.equal((await pool.query('SELECT desired_generation FROM magento_product_sync_requests WHERE product_id=$1', [normal.id])).rows[0].desired_generation, '1');
     assert.equal((await pool.query('SELECT count(*)::int count FROM magento_sync_jobs WHERE product_id=$1', [normal.id])).rows[0].count, 0);
+    // Repeat the name regression after the real permanent activation boundary:
+    // names and unresolved conflicts follow the same public identity.
+    await require('./11-full-product-lifecycle.cases').assertRecountExactNames();
   });
 });

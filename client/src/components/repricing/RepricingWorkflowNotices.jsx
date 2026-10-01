@@ -1,4 +1,5 @@
 import { AlertTriangle, CheckCircle2, ClipboardList, Download, Undo2 } from 'lucide-react';
+import { RepricingSyncProgress } from './RepricingSyncProgress.jsx';
 import { Link } from 'react-router-dom';
 
 export function RepricingWorkflowNotices({ controller }) {
@@ -61,15 +62,16 @@ export function RepricingWorkflowNotices({ controller }) {
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
           <div className="flex items-center gap-3 text-sm text-emerald-900">
             <CheckCircle2 size={19} />
-            <span>Оновлено товарів: {appliedBatch.changed_count ?? appliedBatch.changedCount}</span>
+            <span>В Amber оновлено {appliedBatch.changed_count ?? appliedBatch.changedCount} із {appliedBatch.changed_count ?? appliedBatch.changedCount} товарів.</span>
           </div>
           <button type="button" className="btn btn-outline gap-2" onClick={() => downloadBatch(appliedBatch.id)}>
             <Download size={16} />
-            CSV для сайту
+            Файл змінених цін
           </button>
         </div>
       )}
 
+      {appliedBatch && <RepricingSyncProgress batchId={appliedBatch.id} />}
       {rollbackResult && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
           <div className="flex items-center gap-3 text-sm text-amber-900">

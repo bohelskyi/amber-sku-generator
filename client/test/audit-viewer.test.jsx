@@ -1,3 +1,4 @@
+import SettingsPage from '../src/pages/SettingsPage.jsx';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -31,12 +32,12 @@ afterEach(() => cleanup());
 describe('global audit viewer', () => {
   it('uses only audit.view for navigation and page access', async () => {
     vi.spyOn(api, 'get').mockResolvedValue(response([]));
-    const { rerender } = render(<AuthContext.Provider value={authValue()}><MemoryRouter><WorkspaceNav /><AuditPage /></MemoryRouter></AuthContext.Provider>);
-    fireEvent.click(screen.getByRole('button', { name: /Розділи/ }));
+    const { rerender } = render(<AuthContext.Provider value={authValue()}><MemoryRouter><WorkspaceNav /><SettingsPage /><AuditPage /></MemoryRouter></AuthContext.Provider>);
+    expect(screen.getByRole('link', { name: 'Налаштування' })).toBeTruthy();
     expect(screen.getByRole('link', { name: /Аудит/ })).toBeTruthy();
     await waitFor(() => expect(api.get).toHaveBeenCalled());
 
-    rerender(<AuthContext.Provider value={authValue(['roles.manage'])}><MemoryRouter><WorkspaceNav /><AuditPage /></MemoryRouter></AuthContext.Provider>);
+    rerender(<AuthContext.Provider value={authValue(['roles.manage'])}><MemoryRouter><WorkspaceNav /><SettingsPage /><AuditPage /></MemoryRouter></AuthContext.Provider>);
     expect(screen.queryByRole('link', { name: /Аудит/ })).toBeNull();
     expect(screen.getByRole('alert').textContent).toContain('Недостатньо прав');
   });

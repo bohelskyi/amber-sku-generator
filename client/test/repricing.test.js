@@ -125,6 +125,7 @@ test('manual-priced row can explicitly use a valid authoritative automatic price
     newPriceUah: 600,
     status: 'error',
     errorCode: 'manual_price',
+    pricingDetails: { matrix: {} },
     pricingState: 'manual',
   };
   const [automaticItem] = applyManualPrices([manualItem], {}, [18]);

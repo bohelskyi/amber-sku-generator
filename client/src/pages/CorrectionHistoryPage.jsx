@@ -47,8 +47,9 @@ function SkuTransition({ item }) {
           <span className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-slate-800">
             {item.sourcePublicSku || item.sourceSku}
           </span>
-          <CopyButton label="Скопіювати старий артикул" value={item.sourcePublicSku || item.sourceSku} />
+          <CopyButton label="Скопіювати артикул до переобліку" value={item.sourcePublicSku || item.sourceSku} />
         </div>
+        {item.sourcePublicSku && item.sourcePublicSku !== item.sourceSku && <p className="mt-1 break-all text-xs text-slate-500">Внутрішній SKU: {item.sourceSku}</p>}
       </div>
       <ArrowRight size={16} className="hidden text-slate-400 sm:block" />
       <div className="min-w-0">
@@ -57,8 +58,9 @@ function SkuTransition({ item }) {
           <span className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-slate-900">
             {item.correctedPublicSku || item.correctedSku}
           </span>
-          <CopyButton label="Скопіювати новий артикул" value={item.correctedPublicSku || item.correctedSku} />
+          <CopyButton label="Скопіювати артикул після переобліку" value={item.correctedPublicSku || item.correctedSku} />
         </div>
+        {item.correctedPublicSku && item.correctedPublicSku !== item.correctedSku && <p className="mt-1 break-all text-xs text-slate-500">Внутрішній SKU: {item.correctedSku}</p>}
       </div>
     </div>
   );

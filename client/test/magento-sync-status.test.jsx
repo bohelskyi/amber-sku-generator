@@ -4,7 +4,7 @@ import { MagentoSyncStatus } from '../src/components/app/MagentoSyncStatus';
 
 afterEach(cleanup);
 it.each([
-  ['not_tracked', 'Не відстежується (історичний товар)'],
+  ['not_tracked', 'Синхронізацію ще не відстежуємо'],
   ['pending', 'Очікує синхронізації'], ['syncing', 'Синхронізується'],
   ['synced', 'Синхронізовано'], ['needs_attention', 'Потребує уваги'],
 ])('shows %s without mutation controls', (state, label) => {

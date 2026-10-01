@@ -1,5 +1,6 @@
+import { StatusBadge } from './UiPrimitives.jsx';
 const labels = {
-  not_tracked: 'Не відстежується (історичний товар)',
+  not_tracked: 'Синхронізацію ще не відстежуємо',
   pending: 'Очікує синхронізації',
   syncing: 'Синхронізується',
   synced: 'Синхронізовано',
@@ -8,8 +9,8 @@ const labels = {
 
 export function MagentoSyncStatus({ status }) {
   if (!status) return null;
-  return <span className="mt-1 block font-sans text-xs text-slate-600">
-    <span>Magento: {labels[status.state] || labels.needs_attention}</span>
-    {status.state === 'needs_attention' && status.reason && <span className="mt-1 block text-amber-800">{status.reason}</span>}
+  return <span className="inline-flex flex-wrap items-center gap-2 font-sans text-xs">
+    <StatusBadge tone={status.state === 'synced' ? 'success' : status.state === 'needs_attention' ? 'warning' : 'neutral'}>Magento: {labels[status.state] || labels.needs_attention}</StatusBadge>
+    {status.state === 'needs_attention' && status.reason && <span className="text-amber-800">{status.reason}</span>}
   </span>;
 }

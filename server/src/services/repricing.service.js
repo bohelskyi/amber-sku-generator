@@ -751,9 +751,9 @@ async function applyRepricingScope({
     const itemInsertResult = await client.query(
       `INSERT INTO repricing_items
        (batch_id, product_id, sku, old_price_uah, new_price_uah, price_delta_uah,
-        old_payload, new_payload)
+        old_payload, new_payload, magento_sync_generation)
        SELECT $1, item.product_id, item.sku, item.old_price_uah, item.new_price_uah,
-              item.price_delta_uah, item.old_payload, item.new_payload
+              item.price_delta_uah, item.old_payload, item.new_payload, request.desired_generation
        FROM jsonb_to_recordset($2::jsonb) AS item(
          ordinal INTEGER,
          product_id INTEGER,
@@ -764,6 +764,9 @@ async function applyRepricingScope({
          old_payload JSONB,
          new_payload JSONB
        )
+       JOIN products p ON p.id=item.product_id
+       LEFT JOIN magento_product_sync_requests request ON request.public_product_identity_id=p.public_product_identity_id
+         AND (SELECT enabled FROM magento_auto_sync_activation WHERE singleton)
        ORDER BY item.ordinal
        RETURNING product_id`,
       [batchId, JSON.stringify(repricingItemRecords)]

@@ -14,11 +14,8 @@ function selection({ sku, productId }) {
   }
 }
 
-async function readPreviewProduct(databasePool, options) {
+async function readPreviewProductOnClient(client, options) {
   selection(options);
-  const client = await databasePool.connect();
-  try {
-    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const resolved = options.sku !== undefined ? await resolveProductLookup(client, options.sku) : null;
     const selected = options.sku !== undefined
       ? resolved.product
@@ -63,12 +60,22 @@ async function readPreviewProduct(databasePool, options) {
     // Preserve the loader's private historical-schema association. Spreading this
     // object discards source-support proof, including NM's optional zero placeholder.
     const product = Object.assign(supported.products[0], selected, { exportState });
+    const nameState = revision ? await require('./name-state').readNameState(client, revision.originHash,
+      selected.public_product_identity_id, { lock: options.lockNameState === true }) : null;
     const observedAt = (await client.query('SELECT transaction_timestamp() AS observed_at')).rows[0].observed_at.toISOString();
+    return { product, compiled, template, revision, observedAt, nameState };
+}
+async function readPreviewProduct(databasePool, options) {
+  selection(options);
+  const client = await databasePool.connect();
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const result = await readPreviewProductOnClient(client, options);
     await client.query('COMMIT');
-    return { product, compiled, template, revision, observedAt };
+    return result;
   } catch (cause) {
     await client.query('ROLLBACK').catch(() => {});
     throw cause;
   } finally { client.release(); }
 }
-module.exports = { selection, readPreviewProduct };
+module.exports = { selection, readPreviewProduct, readPreviewProductOnClient };

@@ -5,6 +5,7 @@ import { useAuth } from '../auth/auth-context.js';
 import { getPermissionUiState } from '../lib/permission-ui.js';
 import { useAdminPricingController } from './admin/useAdminPricingController';
 import { useAdminSchemaController } from './admin/useAdminSchemaController';
+import { getApiError } from '../lib/http-error';
 
 const emptyEditOption = { id: null, value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false };
 const emptyNewCategory = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false, marketing_rounding_enabled: true };
@@ -50,6 +51,7 @@ export function useAdminPanel() {
     auth.permissions
   );
   const [config, setConfig] = useState(null);
+  const [configError, setConfigError] = useState('');
   const [selectedCat, setSelectedCat] = useState(null);
   const [selectedQuestion, setSelectedQuestion] = useState(null);
   const [editCat, setEditCat] = useState(emptyNewCategory);
@@ -104,7 +106,7 @@ export function useAdminPanel() {
   };
 
   useEffect(() => {
-    fetchConfig();
+    fetchConfig().catch((error) => setConfigError(getApiError(error)));
   }, [fetchConfig]);
 
   const parseVisibleRuleInput = (value) => {
@@ -441,6 +443,9 @@ export function useAdminPanel() {
     canViewCatalog,
     canViewPricing,
     config,
+    configError,
+    canManageCatalog: auth.permissions.includes('catalog.manage'),
+    retryConfig: () => { setConfigError(''); fetchConfig().catch((error) => setConfigError(getApiError(error))); },
     currentCatQuestions,
     currentOptions,
     deleteItem,

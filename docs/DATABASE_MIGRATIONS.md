@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`048`. Accepted migrations `000`–`047` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`049`. Accepted migrations `000`–`047` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -207,3 +207,7 @@ Migration 040 adds the distinct one-time `cutover_baseline_revision`/audit refer
 `full_product_export_activation` starts in `legacy`, selector version 0, required writer contract 1. Monotonic generation, phase/event constraints and immutable audit receipts govern `legacy → preparing → active`; active cannot return to legacy. Deferred checks enforce baseline-event identity, exclusion projection and inactive-product retirement. Statement guards fence unaware writers after preparation; application transactions acquire the gate before BEGIN to avoid stale repeatable-read snapshots after waiting.
 
 The migration itself performs no baseline acceptance, successor release, historical indexing or activation. Deploy both the gate-aware application and the schema, then follow the [canonical cutover runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md). Old/new mixed writers are unsupported; ordinary future deployments and one-time production cutover are distinct operations. Production activation remains pending.
+
+## Migration 049: shared names and batch sync evidence
+
+`049_shared_names_and_repricing_sync.sql` adds exact generated/full-name overrides, origin/public-identity name baselines and reviewed conflict state, a bounded durable discovery cursor, safe automatic-request diagnostics, and each repricing item's nullable captured sync generation. It extends the existing product-input projection without modifying prior migrations, SKU allocation, published bindings or historical jobs/snapshots. Existing records receive no guessed baseline or batch synchronization proof. Fresh installation and repeated startup use the migration runner transaction/checksum contract.

@@ -4,7 +4,21 @@ const test = require('node:test');
 const {
   createRequireActiveApplicationUser,
   requirePermission,
+  requireAnyPermission,
 } = require('../src/auth/authorization');
+
+test('recount preview accepts either existing permission and fails closed for everyone else', () => {
+  const middleware = requireAnyPermission(['products.recount', 'corrections.create']);
+  for (const permissions of [['products.recount'], ['corrections.create'], ['products.recount', 'corrections.create'], [], ['products.view']]) {
+    let continued = false; let status; let body;
+    const res = { set: () => res, status: (value) => { status = value; return res; }, json: (value) => { body = value; } };
+    middleware({ permissions }, res, () => { continued = true; });
+    assert.equal(continued, permissions.includes('products.recount') || permissions.includes('corrections.create'));
+    if (!continued) { assert.equal(status, 403); assert.equal(body.code, 'INSUFFICIENT_PERMISSION'); }
+  }
+  assert.deepEqual(middleware.permissionKeys, ['products.recount', 'corrections.create']);
+  for (const invalid of [null, [], ['invalid'], ['products.recount', null]]) assert.throws(() => requireAnyPermission(invalid));
+});
 
 function runMiddleware(access) {
   const req = { user: { issuer: 'https://issuer.example', sub: 'subject' } };
