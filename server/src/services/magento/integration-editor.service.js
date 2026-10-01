@@ -22,7 +22,9 @@ async function read(options, operation) {
 async function selected(client, config, id) {
   if (id) c.identity(id);
   const row = id ? { id } : (await client.query(`SELECT id FROM magento_binding_revisions
-    WHERE state='published' AND origin_hash=$1 ORDER BY version_number DESC LIMIT 1`,
+    WHERE state='published' AND origin_hash=$1
+      AND installation_key=(SELECT installation_key FROM magento_auto_sync_activation WHERE singleton)
+    ORDER BY version_number DESC LIMIT 1`,
   [config.configured ? c.originHash(config.baseUrl) : ''])).rows[0];
   if (!row) return null;
   const revision = await bindings.readRevisionOnClient(client, row.id);

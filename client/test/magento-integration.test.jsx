@@ -11,7 +11,7 @@ const data = { configured: true, revision: null, revisions: [], limitations: ['�
     message: 'Категорія ще не готова до Magento', values: [{ questionKey: 'kind', questionLabel: 'Вид', valueId: '8', label: 'Скриньки', state: 'missing', mappings: [] }] }],
   products: [{ category: 'XX', total: 10, checked: 0, evaluated: 0, blocked: 0, unexamined: 10, remoteChecked: 0 }], catalog: { questions: {} } };
 const shell = (permissions = ['export_templates.view']) => render(<AuthContext.Provider value={{ permissions }}><MemoryRouter><MagentoIntegrationPage /></MemoryRouter></AuthContext.Provider>);
-beforeEach(() => { vi.resetAllMocks(); api.get.mockResolvedValue({ data }); });
+beforeEach(() => { vi.resetAllMocks(); api.get.mockImplementation((path) => Promise.resolve({ data: path.endsWith('/actions') ? [] : data })); });
 it('shows future category readiness and unexamined products without silently claiming sendability', async () => {
   shell(); await screen.findByText('Категорія ще не готова до Magento');
   expect(screen.getByText(/не перевірено: 10/)).toBeTruthy();

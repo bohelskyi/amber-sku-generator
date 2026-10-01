@@ -25,7 +25,7 @@ Each guide is the maintained authority for its domain; other documents summarize
 | [Export templates](EXPORT_TEMPLATES.md) | Administrative API, editor, immutable publications, source support and signed capture binding. |
 | [Shared export sessions](SHARED_EXPORT_SESSIONS.md) | Private/shared workflows, scoped invitations, access epochs, durable attempts and recovery. |
 | [Authentication and RBAC](AUTH_RBAC.md) | OIDC, sessions, active-user/CSRF boundary, permission catalog and administration. |
-| [Database and migrations](DATABASE_MIGRATIONS.md) | Migration/checksum policy, full inventory 000–051 and database protections. |
+| [Database and migrations](DATABASE_MIGRATIONS.md) | Migration/checksum policy, full inventory 000–052 and database protections. |
 | [Operations](OPERATIONS.md) | Topology, ordinary deployments, health, graceful shutdown, backup/restore and integrity audit. |
 
 Local technical references: [client development](../client/README.md), [serialized PostgreSQL tests](../server/integration-test/README.md), [synthetic Magento fixture maintenance](../server/test/fixtures/magento-v1/README.md).
@@ -42,7 +42,7 @@ The [consolidation inventory](archive/implementation/DOCUMENTATION_CONSOLIDATION
 
 ## Deferred work and operationally pending items
 
-- **Wave 2 catalog + integration self-service:** opt-in v4 contract (H0), then readiness/discovery, reviewed category/option workflows and successor binding review/publication. Current production activation, historical cutover and CSV retirement are complete; future installations retain the explicit [runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md).
+- **Wave 2 catalog + integration self-service:** repository checkpoints H0 (opt-in v4), H1 (bounded readiness/discovery/previews) and H2 (reviewed single-category creation) are implemented. Option capabilities (H4) and successor review/publication/handoff (H3a/H3b) remain pending. These repository checkpoints do not imply production deployment. Current production activation, historical cutover and CSV retirement are complete; future installations retain the explicit [runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md).
 - **Historical data quality:** new duplicate/lineage/exclusion or unapproved mapping cases remain case-specific work; completed production collision/delivery reconciliation is not pending. Cutover does not silently repair them. See [Exports](EXPORTS.md#acceptance-boundary).
 - **Target template/Magento acceptance:** source/alias evidence, frozen business mappings (including KL zero semantics, narrow SV names and deferred AR values), measurement units and fresh controlled Check Data/import decisions. Existing template support, publication and recovery are implemented; an old successful Check Data run is not blanket acceptance.
 - **Manual UX acceptance evidence:** the latest retained browser audit still leaves genuine 200% zoom and second-account collaboration scenarios unverified manually. Automated coverage and implemented UX are separate from this operational evidence gap; see the [audit](archive/ux/EXPORT_UX_ACCEPTANCE_AUDIT_POST_UX5_2026-09-26.md#що-ще-потребує-оператора).

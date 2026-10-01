@@ -49,6 +49,7 @@ for (const modulePath of [
   './22-test-product-deletion.cases',
   './23-magento-v4.cases',
   './24-magento-editor.cases',
+  './25-magento-configuration.cases',
 ]) {
   require(modulePath);
 }

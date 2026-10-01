@@ -36,7 +36,8 @@ test('integration routes preserve view/manage/exports permission boundaries', ()
   const router = require('../src/routes/admin/magento-integration.routes');
   for (const layer of router.stack) {
     const permissions = layer.route.stack.map((s) => s.handle.permissionKey).filter(Boolean);
-    assert.deepEqual(permissions, layer.route.path.endsWith('-preview')
-      ? ['export_templates.manage', 'exports.view'] : ['export_templates.view']);
+    assert.deepEqual(permissions, layer.route.path.includes('/categories/')
+      ? ['export_templates.manage', 'export_templates.publish'] : layer.route.path.endsWith('-preview')
+        ? ['export_templates.manage', 'exports.view'] : ['export_templates.view']);
   }
 });

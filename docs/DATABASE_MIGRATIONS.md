@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`051`. Migrations `000`–`050` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`052`. Migrations `000`–`051` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -109,6 +109,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `049_shared_names_and_repricing_sync.sql` | Shared-authority full-name observations/baselines and repricing item sync generation evidence. |
 | `050_test_product_deletion.sql` | Dedicated immutable test-deletion intent/progress, `voided` tombstones and request terminalization, Administrator-only capability and business-write fences. |
 | `051_magento_extensible_categories.sql` | Bounded category syntax in binding routes/options; new categories require an exact declared group in the pinned immutable v4 template. No seeds, data rewrite or publication. |
+| `052_magento_configuration_actions.sql` | Permanent reviewed category-create intent, dispatch, exact returned ID and GET-verification evidence; no implicit binding approval. |
 
 ## Test deletion migration
 
@@ -232,3 +233,14 @@ The migration itself performs no baseline acceptance, successor release, histori
 `051_magento_extensible_categories.sql` changes only the category-code checks on `magento_binding_routes` and `magento_binding_options`, from the historical six-code list to bounded uppercase codes (`^[A-Z][A-Z0-9_]{0,31}$`). Additional BEFORE INSERT/UPDATE guards require any category outside the historical six to be declared in the immutable evaluator-4 template pinned by the owning binding revision. Existing six-category rules, composite identity/observation FKs, publication immutability and audit/permission boundaries remain intact.
 
 There is no table/backfill, catalog seed, activation, automatic upgrade, publication or remote call. The schema runner transaction rolls back both constraints and guards on failure; repeated startup verifies the same checksum. Disposable regression coverage upgrades checkpoint 050 with real published evaluator-1/2/3 templates and bindings, compares their stored records and gate/audit evidence before/after, checks rollback and rerun, and persists a v4 future-category binding with distinct semantic/SKU/remote identities. Fresh installation is covered by the complete migration suite. This is H0 only; the [v4 contract](EXPORT_TEMPLATES.md#extensible-v4-integration-contract) does not implement later readiness/editor/publication orchestration.
+
+## Migration 052: reviewed remote configuration action evidence
+
+`052_magento_configuration_actions.sql` adds the bounded permanent ledger for H2
+single-category creation. Immutable intent/context, one origin/resource reservation,
+monotonic sealed/dispatched/returned/verified states and durable exact remote ID
+separate uncertain remote writes from GET-verified receipts. Updates cannot rewrite
+intent, reset dispatch, replace a returned ID or change verified evidence; DELETE
+and TRUNCATE are denied. No category, binding approval, publication, product, job,
+activation or remote mutation is created by installation. Existing migration files,
+published bindings and product-sync intent interpretations remain unchanged.

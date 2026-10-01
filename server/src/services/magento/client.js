@@ -113,6 +113,7 @@ function createMagentoClient(config, { fetchImpl = globalThis.fetch, storeCode =
       'searchCriteria[pageSize]': String(PAGE_SIZE), 'searchCriteria[currentPage]': '1',
     }),
     getCategoryTree: (rootCategoryId) => get('categories', { rootCategoryId: positiveInteger(rootCategoryId) }),
+    getCategory: (id) => get(`categories/${positiveInteger(id)}`),
     listAttributeSets: (page) => list('products/attribute-sets/sets/list', page),
     getAttributeSet: (id) => get(`products/attribute-sets/${positiveInteger(id)}`),
     getAttributeSetAttributes: (id) => get(`products/attribute-sets/${positiveInteger(id)}/attributes`),

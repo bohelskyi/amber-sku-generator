@@ -127,6 +127,7 @@ test('GET-only API covers every discovery endpoint with explicit all/store scope
       'searchCriteria[filter_groups][0][filters][0][condition_type]': 'eq',
       'searchCriteria[pageSize]': '100', 'searchCriteria[currentPage]': '1' })],
     ['getCategoryTree', [17], 'categories?rootCategoryId=17'],
+    ['getCategory', [17], 'categories/17'],
     ['listAttributeSets', [2], 'products/attribute-sets/sets/list?searchCriteria%5BpageSize%5D=100&searchCriteria%5BcurrentPage%5D=2'],
     ['getAttributeSet', [17], 'products/attribute-sets/17'],
     ['getAttributeSetAttributes', [17], 'products/attribute-sets/17/attributes'],

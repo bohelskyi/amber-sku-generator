@@ -27,6 +27,31 @@ Read/discovery requires `export_templates.view`; product previews require both
 `export_templates.manage` and `exports.view`. Existing role grants, auth, active-user,
 CSRF and lifecycle boundaries are unchanged. The browser never calls Magento.
 
+### Reviewed category creation (H2)
+
+The integration workspace can preview and explicitly create one missing category
+path already required by a selected draft binding, under its exact uniquely observed
+parent ID/full path. The server derives the name from that requirement; no arbitrary
+Magento URL, menu placement, tree recursion, move, rename or delete is exposed.
+Defaults are fixed: `is_active=true`, `include_in_menu=false`. Storefront menu enabling
+remains a deliberate manual Magento Admin action.
+
+Migration `052_magento_configuration_actions.sql` stores a permanent single-action
+receipt: sealed intent → committed dispatched marker → exact returned remote ID →
+GET-verified identity, hierarchy and flags. Independent Amber callers share one
+origin/resource reservation. Remote I/O never spans business locks/transactions.
+Manage **and** publish permissions are rechecked at every local mutation boundary.
+Creation does not change the draft or approve any binding; the UI shows
+**Створено, зв’язок ще не підтверджено**.
+
+`POST .../categories/preview`, `/apply` and `/reconcile` are authenticated and
+CSRF-protected; reconciliation performs only remote GETs. `/actions` and
+`/actions/:id` expose bounded safe receipts after reload. If the exact returned ID
+is durable, failed verification can resume with GET. If the response/ID was lost,
+equal-label/path discovery is insufficient attribution: the action remains explicitly
+uncertain and no automatic POST retry is available. This new workflow leaves the
+historical two-path CLI behavior unchanged.
+
 As reported by the production operator on 2026-10-01, Wave 1 is deployed at PR #19 / `daf627fc2458e5215cbf52735a8f186a3777361f`, with migrations through `050_test_product_deletion.sql`. Stable public `AG-*` identities, the reviewed production binding and automatic Amber → Magento synchronization are active. Magento product CSV delivery is retired; the separate price-export stream and immutable historical evidence remain supported. Historical delivery/collision cutover is complete and the operational freeze has been lifted. This documentation update did not query production or Magento.
 
 ## Stable public SKU boundary

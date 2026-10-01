@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import { useAuth } from '../auth/auth-context.js';
 import { EmptyState, LoadingState, Notice, StatusBadge } from '../components/app/UiPrimitives.jsx';
 import { WorkspaceHeader, WorkspaceLocalNav } from '../components/workspace/WorkspacePrimitives.jsx';
+import MagentoCategoryActions from '../components/workspace/MagentoCategoryActions.jsx';
 
 const root = '/admin/magento-integration';
 const states = { approved: 'Підтверджено', candidate: 'Кандидат', missing: 'Відсутній зв’язок',
@@ -68,6 +69,7 @@ export default function MagentoIntegrationPage() {
           <details><summary>Дерево категорій</summary>{observation.categories.map((c) => <p className="text-sm break-words" key={c.categoryId}>{c.path} / {c.categoryId}</p>)}</details>
         </>}
       </section>
+      <MagentoCategoryActions key={data.revision?.id || 'none'} revision={data.revision} observation={observation} />
       {canPreview && data.revision && category && <section className="card space-y-4 p-5"><h2 className="font-semibold">Перевірка товару</h2>
         <p className="text-sm">Preview виконує лише читання. Товар, артикул і завдання доставки не створюються.</p>
         <form className="space-y-3" onChangeCapture={() => { ++sequence.current; setBusy(false); setPreview(null); }} onSubmit={(e) => { e.preventDefault(); action('create-preview', { bindingRevisionId: data.revision.id,
