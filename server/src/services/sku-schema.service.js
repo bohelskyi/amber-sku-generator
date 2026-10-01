@@ -182,7 +182,13 @@ async function ensureLegacySkuSchemas() {
   const client = await pool.connect();
   try {
     await client.query('SELECT pg_advisory_lock(hashtext($1))', ['amber_legacy_sku_schemas']);
-    const categories = await client.query("SELECT code FROM categories WHERE sku_publication_mode='legacy_bootstrap' ORDER BY code");
+    // Known pre-054 upgrade/checkpoint helpers still run legacy schema capture.
+    // Observe the column; never introduce runtime DDL or relax explicit mode.
+    const hasMode = (await client.query(`SELECT EXISTS(SELECT 1 FROM information_schema.columns
+      WHERE table_schema=current_schema() AND table_name='categories' AND column_name='sku_publication_mode') AS present`)).rows[0].present;
+    const categories = await client.query(hasMode
+      ? "SELECT code FROM categories WHERE sku_publication_mode='legacy_bootstrap' ORDER BY code"
+      : 'SELECT code FROM categories ORDER BY code');
 
     for (const category of categories.rows) {
       await lifecycleGate.begin(client, 'BEGIN');

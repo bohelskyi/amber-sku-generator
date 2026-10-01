@@ -103,6 +103,11 @@ Historical placeholder `0` or a missing stored value can represent an omitted SK
 
 Migration 054 preserves this bootstrap for existing/seeded categories. New categories created through Amber have `sku_publication_mode=explicit`: restart does not publish their draft automatically. Configure questions/options/pricing and use the existing explicit SKU publication command. This distinction adds no database prohibition on ordinary product saves and does not change historical schemas or SKU allocation.
 
+Renaming an unused category preserves its publication mode. The legacy capture helper
+can still run against supported pre-054 upgrade checkpoints by observing whether
+the mode column exists; it adds no runtime DDL. Once migration 054 is present, only
+`legacy_bootstrap` categories are captured automatically.
+
 Legacy products with `total_price_uah=0` retain that stored value and `legacy_uah_price_unset=true`; see [`PRICING.md`](PRICING.md). They remain decodable and recountable, while new products still require a positive final price.
 
 ## Integration category contract
