@@ -43,7 +43,7 @@ export default function MagentoIntegrationPage() {
     {!data ? busy && <LoadingState label="Читаємо стан інтеграції…" /> : <>
       <Notice>{data.limitations.join(' ')}</Notice>
       <label className="block text-sm font-medium">Версія відповідностей
-        <select className="input mt-1" value={revisionId} onChange={(e) => { ++sequence.current; setBusy(true); setError(''); setPreview(null); setRevisionId(e.target.value); }}>
+        <select className="input mt-1" value={revisionId} onChange={(e) => { ++sequence.current; setBusy(true); setError(''); setPreview(null); setData(null); setRevisionId(e.target.value); }}>
           <option value="">Поточна опублікована</option>
           {data.revisions.map((r) => <option key={r.id} value={r.id}>{r.state === 'draft' ? 'Чернетка' : 'Опублікована'} · {r.version_number || r.revision} · {new Date(r.observed_at).toLocaleDateString('uk-UA')}</option>)}
         </select>
