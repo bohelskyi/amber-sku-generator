@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`052`. Migrations `000`–`051` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`055`. Migrations `000`–`054` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -19,6 +19,21 @@ Checked-in migrations now span `000`–`052`. Migrations `000`–`051` are immut
 - test failure rollback and repeated startup where applicable.
 
 `legacyInitDb()` remains in `server/src/db/init-db.js` for compatibility/tests. Normal startup treats migrations as DDL truth, seeds only an empty catalog, ensures calibration questions, and captures missing legacy V1 schemas.
+
+### 055 — reviewed publication obligations and name preservation
+
+`055_magento_publication_handoff.sql` adds immutable publication/controlled-action
+receipts, the exact affected-product obligations and immutable per-binding effective-name
+pins. These are transaction-coupled review evidence and small restart-safe enrollment
+state, not a report engine or a replacement Magento job lifecycle. Each obligation
+settles once from pending to enrolled (capturing the ordinary sync generation),
+protected or retired. UPDATE/DELETE/TRUNCATE cannot reset evidence. Name pins keep
+existing effective names when a successor changes its generation rules; explicit
+Amber edits still use the existing override and three-way baseline model.
+
+Installation performs no backfill, publication, enrollment, baseline update or
+remote call. New publication evidence is committed atomically with the existing
+immutable binding publication; no existing published rows or jobs are reinterpreted.
 
 ## Fresh and upgrade compatibility
 

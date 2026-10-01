@@ -47,6 +47,7 @@ async function overview(config, input = {}, options = {}) {
   return read(options, async (client) => {
     const catalog = await getAppConfig(client);
     const revision = await selected(client, config, input.bindingRevisionId);
+    const current = revision ? await require('./binding-repository').current(client, revision.installationKey) : null;
     const schemas = (await client.query(`SELECT id,category_code,version,published_at FROM sku_schema_versions
       WHERE status='active' ORDER BY category_code,version DESC`)).rows;
     const revisions = (await client.query(`SELECT id,state,revision,version_number,template_version_id,observed_at
@@ -68,7 +69,7 @@ async function overview(config, input = {}, options = {}) {
       }
     }
     const observedAt = (await client.query('SELECT transaction_timestamp() AS at')).rows[0].at.toISOString();
-    return { observedAt, configured: config.configured, revision, revisions, templateVersions,
+    return { observedAt, configured: config.configured, revision, currentPublishedId: current?.id || null, revisions, templateVersions,
       categories: semanticReadiness(catalog, schemas, revision, amber?.compiled.definition), catalog,
       products: totals.map((t) => ({ category: t.category, total: t.total,
         ...(local[t.category] || { checked: 0, evaluated: 0, blocked: 0 }),

@@ -1779,7 +1779,8 @@ and store policy scope. Changed cases remain unapproved. Equal labels are candid
 Choosing a set, option or category is separate from approval; unresolved template
 outputs must be fixed in the template, never by changing Amber semantic IDs.
 Draft CAS and final local evidence revalidation protect preparation/review; remote
-GETs finish before mutation transactions. Publication and handoff belong to H3b.
+GETs finish before mutation transactions. Publication and handoff use the separate
+H3b review below.
 
 The normal template grid supports evaluators 1–4. A public-identity columns-v2 draft
 can explicitly opt into v4 and add a category using reviewed UA/EN names, set name
@@ -1792,3 +1793,54 @@ HTTP `/api/admin/magento-integration`: GET `bindings/:id`; POST
 `bindings/:id/clone`, `bindings/:id/select`, `bindings/:id/decision`,
 `successor/prepare`, `successor/apply`. Existing view/manage permissions apply with
 normal active-user, authentication and CSRF boundaries; no RBAC changes.
+
+### Reviewed publication and controlled handoff (H3b)
+
+The workspace first previews structural validation, all current-product declared
+delivery effects (bounded to 1000 products), exact lost routes/articles, and changed
+name-generation effects. Above the product bound it fails closed, never publishes
+from a partial report. Representative ready CREATE previews are required for newly
+enabled routes or changed attribute-set rules/identities. Actual current-product
+GET previews cover each affected route and optional explicitly selected products.
+Local projections are not a claim that every remote product has been inspected.
+Remote reads reuse the existing evaluator/planner and the request-scoped 512-GET /
+60-second bound; no persistent background-report engine is introduced.
+
+`POST .../publication/preview` and `/apply` require manage + publish + exports.view.
+Apply repeats fresh GET checks and compares the exact preview hash. A short local
+transaction prevents catalog/product/name-state phantoms, rechecks draft/current
+CAS and source evidence, publishes the existing immutable binding and records the
+exact handoff/name pins atomically. No remote write occurs in publication. Lost
+coverage requires the actual Administrator role, explicit acknowledgement and an
+explanation of the displayed exact loss. Changed inputs require another review.
+The legacy binding CLI refuses new successor publication: use this reviewed
+workspace. Initial bootstrap and completed immutable CLI receipts remain supported;
+the trusted internal publication primitive retains historical CAS behavior.
+
+Publication does not mass-rename existing products. Migration 055 pins their exact
+current effective UA/EN names to the new rule generation, including pins inherited
+from an earlier publication. Intentional Amber/external edits take precedence using
+the existing exact override. Subjects and the common baseline remain untouched.
+Under **Контрольовані дії Адміністратора**, a separately selected, explained,
+previewed `name_rule` action can apply the new generated names to at most 100
+products. Conflicts, missing baselines, invalid names and unresolved dispatched work
+block it. It saves an Amber override and normal sync obligation; the durable writer's
+read verification alone confirms the new common baseline. No updated_at winner or
+name reverse-parsing is introduced.
+
+Default handoff contains only products actually unblocked or whose effective owned
+delivery changes. The existing automatic worker settles at most 25 pending receipt
+items per pass and then runs its ordinary generation/job pipeline. Unrelated synced
+products are not enrolled. Manual unfinished jobs, dispatched evidence and sticky
+reconciliation-required requests are protected, never reset or blindly retried.
+Disabled activation keeps obligations pending; retired/test-deleted products are
+skipped. Receipt/generation counters survive process/page restart.
+
+GET `bindings/:id/handoffs` exposes the latest 20 receipts and real sync counts.
+GET `bindings/:id/controlled-products` shows the first 100 eligible current products
+and explicitly reports any unexamined remainder. A separately reviewed Administrator
+`broader_resync` action can enroll an exact selection, without changing any bindings
+or prices. POST `controlled/preview` and `/apply` use local evidence hashes, current
+publication CAS, existing permissions and final authorization; applying name rules
+also requires exports.create. No generic proxy, schema/set mutation or reconciliation
+reset is exposed.

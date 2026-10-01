@@ -19,6 +19,13 @@ function applyNameOverride(mapped, product) {
   const generated = { ...(typeof mapped.base?.name === 'string' ? { all: mapped.base.name } : {}),
     ...(typeof mapped.english?.name === 'string' ? { en: mapped.english.name } : {}) };
   const override = product.magento_name_override;
+  const pin = product.magento_name_rule_pin;
+  if (pin && same(pin.generated, generated)) {
+    if (typeof pin.values?.all === 'string') mapped.base.name = pin.values.all;
+    if (typeof pin.values?.en === 'string') mapped.english.name = pin.values.en;
+  }
+  // An intentional Amber edit or accepted external edit remains authoritative
+  // for this observed generation; a publication pin never defeats that edit.
   if (override && same(override.generated, generated)) {
     if (typeof override.values?.all === 'string') mapped.base.name = override.values.all;
     if (typeof override.values?.en === 'string') mapped.english.name = override.values.en;

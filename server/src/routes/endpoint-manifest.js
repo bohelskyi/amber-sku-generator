@@ -16,6 +16,10 @@ const ENDPOINT_MANIFEST = Object.freeze([
   endpoint('GET', '/admin/magento-integration', 'export_templates.view'),
   endpoint('POST', '/admin/magento-integration/discovery', 'export_templates.view'),
   endpoint('GET', '/admin/magento-integration/bindings/:id', 'export_templates.view'),
+  endpoint('GET', '/admin/magento-integration/bindings/:id/handoffs', 'export_templates.view'),
+  endpoint('GET', '/admin/magento-integration/bindings/:id/controlled-products', 'export_templates.view'),
+  ...['publication/preview','publication/apply','controlled/preview','controlled/apply'].map((path)=>Object.freeze({
+    ...endpoint('POST', `/admin/magento-integration/${path}`, 'export_templates.manage'), additionalPermissions: Object.freeze(['export_templates.publish','exports.view']) })),
   endpoint('POST', '/admin/magento-integration/bindings/:id/clone', 'export_templates.manage'),
   endpoint('POST', '/admin/magento-integration/bindings/:id/decision', 'export_templates.manage'),
   endpoint('POST', '/admin/magento-integration/bindings/:id/select', 'export_templates.manage'),

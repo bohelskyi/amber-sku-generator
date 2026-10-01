@@ -7,6 +7,7 @@ import { WorkspaceHeader, WorkspaceLocalNav } from '../components/workspace/Work
 import MagentoCategoryActions from '../components/workspace/MagentoCategoryActions.jsx';
 import MagentoOptionActions from '../components/workspace/MagentoOptionActions.jsx';
 import MagentoBindingReview from '../components/workspace/MagentoBindingReview.jsx';
+import MagentoPublicationActions from '../components/workspace/MagentoPublicationActions.jsx';
 
 const root = '/admin/magento-integration';
 const states = { approved: 'Підтверджено', candidate: 'Кандидат', missing: 'Відсутній зв’язок',
@@ -22,6 +23,7 @@ export default function MagentoIntegrationPage() {
   const [subjectUa, setSubjectUa] = useState(''); const [subjectEn, setSubjectEn] = useState('');
   const [productId, setProductId] = useState(''); const sequence = useRef(0);
   const [reload, setReload] = useState(0);
+  const [representatives, setRepresentatives] = useState([]);
   const canPreview = permissions.includes('export_templates.manage') && permissions.includes('exports.view');
   useEffect(() => {
     const controller = new AbortController(); const current = ++sequence.current;
@@ -46,7 +48,7 @@ export default function MagentoIntegrationPage() {
     {!data ? busy && <LoadingState label="Читаємо стан інтеграції…" /> : <>
       <Notice>{data.limitations.join(' ')}</Notice>
       <label className="block text-sm font-medium">Версія відповідностей
-        <select className="input mt-1" value={revisionId} onChange={(e) => { ++sequence.current; setBusy(true); setError(''); setPreview(null); setData(null); setRevisionId(e.target.value); }}>
+        <select className="input mt-1" value={revisionId} onChange={(e) => { ++sequence.current; setBusy(true); setError(''); setPreview(null); setRepresentatives([]); setData(null); setRevisionId(e.target.value); }}>
           <option value="">Поточна опублікована</option>
           {data.revisions.map((r) => <option key={r.id} value={r.id}>{r.state === 'draft' ? 'Чернетка' : 'Опублікована'} · {r.version_number || r.revision} · {new Date(r.observed_at).toLocaleDateString('uk-UA')}</option>)}
         </select>
@@ -73,13 +75,15 @@ export default function MagentoIntegrationPage() {
         </>}
       </section>
       <MagentoCategoryActions key={data.revision?.id || 'none'} revision={data.revision} observation={observation} />
-      <MagentoBindingReview key={data.revision?.id || 'none'} revision={data.revision} templateVersions={data.templateVersions} onChanged={(r) => { ++sequence.current; setBusy(true); setData(null); setPreview(null); setObservation(null); setRevisionId(r.id); setReload((n) => n + 1); }} />
+      <MagentoBindingReview key={data.revision?.id || 'none'} revision={data.revision} templateVersions={data.templateVersions} onChanged={(r) => { ++sequence.current; setBusy(true); setData(null); setPreview(null); setObservation(null); setRepresentatives([]); setRevisionId(r.id); setReload((n) => n + 1); }} />
       <MagentoOptionActions key={`${data.revision?.id || 'none'}:${category?.code}`} revision={data.revision} category={category} observation={observation} />
       {canPreview && data.revision && category && <section className="card space-y-4 p-5"><h2 className="font-semibold">Перевірка товару</h2>
         <p className="text-sm">Preview виконує лише читання. Товар, артикул і завдання доставки не створюються.</p>
         <form className="space-y-3" onChangeCapture={() => { ++sequence.current; setBusy(false); setPreview(null); }} onSubmit={(e) => { e.preventDefault(); action('create-preview', { bindingRevisionId: data.revision.id,
           product: { categoryCode: category.code, answers, weight, magentoNameSubjectUa: subjectUa, magentoNameSubjectEn: subjectEn },
-          ...(price ? { pricingDecision: { mode: 'manual_uah', manualPriceUah: price } } : {}) }, setPreview); }}>
+          ...(price ? { pricingDecision: { mode: 'manual_uah', manualPriceUah: price } } : {}) }, (result) => { setPreview(result); if (result.sendable) setRepresentatives((samples) => [...samples.filter((s) => s.routeKey !== result.routeKey), { routeKey: result.routeKey,
+            input: { product: { categoryCode: category.code, answers, weight, magentoNameSubjectUa: subjectUa, magentoNameSubjectEn: subjectEn },
+              ...(price ? { pricingDecision: { mode: 'manual_uah', manualPriceUah: price } } : {}) } }]); }); }}>
           {questions.map((q) => <label className="block text-sm" key={q.id}>{q.label}{q.input_type === 'options'
             ? <select className="input" value={answers[q.id] ?? ''} onChange={(e) => { setAnswers({ ...answers, [q.id]: e.target.value }); setPreview(null); }}><option value="">Оберіть значення</option>{q.options.filter((o) => !o.archived).map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}</select>
             : <input className="input" value={answers[q.id] ?? ''} onChange={(e) => { setAnswers({ ...answers, [q.id]: e.target.value }); setPreview(null); }} />}</label>)}
@@ -98,6 +102,8 @@ export default function MagentoIntegrationPage() {
         <ul>{preview.blockers.map((b, i) => <li key={i}>{b.message || 'Потрібно перевірити відповідності Magento.'}{b.target ? ` · ${b.target}` : ''}</li>)}</ul>
         <details><summary>Технічні деталі перевірки</summary><pre className="overflow-auto text-xs">{JSON.stringify(preview, null, 2)}</pre></details>
       </section>}
+      <MagentoPublicationActions key={`${data.revision?.id || 'none'}:${data.revision?.revision}:${JSON.stringify(representatives)}`} revision={data.revision} currentPublishedId={data.currentPublishedId || null} representatives={representatives}
+        onPublished={(r) => { ++sequence.current; setBusy(true); setData(null); setPreview(null); setObservation(null); setRepresentatives([]); setRevisionId(r.id); setReload((n) => n + 1); }} />
     </>}
   </div></main>;
 }

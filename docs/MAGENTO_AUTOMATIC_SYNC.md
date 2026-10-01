@@ -9,6 +9,16 @@ As reported by the production operator on 2026-10-01, Wave 1 is deployed at PR #
 
 ## Local transaction boundary
 
+Wave 2 reviewed publication records only its exact affected/unblocked products in
+immutable `magento_binding_handoffs/items` (migration 055). The existing worker
+settles at most 25 pending obligations before each ordinary queue pass. Enrollment
+increments the existing request generation once per item, under the usual local
+authorization/lifecycle boundary; no Magento I/O occurs during enrollment. Historical
+and unrelated synced products are not globally re-enrolled. Disabled activation
+retains pending obligations, retired/test-deleted rows are skipped, and unresolved
+manual/dispatched work is protected without reset. Reviewed broader resync and name
+rule application are separate actions. See [publication and handoff](MAGENTO_INTEGRATION.md#reviewed-publication-and-controlled-handoff-h3b).
+
 `product_magento_sync_request` runs after product INSERT/UPDATE in the business
 transaction. With the gate enabled it upserts one `magento_product_sync_requests`
 row and increments `desired_generation`. Rollback also rolls back the request.

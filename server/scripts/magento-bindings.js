@@ -102,6 +102,11 @@ async function runBindings({ args = [], env = process.env, databasePool, fetchIm
       const r = await service.validateDraft(input.id, options);
       result = { id: r.id, revision: r.revision, valid: r.valid, diagnostics: r.diagnostics }; successful = r.valid;
     } else if (input.action === 'publish') {
+      // Successor impact/coverage/name review belongs to the typed reviewed
+      // publication workflow. Keep initial bootstrap and completed receipts.
+      if (input.expectedCurrentId !== null && (await service.getRevision(input.id, options)).state !== 'published') {
+        throw c.error(422, 'MAGENTO_BINDING_PUBLICATION_REVIEW_REQUIRED', 'Review successor impact and publish in the Magento integration workspace');
+      }
       result = receipt(await service.publishDraft(input.id, { expectedRevision: input.expectedRevision,
         expectedCurrentId: input.expectedCurrentId }, options));
     } else {

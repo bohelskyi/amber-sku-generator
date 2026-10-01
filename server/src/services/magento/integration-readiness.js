@@ -51,7 +51,7 @@ function semanticReadiness(config, schemas, revision, definition = null) {
 }
 function previewView(report) {
   return { mode: report.mode, observedAt: report.generatedAt, sendable: report.sendable,
-    article: report.amberProduct.publicSku, group: report.amberProduct.group,
+    article: report.amberProduct.publicSku, group: report.amberProduct.group, routeKey: report.attributeSet.routeKey,
     attributeSet: report.attributeSet.selected, blockers: report.blockers.map((b) => require('./sync-problems').presentProblem(b)),
     names: { ua: report.candidatePayload.product.name ?? null,
       en: report.transport?.storeViews?.candidate?.name ?? null },

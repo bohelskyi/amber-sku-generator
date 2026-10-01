@@ -10,6 +10,9 @@ const option = require('../../services/magento/configuration-option');
 const successor = require('../../services/magento/integration-successor');
 const bindingReview = require('../../services/magento/integration-binding-review');
 const bindingService = require('../../services/magento/binding.service');
+const publication = require('../../services/magento/binding-publication');
+const handoff = require('../../services/magento/binding-handoff');
+const controlled = require('../../services/magento/binding-controlled-actions');
 const router = express.Router();
 const root = '/admin/magento-integration';
 const handle = (operation) => async (req, res) => {
@@ -19,6 +22,12 @@ const handle = (operation) => async (req, res) => {
 router.get(root, requirePermission('export_templates.view'), handle((req) => editor.overview(config, req.query)));
 router.post(`${root}/discovery`, requirePermission('export_templates.view'), handle(() => editor.discovery(config)));
 router.get(`${root}/bindings/:id`, requirePermission('export_templates.view'), handle((req) => bindingReview.get(config,req.params.id)));
+router.get(`${root}/bindings/:id/handoffs`,requirePermission('export_templates.view'),handle((req)=>handoff.status(config,req.params.id)));
+router.get(`${root}/bindings/:id/controlled-products`,requirePermission('export_templates.view'),handle((req)=>controlled.candidates(config,req.params.id)));
+for(const [path,operation] of [['publication/preview',publication.preview],['publication/apply',publication.publish],['controlled/preview',controlled.preview],['controlled/apply',controlled.apply]]){
+  router.post(`${root}/${path}`,requirePermission('export_templates.manage'),requirePermission('export_templates.publish'),requirePermission('exports.view'),
+    handle((req)=>operation(config,req.body,{mutationContext:getRequestMutationContext(req)})));
+}
 router.post(`${root}/bindings/:id/clone`,requirePermission('export_templates.manage'),handle(async (req) => {
   await bindingReview.get(config,req.params.id);
   return bindingService.clonePublished(req.params.id,req.body,{mutationContext:getRequestMutationContext(req)});
