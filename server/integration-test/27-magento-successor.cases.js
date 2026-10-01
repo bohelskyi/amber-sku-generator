@@ -60,6 +60,9 @@ test('H3a new Amber category stays draft across startup until explicit SKU publi
   try{
     await runNodeInDatabase(f.url,"require('./src/services/catalog/category-commands').createCategory({code:'XX',name:'Future'},{mutationContext:{actorUserId:"+f.actor+"}}).finally(()=>require('./src/db/pool').end());");
     assert.equal((await f.db.query("SELECT sku_publication_mode FROM categories WHERE code='XX'")).rows[0].sku_publication_mode,'explicit');
+    await runNodeInDatabase(f.url,"require('./src/services/catalog/category-commands').updateCategory({code:'XX',next_code:'XZ',name:'Renamed draft'},{mutationContext:{actorUserId:"+f.actor+"}}).finally(()=>require('./src/db/pool').end());");
+    assert.equal((await f.db.query("SELECT sku_publication_mode FROM categories WHERE code='XZ'")).rows[0].sku_publication_mode,'explicit','renaming an unused category must retain the explicit publication boundary');
+    await runNodeInDatabase(f.url,"require('./src/services/catalog/category-commands').updateCategory({code:'XZ',next_code:'XX',name:'Future'},{mutationContext:{actorUserId:"+f.actor+"}}).finally(()=>require('./src/db/pool').end());");
     await f.db.query("INSERT INTO categories(code,name) VALUES('YY','Legacy')");
     for(const code of ['XX','YY']){
       const q=(await f.db.query("INSERT INTO questions(category_code,key,label,sku_index,input_type,include_in_sku,required) VALUES($1,'kind','Kind',1,'options',1,1) RETURNING id",[code])).rows[0].id;
