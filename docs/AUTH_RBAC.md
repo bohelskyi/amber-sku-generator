@@ -88,6 +88,14 @@ without `products.view` or administrative permissions. View-only exporters can
 preview; create/confirm/manual-name mutations require `exports.create`. These are
 presentation checks backed by the existing authoritative server boundaries; capabilities remain independently delegable. See [export templates](EXPORT_TEMPLATES.md).
 
+## Test-product deletion permission
+
+Migration 050 adds `products.delete_test`, reserved to the immutable Administrator
+role at both service and database boundaries. It grants nothing to Manager,
+Storekeeper or custom roles and does not alter `products.archive`. Test-deletion
+preview/apply retain authenticated active-user, CSRF and transactional permission
+revalidation; a review hash is not authority. See [the workflow](MAGENTO_AUTOMATIC_SYNC.md#test-product-deletion).
+
 ## First-Administrator bootstrap
 
 Bootstrap is deliberately offline and permanently one-use:

@@ -9,6 +9,8 @@ export function createProductsApi(client = api) {
     save: (payload) => client.post('/save', payload),
     getVariation: (sku) => client.post('/variation', { sku }),
     archive: (skuToDelete) => client.post('/delete', { skuToDelete }),
+    previewTestDeletion: (productId) => client.post('/products/test-delete/preview', { productId }),
+    applyTestDeletion: (payload) => client.post('/products/test-delete/apply', payload),
   });
 }
 

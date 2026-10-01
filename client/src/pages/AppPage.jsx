@@ -9,11 +9,14 @@ import { useAuth } from '../auth/auth-context.js';
 import { useSkuManager } from '../hooks/useSkuManager';
 import { getPermissionUiState, getRecountUiMode } from '../lib/permission-ui.js';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useContext, useEffect, useEffectEvent, useRef } from 'react';
+import { useContext, useEffect, useEffectEvent, useRef, useState } from 'react';
+import { TestProductDeletion } from '../components/app/TestProductDeletion';
 import { ExportWorkflowContext } from '../hooks/product/useExportWorkflow';
 
 function AppPage() {
   const auth = useAuth();
+  const [testDeletion, setTestDeletion] = useState(null);
+  const [deletedArticles, setDeletedArticles] = useState([]);
   const [searchParams] = useSearchParams();
   const exportSku = searchParams.get('exportSku')?.slice(0, 160);
   const selectedArticle = exportSku || searchParams.get('article')?.slice(0, 160);
@@ -61,7 +64,8 @@ function AppPage() {
       <div className="mx-auto max-w-7xl space-y-5 px-4 py-4 sm:px-6 sm:py-6">
         <PageHeader />
         <Toast message={sku.copyMessage} />
-        {sku.savedProduct && <Notice tone="success">Товар збережено. Артикул: <strong>{sku.savedProduct.publicSku || sku.savedProduct.fullSku}</strong>.</Notice>}
+        {sku.savedProduct && !deletedArticles.includes(sku.savedProduct.publicSku || sku.savedProduct.fullSku) &&
+          <Notice tone="success">Товар збережено. Артикул: <strong>{sku.savedProduct.publicSku || sku.savedProduct.fullSku}</strong>.</Notice>}
         {exportSku && auth.permissions.includes('products.view') && auth.permissions.includes('products.decode') && <section className="card p-4 space-y-2">
           <p>Відкрито з перевірки експорту · <strong>{exportSku}</strong></p>
           {exportHandoff?.sku === exportSku && <p>{exportHandoff.reason}</p>}
@@ -164,12 +168,13 @@ function AppPage() {
 
         {sku.historyError && auth.permissions.includes('history.view') && <Notice tone="warning">Не вдалося завантажити останні товари: {sku.historyError}</Notice>}
         {auth.permissions.includes('history.view') && <HistoryTable
-          history={sku.history}
+          history={sku.history.filter((product) => !deletedArticles.includes(product.public_sku || product.full_sku))}
           config={sku.config}
           selectedCat={sku.selectedCat}
           onCopyText={sku.handleCopyText}
           onDecode={sku.handleDecode}
           onDelete={sku.handleDelete}
+          onDeleteTest={auth.permissions.includes('products.delete_test') ? setTestDeletion : undefined}
           canArchive={canArchiveProducts}
           canDecode={auth.permissions.includes('products.decode')}
         />}
@@ -187,6 +192,15 @@ function AppPage() {
           </section>
         )}
       </div>
+      {auth.permissions.includes('products.delete_test') && sku.decodeData?.product?.status === 'active' && !sku.isRecountOpen &&
+        <button type="button" className="btn btn-danger" onClick={() => setTestDeletion({ ...sku.decodeData.product,
+          public_sku: sku.decodeData.publicSku, full_sku: sku.decodeData.sku })}>Видалити тестовий товар</button>}
+      {testDeletion && auth.permissions.includes('products.delete_test') && <TestProductDeletion
+        key={testDeletion.id} product={testDeletion} onClose={() => setTestDeletion(null)}
+        onDeleted={(receipt) => {
+          setDeletedArticles((articles) => [...articles, receipt.publicSku]);
+          sku.fetchHistory(); sku.handleDecodeInputChange('');
+        }} />}
       <RecountConfirmDialog
         config={sku.config}
         canPriceOverride={permissionUi.canPriceOverrideCorrections}

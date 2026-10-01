@@ -30,6 +30,43 @@ CSV retirement is planned only after existing queued/export work is reconciled;
 see [the retirement boundary](EXPORTS.md#planned-csv-retirement). Neither first sync
 success nor migrations 041/042 activate the CSV selector or retire its queues.
 
+## Deploying the test-product deletion hotfix (050)
+
+These are operator steps after review; implementation verification uses only fake
+Magento HTTP and the canonical disposable PostgreSQL service.
+
+1. Deploy the reviewed hotfix commit as one server/client release. Freeze business
+   traffic and stop/drain all old server workers before migration
+   (`docker compose stop server` for the single-server topology); do not run mixed
+   versions. Keep the normal verified backup outside the repository.
+2. Build the server and client images using the deployment's existing configuration:
+   `docker compose build server client`. No dependency or credential changes are needed.
+3. Start the new server only: `docker compose up -d --no-deps server`. Its normal
+   migration runner verifies 000–049 and applies `050_test_product_deletion.sql`.
+   If migration fails, keep business traffic closed and resolve it; never edit an
+   applied migration or its checksum.
+4. Check server readiness (`docker compose ps server` must report healthy; its
+   healthcheck calls `/health/ready`) and migration 050's recorded checksum,
+   then start the matched client: `docker compose up -d --no-deps client`. Verify
+   Administrator has `products.delete_test`; Manager/Storekeeper must not.
+5. Reopen traffic after health and ordinary create/recount/archive smoke checks.
+   This deployment does not rerun public-SKU activation, delivery cutover or bindings.
+6. For the separately authorized manual acceptance product, reserve an exclusive
+   Magento operator window. Open its public SKU in Amber, choose **Видалити тестовий
+   товар**, review eligibility and the permanent-deletion explanation, enter its exact
+   public SKU, and apply. Confirm finalized evidence and absence from ordinary lists.
+   Later product allocation must advance; neither SKU is reusable.
+
+On uncertainty, use the same workflow's result check; it reads only after the durable
+dispatch marker. Never manually reset ledger state or resend DELETE. A sealed drift,
+remote mismatch or still-present dispatched target needs technical review. Audit
+filters use subject type `product` and the product ID; `product.test_delete_*` events
+and the permanent ledger distinguish dispatch, verified absence and local completion.
+
+Schema downgrade/old-server rollback is unsupported after a deletion intent exists.
+Keep the compatible build or roll forward; remote deletion cannot be undone by
+restoring an Amber backup. See [the complete recovery contract](MAGENTO_AUTOMATIC_SYNC.md#test-product-deletion).
+
 ## OIDC deployment
 
 The repository's example production application locations are:

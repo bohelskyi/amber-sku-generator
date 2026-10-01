@@ -27,6 +27,14 @@ new `magento-products-v1` artifacts. Existing snapshots, files, sessions,
 confirmations, cursors and audit evidence remain readable and immutable. The
 separate `sku,price` stream is not switched by this product-delivery cutover.
 
+## Test-product retirement
+
+Test-product deletion (050) rejects retained product/price snapshot exposure and
+business delivery history. Final `voided` rows are excluded and lifecycle-retired;
+no snapshot, artifact, acknowledgment, cursor, reservation or prior sync receipt is
+deleted or rewritten. It is a separate Administrator action from ordinary archive.
+See [test deletion](MAGENTO_AUTOMATIC_SYNC.md#test-product-deletion).
+
 ## Workflow and authority
 
 The operator reviews authoritative current data, explicitly creates an immutable snapshot, downloads stored files and separately confirms the snapshot. Preview/download never acknowledge delivery. Confirmation means local acceptance of the captured export, **not proof of Magento import**. A generated file may already have left the application even when unconfirmed.

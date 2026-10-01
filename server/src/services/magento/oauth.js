@@ -64,4 +64,12 @@ function signSyncRequest(url, credentials, method = 'POST', options) {
   }
   return signRequest(method, url, credentials, options);
 }
-module.exports = { percentEncode, signGetRequest, signCategoryCreateRequest, signSyncRequest };
+function signTestDeleteRequest(url, credentials, options) {
+  let parsed;
+  try { parsed = new URL(url); } catch { throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID'); }
+  if (parsed.search || !/^\/rest\/all\/V1\/products\/AG-[0-9]{6,}$/.test(parsed.pathname)) {
+    throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID');
+  }
+  return signRequest('DELETE', url, credentials, options);
+}
+module.exports = { percentEncode, signGetRequest, signCategoryCreateRequest, signSyncRequest, signTestDeleteRequest };

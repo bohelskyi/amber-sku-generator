@@ -90,6 +90,70 @@ attached job is reconciled successfully, polling consumes its receipt, including
 requests previously marked needs-attention. No historical backfill or unrestricted
 retry/queue API is included.
 
+## Test product deletion
+
+Migration 050 introduces a separate explicit Administrator workflow, **Видалити
+тестовий товар**, on recent products and the decoded current product. Ordinary
+archive is unchanged: local `archived`, excluded, lifecycle retired, `product.archived`,
+and no Magento DELETE. An archived automatic request can still require `product_retired`
+attention; this hotfix does not reinterpret inventory archive as remote destruction.
+
+POST `/api/products/test-delete/preview` and `/apply` require active authentication,
+CSRF and Administrator-reserved `products.delete_test`. Preview accepts a numeric
+`productId`, performs eligibility checks and exact GET, and returns only identifiers,
+state and a review hash. Apply requires the same product/hash and exact unmodified
+public SKU in `confirmation`. Both revalidate the actor inside the access boundary.
+No browser-supplied remote ID, URL, credential or arbitrary DELETE route is accepted.
+
+Eligibility requires one active/current ordinary-save revision with an allocated
+public identity and its exact permanent internal reservation; normal unexcluded
+lifecycle; no correction/request history, price revision/delivery, repricing history
+or applicable active repricing draft; no immutable export exposure or other product
+business audit history; no unfinished sync job/unverified step or pending generation;
+and one succeeded CREATE with a consistent known remote identity. Normal succeeded
+CREATE/UPDATE evidence remains immutable and does not itself block eligibility.
+The exact remote ID/SKU must match and Magento status must still be disabled (`2`).
+Known historical enabled status also blocks. A blocker requires ordinary archive;
+there is no eligibility override. No global historical enrollment occurs.
+
+The dedicated `magento_test_deletions` ledger avoids weakening active-product
+CREATE/UPDATE job invariants. Its unique public identity binds product ID, internal
+and public SKU, origin hash, expected remote ID, CREATE receipt, actor and reviewed
+local/remote hashes. Public-identity then origin/SKU session locks coordinate it with
+normal workers, name discovery and manual sync. Short access/lifecycle/product/state
+transactions finish before all HTTP calls. Persisted product/lifecycle fences remain
+effective across crashes and process restarts.
+
+| Ledger state | Meaning and recovery |
+| --- | --- |
+| `sealed` | Intent committed; no DELETE dispatch authorized yet. Local business changes are frozen. Fresh exact reads and local revalidation precede dispatch. |
+| `dispatched` | Dispatch marker committed before the sole DELETE. It remains uncertain until an exact GET proves absence. Every subsequent apply is GET-only; no timeout, HTTP rejection or still-present product causes resend. |
+| `verified` | Exact query GET proved zero matching products; verification is durably audited. Local finalization can recover independently after a crash or audit failure. |
+| `finalized` | Product is `voided`/excluded, full-product state retired, immutable `product.test_delete_finalized` audit recorded. Identical apply returns this receipt. |
+
+Already-proven remote absence can move sealed directly to verified without DELETE.
+Finalization records a distinct automatic-request `voided` state in the product
+transaction, clears its active association/reason/diagnostics and leaves its actual
+`synced_generation` unchanged. It creates no normal success job and preserves prior
+CREATE/UPDATE receipts. Workers and name discovery skip sealed identities.
+Pending deletion receipts appear as a separate safe recovery problem, including
+when no automatic request exists; finalized receipts disappear from that view.
+Voided rows disappear from ordinary recent, lookup/history and sample-search results;
+technical evidence remains in the ledger and Administrator audit viewer.
+
+After an uncertain response, reopen the same action, perform preview and enter the
+same public SKU to **Перевірити результат видалення**. The durable intent survives
+reload; an absent product completes without a second DELETE. A still-present or
+mismatched counterpart stays frozen for technical review. There is no force/reset,
+automatic DELETE retry, or cancellation after dispatch. Undispatched remote drift
+also stays sealed for technical review; the workflow never silently changes intent.
+
+Magento's SKU DELETE has no conditional-ID/precondition API. Exact reads detect
+identity drift before dispatch, but independent Magento writers are outside Amber's
+locks. Use an exclusive operator window: no concurrent rename, recreation, activation
+or sale activity for the target. Remote order history is not queried; the operator's
+explicit test-product attestation and conservative retained evidence are required.
+
 ## Manager status
 
 The existing authenticated `GET /api/product-timeline?sku=...` (`history.view`)

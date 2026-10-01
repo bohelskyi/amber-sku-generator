@@ -48,6 +48,8 @@ const ENDPOINT_MANIFEST = Object.freeze([
   endpoint('POST', '/product-price-change/apply', 'products.price_change'),
   endpoint('POST', '/save', 'products.create'),
   endpoint('POST', '/delete', 'products.archive'),
+  endpoint('POST', '/products/test-delete/preview', 'products.delete_test'),
+  endpoint('POST', '/products/test-delete/apply', 'products.delete_test'),
   endpoint('GET', '/products', 'history.view'),
   endpoint('GET', '/product-timeline', 'history.view'),
   endpoint('GET', '/export/status', 'exports.view'),

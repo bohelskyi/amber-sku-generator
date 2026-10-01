@@ -8,10 +8,15 @@ const reasons = Object.freeze({
 });
 function presentStatus(row) {
   if (!row) return { state: 'not_tracked', reason: null };
-  return { state: row.state, reason: row.state === 'needs_attention' ? reasons[row.reason_code] || reasons.unexpected_failure : null };
+  if (row.deletion_state && row.deletion_state !== 'finalized') return { state: 'needs_attention',
+    reason: 'Тестове видалення очікує підтвердження. Адміністратор може перевірити результат у дії «Видалити тестовий товар».' };
+  return { state: row.state || 'not_tracked', reason: row.state === 'needs_attention' ? reasons[row.reason_code] || reasons.unexpected_failure : null };
 }
 async function readStatuses(db, productIds) {
-  const rows = (await db.query('SELECT product_id,state,reason_code FROM magento_product_sync_requests WHERE product_id=ANY($1::int[])', [productIds])).rows;
+  const rows = (await db.query(`SELECT p.id AS product_id,r.state,r.reason_code,d.state AS deletion_state
+    FROM products p LEFT JOIN magento_product_sync_requests r ON r.product_id=p.id
+    LEFT JOIN magento_test_deletions d ON d.product_id=p.id
+    WHERE p.id=ANY($1::int[])`, [productIds])).rows;
   const byId = new Map(rows.map((r) => [Number(r.product_id), r]));
   return new Map(productIds.map((id) => [id, presentStatus(byId.get(id))]));
 }
