@@ -4,23 +4,23 @@ const {
   shouldHidePriceForCalibration,
 } = require('../../utils/calibration');
 const { toUahNumber } = require('../../utils/money');
+const { getRuleDependencies } = require('../../utils/rules');
 const {
   buildSkuSuffixDecodeAttempts,
   decodeSkuAnswers,
-  decodeStoredSkuAnswers,
   decodeVisibleSkuAnswers,
   diagnoseSkuAttempts,
   parseVariationSku,
 } = require('../../utils/sku');
 const {
   getSchemaVersion,
+  getSchemaVersionById,
   parseVersionedSkuPart,
 } = require('../sku-schema.service');
 const {
   buildAnswerMap,
   getProductDetails,
   getStoredAnswers,
-  haveSameDecodedAnswers,
 } = require('./product-answers');
 const { getContextualOption } = require('./product-validation');
 const { resolveProductLookup } = require('./public-identity');
@@ -169,6 +169,87 @@ function getDecodedPricingPayload({
   };
 }
 
+async function projectStoredProduct(lookup, category, queryable) {
+  const product = lookup.product;
+  const details = getProductDetails(product);
+  const answers = getStoredAnswers(product);
+  const schema = product.sku_schema_version_id
+    ? await getSchemaVersionById(product.sku_schema_version_id, queryable)
+    : await getSchemaVersion(category.code, details.skuSchemaVersion || 1, queryable);
+  const questions = schema?.questions || [];
+  const decodedAnswers = questions.map((question) => {
+    const value = answers[question.key];
+    const option = getContextualOption(question, value, answers);
+    const isPlaceholder = value === undefined
+      || (value === 0 && !option && !question.options.some((item) => item.sku_code === '0'));
+    return {
+      key: question.key,
+      label: question.label,
+      sku_index: question.sku_index,
+      value_id: isPlaceholder ? null : value,
+      value_label: isPlaceholder ? 'Не обрано' : option?.label || String(value),
+      is_placeholder: isPlaceholder,
+    };
+  });
+  const calibration = resolveCalibrationState({
+    question: await getCalibrationQuestionForCategory(category.code, queryable),
+    answers,
+    storedValue: details.isCalibrated,
+  });
+  // Historical pricing is read from the row, never recalculated or hidden by today's rules.
+  const scenario = details.pricingScenario;
+  const configuredMode = scenario?.price_mode || 'category_default';
+  const priceMode = configuredMode === 'category_default' && Number(product.price_per_gram) > 0
+    ? 'per_gram_usd' : configuredMode;
+  const dependentKeys = uniqueValues([
+    ...getRuleDependencies(scenario?.match_json),
+    ...[scenario?.axis_x_key, scenario?.axis_y_key].flatMap((axis) =>
+      String(axis || '').split('+').map((key) => key.trim() === 'weight_band' ? 'weight' : key.trim())),
+  ]);
+  const pricing = getDecodedPricingPayload({
+    decodedAnswers, product, pricingAnswers: answers, suffixValue: null,
+    pricing: { pricingDetails: {
+      scenario: details.pricingScenario || null,
+      priceMode,
+      isWeightBased: priceMode === 'per_gram_usd',
+      usesWeight: priceMode === 'per_gram_usd' || dependentKeys.includes('weight'),
+      dependentKeys,
+    } },
+  });
+  const { baseFullSku, variationNumber } = parseVariationSku(product.full_sku);
+  const suffixRaw = baseFullSku.startsWith(product.base_sku)
+    ? baseFullSku.slice(product.base_sku.length) : '';
+  const hasSuffix = /^\d+$/.test(suffixRaw);
+  return {
+    sku: product.full_sku,
+    internalSku: product.full_sku,
+    publicSku: product.public_sku || null,
+    lookupKind: lookup.lookupKind,
+    decodeSource: 'stored_history',
+    skuSchema: {
+      id: schema ? Number(schema.id) : null,
+      version: schema?.version ?? details.skuSchemaVersion ?? null,
+      marker: schema?.marker || '',
+      status: schema?.status || null,
+    },
+    calibration,
+    category,
+    baseSku: product.base_sku,
+    decodedAnswers,
+    suffix: {
+      raw: hasSuffix ? suffixRaw : null,
+      type: hasSuffix ? (category.requires_weight === 1 ? 'weight' : 'sequence') : 'none',
+      value: hasSuffix ? Number(product.sequence_number) : null,
+    },
+    pricing,
+    variation: variationNumber === null ? null : {
+      number: variationNumber, suffix: `-${String(variationNumber).padStart(3, '0')}`,
+    },
+    existsInDb: true,
+    product,
+  };
+}
+
 async function decodeSku(skuValue, queryable) {
   const lookup = await resolveProductLookup(queryable, skuValue);
   const internalLookupSku = lookup.product?.full_sku || skuValue;
@@ -178,7 +259,9 @@ async function decodeSku(skuValue, queryable) {
   }
 
   const categories = await getAllCategories(queryable);
-  const category = categories.find((item) => baseFullSku.startsWith(item.code));
+  const category = lookup.product
+    ? categories.find((item) => item.code === lookup.product.category)
+    : categories.find((item) => baseFullSku.startsWith(item.code));
   if (!category) {
     const err = new Error('Не вдалося визначити категорію за кодом артикула.');
     err.statusCode = 422;
@@ -190,7 +273,8 @@ async function decodeSku(skuValue, queryable) {
     throw err;
   }
 
-  const product = lookup.product || null;
+  if (lookup.product) return projectStoredProduct(lookup, category, queryable);
+
   const parsedSchema = parseVersionedSkuPart(baseFullSku.slice(category.code.length));
   const schema = await getSchemaVersion(category.code, parsedSchema.version, queryable);
   if (!schema) {
@@ -209,24 +293,12 @@ async function decodeSku(skuValue, queryable) {
   const questions = schema.questions;
   const calibrationQuestion = await getCalibrationQuestionForCategory(category.code, queryable);
   const attempts = buildSkuSuffixDecodeAttempts(parsedSchema.encodedWithSuffix);
-  const productDetails = getProductDetails(product);
-  const storedAnswers = getStoredAnswers(product);
 
   for (const attempt of attempts) {
-    const configuredDecodedAnswers =
+    const rawDecodedAnswers =
       Number(category.skip_hidden_sku_questions || 0) === 1
         ? decodeVisibleSkuAnswers(questions, attempt.encodedPart)
         : decodeSkuAnswers(questions, attempt.encodedPart);
-    const storedDecodedAnswers = !product || !Object.keys(storedAnswers).length
-      ? null
-      : decodeStoredSkuAnswers(questions, attempt.encodedPart, storedAnswers);
-    const usesStoredHistory = Boolean(
-      storedDecodedAnswers
-      && !haveSameDecodedAnswers(configuredDecodedAnswers, storedDecodedAnswers)
-    );
-    const rawDecodedAnswers = usesStoredHistory
-      ? storedDecodedAnswers
-      : configuredDecodedAnswers || storedDecodedAnswers;
     if (!rawDecodedAnswers) continue;
     const decodedAnswers = resolveContextualAnswerLabels(rawDecodedAnswers, questions);
 
@@ -234,19 +306,12 @@ async function decodeSku(skuValue, queryable) {
       attempt.suffixRaw !== null && /^\d+$/.test(attempt.suffixRaw)
         ? Number(attempt.suffixRaw)
         : null;
-    const decodedAnswerMap = buildAnswerMap(decodedAnswers);
-    const pricingAnswers = { ...decodedAnswerMap, ...storedAnswers };
+    const pricingAnswers = buildAnswerMap(decodedAnswers);
     const calibration = resolveCalibrationState({
       question: calibrationQuestion,
       answers: pricingAnswers,
-      storedValue: productDetails.isCalibrated,
     });
-    const pricingWeight =
-      product?.weight !== null && product?.weight !== undefined && Number(product.weight) > 0
-        ? Number(product.weight)
-        : category.requires_weight === 1
-          ? suffixValue
-          : 0;
+    const pricingWeight = category.requires_weight === 1 ? suffixValue : 0;
     const calculatedPricing = await calculatePricing(
       category.code,
       pricingAnswers,
@@ -264,9 +329,9 @@ async function decodeSku(skuValue, queryable) {
     return {
       sku: normalizedSku,
       internalSku: normalizedSku,
-      publicSku: product?.public_sku || null,
+      publicSku: null,
       lookupKind: lookup.lookupKind,
-      decodeSource: usesStoredHistory ? 'stored_history' : 'versioned_schema',
+      decodeSource: 'versioned_schema',
       skuSchema: {
         id: Number(schema.id),
         version: schema.version,
@@ -294,7 +359,7 @@ async function decodeSku(skuValue, queryable) {
       pricing: pricing
         ? getDecodedPricingPayload({
             decodedAnswers,
-            product,
+            product: null,
             pricing,
             pricingAnswers,
             suffixValue,
@@ -306,8 +371,8 @@ async function decodeSku(skuValue, queryable) {
             suffix: `-${String(variationNumber).padStart(3, '0')}`,
           }
         : null,
-      existsInDb: Boolean(product),
-      product,
+      existsInDb: false,
+      product: null,
     };
   }
 
