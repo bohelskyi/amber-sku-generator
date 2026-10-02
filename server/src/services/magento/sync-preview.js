@@ -72,7 +72,21 @@ function optionLabels(attribute, value) {
     label: attribute.options?.find((o) => o.value === String(id))?.label ?? null }));
 }
 
-function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', generatedAt = new Date().toISOString(), domainEvidence } = {}) {
+// Request-owned opaque preparation: no cross-request mutable/global schema cache.
+// Only invariant mapper/route/binding/schema analysis is reused, never product
+// evaluation, ownership decisions, names, eligibility or remote observations.
+const preparations=new WeakMap();
+function preparePreview(amber,schema){
+  const {revision}=amber,definition=amber.compiled.definition;
+  let plans=[],routeFailure=false;
+  try{plans=requirements(definition,revision?.schema || schema);}catch{routeFailure=true;}
+  const token=Object.freeze({});
+  preparations.set(token,{definition,revision,schema,mapper:describeMapper(definition),plans,routeFailure,
+    drift:revision?compareSchema(revision,schema):null,
+    validation:revision?validateBindings(revision.bindings,definition,revision.schema):null});
+  return token;
+}
+function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', generatedAt = new Date().toISOString(), domainEvidence, prepared } = {}) {
   const { product, revision } = amber;
   const publicSku = product.public_sku || product.full_sku;
   const expected = evaluate(amber, product);
@@ -89,9 +103,12 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
     if (codes[nameDecision.action]) block(codes[nameDecision.action]);
   }
   const definition = amber.compiled.definition;
-  const mapper = describeMapper(definition);
+  const preparation=prepared && preparations.get(prepared);
+  if(prepared && (!preparation || preparation.definition!==definition || preparation.revision!==revision || preparation.schema!==schema))
+    throw new Error('Planner preparation belongs to another context');
+  const mapper = preparation?.mapper || describeMapper(definition);
   let plans = [];
-  try { plans = requirements(definition, revision?.schema || schema); }
+  try { if(preparation?.routeFailure)throw new Error('Unsupported route');plans=preparation?.plans || requirements(definition, revision?.schema || schema); }
   catch { block('ROUTE_ANALYSIS_UNSUPPORTED'); }
   const matching = plans.filter((r) => r.amberGroup === product.category && r.predicates.every((p) =>
     (String(product.details?.answers?.[p.questionKey] ?? '') === p.valueId) === p.equal));
@@ -129,9 +146,9 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
   if (!expected.ready) block('PRODUCT_EVALUATION_NOT_READY', { issueFields: expected.issueFields });
   const eligibility = syncEligibility(product, raw);
   for (const item of eligibility.reasons) block(item.code, { operation: 'all', reason: item.rule });
-  const drift = revision ? compareSchema(revision, schema) : null;
+  const drift = preparation ? preparation.drift : revision ? compareSchema(revision, schema) : null;
   if (revision) {
-    const validation = validateBindings(revision.bindings, definition, revision.schema);
+    const validation = preparation?.validation || validateBindings(revision.bindings, definition, revision.schema);
     for (const issue of validation.diagnostics.filter((d) => !d.routeKey || d.routeKey === route?.routeKey)) block('PERSISTED_BINDING_INVALID', { diagnostic: issue });
     for (const d of drift.diagnostics) {
       const relevant = d.routeKey ? d.routeKey === route?.routeKey : d.bindingKey
@@ -442,4 +459,4 @@ async function previewProduct(config, { databasePool, fetchImpl, storeCode = 'al
   if (onObservation) await onObservation({ amber, schema, raw, categoryNodes: indexTrees(trees), domainEvidence, categoryFailures });
   return report;
 }
-module.exports = { previewProduct, planPreview, comparison };
+module.exports = { previewProduct, planPreview, preparePreview, comparison };

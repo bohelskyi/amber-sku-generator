@@ -3,13 +3,16 @@ const c = require('./binding-contract');
 const { randomUUID } = require('node:crypto');
 const { runAccessAdminMutation } = require('../access-admin-transaction');
 const { writeAuditEvent } = require('../../audit/audit-events');
-async function record(client, context, revision, kind, previewHash, evidence, items) {
+async function record(client, context, revision, kind, previewHash, evidence, items, options={}) {
   const id = randomUUID();
   await client.query(`INSERT INTO magento_binding_handoffs(id,binding_revision_id,kind,preview_hash,actor_user_id,evidence)
     VALUES($1,$2,$3,$4,$5,$6::jsonb)`,[id,revision.id,kind,previewHash,context.actorUserId,JSON.stringify(c.safeData(evidence))]);
-  if(items.length)await client.query(`INSERT INTO magento_binding_handoff_items(handoff_id,product_id,public_product_identity_id,reason)
+  for(let offset=0;offset<items.length;offset+=128){
+    if(options.deadline)require('./publication-scope').checkDeadline(options.deadline);
+    await client.query(`INSERT INTO magento_binding_handoff_items(handoff_id,product_id,public_product_identity_id,reason)
     SELECT $1,v."productId",v."publicIdentityId",v.reason FROM jsonb_to_recordset($2::jsonb)
-      AS v("productId" integer,"publicIdentityId" bigint,reason text)`,[id,JSON.stringify(items.map((v)=>({productId:v.productId,publicIdentityId:v.publicIdentityId,reason:v.reason})))]);
+      AS v("productId" integer,"publicIdentityId" bigint,reason text)`,[id,JSON.stringify(items.slice(offset,offset+128).map((v)=>({productId:v.productId,publicIdentityId:v.publicIdentityId,reason:v.reason})))]);
+  }
   return id;
 }
 async function processHandoffs(config, options = {}) {

@@ -4,6 +4,17 @@ const { applyNameOverride } = require('../src/services/magento/name-reconciliati
 const { impact } = require('../src/services/magento/binding-publication');
 const { compileDefinition } = require('../src/services/export-templates/definition');
 const fixture = require('./fixtures/magento-v4');
+test('request-owned planner preparation preserves uncached diagnostics and rejects reuse for another revision',()=>{
+  const {planPreview,preparePreview}=require('../src/services/magento/sync-preview');
+  const definition=fixture.definition(),compiled=compileDefinition(definition),schema=fixture.observation();
+  const revision={bindings:fixture.approvedBindings(definition,schema),schema};
+  const amber={compiled,revision,product:{id:1,category:'XG',full_sku:'XG001',public_sku:'AG-000003',status:'active',details:{answers:{kind:8}},total_price_uah:42}};
+  const options={generatedAt:'2026-10-02T00:00:00.000Z',domainEvidence:{failures:[]}};
+  const plain=planPreview(amber,schema,null,[],options);
+  const prepared=preparePreview(amber,schema);
+  assert.deepEqual(planPreview(amber,schema,null,[],{...options,prepared}),plain);
+  assert.throws(()=>planPreview({...amber,revision:{...revision}},schema,null,[],{...options,prepared}),/another context/);
+});
 
 test('publication preserves existing effective names until an explicit Amber name-rule action', () => {
   const generated={all:'New generated',en:'New English'},existing={all:'Exact Magento name',en:'Exact English'};

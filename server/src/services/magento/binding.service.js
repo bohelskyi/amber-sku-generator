@@ -230,10 +230,11 @@ async function validateStored(client, loaded) {
 }
 async function validateDraft(id, options = {}) {
   c.identity(id);
-  return read(options, async (client) => {
-    const loaded = await load(client, id);
-    return { id, revision: loaded.row.revision, ...await validateStored(client, loaded) };
-  });
+  return read(options, (client) => validateDraftOnClient(client,id));
+}
+async function validateDraftOnClient(client,id) {
+  const loaded=await load(client,c.identity(id));
+  return {id,revision:loaded.row.revision,...await validateStored(client,loaded)};
 }
 async function publishDraft(id, input, options = {}) {
   c.identity(id); c.command(input, ['expectedRevision','expectedCurrentId']);
@@ -282,4 +283,4 @@ async function listRevisions(key, options = {}) {
     FROM magento_binding_revisions WHERE installation_key=$1 ORDER BY created_at DESC, id`, [key])).rows);
 }
 module.exports = { createDraftOnClient, importReviewedDraftOnClient, publishDraftOnClient, createDraft, clonePublished, updateDraft,
-  validateDraft, publishDraft, getRevision, getCurrentPublished, listRevisions, readRevisionOnClient };
+  validateDraft, validateDraftOnClient, publishDraft, getRevision, getCurrentPublished, listRevisions, readRevisionOnClient };

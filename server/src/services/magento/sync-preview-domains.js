@@ -53,8 +53,10 @@ function safeReason(cause) {
 
 function planDomains({ expected, schema, revision, routeKey, raw, sku, evidence = {}, block }) {
   const binding = (target, row = 'base') => revision?.bindings.attributes.find((a) => a.routeKey === routeKey && a.rowId === row && a.target === target);
-  const policy = (target, row = 'base') => revision?.bindings.policies.find((p) => p.bindingKey === bindingKey(routeKey || '', row, target)
-    && p.storeCode === (row === 'english' ? 'en' : 'all'));
+  const policy = (target, row = 'base') => {
+    const key=bindingKey(routeKey || '', row, target);
+    return revision?.bindings.policies.find((p) => p.bindingKey === key && p.storeCode === (row === 'english' ? 'en' : 'all'));
+  };
   function approved(target, operation, requiredPolicy, row = 'base') {
     const a = binding(target, row); const p = policy(target, row);
     if (a?.reviewState !== 'approved') block(`${operation === 'storeViews' ? 'STORE_VIEW' : operation.toUpperCase().replace(/S$/, '')}_BINDING_REVIEW_REQUIRED`, { operation, target });

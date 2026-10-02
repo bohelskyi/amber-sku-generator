@@ -10,6 +10,24 @@ const {REQUIRED}=require('../src/services/export-templates/column-contract');
 const {readPreviewProduct}=require('../src/services/magento/sync-preview-db');
 const {evaluate}=require('../src/services/magento/binding-evidence-products');
 const {createAutomaticSyncWorker}=require('../src/services/magento/automatic-sync-worker');
+test('H3b full scope exceeds historical 1000 without truncation and detects last-page lifecycle drift',async()=>{
+  const name='amber_publication_scope_test',f=await setup(name);
+  try{
+    const added=await insertProductFixture(f.db,`INSERT INTO products(full_sku,category,weight,total_price_uah,details)
+      SELECT 'XG-SCALE-'||n,'XG',5,42,'{"answers":{}}' FROM generate_series(1,1001) n RETURNING id`);
+    await f.db.query("UPDATE product_full_export_state SET business_exclusion_state='none',delivery_version=delivery_version+1 WHERE product_id=ANY($1::int[])",[added.rows.map(p=>p.id)]);
+    const definition=structuredClone(f.d);definition.groups[0].rows[0].cells.price.value='43';
+    const draft=await f.draft(definition,'scale-next'),input={bindingRevisionId:draft.id,expectedRevision:draft.revision,expectedCurrentId:f.current.id};
+    const reviewed=await publication.preview(f.config,input,f.options);assert.equal(reviewed.totalProducts,1004);assert.equal(reviewed.affected.length,1003);
+    await f.db.query("UPDATE product_full_export_state SET business_exclusion_state='excluded',delivery_version=delivery_version+1 WHERE product_id=(SELECT max(id) FROM products)");
+    const next=await publication.preview(f.config,input,f.options);assert.notEqual(next.previewToken,reviewed.previewToken);
+    await assert.rejects(publication.publish(f.config,{...input,previewToken:reviewed.previewToken},f.options),{code:'MAGENTO_PUBLICATION_STALE'});
+    assert.equal((await f.db.query("SELECT state FROM magento_binding_revisions WHERE id=$1",[draft.id])).rows[0].state,'draft');
+    const fresh=await publication.preview(f.config,input,f.options);
+    const receipt=await publication.publish(f.config,{...input,previewToken:fresh.previewToken,ackCoverageLoss:true,coverageReason:'Reviewed exact synthetic exclusion loss'},f.options);
+    assert.equal((await f.db.query('SELECT count(*)::int n FROM magento_binding_handoff_items WHERE handoff_id=$1',[receipt.handoffId])).rows[0].n,1002);
+  }finally{await f.db.end();await dropTestDatabase(name);}
+});
 async function setup(name){
   const url=await recreateTestDatabase(name),db=new Pool({connectionString:url});
   await runNodeInDatabase(url,"require('./src/db/run-migrations').runMigrations().catch(e=>{console.error(e);process.exitCode=1;});");
@@ -55,6 +73,46 @@ async function setup(name){
   const discover=async()=>({schema,categories:[],observedAt:'2026-10-02T00:00:00.000Z'});
   return {url,db,actor,options:{...options,fetchImpl,discover},config,d,schema,approved,current,products,draft,raw,english,calls};
 }
+
+test('publication lifecycle race uses independent connections: committed drift is stale and locked state waits for commit',async()=>{
+  for(const order of ['before','after']){
+    const name=`amber_publication_lifecycle_${order}_test`,f=await setup(name),writer=await f.db.connect();
+    try{
+      const draft=await f.draft(f.d,'race-next'),input={bindingRevisionId:draft.id,expectedRevision:draft.revision,expectedCurrentId:f.current.id};
+      const proof=await publication.preview(f.config,input,f.options);
+      let arrived,release;const atLock=new Promise(r=>{arrived=r;}),resume=new Promise(r=>{release=r;});
+      const boundaryPool={query:(...a)=>f.db.query(...a),connect:async()=>{
+        const client=await f.db.connect();return {release:()=>client.release(),query:async(...a)=>{
+          if(typeof a[0]==='string' && a[0].startsWith('LOCK TABLE categories')){
+            if(order==='before'){arrived();await resume;}
+            const result=await client.query(...a);
+            if(order==='after'){arrived();await resume;}return result;
+          }return client.query(...a);
+        }};
+      }};
+      // Attach rejection handling immediately while the final boundary is paused.
+      const applying=publication.publish(f.config,{...input,previewToken:proof.previewToken},{...f.options,databasePool:boundaryPool})
+        .then(value=>({value}),error=>({error}));
+      await atLock;
+      await writer.query('BEGIN');const pid=(await writer.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      const changing=writer.query("UPDATE product_full_export_state SET business_exclusion_state='excluded',delivery_version=delivery_version+1 WHERE product_id=$1",[f.products[0].id]);
+      if(order==='before'){await changing;await writer.query('COMMIT');release();const result=await applying;
+        assert.equal(result.error?.code,'MAGENTO_PUBLICATION_STALE');
+        assert.equal((await f.db.query('SELECT state FROM magento_binding_revisions WHERE id=$1',[draft.id])).rows[0].state,'draft');
+      }else{
+        let blocked=false;
+        for(let i=0;i<100 && !blocked;i++){
+          blocked=(await f.db.query('SELECT cardinality(pg_blocking_pids($1))>0 AS blocked',[pid])).rows[0].blocked;
+          if(!blocked)await new Promise(r=>setTimeout(r,10));
+        }
+        assert.ok(blocked,'independent lifecycle writer really waits on publication locks');release();
+        const result=await applying;assert.ok(result.value,!result.error && 'publication commits its coherent reviewed state');
+        await changing;await writer.query('COMMIT');
+      }
+      assert.equal((await f.db.query('SELECT business_exclusion_state FROM product_full_export_state WHERE product_id=$1',[f.products[0].id])).rows[0].business_exclusion_state,'excluded');
+    }finally{await writer.query('ROLLBACK');writer.release();await f.db.end();await dropTestDatabase(name);}
+  }
+});
 test('H3b publication: exact minimal handoff, immutable name pins, restart/concurrent enrollment and verified shared-name delivery',async()=>{
   const name='amber_publication_handoff_test',f=await setup(name);
   try{
@@ -128,7 +186,11 @@ test('H3b coverage loss needs exact Administrator acknowledgement; stale evidenc
     const conflict=await controlled.preview(f.config,action,f.options);assert.equal(conflict.blockers[0].code,'NAME_CONFLICT_OR_BASELINE_REQUIRED');
     await assert.rejects(controlled.apply(f.config,{...action,previewToken:conflict.previewToken},f.options),{code:'MAGENTO_CONTROLLED_ACTION_STALE'});
     const resync={...action,kind:'broader_resync',productIds:[f.products[1].id]};
-    const reviewed=await controlled.preview(f.config,resync,f.options);await controlled.apply(f.config,{...resync,previewToken:reviewed.previewToken},f.options);
+    const reviewed=await controlled.preview(f.config,resync,f.options);
+    await assert.rejects(controlled.apply(f.config,{...resync,previewToken:reviewed.previewToken},
+      {...f.options,mutationContext:{actorUserId:Number(publisher)}}),{code:'MAGENTO_PUBLICATION_ADMINISTRATOR_REQUIRED'});
+    assert.equal((await f.db.query("SELECT count(*)::int n FROM magento_binding_handoffs WHERE kind='broader_resync'")).rows[0].n,0);
+    await controlled.apply(f.config,{...resync,previewToken:reviewed.previewToken},f.options);
     assert.equal((await f.db.query("SELECT count(*)::int n FROM magento_binding_handoffs WHERE kind='broader_resync'")).rows[0].n,1);
   }finally{await f.db.end();await dropTestDatabase(name);}
 });

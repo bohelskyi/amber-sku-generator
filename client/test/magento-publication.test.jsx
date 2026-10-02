@@ -11,6 +11,20 @@ const proof = { previewToken: 'proof', totalProducts: 3, affected: [{ productId:
   lostRoutes: [], lostProducts: [], preservedNames: [], checked: [], blockers: [] };
 const shell = (props = {}, grants = permissions) => render(<AuthContext.Provider value={{ permissions: grants }}><MemoryRouter><MagentoPublicationActions revision={revision} currentPublishedId="current" onPublished={vi.fn()} {...props} /></MemoryRouter></AuthContext.Provider>);
 afterEach(() => { cleanup(); vi.resetAllMocks(); vi.useRealTimers(); });
+it('complete affected and lost sets paginate locally without new HTTP snapshot pages',async()=>{
+  const products=Array.from({length:101},(_,i)=>({productId:i+1,article:`ARTICLE-${i+1}`,routeKey:'XG:all',reason:'unblocked'}));
+  api.post.mockResolvedValueOnce({data:{...proof,totalProducts:3323,affected:products,lostProducts:products,lostRoutes:['XG:all']}});
+  shell();fireEvent.click(screen.getByRole('button',{name:'Перевірити вплив публікації'}));
+  await screen.findByText(/Перевірено поточних товарів: 3323/);
+  fireEvent.click(screen.getByText('Точний перелік товарів для доставки'));
+  const {within}=await import('@testing-library/react');
+  const pager=screen.getByRole('navigation',{name:'Товари для доставки'});
+  fireEvent.click(within(pager).getByRole('button',{name:'Далі'}));
+  expect(screen.queryByText('ARTICLE-101 · Готовність відновлено')).toBeNull();
+  fireEvent.click(within(pager).getByRole('button',{name:'Далі'}));
+  expect(screen.getByText('ARTICLE-101 · Готовність відновлено')).toBeTruthy();
+  expect(api.post).toHaveBeenCalledTimes(1);expect(api.get).not.toHaveBeenCalled();
+});
 it('publication requires an explicit impact preview and reuses exact representative inputs', async () => {
   const published = vi.fn(), input = { product: { categoryCode: 'XX', answers: {}, weight: '2' } };
   api.post.mockResolvedValueOnce({ data: proof }).mockResolvedValueOnce({ data: { revision: { id: 'published' } } });

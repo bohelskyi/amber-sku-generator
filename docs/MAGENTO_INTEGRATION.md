@@ -52,6 +52,14 @@ equal-label/path discovery is insufficient attribution: the action remains expli
 uncertain and no automatic POST retry is available. This new workflow leaves the
 historical two-path CLI behavior unchanged.
 
+Migration 056 adds reviewed recovery for a committed **sealed, undispatched**
+action. Repeat the normal fresh preview and explicit apply; a changed review seals
+a linked successor and marks the old intent superseded in the same transaction.
+Intent, actor, observation and attestation history are never rewritten. One active
+origin/kind/resource reservation and the existing access lock serialize replacement
+against dispatch. A superseded intent cannot dispatch. Dispatched/returned/verified
+reservations can never be replaced, even if later GETs show the target absent.
+
 ### Reviewed option creation (H4)
 
 Option creation is bounded to one existing user-defined select/multiselect with
@@ -82,6 +90,9 @@ option route, initializes no default, and persists the exact returned option ID
 before GET verification in global and optional EN scopes. A lost response remains
 uncertain; equal labels cannot recover attribution or authorize another POST.
 Creation never approves a semantic binding. Returned-ID recovery remains GET-only.
+An expired attestation on still-sealed work requires a fresh Administrator
+classification attestation, preview and explicit apply; 056 retains both attestations
+and intents. Expiry never permits replacement of previously dispatched work.
 
 As reported by the production operator on 2026-10-01, Wave 1 is deployed at PR #19 / `daf627fc2458e5215cbf52735a8f186a3777361f`, with migrations through `050_test_product_deletion.sql`. Stable public `AG-*` identities, the reviewed production binding and automatic Amber → Magento synchronization are active. Magento product CSV delivery is retired; the separate price-export stream and immutable historical evidence remain supported. Historical delivery/collision cutover is complete and the operational freeze has been lifted. This documentation update did not query production or Magento.
 
@@ -1797,9 +1808,23 @@ normal active-user, authentication and CSRF boundaries; no RBAC changes.
 ### Reviewed publication and controlled handoff (H3b)
 
 The workspace first previews structural validation, all current-product declared
-delivery effects (bounded to 1000 products), exact lost routes/articles, and changed
-name-generation effects. Above the product bound it fails closed, never publishes
-from a partial report. Representative ready CREATE previews are required for newly
+delivery effects, exact lost routes/articles, and changed name-generation effects.
+One repeatable-read PostgreSQL snapshot scans the complete selected scope by
+ascending product ID in keyset pages of 128. A deterministic incremental SHA-256
+digest binds every product, its complete public identity/lifecycle, relevant shared
+name state, current name pin, immutable supporting schema and draft/current/source
+validation evidence. No separate HTTP page claims to share this snapshot.
+
+The measured release ceiling is **4096 products**, **2 MiB serialized returned review
+evidence**, **8 MiB per input page**, **60 seconds for preview** and **15 seconds for
+the final local publication boundary** (with a 5-second table-lock wait ceiling).
+Oversized stored product/schema pages are checked before transfer. Any count, byte
+or elapsed-runtime overflow raises `MAGENTO_PUBLICATION_LIMIT` with the exact bound;
+there is no truncated success or publication. The client locally renders exact
+affected/lost/name-impact results in 50-item pages from the single returned review.
+See [the disposable scale measurement](archive/implementation/WAVE2_PUBLICATION_SCALE_2026-10-02.md).
+
+Representative ready CREATE previews are required for newly
 enabled routes or changed attribute-set rules/identities. Actual current-product
 GET previews cover each affected route and optional explicitly selected products.
 Local projections are not a claim that every remote product has been inspected.
@@ -1816,6 +1841,13 @@ explanation of the displayed exact loss. Changed inputs require another review.
 The legacy binding CLI refuses new successor publication: use this reviewed
 workspace. Initial bootstrap and completed immutable CLI receipts remain supported;
 the trusted internal publication primitive retains historical CAS behavior.
+Final revalidation recomputes the complete ordered digest under the existing access,
+lifecycle and installation coordination, followed by product-before-full-state
+locking and shared-name/deletion fences. Remote GETs finish before these locks.
+Name pins and handoff items are inserted in bounded 128-item SQL batches inside the
+one atomic publication transaction. No report table or background-report engine
+is added. Request-owned planner preparation reuses only invariant analysis; every
+product still runs the existing evaluator and planner, with unchanged semantics.
 
 Publication does not mass-rename existing products. Migration 055 pins their exact
 current effective UA/EN names to the new rule generation, including pins inherited

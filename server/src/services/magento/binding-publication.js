@@ -5,10 +5,9 @@ const service = require('./binding.service');
 const repository = require('./binding-repository');
 const handoff = require('./binding-handoff');
 const { evaluate } = require('./binding-evidence-products');
-const { planPreview, previewProduct } = require('./sync-preview');
-const { loadSupportInputs } = require('../export-templates/support-inputs');
+const { planPreview, previewProduct, preparePreview } = require('./sync-preview');
 const { loadSourceEvidence } = require('../export-templates/source-references');
-const { nameStateEvidence } = require('./name-state');
+const scope = require('./publication-scope');
 const { ruleProof } = require('./integration-successor');
 const { boundedGet, previewView } = require('./integration-readiness');
 const { syncEligibility } = require('./sync-eligibility');
@@ -17,7 +16,7 @@ const { runAccessAdminMutation, assertActorStillAuthorized } = require('../acces
 const { writeAuditEvent } = require('../../audit/audit-events');
 const { same } = require('./name-reconciliation');
 const { bindingKey } = require('./binding-validation');
-const MAX_PRODUCTS=1000;
+const MAX_PRODUCTS=scope.LIMITS.products;
 const clean=(value)=>JSON.parse(JSON.stringify(value));
 const names=(mapped)=>({all:mapped.base.name,en:mapped.english.name});
 const scopes=(r)=>r.bindings.routes.filter((v)=>v.enabled && v.reviewState==='approved').map((v)=>v.routeKey);
@@ -29,41 +28,24 @@ function command(input,apply=false){
   if(input.currentProductIds && (!Array.isArray(input.currentProductIds)||input.currentProductIds.length>10
     || input.currentProductIds.some((id)=>!Number.isSafeInteger(id)||id<=0)))c.invalid();
 }
-async function context(client,config,input){
+async function context(client,config,input,scanOptions={}){
   const draft=await editor.selected(client,config,input.bindingRevisionId);
   const currentRow=await repository.current(client,draft.installationKey);
   if(draft.state!=='draft'||draft.revision!==c.counter(input.expectedRevision)||(currentRow?.id || null)!==input.expectedCurrentId)
     throw c.error(409,'MAGENTO_BINDING_CONFLICT','Draft/current publication changed');
   const current=currentRow?await service.readRevisionOnClient(client,currentRow.id):null;
   const next=await editor.compiledRevision(client,draft),old=current?await editor.compiledRevision(client,current):null;
-  const rows=(await client.query(`SELECT p.*,i.public_sku,to_jsonb(s) AS export_state FROM products p
-    JOIN public_product_identities i ON i.id=p.public_product_identity_id LEFT JOIN product_full_export_state s ON s.product_id=p.id
-    WHERE p.status='active' AND p.corrected_to_product_id IS NULL
-      AND NOT EXISTS(SELECT 1 FROM magento_test_deletions d WHERE d.public_product_identity_id=p.public_product_identity_id)
-    ORDER BY p.id LIMIT $1`,[MAX_PRODUCTS+1])).rows;
-  if(rows.length>MAX_PRODUCTS)throw c.error(422,'MAGENTO_PUBLICATION_LIMIT','Review exceeds the bounded 1000 current-product release');
-  const states=(await client.query('SELECT * FROM magento_name_sync_states WHERE origin_hash=$1 AND public_product_identity_id=ANY($2::bigint[])',
-    [draft.originHash,rows.map((p)=>p.public_product_identity_id)])).rows;
-  const pins=current?(await client.query('SELECT * FROM magento_binding_name_pins WHERE binding_revision_id=$1',[current.id])).rows:[];
-  const productsFor=async(compiled,preserve)=>{
-    const supported=await loadSupportInputs(client,compiled,rows.map((p)=>({...p})));
-    return supported.products.map((p)=>{
-      const physical=rows.find((v)=>v.id===p.id),pin=preserve?pins.find((v)=>v.product_id===p.id):null;
-      Object.assign(p,physical,{exportState:physical.export_state?{...physical.export_state,independentExclusion:physical.export_state.evidence?.independentExclusion}:null});
-      if(pin)p.magento_name_rule_pin={generated:pin.generated,values:pin.effective_names};
-      return p;
-    });
-  };
-  const oldProducts=old?await productsFor(old.compiled.definition,true):[],nextProducts=await productsFor(next.compiled.definition,false);
   const evidence=await loadSourceEvidence(client,next.compiled.definition);
-  const localHash=c.hash(clean({draft,current,rows,states:states.map(nameStateEvidence),pins,evidence}));
-  return {draft,current,next,old,oldProducts,nextProducts,states,localHash};
+  const validation=await service.validateDraftOnClient(client,draft.id);
+  const local={draft,current,next,old,evidence,validation};
+  if(scanOptions.metadataOnly)return local;
+  return {...local,...await scope.scan(client,local,scanOptions)};
 }
 // Reuse the planner's translations/diagnostics for declared local delivery.
 // Remote sendability is proved separately by bounded real GET-only previews.
 function projection(amber,product,nodes){
   const mapped=evaluate(amber,product);
-  const report=planPreview({...amber,product},amber.revision.schema,null,nodes,{domainEvidence:{failures:[]}});
+  const report=planPreview({...amber,product},amber.revision.schema,null,nodes,{domainEvidence:{failures:[]},prepared:amber.prepared});
   const currentKnown=Boolean(amber.nameState?.remote_product_id);
   const eligibility=syncEligibility(product,currentKnown?{sku:product.public_sku}:null);
   const eligible=eligibility.eligible;
@@ -87,15 +69,16 @@ function impact(local,nodes){
   const lostRoutes=local.current?scopes(local.current).filter((r)=>!scopes(local.draft).includes(r)):[];
   const affected=[],lostProducts=[],preservedNames=[],projections=[];
   for(const product of local.nextProducts){
+    if(local.deadline)scope.checkDeadline(local.deadline);
     const state=local.states.find((s)=>String(s.public_product_identity_id)===String(product.public_product_identity_id)) || null;
     const oldProduct=local.oldProducts.find((p)=>p.id===product.id);
-    const before=oldProduct?projection({...local.old,revision:local.current,nameState:state},oldProduct,nodes):null;
+    const before=oldProduct?projection({...local.old,revision:local.current,nameState:state,prepared:local.preparedOld},oldProduct,nodes):null;
     const nextMapped=evaluate(local.next,product),generated=nextMapped.generatedNames;
     if(before?.names.all && before.names.en && !same(before.names,names(nextMapped))){
       product.magento_name_rule_pin={generated,values:before.names};
       preservedNames.push({productId:product.id,article:product.public_sku,before:before.names,generated});
     }
-    const after=projection({...local.next,revision:local.draft,nameState:state},product,nodes);
+    const after=projection({...local.next,revision:local.draft,nameState:state,prepared:local.preparedNext},product,nodes);
     if(before?.covered && !after.covered)lostProducts.push({productId:product.id,article:product.public_sku,routeKey:before.routeKey,blockers:after.blockers});
     if(after.covered && (!before?.covered || before.signature!==after.signature))affected.push({productId:product.id,
       publicIdentityId:product.public_product_identity_id,article:product.public_sku,routeKey:after.routeKey,reason:before?.covered?'delivery_changed':'unblocked'});
@@ -112,13 +95,43 @@ function cachedReads(fetchImpl){
   };
 }
 async function preview(config,input,options={}){
+  try{return await boundedPreview(config,input,options);}catch(cause){scope.translateLimit(cause);}
+}
+async function boundedPreview(config,input,options={}){
   command(input);
-  const local=await editor.read(options,(client)=>context(client,config,input));
-  const validation=await service.validateDraft(local.draft.id,options);
-  const fetchImpl=cachedReads(boundedGet(options.fetchImpl));
+  const deadline=Date.now()+scope.LIMITS.previewMs;
+  const metadata=await editor.read(options,(client)=>context(client,config,input,{metadataOnly:true}));
+  const fetchImpl=cachedReads(boundedGet(async(url,init)=>{
+    scope.checkDeadline(deadline);
+    return (options.fetchImpl || globalThis.fetch)(url,{...init,signal:AbortSignal.any([
+      ...(init.signal?[init.signal]:[]),AbortSignal.timeout(Math.max(1,deadline-Date.now()))])});
+  }));
   const observation=await (options.discover || editor.discovery)(config,{fetchImpl});
-  if(c.hash(observation.schema)!==local.draft.schemaFingerprint)throw c.error(409,'MAGENTO_BINDING_OBSERVATION_CHANGED','Prepare a draft with fresh Magento metadata');
-  const result=impact(local,observation.categories);
+  const result={lostRoutes:[],lostProducts:[],affected:[],preservedNames:[],projections:[]};
+  const projectionDigest=require('node:crypto').createHash('sha256');
+  const samples=new Map(),firstByRoute=new Map();
+  let preparedOld,preparedNext;
+  const local=await editor.read(options,(client)=>context(client,config,input,{deadline,onPage:async(page)=>{
+    preparedOld ??= page.old?preparePreview({...page.old,revision:page.current},page.current.schema):null;
+    preparedNext ??= preparePreview({...page.next,revision:page.draft},page.draft.schema);
+    const change=impact({...page,preparedOld,preparedNext,deadline},observation.categories);
+    for(const key of ['lostProducts','affected','preservedNames'])result[key].push(...change[key]);
+    // Debug excerpt only; the digest binds every projection, including later pages.
+    for(const p of change.projections){projectionDigest.update(c.hash(p));if(result.projections.length<64)result.projections.push(p);}
+    for(const p of page.nextProducts){
+      const affected=change.affected.find(a=>a.productId===p.id);
+      if((input.currentProductIds || []).includes(p.id) || (affected && !firstByRoute.has(affected.routeKey))){
+        if(affected && !firstByRoute.has(affected.routeKey))firstByRoute.set(affected.routeKey,p.id);
+        samples.set(p.id,{product:p,nameState:page.states.find(s=>String(s.public_product_identity_id)===String(p.public_product_identity_id)) || null});
+        if(samples.size>74)scope.limit('representative_routes');
+      }
+    }
+    scope.checkEvidence(result);
+  }}));
+  if(metadata.draft.revision!==local.draft.revision || c.hash(observation.schema)!==local.draft.schemaFingerprint)
+    throw c.error(409,'MAGENTO_BINDING_OBSERVATION_CHANGED','Prepare a draft with fresh Magento metadata');
+  result.lostRoutes=local.current?scopes(local.current).filter(r=>!scopes(local.draft).includes(r)):[];
+  const validation=local.validation;
   const newRoutes=scopes(local.draft).filter((route)=>!local.current || !scopes(local.current).includes(route)
     || local.current.bindings.routes.find((r)=>r.routeKey===route)?.setId!==local.draft.bindings.routes.find((r)=>r.routeKey===route)?.setId
     || ruleProof(local.old.compiled.definition,route.split(/[.:]/)[0],'base','attribute_set_code')!==ruleProof(local.next.compiled.definition,route.split(/[.:]/)[0],'base','attribute_set_code'));
@@ -129,11 +142,10 @@ async function preview(config,input,options={}){
     checked.push({kind:'create',...report});
   }
   const ids=new Set(input.currentProductIds || []);
-  for(const item of result.affected)if(![...ids].some((id)=>result.affected.find((a)=>a.productId===id)?.routeKey===item.routeKey))ids.add(item.productId);
+  for(const [route,id] of firstByRoute)if(![...ids].some(productId=>result.affected.find(a=>a.productId===productId)?.routeKey===route))ids.add(id);
   if(ids.size>64)throw c.error(422,'MAGENTO_PUBLICATION_LIMIT','Too many representative routes');
   for(const productId of ids){
-    const product=local.nextProducts.find((p)=>p.id===productId);if(!product)c.invalid();
-    const nameState=local.states.find((s)=>String(s.public_product_identity_id)===String(product.public_product_identity_id)) || null;
+    const sample=samples.get(productId);if(!sample)c.invalid();const {product,nameState}=sample;
     const report=await (options.currentPreview || previewProduct)(config,{databasePool:options.databasePool || pool,fetchImpl,
       bindingRevisionId:local.draft.id,productId,discover:async()=>observation.schema,
       readAmber:async()=>({...local.next,revision:local.draft,product,nameState})});
@@ -143,12 +155,13 @@ async function preview(config,input,options={}){
   const blockers=[...(!validation.valid?validation.diagnostics:[]),...missingCreate.map((routeKey)=>({code:'REPRESENTATIVE_CREATE_REQUIRED',routeKey})),
     ...checked.filter((p)=>p.kind==='current' && result.affected.some((a)=>a.productId===p.productId) && !p.sendable).map((p)=>({code:'AFFECTED_CURRENT_PREVIEW_BLOCKED',productId:p.productId}))];
   const proof={localHash:local.localHash,validation:validation.diagnostics,schemaHash:c.hash(observation.schema),nodes:observation.categories,
-    ...result,checked:checked.map(({observedAt,...p})=>{void observedAt;return p;}),blockers};
+    ...result,projectionDigest:projectionDigest.digest('hex'),checked:checked.map(({observedAt,...p})=>{void observedAt;return p;}),blockers};
   const previewToken=c.hash(clean(proof));
-  return {bindingRevisionId:local.draft.id,expectedRevision:local.draft.revision,expectedCurrentId:local.current?.id || null,
-    previewToken,totalProducts:local.nextProducts.length,lostRoutes:result.lostRoutes,lostProducts:result.lostProducts,
-    affected:result.affected,preservedNames:result.preservedNames,checked,blockers,
-    ...(options.internal?{internal:{local,proof}}:{})};
+  const response={bindingRevisionId:local.draft.id,expectedRevision:local.draft.revision,expectedCurrentId:local.current?.id || null,
+    previewToken,totalProducts:local.totalProducts,lostRoutes:result.lostRoutes,lostProducts:result.lostProducts,
+    affected:result.affected,preservedNames:result.preservedNames,checked,blockers};
+  scope.checkEvidence(response);scope.checkDeadline(deadline);
+  return {...response,...(options.internal?{internal:{local,proof}}:{})};
 }
 async function administrator(client,id){
   if(!(await client.query(`SELECT 1 FROM user_role_assignments a JOIN roles r ON r.id=a.role_id
@@ -178,6 +191,7 @@ async function publish(config,input,options={}){
     throw c.error(422,'MAGENTO_COVERAGE_ACK_REQUIRED','Explicit acknowledgement and explanation of exact lost coverage required');
   return runAccessAdminMutation({databasePool:options.databasePool || pool,actorUserId:contextActor.actorUserId,requiredPermission:'export_templates.publish',createError:c.error,
     operation:async(client)=>{
+      const localDeadline=Date.now()+scope.LIMITS.localMs;
       await assertActorStillAuthorized(client,contextActor.actorUserId,'export_templates.manage',c.error);
       await assertActorStillAuthorized(client,contextActor.actorUserId,'exports.view',c.error);
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`amber_magento_binding:${fresh.internal.local.draft.installationKey}`]);
@@ -185,20 +199,24 @@ async function publish(config,input,options={}){
       if(completed){if(completed.preview_hash!==previewToken)c.invalid();return {revision:await service.readRevisionOnClient(client,input.bindingRevisionId),handoffId:completed.id,alreadyApplied:true};}
       // Brief local publication boundary also prevents catalog/product phantoms.
       // No network calls occur under these locks.
-      await client.query('LOCK TABLE categories,questions,options,sku_schema_versions,products,magento_name_sync_states IN SHARE MODE');
-      const local=await context(client,config,request);
+      await client.query("SET LOCAL lock_timeout='5s'");
+      await client.query("SET LOCAL statement_timeout='15s'");
+      // Product before full state, then shared names. The lifecycle gate and
+      // installation/access coordination precede this existing table boundary.
+      await client.query('LOCK TABLE categories,questions,options,sku_schema_versions,products,product_full_export_state,magento_name_sync_states,magento_test_deletions IN SHARE MODE');
+      const local=await context(client,config,request,{deadline:localDeadline});
       if(local.localHash!==fresh.internal.local.localHash)throw c.error(409,'MAGENTO_PUBLICATION_STALE','Local publication evidence changed');
       if(loss)await administrator(client,contextActor.actorUserId);
       const revision=await service.publishDraftOnClient(client,contextActor,input.bindingRevisionId,{expectedRevision:input.expectedRevision,expectedCurrentId:input.expectedCurrentId});
-      if(fresh.preservedNames.length)await client.query(`INSERT INTO magento_binding_name_pins(binding_revision_id,product_id,generated,effective_names)
+      for(let offset=0;offset<fresh.preservedNames.length;offset+=scope.LIMITS.page){scope.checkDeadline(localDeadline);await client.query(`INSERT INTO magento_binding_name_pins(binding_revision_id,product_id,generated,effective_names)
         SELECT $1,v."productId",v.generated,v.before FROM jsonb_to_recordset($2::jsonb)
-          AS v("productId" integer,generated jsonb,before jsonb)`,[revision.id,JSON.stringify(fresh.preservedNames)]);
+          AS v("productId" integer,generated jsonb,before jsonb)`,[revision.id,JSON.stringify(fresh.preservedNames.slice(offset,offset+scope.LIMITS.page))]);}
       const evidence={lostRoutes:fresh.lostRoutes,lostProducts:fresh.lostProducts,affected:fresh.affected,preservedNames:fresh.preservedNames,
         ackCoverageLoss:Boolean(loss && ackCoverageLoss),coverageReason:loss?coverageReason.trim():null,currentId:input.expectedCurrentId};
-      const handoffId=await handoff.record(client,contextActor,revision,'publication',previewToken,evidence,fresh.affected);
+      const handoffId=await handoff.record(client,contextActor,revision,'publication',previewToken,evidence,fresh.affected,{deadline:localDeadline});
       await writeAuditEvent(client,{mutationContext:contextActor,eventKey:'magento_binding.publication_reviewed',subjectType:'magento_binding',subjectId:revision.id,
         details:{previewToken,handoffId,affectedCount:fresh.affected.length,preservedNameCount:fresh.preservedNames.length,coverageLoss:loss?evidence:null}});
-      return {revision,handoffId,alreadyApplied:false};
-    }});
+      scope.checkDeadline(localDeadline);return {revision,handoffId,alreadyApplied:false};
+    }}).catch(scope.translateLimit);
 }
 module.exports={MAX_PRODUCTS,projection,impact,context,preview,publish,administrator};

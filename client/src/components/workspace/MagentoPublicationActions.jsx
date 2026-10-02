@@ -13,6 +13,17 @@ const blockers = { REPRESENTATIVE_CREATE_REQUIRED: 'Потрібен готов�
 function Problems({ items }) {
   return items.length > 0 && <Notice tone="warning"><ul>{items.map((b, i) => <li key={i}>{blockers[b.code] || 'Потрібно перевірити відповідності.'}{b.routeKey ? ` · ${b.routeKey}` : ''}{b.productId ? ` · товар ${b.productId}` : ''}</li>)}</ul><Link className="underline" to="/sync-problems">Проблеми синхронізації</Link></Notice>;
 }
+function ReviewList({ items, label, render }) {
+  const [page,setPage]=useState(0),pages=Math.ceil(items.length/50);
+  const current=Math.min(page,Math.max(0,pages-1));
+  return <div className="space-y-2">{items.slice(current*50,(current+1)*50).map(render)}
+    {pages>1 && <nav aria-label={label} className="flex items-center gap-2 text-sm">
+      <button type="button" className="btn btn-outline btn-compact-md" disabled={current===0} onClick={()=>setPage(current-1)}>Назад</button>
+      <span>{current+1} / {pages} · усього {items.length}</span>
+      <button type="button" className="btn btn-outline btn-compact-md" disabled={current===pages-1} onClick={()=>setPage(current+1)}>Далі</button>
+    </nav>}
+  </div>;
+}
 export default function MagentoPublicationActions({ revision, currentPublishedId, representatives = empty, onPublished }) {
   const { permissions } = useAuth();
   const canPublish = ['export_templates.manage', 'export_templates.publish', 'exports.view'].every((p) => permissions.includes(p));
@@ -62,10 +73,10 @@ export default function MagentoPublicationActions({ revision, currentPublishedId
       {canPublish && <button type="button" className="btn btn-outline btn-compact-md" disabled={busy} onClick={() => action('publication/preview', request, setReview)}>Перевірити вплив публікації</button>}
       {review && <div className="space-y-3"><p>Перевірено поточних товарів: {review.totalProducts}. До синхронізації буде передано: {review.affected.length}. Назв збережено: {review.preservedNames.length}.</p>
         <Problems items={review.blockers} />
-        {review.affected.length > 0 && <details><summary>Точний перелік товарів для доставки</summary>{review.affected.map((p) => <p key={p.productId}>{p.article} · {p.reason === 'unblocked' ? 'Готовність відновлено' : 'Змінилась доставка'}</p>)}</details>}
-        {review.preservedNames.length > 0 && <details><summary>Вплив нового правила назв</summary>{review.preservedNames.map((p) => <p className="text-sm" key={p.productId}>{p.article}: {p.before.all} → {p.generated.all}; {p.before.en} → {p.generated.en}. Чинні назви залишаться без змін.</p>)}</details>}
+        {review.affected.length > 0 && <details><summary>Точний перелік товарів для доставки</summary><ReviewList key={review.previewToken} items={review.affected} label="Товари для доставки" render={(p) => <p key={p.productId}>{p.article} · {p.reason === 'unblocked' ? 'Готовність відновлено' : 'Змінилась доставка'}</p>} /></details>}
+        {review.preservedNames.length > 0 && <details><summary>Вплив нового правила назв</summary><ReviewList key={review.previewToken} items={review.preservedNames} label="Вплив на назви" render={(p) => <p className="text-sm" key={p.productId}>{p.article}: {p.before.all} → {p.generated.all}; {p.before.en} → {p.generated.en}. Чинні назви залишаться без змін.</p>} /></details>}
         {loss && <Notice tone="warning"><p>Покриття буде скорочено. Потрібне підтвердження Адміністратора.</p><p>Маршрути: {review.lostRoutes.join(', ') || 'без втрат'}</p>
-          {review.lostProducts.map((p) => <p key={p.productId}>{p.article} · {p.routeKey}</p>)}
+          <ReviewList key={review.previewToken} items={review.lostProducts} label="Втрата покриття" render={(p) => <p key={p.productId}>{p.article} · {p.routeKey}</p>} />
           <label className="block text-sm"><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} /> Підтверджую точну втрату покриття</label>
           <label className="block text-sm">Пояснення скорочення<input className="input" maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} /></label></Notice>}
         {canPublish && <button type="button" className="btn btn-primary btn-compact-md" disabled={busy || review.blockers.length > 0 || (loss && (!ack || reason.trim().length < 3))}
