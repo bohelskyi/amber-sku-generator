@@ -40,9 +40,12 @@ async function assertAdministrator(client, actor) {
 }
 async function amberSource(db, input, expected = null, lock = false) {
   if (lock) await db.query('SELECT id FROM questions WHERE category_code=$1 AND key=$2 FOR SHARE',[input.amberGroup,input.questionKey]);
-  const value = (await db.query(`SELECT o.label,o.label_en,q.include_in_sku FROM options o JOIN questions q ON q.id=o.question_id
+  const values = (await db.query(`SELECT o.label,o.label_en,q.include_in_sku FROM options o JOIN questions q ON q.id=o.question_id
     JOIN categories cat ON cat.code=q.category_code WHERE q.category_code=$1 AND q.key=$2 AND o.value_id=$3
-      AND o.archived=false${lock ? ' FOR SHARE OF o' : ''}`, [input.amberGroup,input.questionKey,input.valueId])).rows[0];
+      AND o.archived=false${lock ? ' FOR SHARE OF o' : ''}`, [input.amberGroup,input.questionKey,input.valueId])).rows;
+  const value=values[0];
+  if(values.some(v=>v.label!==value.label || (v.label_en ?? null)!==(value.label_en ?? null)))
+    fail('MAGENTO_OPTION_AMBER_SOURCE_AMBIGUOUS','Для цього значення Amber є різні назви. Уточніть українську та англійську назви в каталозі.');
   if (!value || (expected !== null && (value.label !== expected.label || (value.label_en ?? null) !== (expected.englishLabel ?? null)))) fail('MAGENTO_OPTION_AMBER_SOURCE_MISSING');
   if (value.include_in_sku) {
     const published = await db.query(`SELECT 1 FROM sku_schema_versions v JOIN sku_schema_questions q ON q.schema_version_id=v.id
@@ -72,7 +75,7 @@ async function observe(config, code, options) {
   const capability = characterize(await client.getProductAttribute(code));
   if (capability.attribute.attribute_code !== code) c.invalid();
   const before = normalizeOptions(await client.getProductAttributeOptions(code));
-  const result = { ...capability, before };
+  const result = { ...capability, before, englishStoreId: null };
   const views = c.list(await client.getStoreViews(),1000);
   const englishViews=views.filter(v=>v?.code==='en');
   if (englishViews.some(v=>!Number.isSafeInteger(v.id)||v.id<=0||![true,false,0,1].includes(v.is_active))
@@ -135,7 +138,8 @@ async function preview(config, input, options = {}) {
     target: checked.target, origin: config.baseUrl, attestationId: c.identity(attestationId), attributeId: checked.attribute.attribute_id,
     metadataFingerprint: checked.metadataFingerprint, before: checked.before,
     resource: { attributeId: checked.attribute.attribute_id, attributeCode: checked.target.attributeCode, label: checked.target.label.normalize('NFC') },
-    label: checked.target.label, body: { option: { label: checked.target.label, sort_order: 0, is_default: false } } };
+    label: checked.target.label, englishStoreId: checked.englishStoreId,
+    body: { option: { label: checked.target.label, sort_order: 0, is_default: false } } };
   if (checked.englishStoreId) {
     result.englishStoreId = checked.englishStoreId; result.englishBefore = checked.englishBefore;
     result.body.option.store_labels = [{ store_id: 0, label: checked.target.label }, { store_id: checked.englishStoreId, label: checked.target.englishLabel }];
@@ -156,6 +160,8 @@ async function reconcile(config, input, options = {}) {
   if (row.state !== 'returned') fail('MAGENTO_CONFIGURATION_RECONCILIATION_REQUIRED');
   const t = row.intent.target; const observed = await observe(config,t.attributeCode,options);
   if (observed.metadataFingerprint !== row.intent.metadataFingerprint) fail('MAGENTO_OPTION_METADATA_DRIFT');
+  // New intents bind explicit absence too; historical immutable intents remain readable.
+  if (Object.hasOwn(row.intent,'englishStoreId') && observed.englishStoreId!==row.intent.englishStoreId) fail('MAGENTO_OPTION_EN_SCOPE_UNRESOLVED');
   verifyOption(row.intent,row.remote_id,observed.before);
   if (row.intent.englishStoreId) {
     if (observed.englishStoreId !== row.intent.englishStoreId) fail('MAGENTO_OPTION_EN_SCOPE_UNRESOLVED');

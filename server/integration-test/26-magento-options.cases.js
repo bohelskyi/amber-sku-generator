@@ -169,6 +169,51 @@ test('H4 PostgreSQL EN label is authoritative, scoped and GET verified; SKU valu
 
 module.exports={setup,remote,reviewed};
 
+test('H4 ambiguous authoritative source labels block review and sealed dispatch without a POST',async()=>{
+  const name='amber_option_ambiguous_labels_test',f=await setup(name);
+  try {
+    const r=remote(f.db),review=await reviewed(f,r);
+    const original=(await f.db.query('SELECT * FROM options')).rows[0];
+    const duplicate=(await f.db.query(`INSERT INTO options(question_id,value_id,sku_code,label,label_en)
+      VALUES($1,$2,$3,$4,$5) RETURNING id`,[original.question_id,original.value_id,original.sku_code,original.label,original.label_en])).rows[0];
+    await option.inspect(f.config,f.input,review.opt);
+    for(const labels of [['Інша назва',null],[original.label,'Different English']]){
+      await f.db.query('UPDATE options SET label=$2,label_en=$3 WHERE id=$1',[duplicate.id,...labels]);
+      await assert.rejects(option.inspect(f.config,f.input,review.opt),{code:'MAGENTO_OPTION_AMBER_SOURCE_AMBIGUOUS'});
+      await assert.rejects(actions.seal(f.config,review.proof,review.opt),{code:'MAGENTO_OPTION_AMBER_SOURCE_AMBIGUOUS'});
+    }
+    assert.equal(r.posts,0);assert.equal((await f.db.query('SELECT count(*)::int n FROM magento_configuration_actions')).rows[0].n,0);
+  }finally{await f.db.end();await dropTestDatabase(name);}
+});
+
+test('H4 CREATE binds absent and exact active EN scope through review, dispatch and GET reconciliation',async()=>{
+  const name='amber_option_scope_review_test',f=await setup(name);
+  try {
+    await f.db.query("UPDATE options SET label_en='Amber boxes'");
+    const r=remote(f.db);let storeId=null,changeAfterPost=false;
+    const wrapped={fetch:async(url,init)=>{
+      const path=new URL(url).pathname;
+      if(path.endsWith('/store/storeViews'))return new Response(JSON.stringify(storeId?[{id:storeId,code:'en',is_active:1}]:[]),{headers:{'Content-Type':'application/json'}});
+      if(path.startsWith('/rest/en/'))return new Response(JSON.stringify([{value:'10',label:'Existing'},...(r.posts?[{value:'5738',label:'Amber boxes'}]:[])]),{headers:{'Content-Type':'application/json'}});
+      const result=await r.fetch(url,init);if(init.method==='POST'&&changeAfterPost)storeId=9;return result;
+    }};
+    const noEn=await reviewed(f,wrapped);assert.equal(noEn.proof.englishStoreId,null);
+    storeId=9;
+    await assert.rejects(option.apply(f.config,{...noEn.command,previewToken:noEn.proof.previewToken},noEn.opt),{code:'MAGENTO_CONFIGURATION_PREVIEW_STALE'});
+    const withEn=await reviewed(f,wrapped);assert.equal(withEn.proof.englishStoreId,9);
+    for(const next of [null,10]){
+      storeId=next;
+      await assert.rejects(option.apply(f.config,{...withEn.command,previewToken:withEn.proof.previewToken},withEn.opt),{code:'MAGENTO_CONFIGURATION_PREVIEW_STALE'});
+    }
+    assert.equal(r.posts,0);
+    storeId=null;changeAfterPost=true;
+    await assert.rejects(option.apply(f.config,{...noEn.command,previewToken:noEn.proof.previewToken},noEn.opt),{code:'MAGENTO_OPTION_EN_SCOPE_UNRESOLVED'});
+    const action=(await f.db.query('SELECT * FROM magento_configuration_actions')).rows[0];assert.equal(action.state,'returned');assert.equal(r.posts,1);
+    storeId=null;
+    assert.equal((await option.reconcile(f.config,{actionId:action.id},noEn.opt)).state,'verified');assert.equal(r.posts,1);
+  }finally{await f.db.end();await dropTestDatabase(name);}
+});
+
 test('H4 exact CREATE verification rejects UA fallback in EN and preserves returned identity for GET-only recovery',async()=>{
   const name='amber_option_en_verify_test',f=await setup(name);
   try {

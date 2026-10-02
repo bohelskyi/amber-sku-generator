@@ -27,6 +27,8 @@ it('controlled product picker can reach later pages and preserves the exact cros
   expect((await screen.findByLabelText(/AG-1 ·/)).checked).toBe(true);
   fireEvent.change(screen.getByLabelText('Пояснення контрольованої дії'),{target:{value:'Точний вибір із двох сторінок'}});
   fireEvent.click(screen.getByRole('button',{name:'Перевірити вибрану дію'}));
+  expect(screen.getByRole('button',{name:'Очистити вибір'}).disabled).toBe(true);
+  expect(screen.getByLabelText('Пошук за артикулом').disabled).toBe(true);
   await screen.findByText('Вибрано товарів: 2.');
   expect(api.post.mock.calls[0][1].productIds).toEqual([1,101]);
 });
@@ -109,4 +111,30 @@ it('controlled resync and name-rule application require separate selection, reas
   fireEvent.click(screen.getByRole('button', { name: 'Підтвердити контрольовану дію' }));
   await vi.waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
   expect(api.post.mock.calls[1][1]).toMatchObject({ kind: 'name_rule', productIds: [1], previewToken: 'controlled-proof' });
+});
+it('controlled article search keeps the after cursor, preserves selection, confirms exact articles and clears it',async()=>{
+  const product=(id)=>({productId:id,article:`ARTICLE-${id}`,before:{all:'Назва',en:'Name'},after:{},changed:false,blockers:[]});
+  api.get.mockImplementation((path,{params}={})=>Promise.resolve({data:path.endsWith('/handoffs')?[]:
+    {products:params.search?[product(999)]:params.after?[product(101)]:[product(1)],nextCursor:!params.after&&!params.search?100:null}}));
+  api.post.mockResolvedValue({data:{products:[product(1),product(101)],blockers:[],previewToken:'proof'}});
+  shell({revision:{...revision,id:'current',state:'published'}});
+  fireEvent.click(screen.getByText('Контрольовані дії Адміністратора'));
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити товари для контрольованої дії'}));
+  fireEvent.click(await screen.findByLabelText(/ARTICLE-1 /));
+  fireEvent.click(screen.getByRole('button',{name:'Наступні товари'}));
+  fireEvent.click(await screen.findByLabelText(/ARTICLE-101 /));
+  expect(api.get).toHaveBeenCalledWith(expect.stringContaining('/controlled-products'),{params:{after:100,search:''}});
+  fireEvent.change(screen.getByLabelText('Пояснення контрольованої дії'),{target:{value:'Reviewed articles'}});
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити вибрану дію'}));
+  await screen.findByText('Вибрано товарів: 2.');
+  expect(screen.getByText('ARTICLE-1')).toBeTruthy();expect(screen.getByText('ARTICLE-101')).toBeTruthy();
+  expect(api.post.mock.calls[0][1]).toMatchObject({kind:'broader_resync',productIds:[1,101]});
+  fireEvent.change(screen.getByLabelText('Пошук за артикулом'),{target:{value:'ARTICLE-999'}});
+  expect(screen.queryByRole('button',{name:'Підтвердити контрольовану дію'})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити товари для контрольованої дії'}));
+  await screen.findByLabelText(/ARTICLE-999 /);
+  expect(api.get).toHaveBeenLastCalledWith(expect.stringContaining('/controlled-products'),{params:{after:0,search:'ARTICLE-999'}});
+  expect(screen.getByText(/вибрано 2 \/ 100/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'Очистити вибір'}));
+  expect(screen.getByText(/вибрано 0 \/ 100/)).toBeTruthy();
 });

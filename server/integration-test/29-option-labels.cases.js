@@ -48,6 +48,12 @@ test('catalog authoritative UA/EN commands/read preserve semantic IDs, SKU codes
     assert.equal((await f.db.query('SELECT count(*)::int n FROM magento_configuration_actions')).rows[0].n,0);
     await runNodeInDatabase(f.db.options.connectionString,`(async()=>{const p=require('./src/db/pool');const row=(await p.query('SELECT * FROM options WHERE value_id=8')).rows[0];delete row.label_en;await require('./src/services/catalog.service').updateOption(row,${actor});await p.end();})()`);
     assert.equal((await f.db.query('SELECT label_en FROM options WHERE value_id=8')).rows[0].label_en,'Amber boxes');
+    for(const clear of [null,'']){
+      await runNodeInDatabase(f.db.options.connectionString,`(async()=>{const p=require('./src/db/pool');const row=(await p.query('SELECT * FROM options WHERE value_id=8')).rows[0];await require('./src/services/catalog.service').updateOption({...row,label_en:${JSON.stringify(clear)}},${actor});await p.end();})()`);
+      assert.equal((await f.db.query('SELECT label_en FROM options WHERE value_id=8')).rows[0].label_en,null);
+    }
+    assert.deepEqual((await f.db.query('SELECT * FROM sku_schema_options ORDER BY id')).rows,history);
+    assert.deepEqual((await f.db.query('SELECT * FROM products ORDER BY id')).rows,products);
   }finally{await f.db.end();await dropTestDatabase(name);}
 });
 async function bound(f) {
@@ -95,9 +101,17 @@ test('reviewed approved option EN update requires scoped adapter, durable intent
   const name='amber_option_label_update_test',f=await setup(name),second=new Pool({connectionString:f.db.options.connectionString});
   try {
     const published=await bound(f),missing=adapter(f,{absent:true});
-    await assert.rejects(labels.inspect(f.config,f.input,{...f.options,fetchImpl:missing.fetch}),{code:'MAGENTO_OPTION_LABEL_ADAPTER_REQUIRED'});assert.equal(missing.puts,0);
+    const inspection=await labels.inspect(f.config,f.input,{...f.options,fetchImpl:missing.fetch});
+    assert.match(inspection.updateUnavailable,/адаптер/);assert.equal(inspection.comparisonKind,'effective');
+    assert.deepEqual(inspection.comparison,[{scope:'all',before:'Скриньки',after:'Скриньки'},{scope:'en',before:'Old English',after:'Amber boxes'}]);
+    assert.equal(missing.puts,0);
     const r=adapter(f),review=await labelReview(f,r);
     assert.deepEqual(review.proof.differences,[{scope:'en',before:'Old English',after:'Amber boxes'}]);
+    const unavailable={...f.options,fetchImpl:missing.fetch};
+    await assert.rejects(labels.attest(f.config,{...f.input,metadataFingerprint:inspection.metadataFingerprint,confirmOrdinary:true,confirmHiddenLimit:true,evidence:'No adapter'},unavailable),{code:'MAGENTO_OPTION_LABEL_ADAPTER_REQUIRED'});
+    await assert.rejects(labels.preview(f.config,review.command,unavailable),{code:'MAGENTO_OPTION_LABEL_ADAPTER_REQUIRED'});
+    await assert.rejects(labels.apply(f.config,{...review.command,previewToken:review.proof.previewToken},unavailable),{code:'MAGENTO_OPTION_LABEL_ADAPTER_REQUIRED'});
+    assert.equal(missing.puts,0);assert.equal((await f.db.query('SELECT count(*)::int n FROM magento_configuration_actions')).rows[0].n,0);
     await f.db.query("UPDATE options SET label_en='Changed after preview'");
     await assert.rejects(labels.apply(f.config,{...review.command,previewToken:review.proof.previewToken},review.opt));assert.equal(r.puts,0);
     await f.db.query("UPDATE options SET label_en='Amber boxes'");
@@ -139,6 +153,10 @@ test('controlled picker reaches products beyond first 100; exact later selection
     const first=await controlled.candidates(f.config,f.current.id,f.options);assert.equal(first.products.length,100);assert.ok(first.nextCursor);
     const second=await controlled.candidates(f.config,f.current.id,f.options,{after:String(first.nextCursor)});
     assert.equal(second.products.length,13);assert.equal(second.nextCursor,null);assert.ok(second.products.every(p=>p.productId>first.nextCursor));
+    const article=second.products.at(-1).article;
+    const searched=await controlled.candidates(f.config,f.current.id,f.options,{after:'0',search:article.toLowerCase()});
+    assert.deepEqual(searched.products.map(p=>p.productId),[second.products.at(-1).productId]);
+    for(const query of [{search:'x'.repeat(101)},{search:[]},{afterId:'100'}])await assert.rejects(controlled.candidates(f.config,f.current.id,f.options,query));
     const ids=[first.products[0].productId,second.products.at(-1).productId],input={bindingRevisionId:f.current.id,expectedRevision:f.current.revision,kind:'broader_resync',productIds:ids,reason:'Reviewed cross-page selection'};
     const proof=await controlled.preview(f.config,input,f.options);assert.deepEqual(proof.products.map(p=>p.productId),ids);
     await f.db.query('UPDATE products SET exclude_from_export=1 WHERE id=$1',[ids[1]]);

@@ -137,7 +137,7 @@ export function OptionForm({ config, currentCatQuestions, excludeQuestionId, isN
       </div>
       <div className="catalog-option-form-grid">
         <FieldControl label="Назва українською">
-          <input className="input-sm" placeholder="Назва варіанта" value={option.label} onChange={(event) => onChange({ ...option, label: event.target.value })} />
+          <input className="input-sm" maxLength={255} placeholder="Назва варіанта" value={option.label} onChange={(event) => onChange({ ...option, label: event.target.value })} />
         </FieldControl>
         <FieldControl label="Назва англійською" hint="Необов’язково для каталогу. Потрібна для створення значення Magento з активним EN магазином.">
           <input className="input-sm" maxLength={255} placeholder="English label" value={option.label_en ?? ''} onChange={(event) => onChange({ ...option, label_en: event.target.value })} />

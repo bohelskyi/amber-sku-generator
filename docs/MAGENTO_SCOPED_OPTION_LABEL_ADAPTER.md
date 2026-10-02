@@ -2,7 +2,9 @@
 
 This is the Amber client contract required for reviewed label updates. The Magento
 adapter implementation/deployment is not included or asserted by this repository.
-Until the configured installation exposes this contract, Amber blocks the action.
+Until the configured installation exposes this contract, Amber blocks writes.
+Read-only inspection can show standard GET effective labels with an explicit
+fallback warning; these never authorize attestation, preview, apply or reconciliation.
 Standard option PUT must never substitute for it.
 
 Both fixed endpoints require Magento OAuth authorization and an attribute-management

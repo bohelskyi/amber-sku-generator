@@ -82,7 +82,11 @@ owns both labels. Historical EN remains null: no translation or UA fallback is
 invented. SKU values must already exist in the active published SKU schema. The
 server always discovers store views. If `en` is active, a nonblank Amber EN label
 is required before CREATE; the operator must complete it in the Amber catalog.
-The preview captures both PostgreSQL labels and the exact active EN store ID.
+Conflicting UA/EN labels across matching authoritative source rows fail closed;
+identical contextual labels remain valid. The preview captures both PostgreSQL
+labels and the exact active EN store ID, or explicit absence. A later scope change
+invalidates review or blocks GET verification; historical immutable intents are
+not rewritten.
 Client-authored `englishLabel`/`englishAuthoritative` are rejected. Catalog edits
 alone perform no remote write, product enrollment or SKU schema publication.
 
@@ -110,13 +114,18 @@ immutable `option_label` intent before dispatch, rechecks fresh metadata, author
 labels, current publication and adapter revision, then performs one typed PUT.
 No binding is approved, modified or published by this action.
 
-**A scoped-label adapter is required. Stock Magento option PUT is never a fallback.**
+**A scoped-label adapter is required for writes. Stock Magento option PUT is never a fallback.**
 Magento 2.4.6's [option save](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Eav/Model/Entity/Attribute/OptionManagement.php)
 and [resource persistence](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Eav/Model/ResourceModel/Entity/Attribute.php)
 replace option store-label rows and reset omitted sort order. Effective-label GETs
 cannot prove the stored translation/fallback distinction. The accepted bounded
-release therefore fails closed with `MAGENTO_OPTION_LABEL_ADAPTER_REQUIRED` if the
+release therefore blocks attest/preview/apply/reconciliation with
+`MAGENTO_OPTION_LABEL_ADAPTER_REQUIRED` if the
 configured installation does not implement the [typed adapter contract](MAGENTO_SCOPED_OPTION_LABEL_ADAPTER.md).
+Read-only inspection may still compare authoritative Amber labels with standard
+GET labels for the exact approved option ID. The UI identifies these as effective
+labels (EN may be inherited), not proof of stored overrides, and exposes no write
+controls. Adapter-backed inspection continues to use its exact stored labels.
 This repository defines and tests the Amber client/service contract with fixtures;
 it does **not** claim that the adapter exists or has been deployed in real Magento.
 Installing/accepting that Magento-side adapter is separate deployment work.
@@ -1906,8 +1915,12 @@ skipped. Receipt/generation counters survive process/page restart.
 GET `bindings/:id/handoffs` exposes the latest 20 receipts and real sync counts.
 GET `bindings/:id/controlled-products?after=<productId>` uses ordered keyset
 pagination (100 eligible current products plus one lookahead). Every later product
-is reachable. Each request is its own local snapshot, not a page of publication
-review evidence. The UI retains exact selections between pages and caps one
+is reachable. Optional `search` filters public articles by case-insensitive literal
+substring (at most 100 characters); the cursor contract remains `after`.
+Each request is its own local snapshot, not a page of publication
+review evidence. The UI retains exact selections between pages/searches, offers
+explicit selection clearing, lists the selected articles in broader-resync
+confirmation, and caps one
 controlled action at 100 products; final preview/apply revalidates the whole selected
 set together. No unexamined product is silently enrolled. A separately reviewed Administrator
 `broader_resync` action can enroll an exact selection, without changing any bindings

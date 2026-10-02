@@ -62,3 +62,18 @@ it('uncertain dispatched option offers no blind retry',async()=>{
   api.get.mockResolvedValue({data:[{id:'action',kind:'option',state:'dispatched',attributeCode:'fixture_choice',label:'Скриньки',message:'Не підтверджено',canReconcile:false}]});
   shell();await screen.findByText(/Не підтверджено/);expect(screen.queryByRole('button',{name:/Повтор|Перевірити результат/})).toBeNull();
 });
+it('missing label adapter permits effective read comparison but exposes no attestation or write action',async()=>{
+  render(<AuthContext.Provider value={{permissions:['users.manage','export_templates.manage','export_templates.publish']}}><MagentoOptionActions revision={{...revision,state:'published'}} category={category}/></AuthContext.Provider>);
+  fireEvent.change(screen.getByRole('combobox',{name:'Значення Amber'}),{target:{value:'kind:8'}});
+  fireEvent.change(screen.getByRole('combobox',{name:'Атрибут Magento'}),{target:{value:'fixture_choice'}});
+  api.post.mockResolvedValueOnce({data:{target:{label:'Скриньки',englishLabel:'Boxes'},attribute:{attribute_code:'fixture_choice',attribute_id:1471},
+    updateUnavailable:'Безпечне оновлення недоступне без адаптера Magento.',comparisonKind:'effective',
+    comparison:[{scope:'all',before:'Скриньки',after:'Скриньки'},{scope:'en',before:'Old English',after:'Boxes'}]}});
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити значення Magento'}));
+  await screen.findByText(/Безпечне оновлення недоступне/);
+  expect(screen.getByText(/Magento: Old English.*Amber: Boxes/)).toBeTruthy();
+  expect(screen.getByText(/успадкованою/)).toBeTruthy();
+  expect(screen.queryByRole('checkbox',{name:/Я перевірив/})).toBeNull();
+  expect(screen.queryByRole('button',{name:/Підтвердити можливість|Підтвердити зміну назв/})).toBeNull();
+  expect(api.post).toHaveBeenCalledTimes(1);expect(api.post.mock.calls[0][0]).toBe('/admin/magento-integration/option-labels/inspect');
+});

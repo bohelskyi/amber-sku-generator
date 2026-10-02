@@ -27,7 +27,7 @@ export default function MagentoOptionActions({ revision, category, observation }
     try {
       const response = await api.post(`${endpoint}/${kind}`, payload);
       if (current !== sequence.current) return;
-      if (kind === 'inspect') setInspection(response.data);
+      if (kind === 'inspect') { setInspection(response.data); setProof(null); }
       else if (kind === 'attest') {
         const preview = await api.post(`${root}/preview`, { ...command, attestationId: response.data.id });
         if (current === sequence.current) setProof({ ...preview.data, command: { ...command, attestationId: response.data.id } });
@@ -51,6 +51,8 @@ export default function MagentoOptionActions({ revision, category, observation }
         <button className="btn btn-outline btn-compact-md" disabled={busy || !command || !attributeCode}>Перевірити значення Magento</button>
       </form>
       {inspection && <div className="space-y-3 border-t pt-3"><p className="text-sm">Глобальна назва Amber: {inspection.target.label}. EN: {inspection.target.englishLabel || 'Не задано в каталозі Amber'}. Атрибут: {inspection.attribute.attribute_code} / {inspection.attribute.attribute_id}.</p>
+        {labelUpdate && inspection.comparison?.map(d=><p className="text-sm" key={d.scope}>{d.scope==='all'?'Українська':'Англійська'} · Magento: {d.before ?? 'Не задано'} · Amber: {d.after ?? 'Не задано'}</p>)}
+        {inspection.updateUnavailable ? <Notice tone="warning">{inspection.updateUnavailable} Показано назви, які повертає Magento; англійська може бути успадкованою глобальною назвою. Це не доказ збереженого перекладу.</Notice> : <>
         {!labelUpdate && inspection.candidates.length ? <Notice>Значення вже існує: {inspection.candidates.map((c) => `${c.label} / ${c.value}`).join(', ')}. Підтвердьте зв’язок окремо в чернетці відповідностей.</Notice> : <>
           <Notice>{inspection.warning}</Notice>
           <label className="flex gap-2 text-sm"><input type="checkbox" checked={ordinary} onChange={(e) => { setOrdinary(e.target.checked); setProof(null); }} />Я перевірив, що це звичайний user-defined select/multiselect, без swatch або custom source model.</label>
@@ -59,6 +61,7 @@ export default function MagentoOptionActions({ revision, category, observation }
           <button className="btn btn-outline btn-compact-md" disabled={busy || !ordinary || !hidden || evidence.trim().length < 3} onClick={() => run('attest', {
             ...command, metadataFingerprint: inspection.metadataFingerprint, confirmOrdinary: ordinary, confirmHiddenLimit: hidden, evidence,
           })}>{labelUpdate ? 'Підтвердити можливість і переглянути зміни' : 'Підтвердити можливість і переглянути створення'}</button>
+        </>}
         </>}
       </div>}
       {proof && <Notice><p>{labelUpdate ? 'Оновити назви' : 'Створити'} «{proof.label}» в {proof.target.attributeCode}{proof.target.englishLabel ? `; EN: ${proof.target.englishLabel}` : ''}. Це не підтверджує semantic binding.</p>

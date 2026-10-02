@@ -56,7 +56,9 @@ async function preview(config,input,options={}){
   return {...report,previewToken:c.hash({input,report})};
 }
 async function candidates(config,id,options={},query={}){
-  c.command(query,[],['after']);
+  c.command(query,[],['after','search']);
+  const search=query.search ?? '';
+  if(typeof search!=='string'||search.length>100)c.invalid();
   if (query.after !== undefined && !['string','number'].includes(typeof query.after)) c.invalid();
   const after = query.after === undefined ? 0 : Number(query.after);
   if (!Number.isSafeInteger(after) || after < 0 || after > 2147483647 || (query.after !== undefined && !/^(0|[1-9][0-9]*)$/.test(String(query.after)))) c.invalid();
@@ -66,7 +68,9 @@ async function candidates(config,id,options={},query={}){
     if(revision.state!=='published'||current?.id!==id)throw c.error(409,'MAGENTO_BINDING_CONFLICT','Current publication changed');
     const rows=(await client.query(`SELECT id FROM products p WHERE id>$1 AND status='active' AND corrected_to_product_id IS NULL
       AND exclude_from_export=0 AND NOT EXISTS(SELECT 1 FROM magento_test_deletions d WHERE d.public_product_identity_id=p.public_product_identity_id)
-      ORDER BY id LIMIT 101`,[after])).rows;
+      AND ($2='' OR EXISTS(SELECT 1 FROM public_product_identities i WHERE i.id=p.public_product_identity_id
+        AND position(lower($2) in lower(i.public_sku))>0))
+      ORDER BY id LIMIT 101`,[after,search.trim()])).rows;
     const hasMore=rows.length>100,page=rows.slice(0,100);
     if(!page.length)return {products:[],nextCursor:null};
     const report=await inspect(client,config,{bindingRevisionId:id,expectedRevision:revision.revision,kind:'name_rule',productIds:page.map((r)=>r.id)});

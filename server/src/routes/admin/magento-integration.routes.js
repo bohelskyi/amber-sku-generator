@@ -20,7 +20,7 @@ const handle = (operation) => async (req, res) => {
   try { res.json(await operation(req)); }
   catch (cause) { sendHttpError(res, cause, { includeCode: true, includeDetails: true }); }
 };
-router.get(root, requirePermission('export_templates.view'), handle((req) => editor.overview(config, req.query)));
+router.get(root, requirePermission('export_templates.view'), handle((req) => editor.overview(config, {...req.query})));
 router.post(`${root}/discovery`, requirePermission('export_templates.view'), handle(() => editor.discovery(config)));
 router.get(`${root}/bindings/:id`, requirePermission('export_templates.view'), handle((req) => bindingReview.get(config,req.params.id)));
 router.get(`${root}/bindings/:id/handoffs`,requirePermission('export_templates.view'),handle((req)=>handoff.status(config,req.params.id)));

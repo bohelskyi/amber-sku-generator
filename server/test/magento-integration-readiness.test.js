@@ -44,3 +44,17 @@ test('integration routes preserve view/manage/exports permission boundaries', ()
             ? ['export_templates.manage'] : ['export_templates.view']);
   }
 });
+test('overview normalizes Express null-prototype query before strict command validation', async () => {
+  const router=require('../src/routes/admin/magento-integration.routes');
+  const editor=require('../src/services/magento/integration-editor.service');
+  const contract=require('../src/services/magento/binding-contract');
+  const original=editor.overview;let called=false;
+  editor.overview=async(config,input)=>{contract.command(input,[],['bindingRevisionId']);called=true;return input;};
+  try {
+    const route=router.stack.find(l=>l.route.path==='/admin/magento-integration');
+    const query=Object.assign(Object.create(null),{bindingRevisionId:'fixture'});
+    const response={json:()=>{},status:()=>response};
+    await route.route.stack.at(-1).handle({query},response);
+    assert.equal(called,true);
+  } finally {editor.overview=original;}
+});

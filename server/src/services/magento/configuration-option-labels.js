@@ -43,29 +43,47 @@ function adapterEvidence(raw,target,englishStoreId) {
   } else if (raw.labels.en !== null) c.invalid();
   return c.safeData(raw,[],16384);
 }
-async function observe(config,target,options) {
+async function observe(config,target,options,allowComparison=false) {
   const fetchImpl = boundedGet(options.fetchImpl,{maxRequests:6});
   const observed = await option.observe(config,target.attributeCode,{...options,fetchImpl});
   if (observed.attribute.attribute_id !== target.attributeId) fail('MAGENTO_OPTION_METADATA_DRIFT','Ідентичність атрибута змінилась.');
-  if (observed.englishStoreId && !target.englishLabel)
+  if (!allowComparison && observed.englishStoreId && !target.englishLabel)
     fail('MAGENTO_OPTION_EN_LABEL_REQUIRED','Заповніть англійську назву варіанта в каталозі Amber.');
   let raw;
   try { raw = await createMagentoClient(config,{fetchImpl}).getScopedOptionLabels(target.attributeCode,target.optionId); }
-  catch { fail('MAGENTO_OPTION_LABEL_ADAPTER_REQUIRED','Потрібен адаптер безпечної зміни назв Magento. Стандартний PUT може змінити порядок і видалити інші переклади; його не буде надіслано.'); }
+  catch {
+    const message='Безпечне оновлення недоступне без адаптера Magento. Стандартний PUT не буде надіслано.';
+    if(allowComparison)return {...observed,remote:null,updateUnavailable:message};
+    fail('MAGENTO_OPTION_LABEL_ADAPTER_REQUIRED',message);
+  }
   const remote = adapterEvidence(raw,target,observed.englishStoreId);
   return {...observed,remote};
 }
 async function inspect(config,input,options={}) {
   c.command(input,FIELDS);
   const target = await approved(options.databasePool || pool,config,input);
-  const checked = await observe(config,target,options);
-  return {target,...checked,warning:'Administrator перевіряє звичайний select/multiselect для цієї дії. Адаптер змінює лише перевірені назви, зберігає порядок та інші переклади й атомарно перевіряє revision.'};
+  const checked = await observe(config,target,options,true);
+  function effective(rows) {
+    const matching=rows.filter(r=>r.value===target.optionId);
+    if(matching.length!==1)fail('MAGENTO_OPTION_IDENTITY_MISSING','Точний затверджений варіант не знайдено в Magento.');
+    return matching[0].label;
+  }
+  const comparison=[{scope:'all',before:checked.remote ? checked.remote.labels.all : effective(checked.before),after:target.label},
+    ...(checked.englishStoreId ? [{scope:'en',before:checked.remote ? checked.remote.labels.en.label : effective(checked.englishBefore),after:target.englishLabel ?? null}] : [])];
+  return {target,...checked,comparison,comparisonKind:checked.remote ? 'stored' : 'effective',
+    warning:'Administrator перевіряє звичайний select/multiselect для цієї дії. Адаптер змінює лише перевірені назви, зберігає порядок та інші переклади й атомарно перевіряє revision.'};
+}
+function requireWritable(checked) {
+  if(checked.updateUnavailable)fail('MAGENTO_OPTION_LABEL_ADAPTER_REQUIRED',checked.updateUnavailable);
+  if(checked.englishStoreId && !checked.target.englishLabel)
+    fail('MAGENTO_OPTION_EN_LABEL_REQUIRED','Заповніть англійську назву варіанта в каталозі Amber.');
 }
 async function attest(config,input,options={}) {
   c.command(input,[...FIELDS,'metadataFingerprint','confirmOrdinary','confirmHiddenLimit','evidence']);
   if (input.confirmOrdinary !== true || input.confirmHiddenLimit !== true || typeof input.evidence !== 'string'
     || input.evidence.trim().length < 3 || input.evidence.length > 2000) c.invalid();
   const checked = await inspect(config,Object.fromEntries(FIELDS.map(k=>[k,input[k]])),options);
+  requireWritable(checked);
   if (checked.metadataFingerprint !== input.metadataFingerprint) fail('MAGENTO_OPTION_ATTESTATION_STALE','Повторіть перевірку атрибута.');
   return option.recordAttestation(config,checked,input.evidence,options);
 }
@@ -77,6 +95,7 @@ async function checkedSource(client,config,preview,actor) {
 async function preview(config,input,options={}) {
   c.command(input,[...FIELDS,'attestationId']);
   const {attestationId,...command}=input,checked=await inspect(config,command,options);
+  requireWritable(checked);
   const {target,remote}=checked;
   const differences=[{scope:'all',before:remote.labels.all,after:target.label},
     ...(checked.englishStoreId ? [{scope:'en',before:remote.labels.en.label,after:target.englishLabel}] : [])].filter(d=>d.before!==d.after);
