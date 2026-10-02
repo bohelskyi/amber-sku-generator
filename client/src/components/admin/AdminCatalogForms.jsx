@@ -136,8 +136,11 @@ export function OptionForm({ config, currentCatQuestions, excludeQuestionId, isN
         <button type="button" onClick={onCancel} className="btn btn-outline px-3 py-1.5 text-xs">Закрити</button>
       </div>
       <div className="catalog-option-form-grid">
-        <FieldControl label="Назва">
-          <input className="input-sm" placeholder="Назва варіанта" value={option.label} onChange={(event) => onChange({ ...option, label: event.target.value })} />
+        <FieldControl label="Назва українською">
+          <input className="input-sm" maxLength={255} placeholder="Назва варіанта" value={option.label} onChange={(event) => onChange({ ...option, label: event.target.value })} />
+        </FieldControl>
+        <FieldControl label="Назва англійською" hint="Необов’язково для каталогу. Потрібна для створення значення Magento з активним EN магазином.">
+          <input className="input-sm" maxLength={255} placeholder="English label" value={option.label_en ?? ''} onChange={(event) => onChange({ ...option, label_en: event.target.value })} />
         </FieldControl>
         <FieldControl label="Внутрішнє значення" hint={isNew ? 'Нове унікальне значення для цін та умов.' : 'Використовується у цінах, умовах і модифікаторах.'}>
           <input className="input-sm" type="number" placeholder="6" value={option.value_id} onChange={(event) => onChange({ ...option, value_id: event.target.value })} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
@@ -169,6 +172,7 @@ export function OptionRow({ canManage = true, archived = false, config, currentC
         <div className="catalog-option-name"><span>{option.label}</span>{archived && <small>Архівний</small>}</div>
         <div className="catalog-option-meta">
           <span className="font-mono">SKU {option.sku_code ?? option.id}</span>
+          {option.label_en && <span>EN: {option.label_en}</span>}
           {hasConditions && <span title={`Показувати: ${visibleSummary}. Приховувати: ${hiddenSummary}`}>За умовою</span>}
         </div>
       </div>

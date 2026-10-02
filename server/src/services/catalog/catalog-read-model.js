@@ -2,10 +2,10 @@ const initialConfig = require('../../../data_config');
 const pool = require('../../db/pool');
 const { startPhase } = require('../../observability/performance-metrics');
 
-async function getAppConfig() {
+async function getAppConfig(queryable = pool) {
   const config = { categories: {}, questions: {}, extraConfig: initialConfig.extraConfig };
 
-  const categories = await pool.query(
+  const categories = await queryable.query(
     `SELECT c.*,
             NOT (
               EXISTS (SELECT 1 FROM products p WHERE p.category = c.code)
@@ -34,7 +34,7 @@ async function getAppConfig() {
     };
   }
 
-  const questions = await pool.query(`
+  const questions = await queryable.query(`
     SELECT
       q.id AS q_db_id,
       q.category_code,
@@ -51,6 +51,7 @@ async function getAppConfig() {
       o.value_id,
       o.sku_code,
       o.label AS o_label,
+      o.label_en AS o_label_en,
       o.visible_if_json,
       o.hidden_if_json,
       COALESCE(o.archived, FALSE) AS o_archived
@@ -85,6 +86,7 @@ async function getAppConfig() {
         id: row.value_id,
         sku_code: String(row.sku_code ?? row.value_id),
         label: row.o_label,
+        label_en: row.o_label_en ?? null,
         visible_if_json: row.visible_if_json || null,
         hidden_if_json: row.hidden_if_json || null,
         archived: row.o_archived ? 1 : 0,

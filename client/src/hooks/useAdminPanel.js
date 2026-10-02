@@ -7,10 +7,10 @@ import { useAdminPricingController } from './admin/useAdminPricingController';
 import { useAdminSchemaController } from './admin/useAdminSchemaController';
 import { getApiError } from '../lib/http-error';
 
-const emptyEditOption = { id: null, value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false };
+const emptyEditOption = { id: null, value_id: '', sku_code: '', label: '', label_en: '', visible_if_json: '', hidden_if_json: '', archived: false };
 const emptyNewCategory = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false, marketing_rounding_enabled: true };
 const emptyNewQuestion = { key: '', label: '', display_order: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' };
-const emptyNewOption = { value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false };
+const emptyNewOption = { value_id: '', sku_code: '', label: '', label_en: '', visible_if_json: '', hidden_if_json: '', archived: false };
 const getNextDisplayOrder = (questions = []) => {
   const maxOrder = questions.reduce((maxValue, question) => {
     const orderValue = Number(question.display_order ?? question.sku_index);
@@ -275,12 +275,13 @@ export function useAdminPanel() {
       value_id: newOpt.value_id,
       sku_code: newOpt.sku_code || newOpt.value_id,
       label: newOpt.label,
+      label_en: newOpt.label_en || null,
       visible_if_json: parsedVisibleRule.value,
       hidden_if_json: parsedHiddenRule.value,
     }).then(() => {
       setNewOpt(emptyNewOption);
       fetchConfig();
-    });
+    }).catch((err) => alert(`Помилка створення варіанта: ${err.response?.data?.error || err.message}`));
   };
 
   const beginOptionEdit = (option) => {
@@ -289,6 +290,7 @@ export function useAdminPanel() {
       value_id: String(option.id),
       sku_code: String(option.sku_code ?? option.id),
       label: option.label,
+      label_en: option.label_en ?? '',
       visible_if_json: option.visible_if_json ? formatMatchJson(option.visible_if_json) : '',
       hidden_if_json: option.hidden_if_json ? formatMatchJson(option.hidden_if_json) : '',
       archived: option.archived === 1 || option.archived === true,
@@ -308,6 +310,7 @@ export function useAdminPanel() {
       value_id: editOpt.value_id,
       sku_code: editOpt.sku_code,
       label: editOpt.label,
+      label_en: editOpt.label_en || null,
       visible_if_json: parsedVisibleRule.value,
       hidden_if_json: parsedHiddenRule.value,
       archived: editOpt.archived,

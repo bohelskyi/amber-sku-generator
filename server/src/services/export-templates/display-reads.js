@@ -1,5 +1,5 @@
 const { PublicHttpError } = require('../../http/errors');
-const { HEADERS } = require('./magento-v1-data');
+const { isIntegrationCategoryCode } = require('./version-contract');
 const invalid = () => { throw new PublicHttpError(400, 'Invalid display query', { code: 'TEMPLATE_COMMAND_INVALID' }); };
 
 async function searchSampleProducts(client, input) {
@@ -18,7 +18,7 @@ async function searchSampleProducts(client, input) {
 
 async function sourceDetails(client, input) {
   if (!input || Object.keys(input).some((k) => !['category', 'key'].includes(k))
-    || typeof input.category !== 'string' || !Object.hasOwn(HEADERS, input.category) || typeof input.key !== 'string'
+    || !isIntegrationCategoryCode(input.category) || typeof input.key !== 'string'
     || !/^[A-Za-z0-9_]{1,80}$/.test(input.key) || ['__proto__', 'constructor', 'prototype'].includes(input.key)) invalid();
   const parameters = [input.category, input.key, 513];
   const current = (await client.query(`SELECT q.label, q.include_in_sku, q.input_type,

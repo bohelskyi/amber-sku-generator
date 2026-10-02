@@ -209,7 +209,7 @@ async function validateStored(client, loaded) {
   const t = await template(client, loaded.row.template_version_id);
   const result = validateBindings(loaded.bindings, t.compiled.definition, loaded.schema, { publish: true });
   // Reuse authoritative repository semantic evidence. No SKU-digit or label inference.
-  const evidence = await loadSourceEvidence(client);
+  const evidence = await loadSourceEvidence(client, t.compiled.definition);
   const sourceDiagnostics = validateSourceReferences(t.compiled.definition, evidence);
   for (const option of loaded.bindings.options.filter((o) => o.sourceKind === 'semantic')) {
     const current = evidence.questions.filter((q) => q.category_code === option.amberGroup && q.key === option.questionKey);
@@ -230,16 +230,24 @@ async function validateStored(client, loaded) {
 }
 async function validateDraft(id, options = {}) {
   c.identity(id);
-  return read(options, async (client) => {
-    const loaded = await load(client, id);
-    return { id, revision: loaded.row.revision, ...await validateStored(client, loaded) };
-  });
+  return read(options, (client) => validateDraftOnClient(client,id));
+}
+async function validateDraftOnClient(client,id) {
+  const loaded=await load(client,c.identity(id));
+  return {id,revision:loaded.row.revision,...await validateStored(client,loaded)};
 }
 async function publishDraft(id, input, options = {}) {
   c.identity(id); c.command(input, ['expectedRevision','expectedCurrentId']);
-  const expected = c.counter(input.expectedRevision);
+  c.counter(input.expectedRevision);
   if (input.expectedCurrentId !== null) c.identity(input.expectedCurrentId);
   return mutate('publish', options, async (client, context) => {
+    return publishDraftOnClient(client,context,id,input);
+  });
+}
+// Internal publication primitive: caller owns authorization, local locks and
+// final review revalidation. Existing operator command retains its CAS contract.
+async function publishDraftOnClient(client,context,id,input) {
+    const expected=c.counter(input.expectedRevision);
     const summary = (await client.query('SELECT installation_key FROM magento_binding_revisions WHERE id=$1', [id])).rows[0];
     if (!summary) throw c.error(404, 'MAGENTO_BINDING_NOT_FOUND', 'Binding revision not found');
     await lockInstallation(client, summary.installation_key);
@@ -259,7 +267,6 @@ async function publishDraft(id, input, options = {}) {
     [id, current ? (BigInt(current.version_number) + 1n).toString() : '1', context.actorUserId])).rows[0];
     await audit(client, context, 'published', loaded.row);
     return view(loaded);
-  });
 }
 // Trusted server readers can include the revision in their own coherent read-only snapshot.
 async function readRevisionOnClient(client, id) { c.identity(id); return view(await load(client, id)); }
@@ -275,5 +282,5 @@ async function listRevisions(key, options = {}) {
     CASE WHEN state='published' AND version_number < max(version_number) OVER () THEN 'superseded' ELSE state END AS lifecycle
     FROM magento_binding_revisions WHERE installation_key=$1 ORDER BY created_at DESC, id`, [key])).rows);
 }
-module.exports = { createDraftOnClient, importReviewedDraftOnClient, createDraft, clonePublished, updateDraft,
-  validateDraft, publishDraft, getRevision, getCurrentPublished, listRevisions, readRevisionOnClient };
+module.exports = { createDraftOnClient, importReviewedDraftOnClient, publishDraftOnClient, createDraft, clonePublished, updateDraft,
+  validateDraft, validateDraftOnClient, publishDraft, getRevision, getCurrentPublished, listRevisions, readRevisionOnClient };

@@ -8,6 +8,7 @@ import { ExportWorkflowProvider } from './hooks/product/export-workflow-context'
 
 const AppPage = lazy(() => import('./pages/AppPage.jsx'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
+const MagentoIntegrationPage = lazy(() => import('./pages/MagentoIntegrationPage.jsx'));
 const SyncProblemsPage = lazy(() => import('./pages/SyncProblemsPage.jsx'));
 const AdminPage = lazy(() => import('./pages/AdminPage.jsx'));
 const RepricingPage = lazy(() => import('./pages/RepricingPage.jsx'));
@@ -43,6 +44,7 @@ export function Workspace() {
             <Route path="/settings" element={guard('/settings', <SettingsPage />)} />
             <Route path="/sync-problems" element={guard('/sync-problems', <SyncProblemsPage />)} />
             <Route path="/admin" element={guard('/admin', <AdminPage />)} />
+            <Route path="/admin/magento/*" element={guard('/admin/magento', <MagentoIntegrationPage />)} />
             <Route path="/admin/repricing" element={guard('/admin/repricing', <RepricingPage />)} />
             <Route path="/admin/corrections" element={guard('/admin/corrections', <CorrectionRequestsPage />)} />
             <Route path="/admin/corrections/history" element={guard('/admin/corrections/history', <CorrectionHistoryPage />)} />

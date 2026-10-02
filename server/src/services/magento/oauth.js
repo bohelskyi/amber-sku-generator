@@ -45,6 +45,22 @@ function signRequest(method, urlString, credentials, {
 }
 
 function signGetRequest(url, credentials, options) { return signRequest('GET', url, credentials, options); }
+function signOptionCreateRequest(url, credentials, options) {
+  let parsed;
+  try { parsed = new URL(url); } catch { throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID'); }
+  if (parsed.search || !/^\/rest\/all\/V1\/products\/attributes\/[a-zA-Z][a-zA-Z0-9_]{0,99}\/options$/.test(parsed.pathname)) {
+    throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID');
+  }
+  return signRequest('POST', url, credentials, options);
+}
+function signScopedOptionLabelRequest(url, credentials, options) {
+  let parsed;
+  try { parsed = new URL(url); } catch { throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID'); }
+  if (parsed.search || !/^\/rest\/all\/V1\/amber\/attributes\/[a-zA-Z][a-zA-Z0-9_]{0,99}\/options\/[1-9][0-9]*\/labels$/.test(parsed.pathname)) {
+    throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID');
+  }
+  return signRequest('PUT', url, credentials, options);
+}
 function signCategoryCreateRequest(url, credentials, options) {
   let parsed;
   try { parsed = new URL(url); }
@@ -72,4 +88,4 @@ function signTestDeleteRequest(url, credentials, options) {
   }
   return signRequest('DELETE', url, credentials, options);
 }
-module.exports = { percentEncode, signGetRequest, signCategoryCreateRequest, signSyncRequest, signTestDeleteRequest };
+module.exports = { percentEncode, signGetRequest, signCategoryCreateRequest, signSyncRequest, signTestDeleteRequest, signOptionCreateRequest, signScopedOptionLabelRequest };

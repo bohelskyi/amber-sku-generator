@@ -5,6 +5,7 @@ import { ColumnInspector } from './ColumnInspector';
 import { CategoryTabs, TemplateDesignGrid } from './TemplateDesignGrid';
 import { columnIntent } from '../../lib/export-template-intent';
 import './export-template-editor.css';
+import IntegrationCategoryForm from './IntegrationCategoryForm.jsx';
 
 function ColumnOperation({ definition, groupIndex, column, action, onApply, onCancel, onPendingChange, suspended }) {
   const group = definition.groups[groupIndex];
@@ -76,13 +77,14 @@ export function DefinitionEditor({ definition, onChange, registry, readOnly = fa
     // eslint-disable-next-line react-hooks/set-state-in-effect
     reveal();
   }, [focusField]);
-  const supported = definition?.formatVersion === 1 && ['magento-declarative-1', 'magento-declarative-2'].includes(definition.evaluatorVersion) && ['magento-products-v1', COLUMN_CONTRACT].includes(definition.outputContract)
+  const supported = definition?.formatVersion === 1 && ['magento-declarative-1', 'magento-declarative-2', 'magento-declarative-3', 'magento-declarative-4'].includes(definition.evaluatorVersion) && ['magento-products-v1', COLUMN_CONTRACT].includes(definition.outputContract)
     && Array.isArray(definition.groups) && Array.isArray(definition.bindings) && definition.bindings.every((binding) => record(binding) && typeof binding.id === 'string' && record(binding.value))
     && record(definition.sources) && Object.values(definition.sources).every(record) && record(definition.tables) && Object.values(definition.tables).every(record)
     && definition.groups.every((group) => record(group) && Array.isArray(group.columns) && group.columns.every((key) => typeof key === 'string') && Array.isArray(group.rows) && group.rows.every((row) => record(row) && record(row.cells)));
   if (!supported || !definition.groups[groupIndex]) return <div role="note">Цей формат ще не підтримується формами. Визначення збережено без змін.<details><summary>Технічне визначення</summary><pre>{JSON.stringify(definition, null, 2)}</pre></details></div>;
   const inspectorOverlay = overlay || Boolean(selection && columnIntent(definition, ['groups', groupIndex, 'rows', selection.rowIndex, 'cells', selection.column]) === 'condition');
   return <div ref={root} className="et-fields">
+    {!readOnly && !selection && !creation && !operation && <IntegrationCategoryForm definition={definition} registry={registry} onChange={guardedChange} />}
     <CategoryTabs groups={definition.groups} selected={groupIndex} panelId={panelId} onSelect={(index) => request(() => { close(); setGroupIndex(index); })} />
     <div role="tabpanel" id={panelId} aria-label={definition.groups[groupIndex].name} className={selection && !inspectorOverlay ? 'et-design-layout et-design-with-panel' : 'et-design-layout'}>
       <TemplateDesignGrid definition={definition} groupIndex={groupIndex} registry={registry} selected={selection} readOnly={readOnly} onCreate={() => openCreation()} onSelect={(code, row) => request(() => select(code, row))} onAction={(action, code) => {

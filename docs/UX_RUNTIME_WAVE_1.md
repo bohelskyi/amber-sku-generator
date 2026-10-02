@@ -1,5 +1,7 @@
 # Wave 1: UX and runtime cleanup
 
+Wave 1 is deployed in production via PR #19 at `daf627fc2458e5215cbf52735a8f186a3777361f` (operator receipt 2026-10-01). The following sections retain the implementation/review boundaries and historical checks; pre-production or uncommitted wording describes that earlier stage. Wave 2 H0 is a separate implementation.
+
 This work implements A–G of the approved two-wave plan. Wave 2 remains a separate review boundary: H0 → H1 → H2 → H4 → H3a → H3b. No integration editor, v4 contract, generic Magento mutation primitive, or published binding change belongs to Wave 1. The accepted manual corrections require forward migration 049 for shared-authority names, bounded discovery and captured repricing obligations.
 
 ## Review boundaries

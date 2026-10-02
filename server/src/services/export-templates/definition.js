@@ -2,6 +2,7 @@ const { createHash } = require('node:crypto');
 const { HEADERS } = require('./magento-v1-data');
 const { PRODUCT_FIELDS, fail } = require('./input-projection');
 const { CONTRACT, REQUIRED, validCode } = require('./column-contract');
+const { EXTENSIBLE_EVALUATOR, MAX_GROUPS, isPublicEvaluator, isIntegrationCategoryCode } = require('./version-contract');
 
 const LIMITS = Object.freeze({ definitionBytes: 256 * 1024, sources: 256, bindings: 512,
   depth: 8, children: 16, tableEntries: 512, totalTableEntries: 4096,
@@ -75,12 +76,22 @@ function freeze(value) {
 function inspectDefinition(d) {
   const definitionBytes = preflight(d);
   shape(d, ['formatVersion', 'evaluatorVersion', 'outputContract', 'sources', 'tables', 'questionContracts', 'bindings', 'groups'], ['sourceSupport', 'sourceContractVersion']);
-  check(d.formatVersion === 1 && ['magento-declarative-1', 'magento-declarative-2', 'magento-declarative-3'].includes(d.evaluatorVersion)
+  const extensible = d.evaluatorVersion === EXTENSIBLE_EVALUATOR;
+  check(d.formatVersion === 1 && ['magento-declarative-1', 'magento-declarative-2', 'magento-declarative-3', EXTENSIBLE_EVALUATOR].includes(d.evaluatorVersion)
     && ['magento-products-v1', CONTRACT].includes(d.outputContract), 'Unsupported version/contract');
-  if (d.evaluatorVersion === 'magento-declarative-3') {
+  if (isPublicEvaluator(d.evaluatorVersion)) {
     check(d.sourceContractVersion === 'public-product-identity-v1', 'Public product source contract required');
   } else check(d.sourceContractVersion === undefined, 'Public product source contract requires evaluator 3');
   const editableColumns = d.outputContract === CONTRACT;
+  let declaredCategories;
+  if (extensible) {
+    check(editableColumns, 'Evaluator 4 requires protected editable columns');
+    list(d.groups, MAX_GROUPS); check(d.groups.length > 0, 'At least one group required');
+    check(d.groups.every((g) => record(g) && isIntegrationCategoryCode(g.route)), 'Group category code');
+    declaredCategories = new Set(d.groups.map((g) => g.route));
+    check(declaredCategories.size === d.groups.length, 'Duplicate group route');
+  }
+  const categoryAllowed = (value) => extensible ? declaredCategories.has(value) : Object.hasOwn(HEADERS, value);
   check(record(d.sources) && Object.keys(d.sources).length <= LIMITS.sources, 'Source limit');
   for (const [name, s] of Object.entries(d.sources)) {
     check(id(name) && record(s), 'Source ID/descriptor');
@@ -88,11 +99,11 @@ function inspectDefinition(d) {
       shape(s, ['kind', 'field', 'type']);
       check(PRODUCT_FIELDS.includes(s.field)
         && s.type === (['full_sku', 'public_sku', 'category'].includes(s.field) ? 'text' : 'scalar')
-        && (s.field !== 'public_sku' || d.evaluatorVersion === 'magento-declarative-3'), 'Product source');
+        && (s.field !== 'public_sku' || isPublicEvaluator(d.evaluatorVersion)), 'Product source');
     } else {
       shape(s, ['kind', 'category', 'key', 'type', 'provenance', 'aliases']);
       check(['semantic', 'information'].includes(s.kind) && s.type === 'scalar', 'Answer kind/type');
-      check(typeof s.category === 'string' && Object.hasOwn(HEADERS, s.category) && safeKey(s.key), 'Answer location');
+      check(typeof s.category === 'string' && categoryAllowed(s.category) && safeKey(s.key), 'Answer location');
       check(s.provenance === 'supplied-stored-answers-v1', 'Unsupported provenance');
       list(s.aliases);
       const keys = new Set([s.key]);
@@ -268,17 +279,17 @@ function inspectDefinition(d) {
   for (const b of d.bindings) {
     shape(b, ['id', 'group', 'value']);
     check(id(b.id) && !types.has(b.id) && typeof b.group === 'string'
-      && (b.group === '*' || Object.hasOwn(HEADERS, b.group)), 'Binding ID/scope');
+      && (b.group === '*' || categoryAllowed(b.group)), 'Binding ID/scope');
     dependencies = new Set();
     types.set(b.id, node(b.value, b.group)); scopes.set(b.id, b.group);
     bindingSources.set(b.id, dependencies);
   }
-  list(d.groups, 6); check(d.groups.length === 6, 'Six groups required');
+  if (!extensible) { list(d.groups, 6); check(d.groups.length === 6, 'Six groups required'); }
   const routes = new Set();
   for (const g of d.groups) {
     dependencies = new Set();
     shape(g, ['route', 'name', 'columns', 'evaluate', 'rows'], editableColumns ? ['columnLabels', 'outputChecks'] : []);
-    check(typeof g.route === 'string' && Object.hasOwn(HEADERS, g.route) && !routes.has(g.route)
+    check(typeof g.route === 'string' && categoryAllowed(g.route) && !routes.has(g.route)
       && typeof g.name === 'string' && g.name.trim() !== '', 'Group route');
     routes.add(g.route);
     list(g.columns, 64);

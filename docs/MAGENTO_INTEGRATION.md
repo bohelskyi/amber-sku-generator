@@ -1,5 +1,145 @@
 # Magento integration
 
+## Self-service integration workspace (Wave 2)
+
+Settings → **Інтеграція Magento** (`/admin/magento`) reads every configured Amber
+category, its published SKU schema, the current publication or a selected frozen
+binding draft, semantic mappings and local product evaluation counts. New unsupported
+categories explicitly show **Категорія ще не готова до Magento**. This does not
+prohibit ordinary product saves or publish any later layer automatically.
+
+The authenticated `/api/admin/magento-integration` overview is a repeatable-read
+local snapshot. Discovery is an explicit CSRF-protected GET-only remote operation
+(`POST .../discovery`), bounded to 512 requests and 60 seconds per invocation;
+limit/failure never produces a complete-success receipt. Attribute sets, membership,
+attributes/options and full category paths are observations, not approved bindings.
+Equal labels remain candidates and semantic `value_id` remains distinct from the
+Magento option ID. Frozen observations retain their timestamps.
+
+Local evaluation checks at most 100 current products per overview and reports
+the unchecked count separately; it does not claim remote sendability. Current-product
+and prospective CREATE previews reuse the authoritative builder/evaluator/planner.
+The hypothetical `AG-PREVIEW` identity never reserves a SKU, allocates an article,
+saves a product or enqueues a job. Remote verification is sequential point-in-time
+GET evidence, not an atomic Magento snapshot or a persistent reporting subsystem.
+
+Read/discovery requires `export_templates.view`; product previews require both
+`export_templates.manage` and `exports.view`. Existing role grants, auth, active-user,
+CSRF and lifecycle boundaries are unchanged. The browser never calls Magento.
+
+### Reviewed category creation (H2)
+
+The integration workspace can preview and explicitly create one missing category
+path already required by a selected draft binding, under its exact uniquely observed
+parent ID/full path. The server derives the name from that requirement; no arbitrary
+Magento URL, menu placement, tree recursion, move, rename or delete is exposed.
+Defaults are fixed: `is_active=true`, `include_in_menu=false`. Storefront menu enabling
+remains a deliberate manual Magento Admin action.
+
+Migration `052_magento_configuration_actions.sql` stores a permanent single-action
+receipt: sealed intent → committed dispatched marker → exact returned remote ID →
+GET-verified identity, hierarchy and flags. Independent Amber callers share one
+origin/resource reservation. Remote I/O never spans business locks/transactions.
+Manage **and** publish permissions are rechecked at every local mutation boundary.
+Creation does not change the draft or approve any binding; the UI shows
+**Створено, зв’язок ще не підтверджено**.
+
+`POST .../categories/preview`, `/apply` and `/reconcile` are authenticated and
+CSRF-protected; reconciliation performs only remote GETs. `/actions` and
+`/actions/:id` expose bounded safe receipts after reload. If the exact returned ID
+is durable, failed verification can resume with GET. If the response/ID was lost,
+equal-label/path discovery is insufficient attribution: the action remains explicitly
+uncertain and no automatic POST retry is available. This new workflow leaves the
+historical two-path CLI behavior unchanged.
+
+Migration 056 adds reviewed recovery for a committed **sealed, undispatched**
+action. Repeat the normal fresh preview and explicit apply; a changed review seals
+a linked successor and marks the old intent superseded in the same transaction.
+Intent, actor, observation and attestation history are never rewritten. One active
+origin/kind/resource reservation and the existing access lock serialize replacement
+against dispatch. A superseded intent cannot dispatch. Dispatched/returned/verified
+reservations can never be replaced, even if later GETs show the target absent.
+
+### Reviewed option creation (H4)
+
+Option creation is bounded to one existing user-defined select/multiselect with
+ordinary standard-table source metadata. System, custom-source, unknown and
+explicitly observed swatch types fail closed. REST absence of swatch metadata is
+never proof that the attribute is ordinary. Migration
+`053_magento_option_attestations.sql` records an actual Administrator's reviewed
+capability attestation for the exact origin/installation, attribute ID/code and
+fingerprint of all bounded observable non-option metadata.
+
+Attestations are immutable, action-specific, actor-bound, valid for ten minutes
+and consumed by one sealed intent. Every option action requires renewed manual
+classification review, including acknowledgment that hidden swatch changes may
+have no visible REST signal. Observable identity/metadata drift invalidates review.
+This is an explicit reviewed risk boundary, not permanent non-swatch certification.
+
+The global label is the exact non-archived Amber `options.label`; optional authoritative
+English display metadata is `options.label_en` (migration 057). Catalog create/edit
+owns both labels. Historical EN remains null: no translation or UA fallback is
+invented. SKU values must already exist in the active published SKU schema. The
+server always discovers store views. If `en` is active, a nonblank Amber EN label
+is required before CREATE; the operator must complete it in the Amber catalog.
+Conflicting UA/EN labels across matching authoritative source rows fail closed;
+identical contextual labels remain valid. The preview captures both PostgreSQL
+labels and the exact active EN store ID, or explicit absence. A later scope change
+invalidates review or blocks GET verification; historical immutable intents are
+not rewritten.
+Client-authored `englishLabel`/`englishAuthoritative` are rejected. Catalog edits
+alone perform no remote write, product enrollment or SKU schema publication.
+
+Typed `POST .../options/inspect`, `/attest`, `/preview`, `/apply` and
+`/reconcile` retain manage+publish, authentication and CSRF. Attestation/apply
+also require the actual immutable Administrator role. Metadata/options and local
+source/revision are rechecked before committed dispatch. POST uses only the closed
+option route, initializes no default, and persists the exact returned option ID
+before exact GET verification in global and every applicable EN scope. A lost response remains
+uncertain; equal labels cannot recover attribution or authorize another POST.
+Creation never approves a semantic binding. Returned-ID recovery remains GET-only.
+An expired attestation on still-sealed work requires a fresh Administrator
+classification attestation, preview and explicit apply; 056 retains both attestations
+and intents. Expiry never permits replacement of previously dispatched work.
+
+### Reviewed existing-option label updates
+
+Select the **current published binding**, the Amber semantic value and its exact
+approved attribute. Amber derives the option ID from that publication; unapproved,
+ambiguous, wrong-attribute and superseded selections fail closed. `/option-labels/inspect`,
+`/attest`, `/preview`, `/apply` and `/reconcile` retain the existing manage/publish,
+Administrator attestation, active-user and CSRF boundaries. Review shows exact
+current global/EN labels and proposed PostgreSQL labels. Explicit apply seals an
+immutable `option_label` intent before dispatch, rechecks fresh metadata, authoritative
+labels, current publication and adapter revision, then performs one typed PUT.
+No binding is approved, modified or published by this action.
+
+**A scoped-label adapter is required for writes. Stock Magento option PUT is never a fallback.**
+Magento 2.4.6's [option save](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Eav/Model/Entity/Attribute/OptionManagement.php)
+and [resource persistence](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Eav/Model/ResourceModel/Entity/Attribute.php)
+replace option store-label rows and reset omitted sort order. Effective-label GETs
+cannot prove the stored translation/fallback distinction. The accepted bounded
+release therefore blocks attest/preview/apply/reconciliation with
+`MAGENTO_OPTION_LABEL_ADAPTER_REQUIRED` if the
+configured installation does not implement the [typed adapter contract](MAGENTO_SCOPED_OPTION_LABEL_ADAPTER.md).
+Read-only inspection may still compare authoritative Amber labels with standard
+GET labels for the exact approved option ID. The UI identifies these as effective
+labels (EN may be inherited), not proof of stored overrides, and exposes no write
+controls. Adapter-backed inspection continues to use its exact stored labels.
+This repository defines and tests the Amber client/service contract with fixtures;
+it does **not** claim that the adapter exists or has been deployed in real Magento.
+Installing/accepting that Magento-side adapter is separate deployment work.
+
+After a lost PUT response, the exact pre-known option ID permits GET-only
+reconciliation. A mismatch remains dispatched/uncertain and blocks every new PUT
+for that resource. Only exact adapter/global/EN verification advances the immutable
+receipt. Once verified, a later catalog edit may receive a new separately attested
+and reviewed label action; historical evidence stays immutable. Sealed, undispatched
+work retains migration-056 reviewed recovery. No blind retry, order management,
+other-scope replacement or generic Magento request surface is exposed.
+
+As reported by the production operator on 2026-10-01, Wave 1 is deployed at PR #19 / `daf627fc2458e5215cbf52735a8f186a3777361f`, with migrations through `050_test_product_deletion.sql`. Stable public `AG-*` identities, the reviewed production binding and automatic Amber → Magento synchronization are active. Magento product CSV delivery is retired; the separate price-export stream and immutable historical evidence remain supported. Historical delivery/collision cutover is complete and the operational freeze has been lifted. This documentation update did not query production or Magento.
+
 ## Stable public SKU boundary
 
 Migration 046 separates the externally addressed Magento article from the encoded configuration/history SKU. Exact product GET, CREATE/UPDATE payload `sku`, category, website, inventory and store-view operations, read-after-write verification, durable job remote identity and generated `Art: {sku}` names use `public_sku`. The exact product revision remains captured by product ID, internal `full_sku`, lifecycle state and job hash. Existing legacy products backfill `public_sku = full_sku`, so no Magento rename is implied. Installing the migration alone retains legacy recount identity; after the separately audited stable-public-SKU activation, recount successors inherit the same public identity and are delivered as UPDATEs of that remote product.
@@ -8,9 +148,9 @@ The schema-045 legacy collision repair does not call Magento, rename a legacy re
 
 Generic API fields named `sku`, `fullSku` or `full_sku` retain their prior encoded/internal meaning. New response fields explicitly expose `publicSku` and `internalSku`; only contracts whose purpose is Magento/product article identity switch their value to public SKU.
 
-The fixed code-backed mapper consumes public SKU directly. Immutable template publications are not reinterpreted: `full_sku` remains internal in evaluator versions 1 and 2. Evaluator `magento-declarative-3` with source contract `public-product-identity-v1` adds the distinct `public_sku` source for a future reviewed successor publication. No existing publication or binding is mutated automatically.
+The fixed code-backed mapper consumes public SKU directly. Immutable template publications are not reinterpreted: `full_sku` remains internal in evaluator versions 1 and 2. Evaluator `magento-declarative-3` with source contract `public-product-identity-v1` adds the distinct `public_sku` source for an explicitly reviewed successor publication. No existing publication or binding is mutated automatically.
 
-The later successor review must also consider the post-publication Magento option `rozmir_kartyny`: label `15×15`, option ID `6060`, Amber semantic `AR.size` value `28`. This is candidate evidence only; migration 046 does not approve, publish or bind it.
+The historical migration-046 successor review recorded the post-publication Magento option `rozmir_kartyny`: label `15×15`, option ID `6060`, Amber semantic `AR.size` value `28`. That dated discovery was candidate evidence only; migration 046 did not approve, publish or bind it. It is not a claim about current production coverage.
 
 The [automatic product workflow](MAGENTO_AUTOMATIC_SYNC.md) is implemented behind
 migration 044's default-disabled gate. It reuses the durable jobs below, adds local
@@ -82,12 +222,11 @@ before saving its draft binding decision. `649 / Default/Кулони/З інк�
 that flow before publication and was included in the successful product update.
 Category creation, category assignment and binding publication remain separate actions.
 
-Legacy CSV export is planned for retirement, but no export workflow has been disabled.
+Historical 2026-09-28 state: legacy CSV export was planned for retirement. Current production has since completed product-CSV retirement; price export remains supported.
 Reconcile existing product/price queues, generated/downloaded unconfirmed files and
 held/replacement work before cutover. Sync success does not confirm CSV snapshots or
-advance export revision/cursor state; see [export retirement](EXPORTS.md#planned-csv-retirement).
-Next work is BR/NM/CH/AR/SV bindings, followed by automated sync workflow/UI and export
-cutover. The immutable KL publication remains unchanged.
+advance export revision/cursor state; see [export retirement](EXPORTS.md#product-csv-retirement).
+At that date, next work was BR/NM/CH/AR/SV bindings, followed by automatic sync/UI and product-CSV cutover. Those Wave 1 stages have since completed in production; the old immutable KL publication remains historical evidence.
 
 The binding review CLI supports an explicit disabled-on-create status policy:
 `approve --revision UUID --expected-revision N --actor-user-id ID --binding POLICY_REVIEW_ID --accept-review --reason "Create disabled; preserve update status" --policy initialize_create_only --create-value 2`.
@@ -1678,3 +1817,114 @@ observations for provisional evaluator paths, not approved/sendable category pla
 | --- | --- | --- |
 | Normal | `Default/Сувеніри` → 10; `Default/Сувеніри/Статуетки` → 38; `Default/Сувеніри/Статуетки/Тварини` → 39; `Default/Сувеніри/Статуетки/Символіка` → 610 | None among these provisional paths; other subtypes unexamined. |
 | Stone | `Default/Камінь` → 380; `Default/Камінь/Полірований` → 640 | `Default/Камінь/Камінь сувенірний` |
+
+## H3a successor preparation and review
+
+Settings → Magento separates the immutable current publication, exact clone, and
+successor preparation against a separately published template and fresh GET-only
+schema/category observation. Preparation evaluates at most 100 selected/current
+products and is not installation-wide publication safety or proof of sendability.
+Literal category paths can be discovered without inventing a representative product;
+dynamic paths require evaluator evidence. Existing CREATE/current-product previews
+remain separate and allocate no identities or jobs.
+
+Reviewed carry reuses the existing carry machinery only after checking transitive
+expression/source/table/contracts, routing, attribute metadata, remote identities
+and store policy scope. Changed cases remain unapproved. Equal labels are candidates.
+Choosing a set, option or category is separate from approval; unresolved template
+outputs must be fixed in the template, never by changing Amber semantic IDs.
+Draft CAS and final local evidence revalidation protect preparation/review; remote
+GETs finish before mutation transactions. Publication and handoff use the separate
+H3b review below.
+
+The normal template grid supports evaluators 1–4. A public-identity columns-v2 draft
+can explicitly opt into v4 and add a category using reviewed UA/EN names, set name
+and category path. Initial simple products are disabled and visible in Catalog/Search;
+these rules remain a draft for review, not a Magento schema creation command.
+Sources and columns use the existing form editor. Saving/publishing a template never
+publishes a Magento binding or activates the exporter.
+
+HTTP `/api/admin/magento-integration`: GET `bindings/:id`; POST
+`bindings/:id/clone`, `bindings/:id/select`, `bindings/:id/decision`,
+`successor/prepare`, `successor/apply`. Existing view/manage permissions apply with
+normal active-user, authentication and CSRF boundaries; no RBAC changes.
+
+### Reviewed publication and controlled handoff (H3b)
+
+The workspace first previews structural validation, all current-product declared
+delivery effects, exact lost routes/articles, and changed name-generation effects.
+One repeatable-read PostgreSQL snapshot scans the complete selected scope by
+ascending product ID in keyset pages of 128. A deterministic incremental SHA-256
+digest binds every product, its complete public identity/lifecycle, relevant shared
+name state, current name pin, immutable supporting schema and draft/current/source
+validation evidence. No separate HTTP page claims to share this snapshot.
+
+The measured release ceiling is **4096 products**, **2 MiB serialized returned review
+evidence**, **8 MiB per input page**, **60 seconds for preview** and **15 seconds for
+the final local publication boundary** (with a 5-second table-lock wait ceiling).
+Oversized stored product/schema pages are checked before transfer. Any count, byte
+or elapsed-runtime overflow raises `MAGENTO_PUBLICATION_LIMIT` with the exact bound;
+there is no truncated success or publication. The client locally renders exact
+affected/lost/name-impact results in 50-item pages from the single returned review.
+See [the disposable scale measurement](archive/implementation/WAVE2_PUBLICATION_SCALE_2026-10-02.md).
+
+Representative ready CREATE previews are required for newly
+enabled routes or changed attribute-set rules/identities. Actual current-product
+GET previews cover each affected route and optional explicitly selected products.
+Local projections are not a claim that every remote product has been inspected.
+Remote reads reuse the existing evaluator/planner and the request-scoped 512-GET /
+60-second bound; no persistent background-report engine is introduced.
+
+`POST .../publication/preview` and `/apply` require manage + publish + exports.view.
+Apply repeats fresh GET checks and compares the exact preview hash. A short local
+transaction prevents catalog/product/name-state phantoms, rechecks draft/current
+CAS and source evidence, publishes the existing immutable binding and records the
+exact handoff/name pins atomically. No remote write occurs in publication. Lost
+coverage requires the actual Administrator role, explicit acknowledgement and an
+explanation of the displayed exact loss. Changed inputs require another review.
+The legacy binding CLI refuses new successor publication: use this reviewed
+workspace. Initial bootstrap and completed immutable CLI receipts remain supported;
+the trusted internal publication primitive retains historical CAS behavior.
+Final revalidation recomputes the complete ordered digest under the existing access,
+lifecycle and installation coordination, followed by product-before-full-state
+locking and shared-name/deletion fences. Remote GETs finish before these locks.
+Name pins and handoff items are inserted in bounded 128-item SQL batches inside the
+one atomic publication transaction. No report table or background-report engine
+is added. Request-owned planner preparation reuses only invariant analysis; every
+product still runs the existing evaluator and planner, with unchanged semantics.
+
+Publication does not mass-rename existing products. Migration 055 pins their exact
+current effective UA/EN names to the new rule generation, including pins inherited
+from an earlier publication. Intentional Amber/external edits take precedence using
+the existing exact override. Subjects and the common baseline remain untouched.
+Under **Контрольовані дії Адміністратора**, a separately selected, explained,
+previewed `name_rule` action can apply the new generated names to at most 100
+products. Conflicts, missing baselines, invalid names and unresolved dispatched work
+block it. It saves an Amber override and normal sync obligation; the durable writer's
+read verification alone confirms the new common baseline. No updated_at winner or
+name reverse-parsing is introduced.
+
+Default handoff contains only products actually unblocked or whose effective owned
+delivery changes. The existing automatic worker settles at most 25 pending receipt
+items per pass and then runs its ordinary generation/job pipeline. Unrelated synced
+products are not enrolled. Manual unfinished jobs, dispatched evidence and sticky
+reconciliation-required requests are protected, never reset or blindly retried.
+Disabled activation keeps obligations pending; retired/test-deleted products are
+skipped. Receipt/generation counters survive process/page restart.
+
+GET `bindings/:id/handoffs` exposes the latest 20 receipts and real sync counts.
+GET `bindings/:id/controlled-products?after=<productId>` uses ordered keyset
+pagination (100 eligible current products plus one lookahead). Every later product
+is reachable. Optional `search` filters public articles by case-insensitive literal
+substring (at most 100 characters); the cursor contract remains `after`.
+Each request is its own local snapshot, not a page of publication
+review evidence. The UI retains exact selections between pages/searches, offers
+explicit selection clearing, lists the selected articles in broader-resync
+confirmation, and caps one
+controlled action at 100 products; final preview/apply revalidates the whole selected
+set together. No unexamined product is silently enrolled. A separately reviewed Administrator
+`broader_resync` action can enroll an exact selection, without changing any bindings
+or prices. POST `controlled/preview` and `/apply` use local evidence hashes, current
+publication CAS, existing permissions and final authorization; applying name rules
+also requires exports.create. No generic proxy, schema/set mutation or reconciliation
+reset is exposed.

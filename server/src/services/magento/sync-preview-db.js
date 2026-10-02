@@ -60,6 +60,10 @@ async function readPreviewProductOnClient(client, options) {
     // Preserve the loader's private historical-schema association. Spreading this
     // object discards source-support proof, including NM's optional zero placeholder.
     const product = Object.assign(supported.products[0], selected, { exportState });
+    if (revision) {
+      const pin = (await client.query('SELECT generated,effective_names FROM magento_binding_name_pins WHERE binding_revision_id=$1 AND product_id=$2', [revision.id,selected.id])).rows[0];
+      if (pin) product.magento_name_rule_pin = { generated: pin.generated, values: pin.effective_names };
+    }
     const nameState = revision ? await require('./name-state').readNameState(client, revision.originHash,
       selected.public_product_identity_id, { lock: options.lockNameState === true }) : null;
     const observedAt = (await client.query('SELECT transaction_timestamp() AS observed_at')).rows[0].observed_at.toISOString();

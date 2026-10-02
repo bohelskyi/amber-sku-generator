@@ -1,14 +1,13 @@
 # Exports
 
-This guide defines current product/price delivery, snapshot and acknowledgment semantics. [Export templates](EXPORT_TEMPLATES.md) owns definition/publication and signed binding; [shared export sessions](SHARED_EXPORT_SESSIONS.md) owns collaboration and durable recovery. Production activation is still pending; use the [cutover runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md) for that one-time operation.
+This guide defines current product/price delivery, snapshot and acknowledgment semantics. [Export templates](EXPORT_TEMPLATES.md) owns definition/publication and signed binding; [shared export sessions](SHARED_EXPORT_SESSIONS.md) owns collaboration and durable recovery. Production activation/cutover is complete; the [cutover runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md) remains the procedure for future installations.
 
-## Planned CSV retirement
+## Product CSV retirement
 
 The first direct Amber → Magento UPDATE without CSV succeeded on 2026-09-28 for
 `KL3/11131351005`, job `f2253960-527a-40e9-b879-9041bb036453`, with acknowledgement
 only after read-after-write verification. See the [Magento receipt and ownership rules](MAGENTO_INTEGRATION.md#achieved-state-2026-09-28).
-Legacy CSV delivery is now planned for retirement; its current contracts below remain
-active until an explicit cutover. This is separate from the migration-040 selector cutover.
+Legacy Magento product CSV delivery is retired in production. Price CSV export remains a separate supported stream. Historical product snapshots, confirmation and immutable evidence remain valid; the queue/capture contracts below describe compatibility and installations before delivery cutover. This is separate from the migration-040 selector cutover.
 
 Before retirement, reconcile pending product and price queues, generated/downloaded
 but unconfirmed snapshots, shared-session attempts/results, and held/replacement
@@ -18,8 +17,7 @@ direct job does not confirm a CSV snapshot, release a hold, advance
 `product_full_export_state`/`product_export_revisions` acknowledgements or move the
 export cursor. Do not mark old work delivered merely because one same-SKU sync succeeded.
 The [automatic workflow](MAGENTO_AUTOMATIC_SYNC.md) is implemented behind its own
-default-disabled gate. Final production binding review, activation and reconciled
-export cutover remain explicit operator work.
+default-disabled fresh-install gate. The current production binding review, activation and reconciled export cutover are complete (2026-10-01 operator receipt, PR #19).
 
 Migration 045 supplies that explicit one-way cutover. Successful apply enables
 automatic sync for future relevant mutations and permanently rejects creation of
@@ -193,4 +191,4 @@ CSV serialization quotes commas, quotes and line breaks. String formula sigils `
 
 ## Acceptance boundary
 
-The [2026-09-23 six-group Check Data record](archive/exports/MAGENTO_CHECK_DATA_2026-09-23.md) is historical validation, not an import receipt or acceptance of every later template. Target catalog/source mappings, template publications and real Magento acceptance remain deployment-specific. Direct Magento CLI sync has durable job/verification history; the automatic workflow is implemented but disabled until explicit production activation. Explicit `url_key` generation, attribute/option API synchronization and automated CSV import/result reconciliation remain unimplemented. Historical duplicate SKUs and unapproved data/mapping cases remain separate work. See the [current pending-work index](README.md#deferred-work-and-operationally-pending-items).
+The [2026-09-23 six-group Check Data record](archive/exports/MAGENTO_CHECK_DATA_2026-09-23.md) is historical validation, not an import receipt or acceptance of every later template. Target catalog/source mappings, template publications and real Magento acceptance remain deployment-specific. Direct Magento CLI sync has durable job/verification history; the automatic workflow is active in production (disabled by default on fresh installations). Explicit `url_key` generation, attribute/option API synchronization and automated CSV import/result reconciliation remain unimplemented. Production historical collision/delivery cutover is complete; future unapproved data/mapping cases remain separate work. See the [current pending-work index](README.md#deferred-work-and-operationally-pending-items).

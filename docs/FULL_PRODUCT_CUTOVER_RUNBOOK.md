@@ -1,6 +1,10 @@
 # Full-product lifecycle cutover
 
-**Current operational runbook. Production activation remains pending.** This is the canonical one-time procedure for the implemented Phase 3B / Phase 4 machinery. Code deployment and migration installation do not approve an inventory baseline, attest exclusion provenance, confirm delivery or prove a Magento import. Ordinary later deployments follow [Operations](OPERATIONS.md).
+**Operational procedure for installations that have not completed cutover.**
+
+As reported by the production operator on 2026-10-01, Wave 1 is deployed at PR #19 / `daf627fc2458e5215cbf52735a8f186a3777361f`, with migrations through `050_test_product_deletion.sql`. Stable public `AG-*` identities, the reviewed production binding and automatic Amber → Magento synchronization are active. Magento product CSV delivery is retired; the separate price-export stream and immutable historical evidence remain supported. Historical delivery/collision cutover is complete and the operational freeze has been lifted. This documentation update did not query production or Magento.
+
+ This is the canonical one-time procedure for the implemented Phase 3B / Phase 4 machinery. Code deployment and migration installation do not approve an inventory baseline, attest exclusion provenance, confirm delivery or prove a Magento import. Ordinary later deployments follow [Operations](OPERATIONS.md).
 
 Required production order:
 

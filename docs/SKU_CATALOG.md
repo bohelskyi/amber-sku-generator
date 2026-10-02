@@ -10,7 +10,17 @@ Questions may be option-based or free text, required or optional, included in th
 
 - semantic `value_id`, used by answers, rules, and pricing;
 - digit-only `sku_code`, encoded into the SKU;
-- a label, visibility/hide rules, and archive state.
+- authoritative UA/global `label`, nullable authoritative English `label_en`, visibility/hide rules, and archive state.
+
+Migration 057 adds English display metadata only. Existing rows remain null;
+no backfill, translation or UA fallback is performed. Catalog administration validates
+and saves both labels; omitted EN on an update preserves it, explicit null/empty
+clears it. Labels must be plain nonblank text without edge whitespace/control
+characters, at most 255 characters (EN may be absent). English label edits do not
+change `value_id`, `sku_code`, published snapshots, existing stored products,
+pricing or SKU generation. Catalog edits never automatically write Magento or
+mass-enroll products. H4 consumes the exact PostgreSQL labels; active EN store-view
+option creation requires authoritative EN metadata.
 
 Never conflate `value_id` with `sku_code`. Contextual labels may share a value/code only when they retain the same semantic meaning.
 
@@ -103,4 +113,15 @@ Historical placeholder `0` or a missing stored value can represent an omitted SK
 
 `ensureLegacySkuSchemas()` creates V1 snapshots and links unversioned products during upgrade. For categories with products, it combines stored answer keys with currently required SKU keys so later draft structure is not retroactively imposed on old identifiers.
 
+Migration 054 preserves this bootstrap for existing/seeded categories. New categories created through Amber have `sku_publication_mode=explicit`: restart does not publish their draft automatically. Configure questions/options/pricing and use the existing explicit SKU publication command. This distinction adds no database prohibition on ordinary product saves and does not change historical schemas or SKU allocation.
+
+Renaming an unused category preserves its publication mode. The legacy capture helper
+can still run against supported pre-054 upgrade checkpoints by observing whether
+the mode column exists; it adds no runtime DDL. Once migration 054 is present, only
+`legacy_bootstrap` categories are captured automatically.
+
 Legacy products with `total_price_uah=0` retain that stored value and `legacy_uah_price_unset=true`; see [`PRICING.md`](PRICING.md). They remain decodable and recountable, while new products still require a positive final price.
+
+## Integration category contract
+
+Wave 2 H0 adds an opt-in [v4 integration contract](EXPORT_TEMPLATES.md#extensible-v4-integration-contract) for declared future category/source scopes. It does not change catalog/SKU algorithms, schema publication, used semantic IDs, permanent internal-SKU reservations or stable public identity allocation. Configuring an Amber category is separate from Magento readiness and does not change an existing published binding. Readiness UI and reviewed successor publication remain later Wave 2 work. Current production stable public allocation is active; fresh-install gates remain default-off.

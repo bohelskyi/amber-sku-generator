@@ -5,6 +5,7 @@ const { createMutationContext } = require('../../audit/mutation-context');
 const { parseOptionalRule } = require('../../utils/rules');
 const { buildOptionChanges } = require('./catalog-audit');
 const { lockOptionWithUsage } = require('./option-mutation-state');
+const { normalizeLabel } = require('./option-labels');
 
 function normalizeSkuCode(payload) {
   const skuCode = String(payload.sku_code ?? payload.value_id ?? '').trim();
@@ -17,6 +18,8 @@ function normalizeSkuCode(payload) {
 }
 
 async function createOption(payload, options = {}) {
+  const label = normalizeLabel(payload.label);
+  const labelEn = normalizeLabel(payload.label_en, { optional: true });
   const visibleRule = parseOptionalRule(payload.visible_if_json ?? payload.visible_if);
   const hiddenRule = parseOptionalRule(payload.hidden_if_json ?? payload.hidden_if);
   const skuCode = normalizeSkuCode(payload);
@@ -25,17 +28,18 @@ async function createOption(payload, options = {}) {
   try {
     await lifecycleGate.begin(client, 'BEGIN');
     const result = await client.query(
-      `INSERT INTO options (question_id, value_id, sku_code, label, visible_if_json, hidden_if_json, archived)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
+      `INSERT INTO options (question_id, value_id, sku_code, label, visible_if_json, hidden_if_json, archived, label_en)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)
        RETURNING id`,
       [
         Number(payload.question_id),
         Number(payload.value_id),
         skuCode,
-        payload.label,
+        label,
         visibleRule ? JSON.stringify(visibleRule) : null,
         hiddenRule ? JSON.stringify(hiddenRule) : null,
         Boolean(payload.archived),
+        labelEn,
       ]
     );
     const optionId = result.rows[0].id;
@@ -55,7 +59,7 @@ async function createOption(payload, options = {}) {
         questionKey: question.key,
         valueId: Number(payload.value_id),
         skuCode,
-        label: payload.label,
+        label, labelEn,
       },
     });
     await lifecycleGate.commit(client);
@@ -69,6 +73,10 @@ async function createOption(payload, options = {}) {
 }
 
 async function updateOption(payload, options = {}) {
+  const label = normalizeLabel(payload.label);
+  // Omission preserves metadata for compatibility callers; explicit null clears it.
+  const suppliedEn = payload.label_en !== undefined;
+  const checkedEn = normalizeLabel(payload.label_en, { optional: true });
   const visibleRule = parseOptionalRule(payload.visible_if_json ?? payload.visible_if);
   const hiddenRule = parseOptionalRule(payload.hidden_if_json ?? payload.hidden_if);
   const skuCode = normalizeSkuCode(payload);
@@ -93,12 +101,13 @@ async function updateOption(payload, options = {}) {
       throw err;
     }
 
+    const labelEn = suppliedEn ? checkedEn : currentOption.label_en ?? null;
     const nextArchived =
       payload.archived === undefined ? Boolean(currentOption.archived) : Boolean(payload.archived);
     const changes = buildOptionChanges(currentOption, {
       valueId: Number(payload.value_id),
       skuCode,
-      label: payload.label,
+      label, labelEn,
       visibleRule,
       hiddenRule,
       archived: nextArchived,
@@ -112,16 +121,17 @@ async function updateOption(payload, options = {}) {
     await client.query(
       `UPDATE options
        SET value_id = $1, sku_code = $2, label = $3, visible_if_json = $4::jsonb,
-           hidden_if_json = $5::jsonb, archived = $6
+           hidden_if_json = $5::jsonb, archived = $6, label_en = $8
        WHERE id = $7`,
       [
         Number(payload.value_id),
         skuCode,
-        payload.label,
+        label,
         visibleRule ? JSON.stringify(visibleRule) : null,
         hiddenRule ? JSON.stringify(hiddenRule) : null,
         nextArchived,
         Number(payload.id),
+        labelEn,
       ]
     );
     await writeAuditEvent(client, {

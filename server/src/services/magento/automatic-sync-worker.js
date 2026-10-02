@@ -102,6 +102,7 @@ function createAutomaticSyncWorker(config, { databasePool: db, jobOptions = {}, 
     if (stopping) return;
     const gate = (await db.query('SELECT enabled FROM magento_auto_sync_activation WHERE singleton')).rows[0];
     if (!gate?.enabled) return;
+    await require('./binding-handoff').processHandoffs(config,{databasePool:db});
     // needs_attention is not a retry queue. A later mutation can recheck local
     // blockers; unresolved dispatch remains sticky until trusted reconciliation.
     const rows = (await db.query(`SELECT public_product_identity_id FROM magento_product_sync_requests

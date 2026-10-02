@@ -1,6 +1,6 @@
 async function lockOptionWithUsage(client, optionId) {
   const result = await client.query(
-    `SELECT o.id, o.question_id, o.value_id, o.sku_code, o.label,
+    `SELECT o.id, o.question_id, o.value_id, o.sku_code, o.label, o.label_en,
             o.visible_if_json, o.hidden_if_json, o.archived,
             q.key AS question_key, q.category_code,
             (

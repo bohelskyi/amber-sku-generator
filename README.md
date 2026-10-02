@@ -4,7 +4,7 @@ Amber SKU Manager is an internal application for catalog configuration, authorit
 
 ## Deploy with Docker
 
-The full-product lifecycle is implemented through migration 040, but production activation is pending. Its one-time [cutover procedure](docs/FULL_PRODUCT_CUTOVER_RUNBOOK.md) requires a freeze and fresh manifests; ordinary image startup does not perform that transition.
+Wave 1 production activation/cutover is complete (2026-10-01 operator receipt, PR #19, migrations through 050). Stable public identities and automatic Magento synchronization are active; product CSV delivery is retired. The one-time [cutover procedure](docs/FULL_PRODUCT_CUTOVER_RUNBOOK.md) remains required for new installations; ordinary image startup never performs that transition.
 
 1. Install [Docker Engine and the Compose plugin](https://docs.docker.com/engine/install/ubuntu/), clone the repository, and run the following commands from its root.
 2. Create deployment configuration:

@@ -28,7 +28,7 @@ async function createCategory(
   try {
     await lifecycleGate.begin(client, 'BEGIN');
     await client.query(
-      'INSERT INTO categories (code, name, requires_weight, skip_hidden_sku_questions, marketing_rounding_enabled) VALUES ($1, $2, $3, $4, $5)',
+      "INSERT INTO categories (code, name, requires_weight, skip_hidden_sku_questions, marketing_rounding_enabled, sku_publication_mode) VALUES ($1, $2, $3, $4, $5, 'explicit')",
       [normalizedCode, name, normalizedRequiresWeight, normalizedSkipHidden, normalizedMarketingRounding]
     );
     await writeAuditEvent(client, {
@@ -158,7 +158,7 @@ async function updateCategory(
     }
 
     await client.query(
-      'INSERT INTO categories (code, name, requires_weight, sku_separator, skip_hidden_sku_questions, marketing_rounding_enabled) SELECT $1, $2, $3, sku_separator, $4, $5 FROM categories WHERE code = $6',
+      'INSERT INTO categories (code, name, requires_weight, sku_separator, skip_hidden_sku_questions, marketing_rounding_enabled, sku_publication_mode) SELECT $1, $2, $3, sku_separator, $4, $5, sku_publication_mode FROM categories WHERE code = $6',
       [nextCode, name, normalizedRequiresWeight, normalizedSkipHidden, normalizedMarketingRounding, currentCode]
     );
     await client.query('UPDATE questions SET category_code = $1 WHERE category_code = $2', [nextCode, currentCode]);

@@ -15,6 +15,8 @@ test('source display is exact-key bounded and truncation never claims missing hi
   const result = await sourceDetails(client, { category: 'NM', key: 'extra' });
   assert.equal(result.truncated, true); assert.equal(result.historical.length, 20); assert.equal(result.historical[0].options.length, 512);
   assert.ok(calls.every(([sql,args]) => sql.startsWith('SELECT') && JSON.stringify(args) === JSON.stringify(['NM','extra',513])));
-  for (const input of [{ category: 'NO', key: 'extra' }, { category: ['NM'], key: 'extra' }, { category: 'NM', key: '__proto__' }, { category: 'NM', key: "a'" }, { category: 'NM', key: 'extra', repair: true }]) await assert.rejects(sourceDetails(client,input), { statusCode: 400 });
+  for (const input of [{ category: 'NO;', key: 'extra' }, { category: ['NM'], key: 'extra' }, { category: 'NM', key: '__proto__' }, { category: 'NM', key: "a'" }, { category: 'NM', key: 'extra', repair: true }]) await assert.rejects(sourceDetails(client,input), { statusCode: 400 });
   assert.equal(calls.length, 2);
+  const future=await sourceDetails({query:async(sql,args)=>{assert.ok(sql.startsWith('SELECT'));assert.deepEqual(args,['NO','new_value',513]);return {rows:[]};}},{category:'NO',key:'new_value'});
+  assert.deepEqual(future,{category:'NO',key:'new_value',current:[],historical:[],truncated:false});
 });

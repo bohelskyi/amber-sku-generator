@@ -56,7 +56,7 @@ function relevantReferences(definition, evidence, products) {
 }
 
 async function capturePublished(client, intent, resolved, exportData, newRange, presentation = {}) {
-  const evidence = await loadSourceEvidence(client);
+  const evidence = await loadSourceEvidence(client, resolved.compiled.definition);
   const diagnostics = validateSourceReferences(resolved.compiled.definition, evidence);
   if (diagnostics.length) throw error(422, 'TEMPLATE_SOURCE_INVALID', 'Unresolved or conflicting source references', { diagnostics });
   const supported = await loadSupportInputs(client, resolved.compiled.definition, exportData.rows);

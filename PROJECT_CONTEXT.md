@@ -1,6 +1,6 @@
 # Amber SKU Manager: project context
 
-Amber SKU Manager is an internal application for catalog configuration, authoritative SKU and price generation, inventory history, recount/corrections, controlled repricing, direct Magento synchronization, and immutable product and price CSV exports. Start here, then use the [documentation index](docs/README.md) for each maintained domain contract. Code and migrations define implementation; deployment and external-system facts require operational evidence.
+Amber SKU Manager is an internal application for catalog configuration, authoritative SKU and price generation, inventory history, recount/corrections, controlled repricing, direct Magento synchronization, and immutable historical product exports plus a separate price CSV stream. Start here, then use the [documentation index](docs/README.md) for each maintained domain contract. Code and migrations define implementation; deployment and external-system facts require operational evidence.
 
 ## Architecture
 
@@ -15,12 +15,12 @@ Server-owned OIDC Authorization Code with PKCE resolves immutable `issuer` + `su
 
 | Domain | Current behavior and authoritative guide |
 | --- | --- |
-| [SKU and catalog](docs/SKU_CATALOG.md) | Server preview/save/decode, immutable published schema versions, semantic option IDs, permanent internal-SKU reservation, and a separate immutable stable public product identity behind a default-off activation gate. |
+| [SKU and catalog](docs/SKU_CATALOG.md) | Server preview/save/decode, immutable published schema versions, semantic option IDs, permanent internal-SKU reservation, and a separate immutable stable public product identity active in production (the fresh-install activation gate remains default-off). |
 | [Pricing](docs/PRICING.md) | Positive-or-absent matrices, scenario/modifier rules, exchange-rate evidence, separate calculated/automatic/manual values and legacy zero-price compatibility. |
-| [Recount and corrections](docs/RECOUNT_CORRECTIONS.md) | Target-schema validation, source retirement, successor identity/delivery routing, inherited UA/EN names/review, direct/request parity and local-user claims. Narrow information and price changes preserve identity. |
+| [Recount and corrections](docs/RECOUNT_CORRECTIONS.md) | Target-schema validation, source retirement, successor identity/delivery routing, three-way exact UA/EN shared names, direct/request parity and local-user claims. Narrow information and price changes preserve identity. |
 | [Repricing](docs/REPRICING.md) | Scenario/global drafts, reviewed authoritative previews, atomic apply and exact-state rollback. |
 | [Exports](docs/EXPORTS.md) | Immutable snapshots/artifacts, exact membership, revision acknowledgment, New/Update/Replacement/Held selection after activation, and a separate `sku,price` stream. Confirmation is local acknowledgment, not proof of Magento import. |
-| [Magento integration](docs/MAGENTO_INTEGRATION.md) | Persistent published bindings, category creation/binding, GET-only previews and durable jobs with read-after-write acknowledgement. Automatic mutation requests/worker/status are implemented behind a default-disabled gate; final production activation and CSV retirement remain pending. |
+| [Magento integration](docs/MAGENTO_INTEGRATION.md) | Persistent published bindings, category creation/binding, GET-only previews and durable jobs with read-after-write acknowledgement. Automatic requests/worker/status and shared-name discovery are active in production; fresh installations retain default-disabled gates. |
 | [Export templates](docs/EXPORT_TEMPLATES.md) | Revisioned drafts, immutable publications, editable columns, source validation and signed published-preview binding. Explicit `template-v1` requests use publications; omitted discriminator uses the system mapper. No automatic template seeding/publication. |
 | [Shared export sessions](docs/SHARED_EXPORT_SESSIONS.md) | Durable private/shared template workspaces, explicit local-user invitations, membership epochs and recovery of the original attempt/result after reload. Invitations grant no global permissions. |
 
@@ -28,25 +28,23 @@ Business mutations preserve their transaction, lock-order, stale-evidence, idemp
 
 ## Implementation and deployment status
 
-Migration **044** adds [automatic Magento synchronization](docs/MAGENTO_AUTOMATIC_SYNC.md):
-transactional product requests, generation-aware acknowledgement, a bounded worker
-and safe product-history status. Its durable gate defaults disabled. No automatic
-activation, real Magento write or CSV cutover is part of this implementation.
-The operator reports successful installation-wide publication and manual APPLY on
-KL/BR/NM/CH/AR in the restored dump; the final frozen production database must have
-its own verified current publication. Historical receipts below are not defaults.
+As reported by the production operator on 2026-10-01, Wave 1 is deployed at PR #19 / `daf627fc2458e5215cbf52735a8f186a3777361f`, with migrations through `050_test_product_deletion.sql`. Stable public `AG-*` identities, the reviewed production binding and automatic Amber → Magento synchronization are active. Magento product CSV delivery is retired; the separate price-export stream and immutable historical evidence remain supported. Historical delivery/collision cutover is complete and the operational freeze has been lifted. This documentation update did not query production or Magento.
 
-The repository includes migrations **000–050** and the full-product lifecycle/cutover implementation through **Phase 3B / Phase 4**. Migration **041** supplies persistent versioned Magento bindings; **042** supplies immutable sync intent and durable dispatch/verification evidence. Forward migration **043** supports literal numeric Amber question keys, **044** adds the disabled automatic workflow, **045** adds the one-way Magento-product CSV retirement state, and **046** adds stable public product identities, additive dual-SKU evidence and a separate default-off activation receipt. Migration **047** is a fail-closed compatibility finalizer for rows explicitly staged by the schema-045 legacy-SKU repair operator command; it restores the same real product row under a newly allocated `AG-` public identity and leaves reviewed accidental duplicates retired. Migration **048** adds the distinct audited pre-cutover external-delivery acknowledgement floor and no data acknowledgement. Binding bootstrap/review, portable reviewed-draft promotion, category creation/binding, complete sync previews and explicit CLI APPLY are implemented. Installing these migrations does not activate allocation, acknowledge a product, publish a template, cut over delivery or call Magento.
+Production acceptance includes a real Magento CREATE and the dedicated safe test-product deletion workflow: `AG-000002` was deleted remotely and retained as `voided` in Amber. The reported synchronization-problem count was zero; the public sequence was 2 (next allocation `AG-000003`). These are dated operator receipts, not seeds, defaults or current telemetry. Earlier 2026-09-28 UPDATE and disposable-rehearsal records remain historical evidence in the linked domain guides.
 
-On **2026-09-28 (Europe/Kiev)**, the first direct Amber → Magento synchronization **without CSV** succeeded for `KL3/11131351005`, job `f2253960-527a-40e9-b879-9041bb036453`, Magento product `5509`. The first published binding is `4d563554-bfe3-4d01-9df5-225aa5b61d48`, installation `amber`, version **1**, counter **37** (published from counter 36). All three operations, **coreProduct → categories → storeViews**, were verified before acknowledgement at `2026-09-27T23:50:46.739Z`. The [integration guide](docs/MAGENTO_INTEGRATION.md#achieved-state-2026-09-28) records the receipt, policies and bounded remaining-group review. This is one verified real UPDATE, not acceptance of every route or CREATE.
+The repository includes forward migration **051** for the opt-in [v4 integration contract](docs/EXPORT_TEMPLATES.md#extensible-v4-integration-contract), H1 bounded readiness/discovery/product previews and H2 reviewed category creation with permanent dispatch/read-verification evidence in migration **052**. Evaluator 1–3, published definitions/bindings, current selection and durable Magento jobs are unchanged. H4 reviewed option creation adds action-specific Administrator attestations in migration **053**. H3a adds successor preparation/review and explicit first SKU publication for future administrator-created categories in migration **054**. H3b adds reviewed publication, exact restart-safe handoff and name-rule preservation/controlled application in migration **055**. These are repository checkpoints, not production deployment or successor publication.
 
-Current approved KL ownership sends Amber-managed core fields and produced EN fields, preserves descriptions/media/unmanaged fields, creates products with disabled status `2`, and preserves status and inventory on UPDATE. Websites are additive; EN is scoped separately. Category `649 / Default/Кулони/З інклюзом` was explicitly created and bound before sync. Acknowledgement requires fresh read-after-write verification of intended and preserved state.
+Forward migration **056** adds immutable linked recovery for configuration actions that were sealed but never dispatched. H3b reviews the complete current scope in one snapshot, with measured count/byte/runtime limits and product-before-lifecycle revalidation; see [the scale receipt](docs/archive/implementation/WAVE2_PUBLICATION_SCALE_2026-10-02.md). Existing published semantics, dispatched/uncertain work and Administrator requirements remain intact.
 
-Legacy CSV export is **planned for retirement**, not disabled. Existing queued product/price work, captured/downloaded exports, unconfirmed deliveries and held/replacement cases must be reconciled before export cutover; direct sync does not advance their acknowledgement ledgers or cursor. Final production publication and automatic activation require the frozen database and explicit cutover review; retain CH's Amber dimension semantics and keep AR gaps/SV route decisions fail-closed.
+Forward migration **057** adds authoritative optional English catalog option labels
+without backfill or SKU/history changes. H4 derives CREATE labels from PostgreSQL
+and requires EN when the remote EN store is active. Reviewed existing-option label
+updates require the [scoped-label adapter](docs/MAGENTO_SCOPED_OPTION_LABEL_ADAPTER.md)
+and fail closed without it; stock option PUT is never used. The controlled-product
+picker reaches the complete eligible scope in bounded pages while retaining the
+100-product exact-action bound.
 
-**The production CSV lifecycle cutover remains unconfirmed** in the retained handoff evidence; the successful direct Magento sync does not establish selector activation or CSV retirement. Installing migrations alone does not activate selection. The one-time transition requires maintenance/freeze, draining old writers, fresh production indexing and post-index cutover manifests, explicit approval, batches, validation and activation. Later reconciliations/attestations remain separate operator decisions. Follow the [cutover runbook](docs/FULL_PRODUCT_CUTOVER_RUNBOOK.md).
-
-A local rehearsal restored from a production backup completed through activation with 4,978 products. Its reported counts and limits are recorded as **rehearsal evidence** in the runbook; they are not production expectations. Historical duplicate-SKU/data-quality cases remain separate unresolved work. The final 2026-09-28 review used read-only database queries and live Magento GETs; it did not execute a cutover or another sync.
+Fresh installations still require explicit reviewed activation, publication and cutover. Migration installation alone never allocates public identities, confirms old delivery, enrolls existing products, publishes a binding or calls Magento. Follow the [cutover runbook](docs/FULL_PRODUCT_CUTOVER_RUNBOOK.md) only for installations that have not completed it; ordinary deployments follow [Operations](docs/OPERATIONS.md).
 
 ## Repository and verification
 

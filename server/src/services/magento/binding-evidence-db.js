@@ -41,7 +41,24 @@ async function readAmberEvidence(databasePool, { templateVersionId, mode, suppor
   const client = await databasePool.connect();
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const categories = Object.keys(require('../export-templates/magento-v1-data').GROUPS);
+    const activation = (await client.query(`SELECT implementation, template_version_id, generation
+      FROM export_template_activation WHERE id=1`)).rows[0] || null;
+    let compiled;
+    let template;
+    if (templateVersionId) {
+      const versionId = templateVersionId === 'selected' ? activation?.template_version_id : templateVersionId;
+      if (!versionId) invalid();
+      const row = (await client.query(`SELECT id, template_id, version_number, definition, definition_hash,
+        evaluator_version, output_contract, format_version FROM export_template_versions WHERE id=$1`, [versionId])).rows[0];
+      if (!row) invalid();
+      compiled = compileDefinition(row.definition);
+      if (compiled.hash !== row.definition_hash || row.evaluator_version !== compiled.definition.evaluatorVersion
+        || row.output_contract !== compiled.definition.outputContract || row.format_version !== compiled.definition.formatVersion) invalid();
+      template = { kind: 'published', versionId: row.id, templateId: row.template_id, versionNumber: row.version_number };
+    }
+    const categories = compiled?.definition.evaluatorVersion === require('../export-templates/version-contract').EXTENSIBLE_EVALUATOR
+      ? compiled.definition.groups.map((g) => g.route)
+      : Object.keys(require('../export-templates/magento-v1-data').GROUPS);
     const { rows: currentRows } = await client.query(`SELECT q.id AS question_id, q.category_code, q.key,
       q.label AS question_label, q.input_type, q.include_in_sku, q.required,
       q.visible_if_json AS question_visible_if, o.id AS option_id, o.value_id, o.sku_code,
@@ -63,21 +80,7 @@ async function readAmberEvidence(databasePool, { templateVersionId, mode, suppor
       WHERE v.category_code=ANY($1::text[]) AND v.published_at IS NOT NULL
       ORDER BY v.category_code, v.version, q.id, o.id LIMIT $2`, [categories, ROW_LIMIT + 1]);
     const historical = hydrate(bounded(historicalRows), true);
-    const activation = (await client.query(`SELECT implementation, template_version_id, generation
-      FROM export_template_activation WHERE id=1`)).rows[0] || null;
-    let compiled;
-    let template;
-    if (templateVersionId) {
-      const versionId = templateVersionId === 'selected' ? activation?.template_version_id : templateVersionId;
-      if (!versionId) invalid();
-      const row = (await client.query(`SELECT id, template_id, version_number, definition, definition_hash,
-        evaluator_version, output_contract, format_version FROM export_template_versions WHERE id=$1`, [versionId])).rows[0];
-      if (!row) invalid();
-      compiled = compileDefinition(row.definition);
-      if (compiled.hash !== row.definition_hash || row.evaluator_version !== compiled.definition.evaluatorVersion
-        || row.output_contract !== compiled.definition.outputContract || row.format_version !== compiled.definition.formatVersion) invalid();
-      template = { kind: 'published', versionId: row.id, templateId: row.template_id, versionNumber: row.version_number };
-    } else {
+    if (!templateVersionId) {
       let definition = materializeMagentoV1(await loadMagentoCatalog(client), { publicSku: true });
       if (supportSystem) {
         const { loadSourceEvidence, validateSourceReferences } = require('../export-templates/source-references');

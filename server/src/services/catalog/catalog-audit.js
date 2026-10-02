@@ -66,6 +66,7 @@ function buildOptionChanges(currentOption, {
   valueId,
   skuCode,
   label,
+  labelEn = currentOption.label_en ?? null,
   visibleRule,
   hiddenRule,
   archived,
@@ -74,6 +75,7 @@ function buildOptionChanges(currentOption, {
   addAuditChange(changes, 'valueId', Number(currentOption.value_id), valueId);
   addAuditChange(changes, 'skuCode', currentOption.sku_code, skuCode);
   addAuditChange(changes, 'label', currentOption.label, label);
+  addAuditChange(changes, 'labelEn', currentOption.label_en ?? null, labelEn);
   addAuditChange(changes, 'visibleRule', currentOption.visible_if_json, visibleRule, {
     sensitive: true,
   });

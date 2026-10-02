@@ -177,16 +177,26 @@ it('request-only and users without name-change permission retain read-only names
   }
 });
 it('exact edits participate in authoritative recount preview and apply payload', async () => {
-  api.post.mockImplementation(async (url) => ({ data: url === '/decode' ? decoded : url === '/recount/apply' ? { corrected: { publicSku: decoded.publicSku } } : preview }));
+  let resolveDecode;
+  const decodeResponse = new Promise((resolve) => { resolveDecode = resolve; });
+  api.post.mockImplementation(async (url) => {
+    if (url === '/decode') return decodeResponse;
+    return { data: url === '/recount/apply' ? { corrected: { publicSku: decoded.publicSku } } : preview };
+  });
   function Harness() {
     const rec = useProductRecount({ config });
     return <><button onClick={() => rec.handleDecode(decoded.sku)}>Decode</button><button onClick={rec.handleStartRecount}>Start</button>
       {rec.decodeData && <HomeDashboard {...rec} config={config} onRecountNameChange={rec.handleRecountNameChange}
         onRecountWeightChange={rec.handleRecountWeightChange} onRecountAnswer={rec.handleRecountAnswer} onCancelRecount={rec.handleCancelRecount} />}
+      <output data-testid="decoded-product">{rec.decodeData?.product?.id || 'none'}</output>
       <output>{rec.isRecountPreviewCurrent ? 'Ready' : 'Waiting'}</output><button onClick={() => rec.handleConfirmRecount('apply')}>Apply</button></>;
   }
   shell(<Harness />); fireEvent.click(screen.getByRole('button', { name: 'Decode' }));
   await waitFor(() => expect(api.post).toHaveBeenCalledWith('/decode', { sku: decoded.sku }));
+  expect(screen.getByTestId('decoded-product').textContent).toBe('none');
+  expect(screen.queryByLabelText('Назва товару українською')).toBeNull();
+  await act(async () => resolveDecode({ data: decoded }));
+  await waitFor(() => expect(screen.getByTestId('decoded-product').textContent).toBe('5010'));
   fireEvent.click(screen.getByRole('button', { name: 'Start' })); await screen.findByLabelText('Назва товару українською');
   fireEvent.click(screen.getByRole('button', { name: 'Змінити', exact: true }));
   fireEvent.change(screen.getByLabelText('Назва товару українською'), { target: { value: 'Новий точний текст' } }); await screen.findByText('Ready');

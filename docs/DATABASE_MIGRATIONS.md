@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`050`. Migrations `000`–`049` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`057`. Migrations `000`–`056` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -19,6 +19,21 @@ Checked-in migrations now span `000`–`050`. Migrations `000`–`049` are immut
 - test failure rollback and repeated startup where applicable.
 
 `legacyInitDb()` remains in `server/src/db/init-db.js` for compatibility/tests. Normal startup treats migrations as DDL truth, seeds only an empty catalog, ensures calibration questions, and captures missing legacy V1 schemas.
+
+### 055 — reviewed publication obligations and name preservation
+
+`055_magento_publication_handoff.sql` adds immutable publication/controlled-action
+receipts, the exact affected-product obligations and immutable per-binding effective-name
+pins. These are transaction-coupled review evidence and small restart-safe enrollment
+state, not a report engine or a replacement Magento job lifecycle. Each obligation
+settles once from pending to enrolled (capturing the ordinary sync generation),
+protected or retired. UPDATE/DELETE/TRUNCATE cannot reset evidence. Name pins keep
+existing effective names when a successor changes its generation rules; explicit
+Amber edits still use the existing override and three-way baseline model.
+
+Installation performs no backfill, publication, enrollment, baseline update or
+remote call. New publication evidence is committed atomically with the existing
+immutable binding publication; no existing published rows or jobs are reinterpreted.
 
 ## Fresh and upgrade compatibility
 
@@ -108,6 +123,13 @@ New paths touching these resources must follow existing lock order and final-sta
 | `048_external_magento_delivery_acknowledgement.sql` | Adds a distinct monotonic exact-revision external-delivery floor and immutable audit reference for reviewed deliveries that occurred outside Amber before API cutover. The migration acknowledges no rows. A database guard restricts advances to the active lifecycle, pre-delivery-cutover command boundary and enforces the normal/replacement route transition. |
 | `049_shared_names_and_repricing_sync.sql` | Shared-authority full-name observations/baselines and repricing item sync generation evidence. |
 | `050_test_product_deletion.sql` | Dedicated immutable test-deletion intent/progress, `voided` tombstones and request terminalization, Administrator-only capability and business-write fences. |
+| `051_magento_extensible_categories.sql` | Bounded category syntax in binding routes/options; new categories require an exact declared group in the pinned immutable v4 template. No seeds, data rewrite or publication. |
+| `052_magento_configuration_actions.sql` | Permanent reviewed category-create intent, dispatch, exact returned ID and GET-verification evidence; no implicit binding approval. |
+| `053_magento_option_attestations.sql` | Immutable action-specific Administrator option-capability attestations. |
+| `054_explicit_category_sku_publication.sql` | Explicit initial SKU publication for administrator-created categories. |
+| `055_magento_publication_handoff.sql` | Immutable publication/handoff receipts, bounded enrollment items and name-rule pins. |
+| `056_magento_configuration_reseal.sql` | Linked replacement of sealed, undispatched configuration actions; all dispatched reservations remain permanent. |
+| `057_catalog_english_option_labels.sql` | Nullable authoritative English catalog metadata and immutable reviewed scoped-option label action evidence. |
 
 ## Test deletion migration
 
@@ -220,8 +242,65 @@ Migration 040 adds the distinct one-time `cutover_baseline_revision`/audit refer
 
 `full_product_export_activation` starts in `legacy`, selector version 0, required writer contract 1. Monotonic generation, phase/event constraints and immutable audit receipts govern `legacy → preparing → active`; active cannot return to legacy. Deferred checks enforce baseline-event identity, exclusion projection and inactive-product retirement. Statement guards fence unaware writers after preparation; application transactions acquire the gate before BEGIN to avoid stale repeatable-read snapshots after waiting.
 
-The migration itself performs no baseline acceptance, successor release, historical indexing or activation. Deploy both the gate-aware application and the schema, then follow the [canonical cutover runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md). Old/new mixed writers are unsupported; ordinary future deployments and one-time production cutover are distinct operations. Production activation remains pending.
+The migration itself performs no baseline acceptance, successor release, historical indexing or activation. Deploy both the gate-aware application and the schema, then follow the [canonical cutover runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md). Old/new mixed writers are unsupported; ordinary future deployments and one-time production cutover are distinct operations. Current production completed activation/cutover through migration 050 (2026-10-01 operator receipt, PR #19). This procedure remains required for other installations; migration 051 does not activate or publish anything.
 
 ## Migration 049: shared names and batch sync evidence
 
 `049_shared_names_and_repricing_sync.sql` adds exact generated/full-name overrides, origin/public-identity name baselines and reviewed conflict state, a bounded durable discovery cursor, safe automatic-request diagnostics, and each repricing item's nullable captured sync generation. It extends the existing product-input projection without modifying prior migrations, SKU allocation, published bindings or historical jobs/snapshots. Existing records receive no guessed baseline or batch synchronization proof. Fresh installation and repeated startup use the migration runner transaction/checksum contract.
+
+## Migration 051: extensible integration categories
+
+`051_magento_extensible_categories.sql` changes only the category-code checks on `magento_binding_routes` and `magento_binding_options`, from the historical six-code list to bounded uppercase codes (`^[A-Z][A-Z0-9_]{0,31}$`). Additional BEFORE INSERT/UPDATE guards require any category outside the historical six to be declared in the immutable evaluator-4 template pinned by the owning binding revision. Existing six-category rules, composite identity/observation FKs, publication immutability and audit/permission boundaries remain intact.
+
+There is no table/backfill, catalog seed, activation, automatic upgrade, publication or remote call. The schema runner transaction rolls back both constraints and guards on failure; repeated startup verifies the same checksum. Disposable regression coverage upgrades checkpoint 050 with real published evaluator-1/2/3 templates and bindings, compares their stored records and gate/audit evidence before/after, checks rollback and rerun, and persists a v4 future-category binding with distinct semantic/SKU/remote identities. Fresh installation is covered by the complete migration suite. This is H0 only; the [v4 contract](EXPORT_TEMPLATES.md#extensible-v4-integration-contract) does not implement later readiness/editor/publication orchestration.
+
+## Migration 052: reviewed remote configuration action evidence
+
+`052_magento_configuration_actions.sql` adds the bounded permanent ledger for H2
+single-category creation. Immutable intent/context, one origin/resource reservation,
+monotonic sealed/dispatched/returned/verified states and durable exact remote ID
+separate uncertain remote writes from GET-verified receipts. Updates cannot rewrite
+intent, reset dispatch, replace a returned ID or change verified evidence; DELETE
+and TRUNCATE are denied. No category, binding approval, publication, product, job,
+activation or remote mutation is created by installation. Existing migration files,
+published bindings and product-sync intent interpretations remain unchanged.
+
+## 053 — reviewed option capability attestations
+
+`053_magento_option_attestations.sql` adds immutable Administrator evidence with exact observable attribute identity, action target, expiry and a unique action-use reference. Configuration actions admit the option kind only with this reference. Existing category receipts, published bindings and migration checksums remain unchanged.
+
+### 054 — explicit first category SKU publication
+
+`054_explicit_category_sku_publication.sql` adds a category publication mode.
+Existing rows and compatibility seeds retain `legacy_bootstrap`; future categories
+created by the authoritative Amber command use `explicit`. Restart therefore does
+not silently publish an unfinished new category. Existing schema publication,
+identity/reservation algorithms, historical publications and normal save boundaries
+are unchanged. No remote access, enrollment or activation occurs in the migration.
+
+## 056 — reviewed recovery before dispatch
+
+`056_magento_configuration_reseal.sql` adds an immutable unique predecessor link and
+the terminal `superseded` state to configuration actions. A partial unique index
+reserves each origin/kind/resource across every non-superseded state. A deferred
+guard requires a superseded row's permanent successor in the same transaction;
+insert guards require that predecessor to be undispatched and the exact same
+resource. Existing intent/progress fields remain immutable and the predecessor
+cannot dispatch afterward. Dispatched/returned/verified rows cannot supersede or
+reset. Existing actions receive only a null link; no action, attestation, binding,
+publication, sync job, activation or remote mutation is created by installation.
+
+## 057 — authoritative catalog English labels and reviewed label actions
+
+`057_catalog_english_option_labels.sql` adds nullable `options.label_en` with a
+nonblank/length/control-character constraint. Existing rows remain null; no backfill,
+translation, snapshot rewrite, product/SKU mutation, activation or remote operation
+occurs. Published schemas retain their historical label representation.
+
+The existing configuration ledger admits `option_label` only with an immutable
+single-action Administrator attestation. Its exact origin/attribute/option resource
+remains exclusively reserved while sealed/dispatched/returned; verified label updates
+permit a later separately reviewed action, while every earlier intent/progress row
+remains permanent. CREATE/category reservations and 056 supersession guards are
+unchanged. A lost PUT cannot reset/supersede dispatched work; recovery is GET-only.
+Actual dispatch requires the separately deployed scoped-label adapter contract.
