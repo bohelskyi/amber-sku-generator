@@ -81,7 +81,7 @@ test('Magento binding foundation and current migrations apply to a fresh disposa
   const db = new Pool({ connectionString: url });
   try {
     await runNodeInDatabase(url, "require('./src/db/run-migrations').runMigrations().catch(e=>{console.error(e);process.exitCode=1;});");
-    assert.equal((await db.query('SELECT count(*)::int n FROM schema_migrations')).rows[0].n, 56);
+    assert.equal((await db.query('SELECT count(*)::int n FROM schema_migrations')).rows[0].n, 57);
     assert.equal((await db.query("SELECT count(*)::int n FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'magento_binding_%'")).rows[0].n, 13);
     assert.equal((await db.query('SELECT count(*)::int n FROM magento_binding_revisions')).rows[0].n, 0);
     for(const table of ['magento_binding_handoffs','magento_binding_handoff_items','magento_binding_name_pins'])assert.equal((await db.query(`SELECT count(*)::int n FROM ${table}`)).rows[0].n,0);

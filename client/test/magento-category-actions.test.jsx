@@ -33,3 +33,9 @@ it('remote creation is unavailable without both existing permissions', () => {
   shell(['export_templates.manage']);
   expect(screen.queryByRole('button', { name: /створення/ })).toBeNull();
 });
+it('a sealed undispatched receipt allows another explicit preview after reload', async () => {
+  api.get.mockResolvedValue({data:[{id:'sealed',kind:'category',state:'sealed',path,canReview:true,
+    message:'Зміну підготовлено, але не надіслано.'}]});
+  shell();await screen.findByText(/підготовлено, але не надіслано/);
+  expect(screen.getByRole('button',{name:/Перевірити створення під/})).toBeTruthy();
+});

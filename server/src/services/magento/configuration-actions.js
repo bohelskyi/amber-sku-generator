@@ -21,19 +21,20 @@ async function seal(config, preview, options = {}) {
       throw c.error(409, 'MAGENTO_BINDING_CONFLICT', 'Draft changed after preview');
     }
     const resourceKey = c.hash(preview.resource); const origin = c.originHash(config.baseUrl);
-    const prior = (await client.query('SELECT * FROM magento_configuration_actions WHERE origin_hash=$1 AND kind=$2 AND resource_key=$3 FOR UPDATE',
+    const prior = (await client.query("SELECT * FROM magento_configuration_actions WHERE origin_hash=$1 AND kind=$2 AND resource_key=$3 AND state<>'superseded' FOR UPDATE",
     [origin, preview.kind, resourceKey])).rows[0];
     if (prior) {
       if (prior.state === 'sealed' && prior.preview_hash === preview.previewToken) return prior;
-      throw c.error(409, 'MAGENTO_CONFIGURATION_RECONCILIATION_REQUIRED', 'Previous dispatched work cannot be resent', { actionId: prior.id, state: prior.state });
+      if (prior.state !== 'sealed') throw c.error(409, 'MAGENTO_CONFIGURATION_RECONCILIATION_REQUIRED', 'Previous dispatched work cannot be resent', { actionId: prior.id, state: prior.state });
+      await client.query("UPDATE magento_configuration_actions SET state='superseded' WHERE id=$1 AND state='sealed'", [prior.id]);
     }
     const row = (await client.query(`INSERT INTO magento_configuration_actions
-      (id,kind,origin_hash,resource_key,binding_revision_id,binding_revision,actor_user_id,preview_hash,intent,attestation_id)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10) RETURNING *`,
+      (id,kind,origin_hash,resource_key,binding_revision_id,binding_revision,actor_user_id,preview_hash,intent,attestation_id,supersedes_id)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11) RETURNING *`,
     [randomUUID(), preview.kind, origin, resourceKey, preview.bindingRevisionId, preview.expectedRevision,
-      context.actorUserId, preview.previewToken, JSON.stringify(c.safeData(preview)),preview.attestationId || null])).rows[0];
+      context.actorUserId, preview.previewToken, JSON.stringify(c.safeData(preview)),preview.attestationId || null,prior?.id || null])).rows[0];
     await writeAuditEvent(client, { mutationContext: context, eventKey: 'magento_configuration.sealed',
-      subjectType: 'magento_configuration_action', subjectId: row.id, details: { kind: row.kind, previewHash: row.preview_hash } });
+      subjectType: 'magento_configuration_action', subjectId: row.id, details: { kind: row.kind, previewHash: row.preview_hash, supersedesId: row.supersedes_id } });
     return row;
   });
 }
@@ -68,9 +69,11 @@ function receipt(row) {
     path: row.intent.path ?? null,
     attributeCode: row.intent.target?.attributeCode ?? null, label: row.intent.label ?? null,
     createdAt: row.created_at, verifiedAt: row.verified_at, bound: false,
-    canReconcile: row.state === 'returned',
+    canReconcile: row.state === 'returned', canReview: row.state === 'sealed', supersedesId: row.supersedes_id,
     message: row.state === 'verified' ? 'Створено, зв’язок ще не підтверджено'
-      : 'Amber підготував або надіслав зміну. Підтвердження кінцевого стану ще немає; повторне надсилання недоступне.' };
+      : row.state === 'sealed' ? 'Зміну підготовлено, але не надіслано. Повторіть перевірку перед створенням.'
+        : row.state === 'superseded' ? 'Замінено новою перевіреною дією; цю дію не буде надіслано.'
+          : 'Amber надіслав зміну. Підтвердження кінцевого стану ще немає; повторне надсилання недоступне.' };
 }
 async function list(config, options = {}) {
   if (!config.configured) return [];

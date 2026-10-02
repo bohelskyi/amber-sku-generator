@@ -40,7 +40,7 @@ export default function MagentoCategoryActions({ revision, observation }) {
       const recorded = actions.find((r) => r.path === d.normalizedPath);
       return <div className="border-t py-3 text-sm" key={`${d.bindingKey}:${d.normalizedPath}`}>
         <p className="break-words">{d.requestedPath} · {found.length === 1 ? `ID ${found[0].categoryId}` : found.length > 1 ? 'Неоднозначно' : 'Відсутня'}</p>
-        {found.length === 0 && canCreate && revision.state === 'draft' && !recorded && <div className="mt-2 flex flex-wrap gap-2">
+        {found.length === 0 && canCreate && revision.state === 'draft' && (!recorded || recorded.canReview) && <div className="mt-2 flex flex-wrap gap-2">
           {parents.length === 1 ? <button type="button" className="btn btn-outline btn-compact-md" disabled={busy} onClick={() => run('preview', {
             bindingRevisionId: revision.id, expectedRevision: revision.revision, bindingKey: d.bindingKey,
             path: d.normalizedPath, parentId: Number(parents[0].categoryId),

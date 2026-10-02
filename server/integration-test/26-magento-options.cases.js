@@ -2,6 +2,7 @@ const { test,assert,Pool,runNodeInDatabase,recreateTestDatabase,dropTestDatabase
 const templates = require('../src/services/export-templates/template.service');
 const bindings = require('../src/services/magento/binding.service');
 const option = require('../src/services/magento/configuration-option');
+const actions = require('../src/services/magento/configuration-actions');
 const fixture = require('../test/fixtures/magento-v4');
 const { REQUIRED } = require('../src/services/export-templates/column-contract');
 async function setup(name) {
@@ -25,7 +26,7 @@ async function setup(name) {
 function remote(db,{lost=false,failVerification=false}={}) {
   const attribute={attribute_id:1471,attribute_code:'fixture_choice',frontend_input:'select',backend_type:'int',is_user_defined:true,source_model:'Magento\\Eav\\Model\\Entity\\Attribute\\Source\\Table'};
   let created=false,posts=0;
-  return {attribute,get posts(){return posts;},fetch:async(url,init)=>{
+  return {attribute,hideCreated:()=>{created=false;},get posts(){return posts;},fetch:async(url,init)=>{
     const path=new URL(url).pathname;let data;
     if(init.method==='POST'){
       assert.equal(path,'/rest/all/V1/products/attributes/fixture_choice/options');
@@ -50,6 +51,31 @@ async function reviewed(f,r) {
   const command={...f.input,attestationId:a.id};const proof=await option.preview(f.config,command,opt);
   return {opt,command,proof,a};
 }
+test('sealed option crash recovery: expired immutable attestation is replaced by fresh Administrator review with one concurrent POST',async()=>{
+  const name='amber_option_reseal_test',f=await setup(name),second=new Pool({connectionString:f.db.options.connectionString});
+  try{
+    const r=remote(f.db),first=await reviewed(f,r);
+    const expiring=(await f.db.query(`INSERT INTO magento_option_capability_attestations
+      (id,origin_hash,installation_key,attribute_id,attribute_code,metadata_fingerprint,target_hash,target,actor_user_id,evidence,created_at,expires_at)
+      SELECT '00000000-0000-0000-0000-000000000003',origin_hash,installation_key,attribute_id,attribute_code,metadata_fingerprint,target_hash,target,actor_user_id,evidence,
+        statement_timestamp()-INTERVAL '9 minutes 55 seconds',statement_timestamp()+INTERVAL '5 seconds'
+      FROM magento_option_capability_attestations WHERE id=$1 RETURNING id`,[first.a.id])).rows[0];
+    // Use one statement timestamp for the exact ten-minute database invariant.
+    const command={...first.command,attestationId:expiring.id},proof=await option.preview(f.config,command,first.opt);
+    await runNodeInDatabase(f.db.options.connectionString,`require('./src/services/magento/configuration-actions').seal(${JSON.stringify(f.config)},${JSON.stringify(proof)},{mutationContext:{actorUserId:${f.actor}}}).then(()=>require('./src/db/pool').end()).catch(e=>{console.error(e);process.exitCode=1;});`);
+    await f.db.query('SELECT pg_sleep(5)');
+    await assert.rejects(option.preview(f.config,command,first.opt),{code:'MAGENTO_OPTION_ATTESTATION_STALE'});
+    const prior=(await f.db.query('SELECT * FROM magento_configuration_actions')).rows[0];
+    const fresh=await reviewed(f,r);
+    const results=await Promise.allSettled([option.apply(f.config,{...fresh.command,previewToken:fresh.proof.previewToken},fresh.opt),
+      option.apply(f.config,{...fresh.command,previewToken:fresh.proof.previewToken},{...fresh.opt,databasePool:second})]);
+    assert.ok(results.some(x=>x.status==='fulfilled'));assert.equal(r.posts,1);
+    const rows=(await f.db.query('SELECT * FROM magento_configuration_actions ORDER BY created_at')).rows;
+    assert.equal(rows.length,2);assert.equal(rows[0].state,'superseded');assert.deepEqual(rows[0].intent,prior.intent);
+    assert.equal(rows[1].attestation_id,fresh.a.id);assert.equal(rows[1].supersedes_id,prior.id);assert.equal(rows[1].state,'verified');
+    await assert.rejects(actions.transition(prior.id,'sealed','dispatched',{},fresh.opt));assert.equal(r.posts,1);
+  }finally{await second.end();await f.db.end();await dropTestDatabase(name);}
+});
 test('H4 Administrator attestation: absent, expired, changed metadata and unsupported types fail closed',async()=>{
   const name='amber_option_attestation_test',f=await setup(name);
   try{
@@ -90,7 +116,11 @@ test('H4 exact returned identity supports GET-only recovery; lost response canno
       const r=remote(f.db,{lost,failVerification:!lost}),{opt,command,proof}=await reviewed(f,r);
       await assert.rejects(option.apply(f.config,{...command,previewToken:proof.previewToken},opt));
       const row=(await f.db.query('SELECT * FROM magento_configuration_actions')).rows[0];
-      if(lost){assert.equal(row.state,'dispatched');assert.equal(row.remote_id,null);await assert.rejects(option.reconcile(f.config,{actionId:row.id},opt),{code:'MAGENTO_CONFIGURATION_RECONCILIATION_REQUIRED'});}
+      if(lost){assert.equal(row.state,'dispatched');assert.equal(row.remote_id,null);await assert.rejects(option.reconcile(f.config,{actionId:row.id},opt),{code:'MAGENTO_CONFIGURATION_RECONCILIATION_REQUIRED'});
+        r.hideCreated();const restarted=new Pool({connectionString:f.db.options.connectionString});
+        try{const fresh=await reviewed(f,r);await assert.rejects(option.apply(f.config,{...fresh.command,previewToken:fresh.proof.previewToken},{...fresh.opt,databasePool:restarted}),{code:'MAGENTO_CONFIGURATION_RECONCILIATION_REQUIRED'});}
+        finally{await restarted.end();}
+      }
       else{assert.equal(row.state,'returned');assert.equal((await option.reconcile(f.config,{actionId:row.id},opt)).state,'verified');}
       assert.equal(r.posts,1);
     }finally{await f.db.end();await dropTestDatabase(name);}

@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`055`. Migrations `000`–`054` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`056`. Migrations `000`–`055` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -125,6 +125,10 @@ New paths touching these resources must follow existing lock order and final-sta
 | `050_test_product_deletion.sql` | Dedicated immutable test-deletion intent/progress, `voided` tombstones and request terminalization, Administrator-only capability and business-write fences. |
 | `051_magento_extensible_categories.sql` | Bounded category syntax in binding routes/options; new categories require an exact declared group in the pinned immutable v4 template. No seeds, data rewrite or publication. |
 | `052_magento_configuration_actions.sql` | Permanent reviewed category-create intent, dispatch, exact returned ID and GET-verification evidence; no implicit binding approval. |
+| `053_magento_option_attestations.sql` | Immutable action-specific Administrator option-capability attestations. |
+| `054_explicit_category_sku_publication.sql` | Explicit initial SKU publication for administrator-created categories. |
+| `055_magento_publication_handoff.sql` | Immutable publication/handoff receipts, bounded enrollment items and name-rule pins. |
+| `056_magento_configuration_reseal.sql` | Linked replacement of sealed, undispatched configuration actions; all dispatched reservations remain permanent. |
 
 ## Test deletion migration
 
@@ -272,3 +276,15 @@ created by the authoritative Amber command use `explicit`. Restart therefore doe
 not silently publish an unfinished new category. Existing schema publication,
 identity/reservation algorithms, historical publications and normal save boundaries
 are unchanged. No remote access, enrollment or activation occurs in the migration.
+
+## 056 — reviewed recovery before dispatch
+
+`056_magento_configuration_reseal.sql` adds an immutable unique predecessor link and
+the terminal `superseded` state to configuration actions. A partial unique index
+reserves each origin/kind/resource across every non-superseded state. A deferred
+guard requires a superseded row's permanent successor in the same transaction;
+insert guards require that predecessor to be undispatched and the exact same
+resource. Existing intent/progress fields remain immutable and the predecessor
+cannot dispatch afterward. Dispatched/returned/verified rows cannot supersede or
+reset. Existing actions receive only a null link; no action, attestation, binding,
+publication, sync job, activation or remote mutation is created by installation.
