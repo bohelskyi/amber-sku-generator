@@ -49,6 +49,10 @@ test('dialogs share focus trapping, Escape handling, and focus restoration', () 
     new URL('../src/hooks/useDialogAccessibility.js', import.meta.url),
     'utf8'
   );
+  const overlaySource = fs.readFileSync(
+    new URL('../src/components/ui/Overlays.jsx', import.meta.url),
+    'utf8'
+  );
   const repricingDialogsSource = fs.readFileSync(
     new URL('../src/components/repricing/RepricingDialogs.jsx', import.meta.url),
     'utf8'
@@ -66,10 +70,10 @@ test('dialogs share focus trapping, Escape handling, and focus restoration', () 
   assert.match(hookSource, /event\.key !== 'Tab'/);
   assert.match(hookSource, /previousActiveElement/);
   assert.match(hookSource, /document\.body\.style\.overflow = 'hidden'/);
-  assert.match(dialogSource, /useDialogAccessibility/);
-  assert.match(repricingDialogsSource, /role="dialog"/);
-  assert.match(repricingDialogsSource, /useDialogAccessibility/);
-  assert.match(correctionQueueSource, /aria-modal="true"/);
+  assert.match(overlaySource, /useDialogAccessibility/);
+  assert.match(dialogSource, /<Dialog/);
+  assert.match(repricingDialogsSource, /<SharedConfirmDialog/);
+  assert.match(correctionQueueSource, /<ConfirmDialog/);
   assert.match(drawerSource, /role="dialog"/);
 });
 
@@ -524,7 +528,7 @@ test('correction queue wires application-user claims and legacy compatibility in
   assert.match(source, /createVisibilityAwarePoller/);
   assert.match(source, /createLatestRequestGate/);
   assert.match(source, /Робоча область/);
-  assert.match(source, /nextFilter === 'workspace' \? 'active'/);
+  assert.match(source, /status: query\.filter === 'workspace' \? 'active' : query\.filter/);
   assert.match(source, /getCorrectionRequestsForView/);
   assert.match(source, /isCorrectionClaimConflict/);
   assert.match(source, /correctionsApi\.claimRequest\(request\.id\)/);
@@ -537,5 +541,6 @@ test('correction queue wires application-user claims and legacy compatibility in
   assert.doesNotMatch(source, /В роботі в іншому браузері/);
   assert.doesNotMatch(source, /storeCorrectionClaim/);
   assert.match(source, /Примусово повернути/);
-  assert.match(source, /window\.confirm/);
+  assert.match(source, /setForceReleaseTarget\(selectedRequest\)/);
+  assert.match(source, /<ConfirmDialog[\s\S]*?title="Примусово повернути запит у чергу\?"/);
 });

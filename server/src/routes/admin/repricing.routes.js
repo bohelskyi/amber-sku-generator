@@ -29,6 +29,14 @@ router.get('/admin/repricing/batches', requirePermission('repricing.view'), asyn
   }
 });
 
+router.get('/admin/repricing/batches/page', requirePermission('repricing.view'), async (req, res) => {
+  try {
+    res.json(await require('../../services/repricing/batch-read-model').getRepricingBatchPage(req.query || {}));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
 router.get('/admin/repricing/drafts', requirePermission('repricing.view'), async (req, res) => {
   try {
     res.json(await getRepricingDrafts());

@@ -954,6 +954,8 @@ describe('permission-aware business UI', () => {
       status: 'pending',
       sourceSku: 'BR1001',
       proposedSku: 'BR1002',
+      sourceArticle: 'BR1001',
+      proposedArticle: 'BR1002',
       categoryCode: 'BR',
       comment: '',
       changes: [],
@@ -965,6 +967,8 @@ describe('permission-aware business UI', () => {
       status: 'in_progress',
       sourceSku: 'BR2001',
       proposedSku: 'BR2002',
+      sourceArticle: 'BR2001',
+      proposedArticle: 'BR2002',
       categoryCode: 'BR',
       comment: '',
       changes: [],
@@ -985,12 +989,12 @@ describe('permission-aware business UI', () => {
       </AuthContext.Provider>
     );
 
-    await screen.findByText('BR1001');
-    expect(screen.getByRole('button', { name: 'Відхилити запит' })).toBeTruthy();
+    await screen.findAllByText('BR1001');
+    expect(screen.getByRole('button', { name: 'Відхилити' })).toBeTruthy();
     expect(screen.queryByText('Примусово повернути')).toBeNull();
     if (label === 'Manager') {
       expect(screen.queryByText('Взяти в роботу')).toBeNull();
-      expect(screen.queryByText('Підтвердити')).toBeNull();
+      expect(screen.queryByText('Перевірити й застосувати')).toBeNull();
     } else {
       expect(screen.getByText('Взяти в роботу')).toBeTruthy();
     }

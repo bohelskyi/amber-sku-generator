@@ -66,6 +66,28 @@ Read/discovery requires `export_templates.view`; product previews require both
 `export_templates.manage` and `exports.view`. Existing role grants, auth, active-user,
 CSRF and lifecycle boundaries are unchanged. The browser never calls Magento.
 
+### Recorded product problems in the application workspace
+
+The full-application redesign retains the Magento workspace above and links
+recorded product delivery problems from **Потребує уваги** to `/sync-problems`.
+Correction and synchronization counts remain independent. Future configuration
+preparation is not added to the operational problem count.
+
+`GET /api/magento/problems/page` requires `products.view`, defaults to 30 rows,
+caps at 100, and accepts `offset` and an exact category filter. It reads recorded
+local sync/name/test-deletion evidence and returns `items` plus counted `pageInfo`;
+it does not probe Magento or mutate a job. The original `/magento/problems` and
+`/magento/summary` contracts remain available.
+
+The client requests 20 rows, presents a compact queue and one selected detail,
+and mounts name-conflict inspection only for the selected affected product.
+Its `category`, `offset` and `problem` query parameters preserve list context.
+Visible-page polling remains non-overlapping; stale responses from another filter
+cannot replace the current query. Failed reads retain an explicit unavailable or
+last-known state. Opening a product additionally requires `products.decode`.
+Technical diagnostics remain on demand, and uncertain writes retain their exact
+domain reconciliation path without a generic resend action.
+
 ### Reviewed category creation (H2)
 
 The integration workspace can preview and explicitly create one missing category

@@ -34,6 +34,46 @@ test('custom recount roles can preview through either permission without gaining
   }
 });
 
+test('attention read projections preserve independent capability boundaries', async () => {
+  if (!suite.authenticatedSession) suite.authenticatedSession = await authenticateApplicationSession('/');
+  const userId = suite.authenticatedSession.applicationUser.id;
+  const roleIds = [];
+  try {
+    for (const [suffix, permission, allowedPath, deniedPaths] of [
+      ['corrections', 'corrections.view', '/api/admin/correction-requests/page?limit=1', [
+        '/api/admin/repricing/batches/page?limit=1', '/api/magento/problems/page?limit=1', '/api/config',
+      ]],
+      ['repricing', 'repricing.view', '/api/admin/repricing/batches/page?limit=1', [
+        '/api/admin/correction-requests/page?limit=1', '/api/magento/problems/page?limit=1', '/api/config',
+      ]],
+      ['sync', 'products.view', '/api/magento/problems/page?limit=1', [
+        '/api/admin/correction-requests/page?limit=1', '/api/admin/repricing/batches/page?limit=1',
+      ]],
+    ]) {
+      const key = `attention_read_${suffix}`;
+      const role = (await pool.query(`INSERT INTO roles(role_key,display_name,description,is_system)
+        VALUES($1,$1,'Disposable attention read coverage',FALSE) RETURNING id`, [key])).rows[0];
+      roleIds.push(role.id);
+      await pool.query('INSERT INTO role_permissions(role_id,permission_key) VALUES($1,$2)', [role.id, permission]);
+      await suite.replaceActiveRoleForTest(userId, key);
+      const allowed = await request(allowedPath);
+      assert.equal(allowed.response.status, 200, allowed.text);
+      assert.ok(Array.isArray(allowed.data.items));
+      assert.equal(typeof allowed.data.pageInfo?.total, 'number');
+      for (const path of deniedPaths) {
+        const denied = await request(path);
+        assert.equal(denied.response.status, 403, denied.text);
+      }
+    }
+    await suite.replaceActiveRoleForTest(userId, 'attention_read_corrections');
+    const missingDetail = await request('/api/admin/correction-requests/999999999');
+    assert.equal(missingDetail.response.status, 404, missingDetail.text);
+  } finally {
+    await suite.replaceActiveRoleForTest(userId, 'administrator');
+    await pool.query("UPDATE roles SET status = 'disabled' WHERE id = ANY($1::bigint[])", [roleIds]);
+  }
+});
+
 test('product create, direct recount, and archive share local actor attribution and audit', async () => {
   const actorUserId = suite.authenticatedSession.applicationUser.id;
   const preview = await request('/api/preview', {

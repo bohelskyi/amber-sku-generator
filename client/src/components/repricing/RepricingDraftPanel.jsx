@@ -1,4 +1,5 @@
 import { AlertTriangle, FilePenLine, RefreshCw, Save, Trash2 } from 'lucide-react';
+import { TechnicalDisclosure } from '../ui/index.js';
 
 const formatDate = (value) => (
   value
@@ -7,7 +8,7 @@ const formatDate = (value) => (
     : '-'
 );
 
-export function RepricingDraftPanel({ controller }) {
+export function RepricingDraftPanel({ canPrepareRepricing, controller }) {
   const {
     activeDraft,
     draftConflicts,
@@ -41,7 +42,7 @@ export function RepricingDraftPanel({ controller }) {
             <span className="text-slate-600">Перегляд ще не збережено</span>
           )}
         </div>
-        <div className="flex flex-wrap gap-2">
+        {canPrepareRepricing && <div className="flex flex-wrap gap-2">
           {activeDraft ? (
             <>
               <button
@@ -74,7 +75,7 @@ export function RepricingDraftPanel({ controller }) {
               Зберегти чернетку
             </button>
           )}
-        </div>
+        </div>}
       </div>
 
       {activeDraft && draftSync?.hasChanges && (
@@ -88,7 +89,7 @@ export function RepricingDraftPanel({ controller }) {
               {' '}перераховано {draftSync.changed.length}.
             </span>
           </div>
-          <button
+          {canPrepareRepricing && <button
             type="button"
             className="btn btn-outline gap-2"
             onClick={syncDraft}
@@ -96,7 +97,7 @@ export function RepricingDraftPanel({ controller }) {
           >
             <RefreshCw size={15} />
             Прийняти оновлення
-          </button>
+          </button>}
         </div>
       )}
 
@@ -104,14 +105,17 @@ export function RepricingDraftPanel({ controller }) {
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 sm:px-5">
           <div className="flex items-start gap-2">
             <AlertTriangle size={18} className="mt-0.5 shrink-0" />
-            <span>
+            <div>
               {draftConflicts.length} ручних цін більше не належать цій переоцінці:
-              {' '}{draftConflicts.map((item) => item.publicSku || item.sku).join(', ')}.
-            </span>
+              {' '}{draftConflicts.map((item) => item.publicSku || 'Артикул недоступний').join(', ')}.
+              <TechnicalDisclosure summary="Внутрішні SKU конфліктів">
+                {draftConflicts.map((item) => item.sku || 'Внутрішній SKU недоступний').join(', ')}
+              </TechnicalDisclosure>
+            </div>
           </div>
-          <button type="button" className="btn btn-outline" onClick={removeDraftConflicts}>
+          {canPrepareRepricing && <button type="button" className="btn btn-outline" onClick={removeDraftConflicts}>
             Відкинути недоступні ціни
-          </button>
+          </button>}
         </div>
       )}
     </>

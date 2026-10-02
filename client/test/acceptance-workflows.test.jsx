@@ -13,7 +13,7 @@ import { WorkspaceDialog } from '../src/components/workspace/WorkspaceDialog.jsx
 vi.mock('../src/lib/api.js', () => ({ api: { get: vi.fn(), post: vi.fn() } }));
 beforeEach(() => { vi.resetAllMocks(); api.get.mockResolvedValue({ data: { enabled: true, problemCount: 3 } }); });
 afterEach(cleanup);
-const auth = { identity: { name: 'Богдан' }, logout: vi.fn(), permissions: ['products.view', 'products.recount', 'exports.create', 'exports.view', 'export_templates.view', 'corrections.create', 'corrections.view', 'repricing.view', 'catalog.view'] };
+const auth = { identity: { name: 'Богдан' }, logout: vi.fn(), permissions: ['products.view', 'products.decode', 'products.recount', 'exports.create', 'exports.view', 'export_templates.view', 'corrections.create', 'corrections.view', 'repricing.view', 'catalog.view'] };
 const shell = (element, value = auth) => render(<AuthContext.Provider value={value}><MemoryRouter>{element}</MemoryRouter></AuthContext.Provider>);
 
 it('daily navigation exposes the task-oriented destinations without reading global counts', () => {
@@ -64,11 +64,14 @@ it('name conflict choice uses exact fresh preview and stale apply requires anoth
   expect(screen.getByRole('button', { name: 'Підтвердити вибір' }).disabled).toBe(true);
 });
 it('uncertain write is a resolution queue entry without a retry action', async () => {
-  api.get.mockResolvedValue({ data: [{ productId: 7, article: 'AG-000002', problems: [{ message: 'Amber надіслав зміну, але кінцевий стан не підтверджено.', resolution: 'administrator' }] }] });
+  api.get.mockResolvedValue({ data: {
+    items: [{ productId: 7, article: 'AG-000002', problems: [{ message: 'Amber надіслав зміну, але кінцевий стан не підтверджено.', resolution: 'administrator' }] }],
+    pageInfo: { limit: 20, offset: 0, total: 1, hasPrevious: false, hasNext: false },
+  } });
   shell(<SyncProblemsPage />);
-  await screen.findByText(/кінцевий стан не підтверджено/);
+  await screen.findAllByText(/кінцевий стан не підтверджено/);
   expect(screen.queryByRole('button', { name: /Повтор|Retry/ })).toBeNull();
-  expect(screen.getByRole('link', { name: 'Відкрити товар' }).getAttribute('href')).toBe('/?article=AG-000002');
+  expect(screen.getByRole('link', { name: 'Відкрити товар' }).getAttribute('href')).toBe('/products/open?article=AG-000002');
 });
 it('repricing summary shows only changed categories and preserved manual products', () => {
   render(<RepricingSummary config={{ categories: { BR: { name: 'Браслети' } } }} controller={{ currentCalculationRate: null,

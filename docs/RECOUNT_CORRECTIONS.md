@@ -111,6 +111,35 @@ Migration `025` leaves existing token columns in place. A token is considered on
 
 The client queue loads immediately, polls every five seconds only while visible, refreshes on focus/visibility return, prevents overlapping polls, and prevents an older response from replacing newer state.
 
+### Operator queue and bounded reads
+
+The local application redesign groups `/admin/corrections` under **Потребує уваги**.
+The queue defaults to active work and shows a compact list beside one selected
+request, its ownership, proposed changes, and permitted actions. `?request=ID`
+continues to open exact request evidence, including an item outside the visible
+page. The UI displays public `sourceArticle`/`proposedArticle` separately from
+internal SKU evidence; missing public evidence is never replaced by internal SKU.
+
+`GET /api/admin/correction-requests/page` requires `corrections.view` and returns
+`items`, global status `summary`, and filtered `pageInfo`. It defaults to 40 rows,
+caps at 100, and accepts `offset`, status, literal article/internal-SKU/comment
+search, and the existing owner/legacy-claim workspace filter. The current queue
+requests 30 rows. Counts are server aggregates, not visible-page estimates; missing
+or failed evidence is shown as unavailable. `workspaceIds` is a bounded compatibility
+filter, not an ownership credential. Every command still rechecks actual ownership.
+
+`GET /api/admin/correction-requests/:requestId` has the same view permission and
+returns exact detail or 404. The original list endpoint remains available with
+its default 300/max 1000 and historical wildcard search behavior. Both read shapes
+retain older identity fields and add explicitly named public-article fields.
+These reads do not claim, refresh, complete, audit a mutation, or call Magento.
+
+Completion reviews the captured request/claim version. Polling cannot silently
+replace that reviewed evidence; changed evidence closes the review and requires
+inspection again. The completion receipt means the change committed in Amber;
+Magento delivery is a separate fact. A failed follow-up queue refresh does not
+turn an already successful command into a failed command or invite resubmission.
+
 ## Initial built-in role permissions
 
 | Role | Correction behavior |

@@ -1,15 +1,15 @@
 import { CircleAlert, ClipboardList, RefreshCw } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { createElement, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { correctionsApi } from '../api/corrections-api.js';
 import { useAuth } from '../auth/auth-context.js';
 import { Button, Notice, PageHeader, StatusBadge } from '../components/ui/index.js';
 import { useMagentoSummary } from '../hooks/useMagentoSummary.js';
 
-function AttentionCard({ icon: Icon, title, count, loading, error, countLabel, emptyLabel, description, to, linkLabel }) {
+function AttentionCard({ icon, title, count, loading, error, countLabel, emptyLabel, description, to, linkLabel }) {
   const known = Number.isInteger(count) && count >= 0;
   return <section className="attention-card">
-    <header><span className="attention-card-icon"><Icon size={19} aria-hidden="true" /></span><div><h2>{title}</h2><p>{description}</p></div></header>
+    <header><span className="attention-card-icon">{createElement(icon, { size: 19, 'aria-hidden': true })}</span><div><h2>{title}</h2><p>{description}</p></div></header>
     <div className="attention-card-state" role="status" aria-live="polite">
       {loading && <span>Оновлюємо стан…</span>}
       {!loading && error && <StatusBadge tone="warning">Стан недоступний</StatusBadge>}
@@ -31,15 +31,18 @@ export default function AttentionPage() {
   useEffect(() => {
     if (!canViewCorrections) return undefined;
     let live = true;
-    setCorrections((current) => ({ ...current, loading: true, error: false }));
-    correctionsApi.listRequests('active').then(({ data }) => {
+    correctionsApi.listRequestPage({ status: 'active', limit: 1, offset: 0 }).then(({ data }) => {
       if (live) setCorrections({ loading: false, error: false,
         count: Number.isInteger(data?.summary?.active) ? data.summary.active : null });
     }).catch(() => { if (live) setCorrections({ loading: false, error: true, count: null }); });
     return () => { live = false; };
   }, [canViewCorrections, revision]);
 
-  function refresh() { setRevision((value) => value + 1); magento.refresh(); }
+  function refresh() {
+    setCorrections((current) => canViewCorrections ? { ...current, loading: true, error: false } : current);
+    setRevision((value) => value + 1);
+    magento.refresh();
+  }
   return <main className="app-page"><div className="attention-workspace">
     <PageHeader title="Потребує уваги" description="Поточні робочі черги, які вже зафіксовані в Amber."
       actions={<Button size="compactMd" onClick={refresh}><RefreshCw size={15} aria-hidden="true" />Оновити</Button>} />

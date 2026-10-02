@@ -1,6 +1,7 @@
-import { AlertTriangle, CheckCircle2, ClipboardList, Download, Undo2 } from 'lucide-react';
+import { ClipboardList, Download } from 'lucide-react';
 import { RepricingSyncProgress } from './RepricingSyncProgress.jsx';
 import { Link } from 'react-router-dom';
+import { Button, Notice, OperationReceipt } from '../ui/index.js';
 
 export function RepricingWorkflowNotices({ controller }) {
   const {
@@ -16,29 +17,17 @@ export function RepricingWorkflowNotices({ controller }) {
   return (
     <>
       {createdCorrectionRequest && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-          <span>Створено запит #{createdCorrectionRequest.id} для {createdCorrectionRequest.sourceSku}.</span>
-          <Link to={`/admin/corrections?request=${createdCorrectionRequest.id}&from=admin`} className="btn btn-outline gap-2">
+        <OperationReceipt title={`Створено запит #${createdCorrectionRequest.id}`}
+          description="Товар залишився без змін; запит передано до черги виправлень."
+          identity={createdCorrectionRequest.sourceArticle || createdCorrectionRequest.sourcePublicSku}
+          actions={<Link to={`/admin/corrections?request=${createdCorrectionRequest.id}&from=admin`} className="btn btn-outline gap-2">
             <ClipboardList size={15} />
             Відкрити запит
-          </Link>
-        </div>
+          </Link>} />
       )}
 
       {preview && blockingCorrectionRequests.length > 0 && (
-        <div className="flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-3">
-            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-700" />
-            <div>
-              <div className="font-semibold">Переоцінку тимчасово заблоковано</div>
-              <div className="mt-1 leading-6 text-amber-900">
-                Спочатку опрацюйте {blockingCorrectionRequests.length}{' '}
-                {blockingCorrectionRequests.length === 1 ? 'активний запит' : 'активні запити'},
-                що {preview.scope === 'global' ? 'належать товарам у загальній переоцінці' : 'належать цій матриці'}.
-              </div>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2 sm:justify-end">
+        <Notice tone="warning" title="Переоцінку тимчасово заблоковано" actions={<div className="flex flex-wrap gap-2 sm:justify-end">
             {blockingCorrectionRequests.slice(0, 3).map((request) => (
               <Link
                 key={request.id}
@@ -54,35 +43,29 @@ export function RepricingWorkflowNotices({ controller }) {
                 Ще {blockingCorrectionRequests.length - 3}
               </Link>
             )}
-          </div>
-        </div>
+          </div>}>
+          Спочатку опрацюйте {blockingCorrectionRequests.length}{' '}
+          {blockingCorrectionRequests.length === 1 ? 'активний запит' : 'активні запити'},
+          що {preview.scope === 'global' ? 'належать товарам у загальній переоцінці' : 'належать цій матриці'}.
+        </Notice>
       )}
 
       {appliedBatch && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
-          <div className="flex items-center gap-3 text-sm text-emerald-900">
-            <CheckCircle2 size={19} />
-            <span>В Amber оновлено {appliedBatch.changed_count ?? appliedBatch.changedCount} із {appliedBatch.changed_count ?? appliedBatch.changedCount} товарів.</span>
-          </div>
-          <button type="button" className="btn btn-outline gap-2" onClick={() => downloadBatch(appliedBatch.id)}>
+        <OperationReceipt title="Переоцінку застосовано в Amber"
+          description={`Оновлено ${appliedBatch.changed_count ?? appliedBatch.changedCount} товарів. Доставка до Magento відстежується окремо.`}
+          identity={`#${appliedBatch.id}`} identityLabel="Партія" actions={<Button onClick={() => downloadBatch(appliedBatch.id)}>
             <Download size={16} />
             Файл змінених цін
-          </button>
-        </div>
+          </Button>} />
       )}
 
       {appliedBatch && <RepricingSyncProgress batchId={appliedBatch.id} />}
       {rollbackResult && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-          <div className="flex items-center gap-3 text-sm text-amber-900">
-            <Undo2 size={19} />
-            <span>Переоцінку #{rollbackResult.id} відкочено. Старі ціни повернено.</span>
-          </div>
-          <button type="button" className="btn btn-outline gap-2" onClick={() => downloadRollbackBatch(rollbackResult.id)}>
+        <OperationReceipt title="Переоцінку відкочено" description="Попередні ціни повернено в Amber."
+          identity={`#${rollbackResult.id}`} identityLabel="Партія" tone="warning" actions={<Button onClick={() => downloadRollbackBatch(rollbackResult.id)}>
             <Download size={16} />
             CSV відкату
-          </button>
-        </div>
+          </Button>} />
       )}
     </>
   );

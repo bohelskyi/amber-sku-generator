@@ -115,6 +115,9 @@ function canTransitionCorrectionRequest(fromStatus, toStatus) {
 
 function normalizeRequestRow(row) {
   if (!row) return null;
+  const sourceArticle = row.source_public_sku || row.old_payload?.publicSku || null;
+  const proposedArticle = row.corrected_public_sku || row.proposed_payload?.publicSku
+    || row.old_payload?.publicSku || null;
   return {
     id: Number(row.id),
     requestType: row.request_type || 'recount',
@@ -127,6 +130,8 @@ function normalizeRequestRow(row) {
     proposedSku: row.proposed_sku,
     sourceInternalSku: row.source_sku,
     proposedInternalSku: row.proposed_sku,
+    sourceArticle,
+    proposedArticle,
     sourcePublicSku: row.source_public_sku || row.old_payload?.publicSku || row.source_sku,
     proposedPublicSku: row.corrected_public_sku || row.proposed_payload?.publicSku
       || row.old_payload?.publicSku || row.source_sku,
@@ -473,10 +478,25 @@ async function getCorrectionRequestRow(requestId, queryable = pool) {
   return result.rows[0];
 }
 
-async function getCorrectionRequests({ status, search, limit } = {}) {
+function normalizeCorrectionPageNumber(value, fallback, { maximum = Number.MAX_SAFE_INTEGER } = {}) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    const error = new Error('Некоректні параметри сторінки запитів.');
+    error.statusCode = 422;
+    error.publicCode = 'CORRECTION_REQUEST_QUERY_INVALID';
+    throw error;
+  }
+  return Math.min(Math.floor(numeric), maximum);
+}
+
+function escapeLikeFragment(value) {
+  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
+function buildCorrectionRequestWhere({ status, search, workspace, workspaceIds } = {}, options = {}) {
   const normalizedStatus = normalizeRequestStatusFilter(status);
   const normalizedSearch = String(search || '').trim().slice(0, 120);
-  const normalizedLimit = Math.min(Math.max(Number(limit) || 300, 1), 1000);
   const values = [];
   const where = [];
 
@@ -488,36 +508,111 @@ async function getCorrectionRequests({ status, search, limit } = {}) {
     where.push(`cr.status = $${values.length}`);
   }
   if (normalizedSearch) {
-    values.push(`%${normalizedSearch}%`);
-    where.push(`(cr.source_sku ILIKE $${values.length} OR cr.proposed_sku ILIKE $${values.length}
-      OR identities.public_sku ILIKE $${values.length})`);
+    values.push(`%${options.legacySearch ? normalizedSearch : escapeLikeFragment(normalizedSearch)}%`);
+    where.push(options.legacySearch
+      ? `(cr.source_sku ILIKE $${values.length} OR cr.proposed_sku ILIKE $${values.length}
+        OR identities.public_sku ILIKE $${values.length})`
+      : `(cr.source_sku ILIKE $${values.length} ESCAPE '\\'
+        OR cr.proposed_sku ILIKE $${values.length} ESCAPE '\\'
+        OR identities.public_sku ILIKE $${values.length} ESCAPE '\\'
+        OR COALESCE(cr.comment, '') ILIKE $${values.length} ESCAPE '\\')`);
   }
-  values.push(normalizedLimit);
+  if (workspace === true || String(workspace || '').toLowerCase() === 'true') {
+    const viewerUserId = Number(options.viewerUserId);
+    const claimIds = String(workspaceIds || '').split(',')
+      .map((value) => Number(value.trim()))
+      .filter((value) => Number.isSafeInteger(value) && value > 0)
+      .slice(0, 200);
+    if (!Number.isSafeInteger(viewerUserId) || viewerUserId <= 0) {
+      const error = new Error('Не вдалося визначити працівника для робочої області.');
+      error.statusCode = 422;
+      throw error;
+    }
+    values.push(viewerUserId);
+    const ownerParameter = values.length;
+    values.push(claimIds);
+    where.push(`(cr.claimed_by_user_id = $${ownerParameter}
+      OR cr.id = ANY($${values.length}::bigint[]))`);
+  }
+  return { values, where };
+}
 
-  const [itemsResult, summaryResult] = await Promise.all([
-    pool.query(
-      `SELECT cr.*,
-              creator.display_name AS created_by_display_name,
-              creator.preferred_username AS created_by_preferred_username,
-              owner.display_name AS claimed_by_display_name,
-              owner.preferred_username AS claimed_by_preferred_username,
-              identities.public_sku AS source_public_sku
+const CORRECTION_REQUEST_READ_COLUMNS = `cr.*,
+  creator.display_name AS created_by_display_name,
+  creator.preferred_username AS created_by_preferred_username,
+  owner.display_name AS claimed_by_display_name,
+  owner.preferred_username AS claimed_by_preferred_username,
+  identities.public_sku AS source_public_sku,
+  corrected_identity.public_sku AS corrected_public_sku`;
+
+const CORRECTION_REQUEST_READ_JOINS = `
+  LEFT JOIN products source_product ON source_product.id=cr.source_product_id
+  LEFT JOIN public_product_identities identities ON identities.id=source_product.public_product_identity_id
+  LEFT JOIN products corrected_product ON corrected_product.id=cr.corrected_product_id
+  LEFT JOIN public_product_identities corrected_identity ON corrected_identity.id=corrected_product.public_product_identity_id
+  LEFT JOIN application_users creator ON creator.id = cr.created_by_user_id
+  LEFT JOIN application_users owner ON owner.id = cr.claimed_by_user_id`;
+
+const CORRECTION_REQUEST_ORDER = `
+  ORDER BY
+    CASE WHEN cr.status IN ('pending', 'in_progress') THEN 0 ELSE 1 END,
+    CASE WHEN cr.status IN ('pending', 'in_progress') THEN cr.created_at END ASC NULLS LAST,
+    CASE WHEN cr.status IN ('pending', 'in_progress') THEN cr.id END ASC NULLS LAST,
+    COALESCE(cr.completed_at, cr.rejected_at, cr.created_at) DESC,
+    cr.id DESC`;
+
+async function getCorrectionRequestForView(requestId, queryable = pool) {
+  const id = Number(requestId);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    const error = new Error('Некоректний запит на виправлення.');
+    error.statusCode = 422;
+    throw error;
+  }
+  const result = await queryable.query(
+    `SELECT ${CORRECTION_REQUEST_READ_COLUMNS}
+     FROM correction_requests cr
+     ${CORRECTION_REQUEST_READ_JOINS}
+     WHERE cr.id = $1
+     LIMIT 1`,
+    [id]
+  );
+  if (result.rows.length === 0) {
+    const error = new Error('Запит на виправлення не знайдено.');
+    error.statusCode = 404;
+    throw error;
+  }
+  return normalizeRequestRow(result.rows[0]);
+}
+
+async function getCorrectionRequestPage(query = {}, queryable = pool, options = {}) {
+  const limit = Math.max(1, normalizeCorrectionPageNumber(
+    query.limit,
+    options.defaultLimit || 40,
+    { maximum: options.maximumLimit || 100 }
+  ));
+  const offset = normalizeCorrectionPageNumber(query.offset, 0);
+  const { values, where } = buildCorrectionRequestWhere(query, options);
+  const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+  const listValues = [...values, limit, offset];
+  const [itemsResult, filteredCountResult, summaryResult] = await Promise.all([
+    queryable.query(
+      `SELECT ${CORRECTION_REQUEST_READ_COLUMNS}
        FROM correction_requests cr
-       LEFT JOIN products source_product ON source_product.id=cr.source_product_id
-       LEFT JOIN public_product_identities identities ON identities.id=source_product.public_product_identity_id
-       LEFT JOIN application_users creator ON creator.id = cr.created_by_user_id
-       LEFT JOIN application_users owner ON owner.id = cr.claimed_by_user_id
-       ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
-       ORDER BY
-         CASE WHEN cr.status IN ('pending', 'in_progress') THEN 0 ELSE 1 END,
-         CASE WHEN cr.status IN ('pending', 'in_progress') THEN cr.created_at END ASC NULLS LAST,
-         CASE WHEN cr.status IN ('pending', 'in_progress') THEN cr.id END ASC NULLS LAST,
-         COALESCE(cr.completed_at, cr.rejected_at, cr.created_at) DESC,
-         cr.id DESC
-       LIMIT $${values.length}`,
+       ${CORRECTION_REQUEST_READ_JOINS}
+       ${whereSql}
+       ${CORRECTION_REQUEST_ORDER}
+       LIMIT $${values.length + 1}
+       OFFSET $${values.length + 2}`,
+      listValues
+    ),
+    queryable.query(
+      `SELECT COUNT(*)::int AS count
+       FROM correction_requests cr
+       ${CORRECTION_REQUEST_READ_JOINS}
+       ${whereSql}`,
       values
     ),
-    pool.query(
+    queryable.query(
       `SELECT
          COUNT(*)::int AS all_count,
          COUNT(*) FILTER (WHERE status = 'pending')::int AS pending_count,
@@ -527,8 +622,8 @@ async function getCorrectionRequests({ status, search, limit } = {}) {
        FROM correction_requests`
     ),
   ]);
-  const counts = summaryResult.rows[0];
-
+  const counts = summaryResult.rows[0] || {};
+  const total = Number(filteredCountResult.rows[0]?.count || 0);
   return {
     items: itemsResult.rows.map(normalizeRequestRow),
     summary: {
@@ -539,7 +634,24 @@ async function getCorrectionRequests({ status, search, limit } = {}) {
       completed: Number(counts.completed_count || 0),
       rejected: Number(counts.rejected_count || 0),
     },
+    pageInfo: {
+      limit,
+      offset,
+      total,
+      hasPrevious: offset > 0,
+      hasNext: offset + itemsResult.rows.length < total,
+    },
   };
+}
+
+async function getCorrectionRequests({ status, search, limit } = {}, queryable = pool) {
+  const normalizedLimit = Math.max(1, normalizeCorrectionPageNumber(limit, 300, { maximum: 1000 }));
+  const result = await getCorrectionRequestPage(
+    { status, search, limit: normalizedLimit, offset: 0 },
+    queryable,
+    { defaultLimit: 300, maximumLimit: 1000, legacySearch: true }
+  );
+  return { items: result.items, summary: result.summary };
 }
 
 async function createPriceChangeRequest(payload = {}, options = {}) {
@@ -1197,6 +1309,8 @@ module.exports = {
   previewCorrectionRequest,
   forceReleaseCorrectionRequest,
   getCorrectionPreviewSignature,
+  getCorrectionRequestForView,
+  getCorrectionRequestPage,
   getCorrectionRequests,
   haveSameRequestAnswers,
   getClaimTokenHash,

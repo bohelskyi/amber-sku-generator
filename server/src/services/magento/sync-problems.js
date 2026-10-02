@@ -59,6 +59,15 @@ async function summary(db = pool) {
     FROM magento_auto_sync_activation a WHERE singleton`)).rows[0];
   return { enabled: Boolean(result?.enabled), problemCount: Number(result?.problemCount || 0) };
 }
+function presentProblemRow(row) {
+  return { productId: row.productId, article: row.article, category: row.category,
+    problems: (['reconciliation_required','TEST_DELETION_PENDING'].includes(row.reason_code) ? [{ code: row.reason_code }]
+      : ['conflict', 'baseline_required'].includes(row.name_state) ? [{ code: row.name_state === 'conflict' ? 'NAME_CONFLICT' : 'NAME_BASELINE_REQUIRED' }]
+        : row.diagnostics?.length ? row.diagnostics : [{ code: row.reason_code || 'data_or_binding' }]).map(presentProblem),
+    nameConflict: !['reconciliation_required','TEST_DELETION_PENDING'].includes(row.reason_code) && ['conflict', 'baseline_required'].includes(row.name_state)
+      ? { amber: row.observed_amber_names, magento: row.observed_remote_names } : null,
+  };
+}
 async function problems(config, db = pool) {
   const rows = (await db.query(`SELECT p.id AS "productId",i.public_sku AS "article",p.category,
     CASE WHEN d.state<>'finalized' THEN 'TEST_DELETION_PENDING' ELSE r.reason_code END AS reason_code,
@@ -68,12 +77,58 @@ async function problems(config, db = pool) {
     LEFT JOIN magento_name_sync_states n ON n.public_product_identity_id=i.id AND n.origin_hash=$1
     LEFT JOIN magento_test_deletions d ON d.public_product_identity_id=i.id
     WHERE r.state='needs_attention' OR d.state<>'finalized' ORDER BY i.id`, [config.configured ? originHash(config.baseUrl) : 'unconfigured'])).rows;
-  return rows.map((row) => ({ productId: row.productId, article: row.article, category: row.category,
-    problems: (['reconciliation_required','TEST_DELETION_PENDING'].includes(row.reason_code) ? [{ code: row.reason_code }]
-      : ['conflict', 'baseline_required'].includes(row.name_state) ? [{ code: row.name_state === 'conflict' ? 'NAME_CONFLICT' : 'NAME_BASELINE_REQUIRED' }]
-        : row.diagnostics?.length ? row.diagnostics : [{ code: row.reason_code || 'data_or_binding' }]).map(presentProblem),
-    nameConflict: !['reconciliation_required','TEST_DELETION_PENDING'].includes(row.reason_code) && ['conflict', 'baseline_required'].includes(row.name_state)
-      ? { amber: row.observed_amber_names, magento: row.observed_remote_names } : null,
-  }));
+  return rows.map(presentProblemRow);
 }
-module.exports = { taxonomy, safeDiagnostics, presentProblem, saveDiagnostics, summary, problems };
+
+function normalizePageValue(value, fallback, maximum) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    const error = new Error('Некоректні параметри сторінки проблем синхронізації.');
+    error.statusCode = 422;
+    throw error;
+  }
+  return Math.min(Math.floor(numeric), maximum);
+}
+
+async function problemPage(config, query = {}, db = pool) {
+  const limit = Math.max(1, normalizePageValue(query.limit, 30, 100));
+  const offset = normalizePageValue(query.offset, 0, Number.MAX_SAFE_INTEGER);
+  const category = String(query.category || '').trim().slice(0, 40);
+  const origin = config.configured ? originHash(config.baseUrl) : 'unconfigured';
+  const values = [origin];
+  const categoryClause = category ? ` AND p.category=$${values.push(category)}` : '';
+  const countValues = values.slice(1);
+  const [rowsResult, countResult] = await Promise.all([
+    db.query(`SELECT p.id AS "productId",i.public_sku AS "article",p.category,
+      CASE WHEN d.state<>'finalized' THEN 'TEST_DELETION_PENDING' ELSE r.reason_code END AS reason_code,
+      r.diagnostics,n.state AS name_state,n.observed_amber_names,n.observed_remote_names
+      FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
+      LEFT JOIN magento_product_sync_requests r ON r.product_id=p.id
+      LEFT JOIN magento_name_sync_states n ON n.public_product_identity_id=i.id AND n.origin_hash=$1
+      LEFT JOIN magento_test_deletions d ON d.public_product_identity_id=i.id
+      WHERE (r.state='needs_attention' OR d.state<>'finalized')${categoryClause}
+      ORDER BY i.id, p.id
+      LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+    [...values, limit, offset]),
+    db.query(`SELECT COUNT(*)::int AS count
+      FROM products p
+      JOIN public_product_identities i ON i.id=p.public_product_identity_id
+      LEFT JOIN magento_product_sync_requests r ON r.product_id=p.id
+      LEFT JOIN magento_test_deletions d ON d.public_product_identity_id=i.id
+      WHERE (r.state='needs_attention' OR d.state<>'finalized')${category ? ' AND p.category=$1' : ''}`,
+    countValues),
+  ]);
+  const total = Number(countResult.rows[0]?.count || 0);
+  return {
+    items: rowsResult.rows.map(presentProblemRow),
+    pageInfo: {
+      limit,
+      offset,
+      total,
+      hasPrevious: offset > 0,
+      hasNext: offset + rowsResult.rows.length < total,
+    },
+  };
+}
+module.exports = { taxonomy, safeDiagnostics, presentProblem, saveDiagnostics, summary, problems, problemPage };

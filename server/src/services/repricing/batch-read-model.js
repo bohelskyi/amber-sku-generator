@@ -2,6 +2,57 @@ const pool = require('../../db/pool');
 const { REPRICING_SCOPE_SCENARIO } = require('./constants');
 const { buildPricingChange, buildPricingState } = require('./pricing-state');
 
+function normalizeBatchRows(rows) {
+  return rows.map((batch) => ({
+    ...batch,
+    id: Number(batch.id),
+    scope: batch.scope || REPRICING_SCOPE_SCENARIO,
+    scenario_id: batch.scenario_id === null ? null : Number(batch.scenario_id),
+    candidate_count: Number(batch.candidate_count || 0),
+    changed_count: Number(batch.changed_count || 0),
+    unchanged_count: Number(batch.unchanged_count || 0),
+    skipped_count: Number(batch.skipped_count || 0),
+    error_count: Number(batch.error_count || 0),
+    can_rollback: Boolean(batch.can_rollback),
+  }));
+}
+
+const BATCH_COLUMNS = `b.id, b.scope, b.scenario_id, b.category_code, b.scenario_name, b.status,
+  b.candidate_count, b.changed_count, b.unchanged_count, b.skipped_count,
+  b.error_count, b.created_at, b.applied_at, b.rolled_back_at,
+  (
+    b.status = 'completed'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM repricing_items ri
+      LEFT JOIN products p ON p.id = ri.product_id
+      WHERE ri.batch_id = b.id
+        AND (
+          p.id IS NULL
+          OR COALESCE(p.status, 'active') <> 'active'
+          OR p.details #>> '{repricing,batchId}' IS DISTINCT FROM b.id::text
+          OR jsonb_build_object(
+            'totalPrice', p.total_price,
+            'totalPriceUah', p.total_price_uah,
+            'pricePerGram', p.price_per_gram,
+            'uahRate', p.uah_rate,
+            'details', p.details
+          ) IS DISTINCT FROM ri.new_payload
+        )
+    )
+  ) AS can_rollback`;
+
+function normalizePageValue(value, fallback, maximum) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    const error = new Error('Некоректні параметри історії переоцінок.');
+    error.statusCode = 422;
+    throw error;
+  }
+  return Math.min(Math.floor(numeric), maximum);
+}
+
 async function getRepricingBatches(limit = 20) {
   const normalizedLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
   const result = await pool.query(
@@ -35,18 +86,33 @@ async function getRepricingBatches(limit = 20) {
     [normalizedLimit]
   );
 
-  return result.rows.map((batch) => ({
-    ...batch,
-    id: Number(batch.id),
-    scope: batch.scope || REPRICING_SCOPE_SCENARIO,
-    scenario_id: batch.scenario_id === null ? null : Number(batch.scenario_id),
-    candidate_count: Number(batch.candidate_count || 0),
-    changed_count: Number(batch.changed_count || 0),
-    unchanged_count: Number(batch.unchanged_count || 0),
-    skipped_count: Number(batch.skipped_count || 0),
-    error_count: Number(batch.error_count || 0),
-    can_rollback: Boolean(batch.can_rollback),
-  }));
+  return normalizeBatchRows(result.rows);
+}
+
+async function getRepricingBatchPage(query = {}, db = pool) {
+  const limit = Math.max(1, normalizePageValue(query.limit, 20, 100));
+  const offset = normalizePageValue(query.offset, 0, Number.MAX_SAFE_INTEGER);
+  const [result, countResult] = await Promise.all([
+    db.query(
+      `SELECT ${BATCH_COLUMNS}
+       FROM repricing_batches b
+       ORDER BY b.id DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    ),
+    db.query('SELECT COUNT(*)::int AS count FROM repricing_batches'),
+  ]);
+  const total = Number(countResult.rows[0]?.count || 0);
+  return {
+    items: normalizeBatchRows(result.rows),
+    pageInfo: {
+      limit,
+      offset,
+      total,
+      hasPrevious: offset > 0,
+      hasNext: offset + result.rows.length < total,
+    },
+  };
 }
 
 async function getBatchSyncStatus(batchId, db = pool) {
@@ -149,6 +215,7 @@ async function getRepricingRollbackItems(batchId) {
 module.exports = {
   getBatchSyncStatus,
   getRepricingBatchItems,
+  getRepricingBatchPage,
   getRepricingBatches,
   getRepricingRollbackItems,
 };

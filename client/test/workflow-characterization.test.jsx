@@ -127,7 +127,7 @@ describe('Necklaces product creation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Формований' }));
     expect(screen.queryByRole('group', { name: 'Калібрування' })).toBeNull();
     expect(screen.queryByRole('group', { name: 'Розмір' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Розрахувати SKU і ціну' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Перевірити дані' }));
     await waitFor(() => expect(posts.some((post) => post.url === '/preview')).toBe(true));
     expect(posts.find((post) => post.url === '/preview').body).toMatchObject({
       categoryCode: 'NM', answers: { raw_type: 2 }, isCalibrated: null,
@@ -222,6 +222,7 @@ const repricingPreview = {
   items: [{
     productId: 501,
     sku: 'BR1001',
+    publicSku: 'BR1001',
     categoryCode: 'BR',
     scenarioId: 21,
     scenarioName: 'Base matrix',
@@ -239,6 +240,7 @@ const repricingPreview = {
 };
 
 async function renderRepricing(permissions = [
+  'products.view',
   'corrections.view',
   'repricing.view',
   'repricing.prepare',
@@ -262,9 +264,9 @@ describe('Repricing workflow', () => {
     vi.spyOn(api, 'get').mockImplementation(async (url) => {
       if (url === '/config') return response(repricingConfig);
       if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
-      if (url === '/admin/repricing/batches') return response([]);
+      if (url === '/admin/repricing/batches/page') return response([]);
       if (url === '/admin/repricing/drafts') return response(hasGlobalDraft ? [{ id: 77, scope: 'global' }] : []);
-      if (url === '/admin/correction-requests') return response({ items: [] });
+      if (url === '/admin/correction-requests/page') return response({ items: [] });
       throw new Error(`Unexpected GET ${url}`);
     });
     await renderRepricing(['repricing.view', 'repricing.prepare', 'products.recount', 'corrections.create', 'corrections.view', 'catalog.view', 'pricing.view']);
@@ -281,9 +283,9 @@ describe('Repricing workflow', () => {
     vi.spyOn(api, 'get').mockImplementation(async (url) => {
       if (url === '/config') return response(repricingConfig);
       if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
-      if (url === '/admin/repricing/batches') return response([]);
+      if (url === '/admin/repricing/batches/page') return response([]);
       if (url === '/admin/repricing/drafts') return response(savedDraft ? [savedDraft] : []);
-      if (url === '/admin/correction-requests') return response({ items: [] });
+      if (url === '/admin/correction-requests/page') return response({ items: [] });
       throw new Error(`Unexpected GET ${url}`);
     });
     const post = vi.spyOn(api, 'post').mockImplementation(async (url, body) => {
@@ -348,9 +350,9 @@ describe('Repricing workflow', () => {
     vi.spyOn(api, 'get').mockImplementation(async (url) => {
       if (url === '/config') return response(repricingConfig);
       if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
-      if (url === '/admin/repricing/batches') return response([]);
+      if (url === '/admin/repricing/batches/page') return response([]);
       if (url === '/admin/repricing/drafts') return response([draft]);
-      if (url === '/admin/correction-requests') return response({ items: [] });
+      if (url === '/admin/correction-requests/page') return response({ items: [] });
       if (url === '/admin/repricing/drafts/88') {
         return response({
           draft,
@@ -372,7 +374,7 @@ describe('Repricing workflow', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Продовжити чернетку' }));
     expect(await screen.findByText(/Дані або розрахунок змінилися після збереження чернетки/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Прийняти оновлення' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Застосувати переоцінку' }).disabled).toBe(true);
+    expect((await screen.findByRole('button', { name: 'Застосувати переоцінку' })).disabled).toBe(true);
   });
 
   it('serializes overlapping autosaves and persists the newest resolution last', async () => {
@@ -382,9 +384,9 @@ describe('Repricing workflow', () => {
     vi.spyOn(api, 'get').mockImplementation(async (url) => {
       if (url === '/config') return response(repricingConfig);
       if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
-      if (url === '/admin/repricing/batches') return response([]);
+      if (url === '/admin/repricing/batches/page') return response([]);
       if (url === '/admin/repricing/drafts') return response(savedDraft ? [savedDraft] : []);
-      if (url === '/admin/correction-requests') return response({ items: [] });
+      if (url === '/admin/correction-requests/page') return response({ items: [] });
       throw new Error(`Unexpected GET ${url}`);
     });
     const post = vi.spyOn(api, 'post').mockImplementation((url) => {
@@ -458,6 +460,7 @@ describe('Repricing workflow', () => {
         ...repricingPreview.items[0],
         productId: 502,
         sku: 'NM2002',
+        publicSku: 'NM2002',
         categoryCode: 'NM',
         scenarioId: 22,
         scenarioName: 'New matrix',
@@ -468,9 +471,9 @@ describe('Repricing workflow', () => {
       if (url === '/admin/repricing/scenarios') {
         return response([repricingScenario, secondScenario]);
       }
-      if (url === '/admin/repricing/batches') return response([]);
+      if (url === '/admin/repricing/batches/page') return response([]);
       if (url === '/admin/repricing/drafts') return response([]);
-      if (url === '/admin/correction-requests') return response({ items: [] });
+      if (url === '/admin/correction-requests/page') return response({ items: [] });
       throw new Error(`Unexpected GET ${url}`);
     });
     let draftSaveCount = 0;
@@ -504,6 +507,7 @@ describe('Repricing workflow', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(800); });
     expect(draftSaveCount).toBe(1);
 
+    fireEvent.click(screen.getByRole('link', { name: 'Підготовка' }));
     fireEvent.change(screen.getByRole('combobox', { name: 'Цінова матриця' }), {
       target: { value: '22' },
     });
@@ -556,6 +560,7 @@ describe('Repricing workflow', () => {
         ...repricingPreview.items[0],
         productId: 502,
         sku: 'NM2002',
+        publicSku: 'NM2002',
         categoryCode: 'NM',
         scenarioId: 22,
         scenarioName: 'New matrix',
@@ -566,9 +571,9 @@ describe('Repricing workflow', () => {
       if (url === '/admin/repricing/scenarios') {
         return response([repricingScenario, secondScenario]);
       }
-      if (url === '/admin/repricing/batches') return response([]);
+      if (url === '/admin/repricing/batches/page') return response([]);
       if (url === '/admin/repricing/drafts') return response([]);
-      if (url === '/admin/correction-requests') return response({ items: [] });
+      if (url === '/admin/correction-requests/page') return response({ items: [] });
       throw new Error(`Unexpected GET ${url}`);
     });
     let previewRequestCount = 0;
@@ -611,9 +616,9 @@ describe('Repricing workflow', () => {
     vi.spyOn(api, 'get').mockImplementation(async (url) => {
       if (url === '/config') return response(repricingConfig);
       if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
-      if (url === '/admin/repricing/batches') return response([]);
+      if (url === '/admin/repricing/batches/page') return response([]);
       if (url === '/admin/repricing/drafts') return response([]);
-      if (url === '/admin/correction-requests') return response({ items: activeRequests });
+      if (url === '/admin/correction-requests/page') return response({ items: activeRequests });
       throw new Error(`Unexpected GET ${url}`);
     });
     const post = vi.spyOn(api, 'post').mockImplementation((url) => {
@@ -625,14 +630,15 @@ describe('Repricing workflow', () => {
     const firstRender = await renderRepricing();
     fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
     expect(await screen.findByText('Переоцінку тимчасово заблоковано')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Застосувати переоцінку' }).disabled).toBe(true);
+    expect((await screen.findByRole('button', { name: 'Застосувати переоцінку' })).disabled).toBe(true);
 
     firstRender.unmount();
     activeRequests = [];
     await renderRepricing();
     fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Застосувати переоцінку' }));
-    const confirmButton = screen.getByRole('button', { name: 'Застосувати' });
+    const confirmButton = within(screen.getByRole('dialog', { name: 'Застосувати переоцінку?' }))
+      .getByRole('button', { name: 'Застосувати переоцінку' });
     fireEvent.click(confirmButton);
     fireEvent.click(confirmButton);
     expect(post.mock.calls.filter(([url]) => url === '/admin/repricing/apply')).toHaveLength(1);
@@ -643,14 +649,15 @@ describe('Repricing workflow', () => {
       }));
       await Promise.resolve();
     });
-    expect(await screen.findByText('В Amber оновлено 1 із 1 товарів.')).toBeTruthy();
+    expect(await screen.findByText('Переоцінку застосовано в Amber')).toBeTruthy();
+    expect(screen.getByText(/Оновлено 1 товарів\./)).toBeTruthy();
   });
 
   it('keeps apply and rollback controls hidden without their effective permissions', async () => {
     vi.spyOn(api, 'get').mockImplementation(async (url) => {
       if (url === '/config') return response(repricingConfig);
       if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
-      if (url === '/admin/repricing/batches') {
+      if (url === '/admin/repricing/batches/page') {
         return response([{
           id: 31,
           applied_at: '2026-09-11T08:00:00.000Z',
@@ -662,7 +669,7 @@ describe('Repricing workflow', () => {
         }]);
       }
       if (url === '/admin/repricing/drafts') return response([]);
-      if (url === '/admin/correction-requests') return response({ items: [] });
+      if (url === '/admin/correction-requests/page') return response({ items: [] });
       throw new Error(`Unexpected GET ${url}`);
     });
     vi.spyOn(api, 'post').mockImplementation(async (url) => {
@@ -672,7 +679,9 @@ describe('Repricing workflow', () => {
 
     await renderRepricing(['repricing.view', 'repricing.prepare']);
     await screen.findByRole('button', { name: 'Попередній перегляд' });
+    fireEvent.click(screen.getByRole('link', { name: 'Історія' }));
     expect(screen.queryByRole('button', { name: 'Відкотити переоцінку 31' })).toBeNull();
+    fireEvent.click(screen.getByRole('link', { name: 'Підготовка' }));
     fireEvent.click(screen.getByRole('button', { name: 'Попередній перегляд' }));
     await screen.findByText('BR1001');
     expect(screen.queryByRole('button', { name: 'Застосувати переоцінку' })).toBeNull();
@@ -691,9 +700,9 @@ describe('Repricing workflow', () => {
     vi.spyOn(api, 'get').mockImplementation(async (url) => {
       if (url === '/config') return response(repricingConfig);
       if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
-      if (url === '/admin/repricing/batches') return response([batch]);
+      if (url === '/admin/repricing/batches/page') return response([batch]);
       if (url === '/admin/repricing/drafts') return response([]);
-      if (url === '/admin/correction-requests') return response({ items: [] });
+      if (url === '/admin/correction-requests/page') return response({ items: [] });
       throw new Error(`Unexpected GET ${url}`);
     });
     const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
@@ -706,8 +715,9 @@ describe('Repricing workflow', () => {
     });
 
     await renderRepricing();
+    fireEvent.click(screen.getByRole('link', { name: 'Історія' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Відкотити переоцінку 31' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Відкотити' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Відкотити переоцінку' }));
 
     expect(await screen.findByText('Товар змінився після переоцінки.')).toBeTruthy();
     expect(post).toHaveBeenCalledWith('/admin/repricing/31/rollback');
@@ -736,9 +746,9 @@ describe('Repricing workflow', () => {
     vi.spyOn(api, 'get').mockImplementation(async (url) => {
       if (url === '/config') return response(repricingConfig);
       if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
-      if (url === '/admin/repricing/batches') return response([]);
+      if (url === '/admin/repricing/batches/page') return response([]);
       if (url === '/admin/repricing/drafts') return response(savedDraft ? [savedDraft] : []);
-      if (url === '/admin/correction-requests') return response({ items: [] });
+      if (url === '/admin/correction-requests/page') return response({ items: [] });
       throw new Error(`Unexpected GET ${url}`);
     });
     const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
@@ -838,9 +848,9 @@ describe('Repricing workflow', () => {
     vi.spyOn(api, 'get').mockImplementation(async (url) => {
       if (url === '/config') return response(repricingConfig);
       if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
-      if (url === '/admin/repricing/batches') return response([]);
+      if (url === '/admin/repricing/batches/page') return response([]);
       if (url === '/admin/repricing/drafts') return response([]);
-      if (url === '/admin/correction-requests') return response({ items: [] });
+      if (url === '/admin/correction-requests/page') return response({ items: [] });
       throw new Error(`Unexpected GET ${url}`);
     });
     vi.spyOn(api, 'post').mockImplementation(async (url) => {
@@ -865,6 +875,86 @@ describe('Repricing workflow', () => {
 
     expect(screen.getByText('Ручну ціну збережено без змін.')).toBeTruthy();
     expect(screen.getByRole('textbox', { name: 'Нова ціна для BR1001' }).value).toBe('1000');
+  });
+
+  it('renders only fifty of one thousand prepared rows while applying the full authoritative preview', async () => {
+    const largePreview = {
+      ...repricingPreview,
+      summary: { ...repricingPreview.summary, changedCount: 1000 },
+      items: Array.from({ length: 1000 }, (_, index) => ({
+        ...repricingPreview.items[0],
+        productId: index + 1,
+        sku: `BR-INTERNAL-${index + 1}`,
+        publicSku: `AG-${String(index + 1).padStart(6, '0')}`,
+      })),
+    };
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/config') return response(repricingConfig);
+      if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
+      if (url === '/admin/repricing/batches/page') return response([]);
+      if (url === '/admin/repricing/drafts') return response([]);
+      if (url === '/admin/correction-requests/page') return response({ items: [] });
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+      if (url === '/admin/repricing/preview') return response(largePreview);
+      if (url === '/admin/repricing/apply') {
+        return response({ batch: { id: 100, changedCount: 1000, changed_count: 1000 } });
+      }
+      throw new Error(`Unexpected POST ${url}`);
+    });
+
+    await renderRepricing();
+    fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
+    await screen.findByText('AG-000001');
+    expect(document.querySelectorAll('.repricing-workspace tbody tr')).toHaveLength(50);
+    expect(screen.getByText(/Застосування охопить усі 1000 підготовлені зміни/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Застосувати переоцінку' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Застосувати переоцінку?' }))
+      .getByRole('button', { name: 'Застосувати переоцінку' }));
+    expect(await screen.findByText('Оновлено 1000 товарів. Доставка до Magento відстежується окремо.')).toBeTruthy();
+    expect(post.mock.calls.filter(([url]) => url === '/admin/repricing/apply')).toHaveLength(1);
+  });
+
+  it('keeps a repricing viewer read-only without config or background draft writes', async () => {
+    const draft = {
+      id: 88,
+      scope: 'scenario',
+      scenarioId: 21,
+      updatedAt: '2026-09-11T09:00:00.000Z',
+      manualOverrides: [],
+      automaticProductIds: [],
+      reviewedProductIds: [],
+      uiState: {},
+    };
+    const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
+      if (url === '/admin/repricing/batches/page') return response([]);
+      if (url === '/admin/repricing/drafts') return response([draft]);
+      if (url === '/admin/repricing/drafts/88') return response({
+        draft,
+        preview: repricingPreview,
+        conflicts: [],
+        sync: { hasChanges: false, added: [], removed: [], changed: [] },
+      });
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    const post = vi.spyOn(api, 'post');
+    const put = vi.spyOn(api, 'put');
+
+    await renderRepricing(['repricing.view']);
+    fireEvent.click(await screen.findByRole('button', { name: 'Переглянути чернетку' }));
+    const input = await screen.findByRole('textbox', { name: 'Нова ціна для BR1001' });
+    expect(input.readOnly).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Позначити' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Усі' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Пошук товарів за SKU' }), {
+      target: { value: 'BR1001' },
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(get.mock.calls.some(([url]) => url === '/config')).toBe(false);
+    expect(post).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
   });
 });
 
@@ -952,6 +1042,10 @@ function correctionRequest(id, sourceSku) {
     status: 'pending',
     sourceSku,
     proposedSku: `${sourceSku}-NEW`,
+    sourceArticle: sourceSku,
+    proposedArticle: `${sourceSku}-NEW`,
+    sourceInternalSku: `${sourceSku}/INTERNAL`,
+    proposedInternalSku: `${sourceSku}/INTERNAL-NEW`,
     categoryCode: 'BR',
     comment: '',
     changes: [],
@@ -962,6 +1056,45 @@ function correctionRequest(id, sourceSku) {
 }
 
 describe('Correction queue polling', () => {
+  it('keeps the authoritative completion receipt when the following queue refresh fails', async () => {
+    const request = {
+      ...correctionRequest(60, 'AG-000060'),
+      status: 'in_progress',
+      claimVersion: 4,
+      claimedByUser: { id: 42, displayName: 'Amber User' },
+    };
+    let queueReads = 0;
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/config') return response(builderConfig);
+      if (url === '/admin/correction-requests/page') {
+        queueReads += 1;
+        if (queueReads === 1) return response({
+          items: [request],
+          summary: { active: 1, inProgress: 1 },
+          pageInfo: { limit: 30, offset: 0, total: 1, hasPrevious: false, hasNext: false },
+        });
+        throw new Error('queue unavailable after committed write');
+      }
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    vi.spyOn(api, 'post').mockImplementation(async (url) => {
+      if (url === '/admin/correction-requests/60/complete') {
+        return response({ request: { ...request, status: 'completed', proposedArticle: 'AG-000060-NEW' }, draftSyncFailures: [] });
+      }
+      throw new Error(`Unexpected POST ${url}`);
+    });
+
+    render(<AuthContext.Provider value={authValue(['corrections.view', 'corrections.complete', 'products.view'])}>
+      <MemoryRouter><CorrectionRequestsPage /></MemoryRouter></AuthContext.Provider>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Перевірити й застосувати' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Застосувати зміни в Amber?' }))
+      .getByRole('button', { name: 'Виконати переоблік в Amber' }));
+    expect(await screen.findByText('Зміни застосовано в Amber')).toBeTruthy();
+    expect(screen.getAllByText('AG-000060-NEW').length).toBeGreaterThan(0);
+    expect(screen.getByText(/Не вдалося оновити спільну чергу/)).toBeTruthy();
+    expect(screen.queryByText('queue unavailable after committed write')).toBeNull();
+  });
+
   it('phase2 presents delivery/review and requires refresh for older pending request evidence', async () => {
     const request = { ...correctionRequest(50, 'SV-PHASE2'), status: 'in_progress', claimVersion: 4,
       claimedByUser: { id: 42, displayName: 'Phase One User' }, refreshRequired: true,
@@ -969,14 +1102,14 @@ describe('Correction queue polling', () => {
       proposedPayload: { totalPriceUah: 1250, recountEvidence: { private: 'raw-evidence-not-for-normal-ui' } } };
     vi.spyOn(api, 'get').mockImplementation(async (url) => {
       if (url === '/config') return response(builderConfig);
-      if (url === '/admin/correction-requests') return response({ items: [request], summary: { active: 1, inProgress: 1 } });
+      if (url === '/admin/correction-requests/page') return response({ items: [request], summary: { active: 1, inProgress: 1 } });
       throw new Error(`Unexpected GET ${url}`);
     });
     render(<AuthContext.Provider value={authValue(['corrections.view', 'corrections.complete'])}>
       <MemoryRouter><CorrectionRequestsPage /></MemoryRouter></AuthContext.Provider>);
-    await screen.findByText('Потрібно оновити запит перед завершенням.');
-    expect(screen.getByText(/Доставка наступника потребує узгодження попереднього експорту/).textContent).toContain('Успадковані назви потребують перевірки.');
-    expect(screen.getByRole('button', { name: 'Підтвердити', exact: true }).disabled).toBe(true);
+    await screen.findByText('Розрахунок застарів. Оновіть його і повторно перевірте дані перед виконанням.');
+    expect(screen.getByText(/Доставка наступника потребує узгодження попереднього експорту/).textContent).toContain('Успадковані назви також потребують перевірки.');
+    expect(screen.getByRole('button', { name: 'Перевірити й застосувати' }).disabled).toBe(true);
     expect(screen.getByRole('button', { name: 'Оновити розрахунок' }).disabled).toBe(false);
     expect(screen.queryByText('raw-evidence-not-for-normal-ui')).toBeNull();
   });
@@ -1039,28 +1172,26 @@ describe('Correction queue polling', () => {
     };
     vi.spyOn(api, 'get').mockImplementation(async (url) => {
       if (url === '/config') return response(correctionConfig);
-      if (url === '/admin/correction-requests') {
+      if (url === '/admin/correction-requests/page') {
         return response({ items: [request], summary: { active: 1, pending: 1 } });
       }
       throw new Error(`Unexpected GET ${url}`);
     });
 
     render(
-      <AuthContext.Provider value={authValue(['corrections.view'])}>
+      <AuthContext.Provider value={authValue(['corrections.view', 'products.view'])}>
         <MemoryRouter><CorrectionRequestsPage /></MemoryRouter>
       </AuthContext.Provider>
     );
 
-    await screen.findByText('BR-PLACEHOLDER');
-    const requestRecord = document.querySelector('.correction-list article');
-    expect(requestRecord.classList.contains('correction-record')).toBe(true);
-    const recordHeader = requestRecord.querySelector('.correction-record-header');
+    await screen.findAllByText('BR-PLACEHOLDER');
+    const requestRecord = document.querySelector('.correction-request-detail');
+    expect(requestRecord).toBeTruthy();
+    const recordHeader = requestRecord.querySelector('.correction-detail-header');
     expect(recordHeader.querySelector('.status-badge')).toBeTruthy();
     expect(recordHeader.querySelector('a.btn-compact-md').textContent).toContain('Історія товару');
     expect(recordHeader.textContent).toContain('Запит #3');
     expect(recordHeader.textContent).toContain('Автор: Олена Коваль');
-    expect(recordHeader.querySelector('time').getAttribute('dateTime')).toBe(request.createdAt);
-    expect(requestRecord.querySelector('.correction-record-body')).toBeTruthy();
     const changeList = requestRecord.querySelector('.correction-change-list');
     expect(changeList).toBeTruthy();
     expect(changeList.querySelectorAll('.change-record-row')).toHaveLength(1);
@@ -1085,7 +1216,7 @@ describe('Correction queue polling', () => {
     let correctionLoads = 0;
     vi.spyOn(api, 'get').mockImplementation((url) => {
       if (url === '/config') return Promise.resolve(response(builderConfig));
-      if (url === '/admin/correction-requests') {
+      if (url === '/admin/correction-requests/page') {
         correctionLoads += 1;
         if (correctionLoads === 1) {
           return Promise.resolve(response({
@@ -1111,7 +1242,7 @@ describe('Correction queue polling', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(screen.getByText('BR-OLD')).toBeTruthy();
+    expect(screen.getAllByText('BR-OLD').length).toBeGreaterThan(0);
 
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(correctionLoads).toBe(2);
@@ -1125,8 +1256,8 @@ describe('Correction queue polling', () => {
       }));
       await Promise.resolve();
     });
-    expect(screen.queryByText('BR-OLD')).toBeNull();
-    expect(screen.getByText('BR-LATEST')).toBeTruthy();
+    expect(screen.queryAllByText('BR-OLD')).toHaveLength(0);
+    expect(screen.getAllByText('BR-LATEST').length).toBeGreaterThan(0);
 
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(correctionLoads).toBe(3);
