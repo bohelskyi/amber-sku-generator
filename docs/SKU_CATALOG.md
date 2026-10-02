@@ -52,7 +52,7 @@ For retained schema-045 collisions, this abort is repaired only through the expl
 
 The activation gate defaults off. Before activation, ordinary creates and recount successors retain compatibility by receiving a legacy public identity equal to their normalized internal SKU. After the audited activation command, ordinary creates allocate `AG-000001`, `AG-000002`, and so on from a dedicated non-cycling BIGINT sequence, while recount successors inherit the source identity. Formatting uses at least six digits and naturally grows past `AG-999999`. Exact legacy values matching `AG-[0-9]{6,}` advance the sequence floor. `nextval` gaps after rollback are intentional; identity rows, allocation numbers and product identity references cannot be changed, deleted, truncated or reused.
 
-A deferrable database constraint trigger permits the existing recount transaction to insert its successor before retiring the source, but requires at commit that each public identity have at most one current active/uncorrected revision. Public lookup returns only that unique current revision and fails closed on ambiguity. Historical internal-SKU lookup retains existing duplicate ambiguity. A public `AG-...` value is never decoded as attribute data: decode first resolves stored product context, then decodes that revision's internal `full_sku`.
+A deferrable database constraint trigger permits the existing recount transaction to insert its successor before retiring the source, but requires at commit that each public identity have at most one current active/uncorrected revision. Public lookup returns only that unique current revision and fails closed on ambiguity. Historical internal-SKU lookup retains existing duplicate ambiguity. A public `AG-...` value is never decoded as attribute data: decode first resolves stored product context and projects that revision's stored configuration.
 
 Sequence allocation, variation resolution, and exact reservation are serialized and backed by database uniqueness/trigger protections. Preserve the existing lock order and final reservation check.
 
@@ -66,7 +66,7 @@ For seeded categories containing `raw_type`, startup ensures a required non-SKU 
 
 Never coerce this field to boolean. Preview-token compatibility treats missing calibration and `0` alike while preserving `1` and `2` distinctly; ordinary visible required-field validation still rejects a missing answer.
 
-Decode reports calibration as known, stored, unknown, or not applicable. Price display is hidden only when calibration is unknown and the selected calculation actually depends on it.
+Decode reports calibration as known, stored, unknown, or not applicable. For non-stored decoding, price display is hidden only when calibration is unknown and the selected calculation actually depends on it. Stored-product reads retain historical prices regardless of current calibration-dependent pricing rules.
 
 The published Necklaces `size` rule shows and requires size for natural calibration `0` or `1`. It hides size for calibration `2` and for molded material, where calibration is not applicable. Product creation sends `null` for absent calibration during authoritative preview so the hidden-size placeholder path is used; this does not change the preview-token compatibility rule above.
 
@@ -93,11 +93,13 @@ continues at `AG-000003` or higher. See [eligibility and recovery](MAGENTO_AUTOM
 
 ## Decode and legacy compatibility
 
-Decode finds the category by longest prefix, resolves the historical schema marker, parses encoded answers and suffix/variation, and overlays stored product context only where required for compatibility. Stored answers are accepted only when they reproduce the SKU; arbitrary stored details cannot redefine an identifier.
+Exact existing-product lookup is authoritative for opening a product. Decode projects its stored category, answers, schema reference, weight, historical prices and product identity without requiring its historical internal SKU to parse or reconstruct successfully. Historical values absent from schema options remain visible as their stored values. This read does not validate a new configuration or change the identifier.
+
+When no stored product exists, decode finds the category by longest prefix, resolves the historical schema marker and parses encoded answers and suffix/variation. Unknown codes retain structured diagnostics. New-product validation and recount target validation remain authoritative and unchanged.
 
 For known products, decode reports the stored historical final UAH value instead of recalculating from current pricing. Older rows have explicit compatibility fallbacks for missing calculated/automatic fields, but a manual final price must not be invented as an automatic result.
 
-Historical placeholder `0` or a missing stored value can represent an omitted SKU question only when no genuine zero option exists and reconstruction still reproduces the identifier. A configured zero option remains real data. Unknown codes fail with structured diagnostics.
+Historical placeholder `0` or a missing stored value can represent an omitted SKU question when no genuine zero option exists. A configured zero option remains real data. Unknown codes fail with structured diagnostics.
 
 `ensureLegacySkuSchemas()` creates V1 snapshots and links unversioned products during upgrade. For categories with products, it combines stored answer keys with currently required SKU keys so later draft structure is not retroactively imposed on old identifiers.
 
