@@ -110,7 +110,7 @@ test('failed recount attempt scrolls and focuses the first blocker', () => {
 
   assert.equal(focusFirstRecountBlocker(root), true);
   assert.deepEqual(calls, [
-    ['scroll', { behavior: 'smooth', block: 'center' }],
+    ['scroll', { behavior: 'auto', block: 'center' }],
     ['focus', { preventScroll: true }],
   ]);
 });

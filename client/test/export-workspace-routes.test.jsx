@@ -146,7 +146,7 @@ it('keeps product creation, history, decode, recount and archive available witho
   fireEvent.click(screen.getByRole('button', { name: /BR Браслети/ }));
   expect(await screen.findByRole('heading', { name: 'Браслети' })).toBeTruthy(); button('До категорій');
   await screen.findByRole('heading', { name: 'Оберіть категорію' });
-  fireEvent.click(screen.getByRole('link', { name: 'Товари', exact: true }));
+  fireEvent.click(within(screen.getByRole('navigation', { name: 'Основна навігація' })).getByRole('link', { name: 'Товари', exact: true }));
   await screen.findByLabelText('Артикул для відкриття товару');
   fireEvent.change(screen.getByLabelText('Артикул для відкриття товару'), { target: { value: 'br-a' } }); button('Відкрити товар');
   await screen.findByRole('button', { name: 'Переоблік' });

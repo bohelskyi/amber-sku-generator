@@ -169,7 +169,7 @@ export function ProductBuilder({
   useEffect(() => {
     if (!validationVisible || !validationFailed) return;
     const firstBlocker = workspaceRef.current?.querySelector('[data-builder-blocker="true"]');
-    firstBlocker?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    firstBlocker?.scrollIntoView({ behavior: 'auto', block: 'center' });
     firstBlocker?.focus({ preventScroll: true });
   }, [verificationAttempt, validationFailed, validationVisible]);
 

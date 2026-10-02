@@ -90,7 +90,7 @@ export function focusFirstRecountBlocker(root) {
   const firstBlocker = root?.querySelector?.('[data-recount-blocker="true"]');
   if (!firstBlocker) return false;
 
-  firstBlocker.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  firstBlocker.scrollIntoView?.({ behavior: 'auto', block: 'center' });
   firstBlocker.focus?.({ preventScroll: true });
   return true;
 }

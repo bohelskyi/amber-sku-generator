@@ -12,7 +12,7 @@ const roles=[{key:'administrator'}];
 const permissions=['export_templates.manage','export_templates.publish'];
 const shell=(grants=permissions,assignedRoles=roles,props={})=>render(<AuthContext.Provider value={{permissions:grants,roles:assignedRoles}}><MagentoOptionActions revision={revision} category={category} {...props}/></AuthContext.Provider>);
 const labels=(props={},assignedRoles=roles)=>shell(permissions,assignedRoles,{revision:{...revision,state:'published'},category:labelCategory,mode:'labels',currentPublishedId:'draft',...props});
-async function openHistory(){const summary=await screen.findByText('Історія дій цього типу (1)');const details=summary.closest('details');details.open=true;fireEvent(details,new Event('toggle'));}
+async function openHistory(){const summary=await screen.findByText('Історія дій цього типу (1)');fireEvent.click(summary.closest('summary'));}
 it('English is read from Amber by the server; no caller-authored label or authority control remains',async()=>{
   shell();expect(screen.queryByRole('textbox',{name:/англійською/})).toBeNull();
   fireEvent.change(screen.getByRole('combobox',{name:'Значення Amber'}),{target:{value:'kind:8'}});

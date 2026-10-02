@@ -97,10 +97,10 @@ export function Drawer({ open, title, description, children, footer, busy = fals
   </section>, document.body);
 }
 
-export function ConfirmDialog({ open, title, description, children, confirmLabel = 'Підтвердити', cancelLabel = 'Скасувати',
+export function ConfirmDialog({ open = false, title, description, children, confirmLabel = 'Підтвердити', cancelLabel = 'Скасувати',
   tone = 'primary', busy = false, confirmDisabled = false, onConfirm, onClose }) {
   const cancelRef = useRef(null);
-  return <Dialog open={open} title={title} description={description} busy={busy} onClose={onClose} initialFocusRef={cancelRef}
+  return <Dialog open={Boolean(open)} title={title} description={description} busy={busy} onClose={onClose} initialFocusRef={cancelRef}
     size="sm" footer={<><Button ref={cancelRef} onClick={onClose} disabled={busy}>{cancelLabel}</Button>
       <Button variant={tone === 'danger' ? 'danger' : 'primary'} busy={busy} disabled={confirmDisabled} onClick={onConfirm}>{confirmLabel}</Button></>}>
     {children}

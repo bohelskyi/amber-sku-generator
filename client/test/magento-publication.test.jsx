@@ -13,7 +13,7 @@ const proof = { previewToken: 'proof', totalProducts: 3, affected: [{ productId:
 const roles = [{key:'administrator'}];
 const shell = (props = {}, grants = permissions, assignedRoles = roles) => render(<AuthContext.Provider value={{ permissions: grants, roles: assignedRoles }}><MemoryRouter><MagentoPublicationActions revision={revision} currentPublishedId="current" onPublished={vi.fn()} {...props} /></MemoryRouter></AuthContext.Provider>);
 const controlledShell = (props = {}, grants = permissions, assignedRoles = roles) => render(<AuthContext.Provider value={{ permissions: grants, roles: assignedRoles }}><MemoryRouter><MagentoControlledActions revision={{...revision,id:'current',state:'published'}} currentPublishedId="current" kind="broader_resync" {...props} /></MemoryRouter></AuthContext.Provider>);
-function openDetails(label) {const details=screen.getByText(label).closest('details');details.open=true;fireEvent(details,new Event('toggle'));}
+function openDetails(label) {fireEvent.click(screen.getByText(label).closest('summary'));}
 afterEach(() => { cleanup(); vi.resetAllMocks(); vi.useRealTimers(); });
 it('controlled product picker can reach later pages and preserves the exact cross-page selection',async()=>{
   const product=(id)=>({productId:id,article:`AG-${id}`,before:{all:`Назва ${id}`},after:{all:`Нова ${id}`},changed:true,blockers:[]});
@@ -115,7 +115,7 @@ it('controlled resync and name-rule application require separate selection, reas
   await vi.waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
   expect(api.post.mock.calls[1][1]).toMatchObject({ kind: 'name_rule', productIds: [1], previewToken: 'controlled-proof' });
   await screen.findByRole('heading',{name:'Публікація та передача товарів'});
-  expect(api.get).toHaveBeenCalledWith('/admin/magento-integration/bindings/current/handoffs',expect.objectContaining({signal:expect.any(AbortSignal)}));
+  await vi.waitFor(() => expect(api.get).toHaveBeenCalledWith('/admin/magento-integration/bindings/current/handoffs',expect.objectContaining({signal:expect.any(AbortSignal)})));
 });
 it('controlled article search keeps the after cursor, preserves selection, confirms exact articles and clears it',async()=>{
   const product=(id)=>({productId:id,article:`ARTICLE-${id}`,before:{all:'Назва',en:'Name'},after:{},changed:false,blockers:[]});

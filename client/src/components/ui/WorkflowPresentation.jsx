@@ -58,7 +58,7 @@ export function ActionMenu({ label = 'Дії', children, align = 'end', classNam
     return () => window.cancelAnimationFrame(frame);
   }, [align, open]);
   useEffect(() => {
-    if (!open) { setPosition(null); return undefined; }
+    if (!open) return undefined;
     const closeOutside = (event) => {
       if (!rootRef.current?.contains(event.target) && !popupRef.current?.contains(event.target)) setOpen(false);
     };
@@ -88,12 +88,16 @@ export function ActionMenu({ label = 'Дії', children, align = 'end', classNam
       event.preventDefault(); setOpen(false); (next || triggerRef.current)?.focus();
     }
   }
+  function toggleMenu() {
+    if (!open) setPosition(null);
+    setOpen(!open);
+  }
   return <div ref={rootRef} className={`ui-action-menu ${className}`.trim()}>
     {triggerContent
       ? <Button ref={triggerRef} type="button" variant="secondary" className="ui-action-menu-trigger" aria-label={label}
-        aria-expanded={open} onClick={() => setOpen((value) => !value)}><TriggerIcon size={15} aria-hidden="true" />{triggerContent}<ChevronDown size={14} aria-hidden="true" /></Button>
+        aria-expanded={open} onClick={toggleMenu}><TriggerIcon size={15} aria-hidden="true" />{triggerContent}<ChevronDown size={14} aria-hidden="true" /></Button>
       : <IconButton ref={triggerRef} type="button" icon={TriggerIcon} label={label} variant="secondary"
-        aria-expanded={open} onClick={() => setOpen((value) => !value)} />}
+        aria-expanded={open} onClick={toggleMenu} />}
     {open && createPortal(<div ref={popupRef} className={`ui-action-menu-popup is-${align}`} aria-label={label}
       style={{ top: position?.top ?? 0, left: position?.left ?? 0, visibility: position ? 'visible' : 'hidden' }}
       onKeyDown={handlePopupKeyDown} onClick={(event) => { if (event.target.closest('button,a')) setOpen(false); }}>{children}</div>, document.body)}

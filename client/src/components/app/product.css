@@ -88,6 +88,29 @@
   }
 
 @media (max-width: 639px) {
+  .product-attention-link {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.5rem;
+    padding-block: 0.375rem;
+  }
+
+  .product-attention-link span {
+    display: none;
+  }
+
+  .product-attention-link .btn {
+    min-height: var(--control-height-touch);
+    border-color: transparent;
+    padding-inline: 0.25rem;
+    background: transparent;
+    color: var(--navy-800);
+    text-decoration: underline;
+    text-decoration-color: var(--amber-500);
+    text-underline-offset: 3px;
+  }
+
   .product-register-table-wrap {
     overflow-x: visible;
   }

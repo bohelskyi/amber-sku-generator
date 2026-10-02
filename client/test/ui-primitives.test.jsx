@@ -69,6 +69,11 @@ it('restores focus after a confirmation closes', async () => {
   expect(document.activeElement).toBe(trigger);
 });
 
+it('keeps a confirmation closed when its caller omits open', () => {
+  render(<ConfirmDialog title="Підтвердження" onClose={vi.fn()} onConfirm={vi.fn()} />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
 it('keeps the application inert until the final nested overlay closes', async () => {
   const view = render(<><button>Фон</button><Dialog key="parent" title="Батьківське">Вміст</Dialog><Dialog key="child" title="Дочірнє">Деталі</Dialog></>);
   await waitFor(() => expect(view.container.inert).toBe(true));

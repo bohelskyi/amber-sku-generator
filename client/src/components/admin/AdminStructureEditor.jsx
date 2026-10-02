@@ -173,7 +173,7 @@ export function AdminStructureEditor({
       <section className="catalog-category-context">
         <div className="catalog-category-heading">
           <div><h2>Структура каталогу</h2><p>Категорії, питання та варіанти</p></div>
-          <button type="button" disabled={!canManage} onClick={() => { setIsCategoryEditOpen(false); setIsNewCategoryOpen((isOpen) => !isOpen); }} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Plus size={14} />Категорія</button>
+          {canManage && <button type="button" onClick={() => { setIsCategoryEditOpen(false); setIsNewCategoryOpen((isOpen) => !isOpen); }} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Plus size={14} />Категорія</button>}
         </div>
         <div className="catalog-category-tabs" role="group" aria-label="Категорії каталогу">
           {Object.values(config.categories).map((category) => (
@@ -194,8 +194,8 @@ export function AdminStructureEditor({
                 )}
                 {!schemaStatus && !schemaStatusError && <span className="catalog-schema-state"><i />Завантажуємо стан схеми…</span>}
               </div>
-              <div className="catalog-category-actions">
-                <button type="button" disabled={!canManage} onClick={() => { setIsNewCategoryOpen(false); setIsCategoryEditOpen((isOpen) => !isOpen); }} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Pencil size={14} />Категорія</button>
+              {(canManage || canPublish) && <div className="catalog-category-actions">
+                {canManage && <button type="button" onClick={() => { setIsNewCategoryOpen(false); setIsCategoryEditOpen((isOpen) => !isOpen); }} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Pencil size={14} />Категорія</button>}
                 {canPublish && <button type="button" onClick={publishSkuSchema} disabled={!schemaStatus?.draftChanged || schemaPublishState.loading} className="btn btn-primary flex items-center gap-1.5 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45">
                   <Send size={14} />{schemaPublishState.loading
                     ? schemaPublishState.otherCategory
@@ -203,8 +203,8 @@ export function AdminStructureEditor({
                       : 'Публікуємо…'
                     : schemaStatus?.nextVersion ? `Опублікувати V${schemaStatus.nextVersion}` : 'Опублікувати'}
                 </button>}
-                <button type="button" disabled={!canManage} onClick={() => deleteItem('category', selectedCat.code)} className="catalog-icon-button is-danger" title="Видалити категорію" aria-label={`Видалити категорію ${selectedCat.name}`}><Trash2 size={15} /></button>
-              </div>
+                {canManage && <button type="button" onClick={() => deleteItem('category', selectedCat.code)} className="catalog-icon-button is-danger" title="Видалити категорію" aria-label={`Видалити категорію ${selectedCat.name}`}><Trash2 size={15} /></button>}
+              </div>}
             </div>
             {schemaStatusError && <div className="catalog-context-error" role="alert">Не вдалося завантажити стан схеми. <button type="button" className="et-link" onClick={retrySchemaStatus}>Спробувати ще раз</button></div>}
             {schemaPublishState.otherCategory && <p className="catalog-context-error" role="status">Завершуємо публікацію схеми для «{schemaPublishState.categoryName}». Дочекайтеся результату перед наступною публікацією.</p>}
@@ -212,8 +212,8 @@ export function AdminStructureEditor({
             <SkuTemplatePreview category={selectedCat} marker={schemaStatus?.draftChanged ? schemaStatus.nextMarker : schemaStatus?.active?.marker} questions={currentCatQuestions} />
           </>
         )}
-        {isCategoryEditOpen && selectedCat && <CategoryForm category={editCat} isEdit onCancel={() => setIsCategoryEditOpen(false)} onChange={setEditCat} onSave={updateCategory} />}
-        {isNewCategoryOpen && <CategoryForm category={newCat} onCancel={() => setIsNewCategoryOpen(false)} onChange={setNewCat} onSave={addCategory} />}
+        {canManage && isCategoryEditOpen && selectedCat && <CategoryForm category={editCat} isEdit onCancel={() => setIsCategoryEditOpen(false)} onChange={setEditCat} onSave={updateCategory} />}
+        {canManage && isNewCategoryOpen && <CategoryForm category={newCat} onCancel={() => setIsNewCategoryOpen(false)} onChange={setNewCat} onSave={addCategory} />}
       </section>
 
       {selectedCat ? (
@@ -221,13 +221,13 @@ export function AdminStructureEditor({
           <aside className="catalog-master">
             <div className="catalog-pane-header">
               <div><h3>Питання</h3><p>{currentCatQuestions.length} у поточній категорії</p></div>
-              <button type="button" disabled={!canManage} onClick={openNewQuestion} className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs"><Plus size={14} />Додати</button>
+              {canManage && <button type="button" onClick={openNewQuestion} className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs"><Plus size={14} />Додати</button>}
             </div>
-            <button type="button" disabled={!canManage} onClick={autoAssignSkuIndexes} className="catalog-master-utility">Переіндексувати SKU</button>
+            {canManage && <button type="button" onClick={autoAssignSkuIndexes} className="catalog-master-utility">Переіндексувати SKU</button>}
             <div className="catalog-question-list">
               {currentCatQuestions.map((question) => {
                 const isConditional = formatConditionSummary(question.visible_if_json, currentCatQuestions, config) !== 'Завжди';
-                const isSelected = selectedQuestion?.id === question.id && !isNewQuestionOpen;
+                const isSelected = selectedQuestion?.id === question.id && !(canManage && isNewQuestionOpen);
                 return (
                   <div
                     key={question.q_db_id}
@@ -258,7 +258,7 @@ export function AdminStructureEditor({
                   >
                     {questionDropTarget.id === question.q_db_id && questionDropTarget.position === 'before' && <span className="catalog-drop-line is-before" />}
                     {questionDropTarget.id === question.q_db_id && questionDropTarget.position === 'after' && <span className="catalog-drop-line is-after" />}
-                    <GripVertical className="catalog-drag-handle" size={16} aria-hidden="true" />
+                    {canManage && <GripVertical className="catalog-drag-handle" size={16} aria-hidden="true" />}
                     <div className="min-w-0">
                       <strong>{question.label}</strong>
                       <div className="catalog-question-flags">
@@ -276,18 +276,18 @@ export function AdminStructureEditor({
           </aside>
 
           <div className="catalog-detail">
-            {isNewQuestionOpen ? (
+            {canManage && isNewQuestionOpen ? (
               <QuestionForm config={config} currentCatQuestions={currentCatQuestions} fillNextSkuIndex={fillNextNewQuestionSkuIndex} isNew onCancel={() => setIsNewQuestionOpen(false)} onChange={setNewQuest} onSave={addQuestion} question={newQuest} />
             ) : selectedQuestion ? (
               <>
                 <div className="catalog-detail-header">
                   <div className="min-w-0"><h3>{selectedQuestion.label}</h3><p>{(selectedQuestion.input_type || 'options') === 'text' ? 'Текстове поле' : 'Поле з варіантами'}</p></div>
-                  <div className="catalog-row-actions">
-                    {!isQuestionEditOpen && <button type="button" disabled={!canManage} onClick={openQuestionEdit} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Pencil size={14} />Редагувати</button>}
-                    <button type="button" disabled={!canManage} onClick={() => deleteItem('question', selectedQuestion.q_db_id)} className="catalog-icon-button is-danger" title="Видалити питання" aria-label={`Видалити питання ${selectedQuestion.label}`}><Trash2 size={15} /></button>
-                  </div>
+                  {canManage && <div className="catalog-row-actions">
+                    {!isQuestionEditOpen && <button type="button" onClick={openQuestionEdit} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Pencil size={14} />Редагувати</button>}
+                    <button type="button" onClick={() => deleteItem('question', selectedQuestion.q_db_id)} className="catalog-icon-button is-danger" title="Видалити питання" aria-label={`Видалити питання ${selectedQuestion.label}`}><Trash2 size={15} /></button>
+                  </div>}
                 </div>
-                {isQuestionEditOpen ? (
+                {canManage && isQuestionEditOpen ? (
                   <QuestionForm config={config} currentCatQuestions={currentCatQuestions} excludeQuestionId={selectedQuestion.id} onCancel={() => setIsQuestionEditOpen(false)} onChange={setEditQuestion} onSave={updateQuestion} question={editQuestion} />
                 ) : (
                   <div className="catalog-question-overview">
@@ -314,10 +314,10 @@ export function AdminStructureEditor({
                 <section className="catalog-variants-section">
                   <div className="catalog-variants-header">
                     <div><h4>Варіанти</h4><p>{activeOptions.length} активних{archivedOptions.length ? ` · ${archivedOptions.length} в архіві` : ''}</p></div>
-                    {selectedQuestionInputType !== 'text' && <button type="button" disabled={!canManage} onClick={openNewOption} className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs"><Plus size={14} />Додати варіант</button>}
+                    {canManage && selectedQuestionInputType !== 'text' && <button type="button" onClick={openNewOption} className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs"><Plus size={14} />Додати варіант</button>}
                   </div>
-                  {editOpt.id && <OptionForm config={config} currentCatQuestions={currentCatQuestions} excludeQuestionId={selectedQuestion.id} onCancel={resetOptionEdit} onChange={setEditOpt} onSave={updateOption} option={editOpt} />}
-                  {isNewOptionOpen && selectedQuestionInputType !== 'text' && <OptionForm config={config} currentCatQuestions={currentCatQuestions} excludeQuestionId={selectedQuestion.id} isNew onCancel={() => setIsNewOptionOpen(false)} onChange={setNewOpt} onSave={addOption} option={newOpt} />}
+                  {canManage && editOpt.id && <OptionForm config={config} currentCatQuestions={currentCatQuestions} excludeQuestionId={selectedQuestion.id} onCancel={resetOptionEdit} onChange={setEditOpt} onSave={updateOption} option={editOpt} />}
+                  {canManage && isNewOptionOpen && selectedQuestionInputType !== 'text' && <OptionForm config={config} currentCatQuestions={currentCatQuestions} excludeQuestionId={selectedQuestion.id} isNew onCancel={() => setIsNewOptionOpen(false)} onChange={setNewOpt} onSave={addOption} option={newOpt} />}
                   {selectedQuestionInputType === 'text' ? <p className="catalog-empty-state">Для текстового питання варіанти не використовуються.</p> : (
                     <div className="catalog-option-list">
                       {activeOptions.map((option) => <OptionRow canManage={canManage} key={option.db_id} option={option} config={config} currentCatQuestions={currentCatQuestions} onArchive={archiveOption} onDelete={deleteItem} onEdit={openOptionEdit} />)}

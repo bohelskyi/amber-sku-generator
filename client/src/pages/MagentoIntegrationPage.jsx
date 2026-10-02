@@ -55,6 +55,11 @@ export default function MagentoIntegrationPage() {
   const stored = integration?.structureObservation;
   const useExplicit = observation && (!stored || Date.parse(observation.observedAt) >= Date.parse(stored.observedAt));
   const observedAt = useExplicit ? observation.observedAt : stored?.observedAt;
+  const deliveryText = integration?.delivery.state === 'enabled' ? 'Автоматичну синхронізацію увімкнено'
+    : integration?.delivery.state === 'disabled' ? 'Автоматичну синхронізацію вимкнено' : 'Стан автоматичної синхронізації невідомий';
+  const operationalText = integration?.operational.state !== 'known' ? 'Дані про зафіксовані проблеми недоступні'
+    : integration?.operational.count ? `Потребують уваги: ${integration.operational.count}` : 'Зафіксованих проблем немає';
+  const publicationText = published ? `Версія ${published.versionNumber}` : 'Опублікованих відповідностей ще немає';
   const items = [{ to: '/admin/magento', label: 'Огляд' },
     ...(canManage ? [{ to: '/admin/magento/prepare', label: 'Підготувати зміни інтеграції' }] : []),
     ...(isActualAdministrator(auth) ? [{ to: '/admin/magento/administrator', label: 'Дії Адміністратора' }] : [])];
@@ -63,16 +68,21 @@ export default function MagentoIntegrationPage() {
     <WorkspaceLocalNav label="Інтеграція Magento" items={items} />
     {error && <Notice>{error}</Notice>}
     {!data && !error && <LoadingState label="Читаємо стан інтеграції…" />}
-    {data && <div className="magento-layout">
-      <aside className="magento-context card p-5" aria-label="Поточна інтеграція">
-        <div className="magento-context-summary"><div><h2 className="font-semibold">Поточна доставка</h2><p className="mt-2 text-sm">{integration.delivery.state === 'enabled' ? 'Автоматичну синхронізацію увімкнено' : integration.delivery.state === 'disabled' ? 'Автоматичну синхронізацію вимкнено' : 'Стан автоматичної синхронізації невідомий'}</p>
-          <p className="mt-2 font-medium" role="status">{integration.operational.state !== 'known' ? 'Дані про зафіксовані проблеми недоступні' : integration.operational.count ? `Потребують уваги: ${integration.operational.count}` : 'Зафіксованих проблем немає'}</p><p className="mt-1 text-xs text-slate-500">За записами Amber.</p>
+    {data && <>{narrowLayout && <section className="magento-compact-context" aria-label="Поточна інтеграція">
+      <div><span>Поточна доставка</span><strong>{deliveryText}</strong><small>{operationalText}</small></div>
+      <div><span>Активні відповідності</span><strong>{publicationText}</strong></div>
+      <button type="button" className="magento-context-toggle" aria-expanded={contextOpen}
+        onClick={() => setContextOpen((value) => !value)}>{contextOpen ? 'Сховати деталі' : 'Деталі інтеграції'}</button>
+    </section>}
+    <div className={`magento-layout${narrowLayout ? ' is-narrow' : ''}`}>
+      <aside hidden={narrowLayout && !contextOpen} className={`magento-context card p-5${narrowLayout ? ' is-narrow-details' : ''}`}
+        aria-label={narrowLayout ? 'Деталі поточної інтеграції' : 'Поточна інтеграція'}>
+        {!narrowLayout && <div className="magento-context-summary"><div><h2 className="font-semibold">Поточна доставка</h2><p className="mt-2 text-sm">{deliveryText}</p>
+          <p className="mt-2 font-medium" role="status">{operationalText}</p><p className="mt-1 text-xs text-slate-500">За записами Amber.</p>
         </div>
-        <div className="magento-active-publication"><h2 className="font-semibold">Активні відповідності</h2><p className="mt-1">{published ? `Версія ${published.versionNumber}` : 'Опублікованих відповідностей ще немає'}</p>
+        <div className="magento-active-publication"><h2 className="font-semibold">Активні відповідності</h2><p className="mt-1">{publicationText}</p>
           {published && <p className="mt-1 text-sm text-slate-600">Опубліковано: {date(published.publishedAt)}{published.templateVersionNumber ? ` · Шаблон ${published.templateVersionNumber}` : ''}</p>}
-        </div></div>
-        {narrowLayout && <button type="button" className="magento-context-toggle" aria-expanded={contextOpen}
-          onClick={() => setContextOpen((value) => !value)}>{contextOpen ? 'Сховати деталі інтеграції' : 'Показати стан і технічні деталі'}</button>}
+        </div></div>}
         {(!narrowLayout || contextOpen) && <div className="magento-context-details">
         <div>
           {integration.draftCount > 0 && <p className="mt-2 text-sm">Є чернетки змін: {integration.draftCount}. Вони не змінюють поточну доставку.</p>}
@@ -99,6 +109,6 @@ export default function MagentoIntegrationPage() {
           <Route path="*" element={<Notice>Розділ не знайдено. <Link to="/admin/magento">До огляду</Link></Notice>} />
         </Routes></Suspense>
       </div>
-    </div>}
+    </div></>}
   </div></main>;
 }

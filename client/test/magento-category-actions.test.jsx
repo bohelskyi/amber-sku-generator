@@ -73,8 +73,7 @@ it('category scope excludes other bindings and lazily mounts completed history a
   expect(screen.queryByText(/Історичну категорію створено/)).toBeNull();
   expect(screen.queryByText('pending-action')).toBeNull();
   expect(screen.queryByRole('region',{name:`Категорія Magento: ${otherPath}`})).toBeNull();
-  const disclosure=screen.getByText('Історія інших дій (1)').closest('details');
-  disclosure.open=true;fireEvent(disclosure,new Event('toggle'));
+  fireEvent.click(screen.getByText('Історія інших дій (1)').closest('summary'));
   expect(screen.getByText(/Історичну категорію створено/)).toBeTruthy();
 });
 it('ignores a late creation preview after changing binding context', async () => {

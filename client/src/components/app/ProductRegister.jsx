@@ -29,11 +29,13 @@ function ProductStatus({ status }) {
 }
 
 function ProductRowActions({ product, canDecode }) {
+  const location = useLocation();
   const article = product.publicSku;
   const currentProduct = product.status === 'active';
   return <div className="product-register-actions">
     <CopyButton label={`Скопіювати артикул ${article}`} value={article} />
     {canDecode && currentProduct && <Link className="btn btn-outline btn-icon" to={productLink(article)}
+      state={{ productReturnTo: location.pathname + location.search, productReturnState: location.state }}
       aria-label={`Відкрити товар ${article}`} title="Відкрити товар">
       <ExternalLink size={15} aria-hidden="true" />
     </Link>}
@@ -161,12 +163,12 @@ function ProductRegisterContent({ canDecode, initialFilters, initialPage, locati
             <table className="dense-table min-w-full">
               <caption className="sr-only">Товари: артикул, категорія, стан, вага, ціна та дії.</caption>
               <thead><tr className="table-head">
-                <th className="table-cell text-left">Артикул</th>
-                <th className="table-cell text-left">Категорія</th>
-                <th className="table-cell text-left">Стан</th>
-                <th className="table-cell text-right">Вага</th>
-                <th className="table-cell text-right">Ціна</th>
-                <th className="table-cell text-right"><span className="sr-only">Дії</span></th>
+                <th scope="col" className="table-cell text-left">Артикул</th>
+                <th scope="col" className="table-cell text-left">Категорія</th>
+                <th scope="col" className="table-cell text-left">Стан</th>
+                <th scope="col" className="table-cell text-right">Вага</th>
+                <th scope="col" className="table-cell text-right">Ціна</th>
+                <th scope="col" className="table-cell text-right"><span className="sr-only">Дії</span></th>
               </tr></thead>
               <tbody>{register.items.map((product) => <tr key={product.id}>
                 <td className="table-cell" data-label="Артикул"><div className="font-mono font-semibold text-slate-900">{product.publicSku}</div></td>

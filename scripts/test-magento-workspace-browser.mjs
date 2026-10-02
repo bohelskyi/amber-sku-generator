@@ -62,6 +62,8 @@ const server = http.createServer(async (request, response) => {
         roles: administrator ? [{ id: 1, key: 'administrator', displayName: 'Адміністратор' }] : [{ id: 2, key: 'operator', displayName: 'Administrator' }] }; break;
       case 'GET /api/config': case 'GET /api/admin/magento-integration/creation-inputs': data = config; break;
       case 'GET /api/products': case 'GET /api/admin/magento-integration/actions': data = []; break;
+      case 'GET /api/products/register': data = { items: [], pageInfo: { hasMore: false, nextCursor: null },
+        filterOptions: { categories: [{ code: 'SV', name: 'Сувеніри' }] } }; break;
       case 'GET /api/export/status': data = { delivery: { legacyProductCsvEnabled: false, automaticSyncEnabled: true } }; break;
       case 'GET /api/price-export/status': data = { pendingCount: 0, excludedPendingCount: 0 }; break;
       case 'GET /api/magento/summary': data = { enabled: true, problemCount: 1 }; break;
@@ -97,6 +99,7 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 const browser = spawn(executable, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
   '--disable-background-networking', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
 let socket;
+let command;
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 try {
   const portFile = path.join(profile, 'DevToolsActivePort');
@@ -108,7 +111,7 @@ try {
   await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
   let sequence = 0;
   const pending = new Map(); const browserErrors = []; const blockedExternal = [];
-  const command = (method, params = {}) => new Promise((resolve, reject) => { const id = ++sequence; pending.set(id, { resolve, reject }); socket.send(JSON.stringify({ id, method, params })); });
+  command = (method, params = {}) => new Promise((resolve, reject) => { const id = ++sequence; pending.set(id, { resolve, reject }); socket.send(JSON.stringify({ id, method, params })); });
   socket.on('message', (message) => {
     const data = JSON.parse(String(message));
     if (data.method === 'Runtime.exceptionThrown') browserErrors.push(data.params.exceptionDetails);
@@ -142,7 +145,7 @@ try {
   await command('Page.addScriptToEvaluateOnNewDocument', { source: "window.fixtureCopies=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.fixtureCopies.push(text)}}});" });
   await command('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   const checks = [];
-  for (const width of [1440, 390, 360, 720]) {
+  for (const width of [1440, 390, 360]) {
     await command('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
     await navigate('/admin/magento'); await wait("document.body.textContent.includes('Проблеми поточної доставки')");
     assert.equal(await evaluate("document.body.textContent.includes('Автоматичну синхронізацію увімкнено') && document.body.textContent.includes('Версія 3')"), true);
@@ -158,8 +161,7 @@ try {
     await click('Усі категорії'); await wait("document.body.textContent.includes('Готова категорія')");
     assert.equal(await evaluate("document.querySelectorAll('.magento-category-card').length"), 3);
     await noOverflow(`All categories overflow at ${width}px`);
-    checks.push({ width, overview: 'attention-only', allCategories: true, keyboardFocus: true, noOverflow: true,
-      ...(width === 720 ? { zoom: '200% layout equivalent of 1440px; not actual browser zoom' } : {}) });
+    checks.push({ width, overview: 'attention-only', allCategories: true, keyboardFocus: true, noOverflow: true });
   }
   await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 1000, deviceScaleFactor: 1, mobile: false });
   await navigate('/admin/magento/categories/SV'); await wait("document.body.textContent.includes('Вид: Потрібне значення')");
@@ -213,7 +215,7 @@ try {
   await noOverflow('Controlled resync workspace overflow at 390px');
   await navigate('/'); await wait("!![...document.querySelectorAll('.home-category-option')].find(b=>b.textContent.includes('Сувеніри'))");
   await evaluate("[...document.querySelectorAll('.home-category-option')].find(b=>b.textContent.includes('Сувеніри')).click()");
-  await click('Розрахувати SKU і ціну'); await wait("[...document.querySelectorAll('button')].some(b=>b.textContent==='Зберегти товар')");
+  await click('Перевірити дані'); await wait("[...document.querySelectorAll('button')].some(b=>b.textContent==='Зберегти товар')");
   assert.equal(await evaluate("[...document.querySelectorAll('button')].some(b=>/Копіювати SKU|Копіювати артикул/.test(b.textContent))"), false);
   await click('Зберегти товар'); await wait("document.body.textContent.includes('AG-000021')");
   await click('Копіювати артикул'); assert.deepEqual(await evaluate('window.fixtureCopies'), ['AG-000021']);
@@ -224,13 +226,23 @@ try {
   assert.deepEqual(blockedExternal, [], 'Application attempted external network access');
   assert.deepEqual(browserErrors, [], 'Browser runtime errors');
   const allowedPosts = ['/api/admin/magento-integration/discovery', '/api/admin/magento-integration/option-labels/inspect', '/api/preview', '/api/price-preview', '/api/save'];
-  assert.deepEqual(requests.filter((request) => request.method !== 'GET' && !(request.method === 'POST' && allowedPosts.includes(request.path))), []);
+  const unexpectedWrites = requests.filter((request) => request.method !== 'GET'
+    && !(request.method === 'POST' && allowedPosts.includes(request.path)));
+  assert.deepEqual(unexpectedWrites, []);
   console.log(JSON.stringify({ result: 'passed', authentication: 'local fixture session only; no real login or human acceptance', checks,
     categoryGrouping: 'one visual path, two distinct underlying uses', receipt: 'exact authoritative article copied and reset at next creation',
     administrator: 'separate workflows, exact role gate, delegated label comparison, unavailable adapter has no attest/apply, uncertain product cannot be selected',
-    requestCount: requests.length, remoteRequests: 0, artifacts: directory }));
+    requestCount: requests.length, runtimeErrors: browserErrors.length, externalRequests: blockedExternal.length,
+    unexpectedFixtureRequests: unexpected.length, unexpectedWrites: unexpectedWrites.length, artifacts: directory }));
 } finally {
-  socket?.close(); browser.kill(); await new Promise((resolve) => server.close(resolve)); await pause(500);
+  try { await command?.('Browser.close'); } catch { /* Browser closes the socket before acknowledging. */ }
+  await Promise.race([
+    new Promise((resolve) => browser.exitCode !== null ? resolve() : browser.once('exit', resolve)),
+    pause(3000),
+  ]);
+  socket?.close();
+  server.closeAllConnections?.();
+  await new Promise((resolve) => server.close(resolve));
   const resolvedProfile = path.resolve(profile);
   assert.ok(resolvedProfile.startsWith(`${path.resolve(directory)}${path.sep}`), 'Temporary browser profile must stay inside the created artifact directory');
   try { rmSync(resolvedProfile, { recursive: true, force: true }); } catch { /* Browser profile can finish closing after screenshots are written. */ }

@@ -36,7 +36,7 @@ it('review candidate selection is separate from approval and exact clone is a se
   api.post.mockResolvedValue({ data: { ...revision, revision: '2' } }); const changed = vi.fn();
   render(<AuthContext.Provider value={{ permissions: ['export_templates.manage'] }}><MemoryRouter><MagentoBindingReview revision={revision} onChanged={changed} /></MemoryRouter></AuthContext.Provider>);
   await screen.findByText('Невирішених структурних питань: 1');
-  const disclosure=screen.getByText('Рішення за маршрутами та полями').closest('details');disclosure.open=true;fireEvent(disclosure,new Event('toggle'));
+  fireEvent.click(screen.getByText('Рішення за маршрутами та полями').closest('summary'));
   fireEvent.change(screen.getByLabelText('Кандидат'), { target: { value: '151' } });
   fireEvent.click(screen.getByRole('button', { name: 'Вибрати кандидата' }));
   await vi.waitFor(() => expect(changed).toHaveBeenCalled());
@@ -113,8 +113,7 @@ it('exact clone remains explicit and a late mutation cannot change a departed pr
   let resolveClone;api.post.mockReturnValueOnce(new Promise(resolve=>{resolveClone=resolve;}));
   const changed=vi.fn();const publication={...draft,id:'active',state:'published'};
   const view=shell({revision:publication,currentPublishedId:'active',mode:'successor',onChanged:changed});
-  const disclosure=screen.getByText('Точна копія без нового спостереження').closest('details');
-  disclosure.open=true;fireEvent(disclosure,new Event('toggle'));
+  fireEvent.click(screen.getByText('Точна копія без нового спостереження').closest('summary'));
   fireEvent.click(screen.getByRole('button',{name:'Створити точну чернетку'}));
   expect(api.post).toHaveBeenCalledExactlyOnceWith('/admin/magento-integration/bindings/active/clone',{expectedRevision:'3'});
   view.unmount();await act(async()=>resolveClone({data:{...draft,id:'copied'}}));

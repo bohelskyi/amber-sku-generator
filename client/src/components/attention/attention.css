@@ -200,6 +200,8 @@
   .correction-queue-page,
   .sync-problems-workspace { padding: 18px 14px; }
   .correction-queue-toolbar { align-items: stretch; flex-direction: column; }
+  .correction-filter-tabs { flex-wrap: wrap; overflow-x: visible; }
+  .correction-filter-tabs .btn { flex: 1 1 auto; justify-content: center; }
   .correction-search { flex-basis: auto; }
   .correction-master-detail,
   .sync-problem-master-detail { grid-template-columns: 1fr; }

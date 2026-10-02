@@ -59,6 +59,7 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
   const [feedback, setFeedback] = useState(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const [selectedCat, setSelectedCat] = useState(null);
   const [selectedQuestion, setSelectedQuestion] = useState(null);
   const [editCat, setEditCat] = useState(emptyNewCategory);
@@ -514,11 +515,15 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
       scenario: 'Разом зі сценарієм зникнуть його матриця цін і вагові діапазони.',
       modifier: 'Правило та його множник більше не застосовуватимуться до нових розрахунків.',
     };
+    setDeleteError('');
     setDeleteConfirmation({ type, id, label: labels[type] || typeLabels[type] || 'Елемент', description: descriptions[type], consequence: consequences[type] });
   };
 
   const cancelDelete = () => {
-    if (!deleteBusy) setDeleteConfirmation(null);
+    if (!deleteBusy) {
+      setDeleteConfirmation(null);
+      setDeleteError('');
+    }
   };
 
   const confirmDelete = async () => {
@@ -526,15 +531,17 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
     const { type, id } = deleteConfirmation;
     const successTitles = { category: 'Категорію видалено', question: 'Питання видалено', option: 'Варіант видалено', scenario: 'Сценарій видалено', modifier: 'Модифікатор видалено' };
     setDeleteBusy(true);
+    setDeleteError('');
     try {
       await api.post('/admin/delete-item', { type, id });
     } catch (error) {
-      showFeedback({ tone: 'error', title: 'Не вдалося видалити елемент', message: getApiError(error) });
+      setDeleteError(getApiError(error));
       setDeleteBusy(false);
       return;
     }
 
     setDeleteConfirmation(null);
+    setDeleteError('');
     if (type === 'category') {
       setSelectedCat(null);
       setSelectedQuestion(null);
@@ -601,6 +608,7 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
     confirmDelete,
     deleteBusy,
     deleteConfirmation,
+    deleteError,
     discardLocalChanges,
     canManageCatalog: auth.permissions.includes('catalog.manage'),
     clearFeedback: () => setFeedback(null),

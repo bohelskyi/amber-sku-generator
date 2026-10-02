@@ -353,10 +353,10 @@ export function DecodeWorkspace({
           onSaved={() => onDecode?.(decodeData.publicSku || decodeData.sku)} />
         <header className="builder-header">
           <div className="min-w-0">
-            <h2 className="section-title-text">{decodeData.existsInDb ? 'Товар' : 'Розшифрований код'}</h2>
+            <h2 className="section-title-text">{decodeData.existsInDb ? 'Характеристики товару' : 'Розшифрований код'}</h2>
             <p className="mt-0.5 text-xs text-slate-500">
               {decodeData.category.name}
-              {decodeData.decodeSource === 'stored_history' ? ' · збережені дані' : ' · режим сумісності'}
+              {!decodeData.existsInDb && ' · режим сумісності'}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-3">

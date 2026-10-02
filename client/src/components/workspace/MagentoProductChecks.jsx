@@ -6,6 +6,11 @@ import { LoadingState, Notice } from '../app/UiPrimitives.jsx';
 import MagentoDetails from './MagentoDetails.jsx';
 
 const root = '/admin/magento-integration';
+function productIdentity(product) {
+  if (product.public_sku) return { label: 'Артикул', value: product.public_sku, actionLabel: `Обрати ${product.public_sku}` };
+  if (product.full_sku) return { label: 'Внутрішній SKU', value: product.full_sku, actionLabel: `Обрати внутрішній SKU ${product.full_sku}` };
+  return { label: '', value: 'Артикул недоступний', actionLabel: `Обрати товар ID ${product.id}` };
+}
 function ProductChecks({ revision, categoryCode, onRepresentative }) {
   const [config, setConfig] = useState(null); const [error, setError] = useState('');
   const [answers, setAnswers] = useState({}); const [weight, setWeight] = useState(''); const [price, setPrice] = useState('');
@@ -64,12 +69,16 @@ function ProductChecks({ revision, categoryCode, onRepresentative }) {
         <button className="btn btn-outline btn-compact-md" disabled={searching || query.trim().length < 2}>Знайти товар</button>
       </form>
       {searching && <LoadingState compact />}
-      {products && <><ul className="space-y-2">{products.products.map((product) => <li key={product.id} className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="break-all">{product.public_sku || product.full_sku} · {product.category} · {product.status}</span><button type="button" className="btn btn-outline btn-compact-md" onClick={() => { invalidate(); setSelected(product); }}>Обрати {product.public_sku || product.full_sku}</button>
-      </li>)}</ul>{!products.products.length && <p>Товарів не знайдено.</p>}
+      {products && <><ul className="space-y-2">{products.products.map((product) => {
+        const identity = productIdentity(product);
+        return <li key={product.id} className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="break-all">{identity.label && <>{identity.label}: </>}<strong>{identity.value}</strong> · {product.category} · {product.status}</span>
+          <button type="button" className="btn btn-outline btn-compact-md" onClick={() => { invalidate(); setSelected(product); }}>{identity.actionLabel}</button>
+        </li>;
+      })}</ul>{!products.products.length && <p>Товарів не знайдено.</p>}
         <div className="flex flex-wrap gap-2"><button className="btn btn-outline btn-compact-md" disabled={searching || !offset} onClick={() => search(Math.max(0, offset - 20))}>Попередні товари</button><button className="btn btn-outline btn-compact-md" disabled={searching || products.nextOffset == null} onClick={() => search(products.nextOffset)}>Наступні товари</button></div>
       </>}
-      {selected && <p>Обрано: <strong>{selected.public_sku || selected.full_sku}</strong></p>}
+      {selected && <p>Обрано: {productIdentity(selected).label && <>{productIdentity(selected).label}: </>}<strong>{productIdentity(selected).value}</strong></p>}
       <button className="btn btn-primary btn-compact-md" disabled={busy || !selected} onClick={() => check('product-preview', { productId: selected.id })}>Перевірити поточний товар</button>
     </section>
     <section className="card space-y-3 p-5"><h3 className="font-semibold">Приклад нового товару</h3><p className="text-sm text-slate-600">Перевірка CREATE лише читає дані. Товар, публічний артикул і завдання доставки не створюються.</p>

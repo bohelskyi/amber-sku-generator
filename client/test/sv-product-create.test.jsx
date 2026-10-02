@@ -18,16 +18,16 @@ it.each([1,5])('new SV route %s exposes required paired subjects and size before
   const preview=vi.fn();render(<Form souvenir={souvenir} preview={preview}/>);
   const ua=screen.getByLabelText(/Назва предмета українською/),en=screen.getByLabelText(/Назва предмета англійською/);
   expect(ua.required).toBe(true);expect(en.required).toBe(true);expect(screen.getByLabelText(/Розмір/).required).toBe(true);
-  fireEvent.click(screen.getByRole('button',{name:/Розрахувати SKU і ціну/}));expect(preview).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити дані'}));expect(preview).not.toHaveBeenCalled();
   fireEvent.change(ua,{target:{value:'Сувенір'}});fireEvent.change(en,{target:{value:'souvenir'}});fireEvent.change(screen.getByLabelText(/Розмір/),{target:{value:'3/2'}});
-  fireEvent.click(screen.getByRole('button',{name:/Розрахувати SKU і ціну/}));expect(preview).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити дані'}));expect(preview).toHaveBeenCalledTimes(1);
 });
 it('keychain uses the automatic name but cannot preview without size',()=>{
   const preview=vi.fn();render(<Form souvenir={6} preview={preview}/>);
   expect(screen.queryByLabelText(/Назва предмета українською/)).toBeNull();
-  fireEvent.click(screen.getByRole('button',{name:/Розрахувати SKU і ціну/}));expect(preview).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити дані'}));expect(preview).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText(/Розмір/),{target:{value:'3/2'}});
-  fireEvent.click(screen.getByRole('button',{name:/Розрахувати SKU і ціну/}));expect(preview).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити дані'}));expect(preview).toHaveBeenCalledTimes(1);
 });
 
 it('creation controller sends the subject pair through preview/save and invalidates edits without carrying subjects to another route', async () => {

@@ -3,7 +3,7 @@ import { AuthContext } from '../../auth/auth-context.js';
 import { api } from '../../lib/api.js';
 import { Dialog, Notice } from '../ui';
 
-export function ProductNameConflict({ productId, onSaved }) {
+export function ProductNameConflict({ productId, onSaved, available = true }) {
   const { permissions = [], principalLifetime } = useContext(AuthContext) || {};
   const [open, setOpen] = useState(false); const [choice, setChoice] = useState('');
   const [preview, setPreview] = useState(null); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
@@ -22,8 +22,8 @@ export function ProductNameConflict({ productId, onSaved }) {
     finally { setBusy(false); }
   };
   return <>
-    {permissions.includes('exports.create') ? <button type="button" className="btn btn-outline text-xs" onClick={() => { setOpen(true); void read('amber'); }}>Вибрати актуальну назву</button>
-      : <span className="text-xs text-amber-800">Узгодження назви потребує доступу до зміни назв.</span>}
+    {available && (permissions.includes('exports.create') ? <button type="button" className="btn btn-outline text-xs" onClick={() => { setOpen(true); void read('amber'); }}>Вибрати актуальну назву</button>
+      : <span className="text-xs text-amber-800">Узгодження назви потребує доступу до зміни назв.</span>)}
     <Dialog open={open} title="Виберіть актуальну назву"
       description="Порівняйте назви Amber і Magento. Збереження застосує вибране джерело."
       busy={busy} onClose={() => { if (!busy) setOpen(false); }} size="md"

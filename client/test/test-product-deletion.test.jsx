@@ -71,7 +71,10 @@ it('shows test deletion only to an actual Administrator and retains the authorit
   await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
   expect(screen.queryByText(/Товар збережено/)).toBeNull();
   expect(screen.getByText(/Видалення тестового товару підтверджено/)).toBeTruthy();
-  expect(screen.getByText('Стан операції: finalized.')).toBeTruthy();
+  expect(screen.getByText(/Видалення з Magento перевірено/)).toBeTruthy();
+  expect(screen.queryByText('Стан операції: finalized')).toBeNull();
+  fireEvent.click(screen.getByText('Технічні деталі'));
+  expect(screen.getByText('Стан операції: finalized')).toBeTruthy();
   expect(clearDecode).toHaveBeenCalledWith('');
 
   view.unmount();

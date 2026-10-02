@@ -54,11 +54,11 @@ function WeightBandsEditor({ bands = [], onChange }) {
       </div>
       <div className="pricing-weight-band-list">
         {bands.map((band, index) => (
-          <div key={band.id || index} className="pricing-weight-band-row">
-            <input className="input-sm" value={band.label} placeholder="Назва" onChange={(event) => updateBand(index, 'label', event.target.value)} />
-            <input className="input-sm" type="number" min="0" step="0.1" value={band.min_weight} placeholder="Від, включно" onChange={(event) => updateBand(index, 'min_weight', event.target.value)} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
-            <input className="input-sm" type="number" min="0" step="0.1" value={band.max_weight ?? ''} placeholder="До, не включно" onChange={(event) => updateBand(index, 'max_weight', event.target.value)} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
-            <button type="button" className="pricing-icon-button is-danger" onClick={() => onChange(bands.filter((_, bandIndex) => bandIndex !== index))} title="Видалити діапазон" aria-label="Видалити діапазон">
+          <div key={band.id || index} className="pricing-weight-band-row" role="group" aria-label={`Ваговий діапазон ${index + 1}`}>
+            <input className="input-sm" value={band.label} placeholder="Назва" aria-label={`Назва вагового діапазону ${index + 1}`} onChange={(event) => updateBand(index, 'label', event.target.value)} />
+            <input className="input-sm" type="number" min="0" step="0.1" value={band.min_weight} placeholder="Від, включно" aria-label={`Початкова вага діапазону ${index + 1}, включно`} onChange={(event) => updateBand(index, 'min_weight', event.target.value)} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
+            <input className="input-sm" type="number" min="0" step="0.1" value={band.max_weight ?? ''} placeholder="До, не включно" aria-label={`Кінцева вага діапазону ${index + 1}, не включно`} onChange={(event) => updateBand(index, 'max_weight', event.target.value)} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
+            <button type="button" className="pricing-icon-button is-danger" onClick={() => onChange(bands.filter((_, bandIndex) => bandIndex !== index))} title="Видалити діапазон" aria-label={`Видалити ваговий діапазон ${index + 1}${band.label ? `: ${band.label}` : ''}`}>
               <Trash2 size={14} />
             </button>
           </div>
@@ -246,7 +246,7 @@ export function ScenarioMatrix({ currentCatQuestions, handlePriceChange, matrixC
                           Promise.resolve(handlePriceChange(scenario.id, xOption.id, yOption.id, normalizedPrice)).catch((error) => setMatrixValidationError(error.response?.data?.error || error.message));
                         }}
                       />
-                      {!readOnly && saveState && <SaveState state={saveState.state} message={saveState.state === 'error' ? 'Не збережено' : saveState.message} />}
+                      {!readOnly && saveState && <SaveState state={saveState.state} message={saveState.message} />}
                     </td>
                   );
                 })}

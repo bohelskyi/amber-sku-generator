@@ -6,7 +6,7 @@ import { ProductRegister } from '../components/app/ProductRegister';
 import { ProductPriceChangeDialog } from '../components/app/ProductPriceChangeDialog';
 import { RecountConfirmDialog } from '../components/app/RecountConfirmDialog';
 import { LoadingState, Notice } from '../components/app/UiPrimitives.jsx';
-import { ConfirmDialog, OperationReceipt } from '../components/ui';
+import { ConfirmDialog, CopyAction, OperationReceipt, StatusBadge } from '../components/ui';
 import { useAuth } from '../auth/auth-context.js';
 import { isActualAdministrator } from '../auth/auth-model.js';
 import { useDirtyNavigation } from '../hooks/useDirtyNavigation.jsx';
@@ -150,17 +150,36 @@ function AppPage() {
     navigate(`/products/create?category=${encodeURIComponent(categoryCode)}`);
   };
 
+  const requestedReturn = location.state?.productReturnTo;
+  const registerReturn = typeof requestedReturn === 'string' && /^\/products(?:\?[^#]*)?$/.test(requestedReturn)
+    ? requestedReturn : '/products';
+  const openedProduct = isOpenRoute && !sku.isDecodeLoading ? sku.decodeData : null;
+  const openedArticle = openedProduct?.existsInDb ? openedProduct.publicSku : null;
+  const productState = ({ active: 'Активний', archived: 'Архівний', corrected: 'Переоблікований', voided: 'Анульований' })[openedProduct?.product?.status];
+  const pageTitle = isCreateRoute ? 'Створення товару' : !isOpenRoute ? 'Товари'
+    : !openedProduct ? 'Відкриття товару' : openedProduct.existsInDb
+      ? `Товар ${openedArticle || 'без доступного артикулу'}` : 'Перевірка коду';
+
   if (canViewConfig && !sku.config) {
     return (
       <div className="app-page p-6">{sku.configError ? <Notice tone="error"><p>{sku.configError}</p><button className="btn btn-outline" onClick={sku.retryConfig}>Спробувати ще раз</button></Notice>
-        : <LoadingState label="Підтягуємо конфігурацію та історію…" />}</div>
+        : <LoadingState label="Завантажуємо робочий простір…" />}</div>
     );
   }
 
   return (
     <div className="app-page">
       <div className="mx-auto max-w-7xl space-y-5 px-4 py-4 sm:px-6 sm:py-6">
-        <PageHeader />
+        <PageHeader title={pageTitle}
+          description={isCreateRoute ? 'Заповніть характеристики, перевірте розрахунок і збережіть товар.'
+            : isOpenRoute ? openedProduct?.existsInDb ? openedProduct.category?.name
+              : openedProduct ? 'Код розшифровано. Збережений товар не знайдено.' : 'Читаємо актуальні дані товару.' : undefined}
+          breadcrumbs={isLandingRoute ? undefined : [{ label: 'Товари', to: registerReturn }, { label: isCreateRoute ? 'Створення' : 'Картка товару' }]}
+          status={productState && <StatusBadge tone={openedProduct.product.status === 'active' ? 'success' : 'neutral'}>{productState}</StatusBadge>}
+          actions={isOpenRoute && <>
+            {openedArticle && <CopyAction value={openedArticle} label="Скопіювати артикул товару" buttonLabel="Копіювати артикул" compact />}
+            <Link className="btn btn-outline" to={registerReturn} state={location.state?.productReturnState}>Повернутися до реєстру</Link>
+          </>} />
         <Toast message={sku.copyMessage} />
         {sku.savedProduct && !deletionReceipt && (
           <OperationReceipt title="Товар збережено" identity={savedArticle}
@@ -174,14 +193,14 @@ function AppPage() {
         )}
         {archiveReceipt && <Notice tone="success" actions={<button type="button" className="btn btn-ghost" onClick={() => setArchiveReceipt('')}>Закрити</button>}>{archiveReceipt}</Notice>}
         {deletionReceipt && <OperationReceipt title="Видалення тестового товару підтверджено"
-          identity={deletionReceipt.publicSku} description={`Стан операції: ${deletionReceipt.state}.`}
+          identity={deletionReceipt.publicSku} description="Видалення з Magento перевірено. В Amber збережено технічний запис; артикул залишається зарезервованим."
           actions={<button type="button" className="btn btn-ghost" onClick={() => setDeletionReceipt(null)}>Закрити</button>}
-          details={<p className="break-all font-mono text-xs">Внутрішній SKU: {deletionReceipt.internalSku || 'недоступний'}</p>} />}
-        {exportSku && auth.permissions.includes('products.view') && auth.permissions.includes('products.decode') && <section className="card p-4 space-y-2">
+          details={<div className="break-all font-mono text-xs"><p>Внутрішній SKU: {deletionReceipt.internalSku || 'недоступний'}</p><p>Стан операції: {deletionReceipt.state}</p></div>} />}
+        {exportSku && canDecodeProducts && <section className="card p-4 space-y-2">
           <p>Відкрито з перевірки експорту · <strong>{exportSku}</strong></p>
           {exportHandoff?.sku === exportSku && <p>{exportHandoff.reason}</p>}
           <Link className="btn btn-primary px-3" to={exportHandoff?.sku === exportSku ? exportHandoff.returnTo : '/exports'}>Повернутися до перевірки</Link>
-          {sku.decodeData?.sku !== exportSku && <>
+          {(sku.decodeData?.publicSku || sku.decodeData?.sku) !== exportSku && <>
           <button className="btn btn-outline px-3" disabled={Boolean(sku.selectedCat || sku.hasRecountChanges || sku.isRecountApplying || sku.isPriceChangeOpen)}
             onClick={() => sku.handleDecode(exportSku)}>Відкрити товар із експорту</button>
           {(sku.selectedCat || sku.hasRecountChanges || sku.isPriceChangeOpen) && <p>Спочатку завершіть або скасуйте поточні зміни товару.</p>}</>}

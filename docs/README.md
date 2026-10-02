@@ -30,6 +30,10 @@ Each guide is the maintained authority for its domain; other documents summarize
 
 Local technical references: [client development](../client/README.md), [serialized PostgreSQL tests](../server/integration-test/README.md), [synthetic Magento fixture maintenance](../server/test/fixtures/magento-v1/README.md).
 
+Cross-application presentation: [Amber operations interface](APPLICATION_UX.md)
+describes the local full-application redesign, navigation, shared primitives,
+terminology, read boundaries and fixture-versus-human acceptance.
+
 ## Current operational runbooks
 
 - [Full-product cutover](FULL_PRODUCT_CUTOVER_RUNBOOK.md) — procedure for installations that have not completed cutover. Current production completed Wave 1 activation/cutover; ordinary deployments follow Operations. Rehearsal and dated production receipts remain separate.

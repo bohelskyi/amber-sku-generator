@@ -44,8 +44,15 @@ it('loads only the projection for the selected configuration workspace', async (
 });
 
 it('gates schema publication independently from catalog editing', async () => {
+  const readQuestion = {
+    id: 'material', q_db_id: 11, label: 'Material', input_type: 'options', required: 1,
+    include_in_sku: 1, sku_index: 1, sku_separator: '-', options: [{
+      id: 1, db_id: 21, value_id: 1, sku_code: '1', label: 'Gold', label_en: 'Gold',
+    }],
+  };
+  const readableConfig = { ...config, questions: { BR: [readQuestion] } };
   vi.spyOn(api, 'get').mockImplementation(async (url) => {
-    if (url === '/admin/config') return response(config);
+    if (url === '/admin/config') return response(readableConfig);
     if (url === '/admin/sku-schema/BR') return response({ active: { version: 1 }, draftChanged: true, nextVersion: 2 });
     throw new Error(`Unexpected GET ${url}`);
   });
@@ -55,7 +62,14 @@ it('gates schema publication independently from catalog editing', async () => {
 
   const publish = await screen.findByRole('button', { name: 'Опублікувати V2' });
   expect(publish.disabled).toBe(false);
-  expect(screen.getByRole('button', { name: 'Видалити категорію Bracelets' }).disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Видалити категорію Bracelets' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Категорія', exact: true })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Переіндексувати SKU' })).toBeNull();
+  fireEvent.click(screen.getByText('Material'));
+  expect(screen.getByText('Gold')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Редагувати' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Видалити питання Material' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Редагувати Gold' })).toBeNull();
   fireEvent.click(publish);
   await waitFor(() => expect(post).toHaveBeenCalledWith('/admin/sku-schema/BR/publish'));
 });
@@ -100,6 +114,24 @@ it('closes a completed destructive confirmation even when its refresh fails', as
   await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Видалити «Bracelets»?' })).toBeNull());
   expect(await screen.findByText('Категорію видалено, але дані не оновлено')).toBeTruthy();
   expect(screen.queryByText('Не вдалося видалити елемент')).toBeNull();
+});
+
+it('keeps a failed destructive command visible inside its active confirmation', async () => {
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/admin/config') return response(config);
+    if (url === '/admin/sku-schema/BR') return response({ active: null, draftChanged: false });
+    throw new Error(`Unexpected GET ${url}`);
+  });
+  vi.spyOn(api, 'post').mockRejectedValue({ response: { data: { error: 'Deletion blocked' } } });
+  renderPage('catalog', ['catalog.view', 'catalog.manage']);
+  fireEvent.click(await screen.findByRole('button', { name: /Bracelets/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Видалити категорію Bracelets' }));
+
+  const dialog = screen.getByRole('dialog', { name: 'Видалити «Bracelets»?' });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Видалити' }));
+  expect(await within(dialog).findByText('Не вдалося видалити')).toBeTruthy();
+  expect(within(dialog).getByText('Deletion blocked')).toBeTruthy();
+  expect(screen.getByRole('dialog', { name: 'Видалити «Bracelets»?' })).toBeTruthy();
 });
 
 it('guards changed catalog fields before switching category and can explicitly discard them', async () => {
@@ -158,6 +190,31 @@ it('guards changed pricing settings before switching category', async () => {
   dialog = await screen.findByRole('dialog', { name: 'Незбережені зміни' });
   expect(dialog).toBeTruthy();
   expect(api.get).not.toHaveBeenCalledWith('/admin/prices/NM');
+});
+
+it('gives repeated weight-band controls row-specific accessible names', async () => {
+  const weightCategory = { ...category, requires_weight: 1 };
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/admin/pricing/config') return response({ ...config, categories: { BR: weightCategory } });
+    if (url === '/admin/prices/BR') return response({ scenarios: [{
+      id: 12, category_code: 'BR', name: 'Weight bands', group_name: '', match_json: {},
+      axis_x_key: 'weight_band', axis_y_key: null, priority: 0, status: 'active',
+      price_mode: 'fixed_uah', apply_modifiers: true, matrix: [], weight_bands: [
+        { label: 'Light', min_weight: 0, max_weight: 10 },
+        { label: 'Heavy', min_weight: 10, max_weight: '' },
+      ],
+    }], modifiers: [] });
+    throw new Error(`Unexpected GET ${url}`);
+  });
+  renderPage('pricing', ['pricing.view', 'pricing.manage']);
+  fireEvent.click(await screen.findByRole('button', { name: /Bracelets/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /Weight bands/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Редагувати' }));
+
+  expect(screen.getByRole('textbox', { name: 'Назва вагового діапазону 1' }).value).toBe('Light');
+  expect(screen.getByRole('spinbutton', { name: 'Початкова вага діапазону 2, включно' }).value).toBe('10');
+  expect(screen.getByRole('spinbutton', { name: 'Кінцева вага діапазону 2, не включно' }).value).toBe('');
+  expect(screen.getByRole('button', { name: 'Видалити ваговий діапазон 2: Heavy' })).toBeTruthy();
 });
 
 it('reports a created catalog item honestly when the following refresh fails', async () => {

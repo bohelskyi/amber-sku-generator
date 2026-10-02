@@ -173,6 +173,7 @@ export default function AdminPage({ mode = 'auto' }) {
       description={admin.deleteConfirmation?.description} confirmLabel="Видалити" tone="danger"
       busy={admin.deleteBusy} onConfirm={admin.confirmDelete} onClose={admin.cancelDelete}>
       <p>{admin.deleteConfirmation?.consequence}</p>
+      {admin.deleteError && <Notice tone="error" title="Не вдалося видалити">{admin.deleteError}</Notice>}
     </ConfirmDialog>
   </main>;
 }

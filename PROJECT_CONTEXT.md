@@ -26,6 +26,11 @@ Server-owned OIDC Authorization Code with PKCE resolves immutable `issuer` + `su
 
 Business mutations preserve their transaction, lock-order, stale-evidence, idempotency and audit boundaries. Historical plans are not current behavior contracts.
 
+The [full-application operations interface](docs/APPLICATION_UX.md) documents the
+local capability-driven navigation, shared presentation system, bounded workspaces
+and compatibility routes. Its redesign waves 0–7 are separate from the historical
+deployment waves below and do not imply production deployment.
+
 ## Implementation and deployment status
 
 As reported by the production operator on 2026-10-01, Wave 1 is deployed at PR #19 / `daf627fc2458e5215cbf52735a8f186a3777361f`, with migrations through `050_test_product_deletion.sql`. Stable public `AG-*` identities, the reviewed production binding and automatic Amber → Magento synchronization are active. Magento product CSV delivery is retired; the separate price-export stream and immutable historical evidence remain supported. Historical delivery/collision cutover is complete and the operational freeze has been lifted. This documentation update did not query production or Magento.

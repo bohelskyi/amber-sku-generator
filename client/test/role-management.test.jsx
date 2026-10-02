@@ -183,6 +183,7 @@ describe('role-management UI', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Зберегти зміни' }));
 
     expect(await screen.findByText('На сервері є новіша версія ролі')).toBeTruthy();
+    expect(screen.getAllByText(/новіша версія ролі/)).toHaveLength(1);
     expect(name.value).toBe('Manager draft');
     expect(screen.getByText(/№5, «Manager server»/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Зберегти зміни' }).disabled).toBe(true);
@@ -190,6 +191,31 @@ describe('role-management UI', () => {
     expect(name.value).toBe('Manager server');
     fireEvent.change(name, { target: { value: 'Reviewed manager' } });
     expect(screen.getByRole('button', { name: 'Зберегти зміни' }).disabled).toBe(false);
+  });
+
+  it('keeps conflict reload failure details in the single conflict notice', async () => {
+    let roleReads = 0;
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/admin/roles') {
+        roleReads += 1;
+        if (roleReads > 1) throw { response: { status: 503, data: { error: 'roles unavailable' } } };
+        return response({ roles });
+      }
+      return response({ permissions });
+    });
+    vi.spyOn(api, 'patch').mockRejectedValue({ response: { status: 409, data: { code: 'ROLE_VERSION_CONFLICT' } } });
+    renderPage(<RolesPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Manager/ }));
+    const name = screen.getByLabelText('Назва');
+    fireEvent.change(name, { target: { value: 'Manager draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Зберегти зміни' }));
+
+    expect(await screen.findByText('На сервері є новіша версія ролі')).toBeTruthy();
+    expect(screen.getByText(/Не вдалося завантажити актуальну версію/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Повторити завантаження' })).toBeTruthy();
+    expect(name.value).toBe('Manager draft');
+    expect(screen.getByRole('button', { name: 'Зберегти зміни' }).disabled).toBe(true);
   });
 
   it('reports metadata saved separately when the permission command fails', async () => {

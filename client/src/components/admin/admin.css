@@ -3,7 +3,7 @@
 .admin-page .local-workspace-nav { position: sticky; top: var(--workspace-nav-height); z-index: 18; }
 .admin-category-picker { margin: 0; }
 .pricing-matrix-table td { vertical-align: top; }
-.pricing-matrix-table .ui-save-state { display: block; margin-top: 4px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.pricing-matrix-table .ui-save-state { display: block; margin-top: 4px; max-width: 160px; white-space: normal; overflow-wrap: anywhere; font-size: 12px; line-height: 1.35; }
 
 @media (max-width: 720px) {
   .admin-page-inner { padding: 16px 12px 64px; gap: 12px; }

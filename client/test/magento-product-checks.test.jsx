@@ -137,6 +137,20 @@ it('searches bounded product pages by public article and checks only the explici
   expect(screen.queryByText('Цей приклад пройшов перевірку доставки')).toBeNull();
 });
 
+it('labels an internal SKU fallback without presenting it as the public article', async () => {
+  api.get.mockImplementation((path) => Promise.resolve({ data: path.endsWith('creation-inputs') ? config
+    : { products: [{ id: 31, public_sku: null, full_sku: 'SV-INTERNAL-31', category: 'SV', status: 'active' }], nextOffset: null } }));
+  shell(); await screen.findByLabelText('Вид сувеніра');
+  fireEvent.change(screen.getByLabelText('Пошук за артикулом'), { target: { value: 'SV-INTERNAL' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Знайти товар' }));
+  const option = await screen.findByRole('button', { name: 'Обрати внутрішній SKU SV-INTERNAL-31' });
+  expect(option.closest('li').textContent).toContain('Внутрішній SKU: SV-INTERNAL-31');
+  expect(option.closest('li').textContent).not.toContain('Артикул: SV-INTERNAL-31');
+  fireEvent.click(option);
+  expect(screen.getByText((_, element) => element.tagName === 'P'
+    && element.textContent === 'Обрано: Внутрішній SKU: SV-INTERNAL-31')).toBeTruthy();
+});
+
 it('ignores an earlier search result after the public-article query changes', async () => {
   let complete;
   api.get.mockImplementation((path) => path.endsWith('creation-inputs') ? Promise.resolve({ data: config })

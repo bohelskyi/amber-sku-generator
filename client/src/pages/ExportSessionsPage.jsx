@@ -278,7 +278,9 @@ function SessionWorkspace({ canCreate, canCreateFiles, canActivate, scope = 'own
     setSelected(sessionId || null);
     const saved = cache.current[scope]?.after === listAfter ? cache.current[scope] : null;
     setItems(saved?.items || []); setNext(saved?.next || null);
-    if (listing && saved?.scrollY != null) window.requestAnimationFrame(() => window.scrollTo(0, saved.scrollY));
+    if (listing && saved?.scrollY != null) window.requestAnimationFrame(() => {
+      if (window.scrollX !== 0 || window.scrollY !== saved.scrollY) window.scrollTo(0, saved.scrollY);
+    });
   });
   useEffect(() => {
     // The router owns the address; one controller survives its local destinations.

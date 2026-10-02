@@ -198,15 +198,13 @@ export default function RolesPage() {
     try {
       const result = await loadData(roleId, { replaceForm: false });
       const latestRole = result.roles.find((role) => role.id === roleId) || null;
-      setConflict({ latestRole, attemptedForm, metadataSaved });
+      setConflict({ latestRole, attemptedForm, metadataSaved, readError: '' });
     } catch (refreshError) {
-      setConflict({ latestRole: null, attemptedForm, metadataSaved });
-      setFeedback({
-        tone: 'warning',
-        title: metadataSaved
-          ? 'Назву й опис збережено, дозволи не збережено.'
-          : 'Зміни не збережено через новішу версію ролі.',
-        message: `Не вдалося завантажити актуальну версію: ${getRoleManagementErrorMessage(refreshError)}`,
+      setConflict({
+        latestRole: null,
+        attemptedForm,
+        metadataSaved,
+        readError: `Не вдалося завантажити актуальну версію: ${getRoleManagementErrorMessage(refreshError)}`,
       });
     }
   };
@@ -267,11 +265,6 @@ export default function RolesPage() {
         } catch (requestError) {
           if (requestError?.response?.status === 409) {
             await loadConflict(selectedRole.id, attemptedForm, metadataSaved);
-            if (!metadataSaved) setFeedback({
-              tone: 'warning',
-              title: 'Дозволи не збережено: на сервері є новіша версія ролі.',
-              message: 'Ваші зміни залишилися у формі. Порівняйте їх з актуальною версією перед повторною спробою.',
-            });
           } else if (metadataSaved) {
             setFeedback({
               tone: 'warning',
@@ -304,11 +297,6 @@ export default function RolesPage() {
     } catch (requestError) {
       if (requestError?.response?.status === 409 && selectedRole) {
         await loadConflict(selectedRole.id, attemptedForm, metadataSaved);
-        setFeedback({
-          tone: 'warning',
-          title: 'Зміни не збережено: на сервері є новіша версія ролі.',
-          message: 'Ваші зміни залишилися у формі. Порівняйте їх з актуальною версією перед повторною спробою.',
-        });
       } else {
         setError(getRoleManagementErrorMessage(requestError));
       }
@@ -384,11 +372,14 @@ export default function RolesPage() {
 
         {error && <Notice>{error}</Notice>}
         {feedback && <Notice tone={feedback.tone} title={feedback.title}>{feedback.message}</Notice>}
-        {conflict && <Notice tone="warning" title="На сервері є новіша версія ролі">
+        {conflict && <Notice tone="warning" title={conflict.metadataSaved
+          ? 'Назву й опис збережено; дозволи не збережено'
+          : 'На сервері є новіша версія ролі'}>
           <p>Ваші зміни залишилися у формі. Актуальна версія: {conflict.latestRole
             ? `№${conflict.latestRole.version}, «${conflict.latestRole.displayName}», ${conflict.latestRole.permissionCount} дозволів.`
             : 'не вдалося завантажити.'}</p>
           {conflict.metadataSaved && <p className="mt-2">Команда зміни назви й опису завершилась успішно; команда зміни дозволів — ні. Звірте форму з актуальною версією.</p>}
+          {conflict.readError && <p className="mt-2">{conflict.readError}</p>}
           <p className="mt-2">Повторне збереження заблоковано, доки ви явно не завантажите актуальну версію.</p>
           {conflict.latestRole && <button type="button" className="btn btn-outline mt-3" onClick={() => applyRoleToForm(conflict.latestRole)}>Завантажити актуальну версію</button>}
           {!conflict.latestRole && selectedRole && <button type="button" className="btn btn-outline mt-3" disabled={busy} onClick={() => void loadConflict(selectedRole.id, conflict.attemptedForm, conflict.metadataSaved)}>Повторити завантаження</button>}
