@@ -174,6 +174,34 @@ const magentoOverview = {
     operational: { state: 'known', count: 1, reasons: [{ code: 'MAPPING', count: 1, message: 'Потрібна перевірка відповідностей.' }] },
     preparation: { needed: false, count: 0, reasons: [] }, impact: 'unexamined' }],
 };
+const productTimeline = {
+  querySku: product.publicSku,
+  lineage: {
+    integrity: 'complete', currentSku: product.internalSku, currentPublicSku: product.publicSku, warnings: [],
+    products: [{ sku: product.internalSku, publicSku: product.publicSku, status: 'active',
+      magentoSync: { state: 'needs_attention', reason: 'Потрібна перевірка доставки.' } }],
+  },
+  events: [{
+    id: 'fixture-created', type: 'product.created', occurredAt: '2026-10-01T08:00:00Z',
+    timestampStatus: 'recorded', actor: { status: 'recorded', displayName: personas.storekeeper.name },
+    sku: product.internalSku, publicSku: product.publicSku, details: {}, changes: [], groupKey: null,
+  }, {
+    id: 'fixture-price-change', type: 'product.price_changed', occurredAt: '2026-10-02T08:30:00Z',
+    timestampStatus: 'recorded', actor: { status: 'recorded', displayName: personas.storekeeper.name },
+    sku: product.internalSku, publicSku: product.publicSku, changes: [], groupKey: null,
+    details: { price: { beforeUah: 1200, afterUah: 1450 },
+      pricingDecision: { mode: 'manual_uah', manualPriceUah: 1450, marketingRoundingEnabled: false } },
+  }],
+  configurationEvolution: { status: 'complete', warnings: [], snapshots: [{
+    id: 'fixture-configuration', ordinal: 1, isInitial: true, isCurrent: true, productStatus: 'active',
+    establishingSku: product.internalSku, establishingSchemaVersion: { id: 17, version: 1, marker: '' },
+    currentSku: product.internalSku, currentSchemaVersion: { id: 17, version: 1, marker: '' },
+    occurredAt: '2026-10-01T08:00:00Z', timestampStatus: 'recorded', source: 'product_created',
+    completeness: 'complete', fields: [{ key: 'weight', fieldLabel: 'Вага',
+      value: { value: 10, label: '10 г' }, labelStatus: 'stable_domain', evidence: 'product_details', changed: false }],
+    changes: [],
+  }] },
+};
 
 function json(response, data, status = 200) {
   response.statusCode = status;
@@ -198,6 +226,7 @@ const server = http.createServer(async (request, response) => {
           csrfToken: 'fixture-only', permissions: persona.permissions, roles: persona.roles };
         break;
       case 'GET /api/config': data = config; break;
+      case 'GET /api/product-timeline': data = productTimeline; break;
       case 'GET /api/products': data = [storedProduct]; break;
       case 'GET /api/products/register':
         data = { items: [product], pageInfo: { hasMore: false, nextCursor: null },
@@ -243,6 +272,13 @@ const server = http.createServer(async (request, response) => {
       case 'GET /api/magento/product-status/7': data = { state: 'pending', nameConflict: false }; break;
       case 'GET /api/product-names/7': data = { names: { all: 'Тестовий сувенір', en: 'Test souvenir' }, nameConflict: false }; break;
       case 'GET /api/magento/summary': data = { enabled: true, problemCount: 2 }; break;
+      case 'GET /api/magento/problems/page': data = {
+        items: [{ productId: product.id, article: product.publicSku, category: product.categoryCode,
+          nameConflict: false, problems: [{ code: 'UNCERTAIN_WRITE',
+            message: 'Amber надіслав зміну, але кінцевий стан не підтверджено.',
+            resolution: 'administrator', target: 'product' }] }],
+        pageInfo: { limit: 20, offset: 0, total: 1, hasPrevious: false, hasNext: false },
+      }; break;
       case 'GET /api/admin/magento-integration/overview': data = magentoOverview; break;
       case 'GET /api/admin/correction-requests': data = { requests: [], summary: { active: 3 } }; break;
       case 'GET /api/admin/correction-requests/page':
@@ -547,6 +583,22 @@ try {
     directRecount: true, directPriceChange: true, archived: true };
   report.performance.push(await client.metrics());
 
+  await client.navigate('/attention', 'Потребує уваги');
+  await client.wait("document.body.textContent.includes('2зафіксованих проблем') && [...document.querySelectorAll('a')].some((link)=>link.textContent.trim()==='Переглянути проблеми')", 'storekeeper delivery attention');
+  await client.click('Переглянути проблеми');
+  await client.wait("location.pathname==='/sync-problems' && document.querySelector('h1')?.textContent.trim()==='Проблеми доставки до Magento'", 'storekeeper synchronization problem workspace');
+  await client.wait(`document.body.textContent.includes('кінцевий стан не підтверджено') && document.body.textContent.includes(${JSON.stringify(product.publicSku)})`, 'selected synchronization problem');
+  assert.equal(await client.evaluate("[...document.querySelectorAll('button,a')].some((element)=>/Повтор|Retry/.test(element.textContent))"), false,
+    'An uncertain synchronization problem must not expose a resend action');
+  assert.equal(await client.evaluate(`document.querySelector('a[href="/products/open?article=${product.publicSku}"]')?.textContent.trim()`), 'Відкрити товар');
+  assert.equal(requests.some((entry) => entry.persona === 'storekeeper'
+    && entry.method === 'GET' && entry.path === '/api/magento/problems/page'), true,
+  'Storekeeper synchronization navigation must read the existing safe problem projection');
+  await client.noOverflow('Storekeeper synchronization problem desktop');
+  await client.screenshot('storekeeper-synchronization-problem-1440');
+  report.personas.storekeeper.syncProblemOpened = true;
+  report.performance.push(await client.metrics());
+
   for (const width of [390, 360]) {
     await client.command('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
     currentPersona = 'correctionOperator';
@@ -593,8 +645,12 @@ try {
   await client.click('Виконати переоблік в Amber', "document.querySelector('[role=dialog]')");
   await client.wait("document.body.textContent.includes('Зміни застосовано в Amber') && document.body.textContent.includes('AG-000020')", 'correction completion receipt');
   await client.noOverflow('Correction ownership and completion desktop');
-  await client.screenshot('storekeeper-correction-completion-1440');
-  report.personas.storekeeper.correctionClaimedAndCompleted = true;
+  await client.screenshot('delegated-correction-operator-completion-1440');
+  report.personas.delegatedCorrectionOperator = {
+    effectiveCapabilities: ['corrections.view', 'corrections.claim', 'corrections.complete'],
+    correctionClaimedAndCompleted: true,
+    builtInRoleGrantAssumed: false,
+  };
 
   fixtureProductStatus = 'active';
   currentPersona = 'manager';
@@ -608,12 +664,28 @@ try {
   await client.screenshot('manager-exports-1440');
   await client.navigate(`/products/open?article=${encodeURIComponent(product.publicSku)}`, `Товар ${product.publicSku}`);
   await client.wait("document.body.textContent.includes('Стан у базі')", 'manager product detail');
+  await client.click('Історія товару');
+  await client.wait("location.pathname==='/products/history' && document.querySelector('h1')?.textContent.trim()==='Історія товару'", 'manager product history route');
+  await client.wait(`document.querySelector('[aria-label="Поточний стан товару"]')?.textContent.includes(${JSON.stringify(product.publicSku)}) && document.body.textContent.includes('Ціну товару змінено')`, 'authoritative product timeline');
+  assert.equal(requests.some((entry) => entry.persona === 'manager'
+    && entry.method === 'GET' && entry.path === '/api/product-timeline'
+    && new URLSearchParams(entry.search).get('sku') === product.publicSku), true,
+  'Manager product history must use the exact timeline read projection');
+  await client.click('Версії та технічні деталі');
+  await client.wait(`document.body.textContent.includes('Внутрішній SKU:') && document.body.textContent.includes(${JSON.stringify(product.internalSku)})`, 'timeline technical identity on demand');
+  await client.noOverflow('Manager product history desktop');
+  await client.screenshot('manager-product-history-1440');
+  report.performance.push(await client.metrics());
+  await client.evaluate('history.back()');
+  await client.wait(`location.pathname==='/products/open' && document.querySelector('h1')?.textContent.trim()===${JSON.stringify(`Товар ${product.publicSku}`)}`, 'return from product history');
+  await client.wait("document.body.textContent.includes('Стан у базі')", 'manager product detail restored');
   await client.click('Змінити ціну');
   await client.wait("document.querySelector('[role=dialog]')?.textContent.includes('Змінити ціну чинного товару')", 'price request dialog');
   await client.wait("[...document.querySelectorAll('[role=dialog] button')].some((button)=>button.textContent.trim()==='Створити запит на зміну ціни'&&!button.disabled)", 'price request preview');
   await client.click('Створити запит на зміну ціни', "document.querySelector('[role=dialog]')");
   await client.wait("document.body.textContent.includes('Створено запит на зміну ціни #41')", 'price request receipt');
-  report.personas.manager = { attentionCounts: { corrections: 3, delivery: 2 }, exportsLanding: true, priceRequestCreated: true };
+  report.personas.manager = { attentionCounts: { corrections: 3, delivery: 2 }, exportsLanding: true,
+    productHistoryInspected: true, priceRequestCreated: true };
   report.performance.push(await client.metrics());
 
   const repricingStartedAt = await client.evaluate('Date.now()');
