@@ -4,6 +4,10 @@ export function createProductsApi(client = api) {
   return Object.freeze({
     getConfig: () => client.get('/config'),
     getRecent: () => client.get('/products'),
+    listRegister: (params, options = {}) => client.get('/products/register', {
+      params,
+      ...options,
+    }),
     previewPrice: (payload) => client.post('/price-preview', payload),
     preview: (payload) => client.post('/preview', payload),
     save: (payload) => client.post('/save', payload),

@@ -3,6 +3,7 @@ import { AuthContext } from '../../auth/auth-context.js';
 import { exportsApi } from '../../api/exports-api.js';
 import { getApiError } from '../../lib/http-error.js';
 import { LoadingState, Notice } from './UiPrimitives.jsx';
+import { TechnicalDisclosure } from '../ui';
 
 export function ProductMagentoNameReview({ product, onClose, onSaved, onBusyChange, translationSuggestionAvailable = false }) {
   const { principalLifetime } = useContext(AuthContext) || {};
@@ -65,7 +66,10 @@ export function ProductMagentoNameReview({ product, onClose, onSaved, onBusyChan
   };
 
   return <div className="space-y-4">
-    <h2 className="text-lg font-semibold">Назви для Magento · {product.publicSku || product.sku}</h2>
+    <h2 className="text-lg font-semibold">Назви для Magento · {product.publicSku || 'Артикул недоступний'}</h2>
+    {!product.publicSku && product.sku && <TechnicalDisclosure summary="Технічна ідентичність">
+      <p className="break-all font-mono text-xs">Внутрішній SKU: {product.sku}</p>
+    </TechnicalDisclosure>}
     {loaded?.reviewRequired && <Notice tone="warning">Потрібна перевірка успадкованих назв</Notice>}
     <p className="text-sm text-slate-600">Перевірте українську й англійську назви. Підтвердження збереже рішення та дозволить повторно перевірити готовність до синхронізації.</p>
     {!loaded && busy && <LoadingState label="Читаємо поточні назви…" />}

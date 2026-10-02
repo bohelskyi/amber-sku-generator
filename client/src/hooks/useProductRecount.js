@@ -32,6 +32,8 @@ export function useProductRecount({
   const [decodeData, setDecodeData] = useState(null);
   const [decodeError, setDecodeError] = useState('');
   const [decodeErrorDetails, setDecodeErrorDetails] = useState(null);
+  const [isDecodeLoading, setIsDecodeLoading] = useState(false);
+  const decodeRequestIdRef = useRef(0);
   const [isRecountOpen, setIsRecountOpen] = useState(false);
   const [recountTarget, setRecountTarget] = useState({
     answers: {},
@@ -52,6 +54,8 @@ export function useProductRecount({
   const [isRecountApplying, setIsRecountApplying] = useState(false);
   const [recountSubmitMode, setRecountSubmitMode] = useState(null);
   const [isRecountConfirmOpen, setIsRecountConfirmOpen] = useState(false);
+  const [informationPreview, setInformationPreview] = useState(null);
+  const [isInformationConfirmOpen, setIsInformationConfirmOpen] = useState(false);
   const [recountValidationActive, setRecountValidationActive] = useState(false);
   const [recountValidationAttempt, setRecountValidationAttempt] = useState(0);
   const [recountValidationMessage, setRecountValidationMessage] = useState('');
@@ -164,16 +168,23 @@ export function useProductRecount({
   const handleDecode = (skuValue = skuToDecode) => {
     const normalizedSku = String(skuValue || '').trim().toUpperCase();
     if (!normalizedSku) {
+      decodeRequestIdRef.current += 1;
       setDecodeData(null);
       setDecodeError('Введіть артикул для розшифровки.');
       setDecodeErrorDetails(null);
+      setIsDecodeLoading(false);
       return;
     }
 
+    const requestId = ++decodeRequestIdRef.current;
     previewRequestGateRef.current.invalidate();
     priceChangeRequestIdRef.current += 1;
+    setIsDecodeLoading(true);
+    setDecodeError('');
+    setDecodeErrorDetails(null);
     api.post('/decode', { sku: normalizedSku })
       .then((res) => {
+        if (requestId !== decodeRequestIdRef.current) return;
         resetRecountPricingDecision();
         setSkuToDecode(normalizedSku);
         setDecodeData(res.data);
@@ -191,13 +202,18 @@ export function useProductRecount({
         setRecountValidationMessage('');
       })
       .catch((err) => {
+        if (requestId !== decodeRequestIdRef.current) return;
         setDecodeData(null);
         setDecodeError(err.response?.data?.error || err.message);
         setDecodeErrorDetails(err.response?.data?.details || null);
+      })
+      .finally(() => {
+        if (requestId === decodeRequestIdRef.current) setIsDecodeLoading(false);
       });
   };
 
   const handleDecodeInputChange = (value) => {
+    decodeRequestIdRef.current += 1;
     resetRecountPricingDecision();
     previewRequestGateRef.current.invalidate();
     priceChangeRequestIdRef.current += 1;
@@ -205,8 +221,11 @@ export function useProductRecount({
     setDecodeData(null);
     setDecodeError('');
     setDecodeErrorDetails(null);
+    setIsDecodeLoading(false);
     setIsRecountOpen(false);
     setIsRecountConfirmOpen(false);
+    setIsInformationConfirmOpen(false);
+    setInformationPreview(null);
     setIsPriceChangeOpen(false);
     setRecountPreview(null);
     setIsRecountPreviewCurrent(false);
@@ -240,6 +259,8 @@ export function useProductRecount({
     setRecountError('');
     setRecountSuccess('');
     setIsRecountConfirmOpen(false);
+    setIsInformationConfirmOpen(false);
+    setInformationPreview(null);
     setIsRecountOpen(true);
     setRecountValidationActive(false);
     setRecountValidationMessage('');
@@ -252,6 +273,8 @@ export function useProductRecount({
     priceChangeRequestIdRef.current += 1;
     setIsRecountOpen(false);
     setIsRecountConfirmOpen(false);
+    setIsInformationConfirmOpen(false);
+    setInformationPreview(null);
     setIsPriceChangeOpen(false);
     setRecountPreview(null);
     setIsRecountPreviewCurrent(false);
@@ -455,6 +478,7 @@ export function useProductRecount({
 
   useEffect(() => () => {
     previewRequestGateRef.current.invalidate();
+    decodeRequestIdRef.current += 1;
   }, []);
 
   useEffect(() => {
@@ -515,52 +539,49 @@ export function useProductRecount({
     priceChangeUsdPerGram,
   ]);
 
+  const handleStartPriceChange = () => {
+    if (!decodeData?.product?.id || !canChangeProductPrice || isPriceChangeApplying) return;
+    priceChangeRequestIdRef.current += 1;
+    setPriceChangeMode(
+      canApplyDirectPriceChange || canPriceOverride ? 'manual_uah' : 'system_auto'
+    );
+    setPriceChangeManualUah('');
+    setPriceChangeManualRounding(false);
+    setPriceChangeUsdPerGram('');
+    setPriceChangeMarketingRounding(getCorrectionMarketingRoundingDefault(
+      config,
+      decodeData?.category?.code
+    ));
+    setPriceChangePreview(null);
+    setPriceChangeError('');
+    setIsPriceChangeLoading(false);
+    setIsPriceChangeOpen(true);
+  };
+
   const handleApplyRecount = () => {
     if (!decodeData?.sku) return;
     if (isInformationOnly && !isRecountApplying) {
-      const sourceSku = decodeData.sku;
       const productId = decodeData.product.id;
       const answersPatch = informationPatch;
       setIsRecountApplying(true);
       setRecountError('');
       api.post('/product-information/preview', { productId, answersPatch })
-        .then(async (res) => {
-          const accepted = window.confirm(
-            `Оновити лише інформаційні характеристики ${sourceSku}? `
-            + 'SKU, товар і ціна залишаться тими самими.'
-          );
-          if (!accepted) return;
-          const applied = await api.post('/product-information/apply', {
-            productId, answersPatch, previewToken: res.data.previewToken,
-            reason: recountReason,
+        .then((res) => {
+          setInformationPreview({
+            productId,
+            answersPatch,
+            previewToken: res.data.previewToken,
+            sourceSku: decodeData.sku,
+            publicSku: decodeData.publicSku || decodeData.product?.public_sku || null,
           });
-          setIsRecountOpen(false);
-          setRecountSuccess(`Характеристики ${decodeData.publicSku || decodeData.product?.public_sku || sourceSku} оновлено. Стан Magento можна перевірити в історії товару.`);
-          Promise.resolve(onApplied?.({ result: applied.data, sourceSku,
-            correctedSku: sourceSku, informationOnly: true })).catch(() => {});
-          handleDecode(sourceSku);
+          setIsInformationConfirmOpen(true);
         })
         .catch((err) => setRecountError(err.response?.data?.error || err.message))
         .finally(() => setIsRecountApplying(false));
       return;
     }
     if (!hasRecountChanges) {
-      if (!canChangeProductPrice || isPriceChangeApplying) return;
-      priceChangeRequestIdRef.current += 1;
-      setPriceChangeMode(
-        canApplyDirectPriceChange || canPriceOverride ? 'manual_uah' : 'system_auto'
-      );
-      setPriceChangeManualUah('');
-      setPriceChangeManualRounding(false);
-      setPriceChangeUsdPerGram('');
-      setPriceChangeMarketingRounding(getCorrectionMarketingRoundingDefault(
-        config,
-        decodeData?.category?.code
-      ));
-      setPriceChangePreview(null);
-      setPriceChangeError('');
-      setIsPriceChangeLoading(false);
-      setIsPriceChangeOpen(true);
+      handleStartPriceChange();
       return;
     }
     if (isRecountLoading) return;
@@ -569,6 +590,38 @@ export function useProductRecount({
       return;
     }
     requestRecountPreview({ openConfirmation: true, surfaceValidation: true });
+  };
+
+  const handleCancelInformationConfirmation = () => {
+    if (isRecountApplying) return;
+    setIsInformationConfirmOpen(false);
+    setInformationPreview(null);
+  };
+
+  const handleConfirmInformationUpdate = () => {
+    if (!informationPreview || isRecountApplying) return;
+    const evidence = informationPreview;
+    setIsRecountApplying(true);
+    setRecountError('');
+    api.post('/product-information/apply', {
+      productId: evidence.productId,
+      answersPatch: evidence.answersPatch,
+      previewToken: evidence.previewToken,
+      reason: recountReason,
+    })
+      .then((res) => {
+        setIsInformationConfirmOpen(false);
+        setInformationPreview(null);
+        setIsRecountOpen(false);
+        setRecountSuccess(evidence.publicSku
+          ? `Характеристики товару ${evidence.publicSku} оновлено. Стан Magento можна перевірити в історії товару.`
+          : 'Характеристики товару оновлено. Артикул недоступний у відповіді сервера.');
+        Promise.resolve(onApplied?.({ result: res.data, sourceSku: evidence.sourceSku,
+          correctedSku: evidence.sourceSku, informationOnly: true })).catch(() => {});
+        handleDecode(evidence.sourceSku);
+      })
+      .catch((err) => setRecountError(err.response?.data?.error || err.message))
+      .finally(() => setIsRecountApplying(false));
   };
 
   const handleCancelRecountConfirmation = () => {
@@ -734,10 +787,15 @@ export function useProductRecount({
           return;
         }
 
-        const correctedSku = res.data.corrected.publicSku || res.data.corrected.sku || res.data.corrected.fullSku;
-        setRecountSuccess(`Переоблік застосовано. Артикул: ${correctedSku}. Стан Magento можна перевірити в історії товару.`);
-        Promise.resolve(onApplied?.({ result: res.data, sourceSku, correctedSku })).catch(() => {});
-        handleDecode(correctedSku);
+        const correctedArticle = res.data.corrected.publicSku || null;
+        const correctedLookupSku = correctedArticle
+          || res.data.corrected.sku || res.data.corrected.fullSku;
+        setRecountSuccess(correctedArticle
+          ? `Переоблік застосовано. Артикул: ${correctedArticle}. Стан Magento можна перевірити в історії товару.`
+          : 'Переоблік застосовано. Артикул недоступний у відповіді сервера.');
+        Promise.resolve(onApplied?.({ result: res.data, sourceSku,
+          correctedSku: correctedLookupSku })).catch(() => {});
+        handleDecode(correctedLookupSku);
       })
       .catch((err) => {
         setRecountError(err.response?.data?.error || err.message);
@@ -755,20 +813,26 @@ export function useProductRecount({
     handleApplyRecount,
     handleCancelRecount,
     handleCancelRecountConfirmation,
+    handleCancelInformationConfirmation,
     handleCancelPriceChange,
     handleConfirmPriceChange,
     handleRequestPriceChange,
     handleConfirmRecount,
+    handleConfirmInformationUpdate,
     handleDecode,
     handleDecodeInputChange,
     handleRecountAnswer,
     handleRecountTextAnswer,
     handleRecountWeightChange,
     handleStartRecount,
+    handleStartPriceChange,
     hasRecountChanges,
     isRecountApplying,
     isInformationOnly,
+    informationPreview,
+    isDecodeLoading,
     isRecountConfirmOpen,
+    isInformationConfirmOpen,
     isRecountLoading,
     isRecountOpen,
     isRecountPreviewCurrent,

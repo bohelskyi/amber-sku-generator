@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import AppPage from '../src/pages/AppPage.jsx';
 import { HistoryTable } from '../src/components/app/HistoryTable.jsx';
@@ -8,7 +8,10 @@ import { api } from '../src/lib/api.js';
 
 vi.mock('../src/auth/auth-context.js', async (importOriginal) => ({
   ...await importOriginal(),
-  useAuth: () => ({ permissions: ['products.create'] }),
+  useAuth: () => ({
+    permissions: ['products.view', 'products.create', 'products.decode', 'history.view'],
+    roles: [],
+  }),
 }));
 
 const config = {
@@ -40,9 +43,12 @@ afterEach(() => {
 });
 
 async function openPreview() {
-  render(<MemoryRouter><AppPage /></MemoryRouter>);
+  const router = createMemoryRouter([{ path: '*', element: <AppPage /> }], { initialEntries: ['/products'] });
+  render(<RouterProvider router={router} />);
   fireEvent.click(await screen.findByRole('button', { name: /Сувеніри/ }));
-  fireEvent.click(screen.getByRole('button', { name: 'Розрахувати SKU і ціну' }));
+  await waitFor(() => expect(router.state.location.pathname).toBe('/products/create'));
+  expect(router.state.location.search).toBe('?category=SV');
+  fireEvent.click(await screen.findByRole('button', { name: 'Перевірити дані' }));
   await screen.findByRole('button', { name: 'Зберегти товар' });
 }
 
@@ -99,7 +105,7 @@ it('removes the previous receipt when the operator selects the next category', a
   fireEvent.click(screen.getByRole('button', { name: 'Зберегти товар' }));
   await screen.findByRole('button', { name: 'Копіювати артикул' });
   fireEvent.click(screen.getByRole('button', { name: /Сувеніри/ }));
-  expect(screen.queryByText(saved.publicSku)).toBeNull();
+  await waitFor(() => expect(screen.queryByText(saved.publicSku)).toBeNull());
   expect(screen.queryByText(/Товар збережено/)).toBeNull();
   expect(screen.queryByRole('button', { name: 'Копіювати артикул' })).toBeNull();
 });
@@ -172,5 +178,5 @@ it('retains public-first copy, decode and history links for existing products', 
   fireEvent.click(screen.getByRole('button', { name: 'Розшифрувати' }));
   expect(copy).toHaveBeenCalledWith(saved.publicSku, 'Артикул');
   expect(decode).toHaveBeenCalledWith(saved.publicSku);
-  expect(screen.getByRole('link', { name: 'Історія' }).getAttribute('href')).toBe(`/admin/corrections/history?sku=${saved.publicSku}`);
+  expect(screen.getByRole('link', { name: 'Історія' }).getAttribute('href')).toBe(`/products/history?sku=${saved.fullSku}`);
 });

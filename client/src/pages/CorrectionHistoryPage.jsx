@@ -13,7 +13,7 @@ import { downloadBlob } from '../lib/download';
 import { formatDateTime, formatDecimal, formatUah } from '../lib/formatters';
 import { getApiError } from '../lib/http-error';
 import { ProductTimeline } from '../components/app/ProductTimeline';
-import { AppPageHeader, EmptyState, LoadingState, Notice } from '../components/app/UiPrimitives.jsx';
+import { EmptyState, LoadingState, Notice, PageHeader, Pagination } from '../components/ui';
 
 function useDebouncedValue(value, delay = 300) {
   const [debouncedValue, setDebouncedValue] = useState(value);
@@ -45,9 +45,9 @@ function SkuTransition({ item }) {
         <div className="text-xs font-semibold uppercase text-slate-500">Було</div>
         <div className="mt-1 flex min-w-0 items-center gap-2">
           <span className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-slate-800">
-            {item.sourcePublicSku || item.sourceSku}
+            {item.sourcePublicSku || 'Артикул недоступний'}
           </span>
-          <CopyButton label="Скопіювати артикул до переобліку" value={item.sourcePublicSku || item.sourceSku} />
+          {item.sourcePublicSku && <CopyButton label="Скопіювати артикул до переобліку" value={item.sourcePublicSku} />}
         </div>
         {item.sourcePublicSku && item.sourcePublicSku !== item.sourceSku && <p className="mt-1 break-all text-xs text-slate-500">Внутрішній SKU: {item.sourceSku}</p>}
       </div>
@@ -56,9 +56,9 @@ function SkuTransition({ item }) {
         <div className="text-xs font-semibold uppercase text-[#8a5f2b]">Стало</div>
         <div className="mt-1 flex min-w-0 items-center gap-2">
           <span className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-slate-900">
-            {item.correctedPublicSku || item.correctedSku}
+            {item.correctedPublicSku || 'Артикул недоступний'}
           </span>
-          <CopyButton label="Скопіювати артикул після переобліку" value={item.correctedPublicSku || item.correctedSku} />
+          {item.correctedPublicSku && <CopyButton label="Скопіювати артикул після переобліку" value={item.correctedPublicSku} />}
         </div>
         {item.correctedPublicSku && item.correctedPublicSku !== item.correctedSku && <p className="mt-1 break-all text-xs text-slate-500">Внутрішній SKU: {item.correctedSku}</p>}
       </div>
@@ -114,8 +114,8 @@ function CorrectionReport() {
   const [category, setCategory] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
   const debouncedSearch = useDebouncedValue(search);
@@ -125,11 +125,12 @@ function CorrectionReport() {
     ...(from ? { from } : {}),
     ...(to ? { to } : {}),
   }), [category, debouncedSearch, from, to]);
+  const requestParams = useMemo(() => ({ ...params, limit: 50, offset: page * 50 }), [page, params]);
 
   useEffect(() => {
     const requestId = latestRequestId.current + 1;
     latestRequestId.current = requestId;
-    correctionsApi.listHistory(params)
+    correctionsApi.listHistory(requestParams)
       .then((response) => {
         if (latestRequestId.current !== requestId) return;
         setError('');
@@ -143,29 +144,15 @@ function CorrectionReport() {
       .finally(() => {
         if (latestRequestId.current === requestId) setLoading(false);
       });
-  }, [params]);
+  }, [requestParams]);
 
   const clearFilters = () => {
     setSearch('');
     setCategory('');
     setFrom('');
     setTo('');
-  };
-
-  const loadMore = async () => {
-    if (loadingMore || items.length >= Number(summary.totalCount || 0)) return;
-    const requestId = latestRequestId.current;
-    setLoadingMore(true);
-    setError('');
-    try {
-      const response = await correctionsApi.listHistory({ ...params, offset: items.length });
-      if (latestRequestId.current !== requestId) return;
-      setItems((currentItems) => [...currentItems, ...(response.data.items || [])]);
-    } catch (requestError) {
-      setError(getApiError(requestError));
-    } finally {
-      setLoadingMore(false);
-    }
+    setPage(0);
+    setLoading(true);
   };
 
   const exportCsv = async () => {
@@ -187,12 +174,13 @@ function CorrectionReport() {
   return (
     <div className="app-page">
       <main className="mx-auto w-full min-w-0 max-w-7xl space-y-5 overflow-hidden px-4 py-4 pb-20 sm:px-6 sm:py-6">
-        <AppPageHeader
+        <PageHeader
           eyebrow="Журнал"
           title="Історія переобліків"
           description="Зміни SKU, характеристик і цін із можливістю фільтрації та експорту."
+          breadcrumbs={[{ label: 'Товари', to: '/products' }, { label: 'Історія переобліків' }]}
           actions={<>
-            <Link to="/admin/corrections/history" className="btn btn-outline">
+            <Link to="/products/history" className="btn btn-outline">
               Історія товару
             </Link>
             {isAdminView && (
@@ -236,12 +224,12 @@ function CorrectionReport() {
                 className="input-sm pl-9"
                 value={search}
                 placeholder="Старий або новий SKU"
-                onChange={(event) => setSearch(event.target.value)}
+                onChange={(event) => { setSearch(event.target.value); setPage(0); setLoading(true); }}
               />
             </label>
             <label>
               <span className="mb-1.5 block text-xs font-semibold text-slate-600">Категорія</span>
-              <select className="input-sm" value={category} onChange={(event) => setCategory(event.target.value)}>
+              <select className="input-sm" value={category} onChange={(event) => { setCategory(event.target.value); setPage(0); setLoading(true); }}>
                 <option value="">Усі категорії</option>
                 {categories.map((item) => (
                   <option key={item.code} value={item.code}>{item.code} · {item.name} ({item.count})</option>
@@ -250,11 +238,11 @@ function CorrectionReport() {
             </label>
             <label>
               <span className="mb-1.5 block text-xs font-semibold text-slate-600">Від дати</span>
-              <input type="date" className="input-sm" value={from} onChange={(event) => setFrom(event.target.value)} />
+              <input type="date" className="input-sm" value={from} onChange={(event) => { setFrom(event.target.value); setPage(0); setLoading(true); }} />
             </label>
             <label>
               <span className="mb-1.5 block text-xs font-semibold text-slate-600">До дати</span>
-              <input type="date" className="input-sm" value={to} onChange={(event) => setTo(event.target.value)} />
+              <input type="date" className="input-sm" value={to} onChange={(event) => { setTo(event.target.value); setPage(0); setLoading(true); }} />
             </label>
             <div className="flex gap-2">
               {hasFilters && (
@@ -287,7 +275,7 @@ function CorrectionReport() {
                     </div>
                     <div className="flex items-center gap-2">
                       {item.reason && <span className="text-sm text-slate-600">{item.reason}</span>}
-                      <Link to={`/admin/corrections/history?sku=${encodeURIComponent(item.sourcePublicSku || item.sourceSku)}`} className="btn btn-outline btn-compact-md">Історія товару</Link>
+                      <Link to={`/products/history?sku=${encodeURIComponent(item.sourceSku)}`} className="btn btn-outline btn-compact-md">Історія товару</Link>
                     </div>
                   </div>
 
@@ -324,16 +312,12 @@ function CorrectionReport() {
             </div>
           )}
 
-          {!loading && items.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-sm text-slate-500 sm:px-5">
-              <span>Показано {items.length} із {summary.totalCount || 0}</span>
-              {items.length < Number(summary.totalCount || 0) && (
-                <button type="button" className="btn btn-outline" onClick={loadMore} disabled={loadingMore}>
-                  {loadingMore ? 'Завантажуємо...' : 'Показати ще'}
-                </button>
-              )}
-            </div>
-          )}
+          {!loading && Number(summary.totalCount || 0) > 0 && <Pagination
+            hasPrevious={page > 0} hasNext={(page + 1) * 50 < Number(summary.totalCount || 0)}
+            onPrevious={() => { setLoading(true); setPage((value) => Math.max(0, value - 1)); }}
+            onNext={() => { setLoading(true); setPage((value) => value + 1); }}
+            summary={`Показано ${page * 50 + 1}–${page * 50 + items.length} із ${summary.totalCount || 0}`}
+          />}
         </section>
       </main>
     </div>

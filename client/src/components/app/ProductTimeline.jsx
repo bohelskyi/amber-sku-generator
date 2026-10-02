@@ -15,7 +15,7 @@ import {
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { formatDateTime, formatDecimal, formatUah } from '../../lib/formatters';
-import { AppPageHeader, EmptyState, LoadingState, Notice, StatusBadge } from './UiPrimitives.jsx';
+import { CopyAction, EmptyState, LoadingState, Notice, PageHeader, StatusBadge, TechnicalDisclosure } from '../ui';
 
 const EVENT_META = {
   'product.created': { label: 'Товар створено', icon: PackagePlus, toneClass: 'text-emerald-700' },
@@ -289,7 +289,7 @@ function TimelineCard({ events }) {
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="font-semibold text-slate-900">{title}</h3>
-          <div className="mt-1 font-mono text-sm text-slate-600">{event.publicSku || event.sku}</div>
+          <div className="mt-1 font-mono text-sm text-slate-600">{event.publicSku || 'Артикул недоступний'}</div>
 
         </div>
         <div className="text-right text-xs leading-5 text-slate-500">
@@ -418,16 +418,17 @@ export function ProductTimeline() {
   return (
     <div className="app-page">
       <main className="mx-auto w-full max-w-5xl space-y-5 px-4 py-4 pb-20 sm:px-6 sm:py-6">
-        <AppPageHeader
+        <PageHeader
           eyebrow="Журнал"
           title="Історія товару"
           description="Характеристики, ціни та події товару за артикулом."
-          actions={<Link to="/admin/corrections/history?mode=report" className="btn btn-outline">Звіт про виправлення</Link>}
+          breadcrumbs={[{ label: 'Товари', to: '/products' }, { label: 'Історія товару' }]}
+          actions={<Link to="/products/history?mode=report" className="btn btn-outline">Звіт про виправлення</Link>}
         />
 
         <form className="card flex flex-col gap-3 p-4 sm:flex-row" onSubmit={submit}>
           <label className="relative min-w-0 flex-1">
-            <span className="sr-only">Артикул</span>
+            <span className="sr-only">Артикул або внутрішній SKU</span>
             <Search size={16} className="absolute left-3 top-3 text-slate-400" />
             <input className="input-sm pl-9 font-mono" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Артикул" />
           </label>
@@ -448,10 +449,29 @@ export function ProductTimeline() {
               </div>
             )}
 
-            <details className="card p-4 sm:p-5"><summary className="cursor-pointer font-semibold">Технічні деталі та версії</summary>
-            <section className="mt-3">
+            <section className="card flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5" aria-label="Поточний стан товару">
+              <div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Артикул</p>
+                <div className="mt-1 flex min-w-0 items-center gap-2"><strong className="break-all font-mono text-xl text-slate-900">{data.lineage.currentPublicSku || currentProduct?.publicSku || 'Недоступний'}</strong>
+                  {(data.lineage.currentPublicSku || currentProduct?.publicSku) && <CopyAction value={data.lineage.currentPublicSku || currentProduct.publicSku} label="Скопіювати артикул" />}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusBadge tone={currentProduct?.status === 'active' ? 'success' : 'neutral'}>{currentProduct?.status === 'active' ? 'Активний' : 'Останній збережений'}</StatusBadge>
+                {currentProduct && <MagentoSyncStatus status={currentProduct.magentoSync} />}
+              </div>
+            </section>
+
+            <ConfigurationEvolution evolution={data.configurationEvolution} />
+
+            <section className="timeline-list" aria-label="Хронологія подій">
+              {groups.map((group) => <TimelineCard key={group.key} events={group.events} />)}
+              {groups.length === 0 && <EmptyState compact>Історичні події не знайдено.</EmptyState>}
+            </section>
+
+            <TechnicalDisclosure summary="Версії та технічні деталі">
+            <section>
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Версії товару · {data.lineage.currentPublicSku || data.lineage.currentSku}</div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Версії товару · {data.lineage.currentPublicSku || 'артикул недоступний'}</div>
                 <StatusBadge>{data.lineage.products.length} версій · {groups.length} подій</StatusBadge>
               </div>
               <div className="lineage-scroll" tabIndex={data.lineage.products.length > 3 ? 0 : undefined} aria-label="Ланцюжок версій SKU">
@@ -460,13 +480,10 @@ export function ProductTimeline() {
                   <div key={product.sku} className="lineage-node">
                     {index > 0 && <ArrowRight size={15} className="text-slate-400" />}
                     <span className={`lineage-sku ${[product.sku, product.publicSku].includes(data.querySku) ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-slate-200 bg-white text-slate-700'}`}>
-                      <span className="break-all">{product.sku === data.lineage.currentSku ? product.publicSku || product.sku : product.sku}</span>
-                      {product.publicSku && product.publicSku !== product.sku && (
-                        <span className="mt-1 break-all font-sans text-[10px] text-slate-500">
-                          Внутрішній SKU: <span className="font-mono">{product.sku}</span>
-                        </span>
-                      )}
-                      {product.sku === data.lineage.currentSku && <MagentoSyncStatus status={product.magentoSync} />}
+                      <span className="break-all">{product.publicSku || 'Артикул недоступний'}</span>
+                      <span className="mt-1 break-all font-sans text-[10px] text-slate-500">
+                        Внутрішній SKU: <span className="font-mono">{product.sku}</span>
+                      </span>
                       {product.sku === data.lineage.currentSku && <span className="mt-1 font-sans text-[10px] uppercase text-emerald-700">{product.status === 'active' ? 'актуальний' : 'останній'}</span>}
                     </span>
                   </div>
@@ -478,13 +495,7 @@ export function ProductTimeline() {
 
             <button type="button" className="btn btn-outline" onClick={() => setRefresh((value) => value + 1)} disabled={loading}>Оновити стан</button>
 
-            <ConfigurationEvolution evolution={data.configurationEvolution} />
-            </details>
-
-            <section className="timeline-list" aria-label="Хронологія подій">
-              {groups.map((group) => <TimelineCard key={group.key} events={group.events} />)}
-              {groups.length === 0 && <EmptyState compact>Історичні події не знайдено.</EmptyState>}
-            </section>
+            </TechnicalDisclosure>
           </>
         )}
       </main>

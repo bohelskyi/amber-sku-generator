@@ -67,6 +67,7 @@ beforeEach(() => {
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   productsApi.getConfig.mockResolvedValue(response({ categories: {}, questions: {}, options: {} }));
   productsApi.getRecent.mockResolvedValue(response([]));
+  productsApi.listRegister.mockResolvedValue(response({ items: [], pageInfo: { hasMore: false, nextCursor: null }, filterOptions: { categories: [] } }));
   exports.getStatus.mockResolvedValue(response({ delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false }, countSinceLastExport: 1 }));
   exports.getPriceStatus.mockResolvedValue(response({ pendingCount: 1 }));
   exports.getTemplateOptions.mockResolvedValue(response({ versions: [], activeVersionId: null }));
@@ -131,28 +132,32 @@ it('keeps product creation, history, decode, recount and archive available witho
   const category = { code: 'BR', name: 'Браслети', requires_weight: 0 };
   productsApi.getConfig.mockResolvedValue(response({ categories: { BR: category }, questions: { BR: [] }, options: {} }));
   const decode = vi.spyOn(api, 'post').mockResolvedValue(response({
-    sku: 'BR-A', category, existsInDb: true, decodedAnswers: [], suffix: { type: 'sequence', value: 1 },
+    sku: 'BR-A', internalSku: 'BR-A', publicSku: 'AG-000001', category, existsInDb: true, decodedAnswers: [], suffix: { type: 'sequence', value: 1 },
     product: { id: 1, status: 'active', details: {} }, pricing: null, skuSchema: { version: 1 },
   }));
   vi.spyOn(window, 'confirm').mockReturnValue(true);
   vi.spyOn(window, 'alert').mockImplementation(() => {});
   mount('/', ['products.view', 'history.view', 'products.create', 'products.decode', 'products.archive', 'products.recount']);
   await screen.findByRole('heading', { name: 'Оберіть категорію' });
-  expect(screen.getByRole('heading', { name: 'Останні збережені' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Реєстр товарів' })).toBeTruthy();
   expect(screen.queryByRole('region', { name: 'Експорт' })).toBeNull();
   expect(screen.queryByRole('link', { name: 'Перейти до експорту' })).toBeNull();
   expect(screen.queryByRole('link', { name: 'Експорт', exact: true })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: /BR Браслети/ }));
-  expect(screen.getByRole('heading', { name: 'Браслети' })).toBeTruthy(); button('Скасувати');
-  fireEvent.change(screen.getByLabelText('Артикул для розшифрування'), { target: { value: 'br-a' } }); button('Розшифрувати');
-  await screen.findByRole('button', { name: 'Переоблікувати' });
-  expect(decode).toHaveBeenCalledWith('/decode', { sku: 'BR-A' }); button('Переоблікувати');
+  expect(await screen.findByRole('heading', { name: 'Браслети' })).toBeTruthy(); button('До категорій');
+  await screen.findByRole('heading', { name: 'Оберіть категорію' });
+  fireEvent.click(screen.getByRole('link', { name: 'Товари', exact: true }));
+  await screen.findByLabelText('Артикул для відкриття товару');
+  fireEvent.change(screen.getByLabelText('Артикул для відкриття товару'), { target: { value: 'br-a' } }); button('Відкрити товар');
+  await screen.findByRole('button', { name: 'Переоблік' });
+  expect(decode).toHaveBeenCalledWith('/decode', { sku: 'BR-A' }); button('Переоблік');
   expect(screen.getByText('Переоблік товару')).toBeTruthy(); button('Скасувати');
-  fireEvent.change(screen.getByLabelText('SKU товару для архівування'), { target: { value: 'BR-A' } }); button('Архівувати');
+  fireEvent.click(screen.getByText('Додаткові дії')); button('Архівувати товар');
+  const archiveDialog = await screen.findByRole('dialog', { name: 'Архівувати товар?' });
+  fireEvent.click(within(archiveDialog).getByRole('button', { name: 'Архівувати товар' }));
   await waitFor(() => expect(productsApi.archive).toHaveBeenCalledWith('BR-A'));
-  expect(window.confirm).toHaveBeenCalledWith('Перенести BR-A в архів?');
-  await waitFor(() => expect(screen.getByLabelText('SKU товару для архівування').value).toBe(''));
-  expect(productsApi.getRecent).toHaveBeenCalledTimes(2);
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Архівувати товар?' })).toBeNull());
+  expect(productsApi.getRecent).not.toHaveBeenCalled();
   for (const service of [exports, sessions, templates]) for (const mock of Object.values(service)) expect(mock).not.toHaveBeenCalled();
 });
 

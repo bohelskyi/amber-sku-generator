@@ -1,7 +1,6 @@
 import { useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { useDialogAccessibility } from '../../hooks/useDialogAccessibility';
 import { formatUah } from '../../lib/formatters';
+import { Dialog } from '../ui';
 
 const MODES = [
   { value: 'system_auto', label: 'Автоматична' },
@@ -47,15 +46,7 @@ export function ProductPriceChangeDialog({
   sku,
   usdPerGram = '',
 }) {
-  const dialogRef = useRef(null);
   const confirmButtonRef = useRef(null);
-  useDialogAccessibility({
-    closeDisabled: isApplying,
-    containerRef: dialogRef,
-    initialFocusRef: confirmButtonRef,
-    isOpen,
-    onClose: onCancel,
-  });
   if (!isOpen) return null;
 
   const validInput = mode === 'system_auto'
@@ -69,26 +60,21 @@ export function ProductPriceChangeDialog({
   const requestAllowedForMode = mode === 'system_auto' || canRequestOverride;
   const actionDisabled = !validInput || !preview || preview.unchanged || isLoading || isApplying;
 
-  return createPortal(
-    <div className="dialog-backdrop" onMouseDown={(event) => {
-      if (event.target === event.currentTarget && !isApplying) onCancel();
-    }}>
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="product-price-change-title"
-        tabIndex={-1}
-        className="dialog-surface max-w-lg"
-      >
-        <div className="dialog-header">
-          <p className="eyebrow">Зміна ціни без переобліку</p>
-          <h2 id="product-price-change-title" className="mt-1 text-xl font-semibold text-slate-900 sm:text-2xl">
-            Змінити ціну чинного товару?
-          </h2>
-        </div>
-
-        <div className="dialog-body space-y-5 px-5 py-5 sm:px-6">
+  return <Dialog open title="Змінити ціну чинного товару?"
+    description="Зміна ціни без переобліку. Перевірте розрахунок перед застосуванням."
+    busy={isApplying} onClose={onCancel} initialFocusRef={confirmButtonRef} size="md"
+    footer={<div className={`grid w-full gap-3 ${canApplyDirect && canCreateRequest ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+      <button type="button" className="btn btn-outline" onClick={onCancel} disabled={isApplying}>Скасувати</button>
+      {canCreateRequest && <button ref={!canApplyDirect ? confirmButtonRef : undefined} type="button"
+        className={`btn ${canApplyDirect ? 'btn-outline' : 'btn-primary'}`} onClick={onRequest}
+        disabled={actionDisabled || !requestAllowedForMode}
+        title={!requestAllowedForMode ? 'Для цього режиму потрібен дозвіл керування ціною запиту.' : undefined}>
+        {isApplying ? 'Виконуємо…' : 'Створити запит на зміну ціни'}
+      </button>}
+      {canApplyDirect && <button ref={confirmButtonRef} type="button" className="btn btn-primary" onClick={onConfirm}
+        disabled={actionDisabled}>{isApplying ? 'Змінюємо…' : 'Змінити ціну'}</button>}
+    </div>}>
+        <div className="space-y-5">
           <dl className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
             <div>
               <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Артикул</dt>
@@ -192,33 +178,5 @@ export function ProductPriceChangeDialog({
           )}
           {error && <div className="danger-panel p-4 text-sm" role="alert">{error}</div>}
         </div>
-
-        <div className={`dialog-footer grid gap-3 ${canApplyDirect && canCreateRequest ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
-          <button type="button" className="btn btn-outline order-2 sm:order-1" onClick={onCancel} disabled={isApplying}>
-            Скасувати
-          </button>
-          {canCreateRequest && <button
-            ref={!canApplyDirect ? confirmButtonRef : undefined}
-            type="button"
-            className={`btn ${canApplyDirect ? 'btn-outline' : 'btn-primary'} order-1 sm:order-2`}
-            onClick={onRequest}
-            disabled={actionDisabled || !requestAllowedForMode}
-            title={!requestAllowedForMode ? 'Для цього режиму потрібен дозвіл керування ціною запиту.' : undefined}
-          >
-            {isApplying ? 'Виконуємо…' : 'Створити запит на зміну ціни'}
-          </button>}
-          {canApplyDirect && <button
-            ref={confirmButtonRef}
-            type="button"
-            className="btn btn-primary order-1 sm:order-3"
-            onClick={onConfirm}
-            disabled={actionDisabled}
-          >
-            {isApplying ? 'Змінюємо…' : 'Змінити ціну'}
-          </button>}
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
+  </Dialog>;
 }

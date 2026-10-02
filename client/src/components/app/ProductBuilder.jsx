@@ -198,8 +198,12 @@ export function ProductBuilder({
     <div ref={workspaceRef} className="operational-split-layout">
       <section className="builder-workspace card overflow-hidden fade-up">
         <header className="builder-header">
-          <h2 className="section-title-text">{category.name}</h2>
-          <button onClick={onCancel} className="btn btn-ghost">Скасувати</button>
+          <div>
+            <p className="eyebrow">Новий товар</p>
+            <h2 className="section-title-text mt-1">{category.name}</h2>
+            <p className="mt-1 text-sm text-slate-500">Заповніть характеристики, перевірте розрахунок і збережіть товар.</p>
+          </div>
+          <button onClick={onCancel} className="btn btn-ghost">До категорій</button>
         </header>
 
         <div className="builder-field-list">
@@ -413,7 +417,7 @@ export function ProductBuilder({
                 className="btn btn-amber w-full"
                 disabled={isVerifying}
               >
-                {isVerifying ? 'Перевіряємо…' : 'Розрахувати SKU і ціну'}
+                {isVerifying ? 'Перевіряємо…' : 'Перевірити дані'}
               </button>
             )}
           </div>

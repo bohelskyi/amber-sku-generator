@@ -111,6 +111,19 @@ continues at `AG-000003` or higher. See [eligibility and recovery](MAGENTO_AUTOM
 
 ## Decode and legacy compatibility
 
+`GET /api/products/register` is the bounded operator register read. It retains the
+existing `history.view` authorization boundary rather than treating
+`products.view` as permission to browse stored inventory. The default page contains
+only current active, uncorrected products; explicit archived/corrected/all filters
+remain under that same history permission and terminal `voided` test-product
+tombstones are never included. Search covers the stored public article and internal
+SKU, returns an explicit display projection rather than database rows, and uses a
+filter-bound immutable-ID keyset cursor with a default page of 50 and server maximum of 100.
+Category labels and filter options are included in the same authorized projection,
+so the register does not depend on broader catalog/config access. The legacy
+15-product `GET /api/products` read remains available for existing callers during
+the client transition.
+
 Exact existing-product lookup is authoritative for opening a product. Decode projects its stored category, answers, schema reference, weight, historical prices and product identity without requiring its historical internal SKU to parse or reconstruct successfully. Historical values absent from schema options remain visible as their stored values. This read does not validate a new configuration or change the identifier.
 
 When no stored product exists, decode finds the category by longest prefix, resolves the historical schema marker and parses encoded answers and suffix/variation. Unknown codes retain structured diagnostics. New-product validation and recount target validation remain authoritative and unchanged.
