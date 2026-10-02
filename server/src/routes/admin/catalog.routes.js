@@ -167,7 +167,7 @@ router.post('/admin/option', requirePermission('catalog.manage'), async (req, re
     });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 

@@ -51,6 +51,7 @@ async function getAppConfig(queryable = pool) {
       o.value_id,
       o.sku_code,
       o.label AS o_label,
+      o.label_en AS o_label_en,
       o.visible_if_json,
       o.hidden_if_json,
       COALESCE(o.archived, FALSE) AS o_archived
@@ -85,6 +86,7 @@ async function getAppConfig(queryable = pool) {
         id: row.value_id,
         sku_code: String(row.sku_code ?? row.value_id),
         label: row.o_label,
+        label_en: row.o_label_en ?? null,
         visible_if_json: row.visible_if_json || null,
         hidden_if_json: row.hidden_if_json || null,
         archived: row.o_archived ? 1 : 0,

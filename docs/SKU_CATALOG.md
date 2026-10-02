@@ -10,7 +10,17 @@ Questions may be option-based or free text, required or optional, included in th
 
 - semantic `value_id`, used by answers, rules, and pricing;
 - digit-only `sku_code`, encoded into the SKU;
-- a label, visibility/hide rules, and archive state.
+- authoritative UA/global `label`, nullable authoritative English `label_en`, visibility/hide rules, and archive state.
+
+Migration 057 adds English display metadata only. Existing rows remain null;
+no backfill, translation or UA fallback is performed. Catalog administration validates
+and saves both labels; omitted EN on an update preserves it, explicit null/empty
+clears it. Labels must be plain nonblank text without edge whitespace/control
+characters, at most 255 characters (EN may be absent). English label edits do not
+change `value_id`, `sku_code`, published snapshots, existing stored products,
+pricing or SKU generation. Catalog edits never automatically write Magento or
+mass-enroll products. H4 consumes the exact PostgreSQL labels; active EN store-view
+option creation requires authoritative EN metadata.
 
 Never conflate `value_id` with `sku_code`. Contextual labels may share a value/code only when they retain the same semantic meaning.
 

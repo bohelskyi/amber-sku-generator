@@ -76,23 +76,58 @@ classification review, including acknowledgment that hidden swatch changes may
 have no visible REST signal. Observable identity/metadata drift invalidates review.
 This is an explicit reviewed risk boundary, not permanent non-swatch certification.
 
-The global label comes from the exact non-archived Amber semantic option. SKU
-values must already exist in the active published SKU schema. Optional EN is an
-explicit Administrator-confirmed authoritative Amber value captured in immutable
-attestation/action evidence, never a generated translation. The reviewed preview
-shows global/EN intent; fresh code `en` discovery resolves its exact store ID.
+The global label is the exact non-archived Amber `options.label`; optional authoritative
+English display metadata is `options.label_en` (migration 057). Catalog create/edit
+owns both labels. Historical EN remains null: no translation or UA fallback is
+invented. SKU values must already exist in the active published SKU schema. The
+server always discovers store views. If `en` is active, a nonblank Amber EN label
+is required before CREATE; the operator must complete it in the Amber catalog.
+The preview captures both PostgreSQL labels and the exact active EN store ID.
+Client-authored `englishLabel`/`englishAuthoritative` are rejected. Catalog edits
+alone perform no remote write, product enrollment or SKU schema publication.
 
 Typed `POST .../options/inspect`, `/attest`, `/preview`, `/apply` and
 `/reconcile` retain manage+publish, authentication and CSRF. Attestation/apply
 also require the actual immutable Administrator role. Metadata/options and local
 source/revision are rechecked before committed dispatch. POST uses only the closed
 option route, initializes no default, and persists the exact returned option ID
-before GET verification in global and optional EN scopes. A lost response remains
+before exact GET verification in global and every applicable EN scope. A lost response remains
 uncertain; equal labels cannot recover attribution or authorize another POST.
 Creation never approves a semantic binding. Returned-ID recovery remains GET-only.
 An expired attestation on still-sealed work requires a fresh Administrator
 classification attestation, preview and explicit apply; 056 retains both attestations
 and intents. Expiry never permits replacement of previously dispatched work.
+
+### Reviewed existing-option label updates
+
+Select the **current published binding**, the Amber semantic value and its exact
+approved attribute. Amber derives the option ID from that publication; unapproved,
+ambiguous, wrong-attribute and superseded selections fail closed. `/option-labels/inspect`,
+`/attest`, `/preview`, `/apply` and `/reconcile` retain the existing manage/publish,
+Administrator attestation, active-user and CSRF boundaries. Review shows exact
+current global/EN labels and proposed PostgreSQL labels. Explicit apply seals an
+immutable `option_label` intent before dispatch, rechecks fresh metadata, authoritative
+labels, current publication and adapter revision, then performs one typed PUT.
+No binding is approved, modified or published by this action.
+
+**A scoped-label adapter is required. Stock Magento option PUT is never a fallback.**
+Magento 2.4.6's [option save](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Eav/Model/Entity/Attribute/OptionManagement.php)
+and [resource persistence](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Eav/Model/ResourceModel/Entity/Attribute.php)
+replace option store-label rows and reset omitted sort order. Effective-label GETs
+cannot prove the stored translation/fallback distinction. The accepted bounded
+release therefore fails closed with `MAGENTO_OPTION_LABEL_ADAPTER_REQUIRED` if the
+configured installation does not implement the [typed adapter contract](MAGENTO_SCOPED_OPTION_LABEL_ADAPTER.md).
+This repository defines and tests the Amber client/service contract with fixtures;
+it does **not** claim that the adapter exists or has been deployed in real Magento.
+Installing/accepting that Magento-side adapter is separate deployment work.
+
+After a lost PUT response, the exact pre-known option ID permits GET-only
+reconciliation. A mismatch remains dispatched/uncertain and blocks every new PUT
+for that resource. Only exact adapter/global/EN verification advances the immutable
+receipt. Once verified, a later catalog edit may receive a new separately attested
+and reviewed label action; historical evidence stays immutable. Sealed, undispatched
+work retains migration-056 reviewed recovery. No blind retry, order management,
+other-scope replacement or generic Magento request surface is exposed.
 
 As reported by the production operator on 2026-10-01, Wave 1 is deployed at PR #19 / `daf627fc2458e5215cbf52735a8f186a3777361f`, with migrations through `050_test_product_deletion.sql`. Stable public `AG-*` identities, the reviewed production binding and automatic Amber → Magento synchronization are active. Magento product CSV delivery is retired; the separate price-export stream and immutable historical evidence remain supported. Historical delivery/collision cutover is complete and the operational freeze has been lifted. This documentation update did not query production or Magento.
 
@@ -1869,8 +1904,12 @@ Disabled activation keeps obligations pending; retired/test-deleted products are
 skipped. Receipt/generation counters survive process/page restart.
 
 GET `bindings/:id/handoffs` exposes the latest 20 receipts and real sync counts.
-GET `bindings/:id/controlled-products` shows the first 100 eligible current products
-and explicitly reports any unexamined remainder. A separately reviewed Administrator
+GET `bindings/:id/controlled-products?after=<productId>` uses ordered keyset
+pagination (100 eligible current products plus one lookahead). Every later product
+is reachable. Each request is its own local snapshot, not a page of publication
+review evidence. The UI retains exact selections between pages and caps one
+controlled action at 100 products; final preview/apply revalidates the whole selected
+set together. No unexamined product is silently enrolled. A separately reviewed Administrator
 `broader_resync` action can enroll an exact selection, without changing any bindings
 or prices. POST `controlled/preview` and `/apply` use local evidence hashes, current
 publication CAS, existing permissions and final authorization; applying name rules

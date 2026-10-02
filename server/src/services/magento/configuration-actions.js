@@ -15,13 +15,14 @@ async function mutate(options, operation) {
 }
 async function seal(config, preview, options = {}) {
   return mutate(options, async (client, context) => {
+    if (preview.kind === 'option_label') await require('./configuration-option-labels').checkedSource(client, config, preview, context.actorUserId);
     if (preview.kind === 'option') await require('./configuration-option').checkedAttestation(client, config, preview, context.actorUserId);
     const revision = (await client.query('SELECT state,revision FROM magento_binding_revisions WHERE id=$1 FOR UPDATE', [preview.bindingRevisionId])).rows[0];
-    if (revision?.state !== 'draft' || revision.revision !== preview.expectedRevision) {
+    if (revision?.state !== (preview.kind === 'option_label' ? 'published' : 'draft') || revision.revision !== preview.expectedRevision) {
       throw c.error(409, 'MAGENTO_BINDING_CONFLICT', 'Draft changed after preview');
     }
     const resourceKey = c.hash(preview.resource); const origin = c.originHash(config.baseUrl);
-    const prior = (await client.query("SELECT * FROM magento_configuration_actions WHERE origin_hash=$1 AND kind=$2 AND resource_key=$3 AND state<>'superseded' FOR UPDATE",
+    const prior = (await client.query("SELECT * FROM magento_configuration_actions WHERE origin_hash=$1 AND kind=$2 AND resource_key=$3 AND state<>'superseded' AND (kind<>'option_label' OR state<>'verified') FOR UPDATE",
     [origin, preview.kind, resourceKey])).rows[0];
     if (prior) {
       if (prior.state === 'sealed' && prior.preview_hash === preview.previewToken) return prior;
@@ -44,9 +45,10 @@ async function transition(id, from, to, input, options = {}) {
     const action = (await client.query('SELECT * FROM magento_configuration_actions WHERE id=$1 FOR UPDATE', [id])).rows[0];
     if (!action || action.state !== from) throw c.error(409, 'MAGENTO_CONFIGURATION_RECONCILIATION_REQUIRED', 'Action is no longer eligible for this transition');
     if (from === 'sealed') {
+      if (action.kind === 'option_label') await require('./configuration-option-labels').checkedSource(client, {baseUrl:action.intent.origin}, action.intent, context.actorUserId);
       if (action.kind === 'option') await require('./configuration-option').checkedAttestation(client, { baseUrl: action.intent.origin }, action.intent, context.actorUserId);
       const revision = (await client.query('SELECT state,revision FROM magento_binding_revisions WHERE id=$1 FOR UPDATE', [action.binding_revision_id])).rows[0];
-      if (revision?.state !== 'draft' || revision.revision !== action.binding_revision) throw c.error(409, 'MAGENTO_BINDING_CONFLICT', 'Draft changed before dispatch');
+      if (revision?.state !== (action.kind === 'option_label' ? 'published' : 'draft') || revision.revision !== action.binding_revision) throw c.error(409, 'MAGENTO_BINDING_CONFLICT', 'Draft changed before dispatch');
     }
     let row;
     if (from === 'sealed' && to === 'dispatched') row = (await client.query("UPDATE magento_configuration_actions SET state='dispatched',dispatched_at=CURRENT_TIMESTAMP WHERE id=$1 RETURNING *", [id])).rows[0];
@@ -69,8 +71,8 @@ function receipt(row) {
     path: row.intent.path ?? null,
     attributeCode: row.intent.target?.attributeCode ?? null, label: row.intent.label ?? null,
     createdAt: row.created_at, verifiedAt: row.verified_at, bound: false,
-    canReconcile: row.state === 'returned', canReview: row.state === 'sealed', supersedesId: row.supersedes_id,
-    message: row.state === 'verified' ? 'Створено, зв’язок ще не підтверджено'
+    canReconcile: row.state === 'returned' || (row.kind === 'option_label' && row.state === 'dispatched'), canReview: row.state === 'sealed', supersedesId: row.supersedes_id,
+    message: row.state === 'verified' ? (row.kind === 'option_label' ? 'Назви перевірено; відповідність не змінено' : 'Створено, зв’язок ще не підтверджено')
       : row.state === 'sealed' ? 'Зміну підготовлено, але не надіслано. Повторіть перевірку перед створенням.'
         : row.state === 'superseded' ? 'Замінено новою перевіреною дією; цю дію не буде надіслано.'
           : 'Amber надіслав зміну. Підтвердження кінцевого стану ще немає; повторне надсилання недоступне.' };

@@ -31,6 +31,7 @@ export default function MagentoPublicationActions({ revision, currentPublishedId
   const [ack, setAck] = useState(false); const [reason, setReason] = useState('');
   const [status, setStatus] = useState([]); const [refresh, setRefresh] = useState(0);
   const [candidates, setCandidates] = useState(null); const [selected, setSelected] = useState([]);
+  const [productCursors,setProductCursors]=useState([0]); const [productPage,setProductPage]=useState(0);
   const [kind, setKind] = useState('broader_resync'); const [actionReason, setActionReason] = useState('');
   const [actionReview, setActionReview] = useState(null); const sequence = useRef(0);
   useEffect(() => () => { ++sequence.current; }, []);
@@ -54,9 +55,9 @@ export default function MagentoPublicationActions({ revision, currentPublishedId
     catch (cause) { if (current === sequence.current) { setReview(null); setActionReview(null); setError(cause.response?.data?.error || 'Дані змінилися або дія не завершилася. Повторіть перевірку.'); } }
     finally { if (current === sequence.current) setBusy(false); }
   }
-  async function loadProducts() {
+  async function loadProducts(cursor=0,page=0,reset=false) {
     const current = ++sequence.current; setBusy(true); setError(''); setActionReview(null);
-    try { const { data } = await api.get(`${root}/bindings/${revision.id}/controlled-products`); if (current === sequence.current) { setCandidates(data); setSelected([]); } }
+    try { const { data } = await api.get(`${root}/bindings/${revision.id}/controlled-products`, {params:{after:cursor}}); if (current === sequence.current) { setCandidates(data); setProductPage(page); if(reset){setSelected([]);setProductCursors([0]);} } }
     catch (cause) { if (current === sequence.current) setError(cause.response?.data?.error || 'Не вдалося прочитати товари.'); }
     finally { if (current === sequence.current) setBusy(false); }
   }
@@ -92,13 +93,18 @@ export default function MagentoPublicationActions({ revision, currentPublishedId
       <button type="button" className="btn btn-outline btn-compact-md" onClick={() => setRefresh((n) => n + 1)}>Оновити стан передачі</button>
       {canPublish && currentPublishedId === revision.id && <details><summary>Контрольовані дії Адміністратора</summary><div className="space-y-3 pt-3">
         <p className="text-sm">Обирайте лише потрібні товари. Непідтверджені відправлення не скидаються і не повторюються.</p>
-        <button type="button" className="btn btn-outline btn-compact-md" disabled={busy} onClick={loadProducts}>Перевірити товари для контрольованої дії</button>
+        <button type="button" className="btn btn-outline btn-compact-md" disabled={busy} onClick={()=>loadProducts(0,0,true)}>Перевірити товари для контрольованої дії</button>
         {candidates && <><label className="block text-sm">Дія<select className="input" value={kind} onChange={(e) => { invalidate(); setKind(e.target.value); setSelected([]); }}><option value="broader_resync">Повторно синхронізувати вибрані товари</option><option value="name_rule">Застосувати нове правило назв</option></select></label>
-          {candidates.products.map((p) => <label key={p.productId} className="block text-sm"><input type="checkbox" checked={selected.includes(p.productId)} disabled={p.blockers.includes('RECONCILIATION_REQUIRED') || (kind === 'name_rule' && (!p.changed || p.blockers.length > 0))}
+          {candidates.products.map((p) => <label key={p.productId} className="block text-sm"><input type="checkbox" checked={selected.includes(p.productId)} disabled={(!selected.includes(p.productId) && selected.length>=100) || p.blockers.includes('RECONCILIATION_REQUIRED') || (kind === 'name_rule' && (!p.changed || p.blockers.length > 0))}
             onChange={(e) => { invalidate(); setSelected(e.target.checked ? [...selected, p.productId] : selected.filter((id) => id !== p.productId)); }} /> {p.article} · {p.before.all || 'Назва не сформована'}
             {kind === 'name_rule' && <> → {p.after.all}; {p.before.en} → {p.after.en}</>}
             {p.blockers.length > 0 && <span className="block text-amber-800">{p.blockers.map((code) => blockers[code] || 'Потрібна перевірка').join(' ')}</span>}</label>)}
-          {candidates.unexamined > 0 && <Notice>Показано перші 100 товарів. Не перевірено: {candidates.unexamined}. Для більшого обсягу потрібна окрема перевірка.</Notice>}
+          <nav aria-label="Вибір товарів для контрольованої дії" className="flex flex-wrap items-center gap-2 text-sm">
+            <button type="button" className="btn btn-outline btn-compact-md" disabled={busy || productPage===0} onClick={()=>loadProducts(productCursors[productPage-1],productPage-1)}>Попередні товари</button>
+            <span>Сторінка {productPage+1} · вибрано {selected.length} / 100</span>
+            <button type="button" className="btn btn-outline btn-compact-md" disabled={busy || candidates.nextCursor==null} onClick={()=>{setProductCursors([...productCursors.slice(0,productPage+1),candidates.nextCursor]);loadProducts(candidates.nextCursor,productPage+1);}}>Наступні товари</button>
+          </nav>
+          <p className="text-sm text-slate-500">Вибір зберігається між сторінками. Кожна сторінка показує поточні дані; перед підтвердженням перевіряється весь точний вибір.</p>
           <label className="block text-sm">Пояснення контрольованої дії<input className="input" maxLength={2000} value={actionReason} onChange={(e) => { invalidate(); setActionReason(e.target.value); }} /></label>
           <button type="button" className="btn btn-outline btn-compact-md" disabled={busy || !selected.length || actionReason.trim().length < 3 || (kind === 'name_rule' && !permissions.includes('exports.create'))} onClick={() => action('controlled/preview', controlled, setActionReview)}>Перевірити вибрану дію</button>
         </>}

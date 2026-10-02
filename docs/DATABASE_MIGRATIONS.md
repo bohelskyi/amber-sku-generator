@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`056`. Migrations `000`–`055` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`057`. Migrations `000`–`056` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -129,6 +129,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `054_explicit_category_sku_publication.sql` | Explicit initial SKU publication for administrator-created categories. |
 | `055_magento_publication_handoff.sql` | Immutable publication/handoff receipts, bounded enrollment items and name-rule pins. |
 | `056_magento_configuration_reseal.sql` | Linked replacement of sealed, undispatched configuration actions; all dispatched reservations remain permanent. |
+| `057_catalog_english_option_labels.sql` | Nullable authoritative English catalog metadata and immutable reviewed scoped-option label action evidence. |
 
 ## Test deletion migration
 
@@ -288,3 +289,18 @@ resource. Existing intent/progress fields remain immutable and the predecessor
 cannot dispatch afterward. Dispatched/returned/verified rows cannot supersede or
 reset. Existing actions receive only a null link; no action, attestation, binding,
 publication, sync job, activation or remote mutation is created by installation.
+
+## 057 — authoritative catalog English labels and reviewed label actions
+
+`057_catalog_english_option_labels.sql` adds nullable `options.label_en` with a
+nonblank/length/control-character constraint. Existing rows remain null; no backfill,
+translation, snapshot rewrite, product/SKU mutation, activation or remote operation
+occurs. Published schemas retain their historical label representation.
+
+The existing configuration ledger admits `option_label` only with an immutable
+single-action Administrator attestation. Its exact origin/attribute/option resource
+remains exclusively reserved while sealed/dispatched/returned; verified label updates
+permit a later separately reviewed action, while every earlier intent/progress row
+remains permanent. CREATE/category reservations and 056 supersession guards are
+unchanged. A lost PUT cannot reset/supersede dispatched work; recovery is GET-only.
+Actual dispatch requires the separately deployed scoped-label adapter contract.

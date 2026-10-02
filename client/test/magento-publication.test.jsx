@@ -11,6 +11,25 @@ const proof = { previewToken: 'proof', totalProducts: 3, affected: [{ productId:
   lostRoutes: [], lostProducts: [], preservedNames: [], checked: [], blockers: [] };
 const shell = (props = {}, grants = permissions) => render(<AuthContext.Provider value={{ permissions: grants }}><MemoryRouter><MagentoPublicationActions revision={revision} currentPublishedId="current" onPublished={vi.fn()} {...props} /></MemoryRouter></AuthContext.Provider>);
 afterEach(() => { cleanup(); vi.resetAllMocks(); vi.useRealTimers(); });
+it('controlled product picker can reach later pages and preserves the exact cross-page selection',async()=>{
+  const product=(id)=>({productId:id,article:`AG-${id}`,before:{all:`Назва ${id}`},after:{all:`Нова ${id}`},changed:true,blockers:[]});
+  api.get.mockImplementation((path,options)=>Promise.resolve({data:path.endsWith('/handoffs')?[]: options.params.after===0
+    ? {products:[product(1)],nextCursor:100} : {products:[product(101)],nextCursor:null}}));
+  api.post.mockResolvedValue({data:{previewToken:'selection-proof',products:[product(1),product(101)],blockers:[]}});
+  shell({revision:{...revision,id:'current',state:'published'}});
+  fireEvent.click(screen.getByText('Контрольовані дії Адміністратора'));
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити товари для контрольованої дії'}));
+  await screen.findByLabelText(/AG-1 ·/);fireEvent.click(screen.getByLabelText(/AG-1 ·/));
+  fireEvent.click(screen.getByRole('button',{name:'Наступні товари'}));
+  await screen.findByLabelText(/AG-101 ·/);fireEvent.click(screen.getByLabelText(/AG-101 ·/));
+  expect(screen.getByText(/вибрано 2 \/ 100/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'Попередні товари'}));
+  expect((await screen.findByLabelText(/AG-1 ·/)).checked).toBe(true);
+  fireEvent.change(screen.getByLabelText('Пояснення контрольованої дії'),{target:{value:'Точний вибір із двох сторінок'}});
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити вибрану дію'}));
+  await screen.findByText('Вибрано товарів: 2.');
+  expect(api.post.mock.calls[0][1].productIds).toEqual([1,101]);
+});
 it('complete affected and lost sets paginate locally without new HTTP snapshot pages',async()=>{
   const products=Array.from({length:101},(_,i)=>({productId:i+1,article:`ARTICLE-${i+1}`,routeKey:'XG:all',reason:'unblocked'}));
   api.post.mockResolvedValueOnce({data:{...proof,totalProducts:3323,affected:products,lostProducts:products,lostRoutes:['XG:all']}});

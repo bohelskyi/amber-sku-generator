@@ -36,7 +36,7 @@ function semanticReadiness(config, schemas, revision, definition = null) {
       const state = !applicable ? 'not_applicable' : !mappings.length ? 'missing' : mappings.every((m) => m.state === 'approved') ? 'approved'
         : mappings.some((m) => m.state === 'blocked') ? 'blocked' : mappings.some((m) => m.state === 'drifted') ? 'drifted'
           : mappings.some((m) => m.state === 'missing') ? 'missing' : 'candidate';
-      return { questionKey: q.id, questionLabel: q.label, valueId: String(v.id), label: v.label,
+      return { questionKey: q.id, questionLabel: q.label, valueId: String(v.id), label: v.label, labelEn: v.label_en ?? null,
         skuCode: v.sku_code, state, optionId: mappings.length === 1 ? mappings[0].optionId : null, mappings };
     }));
     // This is structural evidence, never a claim of remote product sendability.

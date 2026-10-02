@@ -134,6 +134,7 @@ test('GET-only API covers every discovery endpoint with explicit all/store scope
     ['listProductAttributes', [], 'products/attributes?searchCriteria%5BpageSize%5D=100&searchCriteria%5BcurrentPage%5D=1'],
     ['getProductAttribute', ['stone_color'], 'products/attributes/stone_color'],
     ['getProductAttributeOptions', ['stone_color'], 'products/attributes/stone_color/options'],
+    ['getScopedOptionLabels', ['stone_color',5738], 'amber/attributes/stone_color/options/5738/labels'],
     ['getProductBySkuPathDiagnostic', ['KL3/11131351005'], 'products/KL3%2F11131351005'],
   ];
   assert.deepEqual(Object.keys(client).sort(), [...cases.map(([method]) => method), 'findProductBySku'].sort());

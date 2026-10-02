@@ -36,6 +36,14 @@ The repository includes forward migration **051** for the opt-in [v4 integration
 
 Forward migration **056** adds immutable linked recovery for configuration actions that were sealed but never dispatched. H3b reviews the complete current scope in one snapshot, with measured count/byte/runtime limits and product-before-lifecycle revalidation; see [the scale receipt](docs/archive/implementation/WAVE2_PUBLICATION_SCALE_2026-10-02.md). Existing published semantics, dispatched/uncertain work and Administrator requirements remain intact.
 
+Forward migration **057** adds authoritative optional English catalog option labels
+without backfill or SKU/history changes. H4 derives CREATE labels from PostgreSQL
+and requires EN when the remote EN store is active. Reviewed existing-option label
+updates require the [scoped-label adapter](docs/MAGENTO_SCOPED_OPTION_LABEL_ADAPTER.md)
+and fail closed without it; stock option PUT is never used. The controlled-product
+picker reaches the complete eligible scope in bounded pages while retaining the
+100-product exact-action bound.
+
 Fresh installations still require explicit reviewed activation, publication and cutover. Migration installation alone never allocates public identities, confirms old delivery, enrolls existing products, publishes a binding or calls Magento. Follow the [cutover runbook](docs/FULL_PRODUCT_CUTOVER_RUNBOOK.md) only for installations that have not completed it; ordinary deployments follow [Operations](docs/OPERATIONS.md).
 
 ## Repository and verification

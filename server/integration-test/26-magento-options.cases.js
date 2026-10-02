@@ -36,7 +36,8 @@ function remote(db,{lost=false,failVerification=false}={}) {
       posts++;created=true;if(lost)throw new Error('lost response');data='5738';
     }else{
       assert.equal(init.method,'GET');
-      if(path.endsWith('/fixture_choice'))data=attribute;
+      if(path.endsWith('/store/storeViews'))data=[];
+      else if(path.endsWith('/fixture_choice'))data=attribute;
       else if(path.endsWith('/fixture_choice/options')){
         if(created&&failVerification){failVerification=false;throw new Error('GET unavailable');}
         data=[{value:'10',label:'Існуюче'},...(created?[{value:'5738',label:'Скриньки'}]:[])];
@@ -51,6 +52,19 @@ async function reviewed(f,r) {
   const command={...f.input,attestationId:a.id};const proof=await option.preview(f.config,command,opt);
   return {opt,command,proof,a};
 }
+
+test('H4 active EN store requires the authoritative Amber English catalog label, never caller text',async()=>{
+  const name='amber_option_en_required_test',f=await setup(name);
+  try {
+    const r=remote(f.db);
+    const opt={...f.options,fetchImpl:async(url,init)=>new URL(url).pathname.endsWith('/store/storeViews')
+      ? new Response(JSON.stringify([{id:9,code:'en',is_active:true}]),{headers:{'Content-Type':'application/json'}})
+      : r.fetch(url,init)};
+    await assert.rejects(option.inspect(f.config,f.input,opt),{code:'MAGENTO_OPTION_EN_LABEL_REQUIRED'});
+    await assert.rejects(option.inspect(f.config,{...f.input,englishLabel:'Invented',englishAuthoritative:true},opt));
+    assert.equal(r.posts,0);
+  }finally{await f.db.end();await dropTestDatabase(name);}
+});
 test('sealed option crash recovery: expired immutable attestation is replaced by fresh Administrator review with one concurrent POST',async()=>{
   const name='amber_option_reseal_test',f=await setup(name),second=new Pool({connectionString:f.db.options.connectionString});
   try{
@@ -126,10 +140,11 @@ test('H4 exact returned identity supports GET-only recovery; lost response canno
     }finally{await f.db.end();await dropTestDatabase(name);}
   }
 });
-test('H4 optional EN label is explicitly authoritative, scoped and GET verified; SKU values need publication',async()=>{
+test('H4 PostgreSQL EN label is authoritative, scoped and GET verified; SKU values need publication',async()=>{
   const name='amber_option_labels_test',f=await setup(name);
   try {
-    const r=remote(f.db),input={...f.input,englishLabel:'Amber boxes',englishAuthoritative:true};
+    const r=remote(f.db),input=f.input;
+    await f.db.query("UPDATE options SET label_en='Amber boxes'");
     const fetch=async(url,init)=>{
       const path=new URL(url).pathname;
       if(path.endsWith('/store/storeViews'))return new Response(JSON.stringify([{id:9,code:'en',is_active:true}]),{headers:{'Content-Type':'application/json'}});
@@ -138,7 +153,7 @@ test('H4 optional EN label is explicitly authoritative, scoped and GET verified;
       return r.fetch(url,init);
     };
     const opt={...f.options,fetchImpl:fetch};
-    await assert.rejects(option.inspect(f.config,{...input,englishAuthoritative:false},opt),{code:'MAGENTO_OPTION_EN_AUTHORITY_REQUIRED'});
+    await assert.rejects(option.inspect(f.config,{...input,englishLabel:'Caller text',englishAuthoritative:true},opt),{code:'MAGENTO_BINDING_INVALID'});
     await f.db.query("UPDATE questions SET include_in_sku=1,sku_index=0 WHERE category_code='XG'");
     await assert.rejects(option.inspect(f.config,input,opt),{code:'MAGENTO_OPTION_AMBER_SCHEMA_REQUIRED'});
     await f.db.query("UPDATE questions SET include_in_sku=0 WHERE category_code='XG'");
@@ -150,4 +165,24 @@ test('H4 optional EN label is explicitly authoritative, scoped and GET verified;
     const attested=(await f.db.query('SELECT target FROM magento_option_capability_attestations WHERE id=$1',[a.id])).rows[0].target;
     assert.equal(attested.englishLabel,'Amber boxes');assert.equal(attested.valueId,'8');
   } finally {await f.db.end();await dropTestDatabase(name);}
+});
+
+module.exports={setup,remote,reviewed};
+
+test('H4 exact CREATE verification rejects UA fallback in EN and preserves returned identity for GET-only recovery',async()=>{
+  const name='amber_option_en_verify_test',f=await setup(name);
+  try {
+    await f.db.query("UPDATE options SET label_en='Amber boxes'");
+    const r=remote(f.db);let wrong=true;
+    const fetch=async(url,init)=>{
+      const p=new URL(url).pathname;
+      if(p.endsWith('/store/storeViews'))return new Response(JSON.stringify([{id:9,code:'en',is_active:true}]),{headers:{'Content-Type':'application/json'}});
+      if(p.startsWith('/rest/en/'))return new Response(JSON.stringify([{value:'10',label:'Existing'},...(r.posts?[{value:'5738',label:wrong?'Скриньки':'Amber boxes'}]:[])]),{headers:{'Content-Type':'application/json'}});
+      return r.fetch(url,init);
+    };
+    const review=await reviewed(f,{fetch});
+    await assert.rejects(option.apply(f.config,{...review.command,previewToken:review.proof.previewToken},review.opt),{code:'MAGENTO_OPTION_VERIFICATION_FAILED'});
+    const row=(await f.db.query('SELECT * FROM magento_configuration_actions')).rows[0];assert.equal(row.state,'returned');assert.equal(row.remote_id,'5738');
+    wrong=false;assert.equal((await option.reconcile(f.config,{actionId:row.id},review.opt)).state,'verified');assert.equal(r.posts,1);
+  }finally{await f.db.end();await dropTestDatabase(name);}
 });

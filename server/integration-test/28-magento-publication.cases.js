@@ -217,3 +217,5 @@ test('H3b new route requires a representative CREATE; changed common-name eviden
     assert.equal((await f.db.query("SELECT count(*)::int n FROM schema_migrations WHERE name='055_magento_publication_handoff.sql'")).rows[0].n,1);
   }finally{await f.db.end();await dropTestDatabase(name);}
 });
+
+module.exports={setup};

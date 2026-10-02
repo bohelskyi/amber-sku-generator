@@ -53,6 +53,7 @@ for (const modulePath of [
   './26-magento-options.cases',
   './27-magento-successor.cases',
   './28-magento-publication.cases',
+  './29-option-labels.cases',
 ]) {
   require(modulePath);
 }

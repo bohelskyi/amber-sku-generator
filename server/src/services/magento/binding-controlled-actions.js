@@ -55,18 +55,23 @@ async function preview(config,input,options={}){
   command(input);const report=await editor.read(options,(client)=>inspect(client,config,input));
   return {...report,previewToken:c.hash({input,report})};
 }
-async function candidates(config,id,options={}){
+async function candidates(config,id,options={},query={}){
+  c.command(query,[],['after']);
+  if (query.after !== undefined && !['string','number'].includes(typeof query.after)) c.invalid();
+  const after = query.after === undefined ? 0 : Number(query.after);
+  if (!Number.isSafeInteger(after) || after < 0 || after > 2147483647 || (query.after !== undefined && !/^(0|[1-9][0-9]*)$/.test(String(query.after)))) c.invalid();
   c.identity(id);
   return editor.read(options,async(client)=>{
     const revision=await editor.selected(client,config,id),current=await repository.current(client,revision.installationKey);
     if(revision.state!=='published'||current?.id!==id)throw c.error(409,'MAGENTO_BINDING_CONFLICT','Current publication changed');
-    const rows=(await client.query(`SELECT id,count(*) OVER()::int AS total FROM products p WHERE status='active' AND corrected_to_product_id IS NULL
+    const rows=(await client.query(`SELECT id FROM products p WHERE id>$1 AND status='active' AND corrected_to_product_id IS NULL
       AND exclude_from_export=0 AND NOT EXISTS(SELECT 1 FROM magento_test_deletions d WHERE d.public_product_identity_id=p.public_product_identity_id)
-      ORDER BY id LIMIT 100`)).rows;
-    if(!rows.length)return {products:[],unexamined:0};
-    const report=await inspect(client,config,{bindingRevisionId:id,expectedRevision:revision.revision,kind:'name_rule',productIds:rows.map((r)=>r.id)});
+      ORDER BY id LIMIT 101`,[after])).rows;
+    const hasMore=rows.length>100,page=rows.slice(0,100);
+    if(!page.length)return {products:[],nextCursor:null};
+    const report=await inspect(client,config,{bindingRevisionId:id,expectedRevision:revision.revision,kind:'name_rule',productIds:page.map((r)=>r.id)});
     return {products:report.products.map((p)=>({productId:p.productId,article:p.article,before:p.before,after:p.after,changed:p.changed,
-      blockers:report.blockers.filter((b)=>b.productId===p.productId).map((b)=>b.code)})),unexamined:rows[0].total-rows.length};
+      blockers:report.blockers.filter((b)=>b.productId===p.productId).map((b)=>b.code)})),nextCursor:hasMore?page[page.length-1].id:null};
   });
 }
 async function apply(config,input,options={}){

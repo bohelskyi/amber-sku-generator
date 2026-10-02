@@ -120,6 +120,7 @@ function createMagentoClient(config, { fetchImpl = globalThis.fetch, storeCode =
     listProductAttributes: (page) => list('products/attributes', page),
     getProductAttribute: (code) => get(`products/attributes/${identifier(code)}`),
     getProductAttributeOptions: (code) => get(`products/attributes/${identifier(code)}/options`),
+    getScopedOptionLabels: (code,id) => get(`amber/attributes/${identifier(code)}/options/${positiveInteger(id)}/labels`),
     findProductBySku,
     // Diagnostic route only: Magento 2.4.6 can reject signed encoded-slash paths.
     getProductBySkuPathDiagnostic: (sku) => get(`products/${percentEncode(validatedSku(sku))}`),

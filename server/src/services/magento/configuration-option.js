@@ -38,12 +38,12 @@ async function assertAdministrator(client, actor) {
       AND r.status='active' AND r.role_key='administrator'`, [actor])).rowCount;
   if (!yes) throw c.error(403, 'MAGENTO_OPTION_ADMINISTRATOR_REQUIRED', 'Підтвердження можливості створення потребує Administrator.');
 }
-async function amberSource(db, input, expectedLabel = null, lock = false) {
+async function amberSource(db, input, expected = null, lock = false) {
   if (lock) await db.query('SELECT id FROM questions WHERE category_code=$1 AND key=$2 FOR SHARE',[input.amberGroup,input.questionKey]);
-  const value = (await db.query(`SELECT o.label,q.include_in_sku FROM options o JOIN questions q ON q.id=o.question_id
+  const value = (await db.query(`SELECT o.label,o.label_en,q.include_in_sku FROM options o JOIN questions q ON q.id=o.question_id
     JOIN categories cat ON cat.code=q.category_code WHERE q.category_code=$1 AND q.key=$2 AND o.value_id=$3
       AND o.archived=false${lock ? ' FOR SHARE OF o' : ''}`, [input.amberGroup,input.questionKey,input.valueId])).rows[0];
-  if (!value || (expectedLabel !== null && value.label !== expectedLabel)) fail('MAGENTO_OPTION_AMBER_SOURCE_MISSING');
+  if (!value || (expected !== null && (value.label !== expected.label || (value.label_en ?? null) !== (expected.englishLabel ?? null)))) fail('MAGENTO_OPTION_AMBER_SOURCE_MISSING');
   if (value.include_in_sku) {
     const published = await db.query(`SELECT 1 FROM sku_schema_versions v JOIN sku_schema_questions q ON q.schema_version_id=v.id
       JOIN sku_schema_options o ON o.schema_question_id=q.id WHERE v.category_code=$1 AND v.status='active'
@@ -53,7 +53,7 @@ async function amberSource(db, input, expectedLabel = null, lock = false) {
   return value;
 }
 async function target(config, input, options) {
-  c.command(input, TARGET_FIELDS, ['englishLabel','englishAuthoritative']);
+  c.command(input, TARGET_FIELDS, []);
   if (!c.code(input.attributeCode) || !c.questionKey(input.questionKey) || !c.semanticId(String(input.valueId))) c.invalid();
   const revision = await bindings.getRevision(c.identity(input.bindingRevisionId), options);
   if (revision.state !== 'draft' || revision.revision !== c.counter(input.expectedRevision)) fail('MAGENTO_BINDING_CONFLICT');
@@ -63,42 +63,46 @@ async function target(config, input, options) {
   const result = { bindingRevisionId: revision.id, expectedRevision: revision.revision, installationKey: revision.installationKey,
     attributeCode: input.attributeCode, amberGroup: input.amberGroup, questionKey: input.questionKey,
     valueId: String(input.valueId), label: label(value.label) };
-  if (input.englishLabel !== undefined) {
-    if (input.englishAuthoritative !== true) fail('MAGENTO_OPTION_EN_AUTHORITY_REQUIRED');
-    result.englishLabel = label(input.englishLabel);
-  } else if (input.englishAuthoritative !== undefined) c.invalid();
+  if (value.label_en != null) result.englishLabel = label(value.label_en);
   return result;
 }
-async function observe(config, code, english, options) {
+async function observe(config, code, options) {
   const fetchImpl = boundedGet(options.fetchImpl, { maxRequests: 6 });
   const client = createMagentoClient(config, { fetchImpl });
   const capability = characterize(await client.getProductAttribute(code));
   if (capability.attribute.attribute_code !== code) c.invalid();
   const before = normalizeOptions(await client.getProductAttributeOptions(code));
   const result = { ...capability, before };
-  if (english) {
-    const views = await client.getStoreViews();
-    const en = views.filter((v) => v.code === 'en' && v.is_active === true && Number.isSafeInteger(v.id) && v.id > 0);
-    if (en.length !== 1) fail('MAGENTO_OPTION_EN_SCOPE_UNRESOLVED');
+  const views = c.list(await client.getStoreViews(),1000);
+  const englishViews=views.filter(v=>v?.code==='en');
+  if (englishViews.some(v=>!Number.isSafeInteger(v.id)||v.id<=0||![true,false,0,1].includes(v.is_active))
+    || englishViews.length>1) fail('MAGENTO_OPTION_EN_SCOPE_UNRESOLVED');
+  const en = englishViews.filter(v=>v.is_active===true||v.is_active===1);
+  if (en.length === 1) {
     result.englishStoreId = en[0].id;
     result.englishBefore = normalizeOptions(await createMagentoClient(config, { fetchImpl, storeCode: 'en' }).getProductAttributeOptions(code));
   }
   return result;
 }
 async function inspect(config, input, options = {}) {
-  const t = await target(config, input, options); const observed = await observe(config, t.attributeCode, !!t.englishLabel, options);
+  const t = await target(config, input, options); const observed = await observe(config, t.attributeCode, options);
+  if (observed.englishStoreId && !t.englishLabel) fail('MAGENTO_OPTION_EN_LABEL_REQUIRED','Заповніть англійську назву варіанта в каталозі Amber перед створенням значення Magento.');
   const candidates = observed.before.filter((o) => o.label.normalize('NFC') === t.label.normalize('NFC'));
   return { target: t, ...observed, candidates, warning: 'REST не доводить відсутність swatch. Administrator має перевірити поточний тип вручну; підтвердження діє лише для цієї дії протягом 10 хвилин.' };
 }
 async function attest(config, input, options = {}) {
-  c.command(input, [...TARGET_FIELDS,'metadataFingerprint','confirmOrdinary','confirmHiddenLimit','evidence'], ['englishLabel','englishAuthoritative']);
+  c.command(input, [...TARGET_FIELDS,'metadataFingerprint','confirmOrdinary','confirmHiddenLimit','evidence'], []);
   if (input.confirmOrdinary !== true || input.confirmHiddenLimit !== true || typeof input.evidence !== 'string'
     || input.evidence.trim().length < 3 || input.evidence.length > 2000) c.invalid();
   const { metadataFingerprint, evidence } = input;
-  const command = Object.fromEntries([...TARGET_FIELDS,'englishLabel','englishAuthoritative'].filter((k) => Object.hasOwn(input,k)).map((k) => [k,input[k]]));
+  const command = Object.fromEntries(TARGET_FIELDS.filter((k) => Object.hasOwn(input,k)).map((k) => [k,input[k]]));
   const checked = await inspect(config, command, options);
   if (checked.metadataFingerprint !== metadataFingerprint) fail('MAGENTO_OPTION_ATTESTATION_STALE');
   if (checked.candidates.length) fail('MAGENTO_OPTION_ALREADY_EXISTS', 'Значення вже існує: підтвердьте зв’язок окремо, не створюйте дублікат.');
+  return recordAttestation(config,checked,evidence,options);
+}
+async function recordAttestation(config,checked,evidence,options) {
+  const metadataFingerprint=checked.metadataFingerprint;
   const context = createMutationContext(options.mutationContext);
   return runAccessAdminMutation({ databasePool: options.databasePool || pool, actorUserId: context.actorUserId,
     requiredPermission: 'export_templates.publish', createError: c.error, operation: async (client) => {
@@ -116,7 +120,7 @@ async function attest(config, input, options = {}) {
 async function checkedAttestation(client, config, preview, actor) {
   const row = (await client.query('SELECT *,expires_at>clock_timestamp() AS fresh FROM magento_option_capability_attestations WHERE id=$1', [c.identity(preview.attestationId)])).rows[0];
   await assertAdministrator(client, actor);
-  await amberSource(client,preview.target,preview.target.label,true);
+  await amberSource(client,preview.target,preview.target,true);
   if (!row || !row.fresh || Number(row.actor_user_id) !== actor || row.origin_hash !== c.originHash(config.baseUrl)
     || row.installation_key !== preview.target.installationKey || row.metadata_fingerprint !== preview.metadataFingerprint
     || row.attribute_id !== String(preview.attributeId) || row.attribute_code !== preview.target.attributeCode
@@ -124,7 +128,7 @@ async function checkedAttestation(client, config, preview, actor) {
   return row;
 }
 async function preview(config, input, options = {}) {
-  c.command(input, [...TARGET_FIELDS,'attestationId'], ['englishLabel','englishAuthoritative']);
+  c.command(input, [...TARGET_FIELDS,'attestationId'], []);
   const { attestationId, ...command } = input; const checked = await inspect(config, command, options);
   if (checked.candidates.length) fail('MAGENTO_OPTION_ALREADY_EXISTS');
   const result = { kind: 'option', bindingRevisionId: checked.target.bindingRevisionId, expectedRevision: checked.target.expectedRevision,
@@ -132,7 +136,7 @@ async function preview(config, input, options = {}) {
     metadataFingerprint: checked.metadataFingerprint, before: checked.before,
     resource: { attributeId: checked.attribute.attribute_id, attributeCode: checked.target.attributeCode, label: checked.target.label.normalize('NFC') },
     label: checked.target.label, body: { option: { label: checked.target.label, sort_order: 0, is_default: false } } };
-  if (checked.target.englishLabel) {
+  if (checked.englishStoreId) {
     result.englishStoreId = checked.englishStoreId; result.englishBefore = checked.englishBefore;
     result.body.option.store_labels = [{ store_id: 0, label: checked.target.label }, { store_id: checked.englishStoreId, label: checked.target.englishLabel }];
   }
@@ -150,19 +154,19 @@ async function reconcile(config, input, options = {}) {
   c.command(input, ['actionId']); const row = await actions.get(config, input.actionId, options);
   if (row.kind !== 'option') c.invalid(); if (row.state === 'verified') return actions.receipt(row);
   if (row.state !== 'returned') fail('MAGENTO_CONFIGURATION_RECONCILIATION_REQUIRED');
-  const t = row.intent.target; const observed = await observe(config,t.attributeCode,!!t.englishLabel,options);
+  const t = row.intent.target; const observed = await observe(config,t.attributeCode,options);
   if (observed.metadataFingerprint !== row.intent.metadataFingerprint) fail('MAGENTO_OPTION_METADATA_DRIFT');
   verifyOption(row.intent,row.remote_id,observed.before);
-  if (t.englishLabel) {
+  if (row.intent.englishStoreId) {
     if (observed.englishStoreId !== row.intent.englishStoreId) fail('MAGENTO_OPTION_EN_SCOPE_UNRESOLVED');
     verifyOption({ before: row.intent.englishBefore, label: t.englishLabel },row.remote_id,observed.englishBefore);
   }
   return actions.receipt(await actions.transition(row.id,'returned','verified',{ remoteId: row.remote_id,
     attributeId: row.intent.attributeId, attributeCode: t.attributeCode, label: t.label,
-    metadataFingerprint: observed.metadataFingerprint, optionsHash: c.hash(observed.before) }, options));
+    metadataFingerprint: observed.metadataFingerprint, optionsHash: c.hash(observed.before), ...(row.intent.englishStoreId ? { englishStoreId: observed.englishStoreId, englishLabel: t.englishLabel, englishOptionsHash: c.hash(observed.englishBefore) } : {}) }, options));
 }
 async function apply(config, input, options = {}) {
-  c.command(input,[...TARGET_FIELDS,'attestationId','previewToken'],['englishLabel','englishAuthoritative']);
+  c.command(input,[...TARGET_FIELDS,'attestationId','previewToken'],[]);
   const { previewToken, ...command } = input;
   const reviewed = await preview(config,command,options);
   if (reviewed.previewToken !== previewToken) fail('MAGENTO_CONFIGURATION_PREVIEW_STALE');
@@ -183,4 +187,4 @@ async function apply(config, input, options = {}) {
   } catch { throw c.error(409,'MAGENTO_CONFIGURATION_RECONCILIATION_REQUIRED','Amber надіслав зміну, але не підтвердив результат. Повторне надсилання недоступне.',{actionId:row.id}); }
   return reconcile(config,{actionId:row.id},options);
 }
-module.exports = { characterize, verifyOption, inspect, attest, preview, apply, reconcile, checkedAttestation };
+module.exports = { characterize, verifyOption, inspect, attest, preview, apply, reconcile, checkedAttestation, amberSource, label, observe, recordAttestation };
