@@ -430,10 +430,10 @@ async function publishSkuSchema(categoryCode, options = {}) {
   }
 }
 
-async function getPublicConfig() {
-  const config = await getAppConfig();
+async function getPublicConfig(queryable = pool) {
+  const config = await getAppConfig(queryable);
   for (const categoryCode of Object.keys(config.categories)) {
-    const active = await getActiveSchema(categoryCode);
+    const active = await getActiveSchema(categoryCode, queryable);
     if (!active) continue;
     const nonSkuQuestions = (config.questions[categoryCode] || []).filter(
       (question) => Number(question.include_in_sku) !== 1

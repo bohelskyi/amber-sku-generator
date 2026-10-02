@@ -93,6 +93,21 @@ async function discovery(config, options = {}) {
     consistency: 'sequential_gets', fingerprint: c.hash(schema) };
   assertEvidenceSafe(result, config); return result;
 }
+async function creationInputs(input, options = {}) {
+  c.command(input, ['categoryCode']);
+  if (typeof input.categoryCode !== 'string' || !input.categoryCode || input.categoryCode.length > 64) c.invalid();
+  return read(options, async (client) => {
+    const config = await require('../sku-schema.service').getPublicConfig(client);
+    const category = input.categoryCode;
+    if (!Object.hasOwn(config.categories, category)) {
+      throw c.error(404, 'MAGENTO_CREATION_CATEGORY_NOT_FOUND', 'Категорію не знайдено.');
+    }
+    const requirements = require('../product/new-product-readiness').requirements;
+    return { categories: { [category]: config.categories[category] },
+      questions: { [category]: config.questions[category] || [] },
+      productCreateRequirements: Object.hasOwn(requirements, category) ? { [category]: requirements[category] } : {} };
+  });
+}
 async function currentPreview(config, input, options = {}) {
   c.command(input, ['productId'], ['bindingRevisionId']);
   const revision = await read(options, (client) => selected(client, config, input.bindingRevisionId));
@@ -129,4 +144,4 @@ async function prospectivePreview(config, input, options = {}) {
   assertEvidenceSafe(report, config);
   return { ...previewView(report), hypothetical: true, limitations: ['Артикул AG-PREVIEW умовний. Товар, SKU та завдання синхронізації не створюються.'] };
 }
-module.exports = { overview, discovery, currentPreview, prospectivePreview, selected, compiledRevision, read };
+module.exports = { overview, discovery, creationInputs, currentPreview, prospectivePreview, selected, compiledRevision, read };

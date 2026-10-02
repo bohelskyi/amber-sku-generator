@@ -1,0 +1,16 @@
+.magento-workspace { max-width: 1440px; overflow-wrap: anywhere; }
+.magento-layout { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.magento-context { border-top: 4px solid var(--amber-500); min-width: 0; }
+.magento-category-grid { display: grid; gap: 12px; }
+.magento-category-card { border: 1px solid var(--border); border-radius: 12px; background: white; padding: 18px; min-width: 0; overflow-wrap: anywhere; }
+.magento-category-card h3 a { color: var(--navy-900); }
+.magento-details { font-size: 0.875rem; color: var(--text-muted); }
+.magento-details summary { cursor: pointer; padding: 8px 0; }
+.magento-details pre { max-width: 100%; overflow: auto; }
+.magento-workspace input, .magento-workspace select { max-width: 100%; min-width: 0; }
+.magento-workspace .btn { white-space: normal; overflow-wrap: anywhere; text-align: center; }
+.magento-workspace summary:focus-visible, .magento-workspace input:focus-visible, .magento-workspace select:focus-visible { outline: 2px solid var(--amber-600); outline-offset: 3px; }
+.magento-steps { display: flex; flex-wrap: wrap; gap: 8px; }
+.magento-steps button[aria-current="step"] { background: var(--navy-900); color: white; }
+@media (max-width: 900px) { .magento-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
+@media (max-width: 480px) { .magento-workspace .card { padding: 16px; } .magento-category-card { padding: 14px; } }

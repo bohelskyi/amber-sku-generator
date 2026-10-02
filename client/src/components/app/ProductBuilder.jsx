@@ -381,7 +381,6 @@ export function ProductBuilder({
             {isVerified && (
               <VerifiedPriceActions
                 effectiveTotalPriceUah={effectiveTotalPriceUah}
-                finalSku={finalSku}
                 hasManualPrice={hasManualPrice}
                 isManualPriceEditing={isManualPriceEditing}
                 manualPriceUah={manualPriceUah}
@@ -532,7 +531,6 @@ function PriceRow({ label, uah, usd, strong = false }) {
 
 function VerifiedPriceActions({
   effectiveTotalPriceUah,
-  finalSku,
   hasManualPrice,
   isManualPriceEditing,
   manualPriceUah,
@@ -545,9 +543,6 @@ function VerifiedPriceActions({
   return (
     <div className="border-t border-slate-200 pt-3">
       <div className="flex flex-wrap gap-1.5">
-        <button onClick={() => onCopyText(finalSku, 'SKU')} className="btn btn-outline btn-compact">
-          Копіювати SKU
-        </button>
         <button
           onClick={() => effectiveTotalPriceUah
             && onCopyText(`${formatDecimal(effectiveTotalPriceUah)} ₴`, 'Ціну')}

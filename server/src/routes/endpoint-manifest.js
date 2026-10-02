@@ -14,6 +14,8 @@ function endpoint(method, path, permission, response = 'json') {
 
 const ENDPOINT_MANIFEST = Object.freeze([
   endpoint('GET', '/admin/magento-integration', 'export_templates.view'),
+  endpoint('GET', '/admin/magento-integration/overview', 'export_templates.view'),
+  Object.freeze({ ...endpoint('GET', '/admin/magento-integration/creation-inputs', 'export_templates.manage'), additionalPermissions: Object.freeze(['exports.view']) }),
   endpoint('POST', '/admin/magento-integration/discovery', 'export_templates.view'),
   endpoint('GET', '/admin/magento-integration/bindings/:id', 'export_templates.view'),
   endpoint('GET', '/admin/magento-integration/bindings/:id/handoffs', 'export_templates.view'),

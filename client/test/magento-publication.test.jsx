@@ -4,20 +4,23 @@ import { MemoryRouter } from 'react-router-dom';
 import { AuthContext } from '../src/auth/auth-context.js';
 import { api } from '../src/lib/api.js';
 import MagentoPublicationActions from '../src/components/workspace/MagentoPublicationActions.jsx';
+import MagentoControlledActions from '../src/components/workspace/MagentoControlledActions.jsx';
 vi.mock('../src/lib/api.js', () => ({ api: { get: vi.fn(), post: vi.fn() } }));
 const permissions = ['export_templates.manage', 'export_templates.publish', 'exports.view', 'exports.create'];
 const revision = { id: 'draft', revision: '3', state: 'draft' };
 const proof = { previewToken: 'proof', totalProducts: 3, affected: [{ productId: 1, article: 'AG-000003', reason: 'unblocked' }],
   lostRoutes: [], lostProducts: [], preservedNames: [], checked: [], blockers: [] };
-const shell = (props = {}, grants = permissions) => render(<AuthContext.Provider value={{ permissions: grants }}><MemoryRouter><MagentoPublicationActions revision={revision} currentPublishedId="current" onPublished={vi.fn()} {...props} /></MemoryRouter></AuthContext.Provider>);
+const roles = [{key:'administrator'}];
+const shell = (props = {}, grants = permissions, assignedRoles = roles) => render(<AuthContext.Provider value={{ permissions: grants, roles: assignedRoles }}><MemoryRouter><MagentoPublicationActions revision={revision} currentPublishedId="current" onPublished={vi.fn()} {...props} /></MemoryRouter></AuthContext.Provider>);
+const controlledShell = (props = {}, grants = permissions, assignedRoles = roles) => render(<AuthContext.Provider value={{ permissions: grants, roles: assignedRoles }}><MemoryRouter><MagentoControlledActions revision={{...revision,id:'current',state:'published'}} currentPublishedId="current" kind="broader_resync" {...props} /></MemoryRouter></AuthContext.Provider>);
+function openDetails(label) {const details=screen.getByText(label).closest('details');details.open=true;fireEvent(details,new Event('toggle'));}
 afterEach(() => { cleanup(); vi.resetAllMocks(); vi.useRealTimers(); });
 it('controlled product picker can reach later pages and preserves the exact cross-page selection',async()=>{
   const product=(id)=>({productId:id,article:`AG-${id}`,before:{all:`Назва ${id}`},after:{all:`Нова ${id}`},changed:true,blockers:[]});
   api.get.mockImplementation((path,options)=>Promise.resolve({data:path.endsWith('/handoffs')?[]: options.params.after===0
     ? {products:[product(1)],nextCursor:100} : {products:[product(101)],nextCursor:null}}));
   api.post.mockResolvedValue({data:{previewToken:'selection-proof',products:[product(1),product(101)],blockers:[]}});
-  shell({revision:{...revision,id:'current',state:'published'}});
-  fireEvent.click(screen.getByText('Контрольовані дії Адміністратора'));
+  controlledShell();
   fireEvent.click(screen.getByRole('button',{name:'Перевірити товари для контрольованої дії'}));
   await screen.findByLabelText(/AG-1 ·/);fireEvent.click(screen.getByLabelText(/AG-1 ·/));
   fireEvent.click(screen.getByRole('button',{name:'Наступні товари'}));
@@ -37,7 +40,8 @@ it('complete affected and lost sets paginate locally without new HTTP snapshot p
   api.post.mockResolvedValueOnce({data:{...proof,totalProducts:3323,affected:products,lostProducts:products,lostRoutes:['XG:all']}});
   shell();fireEvent.click(screen.getByRole('button',{name:'Перевірити вплив публікації'}));
   await screen.findByText(/Перевірено поточних товарів: 3323/);
-  fireEvent.click(screen.getByText('Точний перелік товарів для доставки'));
+  expect(screen.queryByText('ARTICLE-1 · Готовність відновлено')).toBeNull();
+  openDetails('Точний перелік товарів для доставки');
   const {within}=await import('@testing-library/react');
   const pager=screen.getByRole('navigation',{name:'Товари для доставки'});
   fireEvent.click(within(pager).getByRole('button',{name:'Далі'}));
@@ -97,12 +101,11 @@ it('controlled resync and name-rule application require separate selection, reas
     { productId: 1, article: 'AG-000003', before: { all: 'Стара', en: 'Old' }, after: { all: 'Нова', en: 'New' }, changed: true, blockers: [] },
     { productId: 2, article: 'AG-000004', before: { all: 'Конфлікт' }, after: {}, changed: true, blockers: ['RECONCILIATION_REQUIRED'] }] } }));
   api.post.mockResolvedValueOnce({ data: { previewToken: 'controlled-proof', products: [{ productId: 1, article: 'AG-000003', before: { all: 'Стара', en: 'Old' }, after: { all: 'Нова', en: 'New' } }], blockers: [] } }).mockResolvedValue({ data: { handoffId: 'receipt' } });
-  shell({ revision: { ...revision, id: 'current', state: 'published' } });
-  fireEvent.click(screen.getByText('Контрольовані дії Адміністратора'));
+  controlledShell({kind:'name_rule'});
   fireEvent.click(screen.getByRole('button', { name: 'Перевірити товари для контрольованої дії' }));
   await screen.findByLabelText(/AG-000003/);
   expect(screen.getByLabelText(/AG-000004/).disabled).toBe(true);
-  fireEvent.change(screen.getByLabelText('Дія'), { target: { value: 'name_rule' } });
+  expect(screen.queryByRole('combobox',{name:'Дія'})).toBeNull();
   fireEvent.click(screen.getByLabelText(/AG-000003/));
   fireEvent.change(screen.getByLabelText('Пояснення контрольованої дії'), { target: { value: 'Свідоме застосування' } });
   expect(api.post).not.toHaveBeenCalled();
@@ -111,14 +114,15 @@ it('controlled resync and name-rule application require separate selection, reas
   fireEvent.click(screen.getByRole('button', { name: 'Підтвердити контрольовану дію' }));
   await vi.waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
   expect(api.post.mock.calls[1][1]).toMatchObject({ kind: 'name_rule', productIds: [1], previewToken: 'controlled-proof' });
+  await screen.findByRole('heading',{name:'Публікація та передача товарів'});
+  expect(api.get).toHaveBeenCalledWith('/admin/magento-integration/bindings/current/handoffs',expect.objectContaining({signal:expect.any(AbortSignal)}));
 });
 it('controlled article search keeps the after cursor, preserves selection, confirms exact articles and clears it',async()=>{
   const product=(id)=>({productId:id,article:`ARTICLE-${id}`,before:{all:'Назва',en:'Name'},after:{},changed:false,blockers:[]});
   api.get.mockImplementation((path,{params}={})=>Promise.resolve({data:path.endsWith('/handoffs')?[]:
     {products:params.search?[product(999)]:params.after?[product(101)]:[product(1)],nextCursor:!params.after&&!params.search?100:null}}));
   api.post.mockResolvedValue({data:{products:[product(1),product(101)],blockers:[],previewToken:'proof'}});
-  shell({revision:{...revision,id:'current',state:'published'}});
-  fireEvent.click(screen.getByText('Контрольовані дії Адміністратора'));
+  controlledShell();
   fireEvent.click(screen.getByRole('button',{name:'Перевірити товари для контрольованої дії'}));
   fireEvent.click(await screen.findByLabelText(/ARTICLE-1 /));
   fireEvent.click(screen.getByRole('button',{name:'Наступні товари'}));
@@ -137,4 +141,47 @@ it('controlled article search keeps the after cursor, preserves selection, confi
   expect(screen.getByText(/вибрано 2 \/ 100/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button',{name:'Очистити вибір'}));
   expect(screen.getByText(/вибрано 0 \/ 100/)).toBeTruthy();
+});
+it('delegated publication capabilities allow normal publication but never Administrator coverage loss or controlled actions',async()=>{
+  api.post.mockResolvedValueOnce({data:{...proof,lostRoutes:['SV:normal'],lostProducts:[]}});
+  shell({},permissions,[]);fireEvent.click(screen.getByRole('button',{name:'Перевірити вплив публікації'}));
+  await screen.findByText(/Покриття буде скорочено/);
+  expect(screen.queryByLabelText('Підтверджую точну втрату покриття')).toBeNull();
+  expect(screen.queryByRole('button',{name:'Опублікувати відповідності'})).toBeNull();
+  cleanup();controlledShell({},permissions,[]);
+  expect(screen.queryByRole('button',{name:'Перевірити товари для контрольованої дії'})).toBeNull();
+  expect(api.get).not.toHaveBeenCalled();
+  cleanup();api.post.mockResolvedValueOnce({data:proof});shell({},permissions,[]);
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити вплив публікації'}));
+  expect((await screen.findByRole('button',{name:'Опублікувати відповідності'})).disabled).toBe(false);
+});
+it('name-rule application needs exports.create and a current publication, independently from broad resync',()=>{
+  controlledShell({kind:'name_rule'},permissions.filter(permission=>permission!=='exports.create'));
+  expect(screen.queryByRole('button',{name:'Перевірити товари для контрольованої дії'})).toBeNull();
+  cleanup();controlledShell({},permissions.filter(permission=>permission!=='exports.create'));
+  expect(screen.getByRole('button',{name:'Перевірити товари для контрольованої дії'})).toBeTruthy();
+  cleanup();controlledShell({currentPublishedId:'newer'});
+  expect(screen.queryByRole('button',{name:'Перевірити товари для контрольованої дії'})).toBeNull();
+});
+it('a late controlled preview cannot appear in another action context',async()=>{
+  const product={productId:1,article:'LEGACY-ARTICLE',before:{all:'Назва'},after:{all:'Нова'},changed:true,blockers:[]};
+  let resolvePreview;api.get.mockResolvedValue({data:{products:[product],nextCursor:null}});
+  api.post.mockReturnValue(new Promise(resolve=>{resolvePreview=resolve;}));
+  const view=controlledShell();fireEvent.click(screen.getByRole('button',{name:'Перевірити товари для контрольованої дії'}));
+  fireEvent.click(await screen.findByLabelText(/LEGACY-ARTICLE/));
+  fireEvent.change(screen.getByLabelText('Пояснення контрольованої дії'),{target:{value:'Точний вибір'}});
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити вибрану дію'}));
+  view.rerender(<AuthContext.Provider value={{permissions,roles}}><MemoryRouter><MagentoControlledActions revision={{...revision,id:'current',state:'published'}} currentPublishedId="current" kind="name_rule"/></MemoryRouter></AuthContext.Provider>);
+  await act(async()=>resolvePreview({data:{previewToken:'obsolete',products:[product],blockers:[]}}));
+  expect(screen.queryByRole('button',{name:'Підтвердити контрольовану дію'})).toBeNull();
+  expect(screen.getByRole('heading',{name:'Застосувати правило назв'})).toBeTruthy();
+});
+it('a new coverage review resets the old acknowledgement',async()=>{
+  api.post.mockResolvedValue({data:{...proof,lostRoutes:['SV:normal'],lostProducts:[]}});shell();
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити вплив публікації'}));
+  fireEvent.click(await screen.findByLabelText('Підтверджую точну втрату покриття'));
+  fireEvent.change(screen.getByLabelText('Пояснення скорочення'),{target:{value:'Перша перевірка'}});
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити вплив публікації'}));
+  expect((await screen.findByLabelText('Підтверджую точну втрату покриття')).checked).toBe(false);
+  expect(screen.getByRole('button',{name:'Опублікувати відповідності'}).disabled).toBe(true);
 });

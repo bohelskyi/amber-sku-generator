@@ -36,6 +36,7 @@ function AppPage() {
     canArchiveProducts,
     canCreateProducts,
   } = permissionUi;
+  const savedArticle = sku.savedProduct?.publicSku;
   const openedSku = useRef(null);
   const handoffCleanup = useRef(null);
   const viewOnlyHandoff = useEffectEvent(() => {
@@ -64,8 +65,20 @@ function AppPage() {
       <div className="mx-auto max-w-7xl space-y-5 px-4 py-4 sm:px-6 sm:py-6">
         <PageHeader />
         <Toast message={sku.copyMessage} />
-        {sku.savedProduct && !deletedArticles.includes(sku.savedProduct.publicSku || sku.savedProduct.fullSku) &&
-          <Notice tone="success">Товар збережено. Артикул: <strong>{sku.savedProduct.publicSku || sku.savedProduct.fullSku}</strong>.</Notice>}
+        {sku.savedProduct && !deletedArticles.includes(savedArticle) && (
+          <Notice tone="success">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="font-semibold">Товар збережено.</p>
+                {savedArticle
+                  ? <p className="mt-1">Артикул: <strong className="break-all font-mono text-xl">{savedArticle}</strong></p>
+                  : <p className="mt-1">Артикул недоступний у відповіді сервера.</p>}
+              </div>
+              {savedArticle && <button type="button" className="btn btn-amber self-start sm:shrink-0"
+                onClick={() => sku.handleCopyText(savedArticle, 'Артикул')}>Копіювати артикул</button>}
+            </div>
+          </Notice>
+        )}
         {exportSku && auth.permissions.includes('products.view') && auth.permissions.includes('products.decode') && <section className="card p-4 space-y-2">
           <p>Відкрито з перевірки експорту · <strong>{exportSku}</strong></p>
           {exportHandoff?.sku === exportSku && <p>{exportHandoff.reason}</p>}

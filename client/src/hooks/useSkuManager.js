@@ -230,6 +230,7 @@ export function useSkuManager({
   };
 
   const resetProductFlow = (catCode) => {
+    if (catCode) setSavedProduct(null);
     setNameSubjects({ magento_name_subject_ua: '', magento_name_subject_en: '' });
     setSelectedCat(catCode);
     setAnswers({});

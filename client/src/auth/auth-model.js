@@ -89,6 +89,11 @@ export function getApplicationAuthStatus(applicationUser) {
   return AUTH_STATUS.ERROR;
 }
 
+export function isActualAdministrator(auth) {
+  return Array.isArray(auth?.roles)
+    && auth.roles.some((role) => role?.key === 'administrator');
+}
+
 export function getIdentityDisplayName(identity) {
   return identity?.name || identity?.preferred_username || 'Користувач';
 }

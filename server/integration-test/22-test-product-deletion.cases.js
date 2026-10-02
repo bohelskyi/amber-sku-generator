@@ -230,6 +230,14 @@ suite.test('test deletion ledger safety and recovery with fake Magento only', as
     await t.test('lost DELETE response is sticky across attempts; later exact absence safely finalizes', async () => {
       const s = await scenario(); const p = await s.preview(); s.state.loseWrite = true;
       const result = await s.apply(p); assert.equal(result.state,'dispatched'); assert.equal(result.reconciliationRequired,true);
+      const counting = await db.connect();
+      try {
+        await counting.query('BEGIN');
+        await counting.query("UPDATE magento_product_sync_requests SET state='needs_attention',reason_code='reconciliation_required' WHERE product_id=$1", [s.product.id]);
+        const overview = await require('../src/services/magento/integration-overview').operationalCounts(counting, originHash(config.baseUrl));
+        assert.equal(overview.count, 1, 'request and deletion overlap is one public product');
+        assert.deepEqual(overview.categories.get('ZZ').reasons.map((reason) => [reason.code, reason.count]), [['TEST_DELETION_PENDING', 1]]);
+      } finally { await counting.query('ROLLBACK'); counting.release(); }
       assert.equal((await require('../src/services/magento/sync-problems').summary(db)).problemCount,1);
       assert.equal((await require('../src/services/magento/sync-problems').problems(config,db))[0].problems[0].code,'TEST_DELETION_PENDING');
       assert.equal((await require('../src/services/magento/automatic-sync-status').readStatuses(db,[s.product.id])).get(s.product.id).state,'needs_attention');
