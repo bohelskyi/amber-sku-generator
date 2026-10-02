@@ -212,7 +212,7 @@ test('H3b new route requires a representative CREATE; changed common-name eviden
     const fresh=await publication.preview(f.config,request,options);await publication.publish(f.config,{...request,previewToken:fresh.previewToken},options);
     assert.equal((await f.db.query('SELECT count(*)::int n FROM products')).rows[0].n,3);
     assert.equal((await f.db.query('SELECT count(*)::int n FROM magento_sync_jobs')).rows[0].n,0);
-    const candidates=await controlled.candidates(f.config,draft.id,f.options);assert.equal(candidates.products.length,3);assert.equal(candidates.unexamined,0);
+    const candidates=await controlled.candidates(f.config,draft.id,f.options);assert.equal(candidates.products.length,3);assert.equal(candidates.nextCursor,null);
     await runNodeInDatabase(f.url,"require('./src/db/run-migrations').runMigrations().catch(e=>{console.error(e);process.exitCode=1;});");
     assert.equal((await f.db.query("SELECT count(*)::int n FROM schema_migrations WHERE name='055_magento_publication_handoff.sql'")).rows[0].n,1);
   }finally{await f.db.end();await dropTestDatabase(name);}
