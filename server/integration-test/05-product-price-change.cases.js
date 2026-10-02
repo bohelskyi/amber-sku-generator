@@ -48,6 +48,91 @@ async function createPriceChangeProduct({
   return result.rows[0];
 }
 
+test('stored legacy product opens without structural decoding and permits an in-place price change', async () => {
+  await ensureSession();
+  const product = await createPriceChangeProduct({
+    details: { calculatedPriceUah: 2350, autoPriceUah: 2400, manualPriceUah: 2500 },
+    priceUah: 2500,
+  });
+  try {
+    // This historical identifier cannot be decoded by the LN schema (or its prefix).
+    const opened = await request('/api/decode', { method: 'POST', body: { sku: product.full_sku } });
+    assert.equal(opened.response.status, 200, opened.text);
+    assert.equal(opened.data.existsInDb, true);
+    assert.equal(Number(opened.data.product.id), Number(product.id));
+    assert.equal(opened.data.internalSku, product.full_sku);
+    assert.equal(opened.data.publicSku, product.full_sku);
+    assert.equal(opened.data.category.code, 'LN');
+    assert.equal(opened.data.skuSchema.id, Number(schemas.LN));
+    assert.equal(opened.data.decodeSource, 'stored_history');
+    assert.equal(opened.data.decodedAnswers.find((answer) => answer.key === 'size').value_id, 3);
+    assert.equal(opened.data.pricing.weight, 10);
+    assert.equal(opened.data.pricing.calculatedPriceUah, 2350);
+    assert.equal(opened.data.pricing.automaticPriceUah, 2400);
+    assert.equal(opened.data.pricing.totalPriceUah, 2500);
+
+    const decision = { mode: 'manual_uah', manualPriceUah: 2600, marketingRoundingEnabled: false };
+    const pricePreview = await preview(opened.data.product.id, decision);
+    assert.equal(pricePreview.response.status, 200, pricePreview.text);
+    const changed = await apply(opened.data.product.id, decision, pricePreview.data.previewToken);
+    assert.equal(changed.response.status, 200, changed.text);
+    const after = (await pool.query('SELECT * FROM products WHERE id = $1', [product.id])).rows[0];
+    assert.equal(after.full_sku, product.full_sku);
+    assert.equal(Number(after.total_price_uah), 2600);
+    assert.deepEqual(after.details.answers, product.details.answers);
+    assert.equal(Number(after.sku_schema_version_id), Number(product.sku_schema_version_id));
+    assert.equal(Number(after.weight), 10);
+  } finally {
+    await removeProduct(product.id);
+  }
+});
+
+test('stored legacy reads retain target recount and new-product validation and unknown SKU errors', async () => {
+  await ensureSession();
+  const product = (await insertProductFixture(pool,
+    `INSERT INTO products
+       (full_sku, base_sku, sequence_number, category, weight, total_price,
+        total_price_uah, price_per_gram, uah_rate, details, sku_schema_version_id)
+     VALUES ('LN999020', 'LN999', 20, 'LN', 20.3, 50, 2000, 2.5, 40,
+       '{"answers":{"raw_type":1,"size":999,"shape":6,"is_calibrated":1},"isCalibrated":1}'::jsonb, $1)
+     RETURNING id`, [schemas.LN])).rows[0];
+  try {
+    const opened = await request('/api/decode', { method: 'POST', body: { sku: 'LN999020' } });
+    assert.equal(opened.response.status, 200, opened.text);
+    assert.equal(Number(opened.data.product.id), Number(product.id));
+    assert.equal(opened.data.decodedAnswers.find((answer) => answer.key === 'size').value_id, 999);
+
+    const unknown = await request('/api/decode', { method: 'POST', body: { sku: 'LN999021' } });
+    assert.equal(unknown.response.status, 422, unknown.text);
+    assert.equal(unknown.data.details.type, 'sku_config_mismatch');
+    assert.ok(unknown.data.details.issue);
+    const fallback = await request('/api/decode', { method: 'POST', body: { sku: 'LN136099' } });
+    assert.equal(fallback.response.status, 200, fallback.text);
+    assert.equal(fallback.data.existsInDb, false);
+    assert.equal(fallback.data.decodeSource, 'versioned_schema');
+
+    for (const size of [null, 999]) {
+      const invalid = await request('/api/recount/preview', { method: 'POST', body: {
+        sourceSku: 'LN999020', answers: { shape: 7, size }, reason: 'invalid target size',
+      } });
+      assert.equal(invalid.response.status, 422, invalid.text);
+      assert.match(invalid.data.error, /Розмір/);
+    }
+    const valid = await request('/api/recount/preview', { method: 'POST', body: {
+      sourceSku: 'LN999020', answers: { size: 3 }, reason: 'valid target size',
+    } });
+    assert.equal(valid.response.status, 200, valid.text);
+    const newProduct = await request('/api/preview', { method: 'POST', body: {
+      categoryCode: 'LN', answers: { raw_type: 1, size: 999, shape: 6, is_calibrated: 1 },
+      weight: 20.3, isCalibrated: 1,
+    } });
+    assert.equal(newProduct.response.status, 422, newProduct.text);
+    assert.match(newProduct.data.error, /Розмір/);
+  } finally {
+    await removeProduct(product.id);
+  }
+});
+
 test('automatic pricing clears a manual override while preserving product identity and re-exporting', async () => {
   await ensureSession();
   const product = await createPriceChangeProduct({
