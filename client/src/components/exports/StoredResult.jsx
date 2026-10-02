@@ -42,7 +42,11 @@ export function StoredResult({ id, stream = 'product', canCreate, onDenied }) {
         downloadBlob(new Blob([response.data], { type: 'text/csv;charset=utf-8;' }), snapshot.artifacts.find((a) => a.groupCode === group)?.fileName || snapshot.fileName, { documentRef: document, urlApi: window.URL });
       })} onConfirm={() => run(async () => {
         if (!canCreate || !current()) return;
-        await (price ? exportsApi.confirmPriceSnapshot(id) : exportsApi.confirmSnapshot(id, snapshot.accessEpoch)); if (current()) await read();
+        readTicket.current++;
+        await (price ? exportsApi.confirmPriceSnapshot(id) : exportsApi.confirmSnapshot(id, snapshot.accessEpoch));
+        if (!current()) return;
+        setSnapshot((value) => ({ ...value, status: 'confirmed' }));
+        await read();
       })} />}
   </section>;
 }

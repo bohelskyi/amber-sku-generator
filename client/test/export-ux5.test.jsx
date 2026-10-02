@@ -119,7 +119,10 @@ it('history shows only authoritative names and accessible session context, with 
   const item={id:'new',stream:'product',status:'generated',generatedAt:'2026-09-26T09:00:00Z',createdByUserId:4,createdByName:'Олена',sessionId:'private',sessionTitle:'Вересень',artifacts:[],productCount:1};
   exportsApi.getHistory.mockResolvedValue(response({items:[item,{...item,id:'old',createdByUserId:null,createdByName:null,sessionId:undefined,sessionTitle:undefined}],next:null}));
   render(<AuthContext.Provider value={{applicationUser:{id:4},permissions:['exports.view']}}><MemoryRouter><ExportHistoryPage/></MemoryRouter></AuthContext.Provider>);
-  await screen.findByText('Автор: Олена');expect(screen.getByText('Автор невідомий')).toBeTruthy();
+  await screen.findByRole('cell', { name: 'Олена', exact: true });expect(screen.getByText('Автор невідомий')).toBeTruthy();
   expect(screen.getByRole('link',{name:'Вересень'}).getAttribute('href')).toBe('/exports/sessions/private');
-  expect(screen.getAllByText('Створено: '+dateText(item.generatedAt))).toHaveLength(2); await waitFor(()=>expect(exportsApi.getHistory).toHaveBeenCalledTimes(1));
+  const dates = screen.getAllByText(dateText(item.generatedAt));
+  expect(dates).toHaveLength(2);
+  expect(dates.every((element) => element.tagName === 'TIME' && element.dateTime === item.generatedAt)).toBe(true);
+  await waitFor(()=>expect(exportsApi.getHistory).toHaveBeenCalledTimes(1));
 });

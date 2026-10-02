@@ -1,11 +1,12 @@
 import { useAuth } from '../auth/auth-context';
 import { useExportWorkflow } from '../hooks/product/useExportWorkflow';
 import { ExportTools } from '../components/app/ExportTools';
-import { Link, Route, Routes } from 'react-router-dom';
+import { Route, Routes } from 'react-router-dom';
 import { ExportWorkspaceShell } from '../components/workspace/ExportWorkspaceShell';
 import ExportSessionsPage from './ExportSessionsPage';
 import ExportHistoryPage from './ExportHistoryPage';
 import { PriceExportWorkspace } from '../components/exports/PriceExportWorkspace';
+import { ExportLanding } from '../components/exports/ExportLanding';
 
 export default function ExportsPage() {
   const { permissions } = useAuth();
@@ -14,13 +15,11 @@ export default function ExportsPage() {
   const tools = (surface) => <ExportTools {...workflow} durableSessions surface={surface}
     onPreviewExport={workflow.handlePreviewExport} onCreateSnapshot={workflow.handleCreateSnapshot}
     onDownloadMagentoArtifact={workflow.handleDownloadMagentoArtifact} onConfirmSnapshot={workflow.handleConfirmSnapshot}
-    canArchive={false} canViewExport canDecode={permissions.includes('products.decode') && permissions.includes('products.view')}
+    canArchive={false} canViewExport canDecode={permissions.includes('products.decode')}
     canActivateTemplate={permissions.includes('export_templates.activate')}
     canCreateExport={permissions.includes('exports.create')} />;
   return <ExportWorkspaceShell><Routes>
-    <Route index element={<><div className="export-review-heading"><h2 className="text-xl font-semibold">Огляд доставки й експорту</h2>
-      {workflow.exportStatus?.delivery?.legacyProductCsvEnabled === true && <Link className="underline" to="/exports/new/template">Експорт за опублікованим шаблоном</Link>}
-    </div>{tools('products')}</>} />
+    <Route index element={<ExportLanding workflow={workflow} productTools={tools('products')} />} />
     <Route path="prices" element={<PriceExportWorkspace workflow={workflow.priceWorkflow} canCreate={permissions.includes('exports.create')} />} />
     <Route path="history" element={<ExportHistoryPage />} />
     <Route path="history/:stream/:snapshotId" element={<ExportHistoryPage />} />

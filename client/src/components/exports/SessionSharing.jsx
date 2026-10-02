@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { WorkspaceDialog } from '../workspace/WorkspaceDialog';
 import { exportSessionsApi as api } from '../../api/export-sessions-api';
+import { Button } from '../ui';
 
 const nameOf = (user) => user.display_name || user.preferred_username || 'Ім’я не вказано';
 export function SessionSharing({ session, canCreate, busy, error, run, refresh, onLeave, onClose }) {
@@ -23,8 +24,8 @@ export function SessionSharing({ session, canCreate, busy, error, run, refresh, 
     {confirmation ? <><h3 className="font-semibold">{confirmation.action === 'leave' ? `Вийти з «${session.title}»?` : `Відкликати доступ: ${nameOf(confirmation.member)}?`}</h3>
       <p>{confirmation.action === 'leave' ? 'Ви втратите подальший доступ до цього приватного експорту. Сам експорт не буде видалено.'
         : 'Подальший доступ до експорту буде закрито. Уже завантажені файли неможливо відкликати.'}</p>
-      <div className="flex flex-wrap gap-3"><button className="btn btn-primary px-3" disabled={busy} onClick={confirm}>{confirmation.action === 'leave' ? 'Підтвердити вихід' : 'Підтвердити відкликання'}</button>
-        <button ref={cancel} className="btn btn-outline px-3" disabled={busy} onClick={back}>Скасувати</button></div>
+      <div className="flex flex-wrap gap-3"><Button ref={cancel} disabled={busy} onClick={back}>Скасувати</Button>
+        <Button variant={confirmation.action === 'revoke' ? 'danger' : 'primary'} busy={busy} onClick={confirm}>{confirmation.action === 'leave' ? 'Підтвердити вихід' : 'Підтвердити відкликання'}</Button></div>
     </> : <><div><h3 className="text-lg font-semibold">Учасники</h3><p>{session.title}</p></div>
       {notice && <p role="status">{notice}</p>}
       <ul className="export-participants"><li><div><strong>{session.ownerName || 'Ім’я не вказано'}</strong><p>Власник</p></div></li>

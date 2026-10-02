@@ -2,10 +2,11 @@ import { Link } from 'react-router-dom';
 import { dateText } from '../../lib/export-review-presentation';
 import { participantCount, rangeText, sessionDisplayState, sessionRecipe } from '../../lib/export-session-presentation';
 import './export-workspaces.css';
+import { StatusBadge, TechnicalDisclosure } from '../ui';
 
-export function ExportSessionList({ items, scope, onOpen }) {
+export function ExportSessionList({ items, scope, onOpen, returnTo, returnListState }) {
   return <ul className="export-workspace-list">{items.map((session) => <li key={session.id} className="export-workspace-row">
-    <div className="export-workspace-identity"><h3>{session.title}</h3><span className="export-workspace-status">{sessionDisplayState(session)}</span>
+    <div className="export-workspace-identity"><h3>{session.title}</h3><StatusBadge>{sessionDisplayState(session)}</StatusBadge>
       <p>Власник: {session.ownerName || 'Ім’я не вказано'} · Учасників: {participantCount(session)}</p>
       <p>{sessionRecipe(session)}</p>
     </div>
@@ -18,9 +19,9 @@ export function ExportSessionList({ items, scope, onOpen }) {
       {session.lastRecordedActivityAt && <p>Остання зафіксована дія: {dateText(session.lastRecordedActivityAt)}</p>}
     </div>
     <div className="export-workspace-open"><Link className="btn btn-outline px-3" to={'/exports/sessions/' + encodeURIComponent(session.id)}
-      state={{ returnTo: scope === 'shared' ? '/exports/shared' : '/exports/sessions' }} onClick={(event) => onOpen(event, session.id)}
+      state={{ returnTo: returnTo || (scope === 'shared' ? '/exports/shared' : '/exports/sessions'), returnListState }} onClick={(event) => onOpen(event, session.id)}
       aria-label={`Відкрити / продовжити ${session.title}`}>Відкрити</Link>
-      <details><summary>Технічні подробиці</summary><p>{session.id}</p><p>Ревізія: {session.configurationRevision}</p></details>
+      <TechnicalDisclosure><p>{session.id}</p><p>Редакція налаштувань: {session.configurationRevision}</p></TechnicalDisclosure>
     </div>
   </li>)}</ul>;
 }

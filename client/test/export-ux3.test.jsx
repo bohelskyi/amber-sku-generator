@@ -51,7 +51,7 @@ it('ordinary preview renders exact file headers/Main EN; filters, page and width
   fireEvent.change(screen.getByLabelText('Готовність'), { target: { value: 'attention' } }); expect(screen.getByText(/зараз немає товарів, що потребують уваги/)).toBeTruthy();
   click('Ширина колонок'); fireEvent.change(screen.getByLabelText('Ширина, px'), { target: { value: 420 } }); click('Готово');
   expect(exportsApi.preview).toHaveBeenCalledTimes(1);
-  click('Створити файли Magento'); await screen.findByText('ЗБЕРЕЖЕНІ ФАЙЛИ');
+  click('Створити файли Magento'); await screen.findByText('Збережені файли');
   expect(exportsApi.createSnapshot.mock.calls[0][0]).toEqual({ mode: 'new', fromSku: 'BR1', toSku: 'BR1', previewExpectation: 'original' });
   expect(screen.queryByText('ПОПЕРЕДНІЙ ПЕРЕГЛЯД')).toBeNull(); expect(screen.queryByRole('button', { name: 'Оновити перевірку' })).toBeNull();
   expect(screen.queryByLabelText('Початковий SKU для повторного експорту')).toBeNull();
@@ -89,13 +89,13 @@ it('successful product mutation marks review stale and requires explicit recheck
   act(notifyExportReviewChanged); expect(screen.getByText(/ЗАСТАРІЛО/)).toBeTruthy(); click('Створити файли Magento'); expect(exportsApi.createSnapshot).not.toHaveBeenCalled();
   click('Повторити перевірку'); await waitFor(() => expect(screen.queryByText(/ЗАСТАРІЛО/)).toBeNull());
   exportsApi.getSnapshot.mockRejectedValue(new Error('metadata failed')); click('Створити файли Magento');
-  await screen.findByText('Файли створено, але таблицю не вдалося завантажити.'); expect(screen.getByText('ЗБЕРЕЖЕНІ ФАЙЛИ')).toBeTruthy();
+  await screen.findByText('Файли створено, але таблицю не вдалося завантажити.'); expect(screen.getByText('Збережені файли')).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Створити файли Magento' })).toBeNull();
 });
 
 it('price review, create, download and confirm are separate, stored values supersede queue and no template/range appears', async () => {
   render(<Harness prices />); click('Оновити / переглянути поточну чергу'); await screen.findByText('123');
-  expect(screen.getByText(/Під час створення файлу сервер повторно/)).toBeTruthy(); click('Створити файл'); await screen.findByText('456');
+  expect(screen.getByText(/Під час створення файлу чергу буде перевірено ще раз/)).toBeTruthy(); click('Створити файл'); await screen.findByText('456');
   expect(exportsApi.downloadPriceSnapshot).not.toHaveBeenCalled(); expect(exportsApi.confirmPriceSnapshot).not.toHaveBeenCalled();
   expect(screen.getByText(/Після попереднього перегляду дані змінилися/)).toBeTruthy(); expect(screen.queryByText('123')).toBeNull();
   click('Завантажити CSV'); await waitFor(() => expect(downloadBlob).toHaveBeenCalled()); expect(exportsApi.confirmPriceSnapshot).not.toHaveBeenCalled();
@@ -143,9 +143,9 @@ it.each(['product', 'price'])('shared history reopens generated %s snapshots aft
   exportsApi.getHistory.mockResolvedValue(response({ items: [{ ...item, productCount: 1, csvRowCount: 2, createdByUserId: null }], next: null }));
   const auth = { permissions: ['exports.view'], principalLifetime: { valid: true } };
   const tree = () => <AuthContext.Provider value={auth}><RouterProvider router={createMemoryRouter([{ path: '/exports/*', element: <Routes><Route path="history" element={<ExportHistoryPage />} /><Route path="history/:stream/:snapshotId" element={<ExportHistoryPage />} /></Routes> }], { initialEntries: ['/exports/history'] })} /></AuthContext.Provider>;
-  const first = render(tree()); await screen.findByRole('link', { name: /Відкрити/ }); fireEvent.click(screen.getByRole('link', { name: /Відкрити/ })); await screen.findByText('ЗБЕРЕЖЕНІ ФАЙЛИ');
+  const first = render(tree()); await screen.findByRole('link', { name: /Відкрити/ }); fireEvent.click(screen.getByRole('link', { name: /Відкрити/ })); await screen.findByText('Збережені файли');
   expect(screen.queryByRole('button', { name: /Завершити експорт|Підтвердити експорт цін/ })).toBeNull(); first.unmount();
-  render(tree()); await screen.findByRole('link', { name: /Відкрити/ }); fireEvent.click(screen.getByRole('link', { name: /Відкрити/ })); await screen.findByText('ЗБЕРЕЖЕНІ ФАЙЛИ');
+  render(tree()); await screen.findByRole('link', { name: /Відкрити/ }); fireEvent.click(screen.getByRole('link', { name: /Відкрити/ })); await screen.findByText('Збережені файли');
   expect(exportsApi.createSnapshot).not.toHaveBeenCalled(); expect(exportsApi.createPriceSnapshot).not.toHaveBeenCalled(); expect(exportsApi.confirmPriceSnapshot).not.toHaveBeenCalled(); expect(exportsApi.confirmSnapshot).not.toHaveBeenCalled();
   expect(exportsApi.getHistory.mock.calls[0][0]).toEqual({ stream: 'all', scope: 'accessible', status: 'all', limit: 20 });
 });

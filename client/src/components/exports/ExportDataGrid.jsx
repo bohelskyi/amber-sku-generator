@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { parseReviewFile } from '../../lib/export-review-presentation';
 import { WorkspaceDialog } from '../workspace/WorkspaceDialog';
+import { CopyAction, TechnicalDisclosure } from '../ui';
 import './export-data-grid.css';
 
 const defaultWidth = (code) => /name|meta_|categories|description/.test(code) ? 320 : /sku|code|price|qty/.test(code) ? 140 : 200;
@@ -121,10 +122,10 @@ export function ExportDataGrid({ files = [], identity, stored = false, loadFile,
         {onEditName && issues.some((issue) => ['manual_name_required', 'manual_name_review_required'].includes(issue.code)) && <button className="btn btn-primary px-3" onClick={() => { setDetail(null); onEditName({ productId: detailRow.productId, sku: detailRow.sku,
           ...(issues.some((issue) => issue.code === 'manual_name_review_required') ? { reviewRequired: true } : {}) }); }}>{issues.some((issue) => issue.code === 'manual_name_review_required') ? 'Перевірити назви' : 'Заповнити назву'}</button>}
         {canDecode && <Link className="btn btn-outline px-3" to={`/?exportSku=${encodeURIComponent(detailRow.sku)}`} onClick={() => onHandoff?.({ sku: detailRow.sku, reason: issues.map(issueLabel).join('; ') })}>Відкрити товар</Link>}
-        <button className="underline" onClick={async () => { try { await navigator.clipboard.writeText(detailRow.sku); setNotice('SKU скопійовано'); } catch { setNotice('Скопіюйте SKU з повного значення.'); } }}>Копіювати SKU</button>
+        <CopyAction value={detailRow.sku} label="Копіювати SKU" buttonLabel="Копіювати SKU" compact />
       </div>}
       {detailCell && <div role="region" aria-label="Повне значення"><p>{({ final: 'Значення CSV', blank: 'Навмисна порожня клітинка', provisional: 'Попереднє діагностичне значення', 'not-evaluated': 'Значення ще не обчислено' })[detailCell.state]}</p>{detailCell.value != null && <pre className="export-exact-value">{detailCell.value}</pre>}</div>}
-      {issues.map((issue, index) => <details key={index}><summary>Технічні подробиці</summary><p>{issue.message}</p><pre className="export-exact-value">{JSON.stringify({ code: issue.code, field: issue.field, target: issue.target }, null, 2)}</pre></details>)}
+      {issues.map((issue, index) => <TechnicalDisclosure key={index} summary="Технічні подробиці"><p>{issue.message}</p><pre className="export-exact-value">{JSON.stringify({ code: issue.code, field: issue.field, target: issue.target }, null, 2)}</pre></TechnicalDisclosure>)}
       <button onClick={() => setDetail(null)}>Закрити значення</button>
     </WorkspaceDialog>}
   </section>;

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { exportsApi } from '../../api/exports-api';
 import { getApiError } from '../../lib/http-error';
+import { TechnicalDisclosure } from '../ui';
 
 const labels = { update: 'Оновлення товарів', replacement: 'Погоджені заміни', hold: 'Очікують звірки' };
 const reasons = { prior_exposure: 'Потрібна звірка попередніх файлів і SKU', historical_ambiguity: 'Історію експорту не з’ясовано',
@@ -24,7 +25,8 @@ export function FullProductQueues({ lifecycle, onPreview, disabled }) {
     {error && <p role="alert">{error}</p>}
     {page?.items.length === 0 && <p className="text-sm text-slate-600">У цій черзі немає товарів.</p>}
     <ul className="divide-y">{page?.items.map((p) => <li key={p.id} className="py-2 flex flex-wrap gap-3 justify-between text-sm">
-      <span>{p.public_sku || p.full_sku}{p.public_sku && p.public_sku !== p.full_sku ? ` · внутрішній ${p.full_sku}` : ''}{p.magento_name_review_required ? ' · Потрібна перевірка назв' : ''}</span>
+      <div><span>{p.public_sku || 'Артикул недоступний'}{p.magento_name_review_required ? ' · Потрібна перевірка назв' : ''}</span>
+        <TechnicalDisclosure><p>Внутрішній SKU: {p.full_sku}</p></TechnicalDisclosure></div>
       {queue === 'hold' ? <span>{reasons[p.hold_reason] || 'Потрібне рішення щодо виключення'}</span>
         : <button className="btn btn-outline px-3" disabled={disabled} onClick={() => onPreview(queue === 'replacement'
           ? { mode:'replacement', productId:p.id, deliveryVersion:p.delivery_version }

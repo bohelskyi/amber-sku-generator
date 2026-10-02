@@ -274,6 +274,14 @@ profile/instruction blocks. Recovery warnings remain visible for actual conflict
 expired preparation and uncertain/interrupted execution. Preparation replacement
 and original-generation retry stay explicit and retain their existing identities.
 
+Own, shared and invitation lists replace their visible 20-item page instead of
+appending every visited page. The existing `after` cursor remains in the URL;
+opening a session and returning preserves that list page and its previous-page
+context. These are presentation changes to the existing authorized list API, with
+no fabricated total, new membership state or wider visibility. Historical snapshot
+IDs are available through a lazy technical disclosure. Stored-result confirmations
+use the shared reviewed-action dialog with cancellation as its initial focus.
+
 Returning from a product handoff re-reads the session and its preview; only a
 confirmed successful product mutation sets the automatic-correction notice.
 Manual-name success in the workspace also requests a new preview. Session display

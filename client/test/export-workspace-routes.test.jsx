@@ -175,9 +175,9 @@ it('keeps the original uncertain operation through product → exports → produ
   expect(exports.createSnapshot).toHaveBeenCalledTimes(1); expect(exports.preview).toHaveBeenCalledTimes(1);
   await navigate(router, '/exports'); await screen.findByRole('button', { name: 'Повторити початкове створення' });
   expect(exports.createSnapshot).toHaveBeenCalledTimes(1); expect(exports.preview).toHaveBeenCalledTimes(1);
-  button('Повторити початкове створення'); await screen.findByText('ЗБЕРЕЖЕНІ ФАЙЛИ');
+  button('Повторити початкове створення'); await screen.findByText('Збережені файли');
   expect(exports.createSnapshot.mock.calls[1]).toEqual(original);
-  expect(exports.getStatus).toHaveBeenCalledTimes(1);
+  expect(exports.getStatus).toHaveBeenCalledTimes(2);
   expect(localStorage.length).toBe(0); expect(sessionStorage.length).toBe(0);
 });
 
@@ -341,7 +341,7 @@ it('view-only session result can be reopened, but confirmation remains disabled'
   sessions.get.mockResolvedValue(response({ ...session, snapshotId: snapshot.id }));
   mount('/exports/sessions/saved-a', ['exports.view']);
 
-  await screen.findByText('ЗБЕРЕЖЕНІ ФАЙЛИ');
+  await screen.findByText('Збережені файли');
   expect(screen.queryByRole('button', { name: 'Завершити експорт' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Створити свій експорт' })).toBeNull(); noMutations();
 });
@@ -369,10 +369,10 @@ it('same-user refresh keeps the original pending request across subroutes; permi
   await act(async () => observedAuth.refresh());
   await navigate(router, '/exports'); await screen.findByRole('button', { name: 'Повторити початкове створення' });
   expect(exports.createSnapshot).toHaveBeenCalledTimes(1);
-  button('Повторити початкове створення'); await screen.findByText('ЗБЕРЕЖЕНІ ФАЙЛИ');
+  button('Повторити початкове створення'); await screen.findByText('Збережені файли');
   expect(exports.createSnapshot.mock.calls[1]).toEqual(exports.createSnapshot.mock.calls[0]);
   client.get.mockResolvedValue(response(authSession(1, ['exports.view']))); await act(async () => observedAuth.refresh());
-  expect(screen.queryByText('ЗБЕРЕЖЕНІ ФАЙЛИ')).toBeNull(); noTemplateReads();
+  expect(screen.queryByText('Збережені файли')).toBeNull(); noTemplateReads();
 });
 function noTemplateReads() { for (const mock of Object.values(templates)) expect(mock).not.toHaveBeenCalled(); }
 it.each([{ ids: [2] }, { ids: [2, 1] }])('principal transition $ids fences a late operation across the new routes', async ({ ids }) => {
@@ -383,6 +383,6 @@ it.each([{ ids: [2] }, { ids: [2, 1] }])('principal transition $ids fences a lat
   await navigate(router, '/');
   for (const id of ids) { client.get.mockResolvedValue(response(authSession(id))); await act(async () => observedAuth.refresh()); }
   await navigate(router, '/exports'); await act(async () => late.resolve(response(snapshot)));
-  expect(screen.queryByText('ЗБЕРЕЖЕНІ ФАЙЛИ')).toBeNull(); expect(screen.queryByRole('button', { name: 'Повторити початкове створення' })).toBeNull();
+  expect(screen.queryByText('Збережені файли')).toBeNull(); expect(screen.queryByRole('button', { name: 'Повторити початкове створення' })).toBeNull();
   expect(exports.createSnapshot).toHaveBeenCalledTimes(1); expect(exports.getSnapshot).not.toHaveBeenCalled(); noTemplateReads();
 });

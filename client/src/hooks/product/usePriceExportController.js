@@ -70,8 +70,11 @@ export function usePriceExportController({ current, canCreate, onConfirmed }) {
     if (!canCreate || !snapshot || snapshot.status === 'confirmed') return;
     await exportsApi.confirmPriceSnapshot(snapshot.id); if (!current()) return;
     setSnapshot((s) => ({ ...s, status: 'confirmed' }));
-    const metadata = await exportsApi.getPriceSnapshot(snapshot.id); if (!current()) return;
-    setSnapshot((s) => ({ ...metadata.data, artifacts: s.artifacts })); await onConfirmed();
+    try {
+      const metadata = await exportsApi.getPriceSnapshot(snapshot.id); if (!current()) return;
+      setSnapshot((s) => ({ ...metadata.data, artifacts: s.artifacts }));
+    } catch { if (current()) setError('Експорт цін підтверджено, але відомості про результат не оновлено.'); }
+    await onConfirmed();
   });
   const reset = () => { if (working.current || operation.current || !current()) return; storedRead.current = null; capturedReview.current = null; setSnapshot(null); setReview(null); setChanged(false); setCompared(false); setError(''); };
   return { review, snapshot, error, busy, pending, changed, compared, check, create, download, confirm, reset, readArtifact };

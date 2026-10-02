@@ -12,7 +12,7 @@ export function ExportWorkspaceShell({ children }) {
   const { pathname } = useLocation();
   const sessions = ['/exports/sessions', '/exports/shared', '/exports/invitations', '/exports/new/template'].some((path) => pathname.startsWith(path));
   return <main className="app-page"><div className="local-workspace">
-    <WorkspaceHeader title="Експорт" />
+    <WorkspaceHeader title="Експорт" description="Робочі експорти, файли цін і збережена історія." />
     <WorkspaceLocalNav label="Розділи експорту" items={destinations} />
     {sessions && <WorkspaceLocalNav label="Робочі експорти" items={[
       { to: '/exports/sessions', label: 'Мої експорти', end: false },

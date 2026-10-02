@@ -12,7 +12,7 @@ import { useDirtyNavigation } from '../hooks/useDirtyNavigation';
 import { getApiError } from '../lib/http-error';
 import { ExportWorkspaceShell } from '../components/workspace/ExportWorkspaceShell';
 import { WorkspaceToolbar } from '../components/workspace/WorkspacePrimitives';
-import { Notice } from '../components/app/UiPrimitives';
+import { EmptyState, LoadingState, Notice, Pagination, TechnicalDisclosure } from '../components/ui';
 import { ExportSessionList, ExportInvitations } from '../components/exports/ExportSessionList';
 import { SessionSharing } from '../components/exports/SessionSharing';
 import { participantCount, rangeText, sessionDisplayState, sessionRecipe } from '../lib/export-session-presentation';
@@ -238,6 +238,8 @@ function SessionDetail({ id, canCreate, canCreateFiles, canActivate, register, o
 function SessionWorkspace({ canCreate, canCreateFiles, canActivate, scope = 'owned', create = false }) {
   const current = useLifetime(); const { sessionId } = useParams();
   const location = useLocation(); const navigate = useNavigate();
+  const listAfter = new URLSearchParams(location.search).get('after') || '';
+  const listBack = Array.isArray(location.state?.exportListBack) ? location.state.exportListBack : [];
   const [items, setItems] = useState([]); const [next, setNext] = useState(null);
   const [listBusy, setListBusy] = useState(false); const [responding, setResponding] = useState(false); const responseBusy = useRef(false);
   const [selected, setSelected] = useState(null); const [openedLifetime, setOpenedLifetime] = useState(0);
@@ -248,18 +250,18 @@ function SessionWorkspace({ canCreate, canCreateFiles, canActivate, scope = 'own
   const register = useCallback((state) => setForm(state), []);
   const navigation = useDirtyNavigation(form);
   const listing = !sessionId && !create;
-  const list = useCallback(async (after = '') => {
+  const list = useCallback(async (after = listAfter) => {
     if (!current() || listPending.current === listTicket.current) return;
     const ticket = ++listTicket.current; listPending.current = ticket; setListBusy(true); setError('');
     try {
       const { data } = await api.list(scope, after);
       if (!current() || ticket !== listTicket.current) return;
-      const entries = after ? [...(cache.current[scope]?.items || []), ...data.items] : data.items;
-      cache.current[scope] = { ...cache.current[scope], items: entries, next: data.next };
+      const entries = data.items;
+      cache.current[scope] = { ...cache.current[scope], after, items: entries, next: data.next };
       setItems(entries); setNext(data.next);
     } catch (e) { if (current() && ticket === listTicket.current) { setError(getApiError(e)); setItems([]); setNext(null); delete cache.current[scope]; } }
     finally { if (listPending.current === ticket) listPending.current = null; if (current() && ticket === listTicket.current) setListBusy(false); }
-  }, [scope, current]);
+  }, [scope, current, listAfter]);
   useEffect(() => {
     if (!listing) return undefined;
     const ticketRef = listTicket;
@@ -274,7 +276,8 @@ function SessionWorkspace({ canCreate, canCreateFiles, canActivate, scope = 'own
     // This component is inside AuthGate and keyed by the resolved principal.
     // The URL supplies only an ID; SessionDetail performs an authorized GET.
     setSelected(sessionId || null);
-    const saved = cache.current[scope]; setItems(saved?.items || []); setNext(saved?.next || null);
+    const saved = cache.current[scope]?.after === listAfter ? cache.current[scope] : null;
+    setItems(saved?.items || []); setNext(saved?.next || null);
     if (listing && saved?.scrollY != null) window.requestAnimationFrame(() => window.scrollTo(0, saved.scrollY));
   });
   useEffect(() => {
@@ -302,33 +305,44 @@ function SessionWorkspace({ canCreate, canCreateFiles, canActivate, scope = 'own
     finally { responseBusy.current = false; if (current()) setResponding(false); }
   });
   const titles = { owned: 'Мої експорти', shared: 'Спільні зі мною', invitations: 'Запрошення' };
-  const returnTo = location.state?.returnTo === '/exports/shared' ? '/exports/shared' : '/exports/sessions';
+  const requestedReturn = location.state?.returnTo;
+  const returnTo = typeof requestedReturn === 'string' && /^\/exports\/(sessions|shared|invitations)(?:\?[^#]*)?$/.test(requestedReturn)
+    ? requestedReturn : '/exports/sessions';
+  const changePage = (after, back) => {
+    const params = new URLSearchParams(location.search);
+    if (after) params.set('after', after); else params.delete('after');
+    navigate({ pathname: location.pathname, search: params.toString() }, { state: { ...location.state, exportListBack: back } });
+  };
   return <div className="space-y-5">
     {navigation.prompt}
-    {error && <Notice>{error}</Notice>}{notice && <Notice tone="warning">{notice}</Notice>}
+    {error && <Notice tone="error">{error}</Notice>}{notice && <Notice tone="warning">{notice}</Notice>}
     <WorkspaceToolbar label="Дії експорту">
-      {(sessionId || create) && <Link className="underline" to={returnTo}>{returnTo === '/exports/shared' ? '← До спільних експортів' : '← До моїх експортів'}</Link>}
+      {(sessionId || create) && <Link className="underline" to={returnTo} state={location.state?.returnListState}>{returnTo.startsWith('/exports/shared') ? '← До спільних експортів' : returnTo.startsWith('/exports/invitations') ? '← До запрошень' : '← До моїх експортів'}</Link>}
       {canCreateFiles && <button className="btn btn-outline px-3" onClick={newOwn}>Створити свій експорт</button>}
       {listing && <button className="btn btn-outline px-3" disabled={listBusy} onClick={() => { void list(); }}>Оновити список</button>}
     </WorkspaceToolbar>
     {listing && <section className="space-y-3" aria-label={titles[scope]}>
       <h2 className="text-xl font-semibold">{titles[scope]}</h2>
-      {listBusy && <p role="status">Завантаження списку…</p>}
-      {!listBusy && !items.length && <p>{scope === 'invitations' ? 'Нових запрошень немає.' : scope === 'shared' ? 'Тут з’являться експорти, до яких ви приєднаєтеся.' : 'У вас ще немає збережених експортів. Створіть свій експорт, щоб повертатися до його перевірки та файлів.'}</p>}
+      {listBusy && <LoadingState compact label="Завантаження списку…" />}
+      {!listBusy && !error && !items.length && <EmptyState compact>{scope === 'invitations' ? 'Нових запрошень немає.' : scope === 'shared' ? 'Тут з’являться експорти, до яких ви приєднаєтеся.' : listAfter ? 'На цій сторінці немає доступних експортів.' : 'У вас ще немає збережених експортів. Тут залишаються налаштування, перевірки та створені файли.'}</EmptyState>}
       {items.length > 0 && (scope === 'invitations' ? <ExportInvitations items={items} canCreate={canCreate} busy={responding} onRespond={respond} />
-        : <ExportSessionList items={items} scope={scope} onOpen={(event) => {
+        : <ExportSessionList items={items} scope={scope} returnTo={location.pathname + location.search} returnListState={location.state} onOpen={(event) => {
           if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
           cache.current[scope] = { ...cache.current[scope], scrollY: window.scrollY };
         }} />)}
-      {next && <button className="underline" disabled={listBusy} onClick={() => { void list(next); }}>Наступні експорти</button>}
+      <Pagination label="Сторінки експортів" hasPrevious={Boolean(listAfter)} hasNext={Boolean(next)} busy={listBusy}
+        previousLabel={listBack.length ? 'Попередні експорти' : 'До початку'} nextLabel="Наступні експорти"
+        summary={items.length > 0 ? `На сторінці: ${items.length}` : undefined}
+        onPrevious={() => changePage(listBack.at(-1) || '', listBack.slice(0, -1))}
+        onNext={() => changePage(next, [...listBack, listAfter])} />
     </section>}
     {sessionId && !selected && !notice && <p role="status">Завантажуємо експорт…</p>}
     {create && (canCreateFiles ? <NewSession key={openedLifetime} canActivate={canActivate} onCreated={created} register={register} /> : <p>Створення CSV товарів недоступне. Історичні файли та експорт цін залишаються доступними.</p>)}
     {selected === sessionId && selected && <SessionDetail key={`${selected}:${openedLifetime}`} id={selected} canCreate={canCreate} canCreateFiles={canCreateFiles} canActivate={canActivate} register={register} onLost={lost} />}
-    {!create && <details className="border-t pt-4"><summary>Відкрити відомий історичний знімок</summary><p className="my-3 text-sm">Потрібен точний ID. Невідомі операції, створені до збережених сесій, автоматично не зіставляються.</p>
+    {!create && <TechnicalDisclosure summary="Відкрити відомий історичний знімок"><p className="my-3 text-sm">Потрібен точний ID. Невідомі операції, створені до збережених сесій, автоматично не зіставляються.</p>
       <label className="block">ID збереженого знімка<input className="input" value={knownId} maxLength={200} onChange={(e) => setKnownId(e.target.value)} /></label>
       <button className="btn btn-outline px-3" disabled={!knownId.trim()} onClick={() => navigation.request(() => { setForm({ dirty: false, busy: false }); setSelected(null); setOpenedLifetime((n) => n + 1); setKnown(knownId.trim()); })}>Прочитати знімок без підтвердження</button>
-    </details>}
+    </TechnicalDisclosure>}
     {known && <StoredResult key={`${known}:${openedLifetime}`} id={known} canCreate={canCreate} onDenied={lost} />}
   </div>;
 }

@@ -66,9 +66,9 @@ export function ProductMagentoNameReview({ product, onClose, onSaved, onBusyChan
   };
 
   return <div className="space-y-4">
-    <h2 className="text-lg font-semibold">Назви для Magento · {product.publicSku || 'Артикул недоступний'}</h2>
-    {!product.publicSku && product.sku && <TechnicalDisclosure summary="Технічна ідентичність">
-      <p className="break-all font-mono text-xs">Внутрішній SKU: {product.sku}</p>
+    <h2 className="text-lg font-semibold">Назви для Magento · {loaded?.publicSku || product.publicSku || 'Артикул недоступний'}</h2>
+    {(loaded?.internalSku || product.internalSku || product.sku) && <TechnicalDisclosure summary="Технічна ідентичність">
+      <p className="break-all font-mono text-xs">Внутрішній SKU: {loaded?.internalSku || product.internalSku || product.sku}</p>
     </TechnicalDisclosure>}
     {loaded?.reviewRequired && <Notice tone="warning">Потрібна перевірка успадкованих назв</Notice>}
     <p className="text-sm text-slate-600">Перевірте українську й англійську назви. Підтвердження збереже рішення та дозволить повторно перевірити готовність до синхронізації.</p>
