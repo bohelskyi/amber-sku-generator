@@ -1,4 +1,4 @@
-import SettingsPage from '../src/pages/SettingsPage.jsx';
+import AdministrationPage from '../src/pages/AdministrationPage.jsx';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -92,10 +92,10 @@ describe('role-management UI', () => {
     ));
     render(
       <AuthContext.Provider value={authValue()}>
-        <MemoryRouter><WorkspaceNav /><SettingsPage /><RolesPage /></MemoryRouter>
+        <MemoryRouter><WorkspaceNav /><AdministrationPage /><RolesPage /></MemoryRouter>
       </AuthContext.Provider>
     );
-    expect(screen.getByRole('link', { name: 'Налаштування' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Адміністрування' })).toBeTruthy();
     expect(await screen.findByRole('link', { name: /Ролі/ })).toBeTruthy();
     expect(await screen.findByText('Захищена')).toBeTruthy();
     expect(get).toHaveBeenCalledWith('/admin/roles');
@@ -104,7 +104,7 @@ describe('role-management UI', () => {
     get.mockClear();
     render(
       <AuthContext.Provider value={authValue(['products.view'])}>
-        <MemoryRouter><WorkspaceNav /><SettingsPage /><RolesPage /></MemoryRouter>
+        <MemoryRouter><WorkspaceNav /><AdministrationPage /><RolesPage /></MemoryRouter>
       </AuthContext.Provider>
     );
     expect(screen.queryByRole('link', { name: /Ролі/ })).toBeNull();

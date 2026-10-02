@@ -60,11 +60,11 @@ it('shows inherited-name guidance without granting the existing exports.create p
 
 it('keeps legacy routes but exposes current daily destinations with permission visibility', () => {
   expect(new Set(workspaceNavigation.map((entry) => entry.to)).size).toBe(workspaceNavigation.length);
-  expect(allowedWorkspaceNavigation(['history.view']).map((entry) => entry.to)).toEqual(['/settings', '/admin/corrections/history']);
+  expect(allowedWorkspaceNavigation(['history.view']).map((entry) => entry.to)).toEqual(['/products', '/admin/corrections/history']);
   expect(isWorkspaceDestination(workspaceNavigation.find((entry) => entry.to === '/admin/corrections'), '/admin/corrections/history')).toBe(false);
-  render(<AuthContext.Provider value={auth(['history.view', 'exports.view'])}><MemoryRouter initialEntries={['/settings']}><WorkspaceNav /></MemoryRouter></AuthContext.Provider>);
-  expect(screen.getByRole('link', { name: 'Налаштування' }).getAttribute('aria-current')).toBe('page');
-  expect(screen.queryByRole('link', { name: 'Експорт' })).toBeNull();
+  render(<AuthContext.Provider value={auth(['history.view', 'exports.view'])}><MemoryRouter initialEntries={['/products/history']}><WorkspaceNav /></MemoryRouter></AuthContext.Provider>);
+  expect(screen.getByRole('link', { name: 'Товари' }).getAttribute('aria-current')).toBe('page');
+  expect(screen.getByRole('link', { name: 'Експорт' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: /Розділи/ })).toBeNull();
 });
 

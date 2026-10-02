@@ -96,12 +96,21 @@ it('restores focus to a visible fallback if the original control disappeared', a
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Резервний' })));
 });
 
-it('renders action choices in a body portal without claiming menu keyboard semantics', async () => {
-  render(<ActionMenu label="Дії з товаром"><button type="button">Архівувати</button></ActionMenu>);
-  fireEvent.click(screen.getByRole('button', { name: 'Дії з товаром' }));
-  expect(await screen.findByRole('button', { name: 'Архівувати' })).toBeTruthy();
+it('focuses portalled action choices and provides a clear keyboard exit', async () => {
+  render(<><ActionMenu label="Дії з товаром"><button type="button">Архівувати</button></ActionMenu><button type="button">Наступна дія</button></>);
+  const trigger = screen.getByRole('button', { name: 'Дії з товаром' });
+  fireEvent.click(trigger);
+  const action = await screen.findByRole('button', { name: 'Архівувати' });
+  await waitFor(() => expect(document.activeElement).toBe(action));
   expect(screen.queryByRole('menu')).toBeNull();
-  expect(screen.getByRole('button', { name: 'Архівувати' }).parentElement.parentElement).toBe(document.body);
+  expect(action.parentElement.parentElement).toBe(document.body);
+  fireEvent.keyDown(action, { key: 'Tab' });
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Наступна дія' }));
+  expect(screen.queryByRole('button', { name: 'Архівувати' })).toBeNull();
+  fireEvent.click(trigger);
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Архівувати' })));
+  fireEvent.keyDown(document.activeElement, { key: 'Escape' });
+  expect(document.activeElement).toBe(trigger);
 });
 
 it('keeps local navigation addressable and marks its exact destination', () => {

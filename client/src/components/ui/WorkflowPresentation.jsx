@@ -1,15 +1,15 @@
 import { Check, ChevronDown, Copy, MoreHorizontal } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { copyPlainText } from '../../lib/clipboard';
 import { Button, IconButton, SectionHeader } from './Primitives';
 
-export function CopyAction({ value, label = 'Скопіювати', buttonLabel, compact = false, className = '', iconSize = 14, onCopied }) {
+export function CopyAction({ value, label = 'Скопіювати', buttonLabel, compact = false, className = '', iconSize = 14, onCopied, disabled = false }) {
   const [state, setState] = useState('idle');
   const timerRef = useRef(null);
   useEffect(() => () => window.clearTimeout(timerRef.current), []);
   async function copy() {
-    if (value === undefined || value === null || String(value) === '') return;
+    if (disabled || value === undefined || value === null || String(value) === '') return;
     try {
       await copyPlainText(value); setState('copied'); onCopied?.(true);
     } catch { setState('error'); onCopied?.(false); }
@@ -20,23 +20,45 @@ export function CopyAction({ value, label = 'Скопіювати', buttonLabel,
   const visibleLabel = state === 'copied' ? 'Скопійовано' : state === 'error' ? 'Не вдалося скопіювати' : buttonLabel;
   return <span className={`ui-copy-action ${className}`.trim()}>
     {buttonLabel ? <Button type="button" variant={compact ? 'secondary' : 'amber'} size={compact ? 'compactMd' : 'md'} onClick={copy}
-      aria-label={label}>{state === 'copied' ? <Check size={15} aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}{visibleLabel}</Button>
-      : <IconButton type="button" icon={state === 'copied' ? Check : Copy} label={label} size={iconSize} variant="secondary" onClick={copy} />}
+      aria-label={label} disabled={disabled}>{state === 'copied' ? <Check size={15} aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}{visibleLabel}</Button>
+      : <IconButton type="button" icon={state === 'copied' ? Check : Copy} label={label} size={iconSize} variant="secondary" onClick={copy} disabled={disabled} />}
     {!buttonLabel && state === 'error' && <span className="ui-copy-feedback is-error">Не вдалося скопіювати</span>}
     <span className="sr-only" role="status" aria-live="polite">{state === 'idle' ? '' : accessibleLabel}</span>
   </span>;
 }
 
-export function ActionMenu({ label = 'Дії', children, align = 'end', className = '' }) {
+const actionFocusable = 'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+const visibleFocusable = (root) => [...root.querySelectorAll(actionFocusable)]
+  .filter((element) => !element.inert && element.getClientRects().length > 0);
+
+export function ActionMenu({ label = 'Дії', children, align = 'end', className = '', triggerContent,
+  icon: TriggerIcon = MoreHorizontal }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState(null);
   const rootRef = useRef(null);
   const popupRef = useRef(null);
   const triggerRef = useRef(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return undefined;
-    const rect = triggerRef.current?.getBoundingClientRect();
-    if (rect) setPosition({ top: rect.bottom + 6, left: align === 'end' ? rect.right : rect.left });
+    const frame = window.requestAnimationFrame(() => {
+      const triggerRect = triggerRef.current?.getBoundingClientRect();
+      const popupRect = popupRef.current?.getBoundingClientRect();
+      if (!triggerRect || !popupRect) return;
+      const inset = 8;
+      const preferredLeft = align === 'end' ? triggerRect.right - popupRect.width : triggerRect.left;
+      const left = Math.max(inset, Math.min(preferredLeft, window.innerWidth - popupRect.width - inset));
+      const below = triggerRect.bottom + 6;
+      const above = triggerRect.top - popupRect.height - 6;
+      const top = below + popupRect.height <= window.innerHeight - inset || above < inset
+        ? Math.max(inset, Math.min(below, window.innerHeight - popupRect.height - inset))
+        : above;
+      setPosition({ top, left });
+      visibleFocusable(popupRef.current)[0]?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [align, open]);
+  useEffect(() => {
+    if (!open) { setPosition(null); return undefined; }
     const closeOutside = (event) => {
       if (!rootRef.current?.contains(event.target) && !popupRef.current?.contains(event.target)) setOpen(false);
     };
@@ -48,12 +70,33 @@ export function ActionMenu({ label = 'Дії', children, align = 'end', classNam
     window.addEventListener('scroll', closeForLayoutChange, true);
     return () => { document.removeEventListener('pointerdown', closeOutside); document.removeEventListener('keydown', closeEscape);
       window.removeEventListener('resize', closeForLayoutChange); window.removeEventListener('scroll', closeForLayoutChange, true); };
-  }, [align, open]);
+  }, [open]);
+  function handlePopupKeyDown(event) {
+    if (event.key === 'Escape') {
+      event.preventDefault(); setOpen(false); triggerRef.current?.focus(); return;
+    }
+    if (event.key !== 'Tab') return;
+    const popupActions = visibleFocusable(popupRef.current);
+    const first = popupActions[0]; const last = popupActions.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault(); setOpen(false); triggerRef.current?.focus(); return;
+    }
+    if (!event.shiftKey && document.activeElement === last) {
+      const documentActions = visibleFocusable(document).filter((element) => !popupRef.current?.contains(element));
+      const triggerIndex = documentActions.indexOf(triggerRef.current);
+      const next = documentActions[triggerIndex + 1];
+      event.preventDefault(); setOpen(false); (next || triggerRef.current)?.focus();
+    }
+  }
   return <div ref={rootRef} className={`ui-action-menu ${className}`.trim()}>
-    <IconButton ref={triggerRef} type="button" icon={MoreHorizontal} label={label} variant="secondary"
-      aria-expanded={open} onClick={() => setOpen((value) => !value)} />
-    {open && position && createPortal(<div ref={popupRef} className={`ui-action-menu-popup is-${align}`} aria-label={label}
-      style={{ top: position.top, left: position.left }} onClick={(event) => { if (event.target.closest('button,a')) setOpen(false); }}>{children}</div>, document.body)}
+    {triggerContent
+      ? <Button ref={triggerRef} type="button" variant="secondary" className="ui-action-menu-trigger" aria-label={label}
+        aria-expanded={open} onClick={() => setOpen((value) => !value)}><TriggerIcon size={15} aria-hidden="true" />{triggerContent}<ChevronDown size={14} aria-hidden="true" /></Button>
+      : <IconButton ref={triggerRef} type="button" icon={TriggerIcon} label={label} variant="secondary"
+        aria-expanded={open} onClick={() => setOpen((value) => !value)} />}
+    {open && createPortal(<div ref={popupRef} className={`ui-action-menu-popup is-${align}`} aria-label={label}
+      style={{ top: position?.top ?? 0, left: position?.left ?? 0, visibility: position ? 'visible' : 'hidden' }}
+      onKeyDown={handlePopupKeyDown} onClick={(event) => { if (event.target.closest('button,a')) setOpen(false); }}>{children}</div>, document.body)}
   </div>;
 }
 

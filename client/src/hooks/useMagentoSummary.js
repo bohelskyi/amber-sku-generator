@@ -1,20 +1,37 @@
-import { useContext, useEffect, useState } from 'react';
+import { useCallback, useContext, useEffect, useState } from 'react';
 import { AuthContext } from '../auth/auth-context.js';
 import { api } from '../lib/api.js';
 
-export function useMagentoSummary() {
+export function useMagentoSummary({ enabled = true, pollInterval = 0 } = {}) {
   const { permissions = [], principalLifetime } = useContext(AuthContext) || {};
   const [summary, setSummary] = useState(null);
-  const allowed = permissions.includes('products.view');
+  const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const allowed = enabled && permissions.includes('products.view');
+  const refresh = useCallback(() => setRevision((value) => value + 1), []);
+
   useEffect(() => {
-    if (!allowed || principalLifetime?.valid === false) return undefined;
-    let live = true; const controller = new AbortController();
-    const read = () => { if (!document.hidden) api.get('/magento/summary', { signal: controller.signal })
-      .then(({ data }) => { if (live && principalLifetime?.valid !== false) setSummary(data); })
-      .catch(() => { if (live) setSummary(null); }); };
-    read(); const timer = window.setInterval(read, 15000);
-    window.addEventListener('focus', read);
-    return () => { live = false; controller.abort(); window.clearInterval(timer); window.removeEventListener('focus', read); };
-  }, [allowed, principalLifetime]);
-  return { summary: allowed ? summary : null };
+    if (!allowed || principalLifetime?.valid === false) {
+      setSummary(null); setError(false); setLoading(false); return undefined;
+    }
+    let live = true; let reading = false; const controller = new AbortController();
+    const read = async () => {
+      if (reading || document.hidden) return;
+      reading = true; setLoading(true);
+      try {
+        const response = await api.get('/magento/summary', { signal: controller.signal });
+        if (live && principalLifetime?.valid !== false) { setSummary(response.data); setError(false); }
+      } catch {
+        if (live && !controller.signal.aborted) { setSummary(null); setError(true); }
+      } finally {
+        reading = false; if (live) setLoading(false);
+      }
+    };
+    void read();
+    const timer = pollInterval > 0 ? window.setInterval(read, pollInterval) : null;
+    return () => { live = false; controller.abort(); if (timer) window.clearInterval(timer); };
+  }, [allowed, pollInterval, principalLifetime, revision]);
+
+  return { summary: allowed ? summary : null, error: allowed && error, loading: allowed && loading, refresh };
 }

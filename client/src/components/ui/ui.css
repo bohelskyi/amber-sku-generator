@@ -43,7 +43,7 @@
 .ui-action-menu { position: relative; display: inline-flex; }
 .ui-copy-feedback { margin-left: 7px; font-size: 12px; font-weight: 600; }.ui-copy-feedback.is-error { color: var(--danger); }
 .ui-action-menu-popup { position: fixed; z-index: 85; min-width: 190px; max-width: min(320px, calc(100vw - 24px)); overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 5px; background: white; box-shadow: var(--shadow-md); }
-.ui-action-menu-popup.is-end { transform: translateX(-100%); }
+.ui-action-menu-trigger { gap: 7px; }
 .ui-action-menu-popup :is(a, button) { display: flex; width: 100%; min-height: 36px; align-items: center; gap: 8px; border-radius: var(--radius-sm); padding: 7px 9px; text-align: left; }
 .ui-action-menu-popup :is(a, button):hover { background: var(--surface-muted); }
 .ui-technical-disclosure { min-width: 0; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 13px; }

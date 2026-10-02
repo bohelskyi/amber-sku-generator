@@ -107,10 +107,11 @@ it('empty price queue has no grid, filters or pagination; absent stored artifact
 
 it('daily navigation keeps permission filtering and native keyboard links without an oversized menu',()=>{
   render(<AuthContext.Provider value={{permissions:['exports.view','audit.view'],identity:{},logout:vi.fn()}}><MemoryRouter><WorkspaceNav/></MemoryRouter></AuthContext.Provider>);
-  const settings=screen.getByRole('link',{name:'Налаштування'}); settings.focus();
-  expect(document.activeElement).toBe(settings); expect(settings.tabIndex).toBe(0);
+  const exportsLink=screen.getByRole('link',{name:'Експорт'}); exportsLink.focus();
+  expect(document.activeElement).toBe(exportsLink); expect(exportsLink.tabIndex).toBe(0);
+  expect(screen.getByRole('link',{name:'Адміністрування'})).toBeTruthy();
   expect(screen.queryByRole('link',{name:'Користувачі'})).toBeNull();
-  expect(screen.queryByRole('link',{name:'Експорт'})).toBeNull();
+  expect(screen.queryByRole('link',{name:'Налаштування'})).toBeNull();
   expect(screen.queryByRole('button',{name:/Розділи/})).toBeNull();
 });
 

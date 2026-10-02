@@ -1,4 +1,4 @@
-import SettingsPage from '../src/pages/SettingsPage.jsx';
+import AdministrationPage from '../src/pages/AdministrationPage.jsx';
 import { useEffect } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import {
@@ -18,6 +18,7 @@ import {
   normalizeCurrentSession,
 } from '../src/auth/auth-model.js';
 import { WorkspaceNav } from '../src/components/app/WorkspaceNav.jsx';
+import { AppShell } from '../src/components/app/AppShell.jsx';
 import { ExportTools } from '../src/components/app/ExportTools.jsx';
 import { HistoryTable } from '../src/components/app/HistoryTable.jsx';
 import { HomeDashboard } from '../src/components/app/HomeDashboard.jsx';
@@ -291,14 +292,15 @@ describe('login, identity, and logout UI', () => {
       locationObject,
       children: (
         <MemoryRouter>
-          <WorkspaceNav />
+          <AppShell><div /></AppShell>
         </MemoryRouter>
       ),
     });
 
-    await screen.findByText('Amber User');
+    const account = await screen.findByRole('button', { name: 'Обліковий запис: Amber User' });
     expect(getIdentityDisplayName({ preferred_username: 'fallback.user' })).toBe('fallback.user');
-    fireEvent.click(screen.getByRole('button', { name: 'Вийти' }));
+    fireEvent.click(account);
+    fireEvent.click(await screen.findByRole('button', { name: 'Вийти' }));
     await waitFor(() => expect(locationObject.assign).toHaveBeenCalledWith(logoutUrl));
 
     const logoutRequest = requests.find((request) => request.url === '/auth/logout');
@@ -322,11 +324,12 @@ describe('login, identity, and logout UI', () => {
       locationObject,
       children: (
         <MemoryRouter>
-          <WorkspaceNav />
+          <AppShell><div /></AppShell>
         </MemoryRouter>
       ),
     });
 
+    fireEvent.click(await screen.findByRole('button', { name: /Обліковий запис:/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Вийти' }));
     await waitFor(() => expect(locationObject.assign).toHaveBeenCalledWith('/'));
   });
@@ -567,15 +570,15 @@ describe('application-user administration UI', () => {
   it('shows the navigation entry only when users.manage is effective', () => {
     const { rerender } = render(
       <AuthContext.Provider value={authValue()}>
-        <MemoryRouter><WorkspaceNav /><SettingsPage /></MemoryRouter>
+        <MemoryRouter><WorkspaceNav /><AdministrationPage /></MemoryRouter>
       </AuthContext.Provider>
     );
-    expect(screen.getByRole('link', { name: 'Налаштування' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Адміністрування' })).toBeTruthy();
     expect(screen.getByRole('link', { name: /Користувачі/ })).toBeTruthy();
 
     rerender(
       <AuthContext.Provider value={authValue(['products.view'])}>
-        <MemoryRouter><WorkspaceNav /><SettingsPage /></MemoryRouter>
+        <MemoryRouter><WorkspaceNav /><AdministrationPage /></MemoryRouter>
       </AuthContext.Provider>
     );
     expect(screen.queryByRole('link', { name: /Користувачі/ })).toBeNull();

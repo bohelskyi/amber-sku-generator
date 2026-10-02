@@ -16,16 +16,19 @@ afterEach(cleanup);
 const auth = { identity: { name: 'Богдан' }, logout: vi.fn(), permissions: ['products.view', 'products.recount', 'exports.create', 'exports.view', 'export_templates.view', 'corrections.create', 'corrections.view', 'repricing.view', 'catalog.view'] };
 const shell = (element, value = auth) => render(<AuthContext.Provider value={value}><MemoryRouter>{element}</MemoryRouter></AuthContext.Provider>);
 
-it('daily navigation has four visible destinations, unresolved count and no legacy menu', async () => {
+it('daily navigation exposes the task-oriented destinations without reading global counts', () => {
   shell(<WorkspaceNav />);
-  await screen.findByLabelText('3 проблем');
-  expect([...document.querySelectorAll('.daily-links a')].map((link) => link.getAttribute('aria-label'))).toEqual(['Товари', 'Переоцінка', 'Проблеми синхронізації', 'Налаштування']);
-  expect(screen.queryByRole('link', { name: 'Експорт' })).toBeNull();
+  expect([...document.querySelectorAll('.app-navigation-link')].map((link) => link.textContent)).toEqual([
+    'Товари', 'Потребує уваги', 'Переоцінка', 'Експорт', 'Налаштування',
+  ]);
+  expect(api.get).not.toHaveBeenCalled();
+  expect(screen.getByRole('link', { name: 'Експорт' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: /Розділи/ })).toBeNull();
 });
 it('request-only compatibility uses existing capabilities', () => {
   shell(<WorkspaceNav />, { ...auth, permissions: ['products.view', 'corrections.create', 'corrections.view'] });
-  expect(screen.getByRole('link', { name: 'Запити на виправлення' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Потребує уваги' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: 'Запити на виправлення' })).toBeNull();
 });
 it('dialog keeps its original opener when the confirmation focus target changes while the opener is disabled', () => {
   function DialogModes() {

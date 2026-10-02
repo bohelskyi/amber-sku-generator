@@ -16,12 +16,25 @@ const Administrator = lazy(() => import('../components/workspace/MagentoAdminist
 const root = '/admin/magento-integration';
 const date = (value) => value ? new Date(value).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' }) : 'Немає доступного спостереження';
 
+function useNarrowMagentoLayout() {
+  const [narrow, setNarrow] = useState(() => globalThis.matchMedia?.('(max-width: 900px)').matches || false);
+  useEffect(() => {
+    const query = globalThis.matchMedia?.('(max-width: 900px)');
+    if (!query) return undefined;
+    const update = () => setNarrow(query.matches);
+    update(); query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  return narrow;
+}
+
 export default function MagentoIntegrationPage() {
   const auth = useAuth(); const { pathname } = useLocation();
   const canManage = auth.permissions.includes('export_templates.manage');
   const canViewProducts = auth.permissions.includes('products.view');
   const [data, setData] = useState(null); const [error, setError] = useState(''); const [refresh, setRefresh] = useState(0);
   const [observation, setObservation] = useState(null); const [checking, setChecking] = useState(false); const [checkError, setCheckError] = useState('');
+  const narrowLayout = useNarrowMagentoLayout(); const [contextOpen, setContextOpen] = useState(false);
   const discoverySequence = useRef(0);
   useEffect(() => () => { ++discoverySequence.current; }, []);
   useEffect(() => {
@@ -51,12 +64,17 @@ export default function MagentoIntegrationPage() {
     {error && <Notice>{error}</Notice>}
     {!data && !error && <LoadingState label="Читаємо стан інтеграції…" />}
     {data && <div className="magento-layout">
-      <aside className="magento-context card space-y-4 p-5" aria-label="Поточна інтеграція">
-        <div><h2 className="font-semibold">Поточна доставка</h2><p className="mt-2 text-sm">{integration.delivery.state === 'enabled' ? 'Автоматичну синхронізацію увімкнено' : integration.delivery.state === 'disabled' ? 'Автоматичну синхронізацію вимкнено' : 'Стан автоматичної синхронізації невідомий'}</p>
+      <aside className="magento-context card p-5" aria-label="Поточна інтеграція">
+        <div className="magento-context-summary"><div><h2 className="font-semibold">Поточна доставка</h2><p className="mt-2 text-sm">{integration.delivery.state === 'enabled' ? 'Автоматичну синхронізацію увімкнено' : integration.delivery.state === 'disabled' ? 'Автоматичну синхронізацію вимкнено' : 'Стан автоматичної синхронізації невідомий'}</p>
           <p className="mt-2 font-medium" role="status">{integration.operational.state !== 'known' ? 'Дані про зафіксовані проблеми недоступні' : integration.operational.count ? `Потребують уваги: ${integration.operational.count}` : 'Зафіксованих проблем немає'}</p><p className="mt-1 text-xs text-slate-500">За записами Amber.</p>
         </div>
-        <div className="border-t pt-4"><h2 className="font-semibold">Активні відповідності</h2><p className="mt-1">{published ? `Версія ${published.versionNumber}` : 'Опублікованих відповідностей ще немає'}</p>
+        <div className="magento-active-publication"><h2 className="font-semibold">Активні відповідності</h2><p className="mt-1">{published ? `Версія ${published.versionNumber}` : 'Опублікованих відповідностей ще немає'}</p>
           {published && <p className="mt-1 text-sm text-slate-600">Опубліковано: {date(published.publishedAt)}{published.templateVersionNumber ? ` · Шаблон ${published.templateVersionNumber}` : ''}</p>}
+        </div></div>
+        {narrowLayout && <button type="button" className="magento-context-toggle" aria-expanded={contextOpen}
+          onClick={() => setContextOpen((value) => !value)}>{contextOpen ? 'Сховати деталі інтеграції' : 'Показати стан і технічні деталі'}</button>}
+        {(!narrowLayout || contextOpen) && <div className="magento-context-details">
+        <div>
           {integration.draftCount > 0 && <p className="mt-2 text-sm">Є чернетки змін: {integration.draftCount}. Вони не змінюють поточну доставку.</p>}
         </div>
         <div className="border-t pt-4"><p className="text-sm font-medium" role="status">Остання перевірка структури Magento: {date(observedAt)}</p>
@@ -67,6 +85,7 @@ export default function MagentoIntegrationPage() {
         </div>
         <MagentoDetails>{() => <div className="space-y-2 text-xs"><p>Знімок локальних даних: {date(integration.asOf)}</p><p className="break-all">Активний binding: {published?.id || '—'} · revision: {published?.revision || '—'}</p><p>Спостереження активної публікації: {date(published?.observedAt)}</p><p className="break-all">Джерело спостереження: {useExplicit ? 'Явний GET огляд Magento' : stored?.bindingId || '—'}</p></div>}</MagentoDetails>
         <MagentoDetails summary="Історія дій">{() => <MagentoActionHistory />}</MagentoDetails>
+        </div>}
       </aside>
       <div className="min-w-0" key={pathname}>
         <Suspense fallback={<LoadingState />}><Routes>
