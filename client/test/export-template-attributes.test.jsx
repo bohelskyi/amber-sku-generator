@@ -54,13 +54,14 @@ it('SKU selection deduplicates, supports pages and rejects late/cancelled search
   const search = vi.fn().mockReturnValueOnce(late).mockResolvedValue({ data: { products: [{ id: 21, full_sku: 'BR2/EXACT-001', public_sku: 'AG-000021', category: 'BR', status: 'active' }], nextOffset: 20 } });
   function Picker() { const [selected, setSelected] = useState([]); return <SampleProducts search={search} selected={selected} onChange={setSelected} />; }
   render(<Picker />);
-  fireEvent.change(screen.getByLabelText('Пошук за SKU'), { target: { value: 'OLD' } }); await waitFor(() => expect(search).toHaveBeenCalledTimes(1));
-  fireEvent.change(screen.getByLabelText('Пошук за SKU'), { target: { value: 'BR2/EXACT-001' } });
+  fireEvent.change(screen.getByLabelText('Пошук за артикулом або внутрішнім SKU'), { target: { value: 'OLD' } }); await waitFor(() => expect(search).toHaveBeenCalledTimes(1));
+  fireEvent.change(screen.getByLabelText('Пошук за артикулом або внутрішнім SKU'), { target: { value: 'BR2/EXACT-001' } });
   expect(search.mock.calls[0][1].aborted).toBe(true);
   await screen.findByRole('button', { name: 'Обрати AG-000021' });
   resolve({ data: { products: [{ id: 99, full_sku: 'OLD', category: 'AR' }], nextOffset: null } });
   fireEvent.click(screen.getByRole('button', { name: 'Обрати AG-000021' }));
   expect(screen.getByRole('button', { name: 'Обрати AG-000021' }).disabled).toBe(true);
+  expect(screen.getAllByText('Артикул: AG-000021').length).toBeGreaterThan(0);
   expect(screen.getAllByText(/BR2\/EXACT-001/).length).toBeGreaterThan(0);
   expect(screen.getByText('Вибрано: 1 / 100')).toBeTruthy(); expect(screen.queryByRole('button', { name: 'Обрати OLD' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Наступні товари' })); await waitFor(() => expect(search).toHaveBeenLastCalledWith({ q: 'BR2/EXACT-001', offset: 20 }, expect.any(AbortSignal)));
@@ -70,9 +71,11 @@ it('SKU selection keeps limit and permission errors; table preserves quoted comm
     .mockRejectedValue({ response: { status: 403, data: { error: 'Немає дозволу' } } });
   const view = render(<SampleProducts search={search} selected={Array.from({ length: 100 }, (_, i) => ({ id: i + 1 }))} onChange={vi.fn()} />);
   expect(screen.getByText('Вибрано: 100 / 100')).toBeTruthy();
-  fireEvent.change(screen.getByLabelText('Пошук за SKU'), { target: { value: 'BR' } });
-  expect((await screen.findByRole('button', { name: 'Обрати BR-LIMIT' })).disabled).toBe(true);
-  fireEvent.change(screen.getByLabelText('Пошук за SKU'), { target: { value: 'NM' } }); await screen.findByRole('alert'); view.unmount();
+  fireEvent.change(screen.getByLabelText('Пошук за артикулом або внутрішнім SKU'), { target: { value: 'BR' } });
+  expect((await screen.findByRole('button', { name: 'Обрати товар без артикулу' })).disabled).toBe(true);
+  expect(screen.getAllByText('Артикул недоступний').length).toBeGreaterThan(0);
+  expect(screen.getByText('Внутрішній SKU: BR-LIMIT')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Пошук за артикулом або внутрішнім SKU'), { target: { value: 'NM' } }); await screen.findByRole('alert'); view.unmount();
   render(<PreviewTable artifact={{ groupCode: 'BR', groupName: 'Браслети', rowCount: 2, csvContent: 'sku,store_view_code,name,color\r\nBR1,,"Назва, з ""лапками""\nдалі",Світлий\r\nBR1,en,English,\r\n' }} />);
   expect(screen.getAllByText(/Назва, з "лапками"/)[0].textContent).toBe('Назва, з "лапками"\nдалі');
   expect(screen.getAllByText('English').length).toBeGreaterThan(0);

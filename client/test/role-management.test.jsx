@@ -1,7 +1,7 @@
 import AdministrationPage from '../src/pages/AdministrationPage.jsx';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { AuthContext } from '../src/auth/auth-context.js';
 import { WorkspaceNav } from '../src/components/app/WorkspaceNav.jsx';
 import { api } from '../src/lib/api.js';
@@ -65,6 +65,14 @@ function authValue(rolePermissions = ['roles.manage']) {
   };
 }
 
+function renderPage(children, auth = authValue()) {
+  const router = createMemoryRouter([{
+    path: '*',
+    element: <AuthContext.Provider value={auth}>{children}</AuthContext.Provider>,
+  }], { initialEntries: ['/admin/roles'] });
+  return render(<RouterProvider router={router} />);
+}
+
 afterEach(() => cleanup());
 
 describe('role-management UI', () => {
@@ -90,11 +98,7 @@ describe('role-management UI', () => {
     const get = vi.spyOn(api, 'get').mockImplementation(async (url) => response(
       url === '/admin/roles' ? { roles } : { permissions }
     ));
-    render(
-      <AuthContext.Provider value={authValue()}>
-        <MemoryRouter><WorkspaceNav /><AdministrationPage /><RolesPage /></MemoryRouter>
-      </AuthContext.Provider>
-    );
+    renderPage(<><WorkspaceNav /><AdministrationPage /><RolesPage /></>);
     expect(screen.getByRole('link', { name: 'Адміністрування' })).toBeTruthy();
     expect(await screen.findByRole('link', { name: /Ролі/ })).toBeTruthy();
     expect(await screen.findByText('Захищена')).toBeTruthy();
@@ -102,11 +106,7 @@ describe('role-management UI', () => {
 
     cleanup();
     get.mockClear();
-    render(
-      <AuthContext.Provider value={authValue(['products.view'])}>
-        <MemoryRouter><WorkspaceNav /><AdministrationPage /><RolesPage /></MemoryRouter>
-      </AuthContext.Provider>
-    );
+    renderPage(<><WorkspaceNav /><AdministrationPage /><RolesPage /></>, authValue(['products.view']));
     expect(screen.queryByRole('link', { name: /Ролі/ })).toBeNull();
     expect(screen.getByRole('alert').textContent).toContain('Недостатньо прав');
     expect(get.mock.calls.some(([url]) => url.startsWith('/admin/roles'))).toBe(false);
@@ -117,7 +117,7 @@ describe('role-management UI', () => {
     vi.spyOn(api, 'get').mockImplementation(async (url) => response(
       url === '/admin/roles' ? { roles: listedRoles } : { permissions }
     ));
-    render(<AuthContext.Provider value={authValue()}><RolesPage /></AuthContext.Provider>);
+    renderPage(<RolesPage />);
 
     const list = await screen.findByRole('list', { name: 'Ролі' });
     const rows = within(list).getAllByRole('listitem');
@@ -142,29 +142,131 @@ describe('role-management UI', () => {
     const put = vi.spyOn(api, 'put').mockResolvedValue(response({
       role: { ...roles[1], version: 5, permissionKeys: [], permissionCount: 0 },
     }));
-    const confirm = vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
     const auth = authValue();
-    render(
-      <AuthContext.Provider value={auth}>
-        <RolesPage />
-      </AuthContext.Provider>
-    );
+    renderPage(<RolesPage />, auth);
 
     fireEvent.click(await screen.findByRole('button', { name: /Manager/ }));
     expect(screen.getByText('Перегляд товарів')).toBeTruthy();
-    const reserved = screen.getByRole('checkbox', { name: /users\.manage/ });
+    const reserved = screen.getByRole('checkbox', { name: /Керування користувачами/ });
     expect(reserved.disabled).toBe(true);
-    const productsView = screen.getByRole('checkbox', { name: /products\.view/ });
+    const productsView = screen.getByRole('checkbox', { name: /Перегляд товарів/ });
     expect(productsView.disabled).toBe(false);
     fireEvent.click(productsView);
+    expect(screen.getByText('Запропоновані зміни')).toBeTruthy();
+    expect(screen.getByText(/Вилучаються: Перегляд товарів/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Зберегти зміни' }));
 
-    await waitFor(() => expect(confirm).toHaveBeenCalled());
+    expect(await screen.findByRole('dialog', { name: 'Змінити дозволи ролі «Manager»?' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Змінити дозволи' }));
     await waitFor(() => expect(put).toHaveBeenCalledWith('/admin/roles/2/permissions', {
       permissionKeys: [],
       expectedVersion: 4,
       expectedActiveAssignedUserCount: 1,
     }));
     expect(auth.refresh).not.toHaveBeenCalled();
+  });
+
+  it('preserves attempted edits and shows the newer server version after a conflict', async () => {
+    let currentRoles = roles;
+    vi.spyOn(api, 'get').mockImplementation(async (url) => response(
+      url === '/admin/roles' ? { roles: currentRoles } : { permissions }
+    ));
+    vi.spyOn(api, 'patch').mockImplementation(async () => {
+      currentRoles = [roles[0], { ...roles[1], displayName: 'Manager server', version: 5 }];
+      throw { response: { status: 409, data: { code: 'ROLE_VERSION_CONFLICT' } } };
+    });
+    renderPage(<RolesPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Manager/ }));
+    const name = screen.getByLabelText('Назва');
+    fireEvent.change(name, { target: { value: 'Manager draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Зберегти зміни' }));
+
+    expect(await screen.findByText('На сервері є новіша версія ролі')).toBeTruthy();
+    expect(name.value).toBe('Manager draft');
+    expect(screen.getByText(/№5, «Manager server»/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Зберегти зміни' }).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Завантажити актуальну версію' }));
+    expect(name.value).toBe('Manager server');
+    fireEvent.change(name, { target: { value: 'Reviewed manager' } });
+    expect(screen.getByRole('button', { name: 'Зберегти зміни' }).disabled).toBe(false);
+  });
+
+  it('reports metadata saved separately when the permission command fails', async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (url) => response(
+      url === '/admin/roles' ? { roles } : { permissions }
+    ));
+    vi.spyOn(api, 'patch').mockResolvedValue(response({ role: {
+      ...roles[1], displayName: 'Updated manager', version: 5,
+    } }));
+    vi.spyOn(api, 'put').mockRejectedValue({ response: { status: 500, data: { error: 'permission failure' } } });
+    renderPage(<RolesPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Manager/ }));
+    fireEvent.change(screen.getByLabelText('Назва'), { target: { value: 'Updated manager' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /Перегляд товарів/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Зберегти зміни' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Змінити дозволи' }));
+
+    expect(await screen.findByText('Назву й опис збережено, дозволи не збережено.')).toBeTruthy();
+    expect(screen.getByLabelText('Назва').value).toBe('Updated manager');
+  });
+
+  it('guards role changes until the operator explicitly discards an edited form', async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (url) => response(
+      url === '/admin/roles' ? { roles } : { permissions }
+    ));
+    renderPage(<RolesPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Manager/ }));
+    fireEvent.change(screen.getByLabelText('Назва'), { target: { value: 'Unsaved manager' } });
+    fireEvent.click(screen.getByRole('button', { name: /Administrator/ }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Незбережені зміни' });
+    expect(screen.getByRole('button', { name: /Manager/ }).getAttribute('aria-pressed')).toBe('true');
+    expect(within(dialog).queryByRole('button', { name: 'Зберегти й перейти' })).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Відкинути й перейти' }));
+    expect(screen.getByRole('button', { name: /Administrator/ }).getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('keeps a successful role write distinct from a failed follow-up refresh', async () => {
+    let roleReads = 0;
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/admin/roles') {
+        roleReads += 1;
+        if (roleReads > 1) throw { response: { status: 503, data: { error: 'refresh unavailable' } } };
+        return response({ roles });
+      }
+      return response({ permissions });
+    });
+    vi.spyOn(api, 'patch').mockResolvedValue(response({ role: {
+      ...roles[1], displayName: 'Saved manager', version: 5,
+    } }));
+    renderPage(<RolesPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Manager/ }));
+    fireEvent.change(screen.getByLabelText('Назва'), { target: { value: 'Saved manager' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Зберегти зміни' }));
+
+    expect(await screen.findByText('Роль оновлено, але дані на екрані не повністю оновлено.')).toBeTruthy();
+    expect(screen.getByLabelText('Назва').value).toBe('Saved manager');
+    expect(screen.queryByText('Не вдалося зберегти роль.')).toBeNull();
+  });
+
+  it('filters permissions by operator language while keeping technical keys on demand', async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (url) => response(
+      url === '/admin/roles' ? { roles } : { permissions: [...permissions, { key: 'sku_schemas.publish', description: 'Publish schemas', reserved: false }] }
+    ));
+    renderPage(<RolesPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /Manager/ }));
+
+    expect(screen.queryByText('sku_schemas.publish')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Пошук дозволу'), { target: { value: 'sku_schemas.publish' } });
+    expect(screen.getByText('Публікація схеми SKU')).toBeTruthy();
+    expect(screen.queryByText('Перегляд товарів')).toBeNull();
+    fireEvent.click(screen.getByText('Технічні ключі дозволів'));
+    expect(screen.getByText('sku_schemas.publish')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Група дозволів'), { target: { value: 'products' } });
+    expect(screen.getByText('Дозволів за цими умовами не знайдено.')).toBeTruthy();
   });
 });

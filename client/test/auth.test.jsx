@@ -7,6 +7,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthGate } from '../src/auth/AuthGate.jsx';
@@ -614,10 +615,10 @@ describe('application-user administration UI', () => {
     for (const label of Object.values(APPLICATION_USER_STATUS_LABELS)) {
       expect(screen.getByText(label)).toBeTruthy();
     }
+    fireEvent.click(screen.getByRole('button', { name: 'Відкрити Pending User' }));
     for (const label of roles.map((role) => role.displayName)) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
-
     fireEvent.change(screen.getByRole('combobox', { name: 'Роль для Pending User' }), {
       target: { value: '2' },
     });
@@ -627,11 +628,15 @@ describe('application-user administration UI', () => {
       { roleId: 2 }
     ));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Підтвердити Pending User' }).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Закрити' }));
 
+    fireEvent.click(screen.getByRole('button', { name: 'Відкрити Active User' }));
     fireEvent.change(screen.getByRole('combobox', { name: 'Роль для Active User' }), {
       target: { value: '2' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Змінити роль для Active User' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Переглянути зміну ролі для Active User' }));
+    const roleDialog = await screen.findByRole('dialog', { name: 'Змінити роль для «Active User»?' });
+    fireEvent.click(within(roleDialog).getByRole('button', { name: 'Змінити роль' }));
     await waitFor(() => expect(put).toHaveBeenCalledWith(
       '/admin/users/102/role',
       { roleId: 2, expectedAssignmentId: 202 }
@@ -643,9 +648,12 @@ describe('application-user administration UI', () => {
     roleUpdate.resolve(response({}));
     await waitFor(() => expect(disable.disabled).toBe(false));
     fireEvent.click(disable);
+    fireEvent.click(await screen.findByRole('button', { name: 'Вимкнути доступ' }));
     await waitFor(() => expect(post).toHaveBeenCalledWith('/admin/users/102/disable', {}));
     await waitFor(() => expect(disable.disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Закрити' }));
 
+    fireEvent.click(screen.getByRole('button', { name: 'Відкрити Disabled User' }));
     fireEvent.change(screen.getByRole('combobox', { name: 'Роль для Disabled User' }), {
       target: { value: '3' },
     });
@@ -678,12 +686,12 @@ describe('application-user administration UI', () => {
     );
 
     await screen.findByText('Current Administrator');
+    fireEvent.click(screen.getByRole('button', { name: 'Відкрити Current Administrator' }));
     fireEvent.change(screen.getByRole('combobox', { name: 'Роль для Current Administrator' }), {
       target: { value: '2' },
     });
-    fireEvent.click(screen.getByRole('button', {
-      name: 'Змінити роль для Current Administrator',
-    }));
+    fireEvent.click(screen.getByRole('button', { name: 'Переглянути зміну ролі для Current Administrator' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Змінити роль для «Current Administrator»?' })).getByRole('button', { name: 'Змінити роль' }));
 
     await waitFor(() => expect(put).toHaveBeenCalledWith(
       '/admin/users/42/role',
@@ -691,6 +699,67 @@ describe('application-user administration UI', () => {
     ));
     await waitFor(() => expect(auth.refresh).toHaveBeenCalledTimes(1));
     expect(api.get).toHaveBeenCalledTimes(2);
+  });
+
+  it('bounds the user table to 50 rows while keeping truthful totals', async () => {
+    const manyUsers = Array.from({ length: 51 }, (_, index) => ({
+      ...managedUsers[1],
+      id: index + 1,
+      currentAssignmentId: index + 100,
+      displayName: `Operator ${String(index + 1).padStart(2, '0')}`,
+      preferredUsername: `operator.${index + 1}`,
+    }));
+    vi.spyOn(api, 'get').mockImplementation(async (url) => response(
+      url === '/admin/users' ? { users: manyUsers } : { roles }
+    ));
+    render(<AuthContext.Provider value={authValue()}><UsersPage /></AuthContext.Provider>);
+
+    await screen.findByText('Operator 01');
+    expect(screen.queryByText('Operator 51')).toBeNull();
+    expect(screen.getByText('1–50 з 51')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Далі' }));
+    expect(await screen.findByText('Operator 51')).toBeTruthy();
+    expect(screen.getByText('51–51 з 51')).toBeTruthy();
+  });
+
+  it('does not report a successful access change as failed when list refresh fails', async () => {
+    let userReads = 0;
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/admin/users') {
+        userReads += 1;
+        if (userReads > 1) throw { response: { data: { error: 'refresh failed' } } };
+        return response({ users: [managedUsers[1]] });
+      }
+      return response({ roles });
+    });
+    vi.spyOn(api, 'post').mockResolvedValue(response({}));
+    render(<AuthContext.Provider value={authValue()}><UsersPage /></AuthContext.Provider>);
+
+    await screen.findByText('Active User');
+    fireEvent.click(screen.getByRole('button', { name: 'Відкрити Active User' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Вимкнути доступ для Active User' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Вимкнути доступ' }));
+    expect(await screen.findByText('Доступ для Active User вимкнено. Список не оновлено.')).toBeTruthy();
+    expect(screen.queryByText('Не вдалося виконати дію.')).toBeNull();
+  });
+
+  it('announces an access-command failure inside the active user drawer', async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (url) => response(
+      url === '/admin/users' ? { users: [managedUsers[1]] } : { roles }
+    ));
+    vi.spyOn(api, 'post').mockRejectedValue({
+      response: { status: 409, data: { code: 'LAST_ADMINISTRATOR_REQUIRED' } },
+    });
+    render(<AuthContext.Provider value={authValue()}><UsersPage /></AuthContext.Provider>);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Відкрити Active User' }));
+    const drawer = screen.getByRole('dialog', { name: 'Active User' });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Вимкнути доступ для Active User' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Вимкнути доступ для «Active User»?' })).getByRole('button', { name: 'Вимкнути доступ' }));
+
+    const alert = await within(drawer).findByRole('alert');
+    expect(alert.textContent).toContain('У системі має залишитися щонайменше один активний Адміністратор.');
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
   });
 });
 

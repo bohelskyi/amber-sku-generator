@@ -562,15 +562,15 @@ it('normal saved-draft task searches SKU, selects samples, reads server table an
   const f = family('fixture', d); f.draft.revision = '5';
   const products = [product('BR', { color: 1 }, { id: 42, full_sku: 'BR2/SYNTHETIC-001' }), product('BR', { color: 4 }, { id: 43, full_sku: 'BR2/SYNTHETIC-002' })];
   api.list.mockResolvedValue(response({ templates: [f] })); api.get.mockResolvedValue(response(f));
-  api.searchSamples.mockResolvedValue(response({ products: products.map((p) => ({ id: p.id, full_sku: p.full_sku, category: p.category, status: 'active' })), nextOffset: null }));
+  api.searchSamples.mockResolvedValue(response({ products: products.map((p, index) => ({ id: p.id, full_sku: p.full_sku, public_sku: `AG-${index + 42}`, category: p.category, status: 'active' })), nextOffset: null }));
   const blockers = officeDiagnostics.filter((entry) => entry.sourceId !== 'KL.exact_size');
   api.validate.mockRejectedValue({ response: { data: { code: 'TEMPLATE_SOURCE_INVALID', details: { diagnostics: blockers } } } });
   api.preview.mockResolvedValue(response({ revision: '5', definitionHash: f.draft.definitionHash, draftOnly: true, publicationReady: false, globalSourceDiagnostics: blockers,
     sampleProducts: products.map((p) => ({ productId: p.id, sku: p.full_sku, category: p.category })), result: evaluateBatch(compileDefinition(d), products) }));
   page(); await screen.findByRole('link', { name: 'Відкрити Шаблон fixture' }); choose('Шаблон', f.id);
   await screen.findByRole('tablist', { name: 'Категорії файлів' }); click('Перевірити шаблон'); await screen.findByRole('region', { name: 'Повна перевірка шаблону' });
-  choose('Пошук за SKU', 'BR2/SYNTHETIC'); await screen.findByRole('button', { name: 'Обрати BR2/SYNTHETIC-001' });
-  click('Обрати BR2/SYNTHETIC-001'); click('Обрати BR2/SYNTHETIC-002'); click('Переглянути результат');
+  choose('Пошук за артикулом або внутрішнім SKU', 'BR2/SYNTHETIC'); await screen.findByRole('button', { name: 'Обрати AG-42' });
+  click('Обрати AG-42'); click('Обрати AG-43'); click('Переглянути результат');
   await screen.findByRole('region', { name: 'Таблиця результату BR' });
   expect(api.preview).toHaveBeenCalledWith(f.id, { expectedRevision: '5', expectedDefinitionHash: f.draft.definitionHash, productIds: [42, 43] });
   const table = within(screen.getByRole('region', { name: 'Таблиця результату BR' })).getAllByRole('table')[0];
