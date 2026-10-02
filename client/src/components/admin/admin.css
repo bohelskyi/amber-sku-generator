@@ -1,0 +1,29 @@
+.admin-page { min-width: 0; }
+.admin-page-inner { width: min(100%, 1600px); margin: 0 auto; padding: 20px 24px 80px; display: grid; gap: 16px; }
+.admin-page .local-workspace-nav { position: sticky; top: var(--workspace-nav-height); z-index: 18; }
+.admin-category-picker { margin: 0; }
+.pricing-matrix-table td { vertical-align: top; }
+.pricing-matrix-table .ui-save-state { display: block; margin-top: 4px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+
+@media (max-width: 720px) {
+  .admin-page-inner { padding: 16px 12px 64px; gap: 12px; }
+  .admin-page .page-heading { align-items: flex-start; }
+  .admin-page .local-workspace-nav { margin-inline: -12px; border-inline: 0; border-radius: 0; overflow-x: auto; }
+  .admin-page .catalog-category-heading { align-items: flex-start; }
+  .admin-page .catalog-category-tabs { overflow-x: auto; flex-wrap: nowrap; }
+  .admin-page .catalog-category-tab { flex: 0 0 auto; min-width: 112px; }
+  .admin-page .catalog-category-bar { align-items: flex-start; }
+  .admin-page .catalog-category-actions { width: 100%; }
+  .admin-page .catalog-workspace,
+  .admin-page .pricing-workspace { grid-template-columns: minmax(0, 1fr); }
+  .admin-page .catalog-master,
+  .admin-page .pricing-master { max-height: 360px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .admin-page .pricing-detail-header { align-items: flex-start; }
+  .admin-page .pricing-detail-actions { width: 100%; }
+}
+
+@media (max-width: 390px) {
+  .admin-page-inner { padding-inline: 10px; }
+  .admin-page .catalog-category-actions .btn,
+  .admin-page .pricing-detail-actions .btn { flex: 1 1 auto; }
+}

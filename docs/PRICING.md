@@ -22,6 +22,8 @@ A matrix cell is either a strictly positive decimal or absent:
 
 Scenario, matrix, modifier, weight-band, rules, and schema changes are part of authoritative pricing context and stale existing previews. Pricing edits require `pricing.manage`; `pricing.view` is sufficient for read-only matrices/modifiers.
 
+The pricing workspace reads its category, question, option-label, condition, and axis metadata from `GET /api/admin/pricing/config`. This projection requires `pricing.view` and deliberately omits catalog mutability and SKU-schema publication state. The existing product-creation `/api/config` and catalog-administration `/api/admin/config` permission boundaries remain unchanged.
+
 ## Automatic and manual UAH pricing
 
 Automatic calculation preserves separate meanings:

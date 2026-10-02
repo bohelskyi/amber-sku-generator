@@ -1,5 +1,5 @@
 const express = require('express');
-const { getAdminPrices } = require('../../services/pricing/pricing-read-model');
+const { getAdminPrices, getPricingMetadata } = require('../../services/pricing/pricing-read-model');
 const {
   upsertPriceCell,
   createScenario,
@@ -12,6 +12,14 @@ const { getRequestMutationContext } = require('../../audit/mutation-context');
 const { requirePermission } = require('../../auth/authorization');
 
 const router = express.Router();
+
+router.get('/admin/pricing/config', requirePermission('pricing.view'), async (_req, res) => {
+  try {
+    res.json(await getPricingMetadata());
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
 
 router.get('/admin/prices/:catCode', requirePermission('pricing.view'), async (req, res) => {
   try {

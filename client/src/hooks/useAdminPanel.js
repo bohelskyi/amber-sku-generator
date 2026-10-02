@@ -45,13 +45,20 @@ const formatMatchJson = (value) => {
   }
 };
 
-export function useAdminPanel() {
+export function useAdminPanel({ mode = 'auto' } = {}) {
   const auth = useAuth();
   const { canManagePricing, canViewCatalog, canViewPricing } = getPermissionUiState(
     auth.permissions
   );
+  const effectiveMode = mode === 'auto' ? (canViewCatalog ? 'catalog' : 'pricing') : mode;
+  const catalogWorkspaceEnabled = effectiveMode === 'catalog' && canViewCatalog;
+  const pricingWorkspaceEnabled = effectiveMode === 'pricing' && canViewPricing;
+  const canPublishSchema = auth.permissions.includes('sku_schemas.publish');
   const [config, setConfig] = useState(null);
   const [configError, setConfigError] = useState('');
+  const [feedback, setFeedback] = useState(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [selectedCat, setSelectedCat] = useState(null);
   const [selectedQuestion, setSelectedQuestion] = useState(null);
   const [editCat, setEditCat] = useState(emptyNewCategory);
@@ -61,14 +68,24 @@ export function useAdminPanel() {
   const [newOpt, setNewOpt] = useState(emptyNewOption);
   const [editOpt, setEditOpt] = useState(emptyEditOption);
 
+  const showFeedback = useCallback(({ tone = 'success', title, message = '' }) => {
+    setFeedback({ tone, title, message, id: Date.now() });
+  }, []);
+
+  const showRefreshWarning = (successTitle, error) => showFeedback({
+    tone: 'warning',
+    title: `${successTitle}, але дані не оновлено`,
+    message: getApiError(error),
+  });
+
   const fetchConfig = useCallback(() =>
-    api.get(canViewCatalog ? '/admin/config' : '/config').then((res) => {
+    api.get(effectiveMode === 'catalog' ? '/admin/config' : '/admin/pricing/config').then((res) => {
       setConfig(res.data);
       return res.data;
-    }), [canViewCatalog]);
+    }), [effectiveMode]);
 
-  const pricing = useAdminPricingController({ canViewPricing, formatMatchJson, selectedCat });
-  const schema = useAdminSchemaController({ canViewCatalog, config, fetchConfig, selectedCat });
+  const pricing = useAdminPricingController({ canViewPricing: pricingWorkspaceEnabled, formatMatchJson, onFeedback: showFeedback, selectedCat });
+  const schema = useAdminSchemaController({ canPublishSchema, canViewCatalog: catalogWorkspaceEnabled, config, fetchConfig, onFeedback: showFeedback, selectedCat });
 
   const updateSelectedQuestionState = (question) => {
     if (!question) return;
@@ -106,8 +123,9 @@ export function useAdminPanel() {
   };
 
   useEffect(() => {
+    if (!catalogWorkspaceEnabled && !pricingWorkspaceEnabled) return;
     fetchConfig().catch((error) => setConfigError(getApiError(error)));
-  }, [fetchConfig]);
+  }, [catalogWorkspaceEnabled, fetchConfig, pricingWorkspaceEnabled]);
 
   const parseVisibleRuleInput = (value) => {
     try {
@@ -137,8 +155,8 @@ export function useAdminPanel() {
     });
     setEditOpt(emptyEditOption);
     setNewQuest(buildNewQuestionDefaults(categoryQuestions));
-    schema.resetSchemaPublishState();
-    pricing.selectCategory(category);
+    if (catalogWorkspaceEnabled) schema.selectSchemaCategory(category);
+    if (pricingWorkspaceEnabled) pricing.selectCategory(category);
   };
 
   const handleSelectQuestion = (question) => {
@@ -147,141 +165,180 @@ export function useAdminPanel() {
     updateSelectedQuestionState(question);
   };
 
-  const addCategory = () => {
+  const addCategory = async () => {
     if (!newCat.code) return;
-    api.post('/admin/category', {
-      ...newCat,
-      requires_weight: newCat.requires_weight ? 1 : 0,
-      skip_hidden_sku_questions: newCat.skip_hidden_sku_questions ? 1 : 0,
-      marketing_rounding_enabled: newCat.marketing_rounding_enabled ? 1 : 0,
-    })
-      .then(() => {
-        setNewCat(emptyNewCategory);
-        fetchConfig();
-      })
-      .catch((err) => alert(`Помилка створення категорії: ${err.response?.data?.error || err.message}`));
+    try {
+      await api.post('/admin/category', {
+        ...newCat,
+        requires_weight: newCat.requires_weight ? 1 : 0,
+        skip_hidden_sku_questions: newCat.skip_hidden_sku_questions ? 1 : 0,
+        marketing_rounding_enabled: newCat.marketing_rounding_enabled ? 1 : 0,
+      });
+    } catch (error) {
+      showFeedback({ tone: 'error', title: 'Не вдалося створити категорію', message: getApiError(error) });
+      return false;
+    }
+    setNewCat(emptyNewCategory);
+    showFeedback({ title: 'Категорію створено' });
+    try {
+      await fetchConfig();
+    } catch (error) {
+      showRefreshWarning('Категорію створено', error);
+    }
+    return true;
   };
 
-  const updateCategory = () => {
+  const updateCategory = async () => {
     if (!selectedCat) return;
     const nextCode = String(editCat.code || '').trim().toUpperCase();
-    if (!nextCode) return alert('Вкажіть код категорії');
+    if (!nextCode) return showFeedback({ tone: 'error', title: 'Категорію не збережено', message: 'Вкажіть код категорії.' });
 
-    api.put('/admin/category', {
-      code: selectedCat.code,
-      next_code: nextCode,
-      name: editCat.name,
-      requires_weight: editCat.requires_weight ? 1 : 0,
-      skip_hidden_sku_questions: editCat.skip_hidden_sku_questions ? 1 : 0,
-      marketing_rounding_enabled: editCat.marketing_rounding_enabled ? 1 : 0,
-    })
-      .then((res) => {
-        const savedCode = res.data?.code || nextCode;
-        return fetchConfig().then((nextConfig) => {
-          const nextCategory = nextConfig.categories?.[savedCode];
-          setSelectedCat(nextCategory || null);
-          if (nextCategory) {
-            setEditCat({
-              code: nextCategory.code,
-              name: nextCategory.name,
-              requires_weight: nextCategory.requires_weight === 1,
-              skip_hidden_sku_questions: nextCategory.skip_hidden_sku_questions === 1,
-              marketing_rounding_enabled: nextCategory.marketing_rounding_enabled !== 0,
-              code_mutable: nextCategory.code_mutable !== false,
-            });
-            pricing.fetchPricesForCategory(nextCategory.code);
-          } else {
-            pricing.clearCategory();
-          }
+    let response;
+    try {
+      response = await api.put('/admin/category', {
+        code: selectedCat.code,
+        next_code: nextCode,
+        name: editCat.name,
+        requires_weight: editCat.requires_weight ? 1 : 0,
+        skip_hidden_sku_questions: editCat.skip_hidden_sku_questions ? 1 : 0,
+        marketing_rounding_enabled: editCat.marketing_rounding_enabled ? 1 : 0,
+      });
+    } catch (error) {
+      showFeedback({ tone: 'error', title: 'Не вдалося зберегти категорію', message: getApiError(error) });
+      return false;
+    }
+    const savedCode = response.data?.code || nextCode;
+    showFeedback({ title: 'Категорію збережено' });
+    try {
+      const nextConfig = await fetchConfig();
+      const nextCategory = nextConfig.categories?.[savedCode];
+      if (nextCategory) schema.selectSchemaCategory(nextCategory);
+      setSelectedCat(nextCategory || null);
+      if (nextCategory) {
+        setEditCat({
+          code: nextCategory.code,
+          name: nextCategory.name,
+          requires_weight: nextCategory.requires_weight === 1,
+          skip_hidden_sku_questions: nextCategory.skip_hidden_sku_questions === 1,
+          marketing_rounding_enabled: nextCategory.marketing_rounding_enabled !== 0,
+          code_mutable: nextCategory.code_mutable !== false,
         });
-      })
-      .catch((err) => alert(`Помилка оновлення категорії: ${err.response?.data?.error || err.message}`));
+      }
+    } catch (error) {
+      showRefreshWarning('Категорію збережено', error);
+    }
+    return true;
   };
 
-  const addQuestion = () => {
+  const addQuestion = async () => {
     if (!selectedCat) return;
     const isNewTextQuestion = newQuest.input_type === 'text';
     const shouldAddNewQuestionToSku = !isNewTextQuestion && newQuest.include_in_sku;
     const parsedVisibleRule = parseVisibleRuleInput(newQuest.visible_if_json);
-    if (!parsedVisibleRule.ok) return alert('Помилка JSON в visible_if питання');
+    if (!parsedVisibleRule.ok) return showFeedback({ tone: 'error', title: 'Питання не створено', message: 'Перевірте умову показу.' });
 
-    api.post('/admin/question', {
-      ...newQuest,
-      sku_index: shouldAddNewQuestionToSku ? newQuest.sku_index : 0,
-      required: newQuest.required ? 1 : 0,
-      include_in_sku: shouldAddNewQuestionToSku ? 1 : 0,
-      input_type: isNewTextQuestion ? 'text' : 'options',
-      sku_separator: shouldAddNewQuestionToSku ? newQuest.sku_separator : '',
-      display_order: newQuest.display_order !== ''
-        ? newQuest.display_order
-        : shouldAddNewQuestionToSku
-          ? newQuest.sku_index
-          : 0,
-      visible_if_json: parsedVisibleRule.value,
-      category_code: selectedCat.code,
-    }).then(() => {
-      fetchConfig().then((nextConfig) => {
-        applyConfigWithSelection(nextConfig, selectedCat.code, null);
+    try {
+      await api.post('/admin/question', {
+        ...newQuest,
+        sku_index: shouldAddNewQuestionToSku ? newQuest.sku_index : 0,
+        required: newQuest.required ? 1 : 0,
+        include_in_sku: shouldAddNewQuestionToSku ? 1 : 0,
+        input_type: isNewTextQuestion ? 'text' : 'options',
+        sku_separator: shouldAddNewQuestionToSku ? newQuest.sku_separator : '',
+        display_order: newQuest.display_order !== ''
+          ? newQuest.display_order
+          : shouldAddNewQuestionToSku
+            ? newQuest.sku_index
+            : 0,
+        visible_if_json: parsedVisibleRule.value,
+        category_code: selectedCat.code,
       });
-    });
+    } catch (error) {
+      showFeedback({ tone: 'error', title: 'Не вдалося створити питання', message: getApiError(error) });
+      return false;
+    }
+    setNewQuest(buildNewQuestionDefaults(currentCatQuestions));
+    showFeedback({ title: 'Питання створено' });
+    try {
+      const nextConfig = await fetchConfig();
+      applyConfigWithSelection(nextConfig, selectedCat.code, null);
+    } catch (error) {
+      showRefreshWarning('Питання створено', error);
+    }
+    return true;
   };
 
-  const updateQuestion = () => {
+  const updateQuestion = async () => {
     if (!selectedQuestion) return;
     const isEditedTextQuestion = editQuestion.input_type === 'text';
     const shouldAddEditedQuestionToSku = !isEditedTextQuestion && editQuestion.include_in_sku;
     const parsedVisibleRule = parseVisibleRuleInput(editQuestion.visible_if_json);
-    if (!parsedVisibleRule.ok) return alert('Помилка JSON в visible_if питання');
+    if (!parsedVisibleRule.ok) return showFeedback({ tone: 'error', title: 'Питання не збережено', message: 'Перевірте умову показу.' });
 
-    api.post('/admin/question/update', {
-      id: selectedQuestion.q_db_id,
-      key: editQuestion.key,
-      label: editQuestion.label,
-      display_order: editQuestion.display_order !== ''
-        ? editQuestion.display_order
-        : shouldAddEditedQuestionToSku
-          ? editQuestion.sku_index
-          : 0,
-      sku_index: shouldAddEditedQuestionToSku ? editQuestion.sku_index : 0,
-      required: editQuestion.required ? 1 : 0,
-      include_in_sku: shouldAddEditedQuestionToSku ? 1 : 0,
-      input_type: isEditedTextQuestion ? 'text' : 'options',
-      sku_separator: shouldAddEditedQuestionToSku ? editQuestion.sku_separator : '',
-      visible_if_json: parsedVisibleRule.value,
-    })
-      .then(() => fetchConfig())
-      .then((nextConfig) => {
-        applyConfigWithSelection(nextConfig, selectedCat.code, selectedQuestion.q_db_id);
-        alert('Збережено');
-      })
-      .catch((err) => {
-        alert(`Помилка збереження: ${err.response?.data?.error || err.message}`);
+    try {
+      await api.post('/admin/question/update', {
+        id: selectedQuestion.q_db_id,
+        key: editQuestion.key,
+        label: editQuestion.label,
+        display_order: editQuestion.display_order !== ''
+          ? editQuestion.display_order
+          : shouldAddEditedQuestionToSku
+            ? editQuestion.sku_index
+            : 0,
+        sku_index: shouldAddEditedQuestionToSku ? editQuestion.sku_index : 0,
+        required: editQuestion.required ? 1 : 0,
+        include_in_sku: shouldAddEditedQuestionToSku ? 1 : 0,
+        input_type: isEditedTextQuestion ? 'text' : 'options',
+        sku_separator: shouldAddEditedQuestionToSku ? editQuestion.sku_separator : '',
+        visible_if_json: parsedVisibleRule.value,
       });
+    } catch (error) {
+      showFeedback({ tone: 'error', title: 'Не вдалося зберегти питання', message: getApiError(error) });
+      return false;
+    }
+    showFeedback({ title: 'Питання збережено' });
+    try {
+      const nextConfig = await fetchConfig();
+      applyConfigWithSelection(nextConfig, selectedCat.code, selectedQuestion.q_db_id);
+    } catch (error) {
+      showRefreshWarning('Питання збережено', error);
+    }
+    return true;
   };
 
-  const addOption = () => {
+  const addOption = async () => {
     if (!selectedQuestion) return;
     if ((selectedQuestion.input_type || 'options') === 'text') {
-      return alert('Для текстового питання варіанти не потрібні');
+      return showFeedback({ tone: 'error', title: 'Варіант не створено', message: 'Для текстового питання варіанти не використовуються.' });
     }
 
     const parsedVisibleRule = parseVisibleRuleInput(newOpt.visible_if_json);
     const parsedHiddenRule = parseVisibleRuleInput(newOpt.hidden_if_json);
-    if (!parsedVisibleRule.ok) return alert('Помилка в умові показу варіанта');
-    if (!parsedHiddenRule.ok) return alert('Помилка в умові приховування варіанта');
+    if (!parsedVisibleRule.ok) return showFeedback({ tone: 'error', title: 'Варіант не створено', message: 'Перевірте умову показу.' });
+    if (!parsedHiddenRule.ok) return showFeedback({ tone: 'error', title: 'Варіант не створено', message: 'Перевірте умову приховування.' });
 
-    api.post('/admin/option', {
-      question_id: selectedQuestion.q_db_id,
-      value_id: newOpt.value_id,
-      sku_code: newOpt.sku_code || newOpt.value_id,
-      label: newOpt.label,
-      label_en: newOpt.label_en || null,
-      visible_if_json: parsedVisibleRule.value,
-      hidden_if_json: parsedHiddenRule.value,
-    }).then(() => {
-      setNewOpt(emptyNewOption);
-      fetchConfig();
-    }).catch((err) => alert(`Помилка створення варіанта: ${err.response?.data?.error || err.message}`));
+    try {
+      await api.post('/admin/option', {
+        question_id: selectedQuestion.q_db_id,
+        value_id: newOpt.value_id,
+        sku_code: newOpt.sku_code || newOpt.value_id,
+        label: newOpt.label,
+        label_en: newOpt.label_en || null,
+        visible_if_json: parsedVisibleRule.value,
+        hidden_if_json: parsedHiddenRule.value,
+      });
+    } catch (error) {
+      showFeedback({ tone: 'error', title: 'Не вдалося створити варіант', message: getApiError(error) });
+      return false;
+    }
+    setNewOpt(emptyNewOption);
+    showFeedback({ title: 'Варіант створено' });
+    try {
+      await fetchConfig();
+    } catch (error) {
+      showRefreshWarning('Варіант створено', error);
+    }
+    return true;
   };
 
   const beginOptionEdit = (option) => {
@@ -297,38 +354,55 @@ export function useAdminPanel() {
     });
   };
 
-  const updateOption = () => {
+  const updateOption = async () => {
     if (!editOpt.id) return;
 
     const parsedVisibleRule = parseVisibleRuleInput(editOpt.visible_if_json);
     const parsedHiddenRule = parseVisibleRuleInput(editOpt.hidden_if_json);
-    if (!parsedVisibleRule.ok) return alert('Помилка в умові показу варіанта');
-    if (!parsedHiddenRule.ok) return alert('Помилка в умові приховування варіанта');
+    if (!parsedVisibleRule.ok) return showFeedback({ tone: 'error', title: 'Варіант не збережено', message: 'Перевірте умову показу.' });
+    if (!parsedHiddenRule.ok) return showFeedback({ tone: 'error', title: 'Варіант не збережено', message: 'Перевірте умову приховування.' });
 
-    api.put('/admin/option', {
-      id: editOpt.id,
-      value_id: editOpt.value_id,
-      sku_code: editOpt.sku_code,
-      label: editOpt.label,
-      label_en: editOpt.label_en || null,
-      visible_if_json: parsedVisibleRule.value,
-      hidden_if_json: parsedHiddenRule.value,
-      archived: editOpt.archived,
-    })
-      .then(() => {
-        setEditOpt(emptyEditOption);
-        fetchConfig();
-      })
-      .catch((err) => alert(`Помилка оновлення опції: ${err.response?.data?.error || err.message}`));
+    try {
+      await api.put('/admin/option', {
+        id: editOpt.id,
+        value_id: editOpt.value_id,
+        sku_code: editOpt.sku_code,
+        label: editOpt.label,
+        label_en: editOpt.label_en || null,
+        visible_if_json: parsedVisibleRule.value,
+        hidden_if_json: parsedHiddenRule.value,
+        archived: editOpt.archived,
+      });
+    } catch (error) {
+      showFeedback({ tone: 'error', title: 'Не вдалося зберегти варіант', message: getApiError(error) });
+      return false;
+    }
+    setEditOpt(emptyEditOption);
+    showFeedback({ title: 'Варіант збережено' });
+    try {
+      await fetchConfig();
+    } catch (error) {
+      showRefreshWarning('Варіант збережено', error);
+    }
+    return true;
   };
 
-  const archiveOption = (option, archived) => {
-    api.patch(`/admin/option/${option.db_id}/archive`, { archived })
-      .then(() => {
-        if (editOpt.id === option.db_id) setEditOpt(emptyEditOption);
-        return fetchConfig();
-      })
-      .catch((err) => alert(`Помилка архівування: ${err.response?.data?.error || err.message}`));
+  const archiveOption = async (option, archived) => {
+    try {
+      await api.patch(`/admin/option/${option.db_id}/archive`, { archived });
+    } catch (error) {
+      showFeedback({ tone: 'error', title: 'Не вдалося змінити стан варіанта', message: getApiError(error) });
+      return false;
+    }
+    if (editOpt.id === option.db_id) setEditOpt(emptyEditOption);
+    const successTitle = archived ? 'Варіант перенесено в архів' : 'Варіант повернено з архіву';
+    showFeedback({ title: successTitle });
+    try {
+      await fetchConfig();
+    } catch (error) {
+      showRefreshWarning(successTitle, error);
+    }
+    return true;
   };
 
   const persistQuestionOrder = (orderedQuestions, { reindexSku = false } = {}) => {
@@ -378,15 +452,20 @@ export function useAdminPanel() {
     return api.put('/admin/questions/order', {
       category_code: selectedCat.code,
       questions: payloadQuestions,
-    })
-      .then(() => fetchConfig())
-      .then((nextConfig) => {
+    }).then(async () => {
+      showFeedback({ title: 'Порядок питань збережено' });
+      try {
+        const nextConfig = await fetchConfig();
         applyConfigWithSelection(nextConfig, selectedCat.code);
-      })
-      .catch((err) => {
-        fetchConfig();
-        alert(`Помилка збереження порядку: ${err.response?.data?.error || err.message}`);
-      });
+      } catch (error) {
+        showRefreshWarning('Порядок питань збережено', error);
+      }
+      return true;
+    }).catch((error) => {
+      fetchConfig().catch(() => {});
+      showFeedback({ tone: 'error', title: 'Не вдалося зберегти порядок', message: getApiError(error) });
+      return false;
+    });
   };
 
   const reorderQuestions = (orderedQuestions) => persistQuestionOrder(orderedQuestions);
@@ -395,7 +474,7 @@ export function useAdminPanel() {
     if (!selectedCat) return;
     const skuQuestionCount = currentCatQuestions.filter((question) => question.include_in_sku === 1).length;
     if (skuQuestionCount === 0) {
-      alert('У цій категорії немає питань, які додаються в SKU');
+      showFeedback({ tone: 'error', title: 'Переіндексацію не виконано', message: 'У цій категорії немає питань, які додаються у внутрішній SKU.' });
       return;
     }
 
@@ -411,19 +490,89 @@ export function useAdminPanel() {
   };
 
   const deleteItem = (type, id) => {
-    if (!window.confirm('Видалити цей елемент?')) return;
-    api.post('/admin/delete-item', { type, id })
-      .then(() => {
-        fetchConfig();
-        if (type === 'category') {
-          setSelectedCat(null);
-          setSelectedQuestion(null);
-          pricing.clearCategory();
-          setEditOpt(emptyEditOption);
-        }
-        if (type === 'scenario' || type === 'modifier') pricing.fetchPrices();
-      })
-      .catch((err) => alert(`Помилка видалення: ${err.response?.data?.error || err.message}`));
+    const labels = {
+      category: selectedCat?.name,
+      question: selectedQuestion?.label,
+      option: currentOptions.find((option) => option.db_id === id)?.label,
+      scenario: pricing.pricesData?.scenarios?.find((scenario) => scenario.id === id)?.name,
+      modifier: pricing.pricesData?.modifiers?.find((modifier) => modifier.id === id)
+        ? `модифікатор ×${pricing.pricesData.modifiers.find((modifier) => modifier.id === id).factor}`
+        : '',
+    };
+    const typeLabels = { category: 'Категорія', question: 'Питання', option: 'Варіант', scenario: 'Сценарій', modifier: 'Модифікатор' };
+    const descriptions = {
+      category: 'Буде видалено всю конфігурацію цієї категорії.',
+      question: 'Буде видалено питання з каталогу.',
+      option: 'Буде видалено варіант відповіді.',
+      scenario: 'Буде видалено ціновий сценарій.',
+      modifier: 'Буде видалено ціновий модифікатор.',
+    };
+    const consequences = {
+      category: 'Разом із категорією зникнуть її питання, варіанти, цінові сценарії, матриці, вагові діапазони та модифікатори.',
+      question: 'Разом із питанням зникнуть усі його варіанти.',
+      option: 'Варіант, який уже використано в товарах, видалити не можна — його можна перенести в архів.',
+      scenario: 'Разом зі сценарієм зникнуть його матриця цін і вагові діапазони.',
+      modifier: 'Правило та його множник більше не застосовуватимуться до нових розрахунків.',
+    };
+    setDeleteConfirmation({ type, id, label: labels[type] || typeLabels[type] || 'Елемент', description: descriptions[type], consequence: consequences[type] });
+  };
+
+  const cancelDelete = () => {
+    if (!deleteBusy) setDeleteConfirmation(null);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmation || deleteBusy) return;
+    const { type, id } = deleteConfirmation;
+    const successTitles = { category: 'Категорію видалено', question: 'Питання видалено', option: 'Варіант видалено', scenario: 'Сценарій видалено', modifier: 'Модифікатор видалено' };
+    setDeleteBusy(true);
+    try {
+      await api.post('/admin/delete-item', { type, id });
+    } catch (error) {
+      showFeedback({ tone: 'error', title: 'Не вдалося видалити елемент', message: getApiError(error) });
+      setDeleteBusy(false);
+      return;
+    }
+
+    setDeleteConfirmation(null);
+    if (type === 'category') {
+      setSelectedCat(null);
+      setSelectedQuestion(null);
+      setEditOpt(emptyEditOption);
+    }
+    showFeedback({ title: successTitles[type] || 'Елемент видалено' });
+
+    const refreshes = type === 'scenario' || type === 'modifier'
+      ? [pricing.fetchPrices()]
+      : [fetchConfig()];
+    const refreshResults = await Promise.allSettled(refreshes);
+    if (refreshResults.some((result) => result.status === 'rejected')) {
+      showFeedback({
+        tone: 'warning',
+        title: `${successTitles[type] || 'Елемент видалено'}, але дані не оновлено`,
+        message: 'Оновіть сторінку перед наступною зміною.',
+      });
+    }
+    setDeleteBusy(false);
+  };
+
+  const discardLocalChanges = () => {
+    setNewCat(emptyNewCategory);
+    setNewQuest(buildNewQuestionDefaults(selectedCat ? (config?.questions?.[selectedCat.code] || []) : []));
+    setNewOpt(emptyNewOption);
+    setEditOpt(emptyEditOption);
+    if (selectedCat) {
+      setEditCat({
+        code: selectedCat.code,
+        name: selectedCat.name,
+        requires_weight: selectedCat.requires_weight === 1,
+        skip_hidden_sku_questions: selectedCat.skip_hidden_sku_questions === 1,
+        marketing_rounding_enabled: selectedCat.marketing_rounding_enabled !== 0,
+        code_mutable: selectedCat.code_mutable !== false,
+      });
+    }
+    if (selectedQuestion) updateSelectedQuestionState(selectedQuestion);
+    pricing.discardLocalChanges();
   };
 
   const currentCatQuestions = selectedCat ? (config?.questions[selectedCat.code] || []) : [];
@@ -443,11 +592,20 @@ export function useAdminPanel() {
     autoAssignSkuIndexes,
     beginOptionEdit,
     canManagePricing,
+    canPublishSchema,
     canViewCatalog,
     canViewPricing,
+    cancelDelete,
     config,
     configError,
+    confirmDelete,
+    deleteBusy,
+    deleteConfirmation,
+    discardLocalChanges,
     canManageCatalog: auth.permissions.includes('catalog.manage'),
+    clearFeedback: () => setFeedback(null),
+    effectiveMode,
+    feedback,
     retryConfig: () => { setConfigError(''); fetchConfig().catch((error) => setConfigError(getApiError(error))); },
     currentCatQuestions,
     currentOptions,

@@ -1,4 +1,4 @@
-import { MemoryRouter } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AuthContext } from '../src/auth/auth-context.js';
@@ -13,13 +13,14 @@ const config = { categories: { BR: category }, questions: { BR: [] }, extraConfi
 const response = (data) => ({ data, status: 200 });
 
 function renderAdmin() {
+  const router = createMemoryRouter([{ path: '*', element: <AdminPage /> }]);
   render(
     <AuthContext.Provider value={{
       identity: { name: 'Admin' }, applicationUser: { id: 1, status: 'active' },
       permissions: ['catalog.view', 'catalog.manage'], roles: [],
       logout: vi.fn(), refresh: vi.fn(),
     }}>
-      <MemoryRouter><AdminPage /></MemoryRouter>
+      <RouterProvider router={router} />
     </AuthContext.Provider>
   );
 }
@@ -33,7 +34,7 @@ it('submits the enabled default when creating a category', async () => {
   vi.spyOn(api, 'get').mockResolvedValue(response(config));
   const post = vi.spyOn(api, 'post').mockResolvedValue(response({ id: 'NEW' }));
   renderAdmin();
-  await screen.findByRole('tab', { name: /Bracelets/ });
+  await screen.findByRole('button', { name: /Bracelets/ });
   fireEvent.click(screen.getAllByRole('button', { name: 'Категорія', exact: true })[0]);
   const rounding = screen.getByLabelText('Маркетингове округлення автоматичних цін');
   expect(rounding.checked).toBe(true);
@@ -49,7 +50,7 @@ it('submits zero when creating a category with rounding unchecked', async () => 
   vi.spyOn(api, 'get').mockResolvedValue(response(config));
   const post = vi.spyOn(api, 'post').mockResolvedValue(response({ id: 'EXACT' }));
   renderAdmin();
-  await screen.findByRole('tab', { name: /Bracelets/ });
+  await screen.findByRole('button', { name: /Bracelets/ });
   fireEvent.click(screen.getAllByRole('button', { name: 'Категорія', exact: true })[0]);
   const rounding = screen.getByLabelText('Маркетингове округлення автоматичних цін');
   fireEvent.click(rounding);
@@ -71,7 +72,7 @@ it('loads and submits the category rounding choice', async () => {
   });
   const put = vi.spyOn(api, 'put').mockResolvedValue(response({ success: true, code: 'BR' }));
   renderAdmin();
-  fireEvent.click(await screen.findByRole('tab', { name: /Bracelets/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /Bracelets/ }));
   fireEvent.click(screen.getAllByRole('button', { name: 'Категорія', exact: true })[1]);
   const rounding = screen.getByLabelText('Маркетингове округлення автоматичних цін');
   expect(rounding.checked).toBe(true);

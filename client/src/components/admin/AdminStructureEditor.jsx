@@ -1,21 +1,26 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Archive, ChevronDown, GripVertical, Pencil, Plus, Send, Trash2 } from 'lucide-react';
 import { SkuTemplatePreview } from './SkuTemplatePreview';
 import { formatConditionSummary } from '../../lib/admin-conditions';
 import { FormSection } from '../shared/FormSection';
 import { CategoryForm, MetaRow, OptionForm, OptionRow, QuestionForm } from './AdminCatalogForms';
 
-const EMPTY_EDIT_OPTION = { id: null, value_id: '', sku_code: '', label: '', visible_if_json: '', hidden_if_json: '', archived: false };
+const EMPTY_EDIT_OPTION = { id: null, value_id: '', sku_code: '', label: '', label_en: '', visible_if_json: '', hidden_if_json: '', archived: false };
+const EMPTY_NEW_CATEGORY = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false, marketing_rounding_enabled: true };
+const EMPTY_NEW_OPTION = { value_id: '', sku_code: '', label: '', label_en: '', visible_if_json: '', hidden_if_json: '', archived: false };
+const draftsMatch = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+const ruleText = (value) => value ? (typeof value === 'string' ? value : JSON.stringify(value)) : '';
 const isEnabled = (value) => value === 1 || value === true;
 export function AdminStructureEditor({
-  canManage = true,
+  canManage = true, canPublish = false,
   config, selectedCat, selectedQuestion, currentCatQuestions, currentOptions,
-  selectedQuestionInputType, schemaStatus, schemaPublishState, editCat, setEditCat,
-  editQuestion, setEditQuestion, newCat, setNewCat, newQuest, setNewQuest, newOpt,
-  setNewOpt, editOpt, setEditOpt, onSelectCategory, onSelectQuestion, addCategory,
+  selectedQuestionInputType, schemaStatus, schemaStatusError, retrySchemaStatus, schemaPublishState, editCat = {}, setEditCat,
+  editQuestion = {}, setEditQuestion, newCat = EMPTY_NEW_CATEGORY, setNewCat, newQuest = {}, setNewQuest, newOpt = EMPTY_NEW_OPTION,
+  setNewOpt, editOpt = EMPTY_EDIT_OPTION, setEditOpt, onSelectCategory, onSelectQuestion, addCategory,
   updateCategory, addQuestion, updateQuestion, reorderQuestions, autoAssignSkuIndexes,
   fillNextNewQuestionSkuIndex, addOption, archiveOption, beginOptionEdit, updateOption,
   publishSkuSchema, deleteItem,
+  onDirtyChange = () => {},
 }) {
   const [isCategoryEditOpen, setIsCategoryEditOpen] = useState(false);
   const [isNewCategoryOpen, setIsNewCategoryOpen] = useState(false);
@@ -28,6 +33,59 @@ export function AdminStructureEditor({
   const activeOptions = currentOptions.filter((option) => !isEnabled(option.archived));
   const archivedOptions = currentOptions.filter((option) => isEnabled(option.archived));
   const questionVisibilitySummary = selectedQuestion ? formatConditionSummary(selectedQuestion.visible_if_json, currentCatQuestions, config) : '';
+  const selectedOption = editOpt.id ? currentOptions.find((option) => option.db_id === editOpt.id) : null;
+  const nextDisplayOrder = String(currentCatQuestions.reduce((maxValue, question) => {
+    const value = Number(question.display_order ?? question.sku_index);
+    return Number.isFinite(value) ? Math.max(maxValue, value) : maxValue;
+  }, 0) + 1);
+  const nextSkuIndex = String(currentCatQuestions.filter((question) => isEnabled(question.include_in_sku))
+    .reduce((maxValue, question) => {
+      const value = Number(question.sku_index);
+      return Number.isFinite(value) ? Math.max(maxValue, value) : maxValue;
+    }, 0) + 1);
+  const catalogDirty = (
+    (isNewCategoryOpen && !draftsMatch(newCat, EMPTY_NEW_CATEGORY))
+    || (isCategoryEditOpen && selectedCat && !draftsMatch(editCat, {
+      code: selectedCat.code,
+      name: selectedCat.name,
+      requires_weight: isEnabled(selectedCat.requires_weight),
+      skip_hidden_sku_questions: isEnabled(selectedCat.skip_hidden_sku_questions),
+      marketing_rounding_enabled: selectedCat.marketing_rounding_enabled !== 0,
+      code_mutable: selectedCat.code_mutable !== false,
+    }))
+    || (isNewQuestionOpen && !draftsMatch(newQuest, {
+      key: '', label: '', display_order: nextDisplayOrder, sku_index: nextSkuIndex,
+      required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '',
+    }))
+    || (isQuestionEditOpen && selectedQuestion && !draftsMatch(editQuestion, {
+      key: selectedQuestion.id,
+      label: selectedQuestion.label,
+      display_order: selectedQuestion.display_order ?? selectedQuestion.sku_index,
+      sku_index: selectedQuestion.sku_index,
+      required: isEnabled(selectedQuestion.required),
+      include_in_sku: isEnabled(selectedQuestion.include_in_sku),
+      input_type: selectedQuestion.input_type || 'options',
+      sku_separator: selectedQuestion.sku_separator || '',
+      visible_if_json: ruleText(selectedQuestion.visible_if_json),
+    }))
+    || (isNewOptionOpen && !draftsMatch(newOpt, EMPTY_NEW_OPTION))
+    || Boolean(selectedOption && !draftsMatch(editOpt, {
+      id: selectedOption.db_id,
+      value_id: String(selectedOption.id),
+      sku_code: String(selectedOption.sku_code ?? selectedOption.id),
+      label: selectedOption.label,
+      label_en: selectedOption.label_en ?? '',
+      visible_if_json: ruleText(selectedOption.visible_if_json),
+      hidden_if_json: ruleText(selectedOption.hidden_if_json),
+      archived: isEnabled(selectedOption.archived),
+    }))
+  );
+
+  useEffect(() => {
+    onDirtyChange(Boolean(catalogDirty));
+  }, [catalogDirty, onDirtyChange]);
+
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
   const resetOptionEdit = () => setEditOpt(EMPTY_EDIT_OPTION);
   const closeDetailEditors = () => {
@@ -117,9 +175,9 @@ export function AdminStructureEditor({
           <div><h2>Структура каталогу</h2><p>Категорії, питання та варіанти</p></div>
           <button type="button" disabled={!canManage} onClick={() => { setIsCategoryEditOpen(false); setIsNewCategoryOpen((isOpen) => !isOpen); }} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Plus size={14} />Категорія</button>
         </div>
-        <div className="catalog-category-tabs" role="tablist" aria-label="Категорії каталогу">
+        <div className="catalog-category-tabs" role="group" aria-label="Категорії каталогу">
           {Object.values(config.categories).map((category) => (
-            <button key={category.code} type="button" role="tab" aria-selected={selectedCat?.code === category.code} onClick={() => selectCategory(category)} className={`catalog-category-tab ${selectedCat?.code === category.code ? 'is-active' : ''}`}>
+            <button key={category.code} type="button" aria-pressed={selectedCat?.code === category.code} onClick={() => selectCategory(category)} className={`catalog-category-tab ${selectedCat?.code === category.code ? 'is-active' : ''}`}>
               <span>{category.name}</span><small>{category.code}</small>
             </button>
           ))}
@@ -134,15 +192,22 @@ export function AdminStructureEditor({
                     <i />{schemaStatus.active ? `Схема V${schemaStatus.active.version}` : 'Без активної схеми'}{schemaStatus.draftChanged ? ` · зміни для V${schemaStatus.nextVersion}` : ' · опубліковано'}
                   </span>
                 )}
+                {!schemaStatus && !schemaStatusError && <span className="catalog-schema-state"><i />Завантажуємо стан схеми…</span>}
               </div>
               <div className="catalog-category-actions">
                 <button type="button" disabled={!canManage} onClick={() => { setIsNewCategoryOpen(false); setIsCategoryEditOpen((isOpen) => !isOpen); }} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Pencil size={14} />Категорія</button>
-                <button type="button" onClick={publishSkuSchema} disabled={!canManage || !schemaStatus?.draftChanged || schemaPublishState.loading} className="btn btn-primary flex items-center gap-1.5 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45">
-                  <Send size={14} />{schemaPublishState.loading ? 'Публікуємо...' : schemaStatus?.nextVersion ? `Опублікувати V${schemaStatus.nextVersion}` : 'Опублікувати'}
-                </button>
+                {canPublish && <button type="button" onClick={publishSkuSchema} disabled={!schemaStatus?.draftChanged || schemaPublishState.loading} className="btn btn-primary flex items-center gap-1.5 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45">
+                  <Send size={14} />{schemaPublishState.loading
+                    ? schemaPublishState.otherCategory
+                      ? `Публікується «${schemaPublishState.categoryName}»…`
+                      : 'Публікуємо…'
+                    : schemaStatus?.nextVersion ? `Опублікувати V${schemaStatus.nextVersion}` : 'Опублікувати'}
+                </button>}
                 <button type="button" disabled={!canManage} onClick={() => deleteItem('category', selectedCat.code)} className="catalog-icon-button is-danger" title="Видалити категорію" aria-label={`Видалити категорію ${selectedCat.name}`}><Trash2 size={15} /></button>
               </div>
             </div>
+            {schemaStatusError && <div className="catalog-context-error" role="alert">Не вдалося завантажити стан схеми. <button type="button" className="et-link" onClick={retrySchemaStatus}>Спробувати ще раз</button></div>}
+            {schemaPublishState.otherCategory && <p className="catalog-context-error" role="status">Завершуємо публікацію схеми для «{schemaPublishState.categoryName}». Дочекайтеся результату перед наступною публікацією.</p>}
             {schemaPublishState.error && <p className="catalog-context-error" role="alert">{schemaPublishState.error}</p>}
             <SkuTemplatePreview category={selectedCat} marker={schemaStatus?.draftChanged ? schemaStatus.nextMarker : schemaStatus?.active?.marker} questions={currentCatQuestions} />
           </>

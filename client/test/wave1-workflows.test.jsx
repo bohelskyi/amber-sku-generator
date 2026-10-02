@@ -88,7 +88,7 @@ it.each([true, false])('catalog keyboard ordering respects the existing manageme
   const category = { code: 'SV', name: 'Сувеніри' };
   const questions = [{ id: 'material', q_db_id: 1, label: 'Матеріал' }, { id: 'color', q_db_id: 2, label: 'Колір' }];
   const reorder = vi.fn(); const select = vi.fn();
-  render(<AdminStructureEditor canManage={canManage} config={{ categories: { SV: category } }} selectedCat={category}
+  render(<AdminStructureEditor canManage={canManage} canPublish config={{ categories: { SV: category } }} selectedCat={category}
     selectedQuestion={null} currentCatQuestions={questions} currentOptions={[]} schemaStatus={{ draftChanged: true, nextVersion: 2 }}
     schemaPublishState={{ loading: false }} reorderQuestions={reorder} onSelectQuestion={select} setEditOpt={vi.fn()} />);
   const item = screen.getByText('Матеріал').closest('[role="button"]');
@@ -97,6 +97,14 @@ it.each([true, false])('catalog keyboard ordering respects the existing manageme
   fireEvent.keyDown(item, { key: 'ArrowDown', altKey: true });
   if (canManage) expect(reorder).toHaveBeenCalledWith([questions[1], questions[0]]);
   else expect(reorder).not.toHaveBeenCalled();
-  expect(screen.getByRole('button', { name: 'Опублікувати V2' }).disabled).toBe(!canManage);
+  expect(screen.getByRole('button', { name: 'Опублікувати V2' }).disabled).toBe(false);
   expect(item.draggable).toBe(canManage);
+});
+
+it('does not expose schema publication without sku_schemas.publish', () => {
+  const category = { code: 'SV', name: 'Сувеніри' };
+  render(<AdminStructureEditor canManage config={{ categories: { SV: category } }} selectedCat={category}
+    selectedQuestion={null} currentCatQuestions={[]} currentOptions={[]} schemaStatus={{ draftChanged: true, nextVersion: 2 }}
+    schemaPublishState={{ loading: false }} setEditOpt={vi.fn()} />);
+  expect(screen.queryByRole('button', { name: 'Опублікувати V2' })).toBeNull();
 });

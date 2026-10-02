@@ -42,8 +42,10 @@ test('a refreshed persisted value replaces the stale matrix cell identity', () =
   );
   assert.match(
     hookSource,
-    /api\.post\('\/admin\/price-cell',[\s\S]*?\.then\(\(\) => fetchPricesForCategory\(categoryCode\)\)/
+    /api\.post\('\/admin\/price-cell'/
   );
+  assert.match(hookSource, /selectionEpoch !== categorySelectionEpoch\.current/);
+  assert.match(hookSource, /Ціну збережено, але дані не оновлено/);
 });
 
 test('scenario settings save keeps the refreshed scenario selected and editable', () => {

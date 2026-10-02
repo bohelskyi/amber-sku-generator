@@ -440,7 +440,7 @@ test('recount uses a Builder-aligned editor with one authoritative comparison su
   assert.match(stylesSource, /\.recount-price-delta > \.recount-price-delta-usd \{[\s\S]*text-xs font-semibold text-\[#713b10\]/);
 });
 
-test('catalog structure uses category tabs and a dense question master-detail workspace', () => {
+test('catalog structure uses category choices and a dense question master-detail workspace', () => {
   const source = fs.readFileSync(
     new URL('../src/components/admin/AdminStructureEditor.jsx', import.meta.url),
     'utf8'
@@ -450,7 +450,8 @@ test('catalog structure uses category tabs and a dense question master-detail wo
     'utf8'
   );
 
-  assert.match(source, /role="tablist"/);
+  assert.match(source, /role="group" aria-label="Категорії каталогу"/);
+  assert.match(source, /aria-pressed=/);
   assert.match(source, /catalog-category-tab/);
   assert.match(source, /catalog-workspace/);
   assert.match(source, /catalog-master/);

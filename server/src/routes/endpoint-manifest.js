@@ -138,6 +138,7 @@ const ENDPOINT_MANIFEST = Object.freeze([
   endpoint('GET', '/admin/config', 'catalog.view'),
   endpoint('GET', '/admin/sku-schema/:catCode', 'catalog.view'),
   endpoint('POST', '/admin/sku-schema/:catCode/publish', 'sku_schemas.publish'),
+  endpoint('GET', '/admin/pricing/config', 'pricing.view'),
   endpoint('GET', '/admin/prices/:catCode', 'pricing.view'),
   endpoint('GET', '/admin/repricing/scenarios', 'repricing.view'),
   endpoint('GET', '/admin/correction-requests', 'corrections.view'),

@@ -1,6 +1,6 @@
 import AdministrationPage from '../src/pages/AdministrationPage.jsx';
 import { useEffect } from 'react';
-import { MemoryRouter } from 'react-router-dom';
+import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router-dom';
 import {
   cleanup,
   fireEvent,
@@ -844,18 +844,19 @@ describe('permission-aware business UI', () => {
 
   it('renders Manager price matrices and modifiers read-only without catalog.view', async () => {
     const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
-      if (url === '/config') return response(config);
+      if (url === '/admin/pricing/config') return response(config);
       if (url === '/admin/prices/BR') return response(pricing);
       throw new Error(`Unexpected GET ${url}`);
     });
 
+    const router = createMemoryRouter([{ path: '*', element: <AdminPage /> }]);
     render(
       <AuthContext.Provider value={authValue(['pricing.view'])}>
-        <MemoryRouter><AdminPage /></MemoryRouter>
+        <RouterProvider router={router} />
       </AuthContext.Provider>
     );
 
-    const category = await screen.findByRole('tab', { name: /Браслети/ });
+    const category = await screen.findByRole('button', { name: /Браслети/ });
     expect(screen.queryByText('Структура каталогу')).toBeNull();
     fireEvent.click(category);
 
@@ -865,7 +866,7 @@ describe('permission-aware business UI', () => {
     expect(get).toHaveBeenCalledWith('/admin/prices/BR');
     expect(screen.queryByRole('button', { name: 'Дублювати сценарій' })).toBeNull();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Модифікатори' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Модифікатори' }));
     expect(await screen.findByText('Модифікатор ×1.2')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Редагувати/ })).toBeNull();
   });

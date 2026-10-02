@@ -58,12 +58,13 @@ export function DefinitionEditor({ definition, onChange, registry, readOnly = fa
   const select = (column, rowIndex, sourceId) => { trigger.current = document.activeElement; setSelection({ column, rowIndex, sourceId, epoch: ++epoch.current }); };
   const openCreation = (anchor = null) => { if (readOnly || creation) return; request(() => { close(); setCreation({ groupIndex, rowIndex: selection?.rowIndex || 0, anchor }); }); };
   useEffect(() => {
+    if (!visible) return undefined;
     const update = () => { const width = root.current?.getBoundingClientRect().width || window.innerWidth - 48; setOverlay(width < 1220); };
     update(); const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null;
     if (root.current) observer?.observe(root.current);
     window.addEventListener('resize', update);
     return () => { observer?.disconnect(); window.removeEventListener('resize', update); };
-  }, []);
+  }, [visible]);
   useEffect(() => { onPendingChange?.(panelPending || dialogPending); return () => onPendingChange?.(false); }, [panelPending, dialogPending, onPendingChange]);
   useEffect(() => { onEditingChange?.(Boolean(selection || creation || operation)); return () => onEditingChange?.(false); }, [selection, creation, operation, onEditingChange]);
   useEffect(() => { if (!panelPending && !dialogPending) return; const warn = (e) => { e.preventDefault(); e.returnValue = ''; }; window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn); }, [panelPending, dialogPending]);
@@ -84,18 +85,18 @@ export function DefinitionEditor({ definition, onChange, registry, readOnly = fa
   if (!supported || !definition.groups[groupIndex]) return <div role="note">Цей формат ще не підтримується формами. Визначення збережено без змін.<details><summary>Технічне визначення</summary><pre>{JSON.stringify(definition, null, 2)}</pre></details></div>;
   const inspectorOverlay = overlay || Boolean(selection && columnIntent(definition, ['groups', groupIndex, 'rows', selection.rowIndex, 'cells', selection.column]) === 'condition');
   return <div ref={root} className="et-fields">
-    {!readOnly && !selection && !creation && !operation && <IntegrationCategoryForm definition={definition} registry={registry} onChange={guardedChange} />}
-    <CategoryTabs groups={definition.groups} selected={groupIndex} panelId={panelId} onSelect={(index) => request(() => { close(); setGroupIndex(index); })} />
+    {visible && !readOnly && !selection && !creation && !operation && <IntegrationCategoryForm definition={definition} registry={registry} onChange={guardedChange} />}
+    {visible && <CategoryTabs groups={definition.groups} selected={groupIndex} panelId={panelId} onSelect={(index) => request(() => { close(); setGroupIndex(index); })} />}
     <div role="tabpanel" id={panelId} aria-label={definition.groups[groupIndex].name} className={selection && !inspectorOverlay ? 'et-design-layout et-design-with-panel' : 'et-design-layout'}>
-      <TemplateDesignGrid definition={definition} groupIndex={groupIndex} registry={registry} selected={selection} readOnly={readOnly} onCreate={() => openCreation()} onSelect={(code, row) => request(() => select(code, row))} onAction={(action, code) => {
+      {visible && <TemplateDesignGrid definition={definition} groupIndex={groupIndex} registry={registry} selected={selection} readOnly={readOnly} onCreate={() => openCreation()} onSelect={(code, row) => request(() => select(code, row))} onAction={(action, code) => {
         if (action === 'configure') { request(() => select(code, 0)); return; }
         if (action === 'left' || action === 'right') { const columns = definition.groups[groupIndex].columns; openCreation(action === 'left' ? code : columns[columns.indexOf(code) + 1] ?? null); return; }
         request(() => { close(); setOperation({ groupIndex, column: code, action }); });
-      }} />
+      }} />}
       {selection && <ColumnInspector key={groupIndex + '/' + selection.epoch} definition={definition} {...selection} groupIndex={groupIndex} registry={registry} readOnly={readOnly} loadSource={loadSource} diagnostics={diagnostics} overlay={inspectorOverlay} suspended={Boolean(transition) || !visible}
         onPendingChange={setPanelPending} onCancel={close} onRequestClose={() => request(close)} onApply={(next, base) => { if (!guardedChange(next, base)) return false; close(); return true; }} />}
     </div>
-    <p className="et-design-caption">Основний і EN — незалежні правила, не приклади значень товарів. Категорія змінює лише вигляд.</p>
+    {visible && <p className="et-design-caption">Основний і EN — незалежні правила, не приклади значень товарів. Категорія змінює лише вигляд.</p>}
     {creation && <NewColumnDialog suspended={!visible} {...creation} definition={definition} registry={registry} loadSource={loadSource} readOnly={readOnly} onPendingChange={setDialogPending} onCancel={() => setCreation(null)} onCreate={(next, code) => {
       if (!guardedChange(next)) return false;
       setCreation(null); setGroupIndex(creation.groupIndex); setSelection(null);

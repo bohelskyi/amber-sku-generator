@@ -1,4 +1,4 @@
-import { MemoryRouter } from 'react-router-dom';
+import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router-dom';
 import {
   act,
   cleanup,
@@ -919,12 +919,13 @@ describe('Admin catalog workflow', () => {
       throw new Error(`Unexpected POST ${url}`);
     });
 
+    const router = createMemoryRouter([{ path: '*', element: <AdminPage /> }]);
     render(
       <AuthContext.Provider value={authValue(['catalog.view', 'catalog.manage', 'sku_schemas.publish'])}>
-        <MemoryRouter><AdminPage /></MemoryRouter>
+        <RouterProvider router={router} />
       </AuthContext.Provider>
     );
-    fireEvent.click(await screen.findByRole('tab', { name: /Bracelets/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Bracelets/ }));
     fireEvent.click(screen.getByText('Kind').closest('[role="button"]'));
     fireEvent.click(screen.getByRole('button', { name: 'Редагувати' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Назва питання' }), {

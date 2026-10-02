@@ -4,6 +4,7 @@ import { ConditionBuilder } from './ConditionBuilder';
 import { getMatrixPriceValidationError, handleNumberKeyDown, handleNumberWheel, normalizeDecimalInput } from '../../lib/number-input';
 import { getPricingAxis } from '../../lib/pricing-axis';
 import { getScenarioMatrixCellKey } from '../../lib/admin-pricing-state';
+import { SaveState } from '../ui/index.js';
 import { formatDecimal } from '../../lib/formatters';
 
 const defaultWeightBands = [
@@ -189,7 +190,7 @@ export function ModifierForm({ config, currentCatQuestions, isNew = false, modif
   );
 }
 
-export function ScenarioMatrix({ currentCatQuestions, handlePriceChange, matrixValidationError, readOnly, scenario, setMatrixValidationError }) {
+export function ScenarioMatrix({ currentCatQuestions, handlePriceChange, matrixCellSaveStates = {}, matrixValidationError, readOnly, scenario, setMatrixValidationError }) {
   const axisX = getPricingAxis(scenario.axis_x_key, currentCatQuestions, 'X', scenario.weight_bands || [], scenario.match_json);
   const axisY = getPricingAxis(scenario.axis_y_key, currentCatQuestions, 'Base', scenario.weight_bands || [], scenario.match_json);
 
@@ -214,6 +215,7 @@ export function ScenarioMatrix({ currentCatQuestions, handlePriceChange, matrixV
                 <th>{xOption.label}</th>
                 {axisY.options.map((yOption) => {
                   const cell = scenario.matrix.find((item) => item.x_val === xOption.id && item.y_val === yOption.id);
+                  const saveState = matrixCellSaveStates[`${scenario.id}:${xOption.id}:${yOption.id}`];
                   return (
                     <td key={yOption.id}>
                       <input
@@ -244,6 +246,7 @@ export function ScenarioMatrix({ currentCatQuestions, handlePriceChange, matrixV
                           Promise.resolve(handlePriceChange(scenario.id, xOption.id, yOption.id, normalizedPrice)).catch((error) => setMatrixValidationError(error.response?.data?.error || error.message));
                         }}
                       />
+                      {!readOnly && saveState && <SaveState state={saveState.state} message={saveState.state === 'error' ? 'Не збережено' : saveState.message} />}
                     </td>
                   );
                 })}

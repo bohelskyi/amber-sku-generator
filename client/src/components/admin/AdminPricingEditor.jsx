@@ -1,9 +1,21 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Copy, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { FormSection } from '../shared/FormSection';
 import { formatConditionSummary } from '../../lib/admin-conditions';
 import { formatDecimal } from '../../lib/formatters';
 import { MetaItem, ModifierForm, ScenarioForm, ScenarioMatrix } from './AdminPricingForms';
+import { buildScenarioEditorDraft } from '../../lib/admin-pricing-state';
+
+const EMPTY_NEW_SCENARIO = {
+  name: '', group_name: '', match_json: '', axis_x_key: '', axis_y_key: '', priority: '0',
+  status: 'draft', price_mode: 'category_default', apply_modifiers: true, weight_bands: [],
+};
+const EMPTY_NEW_MODIFIER = { match_json: '', factor: '' };
+const draftsMatch = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+const formatMatchJson = (value) => {
+  if (value === null || value === undefined) return '{}';
+  return typeof value === 'string' ? value : JSON.stringify(value);
+};
 const getScenarioGroupName = (scenario) => {
   const groupName = String(scenario.group_name || '').trim();
   if (groupName) return groupName;
@@ -64,10 +76,13 @@ export function AdminPricingEditor({
   duplicateScenario,
   deleteItem,
   handlePriceChange,
+  matrixCellSaveStates,
   addScenario,
   saveModifierEdit,
   addModifier,
   readOnly = false,
+  onDirtyChange = () => {},
+  requestTransition = (action) => action(),
 }) {
   const [workspaceMode, setWorkspaceMode] = useState('scenarios');
   const [scenarioTabState, setScenarioTabState] = useState({ scenarioId: null, tab: 'matrix' });
@@ -79,6 +94,26 @@ export function AdminPricingEditor({
   const [scenarioStatusFilter, setScenarioStatusFilter] = useState('all');
   const [modifierQuery, setModifierQuery] = useState('');
   const [matrixValidation, setMatrixValidation] = useState({ scenarioId: null, message: '' });
+
+  const editedScenarioSource = pricesData?.scenarios?.find((scenario) => scenario.id === editScenario?.id);
+  const editedModifierSource = pricesData?.modifiers?.find((modifier) => modifier.id === editModifier?.id);
+  const pricingDirty = (
+    (newScenarioCategory !== null && !draftsMatch(newScenario, EMPTY_NEW_SCENARIO))
+    || (newModifierCategory !== null && !draftsMatch(newModifier, EMPTY_NEW_MODIFIER))
+    || Boolean(editScenario && editedScenarioSource
+      && !draftsMatch(editScenario, buildScenarioEditorDraft(editedScenarioSource)))
+    || Boolean(editModifier && editedModifierSource && !draftsMatch(editModifier, {
+      id: editedModifierSource.id,
+      match_json: formatMatchJson(getModifierRule(editedModifierSource)),
+      factor: formatDecimal(editedModifierSource.factor),
+    }))
+  );
+
+  useEffect(() => {
+    onDirtyChange(pricingDirty);
+  }, [onDirtyChange, pricingDirty]);
+
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
   if (!selectedCat || !pricesData) return null;
 
@@ -116,11 +151,13 @@ export function AdminPricingEditor({
   });
 
   const selectScenario = (scenario) => {
-    setScenarioSelection({ categoryCode: selectedCat.code, id: scenario.id });
-    setNewScenarioCategory(null);
-    setScenarioTabState({ scenarioId: scenario.id, tab: 'matrix' });
-    setMatrixValidation({ scenarioId: scenario.id, message: '' });
-    setEditScenario(null);
+    requestTransition(() => {
+      setScenarioSelection({ categoryCode: selectedCat.code, id: scenario.id });
+      setNewScenarioCategory(null);
+      setScenarioTabState({ scenarioId: scenario.id, tab: 'matrix' });
+      setMatrixValidation({ scenarioId: scenario.id, message: '' });
+      setEditScenario(null);
+    });
   };
 
   const openScenarioSettings = () => {
@@ -137,9 +174,11 @@ export function AdminPricingEditor({
   });
 
   const selectModifier = (modifier) => {
-    setModifierSelection({ categoryCode: selectedCat.code, id: modifier.id });
-    setNewModifierCategory(null);
-    setEditModifier(null);
+    requestTransition(() => {
+      setModifierSelection({ categoryCode: selectedCat.code, id: modifier.id });
+      setNewModifierCategory(null);
+      setEditModifier(null);
+    });
   };
 
   const openModifierEdit = () => {
@@ -151,9 +190,9 @@ export function AdminPricingEditor({
     <div className="pricing-shell fade-up">
       <div className="pricing-workspace-header">
         <div><p className="eyebrow">Ціни</p><h2>Ціноутворення · {selectedCat.name}</h2></div>
-        <div className="pricing-mode-tabs" role="tablist" aria-label="Режим ціноутворення">
-          <button type="button" role="tab" aria-selected={workspaceMode === 'scenarios'} className={workspaceMode === 'scenarios' ? 'is-active' : ''} onClick={() => setWorkspaceMode('scenarios')}>Сценарії</button>
-          <button type="button" role="tab" aria-selected={workspaceMode === 'modifiers'} className={workspaceMode === 'modifiers' ? 'is-active' : ''} onClick={() => setWorkspaceMode('modifiers')}>Модифікатори</button>
+        <div className="pricing-mode-tabs" role="group" aria-label="Режим ціноутворення">
+          <button type="button" aria-pressed={workspaceMode === 'scenarios'} className={workspaceMode === 'scenarios' ? 'is-active' : ''} onClick={() => requestTransition(() => setWorkspaceMode('scenarios'))}>Сценарії</button>
+          <button type="button" aria-pressed={workspaceMode === 'modifiers'} className={workspaceMode === 'modifiers' ? 'is-active' : ''} onClick={() => requestTransition(() => setWorkspaceMode('modifiers'))}>Модифікатори</button>
         </div>
       </div>
 
@@ -161,7 +200,7 @@ export function AdminPricingEditor({
         {workspaceMode === 'scenarios' ? (
           <>
             <aside className="pricing-master">
-              <div className="pricing-master-header"><div><h3>Сценарії</h3><p>{scenarios.length} у категорії</p></div>{!readOnly && <button type="button" className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs" onClick={() => { setNewScenarioCategory(selectedCat.code); setEditScenario(null); }}><Plus size={14} />Додати</button>}</div>
+              <div className="pricing-master-header"><div><h3>Сценарії</h3><p>{scenarios.length} у категорії</p></div>{!readOnly && <button type="button" className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs" onClick={() => requestTransition(() => { setNewScenarioCategory(selectedCat.code); setEditScenario(null); })}><Plus size={14} />Додати</button>}</div>
               <div className="pricing-master-filters">
                 <label className="pricing-search"><Search size={14} /><input value={scenarioQuery} onChange={(event) => setScenarioQuery(event.target.value)} placeholder="Пошук сценарію" aria-label="Пошук цінового сценарію" /></label>
                 <select value={scenarioStatusFilter} onChange={(event) => setScenarioStatusFilter(event.target.value)} aria-label="Фільтр статусу сценаріїв"><option value="all">Усі статуси</option><option value="active">Активні</option><option value="inactive">Неактивні</option></select>
@@ -204,12 +243,12 @@ export function AdminPricingEditor({
                     <MetaItem label="Пріоритет" value={selectedScenario.priority || 0} />
                     <MetaItem label="Режим" value={getPriceModeLabel(selectedScenario.price_mode)} />
                   </div>
-                  <div className="pricing-local-tabs" role="tablist" aria-label="Редактор сценарію">
-                    <button type="button" role="tab" aria-selected={scenarioTab === 'matrix'} className={scenarioTab === 'matrix' ? 'is-active' : ''} onClick={() => setScenarioTabState({ scenarioId: selectedScenario.id, tab: 'matrix' })}>Матриця</button>
-                    {!readOnly && <button type="button" role="tab" aria-selected={scenarioTab === 'settings'} className={scenarioTab === 'settings' ? 'is-active' : ''} onClick={openScenarioSettings}>Налаштування</button>}
+                  <div className="pricing-local-tabs" role="group" aria-label="Редактор сценарію">
+                    <button type="button" aria-pressed={scenarioTab === 'matrix'} className={scenarioTab === 'matrix' ? 'is-active' : ''} onClick={() => requestTransition(() => { setEditScenario(null); setScenarioTabState({ scenarioId: selectedScenario.id, tab: 'matrix' }); })}>Матриця</button>
+                    {!readOnly && <button type="button" aria-pressed={scenarioTab === 'settings'} className={scenarioTab === 'settings' ? 'is-active' : ''} onClick={openScenarioSettings}>Налаштування</button>}
                   </div>
                   {scenarioTab === 'matrix' ? (
-                    <ScenarioMatrix currentCatQuestions={currentCatQuestions} handlePriceChange={handlePriceChange} matrixValidationError={matrixValidationError} readOnly={readOnly} scenario={selectedScenario} setMatrixValidationError={(message) => setMatrixValidation({ scenarioId: selectedScenario.id, message })} />
+                    <ScenarioMatrix currentCatQuestions={currentCatQuestions} handlePriceChange={handlePriceChange} matrixCellSaveStates={matrixCellSaveStates} matrixValidationError={matrixValidationError} readOnly={readOnly} scenario={selectedScenario} setMatrixValidationError={(message) => setMatrixValidation({ scenarioId: selectedScenario.id, message })} />
                   ) : editScenario?.id === selectedScenario.id ? (
                     <ScenarioForm config={config} currentCatQuestions={currentCatQuestions} groupOptions={knownGroupNames} onCancel={() => { setEditScenario(null); setScenarioTabState({ scenarioId: selectedScenario.id, tab: 'matrix' }); }} onSave={saveScenarioSettings} scenario={editScenario} selectedCat={selectedCat} setScenario={setEditScenario} />
                   ) : null}
@@ -220,7 +259,7 @@ export function AdminPricingEditor({
         ) : (
           <>
             <aside className="pricing-master">
-              <div className="pricing-master-header"><div><h3>Модифікатори</h3><p>{modifiers.length} у категорії</p></div>{!readOnly && <button type="button" className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs" onClick={() => { setNewModifierCategory(selectedCat.code); setEditModifier(null); }}><Plus size={14} />Додати</button>}</div>
+              <div className="pricing-master-header"><div><h3>Модифікатори</h3><p>{modifiers.length} у категорії</p></div>{!readOnly && <button type="button" className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs" onClick={() => requestTransition(() => { setNewModifierCategory(selectedCat.code); setEditModifier(null); })}><Plus size={14} />Додати</button>}</div>
               <div className="pricing-master-filters"><label className="pricing-search full-width"><Search size={14} /><input value={modifierQuery} onChange={(event) => setModifierQuery(event.target.value)} placeholder="Пошук модифікатора" aria-label="Пошук цінового модифікатора" /></label></div>
               <div className="pricing-master-list">
                 {filteredModifiers.map((modifier) => {
