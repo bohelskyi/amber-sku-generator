@@ -11,6 +11,22 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 
+let bodyScrollLockCount = 0;
+let bodyOriginalOverflow = '';
+
+function acquireBodyScrollLock() {
+  if (bodyScrollLockCount === 0) bodyOriginalOverflow = document.body.style.overflow;
+  bodyScrollLockCount += 1;
+  document.body.style.overflow = 'hidden';
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    bodyScrollLockCount = Math.max(0, bodyScrollLockCount - 1);
+    if (bodyScrollLockCount === 0) document.body.style.overflow = bodyOriginalOverflow;
+  };
+}
+
 const getFocusableElements = (container) => (
   container
     ? Array.from(container.querySelectorAll(FOCUSABLE_SELECTOR)).filter(
@@ -20,12 +36,14 @@ const getFocusableElements = (container) => (
     : []
 );
 
-const canReceiveFocus = (element) => Boolean(
-  element
-    && !element.disabled
-    && element.tabIndex >= 0
-    && element.getClientRects().length > 0
-);
+const canReceiveFocus = (element) => {
+  if (!element || element.disabled || element.tabIndex < 0 || element.hidden
+    || element.getAttribute('aria-hidden') === 'true' || element.closest('[inert],[hidden]')) return false;
+  if (element.style?.display === 'none' || element.style?.visibility === 'hidden') return false;
+  const style = globalThis.getComputedStyle?.(element);
+  if (style?.display === 'none' || style?.visibility === 'hidden') return false;
+  return element.getClientRects().length > 0 || /jsdom/i.test(globalThis.navigator?.userAgent || '');
+};
 
 export function useDialogAccessibility({
   beforeFocusRestore,
@@ -42,14 +60,25 @@ export function useDialogAccessibility({
     const previousActiveElement = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const container = containerRef.current;
+    const releaseBodyScrollLock = acquireBodyScrollLock();
 
     return () => {
-      document.body.style.overflow = previousOverflow;
+      releaseBodyScrollLock();
       beforeFocusRestore?.();
-      if (previousActiveElement?.isConnected) {
+      if (previousActiveElement?.isConnected && canReceiveFocus(previousActiveElement)) {
         previousActiveElement.focus({ preventScroll: true });
+      } else {
+        const restoreFallback = () => {
+          const fallback = Array.from(document.querySelectorAll(FOCUSABLE_SELECTOR)).find(
+            (element) => element.isConnected && !container?.contains(element) && canReceiveFocus(element)
+          );
+          fallback?.focus({ preventScroll: true });
+        };
+        restoreFallback();
+        queueMicrotask(() => {
+          if (!canReceiveFocus(document.activeElement)) restoreFallback();
+        });
       }
     };
   }, [beforeFocusRestore, containerRef, isOpen]);

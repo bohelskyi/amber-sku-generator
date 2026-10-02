@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { EmptyState, StatusBadge } from '../app/UiPrimitives.jsx';
+import { EmptyState, SectionHeader, StatusBadge } from '../ui/index.js';
 
 export function CategoryCard({ category }) {
   const operational = category.operational;
@@ -19,10 +19,8 @@ export default function MagentoOverview({ categories, all = false, canManage }) 
   const operational = categories.filter((category) => category.operational.count > 0);
   const preparation = categories.filter((category) => category.preparation.needed && !category.operational.count);
   return <div className="space-y-5">
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <h2 className="text-xl font-semibold">{all ? 'Усі категорії' : 'Потребують уваги'}</h2>
-      <Link className="btn btn-outline btn-compact-md" to={all ? '/admin/magento' : '/admin/magento/categories'}>{all ? 'До огляду' : 'Усі категорії'}</Link>
-    </div>
+    <SectionHeader title={all ? 'Усі категорії' : 'Потребують уваги'}
+      actions={<Link className="btn btn-outline btn-compact-md" to={all ? '/admin/magento' : '/admin/magento/categories'}>{all ? 'До огляду' : 'Усі категорії'}</Link>} />
     {all ? <div className="magento-category-grid">{categories.map((category) => <CategoryCard key={category.code} category={category} />)}</div> : <>
       {operational.length > 0 && <section aria-labelledby="magento-operational-title"><h3 id="magento-operational-title" className="mb-3 font-semibold">Проблеми поточної доставки</h3>
         <div className="magento-category-grid">{operational.map((category) => <CategoryCard key={category.code} category={category} />)}</div>
