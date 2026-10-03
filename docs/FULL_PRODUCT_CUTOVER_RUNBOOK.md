@@ -126,6 +126,115 @@ SKU dispositions are `verified_absent` or `retired_reconciled`; file disposition
 are `quarantined_do_not_import` or `consumed_and_reconciled`. These are recorded
 operator assertions. An application cannot revoke a downloaded file.
 
+## Historical ambiguity after recount
+
+This is a diagnosis/review procedure, not authorization to resolve a hold. The
+operator-supplied 2026-10-03 case is public article `SV5111010`, current product
+`5033`, ancestor `1368`, correction `1509`. Its saved revision/delivery version
+are `1`/`1`, route `hold`, reason `historical_ambiguity`, classification
+`historical_ambiguous`, primary reason `INFERRED_HISTORY_WITHOUT_EXACT_MEMBERSHIP`.
+No production or Magento access was performed to verify this report.
+
+The local planner's `syncEligibility()` rejects this hold for CREATE and UPDATE.
+`sync-job.service.enqueue()` records safe blockers before `sync-job-plan.intent()`
+rejects the non-sendable plan, before job insertion or dispatch. The automatic
+worker records `needs_attention/data_or_binding`; only transient retry handling
+increments request `attempts`. Thus zero attempts and no active job are consistent
+with this local pre-dispatch failure. They do **not** prove that planning performed
+no Magento GET: `previewProduct()` discovers remote evidence before completing
+eligibility. Opening Attention/Product Detail performs local reads only.
+
+Safest existing first step, from `server/`, is the **read-only** `review` action.
+Store the following command outside the repository, replacing the database name
+and actor with verified target values. Use an explicitly configured secret
+`DATABASE_URL`; do not copy credentials into either file. Output must be new.
+
+```json
+{
+  "action": "review",
+  "expectedDatabase": "EXACT_TARGET_NAME",
+  "actorUserId": 123,
+  "productIds": [1368, 5033]
+}
+```
+
+```text
+node scripts/full-product-cutover.js /secure/review-command.json /secure/new-review-result.json
+```
+
+This calls `dryRunRepair` → `loadRepairInput` → `buildRepairManifest` in a local
+repeatable-read/read-only transaction. It reads the complete retained inventory
+and filters returned entries to these IDs; it is not a small per-product database
+scan. It performs no Magento GET, job creation, audit write or reconciliation.
+CLI review requires database access and an actor ID but does not recheck the
+actor's capability; every mutation separately rechecks active `exports.reconcile`.
+
+Review the returned `beforeFingerprint`, `lifecycle`, `before`, `ancestorChain`,
+`lineageProductIds`, `terminalDescendants`, `correctionId`, `independentExclusion`,
+`exposure`, `indicators`, generated/confirmed memberships and historical-index
+diagnostics. Specifically establish:
+
+- Current product identity and immutable reservation; exact internal SKUs and
+  shared public identity for 1368 and 5033; intact correction 1509 and terminal
+  current successor; no conflicting descendant, reservation or active work.
+- Ancestor 1368's lifecycle origin/coverage, prior reconciliation and exclusion
+  provenance, revision/confirmation/delivery counters, cutover baseline and
+  external-delivery receipts. The recount classifier additionally considers
+  unresolved lifecycle coverage and baseline/external-delivery indicators;
+  inspect these alongside the repair manifest's retained-file classification.
+- Exact stored snapshot membership, immutable CSV/artifact bytes and hashes,
+  generated versus confirmed state, historical sidecars, legacy cursor/events
+  and price exposure flags. A cursor/range/flag or missing membership cannot
+  prove absence or actual Magento import. The supplied empty `snapshotIds`
+  array alone does not establish that ancestry was never exposed.
+- Actual external/file disposition, including any downloaded files, and exact
+  public-SKU remote identity evidence if needed by the human investigation.
+  Such an explicit remote read is separate from local review. Never rename or
+  retire the stable public article merely because an internal revision retired.
+- Request/job/step history for this public identity: desired/synced generation,
+  active associations and any dispatched or unverified work. The supplied request
+  is generation 7/0 with no active job; obtain fresh evidence before any decision.
+
+The supplied evidence is insufficient to authorize a resolution. If fresh review
+still finds an intact held terminal successor with ambiguous history and no
+integrity issues, **`replacement` is the applicable existing command class**.
+It needs all exact ancestor-SKU and retained-file dispositions plus explicit
+`externalHistory: {disposition: "resolved", evidence: "..."}`. Unknown/independent
+exclusions need the separately reviewed release decision. Do not invent evidence.
+`generated_first_delivery` rejects any correction successor, even if ancestor
+files are generated-only. `unexposed_first_delivery` is available only if retained
+evidence actually establishes `reliably_unexposed`; the service also requires
+`exclusionResolution` with `recount_only_attested` (or `release` for an excluded
+business state) and evidence. The exact-Magento-exposure command below rejects
+correction lineage, so an exact GET alone cannot resolve this successor.
+
+`reconcileFullProduct` is the existing reviewed command boundary: access/lifecycle
+coordination → ascending lineage product locks → lifecycle locks → fresh manifest
+and fingerprint comparison → delivery-version CAS → atomic immutable audit receipt.
+Its fingerprint binds full product state, lineage, lifecycle rows (including
+revision/confirmed/delivery counters), reservations, file fingerprints, cursor,
+events, price revisions and exclusion/classification evidence. `successorId`,
+`deliveryVersion`, `beforeFingerprint`, full dispositions, reason and resolution key
+must come from fresh reviewed evidence; the example version `1` is not permission
+to reuse stale evidence. The command itself performs no Magento GET or write.
+
+Do not promise a normal route or automatic delivery after resolution:
+`unexposed_first_delivery` yields `normal`; `replacement` yields `replacement`
+and increments delivery version. Replacement → normal currently requires matching
+captured snapshot confirmation, or the separate pre-cutover external-delivery
+acknowledgement. Product CSV is retired in this case and that acknowledgement is
+disabled after cutover. Successful API sync does not complete this lifecycle route.
+Also, with business exclusion already `none` and product flag already zero, a
+replacement resolution can change only lifecycle state: it need not advance the
+product trigger's generation or clear a parked `needs_attention` request. None of
+these gaps authorizes a direct UPDATE, requeue, resend or changed semantics here.
+
+A future browser reconciliation workflow is a separate product/security decision.
+The reusable reviewed primitive exists, but it would need authenticated preview
+authority, complete evidence/disposition review, stale-review recovery and an
+explicit post-cutover delivery/completion policy. This correction adds diagnosis
+and handoff only; it adds no HTTP reconciliation surface.
+
 ## Exact Magento SKU evidence: exposure-only reconciliation
 
 Migration 039 initializes existing non-retired products as

@@ -6,6 +6,7 @@ import { api } from '../../lib/api.js';
 import { MagentoSyncStatus } from './MagentoSyncStatus.jsx';
 import { ProductMagentoAttention } from './ProductMagentoAttention.jsx';
 import { ProductNameConflict } from './ProductNameConflict.jsx';
+import { LifecycleReconciliationNotice } from './LifecycleReconciliationNotice.jsx';
 
 export function ProductMagentoState({ product, onRepairCharacteristics, onSaved }) {
   const { permissions = [], principalLifetime } = useContext(AuthContext) || {};
@@ -51,10 +52,13 @@ export function ProductMagentoState({ product, onRepairCharacteristics, onSaved 
   }, [canRead, waiting]);
   if (!canRead) return null;
   const hasReadinessProblem = current?.problems?.some((problem) => problem.code === 'PRODUCT_EVALUATION_NOT_READY');
+  const lifecycleProblem = current?.problems?.find((problem) => problem.resolution === 'lifecycle_reconciliation');
   return <div className="product-sync-state px-4 py-2" aria-live="polite">
-    <MagentoSyncStatus status={hasReadinessProblem ? { ...current, reason: null } : current} />
+    <MagentoSyncStatus status={hasReadinessProblem || lifecycleProblem ? { ...current, reason: null } : current} />
     {current?.state === 'needs_attention' && <Link className="text-xs underline" to="/sync-problems">Переглянути проблему</Link>}
-    <ProductMagentoAttention key={productId} product={{ ...product, nameConflict: Boolean(current?.nameConflict) }} problems={current?.problems || []}
+    {lifecycleProblem && <section className="mt-2"><h3 className="font-semibold">{lifecycleProblem.message}</h3>
+      <LifecycleReconciliationNotice problem={lifecycleProblem} article={product.publicSku} /></section>}
+    <ProductMagentoAttention key={`readiness-${productId}`} product={{ ...product, nameConflict: Boolean(current?.nameConflict) }} problems={current?.problems || []}
       onRepairCharacteristics={onRepairCharacteristics}
       onSaved={() => { setRefresh((value) => value + 1); onSaved?.(); }} />
     <ProductNameConflict key={productId} productId={productId} available={Boolean(current?.nameConflict)} onSaved={() => { setRefresh((value) => value + 1); onSaved?.(); }} />

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/auth-context.js';
 import { ProductNameConflict } from '../components/app/ProductNameConflict.jsx';
+import { LifecycleReconciliationNotice } from '../components/app/LifecycleReconciliationNotice.jsx';
 import {
   Button,
   EmptyState,
@@ -143,6 +144,7 @@ export default function SyncProblemsPage() {
         <div className="sync-problem-detail-body">
           {selected.problems.map((problem, index) => <section key={`${problem.code}-${index}`}>
             <h3>{problem.message}</h3>
+            {problem.resolution === 'lifecycle_reconciliation' && <LifecycleReconciliationNotice problem={problem} article={selected.article} />}
             {problem.resolution === 'product' && productProblemFields(problem).length > 0 && <>
               <p className="sync-problem-guidance">Проблемні дані:</p>
               <ul className="list-disc pl-5">{productProblemFields(problem).map((field) => <li key={field}>{field}</li>)}</ul>
@@ -153,18 +155,21 @@ export default function SyncProblemsPage() {
               ? <Link to={`/products/open?article=${encodeURIComponent(selected.article)}`}>Виправити дані товару</Link>
               : 'Передайте виправлення оператору з дозволом на зміну даних товару.'}</p>}
             {problem.resolution === 'integration_configuration' && <p className="sync-problem-guidance">{permissions.includes('export_templates.view')
-              ? <Link to={selected.category ? `/admin/magento/categories/${encodeURIComponent(selected.category)}` : '/admin/magento'}>Перевірити відповідності Magento</Link>
+              ? <Link to={selected.category ? `/admin/magento/categories/${encodeURIComponent(selected.category)}${problem.target || problem.field ? `?field=${encodeURIComponent(problem.target || problem.field)}` : ''}` : '/admin/magento'}>Перевірити відповідності Magento</Link>
               : 'Передайте питання оператору з доступом до відповідностей Magento.'}</p>}
+            {problem.resolution === 'integration_preparation' && <p className="sync-problem-guidance">{permissions.includes('export_templates.view')
+              ? <Link to={permissions.includes('export_templates.manage') ? '/admin/magento/prepare' : '/admin/magento'}>Перевірити підготовку інтеграції</Link>
+              : 'Передайте питання оператору з доступом до підготовки інтеграції Magento.'}</p>}
             {problem.code === 'PRODUCT_EVALUATION_NOT_READY' && selected.category && permissions.includes('export_templates.view') && <div className="flex flex-wrap gap-2">
               {[...new Set(problem.issueFields || [])].map((field) => <Link key={field} className="underline" to={`/admin/magento/categories/${encodeURIComponent(selected.category)}?field=${encodeURIComponent(field)}`}>
                 Відповідності: {PRODUCT_FIELD_LABELS[field] || field}
               </Link>)}
             </div>}
-            <TechnicalDisclosure>
+            {problem.resolution !== 'lifecycle_reconciliation' && <TechnicalDisclosure>
               <dl className="technical-key-values"><div><dt>Код</dt><dd>{problem.code}</dd></div>
                 {problem.diagnosticCode && <div><dt>Діагностика</dt><dd>{problem.diagnosticCode}</dd></div>}
                 {(problem.path || problem.target || problem.field || problem.issueFields?.length > 0) && <div><dt>Контекст</dt><dd>{problem.path || problem.target || problem.field || problem.issueFields.join(', ')}</dd></div>}</dl>
-            </TechnicalDisclosure>
+            </TechnicalDisclosure>}
           </section>)}
           {selected.nameConflict && <ProductNameConflict productId={selected.productId} onSaved={reload} />}
         </div>

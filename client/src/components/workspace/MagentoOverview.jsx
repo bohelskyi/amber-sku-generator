@@ -3,15 +3,18 @@ import { EmptyState, SectionHeader, StatusBadge } from '../ui/index.js';
 
 export function CategoryCard({ category }) {
   const operational = category.operational;
+  const lifecycle = operational.reasons?.some((reason) => reason.resolution === 'lifecycle_reconciliation');
+  const destination = lifecycle ? `/sync-problems?category=${encodeURIComponent(category.code)}`
+    : `/admin/magento/categories/${encodeURIComponent(category.code)}`;
   return <article className="magento-category-card">
     <div className="flex flex-wrap items-start justify-between gap-2">
-      <h3 className="font-semibold"><Link to={`/admin/magento/categories/${encodeURIComponent(category.code)}`}>{category.name}</Link></h3>
+      <h3 className="font-semibold"><Link to={destination}>{category.name}</Link></h3>
       {operational.count > 0 && <StatusBadge tone="warning">Потребують уваги: {operational.count}</StatusBadge>}
     </div>
     {operational.reasons?.slice(0, 2).map((reason) => <p key={reason.code} className="mt-2 text-sm">{reason.message}</p>)}
     {category.preparation.needed && <p className="mt-2 text-sm text-slate-600">{category.preparation.reasons[0]?.message || 'Потрібна підготовка перед використанням'}</p>}
     {!operational.count && !category.preparation.needed && <p className="mt-2 text-sm text-slate-600">{operational.state === 'known' ? 'Додаткових дій зараз не потрібно' : 'Операційні дані недоступні'}</p>}
-    <Link className="mt-3 inline-block text-sm font-medium underline" to={`/admin/magento/categories/${encodeURIComponent(category.code)}`}>Переглянути категорію</Link>
+    <Link className="mt-3 inline-block text-sm font-medium underline" to={destination}>{lifecycle ? 'Переглянути проблеми товарів' : 'Переглянути категорію'}</Link>
   </article>;
 }
 

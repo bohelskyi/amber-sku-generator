@@ -30,6 +30,13 @@ let currentPersona = 'storekeeper';
 let characteristicPolishFixture = false;
 let characteristicPolishApplied = false;
 let magentoReadinessFixture = false;
+let operationalFixture = null;
+const lifecycleProblem = { code: 'AMBER_SYNC_ELIGIBILITY_UNRESOLVED', resolution: 'lifecycle_reconciliation',
+  message: 'Потрібне підтвердження історії доставки', eligibilityIssue: {
+    type: 'historical_ambiguity', lifecycleRoute: 'hold', holdReason: 'historical_ambiguity',
+    primaryReason: 'INFERRED_HISTORY_WITHOUT_EXACT_MEMBERSHIP', classification: 'historical_ambiguous',
+    sourceCorrectionId: 1509, ancestorProductIds: [1368], deliveryVersion: '1',
+  } };
 let readinessNamesApplied = false;
 let readinessSizeApplied = false;
 // Keep the browser recount target valid; historical invalid evidence is covered
@@ -52,6 +59,7 @@ const personas = {
     permissions: ['products.view', 'products.decode', 'history.view', 'corrections.view', 'corrections.create',
       'repricing.view', 'repricing.prepare', 'repricing.apply', 'exports.view', 'exports.create', 'pricing.view'],
   },
+  productViewer: { name: 'Оператор перегляду', roles: [], permissions: ['products.view', 'products.decode', 'history.view'] },
   exportCreator: {
     name: 'Марія Керівниця',
     roles: [{ id: 3, key: 'manager', displayName: 'Керівник' }],
@@ -74,7 +82,7 @@ const personas = {
       'corrections.view', 'corrections.create', 'repricing.view', 'exports.view', 'exports.create',
       'catalog.view', 'catalog.manage', 'sku_schemas.publish', 'pricing.view', 'pricing.manage',
       'export_templates.view', 'export_templates.manage', 'export_templates.publish', 'products.delete_test',
-      'users.manage', 'roles.manage', 'audit.view'],
+      'users.manage', 'roles.manage', 'audit.view', 'exports.reconcile'],
   },
 };
 
@@ -258,8 +266,8 @@ const server = http.createServer(async (request, response) => {
                   ? { ...answer, value_id: null, is_placeholder: true, value_label: 'Не обрано' } : answer) };
           break;
         }
-        data = { sku: product.internalSku, publicSku: magentoReadinessFixture ? 'SV5111010' : product.publicSku, internalSku: product.internalSku,
-          category, product: { ...storedProduct, public_sku: magentoReadinessFixture ? 'SV5111010' : product.publicSku,
+        data = { sku: product.internalSku, publicSku: magentoReadinessFixture || operationalFixture ? 'SV5111010' : product.publicSku, internalSku: product.internalSku,
+          category, product: { ...storedProduct, public_sku: magentoReadinessFixture || operationalFixture ? 'SV5111010' : product.publicSku,
             status: fixtureProductStatus, weight: fixtureWeight,
             total_price_uah: fixturePriceUah.toFixed(2) }, existsInDb: true, decodedAnswers: [], skuSchema: { version: 1 },
           suffix: { type: 'sequence', value: 2 }, calibration: { status: 'known' }, pricing: {
@@ -312,7 +320,8 @@ const server = http.createServer(async (request, response) => {
         data = { message: `Товар ${product.publicSku} перенесено в архів.` }; break;
       case 'POST /api/products/test-delete/preview': data = { state: 'preview', previewHash: 'fixture-delete-preview',
         publicSku: product.publicSku, productId: product.id }; break;
-      case 'GET /api/magento/product-status/7': data = magentoReadinessFixture ? { state: 'needs_attention', nameConflict: false,
+      case 'GET /api/magento/product-status/7': data = operationalFixture ? { state: 'needs_attention', nameConflict: false, problems: [operationalFixture] }
+        : magentoReadinessFixture ? { state: 'needs_attention', nameConflict: false,
         problems: [{ code: 'PRODUCT_EVALUATION_NOT_READY', message: 'Товар не готовий до синхронізації. Потрібно доповнити або виправити дані товару.',
           issueFields: [...(!readinessNamesApplied ? ['name'] : []), ...(!readinessSizeApplied ? ['rozmir_suveniriv'] : []), 'kamin_obrobka'] }] }
         : { state: 'pending', nameConflict: false }; break;
@@ -321,8 +330,8 @@ const server = http.createServer(async (request, response) => {
       case 'GET /api/product-names/7': data = { names: { all: 'Тестовий сувенір', en: 'Test souvenir' }, nameConflict: false }; break;
       case 'GET /api/magento/summary': data = { enabled: true, problemCount: 2 }; break;
       case 'GET /api/magento/problems/page': data = {
-        items: [{ productId: product.id, article: magentoReadinessFixture ? 'SV5111010' : product.publicSku, category: product.categoryCode,
-          nameConflict: false, problems: magentoReadinessFixture ? [
+        items: [{ productId: product.id, article: magentoReadinessFixture || operationalFixture ? 'SV5111010' : product.publicSku, category: product.categoryCode,
+          nameConflict: false, problems: operationalFixture ? [operationalFixture] : magentoReadinessFixture ? [
             { code: 'NAME_READ_UNAVAILABLE', message: 'Назви товару в Amber потрібно заповнити або виправити.', resolution: 'product' },
             { code: 'PRODUCT_EVALUATION_NOT_READY', message: 'Товар не готовий до синхронізації. Потрібно доповнити або виправити дані товару.',
               resolution: 'product', issueFields: ['kamin_obrobka', 'name', 'rozmir_suveniriv'] },
@@ -922,6 +931,42 @@ try {
   report.magentoReadinessRecovery = { publicArticle: 'SV5111010', rawDiagnosticsAvailable: true,
     nameWorkflow: true, informationWorkflow: true, recountWrites: 0, resendAction: false };
   magentoReadinessFixture = false;
+  const lifecycleRequestStart = requests.length;
+  operationalFixture = lifecycleProblem;
+  for (const persona of ['productViewer', 'administrator']) {
+    currentPersona = persona;
+    for (const width of [1440, 390]) {
+      await client.command('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+      await client.navigate('/attention', 'Потребує уваги');
+      await client.click('Переглянути проблеми');
+      await client.wait("document.body.textContent.includes('Потрібне підтвердження історії доставки')", 'lifecycle problem');
+      assert.equal(await client.evaluate("document.body.textContent.includes('Товар збережено в Amber')"), true);
+      assert.equal(await client.evaluate("[...document.querySelectorAll('a,button')].some((e)=>/Перевірити відповідності|Надіслати|Повторити|Зняти утримання/.test(e.textContent))"), false);
+      const handoff = persona === 'administrator' ? 'Потрібне контрольоване узгодження історії доставки' : 'Потрібне узгодження Адміністратора';
+      assert.equal(await client.evaluate(`document.body.textContent.includes(${JSON.stringify(handoff)})`), true);
+      await client.click('Технічні деталі');
+      await client.wait("document.body.textContent.includes('INFERRED_HISTORY_WITHOUT_EXACT_MEMBERSHIP')", 'safe lifecycle evidence');
+      await client.noOverflow(`Lifecycle ${persona} ${width}`);
+      await client.screenshot(`lifecycle-${persona}-${width}`);
+      await client.click('Відкрити товар');
+      await client.wait("document.body.textContent.includes('Товар SV5111010') && document.body.textContent.includes('Товар збережено в Amber')", 'held product detail');
+      await client.noOverflow(`Held detail ${persona} ${width}`);
+      await client.screenshot(`held-detail-${persona}-${width}`);
+    }
+  }
+  currentPersona = 'administrator';
+  operationalFixture = { code: 'OPTION_BINDING_REVIEW_REQUIRED', message: 'Потрібна відповідність значення',
+    resolution: 'integration_configuration', target: 'kamin_obrobka' };
+  await client.navigate('/sync-problems', 'Проблеми доставки до Magento');
+  await client.wait("!![...document.querySelectorAll('a')].find((e)=>e.textContent==='Перевірити відповідності Magento')", 'mapping problem');
+  assert.equal(await client.evaluate("[...document.querySelectorAll('a')].find((e)=>e.textContent==='Перевірити відповідності Magento').getAttribute('href')"), '/admin/magento/categories/SV?field=kamin_obrobka');
+  assert.deepEqual(requests.slice(lifecycleRequestStart).filter((entry) => entry.method !== 'GET'
+    && !(entry.method === 'POST' && entry.path === '/api/decode')), [],
+  'Viewing holds allows only local reads, including the existing POST decode');
+  report.lifecycleReconciliation = { personas: ['productViewer', 'administrator'], widths: [1440, 390],
+    stablePublicArticle: true, safeEvidence: true, localReadsOnly: true, mappingTargetRetained: true };
+  operationalFixture = null;
+  await client.command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await client.navigate(`/products/open?article=${encodeURIComponent(product.publicSku)}`, `Товар ${product.publicSku}`);
   await client.wait("document.body.textContent.includes('Стан у базі')", 'administrator product detail');
   await client.click('Додаткові дії');

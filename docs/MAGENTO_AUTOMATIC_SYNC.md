@@ -179,6 +179,24 @@ job payloads and retry/activation controls are not returned.
 
 ## Safe verification
 
+Local problem/page and product-status reads classify a recorded
+`AMBER_SYNC_ELIGIBILITY_UNRESOLVED` using the current lifecycle row. A matching
+`hold/historical_ambiguity` with historical-ambiguity evidence is presented as
+**Потрібне підтвердження історії доставки**, with `resolution:
+"lifecycle_reconciliation"` and a normalized `eligibilityIssue` (route, hold reason,
+allowlisted primary reason/classification, correction ID, ancestor IDs and decimal
+delivery version). Arbitrary lifecycle JSON is not exposed. Missing/mismatched
+evidence receives a neutral responsible-operator handoff, never an inferred mapping
+diagnosis. Dispatched/uncertain work keeps its higher-priority reconciliation state.
+
+Attention and Product Detail offer read-only evidence/history and a capability-based
+handoff; `exports.reconcile` reveals the existing review procedure, not a browser
+release or retry. Integration overview labels held products separately from
+structural preparation and routes their attention to product problems. Genuine
+mapping issues retain exact-field navigation; resource issues point to integration
+preparation. All these reads are local, with no audit, enqueue or Magento I/O.
+See the [post-recount review procedure](FULL_PRODUCT_CUTOVER_RUNBOOK.md#historical-ambiguity-after-recount).
+
 From `server/`, with Node 20 and an explicitly supplied `DATABASE_URL` for the
 intended database (do not paste real credentials into retained commands):
 
