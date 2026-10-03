@@ -79,8 +79,8 @@ async function preflight(options) {
     const summary = Object.fromEntries(['SAFE_TO_COMPLETE','REFRESH_SAME_INTENT','REVIEW_REQUIRED','STALE_OR_OBSOLETE',
       'OWNERSHIP_BLOCKED','INVALID_OR_BLOCKED'].map(c => [c, entries.filter(x => x.classification === c).length]));
     summary.postDeliveryReview = entries.filter(x => e.eligible(x) && x.postDeliveryReviewRequired).length;
-    const body = { format: e.FORMAT, policyVersion: 1, actorUserId, databaseIdentity,
-      toolContract: 'correction-batch-v1', buildId: options.buildId || 'development',
+    const body = { format: e.FORMAT, policyVersion: e.POLICY_VERSION, actorUserId, databaseIdentity,
+      toolContract: e.TOOL_CONTRACT, buildId: options.buildId || 'development',
       generatedAt: new Date().toISOString(), requestIds, selection: options.allActive
         ? { kind: 'all_active', bound: options.limit } : { kind: 'explicit' }, rateObservation, entries, summary };
     await gate.commit(client);

@@ -60,12 +60,45 @@ its hold is retained after completion.
 Recount comparison uses semantic `value_id` answers and calibration state,
 category/schema, weight, internal/public SKU allocation, exact effective names,
 inheritance and delivery. It compares every persisted calculated/automatic/manual
-price result, USD totals, per-gram values, rate and pricing basis. Even a manual
+price result, USD totals, per-gram values, rate and pricing basis, with the narrow
+policy-v2 USD exception below. Even a manual
 UAH request requires review if its automatic baseline or derived USD result
 changes. Stored pricing modes and their explicit parameters are preserved.
 Price-only requests compare the stored decision and entire resulting pricing
 evidence, including the current source signature. A technically successful
 completion is insufficient proof of safety.
+
+Policy/tool **v2** permits a fresh preflight to classify a `usd_per_gram` request
+as `REFRESH_SAME_INTENT` when only the observed NBU rate/date and their proven
+UAH conversions differ. The stored normalized decision (including USD/gram and
+rounding), USD amount/basis, final **and automatic** UAH result, mode semantics
+and all non-rate review evidence must remain exact. Both old and fresh raw UAH
+amounts must match unit conversion from the same decision and authoritative
+weight; recount per-gram UAH must also match that conversion. Missing or
+inconsistent conversion/basis/date evidence requires review. Historical rates
+are used only to verify historical evidence, never as current pricing authority.
+
+For price changes, the entire source pricing/state signature and identity must
+agree. Only resulting `uahRate`, `calculatedPriceUah` and NBU metadata date can
+differ; provider source and fallback/stale meaning remain protected (the
+exception requires NBU, non-stale price evidence). For recounts, only `uahRate`,
+`uahRateDate`, `calculatedPriceUah` and `pricePerGramUah` may differ. Complete
+non-rate target/allocation/name/lineage/lifecycle/exposure evidence stays exact,
+including calibration state 2 and exclusion meaning. Existing evidence-version
+upgrades and inherited hidden-answer cleanup retain their ordinary validation.
+`postDeliveryReviewRequired` stays independent: `hold/historical_ambiguity`
+still requires explicit held-ID selection and separate reconciliation afterward.
+
+Any final price difference, including 1 UAH or a marketing boundary such as
+260→270 or 550→600, remains `REVIEW_REQUIRED`. This exception does not apply to
+manual UAH, system automatic pricing, changed inputs/weight/basis, matrix or
+scenario results, or arbitrary dependencies. It does not change pricing or
+rounding calculations. Plans and selections use `amber-correction-batch-plan-v2`
+and `amber-correction-batch-selection-v2`, with `policyVersion: 2` and
+`toolContract: correction-batch-v2`. Correctly hashed v1 or mixed-version plans
+are rejected by selection/apply; generate and review a fresh v2 plan. Existing
+database receipts retain their schema and immutable history; no new migration
+is required for this classification change.
 
 The only allowed answer removal is normal target-validator cleanup of an
 inherited, unchanged hidden answer. Removal of an explicitly changed answer
@@ -74,7 +107,8 @@ and dependency fingerprints can differ at preflight only when these reviewed
 results remain equal and historical name/delivery proof exists. No missing
 legacy evidence is manufactured. Internal allocator drift requires review.
 
-After selection, all sealed dependency/result fingerprints must still agree.
+The rate exception ends when the fresh plan is sealed. After selection, all
+sealed dependency/result fingerprints must still agree.
 The only ignored comparison fields are observation timestamps/age and pricing
 explanation text (`fetchedAt`, `uahRateFetchedAt`, `uahRateAgeMs`, `ageMs`,
 `logMessage`). The original full rate observation is nevertheless sealed in the

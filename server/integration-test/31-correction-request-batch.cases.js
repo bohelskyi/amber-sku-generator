@@ -368,5 +368,108 @@ test('correction bulk processor: reviewed primitives, unique receipts and crash 
     assert.equal(report.postDeliveryReviewCandidates[0].stableRecountReviewCandidate,true);
     const after=await state();assert.equal(after.jobs,before.jobs);assert.equal(after.handoffs,before.handoffs);
   });
+  const observeAt=rate=>async()=>({rateInfo:{...observation.rateInfo,rate},rateError:null});
+  const usdDecisionFor=rawUah=>({mode:'usd_per_gram',
+    usdPerGram:Number((rawUah/40/(sourceWeight+1)).toFixed(4)),marketingRoundingEnabled:true});
+  const freshAt=async(r,rate)=>{
+    const before=await state(),savedFetch=globalThis.fetch;
+    globalThis.fetch=()=>assert.fail('preflight must not perform real external calls');
+    try {
+      const plan=await service.preflight({...base,requestIds:[r.id],observeRate:observeAt(rate)});
+      assert.deepEqual(await state(),before,'preflight cannot write requests, products, audits, lifecycle or rate cache');
+      assert.equal(plan.policyVersion,2);assert.equal(plan.toolContract,'correction-batch-v2');
+      assert.equal(plan.format,'amber-correction-batch-plan-v2');assert.equal(plan.rateObservation.rateInfo.rate,rate);
+      return plan;
+    }finally{globalThis.fetch=savedFetch;}
+  };
+  await t.test('v2 USD price preflight accepts rate-only drift with final 650 and completes using the fresh quote',async()=>{
+    const r=await pricing(usdDecisionFor(650)),plan=await freshAt(r,40.1),entry=plan.entries[0];
+    assert.equal(entry.classification,'REFRESH_SAME_INTENT',JSON.stringify(entry.reasons));
+    assert.equal(entry.storedIntent.proposedPayload.totalPriceUah,650);assert.equal(entry.refreshedResult.resultingPriceUah,650);
+    assert.notEqual(entry.storedIntent.proposedPayload.pricing.calculatedPriceUah,entry.refreshedResult.resultingPricing.calculatedPriceUah);
+    assert.equal(entry.storedIntent.oldPayload.stateSignature,entry.refreshedResult.productStateSignature);
+    const cache=(await pool.query('SELECT * FROM exchange_rate_cache ORDER BY currency_pair')).rows;
+    const report=await apply(plan,undefined,{observeRate:observeAt(40.1)});
+    assert.equal(report.counts.completed,1,JSON.stringify(report));
+    const row=(await pool.query('SELECT * FROM correction_requests WHERE id=$1',[r.id])).rows[0];
+    assert.equal(row.corrected_product_id,null);assert.equal(row.final_payload.resultingPricing.uahRate,40.1);
+    assert.equal(row.final_payload.resultingPriceUah,650);assert.deepEqual(row.final_payload.pricingDecision,entry.storedIntent.proposedPayload.pricingDecision);
+    assert.deepEqual((await pool.query('SELECT * FROM exchange_rate_cache ORDER BY currency_pair')).rows,cache);
+  });
+  for(const [before,after,rate] of [[260,270,41],[550,600,44]]) await t.test(`v2 rounding boundary ${before} to ${after} remains excluded from selection`,async()=>{
+    const r=await pricing(usdDecisionFor(before)),plan=await freshAt(r,rate),entry=plan.entries[0];
+    assert.equal(entry.storedIntent.proposedPayload.totalPriceUah,before);
+    assert.equal(entry.refreshedResult.resultingPriceUah,after);
+    assert.equal(entry.classification,'REVIEW_REQUIRED');
+    assert.throws(()=>service.select(plan,plan.planHash,[r.id]),{code:'CORRECTION_BATCH_SELECTION_INVALID'});
+    assert.equal((await pool.query('SELECT status FROM correction_requests WHERE id=$1',[r.id])).rows[0].status,'pending');
+  });
+  await t.test('v2 fresh-price equivalence excludes decision/source input changes, manual and automatic modes',async()=>{
+    const decision=await pricing(usdDecisionFor(650));
+    await pool.query('UPDATE correction_requests SET pricing_usd_per_gram=pricing_usd_per_gram+0.0001 WHERE id=$1',[decision.id]);
+    assert.equal((await freshAt(decision,40.1)).entries[0].classification,'REVIEW_REQUIRED');
+    const weight=await pricing(usdDecisionFor(650));
+    await pool.query('UPDATE products SET weight=weight+1 WHERE id=$1',[weight.productId]);
+    assert.equal((await freshAt(weight,40.1)).entries[0].classification,'REVIEW_REQUIRED');
+    const manual=await pricing(),automatic=await pricing({mode:'system_auto'});
+    for(const r of [manual,automatic]) {
+      // A non-USD result difference cannot use the conversion exception.
+      await pool.query("UPDATE correction_requests SET proposed_payload=jsonb_set(proposed_payload,'{pricing,calculatedPriceUah}','999') WHERE id=$1",[r.id]);
+      assert.equal((await freshAt(r,40.1)).entries[0].classification,'REVIEW_REQUIRED');
+    }
+  });
+  const heldUsdRecount=async()=>{
+    const pricingDecision=usdDecisionFor(650),p=await source();
+    await pool.query("UPDATE product_full_export_state SET route='hold',hold_reason='historical_ambiguity',evidence='{\"origin\":\"historical\"}',delivery_version=delivery_version+1 WHERE product_id=$1",[p.id]);
+    const input={sourceSku:p.fullSku,answers:{kind:2},pricingDecision};
+    const checked=await requests.previewCorrectionRequest(input,{canOverride:true});
+    const created=await requests.createCorrectionRequest({...input,previewSignature:checked.previewSignature},{mutationContext,canOverride:true});
+    return{id:created.request.id,productId:p.id};
+  };
+  await t.test('v2 held USD recount preserves exact 650/target/article and rejects post-plan rate drift before completion',async()=>{
+    const r=await heldUsdRecount(),plan=await freshAt(r,40.1),entry=plan.entries[0];
+    assert.equal(entry.classification,'REFRESH_SAME_INTENT',JSON.stringify(entry.reasons));
+    assert.equal(entry.postDeliveryReviewRequired,true);assert.equal(entry.storedIntent.proposedPayload.totalPriceUah,650);
+    assert.equal(entry.refreshedResult.corrected.totalPriceUah,650);
+    assert.deepEqual(entry.refreshedResult.corrected.answers,entry.storedIntent.proposedPayload.answers);
+    assert.equal(entry.refreshedResult.corrected.publicSku,entry.publicArticle);
+    assert.equal(entry.refreshedResult.corrected.delivery.holdReason,'historical_ambiguity');
+    assert.throws(()=>service.select(plan,plan.planHash,[r.id]),{code:'CORRECTION_BATCH_SELECTION_INVALID'});
+    const before=await state(),conflict=await apply(plan,undefined,{observeRate:observeAt(40.2)});
+    assert.equal(conflict.counts.conflicted,1);assert.equal(conflict.outcomes[0].reason,'CORRECTION_BATCH_DRIFT');
+    assert.equal(conflict.outcomes[0].currentClaim.status,'pending');assert.deepEqual(await state(),before);
+    const report=await apply(plan,undefined,{observeRate:observeAt(40.1)});
+    assert.equal(report.counts.completed,1,JSON.stringify(report));assert.equal(report.postDeliveryReviewCandidates.length,1);
+    const result=report.outcomes[0].result;
+    assert.equal(result.publicSku,entry.publicArticle);assert.equal(result.postDeliveryReviewRequired,true);
+    assert.equal(result.lifecycle.route,'hold');assert.equal(result.lifecycle.hold_reason,'historical_ambiguity');
+    const after=await state();assert.equal(after.jobs,before.jobs);assert.equal(after.handoffs,before.handoffs);
+  });
+  await t.test('v2 USD recount semantic target and provisional successor allocation changes still require review',async()=>{
+    const target=await heldUsdRecount();
+    await pool.query("UPDATE correction_requests SET proposed_payload=jsonb_set(proposed_payload,'{answers,extra}','7') WHERE id=$1",[target.id]);
+    // Explicitly changed hidden intent (source inherited value was 7) must not be
+    // mistaken for the ordinary inherited cleanup exception.
+    await pool.query("UPDATE correction_requests SET proposed_payload=jsonb_set(proposed_payload,'{answers,extra}','8') WHERE id=$1",[target.id]);
+    assert.equal((await freshAt(target,40.1)).entries[0].classification,'REVIEW_REQUIRED');
+    const allocation=await heldUsdRecount(),plan=await freshAt(allocation,40.1),c=plan.entries[0].refreshedResult.corrected;
+    assert.equal(plan.entries[0].classification,'REFRESH_SAME_INTENT');
+    const input={categoryCode:'BT',answers:{kind:2},weight:c.weight,skuSchemaVersionId:schema.id};
+    const checked=await products.buildNewProductPreview(input);
+    await products.saveProduct({category:'BT',answers:input.answers,weight:input.weight,skuSchemaVersionId:schema.id,previewToken:checked.previewToken},{mutationContext});
+    const drift=await freshAt(allocation,40.1);
+    assert.notEqual(drift.entries[0].refreshedResult.corrected.fullSku,c.fullSku);
+    assert.equal(drift.entries[0].classification,'REVIEW_REQUIRED');
+  });
+  await t.test('v2 sealed price plan requires a fresh preflight for later NBU drift even when final remains 650',async()=>{
+    const r=await pricing(usdDecisionFor(650)),plan=await freshAt(r,40.1),before=await state();
+    assert.equal(plan.entries[0].classification,'REFRESH_SAME_INTENT');
+    const report=await apply(plan,undefined,{observeRate:observeAt(40.2)});
+    assert.equal(report.counts.conflicted,1);assert.equal(report.outcomes[0].reason,'CORRECTION_BATCH_DRIFT');
+    assert.deepEqual(await state(),before);
+    const fresh=await freshAt(r,40.2);assert.equal(fresh.entries[0].refreshedResult.resultingPriceUah,650);
+    assert.equal(fresh.entries[0].classification,'REFRESH_SAME_INTENT');assert.notEqual(fresh.planHash,plan.planHash);
+    assert.equal((await apply(fresh,undefined,{observeRate:observeAt(40.2)})).counts.completed,1);
+  });
   // Receipt artifacts contain synthetic IDs only and live outside the repository.
 });
