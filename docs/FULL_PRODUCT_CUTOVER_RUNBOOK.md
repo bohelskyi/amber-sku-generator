@@ -195,18 +195,25 @@ diagnostics. Specifically establish:
   active associations and any dispatched or unverified work. The supplied request
   is generation 7/0 with no active job; obtain fresh evidence before any decision.
 
-The supplied evidence is insufficient to authorize a resolution. If fresh review
-still finds an intact held terminal successor with ambiguous history and no
-integrity issues, **`replacement` is the applicable existing command class**.
-It needs all exact ancestor-SKU and retained-file dispositions plus explicit
+The supplied historical indicators alone are insufficient to authorize a resolution.
+For a post-activation recount retaining the **same public identity and article**,
+use the narrowly reviewed [stable recount exposure procedure](#stable-public-sku-recount-exposure)
+below. Do not select `replacement` merely because the product has correction lineage.
+Generic `replacement` does not itself allocate or rename a public identity, but
+changes the CSV lifecycle to `replacement`, permits ordinary CREATE/UPDATE planning,
+and requires separate legacy completion evidence. It neither proves the current
+counterpart nor guarantees re-evaluation of a parked automatic request. It is not
+the appropriate exposure-only resolution for this post-cutover case.
+Legacy replacement handling needs all exact ancestor-SKU and retained-file dispositions plus explicit
 `externalHistory: {disposition: "resolved", evidence: "..."}`. Unknown/independent
 exclusions need the separately reviewed release decision. Do not invent evidence.
 `generated_first_delivery` rejects any correction successor, even if ancestor
 files are generated-only. `unexposed_first_delivery` is available only if retained
 evidence actually establishes `reliably_unexposed`; the service also requires
 `exclusionResolution` with `recount_only_attested` (or `release` for an excluded
-business state) and evidence. The exact-Magento-exposure command below rejects
-correction lineage, so an exact GET alone cannot resolve this successor.
+business state) and evidence. Ordinary exact-Magento-exposure mode still rejects
+correction lineage; the explicit `--stable-recount` mode proves the stricter
+identity and sendability contract. An exact GET alone is never sufficient.
 
 `reconcileFullProduct` is the existing reviewed command boundary: access/lifecycle
 coordination → ascending lineage product locks → lifecycle locks → fresh manifest
@@ -227,13 +234,101 @@ disabled after cutover. Successful API sync does not complete this lifecycle rou
 Also, with business exclusion already `none` and product flag already zero, a
 replacement resolution can change only lifecycle state: it need not advance the
 product trigger's generation or clear a parked `needs_attention` request. None of
-these gaps authorizes a direct UPDATE, requeue, resend or changed semantics here.
+these gaps authorizes a direct UPDATE, manual requeue or blind resend. The stable
+recount exposure command instead records the existing reviewed handoff atomically.
 
 A future browser reconciliation workflow is a separate product/security decision.
 The reusable reviewed primitive exists, but it would need authenticated preview
 authority, complete evidence/disposition review, stale-review recovery and an
-explicit post-cutover delivery/completion policy. This correction adds diagnosis
-and handoff only; it adds no HTTP reconciliation surface.
+explicit post-cutover delivery/completion policy. The CLI boundary below is reusable,
+but this correction adds no HTTP reconciliation surface.
+
+## Stable public SKU recount exposure
+
+Implementation: [stable-recount-exposure.js](../server/src/services/magento/stable-recount-exposure.js),
+selected explicitly by `--stable-recount` in
+[magento-reconcile-exposure.js](../server/scripts/magento-reconcile-exposure.js).
+Ordinary and bulk exposure eligibility are unchanged. This mode is single-product only.
+
+For the supplied case, retained indicators and common names prove neither CSV
+consumption nor delivery of successor 5033. Durable name-state remote ID 3672 is
+only a counterpart identity anchor: a fresh exact GET must confirm it. The preview
+must freshly establish all of the following; the supplied production evidence is
+not an approval or a reusable plan:
+
+- Stable-public-SKU activation and Magento delivery cutover have completed.
+- The complete correction component is a linear chain ending at the active
+  terminal successor, with exact reciprocal product links, correction IDs and
+  stored internal SKUs. Every ancestor is corrected and lifecycle-retired.
+- Every member has the same immutable public identity and exact public SKU;
+  internal SKUs differ across recount links. All reservations belong to their
+  exact products, with no disconnected identity users or conflicting SKU owners.
+- All members have business exclusion `none`, no independent/unknown exclusion
+  provenance, and no recount compatibility exclusion. The current product export
+  flag must be zero. Recount's retired-source flag `exclude_from_export=1` is a
+  retirement marker, not an independent exclusion; it is preserved unchanged.
+- No active correction/deletion, active request job association, uncertain request,
+  unfinished job or unverified dispatch exists for the lineage/public identity.
+- The selected binding is the current published public-SKU-aware binding for the
+  configured origin and automatic-sync installation. A full fresh GET-only preview
+  must be sendable in **UPDATE** mode after projecting only the hold reason.
+- Fresh exact all-scope Magento lookup returns the stable public SKU and the same
+  positive remote ID already retained by shared-name state (or acknowledged durable
+  job evidence). Schema, category and required scoped/domain GETs also run; names,
+  resource readiness, mapping decisions and binding drift remain authoritative.
+
+From `server/`, the next production operation is **preview only**, using the actual
+database name and current published binding UUID obtained by the authorized operator:
+
+```text
+node scripts/magento-reconcile-exposure.js --stable-recount --expected-database DATABASE --sku SV5111010 --binding-revision CURRENT_PUBLISHED_BINDING_UUID --output NEW_STABLE_RECOUNT_PREVIEW_FILE
+```
+
+This reads Amber in repeatable-read, read-only transactions and performs explicit
+Magento GETs. It creates no job, generation, audit, hold change or remote write.
+Review `eligible`, `blockers`, `sync.blockerCodes`, counterpart ID/SKU, product and
+lineage IDs, binding, delivery version, fingerprint, and `planHash`. Missing remote
+or unreadable evidence blocks the procedure. Do not edit the plan or infer approval
+from names, cursor position, old snapshot flags or export-event ranges.
+
+Only after a separate human review, an active actor with `exports.reconcile` can
+use the existing explicit apply protocol (not performed by this task):
+
+```text
+node scripts/magento-reconcile-exposure.js --stable-recount --apply --expected-database DATABASE --plan REVIEWED_PREVIEW_FILE --expected-hash REVIEWED_PLAN_HASH --actor-user-id AUTHORIZED_USER_ID --output NEW_STABLE_RECOUNT_RECEIPT_FILE
+```
+
+Apply takes public-identity then origin/SKU lane locks (busy lanes fail closed),
+then the existing authority/lifecycle boundary, installation lock and ascending
+product/lifecycle locks. It revalidates the full component, publication, evaluated
+inputs, name state, activation, requests and job/step fingerprint, repeats required
+GETs and sendability checks, and compares local evidence again before committing.
+Stale evidence requires a new preview. Actor authorization is checked even on retries.
+
+The atomic commit changes `hold/historical_ambiguity` to `hold/prior_exposure`,
+increments `delivery_version` once, retains prior evidence and attribution, writes
+`product.magento_stable_recount_exposure_reconciled`, and inserts an immutable
+`broader_resync` handoff with source `stable_recount_exposure`. The handoff uses the
+existing reviewed enrollment machinery; it is not a new general resync command.
+Audit or handoff failure rolls back the lifecycle change. Completed identical
+retries return the receipt without repeating GETs, changing attribution or adding
+another handoff.
+
+The existing automatic worker processes this durable handoff when enabled and
+authorized. It rechecks current identity and protected work, then advances the
+request's desired generation once and makes safe work pending. For the supplied
+unchanged request, this means generation **7 → 8**, state **needs_attention → pending**;
+the transition occurs at handoff enrollment, not in the reconciliation transaction.
+If disabled, the handoff stays pending. If uncertainty appeared after review, the
+handoff settles as `protected`, with no requeue/resend. Restart does not lose it.
+Ordinary product edits may advance the generation further before enrollment.
+
+The planner freshly rechecks Magento and chooses UPDATE for `SV5111010`. If that
+counterpart disappears, `hold/prior_exposure` blocks CREATE. Shared-name identity
+checks also block a different remote ID. No public identity, article, correction
+history, historical confirmation, CSV consumption, confirmed revision, or CSV
+retirement is changed or claimed. Successful API delivery leaves the CSV lifecycle
+held; it does not fabricate a transition to `normal`.
 
 ## Exact Magento SKU evidence: exposure-only reconciliation
 

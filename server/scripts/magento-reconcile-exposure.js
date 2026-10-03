@@ -10,6 +10,10 @@ const { createReadOnlyPool, databaseSecrets } = require('./magento-binding-evide
 const HELP = `node scripts/magento-reconcile-exposure.js --expected-database NAME --output NEW_FILE
   --sku EXACT_SKU [--binding-revision UUID]
 Preview only: read-only Amber and Magento GETs; optional full hypothetical sync preview.
+Stable-public-SKU recount preview (single product, current public-SKU binding required):
+  --stable-recount --sku EXACT_PUBLIC_SKU --binding-revision UUID
+Stable recount apply: add --stable-recount to the reviewed single-product apply command.
+This mode proves unchanged public identity and atomically records a reviewed resync handoff.
 Bulk preview, bounded to an explicit candidate file (maximum 5000):
   --bulk --candidates FILE --expected-database NAME --output NEW_PREVIEW_FILE
 Apply a reviewed single-product plan:
@@ -28,6 +32,7 @@ function parseArguments(args) {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--apply' && !out.apply) { out.apply = true; continue; }
     if (args[i] === '--bulk' && !out.bulk) { out.bulk = true; continue; }
+    if (args[i] === '--stable-recount' && !out.stableRecount) { out.stableRecount = true; continue; }
     const key = flags[args[i]]; const value = args[++i];
     if (!key || Object.hasOwn(out, key) || !value || value.startsWith('--') || value.length > 4096
       || /[\u0000-\u001f\u007f]/.test(value)) throw new Error('EXPOSURE_ARGUMENTS');
@@ -39,6 +44,7 @@ function parseArguments(args) {
     : (out.planPath || out.expectedHash || out.actorUserId || (out.bulk
       ? (!out.candidatesPath || out.sku || out.bindingRevisionId) : (!out.sku || out.candidatesPath)))) throw new Error('EXPOSURE_ARGUMENTS');
   if (out.bindingRevisionId) require('../src/services/magento/binding-contract').identity(out.bindingRevisionId);
+  if (out.stableRecount && (out.bulk || (!out.apply && !out.bindingRevisionId))) throw new Error('EXPOSURE_ARGUMENTS');
   return out;
 }
 async function run({ args = [], env = process.env, databasePool, fetchImpl, signal, print = console.log } = {}) {
@@ -70,13 +76,14 @@ async function run({ args = [], env = process.env, databasePool, fetchImpl, sign
     // Reserve the output before any mutation. Never overwrite review evidence.
     output = await fs.open(input.output, 'wx');
     let result;
+    const selected = input.stableRecount ? require('../src/services/magento/stable-recount-exposure') : service;
     if (input.apply) {
       const stored = JSON.parse(await fs.readFile(input.planPath, 'utf8'));
-      result = await service.apply(config, stored.plan, input.expectedHash, options);
+      result = await selected.apply(config, stored.plan, input.expectedHash, options);
     } else {
       const plan = input.bulk ? await bulk.preview(config, JSON.parse(await fs.readFile(input.candidatesPath, 'utf8')), options)
-        : await service.preview(config, input.sku, options);
-      result = { plan, ...(input.bindingRevisionId && plan.eligible
+        : await selected.preview(config, input.sku, options);
+      result = { plan, ...(!input.stableRecount && input.bindingRevisionId && plan.eligible
         ? { syncPreview: await service.hypotheticalSync(config, plan, options) } : {}) };
     }
     assertEvidenceSafe(result, config, options.sensitiveValues);

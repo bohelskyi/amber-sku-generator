@@ -54,6 +54,7 @@ for (const modulePath of [
   './27-magento-successor.cases',
   './28-magento-publication.cases',
   './29-option-labels.cases',
+  './30-stable-recount-exposure.cases',
 ]) {
   require(modulePath);
 }
