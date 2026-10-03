@@ -84,6 +84,8 @@ it('product readiness shows local repair guidance, human fields and unchanged ra
   } });
   shell(<SyncProblemsPage />);
   await screen.findAllByText(/Товар не готовий до синхронізації/);
+  expect(screen.getByRole('link', { name: 'Відповідності: Обробка каменю' }).getAttribute('href')).toBe('/admin/magento/categories/SV?field=kamin_obrobka');
+  expect(api.post).not.toHaveBeenCalled();
   expect(screen.queryByText(/Не вдалося прочитати назву Magento/)).toBeNull();
   for (const label of ['Розмір', 'Назва українською та англійською', 'Обробка каменю']) expect(screen.getByText(label)).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Виправити дані товару' }).getAttribute('href')).toBe('/products/open?article=SV5111010');

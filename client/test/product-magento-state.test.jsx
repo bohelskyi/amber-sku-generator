@@ -46,6 +46,15 @@ function renderState(productId, principalLifetime, permissions, props = {}) {
 beforeEach(() => vi.resetAllMocks());
 afterEach(cleanup);
 
+it('links a processing readiness issue directly to its correspondence without writes', async () => {
+  api.get.mockResolvedValue(response({ state: 'needs_attention', problems: [{
+    code: 'PRODUCT_EVALUATION_NOT_READY', issueFields: ['kamin_obrobka'],
+  }] }));
+  renderState(1368, undefined, ['products.view', 'export_templates.view']);
+  expect((await screen.findByRole('link', { name: 'Відповідності: Обробка каменю' })).getAttribute('href')).toBe('/admin/magento/categories/SV?field=kamin_obrobka');
+  expect(api.post).not.toHaveBeenCalled();
+});
+
 it('removes stale status and actions when a manual refresh fails', async () => {
   api.get
     .mockResolvedValueOnce(response({ state: 'needs_attention', reason: 'Перевірте товар.' }))

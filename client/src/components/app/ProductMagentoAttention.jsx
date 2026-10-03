@@ -1,4 +1,5 @@
 import { useContext, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { AuthContext } from '../../auth/auth-context.js';
 import { WorkspaceDialog } from '../workspace/WorkspaceDialog.jsx';
 import { ProductMagentoNameReview } from './ProductMagentoNameReview.jsx';
@@ -42,6 +43,9 @@ export function ProductMagentoAttention({ product, problems = [], onRepairCharac
         {needsCharacteristics && canRepairCharacteristics && <button type="button" className="btn btn-primary" onClick={onRepairCharacteristics}>
           Виправити характеристики
         </button>}
+        {permissions.includes('export_templates.view') && product.categoryCode && issueFields.map((field) => <Link key={field} className="btn btn-outline" to={`/admin/magento/categories/${encodeURIComponent(product.categoryCode)}?field=${encodeURIComponent(field)}`}>
+          Відповідності: {FIELD_LABELS[field] || field}
+        </Link>)}
       </div>
       {((needsNameCompletion || inheritedNameReview) && !canEditName) || (needsSize && !canRepairInformation) || (needsCharacteristics && !canRepairCharacteristics)
         ? <p className="mt-2">Передайте виправлення оператору з дозволом на відповідну зміну даних товару.</p>

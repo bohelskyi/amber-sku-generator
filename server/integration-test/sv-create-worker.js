@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const pool = require('../src/db/pool');
 const { runMigrations } = require('../src/db/run-migrations');
 const { ensureLegacySkuSchemas } = require('../src/services/sku-schema.service');
-const { buildProductPreview, buildNewProductPreview, saveProduct } = require('../src/services/product.service');
+const { buildProductPreview, buildNewProductPreview, saveProduct, buildProductRecountPreview, applyProductRecount } = require('../src/services/product.service');
 const { catalog } = require('../test/fixtures/magento-v1/contract');
 const { mapProduct, loadMagentoCatalog } = require('../src/services/magento-products-v1');
 
@@ -21,6 +21,13 @@ async function run() {
     }
     for (const key of ['size', 'weight']) await pool.query(`INSERT INTO questions(category_code,key,label,sku_index,display_order,required,include_in_sku,input_type)
       VALUES('SV',$1,$1,0,$2,0,0,'text')`, [key, ++index]);
+    await pool.query(`UPDATE questions SET required=1, visible_if_json='{"souvenir":5}'::jsonb
+      WHERE category_code='SV' AND key='stone_processing'`);
+    for (const [key, rule] of Object.entries({ statuette: { souvenir: 1 }, '2': { statuette: 1 },
+      bird: { '2': 2 }, plants: { statuette: 2 }, symbolic_stat: { statuette: 5 },
+      table_games: { souvenir: 2 }, additional_stone: { souvenir: 5 } })) {
+      await pool.query("UPDATE questions SET visible_if_json=$2::jsonb WHERE category_code='SV' AND key=$1", [key, JSON.stringify(rule)]);
+    }
     await ensureLegacySkuSchemas();
     const protectedState = async () => {
       const out = {};
@@ -31,7 +38,7 @@ async function run() {
     };
     for (const souvenir of [1, 5, 6]) {
       const payload = { categoryCode: 'SV', answers: { souvenir, material: 1, color: 1, weight: '12.5', size: '3/2',
-        ...(souvenir === 1 ? { statuette: 1, '2': 2, bird: 4 } : {}), ...(souvenir === 5 ? { stone_processing: 1 } : {}) },
+        ...(souvenir === 1 ? { statuette: 1, '2': 2, bird: 4 } : {}), ...(souvenir === 5 ? { stone_processing: 1, additional_stone: 1 } : {}) },
       ...(souvenir !== 6 ? { magento_name_subject_ua: 'Тестовий сувенір', magento_name_subject_en: 'test souvenir' } : {}) };
       const preview = await buildNewProductPreview(payload);
       const save = { ...payload, category: 'SV', skuSchemaVersionId: preview.skuSchemaVersionId, previewToken: preview.previewToken, manualPriceUah: 1000 };
@@ -62,6 +69,29 @@ async function run() {
       assert.equal(state.route, 'normal');
       assert.equal(state.business_exclusion_state, 'none');
       assert.equal(state.recount_compatibility_excluded, false);
+      if (souvenir === 5) {
+        // Disposable reproduction of the supplied production absence. The
+        // encoded SKU remains unchanged and must not manufacture an answer.
+        await pool.query("UPDATE products SET details=jsonb_set(details,'{answers}',(details->'answers')-'stone_processing') WHERE id=$1", [saved.id]);
+        const missing = (await pool.query('SELECT * FROM products WHERE id=$1', [saved.id])).rows[0];
+        assert.deepEqual(mapProduct(missing, await loadMagentoCatalog(pool)).errors.map((e) => e.field), ['kamin_obrobka']);
+        const beforeRepair = await protectedState();
+        await assert.rejects(buildProductRecountPreview({ sourceSku: saved.fullSku, answers: {} }), { statusCode: 422 });
+        const repair = { sourceSku: saved.fullSku, answers: { stone_processing: 0 }, manualPriceUah: 1000, reason: 'Explicit processing selection' };
+        const reviewed = await buildProductRecountPreview(repair);
+        assert.equal(Object.hasOwn(reviewed.source.answers, 'stone_processing'), false);
+        assert.deepEqual(reviewed.changes, [{ key: 'stone_processing', from: null, to: 0 }]);
+        assert.deepEqual(await protectedState(), beforeRepair, 'preview cannot repair or mutate product state');
+        const applied = await applyProductRecount({ ...repair, sourceStateSignature: reviewed.source.stateSignature }, options);
+        const successor = (await pool.query('SELECT * FROM products WHERE id=$1', [applied.correctedProductId])).rows[0];
+        assert.equal(successor.details.answers.stone_processing, 0);
+        assert.deepEqual(mapProduct(successor, await loadMagentoCatalog(pool)).errors, []);
+        assert.equal(Number(successor.total_price_uah), 1000);
+        const retired = (await pool.query('SELECT * FROM products WHERE id=$1', [saved.id])).rows[0];
+        assert.equal(Object.hasOwn(retired.details.answers, 'stone_processing'), false);
+        assert.equal(retired.corrected_to_product_id, successor.id);
+        await assert.rejects(buildProductRecountPreview({ sourceSku: successor.full_sku, answers: { stone_processing: 0 } }), { statusCode: 422 });
+      }
     }
   } finally { await pool.end(); }
 }

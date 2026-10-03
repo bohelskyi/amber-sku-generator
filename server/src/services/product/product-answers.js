@@ -63,6 +63,16 @@ function buildProductAnswerContext(decodedProduct) {
     ...getStoredAnswers(decodedProduct.product),
   };
 
+  // A stored-history placeholder is not the genuine SV processing value 0.
+  // Keep this absent so an explicit operator selection is an actual recount
+  // change, rather than inheriting a value that was never stored or decoded.
+  if (decodedProduct.decodeSource === 'stored_history' && decodedProduct.product?.category === 'SV'
+    && !Object.hasOwn(getProductDetails(decodedProduct.product).answers || {}, 'stone_processing')
+    && decodedProduct.decodedAnswers?.some((answer) => answer.key === 'stone_processing'
+      && answer.is_placeholder === true && answer.value_id === null)) {
+    delete answers.stone_processing;
+  }
+
   const storedCalibrated = getProductDetails(decodedProduct.product).isCalibrated;
   if (
     answers.is_calibrated === undefined

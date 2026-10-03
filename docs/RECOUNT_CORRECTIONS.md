@@ -8,6 +8,15 @@ Recount starts from a decoded, existing, active, uncorrected product and always 
 - explicit `null`, `undefined`, or blank clears the named answer;
 - numeric `0` is preserved as real data, including calibration state `0` and configured zero options.
 
+For an existing SV product projected as `stored_history`, an absent stored
+`stone_processing` answer with a null decoded placeholder remains absent in the
+recount source context and form. It must not preselect the real semantic option
+`0` or make an explicit operator selection of `0` look unchanged. This scoped
+repair uses ordinary target validation and reviewed recount preview/apply; it
+does not infer answers from labels or internal SKU text. Existing genuine zero
+answers and other placeholder behavior are unchanged. See the
+[missing-processing investigation](archive/implementation/MAGENTO_SV_PROCESSING_2026-10-03.md).
+
 After merging the patch and before target preview/validation, `omitHiddenRecountAnswers()` removes inherited answers for questions in the published target SKU schema that are hidden (inactive under the target visibility rules). This applies to old placeholders and previously valid values. Corrected product details must not retain those obsolete SKU answers. A visible field with an invalid/archived option still fails validation; the cleanup is not a general option-removal shortcut.
 
 Questions visible in the target remain required and validated normally. This cleanup is recount/correction-specific and must not weaken new-product validation or introduce historical placeholders as active options. The helper currently receives published SKU-schema questions, not live non-SKU metadata; broadening that scope is a separate behavior change requiring a reproduced case and tests.

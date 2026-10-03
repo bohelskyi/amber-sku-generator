@@ -26,6 +26,14 @@ export function getDecodedAnswerMap(decoded) {
       ? decoded.product.details.answers
       : {};
   const nextAnswers = { ...decodedMap, ...storedAnswers };
+  // Stored-history absence must not preselect the genuine SV processing zero.
+  // The operator chooses it explicitly; the server validates the recount target.
+  if (decoded?.decodeSource === 'stored_history' && decoded?.category?.code === 'SV'
+    && !Object.hasOwn(storedAnswers, 'stone_processing')
+    && decoded.decodedAnswers?.some((answer) => answer.key === 'stone_processing'
+      && answer.is_placeholder === true && answer.value_id === null)) {
+    delete nextAnswers.stone_processing;
+  }
   const storedCalibrated = decoded?.product?.details?.isCalibrated;
   if (storedCalibrated !== undefined && storedCalibrated !== null) {
     nextAnswers.is_calibrated = storedCalibrated;

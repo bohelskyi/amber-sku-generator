@@ -63,6 +63,26 @@ test('recount starts from decoded answers enriched with stored product data', ()
   });
 });
 
+test('missing stored SV processing is not preselected as semantic zero, and explicit zero can be reviewed', () => {
+  const source = { decodeSource: 'stored_history', category: { code: 'SV' }, decodedAnswers: [
+    { key: 'stone_processing', value_id: null, is_placeholder: true },
+  ], product: { details: { answers: { souvenir: 5, additional_stone: 1 } } } };
+  const answers = getDecodedAnswerMap(source);
+  assert.equal(Object.hasOwn(answers, 'stone_processing'), false);
+  const selected = updateRecountOptionAnswer(answers, { id: 'stone_processing', required: 1 }, '0');
+  assert.equal(selected.stone_processing, 0);
+  assert.equal(haveAnswersChanged(answers, selected), true);
+  source.product.details.answers.stone_processing = 0;
+  assert.equal(getDecodedAnswerMap(source).stone_processing, 0);
+  assert.equal(haveAnswersChanged(getDecodedAnswerMap(source), selected), false);
+  delete source.product.details.answers.stone_processing;
+  source.decodedAnswers[0] = { key: 'stone_processing', value_id: 0, is_placeholder: false };
+  assert.equal(getDecodedAnswerMap(source).stone_processing, 0);
+  source.category.code = 'NM';
+  source.decodedAnswers[0] = { key: 'stone_processing', value_id: null, is_placeholder: true };
+  assert.equal(getDecodedAnswerMap(source).stone_processing, 0);
+});
+
 test('recount detects changed, added, and cleared answers', () => {
   assert.equal(haveAnswersChanged({ quality: 1 }, { quality: 1 }), false);
   assert.equal(haveAnswersChanged({ quality: 1 }, { quality: 2 }), true);
