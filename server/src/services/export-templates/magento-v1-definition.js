@@ -276,7 +276,10 @@ function materializeMagentoV1(catalog, { publicSku = false } = {}) {
     if (group === 'AR') base.sklo = when(present(answer('glass')), attr('sklo'), literal('Без скла'));
     if (group === 'SV') {
       weight(answer('weight', 'information'), 'decor_weight');
-      cell('rozmir_suveniriv', requiredText('size', 'rozmir_suveniriv'));
+      // Capture the corrected rule in NEW definitions. Published definitions
+      // keep their original AST/hash and require a reviewed successor.
+      cell('rozmir_suveniriv', when(eq(key('souvenir'), '6'), text(answer('size', 'information')),
+        requiredText('size', 'rozmir_suveniriv')));
       cell('fraction', when(all(eq(key('souvenir'), '5'), present(attr('decor_weight'))), {
         op: 'numericBand', input: attr('decor_weight'), format: 'number-v1', onInvalid: 'error', outside: literal('1000+'),
         bands: [2, 5, 10, 20, 50, 100, 200, 300, 500, 1000].map((max, i, bounds) => ({

@@ -63,6 +63,8 @@ Unchanged manual CLI invocations use the existing explicit APPLY contract.
 
 ## Worker and recovery
 
+The SV keychain optional-size correction does not, by deployment alone, retry parked `needs_attention` requests or alter their published template. Review/publish the [corrected template and binding successor](EXPORT_TEMPLATES.md#sv-keychain-size-correction) through H3b: its exact affected/unblocked scope creates the existing bounded handoff, which advances safe request generations. If an earlier publication did not capture the product, use the existing separately reviewed broader resync. Do not change prices or fabricate sizes just to trigger reevaluation. Historical comma-decimal `SV.answers.weight` still requires the reviewed [`sv-readiness-repair.js`](../server/scripts/sv-readiness-repair.js) operation; future writes normalize that answer authoritatively. Other blockers must still pass review, and manual/dispatched/uncertain work remains protected. There is no unrestricted retry/reset or automatic resend.
+
 After normal migrations/startup, the server starts one worker lane with a separate
 five-connection PostgreSQL pool. Each poll selects at most ten due requests and
 processes them sequentially; the idle polling interval is five seconds. A product

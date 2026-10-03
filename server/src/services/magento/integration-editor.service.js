@@ -129,7 +129,8 @@ async function prospectivePreview(config, input, options = {}) {
       category: input.product.categoryCode, status: 'active', exclude_from_export: 0,
       sku_schema_version_id: built.skuSchemaVersionId, weight: built.weightVal,
       total_price_uah: decision?.mode === 'manual_uah' ? decision.manualPriceUah : built.totalPriceUah,
-      details: { answers: input.product.answers },
+      details: { answers: input.product.categoryCode === 'SV'
+        ? require('../product/product-answers').normalizeProductInputAnswers('SV', input.product.answers) : input.product.answers },
       magento_name_subject_ua: built.newProductInput?.names.ua ?? null,
       magento_name_subject_en: built.newProductInput?.names.en ?? null };
     const supported = await loadSupportInputs(client, context.compiled.definition, [product]);

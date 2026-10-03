@@ -264,6 +264,21 @@ function systemFixture(group, answers = {}) {
     name: base.name, price: 42, type_id: 'simple', status: 1, visibility: 4, custom_attributes: [], extension_attributes: { category_links: [] } };
   return { amber, schema, raw };
 }
+
+test('keychain CREATE/UPDATE planning omits missing optional size and keeps canonical weight without mutating source', () => {
+  const f = systemFixture('SV', { size: undefined, weight: 12.7 });
+  const before = structuredClone(f.amber.product);
+  f.raw.custom_attributes.push({ attribute_code: 'rozmir_suveniriv', value: 'Existing remote size' });
+  for (const remote of [null, f.raw]) {
+    const r = run(f, remote);
+    assert.equal(r.evaluation.ready, true);
+    assert.equal(has(r, 'PRODUCT_EVALUATION_NOT_READY'), false);
+    assert.equal(custom(r, 'rozmir_suveniriv'), undefined);
+    assert.equal(field(r, 'decor_weight').evaluatedValue, '12.7');
+  }
+  assert.deepEqual(f.amber.product, before);
+  assert.equal(f.raw.custom_attributes[0].value, 'Existing remote size');
+});
 test('SV readiness separates missing size/names from valid or unmapped stone processing', () => {
   const f = systemFixture('SV', { souvenir: 5, stone_processing: 0, weight: '3.6' });
   delete f.amber.product.details.answers.size;

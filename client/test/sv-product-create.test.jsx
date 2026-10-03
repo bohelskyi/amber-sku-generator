@@ -5,7 +5,7 @@ import { ProductBuilder } from '../src/components/app/ProductBuilder';
 import { useSkuManager } from '../src/hooks/useSkuManager';
 import { api } from '../src/lib/api';
 const config={categories:{SV:{name:'Сувеніри'}},questions:{SV:[{id:'size',label:'Розмір',required:0,input_type:'text'},{id:'weight',label:'Вага',required:0,input_type:'text'}]},
-  productCreateRequirements:{SV:{requiredAnswers:['size','weight'],automaticName:{question:'souvenir',values:['6']}}}};
+  productCreateRequirements:{SV:{requiredAnswers:['size','weight'],optionalAnswersWhen:{size:{question:'souvenir',values:['6']}},automaticName:{question:'souvenir',values:['6']}}}};
 function Form({souvenir,preview}){
   const [answers,setAnswers]=useState({souvenir,weight:'12.5'}),[names,setNames]=useState({});
   return <ProductBuilder config={config} selectedCat="SV" answers={answers} nameSubjects={names} onNameSubject={(k,v)=>setNames(p=>({...p,[k]:v}))}
@@ -22,12 +22,47 @@ it.each([1,5])('new SV route %s exposes required paired subjects and size before
   fireEvent.change(ua,{target:{value:'Сувенір'}});fireEvent.change(en,{target:{value:'souvenir'}});fireEvent.change(screen.getByLabelText(/Розмір/),{target:{value:'3/2'}});
   fireEvent.click(screen.getByRole('button',{name:'Перевірити дані'}));expect(preview).toHaveBeenCalledTimes(1);
 });
-it('keychain uses the automatic name but cannot preview without size',()=>{
+it('keychain uses the automatic name and previews without inventing optional size',async()=>{
   const preview=vi.fn();render(<Form souvenir={6} preview={preview}/>);
   expect(screen.queryByLabelText(/Назва предмета українською/)).toBeNull();
-  fireEvent.click(screen.getByRole('button',{name:'Перевірити дані'}));expect(preview).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText(/Розмір/),{target:{value:'3/2'}});
+  expect(screen.getByLabelText(/Розмір/).required).toBe(false);
+  expect(screen.getByLabelText(/Розмір/).value).toBe('');
   fireEvent.click(screen.getByRole('button',{name:'Перевірити дані'}));expect(preview).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(screen.getByRole('button',{name:'Перевірити дані'})).toBeTruthy());
+  fireEvent.change(screen.getByLabelText(/Розмір/),{target:{value:'3/2'}});
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити дані'}));expect(preview).toHaveBeenCalledTimes(2);
+});
+
+it.each(['12,7', '12.7'])('keychain UI permits decimal weight %s without size', weight => {
+  const preview=vi.fn();render(<Form souvenir={6} preview={preview}/>);
+  fireEvent.change(screen.getByLabelText(/Вага/),{target:{value:weight}});
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити дані'}));expect(preview).toHaveBeenCalledTimes(1);
+});
+
+it.each(['12,7.2', '0', '-1', 'invalid'])('keychain UI rejects invalid weight %s', weight => {
+  const preview=vi.fn();render(<Form souvenir={6} preview={preview}/>);
+  fireEvent.change(screen.getByLabelText(/Вага/),{target:{value:weight}});
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити дані'}));expect(preview).not.toHaveBeenCalled();
+});
+
+it('creation controller excludes optional keychain size from progress and preview even with a required catalog flag', async () => {
+  const posts = [];
+  const inputs = { ...config, categories: { SV: { name: 'Сувеніри', requires_weight: 0 } },
+    questions: { SV: config.questions.SV.map(q => ({ ...q, required: q.id === 'size' ? 1 : 0, include_in_sku: 0 })) }, extraConfig: {} };
+  vi.spyOn(api, 'get').mockImplementation(async url => ({ data: url === '/config' ? inputs : [] }));
+  vi.spyOn(api, 'post').mockImplementation(async (url, body) => {
+    posts.push({ url, body });
+    return { data: { fullProposedSku: 'SV-KEYCHAIN', skuSchemaVersionId: 6, previewToken: 'canonical', totalPriceUah: 1000, weightVal: 12.7 } };
+  });
+  const { result } = renderHook(() => useSkuManager());
+  await waitFor(() => expect(result.current.config).not.toBeNull());
+  act(() => result.current.resetProductFlow('SV'));
+  act(() => { result.current.handleAnswer('souvenir', '6'); result.current.handleTextAnswer('weight', '12,7'); });
+  expect(result.current.requiredCount).toBe(1);
+  expect(result.current.answeredRequiredCount).toBe(1);
+  await act(() => result.current.handlePreview());
+  expect(posts.find(p => p.url === '/preview').body.answers).toEqual({ souvenir: 6, weight: '12,7' });
+  expect(result.current.previewData.previewToken).toBe('canonical');
 });
 
 it('creation controller sends the subject pair through preview/save and invalidates edits without carrying subjects to another route', async () => {

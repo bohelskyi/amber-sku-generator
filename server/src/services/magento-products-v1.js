@@ -457,7 +457,7 @@ function mapProduct(product, catalog = new Map()) {
   if (group === 'AR' && !hasAnswer(answers, 'glass')) base.sklo = 'Без скла';
   if (group === 'SV') {
     base.decor_weight = numericWeight(answers.weight, 'decor_weight', errors);
-    base.rozmir_suveniriv = requiredText(answers, 'size', 'rozmir_suveniriv', errors);
+    base.rozmir_suveniriv = requiredText(answers, 'size', 'rozmir_suveniriv', errors, String(answers.souvenir) !== '6');
     base.fraction = String(answers.souvenir) === '5' && base.decor_weight
       ? fraction(base.decor_weight) : '';
   }

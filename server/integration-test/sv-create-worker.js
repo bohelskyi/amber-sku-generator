@@ -9,6 +9,7 @@ const { mapProduct, loadMagentoCatalog } = require('../src/services/magento-prod
 async function run() {
   try {
     assert.ok(new URL(process.env.DATABASE_URL).pathname.endsWith('_test'));
+    global.fetch = async () => { throw new Error('Network forbidden in SV creation acceptance'); };
     await runMigrations();
     const actor = (await pool.query("INSERT INTO application_users(status,display_name) VALUES('active','SV creation tester') RETURNING id")).rows[0];
     const options = { mutationContext: { actorUserId: Number(actor.id) } };
@@ -43,7 +44,7 @@ async function run() {
       const preview = await buildNewProductPreview(payload);
       const save = { ...payload, category: 'SV', skuSchemaVersionId: preview.skuSchemaVersionId, previewToken: preview.previewToken, manualPriceUah: 1000 };
       const before = await protectedState();
-      for (const missing of ['size', 'weight', ...(souvenir === 6 ? [] : ['magento_name_subject_ua', 'magento_name_subject_en'])]) {
+      for (const missing of ['weight', ...(souvenir === 6 ? [] : ['size', 'magento_name_subject_ua', 'magento_name_subject_en'])]) {
         const incomplete = structuredClone(save);
         if (missing.startsWith('magento_')) delete incomplete[missing]; else delete incomplete.answers[missing];
         await assert.rejects(buildNewProductPreview(incomplete), { statusCode: 422 });
@@ -93,6 +94,54 @@ async function run() {
         await assert.rejects(buildProductRecountPreview({ sourceSku: successor.full_sku, answers: { stone_processing: 0 } }), { statusCode: 422 });
       }
     }
+    // A catalog presentation flag must not override the confirmed optional
+    // non-SKU keychain field. It remains required for the other SV routes.
+    await pool.query("UPDATE questions SET required=1 WHERE category_code='SV' AND key='size'");
+    const comma = { categoryCode: 'SV', answers: { souvenir: 6, material: 1, color: 1, weight: '12,7' } };
+    const dot = { ...comma, answers: { ...comma.answers, weight: '12.7' } };
+    const before = await protectedState();
+    const a = await buildNewProductPreview(comma), b = await buildNewProductPreview(dot);
+    const comparable = ({ uahRateAgeMs: _age, ...preview }) => preview;
+    assert.deepEqual(comparable(a), comparable(b), 'decimal representations must produce the same SKU, price, weight and preview token');
+    assert.equal(a.weightVal, 12.7);
+    assert.deepEqual(await protectedState(), before, 'preview must not write anything');
+    for (const weight of ['12,7.2', '12,7,2', 'nonnumeric', '0', '-1']) {
+      const invalid = { ...comma, answers: { ...comma.answers, weight } };
+      await assert.rejects(buildNewProductPreview(invalid), { statusCode: 422 });
+      await assert.rejects(saveProduct({ ...invalid, skuSchemaVersionId: a.skuSchemaVersionId,
+        previewToken: a.previewToken, manualPriceUah: 1000 }, options), { statusCode: 422 });
+      assert.deepEqual(await protectedState(), before);
+    }
+    let syncProduct;
+    for (const size of [undefined, null, '', '  ', '3/2']) {
+      const payload = { ...comma, answers: { ...comma.answers, size } };
+      const preview = await buildNewProductPreview(payload);
+      const saved = await saveProduct({ ...payload, previewToken: preview.previewToken, skuSchemaVersionId: preview.skuSchemaVersionId, manualPriceUah: 1000 }, options);
+      const p = (await pool.query(`SELECT p.*,i.public_sku FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id=$1`, [saved.id])).rows[0];
+      assert.equal(p.details.answers.weight, 12.7);
+      assert.equal(Number(p.weight), 12.7);
+      assert.equal(Number(p.total_price_uah), 1000);
+      assert.equal(p.public_sku, p.full_sku);
+      assert.equal(p.magento_name_subject_ua, null);
+      assert.equal(p.magento_name_subject_en, null);
+      const mapped = mapProduct(p, await loadMagentoCatalog(pool));
+      assert.deepEqual(mapped.errors, []);
+      assert.equal(mapped.base.decor_weight, '12.7');
+      assert.equal(mapped.base.rozmir_suveniriv, size?.trim() || '');
+      if (size === undefined) syncProduct = p;
+      if (size === '3/2') {
+        const information = require('../src/services/product-information.service');
+        const change = { productId: p.id, answersPatch: { size: null } };
+        const reviewed = await information.previewProductInformation(change);
+        await information.applyProductInformation({ ...change, previewToken: reviewed.previewToken }, options);
+        const cleared = (await pool.query('SELECT * FROM products WHERE id=$1', [p.id])).rows[0];
+        assert.equal(Object.hasOwn(cleared.details.answers, 'size'), false);
+        assert.equal(cleared.weight, p.weight);
+        assert.equal(cleared.full_sku, p.full_sku);
+        assert.equal(cleared.total_price_uah, p.total_price_uah);
+      }
+    }
+    await require('./sv-keychain-sync-fixture').run(pool, actor, syncProduct);
   } finally { await pool.end(); }
 }
 module.exports = { run };

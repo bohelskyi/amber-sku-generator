@@ -157,7 +157,8 @@ async function evaluate(client, product, patch, lockCatalog = false) {
     if (!isQuestionVisibleForSku(question, newAnswers, product.details?.isCalibrated)) {
       throw informationError(`Поле ${key} не є видимим для цього товару.`, 409);
     }
-    if (value === null && Number(question.required) === 1) {
+    const optionalKeychainSize = key === 'size' && require('./product/new-product-readiness').isKeychain(product.category, newAnswers);
+    if (value === null && Number(question.required) === 1 && !optionalKeychainSize) {
       throw informationError(`Поле ${key} є обов'язковим.`);
     }
     const before = oldAnswers[key] === undefined ? null : String(oldAnswers[key]);

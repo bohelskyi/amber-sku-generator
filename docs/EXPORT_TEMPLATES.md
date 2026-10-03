@@ -33,6 +33,12 @@ Draft save permits incomplete definitions, including unsupported format/evaluato
 
 Evaluator versions 1 and 2 permanently retain `full_sku` as the encoded internal/configuration source. Migration 046 adds evaluator `magento-declarative-3` plus `sourceContractVersion: "public-product-identity-v1"`; evaluator 4 also requires this source contract. Only these public-identity evaluators may declare the distinct product source `public_sku`. The current candidate/system view prepares evaluator 3; existing drafts/publications, hashes, stored artifacts and activation metadata are not rewritten or selected automatically. Current production uses the reviewed public-SKU-aware binding. Subsequent reviewed publications must use `public_sku` for Magento article columns while retaining `full_sku` wherever internal configuration evidence is required.
 
+## SV keychain size correction
+
+The current system/candidate materialization makes `SV souvenir=value_id:6` size optional: `rozmir_suveniriv` uses the stored size, trimmed, or an empty cell when absent. Other SV routes keep their existing required-text expression. The same expression language and evaluator versions implement this condition; no evaluator-engine version or database migration is needed.
+
+The size requirement is captured in the template AST and therefore participates in immutable published binding semantics. Existing publications, hashes and snapshots stay unchanged. Correct an existing integration through the existing workflow: clone/edit the template's SV size expression, publish a new template version, prepare/review its binding successor (including any approvals invalidated by the changed dependency), preview the exact affected scope and publish through the reviewed H3b handoff. Do not regenerate an old publication or waive its evaluation errors in the planner. See [publication and controlled handoff](MAGENTO_INTEGRATION.md#reviewed-publication-and-controlled-handoff-h3b).
+
 ## Extensible v4 integration contract
 
 Wave 2 H0 adds the explicit opt-in `evaluatorVersion: "magento-declarative-4"`, with `formatVersion: 1`, `sourceContractVersion: "public-product-identity-v1"` and **only** `outputContract: "magento-products-columns-v2"`. It uses the same compiler, expression language, evaluator, protected full-product columns, source validation, planner and durable writer. It is not a second mapper or automatic contract upgrade.

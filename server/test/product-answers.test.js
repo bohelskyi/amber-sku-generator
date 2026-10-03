@@ -5,8 +5,29 @@ const {
   buildProductAnswerContext,
   mergeRecountAnswerPatch,
   normalizeAnswerMap,
+  normalizeProductInputAnswers,
   omitHiddenRecountAnswers,
 } = require('../src/services/product/product-answers');
+
+test('SV write inputs canonicalize decimal comma and dot without changing other answers or stored reads', () => {
+  for (const weight of ['12,7', '12.7', 12.7, ' 12,7 ']) {
+    const input = { weight, souvenir: '6', size: '3,2 см', notes: '10,2', is_calibrated: '2' };
+    assert.deepEqual(normalizeProductInputAnswers('SV', input), { weight: 12.7, souvenir: 6, size: '3,2 см', notes: '10,2', is_calibrated: 2 });
+    assert.equal(input.weight, weight);
+  }
+  assert.equal(normalizeProductInputAnswers('BR', { weight: '12,7' }).weight, '12,7');
+  assert.equal(normalizeAnswerMap({ weight: '12,7' }).weight, '12,7');
+  assert.deepEqual(normalizeProductInputAnswers('SV', { weight: null }), {});
+  assert.deepEqual(normalizeProductInputAnswers('SV', { souvenir: 6, size: ' \t ' }), { souvenir: 6 });
+  assert.deepEqual(normalizeProductInputAnswers('SV', { souvenir: 5, size: ' \t ' }), normalizeAnswerMap({ souvenir: 5, size: ' \t ' }));
+});
+
+test('SV write inputs reject invalid mixed, nonnumeric and nonpositive weight without inventing values', () => {
+  for (const weight of ['12,7.2', '12,7,2', '12 g', 'NaN', '0', '-12,7', {}, true]) {
+    assert.throws(() => normalizeProductInputAnswers('SV', { weight }), { statusCode: 422 });
+  }
+  assert.deepEqual(normalizeProductInputAnswers('SV', {}), {});
+});
 
 test('answer normalization preserves calibration states and semantic values', () => {
   assert.deepEqual(normalizeAnswerMap({

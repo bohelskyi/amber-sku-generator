@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api.js';
-import { createRequirements } from '../../lib/product-create-readiness.js';
+import { createRequirements, isCreateQuestionRequired } from '../../lib/product-create-readiness.js';
 import { getVisibleOptionsForQuestion, isQuestionVisible, isTextQuestion } from '../../lib/sku-visibility.js';
 import { LoadingState, Notice } from '../app/UiPrimitives.jsx';
 import MagentoDetails from './MagentoDetails.jsx';
@@ -85,8 +85,8 @@ function ProductChecks({ revision, categoryCode, onRepresentative }) {
       {!config && !error && <LoadingState />}
       {config && <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); check('create-preview', createInput()); }}>
         {questions.filter((question) => isQuestionVisible(question, answers, calibrated)).map((question) => <label className="block text-sm" key={question.id}>{question.label}
-          {isTextQuestion(question) ? <input className="input" required={question.required === 1 || rules.requiredAnswers.includes(question.id)} value={answers[question.id] ?? ''} onChange={(event) => changeAnswer(question, event.target.value)} />
-            : <select className="input" required={question.required === 1 || rules.requiredAnswers.includes(question.id)} value={answers[question.id] ?? ''} onChange={(event) => changeAnswer(question, event.target.value)}><option value="">Оберіть значення</option>{getVisibleOptionsForQuestion(question, answers, calibrated).map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select>}
+          {isTextQuestion(question) ? <input className="input" required={isCreateQuestionRequired(question, rules)} value={answers[question.id] ?? ''} onChange={(event) => changeAnswer(question, event.target.value)} />
+            : <select className="input" required={isCreateQuestionRequired(question, rules)} value={answers[question.id] ?? ''} onChange={(event) => changeAnswer(question, event.target.value)}><option value="">Оберіть значення</option>{getVisibleOptionsForQuestion(question, answers, calibrated).map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select>}
         </label>)}
         {Number(config.categories[categoryCode]?.requires_weight) === 1 && <label className="block text-sm">Вага, г<input className="input" required type="number" step="any" min="0" value={weight} onChange={(event) => { invalidate(); setWeight(event.target.value); }} /></label>}
         {rules.namesRequired && <div className="grid gap-3 sm:grid-cols-2"><label className="text-sm">Назва українською<input className="input" required value={ua} onChange={(event) => { invalidate(); setUa(event.target.value); }} /></label><label className="text-sm">Назва англійською<input className="input" required value={en} onChange={(event) => { invalidate(); setEn(event.target.value); }} /></label></div>}

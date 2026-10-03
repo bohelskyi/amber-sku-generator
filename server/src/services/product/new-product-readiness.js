@@ -4,7 +4,9 @@ const { mapProduct, loadMagentoCatalog } = require('../magento-products-v1');
 // Creation-only presentation of the existing Magento v1 input contract.
 // Recount and legacy metadata completion deliberately do not use this gate.
 const requirements = { SV: { requiredAnswers: ['size', 'weight'],
+  optionalAnswersWhen: { size: { question: 'souvenir', values: ['6'] } },
   automaticName: { question: 'souvenir', values: ['6'] } } };
+const isKeychain = (category, answers) => category === 'SV' && String(answers?.souvenir) === '6';
 function subjects(category, payload) {
   if (category !== 'SV') return null;
   const ua = payload.magento_name_subject_ua, en = payload.magento_name_subject_en;
@@ -19,4 +21,4 @@ async function validate(product, client, { allowMissingPrice = false } = {}) {
   if (issues.length) throw Object.assign(new Error(issues.map(e => e.message).join(' ')),
     { statusCode: 422, code: 'NEW_PRODUCT_NOT_READY', issues });
 }
-module.exports = { requirements, subjects, validate };
+module.exports = { requirements, subjects, validate, isKeychain };
