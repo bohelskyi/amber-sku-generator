@@ -182,6 +182,7 @@ export function RepricingRecountDrawer({
       </main>
 
       <RecountConfirmDialog
+        config={config}
         canPriceOverride={canPriceOverride}
         error={recount.recountError}
         isApplying={recount.isRecountApplying}

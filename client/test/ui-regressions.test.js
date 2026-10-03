@@ -432,7 +432,7 @@ test('recount uses a Builder-aligned editor with one authoritative comparison su
   assert.match(recountSource, /Різниця в ціні/);
   assert.match(recountSource, /Змінені атрибути/);
   assert.match(recountSource, /isChanged \? 'is-changed' : ''/);
-  assert.match(recountSource, /getAnswerValueLabel[\s\S]*?→[\s\S]*?getAnswerValueLabel/);
+  assert.match(recountSource, /getPresentedAnswerLabel[\s\S]*?→[\s\S]*?getPresentedAnswerLabel/);
   assert.doesNotMatch(recountSource, /PreviousPricingSnapshot/);
   assert.doesNotMatch(recountSource, /Початкові цінові параметри/);
   assert.doesNotMatch(recountSource, /pricing\.weight/);

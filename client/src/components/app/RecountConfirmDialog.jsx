@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { formatDecimal, formatUah } from '../../lib/formatters';
-import { getAnswerValueLabel, getQuestionLabel } from '../../lib/answer-labels';
+import { getQuestionLabel } from '../../lib/answer-labels';
+import { getPresentableRecountChanges, getPresentedAnswerLabel } from '../../lib/answer-presentation';
 import { CopyAction, Dialog } from '../ui';
 
 const PRICING_MODES = [
@@ -47,6 +48,8 @@ export function RecountConfirmDialog({
   const oldPrice = preview.source.totalPriceUah;
   const newPrice = preview.corrected.totalPriceUah;
   const sourceArticle = preview.source.publicSku || '';
+  const changes = getPresentableRecountChanges(preview.changes, { config,
+    categoryCode: preview.corrected.categoryCode, source: preview.source, target: preview.corrected });
   const correctedArticle = preview.corrected.publicSku || sourceArticle;
   const priceDelta = Number(preview.priceDeltaUah || 0);
   const isRequestMode = mode === 'request';
@@ -143,7 +146,7 @@ export function RecountConfirmDialog({
               {preview.nameChanges.from?.all !== preview.nameChanges.to.all && <p>Назва українською: {preview.nameChanges.from?.all || '—'} → {preview.nameChanges.to.all}</p>}
               {preview.nameChanges.from?.en !== preview.nameChanges.to.en && <p>Назва англійською: {preview.nameChanges.from?.en || '—'} → {preview.nameChanges.to.en}</p>}
             </div>}
-            {(preview.changes || []).map((change) => <p key={change.key}>{change.key === 'weight' ? 'Вага' : getQuestionLabel(config, preview.corrected.categoryCode, change.key)}: {getAnswerValueLabel(config, preview.corrected.categoryCode, change.key, change.from)} → {getAnswerValueLabel(config, preview.corrected.categoryCode, change.key, change.to)}</p>)}
+            {changes.map((change) => <p key={change.key}>{change.key === 'weight' ? 'Вага' : getQuestionLabel(config, preview.corrected.categoryCode, change.key)}: {getPresentedAnswerLabel(config, preview.corrected.categoryCode, change.key, change.from, preview.source)} → {getPresentedAnswerLabel(config, preview.corrected.categoryCode, change.key, change.to, preview.corrected)}</p>)}
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">

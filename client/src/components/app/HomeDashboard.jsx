@@ -10,6 +10,11 @@ import {
 } from '../../lib/formatters';
 import { getAnswerValueLabel, getQuestionLabel } from '../../lib/answer-labels';
 import {
+  getPresentableRecountChanges,
+  getPresentedAnswerLabel,
+  shouldPresentDecodedAnswer,
+} from '../../lib/answer-presentation';
+import {
   getVisibleOptionsForQuestion,
   isQuestionVisible,
   isTextQuestion,
@@ -373,7 +378,7 @@ export function DecodeWorkspace({
         </header>
 
         <div className="builder-field-list">
-          {decodeData.decodedAnswers.map((item) => {
+          {decodeData.decodedAnswers.filter((item) => !decodeData.existsInDb || shouldPresentDecodedAnswer(item)).map((item) => {
             const isPriceDriver = decodeData.pricing?.dependentKeys?.includes(item.key);
 
             return (
@@ -615,7 +620,7 @@ function RecountPanel({
   const blockerByQuestionId = new Map(
     recountBlockers.map((blocker) => [blocker.questionId, blocker])
   );
-  const localChanges = visibleQuestions
+  const localChanges = getPresentableRecountChanges(visibleQuestions
     .filter((question) => isRecountAnswerChanged(
       originalAnswers[question.id],
       recountAnswers[question.id]
@@ -624,10 +629,13 @@ function RecountPanel({
       key: question.id,
       from: originalAnswers[question.id],
       to: recountAnswers[question.id],
-    }));
-  const displayedChanges = isRecountPreviewCurrent
+    })), { config, categoryCode, source: decodeData, target: { answers: recountAnswers } });
+  const changeSource = isRecountPreviewCurrent ? recountPreview?.source ?? decodeData : decodeData;
+  const changeTarget = isRecountPreviewCurrent
+    ? recountPreview?.corrected ?? { answers: recountAnswers } : { answers: recountAnswers };
+  const displayedChanges = getPresentableRecountChanges(isRecountPreviewCurrent
     ? recountPreview?.changes || localChanges
-    : localChanges;
+    : localChanges, { config, categoryCode, source: changeSource, target: changeTarget });
   const currentPricing = decodeData.pricing;
   const correctedPricing = recountPreview?.corrected;
   const pricingDependencyState = getRecountPricingDependencyState({
@@ -729,10 +737,7 @@ function RecountPanel({
             );
             const isRequired = question.required === 1
               && (textQuestion || visibleOptions.length > 0);
-            const isChanged = isRecountAnswerChanged(
-              originalAnswers[question.id],
-              recountAnswers[question.id]
-            );
+            const isChanged = localChanges.some((change) => change.key === question.id);
             const blocker = blockerByQuestionId.get(question.id);
             const isPriceDriver = pricingDependentKeys.has(question.id);
             const blockerMessageId = `recount-blocker-${question.id}`;
@@ -758,7 +763,7 @@ function RecountPanel({
                       id={`recount-${question.id}`}
                       type="text"
                       className="input builder-text-input"
-                      value={recountAnswers[question.id] || ''}
+                      value={recountAnswers[question.id] ?? ''}
                       onChange={(event) => onRecountTextAnswer(question.id, event.target.value)}
                       disabled={isRecountApplying}
                       aria-invalid={blocker ? 'true' : undefined}
@@ -805,9 +810,9 @@ function RecountPanel({
                   )}
                   {isChanged && (
                     <div className="recount-inline-change">
-                      <span>{getAnswerValueLabel(config, categoryCode, question.id, originalAnswers[question.id])}</span>
+                      <span>{getPresentedAnswerLabel(config, categoryCode, question.id, originalAnswers[question.id], decodeData)}</span>
                       <span aria-hidden="true">→</span>
-                      <span>{getAnswerValueLabel(config, categoryCode, question.id, recountAnswers[question.id])}</span>
+                      <span>{getPresentedAnswerLabel(config, categoryCode, question.id, recountAnswers[question.id])}</span>
                     </div>
                   )}
                   {blocker && (
@@ -898,9 +903,9 @@ function RecountPanel({
                     <div key={change.key} className="recount-change-row">
                       <span>{getRecountChangeLabel(config, categoryCode, change.key)}</span>
                       <span>
-                        <span>{getRecountChangeValue(config, categoryCode, change.key, change.from)}</span>
+                        <span>{getRecountChangeValue(config, categoryCode, change.key, change.from, changeSource)}</span>
                         <span aria-hidden="true"> → </span>
-                        <strong>{getRecountChangeValue(config, categoryCode, change.key, change.to)}</strong>
+                        <strong>{getRecountChangeValue(config, categoryCode, change.key, change.to, changeTarget)}</strong>
                       </span>
                     </div>
                   ))}
@@ -1038,8 +1043,8 @@ function getRecountChangeLabel(config, categoryCode, key) {
   return key === 'weight' ? 'Вага' : getQuestionLabel(config, categoryCode, key);
 }
 
-function getRecountChangeValue(config, categoryCode, key, value) {
-  if (key !== 'weight') return getAnswerValueLabel(config, categoryCode, key, value);
+function getRecountChangeValue(config, categoryCode, key, value, payload) {
+  if (key !== 'weight') return getPresentedAnswerLabel(config, categoryCode, key, value, payload);
   return value === null || value === undefined || String(value).trim() === ''
     ? 'Не вказано'
     : `${formatDecimal(value)} г`;
