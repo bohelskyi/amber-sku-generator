@@ -21,19 +21,24 @@ function validatedSku(sku) {
   return sku;
 }
 
+async function readResponseBytes(response) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of response.body || []) {
+    size += chunk.byteLength;
+    if (size > MAX_RESPONSE_BYTES) throw new MagentoIntegrationError('MAGENTO_RESPONSE_TOO_LARGE');
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
 async function readJson(response) {
   const contentType = response.headers.get('content-type') || '';
   if (!/^application\/(?:[\w.-]+\+)?json(?:\s*;|$)/i.test(contentType) || !response.body) {
     throw new MagentoIntegrationError('MAGENTO_RESPONSE_INVALID');
   }
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of response.body) {
-    size += chunk.byteLength;
-    if (size > MAX_RESPONSE_BYTES) throw new MagentoIntegrationError('MAGENTO_RESPONSE_TOO_LARGE');
-    chunks.push(chunk);
-  }
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  const bytes = await readResponseBytes(response);
+  try { return JSON.parse(bytes.toString('utf8')); }
   catch { throw new MagentoIntegrationError('MAGENTO_RESPONSE_INVALID'); }
 }
 
@@ -127,4 +132,4 @@ function createMagentoClient(config, { fetchImpl = globalThis.fetch, storeCode =
   });
 }
 
-module.exports = { createMagentoClient, PAGE_SIZE, MAX_RESPONSE_BYTES, readJson };
+module.exports = { createMagentoClient, PAGE_SIZE, MAX_RESPONSE_BYTES, readJson, readResponseBytes };
