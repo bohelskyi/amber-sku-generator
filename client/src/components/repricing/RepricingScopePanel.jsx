@@ -1,6 +1,6 @@
 import { FilePenLine, RefreshCw } from 'lucide-react';
 
-export function RepricingScopePanel({ controller }) {
+export function RepricingScopePanel({ canPrepareRepricing, controller }) {
   const {
     drafts,
     openSelectedRepricing,
@@ -33,7 +33,7 @@ export function RepricingScopePanel({ controller }) {
             ))}
           </select>
         </label>
-        <button
+        {(selectedDraft || canPrepareRepricing) && <button
           type="button"
           className="btn btn-primary gap-2 lg:min-w-56"
           onClick={openSelectedRepricing}
@@ -45,9 +45,9 @@ export function RepricingScopePanel({ controller }) {
           {previewing
             ? 'Готуємо переоцінку…'
             : selectedDraft
-              ? 'Продовжити чернетку'
+              ? (canPrepareRepricing ? 'Продовжити чернетку' : 'Переглянути чернетку')
               : 'Попередній перегляд'}
-        </button>
+        </button>}
       </div>
       {selectedScenario && (
         <div className="mt-3 flex flex-wrap gap-2">

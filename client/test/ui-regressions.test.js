@@ -49,6 +49,10 @@ test('dialogs share focus trapping, Escape handling, and focus restoration', () 
     new URL('../src/hooks/useDialogAccessibility.js', import.meta.url),
     'utf8'
   );
+  const overlaySource = fs.readFileSync(
+    new URL('../src/components/ui/Overlays.jsx', import.meta.url),
+    'utf8'
+  );
   const repricingDialogsSource = fs.readFileSync(
     new URL('../src/components/repricing/RepricingDialogs.jsx', import.meta.url),
     'utf8'
@@ -66,10 +70,10 @@ test('dialogs share focus trapping, Escape handling, and focus restoration', () 
   assert.match(hookSource, /event\.key !== 'Tab'/);
   assert.match(hookSource, /previousActiveElement/);
   assert.match(hookSource, /document\.body\.style\.overflow = 'hidden'/);
-  assert.match(dialogSource, /useDialogAccessibility/);
-  assert.match(repricingDialogsSource, /role="dialog"/);
-  assert.match(repricingDialogsSource, /useDialogAccessibility/);
-  assert.match(correctionQueueSource, /aria-modal="true"/);
+  assert.match(overlaySource, /useDialogAccessibility/);
+  assert.match(dialogSource, /<Dialog/);
+  assert.match(repricingDialogsSource, /<SharedConfirmDialog/);
+  assert.match(correctionQueueSource, /<ConfirmDialog/);
   assert.match(drawerSource, /role="dialog"/);
 });
 
@@ -94,15 +98,26 @@ test('dialogs and sticky summaries remain bounded on short viewports', () => {
   assert.ok((dashboardSource.match(/sticky-summary/g) || []).length >= 2);
 });
 
-test('compact buttons override the normal button minimum height without shrinking normal actions', () => {
+test('shared control tokens keep normal and compact desktop actions distinct', () => {
   const stylesSource = fs.readFileSync(
     new URL('../src/index.css', import.meta.url),
     'utf8'
   );
 
-  assert.match(stylesSource, /\.btn \{[\s\S]*?min-h-10/);
-  assert.match(stylesSource, /\.btn\.btn-icon[\s\S]*?min-height: 2rem/);
-  assert.match(stylesSource, /\.btn\.btn-compact[\s\S]*?min-height: 2rem/);
+  assert.match(stylesSource, /--control-height-sm: 32px;[\s\S]*?--control-height: 36px;[\s\S]*?--control-height-touch: 44px;/);
+  assert.match(stylesSource, /\.btn \{[\s\S]*?min-height: var\(--control-height\)/);
+  assert.match(stylesSource, /\.btn\.btn-icon[\s\S]*?min-height: var\(--control-height-sm\)/);
+  assert.match(stylesSource, /\.btn\.btn-compact[\s\S]*?min-height: var\(--control-height-sm\)/);
+  assert.match(stylesSource, /@media \(max-width: 1023px\), \(pointer: coarse\)[\s\S]*?min-height: var\(--control-height-touch\)/);
+});
+
+test('reduced motion removes entrance delays as well as shortening animations', () => {
+  const stylesSource = fs.readFileSync(
+    new URL('../src/index.css', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(stylesSource, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?animation-delay: 0s !important;[\s\S]*?animation-duration: 0\.01ms !important;/);
 });
 
 test('sticky navigation and admin anchors use shared responsive offsets', () => {
@@ -110,16 +125,20 @@ test('sticky navigation and admin anchors use shared responsive offsets', () => 
     new URL('../src/index.css', import.meta.url),
     'utf8'
   );
-  const adminSource = fs.readFileSync(
-    new URL('../src/pages/AdminPage.jsx', import.meta.url),
+  const shellStylesSource = fs.readFileSync(
+    new URL('../src/components/app/shell.css', import.meta.url),
+    'utf8'
+  );
+  const adminStylesSource = fs.readFileSync(
+    new URL('../src/components/admin/admin.css', import.meta.url),
     'utf8'
   );
 
-  assert.match(stylesSource, /--workspace-nav-height: 64px/);
-  assert.match(stylesSource, /--workspace-nav-height: 56px/);
+  assert.match(shellStylesSource, /--app-context-height: 52px;[\s\S]*?--workspace-nav-height: var\(--app-context-height\)/);
+  assert.doesNotMatch(stylesSource, /@media \(max-width: 767px\)[\s\S]*?--workspace-nav-height/);
   assert.match(stylesSource, /\.admin-section-nav[\s\S]*?top: var\(--workspace-nav-height\)/);
   assert.match(stylesSource, /\.admin-anchor-section[\s\S]*?scroll-margin-top:/);
-  assert.ok((adminSource.match(/admin-anchor-section/g) || []).length >= 2);
+  assert.match(adminStylesSource, /\.admin-page \.local-workspace-nav[\s\S]*?top: var\(--workspace-nav-height\)/);
 });
 
 test('operational placeholder inputs have explicit accessible names', () => {
@@ -338,19 +357,20 @@ test('home and decode presentation share aligned columns and compact authoritati
     new URL('../src/index.css', import.meta.url),
     'utf8'
   );
+  const productStylesSource = fs.readFileSync(
+    new URL('../src/components/app/product.css', import.meta.url),
+    'utf8'
+  );
 
-  assert.match(homeSource, /home-top-workspace/);
-  assert.match(homeSource, /home-side-workspace/);
-  assert.match(homeSource, /canCreateProducts \? '' : ' is-decoder-only'/);
+  assert.match(homeSource, /product-landing-grid/);
+  assert.match(homeSource, /product-lookup-panel/);
+  assert.match(homeSource, /canCreateProducts && showCreate && showLookup/);
   assert.match(homeSource, /decode-result-workspace/);
   assert.equal((homeSource.match(/operational-split-layout/g) || []).length, 2, 'decode and recount must share the operational split');
   assert.match(builderSource, /className="operational-split-layout"/);
-  assert.match(stylesSource, /\.home-top-workspace,[\s\S]*?\.operational-split-layout[\s\S]*?360px/);
-  assert.match(stylesSource, /\.home-top-workspace\.is-decoder-only[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/);
-  assert.match(stylesSource, /\.home-top-workspace\.is-decoder-only \.home-side-workspace[\s\S]*?minmax\(0, 1fr\) 360px/);
-  assert.match(stylesSource, /\.home-top-workspace:not\(\.is-decoder-only\) \.home-create-panel \{[\s\S]*?flex self-stretch flex-col/);
-  assert.match(stylesSource, /\.home-top-workspace:not\(\.is-decoder-only\) \.home-category-list \{[\s\S]*?flex-1;[\s\S]*?grid-auto-rows: minmax\(80px, 1fr\)/);
-  assert.match(stylesSource, /\.home-top-workspace:not\(\.is-decoder-only\) \.home-category-option \{[\s\S]*?h-full/);
+  assert.match(stylesSource, /\.operational-split-layout[\s\S]*?360px/);
+  assert.match(productStylesSource, /\.product-landing-grid[\s\S]*?lg:grid-cols/);
+  assert.match(productStylesSource, /\.product-landing-grid\.is-lookup-only[\s\S]*?lg:grid-cols-1/);
   assert.doesNotMatch(stylesSource, /\.home-create-panel \{ @apply self-start/);
   assert.match(homeSource, /const finalStoredPriceUsd = decodeData\.existsInDb \? pricing\?\.totalPrice : null/);
   assert.match(homeSource, /formatOptionalValue\(finalStoredPriceUsd, formatUsd\)/);
@@ -362,8 +382,8 @@ test('home and decode presentation share aligned columns and compact authoritati
   assert.match(navSource, /amber-logo-white-orange\.png/);
   assert.match(navSource, /<img src=\{amberLogo\}/);
   assert.doesNotMatch(navSource, /workspace-brand-mark|workspace-brand-copy/);
-  assert.match(stylesSource, /--workspace-nav-height: 64px/);
-  assert.match(stylesSource, /\.workspace-brand-logo \{ @apply block h-9 w-auto sm:h-10; \}/);
+  assert.match(navSource, /className="app-navigation-brand"/);
+  assert.match(navSource, /className="app-navigation-link/);
 });
 
 test('operations chrome is flatter while authentication and overlays retain their geometry', () => {
@@ -440,7 +460,7 @@ test('recount uses a Builder-aligned editor with one authoritative comparison su
   assert.match(stylesSource, /\.recount-price-delta > \.recount-price-delta-usd \{[\s\S]*text-xs font-semibold text-\[#713b10\]/);
 });
 
-test('catalog structure uses category tabs and a dense question master-detail workspace', () => {
+test('catalog structure uses category choices and a dense question master-detail workspace', () => {
   const source = fs.readFileSync(
     new URL('../src/components/admin/AdminStructureEditor.jsx', import.meta.url),
     'utf8'
@@ -450,7 +470,8 @@ test('catalog structure uses category tabs and a dense question master-detail wo
     'utf8'
   );
 
-  assert.match(source, /role="tablist"/);
+  assert.match(source, /role="group" aria-label="Категорії каталогу"/);
+  assert.match(source, /aria-pressed=/);
   assert.match(source, /catalog-category-tab/);
   assert.match(source, /catalog-workspace/);
   assert.match(source, /catalog-master/);
@@ -523,7 +544,7 @@ test('correction queue wires application-user claims and legacy compatibility in
   assert.match(source, /createVisibilityAwarePoller/);
   assert.match(source, /createLatestRequestGate/);
   assert.match(source, /Робоча область/);
-  assert.match(source, /nextFilter === 'workspace' \? 'active'/);
+  assert.match(source, /status: query\.filter === 'workspace' \? 'active' : query\.filter/);
   assert.match(source, /getCorrectionRequestsForView/);
   assert.match(source, /isCorrectionClaimConflict/);
   assert.match(source, /correctionsApi\.claimRequest\(request\.id\)/);
@@ -536,5 +557,6 @@ test('correction queue wires application-user claims and legacy compatibility in
   assert.doesNotMatch(source, /В роботі в іншому браузері/);
   assert.doesNotMatch(source, /storeCorrectionClaim/);
   assert.match(source, /Примусово повернути/);
-  assert.match(source, /window\.confirm/);
+  assert.match(source, /setForceReleaseTarget\(selectedRequest\)/);
+  assert.match(source, /<ConfirmDialog[\s\S]*?title="Примусово повернути запит у чергу\?"/);
 });

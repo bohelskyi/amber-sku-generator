@@ -95,8 +95,8 @@ test('correction mutation controls are wired to effective permission flags', () 
     'utf8'
   );
 
-  assert.match(correctionSource, /request\.status === 'pending'[\s\S]*?&& canClaim/);
-  assert.match(correctionSource, /request\.status === 'in_progress' && !isOwnedClaim && canForceRelease/);
-  assert.match(correctionSource, /canComplete && <button[\s\S]*?openCompletion/);
-  assert.match(correctionSource, /request\.status === 'pending' && canReject/);
+  assert.match(correctionSource, /selectedRequest\.status === 'pending'[\s\S]*?&& canClaim/);
+  assert.match(correctionSource, /selectedRequest\.status === 'in_progress' && !isOwnedClaim && canForceRelease/);
+  assert.match(correctionSource, /canComplete && <Button[\s\S]*?openCompletion/);
+  assert.match(correctionSource, /selectedRequest\.status === 'pending' && canReject/);
 });

@@ -82,6 +82,14 @@ The published Necklaces `size` rule shows and requires size for natural calibrat
 
 ## Authoritative preview and save
 
+ProductBuilder keeps the proposed encoded identity under **Внутрішній SKU** in
+technical details, without a normal pre-save copy action. After save, the receipt
+shows and copies exactly the server's `publicSku` through **Копіювати артикул**.
+Missing public identity is reported explicitly; it never falls back to `fullSku`
+or predicts an `AG-*` allocation. Legacy public articles remain valid. Beginning a
+new category creation clears the previous receipt; the existing post-save reset
+retains it. Preview/save/cancel/variation semantics are otherwise unchanged.
+
 `buildProductPreview()` validates category/schema ownership, required weight, visible questions, option existence, visibility, and archive state. Depending on `skip_hidden_sku_questions`, hidden SKU questions are omitted from encoding or represented through the historical placeholder model.
 
 Public creation preview and save use `buildNewProductPreview()` in addition to these checks. For SV, the existing Magento v1 evaluator input contract is mandatory: size, positive numeric saved weight, and valid route-dependent answers. Normal and stone routes also require both `magento_name_subject_ua` and `magento_name_subject_en` (non-empty plain text, at most 200 characters each). Keychains (`souvenir=6`) retain the automatic bilingual name and require size. No subject or dimension is invented. `/config` exposes the creation requirements to the form, which shows the paired subject inputs and required size/weight. Subject changes invalidate the preview token; save revalidates and persists the pair atomically with the new product. Manual price remains independently enterable after preview and must be positive at save. These creation checks do not rewrite legacy products or change the internal recount compatibility path. Existing-product subject completion remains in the separately authorized Magento name preview/apply workflow.
@@ -102,6 +110,19 @@ remain permanent. Voiding `AG-000002` cannot make it available again; the sequen
 continues at `AG-000003` or higher. See [eligibility and recovery](MAGENTO_AUTOMATIC_SYNC.md#test-product-deletion).
 
 ## Decode and legacy compatibility
+
+`GET /api/products/register` is the bounded operator register read. It retains the
+existing `history.view` authorization boundary rather than treating
+`products.view` as permission to browse stored inventory. The default page contains
+only current active, uncorrected products; explicit archived/corrected/all filters
+remain under that same history permission and terminal `voided` test-product
+tombstones are never included. Search covers the stored public article and internal
+SKU, returns an explicit display projection rather than database rows, and uses a
+filter-bound immutable-ID keyset cursor with a default page of 50 and server maximum of 100.
+Category labels and filter options are included in the same authorized projection,
+so the register does not depend on broader catalog/config access. The legacy
+15-product `GET /api/products` read remains available for existing callers during
+the client transition.
 
 Exact existing-product lookup is authoritative for opening a product. Decode projects its stored category, answers, schema reference, weight, historical prices and product identity without requiring its historical internal SKU to parse or reconstruct successfully. Historical values absent from schema options remain visible as their stored values. This read does not validate a new configuration or change the identifier.
 

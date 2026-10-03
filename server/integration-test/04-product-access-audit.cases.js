@@ -34,6 +34,46 @@ test('custom recount roles can preview through either permission without gaining
   }
 });
 
+test('attention read projections preserve independent capability boundaries', async () => {
+  if (!suite.authenticatedSession) suite.authenticatedSession = await authenticateApplicationSession('/');
+  const userId = suite.authenticatedSession.applicationUser.id;
+  const roleIds = [];
+  try {
+    for (const [suffix, permission, allowedPath, deniedPaths] of [
+      ['corrections', 'corrections.view', '/api/admin/correction-requests/page?limit=1', [
+        '/api/admin/repricing/batches/page?limit=1', '/api/magento/problems/page?limit=1', '/api/config',
+      ]],
+      ['repricing', 'repricing.view', '/api/admin/repricing/batches/page?limit=1', [
+        '/api/admin/correction-requests/page?limit=1', '/api/magento/problems/page?limit=1', '/api/config',
+      ]],
+      ['sync', 'products.view', '/api/magento/problems/page?limit=1', [
+        '/api/admin/correction-requests/page?limit=1', '/api/admin/repricing/batches/page?limit=1',
+      ]],
+    ]) {
+      const key = `attention_read_${suffix}`;
+      const role = (await pool.query(`INSERT INTO roles(role_key,display_name,description,is_system)
+        VALUES($1,$1,'Disposable attention read coverage',FALSE) RETURNING id`, [key])).rows[0];
+      roleIds.push(role.id);
+      await pool.query('INSERT INTO role_permissions(role_id,permission_key) VALUES($1,$2)', [role.id, permission]);
+      await suite.replaceActiveRoleForTest(userId, key);
+      const allowed = await request(allowedPath);
+      assert.equal(allowed.response.status, 200, allowed.text);
+      assert.ok(Array.isArray(allowed.data.items));
+      assert.equal(typeof allowed.data.pageInfo?.total, 'number');
+      for (const path of deniedPaths) {
+        const denied = await request(path);
+        assert.equal(denied.response.status, 403, denied.text);
+      }
+    }
+    await suite.replaceActiveRoleForTest(userId, 'attention_read_corrections');
+    const missingDetail = await request('/api/admin/correction-requests/999999999');
+    assert.equal(missingDetail.response.status, 404, missingDetail.text);
+  } finally {
+    await suite.replaceActiveRoleForTest(userId, 'administrator');
+    await pool.query("UPDATE roles SET status = 'disabled' WHERE id = ANY($1::bigint[])", [roleIds]);
+  }
+});
+
 test('product create, direct recount, and archive share local actor attribution and audit', async () => {
   const actorUserId = suite.authenticatedSession.applicationUser.id;
   const preview = await request('/api/preview', {
@@ -157,6 +197,95 @@ test('product create, direct recount, and archive share local actor attribution 
      WHERE event_key = 'product.archived' AND subject_id = $1`,
     [String(correctedProductId)]
   )).rows[0].count), 1);
+});
+
+test('product register keeps history authorization and bounded filter-bound paging', async () => {
+  const userId = suite.authenticatedSession.applicationUser.id;
+  const role = await pool.query(
+    `INSERT INTO roles(role_key, display_name, description, is_system)
+     VALUES('integration_product_register', 'Integration product register',
+            'Disposable product register coverage', FALSE)
+     RETURNING id`
+  );
+  const roleId = Number(role.rows[0].id);
+  let nullTimestampProduct;
+  try {
+    await pool.query(
+      `INSERT INTO role_permissions(role_id, permission_key)
+       VALUES($1, 'products.view')`,
+      [roleId]
+    );
+    await suite.replaceActiveRoleForTest(userId, 'integration_product_register');
+    const denied = await request('/api/products/register');
+    assert.equal(denied.response.status, 403, denied.text);
+    assert.equal(denied.data.requiredPermission, 'history.view');
+
+    await pool.query(
+      `DELETE FROM role_permissions
+       WHERE role_id = $1 AND permission_key = 'products.view'`,
+      [roleId]
+    );
+    await pool.query(
+      `INSERT INTO role_permissions(role_id, permission_key)
+       VALUES($1, 'history.view')`,
+      [roleId]
+    );
+    const configDenied = await request('/api/config');
+    assert.equal(configDenied.response.status, 403, configDenied.text);
+    assert.equal(configDenied.data.requiredPermission, 'products.view');
+    const legacyHistory = await request('/api/products?limit=1');
+    assert.equal(legacyHistory.response.status, 200, legacyHistory.text);
+
+    const first = await request('/api/products/register?lifecycle=all&limit=1');
+    assert.equal(first.response.status, 200, first.text);
+    assert.equal(first.data.items.length, 1);
+    assert.equal(first.data.pageInfo.hasMore, true);
+    assert.ok(first.data.pageInfo.nextCursor);
+    assert.equal(first.data.items[0].internalSku !== undefined, true);
+    assert.equal(Array.isArray(first.data.filterOptions.categories), true);
+
+    const second = await request(
+      `/api/products/register?lifecycle=all&limit=1&cursor=${encodeURIComponent(first.data.pageInfo.nextCursor)}`
+    );
+    assert.equal(second.response.status, 200, second.text);
+    assert.equal(second.data.items.length, 1);
+    assert.notEqual(second.data.items[0].id, first.data.items[0].id);
+
+    const rebound = await request(
+      `/api/products/register?lifecycle=current&limit=1&cursor=${encodeURIComponent(first.data.pageInfo.nextCursor)}`
+    );
+    assert.equal(rebound.response.status, 422, rebound.text);
+    assert.equal(rebound.data.code, 'PRODUCT_REGISTER_QUERY_INVALID');
+
+    const literalWildcard = await request('/api/products/register?lifecycle=all&search=%25&limit=999');
+    assert.equal(literalWildcard.response.status, 200, literalWildcard.text);
+    assert.equal(literalWildcard.data.items.length, 0, literalWildcard.text);
+
+    nullTimestampProduct = (await pool.query(
+      `SELECT p.id, p.created_at, identity.public_sku
+       FROM products p
+       JOIN public_product_identities identity ON identity.id = p.public_product_identity_id
+       WHERE COALESCE(p.status, 'active') <> 'voided'
+       ORDER BY p.id DESC
+       LIMIT 1`
+    )).rows[0];
+    await pool.query('UPDATE products SET created_at = NULL WHERE id = $1', [nullTimestampProduct.id]);
+    const nullTimestamp = await request(
+      `/api/products/register?lifecycle=all&search=${encodeURIComponent(nullTimestampProduct.public_sku)}`
+    );
+    assert.equal(nullTimestamp.response.status, 200, nullTimestamp.text);
+    assert.equal(nullTimestamp.data.items.length, 1);
+    assert.equal(nullTimestamp.data.items[0].createdAt, null);
+  } finally {
+    if (nullTimestampProduct) {
+      await pool.query(
+        'UPDATE products SET created_at = $1 WHERE id = $2',
+        [nullTimestampProduct.created_at, nullTimestampProduct.id]
+      );
+    }
+    await suite.replaceActiveRoleForTest(userId, 'administrator');
+    await pool.query("UPDATE roles SET status = 'disabled' WHERE id = $1", [roleId]);
+  }
 });
 
 test('product timeline resolves every actual SKU across corrections and combines business history', async () => {

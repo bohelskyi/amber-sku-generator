@@ -183,6 +183,19 @@ The UI separates review → create → stored read/download → explicit price c
 
 History accepts `stream=all|product|price`, `scope=accessible|mine`, `status=all|generated|confirmed`, `limit` (20 default, 50 maximum) and an opaque `after` cursor bound to filters. It orders by immutable generation time descending, ID descending, then stream, retaining microseconds. `mine` is actual creator ID; null historical creators remain unknown. Private session results require owner/accepted membership, with no Administrator bypass. Reads never confirm, audit success or advance state.
 
+The export landing prioritizes the independent price stream, own/shared workspaces,
+invitations and stored file history. Product-CSV creation remains gated by the
+authoritative delivery flag; retired creation never hides historical files or an
+uncertain original operation. Status reads occur while an export route is visible,
+without remounting the principal-scoped workflow provider. Product and price read
+failures remain independent; unavailable counts are not presented as zero.
+
+History renders one 20-item page at a time with filter-bound server cursors in the
+URL and browser-back context. The table identifies time, stream/state, volume and
+author; IDs and provenance are disclosed on demand. Confirmation receipts distinguish
+successful local acknowledgement from Magento delivery. A failed metadata refresh
+after a successful confirmation does not turn that confirmation into a failed write.
+
 The review projection is `export-review-v1`, keyed by table fingerprint, with exact headers, product identity, Main/EN ordinal, readiness/issues and header-aligned cells. Cells distinguish finalized value, intentional blank, provisional failed-product output and not-evaluated output. Failed-only groups remain visible; diagnostic values never authorize partial capture. Lazy evaluation and the 64 MiB output ceiling remain authoritative; there is no silent truncation or automatic range splitting.
 
 The client renders one complete server review in local 50-row pages. Search, category/attention/language filters and widths change presentation only. Successful export-origin product/name corrections obtain a fresh read while preserving display context; they never replace an uncertain original generation attempt. Stored tables read immutable CSV, not current preview. Current warnings may identify a represented product subsequently retired/corrected without modifying its artifact.

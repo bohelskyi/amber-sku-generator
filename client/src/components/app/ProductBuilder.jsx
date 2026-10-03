@@ -169,7 +169,7 @@ export function ProductBuilder({
   useEffect(() => {
     if (!validationVisible || !validationFailed) return;
     const firstBlocker = workspaceRef.current?.querySelector('[data-builder-blocker="true"]');
-    firstBlocker?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    firstBlocker?.scrollIntoView({ behavior: 'auto', block: 'center' });
     firstBlocker?.focus({ preventScroll: true });
   }, [verificationAttempt, validationFailed, validationVisible]);
 
@@ -198,8 +198,12 @@ export function ProductBuilder({
     <div ref={workspaceRef} className="operational-split-layout">
       <section className="builder-workspace card overflow-hidden fade-up">
         <header className="builder-header">
-          <h2 className="section-title-text">{category.name}</h2>
-          <button onClick={onCancel} className="btn btn-ghost">Скасувати</button>
+          <div>
+            <p className="eyebrow">Новий товар</p>
+            <h2 className="section-title-text mt-1">{category.name}</h2>
+            <p className="mt-1 text-sm text-slate-500">Заповніть характеристики, перевірте розрахунок і збережіть товар.</p>
+          </div>
+          <button onClick={onCancel} className="btn btn-ghost">До категорій</button>
         </header>
 
         <div className="builder-field-list">
@@ -381,7 +385,6 @@ export function ProductBuilder({
             {isVerified && (
               <VerifiedPriceActions
                 effectiveTotalPriceUah={effectiveTotalPriceUah}
-                finalSku={finalSku}
                 hasManualPrice={hasManualPrice}
                 isManualPriceEditing={isManualPriceEditing}
                 manualPriceUah={manualPriceUah}
@@ -414,7 +417,7 @@ export function ProductBuilder({
                 className="btn btn-amber w-full"
                 disabled={isVerifying}
               >
-                {isVerifying ? 'Перевіряємо…' : 'Розрахувати SKU і ціну'}
+                {isVerifying ? 'Перевіряємо…' : 'Перевірити дані'}
               </button>
             )}
           </div>
@@ -532,7 +535,6 @@ function PriceRow({ label, uah, usd, strong = false }) {
 
 function VerifiedPriceActions({
   effectiveTotalPriceUah,
-  finalSku,
   hasManualPrice,
   isManualPriceEditing,
   manualPriceUah,
@@ -545,9 +547,6 @@ function VerifiedPriceActions({
   return (
     <div className="border-t border-slate-200 pt-3">
       <div className="flex flex-wrap gap-1.5">
-        <button onClick={() => onCopyText(finalSku, 'SKU')} className="btn btn-outline btn-compact">
-          Копіювати SKU
-        </button>
         <button
           onClick={() => effectiveTotalPriceUah
             && onCopyText(`${formatDecimal(effectiveTotalPriceUah)} ₴`, 'Ціну')}

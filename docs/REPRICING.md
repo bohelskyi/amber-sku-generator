@@ -9,6 +9,29 @@ Repricing supports scenario and global scopes:
 
 Rows are classified as changed, unchanged, skipped, or error. `repricing.view` allows viewing scenarios, drafts, previews, batches, and history. Creating, editing, synchronizing, discarding, or previewing drafts requires `repricing.prepare`.
 
+## Operator workspace and bounded history
+
+The local application redesign keeps `/admin/repricing` and separates **Підготовка**,
+**Перевірка** (`?view=review`) and **Історія** (`?view=history`). Switching these views
+changes presentation without remounting the domain controller or discarding a
+preview, active draft, autosave queue or original apply identity.
+
+Review renders 50 filtered/sorted rows per page. Pagination is presentation only:
+the preview, review markers, manual resolutions and atomic apply still concern the
+complete authoritative scope. The interface states that complete apply count.
+Public articles remain separate from internal SKU technical evidence. Existing
+drafts can be inspected with `repricing.view`; preparation and persisted edits keep
+`repricing.prepare`, while apply/rollback retain their independent capabilities.
+Optional product configuration is not fetched without `products.view`.
+
+`GET /api/admin/repricing/batches/page` requires `repricing.view`, defaults to 20
+rows, caps at 100, and accepts `offset`. It returns `items` plus server-counted
+`pageInfo`; `can_rollback` uses the same exact current-state predicate as the
+existing list. The original `/batches` endpoint remains available. History replaces
+its visible page and fences late responses; it does not accumulate all pages in
+the DOM. This additive read makes no Magento call and introduces no write, audit,
+draft persistence or rollback semantics.
+
 ## Drafts and state binding
 
 One active global draft is allowed separately from one active draft per scenario. Drafts persist the authoritative preview snapshot, manual overrides, automatic-switch product IDs, reviewed product IDs, and UI state. Synchronization refreshes the snapshot and drops reviewed IDs no longer present.

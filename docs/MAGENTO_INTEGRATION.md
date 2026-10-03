@@ -2,13 +2,52 @@
 
 ## Self-service integration workspace (Wave 2)
 
-Settings → **Інтеграція Magento** (`/admin/magento`) reads every configured Amber
-category, its published SKU schema, the current publication or a selected frozen
-binding draft, semantic mappings and local product evaluation counts. New unsupported
-categories explicitly show **Категорія ще не готова до Magento**. This does not
-prohibit ordinary product saves or publish any later layer automatically.
+Settings → **Інтеграція Magento** (`/admin/magento`) opens an attention-first
+Overview. Automatic delivery enabled/disabled, recorded operational problems,
+active publication, and available Magento structure observations are separate facts.
+Enabled delivery is not a worker heartbeat or proof of successful delivery.
+Observation age has no health threshold or color.
 
-The authenticated `/api/admin/magento-integration` overview is a repeatable-read
+The default category list separates **Проблеми поточної доставки** from
+**Підготовка перед використанням**. Unsupported categories say **Ще не підключено**;
+reviewed refusals alone are not operational failures. **Усі категорії** opens full
+browsing. Category details and mapping review mount only unresolved rows initially;
+**Показати всі відповідності** opens bounded pages. Diagnostic evidence/history is
+lazy-mounted. Repeated remote paths share one visual group without merging binding
+decisions or exact action targets.
+
+The four contexts are **Огляд**, category/problem detail,
+**Підготувати зміни інтеграції**, and **Дії Адміністратора**. Preparation is a
+revisitable workspace: scope → resources → mappings → product checks → publication.
+The active publication stays visible while a draft is inspected. Resource creation
+does not refresh a frozen draft; prepare a fresh successor from the current published
+source and re-review unpublished decisions not supported by existing carry rules.
+Explicitly saved hypothetical CREATE examples retain their own inputs; publication
+revalidates them. No article is allocated. Administrator label maintenance, generated
+name application and broader resync are separate workflows.
+
+`GET /api/admin/magento-integration/overview` adds a lightweight repeatable-read,
+read-only local projection `{integration,categories}`. It makes no Magento call and
+performs no sample product evaluation. Operational counts use distinct public product
+identities from needs-attention requests and unfinished test deletions; they require
+`products.view`, otherwise the projection reports unavailable rather than zero.
+The structure timestamp identifies the latest available stored binding observation
+for the configured origin/installation, or the current explicit discovery result in
+the browser session. It is not persisted global discovery history. The active
+publication's own observation remains available in technical details.
+
+`GET .../creation-inputs?categoryCode=SV` uses the existing published product
+configuration and creation requirements under `export_templates.manage` plus
+`exports.view`. It does not grant ordinary product permissions or publish a schema.
+The existing full integration/binding reads are loaded only by detail/configuration
+workflows. No migration or server write-contract change accompanies these projections.
+
+Normal visibility uses effective capabilities. Exact Administrator-only actions use
+the existing authenticated immutable role key through the shared auth helper, with
+all authoritative server checks retained. Delegated manage/publish users can open
+read-only label comparison from category detail; it cannot attest or apply changes.
+
+The existing authenticated `/api/admin/magento-integration` configuration read is a repeatable-read
 local snapshot. Discovery is an explicit CSRF-protected GET-only remote operation
 (`POST .../discovery`), bounded to 512 requests and 60 seconds per invocation;
 limit/failure never produces a complete-success receipt. Attribute sets, membership,
@@ -16,7 +55,7 @@ attributes/options and full category paths are observations, not approved bindin
 Equal labels remain candidates and semantic `value_id` remains distinct from the
 Magento option ID. Frozen observations retain their timestamps.
 
-Local evaluation checks at most 100 current products per overview and reports
+The full configuration read evaluates at most 100 current products and reports
 the unchecked count separately; it does not claim remote sendability. Current-product
 and prospective CREATE previews reuse the authoritative builder/evaluator/planner.
 The hypothetical `AG-PREVIEW` identity never reserves a SKU, allocates an article,
@@ -26,6 +65,28 @@ GET evidence, not an atomic Magento snapshot or a persistent reporting subsystem
 Read/discovery requires `export_templates.view`; product previews require both
 `export_templates.manage` and `exports.view`. Existing role grants, auth, active-user,
 CSRF and lifecycle boundaries are unchanged. The browser never calls Magento.
+
+### Recorded product problems in the application workspace
+
+The full-application redesign retains the Magento workspace above and links
+recorded product delivery problems from **Потребує уваги** to `/sync-problems`.
+Correction and synchronization counts remain independent. Future configuration
+preparation is not added to the operational problem count.
+
+`GET /api/magento/problems/page` requires `products.view`, defaults to 30 rows,
+caps at 100, and accepts `offset` and an exact category filter. It reads recorded
+local sync/name/test-deletion evidence and returns `items` plus counted `pageInfo`;
+it does not probe Magento or mutate a job. The original `/magento/problems` and
+`/magento/summary` contracts remain available.
+
+The client requests 20 rows, presents a compact queue and one selected detail,
+and mounts name-conflict inspection only for the selected affected product.
+Its `category`, `offset` and `problem` query parameters preserve list context.
+Visible-page polling remains non-overlapping; stale responses from another filter
+cannot replace the current query. Failed reads retain an explicit unavailable or
+last-known state. Opening a product additionally requires `products.decode`.
+Technical diagnostics remain on demand, and uncertain writes retain their exact
+domain reconciliation path without a generic resend action.
 
 ### Reviewed category creation (H2)
 

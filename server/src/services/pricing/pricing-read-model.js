@@ -1,4 +1,5 @@
 const pool = require('../../db/pool');
+const initialConfig = require('../../../data_config');
 
 function groupByScenario(rows) {
   const grouped = new Map();
@@ -85,4 +86,78 @@ async function getAdminPrices(catCode, queryable = pool) {
   };
 }
 
-module.exports = { getAdminPrices };
+async function getPricingMetadata(queryable = pool) {
+  const [categoriesResult, questionsResult] = await Promise.all([
+    queryable.query(
+      `SELECT code, name, requires_weight
+       FROM categories
+       ORDER BY code`
+    ),
+    queryable.query(
+      `SELECT
+         q.category_code,
+         q.key,
+         q.label AS q_label,
+         q.input_type,
+         q.display_order,
+         q.sku_index,
+         o.id AS option_id,
+         o.value_id,
+         o.label AS option_label,
+         o.visible_if_json,
+         o.hidden_if_json,
+         COALESCE(o.archived, FALSE) AS archived
+       FROM questions q
+       LEFT JOIN options o ON o.question_id = q.id
+       ORDER BY q.category_code, COALESCE(q.display_order, q.sku_index), q.sku_index, o.value_id`
+    ),
+  ]);
+
+  const categories = {};
+  for (const row of categoriesResult.rows) {
+    categories[row.code] = {
+      code: row.code,
+      name: row.name,
+      requires_weight: row.requires_weight,
+    };
+  }
+
+  const questionMap = new Map();
+  for (const row of questionsResult.rows) {
+    const questionKey = `${row.category_code}:${row.key}`;
+    if (!questionMap.has(questionKey)) {
+      questionMap.set(questionKey, {
+        id: row.key,
+        label: row.q_label,
+        input_type: row.input_type || 'options',
+        options: [],
+      });
+    }
+    if (row.option_id) {
+      questionMap.get(questionKey).options.push({
+        id: row.value_id,
+        label: row.option_label,
+        visible_if_json: row.visible_if_json || null,
+        hidden_if_json: row.hidden_if_json || null,
+        archived: row.archived ? 1 : 0,
+      });
+    }
+  }
+
+  const questions = {};
+  for (const [questionKey, question] of questionMap) {
+    const categoryCode = questionKey.slice(0, questionKey.indexOf(':'));
+    if (!questions[categoryCode]) questions[categoryCode] = [];
+    questions[categoryCode].push(question);
+  }
+
+  return {
+    categories,
+    questions,
+    extraConfig: {
+      is_calibrated: initialConfig.extraConfig?.is_calibrated,
+    },
+  };
+}
+
+module.exports = { getAdminPrices, getPricingMetadata };

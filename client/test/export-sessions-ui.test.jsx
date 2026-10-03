@@ -32,6 +32,28 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
+it('replaces session pages and returns to the same page after opening a session', async () => {
+  const first = Array.from({ length: 20 }, (_, index) => ({ ...own, id: `first-${index}`, title: `Експорт ${index + 1}` }));
+  const older = { ...own, id: 'older', title: 'Попередній експорт' };
+  api.list.mockImplementation(async (_scope, after) => response(after ? { items: [older], next: null } : { items: first, next: 'opaque-next' }));
+  api.get.mockResolvedValue(response(older));
+  const { router } = page();
+  await screen.findByText('На сторінці: 20');
+  expect(document.querySelectorAll('.export-workspace-row')).toHaveLength(20);
+  click('Наступні експорти');
+  await screen.findByText('На сторінці: 1');
+  expect(document.querySelectorAll('.export-workspace-row')).toHaveLength(1);
+  click('Відкрити / продовжити Попередній експорт');
+  await screen.findByLabelText('Назва експорту');
+  click('← До моїх експортів');
+  await screen.findByText('На сторінці: 1');
+  expect(router.state.location.search).toBe('?after=opaque-next');
+  click('Попередні експорти');
+  await screen.findByText('На сторінці: 20');
+  expect(api.create).not.toHaveBeenCalled();
+  expect(api.generate).not.toHaveBeenCalled();
+});
+
 it('definitive creation validation failure allows correction, while unknown outcome retries the exact descriptor', async () => {
   api.create.mockRejectedValueOnce({ response: { status: 422, data: { error: 'invalid saved range' } } })
     .mockRejectedValueOnce(new Error('lost response')).mockResolvedValueOnce(response(own));
@@ -56,7 +78,7 @@ it('explicit private create persists before prepare/generate and a remount resum
   click('Перевірити товари'); await screen.findByText('ПОПЕРЕДНІЙ ПЕРЕГЛЯД'); click('Зберегти перевірку'); await screen.findByText('Готовий до створення файлів'); click('Створити файли'); await screen.findByText('lost response');
   expect(api.generate.mock.calls[0]).toEqual(['session-a', { expectedRevision: '1', expectedAccessEpoch: 'owner', attemptId: 'attempt-a' }]);
   first.unmount(); page(); await screen.findByText('Сесія A'); expect(exportsApi.getSnapshot).not.toHaveBeenCalled();
-  click('Відкрити / продовжити Сесія A'); await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/);
+  click('Відкрити / продовжити Сесія A'); await screen.findByText(/Збережені файли/);
   expect(exportsApi.getSnapshot).toHaveBeenCalledWith('snapshot-a'); expect(api.generate).toHaveBeenCalledTimes(1); expect(exportsApi.confirmSnapshot).not.toHaveBeenCalled();
   expect(localStorage.length).toBe(0); expect(sessionStorage.length).toBe(0);
 });
@@ -111,19 +133,20 @@ it('revoked membership clears data on authoritative refresh and fences a late cr
 it('authorized deep link automatically reads through the current account and never prepares or generates', async () => {
   page(2, '/exports/sessions/session-a'); await screen.findByRole('heading', { name: 'Сесія A' });
   expect(api.get).toHaveBeenCalledWith('session-a'); expect(api.create).not.toHaveBeenCalled(); expect(api.prepare).not.toHaveBeenCalled(); expect(api.preview).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText('Відкрити відомий історичний знімок'));
   fireEvent.change(screen.getByLabelText('ID збереженого знімка'), { target: { value: 'historical-id' } }); click('Прочитати знімок без підтвердження');
-  await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/); expect(exportsApi.getSnapshot).toHaveBeenCalledWith('historical-id'); expect(exportsApi.confirmSnapshot).not.toHaveBeenCalled();
+  await screen.findByText(/Збережені файли/); expect(exportsApi.getSnapshot).toHaveBeenCalledWith('historical-id'); expect(exportsApi.confirmSnapshot).not.toHaveBeenCalled();
 });
 
 it('principal switch discards late private bytes and auto-opens only through a new authorized request', async () => {
   api.get.mockResolvedValue(response({ ...own, snapshotId: snapshot.id })); const late = deferred(); exportsApi.downloadMagentoArtifact.mockReturnValue(late.promise);
-  const first = page(); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A'); await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/);
+  const first = page(); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A'); await screen.findByText(/Збережені файли/);
   click(/Завантажити/); await waitFor(() => expect(exportsApi.downloadMagentoArtifact).toHaveBeenCalled());
   first.auth.principalLifetime.valid = false;
   const secondRead = deferred(); api.get.mockReturnValue(secondRead.promise);
   first.rerender(<AuthContext.Provider value={{ applicationUser: { id: 2 }, permissions: ['exports.view','exports.create'], principalLifetime: { id: 2, valid: true } }}><RouterProvider router={first.router} /></AuthContext.Provider>);
-  await act(async () => late.resolve(response('private bytes'))); expect(downloadBlob).not.toHaveBeenCalled(); expect(screen.queryByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/)).toBeNull();
-  await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2)); expect(screen.queryByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/)).toBeNull();
+  await act(async () => late.resolve(response('private bytes'))); expect(downloadBlob).not.toHaveBeenCalled(); expect(screen.queryByText(/Збережені файли/)).toBeNull();
+  await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2)); expect(screen.queryByText(/Збережені файли/)).toBeNull();
   await act(async () => secondRead.reject({ response: { status: 403 } })); await screen.findByText(/Доступ до цього експорту втрачено|Експорт не знайдено/);
   expect(exportsApi.getSnapshot).toHaveBeenCalledTimes(1); expect(api.generate).not.toHaveBeenCalled();
 });

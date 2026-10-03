@@ -6,8 +6,12 @@ import { subscribeExportReviewChanged } from '../../lib/export-review-events';
 import { createExportViewMemory } from '../../lib/export-view-memory';
 import { usePriceExportController } from './usePriceExportController';
 
-export function useProductExportController({ enabled = true, canCreate = true, principalLifetime } = {}) {
+export function useProductExportController({ enabled = true, canCreate = true, principalLifetime, observeStatus = true } = {}) {
   const [exportStatus, setExportStatus] = useState(null);
+  const [exportStatusError, setExportStatusError] = useState('');
+  const [priceStatusError, setPriceStatusError] = useState('');
+  const [statusLoading, setStatusLoading] = useState(false);
+  const statusTicket = useRef(0);
   const [exportFromSku, setExportFromSku] = useState('');
   const [exportToSku, setExportToSku] = useState('');
   const [exportError, setExportError] = useState('');
@@ -67,7 +71,7 @@ export function useProductExportController({ enabled = true, canCreate = true, p
     let live = true;
     const checkIdentity = async () => {
       const evidence = previewEvidence.current; const ticket = generation.current;
-      if (!current() || !evidence || pending.current || busy.current || exportSnapshot) return;
+      if (!observeStatus || !current() || !evidence || pending.current || busy.current || exportSnapshot) return;
       try {
         const response = await exportsApi.preview(evidence.intent);
         if (live && current() && ticket === generation.current && response.data.tableFingerprint !== evidence.response.tableFingerprint) markExportReviewStale();
@@ -75,7 +79,7 @@ export function useProductExportController({ enabled = true, canCreate = true, p
     };
     window.addEventListener('focus', checkIdentity);
     return () => { live = false; window.removeEventListener('focus', checkIdentity); };
-  }, [current, exportSnapshot, markExportReviewStale]);
+  }, [current, exportSnapshot, markExportReviewStale, observeStatus]);
 
   const invalidate = () => { generation.current++; previewEvidence.current = null; exportReviewView.clear(); setExportProductChanged(false); setExportPreview(null); };
   const updateTemplateMode = (value) => { if (!current()) return; requested.current.templateMode = value; setTemplateMode(value); invalidate(); };
@@ -95,21 +99,31 @@ export function useProductExportController({ enabled = true, canCreate = true, p
     invalidate();
   };
 
-  const fetchExportStatus = useCallback(() => !current() ? Promise.resolve(null) : Promise.all([
-    exportsApi.getStatus(),
-    exportsApi.getPriceStatus(),
-  ]).then(([productResponse, priceResponse]) => {
-    if (!current()) return null;
-    setExportStatus(productResponse.data);
-    setPriceExportStatus(priceResponse.data);
-    return productResponse.data;
-  }), [current]);
-
   useEffect(() => {
     alive.current = true;
-    if (enabled) fetchExportStatus().catch((error) => { if (current()) setExportError(getApiError(error)); });
     return () => { alive.current = false; };
-  }, [enabled, fetchExportStatus, current]);
+  }, [current]);
+
+  const fetchExportStatus = useCallback(async () => {
+    if (!current() || !observeStatus) return null;
+    const ticket = ++statusTicket.current;
+    setStatusLoading(true);
+    const [product, price] = await Promise.allSettled([exportsApi.getStatus(), exportsApi.getPriceStatus()]);
+    if (!current() || ticket !== statusTicket.current) return null;
+    setExportStatus(product.status === 'fulfilled' ? product.value.data : null);
+    setExportStatusError(product.status === 'rejected' ? getApiError(product.reason) : '');
+    setPriceExportStatus(price.status === 'fulfilled' ? price.value.data : null);
+    setPriceStatusError(price.status === 'rejected' ? getApiError(price.reason) : '');
+    setStatusLoading(false);
+    return product.status === 'fulfilled' ? product.value.data : null;
+  }, [current, observeStatus]);
+
+  useEffect(() => {
+    if (!enabled || !observeStatus) return undefined;
+    const timer = window.setTimeout(() => { void fetchExportStatus(); }, 0);
+    // Observing status never changes the lifetime of a command or its original identity.
+    return () => window.clearTimeout(timer);
+  }, [enabled, observeStatus, fetchExportStatus]);
 
   useEffect(() => {
     if (!pendingCreate) return undefined;
@@ -256,8 +270,10 @@ export function useProductExportController({ enabled = true, canCreate = true, p
       await exportsApi.confirmSnapshot(snapshotId);
       if (!current()) return;
       setExportSnapshot((previous) => previous?.id === snapshotId ? { ...previous, status: 'confirmed' } : previous);
-      const stored = await exportsApi.getSnapshot(snapshotId);
-      if (current()) setExportSnapshot(stored.data);
+      try {
+        const stored = await exportsApi.getSnapshot(snapshotId);
+        if (current()) setExportSnapshot(stored.data);
+      } catch { if (current()) setExportError('Експорт підтверджено, але відомості про результат не оновлено.'); }
       await fetchExportStatus();
     } catch (error) {
       if (current()) setExportError(getApiError(error));
@@ -283,6 +299,7 @@ export function useProductExportController({ enabled = true, canCreate = true, p
     exportPreview,
     exportSnapshot,
     exportStatus,
+    exportStatusError, priceStatusError, statusLoading,
     exportToSku,
     fetchExportStatus,
     handlePreviewExport,

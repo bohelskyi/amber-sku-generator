@@ -153,24 +153,24 @@ describe('Home workspace', () => {
     expect(onStart).toHaveBeenNthCalledWith(2, 'BN');
   });
 
-  it('keeps decode and export in one utility surface when category creation is unavailable', () => {
+  it('keeps exact product lookup as the focused workspace when category creation is unavailable', () => {
     const { container, onDecode } = renderHome({ canCreateProducts: false });
 
     expect(container.querySelector('.home-create-panel')).toBeNull();
-    expect(container.querySelector('.home-top-workspace.is-decoder-only')).toBeTruthy();
-    expect(container.querySelector('.home-side-workspace .home-decode-panel')).toBeTruthy();
-    expect(container.querySelector('.home-side-workspace .home-export-panel')).toBeTruthy();
+    expect(container.querySelector('.product-landing-grid.is-lookup-only')).toBeTruthy();
+    expect(container.querySelector('.product-lookup-panel .home-decode-panel')).toBeTruthy();
+    expect(screen.getByText(/старих записів також можна ввести внутрішній SKU/)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Розшифрувати' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Відкрити товар' }));
     expect(onDecode).toHaveBeenCalledOnce();
   });
 
-  it('shows an operator-facing new-product count without raw export totals or cursor IDs', () => {
-    renderHome({ exportStatus: { delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false }, hasExport: true, countSinceLastExport: 25,
+  it('keeps delivery implementation details out of the daily product landing', () => {
+    renderHome({ canViewAttention: true, exportStatus: { delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false }, hasExport: true, countSinceLastExport: 25,
       totalProducts: 400, exportableProducts: 390,
       lastExport: { createdAt: '2026-09-22T10:00:00.000Z', exportedToProductId: 375 } } });
-    expect(screen.queryByText('25 нових товарів очікують експорту')).toBeNull();
-    expect(screen.getByText('Magento')).toBeTruthy();
+    expect(screen.getByText('Потребує уваги')).toBeTruthy();
+    expect(screen.queryByText('Magento')).toBeNull();
     expect(screen.queryByText(/У базі:/)).toBeNull();
     expect(screen.queryByText(/До експорту:/)).toBeNull();
     expect(screen.queryByText(/375/)).toBeNull();

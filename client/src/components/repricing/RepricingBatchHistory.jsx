@@ -1,6 +1,7 @@
 import { RepricingSyncProgress } from './RepricingSyncProgress.jsx';
 import { useState } from 'react';
 import { Download, Undo2 } from 'lucide-react';
+import { Pagination, StatusBadge, TechnicalDisclosure } from '../ui/index.js';
 
 const formatDate = (value) => (
   value
@@ -19,9 +20,12 @@ function BatchSyncDetails({ batchId }) {
 export function RepricingBatchHistory({ canRollbackRepricing, controller }) {
   const {
     batches,
+    batchPageLoading,
+    batchPageInfo,
     downloadBatch,
     downloadRollbackBatch,
     setRollbackTarget,
+    setBatchPage,
   } = controller;
 
   return (
@@ -33,12 +37,12 @@ export function RepricingBatchHistory({ canRollbackRepricing, controller }) {
         <table className="dense-table min-w-full">
           <thead>
             <tr className="table-head">
-              <th className="table-cell text-left">Дата</th>
-              <th className="table-cell text-left">Матриця</th>
-              <th className="table-cell text-left">Статус</th>
-              <th className="table-cell text-right">Оновлено</th>
-              <th className="table-cell text-right">CSV</th>
-              <th className="table-cell text-right">Дія</th>
+              <th scope="col" className="table-cell text-left">Дата</th>
+              <th scope="col" className="table-cell text-left">Матриця</th>
+              <th scope="col" className="table-cell text-left">Статус</th>
+              <th scope="col" className="table-cell text-right">Оновлено</th>
+              <th scope="col" className="table-cell text-right">CSV</th>
+              <th scope="col" className="table-cell text-right">Дія</th>
             </tr>
           </thead>
           <tbody>
@@ -53,15 +57,9 @@ export function RepricingBatchHistory({ canRollbackRepricing, controller }) {
                     : `${batch.category_code} — ${batch.scenario_name}`}
                 </td>
                 <td className="table-cell text-sm">
-                  {batch.status === 'rolled_back' ? (
-                    <span className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">
-                      Відкочено
-                    </span>
-                  ) : (
-                    <span className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
-                      Застосовано
-                    </span>
-                  )}
+                  <StatusBadge tone={batch.status === 'rolled_back' ? 'warning' : 'success'}>
+                    {batch.status === 'rolled_back' ? 'Відкочено' : 'Застосовано'}
+                  </StatusBadge>
                 </td>
                 <td className="table-cell text-right text-sm">{batch.changed_count}<BatchSyncDetails batchId={batch.id} /></td>
                 <td className="table-cell text-right">
@@ -95,9 +93,7 @@ export function RepricingBatchHistory({ canRollbackRepricing, controller }) {
                       className="btn btn-outline btn-icon ml-auto disabled:cursor-not-allowed disabled:opacity-40"
                       onClick={() => setRollbackTarget(batch)}
                       disabled={!batch.can_rollback}
-                      title={batch.can_rollback
-                        ? 'Відкотити переоцінку'
-                        : 'Після цієї партії товари вже змінювали'}
+                      title={batch.can_rollback ? 'Відкотити переоцінку' : 'Відкат недоступний за поточним станом товарів'}
                       aria-label={`Відкотити переоцінку ${batch.id}`}
                     >
                       <Undo2 size={15} />
@@ -111,6 +107,17 @@ export function RepricingBatchHistory({ canRollbackRepricing, controller }) {
         {batches.length === 0 && (
           <div className="px-5 py-8 text-sm text-slate-500">Історія порожня.</div>
         )}
+      </div>
+      <div className="border-t border-slate-200 px-4 py-3">
+        <Pagination busy={batchPageLoading} hasPrevious={batchPageInfo.hasPrevious} hasNext={batchPageInfo.hasNext}
+          onPrevious={() => setBatchPage(Math.max(0, batchPageInfo.offset - batchPageInfo.limit))}
+          onNext={() => setBatchPage(batchPageInfo.offset + batchPageInfo.limit)}
+          summary={batchPageInfo.total > 0
+            ? `${batchPageInfo.offset + 1}–${Math.min(batchPageInfo.offset + batches.length, batchPageInfo.total)} із ${batchPageInfo.total}`
+            : undefined} />
+        <TechnicalDisclosure summary="Про доступність відкату">
+          Amber показує дію лише коли сервер підтвердив, що всі товари досі мають точний стан цієї партії. Інтерфейс не обчислює доступність відкату самостійно.
+        </TechnicalDisclosure>
       </div>
     </section>
   );

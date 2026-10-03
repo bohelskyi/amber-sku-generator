@@ -849,6 +849,48 @@ test('roles.manage API provides protected Administrator and editable versioned r
   assert.equal(reservedCreate.response.status, 400, reservedCreate.text);
   assert.equal(reservedCreate.data.code, 'RESERVED_PERMISSION');
 
+  const pricingReaderRole = await request('/api/admin/roles', {
+    method: 'POST',
+    body: {
+      displayName: 'Pricing reader only',
+      description: 'Integration pricing projection role',
+      permissionKeys: ['pricing.view'],
+    },
+  });
+  assert.equal(pricingReaderRole.response.status, 201, pricingReaderRole.text);
+  const pricingReaderSession = await authenticateIdentitySession({
+    subject: 'pricing-reader-only',
+    preferredUsername: 'pricing.reader',
+    displayName: 'Pricing Reader',
+  });
+  const approvedPricingReader = await request(
+    `/api/admin/users/${pricingReaderSession.applicationUser.id}/approve`,
+    {
+      method: 'POST',
+      body: { roleId: pricingReaderRole.data.role.id },
+    }
+  );
+  assert.equal(approvedPricingReader.response.status, 200, approvedPricingReader.text);
+  const pricingMetadata = await request('/api/admin/pricing/config', {
+    authentication: pricingReaderSession,
+  });
+  assert.equal(pricingMetadata.response.status, 200, pricingMetadata.text);
+  assert.ok(pricingMetadata.data.categories.ZZ);
+  assert.ok(Array.isArray(pricingMetadata.data.questions.ZZ));
+  const deniedProductConfig = await request('/api/config', {
+    authentication: pricingReaderSession,
+  });
+  assert.equal(deniedProductConfig.response.status, 403, deniedProductConfig.text);
+  assert.equal(deniedProductConfig.data.requiredPermission, 'products.view');
+  const deniedCatalogConfig = await request('/api/admin/config', {
+    authentication: pricingReaderSession,
+  });
+  assert.equal(deniedCatalogConfig.response.status, 403, deniedCatalogConfig.text);
+  assert.equal(deniedCatalogConfig.data.requiredPermission, 'catalog.view');
+  assert.equal((await request('/api/admin/prices/ZZ', {
+    authentication: pricingReaderSession,
+  })).response.status, 200);
+
   const created = await request('/api/admin/roles', {
     method: 'POST',
     body: {

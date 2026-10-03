@@ -4,6 +4,7 @@ import { ConditionBuilder } from './ConditionBuilder';
 import { getMatrixPriceValidationError, handleNumberKeyDown, handleNumberWheel, normalizeDecimalInput } from '../../lib/number-input';
 import { getPricingAxis } from '../../lib/pricing-axis';
 import { getScenarioMatrixCellKey } from '../../lib/admin-pricing-state';
+import { SaveState } from '../ui/index.js';
 import { formatDecimal } from '../../lib/formatters';
 
 const defaultWeightBands = [
@@ -53,11 +54,11 @@ function WeightBandsEditor({ bands = [], onChange }) {
       </div>
       <div className="pricing-weight-band-list">
         {bands.map((band, index) => (
-          <div key={band.id || index} className="pricing-weight-band-row">
-            <input className="input-sm" value={band.label} placeholder="Назва" onChange={(event) => updateBand(index, 'label', event.target.value)} />
-            <input className="input-sm" type="number" min="0" step="0.1" value={band.min_weight} placeholder="Від, включно" onChange={(event) => updateBand(index, 'min_weight', event.target.value)} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
-            <input className="input-sm" type="number" min="0" step="0.1" value={band.max_weight ?? ''} placeholder="До, не включно" onChange={(event) => updateBand(index, 'max_weight', event.target.value)} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
-            <button type="button" className="pricing-icon-button is-danger" onClick={() => onChange(bands.filter((_, bandIndex) => bandIndex !== index))} title="Видалити діапазон" aria-label="Видалити діапазон">
+          <div key={band.id || index} className="pricing-weight-band-row" role="group" aria-label={`Ваговий діапазон ${index + 1}`}>
+            <input className="input-sm" value={band.label} placeholder="Назва" aria-label={`Назва вагового діапазону ${index + 1}`} onChange={(event) => updateBand(index, 'label', event.target.value)} />
+            <input className="input-sm" type="number" min="0" step="0.1" value={band.min_weight} placeholder="Від, включно" aria-label={`Початкова вага діапазону ${index + 1}, включно`} onChange={(event) => updateBand(index, 'min_weight', event.target.value)} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
+            <input className="input-sm" type="number" min="0" step="0.1" value={band.max_weight ?? ''} placeholder="До, не включно" aria-label={`Кінцева вага діапазону ${index + 1}, не включно`} onChange={(event) => updateBand(index, 'max_weight', event.target.value)} onWheel={handleNumberWheel} onKeyDown={handleNumberKeyDown} />
+            <button type="button" className="pricing-icon-button is-danger" onClick={() => onChange(bands.filter((_, bandIndex) => bandIndex !== index))} title="Видалити діапазон" aria-label={`Видалити ваговий діапазон ${index + 1}${band.label ? `: ${band.label}` : ''}`}>
               <Trash2 size={14} />
             </button>
           </div>
@@ -189,7 +190,7 @@ export function ModifierForm({ config, currentCatQuestions, isNew = false, modif
   );
 }
 
-export function ScenarioMatrix({ currentCatQuestions, handlePriceChange, matrixValidationError, readOnly, scenario, setMatrixValidationError }) {
+export function ScenarioMatrix({ currentCatQuestions, handlePriceChange, matrixCellSaveStates = {}, matrixValidationError, readOnly, scenario, setMatrixValidationError }) {
   const axisX = getPricingAxis(scenario.axis_x_key, currentCatQuestions, 'X', scenario.weight_bands || [], scenario.match_json);
   const axisY = getPricingAxis(scenario.axis_y_key, currentCatQuestions, 'Base', scenario.weight_bands || [], scenario.match_json);
 
@@ -214,6 +215,7 @@ export function ScenarioMatrix({ currentCatQuestions, handlePriceChange, matrixV
                 <th>{xOption.label}</th>
                 {axisY.options.map((yOption) => {
                   const cell = scenario.matrix.find((item) => item.x_val === xOption.id && item.y_val === yOption.id);
+                  const saveState = matrixCellSaveStates[`${scenario.id}:${xOption.id}:${yOption.id}`];
                   return (
                     <td key={yOption.id}>
                       <input
@@ -244,6 +246,7 @@ export function ScenarioMatrix({ currentCatQuestions, handlePriceChange, matrixV
                           Promise.resolve(handlePriceChange(scenario.id, xOption.id, yOption.id, normalizedPrice)).catch((error) => setMatrixValidationError(error.response?.data?.error || error.message));
                         }}
                       />
+                      {!readOnly && saveState && <SaveState state={saveState.state} message={saveState.message} />}
                     </td>
                   );
                 })}

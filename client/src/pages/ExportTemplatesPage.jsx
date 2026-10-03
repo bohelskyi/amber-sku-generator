@@ -15,6 +15,7 @@ import { WorkspaceHeader } from '../components/workspace/WorkspacePrimitives';
 import { WorkspaceDialog } from '../components/workspace/WorkspaceDialog';
 import { TemplateRegistry } from '../components/export-templates/TemplateRegistry';
 import { dateText } from '../lib/export-review-presentation';
+import { Notice, SaveState, StatusBadge } from '../components/ui/index.js';
 
 const templateBase = '/admin/export-templates';
 function templateRoute(location) {
@@ -231,7 +232,7 @@ function TemplateWorkspace({ permissions }) {
   }, [route.id, screen, versionId]);
   return <TemplateWorkspaceShell>
     {navigation.prompt}
-    {screen !== 'editor' && <><Diagnostics error={error} definition={definition} registry={registry} />{busy && <p role="status">{busy}…</p>}</>}
+    {screen !== 'editor' && <><Diagnostics error={error} definition={definition} registry={registry} />{busy && <SaveState state="saving" message={`${busy}…`} />}</>}
     {screen === 'list' ? <>
       <WorkspaceHeader title="Шаблони експорту" description="Налаштуйте назви, характеристики та порядок полів у файлі." actions={
         manage && <button className="btn btn-primary px-4" disabled={Boolean(busy)} onClick={() => run('Підготовка шаблону', () => api.candidate(), (data) => {
@@ -264,9 +265,9 @@ function TemplateWorkspace({ permissions }) {
           {manage && selectedVersion && <button className="btn btn-primary px-3" disabled={Boolean(busy)} onClick={() => run('Копіювання в чернетку', () => api.clone(family.id, { expectedRevision: family.draft.revision, versionId }), saved)}>Створити чернетку з цієї версії</button>}
         </div></div>
         {!publishReview && !supportProposal && <Diagnostics error={error} definition={definition} registry={registry} onOpenSource={openSource} showSources={view !== 'check'} />}
-        {busy && <p role="status">{busy}…</p>}{message && <p role="status" className="rounded bg-green-50 p-3">{message}</p>}
-        <div className="et-title-line"><h1>{family?.display_name || 'Завантаження шаблону…'}</h1><span className="et-badge">{selectedVersion ? 'Опублікована v' + selectedVersion.versionNumber + ' · лише читання' : dirty ? 'Незбережена чернетка' : 'Чернетка'}</span>
-          {family && <span className="et-muted" role="status">{selectedVersion ? 'Незмінна версія' : dirty ? 'Є незбережені зміни' : 'Збережено · редакція ' + family.draft.revision}</span>}</div>
+        {busy && <SaveState state="saving" message={`${busy}…`} />}{message && <Notice tone="success">{message}</Notice>}
+        <div className="et-title-line"><h1>{family?.display_name || 'Завантаження шаблону…'}</h1><StatusBadge tone={selectedVersion ? 'neutral' : dirty ? 'warning' : 'info'}>{selectedVersion ? 'Опублікована v' + selectedVersion.versionNumber + ' · лише читання' : dirty ? 'Незбережена чернетка' : 'Чернетка'}</StatusBadge>
+          {family && <SaveState state={selectedVersion ? 'idle' : dirty ? 'dirty' : 'saved'} message={selectedVersion ? 'Незмінна версія' : dirty ? 'Є незбережені зміни' : 'Збережено · редакція ' + family.draft.revision} />}</div>
         {family && !selectedVersion && !validation?.valid && <p className="et-muted">Готовність до публікації не підтверджено. Збереження чернетки не перевіряє джерела та не створює експорт.</p>}
         <TemplateLocalNav familyId={route.id} versionId={versionId} />
       </header>

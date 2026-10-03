@@ -4,7 +4,6 @@ import { createRequirements } from '../lib/product-create-readiness';
 import { useProductRecount } from './useProductRecount';
 import { useCopyFeedback } from './product/useCopyFeedback';
 import { useExportWorkflow } from './product/useExportWorkflow';
-import { useProductRecordsController } from './product/useProductRecordsController';
 import { getApiError } from '../lib/http-error';
 import {
   isValidPositivePrice,
@@ -57,7 +56,7 @@ export function useSkuManager({
   canApplyDirectPriceChange = canChangeProductPrice,
   canCreatePriceChangeRequest = false,
   canPriceOverride = false,
-  canViewHistory = true,
+  canViewConfig = true,
   submitMode = 'apply',
 } = {}) {
   const [config, setConfig] = useState(null);
@@ -81,7 +80,6 @@ export function useSkuManager({
   const [manualPriceUah, setManualPriceUah] = useState('');
   const [isManualPriceEditing, setIsManualPriceEditing] = useState(false);
   const productExport = useExportWorkflow();
-  const records = useProductRecordsController({ canViewHistory, onArchived: productExport.fetchExportStatus });
   const copyFeedback = useCopyFeedback();
 
   const {
@@ -91,10 +89,12 @@ export function useSkuManager({
     handleApplyRecount,
     handleCancelRecount,
     handleCancelRecountConfirmation,
+    handleCancelInformationConfirmation,
     handleCancelPriceChange,
     handleConfirmPriceChange,
     handleRequestPriceChange,
     handleConfirmRecount,
+    handleConfirmInformationUpdate,
     handleDecode,
     handleDecodeInputChange,
     handleRecountAnswer,
@@ -102,10 +102,14 @@ export function useSkuManager({
     handleRecountWeightChange,
     handleRecountNameChange,
     handleStartRecount,
+    handleStartPriceChange,
     hasRecountChanges,
+    informationPreview,
     isInformationOnly,
+    isDecodeLoading,
     isRecountApplying,
     isRecountConfirmOpen,
+    isInformationConfirmOpen,
     isRecountLoading,
     isRecountOpen,
     isRecountPreviewCurrent,
@@ -150,19 +154,23 @@ export function useSkuManager({
     canCreatePriceChangeRequest,
     canPriceOverride,
     config,
-    onApplied: () => {
-      records.fetchHistory();
-      productExport.fetchExportStatus();
-    },
+    onApplied: () => productExport.fetchExportStatus(),
     submitMode,
   });
 
   useEffect(() => {
+    if (!canViewConfig) {
+      const timer = window.setTimeout(() => {
+        setConfig(null);
+        setConfigError('');
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
     let live = true;
     productsApi.getConfig().then((res) => { if (live) setConfig(res.data); })
       .catch((error) => { if (live) setConfigError(getApiError(error)); });
     return () => { live = false; };
-  }, [configAttempt]);
+  }, [canViewConfig, configAttempt]);
 
   const isCalibrated = answers.is_calibrated ?? null;
 
@@ -230,6 +238,7 @@ export function useSkuManager({
   };
 
   const resetProductFlow = (catCode) => {
+    if (catCode) setSavedProduct(null);
     setNameSubjects({ magento_name_subject_ua: '', magento_name_subject_en: '' });
     setSelectedCat(catCode);
     setAnswers({});
@@ -349,8 +358,12 @@ export function useSkuManager({
   }, [selectedCat, config, answers, weight, isCalibrated, isWeightRequired]);
 
   const handlePreview = () => {
-    if (isWeightRequired && !weight) return alert('Введіть вагу!');
-    if (parseFloat(weight) < 0) return alert("Вага не може бути від'ємною!");
+    if (isWeightRequired && !weight) {
+      return Promise.reject(new Error('Вкажіть вагу виробу.'));
+    }
+    if (parseFloat(weight) < 0) {
+      return Promise.reject(new Error("Вага не може бути від'ємною."));
+    }
 
     const missingRequired = questionsForSelected
       .filter((question) => getQuestionVisibility(question))
@@ -363,7 +376,9 @@ export function useSkuManager({
       });
 
     if (missingRequired.length > 0) {
-      return alert(`Будь ласка, заповніть обов'язкові питання: ${missingRequired.map((question) => question.label).join(', ')}`);
+      return Promise.reject(new Error(
+        `Заповніть обов'язкові поля: ${missingRequired.map((question) => question.label).join(', ')}`
+      ));
     }
 
     return productsApi.preview({
@@ -406,7 +421,6 @@ export function useSkuManager({
       useVariation: Boolean(variationData),
     }).then((response) => {
       setSavedProduct(response.data);
-      records.fetchHistory();
       productExport.fetchExportStatus();
       resetProductFlow(null);
     }).catch((err) => {
@@ -466,7 +480,6 @@ export function useSkuManager({
     handleNameSubject,
     ...copyFeedback,
     ...productExport,
-    ...records,
     answers,
     answeredRequiredCount,
     config,
@@ -485,10 +498,12 @@ export function useSkuManager({
     handleAnswer,
     handleCancelRecount,
     handleCancelRecountConfirmation,
+    handleCancelInformationConfirmation,
     handleCancelPriceChange,
     handleConfirmPriceChange,
     handleRequestPriceChange,
     handleConfirmRecount,
+    handleConfirmInformationUpdate,
     handleDecode,
     handleDecodeInputChange,
     handlePreview,
@@ -500,16 +515,20 @@ export function useSkuManager({
     handleSave,
     handleStartManualPriceEdit,
     handleStartRecount,
+    handleStartPriceChange,
     handleStopManualPriceEdit,
     handleTextAnswer,
     hasRecountChanges,
+    informationPreview,
     isInformationOnly,
+    isDecodeLoading,
     hasManualPrice,
     isCalibrated,
     isLivePriceLoading,
     isManualPriceEditing,
     isRecountApplying,
     isRecountConfirmOpen,
+    isInformationConfirmOpen,
     isRecountLoading,
     isRecountOpen,
     isRecountPreviewCurrent,

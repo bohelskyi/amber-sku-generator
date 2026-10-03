@@ -180,7 +180,7 @@ it('presents selected stored download and explicit confirmation dialog, freezing
     { groupCode: 'BR', groupName: 'Браслети', csvContent: 'sku,price\nBR,2', fileName: 'br.csv', rowCount: 1 },
     { groupCode: 'SV', groupName: 'Сувеніри', csvContent: 'sku,price\nSV,3', fileName: 'sv.csv', rowCount: 1 },
   ] }, onDownloadMagentoArtifact, onConfirmSnapshot });
-  expect(screen.getByText('ЗБЕРЕЖЕНІ ФАЙЛИ')).toBeTruthy(); expect(screen.queryByText('Повторний або вибірковий експорт')).toBeNull();
+  expect(screen.getByText('Збережені файли')).toBeTruthy(); expect(screen.queryByText('Повторний або вибірковий експорт')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Завантажити CSV' })); expect(onDownloadMagentoArtifact).toHaveBeenCalledWith('BR'); expect(onConfirmSnapshot).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('tab', { name: 'Сувеніри' })); fireEvent.click(screen.getByRole('button', { name: 'Завантажити CSV' })); expect(onDownloadMagentoArtifact).toHaveBeenCalledWith('SV');
   fireEvent.click(screen.getByRole('button', { name: 'Завершити експорт' })); expect(onConfirmSnapshot).not.toHaveBeenCalled();

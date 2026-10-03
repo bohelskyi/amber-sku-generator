@@ -57,7 +57,22 @@ function normalizeDraftPayload(data) {
   };
 }
 
-export function useRepricingController({ canViewCorrections = true } = {}) {
+function normalizeBatchPage(data, offset = 0) {
+  if (Array.isArray(data)) {
+    return {
+      items: data,
+      pageInfo: { limit: 20, offset, total: data.length, hasPrevious: offset > 0, hasNext: false },
+    };
+  }
+  return {
+    items: data?.items || [],
+    pageInfo: data?.pageInfo || { limit: 20, offset, total: 0, hasPrevious: offset > 0, hasNext: false },
+  };
+}
+
+const ITEM_PAGE_SIZE = 50;
+
+export function useRepricingController({ canPrepareRepricing = true, canViewCorrections = true, canViewProductConfig = true } = {}) {
   const [state, dispatch] = useRepricingControllerState();
   const stateRef = useRef(state);
   const activeDraftRef = useRef(state.activeDraft);
@@ -67,6 +82,7 @@ export function useRepricingController({ canViewCorrections = true } = {}) {
   const lastQueuedSaveSignatureRef = useRef(null);
   const applyInFlightRef = useRef(false);
   const rollbackInFlightRef = useRef(false);
+  const batchRequestRef = useRef(0);
 
   useEffect(() => {
     stateRef.current = state;
@@ -83,10 +99,22 @@ export function useRepricingController({ canViewCorrections = true } = {}) {
     []
   );
 
-  const loadBatches = useCallback(async () => {
-    const response = await repricingApi.listBatches();
-    if (mountedRef.current) patch({ batches: response.data || [] });
-    return response.data || [];
+  const loadBatches = useCallback(async (offset = 0) => {
+    const requestId = ++batchRequestRef.current;
+    if (mountedRef.current) patch({ batchPageLoading: true });
+    try {
+      const response = await repricingApi.listBatchPage({ limit: 20, offset });
+      const page = normalizeBatchPage(response.data, offset);
+      if (mountedRef.current && requestId === batchRequestRef.current) patch({
+        batches: page.items,
+        batchPageInfo: page.pageInfo,
+      });
+      return page.items;
+    } finally {
+      if (mountedRef.current && requestId === batchRequestRef.current) {
+        patch({ batchPageLoading: false });
+      }
+    }
   }, [patch]);
 
   const loadDrafts = useCallback(async () => {
@@ -95,14 +123,20 @@ export function useRepricingController({ canViewCorrections = true } = {}) {
     return response.data || [];
   }, [patch]);
 
+  const setBatchPage = useCallback((offset) => {
+    loadBatches(offset).catch((error) => patch({ error: getApiError(error) }));
+  }, [loadBatches, patch]);
+
   useEffect(() => {
     mountedRef.current = true;
     Promise.all([
-      repricingApi.getPublicConfig(),
+      canViewProductConfig ? repricingApi.getPublicConfig() : Promise.resolve({ data: null }),
       repricingApi.listScenarios(),
-      repricingApi.listBatches(),
+      repricingApi.listBatchPage({ limit: 20, offset: 0 }),
       repricingApi.listDrafts(),
-      canViewCorrections ? correctionsApi.listRequests('active') : Promise.resolve({ data: { items: [] } }),
+      canViewCorrections
+        ? correctionsApi.listRequestPage({ status: 'active', limit: 100, offset: 0 })
+        : Promise.resolve({ data: { items: [] } }),
     ])
       .then(([
         configResponse,
@@ -114,9 +148,11 @@ export function useRepricingController({ canViewCorrections = true } = {}) {
         if (!mountedRef.current) return;
         const scenarios = scenariosResponse.data || [];
         const drafts = draftsResponse.data || [];
+        const batchPage = normalizeBatchPage(batchesResponse.data, 0);
         const preferredScenario = scenarios.find((item) => item.price_mode === 'fixed_uah');
         patch({
-          batches: batchesResponse.data || [],
+          batches: batchPage.items,
+          batchPageInfo: batchPage.pageInfo,
           config: configResponse.data,
           correctionRequests: correctionRequestsResponse.data.items || [],
           drafts,
@@ -136,7 +172,7 @@ export function useRepricingController({ canViewCorrections = true } = {}) {
       mountedRef.current = false;
       workflowGenerationRef.current += 1;
     };
-  }, [patch, canViewCorrections]);
+  }, [patch, canViewCorrections, canViewProductConfig]);
 
   const selectedScenario = state.scenarios.find(
     (item) => Number(item.id) === Number(state.scenarioId)
@@ -217,7 +253,7 @@ export function useRepricingController({ canViewCorrections = true } = {}) {
     () => new Set(state.reviewedProductIds.map(Number)),
     [state.reviewedProductIds]
   );
-  const visibleItems = useMemo(() => sortRepricingItems(
+  const filteredItems = useMemo(() => sortRepricingItems(
     filterRepricingItems(effectiveItems, {
       status: state.filter,
       scenarioFilter: state.scenarioFilter,
@@ -237,6 +273,20 @@ export function useRepricingController({ canViewCorrections = true } = {}) {
     state.search,
     state.sort,
   ]);
+  const itemPageCount = Math.max(1, Math.ceil(filteredItems.length / ITEM_PAGE_SIZE));
+  const itemPage = Math.min(state.itemPage, itemPageCount - 1);
+  const visibleItems = useMemo(() => filteredItems.slice(
+    itemPage * ITEM_PAGE_SIZE,
+    (itemPage + 1) * ITEM_PAGE_SIZE
+  ), [filteredItems, itemPage]);
+  const itemPageInfo = {
+    page: itemPage,
+    pageCount: itemPageCount,
+    pageSize: ITEM_PAGE_SIZE,
+    total: filteredItems.length,
+    hasPrevious: itemPage > 0,
+    hasNext: itemPage + 1 < itemPageCount,
+  };
   const previewScenarios = useMemo(() => {
     if (state.preview?.scope !== 'global') return [];
     const byId = new Map();
@@ -287,21 +337,25 @@ export function useRepricingController({ canViewCorrections = true } = {}) {
   }, [dispatch, patch]);
 
   const openDraft = useCallback(async (draftId) => {
-    if (!draftId || stateRef.current.previewing) return;
+    if (!draftId || stateRef.current.previewing) return false;
     const generation = beginWorkflow({ reset: false });
     try {
       const response = await repricingApi.getDraft(draftId);
-      if (isCurrentWorkflow(generation)) applyDraftPayload(response.data);
+      if (isCurrentWorkflow(generation)) {
+        applyDraftPayload(response.data);
+        return true;
+      }
     } catch (error) {
       if (isCurrentWorkflow(generation)) patch({ error: getApiError(error) });
     } finally {
       if (isCurrentWorkflow(generation)) patch({ previewing: false });
     }
+    return false;
   }, [applyDraftPayload, beginWorkflow, isCurrentWorkflow, patch]);
 
   const buildPreview = useCallback(async (scope) => {
     const current = stateRef.current;
-    if (current.previewing || (scope === 'scenario' && !current.scenarioId)) return;
+    if (current.previewing || (scope === 'scenario' && !current.scenarioId)) return false;
     const generation = beginWorkflow();
     try {
       const response = scope === 'global'
@@ -309,22 +363,24 @@ export function useRepricingController({ canViewCorrections = true } = {}) {
         : await repricingApi.previewScenario(Number(current.scenarioId));
       if (isCurrentWorkflow(generation)) {
         dispatch({ type: 'previewLoaded', preview: response.data });
+        return true;
       }
     } catch (error) {
       if (isCurrentWorkflow(generation)) patch({ error: getApiError(error) });
     } finally {
       if (isCurrentWorkflow(generation)) patch({ previewing: false });
     }
+    return false;
   }, [beginWorkflow, dispatch, isCurrentWorkflow, patch]);
 
   const openSelectedRepricing = useCallback(() => {
-    if (selectedDraft) openDraft(selectedDraft.id);
-    else buildPreview('scenario');
+    if (selectedDraft) return openDraft(selectedDraft.id);
+    return buildPreview('scenario');
   }, [buildPreview, openDraft, selectedDraft]);
 
   const openGlobalRepricing = useCallback(() => {
-    if (globalDraft) openDraft(globalDraft.id);
-    else buildPreview('global');
+    if (globalDraft) return openDraft(globalDraft.id);
+    return buildPreview('global');
   }, [buildPreview, globalDraft, openDraft]);
 
   const saveDraft = useCallback(({ automatic = false, snapshot = stateRef.current } = {}) => {
@@ -381,6 +437,7 @@ export function useRepricingController({ canViewCorrections = true } = {}) {
   }, [isCurrentWorkflow, loadDrafts, patch]);
 
   useEffect(() => {
+    if (!canPrepareRepricing) return undefined;
     if (!state.preview || invalidManualPriceIds.size > 0) return undefined;
     if (state.draftConflicts.length > 0) return undefined;
     if (
@@ -407,6 +464,7 @@ export function useRepricingController({ canViewCorrections = true } = {}) {
     }, 800);
     return () => window.clearTimeout(timeoutId);
   }, [
+    canPrepareRepricing,
     invalidManualPriceIds.size,
     manualOverrides.length,
     saveDraft,
@@ -608,7 +666,7 @@ export function useRepricingController({ canViewCorrections = true } = {}) {
       lastQueuedSaveSignatureRef.current = null;
       dispatch({ type: 'workflowCleared' });
       patch({ appliedBatch: response.data.batch, confirmOpen: false });
-      await Promise.all([loadBatches(), loadDrafts()]);
+      await Promise.all([loadBatches(0), loadDrafts()]);
     } catch (error) {
       if (isCurrentWorkflow(generation)) {
         patch({ confirmOpen: false, error: getApiError(error) });
@@ -646,7 +704,7 @@ export function useRepricingController({ canViewCorrections = true } = {}) {
         rollbackResult: response.data.batch,
         rollbackTarget: null,
       });
-      await loadBatches();
+      await loadBatches(stateRef.current.batchPageInfo?.offset || 0);
     } catch (error) {
       patch({ error: getApiError(error), rollbackTarget: null });
     } finally {
@@ -673,6 +731,7 @@ export function useRepricingController({ canViewCorrections = true } = {}) {
     handleRecountApplied,
     handleSort,
     invalidManualPriceIds,
+    itemPageInfo,
     keepAllCurrentManualPrices,
     keepCurrentManualPrice,
     manualOverrides,
@@ -689,8 +748,10 @@ export function useRepricingController({ canViewCorrections = true } = {}) {
     selectedScenario,
     selectScenario,
     setConfirmOpen: (value) => edit('confirmOpen', value),
+    setBatchPage,
     setDiscardDraftOpen: (value) => edit('discardDraftOpen', value),
     setFilter: (value) => edit('filter', value),
+    setItemPage: (value) => edit('itemPage', value),
     setRecountTarget: (value) => edit('recountTarget', value),
     setReviewFilter: (value) => edit('reviewFilter', value),
     setRollbackTarget: (value) => edit('rollbackTarget', value),
@@ -700,6 +761,7 @@ export function useRepricingController({ canViewCorrections = true } = {}) {
     syncDraft,
     toggleReviewed,
     unresolvedManualPriceItems,
+    filteredItems,
     visibleItems,
   };
 }

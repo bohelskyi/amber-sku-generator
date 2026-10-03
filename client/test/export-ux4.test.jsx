@@ -94,7 +94,7 @@ it('UX4 exact recipient review, pending invitation, revoke confirmation and dial
 
 it('UX4 view-only member reads stored result, has no create/confirm/invite and leaves only after confirmation', async () => {
   api.get.mockResolvedValue(response({ ...own, isOwner: false, accessEpoch: '8', snapshotId: snapshot.id, snapshot, participantCount: 2 }));
-  mount('/exports/shared', ['exports.view']); await open(); await screen.findByText('ЗБЕРЕЖЕНІ ФАЙЛИ'); await screen.findByRole('table');
+  mount('/exports/shared', ['exports.view']); await open(); await screen.findByText('Збережені файли'); await screen.findByRole('table');
   expect(screen.queryByRole('button', { name: /Створити файли|Завершити експорт|Поділитися|Зберегти/ })).toBeNull(); expect(api.preview).not.toHaveBeenCalled();
   expect(screen.getByRole('button', { name: 'Завантажити CSV' })).toBeTruthy();
   click('Учасники'); expect(screen.queryByLabelText('Ім’я або логін одержувача')).toBeNull(); click('Вийти зі спільного експорту');
@@ -176,7 +176,7 @@ it('UX4 A → B → A fences late directory data while same-user refresh preserv
 
 it('UX4 revocation during a pending table read clears private content and fences late bytes', async () => {
   const late = deferred(); exportsApi.readMagentoArtifact.mockReturnValue(late.promise);
-  api.get.mockResolvedValue(response({ ...own, snapshotId: snapshot.id, snapshot })); mount(); await open(); await screen.findByText('ЗБЕРЕЖЕНІ ФАЙЛИ');
+  api.get.mockResolvedValue(response({ ...own, snapshotId: snapshot.id, snapshot })); mount(); await open(); await screen.findByText('Збережені файли');
   await waitFor(() => expect(exportsApi.readMagentoArtifact).toHaveBeenCalled());
   api.get.mockRejectedValue({ response: { status: 404 } }); fireEvent.focus(window); await screen.findByText(/Доступ до цього експорту втрачено|Експорт не знайдено/);
   await act(async () => late.resolve(response('sku,name\nPRIVATE,LATE'))); expect(screen.queryByText('PRIVATE')).toBeNull(); expect(screen.queryByRole('table')).toBeNull();
@@ -195,7 +195,7 @@ it('UX4 history preserves unknown attribution and no-session historical identity
   const historical = { ...snapshot, id: 'historical', sessionId: undefined, artifacts: [], recipe: { kind: 'historical', name: 'Немає даних про профіль Magento' } };
   exportsApi.getHistory.mockResolvedValue(response({ items: [historical], next: null })); exportsApi.getSnapshot.mockResolvedValue(response(historical));
   mount('/exports/history', ['exports.view']); await screen.findByText('Автор невідомий'); expect(screen.getByText('Історичні файли Magento недоступні')).toBeTruthy();
-  fireEvent.click(screen.getByRole('link', { name: /Відкрити товари від/ })); await screen.findByText('ЗБЕРЕЖЕНІ ФАЙЛИ');
+  fireEvent.click(screen.getByRole('link', { name: /Відкрити товари від/ })); await screen.findByText('Збережені файли');
   expect(exportsApi.getHistory.mock.calls[0][0]).toEqual({ stream: 'all', scope: 'accessible', status: 'all', limit: 20 });
   expect(api.create).not.toHaveBeenCalled(); expect(api.get).not.toHaveBeenCalled(); expect(exportsApi.createSnapshot).not.toHaveBeenCalled();
 });
@@ -222,7 +222,7 @@ it('UX5: confirmed correction automatically rechecks, preserving attention/file/
     review: { files: [{ groupCode: 'BR', groupName: 'Браслети', headers: ['sku', 'name'], rows: [] }, { groupCode: 'SV', groupName: 'Сувеніри', headers: ['sku', 'name'], rows: [row(1, fixed), row(2)] }] } });
   exportsApi.getStatus.mockResolvedValue(response({ delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false }, countSinceLastExport: 2 })); exportsApi.getPriceStatus.mockResolvedValue(response({ pendingCount: 0 }));
   exportsApi.preview.mockResolvedValueOnce(response(review())).mockResolvedValue(response(review(true)));
-  exportsApi.previewMagentoName.mockResolvedValue(response({ previewToken: 'name-proof' }));
+  exportsApi.previewMagentoName.mockImplementation(async ({ productId }) => response({ previewToken: 'name-proof', publicSku: `AG-00000${productId}`, internalSku: `SV-${productId}` }));
   const savedName = deferred();
   exportsApi.applyMagentoName.mockImplementation(() => { notifyExportReviewChanged({ kind: 'product' }); return savedName.promise; });
   render(<ReviewHarness />); await screen.findByText(/2 нові товари очікують/); click('Перевірити 2 нові товари'); await screen.findByRole('tab', { name: 'Сувеніри' });
@@ -241,6 +241,6 @@ it('UX5: confirmed correction automatically rechecks, preserving attention/file/
   expect(screen.getByLabelText('Готовність').value).toBe('attention'); expect(screen.getByLabelText('Пошук SKU').value).toBe('SV-'); expect(screen.getByLabelText('Мова рядка').value).toBe('main');
   expect(screen.getByRole('tab', { name: 'Сувеніри' }).getAttribute('aria-selected')).toBe('true'); expect(document.querySelector('colgroup col:nth-child(2)').style.width).toBe('420px');
   expect(screen.queryByText('Fixed name')).toBeNull(); expect(screen.queryByRole('button', { name: 'Значення name, рядок 1, потребує уваги' })).toBeNull();
-  click('Значення name, рядок 2, потребує уваги'); click('Заповнити назву'); expect(within(screen.getByRole('dialog')).getByText('Назви для Magento · SV-2')).toBeTruthy();
+  click('Значення name, рядок 2, потребує уваги'); click('Заповнити назву'); expect(await within(screen.getByRole('dialog')).findByText('Назви для Magento · AG-000002')).toBeTruthy();
   expect(exportsApi.preview.mock.calls).toEqual([[{ mode: 'new' }], [{ mode: 'new' }]]); expect(exportsApi.createSnapshot).not.toHaveBeenCalled();
 });

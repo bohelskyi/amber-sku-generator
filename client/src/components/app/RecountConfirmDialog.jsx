@@ -1,10 +1,7 @@
 import { useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { Copy } from 'lucide-react';
 import { formatDecimal, formatUah } from '../../lib/formatters';
 import { getAnswerValueLabel, getQuestionLabel } from '../../lib/answer-labels';
-import { copyPlainText } from '../../lib/clipboard';
-import { useDialogAccessibility } from '../../hooks/useDialogAccessibility';
+import { CopyAction, Dialog } from '../ui';
 
 const PRICING_MODES = [
   { value: 'system_auto', label: 'Автоматична' },
@@ -41,25 +38,16 @@ export function RecountConfirmDialog({
   mode = 'apply',
   submittingMode = null,
 }) {
-  const dialogRef = useRef(null);
   const confirmButtonRef = useRef(null);
   const [previewBeforeDecisionEdit, setPreviewBeforeDecisionEdit] = useState(null);
   const dialogOpen = Boolean(isOpen && preview);
-
-  useDialogAccessibility({
-    closeDisabled: isApplying,
-    containerRef: dialogRef,
-    initialFocusRef: confirmButtonRef,
-    isOpen: dialogOpen,
-    onClose: onCancel,
-  });
 
   if (!dialogOpen) return null;
 
   const oldPrice = preview.source.totalPriceUah;
   const newPrice = preview.corrected.totalPriceUah;
-  const sourceArticle = preview.source.publicSku || preview.source.sku;
-  const correctedArticle = preview.corrected.publicSku || preview.corrected.fullSku || sourceArticle;
+  const sourceArticle = preview.source.publicSku || '';
+  const correctedArticle = preview.corrected.publicSku || sourceArticle;
   const priceDelta = Number(preview.priceDeltaUah || 0);
   const isRequestMode = mode === 'request';
   const showDecision = !isRequestMode || canPriceOverride;
@@ -79,35 +67,22 @@ export function RecountConfirmDialog({
     && !showDecision;
   const hasManualPrice = Number(manualPriceUah) > 0;
 
-  return createPortal(
-    <div
-      className="dialog-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !isApplying) onCancel();
-      }}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="recount-confirm-title"
-        tabIndex={-1}
-        className="dialog-surface max-w-xl"
-      >
-        <div className="dialog-header">
-          <p className="eyebrow">
-            {isRequestMode
-                ? 'Запит на виправлення'
-                : 'Підтвердження переобліку'}
-          </p>
-          <h2 id="recount-confirm-title" className="mt-1 text-xl font-semibold text-slate-900 sm:text-2xl">
-            {isRequestMode
-                ? 'Передати товар на виправлення?'
-                : 'Застосувати переоблік?'}
-          </h2>
-        </div>
+  const confirmDisabled = isApplying || !previewCurrent || (isCustomDecision && !showTargetPrice)
+    || (showDecision && !(Number(newPrice) > 0))
+    || (requiresManualPrice && !hasManualPrice);
 
-        <div className="dialog-body space-y-5 px-5 py-5 sm:px-6">
+  return <Dialog open title={isRequestMode ? 'Передати товар на виправлення?' : 'Застосувати переоблік?'}
+    description={isRequestMode ? 'Перевірте пропоновані зміни перед створенням запиту.' : 'Перевірте розрахунок і зміни перед застосуванням.'}
+    busy={isApplying} onClose={onCancel} initialFocusRef={confirmButtonRef} size="lg"
+    footer={<><button type="button" onClick={onCancel} className="btn btn-outline" disabled={isApplying}>
+      Повернутися до параметрів
+    </button><button ref={confirmButtonRef} type="button" onClick={() => onConfirm(isRequestMode ? 'request' : 'apply')}
+      className="btn btn-primary" disabled={confirmDisabled}>
+      {isApplying && submittingMode === (isRequestMode ? 'request' : 'apply')
+        ? isRequestMode ? 'Створюємо запит…' : 'Застосовуємо…'
+        : isRequestMode ? 'Створити запит' : 'Застосувати переоблік'}
+    </button></>}>
+        <div className="space-y-5">
           {showDecision && (
             <fieldset className="rounded-lg border border-slate-200 p-4">
               <legend className="px-1 text-sm font-semibold">Спосіб ціноутворення</legend>
@@ -163,7 +138,7 @@ export function RecountConfirmDialog({
                 && <p className="mt-2 text-sm text-amber-800">Автоматична ціна відсутня. Оберіть ручну ціну або USD/г.</p>}
             </fieldset>
           )}
-          <div className="space-y-2 text-sm"><p className="font-semibold">Артикул: {sourceArticle}</p>
+          <div className="space-y-2 text-sm"><p className="font-semibold">Артикул: {sourceArticle || 'Недоступний'}</p>
             {preview.nameChanges && <div className="space-y-1 break-words">
               {preview.nameChanges.from?.all !== preview.nameChanges.to.all && <p>Назва українською: {preview.nameChanges.from?.all || '—'} → {preview.nameChanges.to.all}</p>}
               {preview.nameChanges.from?.en !== preview.nameChanges.to.en && <p>Назва англійською: {preview.nameChanges.from?.en || '—'} → {preview.nameChanges.to.en}</p>}
@@ -175,17 +150,9 @@ export function RecountConfirmDialog({
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Було</div>
               <div className="mt-2 flex min-w-0 items-start gap-2">
                 <div className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-slate-900">
-                  {sourceArticle}
+                  {sourceArticle || 'Недоступний'}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => copyPlainText(sourceArticle)}
-                  className="btn btn-outline btn-icon"
-                  aria-label="Скопіювати поточний артикул"
-                  title="Скопіювати артикул"
-                >
-                  <Copy size={15} aria-hidden="true" />
-                </button>
+                {sourceArticle && <CopyAction value={sourceArticle} label="Скопіювати поточний артикул" />}
               </div>
               <div className="mt-1 text-sm text-slate-600">{formatUah(oldPrice)}</div>
             </div>
@@ -193,32 +160,19 @@ export function RecountConfirmDialog({
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#8a5f2b]">Стане</div>
               <div className="mt-2 flex min-w-0 items-start gap-2">
                 <div className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-slate-900">
-                  {correctedArticle}
+                  {correctedArticle || 'Недоступний'}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => copyPlainText(correctedArticle)}
-                  className="btn btn-outline btn-icon"
-                  aria-label="Скопіювати артикул після переобліку"
-                  title="Скопіювати артикул"
-                >
-                  <Copy size={15} aria-hidden="true" />
-                </button>
+                {correctedArticle && <CopyAction value={correctedArticle} label="Скопіювати артикул після переобліку" />}
               </div>
               <div className="mt-2 flex items-center gap-2">
                 <div className="min-w-0 flex-1 text-sm font-semibold text-slate-900">
                   {showTargetPrice ? formatUah(newPrice) : '—'}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => copyPlainText(plainNewPrice)}
-                  className="btn btn-outline btn-icon"
-                  aria-label="Скопіювати нову ціну"
-                  title="Скопіювати ціну"
+                <CopyAction
+                  value={plainNewPrice}
+                  label="Скопіювати нову ціну"
                   disabled={!showTargetPrice}
-                >
-                  <Copy size={15} aria-hidden="true" />
-                </button>
+                />
               </div>
             </div>
           </div>
@@ -258,37 +212,6 @@ export function RecountConfirmDialog({
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{reason}</p>
             </div>
           )}
-
-
         </div>
-
-        <div className="dialog-footer grid gap-3 sm:grid-cols-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="btn btn-outline order-2 sm:order-1"
-            disabled={isApplying}
-          >
-            Повернутися до параметрів
-          </button>
-          <button
-            ref={confirmButtonRef}
-            type="button"
-            onClick={() => onConfirm(isRequestMode ? 'request' : 'apply')}
-            className="btn btn-primary order-1 sm:order-2"
-            disabled={isApplying || !previewCurrent || (isCustomDecision && !showTargetPrice)
-              || (showDecision && !(Number(newPrice) > 0))
-              || (requiresManualPrice && !hasManualPrice)}
-          >
-            {isApplying && submittingMode === (isRequestMode ? 'request' : 'apply')
-              ? isRequestMode ? 'Створюємо запит…' : 'Застосовуємо…'
-              : isRequestMode
-                ? 'Створити запит'
-                : 'Застосувати переоблік'}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
+  </Dialog>;
 }

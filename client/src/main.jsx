@@ -4,6 +4,7 @@ import { AuthGate } from './auth/AuthGate.jsx';
 import { AuthProvider } from './auth/AuthProvider.jsx';
 import AppRouter from './router.jsx';
 import './index.css';
+import './components/ui/ui.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

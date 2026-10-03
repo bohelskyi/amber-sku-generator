@@ -36,6 +36,10 @@ router.get('/magento/problems', requirePermission('products.view'), async (req, 
   try { res.json(await require('../../services/magento/sync-problems').problems(require('../../config/env').magento)); }
   catch (error) { next(error); }
 });
+router.get('/magento/problems/page', requirePermission('products.view'), async (req, res, next) => {
+  try { res.json(await require('../../services/magento/sync-problems').problemPage(require('../../config/env').magento, req.query || {})); }
+  catch (error) { next(error); }
+});
 router.get('/magento/product-status/:productId', requirePermission('products.view'), async (req, res, next) => {
   try {
     const productId = Number(req.params.productId);

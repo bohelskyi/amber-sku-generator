@@ -6,6 +6,8 @@ export const initialRepricingControllerState = Object.freeze({
   applying: false,
   automaticProductIds: [],
   batches: [],
+  batchPageLoading: false,
+  batchPageInfo: { limit: 20, offset: 0, total: 0, hasPrevious: false, hasNext: false },
   config: null,
   confirmOpen: false,
   correctionRequests: [],
@@ -19,6 +21,7 @@ export const initialRepricingControllerState = Object.freeze({
   error: '',
   filter: 'changed',
   focusedManualPriceProductId: null,
+  itemPage: 0,
   loading: true,
   manualPrices: {},
   preview: null,
@@ -40,6 +43,7 @@ const editableFields = new Set([
   'confirmOpen',
   'discardDraftOpen',
   'filter',
+  'itemPage',
   'recountTarget',
   'reviewFilter',
   'rollbackTarget',
@@ -55,6 +59,7 @@ const emptyWorkflow = Object.freeze({
   draftSaveState: 'idle',
   draftSync: null,
   focusedManualPriceProductId: null,
+  itemPage: 0,
   manualPrices: {},
   preview: null,
   reviewFilter: 'all',
@@ -75,9 +80,12 @@ export function repricingControllerReducer(state, action) {
       const nextValue = typeof action.value === 'function'
         ? action.value(state[action.field])
         : action.value;
-      return Object.is(nextValue, state[action.field])
+      const nextState = Object.is(nextValue, state[action.field])
         ? state
         : { ...state, [action.field]: nextValue };
+      return ['filter', 'reviewFilter', 'scenarioFilter', 'search', 'sort'].includes(action.field)
+        ? { ...nextState, itemPage: 0 }
+        : nextState;
     }
     case 'scenarioSelected':
       return {
@@ -85,6 +93,7 @@ export function repricingControllerReducer(state, action) {
         ...emptyWorkflow,
         appliedBatch: null,
         previewing: false,
+        itemPage: 0,
         scenarioId: action.scenarioId,
       };
     case 'workflowStarted':
@@ -99,6 +108,7 @@ export function repricingControllerReducer(state, action) {
       return {
         ...state,
         preview: action.preview,
+        itemPage: 0,
         filter: action.preview.summary.errorCount > 0 ? 'error' : 'changed',
       };
     case 'draftPayloadLoaded':
@@ -113,6 +123,7 @@ export function repricingControllerReducer(state, action) {
           || (action.preview?.summary?.errorCount > 0 ? 'error' : 'changed'),
         focusedManualPriceProductId: null,
         manualPrices: action.manualPrices,
+        itemPage: 0,
         preview: action.preview || state.preview,
         reviewFilter: action.uiState.reviewFilter || 'all',
         reviewedProductIds: action.reviewedProductIds,

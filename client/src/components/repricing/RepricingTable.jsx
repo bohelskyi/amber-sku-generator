@@ -6,12 +6,14 @@ import {
   SquareCheckBig,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { TechnicalDisclosure } from '../ui/index.js';
 import { formatDecimal, formatUah } from '../../lib/formatters';
 import { PricingExplanation, SortHeader } from './RepricingTablePrimitives';
 
 export function RepricingTable({
   canApplyDirectRecount,
   canCreateCorrectionRequest,
+  canPrepareRepricing,
   controller,
 }) {
   const {
@@ -41,7 +43,7 @@ export function RepricingTable({
           <tr className="table-head">
             <SortHeader column="sku" sort={sort} onSort={handleSort}>Артикул</SortHeader>
             <SortHeader column="weight" sort={sort} onSort={handleSort}>Вага</SortHeader>
-            <th className="table-cell sticky top-0 z-20 border-b border-slate-200 bg-slate-100 text-left shadow-[0_1px_0_rgba(148,163,184,0.35)]">Умова та розрахунок</th>
+            <th scope="col" className="table-cell sticky top-0 z-20 border-b border-slate-200 bg-slate-100 text-left shadow-[0_1px_0_rgba(148,163,184,0.35)]">Умова та розрахунок</th>
             <SortHeader align="right" column="oldPriceUah" sort={sort} onSort={handleSort}>Стара ціна</SortHeader>
             <SortHeader align="right" column="newPriceUah" sort={sort} onSort={handleSort}>Нова ціна</SortHeader>
             <SortHeader align="right" column="priceDeltaUah" sort={sort} onSort={handleSort}>Різниця</SortHeader>
@@ -63,13 +65,18 @@ export function RepricingTable({
             const hasAutomaticResolution = Boolean(item.useAutomatic);
             const canUseAutomaticPrice = (item.manualPreserved || item.errorCode === 'manual_price') && item.pricingDetails?.matrix
               && Number(item.automaticPriceUah ?? item.newPriceUah) > 0;
+            const articleLabel = item.publicSku || 'Артикул недоступний';
+            const manualPriceErrorId = `repricing-price-error-${item.productId}`;
             return (
               <tr
                 key={item.productId}
                 className={`border-t border-slate-100 ${isReviewed ? 'bg-emerald-50/45' : ''}`}
               >
-                <td className="table-cell min-w-48 text-xs text-slate-800">
-                  <div className="font-mono font-semibold">{item.publicSku || item.sku}</div>
+                <th scope="row" className="table-cell min-w-48 text-left text-xs font-normal text-slate-800">
+                  <div className="font-mono font-semibold">{articleLabel}</div>
+                  {item.sku && <TechnicalDisclosure summary="Внутрішній SKU">
+                    <span className="font-mono">{item.sku}</span>
+                  </TechnicalDisclosure>}
                   <div className="mt-1 flex flex-wrap gap-1">
                     <span className={`status-badge ${
                       item.status === 'error'
@@ -128,7 +135,7 @@ export function RepricingTable({
                         Запит #{correctionRequest.id}
                       </Link>
                     )}
-                    <button
+                    {canPrepareRepricing && <button
                       type="button"
                       className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${isReviewed ? 'text-emerald-700' : 'text-slate-500 hover:text-slate-900'}`}
                       onClick={() => toggleReviewed(item.productId)}
@@ -136,9 +143,9 @@ export function RepricingTable({
                     >
                       {isReviewed ? <SquareCheckBig size={14} /> : <Square size={14} />}
                       {isReviewed ? 'Переглянуто' : 'Позначити'}
-                    </button>
+                    </button>}
                   </div>
-                </td>
+                </th>
                 <td className="table-cell whitespace-nowrap text-sm">
                   {item.weight === null || item.weight === undefined
                     ? '-'
@@ -146,7 +153,7 @@ export function RepricingTable({
                 </td>
                 <td className="table-cell min-w-64 text-xs text-slate-600">
                   {item.manualPreserved ? <div className="space-y-2"><p>Ручну ціну збережено без змін.</p>
-                    {canUseAutomaticPrice && <button type="button" className="btn btn-outline btn-compact" onClick={() => selectAutomaticPrice(item.productId)}>Перейти на автоматичну ціну · {formatUah(item.automaticPriceUah)}</button>}
+                    {canPrepareRepricing && canUseAutomaticPrice && <button type="button" className="btn btn-outline btn-compact" onClick={() => selectAutomaticPrice(item.productId)}>Перейти на автоматичну ціну · {formatUah(item.automaticPriceUah)}</button>}
                   </div> : item.status === 'error' && !requiresManualPrice
                     ? <span className="text-rose-700">{item.message}</span>
                     : requiresManualPrice
@@ -162,7 +169,7 @@ export function RepricingTable({
                               ? ` · розраховано ${formatUah(item.calculatedPriceUah)} → автоматично ${formatUah(item.automaticPriceUah)}`
                               : ''}
                           </div>
-                          <div className="flex flex-wrap gap-2">
+                          {canPrepareRepricing && <div className="flex flex-wrap gap-2">
                             <button
                               type="button"
                               className="btn btn-outline btn-compact"
@@ -183,7 +190,7 @@ export function RepricingTable({
                                 {formatUah(item.automaticPriceUah ?? item.newPriceUah)}
                               </button>
                             )}
-                          </div>
+                          </div>}
                         </div>
                       )
                       : (
@@ -205,16 +212,18 @@ export function RepricingTable({
                           <input
                             className={`input-sm w-28 pr-7 text-right font-semibold ${invalidManualPriceIds.has(item.productId) ? 'border-rose-400 focus:border-rose-500' : ''}`}
                             inputMode="decimal"
-                            readOnly={item.manualPreserved || (preview.scope === 'global' && item.hasManualPrice)}
-                            aria-label={`Нова ціна для ${item.publicSku || item.sku}`}
+                            readOnly={!canPrepareRepricing || item.manualPreserved || (preview.scope === 'global' && item.hasManualPrice)}
+                            aria-label={`Нова ціна для ${articleLabel}`}
+                            aria-invalid={invalidManualPriceIds.has(item.productId) || undefined}
+                            aria-describedby={invalidManualPriceIds.has(item.productId) ? manualPriceErrorId : undefined}
                             value={hasManualOverride
                               ? manualPrices[item.productId]
                               : (hasAutomaticResolution
                                   ? formatDecimal(item.automaticPriceUah ?? item.newPriceUah)
                                   : (requiresManualPrice ? '' : formatDecimal(item.newPriceUah)))}
-                            onChange={(event) => setManualPrice(item.productId, event.target.value)}
-                            onFocus={() => { if (!item.manualPreserved && !(preview.scope === 'global' && item.hasManualPrice)) handleManualPriceFocus(item.productId); }}
-                            onBlur={(event) => !item.manualPreserved && !(preview.scope === 'global' && item.hasManualPrice) && handleManualPriceBlur(
+                            onChange={(event) => canPrepareRepricing && setManualPrice(item.productId, event.target.value)}
+                            onFocus={() => { if (canPrepareRepricing && !item.manualPreserved && !(preview.scope === 'global' && item.hasManualPrice)) handleManualPriceFocus(item.productId); }}
+                            onBlur={(event) => canPrepareRepricing && !item.manualPreserved && !(preview.scope === 'global' && item.hasManualPrice) && handleManualPriceBlur(
                               item.productId,
                               event.target.value,
                               hasAutomaticResolution
@@ -222,13 +231,13 @@ export function RepricingTable({
                           />
                           <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-normal text-slate-400">₴</span>
                         </div>
-                        {(hasManualOverride || hasAutomaticResolution) && (
+                        {canPrepareRepricing && (hasManualOverride || hasAutomaticResolution) && (
                           <button
                             type="button"
                             className="btn btn-outline btn-icon"
                             onClick={() => resetManualPrice(item.productId)}
                             title="Повернути розраховану ціну"
-                            aria-label={`Скинути ручну ціну для ${item.publicSku || item.sku}`}
+                            aria-label={`Скинути ручну ціну для ${articleLabel}`}
                           >
                             <RotateCcw size={14} />
                           </button>
@@ -247,7 +256,7 @@ export function RepricingTable({
                         </span>
                       )}
                       {invalidManualPriceIds.has(item.productId) && (
-                        <span className="text-[10px] font-medium text-rose-600">
+                        <span id={manualPriceErrorId} className="text-[10px] font-medium text-rose-600">
                           Вкажіть ціну більше нуля
                         </span>
                       )}

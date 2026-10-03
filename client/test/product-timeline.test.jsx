@@ -149,6 +149,7 @@ describe('product timeline', () => {
     expect(screen.getAllByText('Напівкалібрована').length).toBeGreaterThan(0);
     expect(screen.getByText('future_field')).toBeTruthy();
     expect(screen.getByText('9')).toBeTruthy();
+    fireEvent.click(screen.getByText('Версії та технічні деталі'));
     expect(screen.getByText('останній')).toBeTruthy();
     const transitions = screen.getAllByTestId('sku-transition');
     expect(document.querySelectorAll('.timeline-card')).toHaveLength(3);
@@ -191,6 +192,7 @@ describe('product timeline', () => {
     render(<MemoryRouter initialEntries={['/admin/corrections/history?sku=AG-000123']}><ProductTimeline /></MemoryRouter>);
 
     await waitFor(() => expect(screen.getAllByText('AG-000123').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByText('Версії та технічні деталі'));
     expect(screen.getAllByText(/Внутрішній SKU:/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('SKU-A').length).toBeGreaterThan(0);
   });
@@ -224,10 +226,11 @@ describe('product timeline', () => {
     expect(within(cards[1]).getByText('Бурштин')).toBeTruthy();
     expect(within(cards[1]).getByTestId('configuration-field-kind').dataset.changed).toBe('true');
 
-    const skuChain = screen.getByLabelText('Ланцюжок версій SKU').closest('section');
     const eventTimeline = screen.getByLabelText('Хронологія подій');
-    expect(skuChain.compareDocumentPosition(evolution) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(evolution.compareDocumentPosition(eventTimeline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(screen.getByText('Версії та технічні деталі'));
+    const skuChain = screen.getByLabelText('Ланцюжок версій SKU').closest('section');
+    expect(eventTimeline.compareDocumentPosition(skuChain) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText('Запит виконано та переоблік застосовано')).toBeTruthy();
   });
 

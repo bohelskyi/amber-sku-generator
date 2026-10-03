@@ -1,6 +1,7 @@
 import { useAuth } from '../../auth/auth-context';
 import { useProductExportController } from './useProductExportController';
 import { ExportWorkflowContext } from './useExportWorkflow';
+import { useLocation } from 'react-router-dom';
 
 export function ExportWorkflowProvider({ children }) {
   const { permissions, applicationUser, principalLifetime } = useAuth();
@@ -11,6 +12,8 @@ export function ExportWorkflowProvider({ children }) {
 }
 
 function PrincipalWorkflow({ children, enabled, canCreate, principalLifetime }) {
-  const controller = useProductExportController({ enabled, canCreate, principalLifetime });
+  const { pathname } = useLocation();
+  const observeStatus = pathname === '/exports' || pathname.startsWith('/exports/');
+  const controller = useProductExportController({ enabled, canCreate, principalLifetime, observeStatus });
   return <ExportWorkflowContext.Provider value={controller}>{children}</ExportWorkflowContext.Provider>;
 }

@@ -4,6 +4,8 @@ export function createCorrectionsApi(client = api) {
   return Object.freeze({
     getPublicConfig: () => client.get('/config'),
     listRequests: (status) => client.get('/admin/correction-requests', { params: { status } }),
+    listRequestPage: (params) => client.get('/admin/correction-requests/page', { params }),
+    getRequest: (requestId) => client.get(`/admin/correction-requests/${requestId}`),
     claimRequest: (requestId) => client.post(`/admin/correction-requests/${requestId}/claim`),
     releaseRequest: (requestId, claimVersion, headers = {}) => client.post(
       `/admin/correction-requests/${requestId}/release`,

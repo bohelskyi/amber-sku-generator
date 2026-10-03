@@ -19,19 +19,37 @@ const emptyNewScenario = {
 };
 const emptyNewModifier = { match_json: '', factor: '' };
 
-export function useAdminPricingController({ canViewPricing, formatMatchJson, selectedCat }) {
+const matrixCellKey = (scenarioId, xVal, yVal) => `${scenarioId}:${xVal}:${yVal}`;
+
+export function useAdminPricingController({ canViewPricing, formatMatchJson, onFeedback, selectedCat }) {
   const [pricesData, setPricesData] = useState(null);
+  const [pricesError, setPricesError] = useState('');
   const [newScenario, setNewScenario] = useState(emptyNewScenario);
   const [editScenario, setEditScenario] = useState(null);
   const [newModifier, setNewModifier] = useState(emptyNewModifier);
   const [editModifier, setEditModifier] = useState(null);
+  const [matrixCellSaveStates, setMatrixCellSaveStates] = useState({});
   const pricesRequestId = useRef(0);
+  const cellRequestIds = useRef(new Map());
+  const categorySelectionEpoch = useRef(0);
+  const activeCategoryCode = useRef(selectedCat?.code || null);
+  const feedback = (tone, title, message) => onFeedback?.({ tone, title, message });
 
-  const fetchPricesForCategory = (categoryCode) => {
+  const fetchPricesForCategory = (categoryCode, selectionEpoch = categorySelectionEpoch.current) => {
     const requestId = ++pricesRequestId.current;
     return api.get(`/admin/prices/${categoryCode}`).then((response) => {
-      if (requestId === pricesRequestId.current) setPricesData(response.data);
+      if (requestId === pricesRequestId.current
+        && selectionEpoch === categorySelectionEpoch.current
+        && activeCategoryCode.current === categoryCode) {
+        setPricesData(response.data);
+        setPricesError('');
+      }
       return response.data;
+    }).catch((error) => {
+      if (requestId === pricesRequestId.current
+        && selectionEpoch === categorySelectionEpoch.current
+        && activeCategoryCode.current === categoryCode) setPricesError(getApiError(error));
+      throw error;
     });
   };
 
@@ -41,21 +59,30 @@ export function useAdminPricingController({ canViewPricing, formatMatchJson, sel
   };
 
   const selectCategory = (category) => {
+    categorySelectionEpoch.current += 1;
+    activeCategoryCode.current = category.code;
     setEditScenario(null);
     setEditModifier(null);
     setPricesData(null);
-    if (canViewPricing) fetchPricesForCategory(category.code);
+    setPricesError('');
+    setMatrixCellSaveStates({});
+    if (canViewPricing) fetchPricesForCategory(category.code, categorySelectionEpoch.current).catch(() => {});
   };
 
   const clearCategory = () => {
+    categorySelectionEpoch.current += 1;
+    activeCategoryCode.current = null;
     pricesRequestId.current += 1;
     setPricesData(null);
+    setPricesError('');
     setEditScenario(null);
     setEditModifier(null);
+    setMatrixCellSaveStates({});
   };
 
   const handlePriceChange = (scenarioId, xVal, yVal, newPrice) => {
     const categoryCode = selectedCat?.code;
+    const selectionEpoch = categorySelectionEpoch.current;
     const normalizedPrice = normalizeDecimalInput(newPrice);
     const isBlank = normalizedPrice.trim() === '';
     if (!isBlank) {
@@ -63,107 +90,171 @@ export function useAdminPricingController({ canViewPricing, formatMatchJson, sel
       if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) return Promise.resolve();
     }
 
+    const cellKey = matrixCellKey(scenarioId, xVal, yVal);
+    const requestId = (cellRequestIds.current.get(cellKey) || 0) + 1;
+    cellRequestIds.current.set(cellKey, requestId);
+    setMatrixCellSaveStates((current) => ({ ...current, [cellKey]: { state: 'saving', message: 'Зберігаємо…' } }));
+
     return api.post('/admin/price-cell', {
       scenario_id: scenarioId,
       x_val: xVal,
       y_val: yVal,
       price: isBlank ? null : normalizedPrice,
-    }).then(() => fetchPricesForCategory(categoryCode));
+    }).catch((error) => {
+      if (cellRequestIds.current.get(cellKey) === requestId
+        && selectionEpoch === categorySelectionEpoch.current
+        && activeCategoryCode.current === categoryCode) {
+        setMatrixCellSaveStates((current) => ({ ...current, [cellKey]: { state: 'error', message: getApiError(error) } }));
+      }
+      throw error;
+    }).then(async () => {
+      if (cellRequestIds.current.get(cellKey) === requestId
+        && selectionEpoch === categorySelectionEpoch.current
+        && activeCategoryCode.current === categoryCode) {
+        setMatrixCellSaveStates((current) => ({ ...current, [cellKey]: { state: 'saved', message: 'Збережено' } }));
+      }
+      if (selectionEpoch !== categorySelectionEpoch.current || activeCategoryCode.current !== categoryCode) return undefined;
+      try {
+        return await fetchPricesForCategory(categoryCode, selectionEpoch);
+      } catch (error) {
+        if (cellRequestIds.current.get(cellKey) === requestId
+          && selectionEpoch === categorySelectionEpoch.current
+          && activeCategoryCode.current === categoryCode) {
+          setMatrixCellSaveStates((current) => ({ ...current, [cellKey]: { state: 'saved', message: 'Збережено; оновіть дані' } }));
+        }
+        feedback('warning', 'Ціну збережено, але дані не оновлено', getApiError(error));
+        return undefined;
+      }
+      });
   };
 
-  const addScenario = () => {
+  const refreshAfterWrite = async (categoryCode, successTitle, selectionEpoch) => {
+    feedback('success', successTitle);
+    if (selectionEpoch !== categorySelectionEpoch.current || activeCategoryCode.current !== categoryCode) return null;
+    try {
+      return await fetchPricesForCategory(categoryCode, selectionEpoch);
+    } catch (error) {
+      feedback('warning', `${successTitle}, але дані не оновлено`, getApiError(error));
+      return null;
+    }
+  };
+
+  const addScenario = async () => {
     if (!newScenario.name || !newScenario.axis_x_key) {
-      return alert('Заповніть назву та вісь рядків матриці');
+      return feedback('error', 'Сценарій не створено', 'Заповніть назву та вісь рядків матриці.');
     }
 
     let parsedJson;
     try {
       parsedJson = JSON.parse(newScenario.match_json || '{}');
     } catch {
-      return alert('Помилка в умові сценарію');
+      return feedback('error', 'Перевірте умову сценарію', 'Умова має бути коректним JSON.');
     }
 
-    return api.post('/admin/scenario', {
-      ...newScenario,
-      match_json: parsedJson,
-      priority: Number(newScenario.priority || 0),
-      category_code: selectedCat.code,
-    })
-      .then(() => {
-        setNewScenario(emptyNewScenario);
-        return fetchPrices();
-      })
-      .catch((error) => alert(`Помилка створення сценарію: ${getApiError(error)}`));
+    const categoryCode = selectedCat.code;
+    const selectionEpoch = categorySelectionEpoch.current;
+    try {
+      await api.post('/admin/scenario', {
+        ...newScenario,
+        match_json: parsedJson,
+        priority: Number(newScenario.priority || 0),
+        category_code: categoryCode,
+      });
+    } catch (error) {
+      feedback('error', 'Не вдалося створити сценарій', getApiError(error));
+      return null;
+    }
+    if (selectionEpoch === categorySelectionEpoch.current && activeCategoryCode.current === categoryCode) {
+      setNewScenario(emptyNewScenario);
+    }
+    return refreshAfterWrite(categoryCode, 'Сценарій створено', selectionEpoch);
   };
 
   const beginScenarioEdit = (scenario) => {
     setEditScenario(buildScenarioEditorDraft(scenario));
   };
 
-  const updateScenario = () => {
+  const updateScenario = async () => {
     if (!editScenario?.id) return undefined;
     if (!editScenario.name || !editScenario.axis_x_key) {
-      return alert('Потрібні назва сценарію та вісь X');
+      return feedback('error', 'Сценарій не збережено', 'Потрібні назва сценарію та вісь рядків матриці.');
     }
 
     let parsedJson;
     try {
       parsedJson = JSON.parse(editScenario.match_json || '{}');
     } catch {
-      return alert('Помилка в JSON умови');
+      return feedback('error', 'Перевірте умову сценарію', 'Умова має бути коректним JSON.');
     }
 
     const scenarioId = editScenario.id;
     const categoryCode = selectedCat?.code;
-    return api.put('/admin/scenario', {
-      id: scenarioId,
-      name: editScenario.name,
-      group_name: editScenario.group_name,
-      match_json: parsedJson,
-      axis_x_key: editScenario.axis_x_key,
-      axis_y_key: editScenario.axis_y_key || null,
-      priority: Number(editScenario.priority || 0),
-      status: editScenario.status,
-      price_mode: editScenario.price_mode,
-      apply_modifiers: editScenario.apply_modifiers !== false,
-      weight_bands: editScenario.weight_bands || [],
-    })
-      .then(() => fetchPricesForCategory(categoryCode))
-      .then((nextPricesData) => {
-        const savedScenario = findScenarioById(nextPricesData, scenarioId);
-        setEditScenario(buildScenarioEditorDraft(savedScenario));
-        return savedScenario;
-      })
-      .catch((error) => {
-        alert(`Помилка оновлення сценарію: ${getApiError(error)}`);
-        return null;
+    const selectionEpoch = categorySelectionEpoch.current;
+    try {
+      await api.put('/admin/scenario', {
+        id: scenarioId,
+        name: editScenario.name,
+        group_name: editScenario.group_name,
+        match_json: parsedJson,
+        axis_x_key: editScenario.axis_x_key,
+        axis_y_key: editScenario.axis_y_key || null,
+        priority: Number(editScenario.priority || 0),
+        status: editScenario.status,
+        price_mode: editScenario.price_mode,
+        apply_modifiers: editScenario.apply_modifiers !== false,
+        weight_bands: editScenario.weight_bands || [],
       });
+    } catch (error) {
+      feedback('error', 'Не вдалося зберегти сценарій', getApiError(error));
+      return null;
+    }
+    const nextPricesData = await refreshAfterWrite(categoryCode, 'Сценарій збережено', selectionEpoch);
+    if (!nextPricesData || selectionEpoch !== categorySelectionEpoch.current || activeCategoryCode.current !== categoryCode) return null;
+    const savedScenario = findScenarioById(nextPricesData, scenarioId);
+    setEditScenario(buildScenarioEditorDraft(savedScenario));
+    return savedScenario;
   };
 
-  const duplicateScenario = (scenarioId) => api.post('/admin/scenario/duplicate', { id: scenarioId })
-    .then(() => fetchPrices())
-    .catch((error) => alert(`Помилка дублювання: ${getApiError(error)}`));
+  const duplicateScenario = async (scenarioId) => {
+    const categoryCode = selectedCat?.code;
+    const selectionEpoch = categorySelectionEpoch.current;
+    try {
+      await api.post('/admin/scenario/duplicate', { id: scenarioId });
+    } catch (error) {
+      feedback('error', 'Не вдалося продублювати сценарій', getApiError(error));
+      return null;
+    }
+    return refreshAfterWrite(categoryCode, 'Сценарій продубльовано', selectionEpoch);
+  };
 
-  const addModifier = () => {
+  const addModifier = async () => {
     if (!newModifier.match_json || !newModifier.factor) {
-      return alert('Заповніть умови модифікатора та множник');
+      return feedback('error', 'Модифікатор не створено', 'Заповніть умову та множник.');
     }
 
     let parsedJson;
     try {
       parsedJson = JSON.parse(newModifier.match_json || '{}');
     } catch {
-      return alert('Помилка в умові модифікатора');
+      return feedback('error', 'Перевірте умову модифікатора', 'Умова має бути коректним JSON.');
     }
 
-    return api.post('/admin/modifier', {
-      ...newModifier,
-      match_json: parsedJson,
-      category_code: selectedCat.code,
-    }).then(() => {
+    const categoryCode = selectedCat.code;
+    const selectionEpoch = categorySelectionEpoch.current;
+    try {
+      await api.post('/admin/modifier', {
+        ...newModifier,
+        match_json: parsedJson,
+        category_code: categoryCode,
+      });
+    } catch (error) {
+      feedback('error', 'Не вдалося створити модифікатор', getApiError(error));
+      return null;
+    }
+    if (selectionEpoch === categorySelectionEpoch.current && activeCategoryCode.current === categoryCode) {
       setNewModifier(emptyNewModifier);
-      return fetchPrices();
-    });
+    }
+    return refreshAfterWrite(categoryCode, 'Модифікатор створено', selectionEpoch);
   };
 
   const beginModifierEdit = (modifier) => {
@@ -176,30 +267,36 @@ export function useAdminPricingController({ canViewPricing, formatMatchJson, sel
     });
   };
 
-  const updateModifier = (payloadOrId, newFactor) => {
+  const updateModifier = async (payloadOrId, newFactor) => {
     const payload = typeof payloadOrId === 'object'
       ? payloadOrId
       : { id: payloadOrId, factor: parseFloat(newFactor) };
 
-    return api.put('/admin/modifier', payload)
-      .then(() => {
-        setEditModifier(null);
-        return fetchPrices();
-      })
-      .catch((error) => alert(`Помилка оновлення модифікатора: ${getApiError(error)}`));
+    const categoryCode = selectedCat?.code;
+    const selectionEpoch = categorySelectionEpoch.current;
+    try {
+      await api.put('/admin/modifier', payload);
+    } catch (error) {
+      feedback('error', 'Не вдалося зберегти модифікатор', getApiError(error));
+      return null;
+    }
+    if (selectionEpoch === categorySelectionEpoch.current && activeCategoryCode.current === categoryCode) {
+      setEditModifier(null);
+    }
+    return refreshAfterWrite(categoryCode, 'Модифікатор збережено', selectionEpoch);
   };
 
   const saveModifierEdit = () => {
     if (!editModifier?.id) return undefined;
     if (!editModifier.match_json || !editModifier.factor) {
-      return alert('Заповніть умови модифікатора та множник');
+      return feedback('error', 'Модифікатор не збережено', 'Заповніть умову та множник.');
     }
 
     let parsedJson;
     try {
       parsedJson = JSON.parse(editModifier.match_json || '{}');
     } catch {
-      return alert('Помилка в умові модифікатора');
+      return feedback('error', 'Перевірте умову модифікатора', 'Умова має бути коректним JSON.');
     }
 
     return updateModifier({
@@ -209,6 +306,13 @@ export function useAdminPricingController({ canViewPricing, formatMatchJson, sel
     });
   };
 
+  const discardLocalChanges = () => {
+    setNewScenario(emptyNewScenario);
+    setEditScenario(null);
+    setNewModifier(emptyNewModifier);
+    setEditModifier(null);
+  };
+
   return {
     addModifier,
     addScenario,
@@ -216,14 +320,20 @@ export function useAdminPricingController({ canViewPricing, formatMatchJson, sel
     beginScenarioEdit,
     clearCategory,
     duplicateScenario,
+    discardLocalChanges,
     editModifier,
     editScenario,
     fetchPrices,
     fetchPricesForCategory,
     handlePriceChange,
+    matrixCellSaveStates,
     newModifier,
     newScenario,
     pricesData,
+    pricesError,
+    retryPrices: () => selectedCat?.code
+      ? fetchPricesForCategory(selectedCat.code, categorySelectionEpoch.current).catch(() => {})
+      : undefined,
     saveModifierEdit,
     selectCategory,
     setEditModifier,

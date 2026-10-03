@@ -5,6 +5,7 @@ export function createRepricingApi(client = api) {
     getPublicConfig: () => client.get('/config'),
     listScenarios: () => client.get('/admin/repricing/scenarios'),
     listBatches: () => client.get('/admin/repricing/batches'),
+    listBatchPage: (params) => client.get('/admin/repricing/batches/page', { params }),
     listDrafts: () => client.get('/admin/repricing/drafts'),
     getDraft: (draftId) => client.get(`/admin/repricing/drafts/${draftId}`),
     createDraft: (payload) => client.post('/admin/repricing/drafts', payload),

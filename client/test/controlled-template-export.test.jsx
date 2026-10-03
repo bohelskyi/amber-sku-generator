@@ -90,7 +90,7 @@ it('uncertain create retains same key/token after selection changes, double clic
   await act(async () => first.reject(new Error('network lost')));
   expect(screen.getByText(/Є незавершена операція/)).toBeTruthy();
   vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 3600000);
-  click('Повторити початкове створення'); await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/);
+  click('Повторити початкове створення'); await screen.findByText(/Збережені файли/);
   expect(exportsApi.createSnapshot.mock.calls[1]).toEqual(original);
   expect(exportsApi.preview).toHaveBeenCalledTimes(1);
 });
@@ -98,7 +98,7 @@ it.each(['EXPORT_PREVIEW_STALE', 'EXPORT_PREVIEW_EXPIRED'])('%s requires explici
   exportsApi.createSnapshot.mockRejectedValueOnce({ response: { status: 409, data: { code, error: code } } }).mockResolvedValueOnce(response(snapshot));
   render(<Harness />); await screen.findByText(/1 новий товар очікує/); optIn(); await start(); click(/Створити файли/);
   await screen.findByText(new RegExp(`${code} Оновіть перевірку`)); expect(controller.pendingCreate).toBeNull();
-  expect(exportsApi.preview).toHaveBeenCalledTimes(1); await start(); click(/Створити файли/); await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/);
+  expect(exportsApi.preview).toHaveBeenCalledTimes(1); await start(); click(/Створити файли/); await screen.findByText(/Збережені файли/);
   expect(exportsApi.createSnapshot.mock.calls[1][1]).not.toBe(exportsApi.createSnapshot.mock.calls[0][1]);
 });
 it('ambiguous 5xx and idempotency conflict do not get blanket 409 refresh or replacement keys', async () => {
@@ -116,7 +116,7 @@ it('late preview after selector edit cannot bind a new create to stale evidence'
 });
 it('stored download and failed confirmation retry use snapshot ID after mode/selection changes', async () => {
   exportsApi.confirmSnapshot.mockRejectedValueOnce(new Error('confirmation lost')).mockResolvedValueOnce(response({ status: 'confirmed' }));
-  render(<Harness />); await screen.findByText(/1 новий товар очікує/); optIn(); await start(); click(/Створити файли/); await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/);
+  render(<Harness />); await screen.findByText(/1 новий товар очікує/); optIn(); await start(); click(/Створити файли/); await screen.findByText(/Збережені файли/);
   expect(screen.queryByRole('checkbox')).toBeNull(); await act(async () => controller.setTemplateSelection({ mode: 'explicit', templateId: 'other', versionId: 'other' }));
   await act(async () => controller.handleDownloadMagentoArtifact('BR'));
   expect(exportsApi.downloadMagentoArtifact).toHaveBeenCalledWith('snapshot-a', 'BR'); expect(downloadBlob).toHaveBeenCalled(); expect(exportsApi.confirmSnapshot).not.toHaveBeenCalled();
@@ -130,11 +130,11 @@ it('uncertain creation survives route navigation in the mounted workflow provide
   </ExportWorkflowProvider></MemoryRouter></AuthContext.Provider>);
   await screen.findByText(/1 новий товар очікує/); optIn(); await start(); click(/Створити файли/); await screen.findByText(/lost Результат/);
   fireEvent.click(screen.getByText('Інший розділ')); await screen.findByText('Інший екран'); fireEvent.click(screen.getByText('Повернутися'));
-  click('Повторити початкове створення'); await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/);
+  click('Повторити початкове створення'); await screen.findByText(/Збережені файли/);
   expect(exportsApi.createSnapshot.mock.calls[1]).toEqual(exportsApi.createSnapshot.mock.calls[0]);
 });
 it('view-only exporters can preview without admin definition calls, create/activation controls remain disabled', async () => {
-  render(<AuthContext.Provider value={{ permissions: ['exports.view'] }}><ExportWorkflowProvider><ExportsPage /></ExportWorkflowProvider></AuthContext.Provider>);
+  render(<AuthContext.Provider value={{ permissions: ['exports.view'] }}><MemoryRouter initialEntries={['/exports']}><ExportWorkflowProvider><ExportsPage /></ExportWorkflowProvider></MemoryRouter></AuthContext.Provider>);
   await screen.findByText(/1 новий товар очікує/); optIn(); click(/Перевірити 1 новий товар/); await screen.findByText('ПОПЕРЕДНІЙ ПЕРЕГЛЯД');
   expect(screen.queryByRole('option', { name: 'Явно вказана опублікована версія' })).toBeNull();
   expect(screen.queryByRole('button', { name: /Створити файли/ })).toBeNull(); expect(exportsApi.createSnapshot).not.toHaveBeenCalled();
@@ -178,7 +178,7 @@ const session = (id) => ({ identity: { issuer: 'https://example.test', sub: `sub
   applicationUser: { id, status: 'active' }, roles: [], permissions: ['exports.view', 'exports.create'], csrfToken: `test-csrf-${id}` });
 function authenticatedWorkflow(apiClient, bindApiAuth, locationObject) {
   return <AuthProvider apiClient={apiClient} bindApiAuth={bindApiAuth} locationObject={locationObject}>
-    <AuthObserver /><AuthGate><MemoryRouter><ExportWorkflowProvider><WorkflowObserver /></ExportWorkflowProvider></MemoryRouter></AuthGate>
+    <AuthObserver /><AuthGate><MemoryRouter initialEntries={['/exports']}><ExportWorkflowProvider><WorkflowObserver /></ExportWorkflowProvider></MemoryRouter></AuthGate>
   </AuthProvider>;
 }
 
@@ -189,7 +189,7 @@ it.each(['uncertain', 'known'])('full workflow unmount/remount loses %s operatio
   const locationObject = { pathname: '/exports', assign: vi.fn() };
   const first = render(authenticatedWorkflow(apiClient, bindApiAuth, locationObject));
   await screen.findByText(/1 новий товар очікує/); optIn(); await start(); click(/Створити файли/);
-  await screen.findByText(outcome === 'uncertain' ? /response lost Результат/ : /ЗБЕРЕЖЕНІ ФАЙЛИ/);
+  await screen.findByText(outcome === 'uncertain' ? /response lost Результат/ : /Збережені файли/);
   if (outcome === 'uncertain') expect(observedWorkflow.pendingCreate.idempotencyKey).toBe(exportsApi.createSnapshot.mock.calls[0][1]);
   else await waitFor(() => expect(observedWorkflow.exportSnapshot?.id).toBe('snapshot-a'));
   first.unmount();
@@ -233,7 +233,7 @@ it.each([1, 2])('successful logout clears pending state; later user %s cannot re
   await act(async () => retry.resolve(response(snapshot)));
   expect(observedWorkflow.pendingCreate).toBeNull(); expect(observedWorkflow.exportSnapshot).toBeNull();
   expect(observedWorkflow.exportPreview).toBeNull();
-  expect(screen.queryByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/)).toBeNull();
+  expect(screen.queryByText(/Збережені файли/)).toBeNull();
   expect(exportsApi.createSnapshot).toHaveBeenCalledTimes(2);
   expect(exportsApi.preview).toHaveBeenCalledTimes(1);
   expect(localStorage.length).toBe(0); expect(sessionStorage.length).toBe(0);
@@ -259,7 +259,7 @@ it('A → B → A never revives the first lifetime, including stale actions and 
   const late = deferred(); exportsApi.downloadMagentoArtifact.mockReturnValue(late.promise);
   const apiClient = { get: vi.fn().mockResolvedValue(response(session(1))), post: vi.fn() };
   render(authenticatedWorkflow(apiClient, () => () => {}, { pathname: '/exports', assign: vi.fn() }));
-  await screen.findByText(/1 новий товар очікує/); await start(); click(/Створити файли/); await screen.findByText(/ЗБЕРЕЖЕНІ ФАЙЛИ/);
+  await screen.findByText(/1 новий товар очікує/); await start(); click(/Створити файли/); await screen.findByText(/Збережені файли/);
   const first = observedWorkflow;
   let downloading; await act(async () => { downloading = first.handleDownloadMagentoArtifact('BR'); });
   for (const id of [2,1]) { apiClient.get.mockResolvedValue(response(session(id))); await act(async () => observedAuth.refresh()); }

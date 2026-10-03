@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { AuthContext } from '../src/auth/auth-context.js';
 import { api } from '../src/lib/api.js';
 import { RecountNameFields } from '../src/components/app/RecountNameFields.jsx';
@@ -18,7 +19,13 @@ const decoded = { existsInDb: true, sku: 'SV227001', publicSku: 'AG-000002', cat
   decodedAnswers: [], skuSchema: { version: 1 }, suffix: { type: 'sequence', value: 1 }, product: { id: 5010, status: 'active', details: { answers: {} } } };
 const preview = { source: { sku: decoded.sku, publicSku: decoded.publicSku, totalPriceUah: 100, stateSignature: 'name-bound' },
   corrected: { categoryCode: 'SV', publicSku: decoded.publicSku, fullSku: 'SV227002', totalPriceUah: 100 }, changes: [], previewToken: 'reviewed' };
-function shell(element, keys = permissions) { return render(<AuthContext.Provider value={{ permissions: keys }}><MemoryRouter>{element}</MemoryRouter></AuthContext.Provider>); }
+function shell(element, keys = permissions) {
+  const router = createMemoryRouter([{
+    path: '*',
+    element: <AuthContext.Provider value={{ permissions: keys }}>{element}</AuthContext.Provider>,
+  }], { initialEntries: ['/products'] });
+  return render(<RouterProvider router={router} />);
+}
 beforeEach(() => { vi.resetAllMocks(); api.get.mockResolvedValue({ data: { names, nameConflict: false } }); });
 afterEach(cleanup);
 const formConfig = { ...config, questions: { SV: [{ id: 101, key: 'souvenir', label: 'Тип', input_type: 'text', include_in_sku: 1 }] } };
@@ -149,12 +156,18 @@ it('inline UA label action focuses editing and cancellation restores both exact 
   expect(screen.queryByRole('dialog')).toBeNull(); expect(screen.queryByText(/Підтвердити без змін/)).toBeNull();
 });
 it('inline name action retains the existing busy guard', async () => {
-  const onChange = vi.fn(); const view = shell(<RecountNameFields productId={5010} mode="apply" busy onChange={onChange} />);
+  const onChange = vi.fn();
+  function BusyHarness() {
+    const [busy, setBusy] = useState(true);
+    return <><button type="button" onClick={() => setBusy((value) => !value)}>Toggle busy</button>
+      <RecountNameFields productId={5010} mode="apply" busy={busy} onChange={onChange} /></>;
+  }
+  shell(<BusyHarness />);
   const ua = await screen.findByLabelText('Назва товару українською');
   expect(screen.getByRole('button', { name: 'Змінити', exact: true }).disabled).toBe(true);
-  view.rerender(<AuthContext.Provider value={{ permissions }}><MemoryRouter><RecountNameFields productId={5010} mode="apply" onChange={onChange} /></MemoryRouter></AuthContext.Provider>);
+  fireEvent.click(screen.getByRole('button', { name: 'Toggle busy' }));
   fireEvent.click(screen.getByRole('button', { name: 'Змінити', exact: true })); expect(ua.readOnly).toBe(false);
-  view.rerender(<AuthContext.Provider value={{ permissions }}><MemoryRouter><RecountNameFields productId={5010} mode="apply" busy onChange={onChange} /></MemoryRouter></AuthContext.Provider>);
+  fireEvent.click(screen.getByRole('button', { name: 'Toggle busy' }));
   expect(screen.getByRole('button', { name: 'Скасувати', exact: true }).disabled).toBe(true);
   expect(onChange).not.toHaveBeenCalled();
 });
@@ -218,7 +231,7 @@ for (const keys of [['products.recount'], ['products.recount', 'corrections.crea
     useSkuManager.mockReturnValue({ config, decodeData: decoded, handleDecode: vi.fn(), handleStartRecount: onStart });
     shell(<AppPage />, ['products.view', 'products.decode', ...keys]);
     expect(screen.queryByRole('button', { name: 'Передати зміни на розгляд' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: keys.includes('products.recount') ? 'Переоблікувати' : 'Підготувати запит' }));
+    fireEvent.click(screen.getByRole('button', { name: keys.includes('products.recount') ? 'Переоблік' : 'Підготувати запит' }));
     expect(onStart).toHaveBeenCalledOnce();
     expect(useSkuManager).toHaveBeenCalledWith(expect.objectContaining({ submitMode: keys.includes('products.recount') ? 'apply' : 'request' }));
   });

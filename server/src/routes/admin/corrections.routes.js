@@ -1,5 +1,5 @@
 const express = require('express');
-const { CLAIM_TOKEN_HEADER, claimCorrectionRequest, completeCorrectionRequest, createCorrectionRequest, forceReleaseCorrectionRequest, getCorrectionRequests, previewCorrectionRequest, refreshCorrectionRequest, releaseCorrectionRequest, updateCorrectionRequestStatus } = require('../../services/correction-request.service');
+const { CLAIM_TOKEN_HEADER, claimCorrectionRequest, completeCorrectionRequest, createCorrectionRequest, forceReleaseCorrectionRequest, getCorrectionRequestForView, getCorrectionRequestPage, getCorrectionRequests, previewCorrectionRequest, refreshCorrectionRequest, releaseCorrectionRequest, updateCorrectionRequestStatus } = require('../../services/correction-request.service');
 const { getCorrectionHistory } = require('../../services/correction-history.service');
 const { getRequestMutationContext } = require('../../audit/mutation-context');
 const { presentCorrectionHistoryCsv } = require('../../presenters/correction-history-csv');
@@ -20,6 +20,27 @@ function rejectPricingMutation(req, res, next) {
 router.get('/admin/correction-requests', requirePermission('corrections.view'), async (req, res) => {
   try {
     res.json(await getCorrectionRequests(req.query || {}));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+router.get('/admin/correction-requests/page', requirePermission('corrections.view'), async (req, res) => {
+  try {
+    res.json(await getCorrectionRequestPage(req.query || {}, undefined, {
+      viewerUserId: req.applicationUser?.id,
+    }));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({
+      error: err.message,
+      ...(err.publicCode ? { code: err.publicCode } : {}),
+    });
+  }
+});
+
+router.get('/admin/correction-requests/:requestId', requirePermission('corrections.view'), async (req, res) => {
+  try {
+    res.json(await getCorrectionRequestForView(req.params.requestId));
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }

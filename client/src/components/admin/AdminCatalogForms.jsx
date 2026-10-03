@@ -176,11 +176,11 @@ export function OptionRow({ canManage = true, archived = false, config, currentC
           {hasConditions && <span title={`Показувати: ${visibleSummary}. Приховувати: ${hiddenSummary}`}>За умовою</span>}
         </div>
       </div>
-      <div className="catalog-row-actions">
-        <button type="button" disabled={!canManage} onClick={() => onEdit(option)} className="catalog-icon-button" title="Редагувати" aria-label={`Редагувати ${option.label}`}><Pencil size={14} /></button>
-        <button type="button" disabled={!canManage} onClick={() => onArchive(option, !archived)} className="catalog-icon-button" title={archived ? 'Відновити з архіву' : 'Архівувати'} aria-label={`${archived ? 'Відновити' : 'Архівувати'} ${option.label}`}>{archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}</button>
-        <button type="button" disabled={!canManage} onClick={() => onDelete('option', option.db_id)} className="catalog-icon-button is-danger" title="Видалити" aria-label={`Видалити ${option.label}`}><Trash2 size={15} /></button>
-      </div>
+      {canManage && <div className="catalog-row-actions">
+        <button type="button" onClick={() => onEdit(option)} className="catalog-icon-button" title="Редагувати" aria-label={`Редагувати ${option.label}`}><Pencil size={14} /></button>
+        <button type="button" onClick={() => onArchive(option, !archived)} className="catalog-icon-button" title={archived ? 'Відновити з архіву' : 'Архівувати'} aria-label={`${archived ? 'Відновити' : 'Архівувати'} ${option.label}`}>{archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}</button>
+        <button type="button" onClick={() => onDelete('option', option.db_id)} className="catalog-icon-button is-danger" title="Видалити" aria-label={`Видалити ${option.label}`}><Trash2 size={15} /></button>
+      </div>}
     </div>
   );
 }

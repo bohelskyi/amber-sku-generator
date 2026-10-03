@@ -9,7 +9,6 @@ import {
   formatUsd,
 } from '../../lib/formatters';
 import { getAnswerValueLabel, getQuestionLabel } from '../../lib/answer-labels';
-import { useMagentoSummary } from '../../hooks/useMagentoSummary.js';
 import {
   getVisibleOptionsForQuestion,
   isQuestionVisible,
@@ -96,10 +95,16 @@ export function DecodeErrorPanel({ details, message }) {
 }
 
 export function HomeDashboard({
+  canArchiveProducts = false,
   canDecodeProducts = true,
+  canDeleteTestProduct = false,
   canChangeProductPrice = false,
   canCreateProducts = true,
+  canViewAttention = false,
+  showCreate = true,
+  showLookup = true,
   canStartRecount = true,
+  canViewHistory = false,
   config,
   skuToDecode,
   decodeData,
@@ -129,15 +134,49 @@ export function HomeDashboard({
   onRecountWeightChange,
   onRecountNameChange,
   onStart,
+  onArchive,
+  onDeleteTest,
   onStartRecount,
+  onStartPriceChange,
   onDecode,
   onDecodeInputChange,
 }) {
-  const { summary: magentoSummary } = useMagentoSummary();
   return (
     <div className="space-y-5">
-      <div className={`home-top-workspace${canCreateProducts ? '' : ' is-decoder-only'}`}>
-        {canCreateProducts && <section className="home-workspace-panel home-create-panel card fade-up stagger-1">
+      {!decodeData && <div className={`product-landing-grid${canCreateProducts && showCreate && showLookup ? '' : ' is-lookup-only'}`}>
+        {showLookup && <section className="home-workspace-panel product-lookup-panel card fade-up">
+          <div className="home-decode-panel px-4 py-4 sm:px-5">
+            <p className="eyebrow">Відкрити товар</p>
+            <h2 className="mt-1 text-lg font-semibold text-slate-900">Знайти за артикулом</h2>
+            <p className="mt-1 text-sm text-slate-500">Для старих записів також можна ввести внутрішній SKU.</p>
+            {canDecodeProducts ? <div className="home-decode-actions mt-4 flex flex-col gap-2 sm:flex-row">
+              <input
+                type="text"
+                value={skuToDecode}
+                onChange={(event) => onDecodeInputChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') onDecode();
+                }}
+                placeholder="Наприклад, AG-000123"
+                aria-label="Артикул для відкриття товару"
+                className="input min-w-0 flex-1"
+              />
+              <button onClick={() => onDecode()} className="btn btn-primary shrink-0">
+                Відкрити товар
+              </button>
+            </div> : <p className="mt-3 text-sm text-slate-600">Для відкриття товару потрібен відповідний дозвіл.</p>}
+
+            {decodeError && (
+              <DecodeErrorPanel details={decodeErrorDetails} message={decodeError} />
+            )}
+          </div>
+          {canViewAttention && <div className="product-attention-link">
+            <div><strong>Потребує уваги</strong><span>Запити на виправлення та проблеми синхронізації</span></div>
+            <Link to="/attention" className="btn btn-outline btn-compact-md">Переглянути</Link>
+          </div>}
+        </section>}
+
+        {canCreateProducts && showCreate && <section className="home-workspace-panel home-create-panel card fade-up stagger-1">
           <div className="home-create-heading section-title">
             <div>
               <p className="eyebrow">Створити товар</p>
@@ -164,42 +203,7 @@ export function HomeDashboard({
             ))}
           </div>
         </section>}
-
-        <div className="home-side-workspace home-workspace-panel card fade-up stagger-2">
-          <div className="home-decode-panel px-4 py-3">
-            <p className="eyebrow">Пошук товару</p>
-            <h2 className="mt-1 text-lg font-semibold text-slate-900">Знайти та перевірити товар</h2>
-            {canDecodeProducts ? <div className="home-decode-actions mt-3 flex flex-col gap-2 sm:flex-row lg:flex-col">
-              <input
-                type="text"
-                value={skuToDecode}
-                onChange={(event) => onDecodeInputChange(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') onDecode();
-                }}
-                placeholder="Введіть артикул"
-                aria-label="Артикул для розшифрування"
-                className="input min-w-0"
-              />
-              <button onClick={() => onDecode()} className="btn btn-primary shrink-0">
-                Розшифрувати
-              </button>
-            </div> : <p className="mt-2 text-sm text-slate-600">Для пошуку товарів потрібен дозвіл на перегляд їхніх характеристик.</p>}
-
-            {decodeError && (
-              <DecodeErrorPanel details={decodeErrorDetails} message={decodeError} />
-            )}
-          </div>
-
-          <section className="home-export-panel min-w-0" aria-label="Magento">
-            <h2 className="text-sm font-semibold">Magento</h2>
-            <p className="mt-1 text-sm">{!magentoSummary ? 'Стан синхронізації недоступний'
-              : magentoSummary.problemCount > 0 ? `● Є проблеми синхронізації · ${magentoSummary.problemCount}`
-                : magentoSummary.enabled ? '● Автоматичну синхронізацію ввімкнено' : 'Автоматичну синхронізацію призупинено'}</p>
-            {magentoSummary?.problemCount > 0 && <Link to="/sync-problems" className="mt-2 inline-block text-sm underline">Переглянути проблеми</Link>}
-          </section>
-        </div>
-      </div>
+      </div>}
 
       {decodeData && (
         <DecodeWorkspace
@@ -224,6 +228,9 @@ export function HomeDashboard({
           recountMode={recountMode}
           canStartRecount={canStartRecount}
           canChangeProductPrice={canChangeProductPrice}
+          canArchiveProducts={canArchiveProducts}
+          canDeleteTestProduct={canDeleteTestProduct}
+          canViewHistory={canViewHistory}
           onApplyRecount={onApplyRecount}
           onCancelRecount={onCancelRecount}
           onRecountAnswer={onRecountAnswer}
@@ -232,6 +239,9 @@ export function HomeDashboard({
           onRecountWeightChange={onRecountWeightChange}
           onRecountNameChange={onRecountNameChange}
           onStartRecount={onStartRecount}
+          onStartPriceChange={onStartPriceChange}
+          onArchive={onArchive}
+          onDeleteTest={onDeleteTest}
         />
       )}
     </div>
@@ -240,8 +250,11 @@ export function HomeDashboard({
 
 export function DecodeWorkspace({
   onDecode,
+  canArchiveProducts = false,
+  canDeleteTestProduct = false,
   canChangeProductPrice = false,
   canStartRecount = true,
+  canViewHistory = false,
   config,
   decodeData,
   hasRecountChanges,
@@ -267,6 +280,9 @@ export function DecodeWorkspace({
   onRecountWeightChange,
   onRecountNameChange,
   onStartRecount,
+  onStartPriceChange,
+  onArchive,
+  onDeleteTest,
   recountMode = 'apply',
 }) {
   const isCalibrationUnknown = decodeData.calibration?.status === 'unknown';
@@ -323,20 +339,24 @@ export function DecodeWorkspace({
     );
   }
 
+  const isCurrentProduct = decodeData.existsInDb
+    && decodeData.product?.status === 'active'
+    && !decodeData.product?.corrected_to_product_id;
+
   return (
     <section className="operational-split-layout decode-result-workspace fade-up stagger-3">
       <div className="decode-workspace builder-workspace card overflow-hidden">
         <ProductMagentoState key={decodeData.product?.id || decodeData.sku} product={{ productId: decodeData.product?.id,
-          publicSku: decodeData.publicSku || decodeData.sku, sku: decodeData.sku,
+          publicSku: decodeData.publicSku, sku: decodeData.sku,
           categoryCode: decodeData.category.code, status: decodeData.product?.status || 'active',
           magentoNameReviewRequired: decodeData.product?.magento_name_review_required === true }}
           onSaved={() => onDecode?.(decodeData.publicSku || decodeData.sku)} />
         <header className="builder-header">
           <div className="min-w-0">
-            <h2 className="section-title-text">{decodeData.category.name}</h2>
+            <h2 className="section-title-text">{decodeData.existsInDb ? 'Характеристики товару' : 'Розшифрований код'}</h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              Результат декодування
-              {decodeData.decodeSource === 'stored_history' ? ' · історична схема' : ''}
+              {decodeData.category.name}
+              {!decodeData.existsInDb && ' · режим сумісності'}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-3">
@@ -383,9 +403,16 @@ export function DecodeWorkspace({
 
           <div className="builder-summary-body">
             <div className="builder-summary-group first">
-              <DecodeSummaryRow label="Артикул" value={decodeData.publicSku || decodeData.sku} mono strong />
+              {decodeData.existsInDb
+                ? <DecodeSummaryRow label="Артикул" value={decodeData.publicSku || 'Недоступний'} mono strong />
+                : <DecodeSummaryRow label="Код" value={decodeData.sku} mono strong />}
               <DecodeSummaryRow label="Стан у базі" value={productStatus} />
             </div>
+
+            {!decodeData.existsInDb && <div className="decode-warning">
+              <p>Збережений товар не знайдено</p>
+              <span>Код розшифровано за схемою SKU. Переоблік, зміна ціни, архівування та інші дії з товаром недоступні.</span>
+            </div>}
 
             {isCalibrationBlockingPrice && (
               <div className="decode-warning">
@@ -514,13 +541,20 @@ export function DecodeWorkspace({
             )}
           </div>
 
-          {canStartRecount && decodeData.existsInDb && (
-            <div className="builder-summary-actions">
-              <button onClick={onStartRecount} className="btn btn-primary w-full">
-                {recountMode === 'request' ? 'Підготувати запит' : 'Переоблікувати'}
-              </button>
-            </div>
-          )}
+          {decodeData.existsInDb && <div className="builder-summary-actions product-detail-actions">
+            {canStartRecount && isCurrentProduct && <button onClick={onStartRecount} className="btn btn-primary">
+              {recountMode === 'request' ? 'Підготувати запит' : 'Переоблік'}
+            </button>}
+            {canChangeProductPrice && isCurrentProduct && <button onClick={onStartPriceChange} className="btn btn-outline">Змінити ціну</button>}
+            {canViewHistory && <Link className="btn btn-outline" to={`/products/history?sku=${encodeURIComponent(decodeData.publicSku || decodeData.internalSku || decodeData.sku)}`}>Історія товару</Link>}
+            {(canArchiveProducts || canDeleteTestProduct) && isCurrentProduct && <details className="product-exceptional-actions">
+              <summary>Додаткові дії</summary>
+              <div>
+                {canArchiveProducts && <button type="button" className="btn btn-outline text-rose-700" onClick={onArchive}>Архівувати товар</button>}
+                {canDeleteTestProduct && <button type="button" className="btn btn-danger" onClick={onDeleteTest}>Видалити тестовий товар</button>}
+              </div>
+            </details>}
+          </div>}
         </div>
       </aside>
     </section>
@@ -823,8 +857,8 @@ function RecountPanel({
               </div>
               <RecountComparisonRow
                 label="Артикул"
-                current={decodeData.publicSku || decodeData.sku}
-                next={correctedPricing?.publicSku || decodeData.publicSku || decodeData.sku}
+                current={decodeData.publicSku || 'Недоступний'}
+                next={correctedPricing?.publicSku || decodeData.publicSku || 'Недоступний'}
                 mono
               />
               <RecountComparisonRow

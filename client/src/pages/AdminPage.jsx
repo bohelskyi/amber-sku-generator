@@ -1,64 +1,101 @@
+import { useEffect, useState } from 'react';
 import { AdminHeader } from '../components/admin/AdminHeader';
 import { AdminPricingEditor } from '../components/admin/AdminPricingEditor';
 import { AdminStructureEditor } from '../components/admin/AdminStructureEditor';
 import { ValidationIssues } from '../components/admin/ValidationIssues';
-import { LoadingState, Notice } from '../components/app/UiPrimitives.jsx';
+import { Button, ConfirmDialog, LoadingState, LocalNavigation, Notice } from '../components/ui/index.js';
 import { useAdminPanel } from '../hooks/useAdminPanel';
-import { Link } from 'react-router-dom';
-import { useAuth } from '../auth/auth-context.js';
+import { useDirtyNavigation } from '../hooks/useDirtyNavigation.jsx';
+import '../components/admin/admin.css';
 
-export default function AdminPage() {
-  const admin = useAdminPanel();
-  const { permissions } = useAuth();
+function CategoryPicker({ categories, selectedCode, onSelect }) {
+  return <section className="catalog-category-context admin-category-picker" aria-label="Категорія для цін">
+    <div className="catalog-category-heading">
+      <div><h2>Категорія</h2><p>Оберіть категорію, щоб відкрити її сценарії та модифікатори.</p></div>
+    </div>
+    <div className="catalog-category-tabs" role="group" aria-label="Категорії цін">
+      {Object.values(categories).map((category) => <button key={category.code} type="button"
+        aria-pressed={selectedCode === category.code} onClick={() => onSelect(category)}
+        className={`catalog-category-tab ${selectedCode === category.code ? 'is-active' : ''}`}>
+        <span>{category.name}</span><small>{category.code}</small>
+      </button>)}
+    </div>
+  </section>;
+}
 
-  if (!admin.config) {
-    return (
-      <div className="app-page p-6">{admin.configError ? <Notice tone="error"><p>{admin.configError}</p><button className="btn btn-outline" onClick={admin.retryConfig}>Спробувати ще раз</button></Notice>
-        : <LoadingState label="Збираємо конфігурацію та цінові сценарії…" />}</div>
-    );
+export default function AdminPage({ mode = 'auto' }) {
+  const admin = useAdminPanel({ mode });
+  const [workspaceDirty, setWorkspaceDirty] = useState(false);
+  const [editorKey, setEditorKey] = useState(0);
+  const dirtyNavigation = useDirtyNavigation({
+    dirty: workspaceDirty,
+    discard: () => {
+      admin.discardLocalChanges();
+      setWorkspaceDirty(false);
+      setEditorKey((current) => current + 1);
+    },
+  });
+  const isCatalog = admin.effectiveMode === 'catalog';
+  const hasAccess = isCatalog ? admin.canViewCatalog : admin.canViewPricing;
+  const localNavItems = [
+    admin.canViewCatalog && { to: '/admin/catalog', label: 'Каталог' },
+    admin.canViewPricing && { to: '/admin/pricing', label: 'Ціноутворення' },
+  ].filter(Boolean);
+
+  useEffect(() => {
+    if (!workspaceDirty) return undefined;
+    const warnBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [workspaceDirty]);
+
+  const selectCategory = (category) => dirtyNavigation.request(() => admin.handleSelectCategory(category));
+  const selectQuestion = (question) => dirtyNavigation.request(() => admin.handleSelectQuestion(question));
+
+  if (!hasAccess) {
+    return <main className="app-page admin-page"><div className="admin-page-inner">
+      <Notice tone="warning" title="Немає доступу до розділу">
+        Цей робочий простір недоступний за вашими чинними дозволами.
+      </Notice>
+    </div></main>;
   }
 
-  return (
-    <div className="app-page">
-      <div className="mx-auto max-w-7xl space-y-5 px-4 py-4 pb-20 sm:px-6 sm:py-6">
-        <AdminHeader />
-        {admin.canViewCatalog && <ValidationIssues issues={admin.validationIssues} />}
-        <nav className="admin-section-nav" aria-label="Розділи налаштувань">
-          {admin.canViewCatalog && <a href="#catalog-structure">Структура каталогу</a>}
-          {admin.canViewPricing && <a href="#catalog-pricing">Матриці та модифікатори</a>}
-          {permissions.includes('export_templates.view') && <Link to="/admin/magento">Інтеграція Magento</Link>}
-        </nav>
-        {!admin.canViewCatalog && admin.canViewPricing && (
-          <section className="catalog-category-context" aria-label="Категорія для перегляду цін">
-            <div className="catalog-category-heading">
-              <div><h2>Категорія</h2><p>Оберіть матриці та модифікатори для перегляду</p></div>
-            </div>
-            <div className="catalog-category-tabs" role="tablist" aria-label="Категорії цін">
-              {Object.values(admin.config.categories).map((category) => (
-                <button
-                  key={category.code}
-                  type="button"
-                  role="tab"
-                  aria-selected={admin.selectedCat?.code === category.code}
-                  onClick={() => admin.handleSelectCategory(category)}
-                  className={`catalog-category-tab ${admin.selectedCat?.code === category.code ? 'is-active' : ''}`}
-                >
-                  <span>{category.name}</span><small>{category.code}</small>
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
-        {admin.canViewCatalog && <section id="catalog-structure" className="admin-anchor-section">
-          <AdminStructureEditor
-            canManage={admin.canManageCatalog}
-            config={admin.config}
+  if (!admin.config) {
+    return <main className="app-page admin-page"><div className="admin-page-inner">
+      {admin.configError
+        ? <Notice tone="error" title="Не вдалося завантажити налаштування" actions={<Button onClick={admin.retryConfig}>Спробувати ще раз</Button>}>{admin.configError}</Notice>
+        : <LoadingState label={isCatalog ? 'Завантажуємо каталог…' : 'Завантажуємо налаштування цін…'} />}
+    </div></main>;
+  }
+
+  return <main className="app-page admin-page">
+    <div className="admin-page-inner">
+      <AdminHeader mode={admin.effectiveMode} />
+      {localNavItems.length > 1 && <LocalNavigation label="Розділи конфігурації" items={localNavItems} />}
+
+      {admin.feedback && <Notice tone={admin.feedback.tone} title={admin.feedback.title}
+        actions={<Button variant="ghost" size="compact" onClick={admin.clearFeedback}>Закрити</Button>}>
+        {admin.feedback.message}
+      </Notice>}
+
+      {isCatalog && <>
+        <ValidationIssues issues={admin.validationIssues} />
+        <AdminStructureEditor
+          key={`catalog-${editorKey}`}
+          canManage={admin.canManageCatalog}
+          canPublish={admin.canPublishSchema}
+          config={admin.config}
           selectedCat={admin.selectedCat}
           selectedQuestion={admin.selectedQuestion}
           currentCatQuestions={admin.currentCatQuestions}
           currentOptions={admin.currentOptions}
           selectedQuestionInputType={admin.selectedQuestionInputType}
           schemaStatus={admin.schemaStatus}
+          schemaStatusError={admin.schemaStatusError}
+          retrySchemaStatus={admin.retrySchemaStatus}
           schemaPublishState={admin.schemaPublishState}
           editCat={admin.editCat}
           setEditCat={admin.setEditCat}
@@ -72,8 +109,9 @@ export default function AdminPage() {
           setNewOpt={admin.setNewOpt}
           editOpt={admin.editOpt}
           setEditOpt={admin.setEditOpt}
-          onSelectCategory={admin.handleSelectCategory}
-          onSelectQuestion={admin.handleSelectQuestion}
+          onSelectCategory={selectCategory}
+          onSelectQuestion={selectQuestion}
+          onDirtyChange={setWorkspaceDirty}
           addCategory={admin.addCategory}
           updateCategory={admin.updateCategory}
           addQuestion={admin.addQuestion}
@@ -87,12 +125,20 @@ export default function AdminPage() {
           updateOption={admin.updateOption}
           publishSkuSchema={admin.publishSkuSchema}
           deleteItem={admin.deleteItem}
-            formatMatchJson={admin.formatMatchJson}
-          />
-        </section>}
-        {admin.canViewPricing && <section id="catalog-pricing" className="admin-anchor-section">
-          <AdminPricingEditor
-            config={admin.config}
+          formatMatchJson={admin.formatMatchJson}
+        />
+      </>}
+
+      {!isCatalog && <>
+        <CategoryPicker categories={admin.config.categories} selectedCode={admin.selectedCat?.code} onSelect={selectCategory} />
+        {admin.selectedCat && admin.pricesError && !admin.pricesData && <Notice tone="error" title={`Не вдалося завантажити ціни для «${admin.selectedCat.name}»`}
+          actions={<Button onClick={admin.retryPrices}>Спробувати ще раз</Button>}>
+          {admin.pricesError}
+        </Notice>}
+        {admin.selectedCat && !admin.pricesData && !admin.pricesError && <LoadingState label={`Завантажуємо ціни для «${admin.selectedCat.name}»…`} compact />}
+        <AdminPricingEditor
+          key={`pricing-${editorKey}`}
+          config={admin.config}
           selectedCat={admin.selectedCat}
           pricesData={admin.pricesData}
           currentCatQuestions={admin.currentCatQuestions}
@@ -109,16 +155,25 @@ export default function AdminPage() {
           updateScenario={admin.updateScenario}
           duplicateScenario={admin.duplicateScenario}
           deleteItem={admin.deleteItem}
-          formatMatchJson={admin.formatMatchJson}
           handlePriceChange={admin.handlePriceChange}
+          matrixCellSaveStates={admin.matrixCellSaveStates}
           addScenario={admin.addScenario}
-          updateModifier={admin.updateModifier}
           saveModifierEdit={admin.saveModifierEdit}
-            addModifier={admin.addModifier}
-            readOnly={!admin.canManagePricing}
-          />
-        </section>}
-      </div>
+          addModifier={admin.addModifier}
+          readOnly={!admin.canManagePricing}
+          onDirtyChange={setWorkspaceDirty}
+          requestTransition={dirtyNavigation.request}
+        />
+      </>}
     </div>
-  );
+
+    {dirtyNavigation.prompt}
+
+    <ConfirmDialog open={Boolean(admin.deleteConfirmation)} title={`Видалити «${admin.deleteConfirmation?.label || 'елемент'}»?`}
+      description={admin.deleteConfirmation?.description} confirmLabel="Видалити" tone="danger"
+      busy={admin.deleteBusy} onConfirm={admin.confirmDelete} onClose={admin.cancelDelete}>
+      <p>{admin.deleteConfirmation?.consequence}</p>
+      {admin.deleteError && <Notice tone="error" title="Не вдалося видалити">{admin.deleteError}</Notice>}
+    </ConfirmDialog>
+  </main>;
 }

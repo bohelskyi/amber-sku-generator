@@ -18,6 +18,8 @@ describe('correction history report presentation', () => {
           reason: 'Планова перевірка',
           sourceSku: 'BR-OLD',
           correctedSku: 'BR-NEW',
+          sourcePublicSku: 'AG-000012',
+          correctedPublicSku: 'AG-000012',
           oldPriceUah: 1000,
           newPriceUah: 1250,
           oldPricePerGram: null,
@@ -48,7 +50,7 @@ describe('correction history report presentation', () => {
       </MemoryRouter>,
     );
 
-    const record = (await screen.findByText('BR-OLD')).closest('article');
+    const record = (await screen.findByText(/Внутрішній SKU: BR-OLD/)).closest('article');
     expect(record.textContent).toContain('BR-NEW');
     expect(record.textContent).toContain('Розмір');
     expect(record.textContent).toContain('Матриця B');
