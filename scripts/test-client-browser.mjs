@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { polishConfig, polishDecoded, polishPreview } from '../client/test/fixtures/characteristic-polish.js';
 
 const require = createRequire(new URL('../client/package.json', import.meta.url));
 const WebSocket = require('ws');
@@ -26,6 +27,14 @@ const artifacts = mkdtempSync(path.join(tmpdir(), 'amber-application-browser-'))
 const requests = [];
 const unexpected = [];
 let currentPersona = 'storekeeper';
+let characteristicPolishFixture = false;
+let characteristicPolishApplied = false;
+// Keep the browser recount target valid; historical invalid evidence is covered
+// by rendered regressions without pretending it passes server validation.
+const browserPolishQuestions = polishConfig.questions.SV.filter((question) => !question.id.startsWith('historic_'));
+const browserPolishConfig = { ...polishConfig, questions: { SV: browserPolishQuestions } };
+const browserPolishAnswers = (answers) => Object.fromEntries(browserPolishQuestions
+  .filter((question) => Object.hasOwn(answers, question.id)).map((question) => [question.id, answers[question.id]]));
 
 const personas = {
   storekeeper: {
@@ -225,7 +234,7 @@ const server = http.createServer(async (request, response) => {
             status: 'active', displayName: persona.name },
           csrfToken: 'fixture-only', permissions: persona.permissions, roles: persona.roles };
         break;
-      case 'GET /api/config': data = config; break;
+      case 'GET /api/config': data = characteristicPolishFixture ? browserPolishConfig : config; break;
       case 'GET /api/product-timeline': data = productTimeline; break;
       case 'GET /api/products': data = [storedProduct]; break;
       case 'GET /api/products/register':
@@ -233,6 +242,19 @@ const server = http.createServer(async (request, response) => {
           filterOptions: { categories: [{ code: 'SV', name: 'Сувеніри' }] } };
         break;
       case 'POST /api/decode':
+        if (characteristicPolishFixture) {
+          const answers = browserPolishAnswers(characteristicPolishApplied
+            ? polishPreview.corrected.answers : polishDecoded.product.details.answers);
+          data = { ...polishDecoded,
+            sku: characteristicPolishApplied ? polishPreview.corrected.fullSku : polishDecoded.sku,
+            product: { ...polishDecoded.product, details: { answers, isCalibrated: 0 } },
+            decodedAnswers: polishDecoded.decodedAnswers.filter((answer) => !answer.key.startsWith('historic_'))
+              .map((answer) => answer.key === 'souvenir' && characteristicPolishApplied
+                ? { ...answer, value_id: 2, value_label: 'Годинник' }
+                : answer.key === 'kit_part' && characteristicPolishApplied
+                  ? { ...answer, value_id: null, is_placeholder: true, value_label: 'Не обрано' } : answer) };
+          break;
+        }
         data = { sku: product.internalSku, publicSku: product.publicSku, internalSku: product.internalSku,
           category, product: { ...storedProduct, status: fixtureProductStatus, weight: fixtureWeight,
             total_price_uah: fixturePriceUah.toFixed(2) }, existsInDb: true, decodedAnswers: [], skuSchema: { version: 1 },
@@ -243,7 +265,15 @@ const server = http.createServer(async (request, response) => {
             weight: fixtureWeight, source: 'stored', dependentKeys: ['weight'], usesWeight: true,
           } };
         break;
-      case 'POST /api/recount/preview': data = {
+      case 'POST /api/recount/preview':
+        if (characteristicPolishFixture) {
+          data = { ...polishPreview,
+            source: { ...polishPreview.source, answers: browserPolishAnswers(polishPreview.source.answers),
+              decodedAnswers: polishPreview.source.decodedAnswers.filter((answer) => !answer.key.startsWith('historic_')) },
+            corrected: { ...polishPreview.corrected, answers: browserPolishAnswers(polishPreview.corrected.answers) } };
+          break;
+        }
+        data = {
         source: { sku: product.internalSku, publicSku: product.publicSku, totalPriceUah: fixturePriceUah, stateSignature: 'source-state' },
         corrected: { categoryCode: 'SV', publicSku: product.publicSku, totalPriceUah: 1300, totalPrice: 32.5,
           pricePerGramUah: 118.18, pricePerGram: 2.9545, pricingDetails: { scenario: { name: 'Базова матриця' } } },
@@ -251,7 +281,16 @@ const server = http.createServer(async (request, response) => {
         previewToken: 'fixture-recount-preview', priceDeltaUah: 1300 - fixturePriceUah,
         priceDeltaUsd: 32.5 - (fixturePriceUah / 40),
       }; break;
-      case 'POST /api/recount/apply': fixtureWeight = Number(body?.weight || 11); fixturePriceUah = 1300;
+      case 'POST /api/recount/apply':
+        if (characteristicPolishFixture) {
+          assert.equal(body.sourceStateSignature, polishPreview.source.stateSignature);
+          assert.equal(body.answers.souvenir, 2);
+          assert.equal(body.answers.is_calibrated, 0);
+          characteristicPolishApplied = true;
+          data = { corrected: { publicSku: polishDecoded.publicSku, sku: polishPreview.corrected.fullSku } };
+          break;
+        }
+        fixtureWeight = Number(body?.weight || 11); fixturePriceUah = 1300;
         data = { corrected: { publicSku: product.publicSku, sku: product.internalSku } }; break;
       case 'POST /api/product-price-change/preview':
       case 'POST /api/admin/correction-requests/preview': {
@@ -270,6 +309,8 @@ const server = http.createServer(async (request, response) => {
       case 'POST /api/products/test-delete/preview': data = { state: 'preview', previewHash: 'fixture-delete-preview',
         publicSku: product.publicSku, productId: product.id }; break;
       case 'GET /api/magento/product-status/7': data = { state: 'pending', nameConflict: false }; break;
+      case 'GET /api/magento/product-status/20': data = { state: 'not_queued', nameConflict: false }; break;
+      case 'GET /api/product-names/20': data = { names: { all: 'Синтетичний сувенір', en: 'Synthetic souvenir' }, nameConflict: false }; break;
       case 'GET /api/product-names/7': data = { names: { all: 'Тестовий сувенір', en: 'Test souvenir' }, nameConflict: false }; break;
       case 'GET /api/magento/summary': data = { enabled: true, problemCount: 2 }; break;
       case 'GET /api/magento/problems/page': data = {
@@ -546,6 +587,36 @@ try {
 
   await client.command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   currentPersona = 'storekeeper';
+  characteristicPolishFixture = true;
+  await client.navigate('/products/open?article=AG-000020', 'Товар AG-000020');
+  await client.wait("!!document.querySelector('.decode-field-row')", 'synthetic characteristic detail');
+  const characteristicRows = await client.evaluate("[...document.querySelectorAll('.decode-field-row')].map((row)=>row.textContent)");
+  assert.equal(characteristicRows.some((row) => row.includes('Не обрано')), false);
+  assert.ok(characteristicRows.some((row) => row.includes('Справжній нуль')));
+  assert.ok(characteristicRows.some((row) => row.includes('Числове поле0')));
+  assert.ok(characteristicRows.some((row) => row.includes('Некалібрований')));
+  await client.screenshot('characteristic-polish-detail');
+  await client.click('Переоблік');
+  await client.wait("!!document.querySelector('.recount-workspace')", 'synthetic recount editor');
+  await client.click('Годинник');
+  await client.wait("document.body.textContent.includes('Перераховано')", 'synthetic recount preview');
+  assert.equal(await client.evaluate("document.querySelector('#recount-numeric_zero').value"), '0');
+  const meaningfulRows = await client.evaluate("[...document.querySelectorAll('.recount-change-row')].map((row)=>row.textContent)");
+  assert.deepEqual(meaningfulRows, ['Тип сувеніраПисьмовий набір → Годинник']);
+  await client.noOverflow('Characteristic polish comparison');
+  await client.screenshot('characteristic-polish-recount');
+  await client.click('Продовжити');
+  await client.wait("document.querySelector('[role=dialog]')?.textContent.includes('Застосувати переоблік?')", 'synthetic recount confirmation');
+  const confirmation = await client.evaluate("document.querySelector('[role=dialog]').textContent");
+  assert.ok(confirmation.includes('Тип сувеніра: Письмовий набір → Годинник'));
+  assert.equal(confirmation.includes('Деталь набору:'), false);
+  assert.equal(confirmation.includes('Відсутнє'), false);
+  await client.click('Застосувати переоблік', "document.querySelector('[role=dialog]')");
+  await client.wait("document.body.textContent.includes('Переоблік застосовано. Артикул: AG-000020')", 'synthetic direct recount receipt');
+  assert.equal(characteristicPolishApplied, true);
+  report.characteristicPolish = { absentRowsOmitted: true, numericZeroVisible: true, calibrationZeroVisible: true,
+    meaningfulParentChangeOnly: true, confirmationClean: true, stablePublicArticle: true, directRecountApplied: true };
+  characteristicPolishFixture = false;
   await client.navigate('/products', 'Товари');
   await client.setValue('.product-register-search input', product.publicSku);
   await client.click('Знайти');
