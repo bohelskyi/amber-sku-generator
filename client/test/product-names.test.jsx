@@ -181,6 +181,39 @@ it('invalid names are clear and existing conflicts disable editing with a resolu
   expect(screen.queryByRole('button', { name: 'Змінити', exact: true })).toBeNull();
   expect(screen.getByLabelText('Назва товару українською').readOnly).toBe(true);
 });
+it('repairable invalid generated SV names open the existing reviewed name workflow', async () => {
+  api.get.mockRejectedValue({ response: { status: 422, data: {
+    code: 'PRODUCT_NAMES_INVALID', error: 'Введіть українську та англійську назви.',
+    details: { nameConflict: false, repair: 'product_magento_name' },
+  } } });
+  api.post.mockResolvedValue({ data: { productId: 5010, publicSku: 'SV5111010', subjectUa: null, subjectEn: null } });
+  shell(<RecountNameFields productId={5010} product={{ productId: 5010, publicSku: 'SV5111010', categoryCode: 'SV', status: 'active' }}
+    mode="apply" onChange={vi.fn()} />);
+  await screen.findByText(/не може сформувати чинну пару назв/);
+  fireEvent.click(screen.getByRole('button', { name: 'Заповнити назви' }));
+  await waitFor(() => expect(api.post).toHaveBeenCalledWith('/product-magento-name/preview', { productId: 5010 }));
+  expect(await screen.findByRole('dialog', { name: 'Заповнення назв для Magento' })).toBeTruthy();
+  expect(screen.getByLabelText('Українська назва').value).toBe('');
+  expect(screen.getByLabelText('Англійська назва (EN)').value).toBe('');
+});
+it.each([
+  [403, 'INSUFFICIENT_PERMISSION', 'Назви недоступні для вашого рівня доступу.'],
+  [500, 'UNEXPECTED', 'Не вдалося завантажити назви через неочікувану помилку.'],
+])('distinguishes name read failure %s without offering missing-name repair', async (status, code, message) => {
+  api.get.mockRejectedValue({ response: { status, data: { code, error: 'raw failure' } } });
+  shell(<RecountNameFields productId={5010} product={{ categoryCode: 'SV' }} mode="apply" onChange={vi.fn()} />);
+  await screen.findByText(new RegExp(message));
+  expect(screen.queryByRole('button', { name: 'Заповнити назви' })).toBeNull();
+});
+it('keeps invalid names in a known conflict on the separate controlled path', async () => {
+  api.get.mockRejectedValue({ response: { status: 422, data: {
+    code: 'PRODUCT_NAMES_INVALID', error: 'Введіть українську та англійську назви.',
+    details: { nameConflict: true, repair: null },
+  } } });
+  shell(<RecountNameFields productId={5010} product={{ categoryCode: 'SV' }} mode="apply" onChange={vi.fn()} />);
+  await screen.findByText('Спочатку узгодьте назву в проблемах синхронізації.');
+  expect(screen.queryByRole('button', { name: 'Заповнити назви' })).toBeNull();
+});
 it('request-only and users without name-change permission retain read-only names', async () => {
   for (const keys of [['products.decode', 'corrections.create'], ['products.decode', 'products.recount']]) {
     const view = shell(<RecountNameFields productId={5010} mode={keys.includes('products.recount') ? 'apply' : 'request'} onChange={vi.fn()} />, keys);

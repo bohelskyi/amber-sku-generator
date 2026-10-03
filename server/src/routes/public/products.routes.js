@@ -64,7 +64,7 @@ router.post('/magento/name-resolution/apply', requirePermission('exports.create'
 
 router.get('/product-names/:productId', requirePermission('products.decode'), async (req, res) => {
   try { res.json(await require('../../services/magento/product-names.service').read(Number(req.params.productId))); }
-  catch (error) { require('../../http/errors').sendHttpError(res, error, { includeCode: true }); }
+  catch (error) { require('../../http/errors').sendHttpError(res, error, { includeCode: true, includeDetails: true }); }
 });
 router.post('/product-names/save', requirePermission('exports.create'), async (req, res) => {
   try { res.json(await require('../../services/magento/product-names.service').save(req.body || {},

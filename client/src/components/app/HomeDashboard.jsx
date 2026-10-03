@@ -355,6 +355,7 @@ export function DecodeWorkspace({
           publicSku: decodeData.publicSku, sku: decodeData.sku,
           categoryCode: decodeData.category.code, status: decodeData.product?.status || 'active',
           magentoNameReviewRequired: decodeData.product?.magento_name_review_required === true }}
+          onRepairCharacteristics={canStartRecount && isCurrentProduct ? onStartRecount : undefined}
           onSaved={() => onDecode?.(decodeData.publicSku || decodeData.sku)} />
         <header className="builder-header">
           <div className="min-w-0">
@@ -824,7 +825,13 @@ function RecountPanel({
               </div>
             );
           })}
-          <RecountNameFields productId={decodeData.product?.id} mode={recountMode} busy={isRecountApplying} onChange={onRecountNameChange} />
+          <RecountNameFields productId={decodeData.product?.id} product={{
+            productId: decodeData.product?.id,
+            publicSku: decodeData.publicSku,
+            internalSku: decodeData.internalSku || decodeData.sku,
+            categoryCode,
+            status: decodeData.product?.status || 'active',
+          }} mode={recountMode} busy={isRecountApplying} onChange={onRecountNameChange} />
         </div>
 
         <div className="border-t border-slate-200 px-5 py-4 sm:px-6">

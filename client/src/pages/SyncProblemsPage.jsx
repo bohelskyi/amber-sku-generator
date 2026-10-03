@@ -17,6 +17,28 @@ import { api } from '../lib/api.js';
 import '../components/attention/attention.css';
 
 const PAGE_SIZE = 20;
+const PRODUCT_FIELD_LABELS = Object.freeze({
+  name: 'Назва українською та англійською',
+  rozmir_suveniriv: 'Розмір',
+  kamin_obrobka: 'Обробка каменю',
+});
+
+function productProblemFields(problem) {
+  return [...new Set(problem.issueFields || [])]
+    .map((field) => PRODUCT_FIELD_LABELS[field])
+    .filter(Boolean);
+}
+
+function canRepairProblem(problem, selected, permissions) {
+  const fields = problem.issueFields || [];
+  const canRepairNames = selected.category === 'SV' && !selected.nameConflict
+    && fields.includes('name') && permissions.includes('exports.create');
+  const canRepairInformation = selected.category === 'SV' && fields.includes('rozmir_suveniriv')
+    && permissions.includes('products.recount');
+  const canRepairCharacteristics = fields.some((field) => !['name', 'rozmir_suveniriv'].includes(field))
+    && permissions.includes('products.recount');
+  return canRepairNames || canRepairInformation || canRepairCharacteristics;
+}
 
 function normalizedOffset(value) {
   const number = Number(value);
@@ -121,13 +143,23 @@ export default function SyncProblemsPage() {
         <div className="sync-problem-detail-body">
           {selected.problems.map((problem, index) => <section key={`${problem.code}-${index}`}>
             <h3>{problem.message}</h3>
+            {problem.resolution === 'product' && productProblemFields(problem).length > 0 && <>
+              <p className="sync-problem-guidance">Проблемні дані:</p>
+              <ul className="list-disc pl-5">{productProblemFields(problem).map((field) => <li key={field}>{field}</li>)}</ul>
+            </>}
+            {problem.resolution === 'product' && problem.code !== 'NAME_READ_UNAVAILABLE' && <p className="sync-problem-guidance">{canDecode
+              && canRepairProblem(problem, selected, permissions)
+              && selected.article
+              ? <Link to={`/products/open?article=${encodeURIComponent(selected.article)}`}>Виправити дані товару</Link>
+              : 'Передайте виправлення оператору з дозволом на зміну даних товару.'}</p>}
             {problem.resolution === 'integration_configuration' && <p className="sync-problem-guidance">{permissions.includes('export_templates.view')
               ? <Link to={selected.category ? `/admin/magento/categories/${encodeURIComponent(selected.category)}` : '/admin/magento'}>Перевірити відповідності Magento</Link>
               : 'Передайте питання оператору з доступом до відповідностей Magento.'}</p>}
-            {(problem.target || problem.field || problem.path || problem.issueFields?.length > 0) && <TechnicalDisclosure>
+            <TechnicalDisclosure>
               <dl className="technical-key-values"><div><dt>Код</dt><dd>{problem.code}</dd></div>
-                <div><dt>Контекст</dt><dd>{problem.path || problem.target || problem.field || problem.issueFields.join(', ')}</dd></div></dl>
-            </TechnicalDisclosure>}
+                {problem.diagnosticCode && <div><dt>Діагностика</dt><dd>{problem.diagnosticCode}</dd></div>}
+                {(problem.path || problem.target || problem.field || problem.issueFields?.length > 0) && <div><dt>Контекст</dt><dd>{problem.path || problem.target || problem.field || problem.issueFields.join(', ')}</dd></div>}</dl>
+            </TechnicalDisclosure>
           </section>)}
           {selected.nameConflict && <ProductNameConflict productId={selected.productId} onSaved={reload} />}
         </div>

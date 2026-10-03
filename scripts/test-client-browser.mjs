@@ -29,6 +29,9 @@ const unexpected = [];
 let currentPersona = 'storekeeper';
 let characteristicPolishFixture = false;
 let characteristicPolishApplied = false;
+let magentoReadinessFixture = false;
+let readinessNamesApplied = false;
+let readinessSizeApplied = false;
 // Keep the browser recount target valid; historical invalid evidence is covered
 // by rendered regressions without pretending it passes server validation.
 const browserPolishQuestions = polishConfig.questions.SV.filter((question) => !question.id.startsWith('historic_'));
@@ -255,8 +258,9 @@ const server = http.createServer(async (request, response) => {
                   ? { ...answer, value_id: null, is_placeholder: true, value_label: 'Не обрано' } : answer) };
           break;
         }
-        data = { sku: product.internalSku, publicSku: product.publicSku, internalSku: product.internalSku,
-          category, product: { ...storedProduct, status: fixtureProductStatus, weight: fixtureWeight,
+        data = { sku: product.internalSku, publicSku: magentoReadinessFixture ? 'SV5111010' : product.publicSku, internalSku: product.internalSku,
+          category, product: { ...storedProduct, public_sku: magentoReadinessFixture ? 'SV5111010' : product.publicSku,
+            status: fixtureProductStatus, weight: fixtureWeight,
             total_price_uah: fixturePriceUah.toFixed(2) }, existsInDb: true, decodedAnswers: [], skuSchema: { version: 1 },
           suffix: { type: 'sequence', value: 2 }, calibration: { status: 'known' }, pricing: {
             totalPriceUah: fixturePriceUah, totalPrice: fixturePriceUah / 40,
@@ -308,18 +312,34 @@ const server = http.createServer(async (request, response) => {
         data = { message: `Товар ${product.publicSku} перенесено в архів.` }; break;
       case 'POST /api/products/test-delete/preview': data = { state: 'preview', previewHash: 'fixture-delete-preview',
         publicSku: product.publicSku, productId: product.id }; break;
-      case 'GET /api/magento/product-status/7': data = { state: 'pending', nameConflict: false }; break;
+      case 'GET /api/magento/product-status/7': data = magentoReadinessFixture ? { state: 'needs_attention', nameConflict: false,
+        problems: [{ code: 'PRODUCT_EVALUATION_NOT_READY', message: 'Товар не готовий до синхронізації. Потрібно доповнити або виправити дані товару.',
+          issueFields: [...(!readinessNamesApplied ? ['name'] : []), ...(!readinessSizeApplied ? ['rozmir_suveniriv'] : []), 'kamin_obrobka'] }] }
+        : { state: 'pending', nameConflict: false }; break;
       case 'GET /api/magento/product-status/20': data = { state: 'not_queued', nameConflict: false }; break;
       case 'GET /api/product-names/20': data = { names: { all: 'Синтетичний сувенір', en: 'Synthetic souvenir' }, nameConflict: false }; break;
       case 'GET /api/product-names/7': data = { names: { all: 'Тестовий сувенір', en: 'Test souvenir' }, nameConflict: false }; break;
       case 'GET /api/magento/summary': data = { enabled: true, problemCount: 2 }; break;
       case 'GET /api/magento/problems/page': data = {
-        items: [{ productId: product.id, article: product.publicSku, category: product.categoryCode,
-          nameConflict: false, problems: [{ code: 'UNCERTAIN_WRITE',
+        items: [{ productId: product.id, article: magentoReadinessFixture ? 'SV5111010' : product.publicSku, category: product.categoryCode,
+          nameConflict: false, problems: magentoReadinessFixture ? [
+            { code: 'NAME_READ_UNAVAILABLE', message: 'Назви товару в Amber потрібно заповнити або виправити.', resolution: 'product' },
+            { code: 'PRODUCT_EVALUATION_NOT_READY', message: 'Товар не готовий до синхронізації. Потрібно доповнити або виправити дані товару.',
+              resolution: 'product', issueFields: ['kamin_obrobka', 'name', 'rozmir_suveniriv'] },
+          ] : [{ code: 'UNCERTAIN_WRITE',
             message: 'Amber надіслав зміну, але кінцевий стан не підтверджено.',
             resolution: 'administrator', target: 'product' }] }],
         pageInfo: { limit: 20, offset: 0, total: 1, hasPrevious: false, hasNext: false },
       }; break;
+      case 'POST /api/product-magento-name/preview':
+        data = body?.subjectUa ? { productId: product.id, publicSku: 'SV5111010', subjectUa: body.subjectUa,
+          subjectEn: body.subjectEn, previewToken: 'fixture-name-preview', nameUa: `${body.subjectUa} з бурштину. Арт: SV5111010`,
+          nameEn: `Amber ${body.subjectEn}. Art: SV5111010` }
+          : { productId: product.id, publicSku: 'SV5111010', subjectUa: null, subjectEn: null, canConfirmUnchanged: false }; break;
+      case 'POST /api/product-magento-name/apply': readinessNamesApplied = true; data = { productId: product.id }; break;
+      case 'POST /api/product-information/preview': data = { productId: product.id, publicSku: 'SV5111010', previewToken: 'fixture-size-preview',
+        changes: [{ key: 'size', before: null, after: body?.answersPatch?.size }] }; break;
+      case 'POST /api/product-information/apply': readinessSizeApplied = true; data = { productId: product.id }; break;
       case 'GET /api/admin/magento-integration/overview': data = magentoOverview; break;
       case 'GET /api/admin/correction-requests': data = { requests: [], summary: { active: 3 } }; break;
       case 'GET /api/admin/correction-requests/page':
@@ -863,6 +883,45 @@ try {
     viewOnlyCannotConfirm: true, readDidNotConfirm: true };
 
   currentPersona = 'administrator';
+  magentoReadinessFixture = true;
+  readinessNamesApplied = false;
+  readinessSizeApplied = false;
+  fixtureProductStatus = 'active';
+  const readinessRequestStart = requests.length;
+  await client.navigate('/sync-problems', 'Проблеми доставки до Magento');
+  await client.wait("document.body.textContent.includes('Товар не готовий до синхронізації') && document.body.textContent.includes('SV5111010')", 'readiness problem guidance');
+  assert.equal(await client.evaluate("document.body.textContent.includes('Не вдалося прочитати назву Magento')"), false);
+  assert.equal(await client.evaluate("['Розмір','Назва українською та англійською','Обробка каменю'].every((label)=>document.body.textContent.includes(label))"), true);
+  assert.equal(await client.evaluate("[...document.querySelectorAll('button,a')].some((node)=>/Повторити|Надіслати повторно/.test(node.textContent))"), false);
+  await client.click('Технічні деталі', "document.querySelectorAll('.sync-problem-detail section')[1]");
+  await client.wait("document.body.textContent.includes('PRODUCT_EVALUATION_NOT_READY') && document.body.textContent.includes('kamin_obrobka, name, rozmir_suveniriv')", 'raw readiness diagnostics');
+  await client.click('Виправити дані товару');
+  await client.wait("document.body.textContent.includes('Товар SV5111010') && document.body.textContent.includes('Потребує уваги')", 'legacy product readiness detail');
+  await client.click('Заповнити назви');
+  await client.wait("document.querySelector('[role=dialog]')?.textContent.includes('Назви для Magento · SV5111010')", 'missing-name repair workspace');
+  await client.setValue('[role=dialog] input[id$="-ua"]', 'Сувенірний камінь');
+  await client.setValue('[role=dialog] input[id$="-en"]', 'Souvenir stone');
+  await client.click('Переглянути зміни', "document.querySelector('[role=dialog]')");
+  await client.wait("document.querySelector('[role=dialog]')?.textContent.includes('Попередній перегляд')", 'name preview');
+  await client.click('Зберегти назви', "document.querySelector('[role=dialog]')");
+  await client.wait("!document.querySelector('[role=dialog]') && ![...document.querySelectorAll('button')].some((button)=>button.textContent.trim()==='Заповнити назви')", 'name repair applied');
+  await client.click('Заповнити розмір');
+  await client.wait("document.querySelector('[role=dialog]')?.textContent.includes('Розмір товару · SV5111010')", 'size information workspace');
+  await client.setValue('[role=dialog] input', '12 × 8 см');
+  await client.click('Переглянути зміну', "document.querySelector('[role=dialog]')");
+  await client.wait("document.querySelector('[role=dialog]')?.textContent.includes('Попередній перегляд')", 'size preview');
+  await client.click('Зберегти розмір', "document.querySelector('[role=dialog]')");
+  await client.wait("!document.querySelector('[role=dialog]') && ![...document.querySelectorAll('button')].some((button)=>button.textContent.trim()==='Заповнити розмір')", 'size repair applied');
+  const readinessRequests = requests.slice(readinessRequestStart);
+  for (const path of ['/api/product-magento-name/preview', '/api/product-magento-name/apply',
+    '/api/product-information/preview', '/api/product-information/apply']) {
+    assert.ok(readinessRequests.some((entry) => entry.path === path), `Readiness flow must call ${path}`);
+  }
+  assert.equal(readinessRequests.some((entry) => entry.path.startsWith('/api/recount/')), false,
+    'Completing names and size must not start a recount');
+  report.magentoReadinessRecovery = { publicArticle: 'SV5111010', rawDiagnosticsAvailable: true,
+    nameWorkflow: true, informationWorkflow: true, recountWrites: 0, resendAction: false };
+  magentoReadinessFixture = false;
   await client.navigate(`/products/open?article=${encodeURIComponent(product.publicSku)}`, `Товар ${product.publicSku}`);
   await client.wait("document.body.textContent.includes('Стан у базі')", 'administrator product detail');
   await client.click('Додаткові дії');
@@ -1023,6 +1082,10 @@ try {
   allowedFixtureWrites.add('/api/admin/repricing/drafts');
   allowedFixtureWrites.add('/api/admin/repricing/drafts/77');
   allowedFixtureWrites.add('/api/admin/repricing/apply');
+  allowedFixtureWrites.add('/api/product-magento-name/preview');
+  allowedFixtureWrites.add('/api/product-magento-name/apply');
+  allowedFixtureWrites.add('/api/product-information/preview');
+  allowedFixtureWrites.add('/api/product-information/apply');
   const unexpectedWrites = requests.filter((entry) => entry.method !== 'GET' && !allowedFixtureWrites.has(entry.path));
   assert.deepEqual(unexpectedWrites, [], 'Local fixture observed an unexpected write');
   assert.deepEqual(unexpected, [], 'The application requested an unimplemented fixture API');

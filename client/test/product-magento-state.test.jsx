@@ -25,10 +25,10 @@ function auth(principalLifetime = { id: 'operator-1', valid: true }, permissions
   return { permissions, principalLifetime };
 }
 
-function renderState(productId, principalLifetime, permissions) {
+function renderState(productId, principalLifetime, permissions, props = {}) {
   const view = render(
     <AuthContext.Provider value={auth(principalLifetime, permissions)}>
-      <MemoryRouter><ProductMagentoState product={{ productId }} /></MemoryRouter>
+      <MemoryRouter><ProductMagentoState product={{ productId, publicSku: 'SV5111010', categoryCode: 'SV', status: 'active' }} {...props} /></MemoryRouter>
     </AuthContext.Provider>
   );
   return {
@@ -59,6 +59,51 @@ it('removes stale status and actions when a manual refresh fails', async () => {
   await screen.findByText('Стан тимчасово недоступний');
   expect(screen.queryByText('Magento: Потребує уваги')).toBeNull();
   expect(screen.queryByRole('link', { name: 'Переглянути проблему' })).toBeNull();
+});
+
+it('offers existing name and narrow SV size repair workflows from readiness status', async () => {
+  const saved = vi.fn(); const recount = vi.fn();
+  api.get.mockResolvedValue(response({ state: 'needs_attention', reason: 'generic', problems: [{
+    code: 'PRODUCT_EVALUATION_NOT_READY',
+    message: 'Товар не готовий до синхронізації. Потрібно доповнити або виправити дані товару.',
+    issueFields: ['kamin_obrobka', 'name', 'rozmir_suveniriv'],
+  }] }));
+  api.post.mockImplementation(async (url) => {
+    if (url === '/product-information/preview') return response({ previewToken: 'size-proof',
+      changes: [{ key: 'size', before: null, after: '12×8 см' }] });
+    if (url === '/product-information/apply') return response({ productId: 1368 });
+    throw new Error(`Unexpected ${url}`);
+  });
+  renderState(1368, undefined, ['products.view', 'products.recount', 'exports.create'], {
+    onSaved: saved, onRepairCharacteristics: recount,
+  });
+  await screen.findByText('Товар не готовий до синхронізації');
+  expect(screen.getByRole('button', { name: 'Заповнити назви' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Заповнити розмір' }));
+  expect(screen.getByText('Розмір товару · SV5111010')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Розмір'), { target: { value: '12 × 8 см' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Переглянути зміну' }));
+  await waitFor(() => expect(api.post).toHaveBeenCalledWith('/product-information/preview', {
+    productId: 1368, answersPatch: { size: '12 × 8 см' },
+  }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Зберегти розмір' }));
+  await waitFor(() => expect(api.post).toHaveBeenCalledWith('/product-information/apply', {
+    productId: 1368, answersPatch: { size: '12×8 см' }, previewToken: 'size-proof',
+    reason: 'Доповнення даних для синхронізації Magento',
+  }));
+  expect(recount).not.toHaveBeenCalled();
+  expect(saved).toHaveBeenCalledOnce();
+});
+
+it('readiness actions follow capabilities and name conflicts keep their separate workflow', async () => {
+  api.get.mockResolvedValue(response({ state: 'needs_attention', nameConflict: true, problems: [{
+    code: 'PRODUCT_EVALUATION_NOT_READY', issueFields: ['name', 'rozmir_suveniriv'],
+  }] }));
+  renderState(1368, undefined, ['products.view']);
+  await screen.findByText('Товар не готовий до синхронізації');
+  expect(screen.getByText(/Передайте виправлення оператору/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Заповнити назви' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Заповнити розмір' })).toBeNull();
 });
 
 it('keeps an open name review mounted while a polling refresh fails', async () => {

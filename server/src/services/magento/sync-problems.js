@@ -25,7 +25,7 @@ const taxonomy = Object.freeze({
   CATEGORY_PATH_AMBIGUOUS: 'Знайдено кілька відповідних категорій Magento.',
   PRODUCT_ATTRIBUTE_SET_MISMATCH: 'Товар має інший набір характеристик Magento.',
   ATTRIBUTE_SET_DECISION_REQUIRED: 'Потрібно підтвердити набір характеристик Magento.',
-  PRODUCT_EVALUATION_NOT_READY: 'Дані товару відсутні або некоректні.',
+  PRODUCT_EVALUATION_NOT_READY: 'Товар не готовий до синхронізації. Потрібно доповнити або виправити дані товару.',
   REQUIRED_ATTRIBUTE_VALUE_MISSING: 'Не заповнено обов’язкову характеристику товару.',
   REQUIRED_NATIVE_FIELD_MISSING: 'Не заповнено обов’язкові дані товару.',
   BINDING_DRIFT_REVIEW_REQUIRED: 'Структура Magento змінилася; відповідності потрібно перевірити.',
@@ -43,9 +43,28 @@ function safeDiagnostics(blockers = []) {
   }));
 }
 function presentProblem(item) {
-  return { ...item, message: taxonomy[item.diagnosticCode] || taxonomy[item.code] || taxonomy.data_or_binding,
+  // Evaluator readiness is local product evidence. A nested diagnostic can
+  // describe one failed expression, but must not reclassify the whole failure
+  // as a Magento read problem.
+  const message = item.code === 'PRODUCT_EVALUATION_NOT_READY'
+    ? taxonomy.PRODUCT_EVALUATION_NOT_READY
+    : taxonomy[item.diagnosticCode] || taxonomy[item.code] || taxonomy.data_or_binding;
+  return { ...item, message,
     resolution: item.code.startsWith('NAME_') ? 'name' : ['PRODUCT_EVALUATION_NOT_READY', 'REQUIRED_ATTRIBUTE_VALUE_MISSING', 'REQUIRED_NATIVE_FIELD_MISSING'].includes(item.code)
       ? 'product' : ['reconciliation_required','TEST_DELETION_PENDING'].includes(item.code) ? 'administrator' : 'integration_configuration' };
+}
+function presentProblems(items = []) {
+  const localNameNotReady = items.some((item) => item.code === 'PRODUCT_EVALUATION_NOT_READY'
+    && Array.isArray(item.issueFields) && item.issueFields.includes('name'));
+  return items.map((item) => {
+    const problem = presentProblem(item);
+    if (localNameNotReady && item.code === 'NAME_READ_UNAVAILABLE') {
+      return { ...problem,
+        message: 'Назви товару в Amber потрібно заповнити або виправити.',
+        resolution: 'product' };
+    }
+    return problem;
+  });
 }
 async function saveDiagnostics(db, automatic, blockers) {
   await db.query(`UPDATE magento_product_sync_requests SET diagnostics=$3::jsonb
@@ -61,9 +80,9 @@ async function summary(db = pool) {
 }
 function presentProblemRow(row) {
   return { productId: row.productId, article: row.article, category: row.category,
-    problems: (['reconciliation_required','TEST_DELETION_PENDING'].includes(row.reason_code) ? [{ code: row.reason_code }]
+    problems: presentProblems(['reconciliation_required','TEST_DELETION_PENDING'].includes(row.reason_code) ? [{ code: row.reason_code }]
       : ['conflict', 'baseline_required'].includes(row.name_state) ? [{ code: row.name_state === 'conflict' ? 'NAME_CONFLICT' : 'NAME_BASELINE_REQUIRED' }]
-        : row.diagnostics?.length ? row.diagnostics : [{ code: row.reason_code || 'data_or_binding' }]).map(presentProblem),
+        : row.diagnostics?.length ? row.diagnostics : [{ code: row.reason_code || 'data_or_binding' }]),
     nameConflict: !['reconciliation_required','TEST_DELETION_PENDING'].includes(row.reason_code) && ['conflict', 'baseline_required'].includes(row.name_state)
       ? { amber: row.observed_amber_names, magento: row.observed_remote_names } : null,
   };
@@ -131,4 +150,4 @@ async function problemPage(config, query = {}, db = pool) {
     },
   };
 }
-module.exports = { taxonomy, safeDiagnostics, presentProblem, saveDiagnostics, summary, problems, problemPage };
+module.exports = { taxonomy, safeDiagnostics, presentProblem, presentProblems, saveDiagnostics, summary, problems, problemPage };

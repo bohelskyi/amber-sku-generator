@@ -2,6 +2,7 @@ const { test, assert, pool, Pool, TEST_DATABASE_URL, crypto, authenticateApplica
 const products = require('../src/services/product.service');
 const requests = require('../src/services/correction-request.service');
 const names = require('../src/services/product-magento-name.service');
+const fullNames = require('../src/services/magento/product-names.service');
 const information = require('../src/services/product-information.service');
 const exportsService = require('../src/services/export.service');
 const prices = require('../src/services/product-price-change.service');
@@ -218,6 +219,31 @@ test('phase2 inherited pair confirmation is explicit, versioned, audited, stale-
   const editable = await save(true); await names.applyProductMagentoName(await nameInput(editable), opts());
   assert.deepEqual(counters(await state(editable.id)), ['2','0','2']);
   assert.equal((await product(editable.id)).magento_name_review_required, false);
+});
+
+test('phase2 reviewed Magento-name command fills an initially missing SV pair', async () => {
+  await setup(); const saved = await save();
+  await pool.query(`UPDATE products SET magento_name_subject_ua=NULL,magento_name_subject_en=NULL
+    WHERE id=$1`, [saved.id]);
+  const missing = await product(saved.id);
+  await assert.rejects(fullNames.read(missing.id), (error) => error.statusCode === 422
+    && error.code === 'PRODUCT_NAMES_INVALID'
+    && error.details?.repair === 'product_magento_name'
+    && error.details?.nameConflict === false);
+  const current = await names.previewProductMagentoName({ productId: missing.id });
+  assert.equal(current.subjectUa, null); assert.equal(current.subjectEn, null);
+  const input = { productId: missing.id, subjectUa: 'Сувенірний камінь', subjectEn: 'souvenir stone' };
+  const preview = await names.previewProductMagentoName(input);
+  const publicSku = (await pool.query(`SELECT i.public_sku FROM public_product_identities i
+    WHERE i.id=$1`, [missing.public_product_identity_id])).rows[0].public_sku;
+  assert.equal(preview.publicSku, publicSku);
+  const result = await names.applyProductMagentoName({ ...input, previewToken: preview.previewToken }, opts());
+  const updated = await product(missing.id);
+  assert.equal(updated.magento_name_subject_ua, input.subjectUa);
+  assert.equal(updated.magento_name_subject_en, input.subjectEn);
+  assert.equal(result.action, 'change');
+  assert.equal((await audits('product_magento_name.updated', missing.id)).length, 1);
+  assert.deepEqual(counters(await state(missing.id)), ['2','0','1']);
 });
 
 test('phase2 no-op, invalid information and price-only mutations preserve full-product revision boundaries', async () => {

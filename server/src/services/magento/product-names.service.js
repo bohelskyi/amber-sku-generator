@@ -18,6 +18,19 @@ function validateNames(names) {
   return { all: names.all, en: names.en };
 }
 
+function validateEvaluatedNames(names, amber, mapped) {
+  try { return validateNames(names); }
+  catch (error) {
+    if (error.code !== 'PRODUCT_NAMES_INVALID') throw error;
+    const nameConflict = ['conflict', 'baseline_required'].includes(amber.nameState?.state);
+    throw c.error(422, 'PRODUCT_NAMES_INVALID', error.message, {
+      nameConflict,
+      repair: !nameConflict && amber.product.category === 'SV' && mapped.issueFields.includes('name')
+        ? 'product_magento_name' : null,
+    });
+  }
+}
+
 async function read(productId, options = {}) {
   selection({ productId });
   const db = options.queryable || options.databasePool || pool; const config = options.config || configuration.magento;
@@ -35,7 +48,7 @@ async function read(productId, options = {}) {
   const mapped = evaluate(amber, amber.product);
   let names = { all: mapped.base.name, en: mapped.english.name };
   if (options.allowUnavailable && (!names.all || !names.en)) names = null;
-  else validateNames(names);
+  else validateEvaluatedNames(names, amber, mapped);
   const previewToken = c.hash({ product: amber.product, template: amber.template, bindingId: binding?.id ?? null, names });
   return { productId, names, previewToken, nameConflict: ['conflict', 'baseline_required'].includes(amber.nameState?.state),
     ...(options.internal ? { amber, generated: mapped.generatedNames } : {}) };
@@ -67,4 +80,4 @@ async function save(payload, options = {}) {
       return { productId: product.id, names };
     } });
 }
-module.exports = { read, save, validateNames };
+module.exports = { read, save, validateNames, validateEvaluatedNames };
