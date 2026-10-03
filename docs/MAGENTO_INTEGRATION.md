@@ -1904,6 +1904,25 @@ Draft CAS and final local evidence revalidation protect preparation/review; remo
 GETs finish before mutation transactions. Publication and handoff use the separate
 H3b review below.
 
+Legacy fixed-column eager checks are compared by output ownership, including
+their transitive references and diagnostic fields. An SV size-only readiness
+change therefore leaves unrelated SV mapping, option, route and ownership
+decisions eligible for carry. Unknown checks remain global. Evaluator/output
+contracts, referenced question visibility rules and source support, row/store
+scope, chosen-set membership and attribute metadata still participate in the
+proof; fresh remote identity checks remain mandatory. The target keeps its own
+immutable option-domain hashes. Candidate `magento_managed` defaults do not
+replace an unchanged reviewed ownership policy.
+
+After a carry fix, leave any incorrectly prepared draft unpublished and prepare
+a fresh successor from the **current publication**, selecting the already
+published corrected template. Existing drafts are not refreshed or repaired.
+Review only the changed size mappings/policies and any independently changed
+remote/source evidence, then use H3b preview/publication. Exact clone preserves
+the original template pin and observation; it cannot switch template versions.
+Neither deployment nor an abandoned draft changes current delivery. No data
+migration or bulk approval is part of this workflow.
+
 The normal template grid supports evaluators 1–4. A public-identity columns-v2 draft
 can explicitly opt into v4 and add a category using reviewed UA/EN names, set name
 and category path. Initial simple products are disabled and visible in Catalog/Search;
