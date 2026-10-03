@@ -136,6 +136,77 @@ test('SV saved current preview consumes exact successor pin and preserves keycha
     assert.equal((await bindings.getCurrentPublished('sv-current', options)).id, current.id);
     assert.deepEqual(await bindings.getRevision(current.id, options), current);
     assert.deepEqual(await bindings.getRevision(next.binding.id, options), next.binding);
+    await t.test('publication and direct preview use the same acknowledged-job name baseline', async () => {
+      // Legacy confirmed deliveries can predate the shared-name observation row.
+      // A later Amber name edit is allowed against that exact confirmed baseline.
+      names.all = 'Confirmed remote UA name'; names.en = 'Confirmed remote EN name';
+      const intent = { operations: [{ domain: 'coreProduct', payload: { product: { name: names.all } } }],
+        englishValues: { name: names.en } };
+      await db.query(`INSERT INTO magento_sync_jobs(id,product_id,public_product_identity_id,sku,installation_key,origin_hash,
+        binding_revision_id,binding_hash,amber_hash,plan_hash,intent,baseline,state,remote_product_id,created_by_user_id,acknowledged_at)
+        VALUES('sv-confirmed-job',$1,$2,$3,'sv-current',$4,$5,$6,$6,$6,$7::jsonb,'{}','succeeded',1919,$8,CURRENT_TIMESTAMP)`,
+      [p.id, p.public_product_identity_id, p.full_sku, current.originHash, current.id, 'a'.repeat(64), JSON.stringify(intent), actor]);
+      await db.query('DELETE FROM magento_name_sync_states WHERE origin_hash=$1 AND public_product_identity_id=$2',
+        [current.originHash, p.public_product_identity_id]);
+      const ordinary = await editor.currentPreview(config, { productId: p.id, bindingRevisionId: next.binding.id }, remote);
+      assert.equal(ordinary.sendable, true, JSON.stringify(ordinary));
+      const normalInput = await readPreviewProduct(db, { productId: p.id, bindingRevisionId: next.binding.id });
+      let representativeInput;
+      const reviewed = await publication.preview(config, publicationInput, { ...publicationOptions, internal: true,
+        currentPreview: (cfg, opts) => require('../src/services/magento/sync-preview').previewProduct(cfg, { ...opts,
+          onObservation: observation => { representativeInput = observation.amber; } }) });
+      const checked = reviewed.checked.find(v => v.productId === p.id);
+      t.diagnostic(JSON.stringify({ normalNameState: normalInput.nameState, publicationNameState: representativeInput.nameState,
+        blockers: checked.blockers, projections: reviewed.internal.proof.projections }));
+      assert.equal(checked.sendable, true, JSON.stringify(checked.blockers));
+      assert.deepEqual(reviewed.blockers, []);
+      const { nameStateEvidence } = require('../src/services/magento/name-state');
+      assert.deepEqual(nameStateEvidence(representativeInput.nameState), nameStateEvidence(normalInput.nameState));
+      for (const key of ['id','public_sku','full_sku','category','sku_schema_version_id','details','weight','total_price_uah',
+        'magento_name_subject_ua','magento_name_subject_en','magento_name_review_required','magento_name_rule_pin']) {
+        assert.deepEqual(representativeInput.product[key], normalInput.product[key], key);
+      }
+      assert.equal(typeof representativeInput.product.details.answers.souvenir, 'number');
+      assert.equal(Object.hasOwn(representativeInput.product.details.answers, 'size'), false);
+      assert.equal(representativeInput.compiled.hash, normalInput.compiled.hash);
+      assert.equal(representativeInput.template.versionId, next.version.id);
+      assert.deepEqual(evaluateProduct(representativeInput.compiled, representativeInput.product).errors, []);
+      assert.equal(evaluateProduct(representativeInput.compiled, representativeInput.product).base.rozmir_suveniriv, '');
+      assert.equal(reviewed.internal.proof.projections[0].after.covered, true);
+      assert.deepEqual(reviewed.internal.proof.projections[0].after.blockers, []);
+      for (const key of ['route','hold_reason','source_correction_id','business_exclusion_state',
+        'recount_compatibility_excluded','independentExclusion']) {
+        assert.deepEqual(representativeInput.product.exportState[key] ?? null, normalInput.product.exportState[key] ?? null, key);
+      }
+      // Immutable confirmed job evidence is part of the publication token, even
+      // when its fallback observation version is always zero.
+      await db.query(`INSERT INTO magento_sync_jobs(id,product_id,public_product_identity_id,sku,installation_key,origin_hash,
+        binding_revision_id,binding_hash,amber_hash,plan_hash,intent,baseline,state,remote_product_id,created_by_user_id,acknowledged_at)
+        VALUES('sv-next-confirmed-job',$1,$2,$3,'sv-current',$4,$5,$6,$6,$6,$7::jsonb,'{}','succeeded',1919,$8,CURRENT_TIMESTAMP)`,
+      [p.id, p.public_product_identity_id, p.full_sku, current.originHash, current.id, 'b'.repeat(64),
+        JSON.stringify({ ...intent, englishValues: { name: 'Later confirmed EN' } }), actor]);
+      names.en = 'Later confirmed EN';
+      const changed = await publication.preview(config, publicationInput, publicationOptions);
+      assert.deepEqual(changed.blockers, []); assert.notEqual(changed.previewToken, reviewed.previewToken);
+      await assert.rejects(publication.publish(config, { ...publicationInput, previewToken: reviewed.previewToken }, publicationOptions),
+        { code: 'MAGENTO_PUBLICATION_STALE' });
+      assert.deepEqual(await bindings.getRevision(next.binding.id, options), next.binding);
+      // Actual name conflicts and remote identity drift still block an affected
+      // representative; the fallback does not approve fresh remote evidence.
+      for (const kind of ['conflict', 'identity']) {
+        if (kind === 'conflict') names.all = 'External change after confirmed delivery';
+        else raw.id = 1920;
+        const blocked = await publication.preview(config, publicationInput, publicationOptions);
+        const check = blocked.checked.find(v => v.productId === p.id);
+        assert.ok(check.blockers.some(b => b.code === (kind === 'conflict' ? 'NAME_CONFLICT' : 'NAME_REMOTE_IDENTITY_CHANGED')));
+        assert.deepEqual(blocked.blockers, [{ code: 'AFFECTED_CURRENT_PREVIEW_BLOCKED', productId: p.id }]);
+        await assert.rejects(publication.publish(config, { ...publicationInput, previewToken: blocked.previewToken }, publicationOptions),
+          { code: 'MAGENTO_PUBLICATION_STALE' });
+        names.all = 'Confirmed remote UA name'; raw.id = 1919;
+      }
+      assert.equal((await db.query('SELECT count(*)::int n FROM magento_name_sync_states')).rows[0].n, 0,
+        'previews never backfill the shared-name table');
+    });
     await db.query("UPDATE products SET details=jsonb_set(details,'{answers,souvenir}','7'),magento_name_subject_ua='Лампа',magento_name_subject_en='lamp' WHERE id=$1", [p.id]);
     const required = await editor.currentPreview(config, { productId: p.id, bindingRevisionId: next.binding.id }, remote);
     assert.ok(required.blockers.some(b => b.code === 'PRODUCT_EVALUATION_NOT_READY' && b.issueFields.includes('rozmir_suveniriv')));

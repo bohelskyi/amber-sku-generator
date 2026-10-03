@@ -1,6 +1,6 @@
 const { createHash } = require('node:crypto');
 const c = require('./binding-contract');
-const { nameStateEvidence } = require('./name-state');
+const { nameStateEvidence, readNameStates } = require('./name-state');
 const { loadSupportInputs } = require('../export-templates/support-inputs');
 // Measured release bounds are documented with the disposable benchmark receipt.
 const LIMITS = Object.freeze({ products: 4096, page: 128, evidenceBytes: 2 * 1024 * 1024,
@@ -47,8 +47,7 @@ async function scan(client,local,{deadline,onPage}={}) {
       UNION ALL SELECT octet_length(to_jsonb(o)::text)+128 FROM sku_schema_options o JOIN sku_schema_questions q ON q.id=o.schema_question_id
         WHERE q.schema_version_id=ANY($1::int[])) v`,[schemaIds])).rows[0];
     if(Number(schemaBudget.bytes)>LIMITS.inputPageBytes)limit('schema_page_bytes');
-    const states=(await client.query(`SELECT * FROM magento_name_sync_states WHERE origin_hash=$1
-      AND public_product_identity_id=ANY($2::bigint[]) ORDER BY public_product_identity_id`,[local.draft.originHash,ids])).rows;
+    const states=await readNameStates(client,local.draft.originHash,ids);
     const pins=local.current?(await client.query(`SELECT * FROM magento_binding_name_pins WHERE binding_revision_id=$1
       AND product_id=ANY($2::int[]) ORDER BY product_id`,[local.current.id,rows.map(p=>p.id)])).rows:[];
     const next=await loadSupportInputs(client,local.next.compiled.definition,rows.map(p=>({...p})));

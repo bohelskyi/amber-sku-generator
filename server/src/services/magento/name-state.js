@@ -20,13 +20,39 @@ async function readNameState(db, origin, identityId, { lock = false } = {}) {
   const state = (await db.query(`SELECT * FROM magento_name_sync_states
     WHERE origin_hash=$1 AND public_product_identity_id=$2${lock ? ' FOR SHARE' : ''}`, [origin, identityId])).rows[0];
   if (state) return state;
-  // Only a succeeded, acknowledged durable intent is confirmed common evidence.
-  const job = (await db.query(`SELECT intent,remote_product_id FROM magento_sync_jobs
-    WHERE origin_hash=$1 AND public_product_identity_id=$2 AND state='succeeded'
+  return (await acknowledgedNameStates(db, origin, [identityId])).get(String(identityId)) || null;
+}
+// Share the single-product fallback with publication's bounded pages. Only a
+// succeeded, acknowledged durable intent is confirmed common evidence; select
+// the latest qualifying job before inspecting its names, never an older match.
+async function acknowledgedNameStates(db, origin, identityIds) {
+  const jobs = (await db.query(`SELECT DISTINCT ON (public_product_identity_id)
+      public_product_identity_id,intent,remote_product_id FROM magento_sync_jobs
+    WHERE origin_hash=$1 AND public_product_identity_id=ANY($2::bigint[]) AND state='succeeded'
       AND acknowledged_at IS NOT NULL AND remote_product_id IS NOT NULL
-    ORDER BY acknowledged_at DESC,created_at DESC LIMIT 1`, [origin, identityId])).rows[0];
-  const names = intentNames(job?.intent);
-  return job && names.all ? { baseline_names: names, remote_product_id: job.remote_product_id, version: '0' } : null;
+    ORDER BY public_product_identity_id,acknowledged_at DESC,created_at DESC`, [origin, identityIds])).rows;
+  const states = new Map();
+  for (const job of jobs) {
+    const names = intentNames(job.intent);
+    if (names.all) states.set(String(job.public_product_identity_id), {
+      baseline_names: names, remote_product_id: job.remote_product_id, version: '0',
+    });
+  }
+  return states;
+}
+async function readNameStates(db, origin, identityIds) {
+  if (!identityIds.length) return [];
+  const states = (await db.query(`SELECT * FROM magento_name_sync_states WHERE origin_hash=$1
+    AND public_product_identity_id=ANY($2::bigint[]) ORDER BY public_product_identity_id`, [origin, identityIds])).rows;
+  const present = new Set(states.map(s => String(s.public_product_identity_id)));
+  const missing = identityIds.filter(id => !present.has(String(id)));
+  if (!missing.length) return states;
+  const confirmed = await acknowledgedNameStates(db, origin, missing);
+  for (const id of missing) {
+    const state = confirmed.get(String(id));
+    if (state) states.push({ public_product_identity_id: id, ...state });
+  }
+  return states;
 }
 function namesFromObservation(observation) {
   const expected = evaluate(observation.amber, observation.amber.product);
@@ -128,5 +154,5 @@ async function confirmJobNames(client, job) {
   await saveObservation(client, job.origin_hash, { public_product_identity_id: job.public_product_identity_id }, job.remote_product_id,
     { action: 'confirm', amber: names, remote: names }, names);
 }
-module.exports = { intentNames, readNameState, namesFromObservation, decisionFor,
+module.exports = { intentNames, readNameState, readNameStates, namesFromObservation, decisionFor,
   nameStateEvidence, saveObservation, importRemote, auditName, reconcileObservation, confirmJobNames };
