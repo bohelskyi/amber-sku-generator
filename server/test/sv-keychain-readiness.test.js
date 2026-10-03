@@ -39,7 +39,7 @@ test('published historical size AST stays strict; corrected definition has a dif
 
 test('SV normal and stone size requirements and keychain weight/mappings stay enforced', () => {
   const compiled = compileDefinition(materializeMagentoV1(catalog()));
-  for (const souvenir of [1, 5]) {
+  for (const souvenir of [1, 2, 3, 4, 5, 7, 8, 9]) {
     const p = product('SV', { souvenir, size: undefined }, { magento_name_subject_ua: 'Сувенір', magento_name_subject_en: 'souvenir' });
     for (const r of [mapProduct(p, catalog()), evaluateProduct(compiled, p)]) assert.ok(r.errors.some(e => e.field === 'rozmir_suveniriv'));
   }
