@@ -5,6 +5,96 @@ const successor = require('../src/services/magento/integration-successor');
 const review = require('../src/services/magento/integration-binding-review');
 const fixture = require('../test/fixtures/magento-v4');
 const { REQUIRED } = require('../src/services/export-templates/column-contract');
+
+test('SV narrow requiredness successor retains unrelated reviewed decisions and policies', async (t) => {
+  const name = 'amber_sv_successor_test', url = await recreateTestDatabase(name), db = new Pool({ connectionString: url });
+  try {
+    await runNodeInDatabase(url, "require('./src/db/run-migrations').runMigrations().catch(e=>{console.error(e);process.exitCode=1;});");
+    const actor = Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','SV admin') RETURNING id")).rows[0].id);
+    await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'", [actor]);
+    const options = { databasePool: db, mutationContext: { actorUserId: actor } };
+    const f = require('../test/fixtures/magento-successor').fixture();
+    for (const g of f.old.groups) await db.query('INSERT INTO categories(code,name) VALUES($1,$1)', [g.route]);
+    for (const [id, s] of Object.entries(f.old.sources)) {
+      if (s.kind === 'product') continue;
+      const q = (await db.query(`INSERT INTO questions(category_code,key,label,input_type,include_in_sku,required)
+        VALUES($1,$2,$2,$3,0,0) RETURNING id`, [s.category, s.key, s.kind === 'semantic' ? 'options' : 'text'])).rows[0];
+      const values = [...new Set(Object.values(f.old.questionContracts).filter(q => q.source === id).flatMap(q => q.allowed))];
+      for (const value of values) await db.query('INSERT INTO options(question_id,value_id,sku_code,label) VALUES($1,$2,$3,$3)', [q.id, value, value]);
+    }
+    async function publishTemplate(definition, key) {
+      const family = await templates.createTemplate({ key, displayName: key, definition }, options);
+      return templates.publishTemplate(family.id, { expectedRevision: family.draft.revision, expectedDefinitionHash: family.draft.definitionHash }, options);
+    }
+    const oldVersion = await publishTemplate(f.old, 'sv-old'), nextVersion = await publishTemplate(f.next, 'sv-next');
+    const config = { configured: true, baseUrl: 'https://successor.invalid' };
+    let draft = await bindings.createDraft({ installationKey: 'sv-successor', origin: config.baseUrl,
+      templateVersionId: oldVersion.id, observedAt: new Date().toISOString(), schema: f.schema }, options);
+    draft = await bindings.updateDraft(draft.id, { expectedRevision: draft.revision, bindings: f.source.bindings }, options);
+    const published = await bindings.publishDraft(draft.id, { expectedRevision: draft.revision, expectedCurrentId: null }, options);
+    const before = await bindings.getRevision(published.id, options);
+    const remote = { ...options, discover: async () => ({ schema: f.schema, categories: [], observedAt: new Date().toISOString() }),
+      fetchImpl: async () => assert.fail('This fixture must never call Magento') };
+    const input = { sourceId: published.id, expectedSourceRevision: published.revision, templateVersionId: nextVersion.id, productIds: [] };
+    const prepared = await successor.prepare(config, input, remote);
+    const count = rows => rows.reduce((counts, row) => ({ ...counts, [row.reviewState]: (counts[row.reviewState] || 0) + 1 }), {});
+    const counts = Object.fromEntries(Object.entries(prepared.bindings).map(([kind, rows]) => [kind, count(rows)]));
+    t.diagnostic(JSON.stringify(counts));
+    assert.deepEqual(counts, { routes: { approved: 7 }, attributes: { approved: 206, proposed: 2 },
+      options: { approved: 234, blocked: 15 }, policies: { approved: 206, review_required: 2 } });
+    assert.deepEqual(prepared.blockers, []);
+    for (const r of before.bindings.routes) assert.deepEqual(
+      prepared.bindings.routes.find(n => n.routeKey === r.routeKey).setId, r.setId, r.routeKey);
+    assert.ok(prepared.bindings.routes.every(r => r.reviewState === 'approved'));
+    for (const a of before.bindings.attributes) {
+      const next = prepared.bindings.attributes.find(n => n.bindingKey === a.bindingKey);
+      if (a.target === 'rozmir_suveniriv') assert.notEqual(next.reviewState, 'approved');
+      else assert.equal(next.reviewState, a.reviewState, `${a.routeKey}/${a.rowId}/${a.target}`);
+    }
+    for (const p of before.bindings.policies) {
+      const a = before.bindings.attributes.find(a => a.bindingKey === p.bindingKey);
+      const next = prepared.bindings.policies.find(n => n.bindingKey === p.bindingKey && n.storeCode === p.storeCode);
+      if (a.target === 'rozmir_suveniriv') assert.notEqual(next.reviewState, 'approved');
+      else { assert.equal(next.reviewState, p.reviewState); assert.equal(next.policy, p.policy); assert.equal(next.evidence.createValue, p.evidence.createValue); }
+    }
+    for (const o of before.bindings.options) {
+      const next = prepared.bindings.options.find(n => n.bindingKey === o.bindingKey && n.sourceKind === o.sourceKind
+        && (o.sourceKind === 'semantic' ? n.sourceKey === o.sourceKey : n.outputKey === o.outputKey));
+      assert.equal(next.reviewState, o.reviewState, o.sourceKey);
+      assert.equal(next.optionId, o.optionId);
+      if (o.sourceKind === 'evaluated') assert.notEqual(next.domainKey, o.domainKey, 'target retains its own immutable output domain');
+    }
+    const successorDraft = await successor.apply(config, { ...input, previewToken: prepared.previewToken }, remote);
+    assert.equal(successorDraft.state, 'draft'); assert.equal(successorDraft.revision, '1');
+    assert.equal(successorDraft.templateVersionId, nextVersion.id);
+    const validation = await bindings.validateDraft(successorDraft.id, options);
+    const reviews = validation.diagnostics.filter(d => d.code === 'BINDING_REVIEW_REQUIRED');
+    t.diagnostic(`remaining binding reviews: ${reviews.length}`);
+    assert.equal(reviews.length, 4, JSON.stringify(validation));
+    await assert.rejects(bindings.publishDraft(successorDraft.id, { expectedRevision: successorDraft.revision,
+      expectedCurrentId: published.id }, options), { code: 'MAGENTO_BINDING_INVALID' });
+    const publication = require('../src/services/magento/binding-publication');
+    const publicationInput = { bindingRevisionId: successorDraft.id, expectedRevision: successorDraft.revision, expectedCurrentId: published.id };
+    const preview = await publication.preview(config, publicationInput, remote);
+    assert.equal(preview.blockers.filter(d => d.code === 'BINDING_REVIEW_REQUIRED').length, 4);
+    assert.ok(!preview.blockers.some(d => d.code === 'REPRESENTATIVE_CREATE_REQUIRED'), 'size requiredness must not make unchanged SV routes new');
+    await assert.rejects(publication.publish(config, { ...publicationInput, previewToken: preview.previewToken }, remote),
+      { code: 'MAGENTO_PUBLICATION_STALE' });
+    // An abandoned draft neither becomes the carry source nor needs data repair.
+    const fresh = await successor.prepare(config, input, remote);
+    const regenerated = await successor.apply(config, { ...input, previewToken: fresh.previewToken }, remote);
+    assert.notEqual(regenerated.id, successorDraft.id);
+    assert.deepEqual(regenerated.bindings, successorDraft.bindings);
+    assert.deepEqual(await bindings.getRevision(successorDraft.id, options), successorDraft);
+    assert.deepEqual(await bindings.getRevision(published.id, options), before);
+    assert.equal((await bindings.getCurrentPublished('sv-successor', options)).id, published.id);
+    assert.deepEqual((await db.query('SELECT definition,definition_hash FROM export_template_versions WHERE id=$1', [oldVersion.id])).rows[0],
+      { definition: oldVersion.definition, definition_hash: oldVersion.definitionHash });
+    assert.deepEqual((await db.query('SELECT definition,definition_hash FROM export_template_versions WHERE id=$1', [nextVersion.id])).rows[0],
+      { definition: nextVersion.definition, definition_hash: nextVersion.definitionHash });
+  } finally { await db.end(); await dropTestDatabase(name); }
+});
+
 async function setup(name) {
   const url = await recreateTestDatabase(name), db = new Pool({connectionString:url});
   await runNodeInDatabase(url,"require('./src/db/run-migrations').runMigrations().catch(e=>{console.error(e);process.exitCode=1;});");

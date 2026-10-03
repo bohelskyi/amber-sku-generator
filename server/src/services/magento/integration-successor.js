@@ -15,15 +15,64 @@ const { createMutationContext } = require('../../audit/mutation-context');
 const { runAccessAdminMutation } = require('../access-admin-transaction');
 const { writeAuditEvent } = require('../../audit/audit-events');
 
-// An unchanged destination is insufficient: carry only an unchanged expression
-// and all its transitive references. Unrelated cells may change independently.
+// Legacy fixed-column templates eagerly evaluate every cell. Those checks are
+// readiness gates, not dependencies of every mapping in the group. Resolve their
+// output ownership without rewriting the immutable definition. Unclassifiable
+// checks remain global, as in the explicit editable-column conversion.
+function relevantChecks(definition, group, target) {
+  const bindings = new Map(definition.bindings.map(b => [b.id, b.value]));
+  function fields(node, seen = new Set()) {
+    if (!node || typeof node !== 'object') return [];
+    if (node.op === 'ref') return seen.has(node.id) ? [] : fields(bindings.get(node.id), new Set([...seen, node.id]));
+    return [...(node.op === 'error' ? [node.field] : []), ...Object.values(node).flatMap(v => fields(v, seen))];
+  }
+  return [...(group.evaluate || []).filter(rule => {
+    const errors = fields(rule);
+    if (errors.some(field => !group.columns?.includes(field))) return true;
+    const owners = new Set([...errors, ...group.rows.flatMap(row => Object.entries(row.cells)
+      .filter(([, cell]) => c.hash(cell) === c.hash(rule)).map(([field]) => field))]);
+    return !owners.size || owners.has(target);
+  }), ...(group.outputChecks || []).filter(check => check.columns.includes(target)).map(check => check.rule)];
+}
+
+// Compare a decision's expression, scope and transitive source contract. Never
+// use the whole definition hash (option domain hashes still belong to the new
+// immutable template). Remote identities are checked separately by reviewed carry.
 function ruleProof(definition, groupCode, rowId, target) {
   const group = definition.groups.find((g) => g.route === groupCode);
   const row = group?.rows.find((r) => r.id === rowId);
   if (!row || !Object.hasOwn(row.cells, target)) return null;
-  const proof = { expression: row.cells[target], evaluate: [...(group.evaluate || []), ...(group.outputChecks || []).filter((check) => check.columns.includes(target)).map((check) => check.rule)], sources: {}, tables: {}, bindings: {},
-    contracts: {}, support: definition.sourceSupport || [], sourceContractVersion: definition.sourceContractVersion || null };
+  const proof = { expression: row.cells[target], evaluate: relevantChecks(definition, group, target),
+    scope: { group: groupCode, row: rowId, store: row.cells.store_view_code || null,
+      productType: group.rows.find(r => r.id === 'base')?.cells.product_type || null },
+    evaluatorVersion: definition.evaluatorVersion || null, formatVersion: definition.formatVersion || null,
+    outputContract: definition.outputContract || null,
+    sources: {}, tables: {}, bindings: {}, contracts: {}, support: {},
+    sourceContractVersion: definition.sourceContractVersion || null };
   const visited = new Set();
+  function visitRule(rule) {
+    for (const [key, value] of Object.entries(rule || {})) {
+      if (key === '$and' || key === '$or') value.forEach(visitRule);
+      else visitSource(key);
+    }
+  }
+  function visitContract(key) {
+    if (Object.hasOwn(proof.contracts, key)) return;
+    const contract = definition.questionContracts[key]; proof.contracts[key] = contract || null;
+    if (contract) { visitSource(contract.source); visitRule(contract.rule); }
+  }
+  function visitSource(id) {
+    if (Object.hasOwn(proof.sources, id)) return;
+    const source = definition.sources[id]; proof.sources[id] = source || null;
+    if (source?.category) {
+      const location = `${source.category}.${source.key}`;
+      const support = definition.sourceSupport?.sources[location];
+      if (support) proof.support[location] = { version: definition.sourceSupport.version, ...support };
+      for (const [key, contract] of Object.entries(definition.questionContracts)) {
+        if (contract.source === id) visitContract(key);
+      }
+    }
+  }
   function visit(value) {
     if (!value || typeof value !== 'object') return;
     if (value.op === 'ref' && !visited.has(value.id)) {
@@ -31,21 +80,25 @@ function ruleProof(definition, groupCode, rowId, target) {
       const binding = definition.bindings.find((b) => b.id === value.id);
       proof.bindings[value.id] = binding || null; visit(binding?.value);
     }
-    if (value.op === 'source') {
-      const source = definition.sources[value.id]; proof.sources[value.id] = source || null;
-      if (source?.category) {
-        for (const [key, contract] of Object.entries(definition.questionContracts)) {
-          if (contract.source === value.id) proof.contracts[key] = contract;
-        }
-      }
-    }
+    if (value.op === 'source') visitSource(value.id);
+    if (value.op === 'questionValue' || value.op === 'catalogRule') visitContract(value.question);
     if (typeof value.table === 'string') proof.tables[value.table] = definition.tables[value.table] || null;
     for (const child of Object.values(value)) if (typeof child === 'object') {
       if (Array.isArray(child)) child.forEach(visit); else visit(child);
     }
   }
-  visit(proof.expression); proof.evaluate.forEach(visit);
+  visit(proof.expression); visit(proof.scope); proof.evaluate.forEach(visit);
   return c.hash(proof);
+}
+
+function storeProof(schema, rowId) {
+  if (!schema) return null;
+  const code = rowId === 'base' ? schema.storeCode : 'en';
+  const topology = schema.storeTopology;
+  if (code === 'all') return { code, topology };
+  const view = topology.storeViews.find(s => s.code === code);
+  return { code, view: view || null, group: topology.storeGroups.find(g => g.id === view?.store_group_id) || null,
+    website: topology.websites.find(w => w.id === view?.website_id) || null };
 }
 function stableReviewedSource(source, oldDefinition, nextDefinition, nextSchema = source.schema) {
   const result = structuredClone(source); const changed = new Set();
@@ -53,6 +106,9 @@ function stableReviewedSource(source, oldDefinition, nextDefinition, nextSchema 
     const group = a.routeKey.split(/[.:]/)[0];
     const route = source.bindings.routes.find((r) => r.routeKey === a.routeKey);
     const routeChanged = ruleProof(oldDefinition, group, 'base', 'attribute_set_code') !== ruleProof(nextDefinition, group, 'base', 'attribute_set_code');
+    const oldSet = source.schema?.attributeSets.find(s => s.attribute_set_id === route?.setId);
+    const nextSet = nextSchema?.attributeSets.find(s => s.attribute_set_id === route?.setId);
+    const setChanged = c.hash(oldSet?.attribute_set_name || null) !== c.hash(nextSet?.attribute_set_name || null);
     const membershipLost = a.attributeCode && nextSchema && route?.setId && !nextSchema.attributeSets.find((s) => s.attribute_set_id === route.setId)?.attributeCodes.includes(a.attributeCode);
     const before = ruleProof(oldDefinition, group, a.rowId, a.target);
     const metadata = (schema) => {
@@ -60,7 +116,8 @@ function stableReviewedSource(source, oldDefinition, nextDefinition, nextSchema 
       if (!attr) return null;
       const { options: ignored, ...identity } = attr; void ignored; return identity;
     };
-    if (routeChanged || membershipLost || !before || before !== ruleProof(nextDefinition, group, a.rowId, a.target)
+    if (routeChanged || setChanged || membershipLost || !before || before !== ruleProof(nextDefinition, group, a.rowId, a.target)
+      || c.hash(storeProof(source.schema, a.rowId)) !== c.hash(storeProof(nextSchema, a.rowId))
       || c.hash(metadata(source.schema)) !== c.hash(metadata(nextSchema))) {
       changed.add(a.bindingKey); a.reviewState = 'review_required';
       for (const category of a.evidence?.categories || []) category.reviewState = 'review_required';
