@@ -5,6 +5,7 @@
   "scripts": {
     "start": "node server.js",
     "auth:bootstrap-admin": "node scripts/bootstrap-admin.js",
+    "corrections:batch": "node scripts/correction-request-batch.js",
     "audit:data": "node scripts/audit-data-integrity.js",
     "magento:probe": "node scripts/magento-probe.js",
     "magento:sync-preview": "node scripts/magento-sync-preview.js",

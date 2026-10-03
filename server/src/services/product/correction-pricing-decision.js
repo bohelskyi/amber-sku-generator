@@ -1,4 +1,4 @@
-const { getUsdUahRateInfo } = require('../currency.service');
+const { getUsdUahRateInfo, assertUsdRateObservationCurrent } = require('../currency.service');
 const { roundAutomaticUah } = require('../../utils/money');
 
 function invalidDecision(message) {
@@ -67,7 +67,7 @@ function decisionFromRequest(row) {
   return null;
 }
 
-async function calculateDecisionPricing(decision, weight, providedRateInfo = null) {
+async function calculateDecisionPricing(decision, weight, providedRateInfo = null, rateObservation) {
   if (decision.mode === 'manual_uah') {
     return {
       weightVal: Number(weight || 0),
@@ -92,7 +92,11 @@ async function calculateDecisionPricing(decision, weight, providedRateInfo = nul
   }
   let rateInfo;
   try {
-    rateInfo = providedRateInfo || await getUsdUahRateInfo();
+    if (rateObservation !== undefined) {
+      assertUsdRateObservationCurrent(rateObservation);
+      if (rateObservation.rateError) throw new Error(rateObservation.rateError);
+      rateInfo = rateObservation.rateInfo;
+    } else rateInfo = providedRateInfo || await getUsdUahRateInfo();
   } catch {
     throw invalidDecision('Авторитетний курс USD/UAH недоступний для ціни USD/г.');
   }

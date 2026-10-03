@@ -33,6 +33,13 @@ deployment waves below and do not imply production deployment.
 
 ## Implementation and deployment status
 
+The local [reviewed correction-request batch tool](docs/CORRECTION_REQUEST_BATCH.md)
+adds read-only sealed preflight, explicit safe selection and sequential reuse of
+claim/refresh/completion. Forward migration **058** enforces atomic unique phase
+receipts in the immutable audit ledger. Rate observations happen before batch
+transactions without preflight cache writes. This repository implementation does
+not imply production processing or Magento delivery/reconciliation.
+
 As reported by the production operator on 2026-10-01, Wave 1 is deployed at PR #19 / `daf627fc2458e5215cbf52735a8f186a3777361f`, with migrations through `050_test_product_deletion.sql`. Stable public `AG-*` identities, the reviewed production binding and automatic Amber → Magento synchronization are active. Magento product CSV delivery is retired; the separate price-export stream and immutable historical evidence remain supported. Historical delivery/collision cutover is complete and the operational freeze has been lifted. This documentation update did not query production or Magento.
 
 Production acceptance includes a real Magento CREATE and the dedicated safe test-product deletion workflow: `AG-000002` was deleted remotely and retained as `voided` in Amber. The reported synchronization-problem count was zero; the public sequence was 2 (next allocation `AG-000003`). These are dated operator receipts, not seeds, defaults or current telemetry. Earlier 2026-09-28 UPDATE and disposable-rehearsal records remain historical evidence in the linked domain guides.

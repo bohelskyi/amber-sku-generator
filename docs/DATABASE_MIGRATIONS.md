@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`057`. Migrations `000`–`056` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`058`. Migrations `000`–`057` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -130,6 +130,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `055_magento_publication_handoff.sql` | Immutable publication/handoff receipts, bounded enrollment items and name-rule pins. |
 | `056_magento_configuration_reseal.sql` | Linked replacement of sealed, undispatched configuration actions; all dispatched reservations remain permanent. |
 | `057_catalog_english_option_labels.sql` | Nullable authoritative English catalog metadata and immutable reviewed scoped-option label action evidence. |
+| `058_correction_batch_phase_receipts.sql` | Unique immutable batch phase identities and strict receipt shape in the existing audit ledger. |
 
 ## Test deletion migration
 
@@ -304,3 +305,14 @@ permit a later separately reviewed action, while every earlier intent/progress r
 remains permanent. CREATE/category reservations and 056 supersession guards are
 unchanged. A lost PUT cannot reset/supersede dispatched work; recovery is GET-only.
 Actual dispatch requires the separately deployed scoped-label adapter contract.
+
+## 058 — atomic correction batch phase receipts
+
+`058_correction_batch_phase_receipts.sql` adds the partial unique
+`correction_batch_step_identity_idx` and the fail-closed
+`correction_batch_step_shape` constraint on `audit_events`. Deterministic phase
+IDs bind the plan/actor/request entry and phase; receipts commit with the existing
+business primitive. Concurrent duplicate receipts cannot both commit. Existing
+audit immutability and historical events remain unchanged. The migration creates
+no requests, corrections, products, claims, exchange-rate cache entries or
+Magento work. See the [batch runbook](CORRECTION_REQUEST_BATCH.md).

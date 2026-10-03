@@ -9,6 +9,8 @@ const {
 const { syncRepricingDraft } = require('./repricing.service');
 const { writeAuditEvent } = require('../audit/audit-events');
 const { createMutationContext } = require('../audit/mutation-context');
+const batchReceipts = require('./correction-request-batch-receipts');
+const batchEvidence = require('./correction-request-batch-evidence');
 const {
   getCorrectionDecisionSignature,
   getCorrectionPreviewSignature,
@@ -272,12 +274,42 @@ async function previewCorrectionRequest(payload = {}, options = {}) {
   };
 }
 
+function storedRecountInput(row) {
+  return { sourceSku: row.source_sku, answers: getStoredRecountAnswerPatch(row),
+    isCalibrated: row.proposed_payload?.answers?.is_calibrated ?? null,
+    reason: row.comment || '', manualPriceUah: row.proposed_payload?.manualPriceUah ?? null,
+    weight: row.proposed_payload?.weight ?? undefined, pricingDecision: decisionFromRequest(row) };
+}
+
+// Shared by real refresh and read-only batch preflight. It never claims or writes.
+async function deriveCorrectionRequestRefresh(row, options = {}) {
+  if ((row.request_type || 'recount') === 'price_change') {
+    const pricingDecision = decisionFromRequest(row);
+    const preview = await previewProductPriceChange({ productId: Number(row.source_product_id), pricingDecision }, {
+      queryable: options.queryable, allowedCorrectionRequestId: Number(row.id), rateObservation: options.rateObservation,
+    });
+    return { preview, signature: preview.previewToken,
+      oldPayload: { requestType: 'price_change', productId: Number(row.source_product_id), sku: preview.sku,
+        stateSignature: preview.productStateSignature, totalPriceUah: preview.currentPriceUah, pricing: preview.currentPricing },
+      proposedPayload: { requestType: 'price_change', productId: Number(row.source_product_id), sku: preview.sku,
+        totalPriceUah: preview.resultingPriceUah, priceDifferenceUah: preview.priceDifferenceUah, pricingDecision,
+        pricing: preview.resultingPricing, pricingContextFingerprint: preview.pricingContextFingerprint,
+        uahRateDate: preview.uahRateDate, previewToken: preview.previewToken }, changes: [], proposedSku: preview.sku };
+  }
+  const preview = await buildProductRecountPreview(storedRecountInput(row), options);
+  if (Number(preview.source.productId) !== Number(row.source_product_id)) throw batchEvidence.error(409, 'CORRECTION_SOURCE_IDENTITY_CHANGED');
+  return { preview, signature: getCorrectionDecisionSignature(preview, decisionFromRequest(row)),
+    oldPayload: preview.source, proposedPayload: preview.corrected,
+    changes: preview.changes || [], proposedSku: preview.corrected.fullSku };
+}
+
 async function claimCorrectionRequest(requestId, options = {}) {
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await (options.databasePool || pool).connect();
   let claimedRow;
   try {
-    await lifecycleGate.begin(client, 'BEGIN');
+    await batchReceipts.begin(client, options, 'corrections.claim');
+    if (options.batchReview) await client.query('SELECT id FROM products WHERE id=$1 FOR UPDATE', [options.batchReview.entry.sourceProductId]);
     const result = await client.query(
       'SELECT * FROM correction_requests WHERE id = $1 FOR UPDATE',
       [Number(requestId)]
@@ -288,6 +320,12 @@ async function claimCorrectionRequest(requestId, options = {}) {
       throw error;
     }
     const row = result.rows[0];
+    if (options.batchReview) {
+      const derived = await deriveCorrectionRequestRefresh(row, { ...options, queryable: client, lockLifecycle: true });
+      await batchReceipts.guard(client, options.batchReview);
+      batchEvidence.assertReviewedResult(options.batchReview.entry, derived.preview, options.rateObservation);
+      batchEvidence.assertReviewedClassification(options.batchReview.entry, row, derived.preview, mutationContext.actorUserId);
+    }
     const isPending = row.status === 'pending'
       && row.claim_token_hash === null
       && row.claimed_by_user_id === null;
@@ -323,12 +361,13 @@ async function claimCorrectionRequest(requestId, options = {}) {
         ...(isLegacyUnowned ? { legacyUnownedClaimAdopted: true } : {}),
       }
     );
+    await batchReceipts.record(client, options, 'claimed');
     await lifecycleGate.commit(client);
   } catch (error) {
     await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    await lifecycleGate.release(client); client.release();
+    await batchReceipts.release(client); client.release();
   }
 
   // Refresh only after the atomic claim commits, then guard every write with that
@@ -348,7 +387,7 @@ async function claimCorrectionRequest(requestId, options = {}) {
   } catch (error) {
     try {
       await releaseCorrectionRequest(requestId, Number(claimedRow.claim_version), null, {
-        mutationContext,
+        ...options, mutationContext,
         reason: 'claim_refresh_failed',
       });
     } catch {
@@ -362,7 +401,7 @@ async function releaseCorrectionRequest(requestId, claimVersion, claimToken, opt
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await (options.databasePool || pool).connect();
   try {
-    await lifecycleGate.begin(client, 'BEGIN');
+    await batchReceipts.begin(client, options, 'corrections.claim');
     const result = await client.query(
       'SELECT * FROM correction_requests WHERE id = $1 FOR UPDATE',
       [Number(requestId)]
@@ -378,6 +417,7 @@ async function releaseCorrectionRequest(requestId, claimVersion, claimToken, opt
       claimVersion,
       claimToken
     );
+    if (options.batchReview) await batchReceipts.guard(client, options.batchReview, { source: false });
     const updated = await client.query(
       `UPDATE correction_requests
        SET status = 'pending',
@@ -397,13 +437,14 @@ async function releaseCorrectionRequest(requestId, claimVersion, claimToken, opt
       ...(ownership.legacyAdopted ? { legacyClaimAdopted: true } : {}),
       ...(options.reason ? { reason: options.reason } : {}),
     });
+    await batchReceipts.record(client, options, 'released');
     await lifecycleGate.commit(client);
     return { success: true, request: normalizeRequestRow(updated.rows[0]) };
   } catch (error) {
     await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    await lifecycleGate.release(client); client.release();
+    await batchReceipts.release(client); client.release();
   }
 }
 
@@ -884,187 +925,46 @@ async function createCorrectionRequest(payload = {}, options = {}) {
   }
 }
 
-async function refreshClaimedPriceChangeRequest(
-  row,
-  actorUserId,
-  claimVersion,
-  claimToken,
-  options = {}
-) {
-  const pricingDecision = decisionFromRequest(row);
-  const mutationContext = createMutationContext(
-    options.mutationContext || { actorUserId, requestId: null }
-  );
-  const client = await pool.connect();
-  try {
-    await lifecycleGate.begin(client, 'BEGIN');
-    const preview = await previewProductPriceChange({
-      productId: Number(row.source_product_id),
-      pricingDecision,
-    }, {
-      allowedCorrectionRequestId: Number(row.id),
-      lockProduct: true,
-      queryable: client,
-    });
-    if (preview.unchanged) {
-      const error = new Error('Після оновлення результуюча ціна не відрізняється від поточної.');
-      error.statusCode = 422;
-      error.publicCode = 'PRODUCT_PRICE_UNCHANGED';
-      throw error;
-    }
-    const locked = await client.query(
-      'SELECT * FROM correction_requests WHERE id = $1 FOR UPDATE',
-      [Number(row.id)]
-    );
-    if (locked.rows.length === 0) {
-      const error = new Error('Запит на виправлення не знайдено.');
-      error.statusCode = 404;
-      throw error;
-    }
-    const ownership = assertClaimOwnership(
-      locked.rows[0], actorUserId, claimVersion, claimToken
-    );
-    const oldPayload = {
-      requestType: 'price_change',
-      productId: Number(row.source_product_id),
-      sku: preview.sku,
-      stateSignature: preview.productStateSignature,
-      totalPriceUah: preview.currentPriceUah,
-      pricing: preview.currentPricing,
-    };
-    const proposedPayload = {
-      requestType: 'price_change',
-      productId: Number(row.source_product_id),
-      sku: preview.sku,
-      totalPriceUah: preview.resultingPriceUah,
-      priceDifferenceUah: preview.priceDifferenceUah,
-      pricingDecision,
-      pricing: preview.resultingPricing,
-      pricingContextFingerprint: preview.pricingContextFingerprint,
-      uahRateDate: preview.uahRateDate,
-      previewToken: preview.previewToken,
-    };
-    const result = await client.query(
-      `UPDATE correction_requests
-       SET source_sku = $1, proposed_sku = $1,
-           old_payload = $2::jsonb, proposed_payload = $3::jsonb,
-           changes = '[]'::jsonb, preview_signature = $4,
-           claimed_by_user_id = $5, claim_token_hash = NULL,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $6 AND request_type = 'price_change'
-       RETURNING *`,
-      [
-        preview.sku,
-        JSON.stringify(oldPayload),
-        JSON.stringify(proposedPayload),
-        preview.previewToken,
-        actorUserId,
-        Number(row.id),
-      ]
-    );
-    if (ownership.legacyAdopted) {
-      await writeCorrectionAuditEvent(client, mutationContext, 'claimed', row.id, {
-        requestType: 'price_change',
-        claimVersion: ownership.claimVersion,
-        legacyClaimAdopted: true,
-      });
-    }
-    await lifecycleGate.commit(client);
-    return result.rows[0];
-  } catch (error) {
-    await lifecycleGate.rollback(client);
-    throw error;
-  } finally {
-    await lifecycleGate.release(client); client.release();
-  }
-}
-
-async function refreshClaimedCorrectionRequest(
-  row,
-  actorUserId,
-  claimVersion,
-  claimToken,
-  options = {}
-) {
-  if ((row.request_type || 'recount') === 'price_change') {
-    return refreshClaimedPriceChangeRequest(
-      row, actorUserId, claimVersion, claimToken, options
-    );
-  }
-  const mutationContext = createMutationContext(
-    options.mutationContext || { actorUserId, requestId: null }
-  );
+async function refreshClaimedCorrectionRequest(row, actorUserId, claimVersion, claimToken, options = {}) {
+  const mutationContext = createMutationContext(options.mutationContext || { actorUserId, requestId: null });
   const client = await (options.databasePool || pool).connect();
   try {
-    await lifecycleGate.begin(client, 'BEGIN');
+    await batchReceipts.begin(client, options, 'corrections.complete');
     await client.query('SELECT id FROM products WHERE id=$1 FOR UPDATE', [Number(row.source_product_id)]);
-    const locked = await client.query(
-      'SELECT * FROM correction_requests WHERE id = $1 FOR UPDATE',
-      [Number(row.id)]
-    );
-    if (locked.rows.length === 0) {
-      const error = new Error('Запит на виправлення не знайдено.');
-      error.statusCode = 404;
-      throw error;
-    }
-    const ownership = assertClaimOwnership(
-      locked.rows[0],
-      actorUserId,
-      claimVersion,
-      claimToken
-    );
+    const locked = await client.query('SELECT * FROM correction_requests WHERE id=$1 FOR UPDATE', [Number(row.id)]);
+    if (!locked.rows.length) throw Object.assign(new Error('Запит на виправлення не знайдено.'), { statusCode: 404 });
     const current = locked.rows[0];
-    const pricingDecision = decisionFromRequest(current);
-    const preview = await buildProductRecountPreview({
-      sourceSku: current.source_sku,
-      answers: getStoredRecountAnswerPatch(current),
-      isCalibrated: current.proposed_payload?.answers?.is_calibrated ?? null,
-      reason: current.comment || '',
-      manualPriceUah: current.proposed_payload?.manualPriceUah ?? null,
-      weight: current.proposed_payload?.weight ?? undefined,
-      pricingDecision,
-    }, { queryable: client, lockLifecycle: true });
-    const result = await client.query(
-      `UPDATE correction_requests
-       SET proposed_sku = $1,
-           old_payload = $2::jsonb,
-           proposed_payload = $3::jsonb,
-           changes = $4::jsonb,
-           preview_signature = $5,
-           claimed_by_user_id = $6,
-           claim_token_hash = NULL,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $7
-       RETURNING *`,
-      [
-        preview.corrected.fullSku,
-        JSON.stringify(preview.source),
-        JSON.stringify(preview.corrected),
-        JSON.stringify(preview.changes || []),
-        getCorrectionDecisionSignature(preview, pricingDecision),
-        actorUserId,
-        Number(row.id),
-      ]
-    );
-    if (ownership.legacyAdopted) {
-      await writeCorrectionAuditEvent(client, mutationContext, 'claimed', row.id, {
-        claimVersion: ownership.claimVersion,
-        legacyClaimAdopted: true,
-      });
+    const ownership = assertClaimOwnership(current, actorUserId, claimVersion, claimToken);
+    const derived = await deriveCorrectionRequestRefresh(current, { ...options, queryable: client, lockLifecycle: true });
+    if (current.request_type === 'price_change' && derived.preview.unchanged) {
+      throw Object.assign(new Error('Після оновлення результуюча ціна не відрізняється від поточної.'),
+        { statusCode: 422, publicCode: 'PRODUCT_PRICE_UNCHANGED' });
     }
+    if (options.batchReview) {
+      await batchReceipts.guard(client, options.batchReview);
+      batchEvidence.assertReviewedResult(options.batchReview.entry, derived.preview, options.rateObservation);
+      batchEvidence.assertReviewedClassification(options.batchReview.entry, current, derived.preview, actorUserId);
+    }
+    const result = await client.query(
+      `UPDATE correction_requests SET source_sku=CASE WHEN request_type='price_change' THEN $1 ELSE source_sku END,
+        proposed_sku=$1,old_payload=$2::jsonb,proposed_payload=$3::jsonb,
+        changes=$4::jsonb,preview_signature=$5,claimed_by_user_id=$6,claim_token_hash=NULL,updated_at=CURRENT_TIMESTAMP
+        WHERE id=$7 RETURNING *`,
+      [derived.proposedSku, JSON.stringify(derived.oldPayload), JSON.stringify(derived.proposedPayload),
+        JSON.stringify(derived.changes), derived.signature, actorUserId, Number(current.id)]);
+    if (ownership.legacyAdopted) await writeCorrectionAuditEvent(client, mutationContext, 'claimed', current.id, {
+      requestType: current.request_type || 'recount', claimVersion: ownership.claimVersion, legacyClaimAdopted: true,
+    });
+    await batchReceipts.record(client, { ...options, mutationContext }, 'refreshed');
     await lifecycleGate.commit(client);
     return result.rows[0];
-  } catch (error) {
-    await lifecycleGate.rollback(client);
-    throw error;
-  } finally {
-    await lifecycleGate.release(client); client.release();
-  }
+  } catch (error) { await lifecycleGate.rollback(client); throw error; }
+  finally { await batchReceipts.release(client); client.release(); }
 }
 
 async function refreshCorrectionRequest(requestId, claimVersion, claimToken, options = {}) {
   const mutationContext = createMutationContext(options.mutationContext);
-  const row = await getCorrectionRequestRow(requestId);
+  const row = await getCorrectionRequestRow(requestId, options.databasePool || pool);
   assertClaimOwnership(row, mutationContext.actorUserId, claimVersion, claimToken);
   const refreshedRow = await refreshClaimedCorrectionRequest(
     row,
@@ -1167,14 +1067,14 @@ async function updateCorrectionRequestStatus(
   }
 }
 
-async function syncActiveRepricingDrafts(mutationContext) {
-  const result = await pool.query(
+async function syncActiveRepricingDrafts(mutationContext, databasePool = pool, rateObservation) {
+  const result = await databasePool.query(
     "SELECT id FROM repricing_drafts WHERE status = 'draft' ORDER BY id"
   );
   const failures = [];
   for (const row of result.rows) {
     try {
-      await syncRepricingDraft(row.id, { mutationContext });
+      await syncRepricingDraft(row.id, { mutationContext, queryable: databasePool, rateObservation });
     } catch (error) {
       failures.push({ draftId: Number(row.id), message: error.message });
     }
@@ -1189,9 +1089,11 @@ async function completeCorrectionRequest(
   options = {}
 ) {
   const mutationContext = createMutationContext(options.mutationContext);
-  const row = await getCorrectionRequestRow(requestId);
+  const databasePool = options.databasePool || pool;
+  const row = await getCorrectionRequestRow(requestId, databasePool);
   if (row.status === 'completed') {
-    const completedAudit = await pool.query(
+    if (options.batchReview) throw batchEvidence.error(409, 'CORRECTION_BATCH_TERMINAL_REQUEST');
+    const completedAudit = await databasePool.query(
       `SELECT actor_user_id, details
        FROM audit_events
        WHERE event_key = 'correction_request.completed'
@@ -1230,7 +1132,7 @@ async function completeCorrectionRequest(
       pricingDecision: decisionFromRequest(row),
       previewToken: row.proposed_payload?.previewToken || row.preview_signature,
     }, {
-      mutationContext,
+      ...options, mutationContext,
       correctionRequest: {
         id: Number(row.id),
         claimedByUserId: mutationContext.actorUserId,
@@ -1238,7 +1140,7 @@ async function completeCorrectionRequest(
         previewToken: row.proposed_payload?.previewToken || row.preview_signature,
       },
     });
-    const completedRow = await getCorrectionRequestRow(requestId);
+    const completedRow = await getCorrectionRequestRow(requestId, databasePool);
     return {
       success: true,
       request: normalizeRequestRow(completedRow),
@@ -1251,15 +1153,7 @@ async function completeCorrectionRequest(
   }
   const pricingDecision = decisionFromRequest(row);
   const answers = getStoredRecountAnswerPatch(row);
-  const preview = await buildProductRecountPreview({
-    sourceSku: row.source_sku,
-    answers,
-    isCalibrated: row.proposed_payload?.answers?.is_calibrated ?? null,
-    reason: row.comment || '',
-    manualPriceUah: row.proposed_payload?.manualPriceUah ?? null,
-    weight: row.proposed_payload?.weight ?? undefined,
-    pricingDecision,
-  });
+  const preview = await buildProductRecountPreview(storedRecountInput(row), options);
   const signatureMatches = getCorrectionDecisionSignature(preview, pricingDecision)
     === row.preview_signature;
   if (!signatureMatches) {
@@ -1281,12 +1175,14 @@ async function completeCorrectionRequest(
     correctionRequestLegacyClaimHash: ownership.legacyTokenHash,
     correctionRequestLegacyAdopted: ownership.legacyAdopted,
   }, {
-    mutationContext,
+    ...options, mutationContext,
     databasePool: options.databasePool,
     trustedCorrectionDecision: Boolean(pricingDecision),
   });
-  const completedRow = await getCorrectionRequestRow(requestId);
-  const draftSyncFailures = await syncActiveRepricingDrafts(mutationContext);
+  const completedRow = await getCorrectionRequestRow(requestId, databasePool);
+  let draftSyncFailures;
+  try { draftSyncFailures = await syncActiveRepricingDrafts(mutationContext, databasePool, options.rateObservation); }
+  catch (error) { draftSyncFailures = [{ message: error.message }]; }
   return {
     success: true,
     request: normalizeRequestRow(completedRow),
@@ -1307,6 +1203,7 @@ module.exports = {
   completeCorrectionRequest,
   createCorrectionRequest,
   previewCorrectionRequest,
+  deriveCorrectionRequestRefresh,
   forceReleaseCorrectionRequest,
   getCorrectionPreviewSignature,
   getCorrectionRequestForView,

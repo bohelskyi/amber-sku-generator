@@ -86,13 +86,13 @@ async function getRepricingDrafts() {
   return result.rows.map(normalizeDraftRow);
 }
 
-async function getDraftOverrideConflicts(resolutions, preview) {
+async function getDraftOverrideConflicts(resolutions, preview, queryable = pool) {
   const previewIds = new Set((preview.items || []).map((item) => Number(item.productId)));
   const unavailable = resolutions.filter((item) => !previewIds.has(item.productId));
   if (unavailable.length === 0) return [];
 
   const productIds = unavailable.map((item) => item.productId);
-  const result = await pool.query(
+  const result = await queryable.query(
     `SELECT p.id,p.full_sku,i.public_sku,p.status,p.total_price_uah
      FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
      WHERE p.id = ANY($1::int[])`,
@@ -114,8 +114,9 @@ async function getDraftOverrideConflicts(resolutions, preview) {
   });
 }
 
-async function getRepricingDraft(draftId) {
-  const row = await getRepricingDraftRow(draftId);
+async function getRepricingDraft(draftId, options = {}) {
+  const queryable = options.queryable || pool;
+  const row = await getRepricingDraftRow(draftId, queryable);
   if (row.status !== 'draft') {
     const error = new Error('Ця чернетка вже не є активною.');
     error.statusCode = 409;
@@ -129,8 +130,8 @@ async function getRepricingDraft(draftId) {
   }
 
   const preview = scope === REPRICING_SCOPE_GLOBAL
-    ? await buildGlobalRepricingPreview()
-    : await buildRepricingPreview(row.scenario_id);
+    ? await buildGlobalRepricingPreview(options)
+    : await buildRepricingPreview(row.scenario_id, options);
   const storedResolutions = normalizeStoredPricingResolutions(row.manual_overrides);
   const overrides = storedResolutions.manualOverrides;
   const automaticProductIds = storedResolutions.automaticProductIds;
@@ -147,7 +148,7 @@ async function getRepricingDraft(draftId) {
   const conflicts = await getDraftOverrideConflicts([
     ...overrides,
     ...automaticProductIds.map((productId) => ({ productId, useAutomatic: true })),
-  ], preview);
+  ], preview, queryable);
   return {
     draft,
     preview,
@@ -309,7 +310,8 @@ async function saveRepricingDraft(
 
 async function syncRepricingDraft(draftId, options = {}) {
   const mutationContext = createMutationContext(options.mutationContext);
-  const row = await getRepricingDraftRow(draftId);
+  const queryable = options.queryable || pool;
+  const row = await getRepricingDraftRow(draftId, queryable);
   const scope = row.scope || REPRICING_SCOPE_SCENARIO;
   if (
     row.status !== 'draft'
@@ -320,12 +322,12 @@ async function syncRepricingDraft(draftId, options = {}) {
     throw error;
   }
   const preview = scope === REPRICING_SCOPE_GLOBAL
-    ? await buildGlobalRepricingPreview()
-    : await buildRepricingPreview(row.scenario_id);
+    ? await buildGlobalRepricingPreview(options)
+    : await buildRepricingPreview(row.scenario_id, options);
   const previewIds = new Set(preview.items.map((item) => Number(item.productId)));
   const reviewedProductIds = normalizeReviewedProductIds(row.reviewed_product_ids || [])
     .filter((productId) => previewIds.has(productId));
-  const result = await pool.query(
+  const result = await queryable.query(
      `UPDATE repricing_drafts
       SET scenario_snapshot = $1::jsonb,
           preview_fingerprint = $2,
@@ -353,7 +355,7 @@ async function syncRepricingDraft(draftId, options = {}) {
     error.statusCode = 404;
     throw error;
   }
-  return getRepricingDraft(draftId);
+  return getRepricingDraft(draftId, options);
 }
 
 async function discardRepricingDraft(draftId, options = {}) {

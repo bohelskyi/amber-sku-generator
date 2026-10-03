@@ -1,5 +1,5 @@
 const pool = require('../db/pool');
-const { getUsdUahRateInfo } = require('./currency.service');
+const { getUsdUahRateInfo, assertUsdRateObservationCurrent } = require('./currency.service');
 const {
   calculatePricingBase,
   finalizePricing,
@@ -20,7 +20,7 @@ async function calculatePricing(
   answers = {},
   weight,
   isCalibrated,
-  { queryable = pool, context = null, rateInfo = null } = {}
+  { queryable = pool, context = null, rateInfo = null, rateObservation } = {}
 ) {
   const pricingContext = context || await loadPricingContext(categoryCode, queryable);
   const baseCalculation = calculatePricingBase({
@@ -34,7 +34,11 @@ async function calculatePricing(
   let resolvedRateInfo = rateInfo;
   let rateError = null;
   try {
-    resolvedRateInfo = rateInfo || await getUsdUahRateInfo();
+    if (rateObservation !== undefined) {
+      assertUsdRateObservationCurrent(rateObservation);
+      if (rateObservation.rateError) throw new Error(rateObservation.rateError);
+      resolvedRateInfo = rateObservation.rateInfo;
+    } else resolvedRateInfo = rateInfo || await getUsdUahRateInfo();
   } catch (err) {
     rateError = err;
   }

@@ -103,7 +103,7 @@ function currentPricingEvidence(product) {
   });
 }
 
-async function calculatePriceChange(product, decision, queryable) {
+async function calculatePriceChange(product, decision, queryable, rateObservation) {
   const oldDetails = getProductDetails(product);
   const answers = getPricingAnswers(product, oldDetails);
   let pricing;
@@ -119,10 +119,10 @@ async function calculatePriceChange(product, decision, queryable) {
       answers,
       product.weight,
       answers.is_calibrated ?? oldDetails.isCalibrated ?? null,
-      { queryable, context }
+      { queryable, context, rateObservation }
     );
   } else {
-    pricing = await calculateDecisionPricing(decision, product.weight);
+    pricing = await calculateDecisionPricing(decision, product.weight, null, rateObservation);
   }
 
   const calculatedPriceUah = toUahNumber(pricing.currencyPayload.calculatedPriceUah);
@@ -294,7 +294,7 @@ async function previewProductPriceChange(payload = {}, options = {}) {
     queryable,
     options.allowedCorrectionRequestId || null
   );
-  const projected = await calculatePriceChange(product, decision, queryable);
+  const projected = await calculatePriceChange(product, decision, queryable, options.rateObservation);
   return buildPreviewResponse(product, decision, projected);
 }
 
@@ -312,7 +312,7 @@ async function applyProductPriceChangeInTransaction(payload = {}, options = {}) 
     const product = await loadProduct(productId, client, { lock: true });
     assertActiveProduct(product);
     await assertNoActiveCorrectionRequest(productId, client, correctionRequest?.id || null);
-    const projected = await calculatePriceChange(product, decision, client);
+    const projected = await calculatePriceChange(product, decision, client, options.rateObservation);
     const authoritativePreview = buildPreviewResponse(product, decision, projected);
     if (authoritativePreview.previewToken !== payload.previewToken) {
       throw commandError(
@@ -359,6 +359,12 @@ async function applyProductPriceChangeInTransaction(payload = {}, options = {}) 
     }
 
     const oldPrice = currentPricingEvidence(product);
+    if (options.batchReview) {
+      await require('./correction-request-batch-receipts').guard(client, options.batchReview);
+      require('./correction-request-batch-evidence').assertReviewedResult(
+        options.batchReview.entry, authoritativePreview, options.rateObservation
+      );
+    }
     const newPrice = pricingEvidence(projected);
     const updateResult = await client.query(
       `UPDATE products
@@ -496,20 +502,21 @@ async function applyProductPriceChangeInTransaction(payload = {}, options = {}) 
 }
 
 async function applyProductPriceChange(payload = {}, options = {}) {
-  const client = await pool.connect();
+  const client = await (options.databasePool || pool).connect();
   try {
-    await lifecycleGate.begin(client, 'BEGIN');
+    await require('./correction-request-batch-receipts').begin(client, options, 'corrections.complete');
     const result = await applyProductPriceChangeInTransaction(payload, {
       ...options,
       queryable: client,
     });
+    await require('./correction-request-batch-receipts').record(client, options, 'completed', result);
     await lifecycleGate.commit(client);
     return result;
   } catch (error) {
     await lifecycleGate.rollback(client);
     throw error;
   } finally {
-    await lifecycleGate.release(client); client.release();
+    await require('./correction-request-batch-receipts').release(client); client.release();
   }
 }
 

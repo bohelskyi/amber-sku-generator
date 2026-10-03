@@ -181,6 +181,28 @@ async function getUsdUahRate() {
   return (await getUsdUahRateInfo()).rate;
 }
 
+function assertUsdRateObservationCurrent(observation, now = new Date()) {
+  const rate = observation?.rateInfo;
+  if (rate?.stale && now.getTime() - new Date(rate.fetchedAt).getTime() > nbuMaxStaleMs) {
+    throw Object.assign(new Error('Observed USD/UAH fallback expired before use'), { code: 'ERR_RATE_TOO_OLD' });
+  }
+}
+
+// Observe before opening a business transaction. This provider shares the normal
+// live parsing/fallback rules but cannot persist the cache (including on preview).
+async function observeUsdRate({ databasePool, fetchLive = fetchLiveUsdRate, now } = {}) {
+  const readOnlyProvider = createUsdRateProvider({
+    fetchLive,
+    loadLastKnown: async () => (await databasePool.query(
+      "SELECT rate,rate_date,fetched_at FROM exchange_rate_cache WHERE currency_pair='USD_UAH'"
+    )).rows[0] || null,
+    maxStaleMs: nbuMaxStaleMs,
+    ...(now ? { now } : {}),
+  });
+  try { return { rateInfo: await readOnlyProvider.getRateInfo(), rateError: null }; }
+  catch (error) { return { rateInfo: null, rateError: String(error.message || error) }; }
+}
+
 module.exports = {
   DEFAULT_MAX_STALE_MS,
   NBU_USD_URL,
@@ -190,5 +212,7 @@ module.exports = {
   getUsdUahRateInfo,
   normalizeRateInfo,
   normalizeRateDate,
+  observeUsdRate,
+  assertUsdRateObservationCurrent,
   saveLastKnownRate,
 };

@@ -176,7 +176,7 @@ async function validateNonSkuAnswers(categoryCode, answers, isCalibrated, querya
 
 async function buildProductPreview(
   { categoryCode, answers = {}, weight, isCalibrated, skuSchemaVersionId },
-  { queryable = pool, lockSequence = false, pricingDecision = null } = {}
+  { queryable = pool, lockSequence = false, pricingDecision = null, rateObservation } = {}
 ) {
   const normalizedCategoryCode = String(categoryCode || '').trim().toUpperCase();
   const normalizedAnswers = normalizeAnswerMap(answers);
@@ -279,13 +279,13 @@ async function buildProductPreview(
       && (!pricingDecision || pricingDecision.mode === 'system_auto')
     ? getPricingContextFingerprint(pricingContext) : null;
   const pricing = usesCustomUsdBasis
-    ? await calculateDecisionPricing(pricingDecision, normalizedWeight)
+    ? await calculateDecisionPricing(pricingDecision, normalizedWeight, null, rateObservation)
     : await calculatePricing(
       normalizedCategoryCode,
       normalizedAnswers,
       normalizedWeight,
       isCalibrated,
-      { queryable, context: pricingContext }
+      { queryable, context: pricingContext, rateObservation }
     );
   const {
     weightVal,
@@ -488,7 +488,7 @@ async function buildRecountPreview({
     weight: correctedWeight,
     isCalibrated: nextIsCalibrated,
     skuSchemaVersionId: activeSchema?.id,
-  }, { pricingDecision, queryable });
+  }, { pricingDecision, queryable, rateObservation: options.rateObservation });
   const correctionSku = await resolveCorrectionSku(correctedPreview.fullProposedSku, queryable);
   const publicSkuActivation = await queryable.query(
     'SELECT enabled FROM public_sku_activation WHERE singleton'
@@ -616,7 +616,7 @@ async function applyProductRecount(payload, options = {}) {
     pricingDecision: normalizePricingDecision(payload.pricingDecision),
   } : {}) };
   const mutationContext = createMutationContext(options.mutationContext);
-  const preview = await buildProductRecountPreview(payload || {}, { databasePool: options.databasePool, magentoConfig: options.magentoConfig });
+  const preview = await buildProductRecountPreview(payload || {}, { databasePool: options.databasePool, magentoConfig: options.magentoConfig, rateObservation: options.rateObservation });
   if (payload.pricingDecision && !payload.correctionRequestId
       && payload.previewToken !== preview.previewToken) {
     throw Object.assign(new Error('Ціна або характеристики змінилися. Перегляньте переоблік ще раз.'),
@@ -636,7 +636,8 @@ async function applyProductRecount(payload, options = {}) {
       await access.assertActorStillAuthorized(client, mutationContext.actorUserId, 'products.recount', createError);
       await access.assertActorStillAuthorized(client, mutationContext.actorUserId, 'exports.create', createError);
       await lifecycleGate.enterExisting(client);
-    } else await lifecycleGate.begin(client, 'BEGIN');
+    } else if (options.batchReview) await require('./correction-request-batch-receipts').begin(client, options, 'corrections.complete');
+    else await lifecycleGate.begin(client, 'BEGIN');
 
     const sourceProductId = Number(preview.source.productId);
     const sourceLockResult = await client.query(
@@ -674,7 +675,7 @@ async function applyProductRecount(payload, options = {}) {
       weight: preview.corrected.weight,
       isCalibrated: preview.corrected.answers.is_calibrated,
       skuSchemaVersionId: preview.corrected.skuSchemaVersionId,
-    }, { queryable: client, lockSequence: true, pricingDecision: payload.pricingDecision || null });
+    }, { queryable: client, lockSequence: true, pricingDecision: payload.pricingDecision || null, rateObservation: options.rateObservation });
     const correctionCalculatedPriceUah = toUahNumber(freshPreview.calculatedPriceUah);
     const correctionAutoPriceUah = toUahNumber(freshPreview.totalPriceUah);
     const correctionManualPriceUah = payload.pricingDecision?.mode === 'manual_uah'
@@ -810,6 +811,12 @@ async function applyProductRecount(payload, options = {}) {
     corrected.recountEvidence = evidence.binding;
     corrected.delivery = evidence.delivery;
     corrected.exactNames = evidence.exactNames?.next ?? null;
+    if (options.batchReview) {
+      await require('./correction-request-batch-receipts').guard(client, options.batchReview);
+      require('./correction-request-batch-evidence').assertReviewedResult(
+        options.batchReview.entry, { source: preview.source, corrected }, options.rateObservation
+      );
+    }
     const details = {
       answers: corrected.answers,
       isCalibrated: corrected.answers.is_calibrated ?? null,
@@ -991,6 +998,10 @@ async function applyProductRecount(payload, options = {}) {
       },
     });
 
+    if (options.batchReview) await require('./correction-request-batch-receipts').record(
+      client, options, 'completed', { correctedProductId, productCorrectionId, publicSku: corrected.publicSku,
+        internalSku: corrected.fullSku, delivery: corrected.delivery }
+    );
     await lifecycleGate.commit(client);
 
     return {
@@ -1003,7 +1014,7 @@ async function applyProductRecount(payload, options = {}) {
     await lifecycleGate.rollback(client);
     throw normalizeSkuWriteError(err, preview.corrected.fullSku);
   } finally {
-    await lifecycleGate.release(client); client.release();
+    await require('./correction-request-batch-receipts').release(client); client.release();
   }
 }
 
