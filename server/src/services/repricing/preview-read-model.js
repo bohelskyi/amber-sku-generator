@@ -88,8 +88,9 @@ function buildErrorItem(product, details, answers, code, message) {
   };
 }
 
-async function buildRepricingPreviewState(scenarioId) {
-  const loadedPricing = await loadScenarioPricingContext(scenarioId);
+async function buildRepricingPreviewState(scenarioId, options = {}) {
+  const queryable = options.queryable || pool;
+  const loadedPricing = await loadScenarioPricingContext(scenarioId, queryable);
   if (!loadedPricing) {
     const error = new Error('Активну цінову матрицю не знайдено.');
     error.statusCode = 404;
@@ -99,7 +100,7 @@ async function buildRepricingPreviewState(scenarioId) {
   const fullConfigurationToken = hashPayload([getPricingContextSnapshot(pricingContext)]);
   let rateInfo;
   try {
-    rateInfo = await getUsdUahRateInfo();
+    rateInfo = options.rateObservation === undefined ? await getUsdUahRateInfo() : options.rateObservation.rateInfo;
   } catch (error) {
     rateInfo = {
       rate: null,
@@ -112,7 +113,7 @@ async function buildRepricingPreviewState(scenarioId) {
     };
   }
   const scenarioRule = asRuleObject(scenario.match_json);
-  const productsResult = await pool.query(
+  const productsResult = await queryable.query(
     `SELECT p.id,p.full_sku,i.public_sku,p.category,p.weight,p.total_price,p.total_price_uah,
             p.price_per_gram,p.uah_rate,p.details,p.status,p.exclude_from_export
      FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
@@ -175,7 +176,7 @@ async function buildRepricingPreviewState(scenarioId) {
         answers,
         product.weight,
         answers.is_calibrated,
-        { context: pricingContext, rateInfo }
+        { context: pricingContext, rateInfo, rateObservation: options.rateObservation }
       );
       const selectedScenarioId = Number(pricing.pricingDetails?.scenario?.id || 0);
       if (selectedScenarioId !== Number(scenario.id)) {
@@ -261,7 +262,7 @@ async function buildRepricingPreviewState(scenarioId) {
   const applicableItems = items.filter((item) => (
     item.status === 'changed' || ['price_missing', 'manual_price'].includes(item.errorCode)
   ));
-  const blockingCorrectionRequests = await getBlockingCorrectionRequests(items);
+  const blockingCorrectionRequests = await getBlockingCorrectionRequests(items, queryable);
   const customOnlyPricing = !hasSystemCandidates && candidateBindings.length > 0;
   const configurationToken = customOnlyPricing
     ? hashPayload(sortScenariosByPrecedence(pricingContext.scenarios).map((candidate) => ({
@@ -311,12 +312,13 @@ async function buildRepricingPreviewState(scenarioId) {
   };
 }
 
-async function buildRepricingPreview(scenarioId) {
-  return (await buildRepricingPreviewState(scenarioId)).preview;
+async function buildRepricingPreview(scenarioId, options = {}) {
+  return (await buildRepricingPreviewState(scenarioId, options)).preview;
 }
 
-async function buildGlobalRepricingPreview() {
-  const productsResult = await pool.query(
+async function buildGlobalRepricingPreview(options = {}) {
+  const queryable = options.queryable || pool;
+  const productsResult = await queryable.query(
     `SELECT p.id,p.full_sku,i.public_sku,p.category,p.weight,p.total_price,p.total_price_uah,
             p.price_per_gram,p.uah_rate,p.details,p.status,p.exclude_from_export
      FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
@@ -327,7 +329,7 @@ async function buildGlobalRepricingPreview() {
   const categoryCodes = [...new Set(productsResult.rows.map((product) => product.category))]
     .filter(Boolean)
     .sort();
-  const contextsByCategory = await loadPricingContexts(categoryCodes);
+  const contextsByCategory = await loadPricingContexts(categoryCodes, queryable);
   const contexts = categoryCodes.map((categoryCode) => contextsByCategory.get(categoryCode));
   const systemCategories = new Set(productsResult.rows.filter((product) => {
     const details = getProductDetails(product);
@@ -354,7 +356,7 @@ async function buildGlobalRepricingPreview() {
   const bindingScenarios = scenarios.filter((scenario) => systemCategories.has(scenario.categoryCode));
   let rateInfo;
   try {
-    rateInfo = await getUsdUahRateInfo();
+    rateInfo = options.rateObservation === undefined ? await getUsdUahRateInfo() : options.rateObservation.rateInfo;
   } catch (error) {
     rateInfo = {
       rate: null,
@@ -406,7 +408,7 @@ async function buildGlobalRepricingPreview() {
         answers,
         product.weight,
         answers.is_calibrated,
-        { context: contextsByCategory.get(product.category), rateInfo }
+        { context: contextsByCategory.get(product.category), rateInfo, rateObservation: options.rateObservation }
       );
       const selectedScenario = pricing.pricingDetails?.scenario || null;
       const matrixName = selectedScenario?.name || null;
@@ -503,7 +505,7 @@ async function buildGlobalRepricingPreview() {
     }
   }
 
-  const blockingCorrectionRequests = await getBlockingCorrectionRequests(items);
+  const blockingCorrectionRequests = await getBlockingCorrectionRequests(items, queryable);
   const preview = {
     scope: REPRICING_SCOPE_GLOBAL,
     customOnlyPricing,

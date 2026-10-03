@@ -441,7 +441,7 @@ test('migration 028 aborts without changing unsafe existing RBAC state', async (
         && !fileName.startsWith('028_')
         && !fileName.startsWith('030_')
         && !fileName.startsWith('031_')
-        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_') && !fileName.startsWith('040_') && !fileName.startsWith('041_') && !fileName.startsWith('042_') && !fileName.startsWith('043_') && !fileName.startsWith('044_') && !fileName.startsWith('045_') && !fileName.startsWith('046_') && !fileName.startsWith('047_') && !fileName.startsWith('048_') && !fileName.startsWith('049_') && !fileName.startsWith('050_') && !fileName.startsWith('051_') && !fileName.startsWith('052_') && !fileName.startsWith('053_') && !fileName.startsWith('054_') && !fileName.startsWith('055_') && !fileName.startsWith('056_') && !fileName.startsWith('057_'));
+        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_') && !fileName.startsWith('040_') && !fileName.startsWith('041_') && !fileName.startsWith('042_') && !fileName.startsWith('043_') && !fileName.startsWith('044_') && !fileName.startsWith('045_') && !fileName.startsWith('046_') && !fileName.startsWith('047_') && !fileName.startsWith('048_') && !fileName.startsWith('049_') && !fileName.startsWith('050_') && !fileName.startsWith('051_') && !fileName.startsWith('052_') && !fileName.startsWith('053_') && !fileName.startsWith('054_') && !fileName.startsWith('055_') && !fileName.startsWith('056_') && !fileName.startsWith('057_') && !fileName.startsWith('058_'));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
       path.resolve(preCustomRoleDirectory, fileName)
@@ -793,6 +793,7 @@ test('migration 023 constrains and makes durable audit records immutable', async
     'audit_events_occurred_idx',
     'audit_events_pkey',
     'audit_events_subject_idx',
+    'correction_batch_step_identity_idx',
   ]);
 
   const grants = await pool.query(`
@@ -870,7 +871,7 @@ test('migration 024 preserves historical product attribution as null', async () 
         && !fileName.startsWith('028_')
         && !fileName.startsWith('030_')
         && !fileName.startsWith('031_')
-        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_') && !fileName.startsWith('040_') && !fileName.startsWith('041_') && !fileName.startsWith('042_') && !fileName.startsWith('043_') && !fileName.startsWith('044_') && !fileName.startsWith('045_') && !fileName.startsWith('046_') && !fileName.startsWith('047_') && !fileName.startsWith('048_') && !fileName.startsWith('049_') && !fileName.startsWith('050_') && !fileName.startsWith('051_') && !fileName.startsWith('052_') && !fileName.startsWith('053_') && !fileName.startsWith('054_') && !fileName.startsWith('055_') && !fileName.startsWith('056_') && !fileName.startsWith('057_')
+        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_') && !fileName.startsWith('040_') && !fileName.startsWith('041_') && !fileName.startsWith('042_') && !fileName.startsWith('043_') && !fileName.startsWith('044_') && !fileName.startsWith('045_') && !fileName.startsWith('046_') && !fileName.startsWith('047_') && !fileName.startsWith('048_') && !fileName.startsWith('049_') && !fileName.startsWith('050_') && !fileName.startsWith('051_') && !fileName.startsWith('052_') && !fileName.startsWith('053_') && !fileName.startsWith('054_') && !fileName.startsWith('055_') && !fileName.startsWith('056_') && !fileName.startsWith('057_') && !fileName.startsWith('058_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -1017,7 +1018,7 @@ test('migration 026 preserves historical repricing attribution as null without a
         && !fileName.startsWith('028_')
         && !fileName.startsWith('030_')
         && !fileName.startsWith('031_')
-        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_') && !fileName.startsWith('040_') && !fileName.startsWith('041_') && !fileName.startsWith('042_') && !fileName.startsWith('043_') && !fileName.startsWith('044_') && !fileName.startsWith('045_') && !fileName.startsWith('046_') && !fileName.startsWith('047_') && !fileName.startsWith('048_') && !fileName.startsWith('049_') && !fileName.startsWith('050_') && !fileName.startsWith('051_') && !fileName.startsWith('052_') && !fileName.startsWith('053_') && !fileName.startsWith('054_') && !fileName.startsWith('055_') && !fileName.startsWith('056_') && !fileName.startsWith('057_')
+        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_') && !fileName.startsWith('040_') && !fileName.startsWith('041_') && !fileName.startsWith('042_') && !fileName.startsWith('043_') && !fileName.startsWith('044_') && !fileName.startsWith('045_') && !fileName.startsWith('046_') && !fileName.startsWith('047_') && !fileName.startsWith('048_') && !fileName.startsWith('049_') && !fileName.startsWith('050_') && !fileName.startsWith('051_') && !fileName.startsWith('052_') && !fileName.startsWith('053_') && !fileName.startsWith('054_') && !fileName.startsWith('055_') && !fileName.startsWith('056_') && !fileName.startsWith('057_') && !fileName.startsWith('058_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),
@@ -1107,7 +1108,7 @@ test('migration 027 preserves historical export and publication attribution as n
         && !fileName.startsWith('028_')
         && !fileName.startsWith('030_')
         && !fileName.startsWith('031_')
-        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_') && !fileName.startsWith('040_') && !fileName.startsWith('041_') && !fileName.startsWith('042_') && !fileName.startsWith('043_') && !fileName.startsWith('044_') && !fileName.startsWith('045_') && !fileName.startsWith('046_') && !fileName.startsWith('047_') && !fileName.startsWith('048_') && !fileName.startsWith('049_') && !fileName.startsWith('050_') && !fileName.startsWith('051_') && !fileName.startsWith('052_') && !fileName.startsWith('053_') && !fileName.startsWith('054_') && !fileName.startsWith('055_') && !fileName.startsWith('056_') && !fileName.startsWith('057_')
+        && !fileName.startsWith('032_') && !fileName.startsWith('035_') && !fileName.startsWith('036_') && !fileName.startsWith('037_') && !fileName.startsWith('038_') && !fileName.startsWith('039_') && !fileName.startsWith('040_') && !fileName.startsWith('041_') && !fileName.startsWith('042_') && !fileName.startsWith('043_') && !fileName.startsWith('044_') && !fileName.startsWith('045_') && !fileName.startsWith('046_') && !fileName.startsWith('047_') && !fileName.startsWith('048_') && !fileName.startsWith('049_') && !fileName.startsWith('050_') && !fileName.startsWith('051_') && !fileName.startsWith('052_') && !fileName.startsWith('053_') && !fileName.startsWith('054_') && !fileName.startsWith('055_') && !fileName.startsWith('056_') && !fileName.startsWith('057_') && !fileName.startsWith('058_')
       ));
     await Promise.all(migrationFiles.map((fileName) => fs.copyFile(
       path.resolve(migrationDirectory, fileName),

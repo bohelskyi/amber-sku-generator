@@ -36,6 +36,8 @@ terminology, read boundaries and fixture-versus-human acceptance.
 
 ## Current operational runbooks
 
+- [Reviewed bulk correction requests](CORRECTION_REQUEST_BATCH.md) — read-only plans, explicit scope, sequential apply, atomic phase receipts and separate delivery review. Implemented locally; no production run is implied.
+
 - [Full-product cutover](FULL_PRODUCT_CUTOVER_RUNBOOK.md) — procedure for installations that have not completed cutover. Current production completed Wave 1 activation/cutover; ordinary deployments follow Operations. Rehearsal and dated production receipts remain separate.
 
 ## Historical archive

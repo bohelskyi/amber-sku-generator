@@ -1,7 +1,7 @@
 const lifecycleGate = require('./full-product-cutover-gate');
 const APPLICATION_USER_ADMIN_LOCK_KEY = 'amber_application_user_admin_active_administrators';
 
-async function assertActorStillAuthorized(client, actorUserId, permissionKey, createError) {
+async function assertActorStillAuthorized(client, actorUserId, permissionKey, createError, { readOnly = false } = {}) {
   const result = await client.query(
     `SELECT u.status,
             EXISTS (
@@ -15,7 +15,7 @@ async function assertActorStillAuthorized(client, actorUserId, permissionKey, cr
             ) AS has_permission
      FROM application_users u
      WHERE u.id = $1
-     FOR KEY SHARE`,
+     ${readOnly ? '' : 'FOR KEY SHARE'}`,
     [actorUserId, permissionKey]
   );
   if (

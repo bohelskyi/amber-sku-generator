@@ -195,4 +195,10 @@ Use [Exports](EXPORTS.md#reconciliation-and-exclusion-provenance) for delivery/t
 
 ## Direct recount pricing
 
+The local [reviewed bulk request processor](CORRECTION_REQUEST_BATCH.md) reuses
+claim, authoritative refresh and completion with sealed preflight/selection,
+per-phase database receipts and per-request transactions. Legacy missing review
+proof, changed results and other owners remain excluded; delivery holds require
+separate review. Migration 058 enforces atomic unique batch phase receipts.
+
 Authorized `products.recount` users may choose the existing `system_auto`, `manual_uah`, or `usd_per_gram` decision even when automatic pricing exists. Preview returns an opaque decision token; apply normalizes the decision and checks that token, source signature, target, and current authoritative calculation again inside the locked transaction. React never supplies a trusted calculated price. Request-only custom pricing still requires `corrections.price_override`; no role grants change. Missing automatic pricing requires a valid explicit supported decision. USD/gram persists the existing custom basis and rounding semantics.
