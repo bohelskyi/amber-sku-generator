@@ -4,9 +4,10 @@ import { Link } from 'react-router-dom';
 import { AuthContext } from '../../auth/auth-context.js';
 import { api } from '../../lib/api.js';
 import { MagentoSyncStatus } from './MagentoSyncStatus.jsx';
+import { ProductMagentoAttention } from './ProductMagentoAttention.jsx';
 import { ProductNameConflict } from './ProductNameConflict.jsx';
 
-export function ProductMagentoState({ product, onSaved }) {
+export function ProductMagentoState({ product, onRepairCharacteristics, onSaved }) {
   const { permissions = [], principalLifetime } = useContext(AuthContext) || {};
   const productId = product.productId;
   const [readState, setReadState] = useState({ productId: null, principalLifetime: null, current: null, error: '' });
@@ -49,9 +50,13 @@ export function ProductMagentoState({ product, onSaved }) {
     return () => { window.clearInterval(timer); window.removeEventListener('focus', update); };
   }, [canRead, waiting]);
   if (!canRead) return null;
+  const hasReadinessProblem = current?.problems?.some((problem) => problem.code === 'PRODUCT_EVALUATION_NOT_READY');
   return <div className="product-sync-state px-4 py-2" aria-live="polite">
-    <MagentoSyncStatus status={current} />
+    <MagentoSyncStatus status={hasReadinessProblem ? { ...current, reason: null } : current} />
     {current?.state === 'needs_attention' && <Link className="text-xs underline" to="/sync-problems">Переглянути проблему</Link>}
+    <ProductMagentoAttention key={productId} product={{ ...product, nameConflict: Boolean(current?.nameConflict) }} problems={current?.problems || []}
+      onRepairCharacteristics={onRepairCharacteristics}
+      onSaved={() => { setRefresh((value) => value + 1); onSaved?.(); }} />
     <ProductNameConflict key={productId} productId={productId} available={Boolean(current?.nameConflict)} onSaved={() => { setRefresh((value) => value + 1); onSaved?.(); }} />
     <button className="sync-refresh" type="button" aria-label="Оновити стан Magento" onClick={() => setRefresh((value) => value + 1)}><RefreshCw size={14} aria-hidden="true" /></button>
     {error && <span className="text-xs text-slate-500">{error}</span>}

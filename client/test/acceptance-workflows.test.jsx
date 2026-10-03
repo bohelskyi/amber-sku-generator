@@ -73,6 +73,48 @@ it('uncertain write is a resolution queue entry without a retry action', async (
   expect(screen.queryByRole('button', { name: /Повтор|Retry/ })).toBeNull();
   expect(screen.getByRole('link', { name: 'Відкрити товар' }).getAttribute('href')).toBe('/products/open?article=AG-000002');
 });
+it('product readiness shows local repair guidance, human fields and unchanged raw diagnostics', async () => {
+  api.get.mockResolvedValue({ data: {
+    items: [{ productId: 1368, article: 'SV5111010', category: 'SV', problems: [
+      { code: 'NAME_READ_UNAVAILABLE', message: 'Назви товару в Amber потрібно заповнити або виправити.', resolution: 'product' },
+      { code: 'PRODUCT_EVALUATION_NOT_READY', message: 'Товар не готовий до синхронізації. Потрібно доповнити або виправити дані товару.',
+        resolution: 'product', issueFields: ['kamin_obrobka', 'name', 'rozmir_suveniriv'] },
+    ] }],
+    pageInfo: { limit: 20, offset: 0, total: 1, hasPrevious: false, hasNext: false },
+  } });
+  shell(<SyncProblemsPage />);
+  await screen.findAllByText(/Товар не готовий до синхронізації/);
+  expect(screen.queryByText(/Не вдалося прочитати назву Magento/)).toBeNull();
+  for (const label of ['Розмір', 'Назва українською та англійською', 'Обробка каменю']) expect(screen.getByText(label)).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Виправити дані товару' }).getAttribute('href')).toBe('/products/open?article=SV5111010');
+  for (const disclosure of screen.getAllByText('Технічні деталі')) fireEvent.click(disclosure);
+  expect(screen.getByText('PRODUCT_EVALUATION_NOT_READY')).toBeTruthy();
+  expect(screen.getByText('kamin_obrobka, name, rozmir_suveniriv')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /Повтор|Надіслати|Retry/ })).toBeNull();
+});
+it('view-only readiness gives a truthful handoff and no repair action', async () => {
+  api.get.mockResolvedValue({ data: {
+    items: [{ productId: 1368, article: 'SV5111010', category: 'SV', problems: [{
+      code: 'PRODUCT_EVALUATION_NOT_READY', message: 'Товар не готовий до синхронізації.', resolution: 'product', issueFields: ['name', 'rozmir_suveniriv'],
+    }] }], pageInfo: { limit: 20, offset: 0, total: 1, hasPrevious: false, hasNext: false },
+  } });
+  shell(<SyncProblemsPage />, { ...auth, permissions: ['products.view'] });
+  await screen.findAllByText(/Товар не готовий/);
+  expect(screen.getByText('Передайте виправлення оператору з дозволом на зміну даних товару.')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: 'Виправити дані товару' })).toBeNull();
+  expect(screen.queryByRole('link', { name: 'Відкрити товар' })).toBeNull();
+});
+it('readiness action requires permission for a field that is actually repairable', async () => {
+  api.get.mockResolvedValue({ data: {
+    items: [{ productId: 1368, article: 'SV5111010', category: 'SV', problems: [{
+      code: 'PRODUCT_EVALUATION_NOT_READY', message: 'Товар не готовий до синхронізації.', resolution: 'product', issueFields: ['name'],
+    }] }], pageInfo: { limit: 20, offset: 0, total: 1, hasPrevious: false, hasNext: false },
+  } });
+  shell(<SyncProblemsPage />, { ...auth, permissions: ['products.view', 'products.decode', 'products.recount'] });
+  await screen.findAllByText(/Товар не готовий/);
+  expect(screen.queryByRole('link', { name: 'Виправити дані товару' })).toBeNull();
+  expect(screen.getByText('Передайте виправлення оператору з дозволом на зміну даних товару.')).toBeTruthy();
+});
 it('repricing summary shows only changed categories and preserved manual products', () => {
   render(<RepricingSummary config={{ categories: { BR: { name: 'Браслети' } } }} controller={{ currentCalculationRate: null,
     effectiveSummary: { changedCount: 4, categories: [{ code: 'BR', count: 4 }], manualPreservedCount: 8, currentCount: 2, errorCount: 1 } }} />);

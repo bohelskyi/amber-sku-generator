@@ -264,6 +264,21 @@ function systemFixture(group, answers = {}) {
     name: base.name, price: 42, type_id: 'simple', status: 1, visibility: 4, custom_attributes: [], extension_attributes: { category_links: [] } };
   return { amber, schema, raw };
 }
+test('SV readiness separates missing size/names from valid or unmapped stone processing', () => {
+  const f = systemFixture('SV', { souvenir: 5, stone_processing: 0, weight: '3.6' });
+  delete f.amber.product.details.answers.size;
+  Object.assign(f.amber.product, { magento_name_subject_ua: null, magento_name_subject_en: null });
+  f.amber.nameState = null;
+  f.raw.name = 'Remote stone';
+  const validStone = run(f, f.raw);
+  assert.ok(has(validStone, 'NAME_READ_UNAVAILABLE'));
+  const readiness = validStone.blockers.find((blocker) => blocker.code === 'PRODUCT_EVALUATION_NOT_READY');
+  assert.deepEqual(readiness.issueFields.sort(), ['name', 'rozmir_suveniriv']);
+
+  f.amber.product.details.answers.stone_processing = 9;
+  const invalidStone = run(f, f.raw).blockers.find((blocker) => blocker.code === 'PRODUCT_EVALUATION_NOT_READY');
+  assert.deepEqual(invalidStone.issueFields.sort(), ['kamin_obrobka', 'name', 'rozmir_suveniriv']);
+});
 test('CH reversed legacy dimensions are a diff; evaluator semantics and valid size text remain the payload', () => {
   const f = systemFixture('CH', { bead_length: '12.5', bead_width: '8.2', rosary_length: '32' });
   f.raw.custom_attributes = [{ attribute_code: 'dovzhyna_namystyny', value: '8.2' },

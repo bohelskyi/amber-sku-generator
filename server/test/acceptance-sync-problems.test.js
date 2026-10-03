@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { safeDiagnostics, presentProblem } = require('../src/services/magento/sync-problems');
+const { safeDiagnostics, presentProblem, presentProblems } = require('../src/services/magento/sync-problems');
 const { getBatchSyncStatus } = require('../src/services/repricing/batch-read-model');
 
 test('sync problems project specific planner evidence and exclude remote payloads and credentials', () => {
@@ -16,6 +16,18 @@ test('sync problems project specific planner evidence and exclude remote payload
     'REQUIRED_ATTRIBUTE_VALUE_MISSING','NAME_CONFLICT']) {
     assert.notEqual(presentProblem({ code }).message, presentProblem({ code: 'data_or_binding' }).message);
   }
+});
+test('local name readiness reclassifies only the co-occurring name-unavailable presentation', () => {
+  const presented = presentProblems([
+    { code: 'NAME_READ_UNAVAILABLE' },
+    { code: 'PRODUCT_EVALUATION_NOT_READY', issueFields: ['kamin_obrobka', 'name', 'rozmir_suveniriv'] },
+  ]);
+  assert.equal(presented[0].message, 'Назви товару в Amber потрібно заповнити або виправити.');
+  assert.equal(presented[0].code, 'NAME_READ_UNAVAILABLE');
+  assert.match(presented[1].message, /Товар не готовий до синхронізації/);
+  assert.deepEqual(presented[1].issueFields, ['kamin_obrobka', 'name', 'rozmir_suveniriv']);
+  assert.equal(presentProblems([{ code: 'NAME_READ_UNAVAILABLE' }])[0].message,
+    'Не вдалося прочитати назву Magento для перевірки.');
 });
 test('repricing progress follows captured generations, including later edits and exact bigint comparisons', async () => {
   const database = { query: async (sql) => ({ rows: sql.startsWith('SELECT id,')
