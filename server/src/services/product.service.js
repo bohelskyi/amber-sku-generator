@@ -27,7 +27,7 @@ const {
   getCorrectionWeight,
   getProductDetails,
   mergeRecountAnswerPatch,
-  normalizeAnswerMap,
+  normalizeProductInputAnswers,
   omitHiddenRecountAnswers,
 } = require('./product/product-answers');
 const {
@@ -160,6 +160,7 @@ async function validateNonSkuAnswers(categoryCode, answers, isCalibrated, querya
   }
 
   for (const question of questions.values()) {
+    if (question.key === 'size' && question.input_type === 'text' && newReadiness.isKeychain(categoryCode, answers)) question.required = 0;
     const validation = inspectNonSkuAnswer(question, answers, isCalibrated);
     if (!validation.visible) continue;
     if (validation.issue === 'required') {
@@ -179,7 +180,7 @@ async function buildProductPreview(
   { queryable = pool, lockSequence = false, pricingDecision = null, rateObservation } = {}
 ) {
   const normalizedCategoryCode = String(categoryCode || '').trim().toUpperCase();
-  const normalizedAnswers = normalizeAnswerMap(answers);
+  const normalizedAnswers = normalizeProductInputAnswers(normalizedCategoryCode, answers);
   const categoryResult = await queryable.query(
     `SELECT requires_weight, COALESCE(sku_separator, '') AS legacy_sku_separator, skip_hidden_sku_questions
      FROM categories
@@ -448,7 +449,7 @@ async function buildRecountPreview({
   const categoryCode = sourceDecoded.category.code;
   const previousAnswers = buildProductAnswerContext(sourceDecoded);
   const submittedAnswers = answers && typeof answers === 'object' ? answers : {};
-  const nextAnswers = mergeRecountAnswerPatch(previousAnswers, submittedAnswers);
+  const nextAnswers = normalizeProductInputAnswers(categoryCode, mergeRecountAnswerPatch(previousAnswers, submittedAnswers));
   const hasSubmittedCalibration = Object.hasOwn(submittedAnswers, 'is_calibrated');
   const nextIsCalibrated =
     isCalibrated !== undefined && isCalibrated !== null && isCalibrated !== ''
@@ -1020,15 +1021,16 @@ async function applyProductRecount(payload, options = {}) {
 
 async function buildNewProductPreview(payload, options = {}) {
   const category = String(payload.categoryCode || '').trim().toUpperCase();
+  payload = { ...payload, answers: normalizeProductInputAnswers(category, payload.answers || {}) };
   const names = newReadiness.subjects(category, payload);
   const preview = await buildProductPreview(payload, options);
   if (!names) return preview;
   await newReadiness.validate({ category, full_sku: preview.fullProposedSku,
     total_price_uah: preview.totalPriceUah, weight: preview.weightVal,
-    details: { answers: normalizeAnswerMap(payload.answers || {}) },
+    details: { answers: payload.answers },
     magento_name_subject_ua: names.ua, magento_name_subject_en: names.en }, options.queryable || pool, { allowMissingPrice: true });
   const result = { ...preview, newProductInput: { version: 1, names } };
-  result.previewToken = getProductPreviewToken(result, category, normalizeAnswerMap(payload.answers || {}), payload.isCalibrated);
+  result.previewToken = getProductPreviewToken(result, category, payload.answers, payload.isCalibrated);
   return result;
 }
 
@@ -1052,7 +1054,7 @@ async function saveProduct(payload, options = {}) {
       throw err;
     }
     const categoryCode = String(payload.category || payload.categoryCode || '').trim().toUpperCase();
-    const answers = normalizeAnswerMap(payload.answers || payload.details?.answers || {});
+    const answers = normalizeProductInputAnswers(categoryCode, payload.answers || payload.details?.answers || {});
     const isCalibrated = payload.isCalibrated
       ?? payload.details?.isCalibrated
       ?? answers.is_calibrated

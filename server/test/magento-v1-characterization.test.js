@@ -396,11 +396,13 @@ test('SV synthetic dependent questions gate unknown values and required answers 
 
 test('required free text does not depend on question metadata and SKU has no separate nonblank validation', () => {
   for (const [group, key, field] of [['BR', 'braclet_size', 'dovzhyna_brasletu_diuimiv'], ['SV', 'size', 'rozmir_suveniriv']]) {
+    const route = group === 'SV' ? { souvenir: 1 } : {};
+    const names = group === 'SV' ? manualPair : {};
     for (const value of [undefined, null, '', ' \t ']) {
-      assert.deepEqual(map(group, { [key]: value }).errors, [{ field, message: `Немає відповіді ${key}.` }]);
+      assert.deepEqual(map(group, { ...route, [key]: value }, names).errors, [{ field, message: `Немає відповіді ${key}.` }]);
     }
-    assert.equal(map(group, { [key]: 0 }).base[field], '0');
-    assert.deepEqual(map(group, { [key]: 0 }).errors, []);
+    assert.equal(map(group, { ...route, [key]: 0 }, names).base[field], '0');
+    assert.deepEqual(map(group, { ...route, [key]: 0 }, names).errors, []);
   }
   const blankSku = map('BR', {}, { full_sku: null });
   assert.deepEqual(blankSku.errors, []);

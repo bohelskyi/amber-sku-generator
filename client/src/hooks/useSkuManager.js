@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { productsApi } from '../api/products-api';
-import { createRequirements } from '../lib/product-create-readiness';
+import { createRequirements, isCreateQuestionRequired } from '../lib/product-create-readiness';
 import { useProductRecount } from './useProductRecount';
 import { useCopyFeedback } from './product/useCopyFeedback';
 import { useExportWorkflow } from './product/useExportWorkflow';
@@ -186,7 +186,7 @@ export function useSkuManager({
   );
   const createRules = createRequirements(config, selectedCat, answers);
   const requiredQuestions = visibleQuestionsForSelected
-    .filter((question) => question.required === 1 || createRules.requiredAnswers.includes(question.id))
+    .filter((question) => isCreateQuestionRequired(question, createRules))
     .filter((question) => isTextQuestion(question) || getVisibleOptions(question).length > 0);
   const requiredCount = requiredQuestions.length + (createRules.namesRequired ? 2 : 0);
   const answeredRequiredCount = requiredQuestions.filter((question) => {
@@ -306,7 +306,7 @@ export function useSkuManager({
     const categoryQuestions = config.questions?.[selectedCat] || [];
     const hasMissingRequired = categoryQuestions
       .filter((question) => isQuestionVisible(question, answers, isCalibrated))
-      .filter((question) => question.required === 1)
+      .filter((question) => isCreateQuestionRequired(question, createRequirements(config, selectedCat, answers)))
       .filter((question) =>
         isTextQuestion(question) ||
         getVisibleOptionsForQuestion(question, answers, isCalibrated).length > 0
@@ -367,7 +367,7 @@ export function useSkuManager({
 
     const missingRequired = questionsForSelected
       .filter((question) => getQuestionVisibility(question))
-      .filter((question) => question.required === 1)
+      .filter((question) => isCreateQuestionRequired(question, createRules))
       .filter((question) => isTextQuestion(question) || getVisibleOptions(question).length > 0)
       .filter((question) => {
         const value = answers[question.id];

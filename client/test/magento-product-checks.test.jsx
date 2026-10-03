@@ -15,12 +15,20 @@ const config = {
     { id: 'is_calibrated', label: 'Калібрування', options: [{ id: 0, label: 'Ні' }, { id: 2, label: 'Напів' }] },
     { id: 'finish', label: 'Обробка фігурки', visible_if_json: { souvenir: 1 }, options: [{ id: 1, label: 'Полірована' }] },
   ] },
-  productCreateRequirements: { SV: { requiredAnswers: ['size', 'weight'], automaticName: { question: 'souvenir', values: ['6'] } } },
+  productCreateRequirements: { SV: { requiredAnswers: ['size', 'weight'], optionalAnswersWhen: { size: { question: 'souvenir', values: ['6'] } }, automaticName: { question: 'souvenir', values: ['6'] } } },
 };
 const result = { hypothetical: true, article: 'AG-PREVIEW', routeKey: 'SV:normal', sendable: true, blockers: [] };
 beforeEach(() => { vi.resetAllMocks(); api.get.mockResolvedValue({ data: config }); api.post.mockResolvedValue({ data: result }); });
 afterEach(cleanup);
 const shell = (props = {}) => render(<MagentoProductChecks revision={revision} categoryCode="SV" onRepresentative={vi.fn()} {...props} />);
+it('keychain CREATE check leaves size optional and sends decimal comma weight without fabricating size', async () => {
+  shell(); fireEvent.change(await screen.findByLabelText('Вид сувеніра'), { target: { value: '6' } });
+  expect(screen.getByLabelText('Розмір').required).toBe(false);
+  fireEvent.change(screen.getByLabelText('Вага сувеніра'), { target: { value: '12,7' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити приклад CREATE' }));
+  await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+  expect(api.post.mock.calls[0][1].product.answers).toEqual({ souvenir: 6, weight: '12,7' });
+});
 async function fillCreate() {
   fireEvent.change(await screen.findByLabelText('Вид сувеніра'), { target: { value: '1' } });
   fireEvent.change(screen.getByLabelText('Розмір'), { target: { value: '3/2' } });

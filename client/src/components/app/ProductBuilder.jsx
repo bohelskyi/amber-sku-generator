@@ -7,7 +7,7 @@ import {
   formatWholeUah,
 } from '../../lib/formatters';
 import { handleNumberKeyDown, handleNumberWheel } from '../../lib/number-input';
-import { createRequirements } from '../../lib/product-create-readiness';
+import { createRequirements, isCreateQuestionRequired } from '../../lib/product-create-readiness';
 
 const hasAnswer = (value) =>
   value !== undefined && value !== null && String(value).trim() !== '';
@@ -87,7 +87,7 @@ export function ProductBuilder({
     const visibleOptions = getVisibleOptionsForQuestion(question, answers);
     const hasAvailableControl = textQuestion || visibleOptions.length > 0;
 
-    if ((question.required === 1 || createRules.requiredAnswers.includes(question.id)) && hasAvailableControl && !hasAnswer(value)) {
+    if (isCreateQuestionRequired(question, createRules) && hasAvailableControl && !hasAnswer(value)) {
       blockers.push({
         fieldId: question.id,
         message: `Заповніть поле «${question.label}».`,
@@ -103,8 +103,8 @@ export function ProductBuilder({
       });
     }
     if (question.id === 'weight' && createRules.requiredAnswers.includes('weight') && hasAnswer(value)
-      && (!Number.isFinite(Number(value)) || Number(value) <= 0)) {
-      blockers.push({ fieldId: question.id, message: 'Вкажіть додатну вагу; для дробової частини використовуйте крапку.' });
+      && (!Number.isFinite(Number(String(value).replace(',', '.'))) || Number(String(value).replace(',', '.')) <= 0)) {
+      blockers.push({ fieldId: question.id, message: 'Вкажіть додатну числову вагу.' });
     }
     return blockers;
   }, []);
@@ -210,7 +210,7 @@ export function ProductBuilder({
           {visibleQuestions.map((question) => {
             const visibleOptions = getVisibleOptionsForQuestion(question, answers);
             const textQuestion = isTextQuestion(question);
-            const isRequired = (question.required === 1 || createRules.requiredAnswers.includes(question.id))
+            const isRequired = isCreateQuestionRequired(question, createRules)
               && (textQuestion || visibleOptions.length > 0);
             const blocker = blockerByFieldId.get(question.id);
             const blockerMessageId = `builder-blocker-${question.id}`;

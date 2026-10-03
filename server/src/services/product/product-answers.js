@@ -1,4 +1,5 @@
 const { isRuleMatched } = require('../../utils/rules');
+const { parsePositiveDecimal } = require('../../utils/numbers');
 
 function buildAnswerMap(decodedAnswers) {
   return decodedAnswers.reduce((answers, item) => {
@@ -25,6 +26,27 @@ function normalizeAnswerMap(answers = {}) {
     result[key] = Number.isNaN(numericValue) ? value : numericValue;
     return result;
   }, {});
+}
+
+// Write-input normalization only. Stored reads and the reviewed historical SV
+// representation repair retain their existing behavior; no source row is fixed.
+function normalizeProductInputAnswers(categoryCode, answers = {}) {
+  const input = { ...answers };
+  if (categoryCode === 'SV' && String(input.souvenir) === '6'
+    && typeof input.size === 'string' && input.size.trim() === '') delete input.size;
+  if (categoryCode === 'SV' && Object.hasOwn(input, 'weight')) {
+    const value = input.weight;
+    if (value == null || String(value).trim() === '') delete input.weight;
+    else {
+      const text = typeof value === 'string' ? value.trim() : value;
+      if (typeof text === 'string' && text.includes(',') && !/^\d+,\d+$/.test(text)) {
+        throw Object.assign(new Error('Вкажіть додатну числову вагу SV.'), { statusCode: 422 });
+      }
+      try { input.weight = parsePositiveDecimal(text, 'Вага SV'); }
+      catch (cause) { cause.statusCode = 422; throw cause; }
+    }
+  }
+  return normalizeAnswerMap(input);
 }
 
 function mergeRecountAnswerPatch(previousAnswers, submittedAnswers) {
@@ -129,5 +151,6 @@ module.exports = {
   isQuestionVisibleForSku,
   mergeRecountAnswerPatch,
   normalizeAnswerMap,
+  normalizeProductInputAnswers,
   omitHiddenRecountAnswers,
 };
