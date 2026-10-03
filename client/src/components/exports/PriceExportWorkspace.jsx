@@ -6,7 +6,7 @@ import { Notice, SectionHeader } from '../ui';
 
 export function PriceExportWorkspace({ workflow, canCreate }) {
   const files = useMemo(() => workflow.review ? [{ groupCode: 'prices', fileName: 'sku,price', csvContent: workflow.review.csvContent }] : [], [workflow.review]);
-  return <section className="space-y-4"><SectionHeader title="Оновлення цін Magento" description="Перевірте поточну чергу, створіть файл і окремо підтвердьте збережений результат." />
+  return <section className="space-y-4"><SectionHeader title="Експорт цін (сумісність)" description="Історичний потік файлів цін. Поточні зміни доставляються через інтеграцію Magento; сумісні операції зі збереженими результатами залишаються доступними." />
     {workflow.snapshot ? <>
       {workflow.changed && <p role="status">Після попереднього перегляду дані змінилися. Файл створено з актуальними значеннями нижче.</p>}
       <StoredSnapshot snapshot={workflow.snapshot} loading={workflow.busy || workflow.compared === false} canConfirm={canCreate} onDownload={workflow.download} onConfirm={workflow.confirm} loadArtifact={workflow.readArtifact} />

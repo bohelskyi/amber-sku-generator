@@ -88,7 +88,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it('mounts every export destination without commands or admin reads, with native active navigation', async () => {
   const { router } = mount(); await screen.findByText(/1 новий товар очікує/, {}, { timeout: 10000 });
-  for (const [title, path, nav] of [['Робочі експорти', '/exports/sessions', 'Розділи експорту'], ['Спільні зі мною', '/exports/shared', 'Робочі експорти'], ['Запрошення', '/exports/invitations', 'Робочі експорти'], ['Оновлення цін', '/exports/prices', 'Розділи експорту'], ['Огляд', '/exports', 'Розділи експорту']]) {
+  for (const [title, path, nav] of [['Робочі експорти', '/exports/sessions', 'Розділи експорту'], ['Спільні зі мною', '/exports/shared', 'Робочі експорти'], ['Запрошення', '/exports/invitations', 'Робочі експорти'], ['Експорт цін (сумісність)', '/exports/prices', 'Розділи експорту'], ['Огляд', '/exports', 'Розділи експорту']]) {
     const item = within(screen.getByRole('navigation', { name: nav })).getByRole('link', { name: title });
     item.focus(); expect(document.activeElement).toBe(item); expect(item.tabIndex).toBe(0);
     fireEvent.click(item); await waitFor(() => expect(router.state.location.pathname).toBe(path));
@@ -107,7 +107,7 @@ it('mounts every export destination without commands or admin reads, with native
 it.each([390, 1440])('keeps Magento summary on products and legacy exports accessible by deep link at %i px', async (width) => {
   vi.stubGlobal('innerWidth', width);
   const { router } = mount('/');
-  await screen.findByRole('heading', { name: 'Товари' });
+  await screen.findByRole('heading', { name: 'Товари' }, { timeout: 10000 });
   expect(screen.queryByRole('region', { name: 'Експорт' })).toBeNull();
   expect(screen.queryByRole('link', { name: 'Перейти до експорту' })).toBeNull();
   noExportWork();
@@ -115,7 +115,7 @@ it.each([390, 1440])('keeps Magento summary on products and legacy exports acces
   await screen.findByRole('heading', { name: 'Експорт товарів у Magento' });
   noExportWork();
   await navigate(router, '/exports/prices');
-  await screen.findByRole('heading', { name: 'Оновлення цін Magento' }); noExportWork();
+  await screen.findByRole('heading', { name: 'Експорт цін (сумісність)' }); noExportWork();
 });
 it('keeps view-only legacy export deep links without create or archive authority', async () => {
   exports.getStatus.mockResolvedValue(response({ delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false }, countSinceLastExport: 0 }));

@@ -15,9 +15,33 @@ capabilities. Personas are acceptance fixtures, not authorization replacements.
 | Товари | `/products`; create at `/products/create?category=…`; open at `/products/open?article=…`; history at `/products/history`. |
 | Потребує уваги | `/attention`; independently authorized corrections at `/admin/corrections` and recorded synchronization problems at `/sync-problems`. |
 | Переоцінка | `/admin/repricing`; preparation, review and batch history retain domain controllers. |
-| Експорт | `/exports`; `/prices`, `/sessions`, `/shared`, `/invitations`, `/history` and exact stored-result links below it. |
-| Налаштування | `/settings` links to `/admin/catalog`, `/admin/pricing`, `/admin/magento` and `/admin/export-templates`. |
+| Налаштування | `/settings` links to Каталог (`/admin/catalog`), Ціноутворення (`/admin/pricing`), Інтеграція Magento (`/admin/magento`) and Шаблони інтеграції (`/admin/export-templates`). |
 | Адміністрування | `/administration` links to `/admin/users`, `/admin/roles`, `/admin/audit`. |
+
+The product-owner correction of 2026-10-03 removes all export destinations from
+daily navigation. Current daily work is **Товари → Потребує уваги → Переоцінка**;
+current product and price changes use the supported Magento integration.
+Administration shows **Користувачі → Ролі та дозволи → Аудит**.
+
+Permitted users find **Історичний експорт** in the account menu, leading to the
+existing `/exports` overview. File history comes first; product/price snapshots,
+own/shared sessions, invitations, exact results and original-operation recovery
+remain at their existing `/exports/history`, `/exports/prices`, `/exports/sessions`,
+`/exports/shared`, `/exports/invitations` and deeper routes. Price Export is also
+legacy, labelled **Експорт цін (сумісність)**. No top-level archive is introduced.
+Export-only users retain a `/` fallback to this compatibility overview without a
+daily export destination. Permissions, reads/writes, files and recovery are unchanged.
+
+Templates remain current integration configuration, labelled **Шаблони інтеграції**.
+This is a verified dependency, not an inference from the editor's existence:
+[`binding.service.js`](../server/src/services/magento/binding.service.js) pins and
+validates an immutable `export_template_versions` version for each binding revision;
+[`sync-preview-db.js`](../server/src/services/magento/sync-preview-db.js) loads that
+pinned definition and checks its hash for direct synchronization planning;
+[`integration-successor.js`](../server/src/services/magento/integration-successor.js)
+requires an explicit published template version for reviewed successor preparation.
+The existing editor/URL, publication contracts and legacy export selection remain
+compatible. Template publication does not itself publish a Magento binding.
 
 `/?article=…` and `/?exportSku=…` redirect to the permitted product context while
 retaining meaningful query information. `/admin` and its former catalog/pricing

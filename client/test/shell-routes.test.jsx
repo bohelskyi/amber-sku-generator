@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { createMemoryRouter, Link, Route, RouterProvider, Routes } from 'react-router-dom';
+import { createMemoryRouter, Link, MemoryRouter, Route, RouterProvider, Routes } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AuthContext } from '../src/auth/auth-context.js';
 import { AppShell } from '../src/components/app/AppShell.jsx';
@@ -9,6 +9,11 @@ const adminRender = vi.hoisted(() => vi.fn(({ mode }) => <h1>{mode}</h1>));
 vi.mock('../src/pages/AppPage.jsx', () => ({ default: () => <h1>Товари</h1> }));
 vi.mock('../src/pages/AdminPage.jsx', () => ({ default: adminRender }));
 vi.mock('../src/pages/CorrectionHistoryPage.jsx', () => ({ default: () => <h1>Історія товарів</h1> }));
+vi.mock('../src/pages/ExportsPage.jsx', () => ({ default: () => <h1>Історичний експорт</h1> }));
+vi.mock('../src/api/exports-api.js', () => ({ exportsApi: {
+  getStatus: vi.fn().mockResolvedValue({ data: { delivery: { legacyProductCsvEnabled: false } } }),
+  getPriceStatus: vi.fn().mockResolvedValue({ data: { pendingCount: 0 } }),
+} }));
 
 const auth = (permissions) => ({
   permissions, identity: { name: 'Оператор' }, roles: [], logout: vi.fn(), principalLifetime: { valid: true },
@@ -19,6 +24,46 @@ function mount(path, permissions) {
   return router;
 }
 afterEach(() => { cleanup(); adminRender.mockClear(); vi.restoreAllMocks(); });
+
+it('exposes legacy export only in the account menu with its existing permission', async () => {
+  render(<AuthContext.Provider value={auth(['products.view', 'exports.view'])}><MemoryRouter>
+    <AppShell><h1>Товари</h1></AppShell>
+  </MemoryRouter></AuthContext.Provider>);
+  expect(screen.queryByRole('link', { name: 'Експорт', exact: true })).toBeNull();
+  expect(screen.queryByRole('link', { name: 'Історичний експорт' })).toBeNull();
+  expect(document.querySelector('.app-navigation a[href="/exports"]')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Обліковий запис: Оператор' }));
+  expect((await screen.findByRole('link', { name: 'Історичний експорт' })).getAttribute('href')).toBe('/exports');
+  cleanup();
+  render(<AuthContext.Provider value={auth(['products.view'])}><MemoryRouter>
+    <AppShell><h1>Товари</h1></AppShell>
+  </MemoryRouter></AuthContext.Provider>);
+  fireEvent.click(screen.getByRole('button', { name: 'Обліковий запис: Оператор' }));
+  await screen.findByRole('button', { name: 'Вийти' });
+  expect(screen.queryByRole('link', { name: 'Історичний експорт' })).toBeNull();
+});
+
+it('preserves a secondary root fallback and export deep links for export-only users', async () => {
+  const router = mount('/', ['exports.view']);
+  await screen.findByRole('heading', { name: 'Історичний експорт' });
+  expect(router.state.location.pathname).toBe('/exports');
+  expect(document.querySelectorAll('.app-navigation-link')).toHaveLength(0);
+  cleanup();
+  const deep = mount('/exports/history/price/stored-result?after=retained', ['exports.view']);
+  await screen.findByRole('heading', { name: 'Історичний експорт' });
+  expect(deep.state.location.pathname).toBe('/exports/history/price/stored-result');
+  expect(deep.state.location.search).toBe('?after=retained');
+});
+
+it('keeps current Magento template configuration independent of legacy export access', async () => {
+  mount('/settings', ['pricing.view', 'export_templates.view']);
+  await screen.findByRole('heading', { name: 'Налаштування' });
+  expect(screen.getByRole('link', { name: /^Ціноутворення/ }).getAttribute('href')).toBe('/admin/pricing');
+  expect(screen.getByRole('link', { name: /^Шаблони інтеграції/ }).getAttribute('href')).toBe('/admin/export-templates');
+  expect(screen.getByRole('link', { name: /^Інтеграція Magento/ }).getAttribute('href')).toBe('/admin/magento');
+  expect(document.querySelector('.workspace-directory a[href="/exports"]')).toBeNull();
+  expect(screen.queryByRole('link', { name: /Історичний експорт/ })).toBeNull();
+});
 
 it('keeps legacy product links while enforcing the independent decode boundary', async () => {
   const decodeRouter = mount('/?article=AG-000042', ['products.decode']);

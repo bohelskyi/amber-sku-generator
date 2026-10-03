@@ -1,9 +1,9 @@
 import { LogOut, Menu, UserRound } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../auth/auth-context.js';
 import { getIdentityDisplayName } from '../../auth/auth-model.js';
-import { activeWorkspaceDestination } from '../../lib/workspace-navigation.js';
+import { activeWorkspaceDestination, legacyNavigation, navigationForPermissions } from '../../lib/workspace-navigation.js';
 import { ActionMenu, Drawer, IconButton } from '../ui/index.js';
 import { WorkspaceNav } from './WorkspaceNav.jsx';
 import amberLogo from '../../assets/amber-logo-white-orange.png';
@@ -19,6 +19,7 @@ function AccountMenu() {
       <strong>{name}</strong>
       {roleNames.length > 0 && <span>{roleNames.join(', ')}</span>}
     </div>
+    {navigationForPermissions(legacyNavigation, auth.permissions).map((item) => <Link key={item.to} to={item.to}>{item.label}</Link>)}
     <button type="button" onClick={() => { void auth.logout(); }}><LogOut size={16} aria-hidden="true" />Вийти</button>
   </ActionMenu>;
 }

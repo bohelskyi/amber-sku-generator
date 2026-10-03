@@ -19,10 +19,10 @@ const shell = (element, value = auth) => render(<AuthContext.Provider value={val
 it('daily navigation exposes the task-oriented destinations without reading global counts', () => {
   shell(<WorkspaceNav />);
   expect([...document.querySelectorAll('.app-navigation-link')].map((link) => link.textContent)).toEqual([
-    'Товари', 'Потребує уваги', 'Переоцінка', 'Експорт', 'Налаштування',
+    'Товари', 'Потребує уваги', 'Переоцінка', 'Налаштування',
   ]);
   expect(api.get).not.toHaveBeenCalled();
-  expect(screen.getByRole('link', { name: 'Експорт' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: 'Експорт' })).toBeNull();
   expect(screen.queryByRole('button', { name: /Розділи/ })).toBeNull();
 });
 it('request-only compatibility uses existing capabilities', () => {

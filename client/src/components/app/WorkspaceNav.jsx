@@ -1,5 +1,5 @@
 import {
-  Boxes, CircleDollarSign, FileOutput, ListChecks, Settings, ShieldCheck,
+  Boxes, CircleDollarSign, ListChecks, Settings, ShieldCheck,
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import {
@@ -12,7 +12,6 @@ const icons = {
   products: Boxes,
   attention: ListChecks,
   repricing: CircleDollarSign,
-  exports: FileOutput,
   settings: Settings,
   administration: ShieldCheck,
 };

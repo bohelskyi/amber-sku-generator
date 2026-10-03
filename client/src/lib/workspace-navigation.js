@@ -14,10 +14,6 @@ export const topLevelNavigation = [
     permissions: ['repricing.view'], activePaths: [{ path: '/admin/repricing' }],
   },
   {
-    id: 'exports', to: '/exports', label: 'Експорт', group: 'Щоденна робота',
-    permissions: ['exports.view'], activePaths: [{ path: '/exports' }],
-  },
-  {
     id: 'settings', to: '/settings', label: 'Налаштування', group: 'Система',
     permissions: ['catalog.view', 'pricing.view', 'export_templates.view'],
     activePaths: [
@@ -34,15 +30,20 @@ export const topLevelNavigation = [
 
 export const settingsNavigation = [
   { to: '/admin/catalog', label: 'Каталог', description: 'Категорії, характеристики та схеми внутрішнього SKU.', permissions: ['catalog.view'] },
-  { to: '/admin/pricing', label: 'Ціни', description: 'Матриці, модифікатори та курси для розрахунку.', permissions: ['pricing.view'] },
+  { to: '/admin/pricing', label: 'Ціноутворення', description: 'Матриці, модифікатори та курси для розрахунку.', permissions: ['pricing.view'] },
   { to: '/admin/magento', label: 'Інтеграція Magento', description: 'Доставка товарів, відповідності та підготовка публікацій.', permissions: ['export_templates.view'] },
-  { to: '/admin/export-templates', label: 'Шаблони експорту', description: 'Структура та публікація форматів експорту.', permissions: ['export_templates.view'] },
+  { to: '/admin/export-templates', label: 'Шаблони інтеграції', description: 'Правила даних, опубліковані версії яких використовують відповідності та пряма синхронізація Magento.', permissions: ['export_templates.view'] },
 ];
 
 export const administrationNavigation = [
   { to: '/admin/users', label: 'Користувачі', description: 'Доступ користувачів і призначення ролей.', permissions: ['users.manage'] },
-  { to: '/admin/roles', label: 'Ролі', description: 'Набори дозволів для робочих обов’язків.', permissions: ['roles.manage'] },
+  { to: '/admin/roles', label: 'Ролі та дозволи', description: 'Набори дозволів для робочих обов’язків.', permissions: ['roles.manage'] },
   { to: '/admin/audit', label: 'Аудит', description: 'Історія контрольованих дій у системі.', permissions: ['audit.view'] },
+];
+
+// Account-menu access only; these compatibility routes are not daily destinations.
+export const legacyNavigation = [
+  { id: 'legacy-exports', to: '/exports', label: 'Історичний експорт', permissions: ['exports.view'], activePaths: [{ path: '/exports' }] },
 ];
 
 const secondaryNavigation = [
@@ -51,7 +52,7 @@ const secondaryNavigation = [
   { to: '/admin/corrections/history', label: 'Історія товарів', permissions: ['history.view'] },
 ];
 
-export const workspaceNavigation = [...topLevelNavigation, ...settingsNavigation, ...administrationNavigation, ...secondaryNavigation];
+export const workspaceNavigation = [...topLevelNavigation, ...settingsNavigation, ...administrationNavigation, ...secondaryNavigation, ...legacyNavigation];
 
 export function hasAnyPermission(permissions = [], required = []) {
   return required.some((key) => permissions.includes(key));
@@ -84,5 +85,6 @@ export function isWorkspaceDestination(item, pathname) {
 }
 
 export function activeWorkspaceDestination(permissions = [], pathname = '/') {
-  return dailyWorkspaceNavigation(permissions).find((item) => isWorkspaceDestination(item, pathname)) || null;
+  return dailyWorkspaceNavigation(permissions).find((item) => isWorkspaceDestination(item, pathname))
+    || navigationForPermissions(legacyNavigation, permissions).find((item) => isWorkspaceDestination(item, pathname)) || null;
 }

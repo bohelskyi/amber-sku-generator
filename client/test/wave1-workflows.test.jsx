@@ -64,7 +64,8 @@ it('keeps legacy routes but exposes current daily destinations with permission v
   expect(isWorkspaceDestination(workspaceNavigation.find((entry) => entry.to === '/admin/corrections'), '/admin/corrections/history')).toBe(false);
   render(<AuthContext.Provider value={auth(['history.view', 'exports.view'])}><MemoryRouter initialEntries={['/products/history']}><WorkspaceNav /></MemoryRouter></AuthContext.Provider>);
   expect(screen.getByRole('link', { name: 'Товари' }).getAttribute('aria-current')).toBe('page');
-  expect(screen.getByRole('link', { name: 'Експорт' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: 'Експорт' })).toBeNull();
+  expect(allowedWorkspaceNavigation(['exports.view']).map((entry) => entry.to)).toEqual(['/exports']);
   expect(screen.queryByRole('button', { name: /Розділи/ })).toBeNull();
 });
 

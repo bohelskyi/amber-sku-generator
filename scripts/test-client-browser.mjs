@@ -658,10 +658,43 @@ try {
   await client.wait("document.body.textContent.includes('3активних запитів') && document.body.textContent.includes('2зафіксованих проблем')", 'independent attention counts');
   await client.noOverflow('Manager attention desktop');
   await client.screenshot('manager-attention-1440');
-  await client.navigate('/exports', 'Експорт');
-  await client.wait("document.body.textContent.includes('5 змін очікують експорту') && document.body.textContent.includes('CSV товарів вимкнено')", 'export landing states');
-  await client.noOverflow('Manager exports desktop');
-  await client.screenshot('manager-exports-1440');
+  const legacyWritesBefore = requests.filter((entry) => entry.method !== 'GET').length;
+  for (const width of [1440, 390, 360]) {
+    await client.command('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+    await client.navigate('/attention', 'Потребує уваги');
+    if (width <= 720) {
+      await client.evaluate("document.querySelector('.app-navigation-toggle').click()");
+      await client.wait("!!document.querySelector('[role=dialog] .app-navigation')", 'manager navigation drawer');
+      assert.equal(await client.evaluate("document.querySelectorAll('[role=dialog] .app-navigation a[href^=\"/exports\"]').length"), 0);
+      await client.command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+      await client.command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+      await client.wait("!document.querySelector('[role=dialog]')", 'manager navigation drawer closed');
+    }
+    assert.equal(await client.evaluate("document.querySelectorAll('.app-navigation a[href^=\"/exports\"]').length"), 0,
+      'Neither export stream may appear in primary navigation');
+    assert.equal(await client.evaluate("document.querySelector('.app-navigation a[href=\"/archive\"]')"), null,
+      'Legacy export must not be replaced by a prominent archive destination');
+    await client.evaluate("document.querySelector('.app-account-menu button').click()");
+    await client.wait("!!document.querySelector('.ui-action-menu-popup a[href=\"/exports\"]') && getComputedStyle(document.querySelector('.ui-action-menu-popup')).visibility==='visible'", 'secondary legacy account access');
+    await client.noOverflow(`Legacy account menu ${width}px`);
+    await client.screenshot(`legacy-account-menu-${width}`);
+    await client.click('Історичний експорт', "document.querySelector('.ui-action-menu-popup')");
+    await client.wait("location.pathname==='/exports' && document.querySelector('h1')?.textContent.trim()==='Історичний експорт' && document.body.textContent.includes('CSV товарів вимкнено')", 'legacy export overview');
+    assert.equal(await client.evaluate("document.querySelector('.export-destination-list a').getAttribute('href')"), '/exports/history');
+    assert.equal(await client.evaluate("!!document.querySelector('a.btn-primary[href=\"/exports/prices\"]')"), false);
+    await client.click('Стан сумісного потоку цін');
+    await client.wait("document.body.textContent.includes('5 змін у сумісній черзі експорту цін')", 'compatibility price evidence on demand');
+    await client.noOverflow(`Legacy export overview ${width}px`);
+    await client.screenshot(`legacy-export-overview-${width}`);
+    await client.click('Експорт цін (сумісність)');
+    await client.wait("location.pathname==='/exports/prices' && document.querySelector('h2')?.textContent.includes('Експорт цін (сумісність)')", 'legacy price URL');
+    await client.noOverflow(`Legacy price export ${width}px`);
+  }
+  assert.equal(requests.filter((entry) => entry.method !== 'GET').length, legacyWritesBefore,
+    'Discovering legacy routes must not issue commands');
+  report.legacyNavigation = { primaryExport: false, accountEntry: true, historicalFilesFirst: true,
+    priceCompatibilityUrl: true, widths: [1440, 390, 360], implicitWrites: 0 };
+  await client.command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await client.navigate(`/products/open?article=${encodeURIComponent(product.publicSku)}`, `Товар ${product.publicSku}`);
   await client.wait("document.body.textContent.includes('Стан у базі')", 'manager product detail');
   await client.click('Історія товару');
@@ -684,7 +717,7 @@ try {
   await client.wait("[...document.querySelectorAll('[role=dialog] button')].some((button)=>button.textContent.trim()==='Створити запит на зміну ціни'&&!button.disabled)", 'price request preview');
   await client.click('Створити запит на зміну ціни', "document.querySelector('[role=dialog]')");
   await client.wait("document.body.textContent.includes('Створено запит на зміну ціни #41')", 'price request receipt');
-  report.personas.manager = { attentionCounts: { corrections: 3, delivery: 2 }, exportsLanding: true,
+  report.personas.manager = { attentionCounts: { corrections: 3, delivery: 2 }, legacyExportsInspected: true,
     productHistoryInspected: true, priceRequestCreated: true };
   report.performance.push(await client.metrics());
 
@@ -734,7 +767,10 @@ try {
     delivery: { synced: 0, pending: 990, needsAttention: 10 } };
 
   currentPersona = 'exportCreator';
-  await client.navigate('/exports/new/template', 'Експорт');
+  await client.navigate('/', 'Історичний експорт');
+  assert.equal(await client.evaluate("document.querySelectorAll('.app-navigation-link').length"), 0,
+    'Export-only root fallback must not create a primary export destination');
+  await client.navigate('/exports/new/template', 'Історичний експорт');
   await client.wait("document.body.textContent.includes('Створити свій експорт')", 'delegated export create form');
   await client.setValue('input[maxlength="160"]', 'Щотижневий каталог');
   await client.click('Створити приватний експорт');
@@ -744,7 +780,7 @@ try {
     'saving a delegated export workspace must not preview, prepare, or generate files');
 
   currentPersona = 'exportViewer';
-  await client.navigate('/exports/sessions/saved-a', 'Експорт');
+  await client.navigate('/exports/sessions/saved-a', 'Історичний експорт');
   await client.wait("document.body.textContent.includes('Збережені файли') && document.body.textContent.includes('Очікує підтвердження')", 'view-only stored export result');
   assert.equal(await client.evaluate("[...document.querySelectorAll('button')].some((button)=>button.textContent.trim()==='Завершити експорт')"), false,
     'view-only delegated access must not expose confirmation');
@@ -814,6 +850,8 @@ try {
   await client.navigate('/settings', 'Налаштування');
   const settingLinks = await client.evaluate("[...document.querySelectorAll('.workspace-directory-link')].map((link)=>link.getAttribute('href'))");
   assert.deepEqual(settingLinks, ['/admin/catalog', '/admin/pricing', '/admin/magento', '/admin/export-templates']);
+  assert.equal(await client.evaluate("!![...document.querySelectorAll('.workspace-directory-link')].find((link)=>link.textContent.includes('Шаблони інтеграції'))"), true);
+  assert.equal(await client.evaluate("document.querySelectorAll('.workspace-directory a[href^=\"/exports\"]').length"), 0);
   await client.noOverflow('Administrator settings desktop');
   await client.screenshot('administrator-settings-1440');
   await client.navigate('/admin/catalog', 'Каталог');

@@ -68,7 +68,9 @@ it('read-only handoff does not stale; a successful mutation requests a new autho
 
 it('new read after mutation never changes an uncertain original creation payload or retry key', async()=>{
   const {result}=renderHook(()=>useProductExportController()); await act(async()=>result.current.handlePreviewExport());
+  await waitFor(()=>expect(result.current.exportStatus?.delivery?.legacyProductCsvEnabled).toBe(true));
   exportsApi.createSnapshot.mockRejectedValue(new Error('unknown')); await act(async()=>result.current.handleCreateSnapshot());
+  expect(exportsApi.createSnapshot).toHaveBeenCalledTimes(1);
   const original=exportsApi.createSnapshot.mock.calls[0];
   exportsApi.preview.mockResolvedValue(response({...preview,tableFingerprint:'new',previewExpectation:'new'}));
   await act(async()=>result.current.refreshAfterProductChange()); await act(async()=>result.current.handleCreateSnapshot());
@@ -107,8 +109,9 @@ it('empty price queue has no grid, filters or pagination; absent stored artifact
 
 it('daily navigation keeps permission filtering and native keyboard links without an oversized menu',()=>{
   render(<AuthContext.Provider value={{permissions:['exports.view','audit.view'],identity:{},logout:vi.fn()}}><MemoryRouter><WorkspaceNav/></MemoryRouter></AuthContext.Provider>);
-  const exportsLink=screen.getByRole('link',{name:'Експорт'}); exportsLink.focus();
-  expect(document.activeElement).toBe(exportsLink); expect(exportsLink.tabIndex).toBe(0);
+  const administrationLink=screen.getByRole('link',{name:'Адміністрування'}); administrationLink.focus();
+  expect(document.activeElement).toBe(administrationLink); expect(administrationLink.tabIndex).toBe(0);
+  expect(screen.queryByRole('link',{name:'Експорт'})).toBeNull();
   expect(screen.getByRole('link',{name:'Адміністрування'})).toBeTruthy();
   expect(screen.queryByRole('link',{name:'Користувачі'})).toBeNull();
   expect(screen.queryByRole('link',{name:'Налаштування'})).toBeNull();

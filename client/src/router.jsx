@@ -6,7 +6,7 @@ import { AppShell } from './components/app/AppShell.jsx';
 import { LoadingState, Notice } from './components/app/UiPrimitives.jsx';
 import { useAuth } from './auth/auth-context.js';
 import {
-  dailyWorkspaceNavigation, hasAllPermissions, hasAnyPermission,
+  dailyWorkspaceNavigation, hasAllPermissions, hasAnyPermission, legacyNavigation, navigationForPermissions,
 } from './lib/workspace-navigation.js';
 import { ExportWorkflowProvider } from './hooks/product/export-workflow-context';
 
@@ -41,7 +41,8 @@ function LegacyRootRedirect() {
     const path = requestedProduct && auth.permissions.includes('products.decode') ? '/products/open' : '/products';
     return <Navigate replace to={{ pathname: path, search: location.search, hash: location.hash }} />;
   }
-  const fallback = dailyWorkspaceNavigation(auth.permissions)[0]?.to;
+  const fallback = dailyWorkspaceNavigation(auth.permissions)[0]?.to
+    || navigationForPermissions(legacyNavigation, auth.permissions)[0]?.to;
   return fallback ? <Navigate to={fallback} replace /> : <AccessDenied />;
 }
 
