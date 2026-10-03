@@ -4,26 +4,29 @@ const { semanticReadiness } = require('./integration-readiness');
 const { entries } = require('./binding-review');
 const { originHash } = require('./binding-contract');
 const { presentProblem } = require('./sync-problems');
+const { historicalAmbiguitySql } = require('./lifecycle-issue');
 
 // Match the daily problem summary's identities, using each request/deletion's
 // exact product pointer. Joining all historical revisions by identity multiplies
 // problems and can attribute a recount's issue to its former category.
 const OPERATIONAL_COUNTS_SQL = `WITH pending AS (
-  SELECT r.public_product_identity_id AS identity_id,p.category,
+  SELECT r.public_product_identity_id AS identity_id,p.category,(${historicalAmbiguitySql}) AS historical_ambiguity,
     CASE WHEN r.reason_code='reconciliation_required' THEN jsonb_build_array(jsonb_build_object('code',r.reason_code))
       WHEN n.state IN ('conflict','baseline_required') THEN jsonb_build_array(jsonb_build_object('code',
         CASE WHEN n.state='conflict' THEN 'NAME_CONFLICT' ELSE 'NAME_BASELINE_REQUIRED' END))
       WHEN jsonb_array_length(r.diagnostics)>0 THEN r.diagnostics
       ELSE jsonb_build_array(jsonb_build_object('code',COALESCE(r.reason_code,'data_or_binding'))) END AS reasons
   FROM magento_product_sync_requests r JOIN products p ON p.id=r.product_id
+  LEFT JOIN product_full_export_state f ON f.product_id=p.id
   LEFT JOIN magento_name_sync_states n ON n.public_product_identity_id=r.public_product_identity_id AND n.origin_hash=$1
   WHERE r.state='needs_attention' AND NOT EXISTS (SELECT 1 FROM magento_test_deletions d
     WHERE d.public_product_identity_id=r.public_product_identity_id AND d.state<>'finalized')
   UNION ALL
-  SELECT d.public_product_identity_id,p.category,'[{"code":"TEST_DELETION_PENDING"}]'::jsonb
+  SELECT d.public_product_identity_id,p.category,false,'[{"code":"TEST_DELETION_PENDING"}]'::jsonb
   FROM magento_test_deletions d JOIN products p ON p.id=d.product_id WHERE d.state<>'finalized'
 ), classified AS (
-  SELECT identity_id,category,COALESCE(reason->>'code','data_or_binding') AS code
+  SELECT identity_id,category,CASE WHEN historical_ambiguity AND reason->>'code'='AMBER_SYNC_ELIGIBILITY_UNRESOLVED'
+    THEN 'LIFECYCLE_HISTORICAL_AMBIGUITY' ELSE COALESCE(reason->>'code','data_or_binding') END AS code
   FROM pending CROSS JOIN LATERAL jsonb_array_elements(reasons) reason
 )
 SELECT category,code,grouping(category,code)::int AS level,count(DISTINCT identity_id)::int AS count
@@ -40,7 +43,7 @@ async function operationalCounts(client, origin) {
   for (const row of rows) {
     if (row.level === 3) count = row.count;
     else if (row.level === 1) category(row.category).count = row.count;
-    else category(row.category).reasons.push({ code: row.code, message: presentProblem({ code: row.code }).message, count: row.count });
+    else category(row.category).reasons.push({ ...presentProblem({ code: row.code }), count: row.count });
   }
   return { count, categories };
 }

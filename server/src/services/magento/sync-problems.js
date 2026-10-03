@@ -1,6 +1,9 @@
 const pool = require('../../db/pool');
 const { originHash } = require('./binding-contract');
+const { eligibilityIssue, lifecycleProjectionSql } = require('./lifecycle-issue');
 const taxonomy = Object.freeze({
+  LIFECYCLE_HISTORICAL_AMBIGUITY: 'Потрібне підтвердження історії доставки',
+  AMBER_SYNC_ELIGIBILITY_UNRESOLVED: 'Дозвіл на автоматичну доставку потребує перевірки відповідальним оператором.',
   TEST_DELETION_PENDING: 'Тестове видалення очікує підтвердження. Відкрийте товар і перевірте результат у дії «Видалити тестовий товар». Повторний DELETE після відправлення заборонено.',
   NAME_CONFLICT: 'Назву змінено і в Amber, і в Magento. Виберіть актуальну.',
   NAME_BASELINE_REQUIRED: 'Назви Amber і Magento відрізняються; спільну підтверджену назву ще не встановлено.',
@@ -42,7 +45,10 @@ function safeDiagnostics(blockers = []) {
     ...(Array.isArray(item.issueFields) ? { issueFields: item.issueFields.filter((f) => typeof f === 'string').slice(0, 20) } : {}),
   }));
 }
-function presentProblem(item) {
+function presentProblem(item, lifecycle) {
+  const issue = item.code === 'AMBER_SYNC_ELIGIBILITY_UNRESOLVED' ? eligibilityIssue(lifecycle) : null;
+  if (issue) return { ...item, message: taxonomy.LIFECYCLE_HISTORICAL_AMBIGUITY,
+    resolution: 'lifecycle_reconciliation', eligibilityIssue: issue };
   // Evaluator readiness is local product evidence. A nested diagnostic can
   // describe one failed expression, but must not reclassify the whole failure
   // as a Magento read problem.
@@ -51,13 +57,17 @@ function presentProblem(item) {
     : taxonomy[item.diagnosticCode] || taxonomy[item.code] || taxonomy.data_or_binding;
   return { ...item, message,
     resolution: item.code.startsWith('NAME_') ? 'name' : ['PRODUCT_EVALUATION_NOT_READY', 'REQUIRED_ATTRIBUTE_VALUE_MISSING', 'REQUIRED_NATIVE_FIELD_MISSING'].includes(item.code)
-      ? 'product' : ['reconciliation_required','TEST_DELETION_PENDING'].includes(item.code) ? 'administrator' : 'integration_configuration' };
+      ? 'product' : ['reconciliation_required','TEST_DELETION_PENDING','AMBER_SYNC_ELIGIBILITY_UNRESOLVED'].includes(item.code) ? 'administrator'
+        : item.code === 'LIFECYCLE_HISTORICAL_AMBIGUITY' ? 'lifecycle_reconciliation'
+          : ['configuration','ATTRIBUTE_NOT_FOUND','ATTRIBUTE_METADATA_UNRESOLVED','CATEGORY_PATH_MISSING',
+            'attribute_missing','attribute_not_in_selected_set','ATTRIBUTE_NOT_IN_SELECTED_SET'].includes(item.diagnosticCode || item.code)
+            ? 'integration_preparation' : 'integration_configuration' };
 }
-function presentProblems(items = []) {
+function presentProblems(items = [], lifecycle) {
   const localNameNotReady = items.some((item) => item.code === 'PRODUCT_EVALUATION_NOT_READY'
     && Array.isArray(item.issueFields) && item.issueFields.includes('name'));
   return items.map((item) => {
-    const problem = presentProblem(item);
+    const problem = presentProblem(item, lifecycle);
     if (localNameNotReady && item.code === 'NAME_READ_UNAVAILABLE') {
       return { ...problem,
         message: 'Назви товару в Amber потрібно заповнити або виправити.',
@@ -82,7 +92,7 @@ function presentProblemRow(row) {
   return { productId: row.productId, article: row.article, category: row.category,
     problems: presentProblems(['reconciliation_required','TEST_DELETION_PENDING'].includes(row.reason_code) ? [{ code: row.reason_code }]
       : ['conflict', 'baseline_required'].includes(row.name_state) ? [{ code: row.name_state === 'conflict' ? 'NAME_CONFLICT' : 'NAME_BASELINE_REQUIRED' }]
-        : row.diagnostics?.length ? row.diagnostics : [{ code: row.reason_code || 'data_or_binding' }]),
+        : row.diagnostics?.length ? row.diagnostics : [{ code: row.reason_code || 'data_or_binding' }], row.lifecycle),
     nameConflict: !['reconciliation_required','TEST_DELETION_PENDING'].includes(row.reason_code) && ['conflict', 'baseline_required'].includes(row.name_state)
       ? { amber: row.observed_amber_names, magento: row.observed_remote_names } : null,
   };
@@ -90,9 +100,10 @@ function presentProblemRow(row) {
 async function problems(config, db = pool) {
   const rows = (await db.query(`SELECT p.id AS "productId",i.public_sku AS "article",p.category,
     CASE WHEN d.state<>'finalized' THEN 'TEST_DELETION_PENDING' ELSE r.reason_code END AS reason_code,
-    r.diagnostics,n.state AS name_state,n.observed_amber_names,n.observed_remote_names
+    r.diagnostics,n.state AS name_state,n.observed_amber_names,n.observed_remote_names,${lifecycleProjectionSql}
     FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
     LEFT JOIN magento_product_sync_requests r ON r.product_id=p.id
+    LEFT JOIN product_full_export_state f ON f.product_id=p.id
     LEFT JOIN magento_name_sync_states n ON n.public_product_identity_id=i.id AND n.origin_hash=$1
     LEFT JOIN magento_test_deletions d ON d.public_product_identity_id=i.id
     WHERE r.state='needs_attention' OR d.state<>'finalized' ORDER BY i.id`, [config.configured ? originHash(config.baseUrl) : 'unconfigured'])).rows;
@@ -121,9 +132,10 @@ async function problemPage(config, query = {}, db = pool) {
   const [rowsResult, countResult] = await Promise.all([
     db.query(`SELECT p.id AS "productId",i.public_sku AS "article",p.category,
       CASE WHEN d.state<>'finalized' THEN 'TEST_DELETION_PENDING' ELSE r.reason_code END AS reason_code,
-      r.diagnostics,n.state AS name_state,n.observed_amber_names,n.observed_remote_names
+      r.diagnostics,n.state AS name_state,n.observed_amber_names,n.observed_remote_names,${lifecycleProjectionSql}
       FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
       LEFT JOIN magento_product_sync_requests r ON r.product_id=p.id
+      LEFT JOIN product_full_export_state f ON f.product_id=p.id
       LEFT JOIN magento_name_sync_states n ON n.public_product_identity_id=i.id AND n.origin_hash=$1
       LEFT JOIN magento_test_deletions d ON d.public_product_identity_id=i.id
       WHERE (r.state='needs_attention' OR d.state<>'finalized')${categoryClause}

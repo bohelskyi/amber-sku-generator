@@ -7,6 +7,7 @@ const reasons = Object.freeze({
   unexpected_failure: 'Синхронізація потребує перевірки адміністратором.',
 });
 const { presentProblems } = require('./sync-problems');
+const { lifecycleProjectionSql } = require('./lifecycle-issue');
 function presentStatus(row) {
   if (!row) return { state: 'not_tracked', reason: null };
   if (row.deletion_state && row.deletion_state !== 'finalized') return { state: 'needs_attention',
@@ -14,14 +15,16 @@ function presentStatus(row) {
   const problems = row.state === 'needs_attention'
     && !['reconciliation_required', 'TEST_DELETION_PENDING'].includes(row.reason_code)
     && Array.isArray(row.diagnostics)
-    ? presentProblems(row.diagnostics)
+    ? presentProblems(row.diagnostics, row.lifecycle)
     : [];
-  return { state: row.state || 'not_tracked', reason: row.state === 'needs_attention' ? reasons[row.reason_code] || reasons.unexpected_failure : null,
+  const lifecycleProblem = problems.find((problem) => problem.resolution === 'lifecycle_reconciliation');
+  return { state: row.state || 'not_tracked', reason: row.state === 'needs_attention' ? lifecycleProblem?.message || reasons[row.reason_code] || reasons.unexpected_failure : null,
     ...(problems.length ? { problems } : {}) };
 }
 async function readStatuses(db, productIds) {
-  const rows = (await db.query(`SELECT p.id AS product_id,r.state,r.reason_code,r.diagnostics,d.state AS deletion_state
+  const rows = (await db.query(`SELECT p.id AS product_id,r.state,r.reason_code,r.diagnostics,d.state AS deletion_state,${lifecycleProjectionSql}
     FROM products p LEFT JOIN magento_product_sync_requests r ON r.product_id=p.id
+    LEFT JOIN product_full_export_state f ON f.product_id=p.id
     LEFT JOIN magento_test_deletions d ON d.product_id=p.id
     WHERE p.id=ANY($1::int[])`, [productIds])).rows;
   const byId = new Map(rows.map((r) => [Number(r.product_id), r]));
