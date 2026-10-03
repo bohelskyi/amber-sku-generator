@@ -79,16 +79,17 @@ const blankInclusionProduct = {
   suffix: { type: 'sequence', value: 16 },
 };
 
-function RecountStateHarness() {
-  const [answers, setAnswers] = useState(getDecodedAnswerMap(blankInclusionProduct));
+function RecountStateHarness({ product = blankInclusionProduct, questions = recountQuestions } = {}) {
+  const [answers, setAnswers] = useState(getDecodedAnswerMap(product));
+  const category = product.category.code;
   const config = {
-    categories: { KL: blankInclusionProduct.category },
-    questions: { KL: recountQuestions },
+    categories: { [category]: product.category },
+    questions: { [category]: questions },
   };
   const handleAnswer = (questionId, valueId) => {
-    const question = recountQuestions.find((item) => item.id === questionId);
+    const question = questions.find((item) => item.id === questionId);
     setAnswers((previous) => normalizeRecountTargetAnswers(
-      recountQuestions,
+      questions,
       updateRecountOptionAnswer(previous, question, valueId)
     ));
   };
@@ -96,7 +97,7 @@ function RecountStateHarness() {
   return <HomeDashboard
     canCreateProducts={false}
     config={config}
-    decodeData={blankInclusionProduct}
+    decodeData={product}
     decodeError=""
     decodeErrorDetails={null}
     exportStatus={null}
@@ -114,7 +115,7 @@ function RecountStateHarness() {
     recountSuccess=""
     recountValidationAttempt={0}
     recountWeight=""
-    skuToDecode={blankInclusionProduct.sku}
+    skuToDecode={product.sku}
     onApplyRecount={vi.fn()}
     onCancelRecount={vi.fn()}
     onDecode={vi.fn()}
@@ -129,6 +130,17 @@ function RecountStateHarness() {
 }
 
 describe('Home workspace', () => {
+  it('requires explicit processing selection for a missing stored SV answer', () => {
+    const product = { ...blankInclusionProduct, decodeSource: 'stored_history', category: { code: 'SV', name: 'Сувеніри', requires_weight: 0 },
+      decodedAnswers: [{ key: 'stone_processing', value_id: null, is_placeholder: true, label: 'Який камінь?' }],
+      product: { id: 1368, details: { answers: { souvenir: 5 } } } };
+    render(<RecountStateHarness product={product} questions={[{ id: 'stone_processing', label: 'Який камінь?', required: 1, include_in_sku: 1,
+      options: [{ id: 0, label: 'Не оброблений камінь' }, { id: 1, label: 'Оброблений камінь' }] }]} />);
+    const option = screen.getByRole('button', { name: 'Не оброблений камінь' });
+    expect(option.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(option);
+    expect(option.getAttribute('aria-pressed')).toBe('true');
+  });
   it('shows category records in one creation surface with their code, name, and weight requirement', () => {
     const { container, onStart } = renderHome();
     const selectionSurface = container.querySelector('.home-create-panel');

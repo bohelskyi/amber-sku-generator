@@ -55,7 +55,7 @@ it('does not turn unknown evidence into zero problems or Administrator authority
   expect(screen.getAllByRole('link', { name: 'Підготувати зміни інтеграції' }).length).toBeGreaterThan(0);
 });
 
-it('mounts only issue rows and pages all mappings on demand', async () => {
+it('mounts only issue rows; all mappings start collapsed and page an opened group', async () => {
   const values = Array.from({ length: 240 }, (_, i) => ({ questionKey: 'kind', questionLabel: 'Вид', valueId: String(i), label: `Готове значення ${i}`, state: i % 2 ? 'approved' : 'not_applicable', mappings: [] }));
   values.push({ questionKey: 'kind', questionLabel: 'Вид', valueId: 'missing', label: 'Потрібне значення', state: 'missing', mappings: [] });
   api.get.mockImplementation((path) => Promise.resolve({ data: path.endsWith('/overview') ? data : { categories: [{ code: 'XX', values }] } }));
@@ -66,8 +66,56 @@ it('mounts only issue rows and pages all mappings on demand', async () => {
   const mappings = screen.getByRole('heading', { name: 'Відповідності категорії' }).closest('section');
   expect(mappings.querySelectorAll('article')).toHaveLength(1);
   fireEvent.click(screen.getByRole('button', { name: 'Показати всі відповідності' }));
+  expect(mappings.querySelectorAll('article')).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: 'Вид · kind · 241' }));
   expect(mappings.querySelectorAll('article')).toHaveLength(50);
   expect(within(mappings).getByText('1 / 5')).toBeTruthy();
+  fireEvent.click(within(mappings).getByRole('button', { name: 'Далі' }));
+  expect(screen.getByText('Вид: Готове значення 50')).toBeTruthy();
+  expect(mappings.querySelectorAll('article')).toHaveLength(50);
+  expect(screen.queryByText(/value_id:/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Вид · kind · 241' }));
+  expect(mappings.querySelectorAll('article')).toHaveLength(0);
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+const stone = { questionKey: 'stone_processing', questionLabel: 'Який камінь?', valueId: '0', skuCode: '0',
+  label: 'Не оброблений камінь', state: 'approved', mappings: [{ routeKey: 'SV.souvenir=value_id:5', attribute: 'kamin_obrobka', optionId: '6040', optionLabel: 'Необроблений' }] };
+function mappingFixture(values) {
+  api.get.mockImplementation((path) => Promise.resolve({ data: path.endsWith('/overview') ? data : { categories: [{ code: 'XX', values }] } }));
+}
+
+it.each(['Не оброблений камінь', 'Який камінь?', 'stone_processing', 'kamin_obrobka'])('searches the entire mapping scope by %s without mounting unrelated rows', async (search) => {
+  mappingFixture([...Array.from({ length: 240 }, (_, i) => ({ ...stone, questionKey: `color${i}`, questionLabel: 'Колір', label: `Колір ${i}`, mappings: [] })), stone]);
+  shell('/admin/magento/categories/XX');
+  await screen.findByText(/Немає невирішених/);
+  fireEvent.click(screen.getByRole('button', { name: 'Показати всі відповідності' }));
+  expect(document.querySelectorAll('article')).toHaveLength(0);
+  expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(20);
+  fireEvent.change(screen.getByRole('searchbox', { name: 'Пошук відповідностей' }), { target: { value: search } });
+  expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Який камінь? · stone_processing → kamin_obrobka · 1' }));
+  expect(screen.getByText('Який камінь?: Не оброблений камінь')).toBeTruthy();
+  expect(document.querySelectorAll('article')).toHaveLength(1);
+  expect(screen.queryByText(/value_id:/)).toBeNull();
+  fireEvent.click(within(document.querySelector('article')).getByText('Технічні деталі'));
+  expect(screen.getByText(/Magento ID 6040/)).toBeTruthy();
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('a field deep link filters approved mappings, keeps groups collapsed and lets the operator clear context', async () => {
+  mappingFixture([stone, { ...stone, questionKey: 'color', questionLabel: 'Колір', label: 'Світлий', mappings: [{ attribute: 'kolir' }] }]);
+  shell('/admin/magento/categories/XX?field=kamin_obrobka');
+  await screen.findByText('kamin_obrobka');
+  expect(screen.getByRole('button', { name: 'Показати лише питання' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(1);
+  expect(document.querySelectorAll('article')).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: 'Зняти фільтр поля' }));
+  expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(2);
+  fireEvent.click(screen.getByRole('button', { name: 'Показати лише питання' }));
+  expect(screen.queryByRole('searchbox')).toBeNull();
+  expect(screen.queryByText('Світлий')).toBeNull();
+  expect(api.post).not.toHaveBeenCalled();
 });
 
 it('late local overview responses cannot overwrite a newer refresh', async () => {

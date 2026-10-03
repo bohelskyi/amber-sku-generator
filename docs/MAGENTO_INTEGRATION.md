@@ -12,7 +12,13 @@ The default category list separates **Проблеми поточної дост
 **Підготовка перед використанням**. Unsupported categories say **Ще не підключено**;
 reviewed refusals alone are not operational failures. **Усі категорії** opens full
 browsing. Category details and mapping review mount only unresolved rows initially;
-**Показати всі відповідності** opens bounded pages. Diagnostic evidence/history is
+**Показати всі відповідності** opens collapsed source-question/target-attribute
+groups, with search across question/option labels, source keys, and target Magento
+attribute codes. At most 20 group headers and one expanded group of 50 values
+mount per page; the default issue view still mounts at most 50 unresolved values.
+Product readiness links carry an exact `?field=...` target filter into category
+details, including approved mappings, without making any decision or write.
+Diagnostic evidence/history is
 lazy-mounted. Repeated remote paths share one visual group without merging binding
 decisions or exact action targets.
 

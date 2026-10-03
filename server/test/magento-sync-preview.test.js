@@ -279,6 +279,117 @@ test('SV readiness separates missing size/names from valid or unmapped stone pro
   const invalidStone = run(f, f.raw).blockers.find((blocker) => blocker.code === 'PRODUCT_EVALUATION_NOT_READY');
   assert.deepEqual(invalidStone.issueFields.sort(), ['kamin_obrobka', 'name', 'rozmir_suveniriv']);
 });
+
+function stoneFixture(value) {
+  const f = systemFixture('SV', { souvenir: 5, stone_processing: value });
+  f.raw.name = 'Synthetic remote stone';
+  const catalogInput = catalog();
+  const question = catalogInput.get('SV').get('stone_processing');
+  Object.assign(question, { required: 1, visible_if_json: { souvenir: 5 } });
+  question.options.find((o) => o.value_id === '0').sku_code = '0';
+  f.amber.compiled = compileDefinition(materializeMagentoV1(catalogInput));
+  const remote = f.schema.attributes.find((a) => a.attribute_code === 'kamin_obrobka');
+  remote.options = [{ value: '6040', label: 'Необроблений', isEmpty: false },
+    { value: '6039', label: 'Полірований', isEmpty: false }];
+  const bindings = require('../src/services/magento/binding-bootstrap').buildCandidates({ ...f.amber,
+    products: [], current: [] }, f.schema, [], { group: 'SV' });
+  const route = bindings.routes.find((r) => r.routeKey === 'SV.souvenir=value_id:5');
+  route.reviewState = 'approved';
+  const attribute = bindings.attributes.find((a) => a.routeKey === route.routeKey && a.target === 'kamin_obrobka');
+  attribute.reviewState = 'approved';
+  bindings.options.filter((o) => o.bindingKey === attribute.bindingKey).forEach((o) => { o.reviewState = 'approved'; });
+  Object.assign(bindings.policies.find((p) => p.bindingKey === attribute.bindingKey), {
+    reviewState: 'approved', policy: 'authoritative_create_update',
+  });
+  f.amber.revision = { schema: f.schema, schemaFingerprint: hash(f.schema),
+    topologyFingerprint: hash(f.schema.storeTopology), bindings };
+  return f;
+}
+
+for (const value of [0, '0', 1]) test(`SV authoritative processing ${JSON.stringify(value)} (${typeof value}) resolves without readiness errors`, () => {
+  const f = stoneFixture(value);
+  const before = structuredClone(f.amber.product);
+  const r = run(f);
+  assert.equal(r.attributeSet.routeKey, 'SV.souvenir=value_id:5');
+  assert.equal(r.evaluation.ready, true);
+  assert.equal(has(r, 'PRODUCT_EVALUATION_NOT_READY'), false);
+  assert.equal(field(r, 'kamin_obrobka').authority, 'authoritative');
+  assert.equal(field(r, 'kamin_obrobka').magentoOptionId, value === 1 ? '6039' : '6040');
+  assert.equal(custom(r, 'kamin_obrobka'), value === 1 ? '6039' : '6040');
+  assert.equal(f.amber.compiled.definition.questionContracts['SV.stone_processing'].allowed.includes('0'), true);
+  assert.deepEqual(f.amber.product, before);
+});
+
+for (const value of [undefined, null, '', 9, '00', ' 0 ']) test(`SV missing/invalid processing ${JSON.stringify(value)} fails closed despite approved zero binding`, () => {
+  const f = stoneFixture(value);
+  const r = run(f);
+  assert.equal(r.evaluation.ready, false);
+  assert.deepEqual(r.blockers.find((b) => b.code === 'PRODUCT_EVALUATION_NOT_READY').issueFields, ['kamin_obrobka']);
+  assert.equal(custom(r, 'kamin_obrobka'), undefined);
+  assert.equal(r.sendable, false);
+});
+
+test('historical SKU code zero decodes semantic identity zero; an encoded code never substitutes for an answer', () => {
+  const { decodeStoredSkuAnswers } = require('../src/utils/sku');
+  const questions = [{ key: 'stone_processing', label: 'Який камінь?', sku_index: 1, required: 1,
+    options: [{ value_id: 0, sku_code: '0', label: 'Не оброблений камінь' },
+      { value_id: 1, sku_code: '7', label: 'Оброблений камінь' }] }];
+  const decoded = decodeStoredSkuAnswers(questions, '0', { stone_processing: 0 });
+  assert.equal(decoded[0].value_id, 0);
+  assert.equal(decoded[0].is_placeholder, false);
+  assert.equal(custom(run(stoneFixture(decoded[0].value_id)), 'kamin_obrobka'), '6040');
+  const missing = stoneFixture(undefined);
+  missing.amber.product.full_sku = 'SV000001';
+  assert.equal(evaluate(missing.amber, missing.amber.product).ready, false);
+  // Code 7 encodes semantic 1; supplying that code as a semantic answer stays invalid.
+  const encoded = stoneFixture(7);
+  assert.equal(evaluate(encoded.amber, encoded.amber.product).ready, false);
+  const boolean = stoneFixture(false);
+  assert.equal(evaluate(boolean.amber, boolean.amber.product).failed, true);
+  assert.equal(run(boolean).sendable, false);
+});
+
+test('a historical question key requires a schema-bound declared alias; labels cannot provide it', () => {
+  const f = stoneFixture(undefined);
+  delete f.amber.product.details.answers.stone_processing;
+  Object.assign(f.amber.product.details.answers, { historical_processing: 0 });
+  f.amber.product.sku_schema_version_id = 42;
+  assert.equal(evaluate(f.amber, f.amber.product).ready, false);
+  const d = structuredClone(f.amber.compiled.definition);
+  d.sources['SV.stone_processing'].aliases = [{ schemaId: '42', key: 'historical_processing', evidence: 'Synthetic immutable schema identity' }];
+  f.amber.compiled = compileDefinition(d);
+  assert.equal(evaluate(f.amber, f.amber.product).base.kamin_obrobka, 'Необроблений');
+  f.amber.product.sku_schema_version_id = 43;
+  assert.equal(evaluate(f.amber, f.amber.product).ready, false);
+});
+
+for (const value of [undefined, 0, '0', '00', ' 0 ']) test(`stored projection versus evaluator preserves the distinction for ${JSON.stringify(value)}`, async () => {
+  const f = stoneFixture(value);
+  if (value === undefined) delete f.amber.product.details.answers.stone_processing;
+  Object.assign(f.amber.product, { public_sku: 'SYNTH-STONE', sku_schema_version_id: 42, base_sku: 'SV5', sequence_number: 10 });
+  const queryable = { async query(sql) {
+    if (sql.includes('public_product_identities')) return { rows: [{ ...f.amber.product, public_match: true }] };
+    if (sql.includes('FROM categories')) return { rows: [{ code: 'SV', name: 'Сувеніри', requires_weight: 0 }] };
+    if (sql.includes('FROM sku_schema_versions')) return { rows: [{ id: 42, category_code: 'SV', version: 1, marker: '', status: 'archived' }] };
+    if (sql.includes('FROM sku_schema_questions')) return { rows: [{ question_id: 1, question_key: 'stone_processing',
+      question_label: 'Який камінь?', sku_index: 1, required: 1, value_id: 0, sku_code: '0', option_label: 'Не оброблений камінь' }] };
+    if (sql.includes('FROM questions')) return { rows: [] };
+    throw new Error(`Unexpected fixture query: ${sql}`);
+  } };
+  const decoded = await require('../src/services/product/product-decode').decodeSku('SYNTH-STONE', queryable);
+  assert.equal(decoded.decodedAnswers[0].value_id, value === undefined ? null : 0);
+  assert.equal(decoded.decodedAnswers[0].value_label, value === undefined ? 'Не обрано' : 'Не оброблений камінь');
+  if (value === undefined) assert.equal(Object.hasOwn(require('../src/services/product/product-answers').buildProductAnswerContext(decoded), 'stone_processing'), false);
+  // The projection is read-only: the planner receives the original raw answer.
+  assert.equal(decoded.product.details.answers.stone_processing, value);
+  assert.equal(evaluate(f.amber, decoded.product).ready, value === 0 || value === '0');
+  const structural = require('../src/services/magento/integration-readiness').semanticReadiness({
+    categories: { SV: { name: 'Сувеніри' } }, questions: { SV: [{ id: 'stone_processing', label: 'Який камінь?',
+      options: [{ id: 0, sku_code: '0', label: 'Не оброблений камінь' }] }] },
+  }, [], f.amber.revision, f.amber.compiled.definition);
+  assert.equal(structural[0].values[0].state, 'approved');
+  assert.equal(structural[0].values[0].optionId, '6040');
+});
 test('CH reversed legacy dimensions are a diff; evaluator semantics and valid size text remain the payload', () => {
   const f = systemFixture('CH', { bead_length: '12.5', bead_width: '8.2', rosary_length: '32' });
   f.raw.custom_attributes = [{ attribute_code: 'dovzhyna_namystyny', value: '8.2' },

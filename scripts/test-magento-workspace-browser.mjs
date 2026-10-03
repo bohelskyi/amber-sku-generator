@@ -38,6 +38,8 @@ const values = Array.from({ length: 240 }, (_, i) => ({ questionKey: 'kind', que
   label: i === 8 ? 'Скриньки' : `Готове значення ${i}`, labelEn: i === 8 ? 'Boxes' : `Value ${i}`, state: i === 8 || i % 2 ? 'approved' : 'not_applicable',
   mappings: i === 8 ? [{ attribute: 'fixture_choice', optionId: '42', state: 'approved' }] : [] }));
 values.push({ questionKey: 'kind', questionLabel: 'Вид', valueId: 'missing', label: 'Потрібне значення', state: 'missing', mappings: [] });
+values.push({ questionKey: 'stone_processing', questionLabel: 'Який камінь?', valueId: '0', skuCode: '0',
+  label: 'Не оброблений камінь', state: 'approved', mappings: [{ routeKey: 'SV.souvenir=value_id:5', attribute: 'kamin_obrobka', optionId: '6040', optionLabel: 'Необроблений' }] });
 const category = (code, name, count = 0, preparation = false) => ({ code, name, values: code === 'SV' ? values : [], routes: [],
   operational: { state: 'known', count, reasons: count ? [{ code: 'MAPPING', count, message: 'Потрібна перевірка відповідностей для поточного товару.' }] : [] },
   preparation: { needed: preparation, count: preparation ? 1 : 0, reasons: preparation ? [{ code: 'NOT_CONNECTED', count: 1, message: 'Ще не підключено' }] : [] }, impact: 'unexamined' });
@@ -168,8 +170,23 @@ try {
   assert.equal(await evaluate("document.body.textContent.includes('Готове значення')"), false);
   assert.equal(await evaluate("document.querySelectorAll('article').length"), 1);
   await click('Показати всі відповідності');
+  assert.equal(await evaluate("document.querySelectorAll('article').length"), 0);
+  await click('Вид · kind · 240');
   assert.equal(await evaluate("document.querySelectorAll('article').length"), 50);
+  for (const term of ['kamin_obrobka', 'stone_processing', 'Не оброблений камінь']) {
+    await setField('Пошук відповідностей', term);
+    assert.equal(await evaluate("document.querySelectorAll('article').length"), 0);
+    await click('Який камінь? · stone_processing → kamin_obrobka · 1');
+    assert.equal(await evaluate("document.querySelectorAll('article').length"), 1);
+    assert.equal(await evaluate("document.body.textContent.includes('Який камінь?: Не оброблений камінь') && !document.body.textContent.includes('value_id:')"), true);
+  }
   await noOverflow('Category detail overflow at 390px'); await screenshot('category-390');
+  await navigate('/admin/magento/categories/SV?field=kamin_obrobka');
+  await wait("document.body.textContent.includes('Зняти фільтр поля')");
+  assert.equal(await evaluate("document.querySelectorAll('article').length"), 0);
+  await click('Який камінь? · stone_processing → kamin_obrobka · 1');
+  assert.equal(await evaluate("document.querySelectorAll('article').length"), 1);
+  assert.equal(requests.filter((request) => request.method !== 'GET').length, 0, 'Browsing cannot make decisions or writes');
   await navigate('/admin/magento/prepare?category=SV'); await wait("!![...document.querySelectorAll('label')].find(l=>l.textContent.startsWith('Версія для перегляду'))");
   await setField('Версія для перегляду', 'draft'); await wait("document.body.textContent.includes('Чернетка змін · ревізія 7')");
   assert.equal(await evaluate("document.querySelector('[aria-label=\"Поточна інтеграція\"]').textContent.includes('Версія 3')"), true);

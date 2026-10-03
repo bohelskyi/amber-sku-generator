@@ -155,6 +155,11 @@ export default function SyncProblemsPage() {
             {problem.resolution === 'integration_configuration' && <p className="sync-problem-guidance">{permissions.includes('export_templates.view')
               ? <Link to={selected.category ? `/admin/magento/categories/${encodeURIComponent(selected.category)}` : '/admin/magento'}>Перевірити відповідності Magento</Link>
               : 'Передайте питання оператору з доступом до відповідностей Magento.'}</p>}
+            {problem.code === 'PRODUCT_EVALUATION_NOT_READY' && selected.category && permissions.includes('export_templates.view') && <div className="flex flex-wrap gap-2">
+              {[...new Set(problem.issueFields || [])].map((field) => <Link key={field} className="underline" to={`/admin/magento/categories/${encodeURIComponent(selected.category)}?field=${encodeURIComponent(field)}`}>
+                Відповідності: {PRODUCT_FIELD_LABELS[field] || field}
+              </Link>)}
+            </div>}
             <TechnicalDisclosure>
               <dl className="technical-key-values"><div><dt>Код</dt><dd>{problem.code}</dd></div>
                 {problem.diagnosticCode && <div><dt>Діагностика</dt><dd>{problem.diagnosticCode}</dd></div>}

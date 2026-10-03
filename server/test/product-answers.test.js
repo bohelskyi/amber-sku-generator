@@ -44,6 +44,29 @@ test('stored answer context preserves calibration state 2', () => {
   }), { shape: 7, quality: 4, is_calibrated: 2 });
 });
 
+test('missing SV processing stays absent in recount; explicit semantic zero becomes a real change', () => {
+  const source = { decodeSource: 'stored_history', decodedAnswers: [
+    { key: 'stone_processing', value_id: null, is_placeholder: true },
+    { key: 'additional_stone', value_id: 1, is_placeholder: false },
+  ], product: { category: 'SV', details: { answers: { souvenir: 5, additional_stone: 1 } } } };
+  const before = structuredClone(source);
+  const answers = buildProductAnswerContext(source);
+  assert.equal(Object.hasOwn(answers, 'stone_processing'), false);
+  const repaired = mergeRecountAnswerPatch(answers, { stone_processing: 0 });
+  assert.deepEqual(require('../src/utils/answer-changes').getAnswerChanges(answers, repaired), [
+    { key: 'stone_processing', from: null, to: 0 },
+  ]);
+  source.product.details.answers.stone_processing = 0;
+  assert.equal(buildProductAnswerContext(source).stone_processing, 0);
+  delete source.product.details.answers.stone_processing;
+  source.decodedAnswers[0] = { key: 'stone_processing', value_id: 0, is_placeholder: false };
+  assert.equal(buildProductAnswerContext(source).stone_processing, 0);
+  source.product.category = 'NM';
+  source.decodedAnswers[0] = { key: 'stone_processing', value_id: null, is_placeholder: true };
+  assert.equal(buildProductAnswerContext(source).stone_processing, 0);
+  assert.deepEqual(before.product.details.answers, { souvenir: 5, additional_stone: 1 });
+});
+
 test('only recount filtering removes answers hidden by the target configuration', () => {
   const answers = { is_calibrated: 2, visible: 4, inherited: 9, nonSchema: 12 };
   const result = omitHiddenRecountAnswers(answers, [

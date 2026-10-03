@@ -1,6 +1,6 @@
 const { test, recreateTestDatabase, dropTestDatabase, runNodeInDatabase } = require('./suite-context');
 
-test('new SV creation rejects incomplete inputs before persistence and stores complete route inputs', async () => {
+test('new SV creation validates route inputs and explicit recount repairs missing processing without inferred zero', async () => {
   const name = 'amber_sv_create_test';
   const url = await recreateTestDatabase(name);
   try {
