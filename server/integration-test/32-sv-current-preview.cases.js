@@ -33,10 +33,11 @@ test('SV saved current preview consumes exact successor pin and preserves keycha
     schema.storeTopology.websites[0].code = 'base';
     schema.attributes.find(a => a.attribute_code === 'name').scope = 'store';
     schema.attributeSets.find(s => s.attribute_set_name === 'Сувеніри').attribute_set_id = 151;
+    schema.storeTopology.storeGroups[0].root_category_id = 2;
     schema = require('../src/services/magento/binding-contract').normalizeSchema(schema);
-    const tree = { id: 703, name: 'Default', parent_id: 0, children_data: [
-      { id: 705, name: 'Сувеніри', parent_id: 703, children_data: [
-        { id: 706, name: 'Брелоки', parent_id: 705, children_data: [] },
+    const tree = { id: 2, name: 'Default', parent_id: 0, children_data: [
+      { id: 10, name: 'Сувеніри', parent_id: 2, children_data: [
+        { id: 374, name: 'Брелоки', parent_id: 10, children_data: [] },
       ] },
     ] };
     const config = { configured: true, baseUrl: 'https://sv-current.invalid', consumerKey: 'fixture-key',
@@ -136,6 +137,56 @@ test('SV saved current preview consumes exact successor pin and preserves keycha
     assert.equal((await bindings.getCurrentPublished('sv-current', options)).id, current.id);
     assert.deepEqual(await bindings.getRevision(current.id, options), current);
     assert.deepEqual(await bindings.getRevision(next.binding.id, options), next.binding);
+    await t.test('publication discovery and representative reuse detached category GET evidence', async () => {
+      const requests = new Map();
+      const abortBoundFetch = async (url, init) => {
+        requests.set(url, (requests.get(url) || 0) + 1);
+        const response = await fetchImpl(url, init), clone = response.clone.bind(response);
+        // Node 20 native fetch responses retain this abort lifecycle. Model it
+        // explicitly here too so the PostgreSQL regression also runs on Node 24.
+        response.clone = () => {
+          init.signal.throwIfAborted();
+          return clone();
+        };
+        return response;
+      };
+      const cachedOptions = { ...remote, fetchImpl: abortBoundFetch };
+      assert.equal((await editor.currentPreview(config, { productId: p.id, bindingRevisionId: next.binding.id }, cachedOptions)).sendable, true);
+      requests.clear();
+      const checkedPublication = await publication.preview(config, publicationInput, cachedOptions);
+      const check = checkedPublication.checked.find(v => v.productId === p.id);
+      t.diagnostic(JSON.stringify({ cachedCategoryBlockers: check.blockers }));
+      assert.equal(check.sendable, true, JSON.stringify(check.blockers));
+      assert.deepEqual(checkedPublication.blockers, []);
+      assert.equal(checkedPublication.affected.find(v => v.productId === p.id).reason, 'unblocked');
+      assert.deepEqual(check.categories.requested.map(v => [v.requestedPath, v.categoryId, v.status]), [
+        ['Default/Сувеніри', '10', 'resolved_authoritative'],
+        ['Default/Сувеніри/Брелоки', '374', 'resolved_authoritative'],
+      ]);
+      const categoryUrl = [...requests.keys()].find(url => new URL(url).pathname.endsWith('/V1/categories'));
+      assert.equal(new URL(categoryUrl).searchParams.get('rootCategoryId'), '2');
+      assert.equal(requests.get(categoryUrl), 1, 'discovery and representative share one successful GET');
+      const repeated = await publication.preview(config, publicationInput, cachedOptions);
+      assert.equal(repeated.previewToken, checkedPublication.previewToken);
+      for (const kind of ['network', 'missing', 'drift']) {
+        const failed = await publication.preview(config, publicationInput, { ...publicationOptions, fetchImpl: async (url, init) => {
+          if (!new URL(url).pathname.endsWith('/V1/categories')) return fetchImpl(url, init);
+          if (kind === 'network') throw new TypeError('Synthetic category network failure');
+          const changed = structuredClone(tree);
+          if (kind === 'missing') changed.children_data = [];
+          else { changed.children_data[0].id = 11; changed.children_data[0].children_data[0].parent_id = 11; }
+          return new Response(JSON.stringify(changed), { headers: { 'Content-Type': 'application/json' } });
+        } });
+        const result = failed.checked.find(v => v.productId === p.id);
+        assert.equal(result.sendable, false);
+        assert.ok(result.blockers.some(b => b.code === ({ network: 'CATEGORY_TREE_UNAVAILABLE', missing: 'CATEGORY_PATH_MISSING', drift: 'CATEGORY_BINDING_DRIFT' })[kind]));
+        if (kind === 'network') assert.ok(result.blockers.some(b => b.code === 'CATEGORY_TREE_UNAVAILABLE' && b.reason === 'MAGENTO_NETWORK_ERROR'));
+        assert.deepEqual(failed.blockers, [{ code: 'AFFECTED_CURRENT_PREVIEW_BLOCKED', productId: p.id }]);
+        assert.notEqual(failed.previewToken, checkedPublication.previewToken);
+      }
+      assert.deepEqual(await bindings.getRevision(current.id, options), current);
+      assert.deepEqual(await bindings.getRevision(next.binding.id, options), next.binding);
+    });
     await t.test('publication and direct preview use the same acknowledged-job name baseline', async () => {
       // Legacy confirmed deliveries can predate the shared-name observation row.
       // A later Amber name edit is allowed against that exact confirmed baseline.
