@@ -37,6 +37,7 @@ metadata alone do not create requests. This covers actual authoritative writers:
 | `correction-request.service.js` | Completion delegates to the same recount/price primitives; create/claim/preview are not product mutations. |
 | `repricing.service.js` | APPLY and exact-state rollback for every changed product. |
 | Catalog key/category/schema maintenance, recount/SV repairs, full-product reconciliation | Actual changed product inputs are covered by the same trigger; these commands are not invoked by the worker. |
+| Reviewed stable-public-SKU recount exposure | The CLI atomically records a reviewed `broader_resync` handoff with the lifecycle change. Existing enrollment advances the safe parked request generation; uncertain work remains protected. See the [preview/review procedure](FULL_PRODUCT_CUTOVER_RUNBOOK.md#stable-public-sku-recount-exposure). |
 
 The existing planner remains authoritative for recount compatibility exclusions,
 holds, product identity, pricing, source proof, names and published bindings.
