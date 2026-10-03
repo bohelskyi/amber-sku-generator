@@ -56,6 +56,7 @@ for (const modulePath of [
   './29-option-labels.cases',
   './30-stable-recount-exposure.cases',
   './31-correction-request-batch.cases',
+  './32-sv-current-preview.cases',
 ]) {
   require(modulePath);
 }
