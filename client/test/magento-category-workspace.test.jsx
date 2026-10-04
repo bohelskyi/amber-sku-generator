@@ -175,7 +175,7 @@ it('checks the originating product, confirms its new path and requires a separat
   const request = { sourceId: 'current', expectedSourceRevision: '4', templateVersionId: 'original-version', productIds: [5080] };
   expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/successor/prepare', request);
   expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/successor/apply', { ...request, previewToken: 'successor-proof' });
-  expect(screen.getByLabelText('Відповідність: Default/Браслети/Світлі').value).toBe('42');
+  expect((await screen.findByLabelText('Відповідність: Default/Браслети/Світлі')).value).toBe('42');
   expect(screen.getByText(/Перевірте шлях у колонці Magento/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Застосувати зміни' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Підтвердити', exact: true }));
@@ -206,6 +206,93 @@ it('continues restored category review explicitly and checks impact without crea
   expect(api.post.mock.calls).toEqual([['/admin/magento-integration/publication/preview', {
     bindingRevisionId: 'isolated', expectedRevision: '1', expectedCurrentId: 'current', representatives: [],
   }]]);
+});
+
+it('shows the exact remaining category after placement confirmation and applies only after its separate approval', async () => {
+  const placement = { ...entry, id: 'category:placement:local', kind: 'category', target: 'categories',
+    source: undefined, evaluated: undefined, label: 'Default/Браслети/Форма: коло', identity: '42',
+    candidates: [{ categoryId: '42', path: 'Default/Браслети/Форма: коло' }], exact: true, reviewState: 'proposed' };
+  // The other blocker is outside the selected field as well as its category.
+  const other = { ...entry, id: 'attribute:other', group: 'OT', kind: 'attribute', target: 'other_field',
+    source: undefined, evaluated: undefined, label: 'Матеріал оправи', identity: '77', exact: true };
+  const confirmed = new Set(); let finishRead;
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await get(url, config);
+    if (url.includes('/categories/') && !url.includes('/fields/')) result.data.placements = [
+      { ...placement, ...(confirmed.has(placement.id) ? { reviewState: 'approved' } : {}) },
+    ];
+    if (url.endsWith('/bindings/isolated')) {
+      result.data.entries = [placement, other].map((item) => ({ ...item, ...(confirmed.has(item.id) ? { reviewState: 'approved' } : {}) }));
+      if (draft.revision === '2') await new Promise((resolve) => { finishRead = resolve; });
+    }
+    return result;
+  });
+  const post = api.post.getMockImplementation();
+  api.post.mockImplementation(async (url, body) => {
+    if (url.endsWith('/decision')) { confirmed.add(body.binding); draft = { ...draft, revision: String(Number(draft.revision) + 1) }; return { data: draft }; }
+    if (url.endsWith('/publication/preview')) return { data: { previewToken: 'impact-proof', blockers: [], affected: [], preservedNames: [], lostProducts: [], lostRoutes: [], totalProducts: 12 } };
+    if (url.endsWith('/publication/apply')) return { data: { revision: { ...draft, state: 'published' } } };
+    return post(url, body);
+  });
+  mount('/admin/magento?category=BR&view=placement');
+  fireEvent.click(await screen.findByRole('button', { name: 'Перевірити відповідність розділів' }));
+  await screen.findByLabelText('Відповідність: Default/Браслети/Форма: коло');
+  expect(screen.queryByText('Матеріал оправи')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Підтвердити', exact: true }));
+  await screen.findByText('Оновлюємо підтвердження…');
+  expect(screen.queryByText(/Чернетка змінилася/)).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Застосувати зміни' })).toBeNull();
+  await act(async () => finishRead());
+  await screen.findByRole('heading', { name: 'Підтвердьте відповідності інших категорій' });
+  await screen.findByText('Розділи «Браслети» підтверджено. Застосування чекає на підтвердження: Інші.');
+  const row = screen.getByRole('row', { name: /Матеріал оправи/ });
+  expect(within(row).getByText('Інші')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Показати також інші категорії' })).toBeNull();
+  expect(screen.getByText('Default › Браслети › Форма: коло').closest('.mc-placement-row').textContent).toContain('Підтверджено. Очікує застосування змін.');
+  expect(api.post.mock.calls.filter(([url]) => url.endsWith('/decision'))).toHaveLength(1);
+  expect(api.post.mock.calls.some(([url]) => url.includes('/publication/'))).toBe(false);
+  fireEvent.click(within(row).getByRole('button', { name: 'Підтвердити', exact: true }));
+  const apply = await screen.findByRole('button', { name: 'Застосувати зміни' });
+  expect(api.post.mock.calls.filter(([url]) => url.endsWith('/decision')).map(([, body]) => [body.binding, body.expectedRevision])).toEqual([[placement.id, '1'], [other.id, '2']]);
+  expect(screen.queryByText(/Застосування чекає на підтвердження/)).toBeNull();
+  expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
+  fireEvent.click(apply);
+  await screen.findByText('Зміни застосовано в Amber. Результат доставки відстежується окремо.');
+  expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/publication/apply', expect.objectContaining({ bindingRevisionId: 'isolated', expectedRevision: '3', previewToken: 'impact-proof' }));
+});
+
+it('restores the remaining fields of another category visibly without automatic approval or impact checking', async () => {
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await get(url, config);
+    if (url.endsWith('/bindings/isolated')) result.data.entries = [{ ...entry, group: 'OT', source: 'OT.color=value_id:0', evaluated: 'Золотиста оправа' }];
+    return result;
+  });
+  mount('/admin/magento?category=BR&view=placement&binding=isolated&source=current&reviewField=categories');
+  await screen.findByRole('heading', { name: 'Підтвердьте відповідності інших категорій' });
+  const row = screen.getByRole('row', { name: /Золотиста оправа/ });
+  expect(row.textContent).toContain('Інші');
+  expect(within(row).queryByText('Колір: Нуль')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Застосувати зміни' })).toBeNull();
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('shows remaining local fields after the focused placement is confirmed and keeps real draft conflicts blocked', async () => {
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await get(url, config);
+    if (url.endsWith('/bindings/isolated')) result.data.revision.revision = '2';
+    return result;
+  });
+  mount('/admin/magento?category=BR&view=placement&binding=isolated&source=current&reviewField=categories');
+  await screen.findByRole('heading', { name: 'Підтвердьте решту полів категорії' });
+  expect(screen.getByLabelText('Відповідність: Колір: Нуль')).toBeTruthy();
+  expect(screen.getByText(/Чернетка змінилася/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Пояснення перевірки'), { target: { value: 'Перевірено' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Підтвердити', exact: true }));
+  expect(api.post).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: 'Застосувати зміни' })).toBeNull();
 });
 
 it('isolates a shared text rule to the chosen category and language and saves a separate family', async () => {
