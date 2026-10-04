@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../../lib/api.js';
 import { Button, ConfirmDialog, Notice, TechnicalDisclosure } from '../ui/index.js';
 import MagentoControlledActions from '../workspace/MagentoControlledActions.jsx';
+import MagentoRecoveryHistory from './MagentoRecoveryHistory.jsx';
 
 const guidance = {
   prior_exposure: 'Знайдемо цей артикул у Magento. Якщо товар уже є в магазині, ви зможете підтвердити це й перейти до оновлення його даних.',
@@ -140,6 +141,7 @@ export function MagentoRecovery({ productId, categoryCode, onSaved, guided = fal
   const [record, setRecord] = useState(null);
   const [review, setReview] = useState(null);
   const [lifecycle, setLifecycle] = useState(null);
+  const [historyInspection, setHistoryInspection] = useState(null);
   const [kind, setKind] = useState('prior_exposure');
   const [evidence, setEvidence] = useState(null);
   const [reason, setReason] = useState('');
@@ -167,13 +169,17 @@ export function MagentoRecovery({ productId, categoryCode, onSaved, guided = fal
   const open = () => run(async () => {
     const { data } = await api.get(`/admin/magento-recovery/products/${productId}`);
     if (valid()) { setRecord({ ...data, owner: principalLifetime }); setKind(data.lifecycle?.suggestedKind || 'prior_exposure');
-      setNextStep(data.nextAction || null); setReview(null); setLifecycle(null); setReceipt(''); setPendingLifecycle(null); }
+      setNextStep(data.nextAction || null); setReview(null); setLifecycle(null); setHistoryInspection(null); setReceipt(''); setPendingLifecycle(null); }
     if (!valid() || !guided) return;
     // One explicit check reads the original case and its recommended preview.
     // Recording the result or sending remaining steps still requires confirmation.
     if (data.actions.jobRecovery && permissions.includes('export_templates.publish') && data.job && !['succeeded', 'superseded'].includes(data.job.state)) {
       const inspected = await api.post(`/admin/magento-recovery/jobs/${data.job.id}/inspect`, {});
       if (valid()) { setReview(inspected.data); setRecord((previous) => ({ ...previous, job: inspected.data.job })); }
+    } else if (data.actions.lifecycleRecovery && permissions.includes('exports.reconcile') && !data.lifecycle?.blocker
+      && data.history?.hasRecount && !data.history.stableRecount && !data.lifecycle?.legacyDeliveryEnabled && data.history.complete) {
+      const inspected = await api.post(`/admin/magento-recovery/products/${productId}/history-inspect`, {});
+      if (valid()) { setHistoryInspection(inspected.data); if (!inspected.data.stale) setRecord(previous => ({ ...previous, history: inspected.data.history })); }
     } else if (data.actions.lifecycleRecovery && permissions.includes('exports.reconcile') && !data.lifecycle?.blocker
       && data.lifecycle?.suggestedKind && !data.nextAction) {
       const preview = await api.post(`/admin/magento-recovery/products/${productId}/lifecycle-preview`, { kind: data.lifecycle.suggestedKind });
@@ -198,9 +204,13 @@ export function MagentoRecovery({ productId, categoryCode, onSaved, guided = fal
       } catch { if (valid()) setError('Результат збережено, але наступний крок не вдалося прочитати. Оновіть перевірку товару.'); }
     }
   });
-  const previewLifecycle = () => run(async () => {
-    setLifecycle(null); setReceipt('');
-    const { data } = await api.post(`/admin/magento-recovery/products/${productId}/lifecycle-preview`, { kind });
+  const inspectHistory = () => run(async () => {
+    const { data } = await api.post(`/admin/magento-recovery/products/${productId}/history-inspect`, {});
+    if (valid()) { setHistoryInspection(data); if (!data.stale) setRecord(previous => ({ ...previous, history: data.history })); }
+  });
+  const previewLifecycle = (selectedKind = kind) => run(async () => {
+    setKind(selectedKind); setLifecycle(null); setReceipt('');
+    const { data } = await api.post(`/admin/magento-recovery/products/${productId}/lifecycle-preview`, { kind: selectedKind });
     if (valid()) { setLifecycle(data); setEvidence(data.requiredEvidence ? initialEvidence(data.requiredEvidence) : null); }
   });
   const applyLifecycle = () => run(async () => {
@@ -215,6 +225,7 @@ export function MagentoRecovery({ productId, categoryCode, onSaved, guided = fal
   const availableKinds = record?.lifecycle?.availableKinds || [record?.lifecycle?.suggestedKind || 'prior_exposure'];
   const canRecoverJob = record?.actions.jobRecovery && permissions.includes('export_templates.publish');
   const canRecoverLifecycle = record?.actions.lifecycleRecovery && permissions.includes('exports.reconcile');
+  const historyMode = record?.history?.hasRecount && !record.history.stableRecount && !record.lifecycle?.legacyDeliveryEnabled && !unfinishedJob && !nextStep;
   const evidenceComplete = !evidence || [...evidence.oldSkus, ...evidence.files, ...['externalHistory', 'exclusionResolution', 'redeliveryAuthorization'].map((key) => evidence[key]).filter(Boolean)]
     .every((item) => item.disposition && item.evidence.trim().length >= 3);
   const blockers = [...(review?.blockers || []).map((item) => item.code), ...(lifecycle?.blockers || [])];
@@ -222,10 +233,12 @@ export function MagentoRecovery({ productId, categoryCode, onSaved, guided = fal
     {(!guided || opened) && <h3>{guided ? 'Результат перевірки та наступна дія' : 'Перевірка й відновлення доставки'}</h3>}
     {!opened && <>{!guided && <p className="sync-problem-guidance">Перегляньте початкову операцію та доступні кроки. Читання збереженої операції не надсилає змін у Magento.</p>}
       <Button variant={guided ? 'primary' : 'secondary'} size="compactMd" onClick={open} busy={busy}>{guided ? 'Перевірити товар у Magento' : 'Відкрити перевірку доставки'}</Button>
-      {guided && <p className="sync-problem-guidance">Перевірка прочитає дані магазину та покаже доступне рішення.</p>}</>}
+      {guided && <p className="sync-problem-guidance">Покажемо, що зупинило товар і який наступний крок доступний.</p>}</>}
     {error && (!record || opened) && <Notice tone="error">{error}</Notice>}
     {guided && opened && error && !pendingLifecycle && <Button busy={busy} onClick={open}>Оновити перевірку товару</Button>}
     {receipt && opened && <Notice tone="success">{receipt}</Notice>}
+    {opened && nextStep?.kind === 'review_history' && <Notice tone="info"><p>Виключення поточного товару знято. Тепер потрібно повторно перевірити його історію переобліку.</p>
+      <Button size="compactMd" busy={busy} onClick={open}>Перевірити наступний крок</Button></Notice>}
     {opened && nextStep?.kind === 'reviewed_resync' && <Notice tone="info"><p>Історію перевірено. Далі потрібен окремий перегляд відправлення цього товару.</p>
       {isActualAdministrator(auth) && ['export_templates.manage', 'export_templates.publish', 'exports.view'].every((permission) => permissions.includes(permission))
         ? categoryCode ? <ProductResync productId={productId} categoryCode={categoryCode} onSaved={onSaved} /> : <Link className="underline" to={`/admin/magento/administrator?productId=${productId}&action=broader_resync&returnTo=${encodeURIComponent(`/attention?problem=${productId}`)}`}>Перевірити відправлення виправленого товару</Link>
@@ -241,20 +254,23 @@ export function MagentoRecovery({ productId, categoryCode, onSaved, guided = fal
         {review?.canContinue && !review.unsentChanges?.length && <Notice tone="warning">Деталі ненадісланих змін недоступні. Повторіть перевірку перед продовженням.</Notice>}
       </>}
       {canRecoverJob && !record.job && (!guided || !canRecoverLifecycle) && <Notice>Немає збереженого завдання доставки для цього товару.</Notice>}
-      {canRecoverLifecycle && record.lifecycle && !unfinishedJob && availableKinds.length > 0 && (!receipt || guided && !nextStep) && <>
+      {record.history && !unfinishedJob && (historyMode || lifecycle?.blockers?.some(code => ['PUBLIC_IDENTITY_CHANGED', 'CORRECTION_LINEAGE_CONFLICT', 'EXCLUSION_OR_UNKNOWN_POLICY', 'RECOUNT_COMPATIBILITY_EXCLUSION'].includes(code))) && <MagentoRecoveryHistory
+        history={historyInspection?.history || record.history} inspection={historyInspection} busy={busy} onInspect={canRecoverLifecycle && !pendingLifecycle ? inspectHistory : null}
+        canViewHistory={permissions.includes('history.view')} onReleaseExclusion={canRecoverLifecycle && availableKinds.includes('release_exclusion') && !lifecycle && !pendingLifecycle ? () => previewLifecycle('release_exclusion') : null} />}
+      {canRecoverLifecycle && record.lifecycle && !unfinishedJob && availableKinds.length > 0 && (!historyMode || lifecycle) && (!receipt || guided && !nextStep) && <>
         <p className="font-semibold">{guided ? kind === 'stable_recount_exposure' ? 'Підтвердити товар після переобліку' : kind === 'prior_exposure' ? 'Підтвердити наявний товар у магазині' : kinds[kind] : kinds[kind]}</p>
         {(!guided || !lifecycle) && <p className="sync-problem-guidance">{guidance[kind] || 'Перевіримо попередні версії та збережені файли цього товару. Виберіть підтверджений результат для кожного запису нижче.'}</p>}
         {availableKinds.length > 1 && <Button size="compactMd" disabled={busy || Boolean(pendingLifecycle)} onClick={() => setAdvanced((value) => !value)}>Інші рішення щодо історії</Button>}
         {advanced && <label>Рішення щодо історії доставки<select className="input" disabled={busy || Boolean(pendingLifecycle)} value={kind} onChange={(event) => { setKind(event.target.value); setLifecycle(null); setEvidence(null); }}>
           {availableKinds.map((value) => <option key={value} value={value}>{kinds[value]}</option>)}</select></label>}
         {!guided && <p className="sync-problem-guidance">Попередня перевірка може прочитати Magento. Вона не змінює товари й не знімає утримання.</p>}
-        {(!guided || !lifecycle) && <Button size="compactMd" disabled={Boolean(pendingLifecycle)} busy={busy} onClick={previewLifecycle}>{guided ? 'Повторити перевірку товару' : 'Перевірити можливість рішення'}</Button>}
+        {(!guided || !lifecycle) && <Button size="compactMd" disabled={Boolean(pendingLifecycle)} busy={busy} onClick={() => previewLifecycle()}>{guided ? 'Повторити перевірку товару' : 'Перевірити можливість рішення'}</Button>}
         {lifecycle?.eligible && <Notice tone="info">{guided ? decisionEffects[lifecycle.review.kind] || 'Перевірка пройшла. Запишіть, що перевірили, і підтвердьте рішення нижче.' : `Перевірка дозволяє розглянути рішення «${kinds[lifecycle.review.kind]}». Підтвердження збереже це рішення щодо доставки; воно може дозволити подальшу автоматичну синхронізацію.`}</Notice>}
         {guided && lifecycle?.review.payload?.remote?.status === 'found' && <p>У Magento знайдено товар: <strong>{lifecycle.review.payload.remote.sku}</strong>.</p>}
         {lifecycle?.requiredEvidence && evidence && <EvidenceForm requirements={lifecycle.requiredEvidence} evidence={evidence} setEvidence={setEvidence} disabled={busy || Boolean(pendingLifecycle)} />}
       </>}
       {canRecoverLifecycle && record.lifecycle && unfinishedJob && <p className="sync-problem-guidance">Спочатку завершіть перевірку початкової операції{canRecoverJob ? ' вище' : ' з оператором, який має дозвіл на відновлення завдань'}. Рішення щодо історії не замінює підтвердження надісланих змін.</p>}
-      {canRecoverLifecycle && record.lifecycle && !unfinishedJob && availableKinds.length === 0 && !nextStep && <Notice>Для поточного стану немає окремого дозволеного рішення щодо історії доставки. Перевірте актуальну причину в товарі.</Notice>}
+      {canRecoverLifecycle && record.lifecycle && !unfinishedJob && availableKinds.length === 0 && !nextStep && !historyMode && <Notice>Для поточного стану немає окремого дозволеного рішення щодо історії доставки. Перевірте актуальну причину в товарі.</Notice>}
       {blockers.length > 0 && <Notice tone="warning"><p>Застосування заблоковане:</p><ul className="list-disc pl-5">{blockers.map((code, index) => <li key={index}>{blockerText[code] || 'Наявних підтверджень недостатньо для цього рішення. Передайте опис проблеми відповідальному за інтеграцію; дію не застосовано.'}</li>)}</ul></Notice>}
       {(review?.canReconcile || review?.canContinue || lifecycle?.eligible || pendingLifecycle) && <label>Підстава рішення<textarea className="input" value={reason} maxLength={2000} disabled={busy || Boolean(pendingLifecycle)} onChange={(event) => setReason(event.target.value)} placeholder="Що перевірено та чому можна виконати цю дію" /></label>}
       <div className="sync-recovery-actions">

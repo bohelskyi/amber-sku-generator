@@ -188,6 +188,24 @@ the actual Administrator restriction and existing preview/apply protocol. The
 controlled-products read accepts an optional parameterized positive `productId`
 alongside `categoryCode`, so this view does not evaluate a page of unrelated products.
 
+Historical recount recovery distinguishes changed public identities from stable
+articles before recommending a decision. The bounded local recovery history reads
+the actual connected correction component and same-identity users, not ancestor
+hints. It returns at most 30 products and 30 correction records, with an explicit
+incomplete flag. A missing lifecycle source-correction pointer is explained
+separately from contradictory product links. Stable confirmation is not recommended
+for changed identities, incomplete/inconsistent history, non-retired predecessors
+or unresolved exclusion policies. Its existing preview/apply checks remain authoritative.
+
+For an unsupported historical recount, the explicit guided check inspects the
+listed public articles using GETs only and shows each previous/current version,
+found/missing/unavailable Magento evidence, exact history problems and a copyable
+or downloadable report. There is no automatic historical identity repair or hold
+release. The report states the required history-repair handoff; old replacement
+recipes remain unavailable after CSV cutover. Optional product-history links retain
+a validated return to the attention case. An exclusion decision on a held product
+returns a separate history-review step, rather than prematurely offering resync.
+
 ### Controlled product recovery
 
 The separate `/api/admin/magento-recovery` router preserves the authenticated
@@ -202,6 +220,14 @@ No migration, role grant or replacement of durable jobs is introduced.
 | POST `/jobs/:id/reconcile` | Same capability; rechecks reviewed local/remote fingerprints and records only verified results, with an audit receipt; no remote mutation. |
 | POST `/jobs/:id/continue` | Same capability; separate explicit reviewed continuation of remaining original steps through the existing guarded job executor. |
 | POST `/products/:id/lifecycle-preview`, `/lifecycle-apply` | `exports.reconcile`; exact existing exposure/stable-recount or eligible compatibility reconciliation, never a blanket hold release. |
+| POST `/products/:id/history-inspect` | `exports.reconcile`; bounded GET-only observations of the exact public articles in local correction history; no repair token, job, acknowledgement or mutation. |
+
+History inspection rechecks the active actor before and after remote reads, outside
+product/access/publication transactions. One request has a shared 60-second/30-GET
+budget. Local history changes mark observations stale; Magento errors remain
+unavailable evidence and cannot be interpreted as absence. Local versions and the
+report remain available when observation fails. This evidence never authorizes an
+apply and does not acknowledge old files or predecessor delivery.
 
 Inspection is not a generic retry. Dispatched but unverified steps must match exact
 GET evidence before acknowledgement. A partially reconciled job stays uncertain,

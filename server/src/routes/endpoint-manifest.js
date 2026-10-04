@@ -17,6 +17,7 @@ const ENDPOINT_MANIFEST = Object.freeze([
   endpoint('GET', '/admin/magento-recovery/jobs/:id', 'export_templates.publish'),
   ...['inspect', 'reconcile', 'continue'].map((action) => endpoint('POST', `/admin/magento-recovery/jobs/:id/${action}`, 'export_templates.publish')),
   ...['lifecycle-preview', 'lifecycle-apply'].map((action) => endpoint('POST', `/admin/magento-recovery/products/:id/${action}`, 'exports.reconcile')),
+  endpoint('POST', '/admin/magento-recovery/products/:id/history-inspect', 'exports.reconcile'),
   endpoint('GET', '/admin/magento-integration', 'export_templates.view'),
   endpoint('GET', '/admin/magento-integration/overview', 'export_templates.view'),
   endpoint('GET', '/admin/magento-integration/categories/:categoryCode', 'export_templates.view'),

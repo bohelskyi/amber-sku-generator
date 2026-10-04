@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
+import { safeRepairReturn } from '../../lib/magento-repair-context.js';
 import { formatDateTime, formatDecimal, formatUah } from '../../lib/formatters';
 import { CopyAction, EmptyState, LoadingState, Notice, PageHeader, StatusBadge, TechnicalDisclosure } from '../ui';
 
@@ -360,6 +361,7 @@ function groupEvents(events) {
 export function ProductTimeline() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedSku = searchParams.get('sku') || '';
+  const returnTo = safeRepairReturn(searchParams.get('returnTo'));
   const [input, setInput] = useState(requestedSku);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -423,7 +425,8 @@ export function ProductTimeline() {
           title="Історія товару"
           description="Характеристики, ціни та події товару за артикулом."
           breadcrumbs={[{ label: 'Товари', to: '/products' }, { label: 'Історія товару' }]}
-          actions={<Link to="/products/history?mode=report" className="btn btn-outline">Звіт про виправлення</Link>}
+          actions={returnTo ? <Link to={returnTo} className="btn btn-outline">Повернутися до проблеми товару</Link>
+            : <Link to="/products/history?mode=report" className="btn btn-outline">Звіт про виправлення</Link>}
         />
 
         <form className="card flex flex-col gap-3 p-4 sm:flex-row" onSubmit={submit}>

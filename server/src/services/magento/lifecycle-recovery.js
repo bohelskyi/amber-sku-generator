@@ -84,8 +84,10 @@ async function preview(config, id, input, options = {}) {
     const activation = await require('../full-product-cutover-gate').readGate(options.databasePool);
     if (activation.phase !== 'active') blockers.push('LIFECYCLE_ACTIVATION_REQUIRED');
   }
-  const nextAction = input.kind === 'prior_exposure' || input.kind === 'release_exclusion'
-    ? await editor.read(options, (client) => nextResync(client, config, id)) : null;
+  const nextAction = input.kind === 'release_exclusion' && p.lifecycle?.route === 'hold' && p.lifecycle.hold_reason !== 'prior_exposure'
+    ? { kind: 'review_history', productId: id }
+    : input.kind === 'prior_exposure' || input.kind === 'release_exclusion'
+      ? await editor.read(options, (client) => nextResync(client, config, id)) : null;
   const review = { format: FORMAT, kind: input.kind, productId: id, article: p.public_sku,
     payload, requiredEvidence, blockers, nextAction };
   c.safeData(review);
@@ -151,15 +153,18 @@ async function productRecovery(config, id, options = {}) {
       [p.public_product_identity_id])).rows[0];
     const protectedWork = request?.reason_code === 'reconciliation_required' || request?.active_job_id != null || request?.state === 'syncing'
       || (row && !['succeeded', 'superseded'].includes(row.state) && (row.state === 'uncertain' || steps.length > 0));
+    const history = p.lifecycle?.route === 'hold' && p.lifecycle.hold_reason === 'historical_ambiguity'
+      ? await require('./recovery-history').read(client, id) : null;
     const availableKinds = [];
     if (!protectedWork && p.lifecycle && p.lifecycle.route !== 'retired') {
       if (p.lifecycle.business_exclusion_state !== 'none') availableKinds.push('release_exclusion');
       if (p.lifecycle.route === 'hold' && p.lifecycle.hold_reason === 'historical_ambiguity') {
-        availableKinds.push(p.corrected_from_product_id ? 'stable_recount_exposure' : 'prior_exposure');
+        if (history?.stableRecount) availableKinds.push('stable_recount_exposure');
+        else if (history?.complete && !history.hasRecount) availableKinds.push('prior_exposure');
         if (delivery?.legacy_product_csv_enabled === true) availableKinds.push('replacement', 'unexposed_first_delivery', 'generated_first_delivery');
       }
     }
-    return { productId: id, article: p.public_sku,
+    return { productId: id, article: p.public_sku, history,
       job: options.canRecoverJobs && row ? require('./sync-job-recovery').summary(row, steps) : null,
       lifecycle: p.lifecycle ? { route: p.lifecycle.route, holdReason: p.lifecycle.hold_reason,
         deliveryVersion: String(p.lifecycle.delivery_version), businessExclusion: p.lifecycle.business_exclusion_state,

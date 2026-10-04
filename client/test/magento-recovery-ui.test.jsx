@@ -4,16 +4,91 @@ import { MemoryRouter } from 'react-router-dom';
 import { AuthContext } from '../src/auth/auth-context.js';
 import { api } from '../src/lib/api.js';
 import { MagentoRecovery } from '../src/components/attention/MagentoRecovery.jsx';
+import { downloadBlob } from '../src/lib/download.js';
 vi.mock('../src/lib/api.js', () => ({ api: { get: vi.fn(), post: vi.fn() } }));
+vi.mock('../src/lib/download.js', () => ({ downloadBlob: vi.fn() }));
 const job = { id: 'job-1', state: 'uncertain', steps: [{ ordinal: 0, domain: 'coreProduct', state: 'dispatched' }] };
 const record = { productId: 7, article: 'AG-000007', job, lifecycle: null, actions: { jobRecovery: true, lifecycleRecovery: false } };
 const reviewed = { job, review: { jobId: 'job-1', steps: [] }, reviewHash: 'original-review', steps: [{ ...job.steps[0], matches: true }],
   blockers: [], canReconcile: true, canContinue: false, observedAt: '2026-10-04T00:00:00Z' };
+const history = { productId: 7, complete: true, hasRecount: true, stableRecount: false, identityChanged: true,
+  products: [{ productId: 3, article: 'KL-OLD', internalSku: 'OLD', status: 'corrected', businessExclusion: 'unknown' },
+    { productId: 7, article: 'KL-CURRENT', internalSku: 'CURRENT', status: 'active', businessExclusion: 'none' }],
+  corrections: [{ correctionId: 10, sourceProductId: 3, successorProductId: 7, sourceInternalSku: 'OLD', successorInternalSku: 'CURRENT' }],
+  issues: [{ code: 'SOURCE_CORRECTION_NOT_RECORDED', productId: 7, correctionId: 10, recordedCorrectionId: null }] };
 function show(capabilities = ['export_templates.publish'], props = {}, roles = []) {
   return render(<AuthContext.Provider value={{ permissions: capabilities, roles, principalLifetime: { valid: true } }}><MemoryRouter><MagentoRecovery productId={7} {...props} /></MemoryRouter></AuthContext.Provider>);
 }
 beforeEach(() => { vi.resetAllMocks(); api.get.mockResolvedValue({ data: record }); api.post.mockResolvedValue({ data: reviewed }); });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+it('historical changed articles show exact versions, Magento results and a report instead of an unsuitable confirmation', async () => {
+  api.get.mockResolvedValue({ data: { ...record, job: null, history, lifecycle: { suggestedKind: null, availableKinds: [], legacyDeliveryEnabled: false }, actions: { jobRecovery: false, lifecycleRecovery: true } } });
+  api.post.mockResolvedValue({ data: { history, remote: [{ article: 'KL-OLD', status: 'found', id: 42 }, { article: 'KL-CURRENT', status: 'not_found' }], observedAt: '2026-10-04T00:00:00Z', stale: false } });
+  const writeText = vi.fn().mockResolvedValue(); vi.stubGlobal('navigator', { clipboard: { writeText } });
+  show(['exports.reconcile', 'history.view'], { guided: true });
+  expect(api.get).not.toHaveBeenCalled(); expect(api.post).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити товар у Magento' }));
+  await screen.findByText('Є в Magento · ID 42');
+  expect(screen.getByText('Немає в Magento')).toBeTruthy();
+  expect(screen.getByText(/Переоблік №10 збережений, але для KL-CURRENT/)).toBeTruthy();
+  expect(screen.getByText('Далі — виправлення історії переобліку')).toBeTruthy();
+  expect(screen.getAllByRole('link', { name: 'Історія цієї версії' })).toHaveLength(2);
+  expect(screen.queryByText('Підтвердити товар після переобліку')).toBeNull();
+  expect(screen.queryByText('Для поточного стану немає окремого дозволеного рішення щодо історії доставки. Перевірте актуальну причину в товарі.')).toBeNull();
+  expect(api.post).toHaveBeenCalledExactlyOnceWith('/admin/magento-recovery/products/7/history-inspect', {});
+  fireEvent.click(screen.getByRole('button', { name: 'Копіювати звіт для виправлення' }));
+  await screen.findByText(/Звіт скопійовано/);
+  const report = writeText.mock.calls[0][0];
+  expect(report).toContain('KL-OLD'); expect(report).toContain('KL-CURRENT'); expect(report).toContain('SOURCE_CORRECTION_NOT_RECORDED');
+  expect(report).toContain('Є в Magento · ID 42');
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти звіт у файл' }));
+  const [blob, fileName] = downloadBlob.mock.calls[0];
+  expect(fileName).toBe('magento-product-7-history.txt');
+  const contents = await new Promise(resolve => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.readAsText(blob); });
+  expect(contents).toBe(report);
+  expect(api.post.mock.calls.some(([url]) => url.endsWith('lifecycle-apply'))).toBe(false);
+  vi.unstubAllGlobals();
+});
+
+it('a stale historical inspection retains its evidence and explicitly requires a new check', async () => {
+  api.get.mockResolvedValue({ data: { ...record, job: null, history, lifecycle: { availableKinds: [], legacyDeliveryEnabled: false }, actions: { lifecycleRecovery: true } } });
+  api.post.mockResolvedValue({ data: { history, stale: true, remote: [{ article: 'KL-OLD', status: 'lookup_error' }] } });
+  show(['exports.reconcile'], { guided: true });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити товар у Magento' }));
+  await screen.findByText(/Дані товару змінилися під час перевірки/);
+  expect(screen.getByText('Не вдалося перевірити')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Повторити перевірку артикулів у Magento' })).toBeTruthy();
+  expect(api.post.mock.calls.some(([url]) => url.endsWith('/lifecycle-preview') || url.endsWith('/lifecycle-apply'))).toBe(false);
+});
+
+it('a failed history lookup leaves the exact local diagnosis and concrete report available', async () => {
+  api.get.mockResolvedValue({ data: { ...record, job: null, history, lifecycle: { availableKinds: [], legacyDeliveryEnabled: false }, actions: { lifecycleRecovery: true } } });
+  api.post.mockRejectedValue(new Error('unavailable'));
+  show(['exports.reconcile'], { guided: true });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити товар у Magento' }));
+  await screen.findByText(/Не вдалося отримати підтверджений результат/);
+  expect(screen.getByText('KL-OLD')).toBeTruthy();
+  expect(screen.getByText('KL-CURRENT')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Зберегти звіт у файл' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: 'Історія цієї версії' })).toBeNull();
+});
+
+it('an exclusion decision is separate from historical repair and does not offer a premature resync', async () => {
+  api.get.mockResolvedValue({ data: { ...record, job: null, history, lifecycle: { suggestedKind: 'release_exclusion', availableKinds: ['release_exclusion'], legacyDeliveryEnabled: false }, actions: { lifecycleRecovery: true } } });
+  api.post.mockImplementation(async url => ({ data: url.endsWith('/history-inspect') ? { history, remote: [], stale: false }
+    : url.endsWith('/lifecycle-preview') ? { review: { kind: 'release_exclusion', payload: { productId: 7 } }, eligible: true, blockers: [], reviewHash: 'policy-proof' }
+      : { nextAction: { kind: 'review_history', productId: 7 } } }));
+  show(['exports.reconcile'], { guided: true });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити товар у Magento' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Переглянути виключення поточного товару' }));
+  fireEvent.change(await screen.findByLabelText('Підстава рішення'), { target: { value: 'Підтверджено дозвіл на синхронізацію' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Зняти виключення із синхронізації' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Зберегти підтверджене рішення' }));
+  await screen.findByRole('button', { name: 'Перевірити наступний крок' });
+  expect(screen.queryByRole('button', { name: 'Переглянути оновлення товару' })).toBeNull();
+  expect(api.post.mock.calls.filter(([url]) => url.endsWith('/lifecycle-apply'))).toHaveLength(1);
+});
 
 it('guided check inspects the original job in one explicit action and never records or continues automatically', async () => {
   show(['export_templates.publish'], { guided: true });
