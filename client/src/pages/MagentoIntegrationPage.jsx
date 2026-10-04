@@ -10,6 +10,7 @@ import MagentoCategoryDetail from '../components/workspace/MagentoCategoryDetail
 import MagentoDetails from '../components/workspace/MagentoDetails.jsx';
 import MagentoActionHistory from '../components/workspace/MagentoActionHistory.jsx';
 import MagentoStructureResult from '../components/workspace/MagentoStructureResult.jsx';
+import MagentoCategoryWorkspace from '../components/workspace/MagentoCategoryWorkspace.jsx';
 import '../components/workspace/magento.css';
 
 const Preparation = lazy(() => import('../components/workspace/MagentoPreparationWorkspace.jsx'));
@@ -19,6 +20,14 @@ const Changes = lazy(() => import('../components/workspace/MagentoChangesWorkspa
 const CategorySetup = lazy(() => import('../components/workspace/MagentoCategorySetup.jsx'));
 const root = '/admin/magento-integration';
 const date = (value) => value ? new Date(value).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' }) : 'Немає доступного спостереження';
+
+function CategoryEntrance({ categories, canManage, canViewProducts, published, ...workspace }) {
+  const { search } = useLocation(); const params = new URLSearchParams(search);
+  if (['placement', 'products', 'legacy'].includes(params.get('tab')) || params.get('path') || params.get('field') === 'categories') {
+    return <MagentoCategoryDetail categories={categories} canManage={canManage} canViewProducts={canViewProducts} activeId={published?.id} />;
+  }
+  return <MagentoCategoryWorkspace categories={categories} activePublication={published} {...workspace} />;
+}
 
 function useNarrowMagentoLayout() {
   const [narrow, setNarrow] = useState(() => globalThis.matchMedia?.('(max-width: 900px)').matches || false);
@@ -39,7 +48,8 @@ export default function MagentoIntegrationPage() {
   const [data, setData] = useState(null); const [error, setError] = useState(''); const [refresh, setRefresh] = useState(0);
   const [observation, setObservation] = useState(null); const [checking, setChecking] = useState(false); const [checkError, setCheckError] = useState('');
   const narrowViewport = useNarrowMagentoLayout(); const [contextOpen, setContextOpen] = useState(false);
-  const narrowLayout = narrowViewport || pathname !== '/admin/magento';
+  const categoryWorkspace = pathname === '/admin/magento' || pathname === '/admin/magento/categories' || /^\/admin\/magento\/categories\/[^/]+$/.test(pathname);
+  const narrowLayout = narrowViewport || categoryWorkspace || pathname !== '/admin/magento/overview';
   const discoverySequence = useRef(0);
   useEffect(() => () => { ++discoverySequence.current; }, []);
   useEffect(() => {
@@ -65,17 +75,19 @@ export default function MagentoIntegrationPage() {
   const operationalText = integration?.operational.state !== 'known' ? 'Дані про зафіксовані проблеми недоступні'
     : integration?.operational.count ? `Потребують уваги: ${integration.operational.count}` : 'Зафіксованих проблем немає';
   const publicationText = published ? `Версія ${published.versionNumber}` : 'Опублікованих відповідностей ще немає';
-  const items = [{ to: '/admin/magento', label: 'Огляд' },
-    { to: '/admin/magento/categories', label: 'Категорії' },
+  const items = [{ to: '/admin/magento', label: 'Категорії та прив’язки' },
+    { to: '/admin/magento/overview', label: 'Стан доставки' },
     ...(canManage ? [{ to: '/admin/magento/changes', label: 'Підготовлені зміни' }] : []),
     { to: '/admin/magento/history', label: 'Історія' },
     ...(isActualAdministrator(auth) ? [{ to: '/admin/magento/administrator', label: 'Контрольовані операції' }] : [])];
   return <main className="app-page"><div className="local-workspace magento-workspace">
-    <WorkspaceHeader title="Інтеграція Magento" description="Категорії, характеристики та правила передачі товарів." actions={<button className="btn btn-outline btn-compact-md" onClick={() => setRefresh((value) => value + 1)}>Оновити стан</button>} />
-    <WorkspaceLocalNav label="Інтеграція Magento" items={items} />
+    <WorkspaceHeader title="Інтеграція Magento" description={categoryWorkspace ? 'Що передаємо з менеджера в магазин.' : 'Категорії, характеристики та правила передачі товарів.'} actions={!categoryWorkspace && <button className="btn btn-outline btn-compact-md" onClick={() => setRefresh((value) => value + 1)}>Оновити стан</button>} />
+    <div className={categoryWorkspace ? 'mc-navigation' : undefined}><WorkspaceLocalNav label="Інтеграція Magento" items={categoryWorkspace ? items.slice(0, 2) : items} />
+      {categoryWorkspace && <div className="mc-extra-nav"><MagentoDetails summary="Інші розділи">{() => <WorkspaceLocalNav label="Додаткові розділи інтеграції" items={items.slice(2)} />}</MagentoDetails></div>}
+    </div>
     {error && <Notice>{error}</Notice>}
     {!data && !error && <LoadingState label="Читаємо стан інтеграції…" />}
-    {data && <>{narrowLayout && <section className="magento-compact-context" aria-label="Поточна інтеграція">
+    {data && <>{categoryWorkspace ? <section className="mc-integration-status" aria-label="Поточна інтеграція"><span><span>{deliveryText}</span> · <span>{operationalText}</span></span><button type="button" className="mc-field-link" aria-expanded={contextOpen} onClick={() => setContextOpen(!contextOpen)}>{contextOpen ? 'Сховати деталі' : 'Деталі інтеграції'}</button></section> : narrowLayout && <section className="magento-compact-context" aria-label="Поточна інтеграція">
       <div><span>Поточна доставка</span><strong>{deliveryText}</strong><small>{operationalText}</small></div>
       <div><span>Активні відповідності</span><strong>{publicationText}</strong></div>
       <button type="button" className="magento-context-toggle" aria-expanded={contextOpen}
@@ -92,6 +104,7 @@ export default function MagentoIntegrationPage() {
         </div></div>}
         {(!narrowLayout || contextOpen) && <div className="magento-context-details">
         <div>
+          {categoryWorkspace && <><p className="text-sm">{publicationText}</p><button type="button" className="btn btn-outline btn-compact-md mt-2" onClick={() => setRefresh((value) => value + 1)}>Оновити стан</button></>}
           {integration.draftCount > 0 && <p className="mt-2 text-sm">Є чернетки змін: {integration.draftCount}. Вони не змінюють поточну доставку.</p>}
         </div>
         <div className="border-t pt-4"><p className="text-sm font-medium" role="status">Остання перевірка структури Magento: {date(observedAt)}</p>
@@ -107,10 +120,11 @@ export default function MagentoIntegrationPage() {
       </aside>
       <div className="min-w-0">
         <Suspense fallback={<LoadingState />}><Routes>
-          <Route index element={<MagentoOverview categories={data.categories} canManage={canManage} />} />
-          <Route path="categories" element={<MagentoOverview categories={data.categories} all canManage={canManage} />} />
+          <Route index element={<MagentoCategoryWorkspace categories={data.categories} activePublication={published} onPublished={() => setRefresh((value) => value + 1)} onObserve={discover} checking={checking} />} />
+          <Route path="overview" element={<MagentoOverview categories={data.categories} canManage={canManage} />} />
+          <Route path="categories" element={<MagentoCategoryWorkspace categories={data.categories} activePublication={published} onPublished={() => setRefresh((value) => value + 1)} onObserve={discover} checking={checking} />} />
           <Route path="categories/new" element={<CategorySetup activePublication={published} />} />
-          <Route path="categories/:categoryCode" element={<MagentoCategoryDetail key={published?.id || 'none'} categories={data.categories} canManage={canManage} canViewProducts={canViewProducts} activeId={published?.id} />} />
+          <Route path="categories/:categoryCode" element={<CategoryEntrance categories={data.categories} canManage={canManage} canViewProducts={canViewProducts} published={published} onPublished={() => setRefresh((value) => value + 1)} onObserve={discover} checking={checking} />} />
           <Route path="categories/:categoryCode/labels" element={<Administrator activePublication={published} readOnlyLabels />} />
           <Route path="rules/*" element={<Rules embedded basePath="/admin/magento/rules" activePublication={published} />} />
           <Route path="changes" element={<Changes activePublication={published} canManage={canManage} />} />

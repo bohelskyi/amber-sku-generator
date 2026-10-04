@@ -13,7 +13,7 @@ const blockers = { RECONCILIATION_REQUIRED: 'Раніше відправлену
   NAME_CONFLICT_OR_BASELINE_REQUIRED: 'Спочатку вирішіть конфлікт або підтвердьте спільний стан назв.',
   INVALID_GENERATED_NAMES: 'Правило не формує дві допустимі назви.' };
 
-function ControlledWorkspace({ revision, kind, onApplied }) {
+function ControlledWorkspace({ revision, kind, onApplied, categoryCode }) {
   const [params] = useSearchParams();
   const targetId = /^[1-9]\d*$/.test(params.get('productId') || '') && Number.isSafeInteger(Number(params.get('productId'))) ? Number(params.get('productId')) : null;
   const back = params.get('returnTo'); const returnTo = back && /^\/(attention|sync-problems)(\?|$)/.test(back) ? back : '/attention';
@@ -37,7 +37,7 @@ function ControlledWorkspace({ revision, kind, onApplied }) {
     inFlight.current = true;
     const current = ++sequence.current; setBusy(true); setError(''); setReview(null);
     try {
-      const { data } = await api.get(`${root}/bindings/${revision.id}/controlled-products`, { params: { after: targetId ? targetId - 1 : cursor, search } });
+      const { data } = await api.get(`${root}/bindings/${revision.id}/controlled-products`, { params: { after: targetId ? targetId - 1 : cursor, search, ...(categoryCode ? { categoryCode } : {}) } });
       if (current === sequence.current) {
         const eligible = targetId ? data.products.filter((product) => product.productId === targetId) : data.products;
         setCandidates(targetId ? { ...data, products: eligible, nextCursor: null } : data);
@@ -93,5 +93,5 @@ export default function MagentoControlledActions(props) {
   if (!Object.hasOwn(titles, props.kind)) return null;
   if (!canApply) return <Notice>Для цієї дії потрібні права Адміністратора.</Notice>;
   if (props.revision?.state !== 'published' || props.currentPublishedId !== props.revision?.id) return <Notice>Для контрольованої дії потрібна чинна опублікована версія.</Notice>;
-  return <ControlledWorkspace key={`${props.revision.id}:${props.revision.revision}:${props.kind}:${params.get('productId') || ''}`} {...props} />;
+  return <ControlledWorkspace key={`${props.revision.id}:${props.revision.revision}:${props.kind}:${props.categoryCode || ''}:${params.get('productId') || ''}`} {...props} />;
 }

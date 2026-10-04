@@ -5,6 +5,7 @@ const bindings=require('../src/services/magento/binding.service');
 const publication=require('../src/services/magento/binding-publication');
 const handoff=require('../src/services/magento/binding-handoff');
 const controlled=require('../src/services/magento/binding-controlled-actions');
+const categoryWorkspace=require('../src/services/magento/integration-category-workspace');
 const fixture=require('../test/fixtures/magento-v4');
 const {REQUIRED}=require('../src/services/export-templates/column-contract');
 const {readPreviewProduct}=require('../src/services/magento/sync-preview-db');
@@ -73,6 +74,29 @@ async function setup(name){
   const discover=async()=>({schema,categories:[],observedAt:'2026-10-02T00:00:00.000Z'});
   return {url,db,actor,options:{...options,fetchImpl,discover},config,d,schema,approved,current,products,draft,raw,english,calls};
 }
+
+test('category workspace reads the exact immutable publication without product checks or writes; name candidates stay in category',async()=>{
+  const name='amber_category_workspace_test',f=await setup(name);
+  try{
+    const original=await bindings.getRevision(f.current.id,f.options);
+    const counts=async()=> (await f.db.query(`SELECT
+      (SELECT count(*)::int FROM magento_binding_revisions) AS revisions,
+      (SELECT count(*)::int FROM export_template_versions) AS versions,
+      (SELECT count(*)::int FROM audit_events) AS audits,
+      (SELECT count(*)::int FROM magento_sync_jobs) AS jobs`)).rows[0];
+    const before=await counts();
+    const result=await categoryWorkspace.readCategory(f.config,'XG',{bindingRevisionId:f.current.id},f.options);
+    assert.equal(result.revision.id,f.current.id);assert.equal(result.template.versionId,f.current.templateVersionId);
+    assert.equal(result.attributes.find(a=>a.code==='kolir').state,'unmapped');
+    assert.equal(result.attributes.find(a=>a.code==='name').state,'connected');
+    const english=await categoryWorkspace.readField(f.config,'XG','name',{bindingRevisionId:f.current.id,rowId:'english'},f.options);
+    assert.ok(english.entries.length);assert.ok(english.entries.every(e=>e.group==='XG'&&e.row==='english'));
+    const picker=await controlled.candidates(f.config,f.current.id,f.options,{categoryCode:'XG'});
+    assert.deepEqual(picker.products.map(p=>p.productId),[f.products[0].id,f.products[2].id]);
+    assert.equal(f.calls.length,0);assert.deepEqual(await counts(),before);
+    assert.deepEqual(await bindings.getRevision(f.current.id,f.options),original);
+  }finally{await f.db.end();await dropTestDatabase(name);}
+});
 
 test('publication lifecycle race uses independent connections: committed drift is stale and locked state waits for commit',async()=>{
   for(const order of ['before','after']){

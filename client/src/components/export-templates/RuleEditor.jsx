@@ -38,23 +38,27 @@ function Scope({ context, trail, table }) {
   </details></div>;
 }
 
-function CharacteristicPicker({ node, onInsert, context }) {
+function CharacteristicPicker({ node, onInsert, context, copyLabels = false }) {
   const [source, setSource] = useState('');
   const [table, setTable] = useState(null);
   const approved = availableSources(context.registry, context.group);
   const sources = Object.entries(context.definition.sources).filter(([, value]) => value.type !== 'boolean' && approved.some((entry) => entry.descriptor.kind === value.kind && entry.descriptor.category === value.category && entry.descriptor.key === value.key && entry.descriptor.field === value.field)).map(([id, descriptor]) => ({ id, descriptor }));
   const mappings = mappingsForSource(context.definition, source);
   const semantic = context.definition.sources[source]?.kind === 'semantic';
+  const simple = context.simple && copyLabels;
+  const evidence = useSourceEvidence(simple ? context.definition.sources[source] : null, context.loadSource);
+  const copiedLabels = simple && semantic ? copyCurrentOptionLabels(evidence) : null;
   return <div className="et-source-picker">
     <SourcePicker registry={context.registry} group={context.group} choices={sources} value={source} showDetails={!context.focused} onChange={(id) => { setSource(id); setTable(context.definition.sources[id]?.kind === 'semantic' ? null : ''); }} />
-    <label>Як записувати значення<select className="input" value={table ?? '__choose'} onChange={(e) => setTable(e.target.value === '__choose' ? null : e.target.value)}>
+    {!simple && <label>Як записувати значення<select className="input" value={table ?? '__choose'} onChange={(e) => setTable(e.target.value === '__choose' ? null : e.target.value)}>
       <option value="__choose">{context.integration ? "Оберіть значення для Magento" : "Оберіть значення для файлу"}</option>{!semantic && <option value="">Використати значення як є</option>}{mappings.map((id) => <option key={id} value={id}>Значення шаблону: {Object.values(context.definition.tables[id]).slice(0, 3).join(' / ')}</option>)}
-    </select></label>
-    {semantic && <><p>Після вставлення натисніть характеристику в тексті, щоб змінити її значення або скопіювати поточні назви.</p>
+    </select></label>}
+    {simple && source && <p className="et-muted">{semantic ? Object.keys(copiedLabels).length ? `У тексті будуть назви: ${Object.values(copiedLabels).slice(0, 3).join(', ')}.` : 'Назви значень ще не завантажилися. Дочекайтеся їх перед вставленням.' : 'У текст буде підставлено значення товару.'}</p>}
+    {semantic && !simple && <><p>Після вставлення натисніть характеристику в тексті, щоб змінити її значення або скопіювати поточні назви.</p>
       {!context.focused && <details><summary>Технічні налаштування</summary><p>Спеціальний режим для інтеграцій. Для звичайних полів Magento зазвичай використовуються назви або власні відповідності.</p>
         <button type="button" className="btn btn-outline px-3" aria-pressed={table === ''} onClick={() => setTable('')}>Внутрішній ID варіанта</button>
       </details>}{table === '' && <p>Налаштовано технічний вивід внутрішнього ID.</p>}</>}
-    <button type="button" className="btn btn-primary px-3" disabled={!source || table === null || Object.keys(node.slots).length >= 16} onClick={() => onInsert(source, table)}>Вставити характеристику</button>
+    <button type="button" className="btn btn-primary px-3" disabled={!source || (simple ? semantic && !Object.keys(copiedLabels).length : table === null) || Object.keys(node.slots).length >= 16} onClick={() => onInsert(source, simple ? '' : table, copiedLabels)}>Вставити характеристику</button>
     {Object.keys(node.slots).length >= 16 && <p>Досягнуто межу: 16 характеристик.</p>}
   </div>;
 }
@@ -87,18 +91,20 @@ function TextComposer({ node: original, trail, context }) {
   });
   return <div className="et-composer">
     <Scope context={context} trail={trail} />
-    <label>{context.integration ? 'Значення для Magento' : 'Текст у файлі'}<textarea ref={(element) => { input.current = element; element?.setCustomValidity(invalid ? 'Перевірте характеристики у фігурних дужках.' : ''); }} className="input et-text" rows={3} disabled={context.readOnly}
+    <label>{context.simple ? 'Текст для магазину' : context.integration ? 'Значення для Magento' : 'Текст у файлі'}<textarea ref={(element) => { input.current = element; element?.setCustomValidity(invalid ? 'Перевірте характеристики у фігурних дужках.' : ''); }} className="input et-text" rows={3} disabled={context.readOnly}
       value={display(node.template)} aria-invalid={invalid} aria-describedby={helpId} onSelect={(e) => { selection.current = [stored(e.target.value.slice(0, e.target.selectionStart)).length, stored(e.target.value.slice(0, e.target.selectionEnd)).length]; }}
       onChange={(e) => update((value) => ({ ...value, template: stored(e.target.value) }))} /></label>
-    <p id={helpId} className="et-muted">Текст і розділові знаки зберігаються точно. Додавайте характеристики кнопкою нижче; їхні позначки у {'{дужках}'} буде замінено значеннями товару.</p>
+    <p id={helpId} className="et-muted">{context.simple ? 'Характеристики в дужках заміняться даними вибраного товару.' : <>Текст і розділові знаки зберігаються точно. Додавайте характеристики кнопкою нижче; їхні позначки у {'{дужках}'} буде замінено значеннями товару.</>}</p>
     {invalid && <p role="alert">Використайте всі додані характеристики, без невідомих назв чи незакритих дужок. Для вилучення скористайтеся кнопкою характеристики.</p>}
     <div className="et-tokens" aria-label="Характеристики в тексті">{Object.keys(node.slots).map((slot) => <button key={slot} type="button" className="et-token" aria-pressed={selected === slot} onClick={() => { setSelected(selected === slot ? '' : slot); setRenamed(slot); setAdding(false); }}>
       {names[slot]}<span>{`{${names[slot]}}`}</span>
     </button>)}
       {!context.readOnly && <button type="button" className="btn btn-outline px-3" onClick={() => { setAdding(!adding); setSelected(''); }}>+ Додати характеристику</button>}
     </div>
-    {adding && <CharacteristicPicker node={node} context={context} onInsert={(source, table) => {
-      update((value) => insertCharacteristic(value, source, table, selection.current)); setAdding(false); input.current?.focus();
+    {adding && <CharacteristicPicker node={node} context={context} copyLabels onInsert={(source, table, labels) => {
+      if (labels) { if (!context.insertLabels(trail, source, labels, selection.current)) return; }
+      else update((value) => insertCharacteristic(value, source, table, selection.current));
+      setAdding(false); input.current?.focus();
     }} />}
     {selected && Object.hasOwn(node.slots, selected) && <section className="et-slot" aria-label="Налаштування характеристики">
       <div className="et-row"><h3>{context.focused ? names[selected] : label(selected)}</h3><button type="button" className="et-link" onClick={() => setSelected('')}>Закрити</button></div>
@@ -231,7 +237,7 @@ function TaskValue({ node: original, trail: originalTrail = [], context, output 
   return <AdvancedRule context={context}>Власне правило збережено без змін. Його повна структура доступна в розширеному редакторі.</AdvancedRule>;
 }
 
-export function FieldInspector({ integration = false, definition, cellPath, onChange, registry, readOnly, loadSource, diagnostics = [], openSource, onAdvanced, focused = false, onTechnical }) {
+export function FieldInspector({ integration = false, localOnly = false, simple = false, textOnly = false, definition, cellPath, onChange, registry, readOnly, loadSource, diagnostics = [], openSource, onAdvanced, focused = false, onTechnical }) {
   const [scope, setScope] = useState('local');
   const [error, setError] = useState('');
   const column = cellPath[5];
@@ -241,14 +247,20 @@ export function FieldInspector({ integration = false, definition, cellPath, onCh
   const live = useRef(null);
   useLayoutEffect(() => { live.current = definition; return () => { live.current = null; }; }, [definition]);
   const apply = (action) => { if (readOnly || live.current !== definition) return false; try { onChange(action()); setError(''); return true; } catch (e) { setError(e.message); return false; } };
-  const context = { integration, definition, cellPath, scope, setScope, registry, readOnly, loadSource, diagnostics, onAdvanced, onTechnical, focused, openSource, group: group.route,
+  const context = { integration, localOnly, simple, definition, cellPath, scope, setScope, registry, readOnly, loadSource, diagnostics, onAdvanced, onTechnical, focused, openSource, group: group.route,
     update: (trail, transform) => apply(() => editField(definition, cellPath, trail, scope, transform)),
     mapping: (trail, transform) => apply(() => editMapping(definition, cellPath, trail, scope, transform)),
-    questionMapping: (transform) => apply(() => editQuestionMapping(definition, cellPath, scope, transform)) };
+    questionMapping: (transform) => apply(() => editQuestionMapping(definition, cellPath, scope, transform)),
+    insertLabels: (trail, source, entries, selection) => apply(() => {
+      let id = 'text.names'; let number = 1;
+      while (Object.hasOwn(definition.tables, id)) id = 'text.names' + number++;
+      const next = { ...definition, tables: { ...definition.tables, [id]: entries } };
+      return editField(next, cellPath, trail, 'local', (value) => insertCharacteristic(value.op === 'literal' ? { op: 'interpolate', template: value.value, slots: {} } : value, source, id, selection));
+    }) };
   return <section className="et-inspector" aria-label="Редактор поля">
     {error && <p role="alert" className="danger-panel p-3">{error}</p>}
     <div className="et-field-value">
-      {protectedCells.has(column) ? <p>Захищене ідентифікаційне поле: {column}.</p> : lens ? focused ? <Mapping node={lens.lookup} trail={lens.trail} context={{ ...context, question: lens }} /> : <QuestionField lens={lens} context={context} mappingComponent={Mapping} loadSource={loadSource} diagnostics={diagnostics} openSource={openSource} /> : Object.hasOwn(row.cells, column) ? <TaskValue node={at(definition, cellPath)} context={context} /> : <>
+      {protectedCells.has(column) ? <p>Захищене ідентифікаційне поле: {column}.</p> : lens ? focused ? <Mapping node={lens.lookup} trail={lens.trail} context={{ ...context, question: lens }} /> : <QuestionField lens={lens} context={context} mappingComponent={Mapping} loadSource={loadSource} diagnostics={diagnostics} openSource={openSource} /> : Object.hasOwn(row.cells, column) ? <TaskValue node={at(definition, cellPath)} context={context} output={textOnly} /> : <>
         <p>Порожня комірка. Значення з основного рядка не підставляється.</p>{!readOnly && <button type="button" className="btn btn-outline px-3" onClick={() => context.update([], () => ({ op: 'literal', value: '' }))}>Додати текст у цю комірку</button>}</>}
     </div>
     {!focused && !lens && openSource && <><p>Джерело: {sourceLabel(definition, openSource, registry)}</p><SourceSupportStatus definition={definition} sourceId={openSource} diagnostics={diagnostics} showDetails={false} /></>}

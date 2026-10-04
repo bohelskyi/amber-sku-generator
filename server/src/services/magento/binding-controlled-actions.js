@@ -56,7 +56,8 @@ async function preview(config,input,options={}){
   return {...report,previewToken:c.hash({input,report})};
 }
 async function candidates(config,id,options={},query={}){
-  c.command(query,[],['after','search']);
+  c.command(query,[],['after','search','categoryCode']);
+  if(query.categoryCode !== undefined && (typeof query.categoryCode !== 'string' || !/^[A-Z][A-Z0-9_]{0,31}$/.test(query.categoryCode)))c.invalid();
   const search=query.search ?? '';
   if(typeof search!=='string'||search.length>100)c.invalid();
   if (query.after !== undefined && !['string','number'].includes(typeof query.after)) c.invalid();
@@ -70,7 +71,8 @@ async function candidates(config,id,options={},query={}){
       AND exclude_from_export=0 AND NOT EXISTS(SELECT 1 FROM magento_test_deletions d WHERE d.public_product_identity_id=p.public_product_identity_id)
       AND ($2='' OR EXISTS(SELECT 1 FROM public_product_identities i WHERE i.id=p.public_product_identity_id
         AND position(lower($2) in lower(i.public_sku))>0))
-      ORDER BY id LIMIT 101`,[after,search.trim()])).rows;
+      AND ($3::text IS NULL OR p.category=$3)
+      ORDER BY id LIMIT 101`,[after,search.trim(),query.categoryCode ?? null])).rows;
     const hasMore=rows.length>100,page=rows.slice(0,100);
     if(!page.length)return {products:[],nextCursor:null};
     const report=await inspect(client,config,{bindingRevisionId:id,expectedRevision:revision.revision,kind:'name_rule',productIds:page.map((r)=>r.id)});
