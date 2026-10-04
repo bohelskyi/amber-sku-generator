@@ -231,6 +231,13 @@
 .sync-issue-fields { display:grid; gap:7px; list-style:disc; margin:10px 0 10px 20px; font-size:var(--font-size-sm); }
 .sync-next-heading { margin:14px 0 7px; color:var(--navy-900); font-size:var(--font-size-sm); font-weight:650; }
 .sync-problem-detail > footer { flex-wrap:wrap; gap:8px; }
+.sync-start-task .sync-recovery { border:0; padding:12px 0 0; }
+.sync-start-task > .sync-problem-guidance + .sync-problem-guidance { margin-top:8px; }
+.sync-other-problems > ul { display:grid; gap:14px; margin-top:14px; }
+.sync-other-problems > ul > li { padding-top:14px; border-top:1px solid var(--border); }
+.sync-other-problems h4 { font-size:var(--font-size-sm); font-weight:650; color:var(--navy-900); }
+.sync-other-problems .btn { margin-top:8px; }
+.sync-raw-evidence { overflow-wrap:anywhere; white-space:pre-wrap; font-size:var(--font-size-xs); }
 .sync-back { display:none; }
 .sync-recovery { padding:16px 0; border-top:1px solid var(--border); }
 .sync-recovery > :not(:first-child) { margin-top:12px; }

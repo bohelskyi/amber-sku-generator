@@ -1,7 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { repairContext, safeRepairReturn, withRepairContext } from '../src/lib/magento-repair-context.js';
-import { nextAction, problemRepairUrl, problemTitle } from '../src/components/attention/sync-problem-presentation.js';
+import { attentionProblemGroups, nextAction, problemRepairUrl, problemTitle } from '../src/components/attention/sync-problem-presentation.js';
+
+test('attention grouping retains exact repair targets and all original evidence while prioritizing uncertain operations', () => {
+  const mapping = { code: 'OPTION_BINDING_REVIEW_REQUIRED', resolution: 'integration_configuration', target: 'finish', value: 0 };
+  const hold = { code: 'AMBER_SYNC_ELIGIBILITY_UNRESOLVED', resolution: 'lifecycle_reconciliation', eligibilityIssue: { ancestorProductIds: [1] } };
+  const uncertain = { code: 'reconciliation_required' };
+  const input = [mapping, hold, { ...mapping, value: 1 }, { ...hold, eligibilityIssue: { ancestorProductIds: [2] } }, uncertain, mapping];
+  const grouped = attentionProblemGroups(input);
+  assert.equal(grouped.length, 4);
+  assert.equal(grouped[0].problem, uncertain);
+  assert.deepEqual(grouped[1].evidence.map((item) => item.eligibilityIssue.ancestorProductIds), [[1], [2]]);
+  assert.deepEqual(grouped.slice(2).map((item) => item.problem.value), [0, 1]);
+  assert.equal(grouped.reduce((count, item) => count + item.evidence.length, 0), input.length);
+  assert.equal(input[0], mapping);
+});
 
 test('repair navigation keeps exact source and return context without treating them as write instructions', () => {
   const returnTo = '/attention?category=SV&reason=integration&problem=42';

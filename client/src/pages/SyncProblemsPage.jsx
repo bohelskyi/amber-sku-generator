@@ -2,14 +2,10 @@ import { ArrowLeft, RefreshCw, Search } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/auth-context.js';
-import { ProductNameConflict } from '../components/app/ProductNameConflict.jsx';
-import { ProductMagentoAttention } from '../components/app/ProductMagentoAttention.jsx';
 import { MagentoSyncStatus } from '../components/app/MagentoSyncStatus.jsx';
-import { LifecycleReconciliationNotice } from '../components/app/LifecycleReconciliationNotice.jsx';
-import { PRODUCT_FIELD_LABELS, nextAction, problemImpact, problemRepairUrl, problemSubject, problemTitle } from '../components/attention/sync-problem-presentation.js';
-import { MagentoRecovery } from '../components/attention/MagentoRecovery.jsx';
-import MagentoProductDiagnosis from '../components/attention/MagentoProductDiagnosis.jsx';
-import { Button, CopyAction, EmptyState, LoadingState, Notice, PageHeader, Pagination, StatusBadge, TechnicalDisclosure } from '../components/ui/index.js';
+import { attentionProblemGroups, nextAction, problemTitle } from '../components/attention/sync-problem-presentation.js';
+import AttentionProblemDetail from '../components/attention/AttentionProblemDetail.jsx';
+import { Button, CopyAction, EmptyState, LoadingState, Notice, PageHeader, Pagination, StatusBadge } from '../components/ui/index.js';
 import { api } from '../lib/api.js';
 import '../components/attention/attention.css';
 
@@ -91,8 +87,6 @@ export default function SyncProblemsPage() {
   const pageInfo = currentResult?.pageInfo || {};
   const categoryOptions = currentResult?.categories || [...new Map((items || []).map((item) => [item.category, { code: item.category, name: item.categoryName || item.category }])).values()];
   const hasFilters = category || search || reason;
-  const selectedProduct = selected && { productId: selected.productId, publicSku: selected.article,
-    categoryCode: selected.category, status: selected.productStatus || 'active', nameConflict: Boolean(selected.nameConflict) };
   const productUrl = selected?.article ? `/products/open?article=${encodeURIComponent(selected.article)}` : null;
   const returnParams = new URLSearchParams(params);
   if (selected) returnParams.set('problem', String(selected.productId));
@@ -135,8 +129,8 @@ export default function SyncProblemsPage() {
           {items?.map((item) => <button key={item.productId} data-product-id={item.productId} type="button" className={`sync-problem-queue-item ${Number(selected?.productId) === Number(item.productId) ? 'is-selected' : ''}`}
             aria-pressed={Number(selected?.productId) === Number(item.productId)} onClick={() => select(item.productId)}>
             <span><StatusBadge tone="warning">Потребує уваги</StatusBadge><small>{item.categoryName || item.category}</small></span>
-            <strong>{item.article || 'Артикул недоступний'}</strong><span>{problemTitle(item.problems[0])}</span>
-            <span className="sync-next-action">Далі: {nextAction(item.problems[0])}</span>
+            <strong>{item.article || 'Артикул недоступний'}</strong><span>{problemTitle(attentionProblemGroups(item.problems)[0]?.problem)}</span>
+            <span className="sync-next-action">Далі: {nextAction(attentionProblemGroups(item.problems)[0]?.problem)}</span>
           </button>)}
           <Pagination busy={polling} hasPrevious={pageInfo.hasPrevious} hasNext={pageInfo.hasNext}
             onPrevious={() => setLocationState({ offset: Math.max(0, offset - PAGE_SIZE), problem: null })}
@@ -157,41 +151,10 @@ export default function SyncProblemsPage() {
               {selected.state === 'synced' ? 'Magento підтвердив синхронізацію поточного стану товару.'
                 : ['pending', 'syncing'].includes(selected.state) ? 'Поточна зміна очікує завершення доставки. Ця сторінка оновить стан автоматично.'
                   : 'Поточний стан не містить зафіксованої проблеми. Це саме по собі не підтверджує доставку.'}</Notice>}
-            <div className="sync-problem-detail-body">
-              {(selected.problems || []).map((problem, index) => <section key={`${problem.code}-${index}`}>
-                <p className="eyebrow">Що заважає</p><h3>{problem.message || 'Причину ще не визначено'}</h3>
-                {(problemSubject(problem).path || problemSubject(problem).field) && <dl className="sync-problem-subject">
-                  {problemSubject(problem).path && <div><dt>Категорія Magento</dt><dd>{problemSubject(problem).path}</dd></div>}
-                  {problemSubject(problem).field && <div><dt>Характеристика</dt><dd>{problemSubject(problem).field}</dd></div>}
-                  {problemSubject(problem).value !== null && <div><dt>Значення за правилом Amber</dt><dd>{String(problemSubject(problem).value)}</dd></div>}
-                </dl>}
-                {problem.evaluationIssues?.length > 0 ? <ul className="sync-issue-fields">{problem.evaluationIssues.map((issue, issueIndex) => <li key={issueIndex}>
-                  {PRODUCT_FIELD_LABELS[issue.field] && <strong>{PRODUCT_FIELD_LABELS[issue.field]}: </strong>}{issue.message || 'Потрібна перевірка значення.'}</li>)}</ul>
-                  : problem.issueFields?.length > 0 && <><ul className="sync-issue-fields">{problem.issueFields.map((field) => <li key={field}>{PRODUCT_FIELD_LABELS[field] || 'Додаткове поле товару'}</li>)}</ul>
-                    <p className="sync-problem-guidance">Збережено лише перелік полів. Точну причину покаже перевірка у формі виправлення.</p></>}
-                <p className="sync-problem-guidance">{problemImpact(problem)}</p>
-                {problem.resolution === 'lifecycle_reconciliation' && <LifecycleReconciliationNotice problem={problem} article={selected.article} recoveryAvailable />}
-                <p className="sync-next-heading">Наступна дія: {nextAction(problem)}</p>
-                {problem.resolution === 'product' && problem.code === 'PRODUCT_EVALUATION_NOT_READY' && <ProductMagentoAttention compact product={selectedProduct} problems={[problem]} onSaved={onSaved}
-                  onRepairCharacteristics={canDecode && productUrl && permissions.includes('products.recount') ? () => navigate(`${productUrl}&action=recount&returnTo=${encodeURIComponent(`${location.pathname}?${params.toString()}${selectedId ? '' : `${params.size ? '&' : ''}problem=${selected.productId}`}`)}`) : undefined} />}
-                {problem.resolution === 'product' && problem.code !== 'PRODUCT_EVALUATION_NOT_READY' && canDecode && productUrl && <Link className="btn btn-outline" to={productUrl}>Відкрити дані товару</Link>}
-                {['integration_configuration', 'integration_preparation'].includes(problem.resolution) && <p className="sync-problem-guidance">{permissions.includes('export_templates.view')
-                  ? <Link className="btn btn-outline btn-compact-md" to={problemRepairUrl(problem, selected, returnTo)}>{nextAction(problem)}</Link>
-                  : 'Потрібен оператор із доступом до налаштувань інтеграції. Скопіюйте опис проблеми для передачі.'}</p>}
-                {problem.code === 'TEST_DELETION_PENDING' && canDecode && productUrl && <Link className="btn btn-outline" to={productUrl}>Перевірити тестове видалення у товарі</Link>}
-                {problem.resolution === 'name' && !selected.nameConflict && <p className="sync-problem-guidance">Потрібна перевірка доступності або ідентичності товару Magento. Передайте артикул відповідальному за інтеграцію.</p>}
-                {problem.resolution !== 'lifecycle_reconciliation' && <TechnicalDisclosure><dl className="technical-key-values">
-                  <div><dt>Код</dt><dd>{problem.code}</dd></div>{problem.diagnosticCode && <div><dt>Діагностика</dt><dd>{problem.diagnosticCode}</dd></div>}
-                  {(problem.target || problem.field || problem.issueFields?.length > 0) && <div><dt>Поля</dt><dd>{problem.target || problem.field || problem.issueFields.join(', ')}</dd></div>}
-                  {selected.observedAt && <div><dt>Зафіксовано</dt><dd>{new Date(selected.observedAt).toLocaleString('uk-UA')}</dd></div>}
-                </dl></TechnicalDisclosure>}
-              </section>)}
-              <ProductNameConflict key={selected.productId} productId={selected.productId} available={Boolean(selected.nameConflict)} onSaved={onSaved} />
-              <MagentoProductDiagnosis key={`diagnosis-${selected.productId}:${selected.observedAt || selected.state || ''}`} product={selected} returnTo={returnTo} />
-              {selected.problems.some((problem) => ['reconciliation_required', 'AMBER_SYNC_ELIGIBILITY_UNRESOLVED'].includes(problem.code) || problem.resolution === 'lifecycle_reconciliation')
-                && <MagentoRecovery key={`recovery-${selected.productId}`} productId={selected.productId} onSaved={() => onSaved('recovery')} />}
-            </div>
-            <footer><CopyAction compact buttonLabel="Копіювати опис проблеми" label="Копіювати опис проблеми" value={`${selected.article || ''}\n${selected.problems.map(problemTitle).join('\n')}\n${window.location.origin}/attention?problem=${selected.productId}`} />
+            <AttentionProblemDetail key={selected.productId} product={selected} productUrl={productUrl} returnTo={returnTo} onSaved={onSaved}
+              onRepairCharacteristics={canDecode && productUrl && permissions.includes('products.recount') ? () => navigate(`${productUrl}&action=recount&returnTo=${encodeURIComponent(returnTo)}`) : undefined} />
+            <footer><CopyAction compact buttonLabel="Копіювати опис проблеми" label="Копіювати опис проблеми" value={`${selected.article || ''}\n${attentionProblemGroups(selected.problems).map(({ problem }) => problemTitle(problem)).join('\n')}\n${window.location.origin}/attention?problem=${selected.productId}`} />
+              {permissions.includes('history.view') && selected.article && <Link className="btn btn-outline btn-compact-md" to={`/products/history?sku=${encodeURIComponent(selected.article)}`}>Історія товару</Link>}
               {canDecode && productUrl && <Link className="btn btn-outline btn-compact-md" to={productUrl}>Відкрити товар</Link>}</footer>
           </>}
           {!selected && !selectedId && items?.length > 0 && <p>Виберіть товар у черзі.</p>}

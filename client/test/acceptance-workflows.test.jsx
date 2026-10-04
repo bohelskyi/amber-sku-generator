@@ -90,9 +90,10 @@ it('product readiness shows local repair guidance, human fields and unchanged ra
   for (const label of ['Розмір', 'Назва українською та англійською', 'Обробка каменю']) expect(screen.getByText(label)).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Заповнити розмір' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Заповнити назви' })).toBeTruthy();
-  for (const disclosure of screen.getAllByText('Технічні деталі')) fireEvent.click(disclosure);
-  expect(screen.getByText('PRODUCT_EVALUATION_NOT_READY')).toBeTruthy();
-  expect(screen.getByText('kamin_obrobka, name, rozmir_suveniriv')).toBeTruthy();
+  fireEvent.click(screen.getByText('Технічні деталі'));
+  const evidence = JSON.parse(screen.getByText(/"code": "PRODUCT_EVALUATION_NOT_READY"/).textContent);
+  expect(evidence).toHaveLength(2);
+  expect(evidence[1]).toMatchObject({ code: 'PRODUCT_EVALUATION_NOT_READY', issueFields: ['kamin_obrobka', 'name', 'rozmir_suveniriv'] });
   expect(screen.queryByRole('button', { name: /Повтор|Надіслати|Retry/ })).toBeNull();
 });
 it('view-only readiness gives a truthful handoff and no repair action', async () => {

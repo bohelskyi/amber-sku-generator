@@ -55,3 +55,29 @@ export function problemImpact(problem = {}) {
   if (problem.resolution === 'lifecycle_reconciliation') return 'Доставку утримано до перевірки попередньої історії товару.';
   return 'Ця перешкода не дозволяє завершити синхронізацію цього товару.';
 }
+
+export function needsDeliveryRecovery(problem = {}) {
+  return ['reconciliation_required', 'AMBER_SYNC_ELIGIBILITY_UNRESOLVED'].includes(problem.code)
+    || problem.resolution === 'lifecycle_reconciliation';
+}
+
+// Group presentation only. Every original diagnostic remains available as evidence;
+// the recovery workflow still reads the exact original operation from the server.
+export function attentionProblemGroups(problems = []) {
+  const groups = new Map();
+  for (const problem of problems) {
+    const key = problem.resolution === 'lifecycle_reconciliation' ? 'lifecycle_reconciliation'
+      : JSON.stringify([problem.code, problem.diagnosticCode, problem.resolution, problem.message,
+        problem.target, problem.field, problem.path, problem.routeKey, problem.question, problem.questionKey,
+        problem.value, problem.valueId, problem.expectedValue, problem.valueLabel,
+        problem.issueFields, problem.evaluationIssues]);
+    if (groups.has(key)) groups.get(key).evidence.push(problem);
+    else groups.set(key, { key, problem, evidence: [problem] });
+  }
+  const priority = ({ problem }) => problem.code === 'TEST_DELETION_PENDING' ? 0
+    : problem.code === 'reconciliation_required' ? 1 : needsDeliveryRecovery(problem) ? 2
+      : problem.code === 'PRODUCT_EVALUATION_NOT_READY' ? 3
+        : problem.resolution === 'product' ? 4 : problem.resolution === 'name' ? 5
+          : (problem.diagnosticCode || problem.code) === 'data_or_binding' ? 7 : 6;
+  return [...groups.values()].sort((a, b) => priority(a) - priority(b));
+}

@@ -100,7 +100,7 @@ function initialEvidence(requirements) {
   };
 }
 
-export function MagentoRecovery({ productId, onSaved }) {
+export function MagentoRecovery({ productId, onSaved, guided = false }) {
   const auth = useAuth();
   const { permissions, principalLifetime } = auth;
   const canRead = (permissions.includes('export_templates.publish') || permissions.includes('exports.reconcile')) && principalLifetime?.valid !== false;
@@ -169,9 +169,9 @@ export function MagentoRecovery({ productId, onSaved }) {
     .every((item) => item.disposition && item.evidence.trim().length >= 3);
   const blockers = [...(review?.blockers || []).map((item) => item.code), ...(lifecycle?.blockers || [])];
   return <section className="sync-recovery" aria-label="Контрольоване відновлення доставки">
-    <h3>Перевірка й відновлення доставки</h3>
-    {!opened && <><p className="sync-problem-guidance">Перегляньте початкову операцію та доступні кроки. Читання збереженої операції не надсилає змін у Magento.</p>
-      <Button size="compactMd" onClick={open} busy={busy}>Відкрити перевірку доставки</Button></>}
+    {(!guided || opened) && <h3>Перевірка й відновлення доставки</h3>}
+    {!opened && <>{!guided && <p className="sync-problem-guidance">Перегляньте початкову операцію та доступні кроки. Читання збереженої операції не надсилає змін у Magento.</p>}
+      <Button variant={guided ? 'primary' : 'secondary'} size="compactMd" onClick={open} busy={busy}>Відкрити перевірку доставки</Button></>}
     {error && (!record || opened) && <Notice tone="error">{error}</Notice>}
     {receipt && opened && <Notice tone="success">{receipt}</Notice>}
     {opened && nextStep?.kind === 'reviewed_resync' && <Notice tone="info"><p>Історію перевірено. Далі потрібен окремий перегляд відправлення цього товару.</p>

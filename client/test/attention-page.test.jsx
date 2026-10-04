@@ -23,6 +23,30 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+it('turns repeated history diagnostics into one starting task without losing other exact repairs', async () => {
+  const hold = { code: 'AMBER_SYNC_ELIGIBILITY_UNRESOLVED', resolution: 'lifecycle_reconciliation',
+    message: 'Потрібне підтвердження історії доставки', eligibilityIssue: { ancestorProductIds: [1368] } };
+  const category = { code: 'CATEGORY_IDENTITIES_REVIEW_REQUIRED', resolution: 'integration_configuration',
+    message: 'Категорія Magento існує, але зв’язок ще не підтверджено.', path: 'Default Category/Кулони' };
+  api.get.mockResolvedValue({ data: { items: [{ productId: 7, article: 'KL2/11131121007-001', category: 'KL',
+    problems: [hold, { code: 'data_or_binding', resolution: 'integration_configuration', message: 'Перевірте правила' }, hold, category, hold] }], pageInfo: { total: 1 } } });
+  const post = vi.spyOn(api, 'post');
+  renderPage(['products.view', 'exports.reconcile', 'export_templates.view']);
+  const start = await screen.findByRole('region', { name: 'З чого почати' });
+  expect(start.querySelector('h3').textContent).toBe(hold.message);
+  expect(start.querySelector('button').textContent).toBe('Відкрити перевірку доставки');
+  expect(screen.getAllByRole('heading', { name: hold.message })).toHaveLength(1);
+  const categoryLink = screen.getByRole('link', { name: 'Перевірити відповідність категорії' });
+  expect(categoryLink.getAttribute('href')).toContain('path=Default+Category%2F');
+  expect(start.compareDocumentPosition(categoryLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Інші перешкоди' })).toBeTruthy();
+  expect(screen.queryByText('1368')).toBeNull();
+  fireEvent.click(screen.getByText('Технічні деталі'));
+  expect(screen.getByText(/1368/)).toBeTruthy();
+  expect(api.get.mock.calls.every(([url]) => url === '/magento/problems/page')).toBe(true);
+  expect(post).not.toHaveBeenCalled();
+});
+
 it('opens the real product problem queue without reading legacy corrections', async () => {
   api.get.mockResolvedValue({ data: { items: [{ productId: 7, article: 'AG-000007', category: 'SV',
     problems: [{ code: 'PRODUCT_EVALUATION_NOT_READY', resolution: 'product', message: 'Перевірте дані',
@@ -33,6 +57,33 @@ it('opens the real product problem queue without reading legacy corrections', as
   expect(screen.queryByText('Запити на виправлення')).toBeNull();
   expect(correctionsApi.listRequestPage).not.toHaveBeenCalled();
   expect(api.get).toHaveBeenCalledWith('/magento/problems/page', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+});
+
+it('a viewer receives a concrete handoff rather than advice to click an unavailable recovery button', async () => {
+  api.get.mockResolvedValue({ data: { items: [{ productId: 7, article: 'AG-000007', problems: [
+    { code: 'reconciliation_required', resolution: 'administrator', message: 'Результат доставки не підтверджено.' },
+  ] }], pageInfo: { total: 1 } } });
+  renderPage(['products.view']);
+  await screen.findByRole('region', { name: 'З чого почати' });
+  expect(screen.getByText(/Скопіюйте опис проблеми та передайте йому/)).toBeTruthy();
+  expect(screen.queryByText(/^Відкрийте перевірку доставки/)).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Відкрити перевірку доставки' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Копіювати опис проблеми' })).toBeTruthy();
+});
+
+it('optional Magento comparison mounts on demand and still requires an explicit check', async () => {
+  api.get.mockResolvedValue({ data: { items: [{ productId: 7, article: 'AG-000007', category: 'SV', problems: [
+    { code: 'CATEGORY_PATH_MISSING', resolution: 'integration_preparation', message: 'Категорії немає' },
+  ] }], pageInfo: { total: 1 } } });
+  const post = vi.spyOn(api, 'post').mockResolvedValue({ data: { productId: 7, article: 'AG-000007', sendable: true } });
+  renderPage(['products.view', 'export_templates.manage', 'exports.view']);
+  await screen.findByRole('region', { name: 'З чого почати' });
+  expect(screen.queryByRole('button', { name: 'Перевірити категорії та характеристики' })).toBeNull();
+  fireEvent.click(screen.getByText('Порівняти категорії та характеристики з Magento'));
+  const check = screen.getByRole('button', { name: 'Перевірити категорії та характеристики' });
+  expect(post).not.toHaveBeenCalled();
+  fireEvent.click(check);
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/admin/magento-integration/product-preview', { productId: 7 }, expect.any(Object)));
 });
 
 it('does not present an unavailable read as an empty queue', async () => {

@@ -143,6 +143,15 @@ configuration links and controlled original-operation recovery. Raw codes, field
 and evidence remain under technical disclosure. Unknown evidence is never success.
 Background refresh reads Amber only; a remote check requires an explicit action.
 
+The detail starts with **З чого почати** and the actual permitted action, ahead
+of other blockers. Original uncertain-operation recovery takes precedence over
+history checks and data/configuration repairs in presentation only. Repeated
+history diagnostics share one task; distinct field/path/value repair targets
+remain separate under **Інші перешкоди**. All original records remain in the
+single lazy technical disclosure. Optional category/attribute comparison is
+collapsed and mounted on demand; opening it does not run a remote check.
+No grouping releases holds, acknowledges jobs or changes eligibility.
+
 Direct repair uses `/products/open?article=…&action=recount&returnTo=…`.
 It waits for the exact stored public article and effective direct-recount
 permission before opening the form; it never applies changes on navigation.

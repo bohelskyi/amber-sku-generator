@@ -31,6 +31,7 @@ let characteristicPolishFixture = false;
 let characteristicPolishApplied = false;
 let magentoReadinessFixture = false;
 let operationalFixture = null;
+let attentionProblemsFixture = null;
 const lifecycleProblem = { code: 'AMBER_SYNC_ELIGIBILITY_UNRESOLVED', resolution: 'lifecycle_reconciliation',
   message: 'Потрібне підтвердження історії доставки', eligibilityIssue: {
     type: 'historical_ambiguity', lifecycleRoute: 'hold', holdReason: 'historical_ambiguity',
@@ -337,13 +338,13 @@ const server = http.createServer(async (request, response) => {
       case 'GET /api/magento/problems/7':
       case 'GET /api/magento/problems/page': data = {
         items: [{ productId: product.id, article: magentoReadinessFixture || operationalFixture ? 'SV5111010' : product.publicSku, category: product.categoryCode,
-          state: 'needs_attention', productStatus: 'active', nameConflict: false, problems: operationalFixture ? [operationalFixture] : magentoReadinessFixture ? [
+          state: 'needs_attention', productStatus: 'active', nameConflict: false, problems: attentionProblemsFixture || (operationalFixture ? [operationalFixture] : magentoReadinessFixture ? [
             { code: 'NAME_READ_UNAVAILABLE', message: 'Назви товару в Amber потрібно заповнити або виправити.', resolution: 'product' },
             { code: 'PRODUCT_EVALUATION_NOT_READY', message: 'Товар не готовий до синхронізації. Потрібно доповнити або виправити дані товару.',
               resolution: 'product', issueFields: ['kamin_obrobka', ...(!readinessNamesApplied ? ['name'] : []), ...(!readinessSizeApplied ? ['rozmir_suveniriv'] : [])] },
           ] : [{ code: 'reconciliation_required',
             message: 'Amber надіслав зміну, але кінцевий стан не підтверджено.',
-            resolution: 'administrator', target: 'product' }] }],
+            resolution: 'administrator', target: 'product' }]) }],
         pageInfo: { limit: 20, offset: 0, total: 1, hasPrevious: false, hasNext: false },
       };
         if (url.pathname === '/api/magento/problems/7') {
@@ -932,8 +933,8 @@ try {
   assert.equal(await client.evaluate("document.body.textContent.includes('Не вдалося прочитати назву Magento')"), false);
   assert.equal(await client.evaluate("['Розмір','Назва українською та англійською','Обробка каменю'].every((label)=>document.body.textContent.includes(label))"), true);
   assert.equal(await client.evaluate("[...document.querySelectorAll('button,a')].some((node)=>/Повторити|Надіслати повторно/.test(node.textContent))"), false);
-  await client.click('Технічні деталі', "document.querySelectorAll('.sync-problem-detail-body > section')[1]");
-  await client.wait("document.body.textContent.includes('PRODUCT_EVALUATION_NOT_READY') && document.body.textContent.includes('kamin_obrobka, name, rozmir_suveniriv')", 'raw readiness diagnostics');
+  await client.click('Технічні деталі', "document.querySelector('.sync-problem-detail-body')");
+  await client.wait("document.querySelector('.sync-raw-evidence')?.textContent.includes('PRODUCT_EVALUATION_NOT_READY') && document.querySelector('.sync-raw-evidence')?.textContent.includes('rozmir_suveniriv')", 'raw readiness diagnostics');
   await client.click('Заповнити назви');
   await client.wait("document.querySelector('[role=dialog]')?.textContent.includes('Назви для Magento · SV5111010')", 'missing-name repair workspace');
   await client.setValue('[role=dialog] input[id$="-ua"]', 'Сувенірний камінь');
@@ -981,8 +982,9 @@ try {
       }
       assert.equal(await client.evaluate("document.body.textContent.includes('Товар збережено в Amber')"), true);
       assert.equal(await client.evaluate("[...document.querySelectorAll('a,button')].some((e)=>/Перевірити відповідності|Надіслати|Повторити|Зняти утримання/.test(e.textContent))"), false);
-      const handoff = persona === 'administrator' ? 'Потрібне контрольоване узгодження історії доставки' : 'Потрібне узгодження Адміністратора';
-      assert.equal(await client.evaluate(`document.body.textContent.includes(${JSON.stringify(handoff)})`), true);
+      assert.equal(await client.evaluate(persona === 'administrator'
+        ? "!!document.querySelector('.sync-start-task .sync-recovery button')"
+        : "document.body.textContent.includes('Потрібне узгодження Адміністратора')"), true);
       await client.click('Технічні деталі');
       await client.wait("document.body.textContent.includes('INFERRED_HISTORY_WITHOUT_EXACT_MEMBERSHIP')", 'safe lifecycle evidence');
       await client.noOverflow(`Lifecycle ${persona} ${width}`);
@@ -1009,6 +1011,36 @@ try {
   'Viewing holds allows only local reads, including the existing POST decode');
   report.lifecycleReconciliation = { personas: ['productViewer', 'administrator'], widths: [1440, 390],
     stablePublicArticle: true, safeEvidence: true, localReadsOnly: true, mappingTargetRetained: true };
+  currentPersona = 'administrator';
+  operationalFixture = lifecycleProblem;
+  attentionProblemsFixture = [lifecycleProblem,
+    { code: 'data_or_binding', resolution: 'integration_configuration', message: 'Потрібно перевірити дані товару або відповідності Magento.' },
+    lifecycleProblem, lifecycleProblem,
+    { code: 'CATEGORY_IDENTITIES_REVIEW_REQUIRED', resolution: 'integration_configuration',
+      path: 'Default Category/Сувеніри', message: 'Категорія Magento існує, але зв’язок ще не підтверджено.' }];
+  const triageStart = requests.length;
+  for (const width of [1440, 390, 360]) {
+    await client.command('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+    await client.navigate('/attention?problem=7', 'Потребує уваги');
+    await client.wait("!!document.querySelector('.sync-start-task .sync-recovery button')", 'starting task is visible');
+    assert.equal(await client.evaluate("[...document.querySelectorAll('.sync-problem-detail h3')].filter((e)=>e.textContent==='Потрібне підтвердження історії доставки').length"), 1);
+    assert.equal(await client.evaluate("document.querySelectorAll('.sync-other-problems > ul > li').length"), 2);
+    const action = await client.evaluate("document.querySelector('.sync-start-task .sync-recovery button').getBoundingClientRect().toJSON()");
+    assert.ok(action.top >= 0 && action.bottom < 1000, `Starting action remains above the fold at ${width}px`);
+    assert.equal(await client.evaluate("!!document.querySelector('.sync-live-diagnosis')"), false, 'Optional diagnosis remains unmounted');
+    await client.noOverflow(`Grouped attention ${width}`);
+    await client.screenshot(`attention-guided-${width}`);
+  }
+  assert.deepEqual(requests.slice(triageStart).filter((entry) => entry.method !== 'GET'), [], 'Viewing grouped diagnostics performs no writes');
+  await client.evaluate("document.querySelector('.sync-start-task .sync-recovery button').focus()");
+  assert.equal(await client.evaluate("document.activeElement===document.querySelector('.sync-start-task .sync-recovery button')"), true);
+  await client.command('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 });
+  await client.command('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 });
+  await client.wait("document.body.textContent.includes('Перевірити можливість рішення')", 'keyboard starts the exact delivery review');
+  assert.ok(requests.slice(triageStart).some((entry) => entry.method === 'GET' && entry.path === '/api/admin/magento-recovery/products/7'));
+  assert.deepEqual(requests.slice(triageStart).filter((entry) => entry.method !== 'GET'), [], 'Opening original recovery remains read-only');
+  report.attentionGuided = { widths: [1440, 390, 360], oneStartingTask: true, originalEvidenceRetained: true, keyboardReadOnlyRecovery: true, optionalDiagnosisLazy: true };
+  attentionProblemsFixture = null;
   await client.command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   operationalFixture = { code: 'reconciliation_required', message: 'Amber надіслав зміну, але кінцевий стан не підтверджено.', resolution: 'administrator' };
   recoveryStage = 0;
@@ -1180,6 +1212,15 @@ try {
   await zoomClient.screenshot('administrator-magento-actual-200-percent');
   report.actualZoom = { ...zoom, noOverflow: true, touchTarget: zoomMenuBox, focusStyle,
     magentoIssueTop, zoomViewportHeight, magentoContextCollapsed: true };
+  operationalFixture = lifecycleProblem;
+  attentionProblemsFixture = [lifecycleProblem, lifecycleProblem, lifecycleProblem];
+  await zoomClient.navigate('/attention?problem=7', 'Потребує уваги');
+  await zoomClient.wait("!!document.querySelector('.sync-start-task .sync-recovery button')", 'Attention starting task at actual zoom');
+  assert.equal(await zoomClient.evaluate("[...document.querySelectorAll('.sync-problem-detail h3')].filter((e)=>e.textContent==='Потрібне підтвердження історії доставки').length"), 1);
+  await zoomClient.noOverflow('Attention at actual 200% zoom');
+  await zoomClient.screenshot('attention-guided-actual-200-percent');
+  report.actualZoom.attention = { singleStartingTask: true, noOverflow: true };
+  attentionProblemsFixture = null;
   report.performance.push(await zoomClient.metrics());
   assert.deepEqual(zoomClient.blockedExternal, [], '200% browser attempted an external request');
   assert.deepEqual(zoomClient.errors, [], '200% browser emitted an uncaught runtime exception');
