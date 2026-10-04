@@ -84,6 +84,7 @@ function CategoryEditor({ initial, baseline, activePublication, onPublished, onS
   const [samples, setSamples] = useState([]); const [preview, setPreview] = useState(null); const [representatives, setRepresentatives] = useState([]);
   const [namesOpen, setNamesOpen] = useState(false); const [productChecks, setProductChecks] = useState(false);
   const [showService, setShowService] = useState(false); const [reviewReady, setReviewReady] = useState(false); const [checkRequested, setCheckRequested] = useState(false);
+  const [applied, setApplied] = useState(false);
   const [narrow, setNarrow] = useState(() => globalThis.matchMedia?.('(max-width: 1100px)').matches || false);
   const [fieldOverlay, setFieldOverlay] = useState(narrow);
   const flight = useRef(false); const alive = useRef(true); const fieldSequence = useRef(0); const creationKey = useRef(null);
@@ -189,7 +190,8 @@ function CategoryEditor({ initial, baseline, activePublication, onPublished, onS
       const published = (await templates.publish(next.id, body)).data;
       versionId = published.id;
     }
-    const request = { sourceId: base.revision.id, expectedSourceRevision: base.revision.revision, templateVersionId: versionId };
+    const request = { sourceId: base.revision.id, expectedSourceRevision: base.revision.revision, templateVersionId: versionId,
+      ...(context.productId ? { productIds: [Number(context.productId)] } : {}) };
     const preparation = (await api.post(`${root}/successor/prepare`, request)).data;
     let draft = (await api.post(`${root}/successor/apply`, { ...request, previewToken: preparation.previewToken })).data;
     if (!alive.current) return;
@@ -217,6 +219,8 @@ function CategoryEditor({ initial, baseline, activePublication, onPublished, onS
   };
   const checkBinding = (target) => run(async () => {
     revealReview.current = true;
+    setApplied(false);
+    setCheckRequested(true);
     setReviewTarget(target); setField(''); replaceParams({ field: null, reviewField: target });
     if (revision.state !== 'draft') await prepare();
   });
@@ -256,11 +260,15 @@ function CategoryEditor({ initial, baseline, activePublication, onPublished, onS
       <nav className="mc-tabs" aria-label="Поля категорії">{[['attributes', 'Характеристики'], ['text', 'Назва й описи'], ['placement', 'Категорії магазину']].map(([value, label]) => <button type="button" key={value} disabled={busy || pending} aria-pressed={tab === value} onClick={() => { setTab(value); setPage(0); setShowService(false); replaceParams({ view: value, tab: null, path: null }); }}>{label}</button>)}<label>Мова<select aria-label="Мова полів" className="input" value={rowId} disabled={busy || pending} onChange={(e) => scope(routeKey, e.target.value)}><option value="base">UA</option><option value="english">EN</option></select></label></nav>
       {tab === 'placement' ? <section className="mc-placement space-y-3" aria-label="Категорії магазину для товарів">
         <h3 className="font-semibold">Де показувати товари «{initial.category.name}»</h3>
-        <p className="mc-help">Це розділи Magento, у які правило додає товари цієї категорії. Перевірте шлях і підтвердьте відповідність.</p>
-        {(projection.placements || []).map((entry) => <div key={entry.id} className="mc-placement-row"><strong>{entry.label?.split('/').join(' › ')}</strong><p>{entry.reviewState === 'approved' ? 'Розділ підтверджено' : entry.reviewState === 'blocked' ? 'Передавання в цей розділ заблоковано' : entry.identity ? 'Розділ знайдено в Magento. Потрібно підтвердити, що обрано правильний.' : entry.candidates?.length > 1 ? 'Знайдено кілька розділів. Виберіть правильний у перевірці відповідностей.' : 'Розділ не знайдено. Перевірте шлях у правилі або додайте розділ.'}</p></div>)}
-        {!projection.placements?.length && <p>Для цієї мови немає збережених відповідностей розділів магазину.</p>}
-        <div className="mc-actions">{canPublish && <button className="btn btn-primary" disabled={busy || pending || stale || reviewPending} onClick={() => checkBinding('categories')}>Перевірити відповідність розділів</button>}
+        <p>{applied ? context.returnTo ? 'Розділи збережено. Наступний крок — «Повернутися до проблеми товару» вище й «Перевірити товар у Magento».' : 'Розділи збережено. Стан синхронізації товарів доступний у вкладці «Стан доставки».'
+          : prepared ? 'Перевірку підготовлено. Продовжіть нижче: підтвердьте потрібні розділи, а потім натисніть «Застосувати зміни».' : 'Наступний крок — «Перевірити відповідність розділів». Після перевірки підтвердьте запропоновані розділи й натисніть «Застосувати зміни».'}</p>
+        {!prepared && !applied && <p className="mc-help">Нижче — збережені налаштування категорії. Підтверджений розділ у цьому списку ще не означає, що конкретний товар пройшов перевірку.{context.productId && ' Перевірка врахує товар, з якого ви перейшли.'}</p>}
+        <div className="mc-actions">{canPublish && <button className="btn btn-primary" disabled={busy || pending || stale || reviewPending} onClick={() => checkBinding('categories')}>{busy ? 'Перевіряємо розділи…' : prepared ? 'Продовжити перевірку розділів' : 'Перевірити відповідність розділів'}</button>}
           {projection.attributes.some((a) => a.code === 'categories') && <button className="btn btn-outline" disabled={busy || pending} onClick={() => chooseField('categories')}>Змінити правило розміщення</button>}
+        </div>
+        <div className="space-y-3">
+          {(projection.placements || []).map((entry) => <div key={entry.id} className="mc-placement-row"><strong>{entry.label?.split('/').join(' › ')}</strong><p>{entry.reviewState === 'approved' ? 'Підтверджено в збережених налаштуваннях' : entry.reviewState === 'blocked' ? 'Передавання в цей розділ заблоковано' : entry.identity ? 'Розділ знайдено в Magento. Потрібно підтвердити, що обрано правильний.' : entry.candidates?.length > 1 ? 'Знайдено кілька розділів. Виберіть правильний у перевірці відповідностей.' : 'Розділ не знайдено. Перевірте шлях у правилі або додайте розділ.'}</p></div>)}
+          {!projection.placements?.length && <p>Для цієї мови немає збережених відповідностей розділів магазину.</p>}
         </div>
         {canManage && <MagentoDetails summary="Додати відсутній розділ Magento">{() => <><p>Створення розділу потребує окремої перевірки точного батьківського розділу.</p><Link className="mc-field-link" to={`/admin/magento/prepare?category=${categoryCode}&intent=subcategory`}>Відкрити створення розділу</Link></>}</MagentoDetails>}
       </section> : <>
@@ -301,7 +309,8 @@ function CategoryEditor({ initial, baseline, activePublication, onPublished, onS
           setRevision(next); setBase({ ...projection, revision: next, template: { ...projection.template, definition } });
           setFamily(null); creationKey.current = null; setSavedDefinition(definition); setSelections({}); setSelectionDirty(false);
           replaceParams({ binding: next.id, source: next.id, ruleDraft: null });
-          setMessage('Зміни застосовано в Amber. Результат доставки відстежується окремо.'); onPublished(next);
+          setApplied(true);
+          setMessage(context.returnTo ? 'Зміни застосовано. Поверніться до проблеми товару й натисніть «Перевірити товар у Magento», щоб перевірити решту перешкод.' : 'Зміни застосовано в Amber. Результат доставки відстежується окремо.'); onPublished(next);
           api.get(`${root}/categories/${categoryCode}`, { params: { bindingRevisionId: next.id, ...(routeKey ? { routeKey } : {}), rowId } }).then(({ data }) => { if (alive.current) setProjection(data); }).catch((cause) => { if (alive.current) setError(fail(cause)); });
         }} /> : <p className="mc-help">Підтвердьте відповідності вище. Після цього тут з’явиться перевірка впливу та застосування змін.</p>}
       </>}

@@ -143,6 +143,71 @@ it('opens category repair in the new workspace, with paths and a scoped confirma
   expect(new URLSearchParams(router.state.location.search).get('reviewField')).toBe('categories');
 });
 
+it('checks the originating product, confirms its new path and requires a separate apply before returning to attention', async () => {
+  const categoryEntry = { ...entry, id: 'category:placement:unique', kind: 'category', target: 'categories',
+    source: undefined, evaluated: undefined, label: 'Default/Браслети/Світлі', identity: '42',
+    candidates: [{ categoryId: '42', path: 'Default/Браслети/Світлі' }], exact: true, reviewState: 'proposed' };
+  let confirmed = false;
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await get(url, config);
+    if (url.includes('/categories/') && !url.includes('/fields/')) result.data.placements = [
+      { ...categoryEntry, id: 'category:placement:saved', label: 'Default/Браслети', reviewState: 'approved' },
+    ];
+    if (url.endsWith('/bindings/isolated')) result.data.entries = [{ ...categoryEntry, ...(confirmed ? { reviewState: 'approved' } : {}) }];
+    return result;
+  });
+  const post = api.post.getMockImplementation();
+  api.post.mockImplementation(async (url, body) => {
+    if (url.endsWith('/decision')) { confirmed = true; draft = { ...draft, revision: '2' }; return { data: draft }; }
+    if (url.endsWith('/publication/preview')) return { data: { previewToken: 'impact-proof', blockers: [], affected: [], preservedNames: [], lostProducts: [], lostRoutes: [], totalProducts: 12 } };
+    if (url.endsWith('/publication/apply')) { draft = { ...draft, state: 'published' }; return { data: { revision: draft } }; }
+    return post(url, body);
+  });
+  mount('/admin/magento?category=BR&view=placement&productId=5080&returnTo=%2Fattention%3Fproblem%3D5080');
+  await screen.findByText('Підтверджено в збережених налаштуваннях');
+  const check = screen.getByRole('button', { name: 'Перевірити відповідність розділів' });
+  expect(check.compareDocumentPosition(screen.getByText('Default › Браслети')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByText(/Перевірка врахує товар, з якого ви перейшли/)).toBeTruthy();
+  expect(api.post).not.toHaveBeenCalled();
+  fireEvent.click(check);
+  await screen.findByRole('heading', { name: 'Підтвердьте розділи магазину' });
+  const request = { sourceId: 'current', expectedSourceRevision: '4', templateVersionId: 'original-version', productIds: [5080] };
+  expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/successor/prepare', request);
+  expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/successor/apply', { ...request, previewToken: 'successor-proof' });
+  expect(screen.getByLabelText('Відповідність: Default/Браслети/Світлі').value).toBe('42');
+  expect(screen.getByText(/Перевірте шлях у колонці Magento/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Застосувати зміни' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Підтвердити', exact: true }));
+  const apply = await screen.findByRole('button', { name: 'Застосувати зміни' });
+  expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/bindings/isolated/decision', { expectedRevision: '1', binding: categoryEntry.id, action: 'approve', acceptReview: true });
+  expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
+  fireEvent.click(apply);
+  await screen.findByText(/Поверніться до проблеми товару й натисніть «Перевірити товар у Magento»/);
+  expect(screen.getByText(/Розділи збережено. Наступний крок — «Повернутися до проблеми товару»/)).toBeTruthy();
+  expect(screen.queryByText(/^Наступний крок — «Перевірити відповідність розділів»/)).toBeNull();
+  expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/publication/apply', expect.objectContaining({ bindingRevisionId: 'isolated', expectedRevision: '2', expectedCurrentId: 'current', previewToken: 'impact-proof' }));
+  expect(screen.getByRole('link', { name: 'Повернутися до проблеми товару' }).getAttribute('href')).toBe('/attention?problem=5080');
+});
+
+it('continues restored category review explicitly and checks impact without creating another draft', async () => {
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await get(url, config);
+    if (url.endsWith('/bindings/isolated')) result.data.entries = [{ ...entry, reviewState: 'approved' }];
+    return result;
+  });
+  api.post.mockResolvedValue({ data: { previewToken: 'impact-proof', blockers: [], affected: [], preservedNames: [], lostProducts: [], lostRoutes: [], totalProducts: 12 } });
+  mount('/admin/magento?category=BR&view=placement&binding=isolated&source=current&reviewField=categories');
+  await screen.findByText('Відповідності перевірено');
+  expect(api.post).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Продовжити перевірку розділів' }));
+  await screen.findByRole('button', { name: 'Застосувати зміни' });
+  expect(api.post.mock.calls).toEqual([['/admin/magento-integration/publication/preview', {
+    bindingRevisionId: 'isolated', expectedRevision: '1', expectedCurrentId: 'current', representatives: [],
+  }]]);
+});
+
 it('isolates a shared text rule to the chosen category and language and saves a separate family', async () => {
   mount(); await textFields(); fireEvent.click(await screen.findByRole('button', { name: 'Назва' }));
   fireEvent.change(await screen.findByLabelText('Текст для магазину'), { target: { value: 'Нова назва' } });
@@ -320,8 +385,8 @@ it('restores prepared work without starting an automatic product or Magento chec
     return result;
   });
   mount('/admin/magento?category=BR&binding=isolated&source=current');
-  await screen.findByText('Відповідності перевірено');
-  expect(screen.getByRole('button', { name: 'Перевірити вплив на товари' })).toBeTruthy();
+  expect(await screen.findByRole('button', { name: 'Перевірити вплив на товари' })).toBeTruthy();
+  expect(screen.getByText('Відповідності перевірено')).toBeTruthy();
   expect(api.post).not.toHaveBeenCalled();
 });
 
