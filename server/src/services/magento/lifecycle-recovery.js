@@ -175,6 +175,7 @@ async function productRecovery(config, id, options = {}) {
       lifecycle: p.lifecycle ? { route: p.lifecycle.route, holdReason: p.lifecycle.hold_reason,
         deliveryVersion: String(p.lifecycle.delivery_version), businessExclusion: p.lifecycle.business_exclusion_state,
         suggestedKind: availableKinds[0] || null, availableKinds, legacyDeliveryEnabled: delivery?.legacy_product_csv_enabled === true,
+        unavailableReasons: history?.hasRecount && !history.stableRecount && !history.historicalRecount ? history.historicalRecountBlockers : [],
         blocker: protectedWork ? 'MAGENTO_SYNC_PREVIOUS_DISPATCH_UNRESOLVED' : null } : null,
       nextAction: options.canReconcileLifecycle && !protectedWork && p.lifecycle?.hold_reason === 'prior_exposure'
         ? await nextResync(client, config, id) : null,

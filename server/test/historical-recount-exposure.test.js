@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const service = require('../src/services/magento/historical-recount-exposure');
+const { digest } = require('../src/services/export-exposure/repair-manifest');
 function fixture() {
   const members = Array.from({length:5},(_,i) => ({ product: { id:i+1,full_sku:`INTERNAL-${i}`,public_sku:i<2?`OLD-${i}`:'CURRENT',
     public_product_identity_id:i<2?String(i+1):'3',status:i===4?'active':'corrected',exclude_from_export:i===4?0:1,
@@ -23,6 +24,22 @@ test('historical recipe proves the actual mixed chain while keeping baseline poi
     m => {m[4].lifecycle.business_exclusion_state='unknown';}, m => {m[1].product.status='active';},
     m => {m[2].product.corrected_from_product_id=null;}, m => {m[3].reservation.first_product_id=1;},
   ]) { const clone=structuredClone(members);change(clone);assert.ok(service.lineageBlockers(clone,corrections,5).length,change.toString()); }
+});
+test('only receipt-proven cutover ancestors can retain the old unknown policy and missing pointer', () => {
+  const { members, corrections } = fixture(), m = members[2];
+  m.lifecycle.evidence = { origin: 'cutover', decision: 'hold' };
+  m.lifecycle.repair_manifest_hash = 'a'.repeat(64);
+  assert.ok(service.lineageBlockers(members, corrections, 5).includes('CUTOVER_BASELINE_UNVERIFIED'));
+  m.cutoverBaseline = { productId: m.product.id, manifestHash: m.lifecycle.repair_manifest_hash, evidenceHash: digest(m.lifecycle.evidence) };
+  assert.deepEqual(service.lineageBlockers(members, corrections, 5), []);
+  for (const change of [
+    v => { v.cutoverBaseline.productId = 99; }, v => { v.lifecycle.repair_manifest_hash = 'b'.repeat(64); },
+    v => { v.lifecycle.evidence.independentExclusion = true; }, v => { v.lifecycle.source_correction_id = 999; },
+    v => { v.lifecycle.business_exclusion_state = 'excluded'; }, v => { v.lifecycle.recount_compatibility_excluded = true; },
+  ]) {
+    const clone = structuredClone(members); change(clone[2]);
+    assert.ok(service.lineageBlockers(clone, corrections, 5).length, change.toString());
+  }
 });
 test('historical proof requires an explicit current-only decision and every exact retained file', () => {
   const plan={historical:{requiredEvidence:{files:['file-1']}}};

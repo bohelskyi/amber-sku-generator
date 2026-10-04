@@ -4,9 +4,11 @@ const { observe } = require('./exposure-reconciliation');
 const { buildLineageGraph } = require('../export-exposure/manifest');
 const { readRepairInput } = require('../export-exposure/repair-loader');
 const { buildRepairManifest } = require('../export-exposure/repair-manifest');
+const cutover = require('./historical-cutover-baseline');
 
 const FORMAT = 'magento-historical-recount-exposure-v1';
-const legacy = f => f?.evidence?.origin === 'migration_039' && f.evidence.coverage === 'unresolved_historical';
+const legacy = m => (m.lifecycle?.evidence?.origin === 'migration_039' && m.lifecycle.evidence.coverage === 'unresolved_historical')
+  || cutover.verified(m);
 // Missing baseline pointers are not rewritten. Only actual, reciprocal recount
 // records may prove the chain; modern pointers must still match exactly.
 function lineageBlockers(members, corrections, currentId) {
@@ -14,11 +16,14 @@ function lineageBlockers(members, corrections, currentId) {
   const component = graph.components.get(currentId), current = members.find(m => m.product.id === currentId);
   if (!current || members.length > 30 || !component || component.issues.length || members.length < 2
     || component.productIds.length !== members.length || c.hash(graph.terminals(currentId)) !== c.hash([currentId])) out.push('CORRECTION_LINEAGE_CONFLICT');
-  for (const { product: p, lifecycle: f, reservation } of members) {
+  for (const member of members) {
+    const { product: p, lifecycle: f, reservation } = member;
     const retired = p.id !== currentId && p.status === 'corrected' && f?.route === 'retired';
     if (!reservation || reservation.first_product_id !== p.id) out.push('SKU_RESERVATION_CONFLICT');
     if (p.id !== currentId && !retired) out.push('PREDECESSOR_NOT_RETIRED');
-    const unknownBaseline = retired && legacy(f) && f.business_exclusion_state === 'unknown';
+    const unknownBaseline = retired && legacy(member) && f.business_exclusion_state === 'unknown';
+    if (retired && f?.evidence?.origin === 'cutover' && !cutover.verified(member)
+      && (f.business_exclusion_state === 'unknown' || (p.corrected_from_product_id != null && f.source_correction_id == null))) out.push('CUTOVER_BASELINE_UNVERIFIED');
     if (!f || (!unknownBaseline && f.business_exclusion_state !== 'none') || f.evidence?.independentExclusion === true
       || f.evidence?.exclusionProvenance === 'independent_exclusion'
       || (f.evidence?.exclusionProvenance === 'unknown' && !unknownBaseline)) out.push('EXCLUSION_OR_UNKNOWN_POLICY');
@@ -27,13 +32,15 @@ function lineageBlockers(members, corrections, currentId) {
       if (f?.source_correction_id != null) out.push('CORRECTION_LINEAGE_CONFLICT');
     } else {
       const links = corrections.filter(v => v.corrected_product_id === p.id);
-      if (links.length !== 1 || (f?.source_correction_id !== links[0].id && !(retired && legacy(f) && f.source_correction_id == null))) out.push('CORRECTION_LINEAGE_CONFLICT');
+      if (links.length !== 1 || (f?.source_correction_id !== links[0].id && !(retired && legacy(member) && f.source_correction_id == null))) out.push('CORRECTION_LINEAGE_CONFLICT');
     }
   }
   return [...new Set(out)];
 }
 async function read(client,config,sku,bindingRevisionId) {
   const local = await stable.read(client,config,sku,bindingRevisionId), s = local.state.stable;
+  const baselines = await cutover.read(client,s.members);
+  for (const member of s.members) member.cutoverBaseline = baselines.get(member.product.id) || null;
   const identities = [...new Set(s.members.map(m => String(m.product.public_product_identity_id)))].sort((a,b) => Number(a)-Number(b));
   const ids = s.members.map(m => m.product.id);
   const entry = buildRepairManifest(await readRepairInput(client)).repairEntries.find(e => e.productId === local.state.product.id);
@@ -51,6 +58,7 @@ async function read(client,config,sku,bindingRevisionId) {
   local.state.historical = JSON.parse(JSON.stringify({ identities, oldSkus, requests, outsideIdentity, retainedFingerprint: entry?.beforeFingerprint || null,
     retainedIssues: entry?.exposure.issues || ['LIFECYCLE_EVIDENCE_UNAVAILABLE'],
     unknownRetiredProductIds: s.members.filter(m => m.lifecycle?.business_exclusion_state === 'unknown').map(m => m.product.id),
+    cutoverBaselines: [...baselines.values()],
     requiredEvidence: { oldSkus: [], files: [...new Set(exact.map(m => m.snapshotId))].sort(), historicalConfirmation: true } }));
   return local;
 }
@@ -90,8 +98,8 @@ module.exports = { FORMAT,lineageBlockers,blockers,validateEvidence,...stable.cr
   // Full request/retained inventory remains fingerprint-bound on the server;
   // the reviewed package contains only the exact identities and dispositions.
   proof: state => {
-    const { identities,oldSkus,retainedFingerprint,unknownRetiredProductIds,requiredEvidence } = state.historical;
-    return { historical: { identities,oldSkus,retainedFingerprint,unknownRetiredProductIds,requiredEvidence } };
+    const { identities,oldSkus,retainedFingerprint,unknownRetiredProductIds,cutoverBaselines,requiredEvidence } = state.historical;
+    return { historical: { identities,oldSkus,retainedFingerprint,unknownRetiredProductIds,cutoverBaselines,requiredEvidence } };
   },validateEvidence,
   source: 'historical_recount_exposure',action: 'magento_historical_recount_prior_exposure',resolutionPrefix: 'historical-recount-exposure',
   lanes: plan => plan.historical.identities,articles: plan => [...new Set([plan.sku,...plan.historical.oldSkus])].sort(),
