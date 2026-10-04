@@ -16,6 +16,7 @@ const { runAccessAdminMutation, assertActorStillAuthorized } = require('../acces
 const { writeAuditEvent } = require('../../audit/audit-events');
 const { same } = require('./name-reconciliation');
 const { bindingKey } = require('./binding-validation');
+const { readResponseBytes } = require('./client');
 const MAX_PRODUCTS=scope.LIMITS.products;
 const clean=(value)=>JSON.parse(JSON.stringify(value));
 const names=(mapped)=>({all:mapped.base.name,en:mapped.english.name});
@@ -88,10 +89,31 @@ function impact(local,nodes){
 }
 function cachedReads(fetchImpl){
   const cache=new Map(),deadline=Date.now()+60000;
+  async function snapshot(url,options){
+    const response=await fetchImpl(url,options);
+    try{
+      // Consume within the caller's request lifetime, before its client aborts.
+      // Only detached bounded bytes survive in the publication-wide cache.
+      const bytes=await readResponseBytes(response);
+      return {bytes,ok:response.ok,init:{status:response.status,statusText:response.statusText,
+        headers:[...response.headers]}};
+    }finally{
+      if(response.body && !response.body.locked)await response.body.cancel().catch(()=>{});
+    }
+  }
   return async(url,options)=>{
     if(options.method!=='GET')c.invalid();if(Date.now()>=deadline)throw c.error(422,'MAGENTO_DISCOVERY_LIMIT','Read deadline exceeded');
-    if(!cache.has(String(url)))cache.set(String(url),Promise.resolve(fetchImpl(url,options)));
-    return (await cache.get(String(url))).clone();
+    const key=String(url);
+    if(!cache.has(key))cache.set(key,snapshot(url,options));
+    const pending=cache.get(key);
+    try{
+      const value=await pending;
+      if(!value.ok && cache.get(key)===pending)cache.delete(key);
+      return new Response([204,205,304].includes(value.init.status)?null:value.bytes,value.init);
+    }catch(error){
+      if(cache.get(key)===pending)cache.delete(key);
+      throw error;
+    }
   };
 }
 async function preview(config,input,options={}){
@@ -219,4 +241,4 @@ async function publish(config,input,options={}){
       scope.checkDeadline(localDeadline);return {revision,handoffId,alreadyApplied:false};
     }}).catch(scope.translateLimit);
 }
-module.exports={MAX_PRODUCTS,projection,impact,context,preview,publish,administrator};
+module.exports={MAX_PRODUCTS,projection,impact,context,preview,publish,administrator,cachedReads};
