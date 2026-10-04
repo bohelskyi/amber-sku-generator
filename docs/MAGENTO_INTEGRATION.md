@@ -37,6 +37,16 @@ of relying on the general sample. Reviewed carry still preserves unchanged bindi
 of other products. Explicitly continuing a restored preparation also starts product
 impact checking; restoring it alone remains read-only. After apply the retained
 attention return directs the user to recheck the original product's remaining issues.
+After confirming the focused placement, the review immediately exposes any remaining
+fields in that category, then remaining decisions from other categories in the same
+publication package. These rows name their manager category, including fields outside
+the original placement focus; no extra disclosure is needed to reach the next blocker.
+The preparation notice follows the current review step and the saved placement states
+refresh after a decision. While the exact new draft counter is being read, the review
+shows loading instead of reporting a false conflict. A genuinely different returned
+counter still blocks decisions until the preparation is explicitly reread. Every
+approval and final publication remains explicit; restoring work starts no automatic
+product or remote checks.
 Text editing opens directly, without codes, scope selection or an expression-mode
 selector. Technical and advanced rules remain under **Розширені налаштування**.
 Source insertion, shared-reference detachment and field-local mapping tables use

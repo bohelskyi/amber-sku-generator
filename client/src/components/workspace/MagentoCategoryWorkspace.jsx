@@ -65,7 +65,7 @@ function FieldMappings({ field, questions, selections, setSelections, disabled }
   </section>;
 }
 
-function CategoryEditor({ initial, baseline, activePublication, onPublished, onScopeCommit }) {
+function CategoryEditor({ initial, baseline, categories, activePublication, onPublished, onScopeCommit }) {
   const auth = useAuth(); const [params, setParams] = useSearchParams();
   const [projection, setProjection] = useState(initial);
   const [base, setBase] = useState(baseline);
@@ -84,11 +84,13 @@ function CategoryEditor({ initial, baseline, activePublication, onPublished, onS
   const [samples, setSamples] = useState([]); const [preview, setPreview] = useState(null); const [representatives, setRepresentatives] = useState([]);
   const [namesOpen, setNamesOpen] = useState(false); const [productChecks, setProductChecks] = useState(false);
   const [showService, setShowService] = useState(false); const [reviewReady, setReviewReady] = useState(false); const [checkRequested, setCheckRequested] = useState(false);
+  const [reviewProgress, setReviewProgress] = useState('');
   const [applied, setApplied] = useState(false);
   const [narrow, setNarrow] = useState(() => globalThis.matchMedia?.('(max-width: 1100px)').matches || false);
   const [fieldOverlay, setFieldOverlay] = useState(narrow);
   const flight = useRef(false); const alive = useRef(true); const fieldSequence = useRef(0); const creationKey = useRef(null);
   const reviewPanel = useRef(null); const revealReview = useRef(false);
+  const projectionRead = useRef(0);
   const urlParams = useRef(params);
   const categoryCode = initial.category.code;
   const context = repairContext(params);
@@ -224,6 +226,14 @@ function CategoryEditor({ initial, baseline, activePublication, onPublished, onS
     setReviewTarget(target); setField(''); replaceParams({ field: null, reviewField: target });
     if (revision.state !== 'draft') await prepare();
   });
+  async function reviewChanged(next) {
+    setReviewReady(false); setRevision(next); setPreview(null);
+    const ticket = ++projectionRead.current; const scope = urlParams.current.toString();
+    try {
+      const { data } = await api.get(`${root}/categories/${categoryCode}`, { params: { bindingRevisionId: next.id, ...(routeKey ? { routeKey } : {}), rowId } });
+      if (alive.current && ticket === projectionRead.current && scope === urlParams.current.toString()) setProjection(data);
+    } catch (cause) { if (alive.current && ticket === projectionRead.current && scope === urlParams.current.toString()) setError(fail(cause)); }
+  }
   const scope = async (nextRoute, nextRow) => {
     await run(async () => {
       const { data } = await api.get(`${root}/categories/${categoryCode}`, { params: { bindingRevisionId: revision.id, ...(nextRoute ? { routeKey: nextRoute } : {}), rowId: nextRow } });
@@ -253,7 +263,7 @@ function CategoryEditor({ initial, baseline, activePublication, onPublished, onS
       {context.returnTo && <Link className="mc-field-link" to={context.returnTo}>Повернутися до проблеми товару</Link>}
       {initial.category.operational?.count > 0 && <Notice tone="warning"><p>Синхронізацію зупинено для товарів цієї категорії: {initial.category.operational.count}. Відкрийте список, щоб побачити причину та виправити конкретний товар.</p><Link className="btn btn-outline" to={`/attention?category=${encodeURIComponent(categoryCode)}`}>Показати товари з проблемами ({initial.category.operational.count})</Link></Notice>}
       {stale && <Notice tone="warning">Чинна інтеграція змінилася. Ваше введення залишено у формі. Підготовка потребує порівняння з новою версією; автоматичного перезапису немає. <Link className="underline" to={`/admin/magento?category=${categoryCode}`}>Відкрити чинну інтеграцію</Link></Notice>}
-      {error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}
+      {error && <Notice tone="error">{error}</Notice>}{(message || prepared && reviewTarget === 'categories') && <Notice tone="success">{prepared && reviewTarget === 'categories' ? reviewProgress || 'Читаємо збережені підтвердження…' : message}</Notice>}
       {projection.routes.length > 1 && <label className="mc-label">Вид товару / набір Magento<select className="input" value={routeKey || ''} disabled={busy || pending} onChange={(e) => scope(e.target.value, rowId)}>{projection.routes.map((route) => <option key={route.routeKey} value={route.routeKey}>{routeLabel(route, projection.questions)}</option>)}</select></label>}
       {projection.routes.length === 1 && projection.routes[0].setName !== initial.category.name && <p className="mc-help">Поля для товарів: <strong>{projection.routes[0].setName}</strong></p>}
       {!projection.routes.length && <Notice>Категорію ще не підключено до набору Magento. <Link className="underline" to={`/admin/magento/prepare?category=${categoryCode}&intent=connect`}>Налаштувати підключення</Link></Notice>}
@@ -261,13 +271,13 @@ function CategoryEditor({ initial, baseline, activePublication, onPublished, onS
       {tab === 'placement' ? <section className="mc-placement space-y-3" aria-label="Категорії магазину для товарів">
         <h3 className="font-semibold">Де показувати товари «{initial.category.name}»</h3>
         <p>{applied ? context.returnTo ? 'Розділи збережено. Наступний крок — «Повернутися до проблеми товару» вище й «Перевірити товар у Magento».' : 'Розділи збережено. Стан синхронізації товарів доступний у вкладці «Стан доставки».'
-          : prepared ? 'Перевірку підготовлено. Продовжіть нижче: підтвердьте потрібні розділи, а потім натисніть «Застосувати зміни».' : 'Наступний крок — «Перевірити відповідність розділів». Після перевірки підтвердьте запропоновані розділи й натисніть «Застосувати зміни».'}</p>
+          : prepared ? reviewReady ? 'Відповідності підтверджено. Нижче — перевірка впливу на товари та застосування змін.' : 'Продовжіть перевірку нижче: там показано всі відповідності, які ще блокують застосування.' : 'Наступний крок — «Перевірити відповідність розділів». Після перевірки підтвердьте запропоновані розділи й натисніть «Застосувати зміни».'}</p>
         {!prepared && !applied && <p className="mc-help">Нижче — збережені налаштування категорії. Підтверджений розділ у цьому списку ще не означає, що конкретний товар пройшов перевірку.{context.productId && ' Перевірка врахує товар, з якого ви перейшли.'}</p>}
         <div className="mc-actions">{canPublish && <button className="btn btn-primary" disabled={busy || pending || stale || reviewPending} onClick={() => checkBinding('categories')}>{busy ? 'Перевіряємо розділи…' : prepared ? 'Продовжити перевірку розділів' : 'Перевірити відповідність розділів'}</button>}
           {projection.attributes.some((a) => a.code === 'categories') && <button className="btn btn-outline" disabled={busy || pending} onClick={() => chooseField('categories')}>Змінити правило розміщення</button>}
         </div>
         <div className="space-y-3">
-          {(projection.placements || []).map((entry) => <div key={entry.id} className="mc-placement-row"><strong>{entry.label?.split('/').join(' › ')}</strong><p>{entry.reviewState === 'approved' ? 'Підтверджено в збережених налаштуваннях' : entry.reviewState === 'blocked' ? 'Передавання в цей розділ заблоковано' : entry.identity ? 'Розділ знайдено в Magento. Потрібно підтвердити, що обрано правильний.' : entry.candidates?.length > 1 ? 'Знайдено кілька розділів. Виберіть правильний у перевірці відповідностей.' : 'Розділ не знайдено. Перевірте шлях у правилі або додайте розділ.'}</p></div>)}
+          {(projection.placements || []).map((entry) => <div key={entry.id} className="mc-placement-row"><strong>{entry.label?.split('/').join(' › ')}</strong><p>{entry.reviewState === 'approved' ? prepared ? 'Підтверджено. Очікує застосування змін.' : 'Підтверджено в збережених налаштуваннях' : entry.reviewState === 'blocked' ? 'Передавання в цей розділ заблоковано' : entry.identity ? 'Розділ знайдено в Magento. Потрібно підтвердити, що обрано правильний.' : entry.candidates?.length > 1 ? 'Знайдено кілька розділів. Виберіть правильний у перевірці відповідностей.' : 'Розділ не знайдено. Перевірте шлях у правилі або додайте розділ.'}</p></div>)}
           {!projection.placements?.length && <p>Для цієї мови немає збережених відповідностей розділів магазину.</p>}
         </div>
         {canManage && <MagentoDetails summary="Додати відсутній розділ Magento">{() => <><p>Створення розділу потребує окремої перевірки точного батьківського розділу.</p><Link className="mc-field-link" to={`/admin/magento/prepare?category=${categoryCode}&intent=subcategory`}>Відкрити створення розділу</Link></>}</MagentoDetails>}
@@ -303,7 +313,7 @@ function CategoryEditor({ initial, baseline, activePublication, onPublished, onS
       </section>}
       {tab === 'text' && canManage && auth.permissions.includes('exports.view') && <MagentoDetails summary="Приклад тексту на товарі">{() => <section className="space-y-3" aria-label="Приклад текстових шаблонів"><SampleProducts search={searchSamples} selected={samples} onChange={(next) => { setSamples(next.slice(-1)); setPreview(null); }} /><button type="button" className="btn btn-outline" disabled={busy || pending || !samples.length || stale} onClick={() => run(async () => { const next = await save(); const { data } = await templates.preview(next.id, { expectedRevision: next.draft.revision, expectedDefinitionHash: next.draft.definitionHash, productIds: samples.map((p) => p.id) }); setPreview(data); })}>Перевірити приклад</button>{preview && <SampleResult preview={preview} />}</section>}</MagentoDetails>}
       {prepared && <>
-        <div ref={reviewPanel} tabIndex={-1}><MagentoWorkspaceReview revision={revision} categoryCode={categoryCode} questions={projection.questions} focusTarget={reviewTarget} selections={selections} disabled={!canManage || busy || stale} onReadyChange={setReviewReady} onPendingChange={setReviewPending} onChanged={(next) => { setReviewReady(false); setRevision(next); setPreview(null); }} /></div>
+        <div ref={reviewPanel} tabIndex={-1}><MagentoWorkspaceReview revision={revision} categoryCode={categoryCode} categories={categories} questions={projection.questions} focusTarget={reviewTarget} selections={selections} disabled={!canManage || busy || stale} onReadyChange={setReviewReady} onProgressChange={setReviewProgress} onPendingChange={setReviewPending} onChanged={reviewChanged} /></div>
         {canPublish && <MagentoDetails summary="Приклад на товарі">{() => <><button type="button" className="btn btn-outline" onClick={() => setProductChecks(!productChecks)}>{productChecks ? 'Сховати перевірку товарів' : 'Вибрати товар для перевірки'}</button>{productChecks && <MagentoProductChecks key={`${revision.id}:${revision.revision}`} revision={revision} categoryCode={categoryCode} onRepresentative={(example) => setRepresentatives((current) => [...current.filter((e) => e.routeKey !== example.routeKey), { ...example, revision: revision.revision }])} />}</>}</MagentoDetails>}
         {reviewReady ? <MagentoPublicationActions compact autoPreview={checkRequested && reviewReady} disabled={busy || stale || selectionDirty || reviewPending} revision={revision} currentPublishedId={activePublication?.id} representatives={representatives.filter((e) => e.revision === revision.revision)} onPublished={(next) => {
           setRevision(next); setBase({ ...projection, revision: next, template: { ...projection.template, definition } });
@@ -374,6 +384,6 @@ export default function MagentoCategoryWorkspace({ categories, activePublication
   const filtered = categories.filter((c) => `${c.name} ${c.code}`.toLocaleLowerCase('uk').includes(search.trim().toLocaleLowerCase('uk')));
   return <div className="mc-workspace">
     <aside className="mc-categories" aria-label="Категорії менеджера"><h2>Категорії</h2><label className="mc-label">Пошук категорії<input className="input" type="search" value={search} onChange={(e) => setSearch(e.target.value)} /></label><nav>{filtered.map((c) => <Link key={c.code} aria-current={c.code === categoryCode ? 'page' : undefined} to={`/admin/magento?category=${encodeURIComponent(c.code)}`}><strong>{c.name}</strong><small>{c.unboundCount == null ? 'Відповідності — у категорії' : `Ще не передаємо: ${c.unboundCount}`}</small>{c.operational.count > 0 && <small>Проблеми товарів: {c.operational.count}</small>}</Link>)}</nav>{!filtered.length && <p>Категорій за цим пошуком немає.</p>}</aside>
-    {!categoryCode ? <EmptyState title="Оберіть категорію менеджера">Побачите поля Magento, наші характеристики та текстові шаблони.</EmptyState> : error ? <Notice tone="error">{error}</Notice> : !data ? <LoadingState label="Читаємо категорію…" /> : !data.template || data.groupIndex < 0 ? <EmptyState title={data.category.name}>Категорію ще не включено до правил Magento. <Link className="underline" to={`/admin/magento/prepare?category=${categoryCode}&intent=connect`}>Налаштувати підключення</Link></EmptyState> : <CategoryEditor key={loaded.editorKey} initial={{ ...data, category: { ...data.category, operational: categories.find((c) => c.code === categoryCode)?.operational } }} baseline={loaded.baseline.template ? loaded.baseline : data} activePublication={activePublication} onPublished={onPublished} onScopeCommit={(nextScope) => setOwnedScope((current) => ({ key: nextScope, priorLocationKey: location.key, scopes: [...new Set([scopeKey, ...(current?.priorLocationKey === location.key ? current.scopes : []), nextScope])], editorKey: loaded.editorKey }))} />}
+    {!categoryCode ? <EmptyState title="Оберіть категорію менеджера">Побачите поля Magento, наші характеристики та текстові шаблони.</EmptyState> : error ? <Notice tone="error">{error}</Notice> : !data ? <LoadingState label="Читаємо категорію…" /> : !data.template || data.groupIndex < 0 ? <EmptyState title={data.category.name}>Категорію ще не включено до правил Magento. <Link className="underline" to={`/admin/magento/prepare?category=${categoryCode}&intent=connect`}>Налаштувати підключення</Link></EmptyState> : <CategoryEditor key={loaded.editorKey} categories={categories} initial={{ ...data, category: { ...data.category, operational: categories.find((c) => c.code === categoryCode)?.operational } }} baseline={loaded.baseline.template ? loaded.baseline : data} activePublication={activePublication} onPublished={onPublished} onScopeCommit={(nextScope) => setOwnedScope((current) => ({ key: nextScope, priorLocationKey: location.key, scopes: [...new Set([scopeKey, ...(current?.priorLocationKey === location.key ? current.scopes : []), nextScope])], editorKey: loaded.editorKey }))} />}
   </div>;
 }
