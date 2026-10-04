@@ -6,6 +6,32 @@ const { review } = require('./binding-review');
 const TEXT = new Set(['text', 'textarea']);
 const PROTECTED = new Set(['sku', 'store_view_code', 'product_type']);
 const EDITABLE = new Set(['text', 'textarea', 'select', 'multiselect', 'boolean', 'price', 'weight']);
+const LABELS = { name: 'Назва товару', description: 'Опис', short_description: 'Короткий опис',
+  meta_title: 'Заголовок у пошуку', meta_description: 'Опис у пошуку', meta_keyword: 'Ключові слова',
+  categories: 'Категорії магазину', weight: 'Вага', price: 'Ціна', sku: 'Артикул', attribute_set_code: 'Набір характеристик' };
+const REGULAR_NATIVE = new Set(Object.keys(LABELS).filter((code) => !['categories', 'sku', 'attribute_set_code'].includes(code)));
+const SERVICE = new Set(['categories', 'attribute_set_code', 'category_ids', 'custom_layout_update', 'layout_update_xml',
+  'external_id', 'old_id', 'has_options', 'required_options', 'has_enabled', 'url_key', 'image_label', 'small_image_label', 'thumbnail_label']);
+
+function emptyLiteral(definition, expression, seen = new Set()) {
+  if (expression?.op === 'ref' && !seen.has(expression.id)) return emptyLiteral(definition,
+    definition.bindings.find((b) => b.id === expression.id)?.value, new Set([...seen, expression.id]));
+  return expression?.op === 'literal' && (expression.value === '' || expression.value === null);
+}
+
+function fieldReview(binding, route, entries, remote, inSet, empty) {
+  if (empty && !binding && !remote?.is_required) return [];
+  const reasons = [];
+  if (empty && remote?.is_required) reasons.push({ kind: 'text', message: 'Обов’язкове поле порожнє. Заповніть його текст або виберіть джерело.' });
+  if (remote && !inSet) reasons.push({ kind: 'structure', message: 'Поле не входить до вибраного набору характеристик Magento. Перевірте набір або структуру магазину.' });
+  if (!binding && !empty) reasons.push({ kind: 'attribute', message: 'Для цього правила ще немає підтвердженої прив’язки до поля Magento.' });
+  if (route && (route.reviewState !== 'approved' || !route.enabled)) reasons.push({ kind: 'route', message: 'Набір характеристик цієї категорії ще не підтверджено або вимкнено.' });
+  const messages = { attribute: 'Потрібно підтвердити, у яке поле Magento передаємо значення.',
+    option: 'Є значення менеджера без підтвердженої відповідності Magento. Виберіть відповідності нижче.',
+    policy: 'Виберіть, хто заповнює це поле: менеджер чи Magento.', category: 'Підтвердьте, у якій категорії магазину має бути товар.' };
+  for (const kind of Object.keys(messages)) if (entries.some((e) => e.kind === kind && !['approved', 'not_applicable', 'blocked'].includes(e.reviewState))) reasons.push({ kind, message: messages[kind] });
+  return reasons;
+}
 
 // Output provenance, not guard/readiness dependencies. Similar labels and unused
 // source declarations cannot establish that a characteristic is transmitted.
@@ -65,15 +91,20 @@ function projectCategory(catalog, revision, definition, categoryCode, input = {}
     const entries = decisions.filter((e) => e.target === target);
     const unresolved = entries.filter((e) => !['approved', 'not_applicable', 'blocked'].includes(e.reviewState)).length;
     const policy = entries.find((e) => e.kind === 'policy');
-    const text = TEXT.has(remote?.frontend_input) || ['name', 'description', 'short_description', 'meta_title', 'meta_description', 'meta_keyword'].includes(code);
+    const text = !['sku', 'weight', 'price', 'categories', 'attribute_set_code'].includes(code)
+      && (TEXT.has(remote?.frontend_input) || ['name', 'description', 'short_description', 'meta_title', 'meta_description', 'meta_keyword'].includes(code));
+    const service = PROTECTED.has(code) || SERVICE.has(code) || remote?.is_user_defined === false && !REGULAR_NATIVE.has(code);
+    const empty = emptyLiteral(definition, expression);
+    const reviewReasons = expression === undefined ? [] : fieldReview(binding, route, entries, remote, set?.attributeCodes.includes(code), empty);
     const reason = PROTECTED.has(code) ? 'Системне правило захищено.'
       : remote && !set?.attributeCodes.includes(code) ? 'Атрибут не входить до вибраного набору Magento.'
         : remote && !EDITABLE.has(remote.frontend_input) ? 'Цей тип атрибута доступний лише для перегляду.'
           : !remote && !expression ? 'Опис атрибута недоступний.' : null;
-    return { code, target, label: remote?.default_frontend_label || group?.columnLabels?.[target] || code,
-      inputType: remote?.frontend_input ?? null, required: remote?.is_required ?? null, text,
+    return { code, target, label: LABELS[code] || remote?.default_frontend_label || group?.columnLabels?.[target] || code,
+      inputType: remote?.frontend_input ?? null, required: remote?.is_required ?? null, text, service, empty, reviewReasons,
       configured: expression !== undefined, sources, policy: policy?.identity || null, policyApproved: policy?.reviewState === 'approved',
-      state: expression === undefined ? 'unmapped' : !binding || unresolved || remote && !set?.attributeCodes.includes(code) || binding.reviewState !== 'approved' || route?.reviewState !== 'approved' || !route?.enabled ? 'review' : 'connected',
+      state: expression === undefined ? 'unmapped' : binding && ['blocked', 'not_applicable'].includes(binding.reviewState) ? 'excluded'
+        : reviewReasons.length ? 'review' : empty && !binding ? 'empty' : 'connected',
       unresolved, editable: !reason && groupIndex >= 0, restriction: reason, inSet: set?.attributeCodes.includes(code) || false };
   });
   return { category: { code: categoryCode, name: catalog.categories[categoryCode].name },
@@ -81,6 +112,7 @@ function projectCategory(catalog, revision, definition, categoryCode, input = {}
     observedAt: revision?.observedAt || null, groupIndex, rowIndex,
     routes: routes.map((r) => ({ ...r, setName: revision.schema.attributeSets.find((s) => s.attribute_set_id === r.setId)?.attribute_set_name || 'Набір ще не вибрано' })),
     routeKey: route?.routeKey || null, attributes, questions,
+    placements: decisions.filter((e) => e.kind === 'category'),
     unboundCount: questions.filter((q) => !q.uses.length).length,
     template: definition ? { id: revision.templateId, versionId: revision.templateVersionId, definition } : null };
 }
@@ -133,7 +165,10 @@ async function observeCategory(config, categoryCode, input = {}, options = {}) {
   const catalog = { categories: { [categoryCode]: current.category }, questions: { [categoryCode]: current.questions } };
   const result = projectCategory(catalog, revision, current.template.definition, categoryCode, input);
   const comparison = require('./integration-structure-check').structureReport(current.selectedRevision, observation);
-  for (const attribute of result.attributes) if (comparison.findings.some((f) => f.field === attribute.code && f.categoryCode === categoryCode)) attribute.state = 'review';
+  for (const attribute of result.attributes) if (comparison.findings.some((f) => f.field === attribute.code && f.categoryCode === categoryCode)) {
+    attribute.state = 'review';
+    attribute.reviewReasons = [{ kind: 'structure', message: 'Структура цього поля в Magento змінилася. Перевірте актуальний набір, поле та значення перед підтвердженням прив’язки.' }];
+  }
   return { ...result, currentPublishedId: current.currentPublishedId, liveObservation: true, comparison };
 }
 module.exports = { outputSources, questionUsage, projectCategory, readCategory, readField, observeCategory };

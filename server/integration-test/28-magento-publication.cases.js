@@ -93,6 +93,10 @@ test('category workspace reads the exact immutable publication without product c
     assert.ok(english.entries.length);assert.ok(english.entries.every(e=>e.group==='XG'&&e.row==='english'));
     const picker=await controlled.candidates(f.config,f.current.id,f.options,{categoryCode:'XG'});
     assert.deepEqual(picker.products.map(p=>p.productId),[f.products[0].id,f.products[2].id]);
+    const exact=await controlled.candidates(f.config,f.current.id,f.options,{categoryCode:'XG',productId:String(f.products[2].id)});
+    assert.deepEqual(exact.products.map(p=>p.productId),[f.products[2].id]);
+    const foreign=await controlled.candidates(f.config,f.current.id,f.options,{categoryCode:'XG',productId:String(f.products[1].id)});
+    assert.deepEqual(foreign.products,[]);
     assert.equal(f.calls.length,0);assert.deepEqual(await counts(),before);
     assert.deepEqual(await bindings.getRevision(f.current.id,f.options),original);
   }finally{await f.db.end();await dropTestDatabase(name);}

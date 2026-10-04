@@ -86,6 +86,63 @@ it('opens the category and complete attribute set without product evaluation or 
   expect(screen.queryByRole('button', { name: 'Підключити поле' })).toBeNull();
 });
 
+it('explains a review state and starts isolated binding review without requiring a fake rule edit', async () => {
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await get(url, config);
+    if (url.includes('/categories/') && !url.includes('/fields/')) {
+      const color = result.data.attributes.find((a) => a.code === 'kolir');
+      color.state = 'review'; color.reviewReasons = [{ kind: 'option', message: 'Є значення без підтвердженої відповідності.' }];
+    }
+    return result;
+  });
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Що виправити' }));
+  await screen.findByRole('region', { name: 'Що виправити в полі' });
+  expect(screen.getAllByText('Є значення без підтвердженої відповідності.').length).toBeGreaterThan(0);
+  expect(api.post).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити прив’язку цього поля' }));
+  await screen.findByRole('region', { name: 'Перевірка підготовлених відповідностей' });
+  expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/successor/prepare', { sourceId: 'current', expectedSourceRevision: '4', templateVersionId: 'original-version' });
+  expect(api.post.mock.calls.some(([url]) => url === '/admin/export-templates' || /decision|publication\/apply/.test(url))).toBe(false);
+});
+
+it('offers optional empty descriptions and hides editable service text from everyday fields', async () => {
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await get(url, config);
+    if (url.includes('/categories/') && !url.includes('/fields/')) {
+      result.data.attributes.find((a) => a.code === 'description').state = 'empty';
+      result.data.attributes.push({ code: 'image_label', label: 'Image Label', text: true, service: true, editable: true, sources: [], state: 'unmapped' });
+    }
+    return result;
+  });
+  mount(); await textFields();
+  expect(screen.getByText('Порожній текст не передається в Magento.')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Image Label' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Додати текст' }));
+  await screen.findByLabelText('Текст для магазину');
+  expect(screen.getByText(/Це необов’язкове поле порожнє/)).toBeTruthy();
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('opens category repair in the new workspace, with paths and a scoped confirmation action', async () => {
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await get(url, config);
+    if (url.includes('/categories/') && !url.includes('/fields/')) result.data.placements = [{ id: 'category:one', target: 'categories', label: 'Default/Кулони', identity: 42, reviewState: 'proposed' }];
+    return result;
+  });
+  const { router } = mount('/admin/magento?category=BR&view=placement&returnTo=%2Fattention%3Fproblem%3D7');
+  await screen.findByRole('region', { name: 'Категорії магазину для товарів' });
+  expect(screen.getByText('Default › Кулони')).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Повернутися до проблеми товару' }).getAttribute('href')).toBe('/attention?problem=7');
+  expect(api.post).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити відповідність розділів' }));
+  await screen.findByRole('heading', { name: 'Підтвердьте розділи магазину' });
+  expect(new URLSearchParams(router.state.location.search).get('reviewField')).toBe('categories');
+});
+
 it('isolates a shared text rule to the chosen category and language and saves a separate family', async () => {
   mount(); await textFields(); fireEvent.click(await screen.findByRole('button', { name: 'Назва' }));
   fireEvent.change(await screen.findByLabelText('Текст для магазину'), { target: { value: 'Нова назва' } });

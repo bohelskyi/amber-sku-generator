@@ -9,11 +9,57 @@ const job = { id: 'job-1', state: 'uncertain', steps: [{ ordinal: 0, domain: 'co
 const record = { productId: 7, article: 'AG-000007', job, lifecycle: null, actions: { jobRecovery: true, lifecycleRecovery: false } };
 const reviewed = { job, review: { jobId: 'job-1', steps: [] }, reviewHash: 'original-review', steps: [{ ...job.steps[0], matches: true }],
   blockers: [], canReconcile: true, canContinue: false, observedAt: '2026-10-04T00:00:00Z' };
-function show(capabilities = ['export_templates.publish']) {
-  return render(<AuthContext.Provider value={{ permissions: capabilities, principalLifetime: { valid: true } }}><MemoryRouter><MagentoRecovery productId={7} /></MemoryRouter></AuthContext.Provider>);
+function show(capabilities = ['export_templates.publish'], props = {}, roles = []) {
+  return render(<AuthContext.Provider value={{ permissions: capabilities, roles, principalLifetime: { valid: true } }}><MemoryRouter><MagentoRecovery productId={7} {...props} /></MemoryRouter></AuthContext.Provider>);
 }
 beforeEach(() => { vi.resetAllMocks(); api.get.mockResolvedValue({ data: record }); api.post.mockResolvedValue({ data: reviewed }); });
 afterEach(cleanup);
+
+it('guided check inspects the original job in one explicit action and never records or continues automatically', async () => {
+  show(['export_templates.publish'], { guided: true });
+  expect(api.get).not.toHaveBeenCalled(); expect(api.post).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити товар у Magento' }));
+  await screen.findByRole('button', { name: 'Підтвердити перевірений результат' });
+  expect(api.get).toHaveBeenCalledExactlyOnceWith('/admin/magento-recovery/products/7');
+  expect(api.post).toHaveBeenCalledExactlyOnceWith('/admin/magento-recovery/jobs/job-1/inspect', {});
+});
+
+it('guided history check offers the exact server-recommended decision with a concrete result', async () => {
+  api.get.mockResolvedValue({ data: { ...record, job: null, lifecycle: { suggestedKind: 'prior_exposure', availableKinds: ['prior_exposure'] }, actions: { jobRecovery: false, lifecycleRecovery: true } } });
+  api.post.mockResolvedValue({ data: { review: { kind: 'prior_exposure', payload: { remote: { status: 'found', sku: 'AG-000007' } } }, eligible: true, blockers: [], reviewHash: 'exact' } });
+  show(['exports.reconcile'], { guided: true });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити товар у Magento' }));
+  await screen.findByText(/У Magento знайдено товар/);
+  expect(api.post).toHaveBeenCalledExactlyOnceWith('/admin/magento-recovery/products/7/lifecycle-preview', { kind: 'prior_exposure' });
+  expect(screen.getByRole('button', { name: 'Підтвердити наявність товару' }).disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Перевірити можливість рішення' })).toBeNull();
+});
+
+it('keeps the Administrator resync in the problem context and submits only the exact reviewed product', async () => {
+  const revision = { id: 'current', revision: '4', state: 'published' };
+  api.get.mockImplementation(async (url) => ({ data: url.includes('/magento-recovery/')
+    ? { ...record, job: null, lifecycle: { availableKinds: [] }, nextAction: { kind: 'reviewed_resync' } }
+    : url.includes('/controlled-products') ? { products: [7, 8].map((productId) => ({ productId, article: `AG-${productId}`, before: { all: 'Назва' }, after: { all: 'Нова назва' }, blockers: [] })) }
+      : { revision, currentPublishedId: 'current' } }));
+  api.post.mockImplementation(async (url) => ({ data: url.endsWith('/preview') ? { products: [{ productId: 7, article: 'AG-7' }], blockers: [], previewToken: 'proof' } : { handoffId: 'receipt' } }));
+  show(['export_templates.view', 'export_templates.manage', 'export_templates.publish', 'exports.view'], { guided: true, categoryCode: 'KL' }, [{ key: 'administrator' }]);
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити товар у Magento' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Переглянути оновлення товару' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Перевірити готовність цього товару' }));
+  await screen.findByText(/AG-7/);
+  expect(api.get).toHaveBeenLastCalledWith('/admin/magento-integration/bindings/current/controlled-products', { params: { after: 6, search: '', categoryCode: 'KL', productId: 7 } });
+  expect(screen.queryByText(/AG-8/)).toBeNull();
+  expect(screen.queryByRole('link', { name: 'Перевірити відправлення виправленого товару' })).toBeNull();
+  expect(api.post).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('Чому потрібно оновити товар'), { target: { value: 'Перевірено наявність товару' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити оновлення перед надсиланням' }));
+  await screen.findByRole('button', { name: 'Підтвердити надсилання цього товару' });
+  expect(api.post).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Підтвердити надсилання цього товару' }));
+  await waitFor(() => expect(api.post).toHaveBeenLastCalledWith('/admin/magento-integration/controlled/apply', {
+    bindingRevisionId: 'current', expectedRevision: '4', kind: 'broader_resync', productIds: [7], reason: 'Перевірено наявність товару', previewToken: 'proof',
+  }));
+});
 
 it('navigation does not inspect Magento or read administrative evidence until explicitly opened', async () => {
   show();

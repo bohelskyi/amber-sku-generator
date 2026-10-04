@@ -33,7 +33,7 @@ it('checks only the exact selected product explicitly and preserves repair conte
   expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/product-preview', { productId: 42 }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
   const link = new URL(screen.getByRole('link', { name: 'Знайти або додати значення' }).href);
   expect(link.pathname).toBe('/admin/magento/categories/SV');
-  expect(Object.fromEntries(link.searchParams)).toMatchObject({ tab: 'attributes', productId: '42', field: 'kamin_obrobka', question: 'finish', value: '0', returnTo });
+  expect(Object.fromEntries(link.searchParams)).toMatchObject({ view: 'attributes', productId: '42', field: 'kamin_obrobka', question: 'finish', value: '0', returnTo });
   expect(screen.getByText('Полірований')).toBeTruthy();
   expect(screen.queryByRole('button', { name: /Надіслати|Застосувати/ })).toBeNull();
 });

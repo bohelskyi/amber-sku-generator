@@ -5,7 +5,7 @@ import { ProductMagentoAttention } from '../app/ProductMagentoAttention.jsx';
 import { TechnicalDisclosure } from '../ui/index.js';
 import { MagentoRecovery } from './MagentoRecovery.jsx';
 import MagentoProductDiagnosis from './MagentoProductDiagnosis.jsx';
-import { attentionProblemGroups, needsDeliveryRecovery, nextAction, problemImpact, problemRepairUrl, problemSubject, PRODUCT_FIELD_LABELS } from './sync-problem-presentation.js';
+import { attentionProblemGroups, needsDeliveryRecovery, nextAction, problemImpact, problemRepairUrl, problemSubject, problemTitle, PRODUCT_FIELD_LABELS } from './sync-problem-presentation.js';
 
 function ProblemFacts({ problem }) {
   const subject = problemSubject(problem);
@@ -52,14 +52,11 @@ export default function AttentionProblemDetail({ product, productUrl, returnTo, 
   return <div className="sync-problem-detail-body">
     {main && <section className="sync-start-task" aria-label="З чого почати">
       <p className="eyebrow">З чого почати</p>
-      <h3>{main.message || 'Причину ще не визначено'}</h3>
-      <p className="sync-problem-guidance">{main.resolution === 'lifecycle_reconciliation'
-        ? 'Товар збережено в Amber. Автоматичну доставку призупинено: недостатньо підтверджень про доставку попередньої версії.'
-        : problemImpact(main)}</p>
+      <h3>{problemTitle(main)}</h3>
+      <p className="sync-problem-guidance">{problemImpact(main)}</p>
       <ProblemFacts problem={main} />
       {needsDeliveryRecovery(main) && !canOpenRecovery && <p className="sync-problem-guidance">Потрібне узгодження Адміністратора або відповідального оператора з дозволом на відновлення доставки. Скопіюйте опис проблеми та передайте йому.</p>}
-      {needsDeliveryRecovery(main) && canOpenRecovery && <p className="sync-problem-guidance">Відкрийте перевірку доставки. Вона покаже початкову операцію та доступні рішення; відкриття не надсилає змін у Magento.</p>}
-      {needsDeliveryRecovery(main) && canOpenRecovery && <MagentoRecovery guided productId={product.productId} onSaved={() => onSaved('recovery')} />}
+      {needsDeliveryRecovery(main) && canOpenRecovery && <MagentoRecovery guided productId={product.productId} categoryCode={product.category} onSaved={() => onSaved('recovery')} />}
       {repair(main)}
       {main.resolution === 'name' && <ProductNameConflict productId={product.productId} available={Boolean(product.nameConflict)} onSaved={onSaved} />}
     </section>}
@@ -73,7 +70,7 @@ export default function AttentionProblemDetail({ product, productUrl, returnTo, 
       </li>)}</ul>
     </section>}
     {main?.resolution !== 'name' && <ProductNameConflict productId={product.productId} available={Boolean(product.nameConflict)} onSaved={onSaved} />}
-    {recovery && !needsDeliveryRecovery(main) && <MagentoRecovery productId={product.productId} onSaved={() => onSaved('recovery')} />}
+    {recovery && !needsDeliveryRecovery(main) && <MagentoRecovery productId={product.productId} categoryCode={product.category} onSaved={() => onSaved('recovery')} />}
     {permissions.includes('export_templates.manage') && permissions.includes('exports.view') && <TechnicalDisclosure summary="Порівняти категорії та характеристики з Magento">
       {() => <MagentoProductDiagnosis key={`${product.productId}:${product.observedAt || product.state || ''}`} product={product} returnTo={returnTo} />}
     </TechnicalDisclosure>}

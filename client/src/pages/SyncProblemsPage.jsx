@@ -110,7 +110,7 @@ export default function SyncProblemsPage() {
       <form className="sync-problem-filters" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget);
         setLocationState({ search: String(form.get('search') || '').trim(), category: form.get('category'), reason: form.get('reason'), offset: null, problem: null }); }}>
         <label className="sync-search">Артикул<span><Search size={16} aria-hidden="true" /><input key={search} className="input" name="search" defaultValue={search} placeholder="Знайти за артикулом" maxLength={120} /></span></label>
-        <label>Категорія<select className="input" name="category" key={category} defaultValue={category}><option value="">Усі категорії</option>
+        <label>Категорія<select className="input" name="category" key={`${category}:${categoryOptions.map((item) => item.code).join(',')}`} defaultValue={category}><option value="">Усі категорії</option>
           {category && !categoryOptions.some((item) => item.code === category) && <option value={category}>{category}</option>}
           {categoryOptions.map((item) => <option key={item.code} value={item.code}>{item.name || item.code}</option>)}</select></label>
         <label>Причина<select className="input" name="reason" key={reason} defaultValue={reason}><option value="">Усі причини</option>

@@ -63,6 +63,35 @@ test('new category without a publication is unavailable rather than a fabricated
   assert.throws(() => workspace.projectCategory(f.catalog, null, null, 'UNKNOWN'), { code: 'MAGENTO_CATEGORY_NOT_FOUND' });
 });
 
+test('optional empty texts are omitted, required empty texts explain a repair, and service fields stay separate', () => {
+  const f = context();
+  f.definition.groups[0].columns.push('description', 'short_description', 'image_label', 'custom_layout_update');
+  Object.assign(f.definition.groups[0].rows[0].cells, { description: { op: 'ref', id: 'emptyDescription' }, short_description: { op: 'literal', value: '' } });
+  f.definition.bindings.push({ id: 'emptyDescription', value: { op: 'literal', value: '' } });
+  for (const [code, required] of [['description', false], ['short_description', true], ['image_label', false], ['custom_layout_update', false]]) {
+    f.revision.schema.attributes.push({ attribute_code: code, frontend_input: 'text', is_required: required, is_user_defined: false, default_frontend_label: code });
+    f.revision.schema.attributeSets[0].attributeCodes.push(code);
+  }
+  const result = workspace.projectCategory(f.catalog, f.revision, f.definition, 'XG');
+  const field = (code) => result.attributes.find((a) => a.code === code);
+  assert.equal(field('description').state, 'empty'); assert.deepEqual(field('description').reviewReasons, []);
+  assert.equal(field('description').label, 'Опис'); assert.equal(field('description').service, false);
+  assert.equal(field('short_description').state, 'review'); assert.match(field('short_description').reviewReasons[0].message, /Обов’язкове поле порожнє/);
+  assert.equal(field('image_label').service, true); assert.equal(field('custom_layout_update').service, true);
+  assert.equal(field('new_note').service, false);
+});
+
+test('field review explains exact unresolved decisions and placement exposes frozen identities without approval', () => {
+  const f = context(); const binding = f.revision.bindings.attributes.find((a) => a.target === 'kolir');
+  binding.reviewState = 'proposed';
+  f.revision.bindings.options.find((o) => o.bindingKey === binding.bindingKey).reviewState = 'review_required';
+  f.revision.bindings.policies.find((p) => p.bindingKey === binding.bindingKey).reviewState = 'proposed';
+  binding.evidence.categories = [{ requestedPath: 'Default/Кулони', normalizedPath: 'Default/Кулони', categoryId: 42, candidates: [{ categoryId: 42, path: 'Default/Кулони' }], reviewState: 'proposed' }];
+  const result = workspace.projectCategory(f.catalog, f.revision, f.definition, 'XG');
+  assert.deepEqual(result.attributes.find((a) => a.code === 'kolir').reviewReasons.map((r) => r.kind), ['attribute', 'option', 'policy', 'category']);
+  assert.equal(result.placements[0].identity, 42); assert.equal(result.placements[0].reviewState, 'proposed');
+});
+
 test('explicit observation projects new fields and option drift without changing frozen bindings; failures and conflicts fail closed', async () => {
   const editor = require('../src/services/magento/integration-editor.service');
   const c = require('../src/services/magento/binding-contract');
@@ -130,7 +159,10 @@ test('controlled picker binds exact category and literal search as SQL parameter
   try {
     const controlled = require('../src/services/magento/binding-controlled-actions');
     assert.deepEqual(await controlled.candidates({}, id, {}, { after: '0', search: "'%_", categoryCode: 'XG' }), { products: [], nextCursor: null });
-    assert.deepEqual(calls[0][1], [0, "'%_", 'XG']); assert.match(calls[0][0], /p.category=\$3/);
+    assert.deepEqual(calls[0][1], [0, "'%_", 'XG', null]); assert.match(calls[0][0], /p.category=\$3/);
+    await controlled.candidates({}, id, {}, { categoryCode: 'XG', productId: '42' });
+    assert.deepEqual(calls[1][1], [0, '', 'XG', 42]); assert.match(calls[1][0], /p.id=\$4/);
+    for (const productId of ['42 OR 1=1', 0, -1, '1e3', [42], '2147483648']) await assert.rejects(controlled.candidates({}, id, {}, { productId }));
     await assert.rejects(controlled.candidates({}, id, {}, { categoryCode: ['XG'] }));
   } finally { Object.assign(editor, { read: original.read, selected: original.selected }); repository.current = original.current; }
 });
