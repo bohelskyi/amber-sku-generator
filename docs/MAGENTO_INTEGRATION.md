@@ -223,6 +223,16 @@ product. Contradictory links, modern missing pointers, independently excluded
 ancestors, compatibility exclusions and non-retired predecessors remain blockers.
 It does not rewrite any historical pointer, identity, SKU or exclusion policy.
 
+Canonical cutover may have replaced a then-current migration baseline's evidence
+with `origin: cutover` before a later recount retired it. Such a retired ancestor
+qualifies only when its immutable approved cutover manifest and applied batch
+receipt prove the exact migration-039 origin/coverage, unknown policy, NULL pointer,
+internal SKU and unchanged cutover evidence. The active gate, manifest digest,
+database, batch digest and exact product membership are verified; an origin label
+alone is insufficient. These receipts are fingerprint-bound and re-read under the
+existing apply locks. Failed proof remains `CUTOVER_BASELINE_UNVERIFIED`, exposed
+in local recovery diagnostics and copied history reports. No historical row is repaired.
+
 Its exact retained-evidence fingerprint uses the existing repair manifest/index,
 including downloaded/generated/confirmed files. Every retained exact file needs
 an explicit disposition and evidence. The operator also confirms that old versions

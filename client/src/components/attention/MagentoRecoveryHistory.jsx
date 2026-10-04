@@ -39,11 +39,13 @@ function recoveryHistoryReport(history, inspection) {
     ...(inspection?.stale ? ['Дані Amber змінилися під час перевірки; результати потребують повторної перевірки.'] : []),
     '', 'Версії товару:',
     ...history.products.map(p => `№${p.productId} · ${p.article} · внутрішній SKU ${p.internalSku} · ${p.status}; попередня №${p.previousProductId ?? '—'}, наступна №${p.nextProductId ?? '—'}; переоблік №${p.sourceCorrectionId ?? 'не підтверджено'}; маршрут ${p.route}, причина ${p.holdReason ?? '—'}; виключення ${p.businessExclusion}, походження ${p.exclusionProvenance ?? '—'}, обмеження переобліку ${p.compatibilityExcluded}; ${remoteText(inspection?.remote?.find(r => r.article === p.article))}`),
+    ...history.products.map(p => `№${p.productId}: походження стану ${p.lifecycleOrigin ?? '—'}, історичне покриття ${p.lifecycleCoverage ?? '—'}; підтвердження переходу ${p.cutoverBaseline ? `${p.cutoverBaseline.manifestHash}, події ${p.cutoverBaseline.approvalEventId}/${p.cutoverBaseline.batchEventId}` : 'не знайдено'}`),
     '', 'Записи переобліку:',
     ...history.corrections.map(v => `№${v.correctionId}: №${v.sourceProductId} (${v.sourceInternalSku}) → №${v.successorProductId} (${v.successorInternalSku})`),
     '', 'Що потребує розбору:',
     ...history.issues.map(issue => `${issueText(issue, history)} [${issue.code}]`),
     ...history.products.filter(policyText).map(p => `${p.article}: ${policyText(p)}.`),
+    ...(history.historicalRecountBlockers?.length ? ['', 'Чому підтвердження недоступне:', ...history.historicalRecountBlockers] : []),
     '', 'Перевірка лише читає дані. Вона не змінює історію, артикули, виключення або товари Magento.',
   ].join('\n');
 }
@@ -77,6 +79,7 @@ export default function MagentoRecoveryHistory({ history, inspection, busy, onIn
     {(problems.length > 0 || policies.length > 0) && <div><h4 className="sync-next-heading">Що потрібно з’ясувати</h4><ul className="list-disc pl-5 space-y-1">
       {problems.map((text, i) => <li key={i}>{text}</li>)}{policies.map(p => <li key={`policy-${p.productId}`}><strong>{p.article}:</strong> {policyText(p)}.</li>)}</ul></div>}
     {unsupported && <Notice tone="warning"><p className="font-semibold">Далі — виправлення історії переобліку</p>
+      {history.historicalRecountBlockers?.includes('CUTOVER_BASELINE_UNVERIFIED') && <p>Для старої версії не знайдено повного підтвердження переходу на нову синхронізацію. Точну причину та походження записів включено до звіту.</p>}
       <p>На цьому екрані ще немає безпечної дії для узгодження такої історії. Збережіть звіт і передайте відповідальному за інтеграцію: у ньому є точні версії, записи переобліку та результати перевірки Magento.</p></Notice>}
     <div className="flex flex-wrap gap-2">
       {history.complete && onInspect && <Button size="compactMd" busy={busy} onClick={onInspect}>{inspection ? 'Повторити перевірку артикулів у Magento' : 'Перевірити ці артикули у Magento'}</Button>}

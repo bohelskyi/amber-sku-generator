@@ -22,9 +22,18 @@ test('missing lifecycle correlation is distinguished from contradictory product 
   const { products, corrections } = fixture(); products[1].source_correction_id = null;
   const old = describe(products, corrections, 2);
   assert.equal(old.stableRecount, false);
+  assert.ok(old.historicalRecountBlockers.includes('CORRECTION_LINEAGE_CONFLICT'));
   assert.deepEqual(old.issues, [{ code: 'SOURCE_CORRECTION_NOT_RECORDED', productId: 2, correctionId: 10, recordedCorrectionId: null }]);
   products[0].corrected_to_product_id = null;
   assert.ok(describe(products, corrections, 2).issues.some(v => v.code === 'LINEAGE_LINK_MISMATCH'));
+});
+test('unverified cutover history returns the reason for an unavailable procedure, without approving it', () => {
+  const { products, corrections } = fixture();
+  Object.assign(products[0], { lifecycle_origin: 'cutover', business_exclusion_state: 'unknown' });
+  const report = describe(products, corrections, 2);
+  assert.equal(report.stableRecount, false); assert.equal(report.historicalRecount, false);
+  assert.ok(report.historicalRecountBlockers.includes('CUTOVER_BASELINE_UNVERIFIED'));
+  assert.equal(report.products[0].lifecycleOrigin, 'cutover'); assert.equal(report.products[0].cutoverBaseline, null);
 });
 test('unknown ancestor exclusion, compatibility exclusion and incomplete or disconnected history never recommend stable confirmation', () => {
   for (const patch of [{ business_exclusion_state: 'unknown' }, { independent_exclusion: true }, { exclusion_provenance: 'unknown' },

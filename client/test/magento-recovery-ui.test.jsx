@@ -128,6 +128,32 @@ it('a stale historical inspection retains its evidence and explicitly requires a
   expect(screen.getByRole('button', { name: 'Повторити перевірку артикулів у Magento' })).toBeTruthy();
   expect(api.post.mock.calls.some(([url]) => url.endsWith('/lifecycle-preview') || url.endsWith('/lifecycle-apply'))).toBe(false);
 });
+it('missing cutover receipts explain the refusal and include provenance in the copied diagnostic report', async () => {
+  const diagnosis = { ...history, historicalRecountBlockers: ['CUTOVER_BASELINE_UNVERIFIED'],
+    products: history.products.map(p => ({ ...p, lifecycleOrigin: 'cutover', lifecycleCoverage: null, cutoverBaseline: null })) };
+  api.get.mockResolvedValue({ data: { ...record, job: null, history: diagnosis, lifecycle: { availableKinds: [], legacyDeliveryEnabled: false }, actions: { lifecycleRecovery: true } } });
+  api.post.mockResolvedValue({ data: { history: diagnosis, remote: [], stale: false } });
+  const writeText = vi.fn().mockResolvedValue(); vi.stubGlobal('navigator', { clipboard: { writeText } });
+  show(['exports.reconcile'], { guided: true });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити товар у Magento' }));
+  await screen.findByText(/Для старої версії не знайдено повного підтвердження переходу/);
+  fireEvent.click(screen.getByRole('button', { name: 'Копіювати звіт для виправлення' }));
+  await screen.findByText(/Звіт скопійовано/);
+  expect(writeText.mock.calls[0][0]).toContain('CUTOVER_BASELINE_UNVERIFIED');
+  expect(writeText.mock.calls[0][0]).toContain('походження стану cutover');
+  expect(screen.queryByRole('button', { name: 'Підтвердити товар і дозволити оновлення' })).toBeNull();
+  expect(api.post.mock.calls.some(([url]) => url.endsWith('/lifecycle-apply'))).toBe(false);
+});
+it('a baseline lost between local diagnosis and preview names the missing proof and offers no apply', async () => {
+  api.get.mockResolvedValue({ data: historicalRecord });
+  api.post.mockResolvedValue({ data: { ...historicalPreview, eligible: false, blockers: ['CUTOVER_BASELINE_UNVERIFIED'] } });
+  show(['exports.reconcile'], { guided: true });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити товар у Magento' }));
+  await screen.findByText(/Не знайдено повного підтвердження переходу старої версії/);
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Підтвердити товар і дозволити оновлення' })).toBeNull();
+  expect(api.post.mock.calls.some(([url]) => url.endsWith('/lifecycle-apply'))).toBe(false);
+});
 
 it('a failed history lookup leaves the exact local diagnosis and concrete report available', async () => {
   api.get.mockResolvedValue({ data: { ...record, job: null, history, lifecycle: { availableKinds: [], legacyDeliveryEnabled: false }, actions: { lifecycleRecovery: true } } });

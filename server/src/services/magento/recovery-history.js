@@ -5,8 +5,15 @@ const { assertActorStillAuthorized } = require('../access-admin-transaction');
 const { createMutationContext } = require('../../audit/mutation-context');
 const { boundedGet } = require('./integration-readiness');
 const { observe } = require('./exposure-reconciliation');
+const cutover = require('./historical-cutover-baseline');
 
 const LIMIT = 30;
+const historyMembers = rows => rows.map(p => ({ product: p,
+  lifecycle: { route: p.route, business_exclusion_state: p.business_exclusion_state, recount_compatibility_excluded: p.recount_compatibility_excluded,
+    source_correction_id: p.source_correction_id, repair_manifest_hash: p.repair_manifest_hash,
+    evidence: p.lifecycle_evidence || { origin: p.lifecycle_origin, coverage: p.lifecycle_coverage,
+      exclusionProvenance: p.exclusion_provenance, independentExclusion: p.independent_exclusion } },
+  cutoverBaseline: p.cutoverBaseline, reservation: { first_product_id: p.id } }));
 function describe(rows, corrections, productId, complete = true) {
   const graph = buildLineageGraph(rows, corrections);
   const current = rows.find(p => p.id === productId);
@@ -29,21 +36,20 @@ function describe(rows, corrections, productId, complete = true) {
     && rows.every(p => p.business_exclusion_state === 'none' && p.recount_compatibility_excluded === false
       && !p.independent_exclusion && !['unknown', 'independent_exclusion'].includes(p.exclusion_provenance)
       && (p.id === productId || p.status === 'corrected' && p.route === 'retired'));
+  const historicalRecountBlockers = require('./historical-recount-exposure').lineageBlockers(historyMembers(rows),corrections,productId);
+  if (!complete) historicalRecountBlockers.push('MAGENTO_HISTORY_TOO_LARGE');
   const historicalRecount = complete && hasRecount && !stableRecount
     && current.status === 'active' && current.exclude_from_export === 0 && current.corrected_to_product_id == null && current.corrected_from_product_id != null
     && current.business_exclusion_state === 'none'
-    && !require('./historical-recount-exposure').lineageBlockers(rows.map(p => ({ product: p,
-      lifecycle: { route: p.route, business_exclusion_state: p.business_exclusion_state, recount_compatibility_excluded: p.recount_compatibility_excluded,
-        source_correction_id: p.source_correction_id, evidence: { origin: p.lifecycle_origin, coverage: p.lifecycle_coverage,
-          exclusionProvenance: p.exclusion_provenance, independentExclusion: p.independent_exclusion } },
-      reservation: { first_product_id: p.id } })),corrections,productId).length;
-  return { productId, complete, hasRecount, identityChanged, stableRecount, historicalRecount,
+    && !historicalRecountBlockers.length;
+  return { productId, complete, hasRecount, identityChanged, stableRecount, historicalRecount, historicalRecountBlockers,
     products: rows.map(p => ({ productId: p.id, article: p.public_sku, internalSku: p.full_sku, status: p.status,
       previousProductId: p.corrected_from_product_id, nextProductId: p.corrected_to_product_id,
       route: p.route, holdReason: p.hold_reason, businessExclusion: p.business_exclusion_state,
       compatibilityExcluded: p.recount_compatibility_excluded, exclusionProvenance: p.exclusion_provenance,
       independentExclusion: p.independent_exclusion === true, legacyExportExcluded: p.exclude_from_export === 1,
-      sourceCorrectionId: p.source_correction_id })),
+      sourceCorrectionId: p.source_correction_id, lifecycleOrigin: p.lifecycle_origin, lifecycleCoverage: p.lifecycle_coverage,
+      cutoverBaseline: p.cutoverBaseline || null })),
     corrections: corrections.map(v => ({ correctionId: v.id, sourceProductId: v.source_product_id,
       successorProductId: v.corrected_product_id, sourceInternalSku: v.source_sku, successorInternalSku: v.corrected_sku })),
     issues };
@@ -62,13 +68,15 @@ async function read(client, productId) {
   ) SELECT p.id,p.full_sku,p.status,p.exclude_from_export,p.corrected_from_product_id,p.corrected_to_product_id,p.public_product_identity_id,i.public_sku,
     f.route,f.hold_reason,f.business_exclusion_state,f.recount_compatibility_excluded,f.source_correction_id,
     f.evidence->>'exclusionProvenance' exclusion_provenance,(f.evidence->'independentExclusion'='true'::jsonb) independent_exclusion,
-    f.evidence->>'origin' lifecycle_origin,f.evidence->>'coverage' lifecycle_coverage
+    f.evidence->>'origin' lifecycle_origin,f.evidence->>'coverage' lifecycle_coverage,f.evidence AS lifecycle_evidence,f.repair_manifest_hash
     FROM component c JOIN products p ON p.id=c.id JOIN public_product_identities i ON i.id=p.public_product_identity_id
     LEFT JOIN product_full_export_state f ON f.product_id=p.id
     ORDER BY (p.id=$1) DESC,p.id LIMIT $2`, [productId, LIMIT + 1])).rows;
   if (!rows.length) throw c.error(404, 'PRODUCT_NOT_FOUND', 'Товар не знайдено.');
   const complete = rows.length <= LIMIT;
   const bounded = rows.slice(0, LIMIT);
+  const baselines = await cutover.read(client, historyMembers(bounded));
+  for (const p of bounded) p.cutoverBaseline = baselines.get(p.id) || null;
   const corrections = (await client.query(`SELECT id,source_product_id,corrected_product_id,source_sku,corrected_sku
     FROM product_corrections WHERE source_product_id=ANY($1::int[]) OR corrected_product_id=ANY($1::int[])
     ORDER BY id LIMIT $2`, [bounded.map(p => p.id), LIMIT + 1])).rows;
