@@ -23,7 +23,7 @@ const date = (value) => value ? new Date(value).toLocaleString('uk-UA', { dateSt
 
 function CategoryEntrance({ categories, canManage, canViewProducts, published, ...workspace }) {
   const { search } = useLocation(); const params = new URLSearchParams(search);
-  if (['placement', 'products', 'legacy'].includes(params.get('tab')) || params.get('path') || params.get('field') === 'categories') {
+  if (['products', 'legacy'].includes(params.get('tab'))) {
     return <MagentoCategoryDetail categories={categories} canManage={canManage} canViewProducts={canViewProducts} activeId={published?.id} />;
   }
   return <MagentoCategoryWorkspace categories={categories} activePublication={published} {...workspace} />;

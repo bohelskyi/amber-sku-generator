@@ -13,7 +13,22 @@ Conditional routes have a readable set/condition selector. Search and all/unmapp
 review filters page at 30 rows. The selected field uses the shared lossless column
 inspector beside the table, or a dialog on narrow screens.
 
-The **Назва й описи** tab includes all text/textarea fields and UA/EN selection.
+The **Назва й описи** tab includes customer-facing text/textarea fields and UA/EN selection.
+Known technical fields and observed native service attributes are disclosed separately;
+weight and price remain characteristics even when Magento describes their input as text.
+Standard name/description/SEO fields have Ukrainian labels. Optional literal-empty
+outputs without a required binding say **Не заповнюємо**; they are omitted by the
+existing transport, rather than treated as an unconfirmed mapping. Required empty
+fields and actual unconfirmed bindings explain the exact next repair. **Що виправити**
+opens that explanation; **Перевірити прив’язку цього поля** prepares an isolated
+successor from the exact current source without requiring a dummy rule edit.
+The initial review focuses on the selected field and its set; other unresolved
+decisions remain explicitly reachable and still block publication.
+**Категорії магазину** presents frozen category paths and their confirmation states
+on the same screen. Attention repair links, including compatible placement URLs,
+open this view and retain the exact product/return context. Resource creation stays
+an explicitly opened advanced operation. The category links its operational count
+to the category-filtered product problem queue.
 Text editing opens directly, without codes, scope selection or an expression-mode
 selector. Technical and advanced rules remain under **Розширені налаштування**.
 Source insertion, shared-reference detachment and field-local mapping tables use
@@ -161,6 +176,17 @@ cannot replace the current query. Failed reads retain an explicit unavailable or
 last-known state. Opening a product additionally requires `products.decode`.
 Technical diagnostics remain on demand, and uncertain writes retain their exact
 domain reconciliation path without a generic resend action.
+In the attention starting task, **Перевірити товар у Magento** explicitly reads the
+original local recovery record and sequentially inspects its unfinished original job
+or previews the server-recommended lifecycle decision. Mounting still makes neither
+request. Inspection and recording/continuation remain separate confirmed actions.
+History ambiguity is described as paused product synchronization, with the observed
+Magento article and a concrete permitted decision. A successful job decision refreshes
+local recovery context; it does not automatically preview another lifecycle decision.
+The reviewed resync handoff opens inline for the exact product and category, retaining
+the actual Administrator restriction and existing preview/apply protocol. The
+controlled-products read accepts an optional parameterized positive `productId`
+alongside `categoryCode`, so this view does not evaluate a page of unrelated products.
 
 ### Controlled product recovery
 

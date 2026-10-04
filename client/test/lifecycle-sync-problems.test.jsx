@@ -20,9 +20,9 @@ for (const reconcile of [false, true]) it(`lifecycle hold handoff is read-only, 
   api.get.mockResolvedValue({ data: { items: [{ productId: 5033, article: 'SV5111010', category: 'SV', problems: [problem] }],
     pageInfo: { total: 1, hasPrevious: false, hasNext: false } } });
   shell(<SyncProblemsPage />, [...permissions, ...(reconcile ? ['exports.reconcile'] : [])]);
-  await screen.findByRole('heading', { name: problem.message });
+  await screen.findByRole('heading', { name: 'Синхронізацію товару зупинено після попередніх змін' });
   if (!reconcile) expect(screen.getByText(/Потрібне узгодження Адміністратора/)).toBeTruthy();
-  expect(screen.getByText(/Товар збережено в Amber/)).toBeTruthy();
+  expect(screen.getByText(/Amber ще не підтвердив, як попередні зміни/)).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Відкрити товар' }).getAttribute('href')).toContain('article=SV5111010');
   expect(screen.getByRole('link', { name: 'Історія товару' }).getAttribute('href')).toBe('/products/history?sku=SV5111010');
   expect(screen.queryByRole('link', { name: /Перевірити відповідності/ })).toBeNull();
@@ -30,7 +30,7 @@ for (const reconcile of [false, true]) it(`lifecycle hold handoff is read-only, 
   fireEvent.click(screen.getByText('Технічні деталі'));
   expect(screen.getByText(/INFERRED_HISTORY_WITHOUT_EXACT_MEMBERSHIP/).textContent).toContain('1368');
   expect(screen.getByText(/INFERRED_HISTORY_WITHOUT_EXACT_MEMBERSHIP/).textContent).toContain('1509');
-  if (reconcile) expect(screen.getByRole('button', { name: 'Відкрити перевірку доставки' })).toBeTruthy();
+  if (reconcile) expect(screen.getByRole('button', { name: 'Перевірити товар у Magento' })).toBeTruthy();
   expect(api.post).not.toHaveBeenCalled();
 });
 
@@ -53,8 +53,8 @@ it('actual mapping problem opens exact field while resource configuration opens 
   shell(<SyncProblemsPage />, [...permissions, 'export_templates.manage']);
   const mapping = new URL((await screen.findByRole('link', { name: 'Пов’язати значення' })).href);
   expect(mapping.pathname).toBe('/admin/magento/categories/SV');
-  expect(Object.fromEntries(mapping.searchParams)).toMatchObject({ field: 'kamin_obrobka', productId: '5033', tab: 'attributes', returnTo: '/attention?problem=5033' });
-  expect(screen.getByRole('link', { name: 'Налаштувати атрибут Magento' }).getAttribute('href')).toContain('/admin/magento/categories/SV?tab=attributes');
+  expect(Object.fromEntries(mapping.searchParams)).toMatchObject({ field: 'kamin_obrobka', productId: '5033', view: 'attributes', returnTo: '/attention?problem=5033' });
+  expect(screen.getByRole('link', { name: 'Налаштувати атрибут Magento' }).getAttribute('href')).toContain('/admin/magento/categories/SV?view=attributes');
   expect(api.post).not.toHaveBeenCalled();
 });
 

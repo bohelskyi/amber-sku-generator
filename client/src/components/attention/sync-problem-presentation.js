@@ -10,7 +10,7 @@ export function nextAction(problem = {}) {
   const code = problem.diagnosticCode || problem.code;
   if (problem.code === 'TEST_DELETION_PENDING') return 'Перевірити результат тестового видалення';
   if (problem.code === 'reconciliation_required') return 'Перевірити результат надісланої зміни';
-  if (problem.resolution === 'lifecycle_reconciliation') return 'Перевірити історію доставки';
+  if (problem.resolution === 'lifecycle_reconciliation') return 'Перевірити товар і вибрати рішення';
   if (problem.resolution === 'product') return 'Доповнити дані товару';
   if (problem.resolution === 'name') return 'Узгодити назви Amber і Magento';
   if (['authorization', 'configuration'].includes(problem.code)) return 'Перевірити підключення Magento';
@@ -32,6 +32,7 @@ export function problemSubject(problem = {}) {
 }
 
 export function problemTitle(problem = {}) {
+  if (problem.resolution === 'lifecycle_reconciliation') return 'Синхронізацію товару зупинено після попередніх змін';
   const subject = problemSubject(problem);
   const message = problem.evaluationIssues?.[0]?.message || problem.message || 'Причину ще не визначено';
   return subject.path ? `${subject.path} — ${message}` : subject.field && !problem.evaluationIssues?.length ? `${subject.field}: ${message}` : message;
@@ -40,8 +41,8 @@ export function problemTitle(problem = {}) {
 export function problemRepairUrl(problem, product, returnTo) {
   const target = problem.target || problem.field;
   const placement = Boolean(problem.path) || target === 'categories' || (problem.diagnosticCode || problem.code || '').startsWith('CATEGORY_');
-  return withRepairContext(product.category ? `/admin/magento/categories/${encodeURIComponent(product.category)}?tab=${placement ? 'placement' : 'attributes'}` : '/admin/magento', {
-    productId: String(product.productId), category: product.category, field: target,
+  return withRepairContext(product.category ? `/admin/magento/categories/${encodeURIComponent(product.category)}?view=${placement ? 'placement' : ['name', 'description', 'short_description', 'meta_title', 'meta_description', 'meta_keyword'].includes(target) ? 'text' : 'attributes'}` : '/admin/magento', {
+    productId: String(product.productId), category: product.category, field: placement ? undefined : target,
     question: problem.question || problem.questionKey, value: problem.value ?? problem.valueId,
     path: problem.path, returnTo,
   });
@@ -52,7 +53,7 @@ export function problemImpact(problem = {}) {
   if (problem.code === 'TEST_DELETION_PENDING') return 'Результат видалення потрібно перевірити через початкову операцію товару.';
   if (problem.resolution === 'product') return 'Amber не може підготувати повні дані для Magento. Товар залишається збереженим в Amber.';
   if (problem.resolution === 'name') return 'Оновлення спільної назви потребує узгодження, щоб не перезаписати чужу зміну.';
-  if (problem.resolution === 'lifecycle_reconciliation') return 'Доставку утримано до перевірки попередньої історії товару.';
+  if (problem.resolution === 'lifecycle_reconciliation') return 'Amber ще не підтвердив, як попередні зміни цього товару потрапили в Magento. Спочатку перевіримо стан магазину, потім покажемо, що можна зробити.';
   return 'Ця перешкода не дозволяє завершити синхронізацію цього товару.';
 }
 

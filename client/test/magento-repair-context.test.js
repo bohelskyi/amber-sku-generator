@@ -22,7 +22,7 @@ test('repair navigation keeps exact source and return context without treating t
   const path = problemRepairUrl({ code: 'CATEGORY_PATH_MISSING', path: 'Default/Сувеніри/Птахи' }, { productId: 42, category: 'SV' }, returnTo);
   const url = new URL(path, 'http://local.test');
   assert.equal(url.pathname, '/admin/magento/categories/SV');
-  assert.equal(url.searchParams.get('tab'), 'placement');
+  assert.equal(url.searchParams.get('view'), 'placement');
   assert.deepEqual(repairContext(url.searchParams), { productId: '42', category: 'SV', path: 'Default/Сувеніри/Птахи', returnTo });
   const field = problemRepairUrl({ code: 'OPTION_UNRESOLVED', target: 'kamin_obrobka', question: 'finish', value: '0' }, { productId: 42, category: 'SV' }, returnTo);
   assert.equal(new URL(field, 'http://local.test').searchParams.get('value'), '0');

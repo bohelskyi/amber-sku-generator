@@ -45,6 +45,11 @@
 .mc-state-connected { color: var(--success); }
 .mc-state-review { color: var(--warning); }
 .mc-missing { color: var(--text-muted); }
+.mc-state-cell { min-width: 180px; max-width: 300px; }
+.mc-state-cell .mc-field-link { display: block; margin-top: 8px; }
+.mc-field-task { border-left: 3px solid var(--amber-500); padding-left: 12px; font-size: 13px; }
+.mc-placement-row { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; font-size: 13px; }
+.mc-placement-row p { margin-top: 6px; color: var(--text-muted); }
 .mc-text-summary { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .mc-question-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .mc-question-list > span { background: var(--surface-muted); padding: 6px 10px; border-radius: var(--radius-sm); font-size: 13px; }

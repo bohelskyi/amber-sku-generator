@@ -4,6 +4,39 @@ import { isActualAdministrator } from '../../auth/auth-model.js';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api.js';
 import { Button, ConfirmDialog, Notice, TechnicalDisclosure } from '../ui/index.js';
+import MagentoControlledActions from '../workspace/MagentoControlledActions.jsx';
+
+const guidance = {
+  prior_exposure: 'Знайдемо цей артикул у Magento. Якщо товар уже є в магазині, ви зможете підтвердити це й перейти до оновлення його даних.',
+  stable_recount_exposure: 'Звіримо товар після переобліку з поточним товаром Magento. Підтвердження дозволить оновити цю версію зі сталим артикулом.',
+  release_exclusion: 'Перевіримо окреме виключення цього товару із синхронізації. Для його зняття потрібна ваша підстава.',
+};
+const decisionActions = { prior_exposure: 'Підтвердити наявність товару', stable_recount_exposure: 'Дозволити оновлення після переобліку', release_exclusion: 'Зняти виключення із синхронізації' };
+const decisionEffects = { prior_exposure: 'Підтвердження збереже в Amber факт наявності цього товару в магазині. Далі ви зможете перевірити й окремо підтвердити його оновлення.',
+  stable_recount_exposure: 'Підтвердження узгодить цю версію після переобліку й дозволить її подальшу автоматичну синхронізацію.',
+  release_exclusion: 'Підтвердження зніме окреме виключення цього товару. Далі перевірте його готовність до синхронізації.' };
+
+function ProductResync({ productId, categoryCode, onSaved }) {
+  const [data, setData] = useState(null); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
+  const alive = useRef(true); const flight = useRef(false);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  async function open() {
+    if (flight.current) return;
+    flight.current = true; setBusy(true); setError('');
+    try {
+      const result = await api.get(`/admin/magento-integration/categories/${encodeURIComponent(categoryCode)}`);
+      if (alive.current) setData(result.data);
+    } catch (cause) { if (alive.current) setError(errorText(cause)); }
+    finally { flight.current = false; if (alive.current) setBusy(false); }
+  }
+  return <section className="space-y-3" aria-label="Оновлення цього товару в Magento">
+    <p>Далі перевірте зміни для цього товару й підтвердьте їх надсилання.</p>
+    {!data && <Button busy={busy} onClick={open}>Переглянути оновлення товару</Button>}
+    {error && <Notice tone="error">{error}</Notice>}
+    {data && <MagentoControlledActions revision={data.revision} currentPublishedId={data.currentPublishedId} categoryCode={categoryCode}
+      singleProductId={productId} kind="broader_resync" onApplied={() => onSaved?.()} />}
+  </section>;
+}
 
 const kinds = {
   prior_exposure: 'Підтвердити раніше доставлений товар',
@@ -100,7 +133,7 @@ function initialEvidence(requirements) {
   };
 }
 
-export function MagentoRecovery({ productId, onSaved, guided = false }) {
+export function MagentoRecovery({ productId, categoryCode, onSaved, guided = false }) {
   const auth = useAuth();
   const { permissions, principalLifetime } = auth;
   const canRead = (permissions.includes('export_templates.publish') || permissions.includes('exports.reconcile')) && principalLifetime?.valid !== false;
@@ -135,6 +168,17 @@ export function MagentoRecovery({ productId, onSaved, guided = false }) {
     const { data } = await api.get(`/admin/magento-recovery/products/${productId}`);
     if (valid()) { setRecord({ ...data, owner: principalLifetime }); setKind(data.lifecycle?.suggestedKind || 'prior_exposure');
       setNextStep(data.nextAction || null); setReview(null); setLifecycle(null); setReceipt(''); setPendingLifecycle(null); }
+    if (!valid() || !guided) return;
+    // One explicit check reads the original case and its recommended preview.
+    // Recording the result or sending remaining steps still requires confirmation.
+    if (data.actions.jobRecovery && permissions.includes('export_templates.publish') && data.job && !['succeeded', 'superseded'].includes(data.job.state)) {
+      const inspected = await api.post(`/admin/magento-recovery/jobs/${data.job.id}/inspect`, {});
+      if (valid()) { setReview(inspected.data); setRecord((previous) => ({ ...previous, job: inspected.data.job })); }
+    } else if (data.actions.lifecycleRecovery && permissions.includes('exports.reconcile') && !data.lifecycle?.blocker
+      && data.lifecycle?.suggestedKind && !data.nextAction) {
+      const preview = await api.post(`/admin/magento-recovery/products/${productId}/lifecycle-preview`, { kind: data.lifecycle.suggestedKind });
+      if (valid()) { setLifecycle(preview.data); setEvidence(preview.data.requiredEvidence ? initialEvidence(preview.data.requiredEvidence) : null); }
+    }
   });
   const inspect = () => run(async () => {
     setReview(null); setReceipt('');
@@ -147,6 +191,12 @@ export function MagentoRecovery({ productId, onSaved, guided = false }) {
     });
     if (valid()) { setRecord((previous) => ({ ...previous, job: data.job })); setReview(null);
       setReceipt(action === 'reconcile' ? 'Перевірений результат записано в Amber. Змін до Magento не надсилали.' : 'Початкову операцію опрацьовано. Перевірте актуальний стан доставки.'); onSaved?.(); }
+    if (guided && valid()) {
+      try {
+        const fresh = await api.get(`/admin/magento-recovery/products/${productId}`);
+        if (valid()) { setRecord({ ...fresh.data, owner: principalLifetime }); setNextStep(fresh.data.nextAction || null); setKind(fresh.data.lifecycle?.suggestedKind || 'prior_exposure'); setLifecycle(null); setReceipt('Перевірений результат операції збережено. Нижче показано наступний доступний крок.'); }
+      } catch { if (valid()) setError('Результат збережено, але наступний крок не вдалося прочитати. Оновіть перевірку товару.'); }
+    }
   });
   const previewLifecycle = () => run(async () => {
     setLifecycle(null); setReceipt('');
@@ -169,18 +219,20 @@ export function MagentoRecovery({ productId, onSaved, guided = false }) {
     .every((item) => item.disposition && item.evidence.trim().length >= 3);
   const blockers = [...(review?.blockers || []).map((item) => item.code), ...(lifecycle?.blockers || [])];
   return <section className="sync-recovery" aria-label="Контрольоване відновлення доставки">
-    {(!guided || opened) && <h3>Перевірка й відновлення доставки</h3>}
+    {(!guided || opened) && <h3>{guided ? 'Результат перевірки та наступна дія' : 'Перевірка й відновлення доставки'}</h3>}
     {!opened && <>{!guided && <p className="sync-problem-guidance">Перегляньте початкову операцію та доступні кроки. Читання збереженої операції не надсилає змін у Magento.</p>}
-      <Button variant={guided ? 'primary' : 'secondary'} size="compactMd" onClick={open} busy={busy}>Відкрити перевірку доставки</Button></>}
+      <Button variant={guided ? 'primary' : 'secondary'} size="compactMd" onClick={open} busy={busy}>{guided ? 'Перевірити товар у Magento' : 'Відкрити перевірку доставки'}</Button>
+      {guided && <p className="sync-problem-guidance">Перевірка прочитає дані магазину та покаже доступне рішення.</p>}</>}
     {error && (!record || opened) && <Notice tone="error">{error}</Notice>}
+    {guided && opened && error && !pendingLifecycle && <Button busy={busy} onClick={open}>Оновити перевірку товару</Button>}
     {receipt && opened && <Notice tone="success">{receipt}</Notice>}
     {opened && nextStep?.kind === 'reviewed_resync' && <Notice tone="info"><p>Історію перевірено. Далі потрібен окремий перегляд відправлення цього товару.</p>
       {isActualAdministrator(auth) && ['export_templates.manage', 'export_templates.publish', 'exports.view'].every((permission) => permissions.includes(permission))
-        ? <Link className="underline" to={`/admin/magento/administrator?productId=${productId}&action=broader_resync&returnTo=${encodeURIComponent(`/attention?problem=${productId}`)}`}>Перевірити відправлення виправленого товару</Link>
+        ? categoryCode ? <ProductResync productId={productId} categoryCode={categoryCode} onSaved={onSaved} /> : <Link className="underline" to={`/admin/magento/administrator?productId=${productId}&action=broader_resync&returnTo=${encodeURIComponent(`/attention?problem=${productId}`)}`}>Перевірити відправлення виправленого товару</Link>
         : <p>Цей крок виконує Адміністратор із дозволами на публікацію інтеграції та перегляд доставки.</p>}</Notice>}
     {opened && nextStep?.kind === 'configuration_required' && <Notice tone="warning">Перед відправленням потрібно завершити налаштування інтеграції.{permissions.includes('export_templates.view') && <> <Link className="underline" to="/admin/magento">Відкрити інтеграцію Magento</Link></>}</Notice>}
     {opened && record && <>
-      {canRecoverJob && record.job && <>
+      {canRecoverJob && record.job && (!guided || unfinishedJob) && <>
         <p className="sync-problem-guidance">Спочатку прочитайте фактичний результат у Magento. Уже надіслані кроки не повторюються.</p>
         <ol className="sync-recovery-steps">{(review?.steps || record.job.steps).map((step) => <li key={step.ordinal}><span>{step.ordinal + 1}. {domains[step.domain] || 'Зміна даних товару'}</span><span>{states[step.state] || 'Стан невідомий'}{typeof step.matches === 'boolean' ? step.matches ? ' · збігається' : ' · не підтверджено' : ''}</span></li>)}</ol>
         <Button size="compactMd" onClick={inspect} busy={busy}>Перевірити результат у Magento</Button>
@@ -188,16 +240,17 @@ export function MagentoRecovery({ productId, onSaved, guided = false }) {
         {review?.unsentChanges?.length > 0 && <section><h4 className="sync-next-heading">Що ще зміниться в Magento</h4><RemainingChanges changes={review.unsentChanges} /></section>}
         {review?.canContinue && !review.unsentChanges?.length && <Notice tone="warning">Деталі ненадісланих змін недоступні. Повторіть перевірку перед продовженням.</Notice>}
       </>}
-      {canRecoverJob && !record.job && <Notice>Немає збереженого завдання доставки для цього товару.</Notice>}
-      {canRecoverLifecycle && record.lifecycle && !unfinishedJob && availableKinds.length > 0 && !receipt && <>
-        <p className="font-semibold">{kinds[kind]}</p>
-        <p className="sync-problem-guidance">Amber перевірить збережену історію та ідентичність товару, щоб визначити, чи можна продовжити доставку.</p>
+      {canRecoverJob && !record.job && (!guided || !canRecoverLifecycle) && <Notice>Немає збереженого завдання доставки для цього товару.</Notice>}
+      {canRecoverLifecycle && record.lifecycle && !unfinishedJob && availableKinds.length > 0 && (!receipt || guided && !nextStep) && <>
+        <p className="font-semibold">{guided ? kind === 'stable_recount_exposure' ? 'Підтвердити товар після переобліку' : kind === 'prior_exposure' ? 'Підтвердити наявний товар у магазині' : kinds[kind] : kinds[kind]}</p>
+        {(!guided || !lifecycle) && <p className="sync-problem-guidance">{guidance[kind] || 'Перевіримо попередні версії та збережені файли цього товару. Виберіть підтверджений результат для кожного запису нижче.'}</p>}
         {availableKinds.length > 1 && <Button size="compactMd" disabled={busy || Boolean(pendingLifecycle)} onClick={() => setAdvanced((value) => !value)}>Інші рішення щодо історії</Button>}
         {advanced && <label>Рішення щодо історії доставки<select className="input" disabled={busy || Boolean(pendingLifecycle)} value={kind} onChange={(event) => { setKind(event.target.value); setLifecycle(null); setEvidence(null); }}>
           {availableKinds.map((value) => <option key={value} value={value}>{kinds[value]}</option>)}</select></label>}
-        <p className="sync-problem-guidance">Попередня перевірка може прочитати Magento. Вона не змінює товари й не знімає утримання.</p>
-        <Button size="compactMd" disabled={Boolean(pendingLifecycle)} busy={busy} onClick={previewLifecycle}>Перевірити можливість рішення</Button>
-        {lifecycle?.eligible && <Notice tone="info">Перевірка дозволяє розглянути рішення «{kinds[lifecycle.review.kind]}». Підтвердження збереже це рішення щодо доставки; воно може дозволити подальшу автоматичну синхронізацію.</Notice>}
+        {!guided && <p className="sync-problem-guidance">Попередня перевірка може прочитати Magento. Вона не змінює товари й не знімає утримання.</p>}
+        {(!guided || !lifecycle) && <Button size="compactMd" disabled={Boolean(pendingLifecycle)} busy={busy} onClick={previewLifecycle}>{guided ? 'Повторити перевірку товару' : 'Перевірити можливість рішення'}</Button>}
+        {lifecycle?.eligible && <Notice tone="info">{guided ? decisionEffects[lifecycle.review.kind] || 'Перевірка пройшла. Запишіть, що перевірили, і підтвердьте рішення нижче.' : `Перевірка дозволяє розглянути рішення «${kinds[lifecycle.review.kind]}». Підтвердження збереже це рішення щодо доставки; воно може дозволити подальшу автоматичну синхронізацію.`}</Notice>}
+        {guided && lifecycle?.review.payload?.remote?.status === 'found' && <p>У Magento знайдено товар: <strong>{lifecycle.review.payload.remote.sku}</strong>.</p>}
         {lifecycle?.requiredEvidence && evidence && <EvidenceForm requirements={lifecycle.requiredEvidence} evidence={evidence} setEvidence={setEvidence} disabled={busy || Boolean(pendingLifecycle)} />}
       </>}
       {canRecoverLifecycle && record.lifecycle && unfinishedJob && <p className="sync-problem-guidance">Спочатку завершіть перевірку початкової операції{canRecoverJob ? ' вище' : ' з оператором, який має дозвіл на відновлення завдань'}. Рішення щодо історії не замінює підтвердження надісланих змін.</p>}
@@ -207,16 +260,16 @@ export function MagentoRecovery({ productId, onSaved, guided = false }) {
       <div className="sync-recovery-actions">
         {canRecoverJob && review?.canReconcile && <Button size="compactMd" busy={busy} disabled={reason.trim().length < 3} onClick={() => setConfirmation('reconcile')}>Підтвердити перевірений результат</Button>}
         {canRecoverJob && review?.canContinue && review.unsentChanges?.length > 0 && <Button size="compactMd" busy={busy} disabled={reason.trim().length < 3} onClick={() => setConfirmation('continue')}>Переглянути продовження операції</Button>}
-        {canRecoverLifecycle && lifecycle?.eligible && !pendingLifecycle && <Button size="compactMd" busy={busy} disabled={reason.trim().length < 3 || !evidenceComplete} onClick={() => setConfirmation('lifecycle')}>Переглянути рішення щодо доставки</Button>}
+        {canRecoverLifecycle && lifecycle?.eligible && !pendingLifecycle && <Button size="compactMd" busy={busy} disabled={reason.trim().length < 3 || !evidenceComplete} onClick={() => setConfirmation('lifecycle')}>{guided ? decisionActions[lifecycle.review.kind] || 'Переглянути підтвердження' : 'Переглянути рішення щодо доставки'}</Button>}
         {canRecoverLifecycle && pendingLifecycle && <Button size="compactMd" busy={busy} onClick={applyLifecycle}>Отримати результат початкового рішення</Button>}
       </div>
       <TechnicalDisclosure><pre className="whitespace-pre-wrap break-all text-xs">{JSON.stringify({ jobId: record.job?.id, lifecycle: record.lifecycle, review: review?.review || lifecycle?.review, blockers }, null, 2)}</pre></TechnicalDisclosure>
     </>}
-    <ConfirmDialog open={Boolean(opened && confirmation && (confirmation === 'lifecycle' ? canRecoverLifecycle : canRecoverJob))} title={confirmation === 'continue' ? 'Продовжити початкову операцію Magento?' : confirmation === 'lifecycle' ? 'Зберегти рішення щодо доставки?' : 'Підтвердити перевірений результат?'}
+    <ConfirmDialog open={Boolean(opened && confirmation && (confirmation === 'lifecycle' ? canRecoverLifecycle : canRecoverJob))} title={confirmation === 'continue' ? 'Продовжити початкову операцію Magento?' : confirmation === 'lifecycle' ? guided ? `${decisionActions[lifecycle?.review.kind] || 'Зберегти підтвердження'}?` : 'Зберегти рішення щодо доставки?' : 'Підтвердити перевірений результат?'}
       confirmLabel={confirmation === 'continue' ? 'Надіслати лише ненадіслані кроки' : 'Зберегти підтверджене рішення'} busy={busy}
       onClose={() => setConfirmation(null)} onConfirm={() => confirmation === 'lifecycle' ? applyLifecycle() : applyJob(confirmation)}>
       <p>{confirmation === 'continue' ? 'Ця дія записує зміни в Magento. Сервер повторно перевірить початковий план і виконає лише його ненадіслані кроки. Якщо фактичні дані змінилися, дію буде зупинено.'
-        : confirmation === 'lifecycle' ? `Рішення: ${kinds[lifecycle?.review.kind] || ''}. Сервер повторно перевірить історію та повноваження. Збережене рішення може дозволити подальшу автоматичну доставку.`
+        : confirmation === 'lifecycle' ? guided && decisionEffects[lifecycle?.review.kind] ? `${decisionEffects[lifecycle.review.kind]} Сервер повторно перевірить товар і ваші повноваження.` : `Рішення: ${kinds[lifecycle?.review.kind] || ''}. Сервер повторно перевірить історію та повноваження. Збережене рішення може дозволити подальшу автоматичну доставку.`
           : 'Amber запише результати вже виконаних кроків після повторної перевірки. Ця дія не надсилає змін до Magento.'}</p>
       <p className="mt-3">Підстава: {reason}</p>
       {confirmation === 'continue' && review?.unsentChanges?.length > 0 && <RemainingChanges changes={review.unsentChanges} />}

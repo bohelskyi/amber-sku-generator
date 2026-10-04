@@ -13,9 +13,10 @@ const blockers = { RECONCILIATION_REQUIRED: 'Раніше відправлену
   NAME_CONFLICT_OR_BASELINE_REQUIRED: 'Спочатку вирішіть конфлікт або підтвердьте спільний стан назв.',
   INVALID_GENERATED_NAMES: 'Правило не формує дві допустимі назви.' };
 
-function ControlledWorkspace({ revision, kind, onApplied, categoryCode }) {
+function ControlledWorkspace({ revision, kind, onApplied, categoryCode, singleProductId }) {
   const [params] = useSearchParams();
-  const targetId = /^[1-9]\d*$/.test(params.get('productId') || '') && Number.isSafeInteger(Number(params.get('productId'))) ? Number(params.get('productId')) : null;
+  const targetId = Number.isSafeInteger(singleProductId) && singleProductId > 0 ? singleProductId
+    : /^[1-9]\d*$/.test(params.get('productId') || '') && Number.isSafeInteger(Number(params.get('productId'))) ? Number(params.get('productId')) : null;
   const back = params.get('returnTo'); const returnTo = back && /^\/(attention|sync-problems)(\?|$)/.test(back) ? back : '/attention';
   const [candidates, setCandidates] = useState(null); const [selected, setSelected] = useState([]);
   const [productCursors, setProductCursors] = useState([0]); const [productPage, setProductPage] = useState(0);
@@ -37,7 +38,7 @@ function ControlledWorkspace({ revision, kind, onApplied, categoryCode }) {
     inFlight.current = true;
     const current = ++sequence.current; setBusy(true); setError(''); setReview(null);
     try {
-      const { data } = await api.get(`${root}/bindings/${revision.id}/controlled-products`, { params: { after: targetId ? targetId - 1 : cursor, search, ...(categoryCode ? { categoryCode } : {}) } });
+      const { data } = await api.get(`${root}/bindings/${revision.id}/controlled-products`, { params: { after: targetId ? targetId - 1 : cursor, search, ...(categoryCode ? { categoryCode } : {}), ...(singleProductId ? { productId: singleProductId } : {}) } });
       if (current === sequence.current) {
         const eligible = targetId ? data.products.filter((product) => product.productId === targetId) : data.products;
         setCandidates(targetId ? { ...data, products: eligible, nextCursor: null } : data);
@@ -49,14 +50,14 @@ function ControlledWorkspace({ revision, kind, onApplied, categoryCode }) {
   }
   function invalidate() { ++sequence.current; setReview(null); setReceipt(null); }
   const request = { bindingRevisionId: revision.id, expectedRevision: revision.revision, kind, productIds: selected, reason };
-  return <section className="card space-y-3 p-5"><h2 className="font-semibold">{titles[kind]}</h2>
-    {targetId && <div className="space-y-2"><Link className="text-sm underline" to={returnTo}>Повернутися до проблеми товару</Link><p className="text-sm">Відкрито для одного товару з черги проблем. Спочатку перевірте його доступність; надсилання не запускається автоматично.</p></div>}
+  return <section className="card space-y-3 p-5"><h2 className="font-semibold">{singleProductId ? 'Оновити цей товар у Magento' : titles[kind]}</h2>
+    {targetId && !singleProductId && <div className="space-y-2"><Link className="text-sm underline" to={returnTo}>Повернутися до проблеми товару</Link><p className="text-sm">Відкрито для одного товару з черги проблем. Спочатку перевірте його доступність; надсилання не запускається автоматично.</p></div>}
     <p className="text-sm">{kind === 'name_rule' ? 'Перегляньте обидві назви для кожного вибраного товару перед застосуванням правила.' : 'Обирайте лише товари, яким потрібна повторна синхронізація.'} Непідтверджені відправлення не скидаються і не повторюються.</p>
     {error && <Notice tone="error">{error}</Notice>}
     {receipt && <Notice tone="success"><p>Контрольовану дію збережено. Фактичний результат доставки перевіряйте за станом передачі товарів.</p><MagentoDetails summary="Деталі збереженої дії">{() => <pre className="overflow-auto text-xs">{JSON.stringify(receipt, null, 2)}</pre>}</MagentoDetails></Notice>}
     <form className="flex flex-wrap items-end gap-2" onSubmit={(event) => { event.preventDefault(); loadProducts(0, 0, true); }}>
-      <label className="text-sm">Пошук за артикулом<input className="input" maxLength={100} disabled={busy} value={search} onChange={(event) => { invalidate(); setSearch(event.target.value); setCandidates(null); }} /></label>
-      <button type="submit" className="btn btn-outline btn-compact-md" disabled={busy}>Перевірити товари для контрольованої дії</button>
+      {!singleProductId && <label className="text-sm">Пошук за артикулом<input className="input" maxLength={100} disabled={busy} value={search} onChange={(event) => { invalidate(); setSearch(event.target.value); setCandidates(null); }} /></label>}
+      <button type="submit" className="btn btn-outline btn-compact-md" disabled={busy}>{singleProductId ? 'Перевірити готовність цього товару' : 'Перевірити товари для контрольованої дії'}</button>
     </form>
     {selected.length > 0 && <button type="button" className="btn btn-outline btn-compact-md" disabled={busy} onClick={() => { invalidate(); setSelected([]); }}>Очистити вибір</button>}
     {candidates && <>
@@ -64,24 +65,25 @@ function ControlledWorkspace({ revision, kind, onApplied, categoryCode }) {
         onChange={(event) => { invalidate(); setSelected(event.target.checked ? [...selected, product.productId] : selected.filter((id) => id !== product.productId)); }} /> {product.article} · {product.before.all || 'Назва не сформована'}
         {kind === 'name_rule' && <> → {product.after.all}; {product.before.en} → {product.after.en}</>}
         {product.blockers.length > 0 && <span className="block text-amber-800">{product.blockers.map((code) => blockers[code] || 'Потрібна перевірка').join(' ')}</span>}</label>)}
-      <nav aria-label="Вибір товарів для контрольованої дії" className="flex flex-wrap items-center gap-2 text-sm">
+      {!singleProductId && <nav aria-label="Вибір товарів для контрольованої дії" className="flex flex-wrap items-center gap-2 text-sm">
         <button type="button" className="btn btn-outline btn-compact-md" disabled={busy || productPage === 0} onClick={() => loadProducts(productCursors[productPage - 1], productPage - 1)}>Попередні товари</button>
         <span aria-live="polite">Сторінка {productPage + 1} · вибрано {selected.length} / 100</span>
         <button type="button" className="btn btn-outline btn-compact-md" disabled={busy || candidates.nextCursor == null} onClick={() => { setProductCursors([...productCursors.slice(0, productPage + 1), candidates.nextCursor]); loadProducts(candidates.nextCursor, productPage + 1); }}>Наступні товари</button>
-      </nav>
+      </nav>}
       {!candidates.products.length && <p>{targetId ? 'Цей товар недоступний для контрольованої дії за поточними налаштуваннями. Поверніться до проблеми й перевірте актуальний стан.' : 'Товарів за цим пошуком немає.'}</p>}
-      <p className="text-sm text-slate-500">Вибір зберігається між сторінками. Перед підтвердженням сервер перевіряє весь точний вибір.</p>
-      <label className="block text-sm">Пояснення контрольованої дії<input className="input" maxLength={2000} value={reason} disabled={busy} onChange={(event) => { invalidate(); setReason(event.target.value); }} /></label>
-      <button type="button" className="btn btn-outline btn-compact-md" disabled={busy || !selected.length || reason.trim().length < 3} onClick={() => action('controlled/preview', request, setReview)}>Перевірити вибрану дію</button>
+      {!singleProductId && <p className="text-sm text-slate-500">Вибір зберігається між сторінками. Перед підтвердженням сервер перевіряє весь точний вибір.</p>}
+      <label className="block text-sm">{singleProductId ? 'Чому потрібно оновити товар' : 'Пояснення контрольованої дії'}<input className="input" maxLength={2000} value={reason} disabled={busy} onChange={(event) => { invalidate(); setReason(event.target.value); }} /></label>
+      <button type="button" className="btn btn-outline btn-compact-md" disabled={busy || !selected.length || reason.trim().length < 3} onClick={() => action('controlled/preview', request, setReview)}>{singleProductId ? 'Перевірити оновлення перед надсиланням' : 'Перевірити вибрану дію'}</button>
     </>}
     {review && <>
       {review.blockers.length > 0 && <Notice tone="warning"><ul>{review.blockers.map((blocker, index) => <li key={index}>{blockers[blocker.code] || 'Потрібно перевірити відповідності.'}</li>)}</ul><Link className="underline" to="/sync-problems">Проблеми синхронізації</Link></Notice>}
       <p>Вибрано товарів: {review.products.length}.</p>
+      {singleProductId && <p>Після підтвердження Amber поставить цей товар на синхронізацію за чинними правилами категорії. Поточні назви товару збережуться. Результат з’явиться у стані Magento.</p>}
       {review.products.map((product) => <p className="text-sm break-words" key={product.productId}>{product.article}{kind === 'name_rule' && <>: {product.before.all} → {product.after.all}; {product.before.en} → {product.after.en}</>}</p>)}
-      <button type="button" className="btn btn-primary btn-compact-md" disabled={busy || review.blockers.length > 0} onClick={() => action('controlled/apply', { ...request, previewToken: review.previewToken }, (data) => { setReview(null); setCandidates(null); setSelected([]); setReceipt(data); onApplied?.(data); })}>Підтвердити контрольовану дію</button>
+      <button type="button" className="btn btn-primary btn-compact-md" disabled={busy || review.blockers.length > 0} onClick={() => action('controlled/apply', { ...request, previewToken: review.previewToken }, (data) => { setReview(null); setCandidates(null); setSelected([]); setReceipt(data); onApplied?.(data); })}>{singleProductId ? 'Підтвердити надсилання цього товару' : 'Підтвердити контрольовану дію'}</button>
     </>}
     {busy && <LoadingState label="Перевіряємо точний вибір товарів…" />}
-    {receipt && <MagentoPublicationActions revision={revision} currentPublishedId={revision.id} />}
+    {receipt && !singleProductId && <MagentoPublicationActions revision={revision} currentPublishedId={revision.id} />}
   </section>;
 }
 
@@ -93,5 +95,5 @@ export default function MagentoControlledActions(props) {
   if (!Object.hasOwn(titles, props.kind)) return null;
   if (!canApply) return <Notice>Для цієї дії потрібні права Адміністратора.</Notice>;
   if (props.revision?.state !== 'published' || props.currentPublishedId !== props.revision?.id) return <Notice>Для контрольованої дії потрібна чинна опублікована версія.</Notice>;
-  return <ControlledWorkspace key={`${props.revision.id}:${props.revision.revision}:${props.kind}:${props.categoryCode || ''}:${params.get('productId') || ''}`} {...props} />;
+  return <ControlledWorkspace key={`${props.revision.id}:${props.revision.revision}:${props.kind}:${props.categoryCode || ''}:${props.singleProductId || params.get('productId') || ''}`} {...props} />;
 }

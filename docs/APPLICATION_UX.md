@@ -85,6 +85,15 @@ eligibility/permissions, interpret business state or retry commands.
 
 ## Language and state
 
+Magento field warnings include a cause and **Що виправити** action. Optional empty
+descriptions are shown as **Не заповнюємо** with **Додати текст**, not as broken
+bindings. Category operational problems open the filtered product queue. Category
+placement repairs use **Категорії магазину** in the same workspace and retain a
+return link to the product problem. A guided product check combines explicit local
+recovery reading with the original job inspection or recommended lifecycle preview;
+confirmation and external writes remain separate. An eligible resync handoff can be
+reviewed inline for the exact product, with the original Administrator restriction.
+
 | Term | Exact meaning |
 | --- | --- |
 | Артикул | Authoritative `publicSku`; never an internal-SKU fallback. Legacy public articles remain valid. |

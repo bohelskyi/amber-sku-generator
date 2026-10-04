@@ -10,11 +10,12 @@ const kinds = { route: 'Набір атрибутів', attribute: 'Поле', o
 
 // Explicit bounded decisions through the original CAS/authorization endpoints.
 // A partial failure leaves the saved original draft available for a fresh read.
-export default function MagentoWorkspaceReview({ revision, categoryCode, questions, selections, onChanged, disabled, onPendingChange, onReadyChange }) {
+export default function MagentoWorkspaceReview({ revision, categoryCode, questions, selections, focusTarget, onChanged, disabled, onPendingChange, onReadyChange }) {
   const [data, setData] = useState(null); const [error, setError] = useState('');
   const [busy, setBusy] = useState(false); const [reason, setReason] = useState('');
   const [choices, setChoices] = useState({}); const [all, setAll] = useState(false); const [page, setPage] = useState(0);
   const [editPolicies, setEditPolicies] = useState(false);
+  const [showOtherFields, setShowOtherFields] = useState(false);
   const sequence = useRef(0); const flight = useRef(false);
   useEffect(() => {
     const controller = new AbortController(); const requests = sequence; const ticket = ++requests.current;
@@ -31,7 +32,9 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, questio
   const ready = Boolean(data && data.revision.revision === revision.revision && !unresolved.length);
   useEffect(() => { onReadyChange?.(ready); }, [ready, onReadyChange]);
   const entries = [...unresolved, ...(editPolicies ? data?.entries.filter((e) => e.kind === 'policy' && e.group === categoryCode && e.reviewState === 'approved') || [] : [])];
-  const scoped = entries.filter((e) => all || e.group === categoryCode);
+  const focused = (e) => !focusTarget || showOtherFields || e.target === focusTarget || e.kind === 'route';
+  const scoped = entries.filter((e) => (all || e.group === categoryCode) && focused(e));
+  const otherFields = entries.filter((e) => e.group === categoryCode && !focused(e));
   const currentPage = Math.min(page, Math.max(0, Math.ceil(scoped.length / 30) - 1));
   const visible = scoped.slice(currentPage * 30, (currentPage + 1) * 30);
   const label = (entry) => {
@@ -72,7 +75,7 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, questio
   }
   const eligible = (entry) => chosen(entry) !== '' && (entry.reviewState !== 'approved' || chosen(entry) !== String(entry.identity)) && (entry.exact && String(entry.identity) === chosen(entry) && entry.kind !== 'policy' || reason.trim().length >= 3);
   return <section className="mc-review space-y-3" aria-label="Перевірка підготовлених відповідностей">
-    <h3 className="font-semibold">{ready && !editPolicies ? 'Відповідності перевірено' : 'Перевірте ці відповідності'}</h3>
+    <h3 className="font-semibold">{ready && !editPolicies ? 'Відповідності перевірено' : focusTarget === 'categories' && !showOtherFields ? 'Підтвердьте розділи магазину' : 'Перевірте ці відповідності'}</h3>
     {error && <Notice tone="error">{error}</Notice>}{!data && !error && <LoadingState compact />}
     {data && <>
       {data.revision.revision !== revision.revision && <Notice tone="warning">Чернетка змінилася. Перечитайте збережену підготовку перед підтвердженням.</Notice>}
@@ -83,6 +86,8 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, questio
         finally { flight.current = false; setBusy(false); }
       }}>Перечитати підготовку</button>}{(reason || Object.keys(choices).length > 0) && <button type="button" className="btn btn-outline" disabled={busy} onClick={() => { setReason(''); setChoices({}); }}>Відкинути незбережені рішення</button>}</div>
       {unresolved.length > 0 && <p>Залишилося підтвердити: {unresolved.length}. {unresolved.some((e) => e.group !== categoryCode) && `В інших категоріях: ${unresolved.filter((e) => e.group !== categoryCode).length}.`}</p>}
+      {focusTarget && <p className="mc-help">Спочатку показано вибране поле й набір характеристик. Для застосування всієї підготовки потрібно вирішити також решту питань.</p>}
+      {focusTarget && (otherFields.length > 0 || showOtherFields) && <button className="btn btn-outline" disabled={busy} onClick={() => { setShowOtherFields(!showOtherFields); setPage(0); }}>{showOtherFields ? 'Лише вибране поле' : `Показати решту полів категорії (${otherFields.length})`}</button>}
       <MagentoDetails summary="Поведінка передавання полів">{() => <button type="button" className="btn btn-outline" disabled={busy || disabled} onClick={() => { setEditPolicies(!editPolicies); setPage(0); }}>{editPolicies ? 'Сховати поведінку підключених полів' : 'Змінити поведінку підключених полів'}</button>}</MagentoDetails>
       {entries.some((e) => e.group !== categoryCode) && <button className="btn btn-outline" type="button" onClick={() => { setAll(!all); setPage(0); }}>{all ? 'Лише поточна категорія' : 'Показати також інші категорії'}</button>}
       {(reason || visible.some((e) => !e.exact || e.kind === 'policy' || chosen(e) !== String(e.identity))) && <label className="mc-label">Пояснення перевірки<input className="input" maxLength={2000} disabled={busy || disabled} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Чому обрано цю відповідність або поведінку" /></label>}
@@ -91,9 +96,9 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, questio
         <td>{['policy', 'route', 'option', 'category'].includes(entry.kind) ? <select className="input" aria-label={`Відповідність: ${label(entry)}`} value={chosen(entry)} disabled={busy || disabled} onChange={(e) => setChoices({ ...choices, [entry.id]: e.target.value })}><option value="">Оберіть явно</option>{options(entry).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select> : entry.label || entry.target}</td>
         <td><button type="button" className="btn btn-outline" disabled={busy || disabled || !eligible(entry)} onClick={() => approve([entry])}>Підтвердити</button></td>
       </tr>)}</tbody></table></div>}
-      {!visible.length && <p>{entries.length ? 'Питання цієї категорії підтверджено. Перевірте також інші категорії.' : 'Усі необхідні відповідності підтверджено.'}</p>}
-      {visible.some((e) => e.exact && e.kind !== 'policy') && <button type="button" className="btn btn-outline" disabled={busy || disabled} onClick={() => approve(visible.filter((e) => e.exact && e.kind !== 'policy' && String(e.identity) === chosen(e)))}>Прийняти однозначні підказки на цій сторінці</button>}
-      {visible.length > 0 && <button type="button" className="btn btn-primary" disabled={busy || disabled || !visible.every(eligible)} onClick={() => approve(visible)}>Підтвердити показані відповідності</button>}
+      {!visible.length && <p>{otherFields.length ? 'Вибране поле підтверджено. Відкрийте решту полів цієї категорії, щоб завершити перевірку.' : entries.length ? 'Питання цієї категорії підтверджено. Перевірте також інші категорії.' : 'Усі необхідні відповідності підтверджено.'}</p>}
+      {visible.length > 1 && visible.some((e) => e.exact && e.kind !== 'policy') && <MagentoDetails summary="Однозначні підказки">{() => <button type="button" className="btn btn-outline" disabled={busy || disabled} onClick={() => approve(visible.filter((e) => e.exact && e.kind !== 'policy' && String(e.identity) === chosen(e)))}>Прийняти однозначні підказки на цій сторінці</button>}</MagentoDetails>}
+      {visible.length > 1 && <button type="button" className="btn btn-primary" disabled={busy || disabled || !visible.every(eligible)} onClick={() => approve(visible)}>Підтвердити показані відповідності</button>}
       {scoped.length > 30 && <nav aria-label="Сторінки перевірки" className="mc-actions"><button className="btn btn-outline" disabled={!currentPage || busy} onClick={() => setPage(currentPage - 1)}>Назад</button><span>{currentPage + 1} / {Math.ceil(scoped.length / 30)}</span><button className="btn btn-outline" disabled={(currentPage + 1) * 30 >= scoped.length || busy} onClick={() => setPage(currentPage + 1)}>Далі</button></nav>}
       <MagentoDetails summary="Технічна перевірка">{() => <p>Невирішених структурних питань: {data.validation.diagnostics.length}. Чернетка {revision.revision}.</p>}</MagentoDetails>
     </>}

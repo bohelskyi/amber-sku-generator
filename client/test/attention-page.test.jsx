@@ -33,11 +33,13 @@ it('turns repeated history diagnostics into one starting task without losing oth
   const post = vi.spyOn(api, 'post');
   renderPage(['products.view', 'exports.reconcile', 'export_templates.view']);
   const start = await screen.findByRole('region', { name: 'З чого почати' });
-  expect(start.querySelector('h3').textContent).toBe(hold.message);
-  expect(start.querySelector('button').textContent).toBe('Відкрити перевірку доставки');
-  expect(screen.getAllByRole('heading', { name: hold.message })).toHaveLength(1);
+  expect(start.querySelector('h3').textContent).toBe('Синхронізацію товару зупинено після попередніх змін');
+  expect(start.querySelector('button').textContent).toBe('Перевірити товар у Magento');
+  expect(screen.getAllByRole('heading', { name: 'Синхронізацію товару зупинено після попередніх змін' })).toHaveLength(1);
   const categoryLink = screen.getByRole('link', { name: 'Перевірити відповідність категорії' });
   expect(categoryLink.getAttribute('href')).toContain('path=Default+Category%2F');
+  expect(categoryLink.getAttribute('href')).toContain('view=placement');
+  expect(categoryLink.getAttribute('href')).not.toContain('tab=placement');
   expect(start.compareDocumentPosition(categoryLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(screen.getByRole('heading', { name: 'Інші перешкоди' })).toBeTruthy();
   expect(screen.queryByText('1368')).toBeNull();
@@ -123,6 +125,15 @@ it('search and filters are submitted as bounded server reads', async () => {
   await waitFor(() => expect(api.get).toHaveBeenLastCalledWith('/magento/problems/page', expect.objectContaining({
     params: expect.objectContaining({ search: 'AG-000008', reason: 'product', limit: 20, offset: 0 }),
   })));
+});
+
+it('shows the linked category after its options arrive asynchronously and preserves the filter on submit', async () => {
+  api.get.mockResolvedValue({ data: { items: [], pageInfo: { total: 0 }, categories: [{ code: 'KL', name: 'Кулони' }] } });
+  render(<AuthContext.Provider value={auth(['products.view'])}><MemoryRouter initialEntries={['/attention?category=KL']}><AttentionPage /></MemoryRouter></AuthContext.Provider>);
+  await screen.findByText('За цими умовами товарів немає');
+  expect(screen.getByLabelText('Категорія').value).toBe('KL');
+  fireEvent.click(screen.getByRole('button', { name: 'Знайти' }));
+  await waitFor(() => expect(api.get).toHaveBeenLastCalledWith('/magento/problems/page', expect.objectContaining({ params: expect.objectContaining({ category: 'KL' }) })));
 });
 
 it('does not expose a previous principal summary while the next principal is loading', async () => {
