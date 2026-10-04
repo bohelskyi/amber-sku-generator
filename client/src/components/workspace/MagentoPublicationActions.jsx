@@ -5,15 +5,11 @@ import { useAuth } from '../../auth/auth-context.js';
 import { isActualAdministrator } from '../../auth/auth-model.js';
 import { LoadingState, Notice } from '../app/UiPrimitives.jsx';
 import MagentoDetails from './MagentoDetails.jsx';
+import MagentoPublicationProblems from './MagentoPublicationProblems.jsx';
+import MagentoProductChecks from './MagentoProductChecks.jsx';
 
 const root = '/admin/magento-integration';
 const empty = [];
-const blockers = { REPRESENTATIVE_CREATE_REQUIRED: 'Потрібен перевірений приклад нового товару. Відкрийте «Приклад на товарі».',
-  AFFECTED_CURRENT_PREVIEW_BLOCKED: 'Приклад наявного товару ще не готовий до доставки',
-  RECONCILIATION_REQUIRED: 'Раніше відправлену зміну ще не підтверджено. Повторна відправка заборонена.' };
-function Problems({ items, compact }) {
-  return items.length > 0 && <Notice tone="warning"><ul>{items.map((blocker, index) => <li key={index}>{blockers[blocker.code] || 'Потрібно перевірити відповідності.'}{!compact && blocker.routeKey ? ` · ${blocker.routeKey}` : ''}{blocker.productId ? ` · товар ${blocker.productId}` : ''}</li>)}</ul><Link className="underline" to="/sync-problems">Проблеми синхронізації</Link></Notice>;
-}
 function ReviewList({ items, label, render }) {
   const [page, setPage] = useState(0); const pages = Math.ceil(items.length / 50);
   const current = Math.min(page, Math.max(0, pages - 1));
@@ -25,12 +21,14 @@ function ReviewList({ items, label, render }) {
     </nav>}
   </div>;
 }
-function PublicationWorkspace({ revision, currentPublishedId, representatives = empty, onPublished, compact = false, autoPreview = false, disabled = false }) {
+function PublicationWorkspace({ revision, currentPublishedId, representatives = empty, onPublished, onRepresentative, definition, registry, categories, repairContext, compact = false, autoPreview = false, disabled = false }) {
   const auth = useAuth(); const { permissions } = auth; const administrator = isActualAdministrator(auth);
   const canPublish = ['export_templates.manage', 'export_templates.publish', 'exports.view'].every((permission) => permissions.includes(permission));
   const [review, setReview] = useState(null); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+  const [rejectedReview, setRejectedReview] = useState(null);
   const [ack, setAck] = useState(false); const [reason, setReason] = useState('');
   const [status, setStatus] = useState([]); const [refresh, setRefresh] = useState(0);
+  const [exampleCategory, setExampleCategory] = useState(null);
   const sequence = useRef(0); const inFlight = useRef(false);
   const automaticallyChecked = useRef(false);
   useEffect(() => { const requests = sequence; return () => { ++requests.current; }; }, []);
@@ -50,9 +48,15 @@ function PublicationWorkspace({ revision, currentPublishedId, representatives = 
   async function action(path, payload, complete) {
     if (inFlight.current || disabled) return;
     inFlight.current = true;
-    const current = ++sequence.current; setBusy(true); setError('');
+    const current = ++sequence.current; setBusy(true); setError(''); setRejectedReview(null);
     try { const { data } = await api.post(`${root}/${path}`, payload); if (current === sequence.current) complete(data); }
-    catch (cause) { if (current === sequence.current) { setReview(null); setAck(false); setReason(''); setError(cause.response?.data?.error || 'Дані змінилися або дія не завершилася. Повторіть перевірку.'); } }
+    catch (cause) { if (current === sequence.current) {
+      setReview(null); setAck(false); setReason('');
+      const blockers = cause.response?.data?.details?.blockers;
+      if (Array.isArray(blockers) && blockers.length) setRejectedReview({ blockers, affected: [], checked: [] });
+      setError(cause.response?.data?.code === 'MAGENTO_PUBLICATION_STALE' ? 'Перевірка застаріла. Зміни не застосовано. Перевірте причини нижче й повторіть перевірку впливу на товари.'
+        : cause.response?.data?.error || 'Дані змінилися або дія не завершилася. Повторіть перевірку.');
+    } }
     finally { if (current === sequence.current) { inFlight.current = false; setBusy(false); } }
   }
   const request = { bindingRevisionId: revision.id, expectedRevision: revision.revision, expectedCurrentId: currentPublishedId,
@@ -75,11 +79,13 @@ function PublicationWorkspace({ revision, currentPublishedId, representatives = 
   const history = status.filter((item) => !currentStatuses.includes(item));
   return <section className="card space-y-3 p-5"><h2 className="font-semibold">{compact ? 'Застосування змін' : 'Публікація та передача товарів'}</h2>
     {error && <Notice tone="error">{error}</Notice>}
+    {rejectedReview && <MagentoPublicationProblems review={rejectedReview} revision={revision} currentPublishedId={currentPublishedId} definition={definition} registry={registry} categories={categories} repairContext={repairContext} compact={compact} />}
     {revision.state === 'draft' ? <>
       {!compact && <><p className="text-sm">Публікація змінить правила доставки. Чинні назви товарів зберігаються; застосування нового правила назв — окрема контрольована дія.</p><p className="text-sm">Перевірених прикладів CREATE: {representatives.length}. Нові маршрути потребують готового прикладу у розділі «Перевірка товару».</p></>}
       {canPublish && (!autoPreview || error || review?.blockers.length > 0) && <button type="button" className="btn btn-outline btn-compact-md" disabled={busy || disabled} onClick={() => { setReview(null); setAck(false); setReason(''); action('publication/preview', request, setReview); }}>{compact ? 'Перевірити вплив на товари' : 'Перевірити вплив публікації'}</button>}
       {review && <div className="space-y-3"><p>Перевірено поточних товарів: {review.totalProducts}. До синхронізації буде передано: {review.affected.length}. Назв збережено: {review.preservedNames.length}.</p>
-        <Problems items={review.blockers} compact={compact} />
+        <MagentoPublicationProblems review={review} revision={revision} currentPublishedId={currentPublishedId} definition={definition} registry={registry} categories={categories} repairContext={repairContext} compact={compact} onExample={onRepresentative ? setExampleCategory : undefined} />
+        {exampleCategory && onRepresentative && <section className="space-y-3" aria-label="Приклад для застосування змін"><h3 className="font-semibold">Приклад нового товару</h3><MagentoProductChecks revision={revision} categoryCode={exampleCategory} onRepresentative={onRepresentative} /></section>}
         {review.affected.length > 0 && <MagentoDetails summary="Точний перелік товарів для доставки">{() => <ReviewList key={review.previewToken} items={review.affected} label="Товари для доставки" render={(product) => <p className="break-words" key={product.productId}>{product.article} · {product.reason === 'unblocked' ? 'Готовність відновлено' : 'Змінилась доставка'}</p>} />}</MagentoDetails>}
         {review.preservedNames.length > 0 && <MagentoDetails summary="Вплив нового правила назв">{() => <ReviewList key={review.previewToken} items={review.preservedNames} label="Вплив на назви" render={(product) => <p className="text-sm break-words" key={product.productId}>{product.article}: {product.before.all} → {product.generated.all}; {product.before.en} → {product.generated.en}. Чинні назви залишаться без змін.</p>} />}</MagentoDetails>}
         {loss && <Notice tone="warning"><p>Покриття буде скорочено. Потрібне підтвердження Адміністратора.</p><p>Маршрути: {review.lostRoutes.join(', ') || 'без втрат'}</p>

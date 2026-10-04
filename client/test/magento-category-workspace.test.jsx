@@ -207,6 +207,29 @@ it('continues restored category review explicitly and checks impact without crea
     bindingRevisionId: 'isolated', expectedRevision: '1', expectedCurrentId: 'current', representatives: [],
   }]]);
 });
+it('keeps a source failure after category approvals in the same exact preparation and points to the affected field', async () => {
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await get(url, config);
+    if (url.endsWith('/bindings/isolated')) result.data.entries = [{ ...entry, reviewState: 'approved' }];
+    return result;
+  });
+  api.post.mockResolvedValue({ data: { previewToken: 'blocked-proof', blockers: [{ code: 'SOURCE_REFERENCE_UNRESOLVED', sourceId: 'color',
+    category: 'BR', key: 'color', requirement: 'historical_sku_or_current_non_sku_value_ids', unresolvedValueIds: ['9'] }],
+    affected: [], preservedNames: [], lostProducts: [], lostRoutes: [], totalProducts: 3339, checked: [] } });
+  mount('/admin/magento?category=BR&view=placement&binding=isolated&source=current&productId=5080&returnTo=%2Fattention%3Fproblem%3D5080');
+  fireEvent.click(await screen.findByRole('button', { name: 'Продовжити перевірку розділів' }));
+  const issues = await screen.findByRole('region', { name: 'Що блокує застосування' });
+  expect(within(issues).getByText(/яких немає серед підтверджених значень/)).toBeTruthy();
+  expect(within(issues).getByText('Непідтверджені значення: 9.')).toBeTruthy();
+  const target = new URL(within(issues).getByRole('link', { name: 'Перевірити поле: Браслети → Колір · UA' }).href);
+  expect(Object.fromEntries(target.searchParams)).toMatchObject({ binding: 'isolated', source: 'current', field: 'kolir', language: 'base', productId: '5080', returnTo: '/attention?problem=5080' });
+  expect(within(issues).queryByRole('link', { name: 'Проблеми синхронізації' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Застосувати зміни' }).disabled).toBe(true);
+  expect(api.post.mock.calls).toEqual([['/admin/magento-integration/publication/preview', {
+    bindingRevisionId: 'isolated', expectedRevision: '1', expectedCurrentId: 'current', representatives: [],
+  }]]);
+});
 
 it('shows the exact remaining category after placement confirmation and applies only after its separate approval', async () => {
   const placement = { ...entry, id: 'category:placement:local', kind: 'category', target: 'categories',

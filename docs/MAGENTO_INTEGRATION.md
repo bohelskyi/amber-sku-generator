@@ -2172,6 +2172,16 @@ Remote reads reuse the existing evaluator/planner and the request-scoped 512-GET
 60-second bound; no persistent background-report engine is introduced.
 
 `POST .../publication/preview` and `/apply` require manage + publish + exports.view.
+Publication blockers retain the server's exact diagnostics in the client. The
+category workspace shows the relevant category, field, language and source/value
+with links preserving the exact draft and current-publication IDs. Source and
+binding failures lead to the affected draft field, including dependencies in other
+categories. Current-product previews blocked by draft configuration also lead to
+that draft; product/lifecycle failures link to the exact product in Attention.
+Missing CREATE evidence can be checked in place without creating a product. Unknown
+diagnostics remain readable and copyable with the exact revision counters; they
+never become a generic mapping notice or a link to the unfiltered product queue.
+Confirming all mappings does not waive source validation or product preview blockers.
 Apply repeats fresh GET checks and compares the exact preview hash. A short local
 transaction prevents catalog/product/name-state phantoms, rechecks draft/current
 CAS and source evidence, publishes the existing immutable binding and records the
