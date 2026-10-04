@@ -29,6 +29,14 @@ on the same screen. Attention repair links, including compatible placement URLs,
 open this view and retain the exact product/return context. Resource creation stays
 an explicitly opened advanced operation. The category links its operational count
 to the category-filtered product problem queue.
+The placement check appears above saved paths, explains confirmation and apply,
+and distinguishes stored approvals from product readiness. A check opened from an
+exact product problem passes that product's ID through both existing successor
+prepare/apply requests, so its dynamic category outputs enter the review instead
+of relying on the general sample. Reviewed carry still preserves unchanged bindings
+of other products. Explicitly continuing a restored preparation also starts product
+impact checking; restoring it alone remains read-only. After apply the retained
+attention return directs the user to recheck the original product's remaining issues.
 Text editing opens directly, without codes, scope selection or an expression-mode
 selector. Technical and advanced rules remain under **Розширені налаштування**.
 Source insertion, shared-reference detachment and field-local mapping tables use

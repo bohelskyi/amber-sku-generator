@@ -37,6 +37,7 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, questio
   const otherFields = entries.filter((e) => e.group === categoryCode && !focused(e));
   const currentPage = Math.min(page, Math.max(0, Math.ceil(scoped.length / 30) - 1));
   const visible = scoped.slice(currentPage * 30, (currentPage + 1) * 30);
+  const placementReview = focusTarget === 'categories' && !showOtherFields;
   const label = (entry) => {
     if (entry.kind === 'policy') return `${data.revision.schema.attributes.find((a) => a.attribute_code === entry.target)?.default_frontend_label || fieldLabels[entry.target] || entry.target} · ${entry.label === 'en' ? 'EN' : 'UA'}`;
     const match = entry.source?.match(/\.([^.=]+)=value_id:(-?\d+)$/);
@@ -75,7 +76,7 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, questio
   }
   const eligible = (entry) => chosen(entry) !== '' && (entry.reviewState !== 'approved' || chosen(entry) !== String(entry.identity)) && (entry.exact && String(entry.identity) === chosen(entry) && entry.kind !== 'policy' || reason.trim().length >= 3);
   return <section className="mc-review space-y-3" aria-label="Перевірка підготовлених відповідностей">
-    <h3 className="font-semibold">{ready && !editPolicies ? 'Відповідності перевірено' : focusTarget === 'categories' && !showOtherFields ? 'Підтвердьте розділи магазину' : 'Перевірте ці відповідності'}</h3>
+    <h3 className="font-semibold">{ready && !editPolicies ? 'Відповідності перевірено' : placementReview ? data && !visible.length ? 'Розділи цієї категорії підтверджено' : 'Підтвердьте розділи магазину' : 'Перевірте ці відповідності'}</h3>
     {error && <Notice tone="error">{error}</Notice>}{!data && !error && <LoadingState compact />}
     {data && <>
       {data.revision.revision !== revision.revision && <Notice tone="warning">Чернетка змінилася. Перечитайте збережену підготовку перед підтвердженням.</Notice>}
@@ -86,7 +87,12 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, questio
         finally { flight.current = false; setBusy(false); }
       }}>Перечитати підготовку</button>}{(reason || Object.keys(choices).length > 0) && <button type="button" className="btn btn-outline" disabled={busy} onClick={() => { setReason(''); setChoices({}); }}>Відкинути незбережені рішення</button>}</div>
       {unresolved.length > 0 && <p>Залишилося підтвердити: {unresolved.length}. {unresolved.some((e) => e.group !== categoryCode) && `В інших категоріях: ${unresolved.filter((e) => e.group !== categoryCode).length}.`}</p>}
-      {focusTarget && <p className="mc-help">Спочатку показано вибране поле й набір характеристик. Для застосування всієї підготовки потрібно вирішити також решту питань.</p>}
+      {focusTarget && <p className="mc-help">{placementReview ? ready
+        ? 'Розділи підтверджено. Наступний крок — перевірка впливу на товари у блоці нижче, а потім «Застосувати зміни».'
+        : visible.length ? 'Перевірте шлях у колонці Magento й натисніть «Підтвердити». Після підтвердження всіх відповідностей з’явиться кнопка «Застосувати зміни».'
+          : otherFields.length ? 'Розділи цієї категорії підтверджено. Наступний крок — «Показати решту полів категорії» нижче.'
+            : 'Розділи цієї категорії підтверджено. Наступний крок — «Показати також інші категорії» нижче.'
+        : 'Спочатку показано вибране поле й набір характеристик. Для застосування всієї підготовки потрібно вирішити також решту питань.'}</p>}
       {focusTarget && (otherFields.length > 0 || showOtherFields) && <button className="btn btn-outline" disabled={busy} onClick={() => { setShowOtherFields(!showOtherFields); setPage(0); }}>{showOtherFields ? 'Лише вибране поле' : `Показати решту полів категорії (${otherFields.length})`}</button>}
       <MagentoDetails summary="Поведінка передавання полів">{() => <button type="button" className="btn btn-outline" disabled={busy || disabled} onClick={() => { setEditPolicies(!editPolicies); setPage(0); }}>{editPolicies ? 'Сховати поведінку підключених полів' : 'Змінити поведінку підключених полів'}</button>}</MagentoDetails>
       {entries.some((e) => e.group !== categoryCode) && <button className="btn btn-outline" type="button" onClick={() => { setAll(!all); setPage(0); }}>{all ? 'Лише поточна категорія' : 'Показати також інші категорії'}</button>}

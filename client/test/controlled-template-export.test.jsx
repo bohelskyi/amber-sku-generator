@@ -97,7 +97,8 @@ it('uncertain create retains same key/token after selection changes, double clic
 it.each(['EXPORT_PREVIEW_STALE', 'EXPORT_PREVIEW_EXPIRED'])('%s requires explicit fresh preview and a separate new operation', async (code) => {
   exportsApi.createSnapshot.mockRejectedValueOnce({ response: { status: 409, data: { code, error: code } } }).mockResolvedValueOnce(response(snapshot));
   render(<Harness />); await screen.findByText(/1 новий товар очікує/); optIn(); await start(); click(/Створити файли/);
-  await screen.findByText(new RegExp(`${code} Оновіть перевірку`)); expect(controller.pendingCreate).toBeNull();
+  await screen.findByText(new RegExp(`${code} Оновіть перевірку`));
+  await waitFor(() => expect(controller.pendingCreate).toBeNull());
   expect(exportsApi.preview).toHaveBeenCalledTimes(1); await start(); click(/Створити файли/); await screen.findByText(/Збережені файли/);
   expect(exportsApi.createSnapshot.mock.calls[1][1]).not.toBe(exportsApi.createSnapshot.mock.calls[0][1]);
 });

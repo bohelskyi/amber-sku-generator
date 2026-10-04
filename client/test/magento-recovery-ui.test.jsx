@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { AuthContext } from '../src/auth/auth-context.js';
@@ -32,9 +32,10 @@ const historicalPreview = { eligible: true, blockers: [], reviewHash: 'mixed-his
 it('mixed history offers an explicit current-only decision and recovers the exact original receipt after a lost response', async () => {
   api.get.mockResolvedValue({ data: historicalRecord });
   let attempts = 0;
+  let rejectApply;
   api.post.mockImplementation(async url => {
     if (url.endsWith('/lifecycle-preview')) return { data: historicalPreview };
-    if (++attempts === 1) throw new Error('lost response');
+    if (++attempts === 1) return new Promise((resolve, reject) => { rejectApply = reject; });
     return { data: { nextAction: { kind: 'await_delivery' } } };
   });
   show(['exports.reconcile'], { guided: true });
@@ -50,7 +51,13 @@ it('mixed history offers an explicit current-only decision and recovers the exac
   fireEvent.click(action);
   expect(screen.getByRole('dialog').textContent).toContain('поставить її оновлення в чергу');
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Зберегти підтверджене рішення' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Отримати результат початкового рішення' }));
+  const retry = await screen.findByRole('button', { name: 'Отримати результат початкового рішення' });
+  expect(retry.disabled).toBe(true);
+  fireEvent.click(retry);
+  expect(attempts).toBe(1);
+  await act(async () => { rejectApply(new Error('lost response')); });
+  await waitFor(() => expect(retry.disabled).toBe(false));
+  fireEvent.click(retry);
   await screen.findByText(/Оновлення цього товару поставлено в чергу/);
   const applies = api.post.mock.calls.filter(([url]) => url.endsWith('/lifecycle-apply'));
   expect(applies).toHaveLength(2);expect(applies[0][1]).toEqual(applies[1][1]);
