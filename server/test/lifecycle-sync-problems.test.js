@@ -55,5 +55,5 @@ test('all local problem reads retain public article and safe lifecycle projectio
     assert.equal(item.problems[0].resolution, 'lifecycle_reconciliation');
   }
   assert.equal(statuses.get(5033).problems[0].resolution, 'lifecycle_reconciliation');
-  assert.equal(calls.filter((sql) => sql.includes('JOIN product_full_export_state')).length, 3);
+  assert.equal(calls.filter((sql) => sql.includes('JOIN product_full_export_state')).length, 4);
 });

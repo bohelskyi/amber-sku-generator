@@ -84,11 +84,12 @@ it('product readiness shows local repair guidance, human fields and unchanged ra
   } });
   shell(<SyncProblemsPage />);
   await screen.findAllByText(/Товар не готовий до синхронізації/);
-  expect(screen.getByRole('link', { name: 'Відповідності: Обробка каменю' }).getAttribute('href')).toBe('/admin/magento/categories/SV?field=kamin_obrobka');
+  expect(screen.getByRole('button', { name: 'Виправити характеристики' })).toBeTruthy();
   expect(api.post).not.toHaveBeenCalled();
   expect(screen.queryByText(/Не вдалося прочитати назву Magento/)).toBeNull();
   for (const label of ['Розмір', 'Назва українською та англійською', 'Обробка каменю']) expect(screen.getByText(label)).toBeTruthy();
-  expect(screen.getByRole('link', { name: 'Виправити дані товару' }).getAttribute('href')).toBe('/products/open?article=SV5111010');
+  expect(screen.getByRole('button', { name: 'Заповнити розмір' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Заповнити назви' })).toBeTruthy();
   for (const disclosure of screen.getAllByText('Технічні деталі')) fireEvent.click(disclosure);
   expect(screen.getByText('PRODUCT_EVALUATION_NOT_READY')).toBeTruthy();
   expect(screen.getByText('kamin_obrobka, name, rozmir_suveniriv')).toBeTruthy();
@@ -102,7 +103,7 @@ it('view-only readiness gives a truthful handoff and no repair action', async ()
   } });
   shell(<SyncProblemsPage />, { ...auth, permissions: ['products.view'] });
   await screen.findAllByText(/Товар не готовий/);
-  expect(screen.getByText('Передайте виправлення оператору з дозволом на зміну даних товару.')).toBeTruthy();
+  expect(screen.getByText('Передайте виправлення оператору з дозволом на відповідну зміну даних товару.')).toBeTruthy();
   expect(screen.queryByRole('link', { name: 'Виправити дані товару' })).toBeNull();
   expect(screen.queryByRole('link', { name: 'Відкрити товар' })).toBeNull();
 });
@@ -115,7 +116,7 @@ it('readiness action requires permission for a field that is actually repairable
   shell(<SyncProblemsPage />, { ...auth, permissions: ['products.view', 'products.decode', 'products.recount'] });
   await screen.findAllByText(/Товар не готовий/);
   expect(screen.queryByRole('link', { name: 'Виправити дані товару' })).toBeNull();
-  expect(screen.getByText('Передайте виправлення оператору з дозволом на зміну даних товару.')).toBeTruthy();
+  expect(screen.getByText('Передайте виправлення оператору з дозволом на відповідну зміну даних товару.')).toBeTruthy();
 });
 it('repricing summary shows only changed categories and preserved manual products', () => {
   render(<RepricingSummary config={{ categories: { BR: { name: 'Браслети' } } }} controller={{ currentCalculationRate: null,

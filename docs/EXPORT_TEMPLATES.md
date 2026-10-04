@@ -247,11 +247,35 @@ exposure or pending revisions.
 
 ## Editor and controlled workflow
 
-`/admin/export-templates` requires `export_templates.view` before mounting the
-administrative workspace. Candidate preparation/save/clone/validation require
+The current editor lives inside **Інтеграція Magento → Категорії та правила**
+at `/admin/magento/rules/*`. Historical `/admin/export-templates/*` URLs redirect
+with their complete suffix, search and fragment preserved. Both entry paths require
+`export_templates.view` before mounting the administrative workspace.
+Candidate preparation/save/clone/validation require
 `manage`; draft test-preview also needs `exports.view`. Publication and candidate
 selection independently require `publish` and `activate`. No role-name or
 `users.manage` dependency was added. See the current editor and source-support contracts below.
+
+Category details read the exact immutable template version pinned by the active
+binding. No latest publication or CSV selection is substituted if that version is
+unavailable. The ordinary integration view presents fields vertically: Magento
+field, Amber source, persisted rule, example, and delivery ownership where an
+exact binding is available. Computed examples remain uncalculated until an
+explicit server preview; the client does not evaluate expressions. Selecting a
+field opens the existing guarded inspector. The full grid and complex expressions
+remain available under **Розширена таблиця правил** without any automatic rewrite.
+
+Rule publication (**Зафіксувати версію правил**) and Magento binding publication
+remain two explicit independent operations. The receipt links the exact published
+version into successor preparation. Neither saving nor publishing a template
+switches the active Magento binding. Current vs draft vs historical versions are
+identified separately, and dirty navigation remains guarded across editor tabs.
+
+The historical CSV system profile and activation controls remain under explicit
+compatibility disclosure. Opening current integration rules does not request CSV
+activation state; opening that disclosure performs the existing authorized read.
+Selection still uses the unchanged generation-protected command. These controls
+do not select or publish a Magento binding.
 
 `GET /api/export/template-options` requires `exports.view` and returns only
 `generation`, `activeVersionId`, `implementation`, `defaultExporter: "legacy"`,

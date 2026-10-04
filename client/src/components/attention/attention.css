@@ -218,3 +218,72 @@
   .sync-problem-detail > header { flex-direction: column; }
   .correction-detail-actions .btn { width: 100%; justify-content: center; }
 }
+.sync-problem-filters { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+.sync-problem-filters > label { display:grid; gap:5px; flex:1 1 170px; min-width:0; font-size:var(--font-size-sm); color:var(--text-muted); }
+.sync-problem-filters .sync-search { flex:2 1 230px; }
+.sync-search > span { position:relative; display:block; }
+.sync-search svg { position:absolute; left:11px; top:50%; transform:translateY(-50%); color:var(--text-muted); }
+.sync-search input { padding-left:35px; }
+.sync-problem-count { color:var(--text-muted); font-size:var(--font-size-sm); }
+.sync-problem-queue-item .sync-next-action { color:var(--navy-800); font-weight:600; }
+.sync-problem-detail h2 { display:flex; align-items:center; gap:8px; overflow-wrap:anywhere; }
+.sync-problem-detail-body .eyebrow { margin-bottom:5px; }
+.sync-issue-fields { display:grid; gap:7px; list-style:disc; margin:10px 0 10px 20px; font-size:var(--font-size-sm); }
+.sync-next-heading { margin:14px 0 7px; color:var(--navy-900); font-size:var(--font-size-sm); font-weight:650; }
+.sync-problem-detail > footer { flex-wrap:wrap; gap:8px; }
+.sync-back { display:none; }
+.sync-recovery { padding:16px 0; border-top:1px solid var(--border); }
+.sync-recovery > :not(:first-child) { margin-top:12px; }
+.sync-recovery-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.sync-recovery label { display:grid; gap:5px; font-size:var(--font-size-sm); }
+.sync-recovery fieldset { border:1px solid var(--border); padding:12px; border-radius:var(--radius-sm); }
+.sync-recovery fieldset > :not(:first-child) { margin-top:8px; }
+.sync-recovery legend { padding:0 5px; font-weight:650; font-size:var(--font-size-sm); }
+.sync-recovery-steps { display:grid; gap:8px; }
+.sync-recovery-steps > li { display:flex; align-items:center; gap:10px; justify-content:space-between; font-size:var(--font-size-sm); }
+@media (max-width:800px) {
+  .sync-problems-workspace.has-selected-problem .sync-problem-filters,
+  .sync-problems-workspace.has-selected-problem .sync-problem-count { display:none; }
+  .sync-problem-master-detail:not(.has-selection) .sync-problem-detail { display:none; }
+  .sync-problem-master-detail.has-selection .sync-problem-queue { display:none; }
+  .sync-problem-master-detail .sync-problem-queue { max-height:none; overflow:visible; }
+  .sync-back { display:inline-flex; margin-bottom:16px; }
+  .sync-problem-filters > label { flex-basis:100%; }
+  .sync-problem-master-detail { min-height:0; }
+}
+.sync-recovery-changes { display:grid; gap:12px; margin-top:12px; }
+.sync-recovery-changes > div { padding-bottom:10px; border-bottom:1px solid var(--border); }
+.sync-recovery-changes dt { font-size:var(--font-size-sm); font-weight:650; color:var(--navy-900); }
+.sync-recovery-changes dd { display:grid; gap:5px; margin-top:5px; font-size:var(--font-size-sm); overflow-wrap:anywhere; white-space:pre-wrap; }
+.sync-recovery-changes dd span { color:var(--text-muted); }
+.sync-recovery-changes dd strong { font-weight:500; }
+
+.sync-problem-subject { display:grid; gap:8px; margin:12px 0; padding:12px; background:var(--surface-muted); border-left:3px solid var(--amber-500); }
+.sync-problem-subject dt { color:var(--text-muted); font-size:var(--font-size-xs); }
+.sync-problem-subject dd { margin-top:3px; font-size:var(--font-size-sm); font-weight:600; overflow-wrap:anywhere; }
+.sync-live-diagnosis > :not(:first-child) { margin-top:12px; }
+.sync-diagnostic-problems { display:grid; gap:12px; font-size:var(--font-size-sm); }
+.sync-diagnostic-problems li > :not(:first-child) { margin-top:8px; }
+.sync-diagnostic-problems li > strong { display:block; overflow-wrap:anywhere; }
+.sync-product-comparison { min-width:0; }
+.sync-product-comparison table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:var(--font-size-sm); }
+.sync-product-comparison caption { padding:10px 0; color:var(--navy-900); font-weight:650; text-align:left; }
+.sync-product-comparison th,
+.sync-product-comparison td { border-bottom:1px solid var(--border); padding:10px 8px; vertical-align:top; text-align:left; overflow-wrap:anywhere; }
+.sync-product-comparison thead { background:var(--surface-muted); color:var(--text-muted); }
+.sync-product-comparison tbody th { color:var(--navy-900); font-weight:600; }
+.sync-product-comparison td small { display:block; margin-top:5px; color:var(--text-muted); }
+.sync-comparison-value { display:block; white-space:pre-wrap; }
+.sync-comparison-unknown { color:var(--text-muted); }
+.sync-comparison-warnings { margin-top:16px; font-size:var(--font-size-sm); }
+.sync-comparison-warnings h4 { font-weight:650; }
+.sync-comparison-warnings ul { display:grid; gap:8px; margin:8px 0 0 18px; list-style:disc; }
+@media (max-width:640px) {
+  .sync-product-comparison table,
+  .sync-product-comparison tbody { display:block; }
+  .sync-product-comparison thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+  .sync-product-comparison tr { display:grid; grid-template-columns:1fr; padding:10px 0; border-bottom:1px solid var(--border); }
+  .sync-product-comparison th,
+  .sync-product-comparison td { display:block; padding:6px 0; border:0; }
+  .sync-product-comparison td::before { display:block; margin-bottom:4px; content:attr(data-label); color:var(--text-muted); font-size:var(--font-size-xs); }
+}

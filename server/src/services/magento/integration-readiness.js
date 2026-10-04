@@ -50,12 +50,14 @@ function semanticReadiness(config, schemas, revision, definition = null) {
   });
 }
 function previewView(report) {
+  const diagnostic = require('./product-diagnostic-view');
   return { mode: report.mode, observedAt: report.generatedAt, sendable: report.sendable,
+    productId: report.amberProduct.id ?? null,
     article: report.amberProduct.publicSku, group: report.amberProduct.group, routeKey: report.attributeSet.routeKey,
-    attributeSet: report.attributeSet.selected, blockers: report.blockers.map((b) => require('./sync-problems').presentProblem(b)),
+    attributeSet: report.attributeSet.selected, blockers: report.blockers.map((b) => diagnostic.diagnosticProblem(b, report)),
     names: { ua: report.candidatePayload.product.name ?? null,
       en: report.transport?.storeViews?.candidate?.name ?? null },
     attributes: report.attributes.map((a) => ({ target: a.target, diagnostics: a.diagnostics })),
-    categories: report.categories, warnings: report.warnings };
+    categories: report.categories, warnings: report.warnings, comparisons: diagnostic.comparisons(report) };
 }
 module.exports = { semanticReadiness, boundedGet, previewView };

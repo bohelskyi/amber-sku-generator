@@ -131,13 +131,18 @@ test('GET-only API covers every discovery endpoint with explicit all/store scope
     ['listAttributeSets', [2], 'products/attribute-sets/sets/list?searchCriteria%5BpageSize%5D=100&searchCriteria%5BcurrentPage%5D=2'],
     ['getAttributeSet', [17], 'products/attribute-sets/17'],
     ['getAttributeSetAttributes', [17], 'products/attribute-sets/17/attributes'],
+    ['getAttributeSetGroups', [17], 'products/attribute-sets/groups/list?' + new URLSearchParams({
+      'searchCriteria[filter_groups][0][filters][0][field]': 'attribute_set_id',
+      'searchCriteria[filter_groups][0][filters][0][value]': '17',
+      'searchCriteria[filter_groups][0][filters][0][condition_type]': 'eq',
+      'searchCriteria[pageSize]': '100', 'searchCriteria[currentPage]': '1' })],
     ['listProductAttributes', [], 'products/attributes?searchCriteria%5BpageSize%5D=100&searchCriteria%5BcurrentPage%5D=1'],
     ['getProductAttribute', ['stone_color'], 'products/attributes/stone_color'],
     ['getProductAttributeOptions', ['stone_color'], 'products/attributes/stone_color/options'],
     ['getScopedOptionLabels', ['stone_color',5738], 'amber/attributes/stone_color/options/5738/labels'],
     ['getProductBySkuPathDiagnostic', ['KL3/11131351005'], 'products/KL3%2F11131351005'],
   ];
-  assert.deepEqual(Object.keys(client).sort(), [...cases.map(([method]) => method), 'findProductBySku'].sort());
+  assert.deepEqual(Object.keys(client).sort(), [...cases.map(([method]) => method), 'findProductBySku', 'findProductAttribute'].sort());
   assert.equal(client.getProductBySku, undefined);
   assert.equal(Object.isFrozen(client), true);
   for (const [method, args, path] of cases) {
@@ -153,6 +158,25 @@ test('GET-only API covers every discovery endpoint with explicit all/store scope
     assert.equal(url, 'https://store.example.invalid/rest/en/V1/store/storeViews'); return json([]);
   } });
   await scoped.getStoreViews();
+});
+
+test('exact attribute absence lookup is bounded and does not infer an absent code from errors or other rows', async () => {
+  let expected = { items: [], total_count: 0 };
+  const client = createMagentoClient(config, { fetchImpl: async (url, options) => {
+    assert.equal(options.method, 'GET');
+    const query = new URL(url).searchParams;
+    assert.equal(query.get('searchCriteria[filter_groups][0][filters][0][field]'), 'attribute_code');
+    assert.equal(query.get('searchCriteria[filter_groups][0][filters][0][value]'), 'new_color');
+    assert.equal(query.get('searchCriteria[pageSize]'), '2');
+    return json(expected);
+  } });
+  assert.equal(await client.findProductAttribute('new_color'), null);
+  expected = { items: [{ attribute_code: 'other_code' }], total_count: 1 };
+  await assert.rejects(client.findProductAttribute('new_color'));
+  expected = { items: [], total_count: 1 };
+  await assert.rejects(client.findProductAttribute('new_color'));
+  expected = { items: [{ attribute_code: 'new_color', attribute_id: 999 }], total_count: 1 };
+  assert.equal((await client.findProductAttribute('new_color')).attribute_id, 999);
 });
 
 test('SKU URL sent to fetch preserves exactly one encoded route value and matches independent signature reconstruction', async () => {

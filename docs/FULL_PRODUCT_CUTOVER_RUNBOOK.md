@@ -237,11 +237,15 @@ product trigger's generation or clear a parked `needs_attention` request. None o
 these gaps authorizes a direct UPDATE, manual requeue or blind resend. The stable
 recount exposure command instead records the existing reviewed handoff atomically.
 
-A future browser reconciliation workflow is a separate product/security decision.
-The reusable reviewed primitive exists, but it would need authenticated preview
-authority, complete evidence/disposition review, stale-review recovery and an
-explicit post-cutover delivery/completion policy. The CLI boundary below is reusable,
-but this correction adds no HTTP reconciliation surface.
+The separately authorized operational redesign now exposes reviewed browser
+recovery under `/api/admin/magento-recovery`, retaining `exports.reconcile`, exact
+evidence/dispositions, final-state checks and stale-review rejection. It does not
+solve the legacy replacement completion gap by inventing new semantics: legacy
+recipes are blocked after product-CSV cutover inside their transaction. Current
+recovery uses ordinary exact exposure or stable recount exposure where eligible.
+Ordinary exposure may still require a separate Administrator-only reviewed resync;
+stable recount records its existing handoff. See
+[controlled recovery](MAGENTO_INTEGRATION.md#controlled-product-recovery).
 
 ## Stable public SKU recount exposure
 

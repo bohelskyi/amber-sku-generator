@@ -461,7 +461,7 @@ it('ordinary KL name workflow adds mapped color, edits only this field, saves an
   expect(screen.queryByLabelText('Розділ редактора')).toBeNull();
   expect(normalOutput().getByLabelText('Текст у файлі').value).toContain('{Матеріал}');
   click('+ Додати характеристику'); choose('Характеристика', 'KL.color'); choose('Як записувати значення', 'klColor'); click('Вставити характеристику');
-  choose('Текст у файлі', 'Кулон з {Матеріал} бурштину, {Колір}. Арт: {Повний артикул}');
+  choose('Текст у файлі', 'Кулон з {Матеріал} бурштину, {Колір}. Арт: {Внутрішній SKU}');
   click('Колір {Колір}'); choose('Значення у CSV: Значення №1 — назву не підтверджено', '  новий відтінок  ');
   click('Застосувати до чернетки'); click('Зберегти чернетку'); await screen.findByText('Збережено · редакція 9007199254740994');
   const edited = api.save.mock.calls[0][1].definition;
@@ -475,7 +475,7 @@ it('ordinary KL name workflow adds mapped color, edits only this field, saves an
   await screen.findByText(/Результат перевірки · редакція 9007199254740994/);
   expect(api.preview).toHaveBeenCalledWith(f.id, { expectedRevision: '9007199254740994', expectedDefinitionHash: hashJsonData(edited), productIds: [42] });
   expect(screen.getByText(/Товари: 42/)).toBeTruthy(); expect(document.querySelector('pre').textContent).toBe('authoritative CSV from API');
-  click('Таблиця'); choose('Колонка', 'name'); choose('Текст у файлі', '  Інший {Матеріал}, {Колір}. {Повний артикул}\n'); click('Застосувати до чернетки'); click('Перевірка');
+  click('Таблиця'); choose('Колонка', 'name'); choose('Текст у файлі', '  Інший {Матеріал}, {Колір}. {Внутрішній SKU}\n'); click('Застосувати до чернетки'); click('Перевірка');
   expect(screen.getByText(/Застарілий результат/)).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Переглянути результат', exact: true }).disabled).toBe(true);
   expect(api.publish).not.toHaveBeenCalled(); expect(api.select).not.toHaveBeenCalled();

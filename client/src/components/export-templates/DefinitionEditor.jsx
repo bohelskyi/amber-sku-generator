@@ -6,6 +6,7 @@ import { CategoryTabs, TemplateDesignGrid } from './TemplateDesignGrid';
 import { columnIntent } from '../../lib/export-template-intent';
 import './export-template-editor.css';
 import IntegrationCategoryForm from './IntegrationCategoryForm.jsx';
+import { IntegrationRulesTable } from './IntegrationRulesTable.jsx';
 
 function ColumnOperation({ definition, groupIndex, column, action, onApply, onCancel, onPendingChange, suspended }) {
   const group = definition.groups[groupIndex];
@@ -36,14 +37,17 @@ function ColumnOperation({ definition, groupIndex, column, action, onApply, onCa
 }
 
 const record = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
-export function DefinitionEditor({ definition, onChange, registry, readOnly = false, loadSource, diagnostics = [], focusField, onFieldSelect, onPendingChange, onEditingChange, visible = true }) {
-  const [groupIndex, setGroupIndex] = useState(0);
+export function DefinitionEditor({ definition, onChange, registry, readOnly = false, loadSource, diagnostics = [], focusField, onFieldSelect, onPendingChange, onEditingChange, visible = true, integration = false, revision, initialCategory, suggestedField, suggestedQuestion }) {
+  const [groupIndex, setGroupIndex] = useState(() => Math.max(0, definition?.groups?.findIndex((group) => group.route === initialCategory) ?? 0));
   const [selection, setSelection] = useState(null);
   const [creation, setCreation] = useState(null);
   const [operation, setOperation] = useState(null);
   const [panelPending, setPanelPending] = useState(false);
   const [dialogPending, setDialogPending] = useState(false);
+  const [categoryPending, setCategoryPending] = useState(false);
+  const [categoryEpoch, setCategoryEpoch] = useState(0);
   const [transition, setTransition] = useState(null);
+  const [advancedGrid, setAdvancedGrid] = useState(false);
   const [overlay, setOverlay] = useState(() => window.innerWidth < 1270);
   const root = useRef(null); const active = useRef(null); const trigger = useRef(null); const epoch = useRef(0);
   const panelId = useId();
@@ -54,7 +58,7 @@ export function DefinitionEditor({ definition, onChange, registry, readOnly = fa
     return true;
   };
   const close = () => { setSelection(null); setPanelPending(false); trigger.current?.focus(); };
-  const request = (action) => { if (panelPending) setTransition(() => action); else action(); };
+  const request = (action) => { if (panelPending || categoryPending) setTransition(() => action); else action(); };
   const select = (column, rowIndex, sourceId) => { trigger.current = document.activeElement; setSelection({ column, rowIndex, sourceId, epoch: ++epoch.current }); };
   const openCreation = (anchor = null) => { if (readOnly || creation) return; request(() => { close(); setCreation({ groupIndex, rowIndex: selection?.rowIndex || 0, anchor }); }); };
   useEffect(() => {
@@ -65,9 +69,9 @@ export function DefinitionEditor({ definition, onChange, registry, readOnly = fa
     window.addEventListener('resize', update);
     return () => { observer?.disconnect(); window.removeEventListener('resize', update); };
   }, [visible]);
-  useEffect(() => { onPendingChange?.(panelPending || dialogPending); return () => onPendingChange?.(false); }, [panelPending, dialogPending, onPendingChange]);
+  useEffect(() => { onPendingChange?.(panelPending || dialogPending || categoryPending); return () => onPendingChange?.(false); }, [panelPending, dialogPending, categoryPending, onPendingChange]);
   useEffect(() => { onEditingChange?.(Boolean(selection || creation || operation)); return () => onEditingChange?.(false); }, [selection, creation, operation, onEditingChange]);
-  useEffect(() => { if (!panelPending && !dialogPending) return; const warn = (e) => { e.preventDefault(); e.returnValue = ''; }; window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn); }, [panelPending, dialogPending]);
+  useEffect(() => { if (!panelPending && !dialogPending && !categoryPending) return; const warn = (e) => { e.preventDefault(); e.returnValue = ''; }; window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn); }, [panelPending, dialogPending, categoryPending]);
   useEffect(() => { if (selection) onFieldSelect?.({ groupIndex, rowIndex: selection.rowIndex, column: selection.column }); }, [groupIndex, selection, onFieldSelect]);
   const reveal = useEffectEvent(() => {
     if (focusField) request(() => { setGroupIndex(focusField.groupIndex); select(focusField.column, focusField.rowIndex, focusField.sourceId); });
@@ -85,25 +89,27 @@ export function DefinitionEditor({ definition, onChange, registry, readOnly = fa
   if (!supported || !definition.groups[groupIndex]) return <div role="note">Цей формат ще не підтримується формами. Визначення збережено без змін.<details><summary>Технічне визначення</summary><pre>{JSON.stringify(definition, null, 2)}</pre></details></div>;
   const inspectorOverlay = overlay || Boolean(selection && columnIntent(definition, ['groups', groupIndex, 'rows', selection.rowIndex, 'cells', selection.column]) === 'condition');
   return <div ref={root} className="et-fields">
-    {visible && !readOnly && !selection && !creation && !operation && <IntegrationCategoryForm definition={definition} registry={registry} onChange={guardedChange} />}
+    {(visible || categoryPending) && !readOnly && !selection && !creation && !operation && <div hidden={!visible}><IntegrationCategoryForm key={categoryEpoch} initialCategory={initialCategory} definition={definition} registry={registry} onChange={guardedChange} onPendingChange={setCategoryPending} /></div>}
     {visible && <CategoryTabs groups={definition.groups} selected={groupIndex} panelId={panelId} onSelect={(index) => request(() => { close(); setGroupIndex(index); })} />}
     <div role="tabpanel" id={panelId} aria-label={definition.groups[groupIndex].name} className={selection && !inspectorOverlay ? 'et-design-layout et-design-with-panel' : 'et-design-layout'}>
-      {visible && <TemplateDesignGrid definition={definition} groupIndex={groupIndex} registry={registry} selected={selection} readOnly={readOnly} onCreate={() => openCreation()} onSelect={(code, row) => request(() => select(code, row))} onAction={(action, code) => {
+      {visible && integration && <button type="button" className="et-link mb-3" aria-pressed={advancedGrid} onClick={() => request(() => setAdvancedGrid(!advancedGrid))}>{advancedGrid ? 'До правил передачі полів' : 'Розширена таблиця правил'}</button>}
+      {visible && integration && !advancedGrid && <IntegrationRulesTable definition={definition} groupIndex={groupIndex} registry={registry} revision={revision} readOnly={readOnly} onCreate={definition.outputContract === COLUMN_CONTRACT ? () => openCreation() : undefined} onSelect={(code, row) => request(() => select(code, row))} />}
+      {visible && (!integration || advancedGrid) && <TemplateDesignGrid definition={definition} groupIndex={groupIndex} registry={registry} selected={selection} readOnly={readOnly} onCreate={() => openCreation()} onSelect={(code, row) => request(() => select(code, row))} onAction={(action, code) => {
         if (action === 'configure') { request(() => select(code, 0)); return; }
         if (action === 'left' || action === 'right') { const columns = definition.groups[groupIndex].columns; openCreation(action === 'left' ? code : columns[columns.indexOf(code) + 1] ?? null); return; }
         request(() => { close(); setOperation({ groupIndex, column: code, action }); });
       }} />}
-      {selection && <ColumnInspector key={groupIndex + '/' + selection.epoch} definition={definition} {...selection} groupIndex={groupIndex} registry={registry} readOnly={readOnly} loadSource={loadSource} diagnostics={diagnostics} overlay={inspectorOverlay} suspended={Boolean(transition) || !visible}
+      {selection && <ColumnInspector integration={integration} key={groupIndex + '/' + selection.epoch} definition={definition} {...selection} groupIndex={groupIndex} registry={registry} readOnly={readOnly} loadSource={loadSource} diagnostics={diagnostics} overlay={inspectorOverlay} suspended={Boolean(transition) || !visible}
         onPendingChange={setPanelPending} onCancel={close} onRequestClose={() => request(close)} onApply={(next, base) => { if (!guardedChange(next, base)) return false; close(); return true; }} />}
     </div>
     {visible && <p className="et-design-caption">Основний і EN — незалежні правила, не приклади значень товарів. Категорія змінює лише вигляд.</p>}
-    {creation && <NewColumnDialog suspended={!visible} {...creation} definition={definition} registry={registry} loadSource={loadSource} readOnly={readOnly} onPendingChange={setDialogPending} onCancel={() => setCreation(null)} onCreate={(next, code) => {
+    {creation && <NewColumnDialog integration={integration} initialTarget={suggestedField} initialQuestion={suggestedQuestion} suspended={!visible} {...creation} definition={definition} registry={registry} loadSource={loadSource} readOnly={readOnly} onPendingChange={setDialogPending} onCancel={() => setCreation(null)} onCreate={(next, code) => {
       if (!guardedChange(next)) return false;
       setCreation(null); setGroupIndex(creation.groupIndex); setSelection(null);
       requestAnimationFrame(() => root.current?.querySelector(`[aria-label="Налаштувати колонку ${code}"]`)?.focus());
       return true;
     }} />}
     {operation && <ColumnOperation suspended={!visible} {...operation} definition={definition} onPendingChange={setDialogPending} onCancel={() => setOperation(null)} onApply={(next) => { if (!guardedChange(next)) return false; setOperation(null); return true; }} />}
-    {transition && <ColumnDialog title="Незастосоване заповнення" onCancel={() => setTransition(null)}><p>Спочатку застосуйте або скасуйте введені налаштування. Інші локальні зміни чернетки збережено.</p><div className="et-actions"><button type="button" className="btn btn-primary px-3" onClick={() => setTransition(null)}>Залишитися</button><button type="button" className="btn btn-outline px-3" onClick={() => { const proceed = transition; setTransition(null); close(); proceed(); }}>Відкинути заповнення й перейти</button></div></ColumnDialog>}
+    {transition && <ColumnDialog title="Незастосоване заповнення" onCancel={() => setTransition(null)}><p>Спочатку застосуйте або скасуйте введені налаштування. Інші локальні зміни чернетки збережено.</p><div className="et-actions"><button type="button" className="btn btn-primary px-3" onClick={() => setTransition(null)}>Залишитися</button><button type="button" className="btn btn-outline px-3" onClick={() => { const proceed = transition; setTransition(null); close(); setCategoryPending(false); setCategoryEpoch((value) => value + 1); proceed(); }}>Відкинути заповнення й перейти</button></div></ColumnDialog>}
   </div>;
 }

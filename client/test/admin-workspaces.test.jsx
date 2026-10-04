@@ -16,8 +16,8 @@ const authValue = (permissions) => ({
   logout: vi.fn(),
   refresh: vi.fn(),
 });
-const renderPage = (mode, permissions) => {
-  const router = createMemoryRouter([{ path: '*', element: <AdminPage mode={mode} /> }]);
+const renderPage = (mode, permissions, initialEntry = '/') => {
+  const router = createMemoryRouter([{ path: '*', element: <AdminPage mode={mode} /> }], { initialEntries: [initialEntry] });
   return render(<AuthContext.Provider value={authValue(permissions)}>
     <RouterProvider router={router} />
   </AuthContext.Provider>);
@@ -26,6 +26,35 @@ const renderPage = (mode, permissions) => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+});
+
+it('opens the exact catalog context from Magento without writing or reopening a dismissed form', async () => {
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/admin/config') return response(config);
+    if (url === '/admin/sku-schema/BR') return response({ active: null, draftChanged: false });
+    throw new Error(`Unexpected GET ${url}`);
+  });
+  const post = vi.spyOn(api, 'post');
+  renderPage('catalog', ['catalog.view', 'catalog.manage'],
+    '/admin/catalog?category=BR&action=new-question&returnTo=%2Fadmin%2Fmagento%2Fcategories%2FBR');
+  expect(await screen.findByRole('textbox', { name: /Назва питання/ })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /Повернутися до інтеграції Magento/ }).getAttribute('href')).toBe('/admin/magento/categories/BR');
+  expect(post).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: /Скасувати/ }));
+  await waitFor(() => expect(screen.queryByRole('textbox', { name: /Назва питання/ })).toBeNull());
+});
+
+it('does not grant catalog editing from a deep link or accept an external return target', async () => {
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/admin/config') return response(config);
+    if (url === '/admin/sku-schema/BR') return response({ active: null, draftChanged: false });
+    throw new Error(`Unexpected GET ${url}`);
+  });
+  renderPage('catalog', ['catalog.view'], '/admin/catalog?category=BR&action=new-question&returnTo=https%3A%2F%2Fexample.com');
+  await screen.findByRole('button', { name: /Bracelets/ });
+  await waitFor(() => expect(api.get).toHaveBeenCalledWith('/admin/sku-schema/BR'));
+  expect(screen.queryByRole('textbox', { name: /Назва питання/ })).toBeNull();
+  expect(screen.queryByRole('link', { name: /Повернутися до інтеграції Magento/ })).toBeNull();
 });
 
 it('loads only the projection for the selected configuration workspace', async () => {
@@ -41,6 +70,19 @@ it('loads only the projection for the selected configuration workspace', async (
   expect(get).not.toHaveBeenCalledWith('/config');
   expect(get).not.toHaveBeenCalledWith('/admin/config');
   expect(get.mock.calls.some(([url]) => url.startsWith('/admin/sku-schema/'))).toBe(false);
+});
+
+it('returns from category setup to the exact pricing category without catalog reads or writes', async () => {
+  const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/admin/pricing/config') return response(config);
+    if (url === '/admin/prices/BR') return response({ scenarios: [], modifiers: [] });
+    throw new Error(`Unexpected GET ${url}`);
+  });
+  const post = vi.spyOn(api, 'post');
+  renderPage('pricing', ['pricing.view'], '/admin/pricing?category=BR&returnTo=%2Fadmin%2Fmagento%2Fcategories%2Fnew%3Fcategory%3DBR');
+  await waitFor(() => expect(get).toHaveBeenCalledWith('/admin/prices/BR'));
+  expect(screen.getByRole('link', { name: /Повернутися до інтеграції/ }).getAttribute('href')).toBe('/admin/magento/categories/new?category=BR');
+  expect(get).not.toHaveBeenCalledWith('/admin/config'); expect(post).not.toHaveBeenCalled();
 });
 
 it('gates schema publication independently from catalog editing', async () => {

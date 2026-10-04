@@ -22,9 +22,13 @@ Diagnostic evidence/history is
 lazy-mounted. Repeated remote paths share one visual group without merging binding
 decisions or exact action targets.
 
-The four contexts are **Огляд**, category/problem detail,
-**Підготувати зміни інтеграції**, and **Дії Адміністратора**. Preparation is a
-revisitable workspace: scope → resources → mappings → product checks → publication.
+The workspace combines **Огляд**, categories/characteristics, **Правила товару**,
+saved changes and history, with **Дії Адміністратора** separately controlled.
+The rules editor now lives at `/admin/magento/rules/*`; old template URLs redirect
+without changing publication semantics. Category detail reads the actual binding's
+pinned template rather than inferring current rules from a newer publication or
+legacy CSV selection. Preparation is a revisitable, task-specific workspace:
+scope → necessary resources/rules → mappings → product checks → publication.
 The active publication stays visible while a draft is inspected. Resource creation
 does not refresh a frozen draft; prepare a fresh successor from the current published
 source and re-review unpublished decisions not supported by existing carry rules.
@@ -74,25 +78,62 @@ CSRF and lifecycle boundaries are unchanged. The browser never calls Magento.
 
 ### Recorded product problems in the application workspace
 
-The full-application redesign retains the Magento workspace above and links
-recorded product delivery problems from **Потребує уваги** to `/sync-problems`.
-Correction and synchronization counts remain independent. Future configuration
-preparation is not added to the operational problem count.
+**Потребує уваги** (`/attention`, compatible `/sync-problems`) opens recorded
+product delivery problems directly. Historical correction requests are secondary
+account-menu access, absent from this queue. Future configuration preparation is
+not added to the operational problem count.
 
 `GET /api/magento/problems/page` requires `products.view`, defaults to 30 rows,
-caps at 100, and accepts `offset` and an exact category filter. It reads recorded
+caps at 100, and accepts `offset`, article search, exact category and reason-group
+filters. `GET /api/magento/problems/:id` reads an exact selected product even when
+it is off-page or no longer needs attention. Both use `products.view` and recorded
 local sync/name/test-deletion evidence and returns `items` plus counted `pageInfo`;
 it does not probe Magento or mutate a job. The original `/magento/problems` and
 `/magento/summary` contracts remain available.
 
 The client requests 20 rows, presents a compact queue and one selected detail,
 and mounts name-conflict inspection only for the selected affected product.
-Its `category`, `offset` and `problem` query parameters preserve list context.
+Its `category`, `search`, `reason`, `offset` and `problem` parameters preserve context.
 Visible-page polling remains non-overlapping; stale responses from another filter
 cannot replace the current query. Failed reads retain an explicit unavailable or
 last-known state. Opening a product additionally requires `products.decode`.
 Technical diagnostics remain on demand, and uncertain writes retain their exact
 domain reconciliation path without a generic resend action.
+
+### Controlled product recovery
+
+The separate `/api/admin/magento-recovery` router preserves the authenticated
+active-user and synchronizer-token CSRF boundaries. No browser calls Magento.
+No migration, role grant or replacement of durable jobs is introduced.
+
+| Endpoint | Authority and effect |
+| --- | --- |
+| GET `/products/:id` | Either `export_templates.publish` or `exports.reconcile`; local original-job/lifecycle context with capability-filtered actions. |
+| GET `/jobs/:id` | `export_templates.publish`; exact original job and step states. |
+| POST `/jobs/:id/inspect` | Same capability; bounded remote GET evidence only, no dispatch or acknowledgement. |
+| POST `/jobs/:id/reconcile` | Same capability; rechecks reviewed local/remote fingerprints and records only verified results, with an audit receipt; no remote mutation. |
+| POST `/jobs/:id/continue` | Same capability; separate explicit reviewed continuation of remaining original steps through the existing guarded job executor. |
+| POST `/products/:id/lifecycle-preview`, `/lifecycle-apply` | `exports.reconcile`; exact existing exposure/stable-recount or eligible compatibility reconciliation, never a blanket hold release. |
+
+Inspection is not a generic retry. Dispatched but unverified steps must match exact
+GET evidence before acknowledgement. A partially reconciled job stays uncertain,
+preventing the automatic worker from sending remaining steps without a separate
+reviewed continuation. Current publication, product snapshot, actor, installation,
+plan integrity and session locks remain checked. Stale evidence requires a new
+inspection; changed or mismatched remote evidence never permits blind resend.
+GET-only inspection releases product/access/publication transaction locks before
+remote reads, retaining the SKU session lock and binding its result to the local
+snapshot. It exposes a bounded before/after review of remaining original changes.
+Acknowledgement and continuation preserve the existing manual executor's final
+transaction checks; they are not claimed to be lock-free remote operations.
+
+Lifecycle preview exposes the actual supported action and required evidence.
+Legacy replacement/first-delivery recipes remain unavailable after product-CSV
+cutover, checked again transactionally. Ordinary exposure can leave a held or
+parked product and therefore returns a separate reviewed-resync handoff; that
+action retains its actual Administrator-only contract. Stable recount uses its
+existing atomic `broader_resync` handoff. A local receipt never asserts successful
+Magento delivery. Unsupported or incomplete evidence stays blocked with a reason.
 
 ### Reviewed category creation (H2)
 
@@ -128,6 +169,11 @@ against dispatch. A superseded intent cannot dispatch. Dispatched/returned/verif
 reservations can never be replaced, even if later GETs show the target absent.
 
 ### Reviewed option creation (H4)
+
+The separate [controlled attribute workflow](MAGENTO_ATTRIBUTES.md) creates ordinary
+text/single-select attributes and explicitly connects them to an existing set.
+It uses the migration-059 extension of the permanent configuration-action ledger;
+option creation below retains its existing separate Administrator attestation.
 
 Option creation is bounded to one existing user-defined select/multiselect with
 ordinary standard-table source metadata. System, custom-source, unknown and

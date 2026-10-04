@@ -18,7 +18,7 @@ function presentStatus(row) {
     ? presentProblems(row.diagnostics, row.lifecycle)
     : [];
   const lifecycleProblem = problems.find((problem) => problem.resolution === 'lifecycle_reconciliation');
-  return { state: row.state || 'not_tracked', reason: row.state === 'needs_attention' ? lifecycleProblem?.message || reasons[row.reason_code] || reasons.unexpected_failure : null,
+  return { state: row.state || 'not_tracked', reason: row.state === 'needs_attention' ? lifecycleProblem?.message || problems[0]?.message || reasons[row.reason_code] || reasons.unexpected_failure : null,
     ...(problems.length ? { problems } : {}) };
 }
 async function readStatuses(db, productIds) {

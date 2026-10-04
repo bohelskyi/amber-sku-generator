@@ -41,6 +41,11 @@ function evaluate(amber, product) {
     const generatedNames = require('./name-reconciliation').applyNameOverride(mapped, product);
     return { base: mapped.base || {}, english: mapped.english || {}, ready: mapped.errors.length === 0,
       generatedNames,
+      evaluationIssues: mapped.errors.slice(0, 40).map((issue) => ({
+        ...(typeof issue.code === 'string' ? { code: issue.code.slice(0, 100) } : {}),
+        ...(typeof issue.field === 'string' ? { field: issue.field.slice(0, 100) } : {}),
+        ...(typeof issue.message === 'string' ? { message: issue.message.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 600) } : {}),
+      })),
       issueFields: [...new Set(mapped.errors.map((e) => e.field).filter((f) => /^[a-zA-Z][a-zA-Z0-9_]{0,99}$/.test(f)))] };
   } catch {
     return { base: {}, english: {}, ready: false, issueFields: [], failed: true };

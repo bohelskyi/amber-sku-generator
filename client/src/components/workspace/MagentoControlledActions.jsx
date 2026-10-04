@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api.js';
 import { useAuth } from '../../auth/auth-context.js';
 import { isActualAdministrator } from '../../auth/auth-model.js';
@@ -14,6 +14,9 @@ const blockers = { RECONCILIATION_REQUIRED: 'Раніше відправлену
   INVALID_GENERATED_NAMES: 'Правило не формує дві допустимі назви.' };
 
 function ControlledWorkspace({ revision, kind, onApplied }) {
+  const [params] = useSearchParams();
+  const targetId = /^[1-9]\d*$/.test(params.get('productId') || '') && Number.isSafeInteger(Number(params.get('productId'))) ? Number(params.get('productId')) : null;
+  const back = params.get('returnTo'); const returnTo = back && /^\/(attention|sync-problems)(\?|$)/.test(back) ? back : '/attention';
   const [candidates, setCandidates] = useState(null); const [selected, setSelected] = useState([]);
   const [productCursors, setProductCursors] = useState([0]); const [productPage, setProductPage] = useState(0);
   const [search, setSearch] = useState(''); const [reason, setReason] = useState('');
@@ -34,14 +37,20 @@ function ControlledWorkspace({ revision, kind, onApplied }) {
     inFlight.current = true;
     const current = ++sequence.current; setBusy(true); setError(''); setReview(null);
     try {
-      const { data } = await api.get(`${root}/bindings/${revision.id}/controlled-products`, { params: { after: cursor, search } });
-      if (current === sequence.current) { setCandidates(data); setProductPage(page); if (reset) setProductCursors([0]); }
+      const { data } = await api.get(`${root}/bindings/${revision.id}/controlled-products`, { params: { after: targetId ? targetId - 1 : cursor, search } });
+      if (current === sequence.current) {
+        const eligible = targetId ? data.products.filter((product) => product.productId === targetId) : data.products;
+        setCandidates(targetId ? { ...data, products: eligible, nextCursor: null } : data);
+        if (targetId) setSelected(eligible.filter((product) => !product.blockers.includes('RECONCILIATION_REQUIRED') && (kind !== 'name_rule' || product.changed && !product.blockers.length)).map((product) => product.productId));
+        setProductPage(page); if (reset) setProductCursors([0]);
+      }
     } catch (cause) { if (current === sequence.current) setError(cause.response?.data?.error || 'Не вдалося прочитати товари.'); }
     finally { if (current === sequence.current) { inFlight.current = false; setBusy(false); } }
   }
   function invalidate() { ++sequence.current; setReview(null); setReceipt(null); }
   const request = { bindingRevisionId: revision.id, expectedRevision: revision.revision, kind, productIds: selected, reason };
   return <section className="card space-y-3 p-5"><h2 className="font-semibold">{titles[kind]}</h2>
+    {targetId && <div className="space-y-2"><Link className="text-sm underline" to={returnTo}>Повернутися до проблеми товару</Link><p className="text-sm">Відкрито для одного товару з черги проблем. Спочатку перевірте його доступність; надсилання не запускається автоматично.</p></div>}
     <p className="text-sm">{kind === 'name_rule' ? 'Перегляньте обидві назви для кожного вибраного товару перед застосуванням правила.' : 'Обирайте лише товари, яким потрібна повторна синхронізація.'} Непідтверджені відправлення не скидаються і не повторюються.</p>
     {error && <Notice tone="error">{error}</Notice>}
     {receipt && <Notice tone="success"><p>Контрольовану дію збережено. Фактичний результат доставки перевіряйте за станом передачі товарів.</p><MagentoDetails summary="Деталі збереженої дії">{() => <pre className="overflow-auto text-xs">{JSON.stringify(receipt, null, 2)}</pre>}</MagentoDetails></Notice>}
@@ -60,7 +69,7 @@ function ControlledWorkspace({ revision, kind, onApplied }) {
         <span aria-live="polite">Сторінка {productPage + 1} · вибрано {selected.length} / 100</span>
         <button type="button" className="btn btn-outline btn-compact-md" disabled={busy || candidates.nextCursor == null} onClick={() => { setProductCursors([...productCursors.slice(0, productPage + 1), candidates.nextCursor]); loadProducts(candidates.nextCursor, productPage + 1); }}>Наступні товари</button>
       </nav>
-      {!candidates.products.length && <p>Товарів за цим пошуком немає.</p>}
+      {!candidates.products.length && <p>{targetId ? 'Цей товар недоступний для контрольованої дії за поточними налаштуваннями. Поверніться до проблеми й перевірте актуальний стан.' : 'Товарів за цим пошуком немає.'}</p>}
       <p className="text-sm text-slate-500">Вибір зберігається між сторінками. Перед підтвердженням сервер перевіряє весь точний вибір.</p>
       <label className="block text-sm">Пояснення контрольованої дії<input className="input" maxLength={2000} value={reason} disabled={busy} onChange={(event) => { invalidate(); setReason(event.target.value); }} /></label>
       <button type="button" className="btn btn-outline btn-compact-md" disabled={busy || !selected.length || reason.trim().length < 3} onClick={() => action('controlled/preview', request, setReview)}>Перевірити вибрану дію</button>
@@ -78,10 +87,11 @@ function ControlledWorkspace({ revision, kind, onApplied }) {
 
 export default function MagentoControlledActions(props) {
   const auth = useAuth();
+  const [params] = useSearchParams();
   const canApply = isActualAdministrator(auth) && ['export_templates.manage', 'export_templates.publish', 'exports.view'].every((permission) => auth.permissions.includes(permission))
     && (props.kind !== 'name_rule' || auth.permissions.includes('exports.create'));
   if (!Object.hasOwn(titles, props.kind)) return null;
   if (!canApply) return <Notice>Для цієї дії потрібні права Адміністратора.</Notice>;
   if (props.revision?.state !== 'published' || props.currentPublishedId !== props.revision?.id) return <Notice>Для контрольованої дії потрібна чинна опублікована версія.</Notice>;
-  return <ControlledWorkspace key={`${props.revision.id}:${props.revision.revision}:${props.kind}`} {...props} />;
+  return <ControlledWorkspace key={`${props.revision.id}:${props.revision.revision}:${props.kind}:${params.get('productId') || ''}`} {...props} />;
 }

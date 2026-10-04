@@ -55,7 +55,7 @@ export function ProductMagentoState({ product, onRepairCharacteristics, onSaved 
   const lifecycleProblem = current?.problems?.find((problem) => problem.resolution === 'lifecycle_reconciliation');
   return <div className="product-sync-state px-4 py-2" aria-live="polite">
     <MagentoSyncStatus status={hasReadinessProblem || lifecycleProblem ? { ...current, reason: null } : current} />
-    {current?.state === 'needs_attention' && <Link className="text-xs underline" to="/sync-problems">Переглянути проблему</Link>}
+    {current?.state === 'needs_attention' && <Link className="text-xs underline" to={`/attention?problem=${encodeURIComponent(productId)}`}>Переглянути проблему</Link>}
     {lifecycleProblem && <section className="mt-2"><h3 className="font-semibold">{lifecycleProblem.message}</h3>
       <LifecycleReconciliationNotice problem={lifecycleProblem} article={product.publicSku} /></section>}
     <ProductMagentoAttention key={`readiness-${productId}`} product={{ ...product, nameConflict: Boolean(current?.nameConflict) }} problems={current?.problems || []}

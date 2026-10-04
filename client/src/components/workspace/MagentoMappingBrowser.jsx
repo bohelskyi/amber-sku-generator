@@ -1,14 +1,20 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import MagentoDetails from './MagentoDetails.jsx';
+import './category-journeys.css';
 
 const labels = { approved: 'Підтверджено', not_applicable: 'Не застосовується', blocked: 'Рішення / обмеження', candidate: 'Потрібна перевірка', missing: 'Відсутня відповідність', ambiguous: 'Потрібно уточнити', drifted: 'Потрібна повторна перевірка' };
 const ROW_LIMIT = 50;
 const GROUP_LIMIT = 20;
 
-function MappingRow({ value }) {
-  return <article className="py-3">
-    <p className="font-medium">{value.questionLabel}: {value.label}</p><p className="text-sm">{labels[value.state] || 'Потрібна перевірка'}</p>
-    <MagentoDetails>{() => <><p>value_id: {value.valueId} · sku_code: {value.skuCode}</p>{value.mappings.map((mapping, index) => <p key={index}>{mapping.routeKey} · {mapping.attribute} · Magento ID {mapping.optionId ?? '—'} · {mapping.optionLabel}</p>)}</>}</MagentoDetails>
+function MappingRow({ value, targetFields = [], actionFor }) {
+  const targets = value.mappings || [];
+  return <article className="py-3 category-mapping-row">
+    <div><p className="font-medium">{value.questionLabel}: {value.label}</p><small>Значення в Amber</small></div>
+    <div>{targets.length ? targets.map((mapping, index) => <p key={index}>{mapping.optionLabel || 'Значення ще не обрано'}<small>{mapping.attribute || 'Атрибут ще не визначено'}</small></p>)
+      : <p>Не пов’язано<small>{targetFields.length ? `Поле правила: ${targetFields.join(', ')}` : 'Поле Magento ще не визначено'}</small></p>}</div>
+    <div><p className="text-sm">{labels[value.state] || 'Потрібна перевірка'}</p>{actionFor && value.state !== 'not_applicable' && <Link className="underline text-sm" to={actionFor(value, targetFields)}>{value.state === 'approved' ? 'Переглянути відповідність' : 'Налаштувати відповідність'}</Link>}</div>
+    <div className="category-mapping-evidence"><MagentoDetails>{() => <><p>value_id: {value.valueId} · sku_code: {value.skuCode}</p>{targets.map((mapping, index) => <p key={index}>{mapping.routeKey} · {mapping.attribute} · Magento ID {mapping.optionId ?? '—'} · {mapping.optionLabel}</p>)}</>}</MagentoDetails></div>
   </article>;
 }
 
@@ -21,7 +27,7 @@ function Pages({ page, count, limit, onChange, label }) {
   </nav>;
 }
 
-export default function MagentoMappingBrowser({ values, field = '' }) {
+export default function MagentoMappingBrowser({ values, field = '', catalogPath, targetsByQuestion = {}, actionFor, optionActionFor }) {
   const [all, setAll] = useState(Boolean(field));
   const [search, setSearch] = useState('');
   const [context, setContext] = useState(field);
@@ -31,13 +37,13 @@ export default function MagentoMappingBrowser({ values, field = '' }) {
   const reset = () => { setPage(0); setOpen(null); setRowPage(0); };
   const term = search.trim().toLocaleLowerCase('uk');
   const visible = values.filter((value) => (all || ['missing', 'candidate', 'ambiguous', 'drifted'].includes(value.state))
-    && (!context || value.mappings.some((mapping) => mapping.attribute === context))
+    && (!context || value.mappings.some((mapping) => mapping.attribute === context) || targetsByQuestion[value.questionKey]?.includes(context))
     && (!term || [value.questionLabel, value.label, value.questionKey,
-      ...value.mappings.flatMap((mapping) => [mapping.attribute, mapping.routeKey, mapping.optionLabel])]
+      ...(targetsByQuestion[value.questionKey] || []), ...value.mappings.flatMap((mapping) => [mapping.attribute, mapping.routeKey, mapping.optionLabel])]
       .some((text) => String(text ?? '').toLocaleLowerCase('uk').includes(term))));
   const groups = new Map();
   for (const value of visible) {
-    const targets = [...new Set(value.mappings.map((mapping) => mapping.attribute).filter(Boolean))].sort();
+    const targets = [...new Set([...value.mappings.map((mapping) => mapping.attribute).filter(Boolean), ...(targetsByQuestion[value.questionKey] || [])])].sort();
     const key = JSON.stringify([value.questionKey, targets]);
     if (!groups.has(key)) groups.set(key, { key, label: value.questionLabel, questionKey: value.questionKey, targets, values: [] });
     groups.get(key).values.push(value);
@@ -61,10 +67,11 @@ export default function MagentoMappingBrowser({ values, field = '' }) {
         {group.label} · {group.questionKey}{group.targets.length > 0 && ` → ${group.targets.join(', ')}`} · {group.values.length}
       </button>
       {open === group.key && <div className="divide-y pl-3">
-        {group.values.slice(rowPage * ROW_LIMIT, (rowPage + 1) * ROW_LIMIT).map((value) => <MappingRow key={`${value.questionKey}:${value.valueId}`} value={value} />)}
+        {(optionActionFor || catalogPath) && <p className="py-2 text-sm"><Link className="underline" to={optionActionFor ? optionActionFor(group) : `${catalogPath}&question=${encodeURIComponent(group.questionKey)}&action=new-option`}>Додати значення: {group.label}</Link></p>}
+        {group.values.slice(rowPage * ROW_LIMIT, (rowPage + 1) * ROW_LIMIT).map((value) => <MappingRow key={`${value.questionKey}:${value.valueId}`} value={value} targetFields={targetsByQuestion[value.questionKey]} actionFor={actionFor} />)}
         <Pages page={rowPage} count={group.values.length} limit={ROW_LIMIT} onChange={setRowPage} label="Сторінки значень групи" />
       </div>}
-    </section>)}</div> : <div className="divide-y">{visible.slice(current * limit, (current + 1) * limit).map((value) => <MappingRow key={`${value.questionKey}:${value.valueId}`} value={value} />)}</div>}
+    </section>)}</div> : <div className="divide-y">{visible.slice(current * limit, (current + 1) * limit).map((value) => <MappingRow key={`${value.questionKey}:${value.valueId}`} value={value} targetFields={targetsByQuestion[value.questionKey]} actionFor={actionFor} />)}</div>}
     <Pages page={current} count={count} limit={limit} onChange={(next) => { setPage(next); setOpen(null); setRowPage(0); }} label={all ? 'Сторінки груп відповідностей' : 'Сторінки відповідностей'} />
   </div>;
 }

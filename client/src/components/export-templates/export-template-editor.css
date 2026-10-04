@@ -252,3 +252,19 @@
   .et-technical-dialog .et-inspector { padding: 0; }
   .et-rule-summary, .et-fallback, .et-fallback li { min-width: 0; max-width: 100%; }
 }
+.integration-rules { min-width: 0; }
+.integration-rules-toolbar { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.integration-rules-toolbar label { display: grid; gap: 5px; font-size: 13px; }
+.integration-rules table { width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: 14px; }
+.integration-rules th, .integration-rules td { padding: 12px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; font-size: 13px; }
+.integration-rules thead { background: var(--surface-subtle, #f1f5f9); }
+.integration-rules th small, .integration-rules td small { display: block; color: var(--text-muted); font-size: 11px; font-weight: 400; margin-top: 4px; }
+.integration-template-workspace { width: 100%; max-width: none; padding: 0; }
+.integration-template-workspace .et-editor-surface { padding: 16px; }
+@media (max-width: 760px) {
+  .integration-rules table, .integration-rules tbody, .integration-rules tr, .integration-rules td, .integration-rules th { display: block; width: auto; }
+  .integration-rules thead { display: none; }
+  .integration-rules tr { border-bottom: 1px solid var(--border); padding: 10px 0; }
+  .integration-rules th, .integration-rules td { border: 0; padding: 4px 0; }
+  .integration-rules td::before { content: attr(data-label) ': '; font-weight: 600; }
+}

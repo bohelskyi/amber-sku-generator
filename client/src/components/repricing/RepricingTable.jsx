@@ -119,7 +119,7 @@ export function RepricingTable({
                         onClick={() => setRecountTarget({
                           productId: Number(item.productId),
                           sku: item.publicSku || item.sku,
-                          mode: 'request',
+                          mode: canApplyDirectRecount ? 'apply' : 'request',
                         })}
                       >
                         <ScanSearch size={14} />

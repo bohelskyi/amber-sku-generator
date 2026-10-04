@@ -13,7 +13,7 @@ const FIELD_LABELS = Object.freeze({
   kamin_obrobka: 'Обробка каменю',
 });
 
-export function ProductMagentoAttention({ product, problems = [], onRepairCharacteristics, onSaved }) {
+export function ProductMagentoAttention({ product, problems = [], onRepairCharacteristics, onSaved, compact = false }) {
   const { permissions = [] } = useContext(AuthContext) || {};
   const [open, setOpen] = useState(false);
   const [sizeOpen, setSizeOpen] = useState(false);
@@ -29,12 +29,14 @@ export function ProductMagentoAttention({ product, problems = [], onRepairCharac
   const canRepairInformation = permissions.includes('products.recount');
   const canRepairCharacteristics = permissions.includes('products.recount') && onRepairCharacteristics;
   const labels = issueFields.map((field) => FIELD_LABELS[field]).filter(Boolean);
+  const Surface = compact ? 'div' : Notice;
   return <>
-    <Notice tone="warning"><p className="font-semibold">{readiness ? 'Товар не готовий до синхронізації' : 'Потрібно перевірити назву для Magento'}</p>
+    <Surface {...(compact ? {} : { tone: 'warning' })}>{!compact && <><p className="font-semibold">{readiness ? 'Товар не готовий до синхронізації' : 'Потрібно перевірити назву для Magento'}</p>
       <p>{readiness
         ? 'Потрібно доповнити або виправити дані товару.'
         : 'Успадковані назви потребують підтвердження. Після перевірки сервер повторно оцінить готовність товару до синхронізації.'}</p>
-      {labels.length > 0 && <ul className="mt-2 list-disc pl-5">{labels.map((label) => <li key={label}>{label}</li>)}</ul>}
+      {readiness?.evaluationIssues?.length > 0 ? <ul className="mt-2 list-disc pl-5">{readiness.evaluationIssues.map((issue, index) => <li key={index}>{issue.message || FIELD_LABELS[issue.field] || 'Перевірте поле товару.'}</li>)}</ul>
+        : labels.length > 0 && <ul className="mt-2 list-disc pl-5">{labels.map((label) => <li key={label}>{label}</li>)}</ul>}</>}
       <div className="mt-2 flex flex-wrap gap-2">
         {(needsNameCompletion || inheritedNameReview) && canEditName && <button type="button" className="btn btn-primary" onClick={() => setOpen(true)}>
           {needsNameCompletion ? 'Заповнити назви' : 'Перевірити назви'}
@@ -43,17 +45,17 @@ export function ProductMagentoAttention({ product, problems = [], onRepairCharac
         {needsCharacteristics && canRepairCharacteristics && <button type="button" className="btn btn-primary" onClick={onRepairCharacteristics}>
           Виправити характеристики
         </button>}
-        {permissions.includes('export_templates.view') && product.categoryCode && issueFields.map((field) => <Link key={field} className="btn btn-outline" to={`/admin/magento/categories/${encodeURIComponent(product.categoryCode)}?field=${encodeURIComponent(field)}`}>
+        {!compact && permissions.includes('export_templates.view') && product.categoryCode && issueFields.map((field) => <Link key={field} className="btn btn-outline" to={`/admin/magento/categories/${encodeURIComponent(product.categoryCode)}?field=${encodeURIComponent(field)}`}>
           Відповідності: {FIELD_LABELS[field] || field}
         </Link>)}
       </div>
       {((needsNameCompletion || inheritedNameReview) && !canEditName) || (needsSize && !canRepairInformation) || (needsCharacteristics && !canRepairCharacteristics)
         ? <p className="mt-2">Передайте виправлення оператору з дозволом на відповідну зміну даних товару.</p>
         : null}
-      {readiness && <TechnicalDisclosure><dl className="technical-key-values"><div><dt>Код</dt><dd>{readiness.code}</dd></div>
+      {!compact && readiness && <TechnicalDisclosure><dl className="technical-key-values"><div><dt>Код</dt><dd>{readiness.code}</dd></div>
         {readiness.diagnosticCode && <div><dt>Діагностика</dt><dd>{readiness.diagnosticCode}</dd></div>}
         {issueFields.length > 0 && <div><dt>Контекст</dt><dd>{issueFields.join(', ')}</dd></div>}</dl></TechnicalDisclosure>}
-    </Notice>
+    </Surface>
     {open && <WorkspaceDialog title={needsNameCompletion ? 'Заповнення назв для Magento' : 'Перевірка назв для Magento'} onClose={() => setOpen(false)} busy={busy}>
       <ProductMagentoNameReview product={product} onBusyChange={setBusy} onClose={() => setOpen(false)} onSaved={() => { setOpen(false); onSaved?.(); }} />
     </WorkspaceDialog>}

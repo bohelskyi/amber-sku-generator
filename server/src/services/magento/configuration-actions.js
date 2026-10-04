@@ -15,6 +15,7 @@ async function mutate(options, operation) {
 }
 async function seal(config, preview, options = {}) {
   return mutate(options, async (client, context) => {
+    if (['attribute','attribute_assignment'].includes(preview.kind)) await require('./configuration-attribute').checkedSource(client, config, preview, context.actorUserId);
     if (preview.kind === 'option_label') await require('./configuration-option-labels').checkedSource(client, config, preview, context.actorUserId);
     if (preview.kind === 'option') await require('./configuration-option').checkedAttestation(client, config, preview, context.actorUserId);
     const revision = (await client.query('SELECT state,revision FROM magento_binding_revisions WHERE id=$1 FOR UPDATE', [preview.bindingRevisionId])).rows[0];
@@ -44,6 +45,7 @@ async function transition(id, from, to, input, options = {}) {
   return mutate(options, async (client, context) => {
     const action = (await client.query('SELECT * FROM magento_configuration_actions WHERE id=$1 FOR UPDATE', [id])).rows[0];
     if (!action || action.state !== from) throw c.error(409, 'MAGENTO_CONFIGURATION_RECONCILIATION_REQUIRED', 'Action is no longer eligible for this transition');
+    if (['attribute','attribute_assignment'].includes(action.kind)) await require('./configuration-attribute').checkedSource(client, {baseUrl:action.intent.origin}, action.intent, context.actorUserId);
     if (from === 'sealed') {
       if (action.kind === 'option_label') await require('./configuration-option-labels').checkedSource(client, {baseUrl:action.intent.origin}, action.intent, context.actorUserId);
       if (action.kind === 'option') await require('./configuration-option').checkedAttestation(client, { baseUrl: action.intent.origin }, action.intent, context.actorUserId);
@@ -70,9 +72,11 @@ function receipt(row) {
   return { id: row.id, kind: row.kind, state: row.state, remoteId: row.remote_id,
     path: row.intent.path ?? null,
     attributeCode: row.intent.target?.attributeCode ?? null, label: row.intent.label ?? null,
+    ...(['attribute','attribute_assignment'].includes(row.kind) ? {attributeSet:row.intent.target?.set || null,assignmentPlacementVerified:false,
+      ...(row.kind === 'attribute' ? {attributeProfile:row.intent.body.attribute} : {requestedGroup:row.intent.target.group,requestedOrder:row.intent.body.sortOrder})} : {}),
     createdAt: row.created_at, verifiedAt: row.verified_at, bound: false,
-    canReconcile: row.state === 'returned' || (row.kind === 'option_label' && row.state === 'dispatched'), canReview: row.state === 'sealed', supersedesId: row.supersedes_id,
-    message: row.state === 'verified' ? (row.kind === 'option_label' ? 'Назви перевірено; відповідність не змінено' : 'Створено, зв’язок ще не підтверджено')
+    canReconcile: row.state === 'returned' || (['option_label','attribute_assignment'].includes(row.kind) && row.state === 'dispatched'), canReview: row.state === 'sealed', supersedesId: row.supersedes_id,
+    message: row.state === 'verified' ? (row.kind === 'option_label' ? 'Назви перевірено; відповідність не змінено' : row.kind === 'attribute' ? 'Атрибут створено та перевірено. Підключіть його до потрібного набору.' : row.kind === 'attribute_assignment' ? 'Атрибут доступний у вибраному наборі. Правила передачі ще потрібно підключити.' : 'Створено, зв’язок ще не підтверджено')
       : row.state === 'sealed' ? 'Зміну підготовлено, але не надіслано. Повторіть перевірку перед створенням.'
         : row.state === 'superseded' ? 'Замінено новою перевіреною дією; цю дію не буде надіслано.'
           : 'Amber надіслав зміну. Підтвердження кінцевого стану ще немає; повторне надсилання недоступне.' };

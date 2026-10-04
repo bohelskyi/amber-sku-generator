@@ -58,6 +58,14 @@ picker reaches the complete eligible scope in bounded pages while retaining the
 
 Fresh installations still require explicit reviewed activation, publication and cutover. Migration installation alone never allocates public identities, confirms old delivery, enrolls existing products, publishes a binding or calls Magento. Follow the [cutover runbook](docs/FULL_PRODUCT_CUTOVER_RUNBOOK.md) only for installations that have not completed it; ordinary deployments follow [Operations](docs/OPERATIONS.md).
 
+The local administrator scenario UI now unifies category placement, characteristics,
+options and exact-product diagnosis. [Migration 059](server/migrations/059_magento_attribute_actions.sql)
+extends the permanent configuration-action ledger for bounded ordinary
+text/single-select attribute creation and separate reviewed set membership.
+[The attribute contract](docs/MAGENTO_ATTRIBUTES.md) documents explicit settings,
+Administrator checks, uncertain-write recovery and stock Magento readback limits.
+This is repository implementation, not deployment or real Magento acceptance.
+
 ## Repository and verification
 
 | Path | Responsibility |

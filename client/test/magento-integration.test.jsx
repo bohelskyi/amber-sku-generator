@@ -34,15 +34,15 @@ it('discovery is explicit and failed checks retain the prior factual observation
   const stored = screen.getByText(/Остання перевірка структури Magento:/).textContent;
   expect(stored).not.toContain('02.10.26');
   api.post.mockRejectedValueOnce({ response: { data: { error: 'Magento недоступний' } } });
-  fireEvent.click(screen.getByRole('button', { name: 'Перевірити Magento' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити структуру' }));
   await screen.findByText('Magento недоступний');
   expect(screen.getByText(/Остання перевірка структури Magento:/).textContent).toBe(stored);
   expect(screen.getByText('Зафіксованих проблем немає')).toBeTruthy();
   expect(screen.queryByText(/застаріл|7 днів/i)).toBeNull();
   api.post.mockResolvedValueOnce({ data: { observedAt: '2026-10-02T14:32:00Z', schema: { attributes: [] }, categories: [] } });
-  fireEvent.click(screen.getByRole('button', { name: 'Перевірити Magento' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити структуру' }));
   await screen.findByText(/Явна перевірка в цьому сеансі/);
-  expect(api.post.mock.calls).toEqual([['/admin/magento-integration/discovery', {}], ['/admin/magento-integration/discovery', {}]]);
+  expect(api.post.mock.calls).toEqual([['/admin/magento-integration/structure-check', {}], ['/admin/magento-integration/structure-check', {}]]);
 });
 
 it('does not turn unknown evidence into zero problems or Administrator authority', async () => {
@@ -91,9 +91,9 @@ it.each(['Не оброблений камінь', 'Який камінь?', 'st
   await screen.findByText(/Немає невирішених/);
   fireEvent.click(screen.getByRole('button', { name: 'Показати всі відповідності' }));
   expect(document.querySelectorAll('article')).toHaveLength(0);
-  expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(20);
+  expect(within(screen.getByRole('heading', { name: 'Відповідності категорії' }).closest('section')).getAllByRole('button', { expanded: false })).toHaveLength(20);
   fireEvent.change(screen.getByRole('searchbox', { name: 'Пошук відповідностей' }), { target: { value: search } });
-  expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(1);
+  expect(within(screen.getByRole('heading', { name: 'Відповідності категорії' }).closest('section')).getAllByRole('button', { expanded: false })).toHaveLength(1);
   fireEvent.click(screen.getByRole('button', { name: 'Який камінь? · stone_processing → kamin_obrobka · 1' }));
   expect(screen.getByText('Який камінь?: Не оброблений камінь')).toBeTruthy();
   expect(document.querySelectorAll('article')).toHaveLength(1);
@@ -108,10 +108,10 @@ it('a field deep link filters approved mappings, keeps groups collapsed and lets
   shell('/admin/magento/categories/XX?field=kamin_obrobka');
   await screen.findByText('kamin_obrobka');
   expect(screen.getByRole('button', { name: 'Показати лише питання' }).getAttribute('aria-pressed')).toBe('true');
-  expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(1);
+  expect(within(screen.getByRole('heading', { name: 'Відповідності категорії' }).closest('section')).getAllByRole('button', { expanded: false })).toHaveLength(1);
   expect(document.querySelectorAll('article')).toHaveLength(0);
   fireEvent.click(screen.getByRole('button', { name: 'Зняти фільтр поля' }));
-  expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(2);
+  expect(within(screen.getByRole('heading', { name: 'Відповідності категорії' }).closest('section')).getAllByRole('button', { expanded: false })).toHaveLength(2);
   fireEvent.click(screen.getByRole('button', { name: 'Показати лише питання' }));
   expect(screen.queryByRole('searchbox')).toBeNull();
   expect(screen.queryByText('Світлий')).toBeNull();

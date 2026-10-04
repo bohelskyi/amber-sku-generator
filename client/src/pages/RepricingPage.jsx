@@ -32,7 +32,6 @@ export default function RepricingPage() {
   const {
     canApplyDirectRecount,
     canApplyRepricing: mayApplyRepricing,
-    canCreateCorrectionRequest,
     canRollbackRepricing,
   } = permissionUi;
   const setView = (nextView) => setSearchParams(
@@ -89,7 +88,7 @@ export default function RepricingPage() {
         <RepricingWorkflowNotices controller={controller} />
         {view !== 'history' && <RepricingWorkspace
           canApplyDirectRecount={canApplyDirectRecount && Boolean(controller.config)}
-          canCreateCorrectionRequest={canCreateCorrectionRequest && Boolean(controller.config)}
+          canCreateCorrectionRequest={false}
           controller={controller}
           canPrepareRepricing={auth.permissions.includes('repricing.prepare')}
           mayApplyRepricing={mayApplyRepricing}
@@ -131,13 +130,13 @@ export default function RepricingPage() {
         />
       )}
 
-      {controller.recountTarget && controller.config && (
+      {canApplyDirectRecount && controller.recountTarget && controller.config && (
         <RepricingRecountDrawer
           canPriceOverride={permissionUi.canPriceOverrideCorrections}
           canApplyRecount={canApplyDirectRecount}
-          canCreateRequest={canCreateCorrectionRequest}
+          canCreateRequest={false}
           config={controller.config}
-          initialMode={controller.recountTarget.mode || 'apply'}
+          initialMode="apply"
           initialSku={controller.recountTarget.sku}
           onApplied={controller.handleRecountApplied}
           onRequestCreated={controller.handleCorrectionRequestCreated}

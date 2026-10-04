@@ -12,21 +12,42 @@ const { definition } = require('../../server/test/fixtures/magento-v4');
 const { compileDefinition } = require('../../server/src/services/export-templates/definition');
 vi.mock('../src/lib/api.js', () => ({ api: { get: vi.fn(), post: vi.fn() } }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
-it('v4 uses the normal grid and new category authoring remains a local reviewed template draft', () => {
+it('v4 uses the normal grid and new category authoring remains a local reviewed template draft', async () => {
   const d = definition(); const change = vi.fn();
+  api.get.mockResolvedValue({ data: { categories: [{ code: 'ZZ', name: 'Нова категорія' }] } });
+  api.post.mockResolvedValue({ data: { categories: [{ categoryId: '12', normalizedPath: 'Default/Нова', comparable: true }], schema: { attributeSets: [{ attribute_set_id: 151, attribute_set_name: 'Fixture set' }] } } });
   render(<DefinitionEditor definition={d} registry={{ productFields: [] }} onChange={change} />);
   expect(screen.getByRole('table')).toBeTruthy();
   expect(screen.queryByText('Цей формат ще не підтримується формами.')).toBeNull();
-  fireEvent.click(screen.getByText('Категорії інтеграційного шаблону'));
-  const fields = { 'Код категорії Amber': 'ZZ', 'Назва категорії Amber': 'Нова категорія',
-    'Основна назва товару українською': 'Свідома назва', 'Основна назва товару англійською': 'Reviewed English name',
-    'Точна назва набору атрибутів Magento': 'Fixture set', 'Повний шлях категорії Magento': 'Default/Нова' };
+  fireEvent.click(screen.getByRole('button', { name: 'Додати категорію до правил' }));
+  await screen.findByRole('option', { name: 'Нова категорія' });
+  const fields = { 'Категорія товару': 'ZZ', 'Основна назва товару українською': 'Свідома назва', 'Основна назва товару англійською': 'Reviewed English name' };
   for (const [label, value] of Object.entries(fields)) fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  expect(api.post).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Прочитати структуру магазину' }));
+  await screen.findByRole('button', { name: 'Default › Нова' });
+  fireEvent.change(screen.getByLabelText('Набір характеристик'), { target: { value: 'Fixture set' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Default › Нова' }));
   fireEvent.click(screen.getByRole('button', { name: 'Додати категорію до чернетки' }));
   const next = change.mock.calls[0][0]; expect(next.groups.at(-1).route).toBe('ZZ');
   expect(compileDefinition(next).definition.evaluatorVersion).toBe('magento-declarative-4');
-  expect(d.groups).toHaveLength(1); expect(api.post).not.toHaveBeenCalled();
+  expect(d.groups).toHaveLength(1); expect(api.post.mock.calls).toEqual([['/admin/magento-integration/discovery', {}]]);
   expect(() => addIntegrationCategory(d, { code: 'YY' })).toThrow();
+});
+it('keeps pending category fields while the editor is hidden by a navigation guard and restores them on Stay', async () => {
+  const d = definition(); const change = vi.fn(); const pending = vi.fn();
+  api.get.mockResolvedValue({ data: { categories: [{ code: 'ZZ', name: 'Нова категорія' }] } });
+  const props = { definition: d, registry: { productFields: [] }, onChange: change, onPendingChange: pending, initialCategory: 'ZZ' };
+  const view = render(<DefinitionEditor {...props} />);
+  await screen.findByRole('option', { name: 'Нова категорія' });
+  fireEvent.change(screen.getByLabelText('Основна назва товару українською'), { target: { value: 'Збережене заповнення' } });
+  expect(pending).toHaveBeenLastCalledWith(true);
+  view.rerender(<DefinitionEditor {...props} visible={false} />);
+  view.rerender(<DefinitionEditor {...props} visible />);
+  expect(screen.getByLabelText('Основна назва товару українською').value).toBe('Збережене заповнення');
+  expect(pending).toHaveBeenLastCalledWith(true);
+  expect(api.get).toHaveBeenCalledOnce();
+  expect(api.post).not.toHaveBeenCalled();
 });
 it('review candidate selection is separate from approval and exact clone is a separate command', async () => {
   const revision = { id: 'draft', state: 'draft', revision: '1', templateId: 'family', templateVersionId: 'version',

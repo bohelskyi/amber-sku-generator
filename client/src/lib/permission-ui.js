@@ -24,6 +24,5 @@ export function getPermissionUiState(permissions = []) {
 
 export function getRecountUiMode(permissionUi) {
   if (permissionUi.canApplyDirectRecount) return 'apply';
-  if (permissionUi.canCreateCorrectionRequest) return 'request';
   return null;
 }

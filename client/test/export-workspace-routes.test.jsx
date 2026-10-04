@@ -83,6 +83,7 @@ beforeEach(() => {
   templates.activation.mockResolvedValue(response({ implementation: 'legacy', generation: '3' }));
   templates.system.mockResolvedValue(response({ definition: family.draft.definition }));
   templates.candidate.mockResolvedValue(response({ definition: family.draft.definition, diagnostics: [] }));
+  vi.spyOn(api, 'get').mockResolvedValue(response({ integration: { configured: false, activePublication: null, delivery: { state: 'disabled' }, operational: { state: 'unavailable', count: null }, structureObservation: null, draftCount: 0 }, categories: [] }));
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -217,9 +218,33 @@ it('template URLs open table/check/versions and system read-only without publish
   const { router } = mount('/admin/export-templates/family-a/check', admin);
   await screen.findByRole('heading', { name: 'Перевірка шаблону' }, { timeout: 10000 });
   link('Версії', 'Розділи шаблону'); await screen.findByRole('heading', { name: 'Версії шаблону' });
+  expect(router.state.location.pathname).toBe('/admin/magento/rules/family-a/versions');
+  expect(templates.activation).not.toHaveBeenCalled();
   await navigate(router, -1); expect(screen.getByRole('link', { name: 'Перевірка', exact: true }).getAttribute('aria-current')).toBe('page');
   await navigate(router, 1); await navigate(router, '/admin/export-templates/system'); await screen.findByText('Magento — поточний системний');
   expect(templates.get).toHaveBeenCalledTimes(1); expect(templates.system).toHaveBeenCalledTimes(1); noMutations();
+});
+
+it('publishing subcategory rules hands off the new exact version with the original repair context', async () => {
+  family.versions = [{ id: 'old-rules', versionNumber: '1', definition: family.draft.definition }];
+  const nextVersion = { id: 'new-subcategory-rules', versionNumber: '2', definition: family.draft.definition };
+  templates.publish.mockResolvedValue(response(nextVersion));
+  const remoteCommand = vi.spyOn(api, 'post').mockResolvedValue(response({}));
+  const repair = { category: 'BR', field: 'categories', productId: '41', path: 'Default Category/Браслети/Нові', returnTo: '/attention?category=BR&problem=41' };
+  const query = new URLSearchParams({ ...repair, intent: 'subcategory', templateVersion: 'old-rules' });
+  const { router } = mount('/admin/magento/rules/family-a/versions?' + query, admin);
+  await screen.findByRole('heading', { name: 'Версії шаблону' });
+  button('Зафіксувати версію правил');
+  button('Підтвердити публікацію');
+  const handoff = await screen.findByRole('link', { name: 'Перевірити ці правила для інтеграції' });
+  const destination = new URL(handoff.getAttribute('href'), 'http://localhost');
+  expect(destination.pathname).toBe('/admin/magento/prepare');
+  expect(Object.fromEntries(destination.searchParams)).toEqual({ ...repair, intent: 'subcategory', templateVersion: nextVersion.id });
+  expect(new URLSearchParams(router.state.location.search).get('version')).toBe(nextVersion.id);
+  expect(templates.publish).toHaveBeenCalledWith(family.id, { expectedRevision: '9', expectedDefinitionHash: 'saved-hash' });
+  expect(templates.publish).toHaveBeenCalledTimes(1);
+  expect(templates.select).not.toHaveBeenCalled();
+  expect(remoteCommand).not.toHaveBeenCalled();
 });
 
 it('export SKU handoff opens only the explicitly requested existing decode workflow and respects permission', async () => {
@@ -258,22 +283,24 @@ it.each(['publish', 'activate'])('%s-only template capability retains independen
   await screen.findByRole('heading', { name: 'Версії шаблону' });
   expect(templates.sources).not.toHaveBeenCalled(); expect(screen.queryByRole('button', { name: 'Зберегти чернетку' })).toBeNull();
   if (capability === 'publish') {
-    expect(screen.getByRole('button', { name: 'Опублікувати версію' }).disabled).toBe(false);
+    expect(screen.getByRole('button', { name: 'Зафіксувати версію правил' }).disabled).toBe(false);
     expect(screen.queryByRole('button', { name: 'Скасувати вибір шаблону' })).toBeNull();
   } else {
-    expect(screen.getByRole('button', { name: 'Вибрати відкриту публікацію v1' }).disabled).toBe(false);
-    expect(screen.queryByRole('button', { name: 'Опублікувати версію' })).toBeNull();
+    expect(templates.activation).not.toHaveBeenCalled();
+    button('Сумісність з історичним експортом');
+    expect((await screen.findByRole('button', { name: 'Вибрати відкриту публікацію v1' })).disabled).toBe(false);
+    expect(screen.queryByRole('button', { name: 'Зафіксувати версію правил' })).toBeNull();
   }
   noMutations();
 });
 
 it('dirty draft survives local back/forward; Stay, failed Save, successful Save and Discard guard definition changes', async () => {
   const { router } = mount('/admin/export-templates/family-a', admin);
-  await screen.findByRole('tablist', { name: 'Категорії файлів' }); button('Налаштувати колонку meta_title');
-  fireEvent.change(screen.getByLabelText('Текст у файлі', { exact: true }), { target: { value: '  точний текст\n' } }); button('Застосувати до чернетки');
+  await screen.findByRole('tablist', { name: 'Категорії файлів' }); button('Розширена таблиця правил'); button('Налаштувати колонку meta_title');
+  fireEvent.change(screen.getByLabelText('Значення для Magento', { exact: true }), { target: { value: '  точний текст\n' } }); button('Застосувати до чернетки');
   link('Перевірка', 'Розділи шаблону'); link('Версії', 'Розділи шаблону');
   await navigate(router, -1); await navigate(router, -1); await navigate(router, 1); await navigate(router, -1);
-  button('Налаштувати колонку meta_title'); expect(screen.getByLabelText('Текст у файлі', { exact: true }).value).toBe('  точний текст\n');
+  button('Налаштувати колонку meta_title'); expect(screen.getByLabelText('Значення для Magento', { exact: true }).value).toBe('  точний текст\n');
   button('Закрити налаштування');
   const leave = screen.getByRole('link', { name: 'Товари', exact: true }); leave.focus(); fireEvent.click(leave);
   const dialog = await screen.findByRole('dialog', { name: 'Незбережені зміни' });
@@ -283,16 +310,16 @@ it('dirty draft survives local back/forward; Stay, failed Save, successful Save 
   let inertOnRestore;
   leave.addEventListener('focus', () => { inertOnRestore = Boolean(background.inert); }, { once: true });
   button('Залишитися'); expect(inertOnRestore).toBe(false);
-  expect(document.activeElement).toBe(leave); expect(router.state.location.pathname).toBe('/admin/export-templates/family-a');
+  expect(document.activeElement).toBe(leave); expect(router.state.location.pathname).toBe('/admin/magento/rules/family-a');
   templates.save.mockRejectedValueOnce(new Error('save conflict'));
   fireEvent.click(leave); button('Зберегти й перейти'); await screen.findByText('save conflict');
-  expect(router.state.location.pathname).toBe('/admin/export-templates/family-a');
+  expect(router.state.location.pathname).toBe('/admin/magento/rules/family-a');
   button('Залишитися');
   templates.save.mockImplementation(async (_id, body) => response({ ...family.draft, definition: body.definition, revision: '10' }));
   fireEvent.click(leave); button('Зберегти й перейти'); await screen.findByRole('heading', { name: 'Товари' });
   expect(templates.save.mock.calls[1][1].definition.groups[0].rows[0].cells.meta_title.value).toBe('  точний текст\n');
-  await navigate(router, -1); await screen.findByRole('tablist', { name: 'Категорії файлів' }); button('Налаштувати колонку meta_title');
-  fireEvent.change(screen.getByLabelText('Текст у файлі', { exact: true }), { target: { value: 'discard this' } });
+  await navigate(router, -1); await screen.findByRole('tablist', { name: 'Категорії файлів' }); button('Розширена таблиця правил'); button('Налаштувати колонку meta_title');
+  fireEvent.change(screen.getByLabelText('Значення для Magento', { exact: true }), { target: { value: 'discard this' } });
   await navigate(router, 1); await screen.findByRole('dialog'); button('Відкинути й перейти');
   await screen.findByRole('heading', { name: 'Товари' }); expect(templates.save).toHaveBeenCalledTimes(2);
   expect(templates.publish).not.toHaveBeenCalled(); expect(templates.select).not.toHaveBeenCalled();
@@ -303,13 +330,13 @@ it('pending column input blocks local deep links and browser back without losing
   family.draft.definition = upgradeColumns(family.draft.definition);
   const { router } = mount('/admin/export-templates/family-a', admin);
   await screen.findByRole('tablist', { name: 'Категорії файлів' });
-  link('Перевірка', 'Розділи шаблону'); link('Таблиця', 'Розділи шаблону'); button('+ Колонка');
-  fireEvent.change(screen.getByLabelText('Код у CSV'), { target: { value: 'pending_note' } });
+  link('Перевірка', 'Розділи шаблону'); link('Правила полів', 'Розділи шаблону'); button('Додати поле');
+  fireEvent.change(screen.getByLabelText('Код поля Magento'), { target: { value: 'pending_note' } });
   await navigate(router, -1); await screen.findByRole('dialog', { name: 'Незбережені зміни' }); button('Залишитися');
-  expect(screen.getByLabelText('Код у CSV').value).toBe('pending_note');
+  expect(screen.getByLabelText('Код поля Magento').value).toBe('pending_note');
   await navigate(router, '/admin/export-templates/family-a/versions'); button('Зберегти й перейти');
   await screen.findByText(/Спочатку застосуйте або скасуйте/); expect(templates.save).not.toHaveBeenCalled();
-  button('Залишитися'); expect(screen.getByLabelText('Код у CSV').value).toBe('pending_note');
+  button('Залишитися'); expect(screen.getByLabelText('Код поля Magento').value).toBe('pending_note');
   await navigate(router, '/admin/export-templates/family-a/check'); button('Відкинути й перейти');
   await screen.findByRole('heading', { name: 'Перевірка шаблону' }, { timeout: 10000 }); noMutations();
 });

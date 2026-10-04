@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../auth/auth-context.js';
 import { isActualAdministrator } from '../../auth/auth-model.js';
 import { api } from '../../lib/api.js';
@@ -15,7 +15,8 @@ const workflows = [
 
 function AdministratorWorkspace({ activePublication, readOnlyLabels = false }) {
   const auth = useAuth(); const { categoryCode: initialCategory } = useParams();
-  const [workflow, setWorkflow] = useState(readOnlyLabels ? 'labels' : '');
+  const [params] = useSearchParams();
+  const [workflow, setWorkflow] = useState(readOnlyLabels ? 'labels' : ['name_rule', 'broader_resync'].includes(params.get('action')) ? params.get('action') : '');
   const [categoryCode, setCategoryCode] = useState(initialCategory || '');
   const [data, setData] = useState(null); const [error, setError] = useState(''); const [reload, setReload] = useState(0);
   const canInspect = ['export_templates.manage', 'export_templates.publish'].every((permission) => auth.permissions.includes(permission));
@@ -33,7 +34,7 @@ function AdministratorWorkspace({ activePublication, readOnlyLabels = false }) {
   const category = data?.categories.find((item) => item.code === categoryCode) || data?.categories[0];
   const current = data?.currentPublishedId === activePublication.id && data?.revision?.id === activePublication.id;
   return <div className="space-y-5">
-    <h2 className="text-xl font-semibold">{readOnlyLabels ? 'Порівняння підписів значень' : 'Дії Адміністратора'}</h2>
+    <h2 className="text-xl font-semibold">{readOnlyLabels ? 'Порівняння підписів значень' : 'Контрольовані операції'}</h2>
     {readOnlyLabels && <Link className="text-sm underline" to={`/admin/magento/categories/${encodeURIComponent(initialCategory || '')}`}>До категорії</Link>}
     {!workflow && <div className="space-y-3">{workflows.map((item) => <section className="card space-y-3 p-5" key={item.kind}>
       <h3 className="font-semibold">{item.title}</h3><p className="text-sm text-slate-600">{item.description}</p>
@@ -53,5 +54,6 @@ function AdministratorWorkspace({ activePublication, readOnlyLabels = false }) {
   </div>;
 }
 export default function MagentoAdministratorWorkspace(props) {
-  return <AdministratorWorkspace key={`${props.activePublication?.id}:${props.readOnlyLabels ? 'comparison' : 'admin'}`} {...props} />;
+  const location = useLocation();
+  return <AdministratorWorkspace key={`${props.activePublication?.id}:${props.readOnlyLabels ? 'comparison' : 'admin'}:${location.search}`} {...props} />;
 }

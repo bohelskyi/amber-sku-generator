@@ -66,6 +66,12 @@ async function guard(config, input, options, operation, applying = false) {
     const state = { productId: product.id, publicIdentityId: product.public_product_identity_id,
       publicSku: product.public_sku, amberHash: c.hash(plan.clean({ product, lifecycle })),
       bindingHash: c.hash(plan.clean(revision)), revision };
+    if (options.recoveryInspectionOnly === true) {
+      // A browser inspection owns only the SKU lane during remote GETs. It makes
+      // no durable decision; reconciliation re-reads the exact reviewed state.
+      await gate.commit(client); await gate.release(client);
+      return await operation(state);
+    }
     if (options.automatic) {
       if (state.productId !== options.automatic.productId
         || String(state.publicIdentityId) !== String(options.automatic.publicIdentityId)) plan.fail('MAGENTO_SYNC_AMBER_CHANGED');
@@ -153,15 +159,25 @@ async function applyJob(config, id, options) {
   let job = (await options.databasePool.query('SELECT * FROM magento_sync_jobs WHERE id=$1', [id])).rows[0];
   if (!job) plan.fail('MAGENTO_SYNC_JOB_NOT_FOUND');
   const input = { sku: job.sku, bindingRevisionId: job.binding_revision_id };
-  const saveState = (state, failure = null) => ledger(options.databasePool, options.actorUserId, state, async (client) =>
-    (await client.query(`UPDATE magento_sync_jobs SET state=$2, failure=$3::jsonb, updated_at=CURRENT_TIMESTAMP,
+  const saveState = (state, failure = null) => ledger(options.databasePool, options.actorUserId, state, async (client) => {
+    const result = (await client.query(`UPDATE magento_sync_jobs SET state=$2, failure=$3::jsonb, updated_at=CURRENT_TIMESTAMP,
       attempts=attempts+CASE WHEN $2='running' THEN 1 ELSE 0 END,
       acknowledged_at=CASE WHEN $2='succeeded' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$1 RETURNING *`,
-    [id, state, JSON.stringify(failure)])).rows[0]);
+    [id, state, JSON.stringify(failure)])).rows[0];
+    if (state === 'running' && options.recoveryReview) await writeAuditEvent(client, {
+      mutationContext: { actorUserId: options.actorUserId, requestId: options.mutationContext?.requestId },
+      eventKey: 'magento_sync.recovery_continued', subjectType: 'magento_sync_recovery', subjectId: c.hash(options.recoveryReview),
+      details: { jobId: id, reviewHash: c.hash(options.recoveryReview), reason: options.recoveryReason } });
+    return result;
+  });
   return guard(config, input, options, async (state) => {
     job = (await options.databasePool.query('SELECT * FROM magento_sync_jobs WHERE id=$1', [id])).rows[0];
     if (job.state === 'succeeded') return job;
     if (job.state === 'superseded') plan.fail('MAGENTO_SYNC_JOB_SUPERSEDED');
+    if (options.recoveryReview) {
+      const steps = (await options.databasePool.query('SELECT * FROM magento_sync_steps WHERE job_id=$1 ORDER BY ordinal', [id])).rows;
+      require('./sync-job-recovery').assertReviewedJob(job, steps, options.recoveryReview);
+    }
     if (options.automatic && (job.state === 'uncertain' || (await options.databasePool.query(
       "SELECT 1 FROM magento_sync_steps WHERE job_id=$1 AND state='dispatched'", [id])).rowCount)) {
       plan.fail('MAGENTO_SYNC_PREVIOUS_DISPATCH_UNRESOLVED');
@@ -171,8 +187,13 @@ async function applyJob(config, id, options) {
       if (job.amber_hash !== state.amberHash || job.product_id !== state.productId) plan.fail('MAGENTO_SYNC_AMBER_CHANGED');
       if (job.binding_hash !== state.bindingHash) plan.fail('MAGENTO_SYNC_BINDING_CHANGED');
       if (c.hash(job.intent) !== job.plan_hash) plan.fail('MAGENTO_SYNC_PLAN_INTEGRITY');
+      let reviewedObservation;
+      if (options.recoveryReview) {
+        reviewedObservation = (await observe(config, input, options)).observation;
+        require('./sync-job-recovery').assertReviewedRemote(reviewedObservation, options.recoveryReview);
+      }
       job = await saveState('running');
-      let { observation } = await observe(config, input, options);
+      let observation = reviewedObservation || (await observe(config, input, options)).observation;
       if (options.automatic) {
         // Reject a mixed snapshot if a save committed during remote discovery.
         await ledger(options.databasePool, options.actorUserId, 'revalidated', async (client) => {
@@ -263,4 +284,5 @@ async function supersedeUndispatched(config, id, options) {
     client.release();
   }
 }
-module.exports = { enqueue, applyJob, supersedeUndispatched };
+module.exports = { enqueue, applyJob, supersedeUndispatched,
+  recoveryBoundary: { guard, observe, ledger } };

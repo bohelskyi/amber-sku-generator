@@ -99,6 +99,6 @@ export const fieldLabels = {
   nameUa: 'Українська назва', nameEn: 'Англійська назва', nameValid: 'Умова формування назви',
   nameCheck: 'Перевірка назви', material: 'Матеріал', texture: 'Фактура', surface: 'Поверхня', color: 'Колір',
   shape: 'Форма', count: 'Кількість', religion: 'Приналежність', categoryCheck: 'Перевірка категорії',
-  materialCheck: 'Перевірка матеріалу', full_sku: 'Повний артикул', total_price_uah: 'Збережена фінальна ціна, грн',
+  materialCheck: 'Перевірка матеріалу', full_sku: 'Внутрішній SKU', public_sku: 'Артикул', total_price_uah: 'Збережена фінальна ціна, грн',
   weight: 'Збережена вага', magento_name_subject_ua: 'Збережена ручна назва UA', magento_name_subject_en: 'Збережена ручна назва EN',
 };

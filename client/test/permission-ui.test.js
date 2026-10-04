@@ -15,7 +15,7 @@ const commonPermissions = [
   'exports.view',
 ];
 
-test('Manager UI is monitoring/request-oriented with read-only pricing', () => {
+test('request-only permission retains historical access without offering a new recount request', () => {
   const ui = getPermissionUiState([
     ...commonPermissions, 'pricing.view', 'corrections.price_override',
   ]);
@@ -34,7 +34,7 @@ test('Manager UI is monitoring/request-oriented with read-only pricing', () => {
   assert.equal(ui.canApplyRepricing, false);
   assert.equal(ui.canPriceOverrideCorrections, true);
   assert.equal(ui.canRollbackRepricing, false);
-  assert.equal(getRecountUiMode(ui), 'request');
+  assert.equal(getRecountUiMode(ui), null);
 });
 
 test('Storekeeper UI keeps product and correction processing but hides final administrative actions', () => {

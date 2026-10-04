@@ -38,22 +38,25 @@ function AppPage() {
   const selectedCreateCategory = isCreateRoute
     ? searchParams.get('category')?.slice(0, 32)
     : null;
+  const requestedRepair = isOpenRoute && searchParams.get('action') === 'recount';
+  const requestedAttentionReturn = searchParams.get('returnTo');
+  const attentionReturn = typeof requestedAttentionReturn === 'string'
+    && requestedAttentionReturn.length <= 3000 && /^\/(?:attention|sync-problems)(?:\?[^#]*)?$/.test(requestedAttentionReturn)
+    ? requestedAttentionReturn : requestedRepair ? '/attention' : null;
   const { exportHandoff, endExportHandoff } = useContext(ExportWorkflowContext) || {};
   const permissionUi = getPermissionUiState(auth.permissions);
   const recountMode = getRecountUiMode(permissionUi);
   const canViewConfig = auth.permissions.includes('products.view');
   const canViewRegister = auth.permissions.includes('history.view');
   const canDecodeProducts = auth.permissions.includes('products.decode');
-  const canViewAttention = auth.permissions.includes('products.view')
-    || auth.permissions.includes('corrections.view');
+  const canViewAttention = auth.permissions.includes('products.view');
   const canDeleteTestProduct = isActualAdministrator(auth)
     && auth.permissions.includes('products.delete_test');
   const sku = useSkuManager({
     canViewConfig,
-    canChangeProductPrice: permissionUi.canApplyDirectPriceChange
-      || permissionUi.canCreateCorrectionRequest,
+    canChangeProductPrice: permissionUi.canApplyDirectPriceChange,
     canApplyDirectPriceChange: permissionUi.canApplyDirectPriceChange,
-    canCreatePriceChangeRequest: permissionUi.canCreateCorrectionRequest,
+    canCreatePriceChangeRequest: false,
     canPriceOverride: permissionUi.canPriceOverrideCorrections,
     submitMode: recountMode || 'apply',
   });
@@ -92,6 +95,17 @@ function AppPage() {
     sku.handleDecode(selectedArticle);
   });
   useEffect(() => { viewOnlyHandoff(); }, [selectedArticle, sku.config, sku.selectedCat]);
+  const repairEntry = useRef(null);
+  const startRequestedRepair = useEffectEvent(() => {
+    const key = `${location.key}:${selectedArticle}`;
+    if (!requestedRepair || repairEntry.current === key || !permissionUi.canApplyDirectRecount
+      || !sku.config || sku.isDecodeLoading || !sku.decodeData?.existsInDb
+      || sku.decodeData.product?.status !== 'active' || sku.isRecountOpen
+      || sku.decodeData.publicSku !== selectedArticle) return;
+    repairEntry.current = key;
+    sku.handleStartRecount();
+  });
+  useEffect(() => { startRequestedRepair(); }, [location.key, requestedRepair, selectedArticle, sku.config, sku.decodeData, sku.isDecodeLoading]);
   const synchronizeRoute = useEffectEvent(() => {
     if (isLandingRoute) {
       openedSku.current = null;
@@ -178,8 +192,10 @@ function AppPage() {
           status={productState && <StatusBadge tone={openedProduct.product.status === 'active' ? 'success' : 'neutral'}>{productState}</StatusBadge>}
           actions={isOpenRoute && <>
             {openedArticle && <CopyAction value={openedArticle} label="Скопіювати артикул товару" buttonLabel="Копіювати артикул" compact />}
-            <Link className="btn btn-outline" to={registerReturn} state={location.state?.productReturnState}>Повернутися до реєстру</Link>
+            {attentionReturn ? <Link className="btn btn-outline" to={attentionReturn}>Повернутися до проблеми</Link>
+              : <Link className="btn btn-outline" to={registerReturn} state={location.state?.productReturnState}>Повернутися до реєстру</Link>}
           </>} />
+        {requestedRepair && !permissionUi.canApplyDirectRecount && <Notice tone="info">Для виправлення характеристик потрібен дозвіл на переоблік товару. Передайте артикул оператору з цим дозволом.</Notice>}
         <Toast message={sku.copyMessage} />
         {sku.savedProduct && !deletionReceipt && (
           <OperationReceipt title="Товар збережено" identity={savedArticle}
@@ -242,8 +258,7 @@ function AppPage() {
             showCreate={isLandingRoute || isCreateRoute}
             showLookup={!isCreateRoute}
             canStartRecount={Boolean(sku.config && recountMode)}
-            canChangeProductPrice={permissionUi.canApplyDirectPriceChange
-              || permissionUi.canCreateCorrectionRequest}
+            canChangeProductPrice={permissionUi.canApplyDirectPriceChange}
             recountMode={recountMode || 'apply'}
             onApplyRecount={sku.handleApplyRecount}
             onCancelRecount={() => dirtyNavigation.request(sku.handleCancelRecount)}
@@ -372,7 +387,7 @@ function AppPage() {
       </ConfirmDialog>
       <ProductPriceChangeDialog
         canApplyDirect={permissionUi.canApplyDirectPriceChange}
-        canCreateRequest={permissionUi.canCreateCorrectionRequest}
+        canCreateRequest={false}
         canRequestOverride={permissionUi.canPriceOverrideCorrections}
         canUseOverrides={permissionUi.canApplyDirectPriceChange
           || permissionUi.canPriceOverrideCorrections}

@@ -6,8 +6,8 @@ export const topLevelNavigation = [
   },
   {
     id: 'attention', to: '/attention', label: 'Потребує уваги', group: 'Щоденна робота',
-    permissions: ['corrections.view', 'products.view'],
-    activePaths: [{ path: '/attention' }, { path: '/admin/corrections', end: true }, { path: '/sync-problems' }],
+    permissions: ['products.view'],
+    activePaths: [{ path: '/attention' }, { path: '/sync-problems' }],
   },
   {
     id: 'repricing', to: '/admin/repricing', label: 'Переоцінка', group: 'Щоденна робота',
@@ -32,7 +32,6 @@ export const settingsNavigation = [
   { to: '/admin/catalog', label: 'Каталог', description: 'Категорії, характеристики та схеми внутрішнього SKU.', permissions: ['catalog.view'] },
   { to: '/admin/pricing', label: 'Ціноутворення', description: 'Матриці, модифікатори та курси для розрахунку.', permissions: ['pricing.view'] },
   { to: '/admin/magento', label: 'Інтеграція Magento', description: 'Доставка товарів, відповідності та підготовка публікацій.', permissions: ['export_templates.view'] },
-  { to: '/admin/export-templates', label: 'Шаблони інтеграції', description: 'Правила даних, опубліковані версії яких використовують відповідності та пряма синхронізація Magento.', permissions: ['export_templates.view'] },
 ];
 
 export const administrationNavigation = [
@@ -44,10 +43,10 @@ export const administrationNavigation = [
 // Account-menu access only; these compatibility routes are not daily destinations.
 export const legacyNavigation = [
   { id: 'legacy-exports', to: '/exports', label: 'Історичний експорт', permissions: ['exports.view'], activePaths: [{ path: '/exports' }] },
+  { id: 'legacy-corrections', to: '/admin/corrections', label: 'Історичні запити', permissions: ['corrections.view'], activePaths: [{ path: '/admin/corrections', end: true }] },
 ];
 
 const secondaryNavigation = [
-  { to: '/admin/corrections', label: 'Запити на виправлення', end: true, permissions: ['corrections.view'] },
   { to: '/sync-problems', label: 'Проблеми синхронізації', permissions: ['products.view'] },
   { to: '/admin/corrections/history', label: 'Історія товарів', permissions: ['history.view'] },
 ];

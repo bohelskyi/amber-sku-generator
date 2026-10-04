@@ -9,6 +9,7 @@ const category = require('../../services/magento/configuration-category');
 const actions = require('../../services/magento/configuration-actions');
 const option = require('../../services/magento/configuration-option');
 const optionLabels = require('../../services/magento/configuration-option-labels');
+const attribute = require('../../services/magento/configuration-attribute');
 const successor = require('../../services/magento/integration-successor');
 const bindingReview = require('../../services/magento/integration-binding-review');
 const bindingService = require('../../services/magento/binding.service');
@@ -27,6 +28,8 @@ router.get(`${root}/overview`, requirePermission('export_templates.view'), handl
 router.get(`${root}/creation-inputs`, requirePermission('export_templates.manage'), requirePermission('exports.view'),
   handle((req) => editor.creationInputs({ ...req.query })));
 router.post(`${root}/discovery`, requirePermission('export_templates.view'), handle(() => editor.discovery(config)));
+router.post(`${root}/structure-check`, requirePermission('export_templates.view'),
+  handle(() => require('../../services/magento/integration-structure-check').check(config)));
 router.get(`${root}/bindings/:id`, requirePermission('export_templates.view'), handle((req) => bindingReview.get(config,req.params.id)));
 router.get(`${root}/bindings/:id/handoffs`,requirePermission('export_templates.view'),handle((req)=>handoff.status(config,req.params.id)));
 router.get(`${root}/bindings/:id/controlled-products`,requirePermission('export_templates.view'),handle((req)=>controlled.candidates(config,req.params.id,{},{...req.query})));
@@ -48,6 +51,13 @@ for (const [name, operation] of [['prepare',successor.prepare],['apply',successo
 }
 router.get(`${root}/actions`, requirePermission('export_templates.view'), handle(() => actions.list(config)));
 router.get(`${root}/actions/:id`, requirePermission('export_templates.view'), handle(async (req) => actions.receipt(await actions.get(config, req.params.id))));
+router.get(`${root}/attributes/context`, requirePermission('export_templates.manage'), requirePermission('export_templates.publish'),
+  handle((req) => attribute.context(config,{...req.query},{mutationContext:getRequestMutationContext(req)})));
+for (const [name,operation] of [['preview',attribute.preview],['apply',attribute.apply],['reconcile',attribute.reconcile],
+  ['assignment-preview',attribute.assignmentPreview],['assignment-apply',attribute.assignmentApply]]) {
+  router.post(`${root}/attributes/${name}`,requirePermission('export_templates.manage'),requirePermission('export_templates.publish'),
+    handle((req)=>operation(config,req.body,{mutationContext:getRequestMutationContext(req)})));
+}
 for (const [name, operation] of [['inspect',option.inspect],['attest',option.attest],['preview',option.preview],['apply',option.apply],['reconcile',option.reconcile]]) {
   router.post(`${root}/options/${name}`,requirePermission('export_templates.manage'),requirePermission('export_templates.publish'),
     handle((req) => operation(config,req.body,{mutationContext:getRequestMutationContext(req)})));

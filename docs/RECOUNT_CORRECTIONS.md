@@ -69,7 +69,15 @@ Successful direct apply and correction-request completion use the authenticated 
 
 Migration 046 does not change target validation or correction ownership. Before stable-public-SKU activation, recount retains legacy behavior and the successor receives a distinct legacy public identity equal to its new internal `full_sku`; installing the schema alone therefore does not change external delivery identity. After activation, the successor still receives a new immutable internal `full_sku`, while the database insert trigger requires it to inherit the source row's `public_product_identity_id`. Source retirement and successor creation may temporarily coexist inside the transaction; the deferred one-current-revision invariant validates the final state at commit. Thus the product article is stable across post-activation recount, and later Magento delivery is an UPDATE of that public SKU. Lineage, audit and history continue to use correction rows/product IDs, not every row sharing the public identity.
 
-Direct apply requires `products.recount`; recount preview accepts either `products.recount` or `corrections.create`. Correction-request creation still requires `corrections.create`. Request-only custom USD-per-gram or exact manual UAH decisions require `corrections.price_override`; authorized direct recount uses `products.recount` with its own reviewed decision token. The product UI defaults to direct recount for users with `products.recount`, including users who also hold `corrections.create`, and hides the legacy request shortcut. Users holding only `corrections.create` retain the “Підготувати запит” workflow. Compatibility routes remain available and built-in role permissions are unchanged.
+Direct apply requires `products.recount`; recount preview accepts either `products.recount` or `corrections.create`. Correction-request creation still requires `corrections.create`. Request-only custom USD-per-gram or exact manual UAH decisions require `corrections.price_override`; authorized direct recount uses `products.recount` with its own reviewed decision token. Current product and repricing screens expose direct recount only with `products.recount`, and direct price changes only with `products.price_change`. They no longer offer new correction or price-change requests, including to request-only users. Historical request creation contracts remain compatible; no permission is granted or revoked by this presentation change.
+
+The account menu's **Історичні запити** entry retains `/admin/corrections` under
+`corrections.view`, including existing ownership, completion, rejection and
+recovery. Active historical requests still block competing changes under the same
+server rules. Product history remains separate from this legacy request queue.
+An explicit attention handoff can open a permitted recount at
+`/products/open?article=...&action=recount&returnTo=...`; it waits for the exact
+decoded public article and never applies a change automatically.
 
 ## Successor routing and name inheritance
 
@@ -122,7 +130,7 @@ The client queue loads immediately, polls every five seconds only while visible,
 
 ### Operator queue and bounded reads
 
-The local application redesign groups `/admin/corrections` under **Потребує уваги**.
+The application exposes `/admin/corrections` as **Історичні запити** in the account menu.
 The queue defaults to active work and shows a compact list beside one selected
 request, its ownership, proposed changes, and permitted actions. `?request=ID`
 continues to open exact request evidence, including an item outside the visible

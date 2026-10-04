@@ -34,6 +34,21 @@ test('Magento exact exposure reconciliation preserves ledgers, CAS, audit rollba
     }
     return state;
   };
+  await t.test('browser lifecycle preview and apply preserve original exposure proof and immutable receipt', async () => {
+    const recovery = require('../src/services/magento/lifecycle-recovery');
+    const f = await fixture(); const before = await stored(f.id);
+    const reviewed = await recovery.preview(config, f.id, { kind: 'prior_exposure' }, options());
+    assert.equal(reviewed.eligible, true, JSON.stringify(reviewed.blockers)); assert.deepEqual(await stored(f.id), before);
+    const input = { review: reviewed.review, reviewHash: reviewed.reviewHash, reason: 'Перевірено точний артикул Magento' };
+    const result = await recovery.apply(config, f.id, input, options());
+    assert.equal(result.holdReason, 'prior_exposure'); assert.equal(result.alreadyApplied, false);
+    assert.ok(['reviewed_resync','configuration_required'].includes(result.nextAction.kind));
+    const again = await recovery.apply(config, f.id, input, options(pool, () => assert.fail('repeat receipt must not call Magento')));
+    assert.equal(again.alreadyApplied, true);
+    assert.equal((await stored(f.id)).f.delivery_version, before.f.delivery_version + 1);
+    await assert.rejects(recovery.preview(config, f.id, { kind: 'prior_exposure' }, {
+      ...options(), mutationContext: { actorUserId: 999999999 } }), { code: 'ADMIN_PERMISSION_REVOKED' });
+  });
   await t.test('read-only preview, minimal transition, unchanged acknowledgements, idempotent retry and authorization', async () => {
     const f = await fixture(); const before = await stored(f.id); const protectedBefore = await protectedState();
     const plan = await exposure.preview(config, f.sku, options());

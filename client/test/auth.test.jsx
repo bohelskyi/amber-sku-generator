@@ -883,7 +883,7 @@ describe('permission-aware business UI', () => {
     expect(screen.getAllByRole('button', { name: 'Архівувати' }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Експорт CSV' })).toBeNull();
 
-    expect(getRecountUiMode(managerUi)).toBe('request');
+    expect(getRecountUiMode(managerUi)).toBeNull();
     expect(getRecountUiMode(storekeeperUi)).toBe('apply');
   });
 

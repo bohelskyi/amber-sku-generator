@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { AuthContext } from '../../auth/auth-context.js';
 import { TechnicalDisclosure } from '../ui/index.js';
 
-export function LifecycleReconciliationNotice({ problem, article }) {
+export function LifecycleReconciliationNotice({ problem, article, recoveryAvailable = false }) {
   const { permissions = [] } = useContext(AuthContext) || {};
   const issue = problem.eligibilityIssue;
   const canReconcile = permissions.includes('exports.reconcile');
@@ -12,7 +12,7 @@ export function LifecycleReconciliationNotice({ problem, article }) {
     <p>Ця перешкода виникає до надсилання змін у Magento. Перевірка історії може потребувати окремого читання Magento; відкриття цієї сторінки його не виконує.</p>
     <p className="font-semibold">{canReconcile ? 'Потрібне контрольоване узгодження історії доставки' : 'Потрібне узгодження Адміністратора'}</p>
     <p>{canReconcile
-      ? 'Перегляньте збережені підтвердження та узгодьте рішення за чинною процедурою. Зняття утримання в цьому інтерфейсі недоступне.'
+      ? recoveryAvailable ? 'Відкрийте перевірку доставки нижче. Спочатку перевірте докази, потім окремо підтвердьте дозволене рішення.' : 'Відкрийте проблему товару, щоб перевірити докази й окремо підтвердити дозволене рішення щодо доставки.'
       : 'Передайте артикул Адміністратору або відповідальному оператору з дозволом на узгодження історії доставки.'}</p>
     {permissions.includes('history.view') && article && <Link className="underline" to={`/products/history?sku=${encodeURIComponent(article)}`}>Історія товару</Link>}
     <TechnicalDisclosure>
@@ -28,7 +28,6 @@ export function LifecycleReconciliationNotice({ problem, article }) {
           <div><dt>Версія доставки</dt><dd>{issue.deliveryVersion}</dd></div>
         </>}
       </dl>
-      {canReconcile && <p className="mt-2 break-words">Процедура: docs/FULL_PRODUCT_CUTOVER_RUNBOOK.md, розділ «Historical ambiguity after recount». Читання підтверджень: server/scripts/full-product-cutover.js, action: review, productIds: поточний ID товару та ID попередніх версій. Свіжий результат перевірки потрібен перед окремим рішенням; review нічого не застосовує.</p>}
     </TechnicalDisclosure>
   </div>;
 }

@@ -2,11 +2,11 @@ import { useMemo, useState } from 'react';
 import { parsePreviewCsv } from '../../lib/export-template-csv';
 import { OutputGrid } from './OutputGrid';
 
-export function PreviewTable({ artifact }) {
+export function PreviewTable({ artifact, integration = false }) {
   const parsed = useMemo(() => { try { return parsePreviewCsv(artifact.csvContent); } catch (error) { return { error }; } }, [artifact.csvContent]);
   if (parsed.error) return <p role="alert">{parsed.error.message}</p>;
   return <section aria-label={'Таблиця результату ' + artifact.groupCode}><OutputGrid columns={parsed.headers} rows={parsed.rows.map((values) => ({ values, label: (values[parsed.headers.indexOf('store_view_code')] === 'en' ? 'EN' : 'Основний') + ' · ' + (values[parsed.headers.indexOf('sku')] || '') }))}
-    title={`${artifact.groupName || artifact.groupCode} · ${artifact.rowCount} рядків · порядок CSV`} /></section>;
+    title={`${artifact.groupName || artifact.groupCode} · ${artifact.rowCount} рядків · ${integration ? 'перевірені значення полів' : 'порядок CSV'}`} /></section>;
 }
 export function ArtifactTables({ artifacts = [], stored = false }) {
   const [group, setGroup] = useState('');

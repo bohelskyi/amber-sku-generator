@@ -31,7 +31,7 @@ for (const reconcile of [false, true]) it(`lifecycle hold handoff is read-only, 
   expect(screen.getByText('INFERRED_HISTORY_WITHOUT_EXACT_MEMBERSHIP')).toBeTruthy();
   expect(screen.getByText('1368')).toBeTruthy();
   expect(screen.getByText('1509')).toBeTruthy();
-  if (reconcile) expect(screen.getByText(/full-product-cutover.js/)).toBeTruthy();
+  if (reconcile) expect(screen.getByRole('button', { name: 'Відкрити перевірку доставки' })).toBeTruthy();
   expect(api.post).not.toHaveBeenCalled();
 });
 
@@ -52,8 +52,10 @@ it('actual mapping problem opens exact field while resource configuration opens 
     { code: 'ATTRIBUTE_NOT_FOUND', resolution: 'integration_preparation', message: 'Потрібна характеристика' },
   ] }], pageInfo: { total: 1 } } });
   shell(<SyncProblemsPage />, [...permissions, 'export_templates.manage']);
-  expect((await screen.findByRole('link', { name: 'Перевірити відповідності Magento' })).getAttribute('href')).toBe('/admin/magento/categories/SV?field=kamin_obrobka');
-  expect(screen.getByRole('link', { name: 'Перевірити підготовку інтеграції' }).getAttribute('href')).toBe('/admin/magento/prepare');
+  const mapping = new URL((await screen.findByRole('link', { name: 'Пов’язати значення' })).href);
+  expect(mapping.pathname).toBe('/admin/magento/categories/SV');
+  expect(Object.fromEntries(mapping.searchParams)).toMatchObject({ field: 'kamin_obrobka', productId: '5033', tab: 'attributes', returnTo: '/attention?problem=5033' });
+  expect(screen.getByRole('link', { name: 'Налаштувати атрибут Magento' }).getAttribute('href')).toContain('/admin/magento/categories/SV?tab=attributes');
   expect(api.post).not.toHaveBeenCalled();
 });
 

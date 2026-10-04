@@ -117,8 +117,25 @@ function createMagentoClient(config, { fetchImpl = globalThis.fetch, storeCode =
     listAttributeSets: (page) => list('products/attribute-sets/sets/list', page),
     getAttributeSet: (id) => get(`products/attribute-sets/${positiveInteger(id)}`),
     getAttributeSetAttributes: (id) => get(`products/attribute-sets/${positiveInteger(id)}/attributes`),
+    getAttributeSetGroups: (id) => get('products/attribute-sets/groups/list', {
+      'searchCriteria[filter_groups][0][filters][0][field]': 'attribute_set_id',
+      'searchCriteria[filter_groups][0][filters][0][value]': positiveInteger(id),
+      'searchCriteria[filter_groups][0][filters][0][condition_type]': 'eq',
+      'searchCriteria[pageSize]': '100', 'searchCriteria[currentPage]': '1',
+    }),
     listProductAttributes: (page) => list('products/attributes', page),
     getProductAttribute: (code) => get(`products/attributes/${identifier(code)}`),
+    findProductAttribute: (code) => get('products/attributes', {
+      'searchCriteria[filter_groups][0][filters][0][field]': 'attribute_code',
+      'searchCriteria[filter_groups][0][filters][0][value]': identifier(code),
+      'searchCriteria[filter_groups][0][filters][0][condition_type]': 'eq',
+      'searchCriteria[pageSize]': '2', 'searchCriteria[currentPage]': '1',
+    }).then((result) => {
+      if (!result || !Array.isArray(result.items) || !Number.isSafeInteger(result.total_count)
+        || result.total_count < 0 || result.total_count > 1 || result.items.length !== result.total_count
+        || result.items.some((item) => item?.attribute_code !== code)) inputError();
+      return result.items[0] || null;
+    }),
     getProductAttributeOptions: (code) => get(`products/attributes/${identifier(code)}/options`),
     getScopedOptionLabels: (code,id) => get(`amber/attributes/${identifier(code)}/options/${positiveInteger(id)}/labels`),
     findProductBySku,

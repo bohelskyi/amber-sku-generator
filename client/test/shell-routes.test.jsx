@@ -9,6 +9,8 @@ const adminRender = vi.hoisted(() => vi.fn(({ mode }) => <h1>{mode}</h1>));
 vi.mock('../src/pages/AppPage.jsx', () => ({ default: () => <h1>Товари</h1> }));
 vi.mock('../src/pages/AdminPage.jsx', () => ({ default: adminRender }));
 vi.mock('../src/pages/CorrectionHistoryPage.jsx', () => ({ default: () => <h1>Історія товарів</h1> }));
+vi.mock('../src/pages/CorrectionRequestsPage.jsx', () => ({ default: () => <h1>Історичні запити</h1> }));
+vi.mock('../src/pages/MagentoIntegrationPage.jsx', () => ({ default: () => <h1>Інтеграція Magento</h1> }));
 vi.mock('../src/pages/ExportsPage.jsx', () => ({ default: () => <h1>Історичний експорт</h1> }));
 vi.mock('../src/api/exports-api.js', () => ({ exportsApi: {
   getStatus: vi.fn().mockResolvedValue({ data: { delivery: { legacyProductCsvEnabled: false } } }),
@@ -59,10 +61,31 @@ it('keeps current Magento template configuration independent of legacy export ac
   mount('/settings', ['pricing.view', 'export_templates.view']);
   await screen.findByRole('heading', { name: 'Налаштування' });
   expect(screen.getByRole('link', { name: /^Ціноутворення/ }).getAttribute('href')).toBe('/admin/pricing');
-  expect(screen.getByRole('link', { name: /^Шаблони інтеграції/ }).getAttribute('href')).toBe('/admin/export-templates');
+  expect(screen.queryByRole('link', { name: /^Шаблони інтеграції/ })).toBeNull();
   expect(screen.getByRole('link', { name: /^Інтеграція Magento/ }).getAttribute('href')).toBe('/admin/magento');
   expect(document.querySelector('.workspace-directory a[href="/exports"]')).toBeNull();
   expect(screen.queryByRole('link', { name: /Історичний експорт/ })).toBeNull();
+});
+
+it('keeps historical requests outside daily work without granting product access', async () => {
+  const router = mount('/', ['corrections.view']);
+  await screen.findByRole('heading', { name: 'Історичні запити' });
+  expect(router.state.location.pathname).toBe('/admin/corrections');
+  expect(document.querySelectorAll('.app-navigation-link')).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: 'Обліковий запис: Оператор' }));
+  expect((await screen.findByRole('link', { name: 'Історичні запити' })).getAttribute('href')).toBe('/admin/corrections');
+  cleanup();
+  mount('/attention', ['corrections.view']);
+  expect(await screen.findByText('Немає доступу до цього розділу.')).toBeTruthy();
+});
+
+it('opens old template deep links inside Magento with exact version and field context', async () => {
+  const router = mount('/admin/export-templates/family/versions?version=immutable&field=name#evidence', ['export_templates.view']);
+  await screen.findByRole('heading', { name: 'Інтеграція Magento' });
+  expect(router.state.location.pathname).toBe('/admin/magento/rules/family/versions');
+  expect(router.state.location.search).toBe('?version=immutable&field=name');
+  expect(router.state.location.hash).toBe('#evidence');
+  expect(screen.getByRole('link', { name: 'Налаштування' }).getAttribute('aria-current')).toBe('page');
 });
 
 it('keeps legacy product links while enforcing the independent decode boundary', async () => {

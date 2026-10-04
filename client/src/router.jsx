@@ -23,7 +23,6 @@ const CorrectionHistoryPage = lazy(() => import('./pages/CorrectionHistoryPage.j
 const UsersPage = lazy(() => import('./pages/UsersPage.jsx'));
 const RolesPage = lazy(() => import('./pages/RolesPage.jsx'));
 const AuditPage = lazy(() => import('./pages/AuditPage.jsx'));
-const ExportTemplatesPage = lazy(() => import('./pages/ExportTemplatesPage.jsx'));
 const ExportsPage = lazy(() => import('./pages/ExportsPage.jsx'));
 
 const productPermissions = ['products.view', 'products.decode', 'history.view'];
@@ -59,6 +58,12 @@ function LegacyAdminRedirect() {
   return pathname ? <Navigate replace to={{ pathname, search: location.search }} /> : <AccessDenied />;
 }
 
+function LegacyTemplateRedirect() {
+  const location = useLocation();
+  const suffix = location.pathname.slice('/admin/export-templates'.length);
+  return <Navigate replace to={{ pathname: `/admin/magento/rules${suffix}`, search: location.search, hash: location.hash }} />;
+}
+
 export default function AppRouter() {
   const [router] = useState(() => createBrowserRouter([{ path: '*', element: <Workspace /> }]));
   return <RouterProvider router={router} />;
@@ -77,7 +82,7 @@ export function Workspace() {
           <Route path="/products/open" element={guardAny(['products.decode'], <AppPage />)} />
           <Route path="/products/create" element={guardAll(['products.view', 'products.create'], <AppPage />)} />
           <Route path="/products/history" element={guardAny(['history.view'], <CorrectionHistoryPage />)} />
-          <Route path="/attention" element={guardAny(['corrections.view', 'products.view'], <AttentionPage />)} />
+          <Route path="/attention" element={guardAny(['products.view'], <AttentionPage />)} />
           <Route path="/settings" element={guardAny(['catalog.view', 'pricing.view', 'export_templates.view'], <SettingsPage />)} />
           <Route path="/administration" element={guardAny(['users.manage', 'roles.manage', 'audit.view'], <AdministrationPage />)} />
           <Route path="/sync-problems" element={guardAny(['products.view'], <SyncProblemsPage />)} />
@@ -91,7 +96,7 @@ export function Workspace() {
           <Route path="/admin/users" element={guardAny(['users.manage'], <UsersPage />)} />
           <Route path="/admin/roles" element={guardAny(['roles.manage'], <RolesPage />)} />
           <Route path="/admin/audit" element={guardAny(['audit.view'], <AuditPage />)} />
-          <Route path="/admin/export-templates/*" element={guardAny(['export_templates.view'], <ExportTemplatesPage />)} />
+          <Route path="/admin/export-templates/*" element={guardAny(['export_templates.view'], <LegacyTemplateRedirect />)} />
           <Route path="/exports/*" element={guardAny(['exports.view'], <ExportsPage />)} />
           <Route path="*" element={<main className="app-page p-6"><Notice>Сторінку не знайдено.</Notice></main>} />
         </Routes>

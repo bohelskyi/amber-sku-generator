@@ -13,9 +13,9 @@ capabilities. Personas are acceptance fixtures, not authorization replacements.
 | Destination | Routes and context |
 | --- | --- |
 | Товари | `/products`; create at `/products/create?category=…`; open at `/products/open?article=…`; history at `/products/history`. |
-| Потребує уваги | `/attention`; independently authorized corrections at `/admin/corrections` and recorded synchronization problems at `/sync-problems`. |
+| Потребує уваги | `/attention` opens the synchronization problem queue directly; `/sync-problems` remains a compatible entrance to the same workspace. |
 | Переоцінка | `/admin/repricing`; preparation, review and batch history retain domain controllers. |
-| Налаштування | `/settings` links to Каталог (`/admin/catalog`), Ціноутворення (`/admin/pricing`), Інтеграція Magento (`/admin/magento`) and Шаблони інтеграції (`/admin/export-templates`). |
+| Налаштування | `/settings` links to Каталог (`/admin/catalog`), Ціноутворення (`/admin/pricing`) and Інтеграція Magento (`/admin/magento`). Integration rules belong inside Magento. |
 | Адміністрування | `/administration` links to `/admin/users`, `/admin/roles`, `/admin/audit`. |
 
 The product-owner correction of 2026-10-03 removes all export destinations from
@@ -32,7 +32,8 @@ legacy, labelled **Експорт цін (сумісність)**. No top-level 
 Export-only users retain a `/` fallback to this compatibility overview without a
 daily export destination. Permissions, reads/writes, files and recovery are unchanged.
 
-Templates remain current integration configuration, labelled **Шаблони інтеграції**.
+Templates remain current integration configuration, presented as **Правила товару**
+inside `/admin/magento/rules` instead of another Settings destination.
 This is a verified dependency, not an inference from the editor's existence:
 [`binding.service.js`](../server/src/services/magento/binding.service.js) pins and
 validates an immutable `export_template_versions` version for each binding revision;
@@ -40,8 +41,16 @@ validates an immutable `export_template_versions` version for each binding revis
 pinned definition and checks its hash for direct synchronization planning;
 [`integration-successor.js`](../server/src/services/magento/integration-successor.js)
 requires an explicit published template version for reviewed successor preparation.
-The existing editor/URL, publication contracts and legacy export selection remain
-compatible. Template publication does not itself publish a Magento binding.
+Existing `/admin/export-templates/*` URLs redirect with their path, query and hash
+to `/admin/magento/rules/*`. Publication contracts and legacy export selection remain
+compatible; CSV activation is secondary compatibility functionality. Template
+publication does not itself publish a Magento binding.
+
+**Історичні запити** is a capability-filtered account-menu entry to
+`/admin/corrections`. New request creation is absent from product/recount/price
+and repricing interfaces. Existing requests, claims, completion, ownership,
+active-request blockers and historical API contracts remain intact. A user with
+only `corrections.create` is not granted direct modification by this UX change.
 
 `/?article=…` and `/?exportSku=…` redirect to the permitted product context while
 retaining meaningful query information. `/admin` and its former catalog/pricing
@@ -80,7 +89,7 @@ eligibility/permissions, interpret business state or retry commands.
 | --- | --- |
 | Артикул | Authoritative `publicSku`; never an internal-SKU fallback. Legacy public articles remain valid. |
 | Внутрішній SKU | Configuration/history identity and permitted compatibility lookup input. |
-| Переоблік | Existing target-validated recount and unchanged direct/request rules. |
+| Переоблік | Existing target-validated direct recount; historical request completion retains its separate contract. |
 | Незбережені зміни | Browser-local changes; no persistent product draft is implied. |
 | Чернетка збережена | A domain-specific persisted draft has been saved. |
 | Перевірка неактуальна | Reviewed evidence cannot authorize the next apply action. |
@@ -116,9 +125,82 @@ no generic retry, draft persistence or workflow engine.
   Category/request epochs fence late pricing/schema responses. Dirty guards and
   conflicts preserve local input without silent rebasing.
 
-No role grant, new permission, migration or server write semantic is introduced.
+The original shell waves introduced no role grant, permission or migration.
+The subsequent operational recovery work adds explicit reviewed HTTP entrances
+to domain recovery; it does not merge checking with dispatch or replace an
+original uncertain operation. See the current Magento domain guide.
 Authentication, CSRF, active-user boundaries, immutable publications/files,
 reservations, CAS/revisions and transaction ordering remain authoritative.
+
+## Synchronization and integration workspaces (2026-10-04)
+
+Attention now shows a bounded product queue with article search, category and
+reason filters. Selecting a product retains `?problem=<productId>`; exact detail
+is read separately so an off-page or resolved product remains addressable. The
+detail explains **what prevents delivery → its effect → the next permitted action**.
+It offers name/size repair in context, direct recount for characteristics, category
+configuration links and controlled original-operation recovery. Raw codes, fields
+and evidence remain under technical disclosure. Unknown evidence is never success.
+Background refresh reads Amber only; a remote check requires an explicit action.
+
+Direct repair uses `/products/open?article=…&action=recount&returnTo=…`.
+It waits for the exact stored public article and effective direct-recount
+permission before opening the form; it never applies changes on navigation.
+The return target is restricted to the local attention workspace. Receipts say
+that Amber saved the change, while Magento delivery remains a separate state.
+
+Magento combines overview, categories and characteristics, product rules, saved
+changes and history. Category detail connects the actual current binding and its
+pinned template to readable field/source/rule/example information. Preparation
+opens with a task intent instead of demanding that an operator choose technical
+layers. Published current state and future drafts remain visibly separate;
+publication steps keep their own authority and review.
+
+Catalog handoffs accept `category`, `question` and an explicit form-opening
+`action` (`new-category`, `new-question`, `new-option`, `edit-question`). They select
+the exact existing context once and never issue catalog writes on entry. A local
+Magento `returnTo` preserves the return path; dirty changes keep their guard.
+Amber category/questions/options and Magento category/attribute options remain
+different domain objects. The bounded [attribute workflow](MAGENTO_ATTRIBUTES.md)
+adds reviewed creation of ordinary text/single-select Magento attributes and a
+separate existing-set membership action; it is not a generic EAV editor.
+
+### Administrator scenarios
+
+| Task | Entry and visible result |
+| --- | --- |
+| New Amber category | `/admin/magento/categories/new` uses the existing catalog create contract and returns a resumable category receipt. Separate checkpoints open the exact category's characteristics, SKU publication, pricing and shop connection. A saved category never implies valid prices or delivery readiness. |
+| New shop subcategory | Category → **Розміщення в магазині** → prepare change → the pinned category placement rule. Choose an existing observed section or an observed parent plus a new name; explicitly choose all category products or a characteristic/value condition. The authoring form appends to the exact old rule, preserving existing placements, EN rules and shared references. Save/review/publication and remote category creation remain separate actions. |
+| New characteristic | Category → **Характеристики** → prepare change. An Amber question is edited in Catalog; an actual new Magento attribute uses explicit type/scope/visibility/requiredness settings, reviewed creation and a separate set assignment. The exact attribute then opens a suggested new field in the rule editor. Creating a rule column does not create an attribute. |
+| New characteristic value | The same category selects the exact question and semantic value, including `0`. Existing remote values can be connected; a missing value has reviewed creation. A fresh successor observes newly created resources before connections and publication. |
+| Existing product problem | Attention → exact product → explicit Magento check shows Amber's intended values versus observed Magento values and delivery policy. Field/value/path links retain the product, category, source context and safe return URL through diagnosis, rules, preparation and back to the product. Applying a configuration change is not proof of product delivery. |
+
+Category detail has **Розміщення в магазині / Характеристики / Товари** views.
+Text characteristics remain visible even without enumerated options. Category
+paths and attribute-set names use observed selectors; ambiguous names never
+silently choose a target. Missing requested categories/fields produce a clear
+handoff instead of opening another category or the SKU column.
+
+Preparation keeps intent, category, selected draft and step in the URL. Technical
+revision selection is secondary. A resource creation receipt requires a fresh
+successor because existing drafts retain their frozen observation. Unpublished
+decisions are not silently copied. Reads and completion receipts are scoped to
+the selected draft/category; stale publication evidence blocks continuation.
+
+**Перевірити структуру** explicitly performs bounded Magento GETs and compares
+the current approved routes, category paths, attribute metadata, required set
+members and approved options. Its result names affected settings and opens their
+category. It does not turn unrelated future preparation into a failure, claim to
+have checked all products, or report unavailable evidence as healthy. A publication
+change during the check invalidates the result. No background remote polling or
+implicit resource creation was added.
+
+These scenarios retain effective capabilities and actual Administrator-only
+contracts. Attribute creation/assignment is the new bounded write surface for
+these five scenarios; forward migration 059 extends the existing permanent
+configuration-action ledger. Lost remote writes use original-action recovery,
+never blind retry. Stock Magento can verify set membership but does not provide
+assignment group/order readback or remote CAS; see the attribute guide's limits.
 
 ## Verification and human acceptance
 

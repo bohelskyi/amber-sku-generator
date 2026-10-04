@@ -4,6 +4,7 @@ import { api } from '../../lib/api.js';
 import { useAuth } from '../../auth/auth-context.js';
 import { LoadingState, Notice, StatusBadge } from '../app/UiPrimitives.jsx';
 import MagentoDetails from './MagentoDetails.jsx';
+import { withRepairContext } from '../../lib/magento-repair-context.js';
 
 const root = '/admin/magento-integration';
 const kinds = { route: 'Набір атрибутів', attribute: 'Атрибут', option: 'Значення', category: 'Категорія Magento', policy: 'Правило доставки' };
@@ -45,13 +46,14 @@ function Decision({ entry, revision, busy, act }) {
   </article>;
 }
 
-function ReviewEntries({ review, categoryCode, canManage, busy, act }) {
-  const [showAll, setShowAll] = useState(false); const [page, setPage] = useState(0);
-  const entries = review.entries.filter((entry) => !categoryCode || entry.group === categoryCode);
+function ReviewEntries({ review, categoryCode, field, canManage, busy, act }) {
+  const [showAll, setShowAll] = useState(Boolean(field)); const [page, setPage] = useState(0);
+  const entries = review.entries.filter((entry) => (!categoryCode || entry.group === categoryCode) && (!field || entry.target === field));
   const issues = entries.filter(requiresReview);
   const displayed = showAll ? entries : issues;
   const pages = Math.max(1, Math.ceil(displayed.length / 50)); const current = Math.min(page, pages - 1);
   return <div className="space-y-3">
+    {field && <p className="text-sm">Перевіряємо поле: <strong>{field}</strong></p>}
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="text-sm">Потребують перевірки: {issues.length}. Усього відповідностей: {entries.length}.</p>
       <button type="button" className="btn btn-outline btn-compact-md" disabled={busy} onClick={() => { setShowAll(!showAll); setPage(0); }}>{showAll ? 'Показати лише невирішені' : 'Показати всі відповідності'}</button>
@@ -68,10 +70,10 @@ function ReviewEntries({ review, categoryCode, canManage, busy, act }) {
   </div>;
 }
 
-function BindingReviewWorkspace({ revision, templateVersions = [], onChanged, mode = 'all', categoryCode, currentPublishedId }) {
+function BindingReviewWorkspace({ revision, templateVersions = [], onChanged, mode = 'all', categoryCode, field, currentPublishedId, initialTemplateVersionId, guided = false, refreshing = false, repairContext = {}, taskIntent }) {
   const { permissions } = useAuth(); const canManage = permissions.includes('export_templates.manage');
   const [review, setReview] = useState(null); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
-  const [versionId, setVersionId] = useState(''); const [preparation, setPreparation] = useState(null);
+  const [versionId, setVersionId] = useState(templateVersions.some((item) => item.id === initialTemplateVersionId) ? initialTemplateVersionId : ''); const [preparation, setPreparation] = useState(null);
   const sequence = useRef(0); const inFlight = useRef(false);
   useEffect(() => {
     const controller = new AbortController(); const requests = sequence; const current = ++requests.current;
@@ -90,20 +92,20 @@ function BindingReviewWorkspace({ revision, templateVersions = [], onChanged, mo
   }
   const request = { sourceId: revision.id, expectedSourceRevision: revision.revision, templateVersionId: versionId };
   const isCurrent = currentPublishedId === undefined || currentPublishedId === revision.id;
-  const reviewEntries = review && <ReviewEntries review={review} categoryCode={categoryCode} canManage={canManage} busy={busy}
+  const reviewEntries = review && <ReviewEntries review={review} categoryCode={categoryCode} field={field} canManage={canManage} busy={busy}
     act={(name, body) => action(`bindings/${revision.id}/${name}`, body, onChanged)} />;
-  return <section className="card space-y-3 p-5"><h2 className="font-semibold">{mode === 'successor' ? 'Підготовка наступної версії' : 'Перевірка відповідностей'}</h2>
+  return <section className="card space-y-3 p-5"><h2 className="font-semibold">{mode === 'successor' ? guided ? refreshing ? 'Продовжити підключення' : 'Почати зміну налаштувань' : 'Підготовка наступної версії' : 'Перевірка відповідностей'}</h2>
     {error && <Notice tone="error">{error}</Notice>}
     <p className="text-sm">{revision.state === 'published' ? 'Опублікована версія незмінна. Подальші зміни готуються окремою чернеткою.' : 'Чернетка не змінює поточну доставку. Вибір кандидата та підтвердження — окремі дії.'}</p>
-    <Link className="text-sm underline" to={`/admin/export-templates/${revision.templateId}?version=${revision.templateVersionId}`}>Правила інтеграційного шаблону</Link>
+    {revision.templateId && <Link className="text-sm underline" to={withRepairContext(`/admin/magento/rules/${revision.templateId}`, repairContext, { version: revision.templateVersionId, ...(taskIntent ? { intent: taskIntent } : {}), ...(categoryCode ? { category: categoryCode } : {}), ...(field ? { field } : {}) })}>Правила передачі цієї категорії</Link>}
     {mode !== 'review' && revision.state === 'published' && !isCurrent && <Notice>Це попередня публікація. Наступну чернетку потрібно готувати від чинної опублікованої версії.</Notice>}
     {mode !== 'review' && canManage && revision.state === 'published' && isCurrent && <>
-      <p className="text-sm">Після створення ресурсів Magento підготуйте нову чернетку зі свіжим спостереженням. Попередня чернетка не оновлюється; її неопубліковані рішення автоматично не переносяться.</p>
-      <label className="block text-sm">Опублікований шаблон наступної версії<select className="input" value={versionId} disabled={busy} onChange={(event) => { setPreparation(null); setVersionId(event.target.value); }}><option value="">Оберіть версію</option>{templateVersions.map((version) => <option key={version.id} value={version.id}>{version.display_name} · {version.version_number}</option>)}</select></label>
-      <button type="button" className="btn btn-outline btn-compact-md" disabled={busy || !versionId} onClick={() => action('successor/prepare', request, setPreparation)}>Перевірити наступну чернетку зі свіжою структурою Magento</button>
+      {(!guided || refreshing) && <p className="text-sm">{guided ? 'Перевіримо нові дані Magento. Підтверджені чинні налаштування збережуться; неопубліковані рішення попередньої підготовки потрібно переглянути повторно.' : 'Після створення ресурсів Magento підготуйте нову чернетку зі свіжим спостереженням. Попередня чернетка не оновлюється; її неопубліковані рішення автоматично не переносяться.'}</p>}
+      <details open={!guided || !versionId}><summary>{guided ? 'Правила, на основі яких готуємо зміни' : 'Вибір опублікованого шаблону'}</summary><label className="block text-sm">Опублікований шаблон наступної версії<select className="input" value={versionId} disabled={busy} onChange={(event) => { setPreparation(null); setVersionId(event.target.value); }}><option value="">Оберіть версію</option>{templateVersions.map((version) => <option key={version.id} value={version.id}>{version.display_name} · {version.version_number}</option>)}</select></label></details>
+      <button type="button" className="btn btn-outline btn-compact-md" disabled={busy || !versionId} onClick={() => action('successor/prepare', request, setPreparation)}>{guided ? refreshing ? 'Перевірити підключення нових даних' : 'Перевірити налаштування перед зміною' : 'Перевірити наступну чернетку зі свіжою структурою Magento'}</button>
       {preparation && <div className="space-y-2"><p>Підтверджень перенесено з чинної публікації: {preparation.carried.approvalsCarried}. Нові або змінені рішення потребують окремої перевірки.</p><p>Перевірено наявних товарів: {preparation.productIds.length}. Приклади CREATE перевірте після підготовки чернетки.</p>
         {preparation.blockers.map((blocker, index) => <p key={index}>{blocker.message || blocker.code}</p>)}
-        <button type="button" className="btn btn-primary btn-compact-md" disabled={busy} onClick={() => action('successor/apply', { ...request, previewToken: preparation.previewToken }, onChanged)}>Підготувати наступну чернетку</button></div>}
+        <button type="button" className="btn btn-primary btn-compact-md" disabled={busy} onClick={() => action('successor/apply', { ...request, previewToken: preparation.previewToken }, onChanged)}>{guided ? 'Зберегти підготовку і продовжити' : 'Підготувати наступну чернетку'}</button></div>}
       <MagentoDetails summary="Точна копія без нового спостереження">{() => <>
         <p className="text-sm">Копія зберігає заморожене спостереження чинної публікації. Нові ресурси Magento до нього не потраплять.</p>
         <button type="button" className="btn btn-outline btn-compact-md" disabled={busy} onClick={() => action(`bindings/${revision.id}/clone`, { expectedRevision: revision.revision }, onChanged)}>Створити точну чернетку</button>

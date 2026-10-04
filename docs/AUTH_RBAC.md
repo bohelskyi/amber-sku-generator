@@ -48,7 +48,7 @@ Permission keys are stable capabilities stored in `permissions` and mapped to ro
 | Access administration | `users.manage`, `roles.manage` |
 | Audit | `audit.view` |
 
-`products.recount` authorizes direct recount and the separate approved informational-edit command. The shared recount preview accepts `products.recount` or `corrections.create`; this does not authorize either mutation. Apply still requires `products.recount`, and request creation still requires `corrections.create`. The UI defaults to direct apply when available and offers request submission separately. Direct price preview/apply use `products.price_change`; request-based decisions use `corrections.create` and, for custom prices, `corrections.price_override`. See [price-change capabilities](#price-change-capabilities).
+`products.recount` authorizes direct recount and the separate approved informational-edit command. The shared recount preview accepts `products.recount` or `corrections.create`; this does not authorize either mutation. Apply still requires `products.recount`, and historical request creation contracts still require `corrections.create`. Current product and repricing UI offers direct changes only; existing requests retain their compatibility workflow. Direct price preview/apply use `products.price_change`; historical request-based decisions use `corrections.create` and, for custom prices, `corrections.price_override`. See [price-change capabilities](#price-change-capabilities).
 
 Initial built-in mappings after migrations through `040`:
 
@@ -60,7 +60,7 @@ Initial built-in mappings after migrations through `040`:
 
 The built-in Administrator role is permanent and immutable and automatically receives every permission inserted into `permissions`. It cannot be renamed, disabled, deleted, or permission-edited. Manager, Storekeeper, and custom roles retain immutable `role_key` and `is_system` identity fields but otherwise use the same editable lifecycle. Roles are never hard-deleted. `users.manage`, `roles.manage`, and `audit.view` are reserved to Administrator and database constraints reject mappings to any other role.
 
-The initial Manager role remains request-only for these operations: it has correction-request creation and price-override permissions but not `products.price_change`, so direct in-place price preview/apply remain denied. Adding the direct command does not broaden Manager access; an editable Manager or custom role receives it only when an Administrator explicitly grants `products.price_change`.
+The initial Manager role retains historical correction-request creation and price-override permissions but not `products.price_change`, so direct in-place price preview/apply remain denied. Current product and repricing screens no longer offer new requests. Existing request permissions support compatibility; retiring their current UI never grants direct mutation rights. An editable Manager or custom role receives direct price-change access only when an Administrator explicitly grants `products.price_change`.
 
 The permission-aware client uses only the effective keys from `/api/auth/me`, never role-name checks, to hide unavailable controls. Manager pricing uses the published product catalog projection to select a category and the category pricing endpoint to render matrices/modifiers read-only; this does not grant `catalog.view`.
 
@@ -142,7 +142,19 @@ audit coverage is described here for access administration and in the domain gui
 
 ## Lifecycle reconciliation capability
 
-Migration `039` adds `exports.reconcile`. The protected permission trigger initially grants it only to Administrator; it is delegable to editable roles and is not an Administrator-reserved key. Cutover mutations, status and reconciliation commands revalidate the active local actor and this capability inside their access/transaction boundary. Manifest generation and evidence review are read-only CLI tooling requiring database access; the CLI requires an actor ID, but those read paths do not perform the mutation capability recheck. There is no reconciliation HTTP route or general hold-release UI. See [exports](EXPORTS.md#reconciliation-and-exclusion-provenance) and the [operator runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md).
+Migration `039` adds `exports.reconcile`. The protected permission trigger initially grants it only to Administrator; it is delegable to editable roles and is not an Administrator-reserved key. Cutover mutations, status and reconciliation commands revalidate the active local actor and this capability inside their access/transaction boundary. Manifest generation and evidence review are read-only CLI tooling requiring database access; the CLI requires an actor ID, but those read paths do not perform the mutation capability recheck.
+
+The operational recovery workspace now exposes authenticated, CSRF-protected
+`POST /api/admin/magento-recovery/products/:id/lifecycle-preview` and
+`/lifecycle-apply` under `exports.reconcile`. They reuse exact exposure/stable-recount
+and historical reconciliation contracts, with reviewed evidence and no generic
+hold-release or resend. Original sync-job inspection, local acknowledgement and
+explicit continuation use `export_templates.publish`; the product recovery GET
+accepts either capability and filters available actions. Administrator-only
+broader resync remains a separate contract and does not become delegable through
+recovery. See [Magento recovery](MAGENTO_INTEGRATION.md#controlled-product-recovery),
+[exports](EXPORTS.md#reconciliation-and-exclusion-provenance) and the
+[operator runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md).
 
 ## Synchronization presentation and names
 

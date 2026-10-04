@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { Link, MemoryRouter } from 'react-router-dom';
 import { AuthContext } from '../src/auth/auth-context.js';
 import { api } from '../src/lib/api.js';
 import MagentoPublicationActions from '../src/components/workspace/MagentoPublicationActions.jsx';
@@ -15,6 +15,33 @@ const shell = (props = {}, grants = permissions, assignedRoles = roles) => rende
 const controlledShell = (props = {}, grants = permissions, assignedRoles = roles) => render(<AuthContext.Provider value={{ permissions: grants, roles: assignedRoles }}><MemoryRouter><MagentoControlledActions revision={{...revision,id:'current',state:'published'}} currentPublishedId="current" kind="broader_resync" {...props} /></MemoryRouter></AuthContext.Provider>);
 function openDetails(label) {fireEvent.click(screen.getByText(label).closest('summary'));}
 afterEach(() => { cleanup(); vi.resetAllMocks(); vi.useRealTimers(); });
+it('recovery handoff verifies and selects only the exact eligible product without dispatching or widening the selection', async () => {
+  const product = (productId, blocked = false) => ({ productId, article: `AG-${productId}`, before: { all: 'Товар' }, blockers: blocked ? ['RECONCILIATION_REQUIRED'] : [] });
+  api.get.mockResolvedValue({ data: { products: [product(21), product(22)], nextCursor: 22 } });
+  render(<AuthContext.Provider value={{ permissions, roles }}><MemoryRouter initialEntries={['/admin/magento/administrator?productId=21&action=broader_resync&returnTo=%2Fattention%3Fproblem%3D21']}><Link to="/admin/magento/administrator?productId=22">Інший товар</Link><MagentoControlledActions revision={{ ...revision, id: 'current', state: 'published' }} currentPublishedId="current" kind="broader_resync" /></MemoryRouter></AuthContext.Provider>);
+  expect(api.get).not.toHaveBeenCalled(); expect(api.post).not.toHaveBeenCalled();
+  expect(screen.getByRole('link', { name: 'Повернутися до проблеми товару' }).getAttribute('href')).toBe('/attention?problem=21');
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити товари для контрольованої дії' }));
+  expect((await screen.findByLabelText(/AG-21/)).checked).toBe(true);
+  expect(screen.queryByLabelText(/AG-22/)).toBeNull();
+  expect(api.get).toHaveBeenCalledWith('/admin/magento-integration/bindings/current/controlled-products', { params: { after: 20, search: '' } });
+  expect(screen.getByRole('button', { name: 'Наступні товари' }).disabled).toBe(true);
+  expect(api.post).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('link', { name: 'Інший товар' }));
+  expect(screen.queryByLabelText(/AG-21/)).toBeNull(); expect(api.get).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити товари для контрольованої дії' }));
+  expect((await screen.findByLabelText(/AG-22/)).checked).toBe(true);
+  expect(api.get).toHaveBeenLastCalledWith('/admin/magento-integration/bindings/current/controlled-products', { params: { after: 21, search: '' } });
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('recovery handoff never selects a dispatched unconfirmed product', async () => {
+  api.get.mockResolvedValue({ data: { products: [{ productId: 21, article: 'AG-21', before: {}, blockers: ['RECONCILIATION_REQUIRED'] }], nextCursor: null } });
+  render(<AuthContext.Provider value={{ permissions, roles }}><MemoryRouter initialEntries={['/admin/magento/administrator?productId=21']}><MagentoControlledActions revision={{ ...revision, id: 'current', state: 'published' }} currentPublishedId="current" kind="broader_resync" /></MemoryRouter></AuthContext.Provider>);
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити товари для контрольованої дії' }));
+  const checkbox = await screen.findByLabelText(/AG-21/); expect(checkbox.checked).toBe(false); expect(checkbox.disabled).toBe(true);
+  expect(api.post).not.toHaveBeenCalled();
+});
 it('controlled product picker can reach later pages and preserves the exact cross-page selection',async()=>{
   const product=(id)=>({productId:id,article:`AG-${id}`,before:{all:`Назва ${id}`},after:{all:`Нова ${id}`},changed:true,blockers:[]});
   api.get.mockImplementation((path,options)=>Promise.resolve({data:path.endsWith('/handoffs')?[]: options.params.after===0

@@ -316,3 +316,15 @@ business primitive. Concurrent duplicate receipts cannot both commit. Existing
 audit immutability and historical events remain unchanged. The migration creates
 no requests, corrections, products, claims, exchange-rate cache entries or
 Magento work. See the [batch runbook](CORRECTION_REQUEST_BATCH.md).
+
+## 059 — controlled attribute creation and membership evidence
+
+`059_magento_attribute_actions.sql` adds only `attribute` and
+`attribute_assignment` to the existing `magento_configuration_actions` kind
+constraint. No table, backfill, permission, default attribute, binding, publication
+or remote write is created. Existing immutable intent/progress, resource reservation,
+attestation and undispatched-reseal rules are unchanged. The migration runner owns
+the transaction/checksum boundary; disposable coverage checks the 058 upgrade,
+transaction rollback, fresh installation and repeated startup. See the precise
+[attribute and membership workflow](MAGENTO_ATTRIBUTES.md), including stock
+Magento's point-in-time membership verification limits.

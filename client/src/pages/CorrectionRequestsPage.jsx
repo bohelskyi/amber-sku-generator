@@ -496,9 +496,9 @@ export default function CorrectionRequestsPage() {
 
   return <div className="app-page"><main className="correction-queue-page">
     <PageHeader
-      breadcrumbs={[{ label: 'Потребує уваги', to: '/attention' }, { label: 'Запити на виправлення' }]}
-      title="Запити на виправлення"
-      description="Оберіть запит у черзі, перевірте запропонований результат і виконайте лише доступну вам дію."
+      breadcrumbs={[{ label: 'Історичні запити' }]}
+      title="Історичні запити"
+      description="Раніше створені запити та завершення розпочатої роботи. Поточні зміни виконуються безпосередньо в картці товару за відповідними дозволами."
       actions={isAdminView && canViewCatalogOrPricing ? <Link to="/admin" className="btn btn-outline">Налаштування</Link> : undefined}
     />
     {error && <Notice tone="error">{error}</Notice>}

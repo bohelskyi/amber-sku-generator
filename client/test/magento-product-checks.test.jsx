@@ -21,6 +21,15 @@ const result = { hypothetical: true, article: 'AG-PREVIEW', routeKey: 'SV:normal
 beforeEach(() => { vi.resetAllMocks(); api.get.mockResolvedValue({ data: config }); api.post.mockResolvedValue({ data: result }); });
 afterEach(cleanup);
 const shell = (props = {}) => render(<MagentoProductChecks revision={revision} categoryCode="SV" onRepresentative={vi.fn()} {...props} />);
+it('accepts the exact product repair context without a search or automatic preview', async () => {
+  api.post.mockResolvedValue({ data: { ...result, productId: 42, article: 'AG-000042', hypothetical: false } });
+  shell({ initialProductId: 42 }); await screen.findByLabelText('Вид сувеніра');
+  expect(screen.getByText('товар із черги проблем')).toBeTruthy();
+  expect(api.post).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити поточний товар' }));
+  await screen.findByText('Цей приклад пройшов перевірку доставки');
+  expect(api.post).toHaveBeenCalledWith(`${root}/product-preview`, { productId: 42, bindingRevisionId: 'draft' });
+});
 it('keychain CREATE check leaves size optional and sends decimal comma weight without fabricating size', async () => {
   shell(); fireEvent.change(await screen.findByLabelText('Вид сувеніра'), { target: { value: '6' } });
   expect(screen.getByLabelText('Розмір').required).toBe(false);

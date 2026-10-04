@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
@@ -19,11 +19,11 @@ const decoded = { existsInDb: true, sku: 'SV227001', publicSku: 'AG-000002', cat
   decodedAnswers: [], skuSchema: { version: 1 }, suffix: { type: 'sequence', value: 1 }, product: { id: 5010, status: 'active', details: { answers: {} } } };
 const preview = { source: { sku: decoded.sku, publicSku: decoded.publicSku, totalPriceUah: 100, stateSignature: 'name-bound' },
   corrected: { categoryCode: 'SV', publicSku: decoded.publicSku, fullSku: 'SV227002', totalPriceUah: 100 }, changes: [], previewToken: 'reviewed' };
-function shell(element, keys = permissions) {
+function shell(element, keys = permissions, initialEntry = '/products') {
   const router = createMemoryRouter([{
     path: '*',
     element: <AuthContext.Provider value={{ permissions: keys }}>{element}</AuthContext.Provider>,
-  }], { initialEntries: ['/products'] });
+  }], { initialEntries: [initialEntry] });
   return render(<RouterProvider router={router} />);
 }
 beforeEach(() => { vi.resetAllMocks(); api.get.mockResolvedValue({ data: { names, nameConflict: false } }); });
@@ -264,8 +264,46 @@ for (const keys of [['products.recount'], ['products.recount', 'corrections.crea
     useSkuManager.mockReturnValue({ config, decodeData: decoded, handleDecode: vi.fn(), handleStartRecount: onStart });
     shell(<AppPage />, ['products.view', 'products.decode', ...keys]);
     expect(screen.queryByRole('button', { name: 'Передати зміни на розгляд' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: keys.includes('products.recount') ? 'Переоблік' : 'Підготувати запит' }));
-    expect(onStart).toHaveBeenCalledOnce();
-    expect(useSkuManager).toHaveBeenCalledWith(expect.objectContaining({ submitMode: keys.includes('products.recount') ? 'apply' : 'request' }));
+    expect(screen.queryByRole('button', { name: 'Підготувати запит' })).toBeNull();
+    if (keys.includes('products.recount')) {
+      fireEvent.click(screen.getByRole('button', { name: 'Переоблік' }));
+      expect(onStart).toHaveBeenCalledOnce();
+    } else {
+      expect(screen.queryByRole('button', { name: 'Переоблік' })).toBeNull();
+      expect(onStart).not.toHaveBeenCalled();
+    }
+    expect(useSkuManager).toHaveBeenCalledWith(expect.objectContaining({ submitMode: 'apply', canCreatePriceChangeRequest: false }));
   });
 }
+
+it('opens an explicit attention repair only after the exact product loads and keeps its return context', async () => {
+  const start = vi.fn(); let load;
+  function Harness() {
+    const [product, setProduct] = useState(null);
+    useEffect(() => { load = setProduct; }, []);
+    useSkuManager.mockReturnValue({ config, decodeData: product, isDecodeLoading: !product,
+      handleDecode: vi.fn(), handleStartRecount: start });
+    return <AppPage />;
+  }
+  const returnTo = '/attention?category=SV&problem=5010&search=AG';
+  shell(<Harness />, permissions, `/products/open?article=AG-000002&action=recount&returnTo=${encodeURIComponent(returnTo)}`);
+  expect(start).not.toHaveBeenCalled();
+  await act(async () => load({ ...decoded, publicSku: 'AG-000099' }));
+  expect(start).not.toHaveBeenCalled();
+  await act(async () => load(decoded));
+  expect(start).toHaveBeenCalledOnce();
+  expect(screen.getByRole('link', { name: 'Повернутися до проблеми' }).getAttribute('href')).toBe(returnTo);
+  await act(async () => load({ ...decoded }));
+  expect(start).toHaveBeenCalledOnce();
+});
+
+it('an attention repair link cannot grant direct recount or use an external return URL', () => {
+  const start = vi.fn();
+  useSkuManager.mockReturnValue({ config, decodeData: decoded, handleDecode: vi.fn(), handleStartRecount: start });
+  shell(<AppPage />, ['products.view', 'products.decode', 'corrections.create'],
+    '/products/open?article=AG-000002&action=recount&returnTo=https%3A%2F%2Fexample.invalid');
+  expect(start).not.toHaveBeenCalled();
+  expect(screen.getByText(/Для виправлення характеристик потрібен дозвіл/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Повернутися до проблеми' }).getAttribute('href')).toBe('/attention');
+  expect(screen.queryByRole('button', { name: 'Підготувати запит' })).toBeNull();
+});

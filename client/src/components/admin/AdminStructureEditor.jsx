@@ -21,12 +21,13 @@ export function AdminStructureEditor({
   fillNextNewQuestionSkuIndex, addOption, archiveOption, beginOptionEdit, updateOption,
   publishSkuSchema, deleteItem,
   onDirtyChange = () => {},
+  entryAction = null,
 }) {
   const [isCategoryEditOpen, setIsCategoryEditOpen] = useState(false);
-  const [isNewCategoryOpen, setIsNewCategoryOpen] = useState(false);
-  const [isQuestionEditOpen, setIsQuestionEditOpen] = useState(false);
-  const [isNewQuestionOpen, setIsNewQuestionOpen] = useState(false);
-  const [isNewOptionOpen, setIsNewOptionOpen] = useState(false);
+  const [isNewCategoryOpen, setIsNewCategoryOpen] = useState(() => canManage && entryAction?.action === 'new-category');
+  const [isQuestionEditOpen, setIsQuestionEditOpen] = useState(() => canManage && entryAction?.action === 'edit-question');
+  const [isNewQuestionOpen, setIsNewQuestionOpen] = useState(() => canManage && entryAction?.action === 'new-question');
+  const [isNewOptionOpen, setIsNewOptionOpen] = useState(() => canManage && entryAction?.action === 'new-option');
   const [isArchivedOptionsOpen, setIsArchivedOptionsOpen] = useState(false);
   const [draggedQuestionId, setDraggedQuestionId] = useState(null);
   const [questionDropTarget, setQuestionDropTarget] = useState({ id: null, position: null });

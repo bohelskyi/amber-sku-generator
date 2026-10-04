@@ -114,6 +114,11 @@ let fixtureWeight = 10;
 let fixturePriceUah = 1200;
 let fixtureProductStatus = 'active';
 let correctionRequestSequence = 40;
+let recoveryStage = 0;
+const recoveryJob = () => ({ id: 'fixture-original-job', productId: 7, article: 'SV5111010',
+  state: recoveryStage === 2 ? 'succeeded' : 'uncertain',
+  steps: [{ ordinal: 0, domain: 'coreProduct', state: recoveryStage > 0 ? 'verified' : 'dispatched' },
+    { ordinal: 1, domain: 'sharedName', state: recoveryStage === 2 ? 'verified' : 'not_sent' }] });
 const exportTemplateDefinition = materializeMagentoV1(exportTemplateCatalog());
 let exportTemplateFamily = null;
 const exportSessionSettings = { requestContract: 'template-v1', mode: 'new', selection: { mode: 'active' } };
@@ -329,17 +334,39 @@ const server = http.createServer(async (request, response) => {
       case 'GET /api/product-names/20': data = { names: { all: 'Синтетичний сувенір', en: 'Synthetic souvenir' }, nameConflict: false }; break;
       case 'GET /api/product-names/7': data = { names: { all: 'Тестовий сувенір', en: 'Test souvenir' }, nameConflict: false }; break;
       case 'GET /api/magento/summary': data = { enabled: true, problemCount: 2 }; break;
+      case 'GET /api/magento/problems/7':
       case 'GET /api/magento/problems/page': data = {
         items: [{ productId: product.id, article: magentoReadinessFixture || operationalFixture ? 'SV5111010' : product.publicSku, category: product.categoryCode,
-          nameConflict: false, problems: operationalFixture ? [operationalFixture] : magentoReadinessFixture ? [
+          state: 'needs_attention', productStatus: 'active', nameConflict: false, problems: operationalFixture ? [operationalFixture] : magentoReadinessFixture ? [
             { code: 'NAME_READ_UNAVAILABLE', message: 'Назви товару в Amber потрібно заповнити або виправити.', resolution: 'product' },
             { code: 'PRODUCT_EVALUATION_NOT_READY', message: 'Товар не готовий до синхронізації. Потрібно доповнити або виправити дані товару.',
-              resolution: 'product', issueFields: ['kamin_obrobka', 'name', 'rozmir_suveniriv'] },
-          ] : [{ code: 'UNCERTAIN_WRITE',
+              resolution: 'product', issueFields: ['kamin_obrobka', ...(!readinessNamesApplied ? ['name'] : []), ...(!readinessSizeApplied ? ['rozmir_suveniriv'] : [])] },
+          ] : [{ code: 'reconciliation_required',
             message: 'Amber надіслав зміну, але кінцевий стан не підтверджено.',
             resolution: 'administrator', target: 'product' }] }],
         pageInfo: { limit: 20, offset: 0, total: 1, hasPrevious: false, hasNext: false },
-      }; break;
+      };
+        if (url.pathname === '/api/magento/problems/7') {
+          data = operationalFixture?.code === 'reconciliation_required' && recoveryStage === 2
+            ? { ...data.items[0], state: 'synced', problems: [] } : data.items[0];
+        } else if (operationalFixture?.code === 'reconciliation_required' && recoveryStage === 2) {
+          data = { ...data, items: [], pageInfo: { ...data.pageInfo, total: 0 } };
+        }
+        break;
+      case 'GET /api/admin/magento-recovery/products/7': data = { productId: 7, article: 'SV5111010',
+        job: operationalFixture?.code === 'reconciliation_required' ? recoveryJob() : null,
+        lifecycle: operationalFixture?.code === 'reconciliation_required' ? null : { route: 'hold', holdReason: 'fixture', deliveryVersion: '1', businessExclusion: 'none', suggestedKind: 'prior_exposure', availableKinds: ['prior_exposure'] },
+        actions: { jobRecovery: true, lifecycleRecovery: true } }; break;
+      case 'POST /api/admin/magento-recovery/jobs/fixture-original-job/inspect': data = {
+        job: recoveryJob(), steps: recoveryJob().steps.map((step) => ({ ...step, matches: step.ordinal === 0 || recoveryStage === 2 })),
+        blockers: [], observedAt: '2026-10-04T08:00:00Z', canReconcile: recoveryStage === 0, canContinue: recoveryStage === 1,
+        remainingCount: recoveryStage === 2 ? 0 : 1,
+        unsentChanges: recoveryStage === 2 ? [] : [{ ordinal: 1, label: 'Назва товару', before: 'Попередня назва', after: 'Узгоджена назва' }],
+        review: { jobId: 'fixture-original-job', stage: recoveryStage }, reviewHash: `fixture-review-${recoveryStage}` }; break;
+      case 'POST /api/admin/magento-recovery/jobs/fixture-original-job/reconcile':
+        assert.equal(body.reviewHash, 'fixture-review-0'); recoveryStage = 1; data = { job: recoveryJob(), remoteWrites: 0 }; break;
+      case 'POST /api/admin/magento-recovery/jobs/fixture-original-job/continue':
+        assert.equal(body.reviewHash, 'fixture-review-1'); recoveryStage = 2; data = { job: recoveryJob() }; break;
       case 'POST /api/product-magento-name/preview':
         data = body?.subjectUa ? { productId: product.id, publicSku: 'SV5111010', subjectUa: body.subjectUa,
           subjectEn: body.subjectEn, previewToken: 'fixture-name-preview', nameUa: `${body.subjectUa} з бурштину. Арт: SV5111010`,
@@ -498,11 +525,16 @@ async function launchBrowser({ actualZoom = false } = {}) {
     if (data.method === 'Runtime.exceptionThrown') errors.push(data.params.exceptionDetails);
     if (data.method === 'Fetch.requestPaused') {
       const requestedUrl = data.params.request.url;
+      // A route transition can cancel a paused request before CDP continues it.
+      // Keep every other interception error visible to the acceptance assertion.
+      const interceptionFailure = (cause) => {
+        if (cause.message !== 'Invalid InterceptionId.') errors.push({ interceptionError: cause.message });
+      };
       if (requestedUrl.startsWith(`${origin}/`) || /^(data|blob):/.test(requestedUrl)) {
-        void command('Fetch.continueRequest', { requestId: data.params.requestId });
+        void command('Fetch.continueRequest', { requestId: data.params.requestId }).catch(interceptionFailure);
       } else {
         blockedExternal.push(requestedUrl);
-        void command('Fetch.failRequest', { requestId: data.params.requestId, errorReason: 'BlockedByClient' });
+        void command('Fetch.failRequest', { requestId: data.params.requestId, errorReason: 'BlockedByClient' }).catch(interceptionFailure);
       }
     }
     const entry = pending.get(data.id);
@@ -684,9 +716,7 @@ try {
   report.performance.push(await client.metrics());
 
   await client.navigate('/attention', 'Потребує уваги');
-  await client.wait("document.body.textContent.includes('2зафіксованих проблем') && [...document.querySelectorAll('a')].some((link)=>link.textContent.trim()==='Переглянути проблеми')", 'storekeeper delivery attention');
-  await client.click('Переглянути проблеми');
-  await client.wait("location.pathname==='/sync-problems' && document.querySelector('h1')?.textContent.trim()==='Проблеми доставки до Magento'", 'storekeeper synchronization problem workspace');
+  await client.wait("document.querySelectorAll('.sync-problem-queue-item').length===1", 'storekeeper direct delivery queue');
   await client.wait(`document.body.textContent.includes('кінцевий стан не підтверджено') && document.body.textContent.includes(${JSON.stringify(product.publicSku)})`, 'selected synchronization problem');
   assert.equal(await client.evaluate("[...document.querySelectorAll('button,a')].some((element)=>/Повтор|Retry/.test(element.textContent))"), false,
     'An uncertain synchronization problem must not expose a resend action');
@@ -702,7 +732,7 @@ try {
   for (const width of [390, 360]) {
     await client.command('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
     currentPersona = 'correctionOperator';
-    await client.navigate('/admin/corrections', 'Запити на виправлення');
+    await client.navigate('/admin/corrections', 'Історичні запити');
     await client.wait("document.querySelectorAll('.correction-queue-item').length===2 && document.querySelector('.correction-request-detail h2')?.textContent.includes('#71')", `correction queue ${width}px`);
     await client.noOverflow(`Correction queue ${width}px`);
     assert.equal(await client.evaluate(`(() => { const filters=document.querySelector('.correction-filter-tabs');
@@ -734,7 +764,7 @@ try {
 
   await client.command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   currentPersona = 'correctionOperator';
-  await client.navigate('/admin/corrections', 'Запити на виправлення');
+  await client.navigate('/admin/corrections', 'Історичні запити');
   await client.wait("document.body.textContent.includes('AG-000020') && [...document.querySelectorAll('button')].some((button)=>button.textContent.includes('Взяти в роботу'))", 'unowned correction request');
   await client.click('Взяти в роботу');
   await client.wait("document.body.textContent.includes('Запит у роботі у вас.') && [...document.querySelectorAll('button')].some((button)=>button.textContent.includes('Перевірити й застосувати'))", 'owned correction request');
@@ -755,7 +785,8 @@ try {
   fixtureProductStatus = 'active';
   currentPersona = 'manager';
   await client.navigate('/attention', 'Потребує уваги');
-  await client.wait("document.body.textContent.includes('3активних запитів') && document.body.textContent.includes('2зафіксованих проблем')", 'independent attention counts');
+  await client.wait("document.querySelectorAll('.sync-problem-queue-item').length===1 && document.body.textContent.includes('Товарів у черзі:')", 'manager direct problem queue');
+  assert.equal(await client.evaluate("document.querySelector('.sync-problems-workspace').textContent.includes('активних запитів')"), false);
   await client.noOverflow('Manager attention desktop');
   await client.screenshot('manager-attention-1440');
   const legacyWritesBefore = requests.filter((entry) => entry.method !== 'GET').length;
@@ -812,13 +843,12 @@ try {
   await client.evaluate('history.back()');
   await client.wait(`location.pathname==='/products/open' && document.querySelector('h1')?.textContent.trim()===${JSON.stringify(`Товар ${product.publicSku}`)}`, 'return from product history');
   await client.wait("document.body.textContent.includes('Стан у базі')", 'manager product detail restored');
-  await client.click('Змінити ціну');
-  await client.wait("document.querySelector('[role=dialog]')?.textContent.includes('Змінити ціну чинного товару')", 'price request dialog');
-  await client.wait("[...document.querySelectorAll('[role=dialog] button')].some((button)=>button.textContent.trim()==='Створити запит на зміну ціни'&&!button.disabled)", 'price request preview');
-  await client.click('Створити запит на зміну ціни', "document.querySelector('[role=dialog]')");
-  await client.wait("document.body.textContent.includes('Створено запит на зміну ціни #41')", 'price request receipt');
-  report.personas.manager = { attentionCounts: { corrections: 3, delivery: 2 }, legacyExportsInspected: true,
-    productHistoryInspected: true, priceRequestCreated: true };
+  assert.equal(await client.evaluate("[...document.querySelectorAll('button')].some((button)=>/Змінити ціну|Підготувати запит|Створити запит/.test(button.textContent))"), false,
+    'Historical request permissions must not expose new requests or grant direct price changes');
+  assert.equal(requests.some((entry) => entry.persona === 'manager' && entry.method === 'POST'
+    && entry.path.startsWith('/api/admin/correction-requests')), false);
+  report.personas.manager = { legacyExportsInspected: true,
+    productHistoryInspected: true, historicalRequestsOnly: true };
   report.performance.push(await client.metrics());
 
   const repricingStartedAt = await client.evaluate('Date.now()');
@@ -897,15 +927,13 @@ try {
   readinessSizeApplied = false;
   fixtureProductStatus = 'active';
   const readinessRequestStart = requests.length;
-  await client.navigate('/sync-problems', 'Проблеми доставки до Magento');
+  await client.navigate('/sync-problems', 'Потребує уваги');
   await client.wait("document.body.textContent.includes('Товар не готовий до синхронізації') && document.body.textContent.includes('SV5111010')", 'readiness problem guidance');
   assert.equal(await client.evaluate("document.body.textContent.includes('Не вдалося прочитати назву Magento')"), false);
   assert.equal(await client.evaluate("['Розмір','Назва українською та англійською','Обробка каменю'].every((label)=>document.body.textContent.includes(label))"), true);
   assert.equal(await client.evaluate("[...document.querySelectorAll('button,a')].some((node)=>/Повторити|Надіслати повторно/.test(node.textContent))"), false);
-  await client.click('Технічні деталі', "document.querySelectorAll('.sync-problem-detail section')[1]");
+  await client.click('Технічні деталі', "document.querySelectorAll('.sync-problem-detail-body > section')[1]");
   await client.wait("document.body.textContent.includes('PRODUCT_EVALUATION_NOT_READY') && document.body.textContent.includes('kamin_obrobka, name, rozmir_suveniriv')", 'raw readiness diagnostics');
-  await client.click('Виправити дані товару');
-  await client.wait("document.body.textContent.includes('Товар SV5111010') && document.body.textContent.includes('Потребує уваги')", 'legacy product readiness detail');
   await client.click('Заповнити назви');
   await client.wait("document.querySelector('[role=dialog]')?.textContent.includes('Назви для Magento · SV5111010')", 'missing-name repair workspace');
   await client.setValue('[role=dialog] input[id$="-ua"]', 'Сувенірний камінь');
@@ -938,8 +966,19 @@ try {
     for (const width of [1440, 390]) {
       await client.command('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
       await client.navigate('/attention', 'Потребує уваги');
-      await client.click('Переглянути проблеми');
-      await client.wait("document.body.textContent.includes('Потрібне підтвердження історії доставки')", 'lifecycle problem');
+      await client.wait("document.querySelectorAll('.sync-problem-queue-item').length===1", 'lifecycle queue');
+      if (width < 720) {
+        await client.evaluate("document.querySelector('.sync-problem-queue-item').click()");
+      }
+      await client.wait("document.querySelector('.sync-problem-detail')?.textContent.includes('Потрібне підтвердження історії доставки') && document.querySelector('.sync-problem-detail')?.textContent.includes('Товар збережено в Amber')", 'exact selected lifecycle problem');
+      if (width < 720) {
+        assert.equal(await client.evaluate("getComputedStyle(document.querySelector('.sync-problem-filters')).display"), 'none', 'Mobile selected detail prioritizes the problem above filters');
+        assert.notEqual(await client.evaluate("getComputedStyle(document.querySelector('.sync-back')).display"), 'none');
+        await client.click('До списку товарів');
+        await client.wait("getComputedStyle(document.querySelector('.sync-problem-filters')).display!=='none'", 'return to filtered queue');
+        await client.evaluate("document.querySelector('.sync-problem-queue-item').click()");
+        await client.wait("document.querySelector('.sync-problem-detail')?.textContent.includes('Товар збережено в Amber')", 'same product reopened');
+      }
       assert.equal(await client.evaluate("document.body.textContent.includes('Товар збережено в Amber')"), true);
       assert.equal(await client.evaluate("[...document.querySelectorAll('a,button')].some((e)=>/Перевірити відповідності|Надіслати|Повторити|Зняти утримання/.test(e.textContent))"), false);
       const handoff = persona === 'administrator' ? 'Потрібне контрольоване узгодження історії доставки' : 'Потрібне узгодження Адміністратора';
@@ -957,14 +996,47 @@ try {
   currentPersona = 'administrator';
   operationalFixture = { code: 'OPTION_BINDING_REVIEW_REQUIRED', message: 'Потрібна відповідність значення',
     resolution: 'integration_configuration', target: 'kamin_obrobka' };
-  await client.navigate('/sync-problems', 'Проблеми доставки до Magento');
-  await client.wait("!![...document.querySelectorAll('a')].find((e)=>e.textContent==='Перевірити відповідності Magento')", 'mapping problem');
-  assert.equal(await client.evaluate("[...document.querySelectorAll('a')].find((e)=>e.textContent==='Перевірити відповідності Magento').getAttribute('href')"), '/admin/magento/categories/SV?field=kamin_obrobka');
+  await client.navigate('/sync-problems', 'Потребує уваги');
+  await client.wait("!![...document.querySelectorAll('a')].find((e)=>e.textContent==='Пов’язати значення')", 'mapping problem');
+  const repairLink = new URL(await client.evaluate("[...document.querySelectorAll('a')].find((e)=>e.textContent==='Пов’язати значення').getAttribute('href')"), 'http://fixture');
+  assert.equal(repairLink.pathname, '/admin/magento/categories/SV');
+  assert.equal(repairLink.searchParams.get('field'), 'kamin_obrobka');
+  assert.equal(repairLink.searchParams.get('productId'), '7');
+  assert.equal(repairLink.searchParams.get('tab'), 'attributes');
+  assert.ok(repairLink.searchParams.get('returnTo').startsWith('/sync-problems'));
   assert.deepEqual(requests.slice(lifecycleRequestStart).filter((entry) => entry.method !== 'GET'
     && !(entry.method === 'POST' && entry.path === '/api/decode')), [],
   'Viewing holds allows only local reads, including the existing POST decode');
   report.lifecycleReconciliation = { personas: ['productViewer', 'administrator'], widths: [1440, 390],
     stablePublicArticle: true, safeEvidence: true, localReadsOnly: true, mappingTargetRetained: true };
+  await client.command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  operationalFixture = { code: 'reconciliation_required', message: 'Amber надіслав зміну, але кінцевий стан не підтверджено.', resolution: 'administrator' };
+  recoveryStage = 0;
+  const recoveryStart = requests.length;
+  await client.navigate('/attention?problem=7', 'Потребує уваги');
+  await client.wait("[...document.querySelectorAll('button')].some((node)=>node.textContent.trim()==='Відкрити перевірку доставки')", 'selected original-operation recovery entry');
+  await client.click('Відкрити перевірку доставки');
+  await client.wait("document.body.textContent.includes('Надіслано, потрібне підтвердження')", 'original durable job');
+  assert.equal(requests.slice(recoveryStart).some((entry) => entry.method === 'POST'), false, 'Opening recovery is a local read');
+  await client.click('Перевірити результат у Magento');
+  await client.wait("document.body.textContent.includes('Перевірка не надсилала змін')", 'GET-only evidence inspected');
+  await client.setValue('.sync-recovery textarea', 'Перевірено фактичний результат першого кроку');
+  await client.click('Підтвердити перевірений результат');
+  await client.wait("!!document.querySelector('[role=dialog]')", 'reconciliation confirmation');
+  assert.equal(await client.evaluate("document.activeElement.textContent.trim()==='Скасувати'"), true);
+  await client.click('Зберегти підтверджене рішення', "document.querySelector('[role=dialog]')");
+  await client.wait("document.body.textContent.includes('Змін до Magento не надсилали')", 'local acknowledgement receipt');
+  assert.equal(requests.slice(recoveryStart).some((entry) => entry.path.endsWith('/continue')), false);
+  await client.click('Перевірити результат у Magento');
+  await client.wait("[...document.querySelectorAll('button')].some((node)=>node.textContent.trim()==='Переглянути продовження операції')", 'fresh continuation review');
+  await client.click('Переглянути продовження операції');
+  await client.wait("document.querySelector('[role=dialog]')?.textContent.includes('Ця дія записує зміни в Magento')", 'explicit external write warning');
+  await client.click('Надіслати лише ненадіслані кроки', "document.querySelector('[role=dialog]')");
+  await client.wait("document.body.textContent.includes('Magento підтвердив синхронізацію поточного стану товару')", 'resolved product remains visible after leaving queue');
+  assert.equal(requests.slice(recoveryStart).filter((entry) => entry.path.endsWith('/continue')).length, 1);
+  await client.noOverflow('Controlled recovery desktop');
+  await client.screenshot('administrator-original-operation-recovery-1440');
+  report.originalOperationRecovery = { inspectSeparate: true, acknowledgementWithoutDispatch: true, freshContinuationReview: true, singleExplicitContinuation: true };
   operationalFixture = null;
   await client.command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await client.navigate(`/products/open?article=${encodeURIComponent(product.publicSku)}`, `Товар ${product.publicSku}`);
@@ -1024,8 +1096,8 @@ try {
   await client.evaluate("document.querySelector('[role=dialog] [aria-label=\"Закрити\"]').click()");
   await client.navigate('/settings', 'Налаштування');
   const settingLinks = await client.evaluate("[...document.querySelectorAll('.workspace-directory-link')].map((link)=>link.getAttribute('href'))");
-  assert.deepEqual(settingLinks, ['/admin/catalog', '/admin/pricing', '/admin/magento', '/admin/export-templates']);
-  assert.equal(await client.evaluate("!![...document.querySelectorAll('.workspace-directory-link')].find((link)=>link.textContent.includes('Шаблони інтеграції'))"), true);
+  assert.deepEqual(settingLinks, ['/admin/catalog', '/admin/pricing', '/admin/magento']);
+  assert.equal(await client.evaluate("!![...document.querySelectorAll('.workspace-directory-link')].find((link)=>link.textContent.includes('Шаблони інтеграції'))"), false);
   assert.equal(await client.evaluate("document.querySelectorAll('.workspace-directory a[href^=\"/exports\"]').length"), 0);
   await client.noOverflow('Administrator settings desktop');
   await client.screenshot('administrator-settings-1440');
@@ -1048,13 +1120,14 @@ try {
   await client.wait("document.body.textContent.includes('Збережено')", 'pricing cell save state');
   await client.noOverflow('Pricing workspace desktop');
   await client.screenshot('administrator-pricing-1440');
-  await client.navigate('/admin/export-templates', 'Шаблони експорту');
+  await client.navigate('/admin/export-templates', 'Інтеграція Magento');
+  assert.equal(await client.evaluate('location.pathname'), '/admin/magento/rules');
   await client.wait("document.body.textContent.includes('Шаблонів ще немає')", 'empty export template registry');
-  await client.click('Створити шаблон');
-  await client.wait("document.querySelector('h1')?.textContent.trim()==='Новий шаблон'", 'new export template form');
+  await client.click('Створити набір правил');
+  await client.wait("[...document.querySelectorAll('h1,h2')].some((node)=>node.textContent.trim()==='Новий набір правил')", 'new integration rule set form');
   await client.setValue('input[placeholder="Наприклад, Основний каталог"]', 'Основний каталог');
   await client.click('Створити й зберегти чернетку');
-  await client.wait("document.querySelector('h1')?.textContent.trim()==='Основний каталог' && document.body.textContent.includes('Збережено · редакція 1')", 'saved export template draft');
+  await client.wait("[...document.querySelectorAll('h1,h2')].some((node)=>node.textContent.trim()==='Основний каталог') && document.body.textContent.includes('Збережено · редакція 1')", 'saved integration rule draft');
   assert.equal(requests.some((entry) => entry.path.startsWith('/api/admin/export-templates/') && entry.path.endsWith('/publish')), false,
     'draft authoring must not publish a template');
   assert.equal(requests.some((entry) => entry.method === 'PUT' && entry.path === '/api/admin/export-templates/activation'), false,
@@ -1116,13 +1189,14 @@ try {
   client = null;
 
   const allowedFixtureWrites = new Set(['/api/decode', '/api/recount/preview', '/api/recount/apply',
-    '/api/product-price-change/preview', '/api/product-price-change/apply', '/api/admin/correction-requests/preview',
-    '/api/admin/correction-requests', '/api/delete', '/api/products/test-delete/preview',
+    '/api/product-price-change/preview', '/api/product-price-change/apply',
+    '/api/delete', '/api/products/test-delete/preview',
     '/api/admin/sku-schema/SV/publish', '/api/admin/price-cell', '/api/admin/export-templates', '/api/export/sessions']);
   allowedFixtureWrites.add('/api/admin/users/102/role');
   allowedFixtureWrites.add('/api/admin/roles/2/permissions');
   allowedFixtureWrites.add('/api/admin/correction-requests/71/claim');
   allowedFixtureWrites.add('/api/admin/correction-requests/71/complete');
+  for (const action of ['inspect', 'reconcile', 'continue']) allowedFixtureWrites.add(`/api/admin/magento-recovery/jobs/fixture-original-job/${action}`);
   allowedFixtureWrites.add('/api/admin/repricing/preview');
   allowedFixtureWrites.add('/api/admin/repricing/drafts');
   allowedFixtureWrites.add('/api/admin/repricing/drafts/77');

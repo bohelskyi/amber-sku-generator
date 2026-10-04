@@ -454,6 +454,7 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
     } finally { await pool.query('UPDATE magento_auto_sync_activation SET enabled=FALSE'); }
   });
   await require('./magento-automatic-worker-cases')({ t, suite, scenario, config, published, installationKey, actorUserId, makeDraft });
+  await require('./magento-recovery-cases')({ t, suite, scenario, config });
   await t.test('a newer publication makes the old bound job ineligible before any write', async () => {
     const s = await scenario(); const job = await s.enqueue(); const newer = await makeDraft();
     await pool.query('UPDATE magento_auto_sync_activation SET enabled=TRUE,installation_key=$1,actor_user_id=$2', [installationKey, actorUserId]);

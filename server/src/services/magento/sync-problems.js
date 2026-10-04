@@ -39,10 +39,13 @@ const taxonomy = Object.freeze({
 });
 function safeDiagnostics(blockers = []) {
   return blockers.slice(0, 40).map((item) => ({ code: String(item.code || 'data_or_binding').slice(0, 100),
-    ...Object.fromEntries(['target', 'field', 'path', 'routeKey', 'status'].filter((key) =>
-      typeof item[key] === 'string' && item[key].length <= 500).map((key) => [key, item[key]])),
+    ...Object.fromEntries(['target', 'field', 'path', 'routeKey', 'status'].map((key) => [key, item[key] ?? item.diagnostic?.[key]])
+      .filter(([, value]) => typeof value === 'string' && value.length <= 500)),
     ...(item.diagnostic?.code ? { diagnosticCode: String(item.diagnostic.code).slice(0, 100) } : {}),
     ...(Array.isArray(item.issueFields) ? { issueFields: item.issueFields.filter((f) => typeof f === 'string').slice(0, 20) } : {}),
+    ...(Array.isArray(item.evaluationIssues) ? { evaluationIssues: item.evaluationIssues.slice(0, 40).map((issue) =>
+      Object.fromEntries(['code', 'field', 'message'].filter((key) => typeof issue?.[key] === 'string')
+        .map((key) => [key, issue[key].replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, key === 'message' ? 600 : 100)]))) } : {}),
   }));
 }
 function presentProblem(item, lifecycle) {
@@ -90,6 +93,11 @@ async function summary(db = pool) {
 }
 function presentProblemRow(row) {
   return { productId: row.productId, article: row.article, category: row.category,
+    ...(row.category_name ? { categoryName: row.category_name } : {}),
+    ...(row.product_status ? { productStatus: row.product_status } : {}),
+    ...(row.state || (row.deletion_state && row.deletion_state !== 'finalized')
+      ? { state: row.deletion_state && row.deletion_state !== 'finalized' ? 'needs_attention' : row.state } : {}),
+    ...(row.observed_at ? { observedAt: row.observed_at } : {}),
     problems: presentProblems(['reconciliation_required','TEST_DELETION_PENDING'].includes(row.reason_code) ? [{ code: row.reason_code }]
       : ['conflict', 'baseline_required'].includes(row.name_state) ? [{ code: row.name_state === 'conflict' ? 'NAME_CONFLICT' : 'NAME_BASELINE_REQUIRED' }]
         : row.diagnostics?.length ? row.diagnostics : [{ code: row.reason_code || 'data_or_binding' }], row.lifecycle),
@@ -121,45 +129,69 @@ function normalizePageValue(value, fallback, maximum) {
   return Math.min(Math.floor(numeric), maximum);
 }
 
+const problemJoinSql = `FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
+  LEFT JOIN categories c ON c.code=p.category
+  LEFT JOIN magento_product_sync_requests r ON r.product_id=p.id
+  LEFT JOIN product_full_export_state f ON f.product_id=p.id
+  LEFT JOIN magento_name_sync_states n ON n.public_product_identity_id=i.id AND n.origin_hash=$1
+  LEFT JOIN magento_test_deletions d ON d.public_product_identity_id=i.id`;
+const problemSelectSql = `SELECT p.id AS "productId",i.public_sku AS "article",p.category,c.name AS category_name,p.status AS product_status,
+  r.state,d.state AS deletion_state,r.updated_at AS observed_at,
+  CASE WHEN d.state<>'finalized' THEN 'TEST_DELETION_PENDING' ELSE r.reason_code END AS reason_code,
+  r.diagnostics,n.state AS name_state,n.observed_amber_names,n.observed_remote_names,${lifecycleProjectionSql}`;
+const reasonGroupSql = `CASE
+  WHEN d.state<>'finalized' OR r.reason_code='reconciliation_required'
+    OR r.diagnostics @> '[{"code":"AMBER_SYNC_ELIGIBILITY_UNRESOLVED"}]'::jsonb THEN 'recovery'
+  WHEN n.state IN ('conflict','baseline_required') THEN 'names'
+  WHEN r.diagnostics @> '[{"code":"PRODUCT_EVALUATION_NOT_READY"}]'::jsonb
+    OR r.diagnostics @> '[{"code":"REQUIRED_ATTRIBUTE_VALUE_MISSING"}]'::jsonb
+    OR r.diagnostics @> '[{"code":"REQUIRED_NATIVE_FIELD_MISSING"}]'::jsonb THEN 'product'
+  WHEN r.reason_code IN ('authorization','configuration') THEN 'connection'
+  ELSE 'integration' END`;
+
 async function problemPage(config, query = {}, db = pool) {
   const limit = Math.max(1, normalizePageValue(query.limit, 30, 100));
   const offset = normalizePageValue(query.offset, 0, Number.MAX_SAFE_INTEGER);
   const category = String(query.category || '').trim().slice(0, 40);
-  const origin = config.configured ? originHash(config.baseUrl) : 'unconfigured';
-  const values = [origin];
-  const categoryClause = category ? ` AND p.category=$${values.push(category)}` : '';
-  const countValues = values.slice(1);
-  const [rowsResult, countResult] = await Promise.all([
-    db.query(`SELECT p.id AS "productId",i.public_sku AS "article",p.category,
-      CASE WHEN d.state<>'finalized' THEN 'TEST_DELETION_PENDING' ELSE r.reason_code END AS reason_code,
-      r.diagnostics,n.state AS name_state,n.observed_amber_names,n.observed_remote_names,${lifecycleProjectionSql}
-      FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
+  const search = String(query.search || '').trim().slice(0, 120);
+  const reason = String(query.reason || '');
+  if (reason && !['recovery', 'names', 'product', 'connection', 'integration'].includes(reason)) {
+    const error = new Error('Невідомий тип проблеми.'); error.statusCode = 422; throw error;
+  }
+  const values = [config.configured ? originHash(config.baseUrl) : 'unconfigured'];
+  let filter = "WHERE (r.state='needs_attention' OR d.state<>'finalized')";
+  if (category) filter += ` AND p.category=$${values.push(category)}`;
+  if (search) filter += ` AND i.public_sku ILIKE $${values.push('%' + search.replace(/[\\%_]/g, '\\$&') + '%')} ESCAPE '\\'`;
+  if (reason) filter += ` AND (${reasonGroupSql})=$${values.push(reason)}`;
+  const [rowsResult, countResult, categoriesResult] = await Promise.all([
+    db.query(`${problemSelectSql} ${problemJoinSql} ${filter} ORDER BY i.id,p.id
+      LIMIT $${values.length + 1} OFFSET $${values.length + 2}`, [...values, limit, offset]),
+    db.query(`SELECT COUNT(*)::int AS count ${problemJoinSql} ${filter}`, values),
+    db.query(`SELECT p.category,c.name,COUNT(*)::int AS count FROM products p
+      LEFT JOIN categories c ON c.code=p.category
       LEFT JOIN magento_product_sync_requests r ON r.product_id=p.id
-      LEFT JOIN product_full_export_state f ON f.product_id=p.id
-      LEFT JOIN magento_name_sync_states n ON n.public_product_identity_id=i.id AND n.origin_hash=$1
-      LEFT JOIN magento_test_deletions d ON d.public_product_identity_id=i.id
-      WHERE (r.state='needs_attention' OR d.state<>'finalized')${categoryClause}
-      ORDER BY i.id, p.id
-      LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
-    [...values, limit, offset]),
-    db.query(`SELECT COUNT(*)::int AS count
-      FROM products p
-      JOIN public_product_identities i ON i.id=p.public_product_identity_id
-      LEFT JOIN magento_product_sync_requests r ON r.product_id=p.id
-      LEFT JOIN magento_test_deletions d ON d.public_product_identity_id=i.id
-      WHERE (r.state='needs_attention' OR d.state<>'finalized')${category ? ' AND p.category=$1' : ''}`,
-    countValues),
+      LEFT JOIN magento_test_deletions d ON d.product_id=p.id
+      WHERE r.state='needs_attention' OR d.state<>'finalized'
+      GROUP BY p.category,c.name ORDER BY p.category LIMIT 100`, []),
   ]);
   const total = Number(countResult.rows[0]?.count || 0);
-  return {
-    items: rowsResult.rows.map(presentProblemRow),
-    pageInfo: {
-      limit,
-      offset,
-      total,
-      hasPrevious: offset > 0,
-      hasNext: offset + rowsResult.rows.length < total,
-    },
-  };
+  return { items: rowsResult.rows.map(presentProblemRow),
+    categories: categoriesResult.rows.filter((row) => typeof row.category === 'string')
+      .map((row) => ({ code: row.category, name: row.name || row.category, count: Number(row.count) })),
+    pageInfo: { limit, offset, total, hasPrevious: offset > 0, hasNext: offset + rowsResult.rows.length < total } };
 }
-module.exports = { taxonomy, safeDiagnostics, presentProblem, presentProblems, saveDiagnostics, summary, problems, problemPage };
+
+async function problemDetail(config, productId, db = pool) {
+  const id = Number(productId);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    const error = new Error('Некоректний товар.'); error.statusCode = 422; throw error;
+  }
+  const row = (await db.query(`${problemSelectSql} ${problemJoinSql} WHERE p.id=$2`,
+    [config.configured ? originHash(config.baseUrl) : 'unconfigured', id])).rows[0];
+  if (!row) { const error = new Error('Товар не знайдено.'); error.statusCode = 404; throw error; }
+  const presented = presentProblemRow(row);
+  const state = presented.state || 'not_tracked';
+  return { ...presented, state, problems: state === 'needs_attention' ? presented.problems : [],
+    nameConflict: state === 'needs_attention' ? presented.nameConflict : null };
+}
+module.exports = { taxonomy, safeDiagnostics, presentProblem, presentProblems, saveDiagnostics, summary, problems, problemPage, problemDetail };

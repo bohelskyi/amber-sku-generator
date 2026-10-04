@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/auth-context';
 import { exportTemplatesApi as api } from '../api/export-templates-api';
 import { DefinitionEditor } from '../components/export-templates/DefinitionEditor';
@@ -16,9 +16,9 @@ import { WorkspaceDialog } from '../components/workspace/WorkspaceDialog';
 import { TemplateRegistry } from '../components/export-templates/TemplateRegistry';
 import { dateText } from '../lib/export-review-presentation';
 import { Notice, SaveState, StatusBadge } from '../components/ui/index.js';
+import { repairContext, withRepairContext } from '../lib/magento-repair-context.js';
 
-const templateBase = '/admin/export-templates';
-function templateRoute(location) {
+function templateRoute(location, templateBase = '/admin/export-templates') {
   const parts = location.pathname.slice(templateBase.length).split('/').filter(Boolean);
   const id = parts[0];
   return { id: id && !['system', 'new'].includes(id) ? decodeURIComponent(id) : null,
@@ -42,7 +42,7 @@ function Diagnostics({ error, definition, registry, onOpenSource, showSources = 
   </div>;
 }
 
-function DraftPreview({ preview, stale, selectedField }) {
+function DraftPreview({ preview, stale, selectedField, integration = false }) {
   const result = preview.result;
   return <section className="rounded border border-blue-300 bg-blue-50 p-4 space-y-3" aria-label="Тест чернетки">
     <h2 className="font-semibold">Результат перевірки · редакція {preview.revision}</h2>
@@ -53,20 +53,27 @@ function DraftPreview({ preview, stale, selectedField }) {
       <p>Питання до публікації показано окремо в повній перевірці шаблону.</p>
     </>}
     <p>Представлено: {result.representedCount}; готові: {result.readyCount}</p>
-    {result.errors?.length > 0 && <p>Значення товарів не готові до експорту. Це окрема перевірка від підтвердження джерел шаблону.</p>}
+    {result.errors?.length > 0 && <p>{integration ? 'Значення товарів не готові до передачі в Magento. Перевірте зазначені поля.' : 'Значення товарів не готові до експорту. Це окрема перевірка від підтвердження джерел шаблону.'}</p>}
     {(result.errors || []).map((p, i) => <div key={i} className="text-red-800"><p>{p.sku}: перевірте значення товару в зазначених полях.</p>
       {(p.fields || []).map((f, index) => <div key={index}><p>{fieldLabels[f.field] || (f.field === 'sourceSupport' ? 'Підтримка джерел' : f.field)}: {/[A-Z]{2,}_[A-Z_]+|Unverified|semantic value|source reference/i.test(f.message || '') || !/[А-Яа-яІіЇїЄєҐґ]/.test(f.message || '') ? 'Не вдалося підтвердити значення для експорту.' : f.message}</p>
         <details><summary>Технічні подробиці</summary><pre>{JSON.stringify(f, null, 2)}</pre></details></div>)}</div>)}
-    {(result.provisionalArtifacts || result.artifacts || []).map((a) => <div key={a.groupCode}><PreviewTable key={a.groupCode + '/' + selectedField} artifact={a} selectedField={selectedField} />
+    {(result.provisionalArtifacts || result.artifacts || []).map((a) => <div key={a.groupCode}><PreviewTable key={a.groupCode + '/' + selectedField} integration={integration} artifact={a} selectedField={selectedField} />
       <details><summary>CSV / технічний перегляд</summary><pre className="max-h-80 overflow-auto whitespace-pre text-xs">{a.csvContent}</pre></details></div>)}
   </section>;
 }
 
-function TemplateWorkspace({ permissions }) {
+function TemplateWorkspace({ permissions, basePath = '/admin/export-templates', embedded = false, activePublication }) {
   const location = useLocation(); const navigate = useNavigate();
-  const route = templateRoute(location);
+  const templateBase = basePath; const integration = embedded;
+  const route = templateRoute(location, templateBase);
   const { screen, view, versionId } = route;
-  const familyPath = (id = route.id, tab = view, version = versionId) => `${templateBase}/${encodeURIComponent(id)}${tab === 'fields' ? '' : '/' + tab}${version ? '?version=' + encodeURIComponent(version) : ''}`;
+  const requestedContext = repairContext(new URLSearchParams(location.search));
+  const requestedIntent = new URLSearchParams(location.search).get('intent');
+  const taskIntent = ['subcategory', 'attribute', 'option', 'category', 'rules', 'mapping', 'values', 'connect'].includes(requestedIntent) ? requestedIntent : 'rules';
+  const familyPath = (id = route.id, tab = view, version = versionId) => {
+    const params = new URLSearchParams(location.search); if (version) params.set('version', version); else params.delete('version');
+    return `${templateBase}/${encodeURIComponent(id)}${tab === 'fields' ? '' : '/' + tab}${params.size ? '?' + params : ''}`;
+  };
   const setView = (tab) => navigate(familyPath(route.id, tab));
   const has = (key) => permissions.includes(key);
   const manage = has('export_templates.manage');
@@ -75,6 +82,7 @@ function TemplateWorkspace({ permissions }) {
   const [families, setFamilies] = useState(null);
   const [registry, setRegistry] = useState(null);
   const [activation, setActivation] = useState(null);
+  const [compatibilityOpen, setCompatibilityOpen] = useState(false);
   const [family, setFamily] = useState(null);
   const [definition, setDefinition] = useState(null);
   const [candidate, setCandidate] = useState(null);
@@ -118,12 +126,12 @@ function TemplateWorkspace({ permissions }) {
   useEffect(() => {
     mounted.current = true;
     let current = true;
-    Promise.all([api.list(), manage ? api.sources() : Promise.resolve({ data: null }), api.activation()]).then(([list, sources, selection]) => {
+    Promise.all([api.list(), manage ? api.sources() : Promise.resolve({ data: null }), integration ? Promise.resolve({ data: null }) : api.activation()]).then(([list, sources, selection]) => {
       if (!current) return;
       setFamilies(list.data.templates); setRegistry(sources.data); setActivation(selection.data);
     }).catch((e) => { if (current) setError(e); });
     return () => { current = false; mounted.current = false; };
-  }, [manage]);
+  }, [manage, integration]);
 
   useEffect(() => {
     if (!dirty) return undefined;
@@ -156,6 +164,13 @@ function TemplateWorkspace({ permissions }) {
       const published = response.data.versions.find((v) => v.id === versionId);
       if (versionId && !published) throw new Error('Опубліковану версію не знайдено.');
       setFamily(response.data); setDefinition(published ? published.definition : response.data.draft.definition);
+      const openedDefinition = published ? published.definition : response.data.draft.definition;
+      const params = new URLSearchParams(location.search); const categoryCode = params.get('category'); const field = params.get('field');
+      if (categoryCode && field) {
+        const groupIndex = openedDefinition.groups?.findIndex((group) => group.route === categoryCode);
+        if (groupIndex >= 0 && openedDefinition.groups[groupIndex].columns.includes(field)) setFocusField({ groupIndex, rowIndex: 0, column: field });
+        else setFocusField(null);
+      }
     } catch (e) { if (ticket === generation.current && mounted.current) setError(e); }
     finally { if (ticket === generation.current && mounted.current) setBusy(''); }
   }
@@ -184,7 +199,7 @@ function TemplateWorkspace({ permissions }) {
   };
   const navigation = useDirtyNavigation({ dirty: dirty || panelPending, save: manage ? save : null, discard, busy: Boolean(busy),
     shouldBlock: ({ currentLocation, nextLocation }) => {
-      const from = templateRoute(currentLocation); const to = templateRoute(nextLocation);
+      const from = templateRoute(currentLocation, templateBase); const to = templateRoute(nextLocation, templateBase);
       // Local sections retain the same mounted editor and complete draft. Pending
       // inspector input and transitions to another definition still require a choice.
       return panelPending || !nextLocation.pathname.startsWith(templateBase + '/') || !from.id || from.id !== to.id || from.versionId !== to.versionId;
@@ -230,23 +245,23 @@ function TemplateWorkspace({ permissions }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     syncRoute();
   }, [route.id, screen, versionId]);
-  return <TemplateWorkspaceShell>
+  return <TemplateWorkspaceShell embedded={embedded}>
     {navigation.prompt}
     {screen !== 'editor' && <><Diagnostics error={error} definition={definition} registry={registry} />{busy && <SaveState state="saving" message={`${busy}…`} />}</>}
     {screen === 'list' ? <>
-      <WorkspaceHeader title="Шаблони експорту" description="Налаштуйте назви, характеристики та порядок полів у файлі." actions={
+      <WorkspaceHeader title={integration ? 'Правила передачі даних' : 'Шаблони експорту'} description={integration ? 'Назви, характеристики й поля товарів. Опубліковані правила та чернетки зберігаються окремо.' : 'Налаштуйте назви, характеристики та порядок полів у файлі.'} actions={
         manage && <button className="btn btn-primary px-4" disabled={Boolean(busy)} onClick={() => run('Підготовка шаблону', () => api.candidate(), (data) => {
           prepareCandidate(data); navigation.commit(() => navigate(templateBase + '/new'));
-        })}>Створити шаблон</button>
+        })}>{integration ? 'Створити набір правил' : 'Створити шаблон'}</button>
       } />
-      <TemplateRegistry families={families} manage={manage} busy={Boolean(busy)} error={error} onRefresh={() => run('Оновлення списку', () => api.list(), (data) => setFamilies(data.templates))} onCopy={() => run('Підготовка копії', () => api.candidate(), (data) => { prepareCandidate(data); navigation.commit(() => navigate(templateBase + '/new')); })} />
+      <TemplateRegistry base={templateBase} integration={integration} activePublication={activePublication} families={families} manage={manage} busy={Boolean(busy)} error={error} onRefresh={() => run('Оновлення списку', () => api.list(), (data) => setFamilies(data.templates))} onCopy={() => run('Підготовка копії', () => api.candidate(), (data) => { prepareCandidate(data); navigation.commit(() => navigate(templateBase + '/new')); })} />
     </> : screen === 'system' ? <section className="card et-editor-surface">
-      <button className="et-link" onClick={back}>← До шаблонів</button><h1>Magento — поточний системний</h1>
+      <button className="et-link" onClick={back}>{integration ? '← До наборів правил' : '← До шаблонів'}</button><h1>Magento — поточний системний</h1>
       <p>Лише перегляд · використовується звичайним експортом.</p>
       {manage && system && <button className="btn btn-primary px-4" disabled={Boolean(busy)} onClick={() => run('Підготовка копії', () => api.candidate(), (data) => { prepareCandidate(data); navigation.commit(() => navigate(templateBase + '/new')); })}>Створити редаговану копію</button>}
       {system && <DefinitionEditor definition={system.definition} readOnly registry={registry} />}
     </section> : screen === 'create' ? !manage ? <p>Немає дозволу на створення шаблону.</p> : <section className="card et-create">
-      <button className="et-link" onClick={back}>← До шаблонів</button><h1>Новий шаблон</h1><p className="et-muted">Незбережена чернетка на основі Magento. Вкажіть назву, щоб створити її.</p>
+      <button className="et-link" onClick={back}>{integration ? '← До наборів правил' : '← До шаблонів'}</button><h1>{integration ? 'Новий набір правил' : 'Новий шаблон'}</h1><p className="et-muted">Незбережена чернетка на основі Magento. Вкажіть назву, щоб створити її.</p>
       <label>Назва шаблону<input autoFocus className="input" disabled={Boolean(busy)} value={name} onChange={(e) => { generation.current++; setName(e.target.value); }} maxLength={160} placeholder="Наприклад, Основний каталог" /></label>
       <details><summary>Додаткові налаштування</summary><label>Сталий ключ (латиниця, цифри, _ або -)<input className="input" disabled={Boolean(busy)} value={key} onChange={(e) => { generation.current++; setKey(e.target.value); }} pattern="[a-z][a-z0-9_-]{0,79}" /></label><p className="et-muted">Ключ підготовлено автоматично. Після створення він не змінюється.</p></details>
       {!name.trim() && <p className="et-muted">Вкажіть непорожню назву, щоб зберегти чернетку.</p>}
@@ -259,7 +274,7 @@ function TemplateWorkspace({ permissions }) {
       }}>Створити й зберегти чернетку</button>
     </section> : <>
       <header className="et-toolbar">
-        <div className="et-row"><button className="et-link" onClick={back}>← До шаблонів</button><div className="et-actions">
+        <div className="et-row"><button className="et-link" onClick={back}>{integration ? '← До наборів правил' : '← До шаблонів'}</button><div className="et-actions">
           {dirty && <button className="btn btn-outline px-3" disabled={Boolean(busy)} onClick={discard}>Відкинути локальні зміни</button>}
           {manage && family && !selectedVersion && <button className={'btn px-4 ' + (view === 'fields' && !editing ? 'btn-primary' : 'btn-outline')} disabled={Boolean(busy)} onClick={save}>Зберегти чернетку</button>}
           {manage && selectedVersion && <button className="btn btn-primary px-3" disabled={Boolean(busy)} onClick={() => run('Копіювання в чернетку', () => api.clone(family.id, { expectedRevision: family.draft.revision, versionId }), saved)}>Створити чернетку з цієї версії</button>}
@@ -268,19 +283,22 @@ function TemplateWorkspace({ permissions }) {
         {busy && <SaveState state="saving" message={`${busy}…`} />}{message && <Notice tone="success">{message}</Notice>}
         <div className="et-title-line"><h1>{family?.display_name || 'Завантаження шаблону…'}</h1><StatusBadge tone={selectedVersion ? 'neutral' : dirty ? 'warning' : 'info'}>{selectedVersion ? 'Опублікована v' + selectedVersion.versionNumber + ' · лише читання' : dirty ? 'Незбережена чернетка' : 'Чернетка'}</StatusBadge>
           {family && <SaveState state={selectedVersion ? 'idle' : dirty ? 'dirty' : 'saved'} message={selectedVersion ? 'Незмінна версія' : dirty ? 'Є незбережені зміни' : 'Збережено · редакція ' + family.draft.revision} />}</div>
-        {family && !selectedVersion && !validation?.valid && <p className="et-muted">Готовність до публікації не підтверджено. Збереження чернетки не перевіряє джерела та не створює експорт.</p>}
-        <TemplateLocalNav familyId={route.id} versionId={versionId} />
+        {family && !selectedVersion && !validation?.valid && <p className="et-muted">{integration ? 'Збережену чернетку ще потрібно перевірити перед публікацією. Чинні налаштування Magento не змінено.' : 'Готовність до публікації не підтверджено. Збереження чернетки не перевіряє джерела та не створює експорт.'}</p>}
+        {integration && <p className="text-sm">{selectedVersion && selectedVersion.id === activePublication?.templateVersionId ? 'Використовується поточною інтеграцією Magento.' : selectedVersion ? 'Зафіксовані правила. Використання в інтеграції визначає окрема публікація відповідностей.' : 'Редагуємо чернетку правил. Поточна інтеграція продовжує використовувати опубліковану версію.'}</p>}
+        <TemplateLocalNav basePath={templateBase} context={location.search} integration={integration} familyId={route.id} versionId={versionId} />
       </header>
       {family?.id === route.id && definition && <>
         <div hidden={view !== 'fields'} className="card et-editor-surface">
-          {manage && !selectedVersion && definition?.outputContract === 'magento-products-v1' && <div className="et-grid-tools"><div><h3>Що можна змінювати в копії?</h3><p>Зараз — значення та правила. Ви також можете дозволити додавання й видалення колонок CSV. Поточні правила залишаться збереженими.</p>{!exactSaved && <p>Спочатку збережіть поточну чернетку.</p>}</div><button className="btn btn-outline px-3" disabled={!exactSaved} onClick={() => run('Оновлення контракту колонок', () => api.upgrade(family.id, precondition()), saved)}>Також змінювати структуру CSV</button></div>}
-          <DefinitionEditor key={family.id + '/' + versionId + '/' + editorEpoch} visible={view === 'fields' && !navigation.blocked} definition={definition} onChange={edit} onPendingChange={setPanelPending} onEditingChange={setEditing} registry={registry} loadSource={api.sourceDetails} diagnostics={sourceDiagnostics} focusField={focusField} onFieldSelect={setFieldSelection} readOnly={!manage || Boolean(selectedVersion) || (Boolean(busy) && !['Перевірка', 'Тест чернетки'].includes(busy))} />
+          {integration && requestedContext.category && !definition.groups.some((group) => group.route === requestedContext.category) && <Notice>Для категорії {requestedContext.category} у цих правилах ще немає підключення. {selectedVersion ? 'Створіть чернетку з цієї версії, щоб додати категорію.' : 'Додайте категорію у формі нижче. Наявні правила інших категорій збережуться.'}</Notice>}
+          {integration && requestedContext.field && definition.groups.some((group) => group.route === requestedContext.category && !group.columns.includes(requestedContext.field)) && <Notice>Поле {requestedContext.field} ще не підключене до цієї категорії. {selectedVersion ? 'Створіть чернетку з цієї версії, щоб додати правило передачі.' : 'Натисніть «Додати поле передачі» й виберіть джерело значення Amber.'}</Notice>}
+          {manage && !selectedVersion && definition?.outputContract === 'magento-products-v1' && <div className="et-grid-tools"><div><h3>Що можна змінювати в копії?</h3><p>{integration ? 'Зараз можна редагувати значення та правила наявних полів. Окреме оновлення чернетки дозволяє додавати й вилучати поля, зберігаючи чинні правила.' : 'Зараз — значення та правила. Ви також можете дозволити додавання й видалення колонок CSV. Поточні правила залишаться збереженими.'}</p>{!exactSaved && <p>Спочатку збережіть поточну чернетку.</p>}</div><button className="btn btn-outline px-3" disabled={!exactSaved} onClick={() => run('Оновлення контракту колонок', () => api.upgrade(family.id, precondition()), saved)}>{integration ? 'Дозволити зміну набору полів' : 'Також змінювати структуру CSV'}</button></div>}
+          <DefinitionEditor key={family.id + '/' + versionId + '/' + editorEpoch} integration={integration} suggestedField={new URLSearchParams(location.search).get('field')} suggestedQuestion={new URLSearchParams(location.search).get('question')} initialCategory={new URLSearchParams(location.search).get('category')} visible={view === 'fields' && !navigation.blocked} definition={definition} onChange={edit} onPendingChange={setPanelPending} onEditingChange={setEditing} registry={registry} loadSource={api.sourceDetails} diagnostics={sourceDiagnostics} focusField={focusField} onFieldSelect={setFieldSelection} readOnly={!manage || Boolean(selectedVersion) || (Boolean(busy) && !['Перевірка', 'Тест чернетки'].includes(busy))} />
           {!selectedVersion && <aside className="et-validation-tray" aria-label="Перевірка та тестові товари"><div><span>Перевірка: {dirty || panelPending ? 'є незбережені зміни' : issueCount ? `${issueCount} питання до публікації` : validation?.valid ? 'збережену редакцію перевірено' : 'ще не виконана'}</span><button className="et-link" onClick={() => setView('check')}>Показати</button></div>
             {manage && has('exports.view') && <div><span>Товари для тесту: {selectedSamples.length}{previewStale ? ' · застарілий результат' : preview ? ` · готові ${preview.result.readyCount}/${preview.result.representedCount}` : ''}</span><button className="et-link" onClick={() => setView('check')}>Перевірити на товарах</button></div>}
           </aside>}
         </div>
         {view === 'check' && <section className="card et-check space-y-4">
-          <h2>Перевірка шаблону</h2><p>Перевірка правил та результат на збережених товарах. Ці дії не створюють експорт.</p>
+          <h2>Перевірка шаблону</h2><p>{integration ? 'Перевірте правила й приклади на збережених товарах. Ця перевірка не надсилає зміни в Magento.' : 'Перевірка правил та результат на збережених товарах. Ці дії не створюють експорт.'}</p>
           {dirty && <p role="status">Є незбережені зміни. Збережіть чернетку перед перевіркою.</p>}
           {selectedVersion ? <p>Це опублікована версія. Створіть чернетку з цієї версії для перевірки на товарах.</p> : <>
             {manage && family.draft.sourceSupportUpdate?.status === 'unsupported' && <p role="status">Не вдалося визначити сумісність цієї чернетки. Перевірте правила шаблону перед оновленням.</p>}
@@ -327,27 +345,29 @@ function TemplateWorkspace({ permissions }) {
               }}>Переглянути результат</button>
             </div>}
           </>}
-          {preview ? <DraftPreview preview={preview} selectedField={fieldSelection.column} stale={previewStale} /> : <p className="et-muted">Результату ще немає. Оберіть товари й запустіть перевірку.</p>}
+          {preview ? <DraftPreview preview={preview} integration={integration} selectedField={fieldSelection.column} stale={previewStale} /> : <p className="et-muted">Результату ще немає. Оберіть товари й запустіть перевірку.</p>}
         </section>}
         {view === 'versions' && <section className="card et-versions space-y-4">
           <h2>Версії шаблону</h2><label>Версія<select className="input" value={versionId} disabled={Boolean(busy)} onChange={(e) => openVersion(e.target.value)}><option value="">Поточна чернетка · {family.draft.revision}</option>{family.versions.map((v) => <option key={v.id} value={v.id}>Опублікована v{v.versionNumber} · {dateText(v.publishedAt)}</option>)}</select></label>
-          <p>Публікація зберігає незмінну версію. Вибір для експорту виконується окремо.</p>
-          {publish && !selectedVersion && <button className="btn btn-primary px-4" disabled={!exactSaved} onClick={() => { setError(null); setPublishReview(precondition()); }}>Опублікувати версію</button>}
+          <p>{integration ? 'Спочатку зафіксуйте версію правил. Потім підготуйте й окремо опублікуйте налаштування Magento; чинна інтеграція до того не зміниться.' : 'Публікація зберігає незмінну версію. Вибір для експорту виконується окремо.'}</p>
+          {publish && !selectedVersion && <button className="btn btn-primary px-4" disabled={!exactSaved} onClick={() => { setError(null); setPublishReview(precondition()); }}>{integration ? 'Зафіксувати версію правил' : 'Опублікувати версію'}</button>}
+          {integration && selectedVersion && manage && <Link className="btn btn-primary" to={withRepairContext('/admin/magento/prepare', requestedContext, { intent: taskIntent, templateVersion: selectedVersion.id })}>Перевірити ці правила для інтеграції</Link>}
           {publishReview && <WorkspaceDialog title="Перегляд публікації" busy={Boolean(busy)} onClose={() => setPublishReview(null)}>
             <h2>Опублікувати «{family.display_name}»</h2><p>Збережена редакція: <strong>{publishReview.expectedRevision}</strong></p>
-            <p>Результат — незмінна опублікована версія. Подальші зміни виконуються в чернетці. Вибір для експорту — окрема дія.</p>
+            <p>{integration ? 'Результат — незмінна версія правил. Поточна інтеграція не перемикається: для цього потрібна окрема перевірка й публікація налаштувань Magento.' : 'Результат — незмінна опублікована версія. Подальші зміни виконуються в чернетці. Вибір для експорту — окрема дія.'}</p>
             <p>{issueCount ? `Питання до публікації: ${issueCount}. Сервер повторно перевірить джерела.` : validation?.valid ? 'Збережена редакція пройшла перевірку.' : 'Повну готовність ще не підтверджено. Команда публікації виконає авторитетну перевірку.'}</p>
             <details><summary>Ідентичність редакції</summary><code>{publishReview.expectedDefinitionHash}</code></details>
             <Diagnostics error={error} definition={definition} registry={registry} />
             <div className="et-actions"><button className="btn btn-primary px-4" disabled={!publish || !exactSaved || family.draft.revision !== publishReview.expectedRevision || family.draft.definitionHash !== publishReview.expectedDefinitionHash} onClick={() => run('Публікація редакції ' + publishReview.expectedRevision, () => api.publish(family.id, publishReview), (version) => {
             setFamily((f) => ({ ...f, versions: [...f.versions.filter((v) => v.id !== version.id), version] })); setDefinition(version.definition); clearEvidence();
             setFamilies((items) => items?.map((item) => item.id === family.id ? { ...item, publication_count: family.versions.filter((v) => v.id !== version.id).length + 1 } : item));
-            setMessage('Опубліковано v' + version.versionNumber + '. Вибір для експорту не змінено.');
+            setMessage('Опубліковано v' + version.versionNumber + (integration ? '. Правила зафіксовано. Налаштування поточної інтеграції не змінено.' : '. Вибір для експорту не змінено.'));
             setPublishReview(null);
             navigation.commit(() => navigate(familyPath(route.id, 'versions', version.id)));
           })}>Підтвердити публікацію</button><button className="btn btn-outline px-3" disabled={Boolean(busy)} onClick={() => setPublishReview(null)}>Скасувати</button></div>
           </WorkspaceDialog>}
-          {activation && <div className="et-selection space-y-3"><h3>Вибір для експорту за шаблоном</h3><p>Застосовується лише коли експортер явно обирає експорт за шаблоном. Звичайний експорт не змінюється.</p>
+          {integration && <button type="button" className="et-link" aria-expanded={compatibilityOpen} onClick={() => { setCompatibilityOpen(!compatibilityOpen); if (!compatibilityOpen && !activation) run('Читання історичного вибору', () => api.activation(), setActivation); }}>Сумісність з історичним експортом</button>}
+          {activation && (!integration || compatibilityOpen) && <div className="et-selection space-y-3"><h3>Вибір для експорту за шаблоном</h3><p>Застосовується лише коли експортер явно обирає експорт за шаблоном. Звичайний експорт не змінюється.</p>
             <p>{activation.implementation === 'legacy' ? 'Шаблон не вибрано' : activation.templateVersionId === selectedVersion?.id ? 'Вибрано для експорту за шаблоном · v' + selectedVersion.versionNumber : 'Вибрано іншу опубліковану версію'}</p>
             {activate && <div className="et-actions"><button className="btn btn-outline px-3" disabled={!selectedVersion || Boolean(busy)} onClick={() => run('Вибір версії', () => api.select({ expectedGeneration: activation.generation, implementation: 'template', templateVersionId: selectedVersion.id }), setActivation)}>Вибрати відкриту публікацію v{selectedVersion?.versionNumber || '—'}</button>
               <button className="btn btn-outline px-3" disabled={Boolean(busy)} onClick={() => run('Скасування вибору', () => api.select({ expectedGeneration: activation.generation, implementation: 'legacy', templateVersionId: null }), setActivation)}>Скасувати вибір шаблону</button></div>}
@@ -360,8 +380,8 @@ function TemplateWorkspace({ permissions }) {
   </TemplateWorkspaceShell>;
 }
 
-export default function ExportTemplatesPage() {
+export default function ExportTemplatesPage(props) {
   const { permissions, applicationUser } = useAuth();
   if (!permissions.includes('export_templates.view')) return <main className="app-page p-6"><h1>Немає дозволу на перегляд шаблонів експорту</h1></main>;
-  return <TemplateWorkspace key={applicationUser?.id || 'isolated'} permissions={permissions} />;
+  return <TemplateWorkspace key={applicationUser?.id || 'isolated'} permissions={permissions} {...props} />;
 }

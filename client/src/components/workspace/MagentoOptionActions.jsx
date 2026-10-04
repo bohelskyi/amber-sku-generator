@@ -9,14 +9,16 @@ const actionsRoot = '/admin/magento-integration/actions';
 const optionsRoot = '/admin/magento-integration/options';
 const labelsRoot = '/admin/magento-integration/option-labels';
 
-function OptionWorkspace({ revision, category, observation, onResourceChanged, mode, currentPublishedId, readOnly = false }) {
+function OptionWorkspace({ revision, category, observation, onResourceChanged, mode, currentPublishedId, readOnly = false, initialQuestionKey, initialValueId, initialAttributeCode, onExisting }) {
   const auth = useAuth(); const { permissions } = auth;
   const labelUpdate = mode === 'labels'; const root = labelUpdate ? labelsRoot : optionsRoot;
   const canInspect = ['export_templates.manage', 'export_templates.publish'].every((permission) => permissions.includes(permission));
   const canWrite = canInspect && !readOnly && isActualAdministrator(auth);
   const isCurrent = !labelUpdate || (revision?.state === 'published' && (currentPublishedId === undefined || currentPublishedId === revision.id));
   const validContext = isCurrent && (labelUpdate ? revision?.state === 'published' : revision?.state === 'draft');
-  const [source, setSource] = useState(''); const [attributeCode, setAttributeCode] = useState('');
+  const [source, setSource] = useState(initialQuestionKey && initialValueId ? `${initialQuestionKey}:${initialValueId}` : '');
+  const inferred = [...new Set((category?.values || []).filter((item) => item.questionKey === initialQuestionKey).flatMap((item) => item.mappings || []).map((item) => item.attribute).filter(Boolean))];
+  const [attributeCode, setAttributeCode] = useState(initialAttributeCode || (inferred.length === 1 ? inferred[0] : ''));
   const [ordinary, setOrdinary] = useState(false); const [hidden, setHidden] = useState(false); const [evidence, setEvidence] = useState('');
   const [inspection, setInspection] = useState(null); const [proof, setProof] = useState(null);
   const [actions, setActions] = useState([]); const [currentActionIds, setCurrentActionIds] = useState([]);
@@ -29,7 +31,7 @@ function OptionWorkspace({ revision, category, observation, onResourceChanged, m
     }).catch(() => { if (!controller.signal.aborted) setError('Не вдалося прочитати історію дій.'); });
     return () => { controller.abort(); ++requests.current; };
   }, [readOnly]);
-  const values = (category?.values || []).filter((value) => labelUpdate ? value.state === 'approved' : !['approved', 'not_applicable'].includes(value.state));
+  const values = (category?.values || []).filter((value) => (!initialQuestionKey || value.questionKey === initialQuestionKey) && (labelUpdate ? value.state === 'approved' : !['approved', 'not_applicable'].includes(value.state)));
   const value = values.find((item) => `${item.questionKey}:${item.valueId}` === source);
   const command = value && revision ? { bindingRevisionId: revision.id, expectedRevision: revision.revision, attributeCode,
     amberGroup: category.code, questionKey: value.questionKey, valueId: value.valueId } : null;
@@ -95,7 +97,7 @@ function OptionWorkspace({ revision, category, observation, onResourceChanged, m
       {inspection && <div className="space-y-3 border-t pt-3"><p className="text-sm">Глобальна назва Amber: {inspection.target.label}. EN: {inspection.target.englishLabel || 'Не задано в каталозі Amber'}.</p>
         {labelUpdate && inspection.comparison?.map((difference) => <p className="text-sm" key={difference.scope}>{difference.scope === 'all' ? 'Українська' : 'Англійська'} · Magento: {difference.before ?? 'Не задано'} · Amber: {difference.after ?? 'Не задано'}</p>)}
         {inspection.updateUnavailable ? <Notice tone="warning">{inspection.updateUnavailable} Показано назви, які повертає Magento; англійська може бути успадкованою глобальною назвою. Це не доказ збереженого перекладу.</Notice>
-          : !labelUpdate && inspection.candidates?.length ? <Notice>Значення вже існує: {inspection.candidates.map((candidate) => candidate.label).join(', ')}. Підтвердьте зв’язок окремо в чернетці відповідностей.</Notice>
+          : !labelUpdate && inspection.candidates?.length ? <Notice><p>Значення вже існує: {inspection.candidates.map((candidate) => candidate.label).join(', ')}. Оберіть і підтвердьте відповідність; створювати дублікат не потрібно.</p>{onExisting && <button className="btn btn-primary mt-2" onClick={onExisting}>Пов’язати наявне значення</button>}</Notice>
             : canWrite ? <>
               <Notice>{inspection.warning}</Notice>
               <label className="flex gap-2 text-sm"><input type="checkbox" checked={ordinary} disabled={busy} onChange={(event) => { setOrdinary(event.target.checked); setProof(null); }} />Я перевірив, що це звичайний user-defined select/multiselect, без swatch або custom source model.</label>
@@ -122,6 +124,6 @@ function OptionWorkspace({ revision, category, observation, onResourceChanged, m
 export default function MagentoOptionActions(props) {
   const mode = props.mode || (props.revision?.state === 'published' ? 'labels' : 'create');
   if (!['labels', 'create'].includes(mode)) return null;
-  const context = `${props.revision?.id}:${props.revision?.revision}:${props.category?.code}:${mode}:${props.currentPublishedId}:${props.readOnly || false}:${props.observation?.observedAt || ''}`;
+  const context = `${props.revision?.id}:${props.revision?.revision}:${props.category?.code}:${mode}:${props.currentPublishedId}:${props.readOnly || false}:${props.observation?.observedAt || ''}:${props.initialQuestionKey || ''}:${props.initialValueId || ''}:${props.initialAttributeCode || ''}`;
   return <OptionWorkspace key={context} {...props} mode={mode} />;
 }

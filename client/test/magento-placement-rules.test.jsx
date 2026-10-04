@@ -1,0 +1,73 @@
+import { createRequire } from 'node:module';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import MagentoPlacementRuleEditor from '../src/components/export-templates/MagentoPlacementRuleEditor.jsx';
+import { appendPlacement } from '../src/lib/magento-placement-rule.js';
+import { api } from '../src/lib/api.js';
+import MagentoCharacteristics from '../src/components/workspace/MagentoCharacteristics.jsx';
+import { MemoryRouter } from 'react-router-dom';
+const require = createRequire(import.meta.url);
+const { materializeMagentoV1 } = require('../../server/src/services/export-templates/magento-v1-definition');
+const { upgradeColumns } = require('../../server/src/services/export-templates/column-contract');
+const { compileDefinition } = require('../../server/src/services/export-templates/definition');
+const { evaluateProduct } = require('../../server/src/services/export-templates/evaluate');
+const { catalog, product } = require('../../server/test/fixtures/magento-v1/contract');
+vi.mock('../src/lib/api.js', () => ({ api: { get: vi.fn(), post: vi.fn() } }));
+afterEach(cleanup); beforeEach(() => vi.resetAllMocks());
+it('appends one conditional placement without changing existing paths, other products, English, references or the original definition', () => {
+  const definition = upgradeColumns(materializeMagentoV1(catalog()));
+  const before = structuredClone(definition); const index = definition.groups.findIndex((group) => group.route === 'AR');
+  const path = ['groups', index, 'rows', 0, 'cells', 'categories'];
+  const next = appendPlacement(definition, path, 'Default/Картини/Новий розділ', 'AR.type', '1');
+  const oldExpression = definition.groups[index].rows[0].cells.categories;
+  expect(next.groups[index].rows[0].cells.categories.items[0]).toEqual(oldExpression);
+  expect(next.groups[index].rows[1]).toEqual(definition.groups[index].rows[1]);
+  expect(next.bindings).toEqual(definition.bindings);
+  expect(definition).toEqual(before);
+  for (const type of [1, 2]) {
+    const old = evaluateProduct(compileDefinition(definition), product('AR', { type })).base.categories;
+    const changed = evaluateProduct(compileDefinition(next), product('AR', { type })).base.categories;
+    expect(changed).toBe(type === 1 ? `${old},Default/Картини/Новий розділ` : old);
+  }
+});
+it('preserves an opaque existing expression when adding an explicit all-products placement and rejects cross-category conditions', () => {
+  const existing = { op: 'ref', id: 'opaque' };
+  const definition = { sources: { wrong: { kind: 'semantic', category: 'SV', key: 'kind' } }, groups: [{ route: 'BR', rows: [{ cells: { categories: existing } }] }], bindings: [{ id: 'opaque', value: { op: 'literal', value: 'Default/Old' } }] };
+  const path = ['groups', 0, 'rows', 0, 'cells', 'categories'];
+  const next = appendPlacement(definition, path, 'Default/New');
+  expect(next.groups[0].rows[0].cells.categories.items).toEqual([existing, { op: 'literal', value: 'Default/New' }]);
+  expect(next.bindings).toEqual(definition.bindings);
+  expect(() => appendPlacement(definition, path, 'Default/New', 'wrong', '1')).toThrow();
+});
+it('authors an existing category subcategory using observed parent, explicit product scope, and local draft-only application', async () => {
+  const definition = { sources: { color: { kind: 'semantic', category: 'BR', key: 'color' } }, bindings: [], groups: [{ route: 'BR', rows: [{ cells: { categories: { op: 'literal', value: 'Default/Прикраси' } } }] }] };
+  const registry = { references: { questions: [{ category_code: 'BR', key: 'color', include_in_sku: 1, label: 'Колір' }], schemas: [{ category_code: 'BR', questions: [{ key: 'color' }] }] } };
+  const loadSource = vi.fn().mockResolvedValue({ data: { current: [{ options: [{ value_id: '1', label: 'Світлий' }] }] } });
+  const onChange = vi.fn();
+  api.post.mockResolvedValue({ data: { categories: [{ categoryId: '10', normalizedPath: 'Default/Прикраси', comparable: true }] } });
+  render(<MagentoPlacementRuleEditor definition={definition} cellPath={['groups', 0, 'rows', 0, 'cells', 'categories']} registry={registry} loadSource={loadSource} onChange={onChange} onEditing={vi.fn()} />);
+  expect(api.post).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Прочитати розділи магазину' }));
+  await screen.findByRole('button', { name: 'Default › Прикраси' });
+  fireEvent.change(screen.getByLabelText('Розділ'), { target: { value: 'new' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Default › Прикраси' }));
+  fireEvent.change(screen.getByLabelText('Назва підкатегорії'), { target: { value: 'Світлі браслети' } });
+  expect(screen.getByRole('button', { name: 'Додати розміщення до правила' }).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Які товари тут розміщувати?'), { target: { value: 'condition' } });
+  fireEvent.change(screen.getByLabelText('Характеристика'), { target: { value: 'color' } });
+  await screen.findByRole('option', { name: 'Світлий' });
+  fireEvent.change(screen.getByLabelText('Значення характеристики'), { target: { value: '1' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Додати розміщення до правила' }));
+  expect(onChange).toHaveBeenCalledOnce();
+  const node = onChange.mock.calls[0][0].groups[0].rows[0].cells.categories.items[1];
+  expect(node.then.value).toBe('Default/Прикраси/Світлі браслети');
+  expect(node.if.right.value).toBe('1');
+  expect(api.post.mock.calls).toEqual([['/admin/magento-integration/discovery', {}]]);
+});
+it('shows text characteristics with no options and never invents an attribute association', () => {
+  render(<MemoryRouter><MagentoCharacteristics questions={[{ id: 'engraving', label: 'Гравіювання', input_type: 'text', options: [] }, { id: 'description', label: 'Опис', input_type: 'text', options: [] }]} values={[]} targets={{ engraving: ['engraving_text'] }} definition={{}} revision={{ schema: { attributes: [{ attribute_code: 'engraving_text', default_frontend_label: 'Текст гравіювання' }] } }} actionFor={(question) => `/admin/magento/prepare?intent=attribute&question=${question.id}`} /></MemoryRouter>);
+  expect(screen.getByText('Гравіювання')).toBeTruthy();
+  expect(screen.getByText('Текст гравіювання')).toBeTruthy();
+  expect(screen.getByText('Не передається за чинними правилами')).toBeTruthy();
+  expect(screen.getAllByRole('link', { name: 'Налаштувати передачу' })).toHaveLength(2);
+});

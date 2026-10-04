@@ -55,6 +55,21 @@ suite.test('stable recount exposure: reviewed UPDATE, atomic handoff and fail-cl
       assert.equal(plan.sku,'SV5111010'); assert.equal(plan.internalSku,'SV11501001');
       assert.deepEqual(await protectedState(),before); assert.equal(s.writes.length,0);
     });
+    await t.test('browser lifecycle recovery selects the current stable-public binding and forbids legacy replacement after cutover',async () => {
+      const recovery = require('../src/services/magento/lifecycle-recovery');
+      const before = await protectedState();
+      const exact = await recovery.productRecovery(config,product.id,{...options,canRecoverJobs:true,canReconcileLifecycle:true});
+      assert.equal(exact.productId,product.id); assert.equal(exact.article,'SV5111010');
+      assert.deepEqual(exact.lifecycle.availableKinds,['stable_recount_exposure']);
+      assert.equal(exact.lifecycle.suggestedKind,'stable_recount_exposure'); assert.equal(exact.lifecycle.legacyDeliveryEnabled,false);
+      const reviewed = await recovery.preview(config,product.id,{kind:'stable_recount_exposure'},options);
+      assert.equal(reviewed.eligible,true,JSON.stringify(reviewed.blockers));
+      assert.equal(reviewed.review.payload.bindingRevisionId,published.id);
+      assert.equal(reviewed.review.payload.publicIdentityId,String(product.public_product_identity_id));
+      const legacy = await recovery.preview(config,product.id,{kind:'replacement'},options);
+      assert.equal(legacy.eligible,false); assert.ok(legacy.blockers.includes('LIFECYCLE_LEGACY_DELIVERY_RETIRED'));
+      assert.deepEqual(await protectedState(),before); assert.equal(s.writes.length,0);
+    });
     await t.test('authorization, missing/replaced counterpart, and stale version fail without side effects',async () => {
       const before = await protectedState();
       await assert.rejects(service.apply(config,plan,plan.planHash,{...options,mutationContext:{actorUserId:999999}}),{code:'ADMIN_PERMISSION_REVOKED'});

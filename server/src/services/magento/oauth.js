@@ -45,6 +45,14 @@ function signRequest(method, urlString, credentials, {
 }
 
 function signGetRequest(url, credentials, options) { return signRequest('GET', url, credentials, options); }
+function signAttributeCreateRequest(url, credentials, options) {
+  let parsed;
+  try { parsed = new URL(url); } catch { throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID'); }
+  if (parsed.search || !['/rest/all/V1/products/attributes', '/rest/all/V1/products/attribute-sets/attributes'].includes(parsed.pathname)) {
+    throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID');
+  }
+  return signRequest('POST', url, credentials, options);
+}
 function signOptionCreateRequest(url, credentials, options) {
   let parsed;
   try { parsed = new URL(url); } catch { throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID'); }
@@ -88,4 +96,4 @@ function signTestDeleteRequest(url, credentials, options) {
   }
   return signRequest('DELETE', url, credentials, options);
 }
-module.exports = { percentEncode, signGetRequest, signCategoryCreateRequest, signSyncRequest, signTestDeleteRequest, signOptionCreateRequest, signScopedOptionLabelRequest };
+module.exports = { percentEncode, signGetRequest, signCategoryCreateRequest, signSyncRequest, signTestDeleteRequest, signOptionCreateRequest, signScopedOptionLabelRequest, signAttributeCreateRequest };

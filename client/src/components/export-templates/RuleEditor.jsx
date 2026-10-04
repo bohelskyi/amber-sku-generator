@@ -48,7 +48,7 @@ function CharacteristicPicker({ node, onInsert, context }) {
   return <div className="et-source-picker">
     <SourcePicker registry={context.registry} group={context.group} choices={sources} value={source} showDetails={!context.focused} onChange={(id) => { setSource(id); setTable(context.definition.sources[id]?.kind === 'semantic' ? null : ''); }} />
     <label>Як записувати значення<select className="input" value={table ?? '__choose'} onChange={(e) => setTable(e.target.value === '__choose' ? null : e.target.value)}>
-      <option value="__choose">Оберіть значення для файлу</option>{!semantic && <option value="">Використати значення як є</option>}{mappings.map((id) => <option key={id} value={id}>Значення шаблону: {Object.values(context.definition.tables[id]).slice(0, 3).join(' / ')}</option>)}
+      <option value="__choose">{context.integration ? "Оберіть значення для Magento" : "Оберіть значення для файлу"}</option>{!semantic && <option value="">Використати значення як є</option>}{mappings.map((id) => <option key={id} value={id}>Значення шаблону: {Object.values(context.definition.tables[id]).slice(0, 3).join(' / ')}</option>)}
     </select></label>
     {semantic && <><p>Після вставлення натисніть характеристику в тексті, щоб змінити її значення або скопіювати поточні назви.</p>
       {!context.focused && <details><summary>Технічні налаштування</summary><p>Спеціальний режим для інтеграцій. Для звичайних полів Magento зазвичай використовуються назви або власні відповідності.</p>
@@ -87,7 +87,7 @@ function TextComposer({ node: original, trail, context }) {
   });
   return <div className="et-composer">
     <Scope context={context} trail={trail} />
-    <label>Текст у файлі<textarea ref={(element) => { input.current = element; element?.setCustomValidity(invalid ? 'Перевірте характеристики у фігурних дужках.' : ''); }} className="input et-text" rows={3} disabled={context.readOnly}
+    <label>{context.integration ? 'Значення для Magento' : 'Текст у файлі'}<textarea ref={(element) => { input.current = element; element?.setCustomValidity(invalid ? 'Перевірте характеристики у фігурних дужках.' : ''); }} className="input et-text" rows={3} disabled={context.readOnly}
       value={display(node.template)} aria-invalid={invalid} aria-describedby={helpId} onSelect={(e) => { selection.current = [stored(e.target.value.slice(0, e.target.selectionStart)).length, stored(e.target.value.slice(0, e.target.selectionEnd)).length]; }}
       onChange={(e) => update((value) => ({ ...value, template: stored(e.target.value) }))} /></label>
     <p id={helpId} className="et-muted">Текст і розділові знаки зберігаються точно. Додавайте характеристики кнопкою нижче; їхні позначки у {'{дужках}'} буде замінено значеннями товару.</p>
@@ -128,9 +128,9 @@ function Mapping({ node, trail, context }) {
     {context.focused && context.definition.sources[sourceId]?.kind === 'semantic' ? <><label>Як записувати значення<select className="input" value={namesCopied ? 'labels' : 'mapping'} disabled={context.readOnly} onChange={(e) => {
       if (e.target.value === 'labels') { if (update(() => copyCurrentOptionLabels(evidence, table)) === false) return; setNamesCopied(true); }
       else setNamesCopied(false);
-    }}><option value="labels" disabled={!Object.keys(copyCurrentOptionLabels(evidence)).length}>Як названо в характеристиці</option><option value="mapping">Задати свої значення</option></select></label><p className="et-muted">{frozenNamesHelp}</p></> : <><h3>Значення у CSV</h3>
+    }}><option value="labels" disabled={!Object.keys(copyCurrentOptionLabels(evidence)).length}>Як названо в характеристиці</option><option value="mapping">Задати свої значення</option></select></label><p className="et-muted">{frozenNamesHelp}</p></> : <><h3>{context.integration ? 'Значення для Magento' : 'Значення у CSV'}</h3>
       {context.definition.sources[sourceId]?.kind === 'semantic' && <OptionNamesCopy evidence={context.sourceEvidence || evidence} entries={table} readOnly={context.readOnly} onChange={(entries) => update(() => entries)} />}</>}
-    <MappingTableEditor entries={table} ids={ids} evidence={context.sourceEvidence || evidence} support={context.definition.sourceSupport?.sources?.[`${context.definition.sources[sourceId]?.category}.${context.definition.sources[sourceId]?.key}`]} strictText={Boolean(context.question)} readOnly={context.readOnly} showEvidence={!context.question && !context.focused} technical={!context.focused} onChange={(entries) => { update(() => entries); setNamesCopied(false); }} />
+    <MappingTableEditor integration={context.integration} entries={table} ids={ids} evidence={context.sourceEvidence || evidence} support={context.definition.sourceSupport?.sources?.[`${context.definition.sources[sourceId]?.category}.${context.definition.sources[sourceId]?.key}`]} strictText={Boolean(context.question)} readOnly={context.readOnly} showEvidence={!context.question && !context.focused} technical={!context.focused} onChange={(entries) => { update(() => entries); setNamesCopied(false); }} />
     {!context.question && !context.focused && <SourceSupportStatus definition={context.definition} sourceId={sourceId} diagnostics={context.diagnostics} showDetails={false} />}
     {context.question || context.localOnly || context.focused ? <p className="et-muted">Немає відповідності: {node.otherwise?.op === 'literal' && node.otherwise.value === '' ? 'порожній текст; подальші перевірки готовності збережено.' : 'збережене запасне правило.'}</p> : <>
       {node.otherwise && <details><summary>Якщо значення відсутнє або немає відповідності</summary><TaskValue node={node.otherwise} trail={[...trail, 'otherwise']} context={context} /></details>}
@@ -221,7 +221,7 @@ function TaskValue({ node: original, trail: originalTrail = [], context, output 
       {!context.readOnly && <div className="et-actions"><button type="button" disabled={!index} onClick={() => update((value) => ({ ...value, items: moveItem(value.items, index, -1) }))}>Вище</button><button type="button" disabled={index === node.items.length - 1} onClick={() => update((value) => ({ ...value, items: moveItem(value.items, index, 1) }))}>Нижче</button></div>}
     </details>)}{node.op === 'join' && <Scalar disabled={context.readOnly} fixedType value={node.delimiter} label="Роздільник" onChange={(delimiter) => update((value) => ({ ...value, delimiter }))} />}</>;
   if (node.op === 'numericBand' && Array.isArray(node.bands)) return <><Scope context={context} trail={trail} /><TaskValue node={node.input} trail={[...trail, 'input']} context={context} />
-    <div className="et-table-scroll"><table aria-label="Числові діапазони"><thead><tr><th>Мінімум</th><th>Максимум</th><th>Значення у CSV</th></tr></thead><tbody>{node.bands.map((band, index) => <tr key={index}>
+    <div className="et-table-scroll"><table aria-label="Числові діапазони"><thead><tr><th>Мінімум</th><th>Максимум</th><th>{context.integration ? 'Значення для Magento' : 'Значення у CSV'}</th></tr></thead><tbody>{node.bands.map((band, index) => <tr key={index}>
       {['min', 'max', 'value'].map((key) => <td key={key}><Scalar disabled={context.readOnly} value={band[key]} label={`${label(key)} ${index + 1}`} onChange={(next) => context.update([...trail, 'bands', index], (current) => ({ ...current, [key]: next }))} />
         {key !== 'value' && <label><input type="checkbox" disabled={context.readOnly} checked={band[key + 'Inclusive']} onChange={(e) => context.update([...trail, 'bands', index], (current) => ({ ...current, [key + 'Inclusive']: e.target.checked }))} /> {band[key + 'Inclusive'] ? 'Межа включно' : 'Межа виключно'}</label>}</td>)}
     </tr>)}</tbody></table></div>{node.outside && <details><summary>Поза діапазонами</summary><TaskValue node={node.outside} trail={[...trail, 'outside']} context={context} /></details>}</>;
@@ -231,7 +231,7 @@ function TaskValue({ node: original, trail: originalTrail = [], context, output 
   return <AdvancedRule context={context}>Власне правило збережено без змін. Його повна структура доступна в розширеному редакторі.</AdvancedRule>;
 }
 
-export function FieldInspector({ definition, cellPath, onChange, registry, readOnly, loadSource, diagnostics = [], openSource, onAdvanced, focused = false, onTechnical }) {
+export function FieldInspector({ integration = false, definition, cellPath, onChange, registry, readOnly, loadSource, diagnostics = [], openSource, onAdvanced, focused = false, onTechnical }) {
   const [scope, setScope] = useState('local');
   const [error, setError] = useState('');
   const column = cellPath[5];
@@ -241,7 +241,7 @@ export function FieldInspector({ definition, cellPath, onChange, registry, readO
   const live = useRef(null);
   useLayoutEffect(() => { live.current = definition; return () => { live.current = null; }; }, [definition]);
   const apply = (action) => { if (readOnly || live.current !== definition) return false; try { onChange(action()); setError(''); return true; } catch (e) { setError(e.message); return false; } };
-  const context = { definition, cellPath, scope, setScope, registry, readOnly, loadSource, diagnostics, onAdvanced, onTechnical, focused, openSource, group: group.route,
+  const context = { integration, definition, cellPath, scope, setScope, registry, readOnly, loadSource, diagnostics, onAdvanced, onTechnical, focused, openSource, group: group.route,
     update: (trail, transform) => apply(() => editField(definition, cellPath, trail, scope, transform)),
     mapping: (trail, transform) => apply(() => editMapping(definition, cellPath, trail, scope, transform)),
     questionMapping: (transform) => apply(() => editQuestionMapping(definition, cellPath, scope, transform)) };

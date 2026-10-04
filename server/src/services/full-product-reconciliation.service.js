@@ -34,6 +34,12 @@ async function reconcileFullProduct(input, options) {
       if (previous.commandHash !== commandHash) throw error(409,'RECONCILIATION_KEY_CONFLICT','Resolution key already identifies another reviewed command');
       return { ...previous.result,alreadyResolved:true };
     }
+    // Browser compatibility recovery must not introduce a replacement lifecycle
+    // after its CSV completion channel has been retired. The authority boundary
+    // serializes this check against delivery cutover; existing CLI contracts stay explicit.
+    if (options.requireLegacyDelivery && (await client.query('SELECT legacy_product_csv_enabled FROM magento_auto_sync_activation WHERE singleton')).rows[0]?.legacy_product_csv_enabled === false) {
+      throw error(409,'LIFECYCLE_LEGACY_DELIVERY_RETIRED','Use reviewed Magento exposure recovery after delivery cutover');
+    }
     // Read to discover lock IDs, then rebuild after waits and compare the exact
     // reviewed component. A new descendant invalidates the reviewed terminal.
     const discovered = buildRepairManifest(await readRepairInput(client));

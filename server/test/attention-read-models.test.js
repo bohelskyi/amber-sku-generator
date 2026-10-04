@@ -92,7 +92,7 @@ test('synchronization problems page applies category and bounded offset without 
   assert.equal(result.items[0].problems[0].resolution, 'administrator');
   assert.deepEqual(result.pageInfo, { limit: 1, offset: 1, total: 3, hasPrevious: true, hasNext: true });
   assert.deepEqual(calls[0].values, ['unconfigured', 'BR', 1, 1]);
-  assert.deepEqual(calls[1].values, ['BR']);
+  assert.deepEqual(calls[1].values, ['unconfigured', 'BR']);
 });
 
 test('repricing history page preserves authoritative rollback eligibility and exact page bounds', async () => {

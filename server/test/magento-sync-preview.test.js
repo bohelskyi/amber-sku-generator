@@ -67,11 +67,13 @@ const custom = (r, target) => r.candidatePayload.product.custom_attributes.find(
 const has = (r, code) => r.blockers.some((b) => b.code === code);
 
 test('UPDATE produces native payload, option labels, scalar diff and preserves merchandising and Magento-only taxonomy', () => {
-  const f = fixture(); const before = structuredClone(f.raw); const r = run(f);
+  const f = fixture(); f.schema.attributes.find((attribute) => attribute.attribute_code === 'kolir').default_frontend_label = 'Колір';
+  const before = structuredClone(f.raw); const r = run(f);
   assert.equal(r.mode, 'update'); assert.equal(r.candidatePayload.product.visibility, 4);
   assert.equal(r.candidatePayload.product.status, 2); assert.equal(r.candidatePayload.product.type_id, 'simple');
   assert.equal(r.candidatePayload.product.attribute_set_id, 8001);
   assert.equal(field(r, 'kolir').magentoOptionId, 'red-id'); assert.equal(field(r, 'kolir').currentResolvedOptions[0].label, 'Remote blue');
+  assert.equal(field(r, 'kolir').magentoAttributeLabel, 'Колір');
   assert.equal(field(r, 'kolir').authority, 'candidate_only');
   assert.ok(r.candidatePayload.product.custom_attributes.every((a) => !CSV_FIELDS.has(a.attribute_code)));
   for (const target of ['description', 'short_description', 'meta_title', 'meta_description']) {
@@ -289,6 +291,8 @@ test('SV readiness separates missing size/names from valid or unmapped stone pro
   assert.ok(has(validStone, 'NAME_READ_UNAVAILABLE'));
   const readiness = validStone.blockers.find((blocker) => blocker.code === 'PRODUCT_EVALUATION_NOT_READY');
   assert.deepEqual(readiness.issueFields.sort(), ['name', 'rozmir_suveniriv']);
+  assert.ok(readiness.evaluationIssues.some((issue) => issue.field === 'name' && issue.message));
+  assert.ok(readiness.evaluationIssues.some((issue) => issue.field === 'rozmir_suveniriv' && issue.message));
 
   f.amber.product.details.answers.stone_processing = 9;
   const invalidStone = run(f, f.raw).blockers.find((blocker) => blocker.code === 'PRODUCT_EVALUATION_NOT_READY');

@@ -143,7 +143,8 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
       historicalPredicted: { id: 154, name: 'Камінь' }, observed: { id: 151, name: 'Сувеніри', count: 20 },
       authority: 'candidate_only', usedToSelectSet: false };
   }
-  if (!expected.ready) block('PRODUCT_EVALUATION_NOT_READY', { issueFields: expected.issueFields });
+  if (!expected.ready) block('PRODUCT_EVALUATION_NOT_READY', { issueFields: expected.issueFields,
+    ...(expected.evaluationIssues ? { evaluationIssues: expected.evaluationIssues } : {}) });
   const eligibility = syncEligibility(product, raw);
   for (const item of eligibility.reasons) block(item.code, { operation: 'all', reason: item.rule });
   const drift = preparation ? preparation.drift : revision ? compareSchema(revision, schema) : null;
@@ -305,7 +306,8 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
     const action = preserve ? 'preserve' : authority === 'blocked' ? 'blocked' : !populated(value) ? 'unchanged'
       : candidate === null ? domain ? 'blocked' : 'unresolved' : same ? 'unchanged' : populated(rawValue) ? 'would_update' : 'would_add';
     attributes.push({ target, source: sources, evaluatedValue: value, strategy, magentoAttributeCode: native || domain ? null : attributeCode,
-      magentoAttributeId: attr?.attribute_id ?? null, magentoOptionId: option?.value ?? null, resolvedOptionLabel: option?.label ?? null,
+      magentoAttributeId: attr?.attribute_id ?? null, magentoAttributeLabel: attr?.default_frontend_label ?? null,
+      magentoOptionId: option?.value ?? null, resolvedOptionLabel: option?.label ?? null,
       persistedDecision: binding || null, optionDecision, candidates, authority, applicability: applicable,
       productTypeApplicability, nativeTranslation: booleanControl ? 'csv_boolean_to_native_value' : null,
       currentSetApplicability: raw ? schema.attributeSets.find((s) => s.attribute_set_id === raw.attribute_set_id)?.attributeCodes.includes(attributeCode) ?? null : null,

@@ -4,6 +4,8 @@ import { createRequirements, isCreateQuestionRequired } from '../../lib/product-
 import { getVisibleOptionsForQuestion, isQuestionVisible, isTextQuestion } from '../../lib/sku-visibility.js';
 import { LoadingState, Notice } from '../app/UiPrimitives.jsx';
 import MagentoDetails from './MagentoDetails.jsx';
+import MagentoProductComparison from '../attention/MagentoProductComparison.jsx';
+import { problemTitle } from '../attention/sync-problem-presentation.js';
 
 const root = '/admin/magento-integration';
 function productIdentity(product) {
@@ -11,12 +13,14 @@ function productIdentity(product) {
   if (product.full_sku) return { label: 'Внутрішній SKU', value: product.full_sku, actionLabel: `Обрати внутрішній SKU ${product.full_sku}` };
   return { label: '', value: 'Артикул недоступний', actionLabel: `Обрати товар ID ${product.id}` };
 }
-function ProductChecks({ revision, categoryCode, onRepresentative }) {
+function ProductChecks({ revision, categoryCode, onRepresentative, initialProductId, initialArticle }) {
   const [config, setConfig] = useState(null); const [error, setError] = useState('');
   const [answers, setAnswers] = useState({}); const [weight, setWeight] = useState(''); const [price, setPrice] = useState('');
   const [ua, setUa] = useState(''); const [en, setEn] = useState('');
   const [preview, setPreview] = useState(null); const [busy, setBusy] = useState(false);
-  const [query, setQuery] = useState(''); const [products, setProducts] = useState(null); const [selected, setSelected] = useState(null);
+  const [query, setQuery] = useState(''); const [products, setProducts] = useState(null);
+  const [selected, setSelected] = useState(() => Number.isSafeInteger(Number(initialProductId)) && Number(initialProductId) > 0
+    ? { id: Number(initialProductId), public_sku: initialArticle || null, fromProblem: true } : null);
   const [offset, setOffset] = useState(0); const [searching, setSearching] = useState(false);
   const sequence = useRef(0); const searchSequence = useRef(0);
   useEffect(() => {
@@ -47,6 +51,7 @@ function ProductChecks({ revision, categoryCode, onRepresentative }) {
   async function check(kind, input) {
     const ticket = ++sequence.current; setBusy(true); setError(''); setPreview(null);
     try { const { data } = await api.post(`${root}/${kind}`, { bindingRevisionId: revision.id, ...input });
+      if (kind === 'product-preview' && data.productId !== undefined && Number(data.productId) !== Number(input.productId)) throw new Error('Wrong product evidence');
       if (ticket === sequence.current) setPreview({ result: data, input: structuredClone(input) });
     } catch (cause) { if (ticket === sequence.current) setError(cause.response?.data?.error || 'Перевірка товару не завершилася.'); }
     finally { if (ticket === sequence.current) setBusy(false); }
@@ -78,7 +83,7 @@ function ProductChecks({ revision, categoryCode, onRepresentative }) {
       })}</ul>{!products.products.length && <p>Товарів не знайдено.</p>}
         <div className="flex flex-wrap gap-2"><button className="btn btn-outline btn-compact-md" disabled={searching || !offset} onClick={() => search(Math.max(0, offset - 20))}>Попередні товари</button><button className="btn btn-outline btn-compact-md" disabled={searching || products.nextOffset == null} onClick={() => search(products.nextOffset)}>Наступні товари</button></div>
       </>}
-      {selected && <p>Обрано: {productIdentity(selected).label && <>{productIdentity(selected).label}: </>}<strong>{productIdentity(selected).value}</strong></p>}
+      {selected && <p>Обрано: {selected.fromProblem && !selected.public_sku ? <strong>товар із черги проблем</strong> : <>{productIdentity(selected).label && <>{productIdentity(selected).label}: </>}<strong>{productIdentity(selected).value}</strong></>}</p>}
       <button className="btn btn-primary btn-compact-md" disabled={busy || !selected} onClick={() => check('product-preview', { productId: selected.id })}>Перевірити поточний товар</button>
     </section>
     <section className="card space-y-3 p-5"><h3 className="font-semibold">Приклад нового товару</h3><p className="text-sm text-slate-600">Перевірка CREATE лише читає дані. Товар, публічний артикул і завдання доставки не створюються.</p>
@@ -98,12 +103,13 @@ function ProductChecks({ revision, categoryCode, onRepresentative }) {
     {error && <Notice>{error}</Notice>}{busy && <LoadingState label="Перевіряємо цей товар у Magento…" />}
     {preview && <section className="card space-y-3 p-5" aria-live="polite"><h3 className="font-semibold">{preview.result.sendable ? 'Цей приклад пройшов перевірку доставки' : 'Цей приклад потребує уваги'}</h3>
       <p className="text-sm">{preview.result.hypothetical ? 'Умовний приклад CREATE; це не збережений товар.' : `Артикул: ${preview.result.article}`} Результат стосується лише цього прикладу та вибраних відповідностей.</p>
-      <ul>{preview.result.blockers.map((blocker, index) => <li key={index}>{blocker.message || 'Потрібно перевірити відповідності.'}</li>)}</ul>
+      <ul>{preview.result.blockers.map((blocker, index) => <li key={index}>{problemTitle(blocker)}</li>)}</ul>
+      <MagentoProductComparison result={preview.result} />
       {preview.result.hypothetical && preview.result.sendable && <button className="btn btn-outline btn-compact-md" onClick={() => onRepresentative({ routeKey: preview.result.routeKey, input: structuredClone(preview.input), group: categoryCode })}>Зберегти перевірений приклад</button>}
       <MagentoDetails summary="Технічні деталі перевірки">{() => <pre className="text-xs">{JSON.stringify(preview.result, null, 2)}</pre>}</MagentoDetails>
     </section>}
   </div>;
 }
 export default function MagentoProductChecks(props) {
-  return <ProductChecks key={`${props.revision.id}:${props.revision.revision}:${props.categoryCode}`} {...props} />;
+  return <ProductChecks key={`${props.revision.id}:${props.revision.revision}:${props.categoryCode}:${props.initialProductId || ''}`} {...props} />;
 }
