@@ -105,7 +105,7 @@ it('exact route/product loss requires acknowledgement and explanation; stale app
 it('missing CREATE readiness blocks publication and view-only cannot publish', async () => {
   api.post.mockResolvedValueOnce({ data: { ...proof, blockers: [{ code: 'REPRESENTATIVE_CREATE_REQUIRED', routeKey: 'XX:all' }] } });
   shell(); fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив публікації' }));
-  await screen.findByText('Потрібен готовий приклад CREATE для маршруту · XX:all');
+  await screen.findByText('Потрібен перевірений приклад нового товару. Відкрийте «Приклад на товарі». · XX:all');
   expect(screen.getByRole('button', { name: 'Опублікувати відповідності' }).disabled).toBe(true);
   cleanup(); shell({}, ['export_templates.view']);
   expect(screen.queryByRole('button', { name: 'Перевірити вплив публікації' })).toBeNull();

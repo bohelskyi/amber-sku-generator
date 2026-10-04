@@ -1,8 +1,69 @@
 # Magento integration
 
+## Category workspace
+
+Settings → **Інтеграція Magento** (`/admin/magento`) opens manager categories.
+`?category=CODE` selects a category; `/categories/:categoryCode` also opens it.
+The left navigation shows search and the number of current characteristics unused
+in output rules. The centre separates characteristics from names/descriptions.
+Unconnected fields stay in the main table; system and unsupported fields are
+available through **Службові поля**. Counts distinguish connected, missing and
+review-required fields.
+Conditional routes have a readable set/condition selector. Search and all/unmapped/
+review filters page at 30 rows. The selected field uses the shared lossless column
+inspector beside the table, or a dialog on narrow screens.
+
+The **Назва й описи** tab includes all text/textarea fields and UA/EN selection.
+Text editing opens directly, without codes, scope selection or an expression-mode
+selector. Technical and advanced rules remain under **Розширені налаштування**.
+Source insertion, shared-reference detachment and field-local mapping tables use
+the existing template adapters. Guard-only reads and unused source declarations
+do not count as transmitting a characteristic; text usage is labelled separately.
+Exact option-label suggestions require confirmation; ambiguous labels never select
+an identity automatically. Existing ownership is displayed in Ukrainian. Changed
+ownership requires an explicit choice and reason in the prepared binding review.
+
+Editing starts from the exact pinned publication. Saving creates a private template
+family, preserving every other saved draft. Preparation validates and publishes an
+immutable **inactive** template version, then creates a successor binding through
+the existing proof/CAS procedure. Explicit option choices are saved with CAS into
+that successor; approval, product examples and publication remain separate actions.
+The main **Перевірити зміни** action saves and prepares the work. Once required
+decisions are confirmed, it also requests the existing server product-impact preview
+in the same session. Restoring a saved preparation does not auto-check products or
+Magento; checking remains explicit after reload. Saving for later, structure refresh,
+product examples and delivery-policy editing are secondary disclosures.
+The review combines changed fields, unresolved decisions, server-calculated examples
+and publication impact. **Застосувати зміни** uses the existing publication/handoff
+boundary. Existing product names remain pinned. **Застосувати назви до чинних
+товарів** opens the separate actual-Administrator workflow, filtered by category
+on the server, with its existing exact selection, preview, confirmation and 100 limit.
+
+Saved `ruleDraft`, `binding`, `source`, `route`, `language` and `field` URL identities
+restore preparation after reload. Unsaved field input and category navigation are
+guarded. A changed active publication or draft counter blocks stale writes without
+replacing local input. Upgrading old template formats is an explicit existing command.
+
+New authenticated, active-user-gated `export_templates.view` APIs:
+
+- `GET /api/admin/magento-integration/categories/:categoryCode`
+- `GET /api/admin/magento-integration/categories/:categoryCode/fields/:field`
+- `POST /api/admin/magento-integration/categories/:categoryCode/observation`
+
+The GETs accept only optional `bindingRevisionId`, `routeKey`, and `rowId` (`base`/
+`english`), run in repeatable-read read-only transactions, and never evaluate products
+or contact Magento. The category projection includes pinned rules, set membership,
+sources, ownership/review states and observation date; option domains and review
+entries are loaded only for the selected field. Explicit observation accepts the
+same scope, performs bounded Magento GETs outside database transactions and verifies
+the publication/draft identities again. It returns a live view without saving or
+rewriting frozen bindings. Failed observation leaves the previous view/date intact.
+The POST retains synchronizer-token CSRF. Resource creation and editing stay in the
+existing advanced preparation and Administrator workflows.
+
 ## Self-service integration workspace (Wave 2)
 
-Settings → **Інтеграція Magento** (`/admin/magento`) opens an attention-first
+**Стан доставки** (`/admin/magento/overview`) opens the attention-first
 Overview. Automatic delivery enabled/disabled, recorded operational problems,
 active publication, and available Magento structure observations are separate facts.
 Enabled delivery is not a worker heartbeat or proof of successful delivery.
@@ -16,8 +77,9 @@ browsing. Category details and mapping review mount only unresolved rows initial
 groups, with search across question/option labels, source keys, and target Magento
 attribute codes. At most 20 group headers and one expanded group of 50 values
 mount per page; the default issue view still mounts at most 50 unresolved values.
-Product readiness links carry an exact `?field=...` target filter into category
-details, including approved mappings, without making any decision or write.
+Compatibility category details (`?tab=legacy`), placement and product tabs remain
+available. Product readiness links carry an exact `?field=...` target into the
+category field editor without making a decision or write.
 Diagnostic evidence/history is
 lazy-mounted. Repeated remote paths share one visual group without merging binding
 decisions or exact action targets.

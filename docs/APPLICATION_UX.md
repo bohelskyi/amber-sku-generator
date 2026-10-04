@@ -158,9 +158,20 @@ permission before opening the form; it never applies changes on navigation.
 The return target is restricted to the local attention workspace. Receipts say
 that Amber saved the change, while Magento delivery remains a separate state.
 
-Magento combines overview, categories and characteristics, product rules, saved
-changes and history. Category detail connects the actual current binding and its
-pinned template to readable field/source/rule/example information. Preparation
+Magento opens a category workspace with categories on the left, all fields of
+the applicable Magento set in the centre and a field editor on the right (a dialog
+on narrow screens). Characteristics and UA/EN text templates share this screen.
+The simple view separates **Характеристики / Назва й описи**, hides codes and
+secondary operations, and uses **Перевірити зміни → Застосувати зміни**. The first
+action saves/prepares work and requests product impact after required decisions;
+restoration alone never starts that check. System fields remain in a disclosure.
+Unused output sources, explicit option suggestions and human-readable ownership
+are visible. Delivery overview is separate at `/admin/magento/overview`.
+The workspace reads the exact pinned binding/template, saves an isolated rules
+draft and prepares a successor before explicit review and application. Existing
+names use a separate Administrator confirmation, filtered to the category with
+the existing 100-product bound. See [the domain guide](MAGENTO_INTEGRATION.md).
+Advanced preparation
 opens with a task intent instead of demanding that an operator choose technical
 layers. Published current state and future drafts remain visibly separate;
 publication steps keep their own authority and review.

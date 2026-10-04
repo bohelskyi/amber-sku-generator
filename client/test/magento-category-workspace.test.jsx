@@ -1,0 +1,309 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { createMemoryRouter, RouterProvider } from 'react-router-dom';
+import { AuthContext } from '../src/auth/auth-context.js';
+import { api } from '../src/lib/api.js';
+import MagentoCategoryWorkspace from '../src/components/workspace/MagentoCategoryWorkspace.jsx';
+import MagentoWorkspaceReview from '../src/components/workspace/MagentoWorkspaceReview.jsx';
+import MagentoIntegrationPage from '../src/pages/MagentoIntegrationPage.jsx';
+import { assertCategoryScope, changedFields, decisionKey, routeLabel, uniqueOptionSuggestions } from '../src/lib/magento-category-workspace.js';
+
+vi.mock('../src/lib/api.js', () => ({ api: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }));
+const permissions = ['export_templates.view', 'export_templates.manage', 'export_templates.publish', 'exports.view', 'exports.create'];
+const categories = [{ code: 'BR', name: 'Браслети', unboundCount: 1, operational: { count: 0 } }, { code: 'OT', name: 'Інші', unboundCount: 0, operational: { count: 0 } }];
+const active = { id: 'current', revision: '4', state: 'published', templateId: 'original', templateVersionId: 'original-version' };
+const definition = { evaluatorVersion: 'magento-declarative-4', outputContract: 'magento-products-columns-v2',
+  sources: { color: { kind: 'semantic', category: 'BR', key: 'color', type: 'scalar' } }, tables: {},
+  bindings: [{ id: 'sharedName', value: { op: 'literal', value: 'Стара назва' } }],
+  groups: ['BR', 'OT'].map((route) => ({ route, columns: ['name', 'description', 'kolir'], rows: [
+    { id: 'base', cells: { name: { op: 'ref', id: 'sharedName' }, description: { op: 'literal', value: 'Старий опис' }, kolir: { op: 'source', id: 'color' } } },
+    { id: 'english', cells: { name: { op: 'literal', value: 'Old name' }, description: { op: 'literal', value: 'Old description' }, kolir: { op: 'literal', value: '' } } },
+  ] })) };
+const entry = { id: 'option:color-binding:zero', group: 'BR', routeKey: 'BR:all', row: 'base', target: 'kolir', kind: 'option', source: 'BR.color=value_id:0', evaluated: 'Нуль', identity: '10', reviewState: 'review_required', exact: false };
+const options = [{ value: '10', label: 'Нуль' }, { value: '20', label: 'Інше значення' }];
+const questions = [{ id: 'color', label: 'Колір', options: [{ id: 0, label: 'Нуль' }], uses: [{ target: 'kolir', rowId: 'base' }] }, { id: 'guard', label: 'Лише в умові', options: [], uses: [] }];
+function projection(revision = active, rules = definition, rowId = 'base') {
+  return { category: categories[0], revision, template: { definition: rules, versionId: revision.templateVersionId }, groupIndex: 0, rowIndex: rowId === 'english' ? 1 : 0,
+    observedAt: '2026-10-01T00:00:00Z', routeKey: 'BR:all', routes: [{ routeKey: 'BR:all', setName: 'Прикраси' }], questions, unboundCount: 1,
+    attributes: [
+      ...[['name', 'Назва'], ['description', 'Опис'], ['kolir', 'Колір Magento']].map(([code, label]) => ({ code, target: code, label, inputType: code === 'kolir' ? 'select' : 'text', text: code !== 'kolir', configured: true, editable: true, sources: code === 'kolir' ? [{ label: 'Колір' }] : [], state: 'connected', unresolved: 0, policy: 'authoritative_create_update', policyApproved: true })),
+      { code: 'material', target: 'material', label: 'Матеріал', text: false, configured: false, editable: true, inputType: 'select', sources: [], state: 'unmapped' },
+      { code: 'photo', target: 'photo', label: 'Зображення', text: false, configured: false, editable: false, sources: [], state: 'unmapped', restriction: 'Цей тип атрибута доступний лише для перегляду.' },
+    ] };
+}
+let saved;
+let draft;
+function mocks() {
+  saved = null; draft = { ...active, id: 'isolated', revision: '1', state: 'draft', templateVersionId: 'version-next' };
+  api.get.mockImplementation(async (url, config) => {
+    if (url.endsWith('/sources')) return { data: { productFields: ['public_sku'], references: { questions: [], schemas: [] } } };
+    if (url.endsWith('/sample-products')) return { data: { products: [{ id: 21, category: 'BR', public_sku: 'AG-21' }, { id: 22, category: 'OT', public_sku: 'AG-22' }], nextOffset: null } };
+    if (url.includes('/fields/')) return { data: { attribute: {}, options, entries: url.endsWith('/kolir') ? [entry] : [] } };
+    if (url.includes('/categories/')) return { data: projection(config?.params?.bindingRevisionId === 'isolated' ? draft : active, config?.params?.bindingRevisionId === 'isolated' ? saved?.draft.definition || definition : definition, config?.params?.rowId) };
+    if (url.endsWith('/bindings/isolated')) return { data: { revision: { ...draft, schema: { attributes: [{ attribute_code: 'kolir', options }], attributeSets: [] }, bindings: { attributes: [{ bindingKey: 'color-binding', attributeCode: 'kolir' }] } }, entries: [entry], validation: { diagnostics: [] } } };
+    if (url === '/admin/export-templates/family') return { data: saved };
+    if (url.endsWith('/handoffs')) return { data: [] };
+    throw new Error(`Unexpected GET ${url}`);
+  });
+  api.post.mockImplementation(async (url, body) => {
+    if (url === '/admin/export-templates') { saved = { id: 'family', draft: { revision: '1', definitionHash: 'hash', definition: body.definition } }; return { data: saved }; }
+    if (url.endsWith('/validate')) return { data: { valid: true } };
+    if (url.endsWith('/publish')) return { data: { id: 'version-next' } };
+    if (url.endsWith('/successor/prepare')) return { data: { previewToken: 'successor-proof' } };
+    if (url.endsWith('/successor/apply')) return { data: draft };
+    if (url.endsWith('/select')) { draft = { ...draft, revision: String(Number(draft.revision) + 1) }; return { data: draft }; }
+    throw new Error(`Unexpected POST ${url}`);
+  });
+  api.put.mockImplementation(async (_url, body) => { saved = { ...saved, draft: { ...saved.draft, revision: '2', definition: body.definition } }; return { data: saved.draft }; });
+}
+function mount(path = '/admin/magento?category=BR', grants = permissions, roles = []) {
+  const router = createMemoryRouter([{ path: '/admin/magento', element: <MagentoCategoryWorkspace categories={categories} activePublication={active} onPublished={vi.fn()} /> }], { initialEntries: [path] });
+  const view = render(<AuthContext.Provider value={{ permissions: grants, roles }}><RouterProvider router={router} /></AuthContext.Provider>);
+  return { ...view, router };
+}
+async function textFields() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Назва й описи' }));
+}
+function saveDraft() {
+  fireEvent.click(screen.getByText('Зберегти й продовжити пізніше'));
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти чернетку' }));
+}
+beforeEach(() => { vi.resetAllMocks(); mocks(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+it('opens the category and complete attribute set without product evaluation or remote writes; exposes unreadable types', async () => {
+  mount(); await screen.findByRole('button', { name: 'Матеріал' });
+  expect(screen.getByText('Лише в умові')).toBeTruthy();
+  expect(api.post).not.toHaveBeenCalled();
+  expect(api.get.mock.calls.every(([url]) => /categories|sources/.test(url))).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Перевірити зміни' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Оновити структуру Magento' })).toBeNull();
+  fireEvent.change(screen.getByLabelText('Показати'), { target: { value: 'unmapped' } });
+  expect(screen.queryByRole('button', { name: 'Опис' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Службові поля (1)' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Зображення' }));
+  expect(screen.getByText('Цей тип атрибута доступний лише для перегляду.')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Підключити поле' })).toBeNull();
+});
+
+it('isolates a shared text rule to the chosen category and language and saves a separate family', async () => {
+  mount(); await textFields(); fireEvent.click(await screen.findByRole('button', { name: 'Назва' }));
+  fireEvent.change(await screen.findByLabelText('Текст для магазину'), { target: { value: 'Нова назва' } });
+  expect(screen.queryByLabelText('Як формується значення')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Змінити назву поля' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Готово' }));
+  saveDraft();
+  await screen.findByText('Чернетку збережено. Чинна інтеграція ще не змінена.');
+  const next = api.post.mock.calls[0][1];
+  expect(next.key).toMatch(/^magento-edit-/);
+  expect(next.definition.groups[1]).toEqual(definition.groups[1]);
+  expect(next.definition.groups[0].rows[1]).toEqual(definition.groups[0].rows[1]);
+  expect(changedFields(definition, next.definition, 'BR')).toEqual([{ field: 'name', rowId: 'base' }]);
+  expect(definition.bindings[0].value.value).toBe('Стара назва');
+  expect(api.put).not.toHaveBeenCalled();
+});
+
+it('keeps unsaved field input when closing, changing category, or switching language', async () => {
+  mount(); await textFields(); fireEvent.click(await screen.findByRole('button', { name: 'Опис' }));
+  fireEvent.change(await screen.findByLabelText('Текст для магазину'), { target: { value: 'Введення' } });
+  expect(screen.getByLabelText('Мова полів').disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Закрити налаштування' }));
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Незбережене поле' })).getByRole('button', { name: 'Залишитися' }));
+  expect(screen.getByLabelText('Текст для магазину').value).toBe('Введення');
+  fireEvent.click(screen.getByRole('link', { name: /Інші/ }));
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Незбережені зміни' })).getByRole('button', { name: 'Залишитися' }));
+  expect(screen.getByLabelText('Текст для магазину').value).toBe('Введення');
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('stores explicit option IDs in the prepared draft with CAS but does not approve or apply it automatically', async () => {
+  const { router } = mount(); fireEvent.click(await screen.findByRole('button', { name: 'Колір Magento' }));
+  fireEvent.change(await screen.findByLabelText('Magento для Нуль'), { target: { value: '20' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Закрити налаштування' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' }));
+  await screen.findByText('Підготовку збережено. Перевірте відповідності й вплив перед застосуванням.');
+  expect(api.post.mock.calls).toContainEqual(['/admin/magento-integration/successor/prepare', { sourceId: 'current', expectedSourceRevision: '4', templateVersionId: 'original-version' }]);
+  expect(api.post.mock.calls).toContainEqual(['/admin/magento-integration/bindings/isolated/select', { expectedRevision: '1', binding: entry.id, identity: '20' }]);
+  expect(api.post.mock.calls.some(([url]) => /decision|publication\/apply/.test(url))).toBe(false);
+  expect(new URLSearchParams(router.state.location.search).get('binding')).toBe('isolated');
+});
+
+it('preserves both saved rule and binding identities during preparation and uses only the inactive new version', async () => {
+  const { router } = mount(); await textFields(); fireEvent.click(await screen.findByRole('button', { name: 'Опис' }));
+  fireEvent.change(await screen.findByLabelText('Текст для магазину'), { target: { value: 'Підготовлений опис' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Готово' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' }));
+  await waitFor(() => expect(api.post.mock.calls.map(([url]) => url)).toContain('/admin/magento-integration/successor/apply'));
+  await waitFor(() => expect(api.post.mock.calls.map(([url]) => url)).toContain('/admin/magento-integration/successor/apply'));
+  await screen.findByText('Підготовку збережено. Перевірте відповідності й вплив перед застосуванням.');
+  const params = new URLSearchParams(router.state.location.search);
+  expect(params.get('binding')).toBe('isolated'); expect(params.get('ruleDraft')).toBe('family'); expect(params.get('source')).toBe('current');
+  expect(api.post.mock.calls).toContainEqual(['/admin/export-templates/family/publish', { expectedRevision: '1', expectedDefinitionHash: 'hash' }]);
+  expect(api.post.mock.calls.find(([url]) => url.endsWith('/successor/prepare'))[1].templateVersionId).toBe('version-next');
+  expect(api.put.mock.calls.some(([url]) => url.endsWith('/activation'))).toBe(false);
+  expect(api.get.mock.calls.filter(([url]) => url.endsWith('/categories/BR'))).toHaveLength(3);
+});
+
+it('reads an externally navigated language scope without confusing it with a local URL commit', async () => {
+  const { router } = mount(); await textFields(); await screen.findByRole('button', { name: 'Опис' });
+  await act(() => router.navigate('/admin/magento?category=BR&language=english&view=text'));
+  fireEvent.click(await screen.findByRole('button', { name: 'Опис' }));
+  expect((await screen.findByLabelText('Текст для магазину')).value).toBe('Old description');
+});
+
+it('restores a saved rule draft after reload and keeps it when a CAS save fails', async () => {
+  saved = { id: 'family', draft: { revision: '8', definitionHash: 'hash', definition: structuredClone(definition) } };
+  saved.draft.definition.groups[0].rows[0].cells.description.value = 'Відновлений опис';
+  mount('/admin/magento?category=BR&ruleDraft=family&source=current');
+  await textFields();
+  fireEvent.click(await screen.findByRole('button', { name: 'Опис' }));
+  expect((await screen.findByLabelText('Текст для магазину')).value).toBe('Відновлений опис');
+  fireEvent.change(screen.getByLabelText('Текст для магазину'), { target: { value: 'Зберегти введення' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Готово' }));
+  api.put.mockRejectedValueOnce({ response: { data: { error: 'Чернетка змінилася' } } });
+  saveDraft();
+  await screen.findByText('Чернетка змінилася');
+  expect(api.put.mock.calls[0][1].expectedRevision).toBe('8');
+  fireEvent.click(screen.getByRole('button', { name: 'Опис' }));
+  expect((await screen.findByLabelText('Текст для магазину')).value).toBe('Зберегти введення');
+});
+
+it('retains the stored schema and date when explicit Magento observation fails', async () => {
+  mount(); await screen.findByRole('button', { name: 'Матеріал' });
+  fireEvent.click(screen.getByText('Дані Magento та додаткові налаштування'));
+  const date = screen.getByText(/^Структура Magento:/).textContent;
+  api.post.mockRejectedValueOnce({ response: { data: { error: 'Magento недоступний' } } });
+  fireEvent.click(screen.getByRole('button', { name: 'Оновити структуру Magento' }));
+  await screen.findByText('Magento недоступний');
+  expect(screen.getByText(/^Структура Magento:/).textContent).toBe(date);
+  expect(screen.getByRole('button', { name: 'Матеріал' })).toBeTruthy();
+});
+
+it('uses a modal for the whole field on a narrow screen and preserves literal English separately', async () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+  mount(); await textFields(); await screen.findByRole('button', { name: 'Опис' });
+  fireEvent.change(screen.getByLabelText('Мова полів'), { target: { value: 'english' } });
+  await waitFor(() => expect(api.get.mock.calls.some(([, config]) => config?.params?.rowId === 'english')).toBe(true));
+  fireEvent.click(screen.getByRole('button', { name: 'Опис' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Поле Magento' });
+  expect((await within(dialog).findByLabelText('Текст для магазину')).value).toBe('Old description');
+});
+
+it('scopes the separate Administrator rename chooser on the server and hides it for permission-only roles', async () => {
+  const view = mount(undefined, permissions, [{ key: 'administrator' }]);
+  fireEvent.click(await screen.findByRole('button', { name: 'Застосувати назви до чинних товарів' }));
+  api.get.mockResolvedValueOnce({ data: { products: [], nextCursor: null } });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити товари для контрольованої дії' }));
+  await waitFor(() => expect(api.get).toHaveBeenCalledWith('/admin/magento-integration/bindings/current/controlled-products', { params: { after: 0, search: '', categoryCode: 'BR' } }));
+  view.unmount(); mount(); await screen.findByRole('button', { name: 'Матеріал' });
+  expect(screen.queryByRole('button', { name: 'Застосувати назви до чинних товарів' })).toBeNull();
+});
+
+it('makes the main integration page a category entrance and performs only its local overview read', async () => {
+  api.get.mockResolvedValue({ data: { integration: { configured: true, activePublication: { ...active, versionNumber: 1 }, delivery: { state: 'enabled' }, operational: { state: 'known', count: 0 }, structureObservation: null, draftCount: 0 }, categories } });
+  const router = createMemoryRouter([{ path: '/admin/magento/*', element: <MagentoIntegrationPage /> }], { initialEntries: ['/admin/magento'] });
+  render(<AuthContext.Provider value={{ permissions }}><RouterProvider router={router} /></AuthContext.Provider>);
+  await screen.findByText('Оберіть категорію менеджера');
+  expect(screen.getByRole('link', { name: /Браслети/ })).toBeTruthy();
+  expect(api.get.mock.calls.map(([url]) => url)).toEqual(['/admin/magento-integration/overview']);
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('does not guess ambiguous labels, preserves semantic zero, and names conditional sets clearly', () => {
+  expect(uniqueOptionSuggestions([entry], options)[0].option.value).toBe('10');
+  expect(uniqueOptionSuggestions([entry], [...options, { value: '30', label: 'Нуль' }])).toEqual([]);
+  expect(decisionKey(entry)).toContain('value_id:0');
+  expect(routeLabel({ routeKey: 'BR.color=value_id:0', setName: 'Прикраси' }, questions)).toBe('Прикраси · Колір — Нуль');
+});
+
+it('rejects shared rule edits that would transmit changes to another category or language', () => {
+  const next = structuredClone(definition); next.bindings[0].value.value = 'Спільна зміна';
+  expect(() => assertCategoryScope(definition, next, 'BR', 'base')).toThrow(/лише вибраної категорії та мови/);
+  const english = structuredClone(definition); english.groups[0].rows[1].cells.name.value = 'Changed';
+  expect(() => assertCategoryScope(definition, english, 'BR', 'base')).toThrow();
+});
+
+it('reopens the original language after an external navigation back from a locally selected scope', async () => {
+  const initial = '/admin/magento?category=BR&view=text';
+  const { router } = mount(initial);
+  await screen.findByRole('button', { name: 'Опис' });
+  fireEvent.change(screen.getByLabelText('Мова полів'), { target: { value: 'english' } });
+  await waitFor(() => expect(new URLSearchParams(router.state.location.search).get('language')).toBe('english'));
+  await act(() => router.navigate(initial));
+  fireEvent.click(await screen.findByRole('button', { name: 'Опис' }));
+  expect(screen.getByLabelText('Мова полів').value).toBe('base');
+  expect((await screen.findByLabelText('Текст для магазину')).value).toBe('Старий опис');
+});
+
+it('checks product impact after the single explicit check and waits for a separate apply confirmation', async () => {
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await get(url, config);
+    if (url.endsWith('/bindings/isolated')) result.data.entries = [{ ...entry, reviewState: 'approved' }];
+    return result;
+  });
+  const post = api.post.getMockImplementation();
+  api.post.mockImplementation(async (url, body) => url.endsWith('/publication/preview') ? { data: { previewToken: 'impact-proof', blockers: [], affected: [], preservedNames: [], lostProducts: [], lostRoutes: [], totalProducts: 12 } } : post(url, body));
+  mount(); await textFields(); fireEvent.click(await screen.findByRole('button', { name: 'Опис' }));
+  fireEvent.change(await screen.findByLabelText('Текст для магазину'), { target: { value: 'Новий опис' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Готово' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' }));
+  const apply = await screen.findByRole('button', { name: 'Застосувати зміни' });
+  expect(apply.disabled).toBe(false);
+  expect(api.post.mock.calls.filter(([url]) => url.endsWith('/publication/preview'))).toHaveLength(1);
+  expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
+  expect(screen.queryByRole('button', { name: 'Перевірити вплив на товари' })).toBeNull();
+});
+
+it('restores prepared work without starting an automatic product or Magento check', async () => {
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await get(url, config);
+    if (url.endsWith('/bindings/isolated')) result.data.entries = [{ ...entry, reviewState: 'approved' }];
+    return result;
+  });
+  mount('/admin/magento?category=BR&binding=isolated&source=current');
+  await screen.findByText('Відповідності перевірено');
+  expect(screen.getByRole('button', { name: 'Перевірити вплив на товари' })).toBeTruthy();
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('requires an explicit new policy and reason before approving it', async () => {
+  const policy = { ...entry, id: 'policy:color-binding:all', kind: 'policy', target: 'kolir', source: undefined, evaluated: undefined, label: 'all', identity: 'initialize_create_only' };
+  api.get.mockResolvedValue({ data: { revision: { ...draft, schema: { attributeSets: [], attributes: [] }, bindings: { attributes: [] } }, entries: [policy], validation: { diagnostics: [] } } });
+  const changed = vi.fn();
+  render(<MagentoWorkspaceReview revision={draft} categoryCode="BR" questions={questions} selections={{}} onChanged={changed} />);
+  const selector = await screen.findByLabelText('Відповідність: Колір · UA');
+  expect(selector.value).toBe('');
+  fireEvent.change(selector, { target: { value: 'authoritative_create_update' } });
+  expect(screen.getByRole('button', { name: 'Підтвердити', exact: true }).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Пояснення перевірки'), { target: { value: 'Перевірено оновлення з менеджера' } });
+  api.post.mockResolvedValueOnce({ data: { ...draft, revision: '2' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Підтвердити', exact: true }));
+  await waitFor(() => expect(changed).toHaveBeenCalled());
+  expect(api.post.mock.calls[0][1]).toMatchObject({ expectedRevision: '1', action: 'approve', policy: 'authoritative_create_update', reason: 'Перевірено оновлення з менеджера' });
+});
+
+it('inserts a characteristic using fetched labels without another output-mode step and keeps shared consumers unchanged', async () => {
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    if (url.endsWith('/sources')) return { data: { productFields: [], references: { questions: [{ category_code: 'BR', key: 'color', label: 'Колір', include_in_sku: 1 }], schemas: [{ category_code: 'BR', questions: [{ key: 'color', label: 'Колір', value_ids: ['0'] }] }] } } };
+    if (url.endsWith('/source-details')) return { data: { current: [{ label: 'Колір', options: [{ value_id: '0', label: 'Світлий' }] }] } };
+    return get(url, config);
+  });
+  mount(); await textFields(); fireEvent.click(await screen.findByRole('button', { name: 'Назва' }));
+  fireEvent.click(await screen.findByRole('button', { name: '+ Додати характеристику' }));
+  const picker = screen.getByRole('combobox', { name: 'Характеристика' });
+  fireEvent.focus(picker);
+  fireEvent.click(screen.getByRole('option', { name: 'Браслети → Колір' }));
+  await screen.findByText('У тексті будуть назви: Світлий.');
+  expect(screen.queryByLabelText('Як записувати значення')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Вставити характеристику' }));
+  expect(screen.getByLabelText('Текст для магазину').value).toBe('Стара назва{Колір}');
+  fireEvent.click(screen.getByRole('button', { name: 'Готово' }));
+  saveDraft(); await screen.findByText('Чернетку збережено. Чинна інтеграція ще не змінена.');
+  expect(saved.draft.definition.tables['text.names']).toEqual({ 0: 'Світлий' });
+  expect(saved.draft.definition.groups[1]).toEqual(definition.groups[1]);
+  expect(saved.draft.definition.bindings).toEqual(definition.bindings);
+  expect(saved.draft.definition.groups[0].rows[1]).toEqual(definition.groups[0].rows[1]);
+});

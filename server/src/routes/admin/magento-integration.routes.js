@@ -3,6 +3,7 @@ const { requirePermission } = require('../../auth/authorization');
 const { sendHttpError } = require('../../http/errors');
 const editor = require('../../services/magento/integration-editor.service');
 const overview = require('../../services/magento/integration-overview');
+const workspace = require('../../services/magento/integration-category-workspace');
 const config = require('../../config/env').magento;
 const { getRequestMutationContext } = require('../../audit/mutation-context');
 const category = require('../../services/magento/configuration-category');
@@ -25,6 +26,12 @@ const handle = (operation) => async (req, res) => {
 router.get(root, requirePermission('export_templates.view'), handle((req) => editor.overview(config, {...req.query})));
 router.get(`${root}/overview`, requirePermission('export_templates.view'), handle((req) => overview.overview(config,
   { canViewProducts: req.permissions.includes('products.view') })));
+router.get(`${root}/categories/:categoryCode`, requirePermission('export_templates.view'),
+  handle((req) => workspace.readCategory(config, req.params.categoryCode, { ...req.query })));
+router.get(`${root}/categories/:categoryCode/fields/:field`, requirePermission('export_templates.view'),
+  handle((req) => workspace.readField(config, req.params.categoryCode, req.params.field, { ...req.query })));
+router.post(`${root}/categories/:categoryCode/observation`, requirePermission('export_templates.view'),
+  handle((req) => workspace.observeCategory(config, req.params.categoryCode, req.body)));
 router.get(`${root}/creation-inputs`, requirePermission('export_templates.manage'), requirePermission('exports.view'),
   handle((req) => editor.creationInputs({ ...req.query })));
 router.post(`${root}/discovery`, requirePermission('export_templates.view'), handle(() => editor.discovery(config)));

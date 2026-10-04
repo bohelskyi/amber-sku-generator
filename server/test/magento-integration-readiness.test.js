@@ -37,7 +37,7 @@ test('integration routes preserve view/manage/exports permission boundaries', ()
   for (const layer of router.stack) {
     const permissions = layer.route.stack.map((s) => s.handle.permissionKey).filter(Boolean);
     const path=layer.route.path;
-    assert.deepEqual(permissions, /\/(categories|options|option-labels|attributes)\//.test(path)
+    assert.deepEqual(permissions, /\/categories\/:categoryCode(?:\/fields\/:field|\/observation)?$/.test(path) ? ['export_templates.view'] : /\/(categories|options|option-labels|attributes)\//.test(path)
       ? ['export_templates.manage','export_templates.publish'] : /\/(publication|controlled)\//.test(path)
         ? ['export_templates.manage','export_templates.publish','exports.view'] : path.endsWith('-preview') || path.endsWith('/creation-inputs')
           ? ['export_templates.manage','exports.view'] : /\/successor\//.test(path) || /\/(clone|select|decision)$/.test(path)

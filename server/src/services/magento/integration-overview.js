@@ -117,6 +117,7 @@ async function overview(config, { canViewProducts = false, ...options } = {}) {
       code: category.code, name: category.name,
       operational: problems ? problems.categories.get(category.code) || { state: 'known', count: 0, reasons: [] } : unknown,
       preparation: preparationSummary(category, revision, reviewEntries), impact: 'unexamined',
+      unboundCount: require('./integration-category-workspace').questionUsage(catalog, compiled?.compiled.definition, category.code).filter((q) => !q.uses.length).length,
     }));
     // Retained products can refer to historical category codes no longer present
     // in the mutable catalog. Recorded problems must still remain reachable.

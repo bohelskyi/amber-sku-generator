@@ -11,7 +11,7 @@ const category = (code, name, prep = false, count = 0) => ({ code, name, operati
 const data = { integration: { configured: true, activePublication: { id: 'published', revision: '8', versionNumber: 3, publishedAt: '2026-10-01T12:00:00Z' },
   delivery: { state: 'enabled' }, operational: { state: 'known', count: 0 }, structureObservation: { observedAt: '2026-01-01T12:00:00Z', bindingId: 'published', state: 'published' },
   draftCount: 1, asOf: '2026-10-02T12:00:00Z' }, categories: [category('OK', 'Готова категорія'), category('XX', 'Нова категорія', true)] };
-const shell = (path = '/admin/magento', permissions = ['export_templates.view', 'products.view'], roles = []) => render(
+const shell = (path = '/admin/magento/overview', permissions = ['export_templates.view', 'products.view'], roles = []) => render(
   <AuthContext.Provider value={{ permissions, roles }}><MemoryRouter initialEntries={[path]}><Routes><Route path="/admin/magento/*" element={<MagentoIntegrationPage />} /></Routes></MemoryRouter></AuthContext.Provider>);
 beforeEach(() => { vi.resetAllMocks(); api.get.mockResolvedValue({ data }); });
 
@@ -26,7 +26,7 @@ it('separates active delivery from future preparation and loads only the lightwe
   expect(api.get.mock.calls.map(([path]) => path)).toEqual(['/admin/magento-integration/overview']);
   expect(api.post).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('link', { name: 'Усі категорії' }));
-  expect(await screen.findByRole('link', { name: 'Готова категорія' })).toBeTruthy();
+  expect(await screen.findByRole('link', { name: /Готова категорія/ })).toBeTruthy();
 });
 
 it('discovery is explicit and failed checks retain the prior factual observation without age warnings', async () => {
@@ -52,14 +52,15 @@ it('does not turn unknown evidence into zero problems or Administrator authority
   expect(screen.getByText('Дані про зафіксовані проблеми недоступні')).toBeTruthy();
   expect(screen.queryByText('Зафіксованих проблем немає')).toBeNull();
   expect(screen.queryByRole('link', { name: 'Дії Адміністратора' })).toBeNull();
-  expect(screen.getAllByRole('link', { name: 'Підготувати зміни інтеграції' }).length).toBeGreaterThan(0);
+  fireEvent.click(screen.getByText('Інші розділи'));
+  expect(screen.getByRole('link', { name: 'Підготовлені зміни' })).toBeTruthy();
 });
 
 it('mounts only issue rows; all mappings start collapsed and page an opened group', async () => {
   const values = Array.from({ length: 240 }, (_, i) => ({ questionKey: 'kind', questionLabel: 'Вид', valueId: String(i), label: `Готове значення ${i}`, state: i % 2 ? 'approved' : 'not_applicable', mappings: [] }));
   values.push({ questionKey: 'kind', questionLabel: 'Вид', valueId: 'missing', label: 'Потрібне значення', state: 'missing', mappings: [] });
   api.get.mockImplementation((path) => Promise.resolve({ data: path.endsWith('/overview') ? data : { categories: [{ code: 'XX', values }] } }));
-  shell('/admin/magento/categories/XX');
+  shell('/admin/magento/categories/XX?tab=legacy');
   await screen.findByText('Вид: Потрібне значення');
   expect(screen.queryByText(/Готове значення/)).toBeNull();
   expect(screen.queryByText(/value_id:/)).toBeNull();
@@ -87,7 +88,7 @@ function mappingFixture(values) {
 
 it.each(['Не оброблений камінь', 'Який камінь?', 'stone_processing', 'kamin_obrobka'])('searches the entire mapping scope by %s without mounting unrelated rows', async (search) => {
   mappingFixture([...Array.from({ length: 240 }, (_, i) => ({ ...stone, questionKey: `color${i}`, questionLabel: 'Колір', label: `Колір ${i}`, mappings: [] })), stone]);
-  shell('/admin/magento/categories/XX');
+  shell('/admin/magento/categories/XX?tab=legacy');
   await screen.findByText(/Немає невирішених/);
   fireEvent.click(screen.getByRole('button', { name: 'Показати всі відповідності' }));
   expect(document.querySelectorAll('article')).toHaveLength(0);
@@ -105,7 +106,7 @@ it.each(['Не оброблений камінь', 'Який камінь?', 'st
 
 it('a field deep link filters approved mappings, keeps groups collapsed and lets the operator clear context', async () => {
   mappingFixture([stone, { ...stone, questionKey: 'color', questionLabel: 'Колір', label: 'Світлий', mappings: [{ attribute: 'kolir' }] }]);
-  shell('/admin/magento/categories/XX?field=kamin_obrobka');
+  shell('/admin/magento/categories/XX?field=kamin_obrobka&tab=legacy');
   await screen.findByText('kamin_obrobka');
   expect(screen.getByRole('button', { name: 'Показати лише питання' }).getAttribute('aria-pressed')).toBe('true');
   expect(within(screen.getByRole('heading', { name: 'Відповідності категорії' }).closest('section')).getAllByRole('button', { expanded: false })).toHaveLength(1);
