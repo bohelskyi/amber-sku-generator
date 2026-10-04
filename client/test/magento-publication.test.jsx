@@ -14,7 +14,7 @@ const roles = [{key:'administrator'}];
 const shell = (props = {}, grants = permissions, assignedRoles = roles) => render(<AuthContext.Provider value={{ permissions: grants, roles: assignedRoles }}><MemoryRouter><MagentoPublicationActions revision={revision} currentPublishedId="current" onPublished={vi.fn()} {...props} /></MemoryRouter></AuthContext.Provider>);
 const controlledShell = (props = {}, grants = permissions, assignedRoles = roles) => render(<AuthContext.Provider value={{ permissions: grants, roles: assignedRoles }}><MemoryRouter><MagentoControlledActions revision={{...revision,id:'current',state:'published'}} currentPublishedId="current" kind="broader_resync" {...props} /></MemoryRouter></AuthContext.Provider>);
 function openDetails(label) {fireEvent.click(screen.getByText(label).closest('summary'));}
-afterEach(() => { cleanup(); vi.resetAllMocks(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.resetAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 it('recovery handoff verifies and selects only the exact eligible product without dispatching or widening the selection', async () => {
   const product = (productId, blocked = false) => ({ productId, article: `AG-${productId}`, before: { all: 'Товар' }, blockers: blocked ? ['RECONCILIATION_REQUIRED'] : [] });
   api.get.mockResolvedValue({ data: { products: [product(21), product(22)], nextCursor: 22 } });
@@ -109,6 +109,106 @@ it('missing CREATE readiness blocks publication and view-only cannot publish', a
   expect(screen.getByRole('button', { name: 'Опублікувати відповідності' }).disabled).toBe(true);
   cleanup(); shell({}, ['export_templates.view']);
   expect(screen.queryByRole('button', { name: 'Перевірити вплив публікації' })).toBeNull();
+});
+it('source failures name affected fields in both languages and keep the exact draft instead of linking to the product queue', async () => {
+  const definition = { sources: { 'KL.size': { category: 'KL', key: 'exact_size', kind: 'information' } }, questionContracts: {},
+    bindings: [{ id: 'size', value: { op: 'source', id: 'KL.size' } }], groups: [{ route: 'KL', rows: [
+      { id: 'base', cells: { name: { op: 'ref', id: 'size' } } }, { id: 'english', cells: { description: { op: 'ref', id: 'size' } } },
+    ] }] };
+  api.post.mockResolvedValueOnce({ data: { ...proof, affected: [], blockers: [{ code: 'SOURCE_REFERENCE_UNRESOLVED', sourceId: 'KL.size', category: 'KL', key: 'exact_size', requirement: 'current_non_sku_question', message: 'Current non-SKU question metadata required' }] } });
+  shell({ compact: true, definition, repairContext: { productId: '5080', returnTo: '/attention?problem=5080' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив на товари' }));
+  await screen.findByText('Кулони → Точний розмір');
+  expect(screen.getByText(/інформаційну характеристику, яку не знайдено/)).toBeTruthy();
+  const ua = new URL(screen.getByRole('link', { name: 'Перевірити поле: Кулони → Назва товару · UA' }).href);
+  const en = new URL(screen.getByRole('link', { name: /Перевірити поле: Кулони → .* · EN/ }).href);
+  expect(ua.pathname).toBe('/admin/magento/categories/KL');
+  expect(Object.fromEntries(ua.searchParams)).toMatchObject({ binding: 'draft', source: 'current', field: 'name', language: 'base', productId: '5080', returnTo: '/attention?problem=5080' });
+  expect(en.searchParams.get('language')).toBe('english'); expect(en.searchParams.get('field')).toBe('description');
+  expect(screen.queryByRole('link', { name: 'Проблеми синхронізації' })).toBeNull();
+  expect(screen.queryByText('Потрібно перевірити відповідності.')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Застосувати зміни' }).disabled).toBe(true);
+  openDetails('Точна причина перевірки'); expect(screen.getByText(/Current non-SKU question metadata required/)).toBeTruthy();
+});
+it('binding diagnostics identify the exact category, field, language and option in compact publication', async () => {
+  const exact = { ...revision, schema: { attributes: [{ attribute_code: 'kolir', default_frontend_label: 'Колір каменю' }] },
+    bindings: { attributes: [{ bindingKey: 'color', routeKey: 'CH:all', target: 'kolir', rowId: 'english' }],
+      options: [{ bindingKey: 'color', sourceKey: 'CH.color=value_id:9', evaluatedOutput: 'Медовий' }] } };
+  api.post.mockResolvedValueOnce({ data: { ...proof, blockers: [{ code: 'SEMANTIC_IDENTITY_UNRESOLVED', bindingKey: 'color', sourceKey: 'CH.color=value_id:9' }] } });
+  shell({ revision: exact, compact: true }); fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив на товари' }));
+  await screen.findByText('Чотки → Колір каменю → EN → значення «Медовий»');
+  const target = new URL(screen.getByRole('link', { name: 'Перевірити поле: Чотки → Колір каменю · EN' }).href);
+  expect(Object.fromEntries(target.searchParams)).toMatchObject({ binding: 'draft', source: 'current', field: 'kolir', language: 'english', route: 'CH:all' });
+  expect(screen.getByRole('button', { name: 'Застосувати зміни' }).disabled).toBe(true);
+  expect(api.post).toHaveBeenCalledTimes(1);
+});
+it('an affected product blocker shows the server explanation and opens that product, not the unfiltered queue', async () => {
+  api.post.mockResolvedValueOnce({ data: { ...proof, blockers: [{ code: 'AFFECTED_CURRENT_PREVIEW_BLOCKED', productId: 5080 }],
+    checked: [{ kind: 'current', productId: 5080, article: 'KL3/11231120007', blockers: [{ target: 'categories', message: 'Категорія Magento існує, але зв’язок ще не підтверджено.' }] }] } });
+  shell({ compact: true }); fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив на товари' }));
+  await screen.findByText('Товар: KL3/11231120007.');
+  expect(screen.getByText(/Категорія Magento існує, але зв’язок ще не підтверджено/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Відкрити проблему цього товару' }).getAttribute('href')).toBe('/attention?problem=5080');
+  expect(screen.queryByRole('link', { name: 'Проблеми синхронізації' })).toBeNull();
+});
+it('a product preview blocked by a draft rule opens that exact draft field instead of sending the user to current-publication attention', async () => {
+  api.post.mockResolvedValueOnce({ data: { ...proof, blockers: [{ code: 'AFFECTED_CURRENT_PREVIEW_BLOCKED', productId: 5080 }],
+    checked: [{ kind: 'current', productId: 5080, article: 'KL3/11231120007', group: 'KL', routeKey: 'KL:all',
+      blockers: [{ target: 'categories', resolution: 'integration_configuration', message: 'Категорія Magento існує, але зв’язок ще не підтверджено.' }] }] } });
+  shell({ compact: true, revision: { ...revision, bindings: { attributes: [{ bindingKey: 'placement', target: 'categories', routeKey: 'KL:all', rowId: 'base' }] } } });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив на товари' }));
+  const link = await screen.findByRole('link', { name: 'Перевірити поле: Кулони → Категорії Magento · UA' });
+  expect(Object.fromEntries(new URL(link.href).searchParams)).toMatchObject({ binding: 'draft', source: 'current', field: 'categories', route: 'KL:all', language: 'base' });
+  expect(screen.queryByRole('link', { name: 'Відкрити проблему цього товару' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Застосувати зміни' }).disabled).toBe(true);
+});
+it('unknown validation keeps exact diagnostics in a copyable report and cannot apply until a fresh successful preview', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal('navigator', { clipboard: { writeText } });
+  const diagnostic = { code: 'FUTURE_VALIDATION_FAILURE', message: 'Exact server explanation', bindingKey: 'unknown-binding' };
+  api.post.mockResolvedValueOnce({ data: { ...proof, blockers: [diagnostic] } }).mockResolvedValueOnce({ data: proof });
+  shell({ compact: true }); fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив на товари' }));
+  await screen.findByText(/Точну причину наведено в деталях/);
+  expect(screen.getByRole('button', { name: 'Застосувати зміни' }).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Копіювати причини блокування' }));
+  await screen.findByText('Причини блокування скопійовано.');
+  expect(JSON.parse(writeText.mock.calls[0][0])).toMatchObject({ bindingRevisionId: 'draft', expectedRevision: '3', expectedCurrentId: 'current', blockers: [diagnostic] });
+  openDetails('Точна причина перевірки'); expect(screen.getByText(/Exact server explanation/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив на товари' }));
+  await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Застосувати зміни' }).disabled).toBe(false));
+  expect(api.post.mock.calls.every(([url]) => url.endsWith('/publication/preview'))).toBe(true);
+});
+it('missing create evidence opens the exact category example in place without creating or delivering a product', async () => {
+  api.post.mockResolvedValueOnce({ data: { ...proof, blockers: [{ code: 'REPRESENTATIVE_CREATE_REQUIRED', routeKey: 'CH:all' }] } });
+  api.get.mockResolvedValue({ data: { questions: { CH: [] } } });
+  shell({ compact: true, onRepresentative: vi.fn() }); fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив на товари' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Перевірити приклад нового товару: Чотки' }));
+  await vi.waitFor(() => expect(api.get).toHaveBeenCalledWith('/admin/magento-integration/creation-inputs', expect.objectContaining({ params: { categoryCode: 'CH' } })));
+  expect(screen.getByRole('region', { name: 'Приклад для застосування змін' })).toBeTruthy();
+  expect(api.post).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button', { name: 'Застосувати зміни' }).disabled).toBe(true);
+});
+it('a fresh apply revalidation failure exposes returned blockers and discards the obsolete publication proof', async () => {
+  api.post.mockResolvedValueOnce({ data: proof }).mockRejectedValueOnce({ response: { data: { code: 'MAGENTO_PUBLICATION_STALE', error: 'Repeat publication review',
+    details: { blockers: [{ code: 'SOURCE_REFERENCE_UNRESOLVED', category: 'CH', sourceId: 'CH.size', key: 'size', requirement: 'current_non_sku_question' }] } } } });
+  shell({ compact: true }); fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив на товари' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Застосувати зміни' }));
+  await screen.findByText(/Перевірка застаріла. Зміни не застосовано/);
+  expect(screen.getByText('Чотки → size')).toBeTruthy();
+  expect(screen.getByText(/інформаційну характеристику, яку не знайдено/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Застосувати зміни' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Перевірити вплив на товари' }).disabled).toBe(false);
+  expect(api.post).toHaveBeenCalledTimes(2);
+});
+it('keeps the exact blocker report available when clipboard access fails', async () => {
+  vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockRejectedValue(new Error('Denied')) } });
+  api.post.mockResolvedValueOnce({ data: { ...proof, blockers: [{ code: 'SOURCE_REFERENCE_AMBIGUOUS', sourceId: 'KL.size', category: 'KL', requirement: 'unique_current_question' }] } });
+  shell({ compact: true }); fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив на товари' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Копіювати причини блокування' }));
+  const report = await screen.findByLabelText('Скопіюйте цей звіт вручну');
+  expect(JSON.parse(report.value).blockers[0].code).toBe('SOURCE_REFERENCE_AMBIGUOUS');
+  expect(report.readOnly).toBe(true);
+  expect(screen.getByRole('button', { name: 'Застосувати зміни' }).disabled).toBe(true);
 });
 it('publication status survives remount, polls real pending counts and offers no blind retry', async () => {
   vi.useFakeTimers(); const state = { id: 'handoff', kind: 'publication', created_at: '2026-10-02T00:00:00Z', total: 3, pending_handoff: 1, waiting: 1, protected: 1, synced: 0, needs_attention: 0, retired: 0 };
