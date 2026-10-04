@@ -58,6 +58,7 @@ for (const modulePath of [
   './31-correction-request-batch.cases',
   './32-magento-recovery.cases',
   './33-magento-attributes.cases',
+  './34-historical-recount-exposure.cases',
   './32-sv-current-preview.cases',
 ]) {
   require(modulePath);

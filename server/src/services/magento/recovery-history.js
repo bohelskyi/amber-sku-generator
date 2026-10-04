@@ -29,7 +29,15 @@ function describe(rows, corrections, productId, complete = true) {
     && rows.every(p => p.business_exclusion_state === 'none' && p.recount_compatibility_excluded === false
       && !p.independent_exclusion && !['unknown', 'independent_exclusion'].includes(p.exclusion_provenance)
       && (p.id === productId || p.status === 'corrected' && p.route === 'retired'));
-  return { productId, complete, hasRecount, identityChanged, stableRecount,
+  const historicalRecount = complete && hasRecount && !stableRecount
+    && current.status === 'active' && current.exclude_from_export === 0 && current.corrected_to_product_id == null && current.corrected_from_product_id != null
+    && current.business_exclusion_state === 'none'
+    && !require('./historical-recount-exposure').lineageBlockers(rows.map(p => ({ product: p,
+      lifecycle: { route: p.route, business_exclusion_state: p.business_exclusion_state, recount_compatibility_excluded: p.recount_compatibility_excluded,
+        source_correction_id: p.source_correction_id, evidence: { origin: p.lifecycle_origin, coverage: p.lifecycle_coverage,
+          exclusionProvenance: p.exclusion_provenance, independentExclusion: p.independent_exclusion } },
+      reservation: { first_product_id: p.id } })),corrections,productId).length;
+  return { productId, complete, hasRecount, identityChanged, stableRecount, historicalRecount,
     products: rows.map(p => ({ productId: p.id, article: p.public_sku, internalSku: p.full_sku, status: p.status,
       previousProductId: p.corrected_from_product_id, nextProductId: p.corrected_to_product_id,
       route: p.route, holdReason: p.hold_reason, businessExclusion: p.business_exclusion_state,
@@ -53,7 +61,8 @@ async function read(client, productId) {
     UNION SELECT CASE WHEN e.a=c.id THEN e.b ELSE e.a END FROM component c JOIN edges e ON e.a=c.id OR e.b=c.id
   ) SELECT p.id,p.full_sku,p.status,p.exclude_from_export,p.corrected_from_product_id,p.corrected_to_product_id,p.public_product_identity_id,i.public_sku,
     f.route,f.hold_reason,f.business_exclusion_state,f.recount_compatibility_excluded,f.source_correction_id,
-    f.evidence->>'exclusionProvenance' exclusion_provenance,(f.evidence->'independentExclusion'='true'::jsonb) independent_exclusion
+    f.evidence->>'exclusionProvenance' exclusion_provenance,(f.evidence->'independentExclusion'='true'::jsonb) independent_exclusion,
+    f.evidence->>'origin' lifecycle_origin,f.evidence->>'coverage' lifecycle_coverage
     FROM component c JOIN products p ON p.id=c.id JOIN public_product_identities i ON i.id=p.public_product_identity_id
     LEFT JOIN product_full_export_state f ON f.product_id=p.id
     ORDER BY (p.id=$1) DESC,p.id LIMIT $2`, [productId, LIMIT + 1])).rows;

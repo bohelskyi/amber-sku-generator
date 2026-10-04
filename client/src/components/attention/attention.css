@@ -243,6 +243,8 @@
 .sync-recovery > :not(:first-child) { margin-top:12px; }
 .sync-recovery-actions { display:flex; flex-wrap:wrap; gap:8px; }
 .sync-recovery label { display:grid; gap:5px; font-size:var(--font-size-sm); }
+.sync-recovery .sync-recovery-attestation { display:flex; align-items:flex-start; gap:10px; }
+.sync-recovery-attestation input { width:16px; height:16px; flex:0 0 16px; margin-top:3px; accent-color:var(--amber-500); }
 .sync-recovery fieldset { border:1px solid var(--border); padding:12px; border-radius:var(--radius-sm); }
 .sync-recovery fieldset > :not(:first-child) { margin-top:8px; }
 .sync-recovery legend { padding:0 5px; font-weight:650; font-size:var(--font-size-sm); }

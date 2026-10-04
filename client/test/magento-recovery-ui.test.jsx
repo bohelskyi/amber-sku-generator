@@ -22,6 +22,66 @@ function show(capabilities = ['export_templates.publish'], props = {}, roles = [
 beforeEach(() => { vi.resetAllMocks(); api.get.mockResolvedValue({ data: record }); api.post.mockResolvedValue({ data: reviewed }); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
+const historicalRecord = { ...record, job: null, history: { ...history, historicalRecount: true },
+  lifecycle: { suggestedKind: 'historical_recount_exposure', availableKinds: ['historical_recount_exposure'], legacyDeliveryEnabled: false },
+  actions: { lifecycleRecovery: true, jobRecovery: false } };
+const historicalPreview = { eligible: true, blockers: [], reviewHash: 'mixed-history-proof',
+  requiredEvidence: { oldSkus: [], files: [], historicalConfirmation: true },
+  review: { kind: 'historical_recount_exposure', payload: { productId: 7, sync: { remote: { id: 4256, sku: 'KL-CURRENT' },
+    oldArticles: [{ sku: 'KL-OLD', status: 'not_found' }], problems: [] } } } };
+it('mixed history offers an explicit current-only decision and recovers the exact original receipt after a lost response', async () => {
+  api.get.mockResolvedValue({ data: historicalRecord });
+  let attempts = 0;
+  api.post.mockImplementation(async url => {
+    if (url.endsWith('/lifecycle-preview')) return { data: historicalPreview };
+    if (++attempts === 1) throw new Error('lost response');
+    return { data: { nextAction: { kind: 'await_delivery' } } };
+  });
+  show(['exports.reconcile'], { guided: true });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити товар у Magento' }));
+  const action = await screen.findByRole('button', { name: 'Підтвердити товар і дозволити оновлення' });
+  expect(api.post).toHaveBeenCalledExactlyOnceWith('/admin/magento-recovery/products/7/lifecycle-preview', { kind: 'historical_recount_exposure' });
+  expect(screen.getByText(/Magento №4256/)).toBeTruthy();expect(screen.getByText(/Старі артикули відсутні/)).toBeTruthy();
+  expect(screen.queryByText('Далі — виправлення історії переобліку')).toBeNull();
+  fireEvent.change(screen.getByLabelText('Що ви перевірили'), { target: { value: 'Перевірено: старі версії виведені з обігу, імпорти завершені' } });
+  expect(action.disabled).toBe(true);
+  fireEvent.click(screen.getByRole('checkbox'));
+  expect(action.disabled).toBe(false);expect(api.post.mock.calls.some(([url]) => url.endsWith('/lifecycle-apply'))).toBe(false);
+  fireEvent.click(action);
+  expect(screen.getByRole('dialog').textContent).toContain('поставить її оновлення в чергу');
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Зберегти підтверджене рішення' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Отримати результат початкового рішення' }));
+  await screen.findByText(/Оновлення цього товару поставлено в чергу/);
+  const applies = api.post.mock.calls.filter(([url]) => url.endsWith('/lifecycle-apply'));
+  expect(applies).toHaveLength(2);expect(applies[0][1]).toEqual(applies[1][1]);
+  expect(applies[0][1].evidence).toEqual({ files: [], confirmation: { disposition: 'current_update_only', evidence: applies[0][1].reason } });
+});
+it('blocked category review gives the exact new category workspace and requires another preview after correction', async () => {
+  api.get.mockResolvedValue({ data: historicalRecord });
+  api.post.mockResolvedValue({ data: { ...historicalPreview, eligible: false, blockers: ['UPDATE_NOT_SENDABLE'],
+    review: { ...historicalPreview.review, payload: { ...historicalPreview.review.payload, sync: { ...historicalPreview.review.payload.sync,
+      problems: [{ code: 'CATEGORY_IDENTITIES_REVIEW_REQUIRED', message: 'Категорія Magento існує, але зв’язок ще не підтверджено.', target: 'categories' }] } } } } });
+  show(['exports.reconcile','export_templates.view'], { guided: true, categoryCode: 'KL' });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити товар у Magento' }));
+  const link = await screen.findByRole('link', { name: 'Перевірити відповідність категорії' });
+  expect(link.getAttribute('href')).toContain('/admin/magento/categories/KL?view=placement');
+  expect(link.getAttribute('href')).toContain('productId=7');expect(link.getAttribute('href')).toContain('returnTo=');
+  expect(screen.queryByRole('checkbox')).toBeNull();expect(screen.queryByRole('button', { name: 'Підтвердити товар і дозволити оновлення' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Повторити перевірку після виправлення' }));
+  await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
+});
+it('a surviving old Magento article is named and never offers current-only confirmation', async () => {
+  api.get.mockResolvedValue({ data: historicalRecord });
+  api.post.mockResolvedValue({ data: { ...historicalPreview, eligible: false, blockers: ['HISTORICAL_ARTICLE_STILL_PRESENT'],
+    review: { ...historicalPreview.review, payload: { ...historicalPreview.review.payload, sync: { ...historicalPreview.review.payload.sync,
+      oldArticles: [{ sku: 'KL-OLD', status: 'found', id: 41 }] } } } } });
+  show(['exports.reconcile'], { guided: true });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити товар у Magento' }));
+  await screen.findByText(/також є в Magento · №41/);
+  expect(screen.getByText(/Спочатку потрібно визначити, що робити зі старим товаром/)).toBeTruthy();
+  expect(screen.queryByRole('checkbox')).toBeNull();expect(api.post).toHaveBeenCalledTimes(1);
+});
+
 it('historical changed articles show exact versions, Magento results and a report instead of an unsuitable confirmation', async () => {
   api.get.mockResolvedValue({ data: { ...record, job: null, history, lifecycle: { suggestedKind: null, availableKinds: [], legacyDeliveryEnabled: false }, actions: { jobRecovery: false, lifecycleRecovery: true } } });
   api.post.mockResolvedValue({ data: { history, remote: [{ article: 'KL-OLD', status: 'found', id: 42 }, { article: 'KL-CURRENT', status: 'not_found' }], observedAt: '2026-10-04T00:00:00Z', stale: false } });
