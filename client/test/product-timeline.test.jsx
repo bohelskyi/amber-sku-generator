@@ -175,6 +175,16 @@ describe('product timeline', () => {
     await waitFor(() => expect(get).toHaveBeenCalledWith('/product-timeline', { params: { sku: 'SKU-B' }, signal: expect.any(AbortSignal) }));
   });
 
+  it('returns to the exact attention case and rejects external return destinations', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({ data: timeline });
+    const { unmount } = render(<MemoryRouter initialEntries={['/products/history?sku=SKU-B&returnTo=%2Fattention%3Fcategory%3DKL%26problem%3D7']}><ProductTimeline /></MemoryRouter>);
+    expect(screen.getByRole('link', { name: 'Повернутися до проблеми товару' }).getAttribute('href')).toBe('/attention?category=KL&problem=7');
+    unmount();
+    render(<MemoryRouter initialEntries={['/products/history?sku=SKU-B&returnTo=https%3A%2F%2Fexample.com']}><ProductTimeline /></MemoryRouter>);
+    expect(screen.queryByRole('link', { name: 'Повернутися до проблеми товару' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Звіт про виправлення' }).getAttribute('href')).toBe('/products/history?mode=report');
+  });
+
   it('presents public article identity while retaining internal revision SKUs', async () => {
     const publicTimeline = structuredClone(timeline);
     publicTimeline.querySku = 'AG-000123';

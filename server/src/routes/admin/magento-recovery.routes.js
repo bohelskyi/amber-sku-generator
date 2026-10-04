@@ -30,6 +30,10 @@ for (const [path, operation] of [['inspect', jobs.inspect], ['reconcile', jobs.r
 }
 router.post(`${root}/products/:id/lifecycle-preview`, requirePermission('exports.reconcile'), handle((req) =>
   lifecycle.preview(config, productId(req), req.body, options(req))));
+router.post(`${root}/products/:id/history-inspect`, requirePermission('exports.reconcile'), handle((req) => {
+  c.command(req.body, []);
+  return require('../../services/magento/recovery-history').inspect(config, productId(req), options(req));
+}));
 router.post(`${root}/products/:id/lifecycle-apply`, requirePermission('exports.reconcile'), handle((req) =>
   lifecycle.apply(config, productId(req), req.body, options(req))));
 module.exports = router;
