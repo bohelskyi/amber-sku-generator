@@ -197,6 +197,38 @@ separately from contradictory product links. Stable confirmation is not recommen
 for changed identities, incomplete/inconsistent history, non-retired predecessors
 or unresolved exclusion policies. Its existing preview/apply checks remain authoritative.
 
+The separate `historical_recount_exposure` recipe handles a complete reciprocal
+chain containing old public articles and migration-039 retired baseline rows.
+Only those retired baseline rows may retain NULL source-correction pointers or
+unknown business policies, with explicit operator attestation for the current
+product. Contradictory links, modern missing pointers, independently excluded
+ancestors, compatibility exclusions and non-retired predecessors remain blockers.
+It does not rewrite any historical pointer, identity, SKU or exclusion policy.
+
+Its exact retained-evidence fingerprint uses the existing repair manifest/index,
+including downloaded/generated/confirmed files. Every retained exact file needs
+an explicit disposition and evidence. The operator also confirms that old versions
+are retired, the current product has no independent exclusion, and old imports
+have been resolved; the decision reason is retained as this attestation. A Magento
+GET cannot prove that an old downloaded file will never be imported.
+
+Preview verifies every distinct former public/internal/file SKU is absent and
+the current public SKU exists at its durable Magento ID. A surviving old article
+or failed GET blocks the decision and is shown by article. The full hypothetical
+current UPDATE must be sendable under the current public-SKU-aware publication
+after API/CSV cutover. Configuration blockers link to the exact category/field in
+the new workspace and require a fresh preview after correction.
+
+Apply rechecks actor authority, installation, the entire evidence fingerprint and
+fresh GETs under deterministic identity/SKU lanes and ascending product/lifecycle
+locks. It only changes current exposure certainty from `historical_ambiguity` to
+`prior_exposure`, preserving the held CSV route and all acknowledgements. One
+reviewed current-product handoff is recorded atomically for the existing worker;
+apply itself writes nothing to Magento. The audit receipt binds the plan, reason
+and attestations. Identical retries return that receipt without remote reads or
+another handoff; changed attestations/reason conflict. Ordinary and stable exposure
+recipes retain their stricter lineage requirements.
+
 For an unsupported historical recount, the explicit guided check inspects the
 listed public articles using GETs only and shows each previous/current version,
 found/missing/unavailable Magento evidence, exact history problems and a copyable
@@ -219,7 +251,7 @@ No migration, role grant or replacement of durable jobs is introduced.
 | POST `/jobs/:id/inspect` | Same capability; bounded remote GET evidence only, no dispatch or acknowledgement. |
 | POST `/jobs/:id/reconcile` | Same capability; rechecks reviewed local/remote fingerprints and records only verified results, with an audit receipt; no remote mutation. |
 | POST `/jobs/:id/continue` | Same capability; separate explicit reviewed continuation of remaining original steps through the existing guarded job executor. |
-| POST `/products/:id/lifecycle-preview`, `/lifecycle-apply` | `exports.reconcile`; exact existing exposure/stable-recount or eligible compatibility reconciliation, never a blanket hold release. |
+| POST `/products/:id/lifecycle-preview`, `/lifecycle-apply` | `exports.reconcile`; exact exposure/stable-recount, explicitly reviewed historical recount, or eligible compatibility reconciliation, never a blanket hold release. |
 | POST `/products/:id/history-inspect` | `exports.reconcile`; bounded GET-only observations of the exact public articles in local correction history; no repair token, job, acknowledgement or mutation. |
 
 History inspection rechecks the active actor before and after remote reads, outside

@@ -6,16 +6,20 @@ import { api } from '../../lib/api.js';
 import { Button, ConfirmDialog, Notice, TechnicalDisclosure } from '../ui/index.js';
 import MagentoControlledActions from '../workspace/MagentoControlledActions.jsx';
 import MagentoRecoveryHistory from './MagentoRecoveryHistory.jsx';
+import { nextAction, problemRepairUrl } from './sync-problem-presentation.js';
 
 const guidance = {
   prior_exposure: 'Знайдемо цей артикул у Magento. Якщо товар уже є в магазині, ви зможете підтвердити це й перейти до оновлення його даних.',
   stable_recount_exposure: 'Звіримо товар після переобліку з поточним товаром Magento. Підтвердження дозволить оновити цю версію зі сталим артикулом.',
+  historical_recount_exposure: 'Перевіримо поточний товар і всі попередні артикули. Якщо старі артикули відсутні, запропонуємо дозволити оновлення наявного товару.',
   release_exclusion: 'Перевіримо окреме виключення цього товару із синхронізації. Для його зняття потрібна ваша підстава.',
 };
 const decisionActions = { prior_exposure: 'Підтвердити наявність товару', stable_recount_exposure: 'Дозволити оновлення після переобліку', release_exclusion: 'Зняти виключення із синхронізації' };
+decisionActions.historical_recount_exposure = 'Підтвердити товар і дозволити оновлення';
 const decisionEffects = { prior_exposure: 'Підтвердження збереже в Amber факт наявності цього товару в магазині. Далі ви зможете перевірити й окремо підтвердити його оновлення.',
   stable_recount_exposure: 'Підтвердження узгодить цю версію після переобліку й дозволить її подальшу автоматичну синхронізацію.',
   release_exclusion: 'Підтвердження зніме окреме виключення цього товару. Далі перевірте його готовність до синхронізації.' };
+decisionEffects.historical_recount_exposure = 'Amber узгодить історію для поточної версії й поставить її оновлення в чергу. Оновлюватиметься наявний товар Magento з цим артикулом. Старі версії та записи переобліку залишаться збереженими.';
 
 function ProductResync({ productId, categoryCode, onSaved }) {
   const [data, setData] = useState(null); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
@@ -42,6 +46,7 @@ function ProductResync({ productId, categoryCode, onSaved }) {
 const kinds = {
   prior_exposure: 'Підтвердити раніше доставлений товар',
   stable_recount_exposure: 'Узгодити доставку після переобліку зі сталим артикулом',
+  historical_recount_exposure: 'Дозволити оновлення поточного товару',
   replacement: 'Підтвердити заміну попередніх версій',
   unexposed_first_delivery: 'Дозволити першу доставку недоставленої версії',
   generated_first_delivery: 'Узгодити першу доставку з історичними файлами',
@@ -52,6 +57,9 @@ const domains = { coreProduct: 'Основні дані товару', productCr
   inventory: 'Залишки', websites: 'Вебсайти', storeViews: 'Мовні версії', sharedName: 'Спільна назва', customAttributes: 'Характеристики', price: 'Ціна' };
 const states = { not_sent: 'Ще не надіслано', dispatched: 'Надіслано, потрібне підтвердження', verified: 'Результат підтверджено' };
 const blockerText = {
+  HISTORICAL_ARTICLE_STILL_PRESENT: 'У Magento також є один із попередніх артикулів. Спочатку потрібно визначити, що робити зі старим товаром; автоматично його не видаляємо.',
+  LIFECYCLE_EVIDENCE_UNAVAILABLE: 'Збережені файли або записи переобліку містять неповні дані. Їх потрібно перевірити за звітом історії.',
+  MAGENTO_HISTORY_TOO_LARGE: 'Історія завелика для перевірки на цьому екрані. Збережіть звіт для окремого розбору.',
   MAGENTO_SYNC_PREVIOUS_DISPATCH_UNRESOLVED: 'Надіслана зміна не збігається з очікуваним результатом. Її повторне надсилання заборонене.',
   MAGENTO_SYNC_AMBER_CHANGED: 'Товар в Amber змінився після підготовки початкової операції.',
   MAGENTO_SYNC_BINDING_CHANGED: 'Налаштування інтеграції змінилися після підготовки операції.',
@@ -110,6 +118,10 @@ function EvidenceForm({ requirements, evidence, setEvidence, disabled }) {
   const note = (kind, label) => <label>{label}<textarea className="input" disabled={disabled} value={evidence[kind]?.evidence || ''} maxLength={2000}
     onChange={(event) => setEvidence((previous) => ({ ...previous, [kind]: { ...previous[kind], evidence: event.target.value } }))} /></label>;
   return <div className="space-y-3">
+    {requirements.historicalConfirmation && <label className="sync-recovery-attestation"><input type="checkbox" disabled={disabled}
+      checked={evidence.confirmation?.disposition === 'current_update_only'} onChange={event => setEvidence(previous => ({ ...previous,
+        confirmation: { disposition: event.target.checked ? 'current_update_only' : '', evidence: '' } }))} />
+      <span>Підтверджую: старі версії виведені з обігу, для поточного товару немає окремої заборони синхронізації чи незавершеного імпорту старих файлів.</span></label>}
     {requirements.oldSkus.map((sku, index) => <fieldset key={sku}><legend>Попередня ідентичність: {sku}</legend>
       <label>Перевірений стан<select className="input" disabled={disabled} value={evidence.oldSkus[index]?.disposition || ''} onChange={(event) => update('oldSkus', index, 'disposition', event.target.value)}>
         <option value="">Оберіть підтверджений результат</option><option value="verified_absent">Відсутня в Magento — перевірено</option><option value="retired_reconciled">Попередню версію виведено з обігу та узгоджено</option></select></label>
@@ -127,6 +139,7 @@ function EvidenceForm({ requirements, evidence, setEvidence, disabled }) {
 }
 function initialEvidence(requirements) {
   return { oldSkus: requirements.oldSkus.map((sku) => ({ sku, disposition: '', evidence: '' })),
+    ...(requirements.historicalConfirmation ? { confirmation: { disposition: '', evidence: '' } } : {}),
     files: requirements.files.map((snapshotId) => ({ snapshotId, disposition: '', evidence: '' })),
     ...(requirements.externalHistory ? { externalHistory: { disposition: 'resolved', evidence: '' } } : {}),
     ...(requirements.exclusionResolution ? { exclusionResolution: { disposition: requirements.exclusionDisposition, evidence: '' } } : {}),
@@ -177,7 +190,7 @@ export function MagentoRecovery({ productId, categoryCode, onSaved, guided = fal
       const inspected = await api.post(`/admin/magento-recovery/jobs/${data.job.id}/inspect`, {});
       if (valid()) { setReview(inspected.data); setRecord((previous) => ({ ...previous, job: inspected.data.job })); }
     } else if (data.actions.lifecycleRecovery && permissions.includes('exports.reconcile') && !data.lifecycle?.blocker
-      && data.history?.hasRecount && !data.history.stableRecount && !data.lifecycle?.legacyDeliveryEnabled && data.history.complete) {
+      && data.history?.hasRecount && !data.history.stableRecount && !data.history.historicalRecount && !data.lifecycle?.legacyDeliveryEnabled && data.history.complete) {
       const inspected = await api.post(`/admin/magento-recovery/products/${productId}/history-inspect`, {});
       if (valid()) { setHistoryInspection(inspected.data); if (!inspected.data.stale) setRecord(previous => ({ ...previous, history: inspected.data.history })); }
     } else if (data.actions.lifecycleRecovery && permissions.includes('exports.reconcile') && !data.lifecycle?.blocker
@@ -214,7 +227,9 @@ export function MagentoRecovery({ productId, categoryCode, onSaved, guided = fal
     if (valid()) { setLifecycle(data); setEvidence(data.requiredEvidence ? initialEvidence(data.requiredEvidence) : null); }
   });
   const applyLifecycle = () => run(async () => {
-    const input = pendingLifecycle || { review: lifecycle.review, reviewHash: lifecycle.reviewHash, reason: reason.trim(), ...(evidence ? { evidence } : {}) };
+    const reviewedEvidence = lifecycle?.requiredEvidence?.historicalConfirmation
+      ? { files: evidence.files, confirmation: { ...evidence.confirmation, evidence: reason.trim() } } : evidence;
+    const input = pendingLifecycle || { review: lifecycle.review, reviewHash: lifecycle.reviewHash, reason: reason.trim(), ...(reviewedEvidence ? { evidence: reviewedEvidence } : {}) };
     setPendingLifecycle(input);
     const { data } = await api.post(`/admin/magento-recovery/products/${productId}/lifecycle-apply`, input);
     if (valid()) { setPendingLifecycle(null); setLifecycle(null); setNextStep(data.nextAction || null); setReceipt('Рішення щодо історії доставки збережено в Amber. Синхронізацію підтверджує окремий стан Magento.'); onSaved?.(); }
@@ -225,9 +240,11 @@ export function MagentoRecovery({ productId, categoryCode, onSaved, guided = fal
   const availableKinds = record?.lifecycle?.availableKinds || [record?.lifecycle?.suggestedKind || 'prior_exposure'];
   const canRecoverJob = record?.actions.jobRecovery && permissions.includes('export_templates.publish');
   const canRecoverLifecycle = record?.actions.lifecycleRecovery && permissions.includes('exports.reconcile');
-  const historyMode = record?.history?.hasRecount && !record.history.stableRecount && !record.lifecycle?.legacyDeliveryEnabled && !unfinishedJob && !nextStep;
-  const evidenceComplete = !evidence || [...evidence.oldSkus, ...evidence.files, ...['externalHistory', 'exclusionResolution', 'redeliveryAuthorization'].map((key) => evidence[key]).filter(Boolean)]
-    .every((item) => item.disposition && item.evidence.trim().length >= 3);
+  const historyMode = record?.history?.hasRecount && !record.history.stableRecount && !record.history.historicalRecount && !record.lifecycle?.legacyDeliveryEnabled && !unfinishedJob && !nextStep;
+  const evidenceComplete = !evidence || (lifecycle?.requiredEvidence?.historicalConfirmation
+    ? evidence.confirmation?.disposition === 'current_update_only' && evidence.files.every(item => item.disposition && item.evidence.trim().length >= 3)
+    : [...evidence.oldSkus, ...evidence.files, ...['externalHistory', 'exclusionResolution', 'redeliveryAuthorization'].map((key) => evidence[key]).filter(Boolean)]
+    .every((item) => item.disposition && item.evidence.trim().length >= 3));
   const blockers = [...(review?.blockers || []).map((item) => item.code), ...(lifecycle?.blockers || [])];
   return <section className="sync-recovery" aria-label="Контрольоване відновлення доставки">
     {(!guided || opened) && <h3>{guided ? 'Результат перевірки та наступна дія' : 'Перевірка й відновлення доставки'}</h3>}
@@ -237,6 +254,7 @@ export function MagentoRecovery({ productId, categoryCode, onSaved, guided = fal
     {error && (!record || opened) && <Notice tone="error">{error}</Notice>}
     {guided && opened && error && !pendingLifecycle && <Button busy={busy} onClick={open}>Оновити перевірку товару</Button>}
     {receipt && opened && <Notice tone="success">{receipt}</Notice>}
+    {opened && nextStep?.kind === 'await_delivery' && <Notice tone="info">Оновлення цього товару поставлено в чергу. Натисніть «Оновити» на сторінці, щоб побачити результат синхронізації.</Notice>}
     {opened && nextStep?.kind === 'review_history' && <Notice tone="info"><p>Виключення поточного товару знято. Тепер потрібно повторно перевірити його історію переобліку.</p>
       <Button size="compactMd" busy={busy} onClick={open}>Перевірити наступний крок</Button></Notice>}
     {opened && nextStep?.kind === 'reviewed_resync' && <Notice tone="info"><p>Історію перевірено. Далі потрібен окремий перегляд відправлення цього товару.</p>
@@ -267,16 +285,31 @@ export function MagentoRecovery({ productId, categoryCode, onSaved, guided = fal
         {(!guided || !lifecycle) && <Button size="compactMd" disabled={Boolean(pendingLifecycle)} busy={busy} onClick={() => previewLifecycle()}>{guided ? 'Повторити перевірку товару' : 'Перевірити можливість рішення'}</Button>}
         {lifecycle?.eligible && <Notice tone="info">{guided ? decisionEffects[lifecycle.review.kind] || 'Перевірка пройшла. Запишіть, що перевірили, і підтвердьте рішення нижче.' : `Перевірка дозволяє розглянути рішення «${kinds[lifecycle.review.kind]}». Підтвердження збереже це рішення щодо доставки; воно може дозволити подальшу автоматичну синхронізацію.`}</Notice>}
         {guided && lifecycle?.review.payload?.remote?.status === 'found' && <p>У Magento знайдено товар: <strong>{lifecycle.review.payload.remote.sku}</strong>.</p>}
-        {lifecycle?.requiredEvidence && evidence && <EvidenceForm requirements={lifecycle.requiredEvidence} evidence={evidence} setEvidence={setEvidence} disabled={busy || Boolean(pendingLifecycle)} />}
+        {kind === 'historical_recount_exposure' && lifecycle?.review.payload.sync && <div className="space-y-2">
+          {lifecycle.review.payload.sync.remote && <p>Поточний товар: <strong>{lifecycle.review.payload.sync.remote.sku}</strong> · Magento №{lifecycle.review.payload.sync.remote.id}.</p>}
+          {lifecycle.review.payload.sync.oldArticles?.every(item => item.status === 'not_found') && <p>Старі артикули відсутні в Magento. Перевірка не надсилала змін.</p>}
+          {lifecycle.review.payload.sync.oldArticles?.filter(item => item.status !== 'not_found').map(item => <p key={item.sku}><strong>{item.sku}</strong>: {item.status === 'found' ? `також є в Magento · №${item.id}` : 'не вдалося перевірити; повторіть перевірку після відновлення доступу'}.</p>)}
+        </div>}
+        {lifecycle?.eligible && lifecycle.requiredEvidence && evidence && <EvidenceForm requirements={lifecycle.requiredEvidence} evidence={evidence} setEvidence={setEvidence} disabled={busy || Boolean(pendingLifecycle)} />}
       </>}
       {canRecoverLifecycle && record.lifecycle && unfinishedJob && <p className="sync-problem-guidance">Спочатку завершіть перевірку початкової операції{canRecoverJob ? ' вище' : ' з оператором, який має дозвіл на відновлення завдань'}. Рішення щодо історії не замінює підтвердження надісланих змін.</p>}
       {canRecoverLifecycle && record.lifecycle && !unfinishedJob && availableKinds.length === 0 && !nextStep && !historyMode && <Notice>Для поточного стану немає окремого дозволеного рішення щодо історії доставки. Перевірте актуальну причину в товарі.</Notice>}
       {blockers.length > 0 && <Notice tone="warning"><p>Застосування заблоковане:</p><ul className="list-disc pl-5">{blockers.map((code, index) => <li key={index}>{blockerText[code] || 'Наявних підтверджень недостатньо для цього рішення. Передайте опис проблеми відповідальному за інтеграцію; дію не застосовано.'}</li>)}</ul></Notice>}
-      {(review?.canReconcile || review?.canContinue || lifecycle?.eligible || pendingLifecycle) && <label>Підстава рішення<textarea className="input" value={reason} maxLength={2000} disabled={busy || Boolean(pendingLifecycle)} onChange={(event) => setReason(event.target.value)} placeholder="Що перевірено та чому можна виконати цю дію" /></label>}
+      {lifecycle?.blockers?.includes('UPDATE_NOT_SENDABLE') && <section className="space-y-3" aria-label="Що виправити перед підтвердженням">
+        <h4 className="sync-next-heading">Спочатку виправте налаштування для цього товару</h4>
+        {lifecycle.review.payload.sync?.problems?.map((problem,index) => <div key={index}>
+          <p>{problem.message || 'Перевірте відповідність цього поля.'}</p>
+          {permissions.includes('export_templates.view') && <Link className="btn btn-outline btn-compact-md"
+            to={problemRepairUrl(problem,{ productId,category: categoryCode },`/attention?problem=${productId}`)}>{nextAction(problem)}</Link>}
+        </div>)}
+        <p>Після виправлення поверніться сюди й повторіть перевірку товару.</p>
+        <Button busy={busy} disabled={Boolean(pendingLifecycle)} onClick={() => previewLifecycle()}>Повторити перевірку після виправлення</Button>
+      </section>}
+      {(review?.canReconcile || review?.canContinue || lifecycle?.eligible || pendingLifecycle) && <label>{kind === 'historical_recount_exposure' ? 'Що ви перевірили' : 'Підстава рішення'}<textarea className="input" value={reason} maxLength={2000} disabled={busy || Boolean(pendingLifecycle)} onChange={(event) => setReason(event.target.value)} placeholder="Що перевірено та чому можна виконати цю дію" /></label>}
       <div className="sync-recovery-actions">
         {canRecoverJob && review?.canReconcile && <Button size="compactMd" busy={busy} disabled={reason.trim().length < 3} onClick={() => setConfirmation('reconcile')}>Підтвердити перевірений результат</Button>}
         {canRecoverJob && review?.canContinue && review.unsentChanges?.length > 0 && <Button size="compactMd" busy={busy} disabled={reason.trim().length < 3} onClick={() => setConfirmation('continue')}>Переглянути продовження операції</Button>}
-        {canRecoverLifecycle && lifecycle?.eligible && !pendingLifecycle && <Button size="compactMd" busy={busy} disabled={reason.trim().length < 3 || !evidenceComplete} onClick={() => setConfirmation('lifecycle')}>{guided ? decisionActions[lifecycle.review.kind] || 'Переглянути підтвердження' : 'Переглянути рішення щодо доставки'}</Button>}
+        {canRecoverLifecycle && lifecycle?.eligible && !pendingLifecycle && <Button variant={kind === 'historical_recount_exposure' ? 'primary' : 'secondary'} size="compactMd" busy={busy} disabled={reason.trim().length < 3 || !evidenceComplete} onClick={() => setConfirmation('lifecycle')}>{guided ? decisionActions[lifecycle.review.kind] || 'Переглянути підтвердження' : 'Переглянути рішення щодо доставки'}</Button>}
         {canRecoverLifecycle && pendingLifecycle && <Button size="compactMd" busy={busy} onClick={applyLifecycle}>Отримати результат початкового рішення</Button>}
       </div>
       <TechnicalDisclosure><pre className="whitespace-pre-wrap break-all text-xs">{JSON.stringify({ jobId: record.job?.id, lifecycle: record.lifecycle, review: review?.review || lifecycle?.review, blockers }, null, 2)}</pre></TechnicalDisclosure>

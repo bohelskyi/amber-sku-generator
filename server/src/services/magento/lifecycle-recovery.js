@@ -3,13 +3,14 @@ const c = require('./binding-contract');
 const editor = require('./integration-editor.service');
 const exposure = require('./exposure-reconciliation');
 const stable = require('./stable-recount-exposure');
+const historical = require('./historical-recount-exposure');
 const repair = require('../recount-repair.service');
 const reconciliation = require('../full-product-reconciliation.service');
 const { boundedGet } = require('./integration-readiness');
 const { assertActorStillAuthorized } = require('../access-admin-transaction');
 const { createMutationContext } = require('../../audit/mutation-context');
 
-const KINDS = ['prior_exposure', 'stable_recount_exposure', 'replacement', 'unexposed_first_delivery', 'generated_first_delivery', 'release_exclusion'];
+const KINDS = ['prior_exposure', 'stable_recount_exposure', 'historical_recount_exposure', 'replacement', 'unexposed_first_delivery', 'generated_first_delivery', 'release_exclusion'];
 const FORMAT = 'magento-lifecycle-recovery-v1';
 const fail = (code = 'MAGENTO_LIFECYCLE_REVIEW_STALE') => { throw c.error(409, code, 'Повторіть перевірку історії доставки цього товару.'); };
 async function nextResync(client, config, id) {
@@ -64,10 +65,12 @@ async function preview(config, id, input, options = {}) {
   let payload; let blockers = []; let requiredEvidence = null;
   if (input.kind === 'prior_exposure') {
     payload = await exposure.preview(config, p.public_sku, options); blockers = payload.blockers;
-  } else if (input.kind === 'stable_recount_exposure') {
+  } else if (['stable_recount_exposure','historical_recount_exposure'].includes(input.kind)) {
     const binding = await editor.read(options, (client) => editor.selected(client, config));
     if (!binding) fail('MAGENTO_BINDING_REQUIRED');
-    payload = await stable.preview(config, p.public_sku, { ...options, bindingRevisionId: binding.id }); blockers = payload.blockers;
+    const recipe = input.kind === 'historical_recount_exposure' ? historical : stable;
+    payload = await recipe.preview(config, p.public_sku, { ...options, bindingRevisionId: binding.id }); blockers = payload.blockers;
+    requiredEvidence = payload.historical?.requiredEvidence || null;
   } else if (input.kind === 'release_exclusion') {
     payload = { productId: id, deliveryVersion: String(p.lifecycle?.delivery_version),
       businessExclusion: p.lifecycle?.business_exclusion_state, route: p.lifecycle?.route };
@@ -126,8 +129,10 @@ async function apply(config, id, input, options = {}) {
   options = await setup(options);
   const p = await editor.read(options, (client) => product(client, id));
   if (p.public_sku !== review.article) fail();
-  if (review.kind === 'stable_recount_exposure') {
-    const result = await stable.apply(config, review.payload, review.payload.planHash, { ...options, bindingRevisionId: review.payload.bindingRevisionId });
+  if (['stable_recount_exposure','historical_recount_exposure'].includes(review.kind)) {
+    const recipe = review.kind === 'historical_recount_exposure' ? historical : stable;
+    const result = await recipe.apply(config, review.payload, review.payload.planHash, { ...options, bindingRevisionId: review.payload.bindingRevisionId,
+      reviewedEvidence: input.evidence, reason: input.reason.trim() });
     return { ...result, nextAction: { kind: 'await_delivery', handoffId: result.handoffId } };
   }
   return withLocalSafety(config, p, options, async () => {
@@ -160,6 +165,7 @@ async function productRecovery(config, id, options = {}) {
       if (p.lifecycle.business_exclusion_state !== 'none') availableKinds.push('release_exclusion');
       if (p.lifecycle.route === 'hold' && p.lifecycle.hold_reason === 'historical_ambiguity') {
         if (history?.stableRecount) availableKinds.push('stable_recount_exposure');
+        else if (history?.historicalRecount) availableKinds.push('historical_recount_exposure');
         else if (history?.complete && !history.hasRecount) availableKinds.push('prior_exposure');
         if (delivery?.legacy_product_csv_enabled === true) availableKinds.push('replacement', 'unexposed_first_delivery', 'generated_first_delivery');
       }

@@ -54,7 +54,7 @@ async function read(client, config, sku, bindingRevisionId) {
     product: amber.product, nameState: nameStateEvidence(amber.nameState) });
   return { state, amber };
 }
-function blockers(state) {
+function commonBlockers(state) {
   const p = state.product, s = state.stable;
   const out = exposure.blockers(state).filter(b => b !== 'CORRECTION_LINEAGE');
   const block = code => out.push(code);
@@ -70,6 +70,11 @@ function blockers(state) {
     || s.request.active_job_id != null || s.request.active_generation != null || s.request.state === 'syncing')) block('UNFINISHED_SYNC_WORK');
   if (s.jobs.some(j => !['succeeded','superseded'].includes((j.job || j).state)
     || j.steps?.some(step => step.state !== 'verified'))) block('UNFINISHED_SYNC_WORK');
+  return [...new Set(out)];
+}
+function blockers(state) {
+  const p = state.product, s = state.stable, out = commonBlockers(state);
+  const block = code => out.push(code);
   const graph = require('../export-exposure/manifest').buildLineageGraph(s.members.map(m => m.product),s.corrections);
   const component = graph.components.get(p.id);
   if (!component || component.issues.length || component.productIds.length < 2
@@ -94,13 +99,13 @@ function blockers(state) {
   }
   return [...new Set(out)];
 }
-async function snapshot(config, sku, options) {
+async function snapshot(config, sku, options, reader = read) {
   c.identity(options.bindingRevisionId);
   const client = await options.databasePool.connect();
   try {
     await gate.begin(client,'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     if ((await client.query('SELECT current_database() name')).rows[0].name !== options.expectedDatabase) fail('EXPOSURE_DATABASE_MISMATCH');
-    const result = await read(client,config,sku,options.bindingRevisionId);
+    const result = await reader(client,config,sku,options.bindingRevisionId);
     await gate.commit(client); return result;
   } catch (cause) { await gate.rollback(client); throw cause; }
   finally { await gate.release(client); client.release(); }
@@ -124,78 +129,96 @@ async function inspectSync(config, local, options) {
   if (!remote || remote.sku !== local.state.product.public_sku || remote.id !== local.state.stable.remoteId) reasons.push('EXPOSURE_REMOTE_CHANGED');
   if (!hypothetical?.sendable || hypothetical.mode !== 'update') reasons.push('UPDATE_NOT_SENDABLE');
   return { remote, reasons, sendable: hypothetical?.sendable === true,
+    problems: (hypothetical?.blockers || []).map(({ code, message, target, field, path, question, value }) =>
+      clean({ code, message, target, field, path, question, value })),
     blockerCodes: (hypothetical?.blockers || []).map(b => b.code) };
 }
+// Recipes share the transaction/CAS/outbox boundary, but have separate proof
+// readers, eligibility rules, formats and audit receipts. HTTP input cannot
+// select or override these functions.
+function createRecipe({ format = FORMAT, event = EVENT, reader = read, check = blockers, inspect = inspectSync,
+  proof = () => ({}), validateEvidence = () => null, source = 'stable_recount_exposure',
+  action = 'magento_stable_recount_prior_exposure', resolutionPrefix = 'stable-recount-exposure',
+  lanes = plan => [plan.publicIdentityId], articles = plan => [plan.sku] } = {}) {
 async function preview(config,sku,options) {
-  const local = await snapshot(config,sku,options);
-  const reasons = blockers(local.state);
-  const sync = reasons.length ? null : await inspectSync(config,local,options);
+  const local = await snapshot(config,sku,options,reader);
+  const reasons = check(local.state);
+  const sync = reasons.length ? null : await inspect(config,local,options);
   if (sync) reasons.push(...sync.reasons);
-  const fresh = await snapshot(config,sku,options);
+  const fresh = await snapshot(config,sku,options,reader);
   if (c.hash(fresh.state) !== c.hash(local.state)) reasons.push('LOCAL_EVIDENCE_CHANGED');
-  const plan = { format: FORMAT, database: options.expectedDatabase, originHash: c.originHash(config.baseUrl),
+  const plan = { format, database: options.expectedDatabase, originHash: c.originHash(config.baseUrl),
     productId: local.state.product.id, publicIdentityId: String(local.state.product.public_product_identity_id),
     sourceCorrectionId: local.state.lifecycle.source_correction_id,
     sku: local.state.product.public_sku, internalSku: local.state.product.full_sku,
     lineageProductIds: local.state.stable.members.map(m => m.product.id), bindingRevisionId: options.bindingRevisionId,
     installationKey: local.state.stable.binding.installationKey, beforeFingerprint: c.hash(local.state),
-    deliveryVersion: String(local.state.lifecycle?.delivery_version), transition, sync,
+    deliveryVersion: String(local.state.lifecycle?.delivery_version), transition, sync, ...proof(local.state),
     blockers: [...new Set(reasons)], eligible: reasons.length === 0, generatedAt: new Date().toISOString() };
   c.safeData(plan,options.sensitiveValues); return { ...plan, planHash: c.hash(plan) };
 }
 function verify(config,plan,expectedHash,options) {
   const { planHash,...body } = plan || {}; c.safeData(body);
-  if (planHash !== expectedHash || c.hash(body) !== expectedHash || plan.format !== FORMAT || !plan.eligible || plan.blockers.length
+  if (planHash !== expectedHash || c.hash(body) !== expectedHash || plan.format !== format || !plan.eligible || plan.blockers.length
     || plan.database !== options.expectedDatabase || plan.originHash !== c.originHash(config.baseUrl)
     || c.hash(plan.transition) !== c.hash(transition) || !plan.sync?.sendable || plan.sync.remote?.sku !== plan.sku) fail('EXPOSURE_PLAN_INVALID');
 }
 async function apply(config,plan,expectedHash,options) {
   verify(config,plan,expectedHash,options);
+  const reviewedEvidence = validateEvidence(plan,options.reviewedEvidence);
+  const commandHash = reviewedEvidence ? c.hash({ planHash: plan.planHash, evidence: reviewedEvidence, reason: options.reason }) : null;
   const connection = await options.databasePool.connect(), held = [];
   const borrowed = { query: (...args) => connection.query(...args), release() {} };
   try {
     // Same order as automatic sync and controlled test deletion. Fail busy
     // before taking authority/product locks; never wait behind dispatched work.
-    for (const key of [`amber_magento_public_identity:${plan.publicIdentityId}`,`amber_magento_sync:${plan.originHash}:${plan.sku}`]) {
+    for (const key of [...lanes(plan).map(id => `amber_magento_public_identity:${id}`),
+      ...articles(plan).map(sku => `amber_magento_sync:${plan.originHash}:${sku}`)]) {
       if (!(await connection.query('SELECT pg_try_advisory_lock(hashtext($1)) held',[key])).rows[0].held) fail('EXPOSURE_SYNC_BUSY');
       held.push(key);
     }
     return await repairTransaction({ ...options,databasePool: { connect: async () => borrowed } },async(client,context) => {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`amber_magento_binding:${plan.installationKey}`]);
-      const previous = await receipt(client,plan.planHash,EVENT);
-      if (previous) return { ...previous.result,alreadyApplied: true };
+      const previous = await receipt(client,plan.planHash,event);
+      if (previous) {
+        if (commandHash && previous.commandHash !== commandHash) fail('RECONCILIATION_KEY_CONFLICT');
+        return { ...previous.result,alreadyApplied: true };
+      }
       await lockRepairProducts(client,plan.lineageProductIds);
-      const local = await read(client,config,plan.sku,plan.bindingRevisionId);
+      const local = await reader(client,config,plan.sku,plan.bindingRevisionId);
       const p = local.state.product, s = local.state.stable;
-      if (c.hash(local.state) !== plan.beforeFingerprint || blockers(local.state).length
+      if (c.hash(local.state) !== plan.beforeFingerprint || check(local.state).length
         || p.id !== plan.productId || String(p.public_product_identity_id) !== plan.publicIdentityId || p.public_sku !== plan.sku
         || p.full_sku !== plan.internalSku || s.binding.installationKey !== plan.installationKey
         || local.state.lifecycle.source_correction_id !== plan.sourceCorrectionId
         || c.hash(s.members.map(m => m.product.id)) !== c.hash(plan.lineageProductIds)
         || String(local.state.lifecycle.delivery_version) !== plan.deliveryVersion) fail();
-      const sync = await inspectSync(config,local,options);
+      if (c.hash(proof(local.state)) !== c.hash(Object.fromEntries(Object.keys(proof(local.state)).map(key => [key,plan[key]])))) fail();
+      const sync = await inspect(config,local,options);
       if (sync.reasons.length || c.hash(sync.remote) !== c.hash(plan.sync.remote)) fail('EXPOSURE_REMOTE_CHANGED');
       if (options.signal?.aborted) fail('EXPOSURE_INTERRUPTED');
-      if (c.hash((await read(client,config,plan.sku,plan.bindingRevisionId)).state) !== plan.beforeFingerprint) fail();
+      if (c.hash((await reader(client,config,plan.sku,plan.bindingRevisionId)).state) !== plan.beforeFingerprint) fail();
       const prior = local.state.lifecycle;
-      const evidence = { ...prior.evidence,origin: 'reconciliation',action: 'magento_stable_recount_prior_exposure',
+      const evidence = { ...prior.evidence,origin: 'reconciliation',action,
+        ...(reviewedEvidence ? { reviewedHistory: { ...proof(local.state), evidence: reviewedEvidence, remote: sync } } : {}),
         priorEvidence: prior.evidence,magentoPriorExposure: { originHash: plan.originHash,productId: sync.remote.id,sku: plan.sku,
           observedAt: new Date().toISOString(),planHash: plan.planHash,doesNotAcknowledgeExport: true } };
       const changed = (await client.query(`UPDATE product_full_export_state SET hold_reason='prior_exposure',evidence=$2::jsonb,
         delivery_version=delivery_version+1,last_resolution_key=$3,resolved_by_user_id=$4,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
         WHERE product_id=$1 AND route='hold' AND hold_reason='historical_ambiguity' AND delivery_version=$5::bigint RETURNING delivery_version`,
-      [plan.productId,JSON.stringify(evidence),`stable-recount-exposure:${plan.planHash}`,context.actorUserId,plan.deliveryVersion])).rows[0];
+      [plan.productId,JSON.stringify(evidence),`${resolutionPrefix}:${plan.planHash}`,context.actorUserId,plan.deliveryVersion])).rows[0];
       if (!changed) fail();
       // Reuse the reviewed broader-resync outbox. Enrollment and dispatch retain
       // their own actor, current-product and uncertain-work checks. No SQL repair
       // of a parked request, fabricated acknowledgement or Magento write here.
       const handoffId = await require('./binding-handoff').record(client,context,local.state.stable.binding,'broader_resync',plan.planHash,
-        { source: 'stable_recount_exposure',planHash: plan.planHash,doesNotAcknowledgeExport: true },
+        { source,planHash: plan.planHash,doesNotAcknowledgeExport: true },
         [{ productId: plan.productId,publicIdentityId: plan.publicIdentityId,reason: 'reviewed_resync' }]);
       const result = { productId: plan.productId,sku: plan.sku,publicIdentityId: plan.publicIdentityId,
         route: 'hold',holdReason: 'prior_exposure',deliveryVersion: changed.delivery_version,handoffId,planHash: plan.planHash };
-      await writeAuditEvent(client,{ mutationContext: context,eventKey: EVENT,subjectType: 'magento_exposure_resolution',subjectId: plan.planHash,
+      await writeAuditEvent(client,{ mutationContext: context,eventKey: event,subjectType: 'magento_exposure_resolution',subjectId: plan.planHash,
         details: { beforeFingerprint: plan.beforeFingerprint,transition,remote: sync.remote,lineageProductIds: plan.lineageProductIds,
+          ...(reviewedEvidence ? { commandHash, reason: options.reason, reviewedHistory: { ...proof(local.state), evidence: reviewedEvidence, remote: sync } } : {}),
           bindingRevisionId: plan.bindingRevisionId,originHash: plan.originHash,result,doesNotAcknowledgeExport: true } });
       return { ...result,alreadyApplied: false };
     });
@@ -204,4 +227,6 @@ async function apply(config,plan,expectedHash,options) {
     connection.release();
   }
 }
-module.exports = { blockers,preview,apply };
+return { preview,apply };
+}
+module.exports = { blockers,commonBlockers,read,inspectSync,createRecipe,...createRecipe() };
