@@ -92,8 +92,7 @@ suite.test('Magento delivery cutover is previewed, atomic, persistent and perman
     let productId;
     try {
       await client.query('BEGIN');
-      productId = (await client.query("INSERT INTO products(full_sku,category,total_price_uah) VALUES('ZZ-CUTOVER','ZZ',100) RETURNING id")).rows[0].id;
-      await require('../src/services/full-product-export.service').initializeNewProduct(client, productId);
+      productId = (await require('./product-fixture').insertNativeProductFixture(client, { category: 'ZZ' })).rows[0].id;
       await client.query('COMMIT');
     } finally { client.release(); }
     assert.equal((await db.query('SELECT desired_generation FROM magento_product_sync_requests WHERE product_id=$1', [productId])).rows[0].desired_generation, '1');

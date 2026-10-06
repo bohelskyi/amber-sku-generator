@@ -1,0 +1,26 @@
+.card.historical-restore-dialog { max-width: 760px; padding: 24px 24px 0; color: #14203b; }
+.historical-product { border: 1px solid var(--border, #dfe3e8); border-radius: 8px; padding: 16px; background: #fff; }
+.historical-product.is-selected { border-color: #dd974a; box-shadow: inset 3px 0 #dd974a; }
+.historical-product-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.historical-product-identity { display: flex; align-items: flex-start; gap: 10px; min-width: 0; flex: 1; cursor: pointer; }
+.historical-product-identity input { flex: 0 0 auto; margin-top: 5px; accent-color: #14203b; }
+.historical-product-name { display: block; margin-top: 3px; color: var(--text-muted, #667085); font-size: 13px; overflow-wrap: anywhere; }
+.historical-product-status { flex: 0 0 auto; padding: 3px 8px; border-radius: 4px; background: #f4f5f7; font-size: 12px; }
+.historical-product-status.needs-review { background: #fff8ef; }
+.historical-product-outcome { margin-top: 12px; }
+.historical-create-consent, .historical-decision-consent { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; padding: 10px 0; cursor: pointer; }
+.historical-create-consent { margin-top: 10px; border-top: 1px solid var(--border, #dfe3e8); font-size: 13px; }
+.historical-create-consent input, .historical-decision-consent input { flex: 0 0 auto; margin-top: 4px; accent-color: #14203b; }
+.historical-evidence { margin-top: 12px; font-size: 13px; }
+.historical-evidence summary { cursor: pointer; min-height: 32px; padding: 5px 0; color: var(--text-muted, #667085); }
+.historical-input { margin-top: 0; }
+.historical-review-summary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.historical-unknown-history { margin-top: 12px; padding: 10px 12px; border-left: 3px solid #dd974a; background: #fff8ef; font-size: 13px; }
+.historical-restore-footer { position: sticky; bottom: 0; z-index: 2; margin-left: -24px; margin-right: -24px; padding: 16px 24px; border-top: 1px solid var(--border, #dfe3e8); background: #fff; box-shadow: 0 -4px 12px rgba(20, 32, 59, .04); }
+.historical-restore-footer .historical-evidence { margin-top: 4px; max-height: 160px; overflow: auto; }
+.historical-restore-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+@media (max-width: 640px) {
+  .card.historical-restore-dialog { padding: 16px 16px 0; }
+  .historical-product-heading { flex-wrap: wrap; }
+  .historical-restore-footer { margin-left: -16px; margin-right: -16px; padding: 12px 16px; }
+}

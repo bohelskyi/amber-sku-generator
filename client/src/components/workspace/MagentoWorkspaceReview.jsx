@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api.js';
-import { deliveryPolicies, decisionKey } from '../../lib/magento-category-workspace.js';
+import { deliveryPolicies, deliveryPolicyEffect, localValueLabel, matchesRepairValue, decisionKey } from '../../lib/magento-category-workspace.js';
 import { fieldLabels } from '../../lib/export-template-editor.js';
 import { LoadingState, Notice } from '../app/UiPrimitives.jsx';
 import MagentoDetails from './MagentoDetails.jsx';
@@ -10,7 +10,7 @@ const kinds = { route: 'Набір атрибутів', attribute: 'Поле', o
 
 // Explicit bounded decisions through the original CAS/authorization endpoints.
 // A partial failure leaves the saved original draft available for a fresh read.
-export default function MagentoWorkspaceReview({ revision, categoryCode, categories = [], questions, selections, focusTarget, onChanged, disabled, onPendingChange, onReadyChange, onProgressChange }) {
+export default function MagentoWorkspaceReview({ revision, categoryCode, categories = [], questions, selections, focusTarget, onChanged, disabled, onPendingChange, onReadyChange, onProgressChange, onScopeChange, repairContext }) {
   const [data, setData] = useState(null); const [error, setError] = useState('');
   const [loadedKey, setLoadedKey] = useState('');
   const [busy, setBusy] = useState(false); const [reason, setReason] = useState('');
@@ -32,6 +32,7 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, categor
     return () => onPendingChange?.(false);
   }, [busy, choices, reason, onPendingChange]);
   const unresolved = fresh ? data?.entries.filter((e) => !['approved', 'not_applicable', 'blocked'].includes(e.reviewState)) || [] : [];
+  useEffect(() => { onScopeChange?.(fresh && data ? { unresolved: data.entries.filter((entry) => !['approved', 'not_applicable', 'blocked'].includes(entry.reviewState)) } : null); }, [fresh, data, onScopeChange]);
   const ready = Boolean(fresh && data && data.revision.revision === revision.revision && !unresolved.length);
   useEffect(() => { onReadyChange?.(ready); }, [ready, onReadyChange]);
   const entries = [...unresolved, ...(editPolicies ? data?.entries.filter((e) => e.kind === 'policy' && e.group === categoryCode && e.reviewState === 'approved') || [] : [])];
@@ -40,7 +41,7 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, categor
   const focusComplete = Boolean(focusTarget && !editPolicies && !local.some(focused));
   const remainingFields = focusComplete && local.length > 0;
   const remainingCategories = focusComplete && !local.length && unresolved.length > 0;
-  const scoped = entries.filter((e) => remainingCategories || (all || e.group === categoryCode) && (remainingFields || focused(e)));
+  const scoped = entries.filter((e) => remainingCategories || (all || e.group === categoryCode) && (remainingFields || focused(e))).sort((a, b) => Number(matchesRepairValue(b, repairContext)) - Number(matchesRepairValue(a, repairContext)));
   const otherFields = entries.filter((e) => e.group === categoryCode && !focused(e));
   const currentPage = Math.min(page, Math.max(0, Math.ceil(scoped.length / 30) - 1));
   const visible = scoped.slice(currentPage * 30, (currentPage + 1) * 30);
@@ -56,7 +57,7 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, categor
     const match = entry.source?.match(/\.([^.=]+)=value_id:(-?\d+)$/);
     const question = entry.group === categoryCode && match ? questions.find((q) => q.id === match[1]) : null;
     const option = question?.options.find((o) => String(o.id) === match[2]);
-    return question ? `${question.label}: ${option?.label || entry.evaluated || match[2]}` : entry.evaluated || entry.label || entry.target;
+    return question ? `${question.label}: ${option?.label || localValueLabel(questions, match[1], match[2], entry.evaluated)}` : entry.evaluated || entry.label || entry.target;
   };
   const options = (entry) => {
     if (entry.kind === 'policy') return Object.entries(deliveryPolicies).map(([value, name]) => ({ value, label: name }));
@@ -111,9 +112,9 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, categor
       <MagentoDetails summary="Поведінка передавання полів">{() => <button type="button" className="btn btn-outline" disabled={busy || disabled} onClick={() => { setEditPolicies(!editPolicies); setPage(0); }}>{editPolicies ? 'Сховати поведінку підключених полів' : 'Змінити поведінку підключених полів'}</button>}</MagentoDetails>
       {!remainingCategories && entries.some((e) => e.group !== categoryCode) && <button className="btn btn-outline" type="button" onClick={() => { setAll(!all); setPage(0); }}>{all ? 'Лише поточна категорія' : 'Показати також інші категорії'}</button>}
       {(reason || visible.some((e) => !e.exact || e.kind === 'policy' || chosen(e) !== String(e.identity))) && <label className="mc-label">Пояснення перевірки<input className="input" maxLength={2000} disabled={busy || disabled} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Чому обрано цю відповідність або поведінку" /></label>}
-      {visible.length > 0 && <div className="mc-table-scroll"><table><thead><tr><th>Поле / значення менеджера</th><th>Відповідність Magento</th><th>Підтвердження</th></tr></thead><tbody>{visible.map((entry) => <tr key={entry.id}>
+      {visible.length > 0 && <div className="mc-table-scroll"><table><thead><tr><th>Поле / значення менеджера</th><th>Відповідність Magento</th><th>Підтвердження</th></tr></thead><tbody>{visible.map((entry) => <tr key={entry.id} className={matchesRepairValue(entry, repairContext) ? 'is-repair-target' : undefined}>
         <td>{entry.group !== categoryCode && <strong className="block">{categoryName(entry.group)}</strong>}{label(entry)}<small>{kinds[entry.kind]} · {entry.row === 'english' ? 'EN' : 'UA'}</small></td>
-        <td>{['policy', 'route', 'option', 'category'].includes(entry.kind) ? <select className="input" aria-label={`Відповідність: ${label(entry)}`} value={chosen(entry)} disabled={busy || disabled} onChange={(e) => setChoices({ ...choices, [entry.id]: e.target.value })}><option value="">Оберіть явно</option>{options(entry).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select> : entry.label || entry.target}</td>
+        <td>{['policy', 'route', 'option', 'category'].includes(entry.kind) ? <select className="input" aria-label={`Відповідність: ${label(entry)}`} value={chosen(entry)} disabled={busy || disabled} onChange={(e) => setChoices({ ...choices, [entry.id]: e.target.value })}><option value="">Оберіть явно</option>{options(entry).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select> : entry.label || entry.target}{entry.kind === 'policy' && chosen(entry) && <small>{deliveryPolicyEffect(chosen(entry), entry.target)}</small>}</td>
         <td><button type="button" className="btn btn-outline" disabled={busy || disabled || !eligible(entry)} onClick={() => approve([entry])}>Підтвердити</button></td>
       </tr>)}</tbody></table></div>}
       {!visible.length && <p>{otherFields.length ? 'Вибране поле підтверджено. Відкрийте решту полів цієї категорії, щоб завершити перевірку.' : entries.length ? 'Питання цієї категорії підтверджено. Перевірте також інші категорії.' : 'Усі необхідні відповідності підтверджено.'}</p>}

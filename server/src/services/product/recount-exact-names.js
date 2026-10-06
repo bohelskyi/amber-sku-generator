@@ -17,6 +17,7 @@ async function recountExactNames(client, source, target, { lock, nameChange, nam
   }
   const candidate = { ...current.amber.product, full_sku: target.fullSku, public_sku: target.publicSku,
     weight: target.weight, sku_schema_version_id: target.skuSchemaVersionId,
+    characteristic_version_id: null,
     details: { ...current.amber.product.details, answers: target.answers }, magento_name_override: null };
   const supported = await loadSupportInputs(client, current.amber.compiled.definition, [candidate]);
   const generated = evaluate(current.amber, supported.products[0]).generatedNames || {};

@@ -19,6 +19,15 @@ function fixture() {
   return { source,preview,row };
 }
 
+test('native recount requires review when its immutable characteristic configuration changes', () => {
+  const f=fixture();
+  Object.assign(f.preview.corrected,{fullSku:null,skuSchemaVersionId:null,characteristicConfigHash:'a'.repeat(64)});
+  f.row.proposed_payload=structuredClone(f.preview.corrected);
+  assert.equal(e.classify(f.row,f.source,f.preview,5).classification,'SAFE_TO_COMPLETE');
+  f.preview.corrected.characteristicConfigHash='b'.repeat(64);
+  assert.equal(e.classify(f.row,f.source,f.preview,5).classification,'REVIEW_REQUIRED');
+});
+
 test('bulk classification distinguishes current proof, refresh upgrade and missing historical review', () => {
   const f=fixture();
   assert.equal(e.classify(f.row,f.source,f.preview,5).classification,'SAFE_TO_COMPLETE');

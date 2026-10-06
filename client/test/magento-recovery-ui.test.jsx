@@ -42,9 +42,10 @@ it('mixed history offers an explicit current-only decision and recovers the exac
   fireEvent.click(screen.getByRole('button', { name: 'Перевірити товар у Magento' }));
   const action = await screen.findByRole('button', { name: 'Підтвердити товар і дозволити оновлення' });
   expect(api.post).toHaveBeenCalledExactlyOnceWith('/admin/magento-recovery/products/7/lifecycle-preview', { kind: 'historical_recount_exposure' });
-  expect(screen.getByText(/Magento №4256/)).toBeTruthy();expect(screen.getByText(/Старі артикули відсутні/)).toBeTruthy();
+  expect(screen.getByText('Поточний товар знайдено в Magento')).toBeTruthy();expect(screen.getByText('Попередні артикули відсутні в Magento')).toBeTruthy();
   expect(screen.queryByText('Далі — виправлення історії переобліку')).toBeNull();
-  fireEvent.change(screen.getByLabelText('Що ви перевірили'), { target: { value: 'Перевірено: старі версії виведені з обігу, імпорти завершені' } });
+  expect(screen.queryByLabelText('Що ви перевірили')).toBeNull();
+  expect(screen.getByLabelText('Коментар (необов’язково)').value).toBe('');
   expect(action.disabled).toBe(true);
   fireEvent.click(screen.getByRole('checkbox'));
   expect(action.disabled).toBe(false);expect(api.post.mock.calls.some(([url]) => url.endsWith('/lifecycle-apply'))).toBe(false);
@@ -197,9 +198,10 @@ it('guided history check offers the exact server-recommended decision with a con
   api.post.mockResolvedValue({ data: { review: { kind: 'prior_exposure', payload: { remote: { status: 'found', sku: 'AG-000007' } } }, eligible: true, blockers: [], reviewHash: 'exact' } });
   show(['exports.reconcile'], { guided: true });
   fireEvent.click(screen.getByRole('button', { name: 'Перевірити товар у Magento' }));
-  await screen.findByText(/У Magento знайдено товар/);
+  await screen.findByText('Поточний товар знайдено в Magento');
   expect(api.post).toHaveBeenCalledExactlyOnceWith('/admin/magento-recovery/products/7/lifecycle-preview', { kind: 'prior_exposure' });
-  expect(screen.getByRole('button', { name: 'Підтвердити наявність товару' }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: 'Підтвердити наявність товару' }).disabled).toBe(false);
+  expect(api.post.mock.calls.some(([url]) => url.endsWith('/lifecycle-apply'))).toBe(false);
   expect(screen.queryByRole('button', { name: 'Перевірити можливість рішення' })).toBeNull();
 });
 
@@ -242,16 +244,16 @@ it('inspection and recording a verified result are distinct reviewed actions, wi
   show();
   fireEvent.click(screen.getByRole('button', { name: 'Відкрити перевірку доставки' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Перевірити результат у Magento' }));
-  await screen.findByLabelText('Підстава рішення');
+  await screen.findByLabelText('Коментар (необов’язково)');
   expect(api.post).toHaveBeenCalledExactlyOnceWith('/admin/magento-recovery/jobs/job-1/inspect', {});
-  fireEvent.change(screen.getByLabelText('Підстава рішення'), { target: { value: 'Результат звірено' } });
+  fireEvent.change(screen.getByLabelText('Коментар (необов’язково)'), { target: { value: 'Результат звірено' } });
   fireEvent.click(screen.getByRole('button', { name: 'Підтвердити перевірений результат' }));
   expect(api.post).toHaveBeenCalledTimes(1);
   api.post.mockResolvedValueOnce({ data: { job: { ...job, state: 'succeeded' }, remoteWrites: 0 } });
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Зберегти підтверджене рішення' }));
   await screen.findByText('Перевірений результат записано в Amber. Змін до Magento не надсилали.');
   expect(api.post).toHaveBeenLastCalledWith('/admin/magento-recovery/jobs/job-1/reconcile', {
-    review: reviewed.review, reviewHash: reviewed.reviewHash, reason: 'Результат звірено',
+    review: reviewed.review, reviewHash: reviewed.reviewHash, reason: 'Оператор підтвердив запис перевіреного сервером результату початкової операції. Коментар: Результат звірено',
   });
   expect(api.post.mock.calls.some(([url]) => url.endsWith('/continue'))).toBe(false);
 });
@@ -263,7 +265,7 @@ it('uncertain continuation clears its old review and offers fresh inspection rat
   show();
   fireEvent.click(screen.getByRole('button', { name: 'Відкрити перевірку доставки' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Перевірити результат у Magento' }));
-  fireEvent.change(await screen.findByLabelText('Підстава рішення'), { target: { value: 'Перевірено початковий план' } });
+  fireEvent.change(await screen.findByLabelText('Коментар (необов’язково)'), { target: { value: 'Перевірено початковий план' } });
   fireEvent.click(screen.getByRole('button', { name: 'Переглянути продовження операції' }));
   expect(within(screen.getByRole('dialog')).getByText('Зараз: Old name')).toBeTruthy();
   expect(within(screen.getByRole('dialog')).getByText('Після дії: Amber stone')).toBeTruthy();
@@ -289,7 +291,7 @@ it('lifecycle recovery retains the exact original decision after a lost response
   show(['exports.reconcile']);
   fireEvent.click(screen.getByRole('button', { name: 'Відкрити перевірку доставки' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Перевірити можливість рішення' }));
-  fireEvent.change(await screen.findByLabelText('Підстава рішення'), { target: { value: 'Історію перевірено' } });
+  fireEvent.change(await screen.findByLabelText('Коментар (необов’язково)'), { target: { value: 'Історію перевірено' } });
   fireEvent.click(screen.getByRole('button', { name: 'Переглянути рішення щодо доставки' }));
   api.post.mockRejectedValueOnce(new Error('lost response'));
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Зберегти підтверджене рішення' }));
@@ -297,7 +299,7 @@ it('lifecycle recovery retains the exact original decision after a lost response
   await screen.findByText(/Не вдалося отримати підтверджений результат/);
   expect(screen.queryByLabelText('Рішення щодо історії доставки')).toBeNull();
   expect(screen.getByRole('button', { name: 'Перевірити можливість рішення' }).disabled).toBe(true);
-  expect(screen.getByLabelText('Підстава рішення').disabled).toBe(true);
+  expect(screen.getByLabelText('Коментар (необов’язково)').disabled).toBe(true);
   const original = api.post.mock.calls[1];
   api.post.mockResolvedValueOnce({ data: { alreadyApplied: true } });
   fireEvent.click(screen.getByRole('button', { name: 'Отримати результат початкового рішення' }));
@@ -314,4 +316,22 @@ it('a recovery guard failure explains the next step without exposing an internal
   await screen.findByText('Інша операція вже працює з цим товаром. Дочекайтеся її завершення та повторіть перевірку.');
   expect(screen.queryByText('MAGENTO_SYNC_BUSY')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Переглянути продовження операції' })).toBeNull();
+});
+
+it('unknown old file evidence keeps confirmation disabled until the operator selects its actual disposition', async () => {
+  api.get.mockResolvedValue({data:historicalRecord});
+  api.post.mockResolvedValue({data:{...historicalPreview,requiredEvidence:{oldSkus:[],files:['snapshot-42'],historicalConfirmation:true}}});
+  show(['exports.reconcile'],{guided:true});
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити товар у Magento'}));
+  const action=await screen.findByRole('button',{name:'Підтвердити товар і дозволити оновлення'});
+  fireEvent.click(screen.getByRole('checkbox'));
+  expect(action.disabled).toBe(true);
+  expect(screen.getByText(/Вкажіть долю кожного старого файлу/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Чи може цей файл ще потрапити в імпорт?'),{target:{value:'quarantined_do_not_import'}});
+  expect(action.disabled).toBe(false);
+  fireEvent.click(action);
+  expect(api.post).toHaveBeenCalledTimes(1);
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Зберегти підтверджене рішення'}));
+  await waitFor(()=>expect(api.post).toHaveBeenCalledTimes(2));
+  expect(api.post.mock.calls[1][1].evidence.files).toEqual([{snapshotId:'snapshot-42',disposition:'quarantined_do_not_import',evidence:'Оператор підтвердив: файл вилучено з подальшого імпорту.'}]);
 });

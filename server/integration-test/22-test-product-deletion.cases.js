@@ -54,8 +54,7 @@ suite.test('test deletion gap: ordinary archive retains identity and retires loc
   const gate=require('../src/services/full-product-cutover-gate');
   try {
     await connection.query('BEGIN'); await gate.enterExisting(connection);
-    product=(await insertProductFixture(connection, `INSERT INTO products(full_sku,category,total_price_uah)
-      VALUES('ZZ-ARCHIVE-GAP','ZZ',100) RETURNING *`)).rows[0];
+    product=(await require('./product-fixture').insertNativeProductFixture(connection, { category: 'ZZ' })).rows[0];
     await connection.query("UPDATE product_full_export_state SET business_exclusion_state='none',delivery_version=delivery_version+1 WHERE product_id=$1",[product.id]);
     await gate.commit(connection);
   } catch(error) { await gate.rollback(connection); throw error; }
@@ -63,7 +62,8 @@ suite.test('test deletion gap: ordinary archive retains identity and retires loc
   const originalFetch = global.fetch;
   global.fetch = async () => { assert.fail('Archive must never call Magento'); };
   try {
-    await require('../src/services/product.service').deleteProductBySku(product.full_sku,
+    const publicSku = (await pool.query('SELECT public_sku FROM public_product_identities WHERE id=$1', [product.public_product_identity_id])).rows[0].public_sku;
+    await require('../src/services/product.service').deleteProductBySku(publicSku,
       { mutationContext: { actorUserId: suite.authenticatedSession.applicationUser.id } });
   } finally { global.fetch = originalFetch; }
   const saved = (await pool.query('SELECT * FROM products WHERE id=$1', [product.id])).rows[0];
@@ -71,7 +71,8 @@ suite.test('test deletion gap: ordinary archive retains identity and retires loc
   assert.equal(saved.exclude_from_export, 1);
   assert.equal((await pool.query('SELECT route FROM product_full_export_state WHERE product_id=$1', [product.id])).rows[0].route, 'retired');
   assert.equal(saved.public_product_identity_id, product.public_product_identity_id);
-  assert.equal((await pool.query('SELECT 1 FROM sku_registry WHERE full_sku=$1', [product.full_sku])).rowCount, 1);
+  assert.equal(product.full_sku, null);
+  assert.equal((await pool.query('SELECT 1 FROM sku_registry WHERE first_product_id=$1', [product.id])).rowCount, 0);
   assert.equal((await pool.query("SELECT 1 FROM audit_events WHERE event_key='product.archived' AND subject_id=$1", [String(product.id)])).rowCount, 1);
 });
 
@@ -115,18 +116,24 @@ suite.test('test deletion ledger safety and recovery with fake Magento only', as
         legacy_product_csv_enabled=FALSE,cutover_at=CURRENT_TIMESTAMP,cutover_by_user_id=$1,cutover_event_id=$2`, [actor.id,event]);
       await client.query('COMMIT');
     } finally { client.release(); }
-    async function scenario() {
-      const product = (await insertProductFixture(db, `INSERT INTO products(full_sku,category,total_price_uah)
-        VALUES($1,'ZZ',100) RETURNING *`, [`ZZ-${crypto.randomUUID()}`.toUpperCase()])).rows[0];
-      await db.query("UPDATE product_full_export_state SET business_exclusion_state='none',delivery_version=delivery_version+1 WHERE product_id=$1", [product.id]);
+    async function scenario({isTestProduct=false}={}) {
+      const product = (await require('./product-fixture').insertNativeProductFixture(db, { category: 'ZZ', isTestProduct, actorUserId:isTestProduct?actor.id:null })).rows[0];
+      const lifecycleClient = await db.connect(), lifecycleGate = require('../src/services/full-product-cutover-gate');
+      try {
+        await lifecycleGate.begin(lifecycleClient);
+        await lifecycleClient.query("UPDATE product_full_export_state SET business_exclusion_state='none',delivery_version=delivery_version+1 WHERE product_id=$1", [product.id]);
+        await lifecycleGate.commit(lifecycleClient);
+      } catch (error) { await lifecycleGate.rollback(lifecycleClient); throw error; }
+      finally { await lifecycleGate.release(lifecycleClient); lifecycleClient.release(); }
       const sku = (await db.query('SELECT public_sku FROM public_product_identities WHERE id=$1', [product.public_product_identity_id])).rows[0].public_sku;
       const jobId = crypto.randomUUID(); const remoteId = product.id + 100000;
       await db.query(`INSERT INTO magento_sync_jobs(id,product_id,public_product_identity_id,sku,installation_key,origin_hash,
         binding_revision_id,binding_hash,amber_hash,plan_hash,intent,baseline,created_by_user_id,state,remote_product_id,acknowledged_at)
         VALUES($1,$2,$3,$4,'test-delete',$5,$6,$7,$7,$7,
-          '{"mode":"create","operations":[{"domain":"coreProduct","payload":{"product":{"name":"Test"}}}],"englishValues":{"name":"Test"}}',
+          $10::jsonb,
           '{}',$8,'succeeded',$9,CURRENT_TIMESTAMP)`,
-      [jobId,product.id,product.public_product_identity_id,sku,originHash(config.baseUrl),binding.id,hash({}),actor.id,remoteId]);
+      [jobId,product.id,product.public_product_identity_id,sku,originHash(config.baseUrl),binding.id,hash({}),actor.id,remoteId,
+        JSON.stringify({mode:'create',operations:[{domain:'coreProduct',payload:{product:{name:'Test',...(isTestProduct?{status:2}:{})}}}],englishValues:{name:'Test'}})]);
       await require('../src/services/magento/name-state').confirmJobNames(db,
         (await db.query('SELECT * FROM magento_sync_jobs WHERE id=$1',[jobId])).rows[0]);
       await db.query("UPDATE magento_product_sync_requests SET state='synced',synced_generation=desired_generation WHERE product_id=$1", [product.id]);
@@ -177,11 +184,12 @@ suite.test('test deletion ledger safety and recovery with fake Magento only', as
       assert.equal((await require('../src/services/magento/sync-problems').summary(db)).problemCount,0);
       assert.deepEqual(await require('../src/services/magento/sync-problems').problems(config,db),[]);
       assert.deepEqual((await db.query('SELECT * FROM magento_sync_jobs WHERE id=$1',[s.jobId])).rows[0],before);
-      assert.equal((await db.query('SELECT 1 FROM sku_registry WHERE full_sku=$1',[row.full_sku])).rowCount,1);
+      assert.equal(row.full_sku,null);
+      assert.equal((await db.query('SELECT 1 FROM sku_registry WHERE first_product_id=$1',[row.id])).rowCount,0);
       assert.equal((await db.query('SELECT 1 FROM public_product_identities WHERE id=$1',[row.public_product_identity_id])).rowCount,1);
       assert.equal((await db.query("SELECT 1 FROM audit_events WHERE event_key='product.test_delete_finalized' AND subject_id=$1",[String(row.id)])).rowCount,1);
       assert.ok(!(await require('../src/services/product/product-queries').getRecentProducts(db)).some((p) => p.id===row.id));
-      assert.equal((await require('../src/services/product/public-identity').resolveProductLookup(db,row.full_sku)).product,null);
+      assert.equal((await require('../src/services/product/public-identity').resolveProductLookup(db,s.sku)).product,null);
       assert.equal((await scenario()).sku,'AG-000003');
       await assert.rejects(db.query("UPDATE products SET status='active' WHERE id=$1",[row.id]), /frozen/);
       await assert.rejects(db.query('DELETE FROM products WHERE id=$1',[row.id]));
@@ -306,19 +314,19 @@ suite.test('test deletion ledger safety and recovery with fake Magento only', as
       await assert.rejects(history.preview(),{code:'TEST_DELETE_BUSINESS_EVIDENCE'});
       const requested=await scenario(); await db.query(`INSERT INTO correction_requests
         (source_product_id,category_code,source_sku,proposed_sku,old_payload,proposed_payload,preview_signature)
-        VALUES($1,'ZZ',$2,$2,'{}','{}','test')`,[requested.product.id,requested.product.full_sku]);
+        VALUES($1,'ZZ',$2,NULL,'{}','{}','test')`,[requested.product.id,requested.sku]);
       await assert.rejects(requested.preview(),{code:'TEST_DELETE_BUSINESS_EVIDENCE'});
       const repriced=await scenario(); const batch=(await db.query(`INSERT INTO repricing_batches(scenario_name,preview_token)
         VALUES('Test',$1) RETURNING id`,[crypto.randomUUID()])).rows[0];
       await db.query(`INSERT INTO repricing_items(batch_id,product_id,sku,new_price_uah,price_delta_uah,old_payload,new_payload)
-        VALUES($1,$2,$3,100,0,'{}','{}')`,[batch.id,repriced.product.id,repriced.product.full_sku]);
+        VALUES($1,$2,$3,100,0,'{}','{}')`,[batch.id,repriced.product.id,repriced.sku]);
       await assert.rejects(repriced.preview(),{code:'TEST_DELETE_BUSINESS_EVIDENCE'});
       const snapshot=await scenario(); const snapshotId=crypto.randomUUID();
       await db.query(`WITH snapshot AS (INSERT INTO export_snapshots(id,idempotency_key,from_sku,resolved_to_sku,exported_to_product_id,
         row_count,file_name,csv_content,full_product_lifecycle_version) VALUES($1,$1,$2,$2,$3,1,'test.csv','test',1) RETURNING id)
         INSERT INTO export_snapshot_products(snapshot_id,product_id,sku_at_capture,capture_kind,evidence_origin,evidence_hash)
         SELECT id,$3,$2,'legacy_compatibility','live_capture',$4 FROM snapshot`,
-      [snapshotId,snapshot.product.full_sku,snapshot.product.id,hash({})]);
+      [snapshotId,snapshot.sku,snapshot.product.id,hash({})]);
       await assert.rejects(snapshot.preview(),{code:'TEST_DELETE_BUSINESS_EVIDENCE'});
       const unresolved=await scenario();
       await db.query(`INSERT INTO magento_sync_jobs(id,product_id,public_product_identity_id,sku,installation_key,origin_hash,
@@ -354,7 +362,7 @@ suite.test('test deletion ledger safety and recovery with fake Magento only', as
     });
     await t.test('actor revalidation, exact confirmation, and Administrator-only permission mapping', async () => {
       const s=await scenario(); const p=await s.preview();
-      await assert.rejects(service.apply(config,{productId:s.product.id,previewHash:p.previewHash,confirmation:s.product.full_sku},s.options),{code:'TEST_DELETE_CONFIRMATION_REQUIRED'});
+      await assert.rejects(service.apply(config,{productId:s.product.id,previewHash:p.previewHash,confirmation:'INVALID-LEGACY-CONFIRMATION'},s.options),{code:'TEST_DELETE_CONFIRMATION_REQUIRED'});
       await assert.rejects(s.apply(p,{mutationContext:{actorUserId:999999}}),{code:'ADMIN_PERMISSION_REVOKED'});
       for(const role of ['manager','storekeeper']) await assert.rejects(db.query(`INSERT INTO role_permissions(role_id,permission_key)
         SELECT id,'products.delete_test' FROM roles WHERE role_key=$1`,[role]),/reserved/);
@@ -379,6 +387,67 @@ suite.test('test deletion ledger safety and recovery with fake Magento only', as
       assert.equal((await db.query('SELECT status FROM products WHERE id=$1',[s.product.id])).rows[0].status,'active');
       assert.equal((await db.query('SELECT state FROM magento_test_deletions WHERE product_id=$1',[s.product.id])).rows[0].state,'verified');
       assert.equal((await s.apply(p)).state,'finalized'); assert.equal(s.state.writes,1);
+    });
+    await t.test('070 genuine TEST photo/archive history uses exact verified hide, preserves originals and never relaxes ordinary AG or business guards', async () => {
+      const lifecycle=require('../src/services/product-lifecycle-state'),gate=require('../src/services/full-product-cutover-gate');
+      async function archive(s){
+        const client=await db.connect();let hide;
+        try{
+          await gate.begin(client,'BEGIN');
+          const previous=await lifecycle.readTarget(client,s.product.id,{lock:true,origin:originHash(config.baseUrl)});
+          await client.query("UPDATE products SET status='archived',exclude_from_export=1,archived_by_user_id=$2 WHERE id=$1",[s.product.id,actor.id]);
+          await require('../src/services/full-product-export.service').retireFullProduct(client,s.product.id);
+          hide=await require('../src/services/product-lifecycle.service').queueArchivedVisibility(client,{productId:s.product.id,
+            actorUserId:actor.id,mutationContext:mutations.mutationContext,previousProduct:previous.product,previousLifecycle:previous.lifecycle},{config});
+          await require('../src/audit/audit-events').writeAuditEvent(client,{mutationContext:mutations.mutationContext,eventKey:'product.archived',subjectType:'product',subjectId:s.product.id});
+          await gate.commit(client);
+        }catch(e){await gate.rollback(client);throw e;}finally{await gate.release(client);client.release();}
+        // Synthetic exact GET receipt, not real-store acceptance. The ordinary
+        // archive hook and permanent ledger capture the actual fixture state.
+        const observed=await require('../src/services/magento/client').createMagentoClient(config,{fetchImpl:s.options.fetchImpl}).findProductBySku(s.sku);
+        assert.equal(observed.status,2);assert.equal(observed.id,s.state.remote.id);
+        await db.query("UPDATE product_visibility_intents SET state='verified',previous_remote_status=2,verified_at=CURRENT_TIMESTAMP WHERE id=$1",[hide.intentId]);
+        await db.query("UPDATE magento_product_sync_requests SET state='needs_attention',reason_code='product_retired',active_job_id=NULL,active_generation=NULL WHERE product_id=$1",[s.product.id]);
+        return hide;
+      }
+      const s=await scenario({isTestProduct:true}),photoId=crypto.randomUUID();
+      const bytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j3ioAAAAASUVORK5CYII=','base64');
+      await db.query(`INSERT INTO product_photo_assets(id,actor_user_id,request_key,content_hash,mime_type,display_name,content,product_id)
+        VALUES($1,$2,$3,$4,'image/png','synthetic TEST.png',$5,$6)`,[photoId,actor.id,crypto.randomUUID(),crypto.createHash('sha256').update(bytes).digest('hex'),bytes,s.product.id]);
+      await db.query('INSERT INTO product_photo_sets(product_id,version,photo_ids,enable_when_verified) VALUES($1,1,$2,FALSE)',[s.product.id,[photoId]]);
+      await db.query(`INSERT INTO audit_events(event_key,actor_user_id,actor_snapshot,subject_type,subject_id)
+        VALUES('product.photos_saved',$1,'{"displayName":"Test","preferredUsername":null}','product',$2)`,[actor.id,String(s.product.id)]);
+      const hide=await archive(s),photoBefore=(await db.query('SELECT * FROM product_photo_assets WHERE id=$1',[photoId])).rows[0];
+      const galleryBefore=(await db.query('SELECT * FROM product_photo_sets WHERE product_id=$1',[s.product.id])).rows[0];
+      const before=(await db.query('SELECT * FROM magento_sync_jobs WHERE id=$1',[s.jobId])).rows[0];
+      const archivedBefore=(await db.query('SELECT * FROM products WHERE id=$1',[s.product.id])).rows[0];
+      const lifecycleBefore=(await db.query('SELECT * FROM product_full_export_state WHERE product_id=$1',[s.product.id])).rows[0];
+      const p=await s.preview();assert.equal((await s.apply(p)).state,'finalized');assert.equal(s.state.writes,1);
+      assert.deepEqual((await db.query('SELECT * FROM products WHERE id=$1',[s.product.id])).rows[0],archivedBefore);
+      assert.deepEqual((await db.query('SELECT * FROM product_full_export_state WHERE product_id=$1',[s.product.id])).rows[0],lifecycleBefore);
+      assert.equal((await db.query('SELECT state FROM magento_product_sync_requests WHERE product_id=$1',[s.product.id])).rows[0].state,'voided');
+      assert.equal((await s.apply(p)).state,'finalized');assert.equal(s.state.writes,1);
+      const restoreClient=await db.connect();
+      try { await gate.begin(restoreClient); await assert.rejects(restoreClient.query("UPDATE products SET status='active' WHERE id=$1",[s.product.id]),/frozen/); }
+      finally { await gate.rollback(restoreClient); await gate.release(restoreClient);restoreClient.release(); }
+      assert.deepEqual((await db.query('SELECT * FROM product_photo_assets WHERE id=$1',[photoId])).rows[0],photoBefore);
+      assert.deepEqual((await db.query('SELECT * FROM product_photo_sets WHERE product_id=$1',[s.product.id])).rows[0],galleryBefore);
+      assert.deepEqual((await db.query('SELECT * FROM magento_sync_jobs WHERE id=$1',[s.jobId])).rows[0],before);
+      assert.equal((await db.query('SELECT state FROM product_visibility_intents WHERE id=$1',[hide.intentId])).rows[0].state,'verified');
+      await assert.rejects(db.query('UPDATE product_photo_sets SET version=version+1 WHERE product_id=$1',[s.product.id]),/freezes media/);
+      const ordinary=await scenario();await archive(ordinary);await assert.rejects(ordinary.preview(),{code:'TEST_DELETE_NOT_CURRENT'});assert.equal(ordinary.state.writes,0);
+      const unknown=await scenario({isTestProduct:true});await archive(unknown);
+      await db.query(`INSERT INTO audit_events(event_key,actor_user_id,actor_snapshot,subject_type,subject_id)
+        VALUES('product.price_changed',$1,'{"displayName":"Test","preferredUsername":null}','product',$2)`,[actor.id,String(unknown.product.id)]);
+      await assert.rejects(unknown.preview(),{code:'TEST_DELETE_BUSINESS_EVIDENCE'});assert.equal(unknown.state.writes,0);
+      const sale=await scenario({isTestProduct:true});await archive(sale);sale.state.remote.status=1;
+      await assert.rejects(sale.preview(),{code:'TEST_DELETE_REMOTE_NOT_DISABLED'});assert.equal(sale.state.writes,0);
+      const stale=await scenario({isTestProduct:true});await archive(stale);
+      const staleClient=await db.connect();
+      try { await gate.begin(staleClient); await staleClient.query('UPDATE products SET total_price_uah=101 WHERE id=$1',[stale.product.id]); await gate.commit(staleClient); }
+      catch(error) { await gate.rollback(staleClient); throw error; }
+      finally { await gate.release(staleClient); staleClient.release(); }
+      await assert.rejects(stale.preview(),{code:'TEST_DELETE_ARCHIVE_PROOF_REQUIRED'});assert.equal(stale.state.writes,0);
     });
   } finally { await db.end(); await suite.dropTestDatabase(name); }
 });

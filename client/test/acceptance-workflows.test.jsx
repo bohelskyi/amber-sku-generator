@@ -90,7 +90,7 @@ it('product readiness shows local repair guidance, human fields and unchanged ra
   for (const label of ['Розмір', 'Назва українською та англійською', 'Обробка каменю']) expect(screen.getByText(label)).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Заповнити розмір' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Заповнити назви' })).toBeTruthy();
-  fireEvent.click(screen.getByText('Технічні деталі'));
+  fireEvent.click(screen.getByText('Дані для підтримки'));
   const evidence = JSON.parse(screen.getByText(/"code": "PRODUCT_EVALUATION_NOT_READY"/).textContent);
   expect(evidence).toHaveLength(2);
   expect(evidence[1]).toMatchObject({ code: 'PRODUCT_EVALUATION_NOT_READY', issueFields: ['kamin_obrobka', 'name', 'rozmir_suveniriv'] });

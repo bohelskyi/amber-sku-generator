@@ -31,7 +31,10 @@ function createApp({
   app.set('trust proxy', trustProxy);
   // PR1B permits 256 KiB definitions; leave all other routes' parser limits unchanged.
   app.use('/api/admin/export-templates', express.json({ limit: '272kb' }));
-  app.use(express.json());
+  const ordinaryJson = express.json();
+  // Large photo payloads are parsed only after authentication, active access and CSRF.
+  app.use((req, res, next) => req.method === 'POST' && /^\/api\/product-photos\/stage\/?$/i.test(req.path)
+    ? next() : ordinaryJson(req, res, next));
   app.use((req, res, next) => {
     const requestId = String(req.get('X-Request-ID') || crypto.randomUUID()).slice(0, 128);
     const startedAt = Date.now();
@@ -96,6 +99,18 @@ function createApp({
       next();
     } catch (error) { next(error); }
   });
+  const photoJson = express.json({ limit: require('./services/product-photos.service').MAX_PHOTO_REQUEST_BYTES });
+  app.use('/api/product-photos/stage', require('./auth/authorization').requireAnyPermission(['products.create', 'products.recount']),
+    (req, res, next) => photoJson(req, res, (error) => {
+      if (!error) return next();
+      const { PublicHttpError } = require('./http/errors');
+      next(new PublicHttpError(error.type === 'entity.too.large' ? 413 : 400,
+        error.type === 'entity.too.large' ? 'Запит із фото завеликий. Додавайте по одному фото до 1 МіБ (1048576 байтів).' : 'Не вдалося прочитати запит із фото.',
+        { code: error.type === 'entity.too.large' ? 'PHOTO_SIZE_LIMIT_EXCEEDED' : 'PHOTO_REQUEST_INVALID' }));
+    }));
+  app.use('/api', require('./routes/public/product-photos.routes'));
+  app.use('/api', require('./routes/admin/catalog-deletion.routes'));
+  app.use('/api', require('./routes/public/product-lifecycle.routes'));
   app.use('/api', publicRoutes);
   app.use('/api', adminRoutes);
 
@@ -107,7 +122,7 @@ function createApp({
       error: error.message,
       code: error.code,
     });
-    sendHttpError(res, error, { includeCode: error.code === 'EXPORT_CUTOVER_PREPARING' });
+    sendHttpError(res, error, { includeCode: ['EXPORT_CUTOVER_PREPARING', 'PHOTO_SIZE_LIMIT_EXCEEDED', 'PHOTO_REQUEST_INVALID'].includes(error.code) });
   });
 
   return app;

@@ -35,6 +35,41 @@ test('exact create verification checks identity, every reviewed flag, source typ
   const text={...command,frontendInput:'text',filterable:false,filterableInSearch:false};
   assert.equal(shape.verifyCreated({body:shape.creation(text,3)},'6001',remote(text)).attributeId,6001);
 });
+
+test('stock REST nullable backend/default omission verifies only the empty reviewed profile',()=>{
+  const intent={body:shape.creation(command,3)};
+  const observed=remote();
+  delete observed.backend_model; delete observed.default_value;
+  assert.equal(shape.verifyCreated(intent,'6001',observed).attributeId,6001);
+  for(const field of ['backend_model','default_value']){
+    for(const value of [null,'']) assert.equal(shape.verifyCreated(intent,'6001',{...observed,[field]:value}).attributeId,6001);
+    for(const value of ['Custom\\Backend','1',false,true,0,1,[],{}]){
+      assert.throws(()=>shape.verifyCreated(intent,'6001',{...observed,[field]:value}),{code:'MAGENTO_ATTRIBUTE_VERIFICATION_FAILED'});
+    }
+    assert.throws(()=>shape.verifyCreated(intent,'6001',{...observed,[field]:undefined}),{code:'MAGENTO_BINDING_INVALID'});
+  }
+  for(const field of ['backend_type','source_model']){
+    const missing={...observed};delete missing[field];
+    assert.throws(()=>shape.verifyCreated(intent,'6001',missing),{code:'MAGENTO_ATTRIBUTE_VERIFICATION_FAILED'});
+  }
+  for(const patch of [{attribute_id:6002},{attribute_code:'other'},{backend_type:'varchar'},
+    {source_model:'Custom\\Source'},{scope:'store'},{apply_to:[]},{is_required:true},
+    {frontend_labels:[]},{options:[{label:'New',value:'1'}]}]){
+    assert.throws(()=>shape.verifyCreated(intent,'6001',{...observed,...patch}));
+  }
+});
+
+test('stock REST empty option placeholder, omitted null fields and string boolean flags retain exact verification',()=>{
+  const quiet={...command,visibleOnFront:false,searchable:false,filterable:false,filterableInSearch:false};
+  const observed=remote(quiet); delete observed.backend_model; delete observed.default_value;
+  observed.frontend_labels=[{store_id:3,label:'Color'}]; observed.options=[{label:' ',value:''}];
+  for(const key of ['is_visible_on_front','is_searchable','is_unique','is_comparable','is_visible_in_advanced_search','is_used_for_promo_rules','used_in_product_listing']) observed[key]='0';
+  assert.equal(shape.verifyCreated({body:shape.creation(quiet,3)},'6001',observed).attributeId,6001);
+  for(const flag of Object.keys(shape.FIXED_FLAGS)){
+    const opposite=shape.FIXED_FLAGS[flag]?'0':'1';
+    assert.throws(()=>shape.verifyCreated({body:shape.creation(quiet,3)},'6001',{...observed,[flag]:opposite}));
+  }
+});
 test('set context never accepts truncated groups, another set or ambiguous member identity',()=>{
   assert.deepEqual(shape.groups({items:[{attribute_group_id:'3',attribute_set_id:'7',attribute_group_name:'Загальні'}],total_count:1},7),[{id:3,setId:7,name:'Загальні'}]);
   assert.throws(()=>shape.groups({items:[],total_count:101},7));

@@ -149,3 +149,33 @@ it('verified option creation reports the resource change even when its auxiliary
   expect(changed).toHaveBeenCalledExactlyOnceWith();expect(screen.getByText(/Створено, зв’язок ще не підтверджено/)).toBeTruthy();
   expect(api.post).toHaveBeenCalledTimes(4);
 });
+
+it('selected unlinked question exposes its exact resource-only option without automatic dispatch or approved values',async()=>{
+  const key='test_261005102222';
+  const own={questionKey:key,questionLabel:'TEST',valueId:'33',label:'TEST варіант261005102222',labelEn:'TEST option261005102222',state:'not_applicable'};
+  const resourceCategory={code:'SV',values:[own,{...own,valueId:'34',label:'Approved',state:'approved'},{...own,questionKey:'other',valueId:'35',label:'Other'}]};
+  shell(permissions,roles,{category:resourceCategory,initialQuestionKey:key,initialValueId:'33',initialAttributeCode:key,
+    revision:{...revision,id:'a1066106-f224-4fd1-98fc-83599bdb5916',schema:{attributes:[{attribute_code:key,frontend_input:'select'}]}}});
+  expect(screen.getByRole('combobox',{name:'Значення Amber'}).value).toBe(`${key}:33`);
+  expect(screen.getByRole('option',{name:'TEST: TEST варіант261005102222'})).toBeTruthy();
+  expect(screen.queryByRole('option',{name:'TEST: Approved'})).toBeNull();
+  expect(screen.queryByRole('option',{name:'TEST: Other'})).toBeNull();
+  expect(screen.getByText(/відповідність, публікація та доставка товарів потребують окремої перевірки/)).toBeTruthy();
+  expect(api.post).not.toHaveBeenCalled();
+  api.post.mockRejectedValueOnce({response:{data:{error:'Read-only fixture complete'}}});
+  fireEvent.click(screen.getByRole('button',{name:'Перевірити значення Magento'}));
+  await screen.findByText('Read-only fixture complete');
+  expect(api.post).toHaveBeenCalledExactlyOnceWith('/admin/magento-integration/options/inspect',{
+    bindingRevisionId:'a1066106-f224-4fd1-98fc-83599bdb5916',expectedRevision:'1',attributeCode:key,amberGroup:'SV',questionKey:key,valueId:'33'});
+});
+it('unscoped creation and published label editing keep unlinked values excluded',()=>{
+  const unlinked={...category.values[0],state:'not_applicable',label:'Unlinked'};
+  shell(permissions,roles,{category:{...category,values:[unlinked,...labelCategory.values]}});
+  expect(screen.queryByRole('option',{name:'Вид: Unlinked'})).toBeNull();
+  expect(screen.queryByRole('option',{name:'Вид: Скриньки'})).toBeNull();
+  cleanup();
+  labels({category:{...category,values:[unlinked,...labelCategory.values]},initialQuestionKey:'kind'});
+  expect(screen.queryByRole('option',{name:'Вид: Unlinked'})).toBeNull();
+  expect(screen.getByRole('option',{name:'Вид: Скриньки'})).toBeTruthy();
+  expect(api.post).not.toHaveBeenCalled();
+});

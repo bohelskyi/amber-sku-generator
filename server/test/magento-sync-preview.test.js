@@ -396,8 +396,9 @@ for (const value of [undefined, 0, '0', '00', ' 0 ']) test(`stored projection ve
     throw new Error(`Unexpected fixture query: ${sql}`);
   } };
   const decoded = await require('../src/services/product/product-decode').decodeSku('SYNTH-STONE', queryable);
-  assert.equal(decoded.decodedAnswers[0].value_id, value === undefined ? null : 0);
-  assert.equal(decoded.decodedAnswers[0].value_label, value === undefined ? 'Не обрано' : 'Не оброблений камінь');
+  assert.equal(decoded.decodedAnswers[0].value_id, value === undefined ? null : value);
+  assert.equal(decoded.decodedAnswers[0].value_label, value === undefined ? 'Не обрано'
+    : value === 0 || value === '0' ? 'Не оброблений камінь' : value);
   if (value === undefined) assert.equal(Object.hasOwn(require('../src/services/product/product-answers').buildProductAnswerContext(decoded), 'stone_processing'), false);
   // The projection is read-only: the planner receives the original raw answer.
   assert.equal(decoded.product.details.answers.stone_processing, value);

@@ -5,13 +5,16 @@ import { api } from '../../lib/api.js';
 import { EmptyState, LoadingState, Notice } from '../app/UiPrimitives.jsx';
 import MagentoBindingReview from './MagentoBindingReview.jsx';
 import MagentoCategoryActions from './MagentoCategoryActions.jsx';
+import RetiredCatalogNotice from './RetiredCatalogNotice.jsx';
 import MagentoOptionActions from './MagentoOptionActions.jsx';
 import MagentoPublicationActions from './MagentoPublicationActions.jsx';
 import MagentoProductChecks from './MagentoProductChecks.jsx';
 import MagentoDetails from './MagentoDetails.jsx';
 import { repairContext, withRepairContext } from '../../lib/magento-repair-context.js';
 import MagentoAttributeActions from './MagentoAttributeActions.jsx';
+import { localValueLabel } from '../../lib/magento-category-workspace.js';
 import MagentoStructureResult from './MagentoStructureResult.jsx';
+import './magento-preparation.css';
 
 const stages = ['Початок', 'Дані Magento', 'Підключення', 'Перевірка товарів', 'Застосування'];
 const goals = [
@@ -37,6 +40,7 @@ export default function MagentoPreparationWorkspace({ activePublication, observa
   const readKey = `${revisionId}:${activePublication?.id || ''}`;
   const data = loaded?.key === readKey ? loaded.value : null; const [error, setError] = useState(''); const [reload, setReload] = useState(0);
   const intent = goals.some((goal) => goal.value === params.get('intent')) ? params.get('intent') : '';
+  const resourceChoice = params.get('resourceChoice') === 'existing' ? 'existing' : 'new';
   const stage = [0, 1, 2, 3, 4, 5].includes(Number(params.get('step'))) ? Number(params.get('step')) : 0;
   const [representatives, setRepresentatives] = useState([]); const [publishedResult, setPublishedResult] = useState(false);
   const [draftsNeedingObservation, setDraftsNeedingObservation] = useState(() => new Set()); const sequence = useRef(0);
@@ -52,6 +56,7 @@ export default function MagentoPreparationWorkspace({ activePublication, observa
   }
   const revision = data?.revision;
   const resourcesChanged = draftsNeedingObservation.has(revision?.id) || params.get('refresh') === revision?.id;
+  const choosingExisting = ['subcategory', 'attribute', 'option'].includes(intent) && resourceChoice === 'existing';
   const category = categoryCode ? data?.categories.find((item) => item.code === categoryCode) : data?.categories[0];
   const activeRevision = activePublication ? { ...activePublication, state: 'published' } : null;
   const canPreview = permissions.includes('export_templates.manage') && permissions.includes('exports.view');
@@ -70,24 +75,27 @@ export default function MagentoPreparationWorkspace({ activePublication, observa
   const selectedGoal = goals.find((goal) => goal.value === intent);
   const categoryQuery = encodeURIComponent(category?.code || '');
   const taskPath = `/admin/magento/prepare?${params}`;
+  const optionQuestions = (data?.catalog?.questions?.[category?.code] || []).filter((question) => !question.archived && question.input_type === 'options');
+  const optionQuestion = optionQuestions.find((question) => question.id === context.question);
   const catalogLink = (action) => `/admin/catalog?${new URLSearchParams({ category: category?.code || '', ...(context.question ? { question: context.question } : {}), ...(action ? { action } : {}), returnTo: taskPath })}`;
   const rulesPath = revision?.templateId ? withRepairContext(`/admin/magento/rules/${encodeURIComponent(revision.templateId)}`, context, { version: revision.templateVersionId, intent: intent || 'rules', category: category?.code, ...(intent === 'subcategory' ? { field: 'categories' } : {}) }) : null;
   const field = params.get('field') || undefined;
   const returnPath = context.returnTo || (context.productId ? `/attention?problem=${encodeURIComponent(context.productId)}` : `/admin/magento/categories/${categoryQuery}`);
-  return <div className="space-y-5">
+  return <div className="space-y-5 magento-preparation-workspace">
     <Link className="text-sm underline" to={returnPath}>{context.productId ? 'Повернутися до товару' : 'До категорії'}</Link>
     <h2 className="text-xl font-semibold">{selectedGoal?.title || 'Підготувати зміни інтеграції'}</h2>
-    <p className="text-sm text-slate-600">Чернетка не змінює поточну доставку. Етапи можна переглядати повторно; кожна зміна підтверджується окремо.</p>
+    <p className="text-sm text-slate-600">Чернетка не змінює доставку. Застосування перевіряє весь пакет.</p>
     {context.path && <p className="font-medium">Розміщення: {context.path.replaceAll('/', ' → ')}</p>}
-    {context.question && <p className="text-sm">{category?.values?.find((item) => item.questionKey === context.question)?.questionLabel || 'Обрана характеристика'}{context.value ? `: ${category?.values?.find((item) => item.questionKey === context.question && String(item.valueId) === context.value)?.label || context.value}` : ''}</p>}
+    {context.question && <p className="text-sm">{category?.values?.find((item) => item.questionKey === context.question)?.questionLabel || 'Обрана характеристика'}{context.value ? `: ${category?.values?.find((item) => item.questionKey === context.question && String(item.valueId) === context.value)?.label || localValueLabel([], context.question, context.value)}` : ''}</p>}
     {publishedResult?.id === revision?.id && publishedResult?.category === category?.code && publishedResult?.intent === intent && <Notice tone="success"><p>Налаштування опубліковано. Результат передавання товарів перевіряється окремо.</p><Link className="underline" to={returnPath}>{context.productId ? 'Перевірити стан цього товару' : 'Переглянути категорію'}</Link></Notice>}
     <nav className="magento-steps" aria-label="Етапи підготовки">{stageIds.map((id, index) => <button type="button" className="btn btn-outline btn-compact-md" key={id} aria-current={stage === id ? 'step' : undefined} onClick={() => setStage(id)}>{index + 1}. {id === 5 ? 'Правила передачі' : stages[id]}</button>)}</nav>
+    <RetiredCatalogNotice availability={revision?.catalogAvailability} categoryCode={category?.code} />
     {error && <Notice>{error} <button className="btn btn-outline btn-compact-md" onClick={() => setReload((value) => value + 1)}>Повторити читання</button></Notice>}{!data && !error && <LoadingState />}
     {sourceChanged && <Notice>Активні відповідності змінилися. Оновіть стан інтеграції перед продовженням.
       <button className="btn btn-outline btn-compact-md" onClick={() => { setData(null); queryChange({ draft: null, step: 0 }); setRepresentatives([]); setReload((value) => value + 1); onPublished(); }}>Повернутися до поточної публікації</button></Notice>}
     {data && !sourceChanged && categoryCode && !category && <Notice tone="warning">Категорію цієї задачі не знайдено. Поверніться до товару або оберіть категорію заново. Налаштування іншої категорії не підставлено.</Notice>}
     {data && !sourceChanged && (!categoryCode || category) && <>
-      <div className="card space-y-2 p-4"><p className="font-medium">{!revision ? 'Опублікованих відповідностей ще немає' : revision.state === 'draft' ? `Чернетка змін · ревізія ${revision.revision}` : revision.id === activePublication?.id ? `Переглядаємо активну версію ${revision.versionNumber}` : 'Переглядаємо історичну опубліковану версію'}</p>
+      <div className="card space-y-2 p-4 mp-context"><p className="font-medium">{!revision ? 'Опублікованих відповідностей ще немає' : revision.state === 'draft' ? `Чернетка змін · ревізія ${revision.revision}` : revision.id === activePublication?.id ? `Переглядаємо активну версію ${revision.versionNumber}` : 'Переглядаємо історичну опубліковану версію'}</p>
         <p className="text-sm">Категорія: {category?.name || 'Не вибрано'}. {revision?.state === 'draft' ? 'Не впливає на поточну доставку.' : 'Опубліковані відповідності незмінні.'}</p></div>
       {stage === 0 && <section className="card space-y-4 p-5"><h3 className="font-semibold">Обсяг змін</h3>
         <details open={!intent}><summary>Змінити задачу</summary><div className="magento-goal-grid" role="group" aria-label="Що потрібно підготувати?">{goals.map((goal) => <button type="button" key={goal.value} aria-pressed={intent === goal.value} onClick={() => setIntent(goal.value)}><strong>{goal.title}</strong><span>{goal.text}</span></button>)}</div></details>
@@ -100,21 +108,22 @@ export default function MagentoPreparationWorkspace({ activePublication, observa
       </section>}
       {stage === 5 && <section className="card space-y-3 p-5"><h3 className="font-semibold">Правила передачі полів</h3><p>Змініть правило у чернетці, перевірте приклади й зафіксуйте версію. Після повернення підготуйте налаштування Magento саме з цією версією.</p>{revision?.templateId && <Link className="btn btn-primary" to={rulesPath}>Переглянути правила цієї підготовки</Link>}<button className="btn btn-outline" onClick={() => setStage(2)}>Перейти до відповідностей</button></section>}
       {stage === 1 && <div className="space-y-4"><h3 className="font-semibold">{intent === 'subcategory' ? 'Розміщення в магазині' : intent === 'attribute' ? 'Характеристика та атрибут Magento' : intent === 'option' ? 'Варіант характеристики' : 'Категорії та характеристики'}</h3>
-        {permissions.includes('catalog.view') && ['attribute', 'option', 'category', 'connect'].includes(intent) && <section className="space-y-2"><h4 className="font-medium">Дані товарів в Amber</h4><Link className="underline text-sm" to={catalogLink(intent === 'option' ? 'new-option' : intent === 'attribute' ? 'new-question' : undefined)}>{intent === 'option' ? 'Додати варіант характеристики' : intent === 'attribute' ? 'Додати характеристику товару' : 'Переглянути характеристики та схему SKU'}</Link><p className="text-sm text-slate-600">Для нових значень, що входять до внутрішнього SKU, опублікуйте схему в каталозі перед підключенням.</p></section>}
-        {intent === 'attribute' && revision && <MagentoAttributeActions revision={revision} categoryCode={category?.code} initialAttributeCode={field} onResourceChanged={resourceChanged} onReady={(action) => { if (rulesPath) navigate(withRepairContext(rulesPath, context, { field: action.attributeCode, category: category?.code })); }} />}
+        {['subcategory', 'attribute', 'option'].includes(intent) && <section className="space-y-3" aria-label="Як підключити ресурс Magento"><p>Спочатку визначте, чи потрібний ресурс уже є в Magento.</p><div className="mc-actions mp-resource-choices" role="group" aria-label="Ресурс Magento"><button type="button" className="btn btn-outline mp-resource-choice" aria-pressed={resourceChoice === 'existing'} onClick={() => queryChange({ resourceChoice: 'existing' })}>Використати наявний</button><button type="button" className="btn btn-outline mp-resource-choice" aria-pressed={resourceChoice === 'new'} onClick={() => queryChange({ resourceChoice: 'new' })}>Створити відсутній</button></div><p>{resourceChoice === 'existing' ? 'Виберіть наявне поле, значення або розділ у відповідностях. Новий ресурс Magento не створюється; збереження прив’язки й застосування правил залишаються окремими діями.' : intent === 'attribute' ? 'Створення атрибута → окреме підключення до набору → правило передавання → перевірка всього пакета → застосування. Чинні товари не отримають довільне значення.' : intent === 'option' ? 'Перевірка наявних значень → підтверджене створення відсутнього → свіжа підготовка → прив’язка → застосування. Старі значення й історія SKU зберігаються.' : 'Правило точного розміщення → перевірка батьківського розділу → підтверджене створення → свіжа підготовка → застосування. Створений розділ сам не змінює товари.'}</p>{resourceChoice === 'existing' && <button type="button" className="btn btn-primary" disabled={revision?.state !== 'draft' || resourcesChanged} onClick={() => setStage(2)}>Вибрати наявну відповідність</button>}</section>}
+        {permissions.includes('catalog.view') && ['attribute', 'option', 'category', 'connect'].includes(intent) && <section className="space-y-2"><h4 className="font-medium">Дані товарів в Amber</h4>{intent === 'option' && <label className="block text-sm">Характеристика для нового варіанта<select className="input" value={optionQuestion?.id || ''} onChange={(event) => queryChange({ question: event.target.value, value: null })}><option value="">Оберіть характеристику</option>{optionQuestions.map((question) => <option key={question.id} value={question.id}>{question.label}</option>)}</select></label>}{intent === 'option' && !optionQuestion ? <p className="text-sm" role="status">Оберіть чинну характеристику зі списком значень перед додаванням варіанта.</p> : <Link className="btn btn-outline mp-catalog-link" to={catalogLink(intent === 'option' ? 'new-option' : intent === 'attribute' ? 'new-question' : undefined)}>{intent === 'option' ? 'Додати варіант характеристики' : intent === 'attribute' ? 'Додати характеристику товару' : 'Переглянути характеристики та схему SKU'}</Link>}<p className="text-sm text-slate-600">{data.nativeCharacteristicsAuthoring === true ? 'Нові характеристики та значення беруться з чинного каталогу. Для їх передавання підготуйте нову версію правил із підтримкою характеристик, перевірте відповідність Magento й застосуйте перевірений пакет.' : 'Для нових значень, що входять до внутрішнього SKU, опублікуйте схему в каталозі перед підключенням.'}</p></section>}
+        {intent === 'attribute' && resourceChoice === 'new' && revision && <MagentoAttributeActions revision={revision} categoryCode={category?.code} initialAttributeCode={field} onResourceChanged={resourceChanged} onReady={(action) => { if (rulesPath) navigate(withRepairContext(rulesPath, context, { field: action.attributeCode, category: category?.code })); }} />}
         <button className="btn btn-outline btn-compact-md" disabled={checking} onClick={onDiscover}>Перевірити структуру</button>
         {checking && <LoadingState compact label="Перевіряємо структуру…" />}
         {checkError && <Notice tone="warning">{checkError}</Notice>}
         {!checking && !checkError && <MagentoStructureResult comparison={observation?.comparison} activeId={activePublication?.id} />}
         {revision?.state === 'draft' ? <>
-          {intent !== 'option' && intent !== 'attribute' && <MagentoCategoryActions revision={revision} categoryCode={category?.code} observation={observation} onResourceChanged={resourceChanged} />}
-          {!['subcategory', 'attribute'].includes(intent) && <MagentoOptionActions mode="create" revision={revision} category={category} observation={observation} onResourceChanged={resourceChanged} initialQuestionKey={context.question} initialValueId={context.value} initialAttributeCode={field} onExisting={() => setStage(2)} />}
+          {intent !== 'option' && intent !== 'attribute' && resourceChoice === 'new' && <MagentoCategoryActions revision={revision} categoryCode={category?.code} observation={observation} onResourceChanged={resourceChanged} />}
+          {!['subcategory', 'attribute'].includes(intent) && resourceChoice === 'new' && <MagentoOptionActions mode="create" revision={revision} category={category} observation={observation} onResourceChanged={resourceChanged} initialQuestionKey={context.question} initialValueId={context.value} initialAttributeCode={field} onExisting={() => setStage(2)} />}
         </> : <p>Почніть зміну налаштувань на першому кроці.</p>}
         {rulesPath && intent !== 'attribute' && <Link className="btn btn-outline" to={rulesPath}>{intent === 'subcategory' ? 'Вибрати розділ і товари для підкатегорії' : 'Налаштувати передачу цієї характеристики'}</Link>}
         {resourcesChanged && <Notice tone="success">Зміну в Magento підтверджено. Залишилося перевірити підключення та застосувати налаштування.</Notice>}
         {activeRevision && (resourcesChanged || revision?.state !== 'draft') && <MagentoBindingReview repairContext={context} taskIntent={intent} guided refreshing mode="successor" categoryCode={category?.code} revision={activeRevision} currentPublishedId={activePublication.id} templateVersions={data.templateVersions} initialTemplateVersionId={revision?.templateVersionId || activePublication.templateVersionId} onChanged={successorChanged} />}
-        {revision?.state === 'draft' && !resourcesChanged && <button className="btn btn-primary" onClick={() => setStage(2)}>Перевірити підключення</button>}
-        <MagentoDetails summary="Як зберігаються підготовлені зміни">{() => <p>Створення в Magento не оновлює зафіксоване спостереження. Непубліковані рішення попередньої чернетки автоматично не переносяться. Після перевірки створюється нова підготовка від чинних налаштувань; попередні дії залишаються в історії.</p>}</MagentoDetails>
+        {revision?.state === 'draft' && !resourcesChanged && !choosingExisting && <button className="btn btn-primary" onClick={() => setStage(2)}>Перевірити підключення</button>}
+        <MagentoDetails summary="Як зберігаються підготовлені зміни">{() => <p>Етапи можна переглядати повторно; кожна зміна підтверджується окремо. Створення в Magento не оновлює зафіксоване спостереження. Непубліковані рішення попередньої чернетки автоматично не переносяться. Після перевірки створюється нова підготовка від чинних налаштувань; попередні дії залишаються в історії.</p>}</MagentoDetails>
       </div>}
       {stage === 2 && (resourcesChanged ? <Notice tone="warning">Підготуйте нову чернетку після створення ресурсів на попередньому етапі.</Notice> : revision ? <MagentoBindingReview repairContext={context} taskIntent={intent} mode="review" categoryCode={category?.code} field={field} revision={revision} currentPublishedId={activePublication?.id} onChanged={changeRevision} /> : <EmptyState>Спочатку виберіть відповідності.</EmptyState>)}
       {stage === 3 && (resourcesChanged ? <Notice tone="warning">Спочатку підготуйте нову чернетку зі свіжим спостереженням.</Notice> : revision && category && canPreview ? <>

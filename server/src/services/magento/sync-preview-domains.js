@@ -10,41 +10,58 @@ function invalid() { throw Object.assign(new Error('Invalid bounded domain evide
 // These are Magento 2.4.6 MSI read contracts, not legacy stock-item write assumptions.
 async function readDomains(config, { client, schema, sku, raw, expected, fetchImpl }) {
   const evidence = { inventory: null, english: null, failures: [] };
-  if (present(expected.base.qty) || present(expected.base.is_in_stock)) {
-    try {
-      const stock = await client.getInventoryStockForWebsite('base');
-      if (!positiveId(stock?.stock_id) || !stock.extension_attributes?.sales_channels?.some((s) => s.type === 'website' && s.code === 'base')) invalid();
-      const sources = await client.getInventorySourcesForStock(stock.stock_id);
-      const items = await client.getInventorySourceItemsBySku(sku);
-      if (!Array.isArray(sources) || sources.length > 100 || sources.some((s) => typeof s.source_code !== 'string' || !/^[\w-]{1,100}$/.test(s.source_code)
-        || typeof s.enabled !== 'boolean') || new Set(sources.map((s) => s.source_code)).size !== sources.length
-        || !Array.isArray(items?.items) || items.items.length > 100 || items.total_count !== items.items.length
-        || items.items.some((i) => i.sku !== sku || typeof i.source_code !== 'string' || !/^[\w-]{1,100}$/.test(i.source_code)
-          || typeof i.quantity !== 'number' || !Number.isFinite(i.quantity) || ![0, 1].includes(i.status))
-        || new Set(items.items.map((i) => i.source_code)).size !== items.items.length) invalid();
-      evidence.inventory = { stockId: stock.stock_id, websiteCode: 'base',
-        sources: sources.map((s) => ({ sourceCode: s.source_code, enabled: s.enabled })),
-        sourceItems: items.items.map((i) => ({ sourceCode: i.source_code, qty: i.quantity, isInStock: i.status === 1 })) };
-    } catch (cause) { evidence.failures.push({ code: 'INVENTORY_READ_UNAVAILABLE', operation: 'inventory', reason: safeReason(cause) }); }
+  async function inventoryRead() {
+    if (present(expected.base.qty) || present(expected.base.is_in_stock)) {
+      try {
+        const stock = await client.getInventoryStockForWebsite('base');
+        if (!positiveId(stock?.stock_id) || !stock.extension_attributes?.sales_channels?.some((s) => s.type === 'website' && s.code === 'base')) invalid();
+        // Both reads depend on this verified stock/SKU, not on each other's result.
+        // Settle both before a failure can leave this fresh observation boundary.
+        const reads = await Promise.allSettled([
+          Promise.resolve().then(() => client.getInventorySourcesForStock(stock.stock_id)),
+          Promise.resolve().then(() => client.getInventorySourceItemsBySku(sku)),
+        ]);
+        const failed = reads.find((read) => read.status === 'rejected');
+        if (failed) throw failed.reason;
+        const [sources, items] = reads.map((read) => read.value);
+        if (!Array.isArray(sources) || sources.length > 100 || sources.some((s) => typeof s.source_code !== 'string' || !/^[\w-]{1,100}$/.test(s.source_code)
+          || typeof s.enabled !== 'boolean') || new Set(sources.map((s) => s.source_code)).size !== sources.length
+          || !Array.isArray(items?.items) || items.items.length > 100 || items.total_count !== items.items.length
+          || items.items.some((i) => i.sku !== sku || typeof i.source_code !== 'string' || !/^[\w-]{1,100}$/.test(i.source_code)
+            || typeof i.quantity !== 'number' || !Number.isFinite(i.quantity) || ![0, 1].includes(i.status))
+          || new Set(items.items.map((i) => i.source_code)).size !== items.items.length) invalid();
+        evidence.inventory = { stockId: stock.stock_id, websiteCode: 'base',
+          sources: sources.map((s) => ({ sourceCode: s.source_code, enabled: s.enabled })),
+          sourceItems: items.items.map((i) => ({ sourceCode: i.source_code, qty: i.quantity, isInStock: i.status === 1 })) };
+      } catch (cause) { return { code: 'INVENTORY_READ_UNAVAILABLE', operation: 'inventory', reason: safeReason(cause) }; }
+    }
   }
-  const code = expected.english.store_view_code;
-  const views = schema.storeTopology.storeViews.filter((s) => s.code === code && s.is_active === true);
-  if (raw && views.length === 1) {
-    try {
-      const product = await createMagentoClient(config, { fetchImpl, storeCode: code }).findProductBySku(sku);
-      if (product.id !== raw.id || product.sku !== sku || !Array.isArray(product.custom_attributes)
-        || product.custom_attributes.length > 1000
-        || new Set(product.custom_attributes.map((a) => a.attribute_code)).size !== product.custom_attributes.length) invalid();
-      const fields = { name: product.name };
-      const targets = new Set(Object.keys(expected.english));
-      for (const a of product.custom_attributes) if (targets.has(a.attribute_code)) fields[a.attribute_code] = a.value;
-      evidence.english = { id: product.id, sku: product.sku, fields,
-        preservedFieldHashes: Object.fromEntries(product.custom_attributes.filter((a) => !present(expected.english[a.attribute_code])
-          && schema.attributes.some((s) => s.attribute_code === a.attribute_code && s.scope === 'store'))
-          .map((a) => [a.attribute_code, hash(a.value)])),
-        preservedFields: product.custom_attributes.filter((a) => !targets.has(a.attribute_code)).map((a) => a.attribute_code) };
-    } catch (cause) { evidence.failures.push({ code: 'STORE_VIEW_READ_UNAVAILABLE', operation: 'storeViews', reason: safeReason(cause) }); }
+  async function englishRead() {
+    const code = expected.english.store_view_code;
+    const views = schema.storeTopology.storeViews.filter((s) => s.code === code && s.is_active === true);
+    if (raw && views.length === 1) {
+      try {
+        const product = await createMagentoClient(config, { fetchImpl, storeCode: code }).findProductBySku(sku);
+        if (product.id !== raw.id || product.sku !== sku || !Array.isArray(product.custom_attributes)
+          || product.custom_attributes.length > 1000
+          || new Set(product.custom_attributes.map((a) => a.attribute_code)).size !== product.custom_attributes.length) invalid();
+        const fields = { name: product.name };
+        const targets = new Set(Object.keys(expected.english));
+        for (const a of product.custom_attributes) if (targets.has(a.attribute_code)) fields[a.attribute_code] = a.value;
+        evidence.english = { id: product.id, sku: product.sku, fields,
+          preservedFieldHashes: Object.fromEntries(product.custom_attributes.filter((a) => !present(expected.english[a.attribute_code])
+            && schema.attributes.some((s) => s.attribute_code === a.attribute_code && s.scope === 'store'))
+            .map((a) => [a.attribute_code, hash(a.value)])),
+          preservedFields: product.custom_attributes.filter((a) => !targets.has(a.attribute_code)).map((a) => a.attribute_code) };
+      } catch (cause) { return { code: 'STORE_VIEW_READ_UNAVAILABLE', operation: 'storeViews', reason: safeReason(cause) }; }
+    }
   }
+  // Independent EN/inventory evidence stays fresh per invocation, with at most
+  // three simultaneous GETs. Keep failure order stable and drain every branch.
+  const domains = await Promise.allSettled([inventoryRead(), englishRead()]);
+  const failed = domains.find((domain) => domain.status === 'rejected');
+  if (failed) throw failed.reason;
+  evidence.failures = domains.map((domain) => domain.value).filter(Boolean);
   return evidence;
 }
 function safeReason(cause) {

@@ -65,6 +65,47 @@ it('cannot check hypothetical creation without a published SKU schema', async ()
   expect(api.post).not.toHaveBeenCalled();
 });
 
+it('explicit public identity mode checks a native category without any SKU publication', async () => {
+  api.get.mockResolvedValue({ data: { ...config, productCreation: { identityMode: 'public_identity' }, categories: { SV: { ...config.categories.SV, sku_schema_version_id: null } } } });
+  shell(); fireEvent.change(await screen.findByLabelText('Вид сувеніра'), { target: { value: '6' } });
+  expect(screen.queryByText('Спочатку потрібна опублікована схема SKU цієї категорії.')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Перевірити приклад CREATE' }).disabled).toBe(false);
+  fireEvent.change(screen.getByLabelText('Вага сувеніра'), { target: { value: '12,7' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити приклад CREATE' }));
+  await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+  expect(api.post.mock.calls[0][0]).toBe(`${root}/create-preview`);
+  expect(api.post.mock.calls[0][1].product).not.toHaveProperty('skuSchemaVersionId');
+});
+
+it.each(['encoded_sku', 'unknown'])('keeps the no-schema fallback closed for %s', async (identityMode) => {
+  api.get.mockResolvedValue({ data: { ...config, productCreation: { identityMode }, categories: { SV: { ...config.categories.SV, sku_schema_version_id: null } } } });
+  shell(); await screen.findByText('Спочатку потрібна опублікована схема SKU цієї категорії.');
+  expect(screen.getByRole('button', { name: 'Перевірити приклад CREATE' }).disabled).toBe(true);
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('uses one required physical/catalog weight control and invalidates evidence when that canonical weight changes', async () => {
+  api.get.mockResolvedValue({ data: { ...config, productCreation: { identityMode: 'public_identity' }, categories: { SV: { ...config.categories.SV, requires_weight: 1, sku_schema_version_id: null } } } });
+  const captured = vi.fn(); shell({ onRepresentative: captured });
+  fireEvent.change(await screen.findByLabelText('Вид сувеніра'), { target: { value: '6' } });
+  const weightInput = screen.getByLabelText('Вага сувеніра');
+  expect(screen.getAllByLabelText('Вага сувеніра')).toHaveLength(1);
+  expect(screen.queryByLabelText('Вага, г')).toBeNull();
+  expect(weightInput.required).toBe(true);
+  fireEvent.change(weightInput, { target: { value: '12,3' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити приклад CREATE' }));
+  await screen.findByRole('button', { name: 'Зберегти перевірений приклад' });
+  const payload = api.post.mock.calls[0][1].product;
+  expect(payload.weight).toBe('12,3'); expect(payload.answers.weight).toBe('12,3');
+  fireEvent.change(weightInput, { target: { value: '15.5' } });
+  expect(screen.queryByRole('button', { name: 'Зберегти перевірений приклад' })).toBeNull();
+  expect(captured).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити приклад CREATE' }));
+  await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
+  expect(api.post.mock.calls[1][1].product.weight).toBe('15.5');
+  expect(api.post.mock.calls[1][1].product.answers.weight).toBe('15.5');
+});
+
 it('captures only an explicitly saved sendable CREATE example with exact fields and calibration state 2', async () => {
   const captured = vi.fn(); shell({ onRepresentative: captured }); await fillCreate();
   fireEvent.change(screen.getByLabelText('Ручна ціна прикладу, грн (за потреби)'), { target: { value: '1200.50' } });

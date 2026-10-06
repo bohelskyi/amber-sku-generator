@@ -80,7 +80,7 @@ export default function MagentoIntegrationPage() {
     ...(canManage ? [{ to: '/admin/magento/changes', label: 'Підготовлені зміни' }] : []),
     { to: '/admin/magento/history', label: 'Історія' },
     ...(isActualAdministrator(auth) ? [{ to: '/admin/magento/administrator', label: 'Контрольовані операції' }] : [])];
-  return <main className="app-page"><div className="local-workspace magento-workspace">
+  return <main className={categoryWorkspace ? 'app-page magento-category-page' : 'app-page'}><div className="local-workspace magento-workspace">
     <WorkspaceHeader title="Інтеграція Magento" description={categoryWorkspace ? 'Що передаємо з менеджера в магазин.' : 'Категорії, характеристики та правила передачі товарів.'} actions={!categoryWorkspace && <button className="btn btn-outline btn-compact-md" onClick={() => setRefresh((value) => value + 1)}>Оновити стан</button>} />
     <div className={categoryWorkspace ? 'mc-navigation' : undefined}><WorkspaceLocalNav label="Інтеграція Magento" items={categoryWorkspace ? items.slice(0, 2) : items} />
       {categoryWorkspace && <div className="mc-extra-nav"><MagentoDetails summary="Інші розділи">{() => <WorkspaceLocalNav label="Додаткові розділи інтеграції" items={items.slice(2)} />}</MagentoDetails></div>}
@@ -104,7 +104,7 @@ export default function MagentoIntegrationPage() {
         </div></div>}
         {(!narrowLayout || contextOpen) && <div className="magento-context-details">
         <div>
-          {categoryWorkspace && <><p className="text-sm">{publicationText}</p><button type="button" className="btn btn-outline btn-compact-md mt-2" onClick={() => setRefresh((value) => value + 1)}>Оновити стан</button></>}
+          {categoryWorkspace && <><p className="mc-mobile-description text-sm">Що передаємо з менеджера в магазин.</p><p className="text-sm">{publicationText}</p><button type="button" className="btn btn-outline btn-compact-md mt-2" onClick={() => setRefresh((value) => value + 1)}>Оновити стан</button></>}
           {integration.draftCount > 0 && <p className="mt-2 text-sm">Є чернетки змін: {integration.draftCount}. Вони не змінюють поточну доставку.</p>}
         </div>
         <div className="border-t pt-4"><p className="text-sm font-medium" role="status">Остання перевірка структури Magento: {date(observedAt)}</p>

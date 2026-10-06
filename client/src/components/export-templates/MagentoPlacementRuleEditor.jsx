@@ -8,23 +8,25 @@ import { currentOptionIds, currentOptionLabel } from '../../lib/export-template-
 import { ObservedCategoryPicker } from '../workspace/MagentoObservedSelectors.jsx';
 import { Notice } from '../app/UiPrimitives.jsx';
 import { RuleSummary } from './RuleSummary.jsx';
+import MagentoCategoryPlan from '../workspace/MagentoCategoryPlan.jsx';
 
 export default function MagentoPlacementRuleEditor({ definition, cellPath, registry, loadSource, readOnly, onChange, onEditing }) {
   const [observation, setObservation] = useState(null); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const [kind, setKind] = useState('existing'); const [selectedPath, setSelectedPath] = useState(''); const [name, setName] = useState('');
   const [scope, setScope] = useState(''); const [sourceId, setSourceId] = useState(''); const [valueId, setValueId] = useState(''); const [receipt, setReceipt] = useState('');
+  const [categoryPlan, setCategoryPlan] = useState(null);
   const sequence = useRef(0); useEffect(() => () => { ++sequence.current; }, []);
   const source = definition.sources?.[sourceId]; const evidence = useSourceEvidence(source, loadSource);
   const group = definition.groups[cellPath[1]];
-  const authorized = availableSources(registry, group.route);
+  const authorized = availableSources(registry, group.route, definition);
   const sources = Object.entries(definition.sources || {}).filter(([, item]) => item.kind === 'semantic' && item.category === group.route
     && authorized.some((choice) => ['kind', 'category', 'key'].every((key) => choice.descriptor[key] === item[key])));
   const options = currentOptionIds(evidence).filter((id) => currentOptionLabel(evidence, id));
   const targetPath = kind === 'new' && name.trim() && selectedPath ? `${selectedPath}/${name.trim()}` : kind === 'existing' ? selectedPath : '';
-  const set = (setter, value) => { setter(value); setReceipt(''); onEditing?.(); };
+  const set = (setter, value) => { if ([setKind, setSelectedPath, setName].includes(setter)) setCategoryPlan(null); setter(value); setReceipt(''); onEditing?.(); };
   async function discover() {
-    const ticket = ++sequence.current; setBusy(true); setError('');
-    try { const { data } = await api.post('/admin/magento-integration/discovery', {}); if (ticket === sequence.current) setObservation(data); }
+    const ticket = ++sequence.current; setBusy(true); setError(''); setCategoryPlan(null);
+    try { const { data } = await api.post('/admin/magento-integration/discovery', {}); if (ticket === sequence.current) { setCategoryPlan(null); setObservation(data); } }
     catch (cause) { if (ticket === sequence.current) setError(cause.response?.data?.error || 'Не вдалося прочитати розділи магазину.'); }
     finally { if (ticket === sequence.current) setBusy(false); }
   }
@@ -36,6 +38,7 @@ export default function MagentoPlacementRuleEditor({ definition, cellPath, regis
       if (matches.length !== 1) throw new Error('Повторно оберіть однозначний розділ магазину.');
       if (kind === 'new' && (!name.trim() || name !== name.trim() || /[/,]/.test(name) || hasControlCharacter(name))) throw new Error('Вкажіть назву підкатегорії без /, коми та крайніх пробілів.');
       if (kind === 'new' && observation.categories.some((item) => item.normalizedPath === targetPath)) throw new Error('Ця підкатегорія вже існує. Оберіть наявний розділ.');
+      if (kind === 'new' && (categoryPlan?.path !== targetPath || categoryPlan.categoryCode !== group.route)) throw new Error('Спочатку перевірте точний шлях і вплив створення.');
       onChange(appendPlacement(definition, cellPath, targetPath, scope === 'condition' ? sourceId : null, valueId));
       setReceipt(targetPath); setError('');
     } catch (cause) { setError(cause.message); }
@@ -50,6 +53,7 @@ export default function MagentoPlacementRuleEditor({ definition, cellPath, regis
         <label className="block">Розділ<select className="input" value={kind} onChange={(event) => set(setKind, event.target.value)}><option value="existing">Наявний розділ</option><option value="new">Нова підкатегорія</option></select></label>
         <ObservedCategoryPicker categories={observation.categories} value={selectedPath} onChange={(value) => set(setSelectedPath, value)} label={kind === 'new' ? 'Батьківський розділ' : 'Розділ магазину'} disabled={busy} />
         {kind === 'new' && <label className="block">Назва підкатегорії<input className="input" maxLength={255} value={name} onChange={(event) => set(setName, event.target.value)} /></label>}
+        {kind === 'new' && <MagentoCategoryPlan key={`${group.route}:${selectedPath}:${name}:${observation.observedAt || ''}`} categoryCode={group.route} categories={observation.categories} parentPath={selectedPath} name={name} onVerified={setCategoryPlan} />}
         <label className="block">Які товари тут розміщувати?<select className="input" value={scope} onChange={(event) => set(setScope, event.target.value)}><option value="">Оберіть товари</option><option value="all">Усі товари цієї категорії</option><option value="condition">Товари з певною характеристикою</option></select></label>
         {scope === 'condition' && <><label className="block">Характеристика<select className="input" value={sourceId} onChange={(event) => { set(setSourceId, event.target.value); setValueId(''); }}><option value="">Оберіть характеристику</option>{sources.map(([id, item]) => <option key={id} value={id}>{registry?.references?.questions?.find((question) => question.category_code === group.route && question.key === item.key)?.label || item.key}</option>)}</select></label>
           <label className="block">Значення характеристики<select className="input" value={valueId} onChange={(event) => set(setValueId, event.target.value)}><option value="">Оберіть значення</option>{options.map((id) => <option key={id} value={id}>{currentOptionLabel(evidence, id)}</option>)}</select></label>
@@ -58,7 +62,7 @@ export default function MagentoPlacementRuleEditor({ definition, cellPath, regis
         </>}
         {targetPath && <p className="category-observed-selection">{targetPath.split('/').join(' › ')}{scope && <><br />{scope === 'all' ? 'Для всіх товарів цієї категорії' : `${source?.key || 'Характеристика'}: ${currentOptionLabel(evidence, valueId) || 'оберіть значення'}`}</>}</p>}
         <p className="text-sm text-slate-600">Наявне розміщення зберігається. Нове додається лише за обраною умовою. Створення підкатегорії та підключення потребують окремого підтвердження.</p>
-        <button type="button" className="btn btn-outline" disabled={busy || !scope || !targetPath || Boolean(receipt)} onClick={append}>Додати розміщення до правила</button>
+        <button type="button" className="btn btn-outline" disabled={busy || !scope || !targetPath || Boolean(receipt) || kind === 'new' && (categoryPlan?.path !== targetPath || categoryPlan.categoryCode !== group.route)} onClick={append}>Додати розміщення до правила</button>
       </>}
       {receipt && <Notice>Додано до заповнення: {receipt.split('/').join(' › ')}. Застосуйте до чернетки й перевірте приклади товарів.</Notice>}
     </>}

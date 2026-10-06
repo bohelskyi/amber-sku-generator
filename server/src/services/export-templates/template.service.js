@@ -229,12 +229,20 @@ async function saveDraft(templateId, input, options = {}) {
 }
 async function upgradeDraft(templateId, input, options = {}) {
   templateId = identity(templateId);
-  command(input, ['expectedRevision', 'expectedDefinitionHash']);
+  command(input, ['expectedRevision', 'expectedDefinitionHash'], ['targetContract']);
+  const native = input.targetContract === require('./version-contract').CHARACTERISTIC_CONTRACT;
+  if (input.targetContract !== undefined && !native) throw error(400, 'TEMPLATE_COMMAND_INVALID', 'Unknown target contract');
   const revision = counter(input.expectedRevision); const hash = expectedHash(input.expectedDefinitionHash);
   return mutation('manage', options, async (client, context) => {
     const row = await loadDraft(client, templateId, true);
     assertDraft(row, revision, hash);
-    const definition = pureCall(() => require('./column-contract').upgradeColumns(row.definition));
+    const definition = pureCall(() => {
+      const contract = require('./version-contract');
+      if (native && !contract.isPublicEvaluator(row.definition.evaluatorVersion)) throw Object.assign(new Error('Public identity template required before characteristic upgrade'), { code: 'TEMPLATE_INVALID' });
+      const next = require('./column-contract').upgradeColumns(row.definition);
+      if (native) { next.evaluatorVersion = contract.CHARACTERISTIC_EVALUATOR; next.sourceContractVersion = contract.CHARACTERISTIC_CONTRACT; }
+      return next;
+    });
     return replaceDraft(client, row, prepareDraft(definition), row.base_version_id, context);
   });
 }

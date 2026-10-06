@@ -261,15 +261,16 @@ test('product builder live pricing refreshes after answer and weight edits witho
   assert.match(skuManagerSource, /productsApi\.previewPrice\(/);
   assert.match(
     skuManagerSource,
-    /\[selectedCat, config, answers, weight, isCalibrated, isWeightRequired\]/,
-    'live pricing must react to both answer and weight changes'
+    /\[selectedCat, config, answers, weight, isCalibrated, isWeightRequired, isNativeCreation, isTestProduct, testProductCreationAvailable\]/,
+    'live pricing must react to legacy/native identity, answers, physical weight, TEST selection and current TEST authority'
   );
   assert.match(skuManagerSource, /const handleAnswer[\s\S]*?beginLivePriceRefresh\(\);/);
   assert.match(skuManagerSource, /const handleWeightChange[\s\S]*?beginLivePriceRefresh\(\);/);
   assert.match(appSource, /livePriceData=\{sku\.livePriceData\}/);
   assert.match(
     builderSource,
-    /const displayedPricing = previewData \|\| \(fieldBlockers\.length === 0 \? livePriceData : null\)/
+    /const displayedPricing = previewData \|\| \(fieldBlockers\.length === 0 && creationPricingMode === 'system_auto' \? livePriceData : null\)/,
+    'unreviewed automatic prices must not appear as the chosen manual or USD-per-gram result'
   );
   assert.match(builderSource, /displayedPricing\?\.totalPriceUah/);
   assert.match(builderSource, /const isVerified = Boolean\(previewData\)/);

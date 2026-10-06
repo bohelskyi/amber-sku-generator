@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../auth/auth-context.js';
 import { ProductNameConflict } from '../app/ProductNameConflict.jsx';
@@ -23,9 +24,13 @@ function ProblemFacts({ problem }) {
 
 export default function AttentionProblemDetail({ product, productUrl, returnTo, onSaved, onRepairCharacteristics }) {
   const { permissions } = useAuth();
+  const [recoveryEvidence, setRecoveryEvidence] = useState(null);
+  const [comparisonEvidence, setComparisonEvidence] = useState(null);
   const groups = attentionProblemGroups(product.problems);
   const main = groups[0]?.problem;
   const recovery = groups.some(({ problem }) => needsDeliveryRecovery(problem));
+  const identityProblem = (main?.diagnosticCode || main?.code) === 'NAME_REMOTE_IDENTITY_CHANGED';
+  const canCompare = permissions.includes('export_templates.manage') && permissions.includes('exports.view');
   const canDecode = permissions.includes('products.decode');
   const canReconcile = permissions.includes('exports.reconcile');
   const canOpenRecovery = canReconcile || permissions.includes('export_templates.publish');
@@ -51,13 +56,12 @@ export default function AttentionProblemDetail({ product, productUrl, returnTo, 
 
   return <div className="sync-problem-detail-body">
     {main && <section className="sync-start-task" aria-label="З чого почати">
-      <p className="eyebrow">З чого почати</p>
       <h3>{problemTitle(main)}</h3>
       <p className="sync-problem-guidance">{problemImpact(main)}</p>
       <ProblemFacts problem={main} />
       {needsDeliveryRecovery(main) && !canOpenRecovery && <p className="sync-problem-guidance">Потрібне узгодження Адміністратора або відповідального оператора з дозволом на відновлення доставки. Скопіюйте опис проблеми та передайте йому.</p>}
-      {needsDeliveryRecovery(main) && canOpenRecovery && <MagentoRecovery guided productId={product.productId} categoryCode={product.category} onSaved={() => onSaved('recovery')} />}
-      {repair(main)}
+      {needsDeliveryRecovery(main) && canOpenRecovery && <MagentoRecovery guided productId={product.productId} categoryCode={product.category} onTechnicalEvidence={setRecoveryEvidence} onSaved={() => onSaved('recovery')} />}
+      {identityProblem && canCompare ? <MagentoProductDiagnosis product={product} returnTo={returnTo} identityOnly onTechnicalEvidence={setComparisonEvidence} /> : repair(main)}
       {main.resolution === 'name' && <ProductNameConflict productId={product.productId} available={Boolean(product.nameConflict)} onSaved={onSaved} />}
     </section>}
     {groups.length > 1 && <section className="sync-other-problems" aria-label="Інші перешкоди">
@@ -70,14 +74,17 @@ export default function AttentionProblemDetail({ product, productUrl, returnTo, 
       </li>)}</ul>
     </section>}
     {main?.resolution !== 'name' && <ProductNameConflict productId={product.productId} available={Boolean(product.nameConflict)} onSaved={onSaved} />}
-    {recovery && !needsDeliveryRecovery(main) && <MagentoRecovery productId={product.productId} categoryCode={product.category} onSaved={() => onSaved('recovery')} />}
-    {permissions.includes('export_templates.manage') && permissions.includes('exports.view') && <TechnicalDisclosure summary="Порівняти категорії та характеристики з Magento">
-      {() => <MagentoProductDiagnosis key={`${product.productId}:${product.observedAt || product.state || ''}`} product={product} returnTo={returnTo} />}
+    {recovery && !needsDeliveryRecovery(main) && <MagentoRecovery productId={product.productId} categoryCode={product.category} onTechnicalEvidence={setRecoveryEvidence} onSaved={() => onSaved('recovery')} />}
+    {canCompare && !identityProblem && <TechnicalDisclosure summary="Додаткова перевірка даних у Magento">
+      {() => <MagentoProductDiagnosis key={`${product.productId}:${product.observedAt || product.state || ''}`} product={product} returnTo={returnTo} onTechnicalEvidence={setComparisonEvidence} />}
     </TechnicalDisclosure>}
-    {product.problems.length > 0 && <TechnicalDisclosure>
-      {() => <><p className="sync-problem-guidance">Збережені записи діагностики. Повторні записи згруповано лише у відображенні.</p>
+    {(product.problems.length > 0 || recoveryEvidence || comparisonEvidence) && <TechnicalDisclosure summary="Дані для підтримки">
+      {() => <div className="sync-support-evidence"><section><h4>Збережена діагностика товару</h4>
         {product.observedAt && <p className="sync-problem-guidance">Зафіксовано: {new Date(product.observedAt).toLocaleString('uk-UA')}</p>}
-        <pre className="sync-raw-evidence">{JSON.stringify(product.problems, null, 2)}</pre></>}
+        <pre className="sync-raw-evidence">{JSON.stringify(product.problems, null, 2)}</pre></section>
+        {recoveryEvidence && <section><h4>Свідчення перевірки доставки</h4><pre className="sync-raw-evidence">{JSON.stringify(recoveryEvidence, null, 2)}</pre></section>}
+        {comparisonEvidence && <section><h4>Спостереження Magento</h4><pre className="sync-raw-evidence">{JSON.stringify(comparisonEvidence, null, 2)}</pre></section>}
+      </div>}
     </TechnicalDisclosure>}
   </div>;
 }

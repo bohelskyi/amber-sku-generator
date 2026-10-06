@@ -1,6 +1,7 @@
 // Isolated Docker smoke: no Compose services, database, or Magento credentials.
 // node scripts/test-nginx-dns.mjs <built-client-image> [--negative-control]
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -51,7 +52,7 @@ try {
     '-e', 'NGINX_ENVSUBST_FILTER=^SERVER_'];
   if (negative) {
     let template = readFileSync(new URL('../client/nginx.conf', import.meta.url), 'utf8');
-    template = template.replace(/    set \$amber_api_upstream[^\n]*\n    proxy_pass[^\n]*\n    proxy_redirect[^\n]*\n/, '    proxy_pass http://${SERVER_HOST}:${SERVER_PORT}/api/;\n');
+    template = template.replace(/    set \$amber_api_upstream[^\n]*\n    proxy_pass[^\n]*\n    proxy_redirect[^\n]*\n/g, '    proxy_pass http://${SERVER_HOST}:${SERVER_PORT}/api/;\n');
     const filename = path.join(directory, 'default.conf.template');
     writeFileSync(filename, template);
     args.push('--mount', `type=bind,source=${filename},target=/etc/nginx/templates/default.conf.template,readonly`);
@@ -77,6 +78,27 @@ try {
   const posted = await post.json();
   assert.equal(posted.body, '{"name":"Тест"}');
   assert.equal(posted.headers['x-csrf-token'], 'fixture');
+  const photoBody = JSON.stringify({ base64: 'a'.repeat(2 * 1024 * 1024) });
+  const digest = (value) => createHash('sha256').update(value).digest('hex');
+  async function checkPhotoProxy(identity) {
+    const result = await get('/api/product-photos/stage?probe=%2F', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': 'photo-fixture',
+        Cookie: 'amber_fixture=photo-session', 'X-Forwarded-Proto': 'https' }, body: photoBody });
+    assert.equal(result.status, 200);
+    const photo = await result.json();
+    assert.equal(photo.identity, identity);
+    assert.equal(photo.url, '/api/product-photos/stage?probe=%2F');
+    assert.equal(photo.method, 'POST');
+    assert.equal(digest(photo.body), digest(photoBody));
+    assert.equal(photo.headers['x-csrf-token'], 'photo-fixture');
+    assert.equal(photo.headers.cookie, 'amber_fixture=photo-session');
+    assert.equal(photo.headers['x-forwarded-proto'], 'https');
+  }
+  if (!negative) {
+    await checkPhotoProxy('A');
+    assert.equal((await get('/api/name/preview', { method: 'POST', body: photoBody })).status, 413);
+    assert.equal((await get('/api/product-photos/stage', { method: 'POST', body: 'a'.repeat(9 * 1024 * 1024) })).status, 413);
+  }
   const login = await get('/api/auth/login');
   assert.equal(login.status, 302);
   assert.equal(login.headers.get('location'), 'http://127.0.0.1/api/auth/callback?code=fixture&state=fixture');
@@ -111,6 +133,7 @@ try {
     assert.equal(response.status, 200);
     assert.equal((await response.json()).identity, 'B');
   }
+  if (!negative) await checkPhotoProxy('B');
   const after = inspect(client);
   assert.equal(after.Id, before.Id);
   assert.equal(after.State.StartedAt, before.State.StartedAt);

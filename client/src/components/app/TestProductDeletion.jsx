@@ -30,6 +30,8 @@ export function TestProductDeletion({ product, onDeleted, onClose }) {
       <p className="mt-3">Артикул: <strong className="font-mono">{product.public_sku || 'недоступний'}</strong></p>
       <p className="mt-3">Товар буде назавжди видалено з Magento. Amber збереже технічний запис і журнал аудиту.
         Внутрішній SKU і публічний артикул ніколи не використовуватимуться повторно.</p>
+      {product.status === 'archived' && /^TEST-\d{6,}$/.test(product.public_sku || '') &&
+        <p className="mt-3">Архівований TEST запис, фотографії та історія перевірок залишаться в Manager.</p>}
       <p className="mt-3">Для проданого товару або товару з робочою історією використайте звичайне архівування.</p>
       {error && <p role="alert" className="mt-3 text-red-700">{error}</p>}
       {uncertain && <p role="status" className="mt-3">Результат видалення ще не підтверджено. Товар заблоковано для змін.

@@ -28,7 +28,7 @@ afterEach(cleanup);
 
 it('checks only the exact selected product explicitly and preserves repair context for the actual missing value', async () => {
   shell(); expect(api.get).not.toHaveBeenCalled(); expect(api.post).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Перевірити категорії та характеристики' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити дані та очікувані зміни' }));
   await screen.findByText('Перевірка виявила перешкоди для доставки.');
   expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/product-preview', { productId: 42 }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
   const link = new URL(screen.getByRole('link', { name: 'Знайти або додати значення' }).href);
@@ -54,14 +54,14 @@ it('hides diagnostics without both existing preview permissions', () => {
 
 it('rejects evidence for another identity and does not offer its repair actions', async () => {
   api.post.mockResolvedValue({ data: { ...result, productId: 43 } }); shell();
-  fireEvent.click(screen.getByRole('button', { name: 'Перевірити категорії та характеристики' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити дані та очікувані зміни' }));
   await screen.findByText('Не вдалося отримати підтверджені дані цього товару. Повторіть перевірку.');
   expect(screen.queryByRole('table')).toBeNull(); expect(screen.queryByRole('link')).toBeNull();
 });
 
 it('does not apply late diagnosis after leaving the selected product', async () => {
   let complete; api.post.mockImplementation(() => new Promise((resolve) => { complete = resolve; }));
-  const view = shell(); fireEvent.click(screen.getByRole('button', { name: 'Перевірити категорії та характеристики' }));
+  const view = shell(); fireEvent.click(screen.getByRole('button', { name: 'Перевірити дані та очікувані зміни' }));
   const signal = api.post.mock.calls[0][2].signal; view.unmount();
   expect(signal.aborted).toBe(true);
   await act(async () => complete({ data: result }));

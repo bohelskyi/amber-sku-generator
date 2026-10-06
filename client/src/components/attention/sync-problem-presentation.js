@@ -8,10 +8,13 @@ export const PRODUCT_FIELD_LABELS = Object.freeze({
 
 export function nextAction(problem = {}) {
   const code = problem.diagnosticCode || problem.code;
+  if (code === 'NATIVE_CHARACTERISTICS_UPGRADE_REQUIRED' && problem.resolution === 'integration_configuration') return 'Підготувати підтримку нових товарів';
   if (problem.code === 'TEST_DELETION_PENDING') return 'Перевірити результат тестового видалення';
   if (problem.code === 'reconciliation_required') return 'Перевірити результат надісланої зміни';
   if (problem.resolution === 'lifecycle_reconciliation') return 'Перевірити товар і вибрати рішення';
   if (problem.resolution === 'product') return 'Доповнити дані товару';
+  if (code === 'NAME_REMOTE_IDENTITY_CHANGED') return 'Перевірити ідентичність товару Magento';
+  if (code === 'NAME_READ_UNAVAILABLE') return 'Перевірити доступність даних Magento';
   if (problem.resolution === 'name') return 'Узгодити назви Amber і Magento';
   if (['authorization', 'configuration'].includes(problem.code)) return 'Перевірити підключення Magento';
   if (code === 'CATEGORY_PATH_MISSING') return 'Додати відсутню підкатегорію';
@@ -32,9 +35,14 @@ export function problemSubject(problem = {}) {
 }
 
 export function problemTitle(problem = {}) {
-  if (problem.resolution === 'lifecycle_reconciliation') return 'Синхронізацію товару зупинено після попередніх змін';
+  if (problem.resolution === 'lifecycle_reconciliation') {
+    if (problem.eligibilityIssue?.primaryReason === 'INFERRED_HISTORY_WITHOUT_EXACT_MEMBERSHIP') return 'Немає точного підтвердження, які попередні версії товару доставлено в Magento';
+    if (problem.eligibilityIssue?.primaryReason === 'EVIDENCE_INTEGRITY_UNRESOLVED') return 'Цілісність підтверджень попередньої доставки потребує перевірки';
+    return problem.message || 'Історія попередньої доставки не підтверджена';
+  }
   const subject = problemSubject(problem);
   const message = problem.evaluationIssues?.[0]?.message || problem.message || 'Причину ще не визначено';
+  if (problem.diagnosticCode === 'NATIVE_CHARACTERISTICS_UPGRADE_REQUIRED' && problem.resolution === 'integration_configuration') return problem.message;
   return subject.path ? `${subject.path} — ${message}` : subject.field && !problem.evaluationIssues?.length ? `${subject.field}: ${message}` : message;
 }
 
@@ -52,6 +60,8 @@ export function problemImpact(problem = {}) {
   if (problem.code === 'reconciliation_required') return 'Зміну вже надіслано. Поки результат не підтверджено, повторне надсилання заблоковане.';
   if (problem.code === 'TEST_DELETION_PENDING') return 'Результат видалення потрібно перевірити через початкову операцію товару.';
   if (problem.resolution === 'product') return 'Amber не може підготувати повні дані для Magento. Товар залишається збереженим в Amber.';
+  if ((problem.diagnosticCode || problem.code) === 'NAME_REMOTE_IDENTITY_CHANGED') return 'За цим артикулом Magento повернув інший товар, ніж раніше підтверджений. Оновлення зупинено, щоб не змінити інший товар. Потрібна перевірка відповідальним за інтеграцію; вибір назви цього не виправляє.';
+  if ((problem.diagnosticCode || problem.code) === 'NAME_READ_UNAVAILABLE') return 'Magento не повернув повних даних для перевірки назви. Спочатку потрібно відновити достовірне читання.';
   if (problem.resolution === 'name') return 'Оновлення спільної назви потребує узгодження, щоб не перезаписати чужу зміну.';
   if (problem.resolution === 'lifecycle_reconciliation') return 'Amber ще не підтвердив, як попередні зміни цього товару потрапили в Magento. Спочатку перевіримо стан магазину, потім покажемо, що можна зробити.';
   return 'Ця перешкода не дозволяє завершити синхронізацію цього товару.';

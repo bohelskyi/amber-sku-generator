@@ -4,7 +4,7 @@ const bindings = require('./binding.service');
 const { getAppConfig } = require('../catalog/catalog-read-model');
 const { compileDefinition } = require('../export-templates/definition');
 const { loadDraftPreviewProducts } = require('../export-templates/draft-inputs');
-const { loadSupportInputs } = require('../export-templates/support-inputs');
+const { loadSupportInputs, loadProspectiveSupportInput } = require('../export-templates/support-inputs');
 const { evaluate } = require('./binding-evidence-products');
 const { semanticReadiness, boundedGet, previewView } = require('./integration-readiness');
 const { createMagentoClient } = require('./client');
@@ -31,6 +31,8 @@ async function selected(client, config, id) {
   if (!config.configured || revision.originHash !== c.originHash(config.baseUrl)) {
     throw c.error(422, 'MAGENTO_BINDING_INSTALLATION_OR_SCOPE_MISMATCH', 'Binding does not match configured Magento');
   }
+  if (revision.state === 'draft') revision.catalogAvailability =
+    (await require('./retired-catalog-targets').read(client, revision.originHash, [revision.id])).get(revision.id);
   return revision;
 }
 async function compiledRevision(client, revision) {
@@ -46,6 +48,7 @@ async function overview(config, input = {}, options = {}) {
   c.command(input, [], ['bindingRevisionId']);
   return read(options, async (client) => {
     const catalog = await getAppConfig(client);
+    const nativeCharacteristicsAuthoring = Boolean((await client.query('SELECT enabled FROM public_sku_activation WHERE singleton')).rows[0]?.enabled);
     const revision = await selected(client, config, input.bindingRevisionId);
     const current = revision ? await require('./binding-repository').current(client, revision.installationKey) : null;
     const schemas = (await client.query(`SELECT id,category_code,version,published_at FROM sku_schema_versions
@@ -53,6 +56,9 @@ async function overview(config, input = {}, options = {}) {
     const revisions = (await client.query(`SELECT id,state,revision,version_number,template_version_id,observed_at
       FROM magento_binding_revisions WHERE origin_hash=$1 ORDER BY created_at DESC LIMIT 100`,
     [config.configured ? c.originHash(config.baseUrl) : ''])).rows;
+    const availability = config.configured ? await require('./retired-catalog-targets').read(client,
+      c.originHash(config.baseUrl), revisions.filter((r) => r.state === 'draft').map((r) => r.id)) : new Map();
+    for (const row of revisions) if (availability.has(row.id)) row.catalogAvailability = availability.get(row.id);
     const templateVersions = (await client.query(`SELECT v.id,v.template_id,v.version_number,v.evaluator_version,t.display_name
       FROM export_template_versions v JOIN export_templates t ON t.id=v.template_id ORDER BY v.published_at DESC LIMIT 100`)).rows;
     const totals = (await client.query(`SELECT category,count(*)::int AS total FROM products
@@ -69,7 +75,7 @@ async function overview(config, input = {}, options = {}) {
       }
     }
     const observedAt = (await client.query('SELECT transaction_timestamp() AS at')).rows[0].at.toISOString();
-    return { observedAt, configured: config.configured, revision, currentPublishedId: current?.id || null, revisions, templateVersions,
+    return { observedAt, configured: config.configured, nativeCharacteristicsAuthoring, revision, currentPublishedId: current?.id || null, revisions, templateVersions,
       categories: semanticReadiness(catalog, schemas, revision, amber?.compiled.definition), catalog,
       products: totals.map((t) => ({ category: t.category, total: t.total,
         ...(local[t.category] || { checked: 0, evaluated: 0, blocked: 0 }),
@@ -103,7 +109,8 @@ async function creationInputs(input, options = {}) {
       throw c.error(404, 'MAGENTO_CREATION_CATEGORY_NOT_FOUND', 'Категорію не знайдено.');
     }
     const requirements = require('../product/new-product-readiness').requirements;
-    return { categories: { [category]: config.categories[category] },
+    const activation = (await client.query('SELECT enabled FROM public_sku_activation WHERE singleton')).rows[0];
+    return { productCreation: { identityMode: activation?.enabled === true ? 'public_identity' : 'encoded_sku' }, categories: { [category]: config.categories[category] },
       questions: { [category]: config.questions[category] || [] },
       productCreateRequirements: Object.hasOwn(requirements, category) ? { [category]: requirements[category] } : {} };
   });
@@ -114,6 +121,11 @@ async function currentPreview(config, input, options = {}) {
   if (!revision) throw c.error(422, 'MAGENTO_BINDING_REQUIRED', 'Published or draft binding required');
   return previewView(await require('./sync-preview').previewProduct(config, { databasePool: options.databasePool || pool,
     fetchImpl: boundedGet(options.fetchImpl), productId: input.productId, bindingRevisionId: revision.id }));
+}
+function prospectiveAnswers(built, product) {
+  if (built.identityMode === 'public_identity') return structuredClone(built.normalizedAnswers);
+  return product.categoryCode === 'SV'
+    ? require('../product/product-answers').normalizeProductInputAnswers('SV', product.answers) : product.answers;
 }
 async function prospectivePreview(config, input, options = {}) {
   c.command(input, ['bindingRevisionId','product'], ['pricingDecision']);
@@ -129,12 +141,13 @@ async function prospectivePreview(config, input, options = {}) {
       category: input.product.categoryCode, status: 'active', exclude_from_export: 0,
       sku_schema_version_id: built.skuSchemaVersionId, weight: built.weightVal,
       total_price_uah: decision?.mode === 'manual_uah' ? decision.manualPriceUah : built.totalPriceUah,
-      details: { answers: input.product.categoryCode === 'SV'
-        ? require('../product/product-answers').normalizeProductInputAnswers('SV', input.product.answers) : input.product.answers },
+      details: { answers: prospectiveAnswers(built, input.product) },
       magento_name_subject_ua: built.newProductInput?.names.ua ?? null,
       magento_name_subject_en: built.newProductInput?.names.en ?? null };
-    const supported = await loadSupportInputs(client, context.compiled.definition, [product]);
-    return { ...context, revision, product: supported.products[0], observedAt: new Date().toISOString() };
+    const supportedProduct = built.identityMode === 'public_identity'
+      ? await loadProspectiveSupportInput(client, context.compiled.definition, product, built.characteristicConfigHash)
+      : (await loadSupportInputs(client, context.compiled.definition, [product])).products[0];
+    return { ...context, revision, product: supportedProduct, observedAt: new Date().toISOString() };
   });
   const fetchImpl = boundedGet(options.fetchImpl);
   const observed = await (options.discover || discovery)(config, { fetchImpl });
@@ -145,4 +158,4 @@ async function prospectivePreview(config, input, options = {}) {
   assertEvidenceSafe(report, config);
   return { ...previewView(report), hypothetical: true, limitations: ['Артикул AG-PREVIEW умовний. Товар, SKU та завдання синхронізації не створюються.'] };
 }
-module.exports = { overview, discovery, creationInputs, currentPreview, prospectivePreview, selected, compiledRevision, read };
+module.exports = { overview, discovery, creationInputs, currentPreview, prospectivePreview, prospectiveAnswers, selected, compiledRevision, read };

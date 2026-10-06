@@ -2,7 +2,7 @@ const { createHash } = require('node:crypto');
 const { HEADERS } = require('./magento-v1-data');
 const { PRODUCT_FIELDS, fail } = require('./input-projection');
 const { CONTRACT, REQUIRED, validCode } = require('./column-contract');
-const { EXTENSIBLE_EVALUATOR, MAX_GROUPS, isPublicEvaluator, isIntegrationCategoryCode } = require('./version-contract');
+const { CHARACTERISTIC_EVALUATOR, CHARACTERISTIC_CONTRACT, isExtensibleEvaluator, EXTENSIBLE_EVALUATOR, MAX_GROUPS, isPublicEvaluator, isIntegrationCategoryCode } = require('./version-contract');
 
 const LIMITS = Object.freeze({ definitionBytes: 256 * 1024, sources: 256, bindings: 512,
   depth: 8, children: 16, tableEntries: 512, totalTableEntries: 4096,
@@ -76,11 +76,11 @@ function freeze(value) {
 function inspectDefinition(d) {
   const definitionBytes = preflight(d);
   shape(d, ['formatVersion', 'evaluatorVersion', 'outputContract', 'sources', 'tables', 'questionContracts', 'bindings', 'groups'], ['sourceSupport', 'sourceContractVersion']);
-  const extensible = d.evaluatorVersion === EXTENSIBLE_EVALUATOR;
-  check(d.formatVersion === 1 && ['magento-declarative-1', 'magento-declarative-2', 'magento-declarative-3', EXTENSIBLE_EVALUATOR].includes(d.evaluatorVersion)
+  const extensible = isExtensibleEvaluator(d.evaluatorVersion);
+  check(d.formatVersion === 1 && ['magento-declarative-1', 'magento-declarative-2', 'magento-declarative-3', EXTENSIBLE_EVALUATOR, CHARACTERISTIC_EVALUATOR].includes(d.evaluatorVersion)
     && ['magento-products-v1', CONTRACT].includes(d.outputContract), 'Unsupported version/contract');
   if (isPublicEvaluator(d.evaluatorVersion)) {
-    check(d.sourceContractVersion === 'public-product-identity-v1', 'Public product source contract required');
+    check(d.sourceContractVersion === (d.evaluatorVersion === CHARACTERISTIC_EVALUATOR ? CHARACTERISTIC_CONTRACT : 'public-product-identity-v1'), 'Public product source contract required');
   } else check(d.sourceContractVersion === undefined, 'Public product source contract requires evaluator 3');
   const editableColumns = d.outputContract === CONTRACT;
   let declaredCategories;

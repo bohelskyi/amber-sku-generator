@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
   formatDecimal,
   formatUah,
@@ -7,6 +7,11 @@ import {
   formatWholeUah,
 } from '../../lib/formatters';
 import { handleNumberKeyDown, handleNumberWheel } from '../../lib/number-input';
+import CreationDeliveryNotice from './CreationDeliveryNotice.jsx';
+import { creationDeliveryState } from '../../lib/creation-delivery-readiness.js';
+import { ProductPhotos } from './ProductPhotos.jsx';
+import { TestProductNotice } from './TestProductNotice.jsx';
+import { numericQuestionPolicy, physicalWeightPolicy, validateNumericInput } from '../../lib/product-numeric-input.js';
 import { createRequirements, isCreateQuestionRequired } from '../../lib/product-create-readiness';
 
 const hasAnswer = (value) =>
@@ -40,6 +45,9 @@ export function ProductBuilder({
   answeredRequiredCount,
   requiredCount,
   previewData,
+  isTestProduct = false,
+  canCreateTestProducts = false,
+  onTestProductChange,
   livePriceData,
   isLivePriceLoading,
   finalSku,
@@ -51,9 +59,26 @@ export function ProductBuilder({
   isVariationLoading,
   isManualPriceEditing,
   isSaving,
+  isCreationSaveUncertain = false,
   requiresManualPrice,
   manualPriceUah,
   saveError,
+  creationFieldErrors = {},
+  isNativeCreation: nativeCreation,
+  creationPricingMode = 'system_auto',
+  creationUsdPerGram = '',
+  creationMarketingRounding = true,
+  creationPricingAvailable = false,
+  creationPhotosAvailable = false,
+  creationPhotos,
+  creationIntegrationPermissions = [],
+  onRequestIntegration,
+  creatingRequest = false,
+  requestReceipt,
+  integrationTaskError,
+  onCreationPricingMode,
+  onCreationUsdPerGram,
+  onCreationMarketingRounding,
   getVisibleOptionsForQuestion,
   isQuestionVisible,
   isTextQuestion,
@@ -70,17 +95,26 @@ export function ProductBuilder({
   onCancel,
 }) {
   const workspaceRef = useRef(null);
+  const photosPanelRef = useRef(null);
+  const mediaBlockerId = useId();
+  const deliveryNoticeId = useId();
   const [verificationAttempt, setVerificationAttempt] = useState(0);
   const [verificationError, setVerificationError] = useState('');
+  const [verificationFieldErrors, setVerificationFieldErrors] = useState({});
   const [isVerifying, setIsVerifying] = useState(false);
   const category = config.categories[selectedCat];
   const createRules = createRequirements(config, selectedCat, answers);
   const isVerified = Boolean(previewData);
+  const isNativeCreation = nativeCreation ?? (config.productCreation?.identityMode === 'public_identity' || previewData?.identityMode === 'public_identity' || previewData?.mode === 'public_identity');
+  const deliveryState = isNativeCreation ? creationDeliveryState(previewData?.creationDeliveryReadiness, selectedCat) : null;
+  const deliveryConfigurationRequired = deliveryState?.status === 'configuration_required';
   const visibleQuestions = (config.questions[selectedCat] || []).filter((question) =>
-    isQuestionVisible(question, answers)
+    question.archived !== true && question.archived !== 1 && isQuestionVisible(question, answers)
   );
-  const hasValidWeight = !isWeightRequired
-    || (weight !== '' && Number.isFinite(Number(weight)) && Number(weight) > 0);
+  const weightQuestion = visibleQuestions.find((question) => question.id === 'weight');
+  const actualWeight = weightQuestion ? answers.weight : weight;
+  const weightValidation = validateNumericInput(actualWeight, physicalWeightPolicy);
+  const hasValidWeight = !isWeightRequired || weightValidation.valid && weightValidation.normalized !== undefined;
   const fieldBlockers = visibleQuestions.reduce((blockers, question) => {
     const value = answers[question.id];
     const textQuestion = isTextQuestion(question);
@@ -102,10 +136,8 @@ export function ProductBuilder({
         message: `Значення у полі «${question.label}» недоступне.`,
       });
     }
-    if (question.id === 'weight' && createRules.requiredAnswers.includes('weight') && hasAnswer(value)
-      && (!Number.isFinite(Number(String(value).replace(',', '.'))) || Number(String(value).replace(',', '.')) <= 0)) {
-      blockers.push({ fieldId: question.id, message: 'Вкажіть додатну числову вагу.' });
-    }
+    const numeric = validateNumericInput(value, numericQuestionPolicy(question, selectedCat));
+    if (textQuestion && hasAnswer(value) && !numeric.valid) blockers.push({ fieldId: question.id, message: numeric.error });
     return blockers;
   }, []);
   if (createRules.namesRequired) {
@@ -117,10 +149,10 @@ export function ProductBuilder({
   if (!hasValidWeight) {
     fieldBlockers.push({
       fieldId: 'weight',
-      message: 'Вага виробу має бути більшою за 0.',
+      message: weightValidation.error || 'Вага виробу має бути більшою за 0.',
     });
   }
-  const displayedPricing = previewData || (fieldBlockers.length === 0 ? livePriceData : null);
+  const displayedPricing = previewData || (fieldBlockers.length === 0 && creationPricingMode === 'system_auto' ? livePriceData : null);
 
   const matchingServerQuestion = verificationError
     ? visibleQuestions.find((question) => verificationError.includes(`«${question.label}»`))
@@ -130,7 +162,11 @@ export function ProductBuilder({
     fieldBlockers.push({ fieldId: matchingServerQuestion.id, message: verificationError });
   }
 
-  const validationVisible = verificationAttempt > 0 && !isVerified;
+  const serverErrors = { ...verificationFieldErrors, ...creationFieldErrors };
+  for (const [fieldId, message] of Object.entries(serverErrors)) {
+    if (!fieldBlockers.some((blocker) => blocker.fieldId === fieldId)) fieldBlockers.push({ fieldId, message });
+  }
+  const validationVisible = verificationAttempt > 0 && !isVerified || Object.keys(serverErrors).length > 0;
   const validationFailed = validationVisible
     && (fieldBlockers.length > 0 || Boolean(verificationError));
   const blockerByFieldId = new Map(
@@ -140,24 +176,30 @@ export function ProductBuilder({
     ? verificationError
     : '';
   const requiresPriceAttention = isVerified && requiresManualPrice && !hasManualPrice;
-  const verifiedHasError = isVerified && Boolean(saveError || variationError);
-  const summaryNeedsAttention = validationFailed || requiresPriceAttention || verifiedHasError;
+  const verifiedHasError = isVerified && Boolean(saveError || variationError || isCreationSaveUncertain);
+  const photosPending = Boolean(creationPhotos?.hasPendingUploads);
+  const photosFailed = Boolean(creationPhotos?.failedUploads?.length);
+  const summaryNeedsAttention = validationFailed || requiresPriceAttention || verifiedHasError || photosFailed;
   const summaryStateClass = summaryNeedsAttention
     ? 'is-error'
-    : isVerified
+    : deliveryConfigurationRequired
+      ? 'is-neutral'
+    : isVerified && !photosPending
       ? 'is-success'
       : 'is-neutral';
-  const summaryStateLabel = summaryNeedsAttention
+  const summaryStateLabel = isCreationSaveUncertain ? 'Результат не підтверджено' : photosFailed ? 'Фото потребують уваги' : photosPending ? 'Очікуємо фото' : summaryNeedsAttention
     ? 'Потрібна увага'
+    : deliveryConfigurationRequired
+      ? 'Очікує підключення'
     : isVerified
-      ? 'Перевірено'
+      ? isNativeCreation ? 'Дані перевірено' : 'Перевірено'
       : displayedPricing || (isLivePriceLoading && fieldBlockers.length === 0)
         ? 'Потрібна перевірка'
         : 'Не перевірено';
   const summaryWeight = isVerified
     ? previewData.weightVal
-    : hasValidWeight && isWeightRequired
-      ? weight
+    : weightValidation.valid && weightValidation.normalized !== undefined && (isWeightRequired || weightQuestion)
+      ? weightValidation.normalized
       : null;
   const displayedFinalPriceUah = isVerified
     ? effectiveTotalPriceUah
@@ -174,12 +216,14 @@ export function ProductBuilder({
   }, [verificationAttempt, validationFailed, validationVisible]);
 
   const prepareForEdit = () => {
+    setVerificationFieldErrors({});
     if (isVerified) setVerificationAttempt(0);
     setVerificationError('');
   };
 
   const handleVerify = async () => {
     setVerificationError('');
+    setVerificationFieldErrors({});
     setVerificationAttempt((attempt) => attempt + 1);
     if (fieldBlockers.length > 0) return;
 
@@ -188,6 +232,7 @@ export function ProductBuilder({
       await onPreview();
     } catch (error) {
       setVerificationError(error.response?.data?.error || error.message);
+      setVerificationFieldErrors(error.response?.data?.fieldErrors || error.response?.data?.details?.fieldErrors || {});
       setVerificationAttempt((attempt) => attempt + 1);
     } finally {
       setIsVerifying(false);
@@ -203,9 +248,16 @@ export function ProductBuilder({
             <h2 className="section-title-text mt-1">{category.name}</h2>
             <p className="mt-1 text-sm text-slate-500">Заповніть характеристики, перевірте розрахунок і збережіть товар.</p>
           </div>
-          <button onClick={onCancel} className="btn btn-ghost">До категорій</button>
+          <button onClick={onCancel} disabled={isSaving || isCreationSaveUncertain} className="btn btn-ghost">До категорій</button>
         </header>
 
+        {canCreateTestProducts && <div className="test-product-control">
+          <label><input type="checkbox" checked={isTestProduct} disabled={isVerifying || isSaving || isCreationSaveUncertain}
+            onChange={(event) => { prepareForEdit(); onTestProductChange?.(event.target.checked); }} />Створити TEST товар</label>
+          <p>Лише для Адміністратора. Окремий артикул TEST-…; товар залишається вимкненим для покупців у Magento.</p>
+        </div>}
+        {isTestProduct && <p className="test-product-selection" role="status">Обрано TEST товар. Ознака зберігається назавжди; звичайна серія AG не використовується.</p>}
+        {isTestProduct && !canCreateTestProducts && <p className="test-product-selection" role="alert">Для продовження створення TEST товару потрібен чинний доступ Адміністратора. Ознака TEST збережена.</p>}
         <div className="builder-field-list">
           {visibleQuestions.map((question) => {
             const visibleOptions = getVisibleOptionsForQuestion(question, answers);
@@ -224,7 +276,7 @@ export function ProductBuilder({
               >
                 <div className="builder-field-label">
                   <label htmlFor={textQuestion ? `builder-${question.id}` : undefined}>
-                    {question.label}
+                    {question.label}{numericQuestionPolicy(question, selectedCat)?.unit && ` (${numericQuestionPolicy(question, selectedCat).unit})`}
                     {isRequired && <span className="required-marker" aria-label="обов’язкове поле">*</span>}
                   </label>
                 </div>
@@ -236,12 +288,13 @@ export function ProductBuilder({
                       type="text"
                       required={isRequired}
                       className="input builder-text-input"
-                      value={answers[question.id] || ''}
+                      value={answers[question.id] ?? ''}
+                      inputMode={numericQuestionPolicy(question, selectedCat)?.kind === 'integer' ? 'numeric' : numericQuestionPolicy(question, selectedCat) ? 'decimal' : undefined}
                       onChange={(event) => {
                         prepareForEdit();
                         onTextAnswer(question.id, event.target.value);
                       }}
-                      disabled={isVerifying}
+                      disabled={isVerifying || isSaving || isCreationSaveUncertain}
                       placeholder="Введіть значення..."
                       aria-invalid={blocker ? 'true' : undefined}
                       aria-describedby={blocker ? blockerMessageId : undefined}
@@ -262,7 +315,7 @@ export function ProductBuilder({
                               prepareForEdit();
                               onAnswer(question.id, option.id);
                             }}
-                            disabled={isVerifying}
+                            disabled={isVerifying || isSaving || isCreationSaveUncertain}
                             className={`option-pill builder-option ${answers[question.id] === option.id ? 'option-pill-active' : 'option-pill-idle'}`}
                             aria-pressed={answers[question.id] === option.id}
                           >
@@ -295,7 +348,7 @@ export function ProductBuilder({
                 </div>
                 <div className="min-w-0">
                   <input id={`builder-${field}`} className="input builder-text-input" required maxLength={200}
-                    value={nameSubjects[field] || ''} disabled={isVerifying}
+                    value={nameSubjects[field] || ''} disabled={isVerifying || isSaving || isCreationSaveUncertain}
                     aria-invalid={blockerByFieldId.has(field) ? 'true' : undefined}
                     aria-describedby={blockerByFieldId.has(field) ? `builder-blocker-${field}` : undefined}
                     onChange={event => { prepareForEdit(); onNameSubject(field, event.target.value); }} />
@@ -305,15 +358,16 @@ export function ProductBuilder({
             ))}
           </>}
 
-          {isWeightRequired && (
+          {isWeightRequired && !weightQuestion && (
             <WeightField
               blocker={blockerByFieldId.get('weight')}
-              disabled={isVerifying}
+              disabled={isVerifying || isSaving || isCreationSaveUncertain}
               prepareForEdit={prepareForEdit}
               setWeight={setWeight}
               weight={weight}
             />
           )}
+          {creationPhotosAvailable && <div ref={photosPanelRef} tabIndex={-1}><ProductPhotos controller={creationPhotos} activationDisabledReason={isTestProduct ? 'TEST товар не вмикається для покупців після перевірки фото.' : null} canEdit={creationPhotos?.canEdit !== false && !isVerifying && !isSaving && !isCreationSaveUncertain} /></div>}
         </div>
       </section>
 
@@ -332,21 +386,21 @@ export function ProductBuilder({
               <SummaryRow label="Обов’язкові поля" value={`${answeredRequiredCount}/${requiredCount}`} />
               <SummaryRow
                 label="Вага"
-                value={isWeightRequired
+                value={isWeightRequired || weightQuestion
                   ? (summaryWeight !== null ? `${formatDecimal(summaryWeight)} г` : '—')
                   : 'Не потрібна'}
                 danger={validationFailed && isWeightRequired && !hasValidWeight}
               />
-              <details className="mt-2 text-xs"><summary className="cursor-pointer text-slate-500">Технічні деталі</summary>
+              {!isNativeCreation && <details className="mt-2 text-xs"><summary className="cursor-pointer text-slate-500">Технічні деталі</summary>
                 <SummaryRow label="Внутрішній SKU" value={isVerified ? finalSku : '—'} mono />
-              </details>
+              </details>}
               <p className="text-xs text-slate-500">Артикул буде призначено сервером після збереження товару.</p>
-              {isVerified && isVariationActive && (
+              {isVerified && !isNativeCreation && isVariationActive && (
                 <p className="builder-summary-note">
                   Варіація #{String(variationData.variationNumber).padStart(3, '0')}
                 </p>
               )}
-              {isVerified && !isVariationActive && previewData.existsInDb && (
+              {isVerified && !isNativeCreation && !isVariationActive && previewData.existsInDb && (
                 <p className="builder-summary-note is-warning">SKU вже існує</p>
               )}
             </div>
@@ -363,9 +417,12 @@ export function ProductBuilder({
               </div>
             )}
 
+            {onCreationPricingMode && <div className="builder-price-section"><label htmlFor="builder-price-mode" className="builder-summary-section-title">Як визначити ціну</label><select id="builder-price-mode" className="input" value={creationPricingMode} disabled={isVerifying || isSaving || isCreationSaveUncertain} onChange={(event) => { prepareForEdit(); onCreationPricingMode(event.target.value); }}><option value="system_auto">Автоматично</option><option value="manual_uah">Вручну, грн</option>{creationPricingAvailable && config.productCreation?.pricingDecision?.modes?.includes('usd_per_gram') && <option value="usd_per_gram">USD за грам</option>}</select>{creationPricingMode === 'manual_uah' && <label className="mc-label">Ручна ціна, грн<input id="builder-manual-price" className="input" type="text" inputMode="decimal" value={manualPriceUah} disabled={isVerifying || isSaving || isCreationSaveUncertain} onChange={(event) => { prepareForEdit(); onManualPriceChange(event.target.value); }} /></label>}{creationPricingMode === 'usd_per_gram' && <><label className="mc-label">USD за грам<input className="input" type="text" inputMode="decimal" value={creationUsdPerGram} disabled={isVerifying || isSaving || isCreationSaveUncertain} onChange={(event) => { prepareForEdit(); onCreationUsdPerGram(event.target.value); }} /></label><label><input type="checkbox" checked={creationMarketingRounding} disabled={isVerifying || isSaving || isCreationSaveUncertain} onChange={(event) => { prepareForEdit(); onCreationMarketingRounding(event.target.checked); }} /> Маркетингове округлення</label></>}</div>}
             <PriceSummary
               calculatedPriceUah={displayedPricing?.calculatedPriceUah}
-              calculatedPriceUsd={displayedPricing?.totalPrice}
+              calculatedPriceUsd={isNativeCreation
+                ? getFinalPriceUsd(displayedPricing?.calculatedPriceUah, displayedPricing?.uahRate)
+                : displayedPricing?.totalPrice}
               finalPriceUah={displayedFinalPriceUah}
               finalPriceUsd={finalPriceUsd}
               pricePerGramUah={displayedPricing?.pricePerGramUah}
@@ -381,8 +438,14 @@ export function ProductBuilder({
             )}
             {variationError && <div className="builder-operation-error" role="alert">{variationError}</div>}
             {saveError && <div className="builder-operation-error" role="alert">{saveError}</div>}
+            {isCreationSaveUncertain && <p className="text-xs text-slate-600">Перевірка використовує точний запит попередньої спроби: повертає її збережений результат або завершує те саме збереження. До підтвердження результату введення збережено й заблоковано.</p>}
 
-            {isVerified && (
+            {isVerified && onCreationPricingMode && <button type="button" className="btn btn-outline btn-compact"
+              onClick={() => effectiveTotalPriceUah && onCopyText(`${formatDecimal(effectiveTotalPriceUah)} ₴`, 'Ціну')}>
+              Копіювати ціну
+            </button>}
+
+            {isVerified && !onCreationPricingMode && !isCreationSaveUncertain && (
               <VerifiedPriceActions
                 effectiveTotalPriceUah={effectiveTotalPriceUah}
                 hasManualPrice={hasManualPrice}
@@ -398,24 +461,47 @@ export function ProductBuilder({
           </div>
 
           <div className="builder-summary-actions">
+            {isVerified && <TestProductNotice product={previewData} preview />}
+            {isVerified && isNativeCreation && <CreationDeliveryNotice id={deliveryNoticeId}
+                readiness={previewData.creationDeliveryReadiness} categoryCode={selectedCat}
+                categoryLabel={category.name}
+                onRequestIntegration={isCreationSaveUncertain ? undefined : onRequestIntegration}
+                creatingRequest={creatingRequest} requestReceipt={requestReceipt}
+              questionLabel={(config.questions[selectedCat] || []).find((question) => question.id === deliveryState?.questionKey)?.label}
+              valueLabel={(config.questions[selectedCat] || []).find((question) => question.id === deliveryState?.questionKey)?.options?.find((option) => String(option.id) === previewData.creationDeliveryReadiness?.valueId)?.label}
+              permissions={creationIntegrationPermissions} onRecheck={isCreationSaveUncertain ? undefined : handleVerify}
+                busy={isVerifying || isSaving || photosPending} />}
+              {integrationTaskError && <p role="alert" className="text-sm text-amber-900">{integrationTaskError}</p>}
+
+            {photosPending && !isCreationSaveUncertain && <div id={mediaBlockerId} className="builder-media-blocker" role={photosFailed ? 'alert' : 'status'}>
+              {isVerified && <p>Дані товару перевірено.</p>}
+              <p>{photosFailed ? 'Фото не збережені. Повторіть збереження цих фото або приберіть їх зі спроби.' : 'Зачекайте завершення збереження фото. Товар поки не можна зберегти.'}</p>
+              <button type="button" className="btn btn-outline" onClick={() => {
+                photosPanelRef.current?.scrollIntoView({ block: 'center', behavior: 'auto' });
+                photosPanelRef.current?.focus({ preventScroll: true });
+              }}>Перейти до фото</button>
+            </div>}
+
             {isVerified ? (
               <div className="grid gap-2">
                 <button
                   onClick={onSave}
                   className="btn btn-amber"
-                  disabled={isSaving || requiresPriceAttention}
+                  aria-describedby={[photosPending && !isCreationSaveUncertain ? mediaBlockerId : null, deliveryState ? deliveryNoticeId : null].filter(Boolean).join(' ') || undefined}
+                  disabled={isVerifying || isSaving || !isCreationSaveUncertain && (isTestProduct && !canCreateTestProducts || requiresPriceAttention || creationPhotos?.hasPendingUploads || Object.keys(serverErrors).length > 0)}
                 >
-                  {isSaving ? 'Зберігаємо...' : 'Зберегти товар'}
+                  {isSaving ? isCreationSaveUncertain ? 'Перевіряємо результат…' : 'Зберігаємо...' : isCreationSaveUncertain ? 'Перевірити результат збереження' : 'Зберегти товар'}
                 </button>
-                <button onClick={onAddVariation} className="btn btn-primary" disabled={isVariationLoading}>
+                {!isNativeCreation && <button onClick={onAddVariation} className="btn btn-primary" disabled={isVariationLoading}>
                   {isVariationLoading ? 'Підбираємо...' : 'Додати варіацію'}
-                </button>
+                </button>}
               </div>
             ) : (
               <button
                 onClick={handleVerify}
                 className="btn btn-amber w-full"
-                disabled={isVerifying}
+                aria-describedby={photosPending ? mediaBlockerId : undefined}
+                disabled={isVerifying || creationPhotos?.hasPendingUploads || isTestProduct && !canCreateTestProducts}
               >
                 {isVerifying ? 'Перевіряємо…' : 'Перевірити дані'}
               </button>
@@ -445,8 +531,8 @@ function WeightField({ blocker, disabled, prepareForEdit, setWeight, weight }) {
       <div>
         <input
           id="builder-weight"
-          type="number"
-          min="0"
+          type="text"
+          inputMode="decimal"
           onKeyDown={(event) => {
             if (event.key === '-') event.preventDefault();
             handleNumberKeyDown(event);
@@ -456,7 +542,6 @@ function WeightField({ blocker, disabled, prepareForEdit, setWeight, weight }) {
           disabled={disabled}
           onChange={(event) => {
             const value = event.target.value;
-            if (value < 0) return;
             prepareForEdit();
             setWeight(value);
           }}
@@ -512,7 +597,7 @@ function PriceSummary({
         />
       </div>
       <div className="builder-price-section">
-        <p className="builder-summary-section-title">За грам</p>
+        <p className="builder-summary-section-title">За грам · ₴ / USD</p>
         <PriceRow
           label="Розрахункова"
           uah={showPerGram ? formatPositivePrice(pricePerGramUah, formatUahPerGram) : '—'}

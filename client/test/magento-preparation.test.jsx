@@ -212,6 +212,18 @@ it('keeps new attribute work focused without unrelated category or option creati
   expect(api.post).not.toHaveBeenCalled();
 });
 
+it('reuses an existing Magento resource through the original review instead of mounting creation controls', async () => {
+  shell({}, permissions, '/admin/magento/prepare?category=SV&draft=draft&intent=attribute&step=1');
+  await screen.findByText('Attribute creation panel');
+  fireEvent.click(screen.getByRole('button', { name: 'Використати наявний' }));
+  expect(screen.queryByText('Attribute creation panel')).toBeNull();
+  expect(screen.getByText(/Новий ресурс Magento не створюється/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Вибрати наявну відповідність' }));
+  await screen.findByRole('region', { name: 'Binding review' });
+  expect(screen.getByText('review:draft:SV')).toBeTruthy();
+  expect(api.post).not.toHaveBeenCalled();
+});
+
 it('shows explicit structure-check results and failures beside the task action', async () => {
   const comparison = { state: 'checked', bindingRevisionId: 'active', routesChecked: 1, attributesChecked: 2, findings: [] };
   const view = shell({ observation: { comparison } }, permissions, '/admin/magento/prepare?category=SV&draft=draft&intent=attribute&step=1');
@@ -255,5 +267,89 @@ it('keeps resource creation available after a published subcategory rule handoff
   fireEvent.click(await screen.findByRole('button', { name: 'Test fresh successor' }));
   expect(await screen.findByRole('button', { name: 'Test created resource' })).toBeTruthy();
   expect(screen.queryByText('Option preparation panel')).toBeNull();
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('selects an exact active options question before a generic variant task and preserves its preparation return', async () => {
+  const catalog = { questions: { SV: [
+    { id: 'kind', label: 'Вид сувеніра', input_type: 'options', archived: 0 },
+    { id: 'old', label: 'Архівне питання', input_type: 'options', archived: 1 },
+    { id: 'weight', label: 'Вага', input_type: 'text' },
+  ] } };
+  api.get.mockResolvedValue({ data: { ...context, catalog, revision: existingDraft } });
+  shell({}, [...permissions, 'catalog.view'], '/admin/magento/prepare?category=SV&draft=draft&intent=option&step=1&productId=42&returnTo=%2Fattention%3Fproblem%3D42');
+  const selector = await screen.findByLabelText('Характеристика для нового варіанта');
+  expect(screen.queryByRole('link', { name: 'Додати варіант характеристики' })).toBeNull();
+  expect(screen.queryByRole('option', { name: 'Архівне питання' })).toBeNull();
+  expect(screen.queryByRole('option', { name: 'Вага' })).toBeNull();
+  fireEvent.change(selector, { target: { value: 'kind' } });
+  const url = new URL(screen.getByRole('link', { name: 'Додати варіант характеристики' }).href);
+  expect(url.searchParams.get('action')).toBe('new-option');
+  expect(url.searchParams.get('question')).toBe('kind');
+  const back = new URL(url.searchParams.get('returnTo'), 'https://manager.local');
+  expect(back.pathname).toBe('/admin/magento/prepare');
+  expect(back.searchParams.get('draft')).toBe('draft');
+  expect(back.searchParams.get('productId')).toBe('42');
+  expect(back.searchParams.get('returnTo')).toBe('/attention?problem=42');
+  expect(api.post).not.toHaveBeenCalled();
+});
+it('retains an exact repair question and zero value without automatic local writes', async () => {
+  api.get.mockResolvedValue({ data: { ...context, revision: existingDraft, catalog: { questions: { SV: [{ id: 'kind', label: 'Вид', input_type: 'options', archived: 0 }] } } } });
+  shell({}, [...permissions, 'catalog.view'], '/admin/magento/prepare?category=SV&draft=draft&intent=option&step=1&question=kind&value=0&productId=42');
+  expect((await screen.findByLabelText('Характеристика для нового варіанта')).value).toBe('kind');
+  const back = new URL(new URL(screen.getByRole('link', { name: 'Додати варіант характеристики' }).href).searchParams.get('returnTo'), 'https://manager.local');
+  expect(back.searchParams.get('value')).toBe('0');
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('exposes the selected resource choice and one explicit existing-alignment action', async () => {
+  shell({}, permissions, '/admin/magento/prepare?category=SV&draft=draft&intent=attribute&step=1');
+  await screen.findByText('Attribute creation panel');
+  const existing = screen.getByRole('button', { name: 'Використати наявний' });
+  const create = screen.getByRole('button', { name: 'Створити відсутній' });
+  expect(create.getAttribute('aria-pressed')).toBe('true');
+  expect(existing.getAttribute('aria-pressed')).toBe('false');
+  fireEvent.click(existing);
+  expect(existing.getAttribute('aria-pressed')).toBe('true');
+  expect(create.getAttribute('aria-pressed')).toBe('false');
+  expect(screen.getAllByRole('button', { name: 'Вибрати наявну відповідність' })).toHaveLength(1);
+  expect(screen.queryByRole('button', { name: 'Перевірити підключення' })).toBeNull();
+  expect(screen.queryByText('Attribute creation panel')).toBeNull();
+  fireEvent.click(create);
+  expect(create.getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByText('Attribute creation panel')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Перевірити підключення' })).toBeTruthy();
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('does not advance existing alignment with the old observation after a created resource', async () => {
+  shell({}, permissions, '/admin/magento/prepare?category=SV&draft=draft&intent=subcategory&step=1');
+  fireEvent.click(await screen.findByRole('button', { name: 'Test created resource' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Використати наявний' }));
+  const alignment = screen.getByRole('button', { name: 'Вибрати наявну відповідність' });
+  expect(alignment.disabled).toBe(true);
+  fireEvent.click(alignment);
+  expect(screen.queryByRole('region', { name: 'Binding review' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Test fresh successor' }));
+  expect(await screen.findByText('review:fresh:SV')).toBeTruthy();
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('keeps the exact catalog handoff contextual and unavailable without catalog permission', async () => {
+  api.get.mockResolvedValue({ data: { ...context, revision: existingDraft, catalog: { questions: { SV: [{ id: 'kind', label: 'Вид', input_type: 'options', archived: 0 }] } } } });
+  const path = '/admin/magento/prepare?category=SV&draft=draft&intent=option&step=1&question=kind&value=0&productId=42';
+  const view = shell({}, [...permissions, 'catalog.view'], path);
+  const link = await screen.findByRole('link', { name: 'Додати варіант характеристики' });
+  const target = new URL(link.href);
+  expect(target.searchParams.get('category')).toBe('SV');
+  expect(target.searchParams.get('question')).toBe('kind');
+  expect(target.searchParams.get('action')).toBe('new-option');
+  const back = new URL(target.searchParams.get('returnTo'), 'https://fixture.local');
+  expect(back.searchParams.get('value')).toBe('0');
+  expect(back.searchParams.get('productId')).toBe('42');
+  view.unmount();
+  shell({}, permissions, path);
+  await screen.findByText('Option preparation panel');
+  expect(screen.queryByRole('link', { name: 'Додати варіант характеристики' })).toBeNull();
   expect(api.post).not.toHaveBeenCalled();
 });

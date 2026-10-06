@@ -1,0 +1,93 @@
+.magento-preparation-workspace .mp-resource-choice[aria-pressed='true'] {
+  background: #14203b;
+  border-color: #14203b;
+  color: #fff;
+}
+
+.magento-preparation-workspace .mp-catalog-link {
+  display: inline-flex;
+  min-height: 34px;
+  max-width: 100%;
+  white-space: normal;
+}
+
+@media (max-width: 640px) {
+  .magento-preparation-workspace .mp-catalog-link {
+    min-height: 44px;
+  }
+
+  .magento-preparation-workspace > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 12px;
+  }
+
+  .magento-preparation-workspace .mp-context.card {
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+
+  .magento-workspace:has(.magento-preparation-workspace) > .local-workspace-header .page-heading {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 8px;
+  }
+
+  .magento-workspace:has(.magento-preparation-workspace) > .local-workspace-header .section-subtitle {
+    display: none;
+  }
+
+  .magento-workspace:has(.magento-preparation-workspace) > .local-workspace-header .page-title {
+    font-size: 20px;
+  }
+
+  .magento-workspace:has(.magento-preparation-workspace) > .local-workspace-header button {
+    min-height: 44px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .magento-workspace:has(.magento-preparation-workspace) > div > .local-workspace-nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+
+  .magento-workspace:has(.magento-preparation-workspace) > div > .local-workspace-nav > a {
+    flex-shrink: 0;
+    min-height: 44px;
+    white-space: nowrap;
+  }
+
+  .magento-workspace:has(.magento-preparation-workspace) .magento-compact-context {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 8px;
+    padding: 8px 10px;
+    margin-bottom: 12px;
+  }
+
+  .magento-workspace:has(.magento-preparation-workspace) .magento-compact-context > div:first-child {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .magento-workspace:has(.magento-preparation-workspace) .magento-compact-context > div:first-child > span {
+    display: none;
+  }
+
+  .magento-workspace:has(.magento-preparation-workspace) .magento-compact-context > div:nth-child(2) {
+    grid-column: 1;
+    grid-row: 2;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .magento-workspace:has(.magento-preparation-workspace) .magento-compact-context > button {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    width: auto;
+    max-width: 90px;
+    min-height: 44px;
+  }
+}

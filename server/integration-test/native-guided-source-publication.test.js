@@ -1,0 +1,82 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const { Client } = require('pg');
+
+test('guided v5 publication and option preparation precede first native product without publishing legacy SKU', async () => {
+  const sourceUrl = new URL(process.env.TEST_DATABASE_URL || '');
+  assert.equal(sourceUrl.hostname, '127.0.0.1'); assert.equal(sourceUrl.port, '55432');
+  assert.ok(sourceUrl.pathname.endsWith('_test'));
+  const name = `amber_guided_source_${process.pid}_test`;
+  const control = new Client({ connectionString: sourceUrl.toString() }); await control.connect();
+  let db, appPool, created = false; const previousFetch = global.fetch;
+  global.fetch = async () => { assert.fail('External HTTP prohibited by this fixture'); };
+  try {
+    assert.equal((await control.query('SELECT count(*)::int n FROM pg_database WHERE datname=$1', [name])).rows[0].n, 0);
+    await control.query(`CREATE DATABASE ${name}`); created = true;
+    const url = new URL(sourceUrl); url.pathname = `/${name}`;
+    process.env.DATABASE_URL = url.toString(); process.env.NBU_RATE_OVERRIDE = '40'; process.env.MAGENTO_BASE_URL = '';
+    require('../test/setup-env'); appPool = require('../src/db/pool');
+    db = new Client({ connectionString: url.toString() }); await db.connect();
+    await require('../src/db/run-migrations').runMigrations();
+    const actor = (await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Guided source fixture') RETURNING id")).rows[0].id;
+    await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'", [actor]);
+    const options = { databasePool: appPool, mutationContext: { actorUserId: actor } };
+    const catalog = require('../src/services/catalog.service');
+    await catalog.createCategory({ code: 'XG', name: 'Guided new category', requires_weight: 0 }, options);
+    const q = (await catalog.createQuestion({ category_code: 'XG', key: 'new_color', label: 'Колір', input_type: 'options', include_in_sku: 1, sku_index: 1, required: 1, display_order: 1 }, options)).id;
+    await catalog.createOption({ question_id: q, value_id: 7, sku_code: '7', label: 'Новий колір', label_en: 'New color' }, options);
+    await catalog.createQuestion({ category_code: 'XG', key: 'new_note', label: 'Примітка', input_type: 'text', include_in_sku: 0, required: 0, display_order: 2 }, options);
+    const fixture = require('../test/fixtures/magento-v4');
+    const definition = { ...fixture.definition(), evaluatorVersion: 'magento-declarative-5', sourceContractVersion: 'public-product-characteristics-v1' };
+    const templates = require('../src/services/export-templates/template.service');
+    const family = await templates.createTemplate({ key: 'guided-native-source', displayName: 'Guided native source', definition }, options);
+    const version = await templates.publishTemplate(family.id, { expectedRevision: family.draft.revision, expectedDefinitionHash: family.draft.definitionHash }, options);
+    const sources = require('../src/services/export-templates/source-references');
+    const registry = await sources.getSourceRegistry(db);
+    assert.equal(registry.nativeCharacteristicsAuthoring, true);
+    assert.ok(registry.references.questions.some((x) => x.category_code === 'XG' && x.key === 'new_color' && x.active_value_ids.includes('7')));
+    const details = await require('../src/services/export-templates/display-reads').sourceDetails(db, { category: 'XG', key: 'new_color' });
+    assert.equal(details.current[0].archived, false); assert.equal(details.current[0].options[0].archived, false);
+    assert.equal(details.current[0].options[0].label_en, 'New color');
+    const bindings = require('../src/services/magento/binding.service');
+    const config = { configured: true, baseUrl: 'https://guided-source.invalid', consumerKey: 'mock', consumerSecret: 'mock', accessToken: 'mock', accessTokenSecret: 'mock' };
+    const draft = await bindings.createDraft({ installationKey: 'guided-source', origin: config.baseUrl, templateVersionId: version.id, observedAt: new Date().toISOString(), schema: fixture.observation() }, options);
+    const calls = [];
+    const fetchImpl = async (input, init = {}) => {
+      assert.equal(init.method || 'GET', 'GET'); const path = new URL(input).pathname; calls.push(path);
+      let data;
+      if (path.endsWith('/store/storeViews')) data = [{ id: 804, code: 'en', is_active: true }];
+      else if (path.endsWith('/options')) data = [];
+      else if (path.endsWith('/attributes/kolir')) data = { attribute_id: 1471, attribute_code: 'kolir', frontend_input: 'select', backend_type: 'int', is_user_defined: true, source_model: 'Magento\\Eav\\Model\\Entity\\Attribute\\Source\\Table' };
+      else assert.fail(`Unexpected fixture GET ${path}`);
+      return new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
+    };
+    const option = require('../src/services/magento/configuration-option');
+    const input = { bindingRevisionId: draft.id, expectedRevision: draft.revision, attributeCode: 'kolir', amberGroup: 'XG', questionKey: 'new_color', valueId: '7' };
+    await assert.rejects(option.inspect(config, input, { ...options, fetchImpl }), { code: 'MAGENTO_OPTION_AMBER_SCHEMA_REQUIRED' });
+    assert.equal(calls.length, 0);
+    const event = (await db.query(`INSERT INTO audit_events(event_key,actor_user_id,actor_snapshot,subject_type,subject_id,request_id)
+      VALUES('public_sku.activated',$1,'{"displayName":"Guided fixture","preferredUsername":null}','public_sku_activation','singleton',$2) RETURNING id`, [actor, crypto.randomUUID()])).rows[0].id;
+    await db.query('BEGIN'); await db.query("SET LOCAL amber.public_sku_activation='on'");
+    await db.query('UPDATE public_sku_activation SET enabled=TRUE,activated_at=CURRENT_TIMESTAMP,activated_by_user_id=$1,activation_event_id=$2 WHERE singleton', [actor, event]); await db.query('COMMIT');
+    const inspected = await option.inspect(config, input, { ...options, fetchImpl });
+    assert.equal(inspected.target.label, 'Новий колір'); assert.equal(inspected.target.englishLabel, 'New color');
+    const attestation = { ...input, metadataFingerprint: inspected.metadataFingerprint, confirmOrdinary: true, confirmHiddenLimit: true, evidence: 'Synthetic ordinary attribute operator review' };
+    const receipt = await option.attest(config, attestation, { ...options, fetchImpl }); assert.ok(receipt.id);
+    await catalog.setQuestionArchived({ id: q, archived: true }, options);
+    await assert.rejects(option.inspect(config, input, { ...options, fetchImpl }), { code: 'MAGENTO_OPTION_AMBER_SOURCE_MISSING' });
+    await catalog.setQuestionArchived({ id: q, archived: false }, options);
+    await db.query('UPDATE user_role_assignments SET revoked_at=CURRENT_TIMESTAMP WHERE application_user_id=$1', [actor]);
+    await assert.rejects(option.attest(config, attestation, { ...options, fetchImpl }), (error) => error.statusCode === 403 || error.status === 403);
+    assert.equal((await db.query('SELECT count(*)::int n FROM products')).rows[0].n, 0);
+    assert.equal((await db.query("SELECT count(*)::int n FROM sku_schema_versions WHERE category_code='XG'")).rows[0].n, 0);
+    assert.equal((await db.query('SELECT count(*)::int n FROM product_characteristic_versions')).rows[0].n, 0);
+    assert.equal((await db.query('SELECT count(*)::int n FROM magento_configuration_actions')).rows[0].n, 0);
+  } finally {
+    global.fetch = previousFetch;
+    if (db) await db.end(); if (appPool) await appPool.end();
+    if (created) await control.query(`DROP DATABASE ${name} WITH (FORCE)`);
+    await control.end();
+  }
+});

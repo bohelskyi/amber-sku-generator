@@ -130,7 +130,7 @@ function setupShell(path, granted = permissions) {
 it('resumes a persisted category with truthful checkpoints and does not claim pricing or delivery readiness', async () => {
   api.get.mockResolvedValue({ data: { categories: [{ ...category, schema: { version: 1 }, ready: false }], revision, catalog: { questions: { BR: [] } } } });
   setupShell('/admin/magento/categories/new?category=BR');
-  await screen.findByText('Схема внутрішнього SKU');
+  await screen.findByText(/Схема внутрішнього SKU/);
   expect(screen.getByText('Розрахунок ціни нового товару ще потрібно перевірити')).toBeTruthy();
   expect(screen.getByText('Підключення ще потребує перевірки')).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Налаштувати ціну' }).getAttribute('href')).toContain('category=BR');
@@ -161,8 +161,66 @@ it('opens a clean creation form when starting another category after a successfu
   fireEvent.change(screen.getByLabelText('Назва'), { target: { value: 'Браслети' } });
   fireEvent.click(screen.getByRole('button', { name: 'Зберегти категорію' }));
   await screen.findByText('Категорію створено');
+  // The receipt can render before React Router commits the category transition.
+  await screen.findByRole('heading', { name: 'Налаштування категорії «Браслети»' });
   fireEvent.change(screen.getByLabelText('Продовжити налаштування наявної категорії'), { target: { value: '' } });
-  expect(screen.getByRole('button', { name: 'Зберегти категорію' })).toBeTruthy();
+  expect(await screen.findByRole('button', { name: 'Зберегти категорію' })).toBeTruthy();
   expect(screen.getByLabelText('Код').value).toBe('');
   expect(screen.queryByText('Категорію створено')).toBeNull();
+});
+
+it('uses current native characteristics before the first product while preserving the historical SKU explanation', async () => {
+  api.get.mockImplementation((url) => Promise.resolve({ data: url === '/config' ? { productCreation: { identityMode: 'public_identity' } } : { categories: [category], revision, catalog: { questions: { BR: [] } } } }));
+  setupShell('/admin/magento/categories/new?category=BR');
+  const historical = await screen.findByText('Історична SKU-схема та підключення значень Magento');
+  expect(screen.queryByRole('link', { name: 'Перевірити та опублікувати' })).toBeNull();
+  expect(historical.closest('details').open).toBe(false);
+  fireEvent.click(historical);
+  expect(historical.closest('details').open).toBe(true);
+  expect(screen.getByText(/Нові товари використовують чинні характеристики каталогу/)).toBeTruthy();
+  expect(screen.getByText(/її публікація не потрібна для нової характеристики/)).toBeTruthy();
+  expect(screen.queryByText(/може окремо вимагати чинної SKU-схеми/)).toBeNull();
+  expect(api.post).not.toHaveBeenCalled();
+});
+it('retains the legacy checkpoint when creation mode cannot be established', async () => {
+  api.get.mockImplementation((url) => url === '/config' ? Promise.reject(new Error('not available')) : Promise.resolve({ data: { categories: [category], revision, catalog: { questions: { BR: [] } } } }));
+  setupShell('/admin/magento/categories/new?category=BR');
+  expect(await screen.findByRole('link', { name: 'Перевірити та опублікувати' })).toBeTruthy();
+  expect(screen.queryByText('Історична SKU-схема та підключення значень Magento')).toBeNull();
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('plans a new arbitrary subcategory for a catalog code and invalidates the proof when its name changes', async () => {
+  const change = vi.fn(); const base = { ...definition, evaluatorVersion: 'magento-declarative-3', groups: [{ route: 'SV' }] };
+  api.get.mockResolvedValue({ data: { categories: [category] } });
+  const observation = { observedAt: '2026-10-06T00:00:00Z', categories: [{ categoryId: '23', normalizedPath: 'Default/Інше/Вкладений', comparable: true }], schema: { attributeSets: [{ attribute_set_id: 4, attribute_set_name: 'Прикраси' }] } };
+  api.post.mockImplementation((url, command) => Promise.resolve({ data: url.endsWith('/discovery') ? observation : {
+    categoryCode: command.categoryCode, parentId: command.parentId, path: `Default/Інше/Вкладений/${command.name}`,
+    status: 'would_create', magentoWriteAttempted: false, impact: { activeProductUpperBound: 0 },
+  } }));
+  render(<IntegrationCategoryForm definition={base} onChange={change} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Додати категорію до правил' }));
+  await screen.findByRole('option', { name: 'Браслети' });
+  fireEvent.change(screen.getByLabelText('Категорія товару'), { target: { value: 'BR' } });
+  fireEvent.change(screen.getByLabelText('Основна назва товару українською'), { target: { value: 'Браслет' } });
+  fireEvent.change(screen.getByLabelText('Основна назва товару англійською'), { target: { value: 'Bracelet' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Прочитати структуру магазину' }));
+  await screen.findByRole('button', { name: 'Default › Інше › Вкладений' });
+  fireEvent.change(screen.getByLabelText('Набір характеристик'), { target: { value: 'Прикраси' } });
+  fireEvent.change(screen.getByLabelText('Розміщення в магазині'), { target: { value: 'new' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Default › Інше › Вкладений' }));
+  fireEvent.change(screen.getByLabelText('Назва нової підкатегорії'), { target: { value: 'Довільна назва' } });
+  expect(screen.getByRole('button', { name: 'Додати категорію до чернетки' }).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити шлях і вплив' }));
+  await screen.findByText('План створення перевірено');
+  expect(screen.getByRole('button', { name: 'Додати категорію до чернетки' }).disabled).toBe(false);
+  fireEvent.change(screen.getByLabelText('Назва нової підкатегорії'), { target: { value: 'Нова назва' } });
+  expect(screen.getByRole('button', { name: 'Додати категорію до чернетки' }).disabled).toBe(true);
+  expect(screen.queryByText('План створення перевірено')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити шлях і вплив' }));
+  await screen.findByText('План створення перевірено');
+  fireEvent.click(screen.getByRole('button', { name: 'Додати категорію до чернетки' }));
+  expect(change).toHaveBeenCalledOnce();
+  expect(change.mock.calls[0][0].groups[1].rows[0].cells.categories).toEqual({ op: 'literal', value: 'Default/Інше/Вкладений/Нова назва' });
+  expect(api.post.mock.calls.map(call => call[0])).toEqual(['/admin/magento-integration/discovery', '/admin/magento-integration/categories/plan', '/admin/magento-integration/categories/plan']);
 });

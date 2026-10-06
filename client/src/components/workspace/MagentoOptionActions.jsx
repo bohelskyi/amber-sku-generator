@@ -31,7 +31,7 @@ function OptionWorkspace({ revision, category, observation, onResourceChanged, m
     }).catch(() => { if (!controller.signal.aborted) setError('Не вдалося прочитати історію дій.'); });
     return () => { controller.abort(); ++requests.current; };
   }, [readOnly]);
-  const values = (category?.values || []).filter((value) => (!initialQuestionKey || value.questionKey === initialQuestionKey) && (labelUpdate ? value.state === 'approved' : !['approved', 'not_applicable'].includes(value.state)));
+  const values = (category?.values || []).filter((value) => (!initialQuestionKey || value.questionKey === initialQuestionKey) && (labelUpdate ? value.state === 'approved' : value.state !== 'approved' && (value.state !== 'not_applicable' || Boolean(initialQuestionKey))));
   const value = values.find((item) => `${item.questionKey}:${item.valueId}` === source);
   const command = value && revision ? { bindingRevisionId: revision.id, expectedRevision: revision.revision, attributeCode,
     amberGroup: category.code, questionKey: value.questionKey, valueId: value.valueId } : null;
@@ -91,6 +91,7 @@ function OptionWorkspace({ revision, category, observation, onResourceChanged, m
           <option value="">Оберіть значення</option>{values.map((item) => <option key={`${item.questionKey}:${item.valueId}`} value={`${item.questionKey}:${item.valueId}`}>{item.questionLabel}: {item.label}</option>)}</select></label>
           <label className="text-sm">Атрибут Magento<select className="input" required disabled={busy} value={attributeCode} onChange={(event) => { invalidate(); setAttributeCode(event.target.value); }}><option value="">Оберіть атрибут</option>
             {attributes.filter((attribute) => ['select', 'multiselect'].includes(attribute.frontend_input) && (!labelUpdate || approvedAttributes.has(attribute.attribute_code))).map((attribute) => <option key={attribute.attribute_code} value={attribute.attribute_code}>{attribute.default_frontend_label || attribute.attribute_code}</option>)}</select></label></div>
+        {!labelUpdate && value?.state === 'not_applicable' && <Notice>Це значення ще не включено до правил передачі. Створення значення в Magento — окрема дія; відповідність, публікація та доставка товарів потребують окремої перевірки.</Notice>}
         {value && <p className="text-sm">Українська: {value.label}. Англійська: {value.labelEn || 'Не задано в каталозі Amber'}.</p>}
         <button className="btn btn-outline btn-compact-md" disabled={busy || !command || !attributeCode}>Перевірити значення Magento</button>
       </form>

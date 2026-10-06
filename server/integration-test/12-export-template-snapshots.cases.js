@@ -254,6 +254,11 @@ test('PR3 authoritative fingerprints stale on price, answers, weight, names, exc
   ];
   for (const set of changes) {
     const row = await insert(); const input = command(row); const p = await preview(input);
+    if (set.startsWith('full_sku=')) {
+      await assert.rejects(pool.query(`UPDATE products SET ${set} WHERE id=$1`, [row.id]), /immutable/);
+      assert.equal((await pool.query('SELECT full_sku FROM products WHERE id=$1', [row.id])).rows[0].full_sku, row.full_sku);
+      continue;
+    }
     await pool.query(`UPDATE products SET ${set} WHERE id=$1`, [row.id]);
     const before = await exportState();
     await assert.rejects(create(input, p), { code: 'EXPORT_PREVIEW_STALE' });

@@ -41,8 +41,10 @@ function buildQuestionChanges(currentQuestion, {
   inputType,
   skuSeparator,
   visibleRule,
+  numericValidation = currentQuestion.numeric_validation ?? null,
 }) {
   const changes = {};
+  addAuditChange(changes, 'numericValidation', currentQuestion.numeric_validation ?? null, numericValidation);
   addAuditChange(changes, 'key', currentQuestion.key, nextKey);
   addAuditChange(changes, 'label', currentQuestion.label, label);
   addAuditChange(changes, 'skuIndex', Number(currentQuestion.sku_index), skuIndex);

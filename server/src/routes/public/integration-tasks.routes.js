@@ -1,0 +1,15 @@
+const express=require('express');
+const {requirePermission,requireAnyPermission}=require('../../auth/authorization');
+const {getRequestMutationContext}=require('../../audit/mutation-context');
+const {sendHttpError}=require('../../http/errors');
+const tasks=require('../../services/product-integration-tasks.service');
+const router=express.Router();
+const options=req=>({mutationContext:getRequestMutationContext(req)});
+const respond=action=>async(req,res)=>{try{res.json(await action(req));}catch(error){sendHttpError(res,error,{includeCode:true});}};
+router.post('/integration-tasks',requirePermission('products.create'),respond(req=>tasks.create(req.body || {},options(req))));
+router.get('/integration-tasks/attempts/:requestId',requirePermission('products.create'),respond(req=>tasks.recover(req.params.requestId,options(req))));
+router.get('/integration-tasks',requireAnyPermission(['products.create','export_templates.manage']),respond(req=>tasks.list(req.query,options(req))));
+router.get('/integration-tasks/:id/resolution',requirePermission('export_templates.manage'),respond(req=>tasks.resolution(req.params.id,options(req))));
+router.post('/integration-tasks/:id/resolve',requirePermission('export_templates.manage'),respond(req=>tasks.resolve(req.params.id,req.body || {},options(req))));
+router.get('/integration-tasks/:id',requireAnyPermission(['products.create','export_templates.manage']),respond(req=>tasks.read(req.params.id,options(req))));
+module.exports=router;

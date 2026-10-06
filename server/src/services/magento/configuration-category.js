@@ -6,6 +6,41 @@ const { indexTrees, normalizePath } = require('./sync-preview-categories');
 const { signCategoryCreateRequest } = require('./oauth');
 const { validateBaseUrl } = require('../../config/magento');
 const fail = (code) => { throw c.error(409, code, 'Потрібна повторна перевірка категорії Magento.'); };
+function plannedTarget(nodes, input) {
+  if (!c.positive(input.parentId) || typeof input.name !== 'string' || !input.name || input.name.length > 255
+    || input.name !== input.name.trim() || input.name !== input.name.normalize('NFC') || /[/,\u0000-\u001f\u007f]/.test(input.name)) {
+    throw c.error(422, 'MAGENTO_CATEGORY_NAME_INVALID', 'Вкажіть назву до 255 символів без /, коми, керівних символів і крайніх пробілів.');
+  }
+  const parent = nodes.find((node) => node.comparable && Number(node.categoryId) === input.parentId);
+  if (!parent || nodes.filter((node) => node.comparable && node.normalizedPath === parent.normalizedPath).length !== 1) fail('MAGENTO_CATEGORY_PARENT_NOT_EXACT');
+  const path = `${parent.normalizedPath}/${input.name}`;
+  if (path.length > 4096 || path.split('/').length > 30 || /[,\u0000-\u001f\u007f]/.test(path)
+    || normalizePath(path) !== path) fail('MAGENTO_CATEGORY_REQUIREMENT_UNRESOLVED');
+  const existing = nodes.filter((node) => node.comparable && node.normalizedPath === path);
+  if (existing.length > 1) fail('MAGENTO_CATEGORY_PATH_AMBIGUOUS');
+  return { path, parentPath: parent.normalizedPath, parentId: input.parentId, name: input.name,
+    categoryId: existing[0]?.categoryId || null, status: existing.length ? 'existing' : 'would_create',
+    body: { category: { parent_id: input.parentId, name: input.name, is_active: true, include_in_menu: false } } };
+}
+// General authoring preview. It allocates no category, draft, action or SKU;
+// dispatch remains limited to an exact requirement in a reviewed binding draft.
+async function plan(config, input, options = {}) {
+  c.command(input, ['categoryCode', 'parentId', 'name']);
+  if (typeof input.categoryCode !== 'string' || !/^[A-Z][A-Z0-9_]{0,31}$/.test(input.categoryCode)) c.invalid();
+  plannedTarget([{ categoryId: String(input.parentId), normalizedPath: 'Default', comparable: true }], input);
+  const category = await require('./integration-editor.service').read(options, async (client) => {
+    const local = (await client.query('SELECT code,name FROM categories WHERE code=$1', [input.categoryCode])).rows[0];
+    if (!local) throw c.error(404, 'MAGENTO_CATEGORY_NOT_FOUND', 'Спочатку створіть тип товару з цим кодом у каталозі Manager.');
+    const count = (await client.query("SELECT count(*)::int AS count FROM products WHERE category=$1 AND status='active' AND corrected_to_product_id IS NULL", [input.categoryCode])).rows[0].count;
+    return { ...local, activeProductUpperBound: count };
+  });
+  const { nodes } = await live(config, options);
+  const target = plannedTarget(nodes, input);
+  return { ...target, categoryCode: category.code, categoryName: category.name, observedAt: new Date().toISOString(),
+    observationHash: c.hash(nodes), impact: { categoryCreates: target.categoryId ? 0 : 1, productWrites: 0,
+      bindingPublished: false, menuVisible: false, activeProductUpperBound: category.activeProductUpperBound,
+      publicationReviewRequired: true }, magentoWriteAttempted: false };
+}
 function categoryTarget(revision, input, nodes) {
   if (revision.state !== 'draft' || revision.revision !== c.counter(input.expectedRevision)) fail('MAGENTO_BINDING_CONFLICT');
   const a = revision.bindings.attributes.find((a) => a.bindingKey === input.bindingKey && a.target === 'categories');
@@ -18,8 +53,9 @@ function categoryTarget(revision, input, nodes) {
   if (parents.length !== 1 || !Number.isSafeInteger(input.parentId) || Number(parents[0].categoryId) !== input.parentId) fail('MAGENTO_CATEGORY_PARENT_NOT_EXACT');
   const existing = nodes.filter((n) => n.comparable && n.normalizedPath === input.path);
   if (existing.length) fail(existing.length === 1 ? 'MAGENTO_CATEGORY_ALREADY_EXISTS' : 'MAGENTO_CATEGORY_PATH_AMBIGUOUS');
-  return { path: input.path, parentPath, parentId: input.parentId,
-    body: { category: { parent_id: input.parentId, name, is_active: true, include_in_menu: false } } };
+  const target = plannedTarget(nodes, { parentId: input.parentId, name });
+  if (target.path !== input.path) fail('MAGENTO_CATEGORY_PARENT_NOT_EXACT');
+  return { path: target.path, parentPath, parentId: input.parentId, body: target.body };
 }
 function verifyCategory(target, id, remote, nodes) {
   const matches = nodes.filter((n) => n.comparable && n.normalizedPath === target.path);
@@ -45,7 +81,10 @@ async function preview(config, input, options = {}) {
   const { nodes } = await live(config, options); const target = categoryTarget(revision, input, nodes);
   const result = { kind: 'category', bindingRevisionId: revision.id, expectedRevision: revision.revision,
     resource: { path: target.path }, ...target, observationHash: c.hash(nodes),
-    bindingKey: input.bindingKey };
+    bindingKey: input.bindingKey, impact: { categoryCreates: 1, productWrites: 0, bindingPublished: false,
+      menuVisible: false, publicationReviewRequired: true,
+      requiredBindingCount: revision.bindings.attributes.filter((a) => a.target === 'categories'
+        && a.evidence.categories?.some((d) => d.normalizedPath === target.path)).length } };
   return { ...result, previewToken: c.hash(result) };
 }
 async function reconcile(config, input, options = {}) {
@@ -88,4 +127,4 @@ async function apply(config, input, options = {}) {
   try { return await reconcile(config, { actionId: row.id }, options); }
   catch { throw c.error(409, 'MAGENTO_CONFIGURATION_RECONCILIATION_REQUIRED', 'Створення потребує GET-перевірки.', { actionId: row.id }); }
 }
-module.exports = { categoryTarget, verifyCategory, preview, apply, reconcile, live };
+module.exports = { plannedTarget, plan, categoryTarget, verifyCategory, preview, apply, reconcile, live };

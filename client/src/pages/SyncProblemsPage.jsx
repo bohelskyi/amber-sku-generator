@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { useAuth } from '../auth/auth-context.js';
 import { MagentoSyncStatus } from '../components/app/MagentoSyncStatus.jsx';
 import { attentionProblemGroups, nextAction, problemTitle } from '../components/attention/sync-problem-presentation.js';
+import IntegrationTaskQueue from '../components/attention/IntegrationTaskQueue.jsx';
 import AttentionProblemDetail from '../components/attention/AttentionProblemDetail.jsx';
 import { Button, CopyAction, EmptyState, LoadingState, Notice, PageHeader, Pagination, StatusBadge } from '../components/ui/index.js';
 import { api } from '../lib/api.js';
@@ -46,9 +47,13 @@ export default function SyncProblemsPage() {
     if (!canRead) return undefined;
     let live = true;
     let inFlight = false;
+    let timer;
+    let selectedState;
     const controller = new AbortController();
     const read = async () => {
-      if (document.hidden || inFlight) return;
+      window.clearTimeout(timer);
+      if (!live || inFlight) return;
+      if (document.hidden) { timer = window.setTimeout(read, 15000); return; }
       inFlight = true;
       setPolling(true);
       await Promise.all([
@@ -65,19 +70,24 @@ export default function SyncProblemsPage() {
         selectedId ? api.get(`/magento/problems/${selectedId}`, { signal: controller.signal })
           .then(({ data }) => {
             if (Number(data?.productId) !== selectedId || !Array.isArray(data.problems)) throw new Error('Wrong product evidence');
-            if (live && principalLifetime?.valid !== false) setDetail({ item: data, id: selectedId, principalLifetime });
+            if (live && principalLifetime?.valid !== false) {
+              selectedState = data.state;
+              setDetail({ item: data, id: selectedId, principalLifetime });
+            }
           }).catch((error) => {
             if (live && error?.name !== 'CanceledError') setDetail({ id: selectedId, principalLifetime,
               error: error?.response?.status === 404 ? 'Цей товар не знайдено.' : 'Не вдалося прочитати стан вибраного товару. Оновіть дані.' });
           }) : Promise.resolve(),
       ]);
       inFlight = false;
-      if (live) setPolling(false);
+      if (live) {
+        setPolling(false);
+        timer = window.setTimeout(read, ['pending', 'syncing'].includes(selectedState) ? 5000 : 15000);
+      }
     };
     read();
-    const timer = window.setInterval(read, 15000);
     window.addEventListener('focus', read);
-    return () => { live = false; controller.abort(); window.clearInterval(timer); window.removeEventListener('focus', read); };
+    return () => { live = false; controller.abort(); window.clearTimeout(timer); window.removeEventListener('focus', read); };
   }, [canRead, category, search, reason, offset, selectedId, queryKey, refresh, principalLifetime]);
 
   const currentResult = canRead && result?.key === queryKey && result.principalLifetime === principalLifetime ? result : null;
@@ -107,6 +117,9 @@ export default function SyncProblemsPage() {
     <PageHeader title="Потребує уваги" description="Знайдіть товар, зрозумійте причину та виконайте наступну дію для синхронізації з Magento."
       actions={canRead && <Button size="compactMd" onClick={reload} busy={polling}><RefreshCw size={15} aria-hidden="true" />Оновити</Button>} />
     {!canRead ? <Notice>Перегляд проблем синхронізації недоступний для вашого рівня доступу.</Notice> : <>
+      <IntegrationTaskQueue selectedTaskId={params.get('integrationTask')} refreshKey={refresh}
+        onSelectTask={(id) => setLocationState({ integrationTask: id, problem: null })} />
+      <h2 className="font-semibold">Проблеми доставки товарів</h2>
       <form className="sync-problem-filters" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget);
         setLocationState({ search: String(form.get('search') || '').trim(), category: form.get('category'), reason: form.get('reason'), offset: null, problem: null }); }}>
         <label className="sync-search">Артикул<span><Search size={16} aria-hidden="true" /><input key={search} className="input" name="search" defaultValue={search} placeholder="Знайти за артикулом" maxLength={120} /></span></label>
@@ -143,7 +156,7 @@ export default function SyncProblemsPage() {
           {currentDetail?.error && <Notice tone="error">{currentDetail.error}</Notice>}
           {selected && <>
             <header><div><p className="eyebrow">Артикул · {selected.categoryName || selected.category}</p><h2>{selected.article || 'Артикул недоступний'} {selected.article && <CopyAction value={selected.article} label="Копіювати артикул" />}</h2></div>
-              <MagentoSyncStatus status={{ state: selected.state || 'needs_attention' }} /></header>
+              <MagentoSyncStatus status={{ state: selected.state || 'needs_attention', confirmedAt: selected.confirmedAt }} /></header>
             {savedCurrent && <Notice tone="success">{saved.kind === 'recovery'
               ? 'Результат перевірки доставки збережено в Amber. Поточний стан Magento показано окремо.'
               : 'Дані виправлено в Amber. Результат доставки показано окремо у стані Magento.'}</Notice>}
@@ -153,7 +166,7 @@ export default function SyncProblemsPage() {
                   : 'Поточний стан не містить зафіксованої проблеми. Це саме по собі не підтверджує доставку.'}</Notice>}
             <AttentionProblemDetail key={selected.productId} product={selected} productUrl={productUrl} returnTo={returnTo} onSaved={onSaved}
               onRepairCharacteristics={canDecode && productUrl && permissions.includes('products.recount') ? () => navigate(`${productUrl}&action=recount&returnTo=${encodeURIComponent(returnTo)}`) : undefined} />
-            <footer><CopyAction compact buttonLabel="Копіювати опис проблеми" label="Копіювати опис проблеми" value={`${selected.article || ''}\n${attentionProblemGroups(selected.problems).map(({ problem }) => problemTitle(problem)).join('\n')}\n${window.location.origin}/attention?problem=${selected.productId}`} />
+            <footer>{selected.state === 'synced' && items?.some(item => item.productId !== selected.productId) && <Button size="compactMd" onClick={() => select(items.find(item => item.productId !== selected.productId).productId)}>До наступного товару</Button>}<CopyAction compact buttonLabel="Копіювати опис проблеми" label="Копіювати опис проблеми" value={`${selected.article || ''}\n${attentionProblemGroups(selected.problems).map(({ problem }) => problemTitle(problem)).join('\n')}\n${window.location.origin}/attention?problem=${selected.productId}`} />
               {permissions.includes('history.view') && selected.article && <Link className="btn btn-outline btn-compact-md" to={`/products/history?sku=${encodeURIComponent(selected.article)}`}>Історія товару</Link>}
               {canDecode && productUrl && <Link className="btn btn-outline btn-compact-md" to={productUrl}>Відкрити товар</Link>}</footer>
           </>}

@@ -14,10 +14,11 @@ function subjects(category, payload) {
   if (automatic && (ua == null || ua === '') && (en == null || en === '')) return { ua: null, en: null };
   return { ua: normalizeSubject(ua, 'українську'), en: normalizeSubject(en, 'англійську') };
 }
-async function validate(product, client, { allowMissingPrice = false } = {}) {
+async function validate(product, client, { allowMissingPrice = false, pendingPublicIdentity = false } = {}) {
   if (product.category !== 'SV') return;
   const mapped = mapProduct(product, await loadMagentoCatalog(client));
-  const issues = mapped.errors.filter(e => !allowMissingPrice || e.field !== 'price');
+  const issues = mapped.errors.filter(e => (!allowMissingPrice || e.field !== 'price')
+    && (!pendingPublicIdentity || e.field !== 'sku'));
   if (issues.length) throw Object.assign(new Error(issues.map(e => e.message).join(' ')),
     { statusCode: 422, code: 'NEW_PRODUCT_NOT_READY', issues });
 }

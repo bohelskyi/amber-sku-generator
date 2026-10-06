@@ -1,5 +1,5 @@
 const express = require('express');
-const { getAppConfig, createCategory, updateCategory, createQuestion, updateQuestion, createOption, updateOption, setOptionArchived, updateQuestionsOrder, deleteCatalogItem } = require('../../services/catalog.service');
+const { getAppConfig, createCategory, updateCategory, createQuestion, updateQuestion, createOption, updateOption, setOptionArchived, setQuestionArchived, getCatalogItemImpact, updateQuestionsOrder, deleteCatalogItem } = require('../../services/catalog.service');
 const { getSchemaStatus, publishSkuSchema } = require('../../services/sku-schema.service');
 const { getRequestMutationContext } = require('../../audit/mutation-context');
 const { requirePermission } = require('../../auth/authorization');
@@ -39,7 +39,7 @@ router.get('/admin/config', requirePermission('catalog.view'), async (req, res) 
   try {
     res.json(await getAppConfig());
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...(err.fieldErrors ? { fieldErrors: err.fieldErrors } : {}), ...(err.impact ? { impact: err.impact } : {}) });
   }
 });
 
@@ -47,7 +47,7 @@ router.get('/admin/sku-schema/:catCode', requirePermission('catalog.view'), asyn
   try {
     res.json(await getSchemaStatus(String(req.params.catCode || '').toUpperCase()));
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...(err.fieldErrors ? { fieldErrors: err.fieldErrors } : {}), ...(err.impact ? { impact: err.impact } : {}) });
   }
 });
 
@@ -57,7 +57,7 @@ router.post('/admin/sku-schema/:catCode/publish', requirePermission('sku_schemas
       mutationContext: getRequestMutationContext(req),
     }));
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...(err.fieldErrors ? { fieldErrors: err.fieldErrors } : {}), ...(err.impact ? { impact: err.impact } : {}) });
   }
 });
 
@@ -65,12 +65,25 @@ router.post('/admin/delete-item', requireDeleteItemPermission, async (req, res) 
   try {
     const { type, id } = req.body || {};
     await deleteCatalogItem(type, id, {
+      scope: req.body?.scope, confirmation: req.body?.confirmation, impactHash: req.body?.impactHash,
       mutationContext: getRequestMutationContext(req),
     });
     res.json({ success: true });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...(err.fieldErrors ? { fieldErrors: err.fieldErrors } : {}), ...(err.impact ? { impact: err.impact } : {}) });
   }
+});
+
+router.post('/admin/catalog-impact', requireDeleteItemPermission, async (req, res) => {
+  try { res.json(await getCatalogItemImpact(req.body?.type, req.body?.id)); }
+  catch (error) { res.status(error.statusCode || 500).json({ error: error.message }); }
+});
+
+router.patch('/admin/question/:id/archive', requirePermission('catalog.manage'), async (req, res) => {
+  try {
+    await setQuestionArchived({ id: req.params.id, archived: req.body?.archived }, { mutationContext: getRequestMutationContext(req) });
+    res.json({ success: true });
+  } catch (error) { res.status(error.statusCode || 500).json({ error: error.message }); }
 });
 
 router.post('/admin/category', requirePermission('catalog.manage'), async (req, res) => {
@@ -83,7 +96,7 @@ router.post('/admin/category', requirePermission('catalog.manage'), async (req, 
     });
     res.json(result);
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...(err.fieldErrors ? { fieldErrors: err.fieldErrors } : {}), ...(err.impact ? { impact: err.impact } : {}) });
   }
 });
 
@@ -97,15 +110,15 @@ router.put('/admin/category', requirePermission('catalog.manage'), async (req, r
     });
     res.json({ success: true, ...result });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...(err.fieldErrors ? { fieldErrors: err.fieldErrors } : {}), ...(err.impact ? { impact: err.impact } : {}) });
   }
 });
 
 router.post('/admin/question', requirePermission('catalog.manage'), async (req, res) => {
   try {
-    const { key, label } = req.body || {};
-    if (!key || label === undefined) {
-      return res.status(400).json({ error: 'Потрібні key та назва' });
+    const { label } = req.body || {};
+    if (label === undefined) {
+      return res.status(400).json({ error: 'Потрібна назва' });
     }
 
     const result = await createQuestion(req.body || {}, {
@@ -113,7 +126,7 @@ router.post('/admin/question', requirePermission('catalog.manage'), async (req, 
     });
     res.json(result);
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...(err.fieldErrors ? { fieldErrors: err.fieldErrors } : {}), ...(err.impact ? { impact: err.impact } : {}) });
   }
 });
 
@@ -129,7 +142,7 @@ router.put('/admin/question', requirePermission('catalog.manage'), async (req, r
     });
     res.json({ success: true, ...result });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...(err.fieldErrors ? { fieldErrors: err.fieldErrors } : {}), ...(err.impact ? { impact: err.impact } : {}) });
   }
 });
 
@@ -145,7 +158,7 @@ router.post('/admin/question/update', requirePermission('catalog.manage'), async
     });
     res.json({ success: true, ...result });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...(err.fieldErrors ? { fieldErrors: err.fieldErrors } : {}), ...(err.impact ? { impact: err.impact } : {}) });
   }
 });
 
@@ -156,7 +169,7 @@ router.put('/admin/questions/order', requirePermission('catalog.manage'), async 
     });
     res.json(result);
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...(err.fieldErrors ? { fieldErrors: err.fieldErrors } : {}), ...(err.impact ? { impact: err.impact } : {}) });
   }
 });
 
@@ -167,7 +180,7 @@ router.post('/admin/option', requirePermission('catalog.manage'), async (req, re
     });
     res.json(result);
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...(err.fieldErrors ? { fieldErrors: err.fieldErrors } : {}), ...(err.impact ? { impact: err.impact } : {}) });
   }
 });
 
@@ -183,7 +196,7 @@ router.put('/admin/option', requirePermission('catalog.manage'), async (req, res
     });
     res.json({ success: true });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...(err.fieldErrors ? { fieldErrors: err.fieldErrors } : {}), ...(err.impact ? { impact: err.impact } : {}) });
   }
 });
 
@@ -198,7 +211,7 @@ router.patch('/admin/option/:id/archive', requirePermission('catalog.manage'), a
     );
     res.json({ success: true });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...(err.fieldErrors ? { fieldErrors: err.fieldErrors } : {}), ...(err.impact ? { impact: err.impact } : {}) });
   }
 });
 

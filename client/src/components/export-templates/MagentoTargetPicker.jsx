@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api.js';
 
-export default function MagentoTargetPicker({ group, selected, onSelect, disabled }) {
+export default function MagentoTargetPicker({ group, selected, onSelect, disabled, replacing }) {
   const [data, setData] = useState(null); const [error, setError] = useState('');
   const [search, setSearch] = useState(''); const [busy, setBusy] = useState(false);
   const [setId, setSetId] = useState('');
@@ -24,7 +24,7 @@ export default function MagentoTargetPicker({ group, selected, onSelect, disable
   }
   const set = data?.attributeSets?.find((item) => String(item.attribute_set_id) === setId);
   const attributes = (data?.attributes || []).filter((attribute) => set?.attributeCodes.includes(attribute.attribute_code)
-    && !group.columns.includes(attribute.attribute_code));
+    && (!group.columns.includes(attribute.attribute_code) || attribute.attribute_code === replacing));
   const filtered = attributes.filter((attribute) => attribute.attribute_code === selected || `${attribute.default_frontend_label || ''} ${attribute.attribute_code}`.toLocaleLowerCase('uk').includes(search.toLocaleLowerCase('uk')));
   return <fieldset className="space-y-3"><legend>Куди передавати значення</legend>
     {error && <p role="alert">{error}</p>}

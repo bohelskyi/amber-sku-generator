@@ -8,7 +8,9 @@ import AppPage from '../src/pages/AppPage.jsx';
 import { useSkuManager } from '../src/hooks/useSkuManager.js';
 vi.mock('../src/hooks/useSkuManager.js',()=>({useSkuManager:vi.fn()}));
 let authState;
-vi.mock('../src/auth/auth-context.js',()=>({useAuth:()=>authState}));
+vi.mock('../src/auth/auth-context.js', async (importOriginal) => ({
+  ...await importOriginal(), useAuth: () => authState,
+}));
 vi.mock('../src/components/app/HomeDashboard.jsx',()=>({HomeDashboard:({canDeleteTestProduct,onDeleteTest})=>(
   canDeleteTestProduct ? <button type="button" onClick={onDeleteTest}>Open test deletion</button> : null
 )}));
@@ -83,4 +85,10 @@ it('shows test deletion only to an actual Administrator and retains the authorit
   const denied=render(<RouterProvider router={deniedRouter}/>);
   expect(screen.queryByText('Open test deletion')).toBeNull();
   denied.unmount();
+});
+
+it('archived TEST review promises retained archive and reads nothing until explicit preview',()=>{
+  render(<TestProductDeletion product={{...product,public_sku:'TEST-000001',status:'archived'}} onDeleted={vi.fn()} onClose={vi.fn()}/>);
+  expect(screen.getByText('Архівований TEST запис, фотографії та історія перевірок залишаться в Manager.')).toBeTruthy();
+  expect(productsApi.previewTestDeletion).not.toHaveBeenCalled();expect(productsApi.applyTestDeletion).not.toHaveBeenCalled();
 });

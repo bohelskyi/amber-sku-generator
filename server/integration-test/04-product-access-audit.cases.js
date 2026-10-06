@@ -186,12 +186,20 @@ test('product create, direct recount, and archive share local actor attribution 
     details: { fullSku: recounted.data.corrected.fullSku, publicSku: recounted.data.corrected.publicSku },
   }]);
 
+  const archiveSnapshot = async () => (await pool.query(`SELECT to_jsonb(p) AS product,
+    (SELECT to_jsonb(f) FROM product_full_export_state f WHERE f.product_id=p.id) AS lifecycle,
+    (SELECT jsonb_agg(to_jsonb(i) ORDER BY i.id) FROM product_visibility_intents i WHERE i.product_id=p.id) AS visibility
+    FROM products p WHERE p.id=$1`, [correctedProductId])).rows[0];
+  const beforeRepeatedArchive = await archiveSnapshot();
   const repeatedArchive = await request('/api/delete', {
     method: 'POST',
     headers: { 'X-Request-ID': 'audit-product-archive-no-op' },
     body: { skuToDelete: recounted.data.corrected.fullSku },
   });
-  assert.equal(repeatedArchive.response.status, 404, repeatedArchive.text);
+  assert.equal(repeatedArchive.response.status, 200, repeatedArchive.text);
+  assert.equal(repeatedArchive.data.archivedCount, 0);
+  assert.deepEqual(repeatedArchive.data.visibilityIntent, archived.data.visibilityIntent);
+  assert.deepEqual(await archiveSnapshot(), beforeRepeatedArchive, 'archive retry preserves the original actor, lifecycle and hide intent');
   assert.equal(Number((await pool.query(
     `SELECT count(*) FROM audit_events
      WHERE event_key = 'product.archived' AND subject_id = $1`,

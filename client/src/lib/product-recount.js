@@ -1,3 +1,4 @@
+import { physicalWeightPolicy, validateNumericInput } from './product-numeric-input.js';
 import {
   getVisibleOptionsForQuestion,
   isQuestionVisible,
@@ -65,6 +66,20 @@ export function getRecountSourceWeight(decoded) {
   return 0;
 }
 
+export function getRecountWeightState(decoded) {
+  const answers = getDecodedAnswerMap(decoded);
+  const physical = decoded?.product?.weight ?? (decoded?.suffix?.type === 'weight' ? decoded.suffix.value : null);
+  const answer = answers.weight;
+  const present = (value) => value !== undefined && value !== null && String(value).trim() !== '';
+  const policy = { ...physicalWeightPolicy, minInclusive: true };
+  const physicalResult = present(physical) ? validateNumericInput(physical, policy) : null;
+  const answerResult = present(answer) ? validateNumericInput(answer, policy) : null;
+  const conflict = Boolean((physicalResult && !physicalResult.valid) || (answerResult && !answerResult.valid)
+    || (physicalResult && answerResult && physicalResult.normalized !== answerResult.normalized));
+  const single = physicalResult?.normalized ?? answerResult?.normalized;
+  return { physical, answer, conflict, initialWeight: conflict || single == null ? '' : String(single) };
+}
+
 // Presentation hint only. The server checks the catalog and pricing rules again.
 const INFORMATION_FIELDS_V1 = {
   BR: ['braclet_size'],
@@ -78,7 +93,8 @@ export function getInformationOnlyPatch(decoded, answers, weight, submitMode = '
   const category = decoded?.category?.code;
   const eligible = INFORMATION_FIELDS_V1[category] || [];
   if (submitMode !== 'apply' || !decoded?.product?.id || eligible.length === 0
-      || Number(weight) !== getRecountSourceWeight(decoded)) return null;
+      || getRecountWeightState(decoded).conflict
+      || Number(String(weight).replace(',', '.')) !== getRecountSourceWeight(decoded)) return null;
   const previous = getDecodedAnswerMap(decoded);
   const keys = new Set([...Object.keys(previous), ...Object.keys(answers || {})]);
   const changed = [...keys].filter(
@@ -96,10 +112,13 @@ export function getCorrectionMarketingRoundingDefault(config, categoryCode) {
 export function haveRecountTargetChanged(decoded, answers, weight) {
   if (!decoded) return false;
   if (haveAnswersChanged(getDecodedAnswerMap(decoded), answers)) return true;
-  if (Number(decoded.category?.requires_weight) !== 1) return false;
+  if (Number(decoded.category?.requires_weight) !== 1 && !getRecountWeightState(decoded).conflict
+      && !Object.hasOwn(getDecodedAnswerMap(decoded), 'weight')) return false;
 
   const nextWeight = String(weight ?? '').trim();
-  return nextWeight === '' || Number(nextWeight) !== getRecountSourceWeight(decoded);
+  const numeric = validateNumericInput(weight, { ...physicalWeightPolicy, minInclusive: true });
+  return nextWeight === '' || !numeric.valid
+    || getRecountWeightState(decoded).conflict || numeric.normalized !== getRecountSourceWeight(decoded);
 }
 
 export function createRecountPreviewGate() {
@@ -141,10 +160,15 @@ export function getRecountPricingDependencyState({
   return normalizePricingDependencyState(currentPricing);
 }
 
-function getDistinctTargetOptions(question, answers) {
+function getDistinctTargetOptions(question, answers, previousAnswers = {}) {
+  const inheritedQuestion = { ...question, options: (question.options || []).map((option) => (
+    (option.archived === true || option.archived === 1)
+      && Object.hasOwn(previousAnswers, question.id) && String(previousAnswers[question.id]) === String(option.id)
+      ? { ...option, archived: false } : option
+  )) };
   const distinctOptions = new Map();
   for (const option of getVisibleOptionsForQuestion(
-    question,
+    inheritedQuestion,
     answers,
     answers.is_calibrated ?? null
   )) {
@@ -164,7 +188,8 @@ function getRecountAnswerStateKey(answers) {
 export function normalizeRecountTargetState(
   questions,
   answers,
-  retainedHiddenAnswers = {}
+  retainedHiddenAnswers = {},
+  { previousAnswers = {} } = {}
 ) {
   const categoryQuestions = Array.isArray(questions) ? questions : [];
   const nextAnswers = { ...(answers || {}) };
@@ -213,6 +238,11 @@ export function normalizeRecountTargetState(
     let changed = false;
     for (const question of categoryQuestions) {
       const questionId = question.id;
+      if (question.archived === true || question.archived === 1) {
+        if (Object.hasOwn(previousAnswers, questionId)) nextAnswers[questionId] = previousAnswers[questionId];
+        else delete nextAnswers[questionId];
+        continue;
+      }
       const selectedValue = nextAnswers[questionId];
       const hasSelectedValue = hasRecountAnswerValue(selectedValue);
       const isVisible = isQuestionVisible(
@@ -243,7 +273,7 @@ export function normalizeRecountTargetState(
         continue;
       }
 
-      const targetOptions = getDistinctTargetOptions(question, nextAnswers);
+      const targetOptions = getDistinctTargetOptions(question, nextAnswers, previousAnswers);
       const retainedSelectionIsValid = hasRetainedValue && targetOptions.some(
         (option) => String(option.id) === String(retainedValue)
       );
@@ -315,10 +345,10 @@ export function updateRecountOptionAnswer(previousAnswers, question, valueId) {
 }
 
 export function updateRecountTextAnswer(previousAnswers, question, value) {
-  const normalizedValue = String(value || '').trim();
+  const normalizedValue = String(value ?? '');
   return {
     ...previousAnswers,
-    [question?.id]: normalizedValue || null,
+    [question?.id]: normalizedValue.trim() === '' ? null : normalizedValue,
   };
 }
 

@@ -44,7 +44,7 @@ it('authors an existing category subcategory using observed parent, explicit pro
   const registry = { references: { questions: [{ category_code: 'BR', key: 'color', include_in_sku: 1, label: 'Колір' }], schemas: [{ category_code: 'BR', questions: [{ key: 'color' }] }] } };
   const loadSource = vi.fn().mockResolvedValue({ data: { current: [{ options: [{ value_id: '1', label: 'Світлий' }] }] } });
   const onChange = vi.fn();
-  api.post.mockResolvedValue({ data: { categories: [{ categoryId: '10', normalizedPath: 'Default/Прикраси', comparable: true }] } });
+  api.post.mockResolvedValueOnce({ data: { categories: [{ categoryId: '10', normalizedPath: 'Default/Прикраси', comparable: true }] } }).mockResolvedValueOnce({ data: { categoryCode: 'BR', parentId: 10, path: 'Default/Прикраси/Світлі браслети', status: 'would_create', magentoWriteAttempted: false, impact: { activeProductUpperBound: 17 } } });
   render(<MagentoPlacementRuleEditor definition={definition} cellPath={['groups', 0, 'rows', 0, 'cells', 'categories']} registry={registry} loadSource={loadSource} onChange={onChange} onEditing={vi.fn()} />);
   expect(api.post).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Прочитати розділи магазину' }));
@@ -57,12 +57,15 @@ it('authors an existing category subcategory using observed parent, explicit pro
   fireEvent.change(screen.getByLabelText('Характеристика'), { target: { value: 'color' } });
   await screen.findByRole('option', { name: 'Світлий' });
   fireEvent.change(screen.getByLabelText('Значення характеристики'), { target: { value: '1' } });
+  expect(screen.getByRole('button', { name: 'Додати розміщення до правила' }).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити шлях і вплив' }));
+  await screen.findByText('План створення перевірено');
   fireEvent.click(screen.getByRole('button', { name: 'Додати розміщення до правила' }));
   expect(onChange).toHaveBeenCalledOnce();
   const node = onChange.mock.calls[0][0].groups[0].rows[0].cells.categories.items[1];
   expect(node.then.value).toBe('Default/Прикраси/Світлі браслети');
   expect(node.if.right.value).toBe('1');
-  expect(api.post.mock.calls).toEqual([['/admin/magento-integration/discovery', {}]]);
+  expect(api.post.mock.calls.map(call => call.slice(0, 2))).toEqual([['/admin/magento-integration/discovery', {}], ['/admin/magento-integration/categories/plan', { categoryCode: 'BR', parentId: 10, name: 'Світлі браслети' }]]);
 });
 it('shows text characteristics with no options and never invents an attribute association', () => {
   render(<MemoryRouter><MagentoCharacteristics questions={[{ id: 'engraving', label: 'Гравіювання', input_type: 'text', options: [] }, { id: 'description', label: 'Опис', input_type: 'text', options: [] }]} values={[]} targets={{ engraving: ['engraving_text'] }} definition={{}} revision={{ schema: { attributes: [{ attribute_code: 'engraving_text', default_frontend_label: 'Текст гравіювання' }] } }} actionFor={(question) => `/admin/magento/prepare?intent=attribute&question=${question.id}`} /></MemoryRouter>);

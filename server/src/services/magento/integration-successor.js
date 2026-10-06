@@ -7,6 +7,7 @@ const { requirements } = require('./binding-validation');
 const { buildCandidates } = require('./binding-bootstrap');
 const { carryReviewedBindings, collectLiveVerification } = require('./binding-carry-forward');
 const { compileDefinition } = require('../export-templates/definition');
+const { CONTRACT, upgradeColumns } = require('../export-templates/column-contract');
 const { getAppConfig } = require('../catalog/catalog-read-model');
 const { loadDraftPreviewProducts } = require('../export-templates/draft-inputs');
 const { loadSupportInputs } = require('../export-templates/support-inputs');
@@ -100,7 +101,48 @@ function storeProof(schema, rowId) {
   return { code, view: view || null, group: topology.storeGroups.find(g => g.id === view?.store_group_id) || null,
     website: topology.websites.find(w => w.id === view?.website_id) || null };
 }
+
+// Only the official fixed-to-editable conversion may change contract identity
+// without losing review. Prove every existing position, not just the decisions
+// present in the published binding. Additions cannot reorder or rewrite history.
+function equivalentColumnUpgrade(oldDefinition, nextDefinition) {
+  if (oldDefinition.outputContract !== 'magento-products-v1' || nextDefinition.outputContract !== CONTRACT) return null;
+  try {
+    const before = upgradeColumns(oldDefinition);
+    const after = compileDefinition(nextDefinition).definition;
+    const equal = (a, b) => c.hash(a ?? null) === c.hash(b ?? null);
+    // Ownership is a set, while checks themselves retain execution order. JSONB
+    // canonicalization may change traversal order inside an expression before
+    // the official upgrade gathers the same diagnostic owners.
+    const checks = rows => rows.map(check => ({ ...check, columns: [...check.columns].sort() }));
+    for (const key of ['formatVersion', 'evaluatorVersion', 'sourceContractVersion', 'sourceSupport']) {
+      if (!equal(before[key], after[key])) return null;
+    }
+    for (const key of ['sources', 'tables', 'questionContracts']) {
+      for (const [id, value] of Object.entries(before[key])) if (!equal(value, after[key][id])) return null;
+    }
+    const oldIds = new Set(before.bindings.map(b => b.id));
+    if (!equal(before.bindings, after.bindings.filter(b => oldIds.has(b.id)))) return null;
+    if (before.groups.length !== after.groups.length) return null;
+    for (let i = 0; i < before.groups.length; i++) {
+      const oldGroup = before.groups[i], nextGroup = after.groups[i];
+      if (oldGroup.route !== nextGroup.route || !equal(oldGroup.name, nextGroup.name)
+        || !equal(oldGroup.columns, nextGroup.columns.slice(0, oldGroup.columns.length))
+        || !equal(oldGroup.evaluate, nextGroup.evaluate)
+        || !equal(checks(oldGroup.outputChecks), checks((nextGroup.outputChecks || []).filter(check => check.columns.some(column => oldGroup.columns.includes(column)))))
+        || !equal(oldGroup.rows.map(row => [row.id, row.default]), nextGroup.rows.map(row => [row.id, row.default]))) return null;
+      for (const row of oldGroup.rows) for (const target of oldGroup.columns) {
+        if (ruleProof(before, oldGroup.route, row.id, target) !== ruleProof(after, oldGroup.route, row.id, target)) return null;
+      }
+    }
+    return before;
+  } catch {
+    // Invalid/unprovable conversion retains the original strict comparison.
+    return null;
+  }
+}
 function stableReviewedSource(source, oldDefinition, nextDefinition, nextSchema = source.schema) {
+  oldDefinition = equivalentColumnUpgrade(oldDefinition, nextDefinition) || oldDefinition;
   const result = structuredClone(source); const changed = new Set();
   for (const a of result.bindings.attributes) {
     const group = a.routeKey.split(/[.:]/)[0];
@@ -206,4 +248,4 @@ async function apply(config, input, options = {}) {
       return service.readRevisionOnClient(client, draft.id);
     } });
 }
-module.exports = { ruleProof, stableReviewedSource, prepare, apply };
+module.exports = { ruleProof, equivalentColumnUpgrade, stableReviewedSource, prepare, apply };

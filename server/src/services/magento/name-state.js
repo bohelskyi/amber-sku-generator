@@ -67,6 +67,7 @@ function decisionFor(observation) {
   const names = namesFromObservation(observation);
   const state = observation.amber.nameState;
   if (!observation.raw) return { action: 'create', ...names };
+  if (require('./native-identity-ownership').issue(observation.amber, observation.raw)) return { action: 'foreign_identity', ...names };
   if (!names.amber.all || !names.remote.all || !same(Object.keys(names.amber).sort(), Object.keys(names.remote).sort())) {
     return { action: 'unavailable', ...names };
   }
@@ -108,7 +109,7 @@ async function importRemote(client, actorUserId, product, result) {
 }
 async function reconcileObservation(config, observation, options) {
   const result = decisionFor(observation);
-  if (['create', 'unavailable', 'identity_changed'].includes(result.action)) return result;
+  if (['create', 'unavailable', 'identity_changed', 'foreign_identity'].includes(result.action)) return result;
   const client = await options.databasePool.connect();
   const product = observation.amber.product; const origin = c.originHash(config.baseUrl);
   try {

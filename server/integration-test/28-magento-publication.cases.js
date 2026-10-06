@@ -246,4 +246,62 @@ test('H3b new route requires a representative CREATE; changed common-name eviden
   }finally{await f.db.end();await dropTestDatabase(name);}
 });
 
+test('publication preserves acknowledged TEST 5816 ownership across source changes and rejects unowned AG 5797',async()=>{
+  const name='amber_publication_native_receipt_test',f=await setup(name),{randomUUID}=require('node:crypto');
+  try{
+    const event=async key=>(await f.db.query(`INSERT INTO audit_events(event_key,actor_user_id,actor_snapshot,subject_type,subject_id,request_id)
+      VALUES($1,$2,'{"displayName":"Publication admin","preferredUsername":null}','public_sku_activation','singleton',$3) RETURNING id`,[key,f.actor,randomUUID()])).rows[0].id;
+    const activation=await event('public_sku.activated'),cutover=await event('magento_delivery.cutover');
+    await f.db.query('BEGIN');await f.db.query("SET LOCAL amber.public_sku_activation='on'");
+    await f.db.query('UPDATE public_sku_activation SET enabled=TRUE,activated_at=CURRENT_TIMESTAMP,activated_by_user_id=$1,activation_event_id=$2 WHERE singleton',[f.actor,activation]);
+    await f.db.query("SET LOCAL amber.magento_delivery_cutover='on'");
+    await f.db.query(`UPDATE magento_auto_sync_activation SET legacy_product_csv_enabled=FALSE,cutover_at=CURRENT_TIMESTAMP,
+      cutover_by_user_id=$1,cutover_event_id=$2 WHERE singleton`,[f.actor,cutover]);await f.db.query('COMMIT');
+    await f.db.query("SELECT setval('public_product_sku_sequence',2,TRUE)");
+    const create=async isTest=>{
+      const client=await f.db.connect(),gate=require('../src/services/full-product-cutover-gate');
+      try{
+        await gate.begin(client,'BEGIN');
+        const config=require('../src/services/product/characteristic-config');
+        const version=await config.persistCharacteristicConfiguration(client,await config.readCharacteristicConfiguration(client,'XG'));
+        if(isTest){await client.query("SET LOCAL amber.create_test_product='on'");
+          await client.query("SELECT set_config('amber.create_test_product_actor',$1,TRUE)",[String(f.actor)]);}
+        const p=(await client.query(`INSERT INTO products(category,total_price_uah,weight,details,characteristic_version_id,created_by_user_id)
+          VALUES('XG',42,5,'{"answers":{}}',$1,$2) RETURNING *`,[version.id,f.actor])).rows[0];
+        await require('../src/services/full-product-export.service').initializeNewProduct(client,p.id);
+        await gate.commit(client);return p;
+      }catch(e){await gate.rollback(client);throw e;}finally{await gate.release(client);client.release();}
+    };
+    const own=await create(true),foreign=await create(false);
+    for(const [p,sku,id] of [[own,'TEST-000001',5816],[foreign,'AG-000003',5797]]){
+      assert.equal((await f.db.query('SELECT public_sku FROM public_product_identities WHERE id=$1',[p.public_product_identity_id])).rows[0].public_sku,sku);
+      f.raw.set(sku,{id,sku,attribute_set_id:8001,type_id:'simple',status:2,visibility:4,price:42,name:'Тестова назва',
+        custom_attributes:[],extension_attributes:{category_links:[],website_ids:[]}});f.english.set(sku,'Test name');
+      await f.db.query(`INSERT INTO magento_name_sync_states(origin_hash,public_product_identity_id,remote_product_id,
+        baseline_names,observed_amber_names,observed_remote_names,state) VALUES($1,$2,$3,$4::jsonb,$4::jsonb,$4::jsonb,'common')`,
+      [f.current.originHash,p.public_product_identity_id,id,JSON.stringify({all:'Тестова назва',en:'Test name'})]);
+    }
+    const jobId=randomUUID(),hash='a'.repeat(64);
+    await f.db.query(`INSERT INTO magento_sync_jobs(id,product_id,public_product_identity_id,sku,installation_key,origin_hash,
+      binding_revision_id,binding_hash,amber_hash,plan_hash,intent,baseline,created_by_user_id,state,remote_product_id,acknowledged_at)
+      VALUES($1,$2,$3,'TEST-000001','publication',$4,$5,$6,$6,$6,
+        '{"mode":"create","operations":[{"domain":"coreProduct","payload":{"product":{"status":2}}}]}','{}',$7,'succeeded',5816,CURRENT_TIMESTAMP)`,
+    [jobId,own.id,own.public_product_identity_id,f.current.originHash,f.current.id,hash,f.actor]);
+    const before=(await f.db.query('SELECT * FROM magento_sync_jobs WHERE id=$1',[jobId])).rows[0];
+    const next=structuredClone(f.d);next.groups[0].rows[0].cells.price.value='43';
+    const draft=await f.draft(next,'native-next'),input={bindingRevisionId:draft.id,expectedRevision:draft.revision,
+      expectedCurrentId:f.current.id,currentProductIds:[own.id,foreign.id]};
+    const preview=await publication.preview(f.config,input,f.options),a=preview.checked.find(p=>p.productId===own.id),b=preview.checked.find(p=>p.productId===foreign.id);
+    assert.equal(a.sendable,true,JSON.stringify(a));assert.equal(a.identity.observedMagentoId,5816);
+    assert.ok(!a.blockers.some(p=>p.code==='MAGENTO_NATIVE_IDENTITY_COLLISION'));
+    assert.equal(b.sendable,false);assert.ok(b.blockers.some(p=>p.code==='MAGENTO_NATIVE_IDENTITY_COLLISION'));
+    assert.deepEqual(preview.blockers,[{code:'AFFECTED_CURRENT_PREVIEW_BLOCKED',productId:foreign.id}]);
+    assert.deepEqual((await f.db.query('SELECT * FROM magento_sync_jobs WHERE id=$1',[jobId])).rows[0],before);
+    assert.equal((await bindings.getCurrentPublished('publication',f.options)).id,f.current.id);
+    f.raw.get('TEST-000001').status=1;
+    const enabled=await publication.preview(f.config,input,f.options),testReport=enabled.checked.find(p=>p.productId===own.id);
+    assert.equal(testReport.sendable,false);assert.ok(testReport.blockers.some(p=>p.code==='TEST_PRODUCT_REMOTE_ENABLED'),JSON.stringify(testReport));
+  }finally{await f.db.end();await dropTestDatabase(name);}
+});
+
 module.exports={setup};

@@ -23,7 +23,7 @@ async function setup(name) {
   const input={bindingRevisionId:draft.id,expectedRevision:draft.revision,attributeCode:'fixture_choice',amberGroup:'XG',questionKey:'kind',valueId:'8'};
   return {db,options,actor,config,draft,input};
 }
-function remote(db,{lost=false,failVerification=false}={}) {
+function remote(db,{lost=false,failVerification=false,firstOption=false,addedDefaultValue=''}={}) {
   const attribute={attribute_id:1471,attribute_code:'fixture_choice',frontend_input:'select',backend_type:'int',is_user_defined:true,source_model:'Magento\\Eav\\Model\\Entity\\Attribute\\Source\\Table'};
   let created=false,posts=0;
   return {attribute,hideCreated:()=>{created=false;},get posts(){return posts;},fetch:async(url,init)=>{
@@ -37,10 +37,10 @@ function remote(db,{lost=false,failVerification=false}={}) {
     }else{
       assert.equal(init.method,'GET');
       if(path.endsWith('/store/storeViews'))data=[];
-      else if(path.endsWith('/fixture_choice'))data=attribute;
+      else if(path.endsWith('/fixture_choice'))data=firstOption&&created?{...attribute,default_value:addedDefaultValue}:attribute;
       else if(path.endsWith('/fixture_choice/options')){
         if(created&&failVerification){failVerification=false;throw new Error('GET unavailable');}
-        data=[{value:'10',label:'Існуюче'},...(created?[{value:'5738',label:'Скриньки'}]:[])];
+        data=[...(firstOption?[{value:'',label:' '}]:[{value:'10',label:'Існуюче'}]),...(created?[{value:'5738',label:'Скриньки'}]:[])];
       }else throw new Error('Unexpected fixture GET');
     }
     return new Response(JSON.stringify(data),{status:200,headers:{'Content-Type':'application/json'}});
@@ -168,6 +168,49 @@ test('H4 PostgreSQL EN label is authoritative, scoped and GET verified; SKU valu
 });
 
 module.exports={setup,remote,reviewed};
+
+test('H4 first non-default option proves the immutable metadata preimage with exact UA/EN ID and GET-only recovery',async()=>{
+  for(const failVerification of [false,true]){
+    const name='amber_option_race_test',f=await setup(name);
+    try {
+      await f.db.query("UPDATE options SET label_en='Amber boxes'");
+      const r=remote(f.db,{firstOption:true,failVerification});
+      const fetch=async(url,init)=>{
+        const p=new URL(url).pathname;
+        if(p.endsWith('/store/storeViews'))return new Response(JSON.stringify([{id:9,code:'en',is_active:true}]),{headers:{'Content-Type':'application/json'}});
+        if(p.startsWith('/rest/en/'))return new Response(JSON.stringify([{value:'',label:' '},...(r.posts?[{value:'5738',label:'Amber boxes'}]:[])]),{headers:{'Content-Type':'application/json'}});
+        if(init.method==='POST')assert.deepEqual(JSON.parse(init.body).option.store_labels,[{store_id:0,label:'Скриньки'},{store_id:9,label:'Amber boxes'}]);
+        return r.fetch(url,init);
+      };
+      const review=await reviewed(f,{fetch});
+      if(failVerification)await assert.rejects(option.apply(f.config,{...review.command,previewToken:review.proof.previewToken},review.opt));
+      else assert.equal((await option.apply(f.config,{...review.command,previewToken:review.proof.previewToken},review.opt)).state,'verified');
+      const before=(await f.db.query('SELECT * FROM magento_configuration_actions')).rows[0];
+      assert.equal(before.remote_id,'5738');assert.equal(before.state,failVerification?'returned':'verified');
+      assert.equal((await option.reconcile(f.config,{actionId:before.id},review.opt)).state,'verified');
+      const after=(await f.db.query('SELECT * FROM magento_configuration_actions')).rows[0];
+      assert.deepEqual(after.intent,before.intent);assert.equal(after.intent.metadataFingerprint,review.proof.metadataFingerprint);
+      assert.equal(after.verification.metadataPreimage.mode,'first_non_default_option_empty_default_added');
+      assert.equal(after.verification.metadataPreimage.sealedFingerprint,review.proof.metadataFingerprint);
+      assert.equal(after.verification.englishStoreId,9);assert.equal(after.verification.englishLabel,'Amber boxes');
+      const attestation=(await f.db.query('SELECT metadata_fingerprint FROM magento_option_capability_attestations WHERE id=$1',[review.a.id])).rows[0];
+      assert.equal(attestation.metadata_fingerprint,review.proof.metadataFingerprint);
+      assert.equal(r.posts,1);assert.deepEqual(await bindings.getRevision(f.draft.id,f.options),f.draft);
+    }finally{await f.db.end();await dropTestDatabase(name);}
+  }
+});
+
+test('H4 a real default added during first option creation remains returned and cannot be verified or resent',async()=>{
+  const name='amber_option_recovery_returned_test',f=await setup(name);
+  try {
+    const r=remote(f.db,{firstOption:true,addedDefaultValue:'5738'}),review=await reviewed(f,r);
+    await assert.rejects(option.apply(f.config,{...review.command,previewToken:review.proof.previewToken},review.opt),{code:'MAGENTO_OPTION_METADATA_DRIFT'});
+    const row=(await f.db.query('SELECT * FROM magento_configuration_actions')).rows[0];
+    assert.equal(row.state,'returned');assert.equal(row.remote_id,'5738');
+    await assert.rejects(option.reconcile(f.config,{actionId:row.id},review.opt),{code:'MAGENTO_OPTION_METADATA_DRIFT'});
+    assert.equal(r.posts,1);assert.deepEqual(await bindings.getRevision(f.draft.id,f.options),f.draft);
+  }finally{await f.db.end();await dropTestDatabase(name);}
+});
 
 test('H4 ambiguous authoritative source labels block review and sealed dispatch without a POST',async()=>{
   const name='amber_option_ambiguous_labels_test',f=await setup(name);

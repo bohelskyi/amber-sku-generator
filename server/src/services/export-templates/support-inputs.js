@@ -1,4 +1,4 @@
-const { projectSupportProducts } = require('./source-support');
+const { projectSupportProducts, projectProspectiveSupportProduct } = require('./source-support');
 
 // One batched immutable-schema read on the caller's transaction, never a current
 // active-schema fallback. Full questions are needed by the existing reconstruction.
@@ -20,7 +20,23 @@ async function loadSupportInputs(client, definition, products) {
         FROM sku_schema_questions sq WHERE sq.schema_version_id=v.id
       ) q), '[]'::jsonb) AS questions
     FROM sku_schema_versions v WHERE v.id=ANY($1::integer[]) ORDER BY v.id`, [ids]) : { rows: [] };
-  return { products: projectSupportProducts(products, schemas), schemas };
+  const characteristicVersions = [];
+  if (definition.evaluatorVersion === require('./version-contract').CHARACTERISTIC_EVALUATOR) {
+    const ids = [...new Set(products.map((p) => p.characteristic_version_id).filter(Boolean))];
+    for (const id of ids) {
+      const version = await require('../product/characteristic-config').getCharacteristicVersion(client, id);
+      if (version) characteristicVersions.push(version);
+    }
+  }
+  return { products: projectSupportProducts(products, schemas, characteristicVersions), schemas, characteristicVersions };
 }
 
-module.exports = { loadSupportInputs };
+async function loadProspectiveSupportInput(client, definition, product, expectedConfigHash) {
+  const configuration = await require('../product/characteristic-config').readCharacteristicConfiguration(client, product.category);
+  if (typeof expectedConfigHash !== 'string' || configuration.config_hash !== expectedConfigHash) {
+    throw Object.assign(new Error('Prospective characteristic configuration changed'), { code: 'PRODUCT_CHARACTERISTICS_CHANGED', statusCode: 409 });
+  }
+  return projectProspectiveSupportProduct(definition, product, configuration);
+}
+
+module.exports = { loadSupportInputs, loadProspectiveSupportInput };

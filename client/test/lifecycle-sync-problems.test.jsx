@@ -20,14 +20,14 @@ for (const reconcile of [false, true]) it(`lifecycle hold handoff is read-only, 
   api.get.mockResolvedValue({ data: { items: [{ productId: 5033, article: 'SV5111010', category: 'SV', problems: [problem] }],
     pageInfo: { total: 1, hasPrevious: false, hasNext: false } } });
   shell(<SyncProblemsPage />, [...permissions, ...(reconcile ? ['exports.reconcile'] : [])]);
-  await screen.findByRole('heading', { name: 'Синхронізацію товару зупинено після попередніх змін' });
+  await screen.findByRole('heading', { name: 'Немає точного підтвердження, які попередні версії товару доставлено в Magento' });
   if (!reconcile) expect(screen.getByText(/Потрібне узгодження Адміністратора/)).toBeTruthy();
   expect(screen.getByText(/Amber ще не підтвердив, як попередні зміни/)).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Відкрити товар' }).getAttribute('href')).toContain('article=SV5111010');
   expect(screen.getByRole('link', { name: 'Історія товару' }).getAttribute('href')).toBe('/products/history?sku=SV5111010');
   expect(screen.queryByRole('link', { name: /Перевірити відповідності/ })).toBeNull();
   expect(screen.queryByRole('button', { name: /Повтор|Надіслати|Зняти|Release|Retry/ })).toBeNull();
-  fireEvent.click(screen.getByText('Технічні деталі'));
+  fireEvent.click(screen.getByText('Дані для підтримки'));
   expect(screen.getByText(/INFERRED_HISTORY_WITHOUT_EXACT_MEMBERSHIP/).textContent).toContain('1368');
   expect(screen.getByText(/INFERRED_HISTORY_WITHOUT_EXACT_MEMBERSHIP/).textContent).toContain('1509');
   if (reconcile) expect(screen.getByRole('button', { name: 'Перевірити товар у Magento' })).toBeTruthy();

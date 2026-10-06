@@ -34,3 +34,13 @@ test('SPA HTML is never stored while application routes retain fallback', () => 
   assert.match(html, /add_header\s+Cache-Control\s+"[^"]*no-store[^"]*"\s*;/i);
   assert.match(locationBody('', '/'), /try_files\s+\$uri\s+\/index\.html\s*;/);
 });
+
+test('photo upload alone has enough space for one 5 MiB base64 image and retains the exact proxy transport', () => {
+  const upload=locationBody('=', '/api/product-photos/stage');
+  assert.match(upload,/client_max_body_size\s+8m;/);
+  assert.match(upload,/proxy_pass\s+http:\/\/\$amber_api_upstream\$request_uri;/);
+  assert.doesNotMatch(locationBody('', '/api/'),/client_max_body_size/);
+  for(const header of ['Host','X-Real-IP','X-Forwarded-For','X-Forwarded-Proto']) {
+    assert.match(upload,new RegExp(`proxy_set_header\\s+${header}\\s+`));
+  }
+});

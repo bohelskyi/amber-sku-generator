@@ -235,16 +235,27 @@ function compareMapper(mapper, attributes, attributeSets) {
     diagnostics: diagnostics.sort((a, b) => compare(JSON.stringify(a), JSON.stringify(b))) };
 }
 
-async function auditMagentoSchema(config, { fetchImpl, storeCode = 'all' } = {}) {
+async function auditMagentoSchema(config, { fetchImpl = globalThis.fetch, storeCode = 'all', concurrency = 1 } = {}) {
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) {
+    throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID');
+  }
+  if (concurrency === 1) return auditSchema(config, { fetchImpl, storeCode, concurrency });
+  return require('./schema-read-batches').withReadBudget(fetchImpl,
+    (bounded) => auditSchema(config, { fetchImpl: bounded, storeCode, concurrency }));
+}
+
+async function auditSchema(config, { fetchImpl, storeCode, concurrency }) {
   const client = createMagentoClient(config, { fetchImpl, storeCode });
-  const storeTopology = {
-    websites: await located('store_topology_normalization', 'websites', null, config,
-      async () => topology(await client.getWebsites(), 'websites', config)),
-    storeGroups: await located('store_topology_normalization', 'store_groups', null, config,
-      async () => topology(await client.getStoreGroups(), 'store_groups', config)),
-    storeViews: await located('store_topology_normalization', 'store_views', null, config,
-      async () => topology(await client.getStoreViews(), 'store_views', config)),
-  };
+  const { readBatches } = require('./schema-read-batches');
+  const storeTopology = {};
+  // Independent fresh topology reads share the existing budget. A failed group
+  // drains before metadata pagination; manual concurrency=1 stays sequential.
+  await readBatches([
+    { key: 'websites', kind: 'websites', read: client.getWebsites },
+    { key: 'storeGroups', kind: 'store_groups', read: client.getStoreGroups },
+    { key: 'storeViews', kind: 'store_views', read: client.getStoreViews },
+  ], concurrency, (item) => located('store_topology_normalization', item.kind, null, config,
+    async () => topology(await item.read(), item.kind, config)), (item, result) => { storeTopology[item.key] = result; });
   for (const group of storeTopology.storeGroups) {
     located('store_topology_normalization', 'store_groups', group, config, () => {
       if (!storeTopology.websites.some((w) => w.id === group.website_id)) invalid();
@@ -269,12 +280,13 @@ async function auditMagentoSchema(config, { fetchImpl, storeCode = 'all' } = {})
   located('product_attribute_normalization', 'attribute_list', null, config, () => unique(attributes, 'attribute_id'));
   const byCode = new Map(attributes.map((a) => [a.attribute_code, a]));
   let memberships = 0;
-  for (const set of attributeSets) {
-    await located('assigned_attribute_membership', 'attribute_set', set, config, async () => {
-      const assigned = unique(bounded(await client.getAttributeSetAttributes(set.attribute_set_id))
+  await readBatches(attributeSets, concurrency,
+    (set) => located('assigned_attribute_membership', 'attribute_set', set, config, async () =>
+      unique(bounded(await client.getAttributeSetAttributes(set.attribute_set_id))
         .map((item, index) => located('assigned_attribute_membership', 'attribute',
           { ...(item && typeof item === 'object' ? item : {}), index, attribute_set_id: set.attribute_set_id },
-          config, () => normalizeAttribute(item))), 'attribute_code');
+          config, () => normalizeAttribute(item))), 'attribute_code')),
+    (set, assigned) => located('assigned_attribute_membership', 'attribute_set', set, config, () => {
       memberships += assigned.length;
       if (memberships > 100000) throw new MagentoIntegrationError('MAGENTO_DISCOVERY_LIMIT');
       for (const attribute of assigned) {
@@ -288,27 +300,27 @@ async function auditMagentoSchema(config, { fetchImpl, storeCode = 'all' } = {})
         });
       }
       set.attributeCodes = sorted(assigned.map((a) => a.attribute_code));
-    });
-  }
+    }));
   const mapper = located('mapper_derivation', 'mapper', null, config, describeMapper);
   const mapperTargets = new Set(mapper.targets.map((target) => target.target));
   let optionCount = 0;
-  for (const attribute of attributes) {
+  const optionAttributes = attributes.filter((attribute) =>
+    OPTION_INPUTS.has(attribute.frontend_input) || mapperTargets.has(attribute.attribute_code));
+  await readBatches(optionAttributes, concurrency,
+    (attribute) => located('option_normalization', 'attribute', attribute, config, async () =>
+      normalizeOptions(await client.getProductAttributeOptions(attribute.attribute_code))),
+    (attribute, options) => located('option_normalization', 'attribute', attribute, config, () => {
     // Include all actual mapper targets, even non-select attributes: custom
     // source models and boolean fields can expose options too. An empty list
     // on a text attribute is not an unmatched-label finding.
-    if (OPTION_INPUTS.has(attribute.frontend_input) || mapperTargets.has(attribute.attribute_code)) {
-      await located('option_normalization', 'attribute', attribute, config, async () => {
-        attribute.options = normalizeOptions(await client.getProductAttributeOptions(attribute.attribute_code));
-        attribute.optionCount = attribute.options.length;
-        optionCount += attribute.optionCount;
-        if (optionCount > 100000) throw new MagentoIntegrationError('MAGENTO_DISCOVERY_LIMIT');
-      });
-    }
-  }
+      attribute.options = options;
+      attribute.optionCount = attribute.options.length;
+      optionCount += attribute.optionCount;
+      if (optionCount > 100000) throw new MagentoIntegrationError('MAGENTO_DISCOVERY_LIMIT');
+    }));
   return located('report_assembly', 'report', null, config, () => {
     const report = { reportVersion: 1, storeCode, mapperSource: mapper.source,
-      limitations: ['Sequential GET observations, not an atomic Magento snapshot.',
+      limitations: ['Fresh GET observations, not an atomic Magento snapshot.',
         'Exact labels are candidate evidence only; Amber value IDs and Magento option IDs are separate identities.',
         'Code-backed mapper only; deployed Amber catalog, saved drafts and publications are not read.',
         'All output branches are inspected without evaluating business conditions; dynamic outputs are not enumerated.',

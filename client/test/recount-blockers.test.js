@@ -126,3 +126,14 @@ test('target-hidden recount questions are not exposed as blockers', () => {
 
   assert.deepEqual(blockers, []);
 });
+
+
+test('recount validates numeric metadata and maps authoritative errors while preserving archive assignments', () => {
+  const questions = [{ id: 'length', label: 'Довжина', input_type: 'text', numeric_validation: { kind: 'decimal', min: 1, minInclusive: false, max: 3, maxInclusive: true, maxFractionDigits: 2 } },
+    { id: 'old', archived: 1, required: 1 },
+    { id: 'kind', label: 'Вид', options: [{ id: 0, archived: 1 }], required: 1 }];
+  assert.deepEqual(getRecountFieldBlockers({ questions, answers: { length: '2,35', kind: 0 }, previousAnswers: { kind: 0 } }), []);
+  assert.equal(getRecountFieldBlockers({ questions, answers: { length: '1', kind: 0 }, previousAnswers: { kind: 0 } })[0].questionId, 'length');
+  assert.equal(getRecountFieldBlockers({ questions, answers: { length: '2,350', kind: 0 }, previousAnswers: { kind: 0 } })[0].questionId, 'length');
+  assert.deepEqual(getRecountFieldBlockers({ questions, answers: { length: '2.3', kind: 0 }, previousAnswers: { kind: 0 }, fieldErrors: { length: 'Сервер перевірив межу' } }), [{ questionId: 'length', message: 'Сервер перевірив межу' }]);
+});

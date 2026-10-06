@@ -4,7 +4,7 @@ const fixtures = require('../test/fixtures/magento-v4');
 const templates = require('../src/services/export-templates/template.service');
 const bindings = require('../src/services/magento/binding.service');
 const integrationOverview = require('../src/services/magento/integration-overview');
-const { insertProductFixture } = require('./product-fixture');
+const { insertProductFixture, insertNativeProductFixture } = require('./product-fixture');
 
 test('integration editor overview: all configured categories, read-only consistent snapshot and no allocation', async () => {
   const name = 'amber_integration_editor_test'; const url = await recreateTestDatabase(name);
@@ -63,6 +63,7 @@ test('concise integration overview separates publication, stored observation and
       observedAt: '2026-10-03T00:00:00.000Z', schema: fixtures.observation() }, options);
     const event = (await db.query(`INSERT INTO audit_events(event_key,actor_user_id,actor_snapshot,subject_type,subject_id)
       VALUES('test.activation',$1,'{"displayName":"Test","preferredUsername":null}','test','test') RETURNING id`, [actor])).rows[0].id;
+    const source = (await insertProductFixture(db, "INSERT INTO products(full_sku,category,status,total_price_uah) VALUES('YG-OLD','YG','archived',42) RETURNING *")).rows[0];
     const activation = await db.connect();
     try {
       await activation.query('BEGIN');
@@ -72,9 +73,8 @@ test('concise integration overview separates publication, stored observation and
         legacy_product_csv_enabled=FALSE,cutover_at=CURRENT_TIMESTAMP,cutover_by_user_id=$1,cutover_event_id=$2`, [actor, event]);
       await activation.query('COMMIT');
     } finally { activation.release(); }
-    const source = (await insertProductFixture(db, "INSERT INTO products(full_sku,category,status,total_price_uah) VALUES('YG-OLD','YG','archived',42) RETURNING *")).rows[0];
-    const product = (await insertProductFixture(db, `INSERT INTO products(full_sku,category,corrected_from_product_id,total_price_uah)
-      VALUES('XG-NOW','XG',$1,42) RETURNING *`, [source.id])).rows[0];
+    const product = (await insertNativeProductFixture(db,{category:'XG',totalPriceUah:42,correctedFromProductId:source.id})).rows[0];
+    assert.equal(product.full_sku,null);
     assert.equal(product.public_product_identity_id, source.public_product_identity_id);
     await db.query(`UPDATE magento_product_sync_requests SET state='needs_attention',reason_code='data_or_binding',
       diagnostics='[{"code":"OPTION_UNRESOLVED"},{"code":"ATTRIBUTE_NOT_FOUND"},{"code":"OPTION_UNRESOLVED"}]' WHERE product_id=$1`, [product.id]);

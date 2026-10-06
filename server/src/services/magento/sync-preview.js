@@ -13,6 +13,7 @@ const { indexTrees, currentAssignments, resolveCategories } = require('./sync-pr
 const { syncEligibility } = require('./sync-eligibility');
 const { readDomains, planDomains } = require('./sync-preview-domains');
 const { sourceSupportChecker } = require('../export-templates/source-support');
+const { upgradeRequirement } = require('./native-characteristic-upgrade');
 
 const MERCHANDISING = ['description', 'short_description', 'meta_title', 'meta_description'];
 const NATIVE = { sku: 'sku', name: 'name', price: 'price', weight: 'weight', product_type: 'type_id',
@@ -94,12 +95,15 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
   const blockers = []; const warnings = [];
   const block = (code, details = {}) => blockers.push({ code, operation: blockerOperation(code, details), ...details });
   if (raw && raw.sku !== publicSku) block('CURRENT_PRODUCT_SKU_MISMATCH');
+  const identityIssue = require('./native-identity-ownership').issue(amber, raw);
+  if (identityIssue) block(identityIssue, { operation: 'all' });
+  if (product.is_test_product === true && raw && raw.status !== 2) block('TEST_PRODUCT_REMOTE_ENABLED', { operation: 'all' });
   const warn = (code, details = {}) => warnings.push({ code, ...details });
-  if (raw && Object.hasOwn(amber, 'nameState')) {
+  if (raw && !identityIssue && Object.hasOwn(amber, 'nameState')) {
     const nameDecision = require('./name-state').decisionFor({ amber, raw, domainEvidence });
     const codes = { conflict: 'NAME_CONFLICT', baseline_required: 'NAME_BASELINE_REQUIRED',
       accept_external: 'NAME_EXTERNAL_CHANGE_PENDING', unavailable: 'NAME_READ_UNAVAILABLE',
-      identity_changed: 'NAME_REMOTE_IDENTITY_CHANGED' };
+      identity_changed: 'NAME_REMOTE_IDENTITY_CHANGED', foreign_identity: require('./native-identity-ownership').CODE };
     if (codes[nameDecision.action]) block(codes[nameDecision.action]);
   }
   const definition = amber.compiled.definition;
@@ -144,6 +148,7 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
       authority: 'candidate_only', usedToSelectSet: false };
   }
   if (!expected.ready) block('PRODUCT_EVALUATION_NOT_READY', { issueFields: expected.issueFields,
+    ...upgradeRequirement(definition, product, expected),
     ...(expected.evaluationIssues ? { evaluationIssues: expected.evaluationIssues } : {}) });
   const eligibility = syncEligibility(product, raw);
   for (const item of eligibility.reasons) block(item.code, { operation: 'all', reason: item.rule });
@@ -392,6 +397,7 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
     const size = diff.find((d) => d.target === 'rozmir_kameniu');
     if (size && size.comparison !== 'exact') { size.compatibility = 'legacy_remote_mismatch'; warn('LEGACY_REMOTE_SIZE_TEXT_MISMATCH'); }
   }
+  if (product.is_test_product === true && !raw) payload.status = 2;
   const written = new Set(payload.custom_attributes.map((a) => a.attribute_code));
   const untouched = raw ? (raw.custom_attributes || []).filter((a) => !written.has(a.attribute_code))
     .map((a) => ({ field: a.attribute_code, action: 'preserve', reason: 'omitted_from_candidate_payload' })) : [];
@@ -406,12 +412,14 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
   const dedup = (items) => [...new Map(items.map((x) => [JSON.stringify(x), x])).values()];
   const finalBlockers = dedup(blockers);
   return { reportVersion: 1, generatedAt, mode, amberProduct: { id: product.id, sku: product.full_sku,
-    internalSku: product.full_sku, publicSku,
+    internalSku: product.full_sku, publicSku, ...require('../product/test-products').projection(product),
     group: product.category, status: product.status, schemaVersionId: product.sku_schema_version_id ?? null,
     sourceAnswers: Object.fromEntries(Object.values(definition.sources).filter((s) => s.category === product.category)
       .map((s) => [s.key, product.details?.answers?.[s.key] ?? null])) },
+    identity: { article: publicSku, confirmedMagentoId: !identityIssue && Number.isSafeInteger(Number(amber.nameState?.remote_product_id)) && Number(amber.nameState.remote_product_id) > 0 ? Number(amber.nameState.remote_product_id) : null,
+      observedMagentoId: Number.isSafeInteger(Number(raw?.id)) && Number(raw.id) > 0 ? Number(raw.id) : null, state: raw ? 'found' : 'absent' },
     sources: { amberObservedAt: amber.observedAt, template: amber.template, magentoScope: storeCode,
-      observationConsistency: 'Local repeatable-read snapshot followed by sequential non-atomic Magento GETs' },
+      observationConsistency: 'Local repeatable-read snapshot followed by fresh non-atomic Magento GETs' },
     evaluation: { ready: expected.ready, issueFields: expected.issueFields }, syncEligibility: eligibility, requiredAttributes,
     bindingRevision: revision ? { id: revision.id, state: revision.state, revision: revision.revision,
       templateVersionId: revision.templateVersionId, drift } : null,

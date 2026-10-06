@@ -13,6 +13,18 @@ function endpoint(method, path, permission, response = 'json') {
 }
 
 const ENDPOINT_MANIFEST = Object.freeze([
+  endpoint('POST', '/integration-tasks', 'products.create'),
+  endpoint('GET', '/integration-tasks/attempts/:requestId', 'products.create'),
+  endpoint('GET', '/integration-tasks', ['products.create','export_templates.manage']),
+  endpoint('GET', '/integration-tasks/:id', ['products.create','export_templates.manage']),
+  endpoint('GET', '/integration-tasks/:id/resolution', 'export_templates.manage'),
+  endpoint('POST', '/integration-tasks/:id/resolve', 'export_templates.manage'),
+  ...[
+    ...['preview','confirm','reconcile','cancel'].map(action => ['POST', `/products/historical-reactivation/${action}`]),
+    ['GET', '/products/historical-reactivation/batches/:batchId'],
+    ['GET', '/products/historical-reactivation/intents/:intentId/inspection'],
+  ].map(([method,path]) => Object.freeze({...endpoint(method,path,'products.view'),
+    additionalPermissions:Object.freeze(['products.archive','history.view','export_templates.manage','export_templates.publish'])})),
   endpoint('GET', '/admin/magento-recovery/products/:id', ['export_templates.publish', 'exports.reconcile']),
   endpoint('GET', '/admin/magento-recovery/jobs/:id', 'export_templates.publish'),
   ...['inspect', 'reconcile', 'continue'].map((action) => endpoint('POST', `/admin/magento-recovery/jobs/:id/${action}`, 'export_templates.publish')),
@@ -52,6 +64,7 @@ const ENDPOINT_MANIFEST = Object.freeze([
   Object.freeze({ ...endpoint('GET', '/admin/magento-integration/attributes/context', 'export_templates.manage'), additionalPermissions: Object.freeze(['export_templates.publish']) }),
   ...['preview','apply','reconcile','assignment-preview','assignment-apply'].map((action)=>Object.freeze({
     ...endpoint('POST', `/admin/magento-integration/attributes/${action}`, 'export_templates.manage'), additionalPermissions: Object.freeze(['export_templates.publish']) })),
+  Object.freeze({ ...endpoint('POST', '/admin/magento-integration/categories/plan', 'export_templates.manage'), additionalPermissions: Object.freeze(['exports.view']) }),
   Object.freeze({ ...endpoint('POST', '/admin/magento-integration/categories/preview', 'export_templates.manage'), additionalPermissions: Object.freeze(['export_templates.publish']) }),
   Object.freeze({ ...endpoint('POST', '/admin/magento-integration/categories/apply', 'export_templates.manage'), additionalPermissions: Object.freeze(['export_templates.publish']) }),
   Object.freeze({ ...endpoint('POST', '/admin/magento-integration/categories/reconcile', 'export_templates.manage'), additionalPermissions: Object.freeze(['export_templates.publish']) }),
@@ -195,6 +208,8 @@ const ENDPOINT_MANIFEST = Object.freeze([
   endpoint('POST', '/admin/question', 'catalog.manage'),
   endpoint('PUT', '/admin/question', 'catalog.manage'),
   endpoint('POST', '/admin/question/update', 'catalog.manage'),
+  endpoint('PATCH', '/admin/question/:id/archive', 'catalog.manage'),
+  endpoint('POST', '/admin/catalog-impact', ['catalog.manage', 'pricing.manage']),
   endpoint('PUT', '/admin/questions/order', 'catalog.manage'),
   endpoint('POST', '/admin/option', 'catalog.manage'),
   endpoint('PUT', '/admin/option', 'catalog.manage'),

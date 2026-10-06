@@ -1,3 +1,4 @@
+const { resolveProductWeight } = require('../../utils/numbers');
 const { resolveAxisValue } = require('../../utils/pricing-axis');
 const {
   normalizePriceMode,
@@ -60,11 +61,7 @@ function uniqueKeys(keys) {
 }
 
 function getPricingWeight(answers = {}, weight) {
-  const parsedWeight = Number.parseFloat(weight);
-  if (Number.isFinite(parsedWeight) && parsedWeight > 0) return parsedWeight;
-
-  const answerWeight = Number.parseFloat(answers.weight);
-  return Number.isFinite(answerWeight) ? answerWeight : 0;
+  return resolveProductWeight(weight, answers.weight);
 }
 
 function getEffectivePriceMode(scenario, categoryRequiresWeight, scenarioUsesWeight) {

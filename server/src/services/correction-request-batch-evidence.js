@@ -64,6 +64,7 @@ const RECOUNT_PRICE_KEYS = ['pricePerGram', 'pricePerGramUah', 'fixedPriceUah', 
 function recountMaterial(payload) {
   const fields = ['categoryCode', 'skuSchemaVersionId', 'weight', 'fullSku', 'publicSku',
     'exactNames', 'nameInheritance', 'delivery', ...RECOUNT_PRICE_KEYS];
+  if (Object.hasOwn(payload, 'characteristicConfigHash')) fields.push('characteristicConfigHash');
   const missing = fields.filter(key => !Object.hasOwn(payload, key));
   return { missing, value: { ...Object.fromEntries(fields.map(k => [k, payload[k] ?? null])),
     answers: payload.answers, pricingBasis: payload.pricingDetails ?? null } };

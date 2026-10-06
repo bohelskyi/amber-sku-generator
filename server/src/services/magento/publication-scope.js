@@ -32,7 +32,9 @@ async function scan(client,local,{deadline,onPage}={}) {
       ORDER BY p.id LIMIT $2)
       SELECT COALESCE(sum(octet_length(to_jsonb(page)::text)),0)::bigint AS bytes FROM page`,[lastId,LIMITS.page])).rows[0];
     if(Number(budget.bytes)>LIMITS.inputPageBytes)limit('input_page_bytes');
-    const rows=(await client.query(`SELECT p.*,i.public_sku,to_jsonb(i) AS identity_evidence,to_jsonb(s) AS export_state
+    const rows=(await client.query(`SELECT p.*,i.public_sku,
+      COALESCE((to_jsonb(i)->>'is_test_product')::boolean,FALSE) AS is_test_product,
+      to_jsonb(i) AS identity_evidence,to_jsonb(s) AS export_state
       FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
       LEFT JOIN product_full_export_state s ON s.product_id=p.id
       WHERE p.id>$1 AND p.status='active' AND p.corrected_to_product_id IS NULL

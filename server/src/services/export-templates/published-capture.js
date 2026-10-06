@@ -71,6 +71,8 @@ async function capturePublished(client, intent, resolved, exportData, newRange, 
       sku_schema_version_id: p.sku_schema_version_id })),
     references: relevantReferences(resolved.compiled.definition, evidence, exportData.rows),
     internalCatalog: exportData.internalCatalog,
+    ...(resolved.compiled.definition.evaluatorVersion === require('./version-contract').CHARACTERISTIC_EVALUATOR
+      ? { characteristicVersions: supported.characteristicVersions, productCharacteristics: exportData.rows.map((p) => ({ id: String(p.id), characteristicVersionId: p.characteristic_version_id ?? null })) } : {}),
     ...(resolved.compiled.definition.sourceSupport ? { supportSchemas: supported.schemas } : {}),
   });
   const binding = { intent, effective: resolved.effective, inputFingerprint,

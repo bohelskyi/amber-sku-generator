@@ -12,6 +12,8 @@ const {
   updateOption,
 } = require('./catalog/option-commands');
 const {
+  setQuestionArchived,
+  getCatalogItemImpact,
   setOptionArchived,
   updateQuestionsOrder,
   deleteCatalogItem,
@@ -25,6 +27,8 @@ module.exports = {
   updateQuestion,
   createOption,
   updateOption,
+  setQuestionArchived,
+  getCatalogItemImpact,
   setOptionArchived,
   updateQuestionsOrder,
   deleteCatalogItem,

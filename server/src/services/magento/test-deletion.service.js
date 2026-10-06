@@ -29,23 +29,43 @@ async function existing(client, productId) {
   return (await client.query('SELECT * FROM magento_test_deletions WHERE product_id=$1', [productId])).rows[0];
 }
 async function eligible(client, productId, origin) {
-  const product = (await client.query(`SELECT p.*,i.public_sku,i.origin AS identity_origin
+  const product = (await client.query(`SELECT p.*,i.public_sku,i.origin AS identity_origin,COALESCE((to_jsonb(i)->>'is_test_product')::boolean,FALSE) AS is_test_product
     FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
     WHERE p.id=$1 FOR UPDATE OF p`, [productId])).rows[0];
-  if (!product || product.status !== 'active' || product.corrected_from_product_id
-    || product.corrected_to_product_id || product.exclude_from_export !== 0) fail('TEST_DELETE_NOT_CURRENT');
-  if (product.identity_origin !== 'allocated' || !/^AG-[0-9]{6,}$/.test(product.public_sku)) fail('TEST_DELETE_LEGACY_IDENTITY');
+  if (product?.is_test_product === false) delete product.is_test_product;
+  const archivedTest = product?.is_test_product === true && product.status === 'archived' && product.exclude_from_export === 1;
+  if (!product || (!archivedTest && (product.status !== 'active' || product.exclude_from_export !== 0))
+    || product.corrected_from_product_id || product.corrected_to_product_id) fail('TEST_DELETE_NOT_CURRENT');
+  if (product.identity_origin !== 'allocated' || !(product.is_test_product === true
+    ? /^TEST-[0-9]{6,}$/ : /^AG-[0-9]{6,}$/).test(product.public_sku)) fail('TEST_DELETE_LEGACY_IDENTITY');
   const ownership = (await client.query(`SELECT
     (SELECT count(*)::int FROM products WHERE public_product_identity_id=$1 OR full_sku=$2) AS revisions,
     (SELECT first_product_id FROM sku_registry WHERE full_sku=$2) AS owner`,
   [product.public_product_identity_id, product.full_sku])).rows[0];
-  if (ownership.revisions !== 1 || ownership.owner !== product.id) fail('TEST_DELETE_IDENTITY_OWNERSHIP');
+  const nativeIdentity = product.characteristic_version_id != null && product.full_sku === null
+    && product.base_sku === null && product.sequence_number === null && product.sku_schema_version_id === null;
+  if (ownership.revisions !== 1 || (product.characteristic_version_id != null && !nativeIdentity)
+    || (!nativeIdentity && ownership.owner !== product.id)) fail('TEST_DELETE_IDENTITY_OWNERSHIP');
   const lifecycle = (await client.query('SELECT * FROM product_full_export_state WHERE product_id=$1 FOR UPDATE', [productId])).rows[0];
-  if (!lifecycle || lifecycle.route !== 'normal' || lifecycle.evidence?.origin !== 'ordinary_save'
-    || lifecycle.business_exclusion_state !== 'none' || lifecycle.recount_compatibility_excluded
-    || lifecycle.source_correction_id || lifecycle.resolved_at || lifecycle.last_resolution_key
-    || Number(lifecycle.confirmed_revision) || Number(lifecycle.cutover_baseline_revision)
-    || Number(lifecycle.externally_delivered_revision)) fail('TEST_DELETE_LIFECYCLE_EVIDENCE');
+  let archiveProof = null;
+  if (archivedTest) {
+    archiveProof = (await client.query(`SELECT * FROM product_visibility_intents WHERE product_id=$1 AND kind='hide'
+      AND origin_hash=$2 ORDER BY created_at DESC,id DESC LIMIT 1`, [productId,origin])).rows[0];
+    const state = require('../product-lifecycle-state');
+    const fingerprintProduct = { ...product }; delete fingerprintProduct.identity_origin;
+    if (lifecycle?.route !== 'retired' || archiveProof?.state !== 'verified' || archiveProof.target_status !== 2
+      || archiveProof.previous_remote_status !== 2 || archiveProof.previous_product?.status !== 'active'
+      || archiveProof.previous_product.id !== product.id || archiveProof.previous_product.exclude_from_export !== 0
+      || String(archiveProof.public_product_identity_id) !== String(product.public_product_identity_id)
+      || archiveProof.public_sku !== product.public_sku || archiveProof.local_fingerprint !== state.fingerprint(fingerprintProduct,lifecycle)
+      || archiveProof.previous_lifecycle?.route !== 'normal') fail('TEST_DELETE_ARCHIVE_PROOF_REQUIRED');
+  }
+  const originalLifecycle = archiveProof?.previous_lifecycle || lifecycle;
+  if (!originalLifecycle || originalLifecycle.route !== 'normal' || originalLifecycle.evidence?.origin !== 'ordinary_save'
+    || [lifecycle,originalLifecycle].some(s => s.business_exclusion_state !== 'none' || s.recount_compatibility_excluded
+      || s.source_correction_id || s.resolved_at || s.last_resolution_key
+      || Number(s.confirmed_revision) || Number(s.cutover_baseline_revision)
+      || Number(s.externally_delivered_revision))) fail('TEST_DELETE_LIFECYCLE_EVIDENCE');
   const business = (await client.query(`SELECT
     EXISTS(SELECT 1 FROM correction_requests WHERE source_product_id=$1 OR corrected_product_id=$1) AS corrections,
     EXISTS(SELECT 1 FROM product_corrections WHERE source_product_id=$1 OR corrected_product_id=$1
@@ -60,8 +80,13 @@ async function eligible(client, productId, origin) {
         OR e->>'internalSku'=$2 OR e->>'publicSku'=$4) AS price_delivery,
     EXISTS(SELECT 1 FROM audit_events WHERE subject_type='product' AND subject_id=$3
       AND event_key NOT IN ('product.created','product.test_delete_sealed','product.test_delete_dispatched',
-        'product.test_delete_verified')) AS history`,
-  [productId, product.full_sku, String(productId), product.public_sku])).rows[0];
+        'product.test_delete_verified') AND NOT ($5::boolean AND event_key IN
+        ('product.photos_saved','product.archived','product.restored','product.visibility_requested','product.visibility_verified'))) AS history,
+    EXISTS(SELECT 1 FROM product_media_jobs WHERE public_product_identity_id=$6
+      AND state NOT IN ('succeeded','superseded')) AS unfinished_media,
+    EXISTS(SELECT 1 FROM product_visibility_intents WHERE public_product_identity_id=$6
+      AND state IN ('queued','dispatched')) AS unfinished_visibility`,
+  [productId, product.full_sku, String(productId), product.public_sku, product.is_test_product === true, product.public_product_identity_id])).rows[0];
   if (Object.values(business).some(Boolean)) fail('TEST_DELETE_BUSINESS_EVIDENCE');
   const exposure = await readLineageExposure(client, productId, product);
   if (exposure.evidence.classification !== 'reliably_unexposed') fail('TEST_DELETE_EXPORT_EVIDENCE');
@@ -75,18 +100,30 @@ async function eligible(client, productId, origin) {
     || jobs.some((job) => job.state === 'succeeded' &&
       (job.origin_hash !== origin || job.remote_product_id !== creates[0].remote_product_id
         || (job.baseline.raw && job.baseline.raw.status !== 2)))) fail('TEST_DELETE_CREATE_PROOF_REQUIRED');
+  if (!creates[0].acknowledged_at || (archiveProof && String(archiveProof.remote_product_id) !== String(creates[0].remote_product_id))) {
+    fail('TEST_DELETE_CREATE_PROOF_REQUIRED');
+  }
   if ((await client.query(`SELECT 1 FROM magento_sync_steps s JOIN magento_sync_jobs j ON j.id=s.job_id
     WHERE j.public_product_identity_id=$1 AND s.state='dispatched'`, [product.public_product_identity_id])).rowCount) {
     fail('TEST_DELETE_UNRESOLVED_SYNC');
   }
   const request = (await client.query('SELECT * FROM magento_product_sync_requests WHERE public_product_identity_id=$1 FOR UPDATE',
     [product.public_product_identity_id])).rows[0];
-  if (request && (request.state !== 'synced' || request.active_job_id)) fail('TEST_DELETE_SYNC_PENDING');
+  const retiredRequest = archivedTest && request?.state === 'needs_attention' && request.reason_code === 'product_retired'
+    && !request.active_job_id && request.active_generation == null;
+  if (request && ((!retiredRequest && request.state !== 'synced') || request.active_job_id)) fail('TEST_DELETE_SYNC_PENDING');
   const nameStates = (await client.query('SELECT * FROM magento_name_sync_states WHERE public_product_identity_id=$1',
     [product.public_product_identity_id])).rows;
   if (nameStates.some((state) => state.origin_hash !== origin || state.state !== 'common'
     || String(state.remote_product_id) !== String(creates[0].remote_product_id))) fail('TEST_DELETE_NAME_EVIDENCE');
-  return { product, lifecycle, create: creates[0], localHash: c.hash(clean({ product, lifecycle, nameStates,
+  const testHistory = product.is_test_product === true ? {
+    archiveProof,
+    audit: (await client.query(`SELECT id,event_key,details FROM audit_events WHERE subject_type='product' AND subject_id=$1
+      AND event_key NOT LIKE 'product.test_delete_%' ORDER BY id`, [String(productId)])).rows,
+    photoSets: (await client.query('SELECT * FROM product_photo_sets WHERE product_id=$1', [productId])).rows,
+    media: (await client.query('SELECT id,state FROM product_media_jobs WHERE public_product_identity_id=$1 ORDER BY id', [product.public_product_identity_id])).rows,
+  } : null;
+  return { product, lifecycle, create: creates[0], localHash: c.hash(clean({ product, lifecycle, nameStates, testHistory,
     generation: request?.desired_generation || null, jobs: jobs.map((j) => [j.id,j.state,j.remote_product_id]) })) };
 }
 async function observe(config, sku, remoteId, options) {
@@ -198,7 +235,15 @@ async function apply(config, input, supplied = {}) {
       if (saved.state !== 'verified') fail('TEST_DELETE_NOT_VERIFIED');
       const current = await eligible(client, row.product_id, row.origin_hash);
       if (current.localHash !== row.local_hash) fail('TEST_DELETE_PREVIEW_STALE');
-      await client.query("UPDATE products SET status='voided',exclude_from_export=1 WHERE id=$1", [row.product_id]);
+      if (current.product.status === 'archived' && current.product.is_test_product === true) {
+        // Preserve the already verified local archive and its fingerprint.
+        // Only delivery work is terminalized after exact remote absence.
+        await client.query(`UPDATE magento_product_sync_requests SET state='voided',reason_code=NULL,
+          active_job_id=NULL,active_generation=NULL,diagnostics='[]'::jsonb,updated_at=CURRENT_TIMESTAMP
+          WHERE public_product_identity_id=$1`, [row.public_product_identity_id]);
+      } else {
+        await client.query("UPDATE products SET status='voided',exclude_from_export=1 WHERE id=$1", [row.product_id]);
+      }
       await retireFullProduct(client, row.product_id);
       const result = (await client.query(`UPDATE magento_test_deletions SET state='finalized',finalized_at=CURRENT_TIMESTAMP
         WHERE id=$1 RETURNING *`, [row.id])).rows[0];

@@ -132,9 +132,12 @@ async function hypotheticalSync(config, plan, options) {
   const actual = await previewProduct(config, { ...options, sku: plan.sku, onObservation(observation) {
     const { amber, schema, raw, categoryNodes, domainEvidence, categoryFailures } = observation;
     if (raw?.id !== plan.remote.id || raw?.sku !== plan.sku || categoryFailures.length) fail('EXPOSURE_REMOTE_CHANGED');
-    const projected = structuredClone(amber.product);
-    projected.exportState.hold_reason = 'prior_exposure';
-    hypothetical = planPreview({ ...amber, product: projected }, schema, raw, categoryNodes, { domainEvidence });
+    const before = amber.product.exportState;
+    try {
+      // Keep the loader's request-owned characteristic/identity proof associations.
+      amber.product.exportState = { ...before, hold_reason: 'prior_exposure' };
+      hypothetical = planPreview(amber, schema, raw, categoryNodes, { domainEvidence });
+    } finally { amber.product.exportState = before; }
   } });
   const fresh = await snapshot(options.databasePool, options.expectedDatabase, plan.sku);
   if (hash(fresh.state) !== plan.beforeFingerprint || blockers(fresh.state).length) fail();

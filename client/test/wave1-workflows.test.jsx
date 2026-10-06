@@ -109,3 +109,36 @@ it('does not expose schema publication without sku_schemas.publish', () => {
     schemaPublishState={{ loading: false }} setEditOpt={vi.fn()} />);
   expect(screen.queryByRole('button', { name: 'Опублікувати V2' })).toBeNull();
 });
+
+
+it.each([
+  { fields: ['sku'], expected: [] },
+  { fields: ['name', 'rozmir_suveniriv', 'sku'], expected: ['Заповнити назви', 'Заповнити розмір'] },
+  { fields: ['kamin_obrobka', 'sku'], expected: ['Виправити характеристики'] },
+])('routes protected contract issues to integration review without inventing product repairs: $fields', ({ fields, expected }) => {
+  const repair = vi.fn();
+  const message = 'Порушено захищений full-product контракт.';
+  render(<AuthContext.Provider value={auth(['products.recount', 'exports.create', 'export_templates.view'])}>
+    <MemoryRouter><ProductMagentoAttention product={{ ...product, magentoNameReviewRequired: false }}
+      problems={[{ code: 'PRODUCT_EVALUATION_NOT_READY', issueFields: fields, evaluationIssues: [{ field: 'sku', message }] }]}
+      onRepairCharacteristics={repair} /></MemoryRouter>
+  </AuthContext.Provider>);
+  expect(screen.getByText(message)).toBeTruthy();
+  for (const name of ['Заповнити назви', 'Заповнити розмір', 'Виправити характеристики']) {
+    if (expected.includes(name)) expect(screen.getByRole('button', { name })).toBeTruthy();
+    else expect(screen.queryByRole('button', { name })).toBeNull();
+  }
+  expect(screen.queryByRole('link', { name: 'Відповідності: sku' })).toBeNull();
+  expect(screen.getByRole('link', { name: 'Перевірити правила інтеграції' }).getAttribute('href')).toBe('/admin/magento/categories/SV');
+  expect(repair).not.toHaveBeenCalled();
+});
+
+it('keeps protected-row handoff visible in compact view without granting template access', () => {
+  render(<AuthContext.Provider value={auth(['products.recount'])}><MemoryRouter>
+    <ProductMagentoAttention compact product={{ ...product, magentoNameReviewRequired: false }}
+      problems={[{ code: 'PRODUCT_EVALUATION_NOT_READY', issueFields: ['sku'] }]} onRepairCharacteristics={vi.fn()} />
+  </MemoryRouter></AuthContext.Provider>);
+  expect(screen.queryByRole('button', { name: 'Виправити характеристики' })).toBeNull();
+  expect(screen.queryByRole('link', { name: 'Перевірити правила інтеграції' })).toBeNull();
+  expect(screen.getByText('Захищені поля потребують перевірки правил інтеграції адміністратором.')).toBeTruthy();
+});

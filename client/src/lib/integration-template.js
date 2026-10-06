@@ -4,7 +4,7 @@ export function enableExtensibleContract(definition) {
   return { ...structuredClone(definition), evaluatorVersion: 'magento-declarative-4' };
 }
 export function addIntegrationCategory(definition, input) {
-  if (definition.evaluatorVersion !== 'magento-declarative-4' || definition.groups.length >= 64) throw new Error('Потрібен розширюваний контракт v4; максимум 64 категорії.');
+  if (!['magento-declarative-4', 'magento-declarative-5'].includes(definition.evaluatorVersion) || definition.groups.length >= 64) throw new Error('Потрібен розширюваний контракт v4/v5; максимум 64 категорії.');
   if (!/^[A-Z][A-Z0-9_]{0,31}$/.test(input.code) || definition.groups.some((g) => g.route === input.code)) throw new Error('Потрібен унікальний код категорії Amber.');
   for (const key of ['label','nameUa','nameEn','attributeSet','categoryPath']) {
     if (typeof input[key] !== 'string' || !input[key].trim() || input[key].length > 200) throw new Error('Заповніть обидві назви, набір атрибутів та точний шлях категорії.');

@@ -42,7 +42,7 @@ function buildExposureIndex(input) {
   const publicSkuProducts = new Map();
   for (const product of products) {
     // Match the serializer's exact spelling, never strip an arbitrary apostrophe.
-    for (const key of new Set([product.full_sku, finalizeCsvValue(product.full_sku)])) {
+    for (const key of product.full_sku == null ? [] : new Set([product.full_sku, finalizeCsvValue(product.full_sku)])) {
       if (!skuProducts.has(key)) skuProducts.set(key, []);
       skuProducts.get(key).push(product);
     }
@@ -63,7 +63,8 @@ function buildExposureIndex(input) {
   if (!Number.isSafeInteger(cursor) || cursor < 0) globalIssue('EXPORT_STATE_INVALID');
   for (const product of products) {
     const evidence = productEvidence.get(Number(product.id));
-    if (!product.full_sku || (skuProducts.get(product.full_sku) || []).length !== 1) {
+    if (product.full_sku == null ? !product.public_sku || !product.characteristic_version_id
+      : (skuProducts.get(product.full_sku) || []).length !== 1) {
       evidence.issues.push({ code: 'PRODUCT_SKU_AMBIGUOUS', productId: Number(product.id) });
     }
     if (cursor !== null && Number(product.id) <= cursor) {

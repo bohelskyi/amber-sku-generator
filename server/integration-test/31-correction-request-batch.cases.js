@@ -53,6 +53,21 @@ test('correction bulk processor: reviewed primitives, unique receipts and crash 
   const actor = Number((await pool.query("INSERT INTO application_users(status,display_name) VALUES('active','Batch actor') RETURNING id")).rows[0].id);
   const other = Number((await pool.query("INSERT INTO application_users(status,display_name) VALUES('active','Other batch actor') RETURNING id")).rows[0].id);
   for (const id of [actor,other]) await pool.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'",[id]);
+  if (!(await pool.query('SELECT enabled FROM public_sku_activation WHERE singleton')).rows[0].enabled) {
+    const client=await suite.pool.connect();
+    try {
+      await gate.begin(client,'BEGIN');
+      const event=async key=>(await client.query(`INSERT INTO audit_events(event_key,actor_user_id,actor_snapshot,subject_type,subject_id)
+        VALUES($1,$2,'{"displayName":"Batch actor","preferredUsername":null}','fixture','fixture') RETURNING id`,[key,actor])).rows[0].id;
+      const activation=await event('public_sku.activated'),cutover=await event('magento_delivery.cutover');
+      await client.query("SET LOCAL amber.public_sku_activation='on'; SET LOCAL amber.magento_delivery_cutover='on'");
+      await client.query(`UPDATE public_sku_activation SET enabled=TRUE,activated_at=CURRENT_TIMESTAMP,activated_by_user_id=$1,activation_event_id=$2 WHERE singleton`,[actor,activation]);
+      await client.query(`UPDATE magento_auto_sync_activation SET enabled=TRUE,installation_key='native-batch-fixture',actor_user_id=$1,legacy_product_csv_enabled=FALSE,
+        cutover_at=CURRENT_TIMESTAMP,cutover_by_user_id=$1,cutover_event_id=$2 WHERE singleton`,[actor,cutover]);
+      await gate.commit(client);
+    } catch(error){await gate.rollback(client);throw error;}
+    finally{await gate.release(client);client.release();}
+  }
   await pool.query("INSERT INTO categories(code,name,requires_weight,marketing_rounding_enabled) VALUES('BT','Batch fixture',1,1)");
   const q = (await pool.query("INSERT INTO questions(category_code,key,label,sku_index,display_order,required,include_in_sku,input_type) VALUES('BT','kind','Kind',1,1,1,1,'options') RETURNING id")).rows[0].id;
   await pool.query("INSERT INTO options(question_id,value_id,sku_code,label) VALUES($1,1,'1','One'),($1,2,'2','Two')",[q]);
@@ -73,21 +88,21 @@ test('correction bulk processor: reviewed primitives, unique receipts and crash 
   const source = async () => {
     const weight=++sourceWeight;
     const preview = await products.buildNewProductPreview({categoryCode:'BT',answers:{kind:1,extra:7},weight,skuSchemaVersionId:schema.id});
-    return products.saveProduct({category:'BT',answers:{kind:1,extra:7},weight,skuSchemaVersionId:schema.id,previewToken:preview.previewToken},{mutationContext});
+    return products.saveProduct({category:'BT',answers:{kind:1,extra:7},weight,skuSchemaVersionId:schema.id,characteristicConfigHash:preview.characteristicConfigHash,previewToken:preview.previewToken},{mutationContext});
   };
   const recount = async (mode='system_auto') => {
-    const p=await source(),payload={sourceSku:p.fullSku,answers:{kind:2},pricingDecision:mode==='manual_uah'
+    const p=await source(),payload={sourceSku:(p.fullSku || p.publicSku),answers:{kind:2},pricingDecision:mode==='manual_uah'
       ? {mode,manualPriceUah:1511.25} : mode==='usd_per_gram' ? {mode,usdPerGram:9.25,marketingRoundingEnabled:false} : {mode}};
     const preview=await requests.previewCorrectionRequest(payload,{canOverride:true});
     const created=await requests.createCorrectionRequest({...payload,previewSignature:preview.previewSignature},{mutationContext,canOverride:true});
-    return {id:created.request.id,productId:p.id,sku:p.fullSku};
+    return {id:created.request.id,productId:p.id,sku:(p.fullSku || p.publicSku)};
   };
   const pricing = async (decision={mode:'manual_uah',manualPriceUah:1234.56,marketingRoundingEnabled:false}) => {
     const p=await source(),payload={requestType:'price_change',productId:p.id,pricingDecision:decision};
     if(decision.mode==='system_auto')await pool.query('UPDATE products SET total_price_uah=900 WHERE id=$1',[p.id]);
     const preview=await requests.previewCorrectionRequest(payload,{canOverride:true});
-    const created=await requests.createCorrectionRequest({...payload,previewToken:preview.previewToken},{mutationContext,canOverride:true});
-    return {id:created.request.id,productId:p.id,sku:p.fullSku};
+    const created=await requests.createCorrectionRequest({...payload,characteristicConfigHash:preview.characteristicConfigHash,previewToken:preview.previewToken},{mutationContext,canOverride:true});
+    return {id:created.request.id,productId:p.id,sku:(p.fullSku || p.publicSku)};
   };
   const preview = async candidates => service.preflight({...base,requestIds:candidates.map(x=>x.id)});
   const apply = async (plan, selected=plan.entries.filter(e.eligible).map(x=>x.requestId), extra={}) => {
@@ -126,6 +141,26 @@ test('correction bulk processor: reviewed primitives, unique receipts and crash 
       completedPlan.entries.filter(x=>x.postDeliveryReviewRequired).map(x=>x.requestId)),completedPlan.entries[0],actor));
     const phases=(await pool.query("SELECT details->>'phase' phase,actor_user_id FROM audit_events WHERE event_key=$1 AND subject_id LIKE $2 ORDER BY id",[receipts.EVENT,`${key}:%`])).rows;
     assert.deepEqual(phases.map(x=>x.phase),['claimed','refreshed','completed']);assert.ok(phases.every(x=>Number(x.actor_user_id)===actor));
+  });
+  await t.test('native successor remains the sole current owner and supports another reviewed recount and price change',async()=>{
+    const first=completedPlan.entries[0],article=first.publicArticle;
+    const active=(await pool.query("SELECT * FROM products WHERE public_product_identity_id=$1 AND status='active' AND corrected_to_product_id IS NULL",[first.publicIdentityId])).rows[0];
+    assert.notEqual(active.id,first.sourceProductId);assert.equal(active.full_sku,null);
+    const input={sourceSku:article,answers:{kind:1},pricingDecision:{mode:'system_auto'}};
+    const checked=await requests.previewCorrectionRequest(input,{canOverride:true});
+    const created=await requests.createCorrectionRequest({...input,previewSignature:checked.previewSignature},{mutationContext,canOverride:true});
+    const candidate={id:created.request.id,productId:active.id,sku:article},plan=await preview([candidate]);
+    assert.equal(plan.entries[0].classification,'SAFE_TO_COMPLETE',JSON.stringify(plan.entries[0].reasons));
+    assert.equal((await apply(plan)).counts.completed,1);
+    const next=(await pool.query("SELECT * FROM products WHERE public_product_identity_id=$1 AND status='active' AND corrected_to_product_id IS NULL",[first.publicIdentityId])).rows[0];
+    assert.equal(next.corrected_from_product_id,active.id);assert.equal(next.full_sku,null);
+    assert.equal((await products.decodeSku(article)).product.id,next.id);
+    const priceInput={requestType:'price_change',productId:next.id,pricingDecision:{mode:'manual_uah',manualPriceUah:1299,marketingRoundingEnabled:false}};
+    const priceChecked=await requests.previewCorrectionRequest(priceInput,{canOverride:true});
+    const priceRequest=await requests.createCorrectionRequest({...priceInput,previewToken:priceChecked.previewToken},{mutationContext,canOverride:true});
+    assert.equal((await apply(await preview([{id:priceRequest.request.id}]))).counts.completed,1);
+    assert.equal((await pool.query('SELECT count(*)::int n FROM products WHERE public_product_identity_id=$1',[first.publicIdentityId])).rows[0].n,3);
+    assert.equal((await pool.query('SELECT count(*)::int n FROM sku_registry WHERE first_product_id=ANY($1::int[])',[[first.sourceProductId,active.id,next.id]])).rows[0].n,0);
   });
   await t.test('version-4 evidence with proven same intent refreshes; missing history requires individual review',async()=>{
     const r=await recount();await pool.query("UPDATE correction_requests SET proposed_payload=jsonb_set(proposed_payload,'{recountEvidence,version}','4') WHERE id=$1",[r.id]);
@@ -187,13 +222,21 @@ test('correction bulk processor: reviewed primitives, unique receipts and crash 
       const report=await pending;assert.equal(report.counts.conflicted,1);assert.equal(report.outcomes[0].currentClaim.status,'pending');
     }finally{await gate.rollback(holder);await gate.release(holder);holder.release();if(pending)await Promise.allSettled([pending]);await runner.end();}
   });
-  await t.test('allocator drift requires a fresh preview and never accepts a new internal SKU',async()=>{
+  await t.test('unrelated creation preserves native recount identity while legacy allocation drift requires review',async()=>{
     const r=await recount(),plan=await preview([r]),weight=plan.entries[0].refreshedResult.corrected.weight;
     const input={categoryCode:'BT',answers:{kind:2},weight,skuSchemaVersionId:schema.id};
     const p=await products.buildNewProductPreview(input);
-    await products.saveProduct({category:'BT',answers:input.answers,weight,skuSchemaVersionId:schema.id,previewToken:p.previewToken},{mutationContext});
-    const report=await apply(plan);assert.equal(report.counts.conflicted,1);assert.equal(report.outcomes[0].currentClaim.status,'pending');
-    assert.equal((await preview([r])).entries[0].classification,'REVIEW_REQUIRED');
+    await products.saveProduct({category:'BT',answers:input.answers,weight,skuSchemaVersionId:schema.id,characteristicConfigHash:p.characteristicConfigHash,previewToken:p.previewToken},{mutationContext});
+    const report=await apply(plan);
+    if (plan.entries[0].refreshedResult.corrected.mode === 'public_identity') {
+      assert.equal(report.counts.completed,1,JSON.stringify(report));
+      const successor=(await pool.query(`SELECT p.full_sku,i.public_sku FROM products p JOIN public_product_identities i
+        ON i.id=p.public_product_identity_id WHERE p.corrected_from_product_id=$1`,[r.productId])).rows[0];
+      assert.equal(successor.full_sku,null); assert.equal(successor.public_sku,r.sku);
+    } else {
+      assert.equal(report.counts.conflicted,1);assert.equal(report.outcomes[0].currentClaim.status,'pending');
+      assert.equal((await preview([r])).entries[0].classification,'REVIEW_REQUIRED');
+    }
   });
   await t.test('completed/rejected between preview and apply are not credited to this batch',async()=>{
     const r=await pricing(),plan=await preview([r]);const claim=await requests.claimCorrectionRequest(r.id,{mutationContext});
@@ -325,7 +368,7 @@ test('correction bulk processor: reviewed primitives, unique receipts and crash 
   });
   await t.test('ordinary recount hidden/inactive cleanup remains safe only for inherited answers',async()=>{
     const p=await source();
-    const input={sourceSku:p.fullSku,answers:{kind:2},pricingDecision:{mode:'system_auto'}};
+    const input={sourceSku:(p.fullSku || p.publicSku),answers:{kind:2},pricingDecision:{mode:'system_auto'}};
     const checked=await requests.previewCorrectionRequest(input,{canOverride:true});
     const r=await requests.createCorrectionRequest({...input,previewSignature:checked.previewSignature},{mutationContext,canOverride:true});
     // A legacy stored request retained an inherited answer for a hidden target question.
@@ -356,7 +399,7 @@ test('correction bulk processor: reviewed primitives, unique receipts and crash 
       await client.query('COMMIT');
     }finally{await client.query('ROLLBACK');client.release();}}
     const p=await source();await pool.query("UPDATE product_full_export_state SET route='hold',hold_reason='historical_ambiguity',evidence='{\"origin\":\"historical\"}',delivery_version=delivery_version+1 WHERE product_id=$1",[p.id]);
-    const input={sourceSku:p.fullSku,answers:{kind:2},pricingDecision:{mode:'system_auto'}};
+    const input={sourceSku:(p.fullSku || p.publicSku),answers:{kind:2},pricingDecision:{mode:'system_auto'}};
     const checked=await requests.previewCorrectionRequest(input,{canOverride:true}),r=await requests.createCorrectionRequest({...input,previewSignature:checked.previewSignature},{mutationContext,canOverride:true});
     const plan=await preview([{id:r.request.id}]),entry=plan.entries[0],before=await state();
     assert.equal(entry.classification,'SAFE_TO_COMPLETE');assert.equal(entry.postDeliveryReviewRequired,true);
@@ -421,7 +464,7 @@ test('correction bulk processor: reviewed primitives, unique receipts and crash 
   const heldUsdRecount=async()=>{
     const pricingDecision=usdDecisionFor(650),p=await source();
     await pool.query("UPDATE product_full_export_state SET route='hold',hold_reason='historical_ambiguity',evidence='{\"origin\":\"historical\"}',delivery_version=delivery_version+1 WHERE product_id=$1",[p.id]);
-    const input={sourceSku:p.fullSku,answers:{kind:2},pricingDecision};
+    const input={sourceSku:(p.fullSku || p.publicSku),answers:{kind:2},pricingDecision};
     const checked=await requests.previewCorrectionRequest(input,{canOverride:true});
     const created=await requests.createCorrectionRequest({...input,previewSignature:checked.previewSignature},{mutationContext,canOverride:true});
     return{id:created.request.id,productId:p.id};
@@ -456,10 +499,17 @@ test('correction bulk processor: reviewed primitives, unique receipts and crash 
     assert.equal(plan.entries[0].classification,'REFRESH_SAME_INTENT');
     const input={categoryCode:'BT',answers:{kind:2},weight:c.weight,skuSchemaVersionId:schema.id};
     const checked=await products.buildNewProductPreview(input);
-    await products.saveProduct({category:'BT',answers:input.answers,weight:input.weight,skuSchemaVersionId:schema.id,previewToken:checked.previewToken},{mutationContext});
+    await products.saveProduct({category:'BT',answers:input.answers,weight:input.weight,skuSchemaVersionId:schema.id,characteristicConfigHash:checked.characteristicConfigHash,previewToken:checked.previewToken},{mutationContext});
     const drift=await freshAt(allocation,40.1);
-    assert.notEqual(drift.entries[0].refreshedResult.corrected.fullSku,c.fullSku);
-    assert.equal(drift.entries[0].classification,'REVIEW_REQUIRED');
+    if (c.mode === 'public_identity') {
+      assert.equal(drift.entries[0].refreshedResult.corrected.fullSku,null);
+      assert.equal(drift.entries[0].refreshedResult.corrected.publicSku,c.publicSku);
+      assert.equal(drift.entries[0].refreshedResult.corrected.characteristicConfigHash,c.characteristicConfigHash);
+      assert.equal(drift.entries[0].classification,'REFRESH_SAME_INTENT');
+    } else {
+      assert.notEqual(drift.entries[0].refreshedResult.corrected.fullSku,c.fullSku);
+      assert.equal(drift.entries[0].classification,'REVIEW_REQUIRED');
+    }
   });
   await t.test('v2 sealed price plan requires a fresh preflight for later NBU drift even when final remains 650',async()=>{
     const r=await pricing(usdDecisionFor(650)),plan=await freshAt(r,40.1),before=await state();

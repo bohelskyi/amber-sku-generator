@@ -23,11 +23,12 @@ async function setup() {
 async function save() {
   const preview = await products.buildNewProductPreview({ categoryCode: 'SV', answers, weight: 1260, ...names });
   const saved = await products.saveProduct({ category: 'SV', answers, weight: 1260, manualPriceUah: 21700, ...names,
-    skuSchemaVersionId: preview.skuSchemaVersionId, previewToken: preview.previewToken }, opts());
-  return (await pool.query('SELECT * FROM products WHERE id=$1', [saved.id])).rows[0];
+    skuSchemaVersionId: preview.skuSchemaVersionId, characteristicConfigHash: preview.characteristicConfigHash, previewToken: preview.previewToken }, opts());
+  return (await pool.query('SELECT p.*,i.public_sku FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id=$1', [saved.id])).rows[0];
 }
 async function recountInput(p, patch = { size: '24/6/30' }) {
-  const input = { sourceSku: p.full_sku, answers: patch, manualPriceUah: 21700, reason: 'Phase 1 fixture' };
+  const input = { sourceSku: p.full_sku || p.public_sku, answers: patch, manualPriceUah: 21700, reason: 'Phase 1 fixture' };
+  if (patch.weight !== undefined) input.weight = patch.weight;
   const preview = await products.buildProductRecountPreview(input);
   return { ...input, sourceStateSignature: preview.source.stateSignature };
 }
@@ -99,7 +100,7 @@ test('full lifecycle failures roll back ordinary save and entire recount includi
   const before = await footprint();
   await failInsert('product_full_export_state', async () => {
     await assert.rejects(products.saveProduct({ category: 'SV', answers, weight: 1260, manualPriceUah: 21700, ...names,
-      skuSchemaVersionId: preview.skuSchemaVersionId, previewToken: preview.previewToken }, opts()), /phase1 injected failure/);
+      skuSchemaVersionId: preview.skuSchemaVersionId, characteristicConfigHash: preview.characteristicConfigHash, previewToken: preview.previewToken }, opts()), /phase1 injected failure/);
     await assert.rejects(products.applyProductRecount(input, opts()), /phase1 injected failure/);
   });
   assert.deepEqual(await footprint(), before);
@@ -132,9 +133,9 @@ async function assertRecountExactNames() {
   const origin = require('../src/services/magento/binding-contract').originHash(config.baseUrl);
   const previewOptions = { magentoConfig: config };
   const applyOptions = { ...opts(), magentoConfig: config, authorizedNameChange: true };
-  const previewFor = (p, nameChange) => products.buildProductRecountPreview({ sourceSku: p.full_sku,
+  const previewFor = (p, nameChange) => products.buildProductRecountPreview({ sourceSku: p.full_sku || p.public_sku,
     answers: { symbolic_stat: 1 }, manualPriceUah: 21700, ...(nameChange ? { nameChange } : {}) }, previewOptions);
-  const apply = (p, preview, nameChange) => products.applyProductRecount({ sourceSku: p.full_sku,
+  const apply = (p, preview, nameChange) => products.applyProductRecount({ sourceSku: p.full_sku || p.public_sku,
     answers: { symbolic_stat: 1 }, manualPriceUah: 21700, sourceStateSignature: preview.source.stateSignature,
     ...(nameChange ? { nameChange } : {}) }, applyOptions);
   const source = await save(); const original = (await nameService.read(source.id, { config })).names;
@@ -171,7 +172,7 @@ async function assertRecountExactNames() {
     return connection;
   } };
   const raceBefore = await footprint();
-  await assert.rejects(products.applyProductRecount({ sourceSku: editedSource.full_sku, answers: { symbolic_stat: 1 }, manualPriceUah: 21700,
+  await assert.rejects(products.applyProductRecount({ sourceSku: editedSource.full_sku || editedSource.public_sku, answers: { symbolic_stat: 1 }, manualPriceUah: 21700,
     nameChange: edited, sourceStateSignature: fresh.source.stateSignature }, { ...applyOptions, databasePool: racingPool }), /назв|назви|preview/);
   assert.equal(raced, true); assert.deepEqual(await footprint(), raceBefore);
   const reviewedAgain = await previewFor(editedSource, edited);
@@ -420,7 +421,7 @@ for (const confirmWins of [true, false]) test(`full lifecycle real race confirma
     const [one,two] = await Promise.all([first,second]); assert.ifError(one.error); assert.ifError(two.error);
     assert.equal((await state(p.id)).revision, '2'); assert.equal((await state(p.id)).confirmed_revision, '1');
     assert.equal((await state(p.id)).route, 'normal');
-    assert.deepEqual((await pool.query('SELECT * FROM products WHERE id=$1', [p.id])).rows[0], p);
+    assert.deepEqual((await pool.query('SELECT p.*,i.public_sku FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id=$1', [p.id])).rows[0], p);
     assert.equal((await pool.query('SELECT * FROM product_corrections WHERE source_product_id=$1', [p.id])).rows.length, 0);
     await assertCapturedState(p, snap, bytes, true);
     assert.equal(await cursor(), p.id);
@@ -431,7 +432,7 @@ for (const confirmWins of [true, false]) test(`full lifecycle real race confirma
   await setup();
   for (const pricingDecision of [{ mode: 'manual_uah', manualPriceUah: 1200 },
     { mode: 'usd_per_gram', usdPerGram: 2, marketingRoundingEnabled: false }]) {
-    const p = await save(); const input = { sourceSku: p.full_sku, answers: { size: 'changed' }, pricingDecision };
+    const p = await save(); const input = { sourceSku: p.full_sku || p.public_sku, answers: { size: 'changed' }, pricingDecision };
     const preview = await products.buildProductRecountPreview(input);
     const payload = { ...input, sourceStateSignature: preview.source.stateSignature, previewToken: preview.previewToken };
     await assert.rejects(products.applyProductRecount(payload, opts()), { statusCode: 403 });
@@ -445,6 +446,6 @@ for (const confirmWins of [true, false]) test(`full lifecycle real race confirma
     else assert.deepEqual(successor.details.customUsdPerGramBasis, { usdPerGram: 2, marketingRoundingEnabled: false });
   }
   const p = await save();
-  await assert.rejects(products.applyProductRecount({ sourceSku: p.full_sku, answers: { size: 'changed' },
+  await assert.rejects(products.applyProductRecount({ sourceSku: p.full_sku || p.public_sku, answers: { size: 'changed' },
     pricingDecision: { mode: 'manual_uah', manualPriceUah: -1 } }, { ...opts(), authorizedDirectDecision: true }), { statusCode: 422 });
 });

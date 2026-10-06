@@ -56,7 +56,7 @@ async function readAmberEvidence(databasePool, { templateVersionId, mode, suppor
         || row.output_contract !== compiled.definition.outputContract || row.format_version !== compiled.definition.formatVersion) invalid();
       template = { kind: 'published', versionId: row.id, templateId: row.template_id, versionNumber: row.version_number };
     }
-    const categories = compiled?.definition.evaluatorVersion === require('../export-templates/version-contract').EXTENSIBLE_EVALUATOR
+    const categories = require('../export-templates/version-contract').isExtensibleEvaluator(compiled?.definition.evaluatorVersion)
       ? compiled.definition.groups.map((g) => g.route)
       : Object.keys(require('../export-templates/magento-v1-data').GROUPS);
     const { rows: currentRows } = await client.query(`SELECT q.id AS question_id, q.category_code, q.key,

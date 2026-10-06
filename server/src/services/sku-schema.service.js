@@ -431,7 +431,11 @@ async function publishSkuSchema(categoryCode, options = {}) {
 }
 
 async function getPublicConfig(queryable = pool) {
+  const activation = await queryable.query('SELECT enabled FROM public_sku_activation WHERE singleton');
   const config = await getAppConfig(queryable);
+  // Native creation captures the live semantic catalog, independently of legacy
+  // SKU publications. Frozen publications remain authoritative for legacy mode.
+  if (activation.rows[0]?.enabled) return config;
   for (const categoryCode of Object.keys(config.categories)) {
     const active = await getActiveSchema(categoryCode, queryable);
     if (!active) continue;

@@ -71,6 +71,83 @@ function saveDraft() {
 beforeEach(() => { vi.resetAllMocks(); mocks(); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
+it('reuses the exact initial base category read while preserving a different language baseline', async () => {
+  mount(); await screen.findByRole('button', { name: 'Матеріал' });
+  expect(api.get.mock.calls.filter(([url]) => url === '/admin/magento-integration/categories/BR')).toHaveLength(1);
+  cleanup(); api.get.mockClear();
+  mount('/admin/magento?category=BR&language=english'); await screen.findByRole('button', { name: 'Матеріал' });
+  expect(api.get.mock.calls.filter(([url]) => url === '/admin/magento-integration/categories/BR')).toHaveLength(2);
+});
+
+it('shows intended local edits and unrelated publication blockers before preparation without extra requests', async () => {
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await get(url, config);
+    if (url.includes('/categories/') && !url.includes('/fields/')) result.data.reviewScope = { categoryCount: 2, unresolved: [{ group: 'OT', target: 'name', row: 'base', kind: 'policy', reviewState: 'review_required' }] };
+    return result;
+  });
+  mount('/admin/magento?category=BR&language=english');
+  const scope = await screen.findByRole('region', { name: 'Обсяг редагування та перевірки' });
+  expect(scope.textContent).toContain('Браслети · EN');
+  expect(scope.textContent).toContain('увесь пакет правил (2 категорій)');
+  expect(scope.textContent).toContain('В інших категоріях: 1 (Інші)');
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('focuses the exact semantic zero value from a product repair without selecting or approving it', async () => {
+  mount('/admin/magento?category=BR&question=color&value=0&productId=7&returnTo=%2Fattention%3Fproblem%3D7');
+  const mapping = await screen.findByLabelText('Magento для Нуль');
+  const row = mapping.closest('tr');
+  expect(row.classList.contains('is-repair-target')).toBe(true);
+  expect(row.textContent).toContain('Значення з проблеми цього товару');
+  await waitFor(() => expect(document.activeElement).toBe(row));
+  expect(screen.getByRole('link', { name: 'Повернутися до проблеми товару' }).getAttribute('href')).toBe('/attention?problem=7');
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('identifies a missing historical local value instead of rendering a naked numeric ID', async () => {
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await get(url, config);
+    if (url.endsWith('/kolir')) result.data.entries = [{ ...entry, source: 'BR.color=value_id:87', evaluated: '' }];
+    return result;
+  });
+  mount('/admin/magento?category=BR&field=kolir&question=color&value=87');
+  await screen.findByLabelText('Magento для Невідоме локальне значення (ID 87)');
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('restores the applied result and reads persistent delivery evidence without implying remote confirmation', async () => {
+  mount('/admin/magento?category=BR&binding=current&source=current');
+  await screen.findByText('Застосовано в Amber. Доставку Magento перевіряємо окремо.');
+  await waitFor(() => expect(api.get).toHaveBeenCalledWith('/admin/magento-integration/bindings/current/handoffs', expect.any(Object)));
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('prepares native product source support only through the server-advertised explicit isolated draft upgrade', async () => {
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await get(url, config);
+    if (url.endsWith('/sources')) result.data.nativeCharacteristicsUpgrade = { targetContract: 'public-product-characteristics-v1', evaluatorVersion: 'magento-declarative-5', supportedEvaluatorVersions: ['magento-declarative-3', 'magento-declarative-4'] };
+    return result;
+  });
+  const post = api.post.getMockImplementation();
+  api.post.mockImplementation(async (url, body) => {
+    if (url.endsWith('/draft/upgrade-columns')) {
+      saved.draft = { ...saved.draft, revision: '2', definitionHash: 'native-hash', definition: { ...saved.draft.definition, evaluatorVersion: 'magento-declarative-5', sourceContractVersion: 'public-product-characteristics-v1' } };
+      return { data: saved.draft };
+    }
+    return post(url, body);
+  });
+  mount();
+  fireEvent.click(await screen.findByText('Підтримка характеристик нових товарів'));
+  expect(api.post).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Підготувати підтримку характеристик нових товарів' }));
+  await screen.findByText('Підтримку нових товарів збережено у чернетці. Перевірте й застосуйте зміни пакета.');
+  expect(api.post).toHaveBeenCalledWith('/admin/export-templates/family/draft/upgrade-columns', { expectedRevision: '1', expectedDefinitionHash: 'hash', targetContract: 'public-product-characteristics-v1' });
+  expect(api.post.mock.calls.some(([url]) => /successor|publication|\/publish$/.test(url))).toBe(false);
+});
+
 it('opens the category and complete attribute set without product evaluation or remote writes; exposes unreadable types', async () => {
   mount(); await screen.findByRole('button', { name: 'Матеріал' });
   expect(screen.getByText('Лише в умові')).toBeTruthy();
@@ -373,7 +450,7 @@ it('preserves both saved rule and binding identities during preparation and uses
   expect(api.post.mock.calls).toContainEqual(['/admin/export-templates/family/publish', { expectedRevision: '1', expectedDefinitionHash: 'hash' }]);
   expect(api.post.mock.calls.find(([url]) => url.endsWith('/successor/prepare'))[1].templateVersionId).toBe('version-next');
   expect(api.put.mock.calls.some(([url]) => url.endsWith('/activation'))).toBe(false);
-  expect(api.get.mock.calls.filter(([url]) => url.endsWith('/categories/BR'))).toHaveLength(3);
+  expect(api.get.mock.calls.filter(([url]) => url.endsWith('/categories/BR'))).toHaveLength(2);
 });
 
 it('reads an externally navigated language scope without confusing it with a local URL commit', async () => {
@@ -538,4 +615,64 @@ it('inserts a characteristic using fetched labels without another output-mode st
   expect(saved.draft.definition.groups[1]).toEqual(definition.groups[1]);
   expect(saved.draft.definition.bindings).toEqual(definition.bindings);
   expect(saved.draft.definition.groups[0].rows[1]).toEqual(definition.groups[0].rows[1]);
+});
+
+
+it('keeps whole-package blockers upfront and discloses saved-draft consequences without issuing a command', async () => {
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await get(url, config);
+    if (url.includes('/categories/') && !url.includes('/fields/')) result.data.reviewScope = { categoryCount: 2, unresolved: [{ group: 'OT', target: 'name', row: 'base', kind: 'policy', reviewState: 'review_required' }] };
+    return result;
+  });
+  mount('/admin/magento?category=BR&question=color&value=0&productId=7&returnTo=%2Fattention%3Fproblem%3D7');
+  const scope = await screen.findByRole('region', { name: 'Обсяг редагування та перевірки' });
+  expect(scope.textContent).toContain('увесь пакет правил (2 категорій)');
+  expect(scope.textContent).toContain('В інших категоріях: 1 (Інші)');
+  expect(scope.textContent).toContain('Вони також блокують застосування пакета.');
+  expect(scope.textContent).not.toContain('неактивну версію правил');
+  fireEvent.click(screen.getByText('Обсяг і наслідки перевірки'));
+  expect(scope.textContent).toContain('Перевірка збереже чернетку й підготує неактивну версію правил');
+  expect(scope.textContent).toContain('Структурні перешкоди й вплив на товари');
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('keeps an exact repair edit and its explicit review action before the long field table without approving it', async () => {
+  mount('/admin/magento?category=BR&question=color&value=0&productId=7&returnTo=%2Fattention%3Fproblem%3D7');
+  const mapping = await screen.findByLabelText('Magento для Нуль');
+  fireEvent.change(mapping, { target: { value: '20' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Готово' }));
+  const action = await screen.findByRole('button', { name: 'Перевірити зміни' });
+  const table = screen.getByRole('table', { name: 'Поля Magento та джерела менеджера' });
+  expect(action.closest('.mc-change-bar').compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByRole('region', { name: 'Підготовлені зміни' }).textContent).toContain('вибрані відповідності');
+  expect(api.post).not.toHaveBeenCalled();
+  expect(screen.getByRole('link', { name: 'Повернутися до проблеми товару' }).getAttribute('href')).toBe('/attention?problem=7');
+});
+
+it('discloses mobile category choices without changing the selected category or full package scope', async () => {
+  mount(); await screen.findByRole('button', { name: 'Матеріал' });
+  const chooser = screen.getByRole('button', { name: 'Браслети · змінити категорію' });
+  const choices = document.getElementById(chooser.getAttribute('aria-controls'));
+  expect(chooser.getAttribute('aria-expanded')).toBe('false');
+  expect(choices.classList.contains('is-open')).toBe(false);
+  fireEvent.click(chooser);
+  expect(chooser.getAttribute('aria-expanded')).toBe('true');
+  expect(choices.classList.contains('is-open')).toBe(true);
+  expect(within(choices).getByRole('link', { name: /Браслети/ }).getAttribute('aria-current')).toBe('page');
+  fireEvent.click(within(choices).getByRole('link', { name: /Браслети/ }));
+  expect(choices.classList.contains('is-open')).toBe(false);
+  expect(screen.getByRole('region', { name: 'Обсяг редагування та перевірки' }).textContent).toContain('увесь пакет правил (2 категорій)');
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('places optional structural preparation after the ordinary field table without hiding package blockers', async () => {
+  mount(); const table = await screen.findByRole('table', { name: 'Поля Magento та джерела менеджера' });
+  const structure = screen.getByText('Підготувати зміну структури');
+  expect(table.compareDocumentPosition(structure) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(structure.closest('details').open).toBe(false);
+  fireEvent.click(structure);
+  expect(screen.getByRole('link', { name: 'Характеристика', exact: true }).href).toContain('intent=attribute');
+  expect(screen.getByRole('region', { name: 'Обсяг редагування та перевірки' }).textContent).toContain('увесь пакет правил (2 категорій)');
+  expect(api.post).not.toHaveBeenCalled();
 });

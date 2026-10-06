@@ -1,3 +1,5 @@
+const { resolveNewQuestionKey } = require('./catalog-workflow');
+const { normalizeNumericValidation } = require('../../utils/numbers');
 const lifecycleGate = require('../full-product-cutover-gate');
 const pool = require('../../db/pool');
 const { writeAuditEvent } = require('../../audit/audit-events');
@@ -14,7 +16,11 @@ const { rewriteQuestionKeyReferences } = require('./question-key-references');
 
 async function createQuestion(payload, options = {}) {
   const normalizedInputType = normalizeInputType(payload.input_type);
-  const questionKey = normalizeQuestionKey(payload.key);
+  const numericValidation = normalizeNumericValidation(payload.numeric_validation);
+  if (numericValidation && normalizedInputType !== 'text') {
+    throw Object.assign(new Error('Числові правила дозволені для текстового поля.'), { statusCode: 400 });
+  }
+
   const skuSeparator = normalizeEditableSkuSeparator(payload.sku_separator);
   const visibleRule = parseOptionalRule(payload.visible_if_json ?? payload.visible_if);
   const normalizedIncludeInSku =
@@ -22,7 +28,7 @@ async function createQuestion(payload, options = {}) {
       ? 0
       : payload.include_in_sku !== undefined
         ? Number(payload.include_in_sku)
-        : 1;
+        : 0;
   const { skuIndex, displayOrder } = getNormalizedQuestionNumbers(payload, normalizedIncludeInSku);
 
   const normalizedRequired = payload.required !== undefined ? Number(payload.required) : 1;
@@ -30,9 +36,11 @@ async function createQuestion(payload, options = {}) {
   const client = await pool.connect();
   try {
     await lifecycleGate.begin(client, 'BEGIN');
+    const questionKey = await resolveNewQuestionKey(payload.key, client);
+    await client.query('SELECT code FROM categories WHERE code=$1 FOR NO KEY UPDATE', [payload.category_code]);
     const result = await client.query(
-      `INSERT INTO questions (category_code, key, label, sku_index, display_order, required, include_in_sku, input_type, sku_separator, visible_if_json)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+      `INSERT INTO questions (category_code, key, label, sku_index, display_order, required, include_in_sku, input_type, sku_separator, visible_if_json, numeric_validation)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb)
        RETURNING id`,
       [
         payload.category_code,
@@ -45,6 +53,7 @@ async function createQuestion(payload, options = {}) {
         normalizedInputType,
         skuSeparator,
         visibleRule ? JSON.stringify(visibleRule) : null,
+        numericValidation ? JSON.stringify(numericValidation) : null,
       ]
     );
     const questionId = result.rows[0].id;
@@ -60,7 +69,7 @@ async function createQuestion(payload, options = {}) {
       },
     });
     await lifecycleGate.commit(client);
-    return { id: questionId };
+    return { id: questionId, key: questionKey };
   } catch (err) {
     await lifecycleGate.rollback(client);
     throw err;
@@ -71,6 +80,11 @@ async function createQuestion(payload, options = {}) {
 
 async function updateQuestion(payload, options = {}) {
   const normalizedInputType = normalizeInputType(payload.input_type);
+  const suppliedNumericValidation = payload.numeric_validation !== undefined;
+  const numericValidation = normalizeNumericValidation(payload.numeric_validation);
+  if (numericValidation && normalizedInputType !== 'text') {
+    throw Object.assign(new Error('Числові правила дозволені для текстового поля.'), { statusCode: 400 });
+  }
   const questionKey = normalizeQuestionKey(payload.key);
   const skuSeparator = normalizeEditableSkuSeparator(payload.sku_separator);
   const visibleRule = parseOptionalRule(payload.visible_if_json ?? payload.visible_if);
@@ -90,7 +104,7 @@ async function updateQuestion(payload, options = {}) {
 
     const currentResult = await client.query(
       `SELECT id, category_code, key, label, sku_index, display_order, required,
-              include_in_sku, input_type, sku_separator, visible_if_json
+              include_in_sku, input_type, sku_separator, visible_if_json, numeric_validation
        FROM questions
        WHERE id = $1
        FOR UPDATE`,
@@ -104,6 +118,8 @@ async function updateQuestion(payload, options = {}) {
 
     const currentQuestion = currentResult.rows[0];
     const nextKey = questionKey || currentQuestion.key;
+    const nextNumericValidation = suppliedNumericValidation ? numericValidation
+      : normalizedInputType === 'text' ? currentQuestion.numeric_validation ?? null : null;
     const changes = buildQuestionChanges(currentQuestion, {
       nextKey,
       label: payload.label,
@@ -114,6 +130,7 @@ async function updateQuestion(payload, options = {}) {
       inputType: normalizedInputType,
       skuSeparator,
       visibleRule,
+      numericValidation: nextNumericValidation,
     });
 
     if (Object.keys(changes).length === 0) {
@@ -122,6 +139,13 @@ async function updateQuestion(payload, options = {}) {
     }
 
     if (nextKey !== currentQuestion.key) {
+      const history = await client.query(`SELECT
+        EXISTS(SELECT 1 FROM products WHERE category=$1 AND details #> ARRAY['answers',$2] IS NOT NULL)
+        OR EXISTS(SELECT 1 FROM sku_schema_questions sq JOIN sku_schema_versions sv ON sv.id=sq.schema_version_id
+          WHERE sv.category_code=$1 AND sq.question_key=$2)
+        OR EXISTS(SELECT 1 FROM product_characteristic_versions cv WHERE cv.category_code=$1 AND EXISTS (
+          SELECT 1 FROM jsonb_array_elements(cv.snapshot->'questions') q WHERE q->>'key'=$2)) AS used`, [currentQuestion.category_code, currentQuestion.key]);
+      if (history.rows[0]?.used) throw Object.assign(new Error('Ключ використаного питання незмінний. Архівуйте його і створіть нове питання.'), { statusCode: 409 });
       const duplicateResult = await client.query(
         'SELECT id FROM questions WHERE category_code = $1 AND key = $2 AND id <> $3',
         [currentQuestion.category_code, nextKey, Number(payload.id)]
@@ -141,7 +165,7 @@ async function updateQuestion(payload, options = {}) {
 
     await client.query(
       `UPDATE questions
-       SET key = $1, label = $2, sku_index = $3, display_order = $4, required = $5, include_in_sku = $6, input_type = $7, sku_separator = $8, visible_if_json = $9::jsonb
+       SET key = $1, label = $2, sku_index = $3, display_order = $4, required = $5, include_in_sku = $6, input_type = $7, sku_separator = $8, visible_if_json = $9::jsonb, numeric_validation = $11::jsonb
        WHERE id = $10`,
       [
         nextKey,
@@ -154,6 +178,7 @@ async function updateQuestion(payload, options = {}) {
         skuSeparator,
         visibleRule ? JSON.stringify(visibleRule) : null,
         Number(payload.id),
+        nextNumericValidation ? JSON.stringify(nextNumericValidation) : null,
       ]
     );
 

@@ -68,3 +68,31 @@ test('owned category path/ID changes enroll the exact affected products',()=>{
     old:{compiled:compileDefinition(d)},next:{compiled:compileDefinition(next)},states:[],oldProducts:[{...product}],nextProducts:[{...product}]},nodes);
   assert.equal(result.affected.length,1,JSON.stringify(result.projections));assert.equal(result.affected[0].reason,'delivery_changed');
 });
+
+test('optional empty owned fields preserve delivery; populated base and English outputs still enroll exact products',()=>{
+  const original=fixture.definition(),old=structuredClone(original);
+  old.sources={sku:old.sources.sku};old.tables={};old.questionContracts={};
+  for(const g of old.groups){g.columns=g.columns.filter(c=>!['kolir','new_note'].includes(c));
+    for(const r of g.rows){delete r.cells.kolir;delete r.cells.new_note;r.cells.price={op:'literal',value:'42'};}}
+  const next=structuredClone(old);next.sources.note=original.sources.note;next.questionContracts.note=original.questionContracts.note;
+  next.groups[0].columns.push('new_note');
+  for(const r of next.groups[0].rows)r.cells.new_note=structuredClone(original.groups[0].rows[0].cells.new_note);
+  const schema=fixture.observation(),revision=d=>{
+    const b=fixture.approvedBindings(d,schema);
+    for(const a of b.attributes)if(a.transportTarget)a.transportTarget='product.'+({attribute_set_code:'attribute_set_id',product_type:'type_id'}[a.target]||a.target);
+    for(const p of b.policies)p.policy='authoritative_create_update';
+    return {bindings:b,schema};
+  };
+  const product={id:1,category:'XG',public_sku:'AG-000003',full_sku:'XG001',status:'active',exclude_from_export:0,
+    details:{answers:{}},public_product_identity_id:1,exportState:{route:'normal',business_exclusion_state:'none'}};
+  const check=definition=>impact({current:revision(old),draft:revision(definition),old:{compiled:compileDefinition(old)},
+    next:{compiled:compileDefinition(definition)},states:[],oldProducts:[structuredClone(product)],nextProducts:[structuredClone(product)]},[]);
+  const omitted=check(next);assert.equal(omitted.projections[0].after.covered,true);assert.deepEqual(omitted.affected,[]);
+  assert.equal(omitted.projections[0].before.signature,omitted.projections[0].after.signature);
+  for(const row of ['base','english']){
+    const populated=structuredClone(next);populated.groups[0].rows.find(r=>r.id===row).cells.new_note={op:'literal',value:'actual managed value'};
+    const changed=check(populated);assert.equal(changed.affected.length,1,row);assert.equal(changed.affected[0].reason,'delivery_changed');
+  }
+  const zero=structuredClone(next);zero.groups[0].rows[0].cells.new_note={op:'literal',value:'0'};
+  assert.equal(check(zero).affected.length,1,'zero is an actual managed output, not absence');
+});

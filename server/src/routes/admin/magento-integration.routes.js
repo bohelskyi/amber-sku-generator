@@ -37,6 +37,8 @@ router.get(`${root}/creation-inputs`, requirePermission('export_templates.manage
 router.post(`${root}/discovery`, requirePermission('export_templates.view'), handle(() => editor.discovery(config)));
 router.post(`${root}/structure-check`, requirePermission('export_templates.view'),
   handle(() => require('../../services/magento/integration-structure-check').check(config)));
+router.post(`${root}/categories/plan`, requirePermission('export_templates.manage'), requirePermission('exports.view'),
+  handle((req) => category.plan(config, req.body)));
 router.get(`${root}/bindings/:id`, requirePermission('export_templates.view'), handle((req) => bindingReview.get(config,req.params.id)));
 router.get(`${root}/bindings/:id/handoffs`,requirePermission('export_templates.view'),handle((req)=>handoff.status(config,req.params.id)));
 router.get(`${root}/bindings/:id/controlled-products`,requirePermission('export_templates.view'),handle((req)=>controlled.candidates(config,req.params.id,{},{...req.query})));

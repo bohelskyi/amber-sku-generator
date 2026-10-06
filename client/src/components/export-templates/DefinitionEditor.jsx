@@ -82,7 +82,7 @@ export function DefinitionEditor({ definition, onChange, registry, readOnly = fa
     // eslint-disable-next-line react-hooks/set-state-in-effect
     reveal();
   }, [focusField]);
-  const supported = definition?.formatVersion === 1 && ['magento-declarative-1', 'magento-declarative-2', 'magento-declarative-3', 'magento-declarative-4'].includes(definition.evaluatorVersion) && ['magento-products-v1', COLUMN_CONTRACT].includes(definition.outputContract)
+  const supported = definition?.formatVersion === 1 && ['magento-declarative-1', 'magento-declarative-2', 'magento-declarative-3', 'magento-declarative-4', 'magento-declarative-5'].includes(definition.evaluatorVersion) && ['magento-products-v1', COLUMN_CONTRACT].includes(definition.outputContract)
     && Array.isArray(definition.groups) && Array.isArray(definition.bindings) && definition.bindings.every((binding) => record(binding) && typeof binding.id === 'string' && record(binding.value))
     && record(definition.sources) && Object.values(definition.sources).every(record) && record(definition.tables) && Object.values(definition.tables).every(record)
     && definition.groups.every((group) => record(group) && Array.isArray(group.columns) && group.columns.every((key) => typeof key === 'string') && Array.isArray(group.rows) && group.rows.every((row) => record(row) && record(row.cells)));

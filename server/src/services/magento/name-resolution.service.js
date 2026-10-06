@@ -25,6 +25,7 @@ async function preview(payload, options = {}) {
     throw c.error(409, 'MAGENTO_SYNC_PREVIOUS_DISPATCH_UNRESOLVED', 'Попередню надіслану зміну ще не підтверджено. Потрібна перевірка адміністратором.');
   }
   const observation = await readNames(config, amber, options);
+  require('./native-identity-ownership').assertOwned(amber, observation.raw);
   const result = decisionFor(observation);
   if (['unavailable', 'identity_changed'].includes(result.action)) throw c.error(409, 'MAGENTO_NAME_READ_UNAVAILABLE', 'Не вдалося безпечно перевірити назви.');
   const token = c.hash({ product: amber.product, binding: binding.id, state: nameStateEvidence(amber.nameState),

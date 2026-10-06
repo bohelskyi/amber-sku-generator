@@ -1,10 +1,12 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AdminHeader } from '../components/admin/AdminHeader';
 import { AdminPricingEditor } from '../components/admin/AdminPricingEditor';
 import { AdminStructureEditor } from '../components/admin/AdminStructureEditor';
 import { ValidationIssues } from '../components/admin/ValidationIssues';
 import { Button, ConfirmDialog, LoadingState, LocalNavigation, Notice } from '../components/ui/index.js';
+import { resolveCatalogEntry } from '../lib/catalog-entry.js';
+import { isNativeCatalog } from '../lib/catalog-workflow.js';
 import { useAdminPanel } from '../hooks/useAdminPanel';
 import { useDirtyNavigation } from '../hooks/useDirtyNavigation.jsx';
 import '../components/admin/admin.css';
@@ -28,13 +30,9 @@ export default function AdminPage({ mode = 'auto' }) {
   const admin = useAdminPanel({ mode });
   const location = useLocation();
   const entryHandled = useRef(null);
-  const params = new URLSearchParams(location.search);
-  const requestedCategory = params.get('category');
-  const requestedQuestion = params.get('question');
-  const requestedAction = params.get('action');
-  const requestedReturn = params.get('returnTo');
-  const returnTo = requestedReturn?.length <= 3000 && /^\/admin\/magento(?:\/|\?|$)/.test(requestedReturn)
-    && !/[\\#]/.test(requestedReturn) && ![...requestedReturn].some((character) => character.charCodeAt(0) < 32) ? requestedReturn : null;
+  const navigate = useNavigate();
+  const entry = resolveCatalogEntry(admin.config, location.search, location.key);
+  const { requestedCategory, returnTo } = entry;
   const [workspaceDirty, setWorkspaceDirty] = useState(false);
   const [editorKey, setEditorKey] = useState(0);
   const dirtyNavigation = useDirtyNavigation({
@@ -56,20 +54,24 @@ export default function AdminPage({ mode = 'auto' }) {
   const enterCatalogContext = useEffectEvent(() => {
     if (!admin.config || entryHandled.current === location.key) return;
     entryHandled.current = location.key;
-    const category = admin.config.categories?.[requestedCategory];
+    const { category, question, option } = entry;
     if (!category) return;
     admin.handleSelectCategory(category);
-    const question = (admin.config.questions?.[category.code] || []).find((item) =>
-      item.id === requestedQuestion || String(item.q_db_id) === requestedQuestion);
-    if (isCatalog && question) admin.handleSelectQuestion(question);
+    if (isCatalog && question) {
+      admin.handleSelectQuestion(question);
+      if (entry.action?.action === 'edit-option' && option && admin.canManageCatalog) admin.beginOptionEdit(option);
+    }
   });
   useEffect(() => { enterCatalogContext(); }, [isCatalog, admin.config, location.key]);
-  const knownQuestion = admin.config?.questions?.[requestedCategory]?.some((item) =>
-    item.id === requestedQuestion || String(item.q_db_id) === requestedQuestion);
-  const validEntryTarget = requestedAction === 'new-category' || Boolean(admin.config?.categories?.[requestedCategory]
-    && (!['new-option', 'edit-question'].includes(requestedAction) || knownQuestion));
-  const entryAction = isCatalog && validEntryTarget && ['new-category', 'new-question', 'new-option', 'edit-question'].includes(requestedAction)
-    ? { key: location.key, action: requestedAction, category: requestedCategory, question: requestedQuestion } : null;
+  const entryAction = isCatalog ? entry.action : null;
+  const completeCatalogAction = (command) => async (...args) => {
+    const saved = await command(...args);
+    if (saved === true && returnTo) {
+      setWorkspaceDirty(false);
+      dirtyNavigation.commit(() => navigate(returnTo));
+    }
+    return saved;
+  };
 
   useEffect(() => {
     if (!workspaceDirty) return undefined;
@@ -102,10 +104,13 @@ export default function AdminPage({ mode = 'auto' }) {
 
   return <main className="app-page admin-page">
     <div className="admin-page-inner">
-      <AdminHeader mode={admin.effectiveMode} />
-      {returnTo && <Link className="et-link" to={returnTo}>← Повернутися до інтеграції Magento</Link>}
+      <AdminHeader mode={admin.effectiveMode} nativeCatalog={isNativeCatalog(admin.config)} />
+      {returnTo && <Link className="et-link" to={returnTo}>← {returnTo.startsWith('/attention') ? 'Повернутися до задач' : 'Повернутися до інтеграції Magento'}</Link>}
       {requestedCategory && !admin.config.categories?.[requestedCategory] && <Notice tone="warning" title="Категорію не знайдено">
         Оберіть наявну категорію або створіть нову, якщо маєте відповідний дозвіл.
+      </Notice>}
+      {isCatalog && entry.invalidTarget && <Notice tone="warning" title="Елемент каталогу не знайдено">
+        Оберіть наявне питання або точний варіант. Жодної зміни не виконано.
       </Notice>}
       {localNavItems.length > 1 && <LocalNavigation label="Розділи конфігурації" items={localNavItems} />}
 
@@ -120,6 +125,7 @@ export default function AdminPage({ mode = 'auto' }) {
           key={`catalog-${location.key}-${editorKey}`}
           canManage={admin.canManageCatalog}
           canPublish={admin.canPublishSchema}
+          canPrepareMagento={admin.canPrepareMagento}
           entryAction={entryAction}
           config={admin.config}
           selectedCat={admin.selectedCat}
@@ -146,17 +152,18 @@ export default function AdminPage({ mode = 'auto' }) {
           onSelectCategory={selectCategory}
           onSelectQuestion={selectQuestion}
           onDirtyChange={setWorkspaceDirty}
-          addCategory={admin.addCategory}
-          updateCategory={admin.updateCategory}
-          addQuestion={admin.addQuestion}
-          updateQuestion={admin.updateQuestion}
+          addCategory={completeCatalogAction(admin.addCategory)}
+          updateCategory={completeCatalogAction(admin.updateCategory)}
+          addQuestion={completeCatalogAction(admin.addQuestion)}
+          updateQuestion={completeCatalogAction(admin.updateQuestion)}
           reorderQuestions={admin.reorderQuestions}
           autoAssignSkuIndexes={admin.autoAssignSkuIndexes}
           fillNextNewQuestionSkuIndex={admin.fillNextNewQuestionSkuIndex}
-          addOption={admin.addOption}
-          archiveOption={admin.archiveOption}
+          addOption={completeCatalogAction(admin.addOption)}
+          archiveOption={completeCatalogAction(admin.archiveOption)}
+          archiveQuestion={completeCatalogAction(admin.archiveQuestion)}
           beginOptionEdit={admin.beginOptionEdit}
-          updateOption={admin.updateOption}
+          updateOption={completeCatalogAction(admin.updateOption)}
           publishSkuSchema={admin.publishSkuSchema}
           deleteItem={admin.deleteItem}
           formatMatchJson={admin.formatMatchJson}

@@ -83,7 +83,8 @@ function blockers(state) {
   for (const member of s.members) {
     const current = member.product, f = member.lifecycle;
     if (String(current.public_product_identity_id) !== String(p.public_product_identity_id) || current.public_sku !== p.public_sku) block('PUBLIC_IDENTITY_CHANGED');
-    if (!member.reservation || member.reservation.first_product_id !== current.id) block('SKU_RESERVATION_CONFLICT');
+    if (current.full_sku == null ? !current.characteristic_version_id
+      : !member.reservation || member.reservation.first_product_id !== current.id) block('SKU_RESERVATION_CONFLICT');
     // Recount always sets the retired source's legacy export flag to 1.
     // That retirement marker is not an independent business exclusion. Typed
     // lifecycle policy remains authoritative for every member of the chain.
@@ -94,7 +95,7 @@ function blockers(state) {
     if (current.corrected_from_product_id == null) { if (f?.source_correction_id != null) block('CORRECTION_LINEAGE_CONFLICT'); continue; }
     const source = s.members.find(m => m.product.id === current.corrected_from_product_id)?.product;
     const links = s.corrections.filter(v => v.corrected_product_id === current.id);
-    if (!source || source.full_sku === current.full_sku || links.length !== 1
+    if (!source || (source.full_sku != null && source.full_sku === current.full_sku) || source.id === current.id || links.length !== 1
       || links[0].id !== f?.source_correction_id) block('CORRECTION_LINEAGE_CONFLICT');
   }
   return [...new Set(out)];

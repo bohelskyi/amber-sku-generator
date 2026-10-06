@@ -41,18 +41,20 @@ function semanticReadiness(config, schemas, revision, definition = null) {
     }));
     // This is structural evidence, never a claim of remote product sendability.
     const schema = schemas.find((s) => s.category_code === code) || null;
-    const ready = !!schema && !!routes.length && routes.every((r) => r.enabled && r.reviewState === 'approved')
+    const retired = revision?.catalogAvailability?.resources.filter((resource) => resource.categoryCode === code) || [];
+    const ready = !retired.length && !!schema && !!routes.length && routes.every((r) => r.enabled && r.reviewState === 'approved')
       && values.every((v) => ['approved', 'not_applicable'].includes(v.state))
       && (!validation || !validation.diagnostics.some((d) => !d.routeKey || routes.some((r) => r.routeKey === d.routeKey)));
     return { code, name: category.name, schema, routes, values, ready,
       diagnostics: validation?.diagnostics.filter((d) => !d.routeKey || routes.some((r) => r.routeKey === d.routeKey)) || [],
-      message: ready ? 'Структурні відповідності підтверджено' : 'Категорія ще не готова до Magento' };
+      message: retired.length ? 'Чернетка містить видалені тестові ресурси Magento' : ready ? 'Структурні відповідності підтверджено' : 'Категорія ще не готова до Magento' };
   });
 }
 function previewView(report) {
   const diagnostic = require('./product-diagnostic-view');
   return { mode: report.mode, observedAt: report.generatedAt, sendable: report.sendable,
     productId: report.amberProduct.id ?? null,
+    ...(report.identity ? { identity: report.identity } : {}),
     article: report.amberProduct.publicSku, group: report.amberProduct.group, routeKey: report.attributeSet.routeKey,
     attributeSet: report.attributeSet.selected, blockers: report.blockers.map((b) => diagnostic.diagnosticProblem(b, report)),
     names: { ua: report.candidatePayload.product.name ?? null,

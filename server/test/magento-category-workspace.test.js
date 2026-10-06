@@ -31,6 +31,20 @@ test('category shows the complete selected set, unsupported/unmapped fields and 
   assert.deepEqual(f, before);
 });
 
+test('category includes unresolved decisions across the publication without option bodies or changing state', () => {
+  const f = context();
+  f.definition.groups.push({ route: 'OTHER' });
+  f.revision.bindings.routes.push({ ...f.revision.bindings.routes[0], routeKey: 'OTHER:all', reviewState: 'proposed' });
+  f.revision.bindings.attributes.find((a) => a.target === 'kolir').reviewState = 'review_required';
+  const before = structuredClone(f);
+  const result = workspace.projectCategory(f.catalog, f.revision, f.definition, 'XG');
+  assert.equal(result.reviewScope.categoryCount, 2);
+  assert.equal(result.reviewScope.unresolved.some((entry) => entry.group === 'OTHER'), true);
+  assert.equal(result.reviewScope.unresolved.some((entry) => entry.target === 'kolir'), true);
+  assert.equal(result.reviewScope.unresolved.every((entry) => Object.keys(entry).every((key) => ['group', 'target', 'row', 'kind', 'reviewState'].includes(key))), true);
+  assert.deepEqual(f, before);
+});
+
 test('guards, unused declarations and another category source do not count as transmitted characteristics', () => {
   const f = context(); f.definition.sources.guard = { kind: 'information', category: 'XG', key: 'unused' };
   f.definition.groups[0].rows[0].cells.new_note = { op: 'when', if: { op: 'present', input: { op: 'source', id: 'guard' } },
@@ -165,4 +179,20 @@ test('controlled picker binds exact category and literal search as SQL parameter
     for (const productId of ['42 OR 1=1', 0, -1, '1e3', [42], '2147483648']) await assert.rejects(controlled.candidates({}, id, {}, { productId }));
     await assert.rejects(controlled.candidates({}, id, {}, { categoryCode: ['XG'] }));
   } finally { Object.assign(editor, { read: original.read, selected: original.selected }); repository.current = original.current; }
+});
+
+test('retired exact resources remain inspectable but contribute an explicit field review reason', () => {
+  const f = context(); f.revision.state = 'draft';
+  const binding = f.revision.bindings.attributes.find(a => a.target === 'kolir');
+  const retired = require('../src/services/magento/retired-catalog-targets');
+  f.revision.catalogAvailability = retired.availability([{ route_key: 'XG:all', row_id: 'base', binding_key: binding.bindingKey,
+    target: 'kolir', attribute_code: 'kolir', attribute_id: '1535', kind: 'attribute_delete_remote', cleanup_id: 'cleanup', verified_at: '2026-10-06T01:00:00Z' }]);
+  const before = structuredClone(f);
+  const result = workspace.projectCategory(f.catalog, f.revision, f.definition, 'XG');
+  assert.equal(result.revision.catalogAvailability.publicationBlocked, true);
+  assert.equal(result.attributes.find(a => a.code === 'kolir').state, 'review');
+  assert.equal(result.attributes.find(a => a.code === 'kolir').reviewReasons.some(r => r.kind === 'retired_resource'), true);
+  assert.throws(() => retired.assertAvailable(f.revision), { code: 'MAGENTO_BINDING_RETIRED_RESOURCE' });
+  assert.doesNotThrow(() => retired.assertAvailable({ catalogAvailability: retired.availability([]) }));
+  assert.deepEqual(f, before);
 });

@@ -73,6 +73,40 @@ automatic and manual jobs. No product/request row lock spans remote I/O. Shutdow
 stops new claims, drains the current operation and closes the worker pool before
 the main pool; the existing ten-second force-exit leaves durable recovery evidence.
 
+The queue cadence subtracts the preceding pass's elapsed time, so a long batch does
+not add another five-second idle wait. Passes still never overlap. Automatic enqueue
+and APPLY each read the complete fresh schema. Independent topology, set memberships
+and option lists use batches of at most four GETs. Pagination retains its order.
+Each parallel audit has one 512-request/60-second budget, and failed
+batches drain before errors propagate. No schema evidence is cached between jobs,
+generations or publications. Product preconditions, dispatch markers and every
+step/final readback remain unchanged. Safe `magento.auto_sync.phase` logs distinguish
+schema discovery, observation, precondition reads, dispatch and readback timings;
+the immutable job/step ledger remains the delivery authority.
+
+Automatic topology reads (websites, groups and views) also use that bounded batch;
+manual discovery with concurrency 1 retains sequential reads. All three complete
+before cross-reference validation and attribute pagination. A failed batch drains;
+no read, identity check, dispatch marker or readback is skipped or reused.
+
+Phase logs distinguish `stage: enqueue|apply`, UTC start/end, total elapsed time
+and a bounded transport aggregate of at most 32 closed endpoint kinds/methods and
+scopes (`all`, `en`, `other`). Transport time ends when response headers arrive;
+it excludes response-body parsing. Phase duration includes parsing/local work and
+nested discovery, so nested phase totals must not be added to their parent.
+Aggregates never contain URLs, query strings, headers, credentials, request/response
+bodies or SKU text. They forward the original transport arguments, exact response,
+cancellation and failure without consuming its body or retrying. Logging failures
+are ignored and cannot alter authorization or delivery.
+
+`magento.auto_sync.request_claimed` records local identity/generation, claim UTC,
+the latest durable request update and next-attempt timestamps, and age/due-delay.
+Age since that update is not necessarily age since the original save: retries or
+coalesced changes can move it. Immutable audit/dispatch timestamps remain authority;
+`CURRENT_TIMESTAMP` normally marks transaction start, not exact commit or wire time.
+These logs are non-durable container stdout. Capture them before rebuilding/recreating
+containers; a later DB receipt cannot reconstruct individual GET/dispatch latency.
+
 The gate stores an installation key and an active local actor with
 `export_templates.publish`. The worker looks up that installation's highest
 **published** binding version for the configured origin on each attempt. Drafts

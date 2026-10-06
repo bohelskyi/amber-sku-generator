@@ -60,6 +60,8 @@ for (const modulePath of [
   './33-magento-attributes.cases',
   './34-historical-recount-exposure.cases',
   './32-sv-current-preview.cases',
+  './35-catalog-numeric-archive.cases',
+  './35-product-lifecycle.cases',
 ]) {
   require(modulePath);
 }

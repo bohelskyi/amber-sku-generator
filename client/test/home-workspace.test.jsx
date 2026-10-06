@@ -157,7 +157,7 @@ describe('Home workspace', () => {
     expect(options[0].textContent).toContain('Вага обов’язкова');
     expect(options[1].textContent).toContain('BN');
     expect(options[1].textContent).toContain('Намисто');
-    expect(options[1].textContent).toContain('Без ваги');
+    expect(options[1].textContent).toContain('Вага необов’язкова');
 
     fireEvent.click(options[0]);
     fireEvent.click(options[1]);
@@ -199,4 +199,45 @@ describe('Home workspace', () => {
     expect(inclusionGroup.querySelector('[aria-pressed="true"]').textContent).toBe('Не обрано');
     expect(screen.getByRole('button', { name: 'Є інклюз' }).getAttribute('aria-pressed')).toBe('false');
   });
+});
+
+
+it('recount shows archived assignments as history and keeps a single comma-capable weight field', () => {
+  const product = { ...blankInclusionProduct, category: { code: 'SV', name: 'Сувеніри', requires_weight: 1 }, decodedAnswers: [],
+    product: { id: 2384, weight: 12.3, details: { answers: { retired: '0012', kind: 0, weight: 12.3 } } } };
+  const questions = [{ id: 'retired', label: 'Архівне поле', input_type: 'text', archived: 1 },
+    { id: 'kind', label: 'Вид', options: [{ id: 0, label: 'Старий нуль', archived: 1 }, { id: 2, label: 'Активний варіант' }] },
+    { id: 'weight', label: 'Вага', input_type: 'text', required: 1, numeric_validation: { kind: 'decimal', min: 0, minInclusive: false, maxFractionDigits: 3 } }];
+  const changeWeight = vi.fn();
+  const { container } = renderHome({ decodeData: product, config: { categories: { SV: product.category }, questions: { SV: questions } },
+    isRecountOpen: true, recountAnswers: product.product.details.answers, recountWeight: '12,3', recountReason: '',
+    recountBlockers: [{ questionId: 'weight', message: 'Авторитетна помилка ваги' }], hasRecountChanges: true,
+    onRecountWeightChange: changeWeight, onRecountAnswer: vi.fn(), onRecountTextAnswer: vi.fn() });
+  const weight = screen.getByRole('textbox', { name: /Вага виробу/ });
+  expect(weight.getAttribute('inputmode')).toBe('decimal');
+  expect(container.querySelectorAll('#recount-weight')).toHaveLength(1);
+  expect(container.querySelector('#recount-retired')).toBeNull();
+  expect(screen.getByText('Історичне значення · в архіві')).toBeTruthy();
+  expect(screen.getByText(/Старий нуль · історичне значення/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /Старий нуль/ })).toBeNull();
+  expect(weight.getAttribute('aria-invalid')).toBe('true');
+  fireEvent.change(weight, { target: { value: '14,25' } });
+  expect(changeWeight).toHaveBeenCalledWith('14,25');
+});
+
+it('recount displays both conflicting historical weights and requires an explicit canonical choice', () => {
+  const product = { ...blankInclusionProduct, category: { code: 'SV', name: 'Сувеніри', requires_weight: 0 }, decodedAnswers: [],
+    product: { id: 2384, weight: '12.3', details: { answers: { weight: '14,2' } } } };
+  renderHome({ decodeData: product, config: { categories: { SV: product.category }, questions: { SV: [] } },
+    isRecountOpen: true, recountAnswers: product.product.details.answers, recountWeight: '', recountReason: '',
+    recountBlockers: [], hasRecountChanges: true, onRecountWeightChange: vi.fn() });
+  expect(screen.getByText(/Збережена вага товару: 12.3 г; характеристика: 14,2 г/)).toBeTruthy();
+  expect(screen.getByRole('textbox', { name: /Вага виробу/ }).value).toBe('');
+  expect(screen.getByRole('button', { name: 'Продовжити' }).disabled).toBe(true);
+});
+
+
+it('SV category uses the authoritative required-weight rule despite its legacy category flag',()=>{
+  renderHome({canCreateProducts:true,showCreate:true,config:{categories:{SV:{code:'SV',name:'Сувеніри',requires_weight:0}},productCreateRequirements:{SV:{requiredAnswers:['weight']}}}});
+  expect(screen.getByText('Вага обов’язкова')).toBeTruthy();expect(screen.queryByText('Без ваги')).toBeNull();
 });

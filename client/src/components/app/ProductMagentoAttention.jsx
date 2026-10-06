@@ -11,6 +11,7 @@ const FIELD_LABELS = Object.freeze({
   name: 'Назва українською та англійською',
   rozmir_suveniriv: 'Розмір',
   kamin_obrobka: 'Обробка каменю',
+  sku: 'Захищені поля інтеграції',
 });
 
 export function ProductMagentoAttention({ product, problems = [], onRepairCharacteristics, onSaved, compact = false }) {
@@ -22,7 +23,9 @@ export function ProductMagentoAttention({ product, problems = [], onRepairCharac
   const issueFields = [...new Set(readiness?.issueFields || [])];
   const needsNameCompletion = product?.categoryCode === 'SV' && issueFields.includes('name') && !product?.nameConflict;
   const needsSize = product?.categoryCode === 'SV' && issueFields.includes('rozmir_suveniriv');
-  const needsCharacteristics = issueFields.some((field) => !['name', 'rozmir_suveniriv'].includes(field));
+  const needsProtectedContractReview = issueFields.includes('sku');
+  const mappingFields = issueFields.filter((field) => field !== 'sku');
+  const needsCharacteristics = mappingFields.some((field) => !['name', 'rozmir_suveniriv'].includes(field));
   const inheritedNameReview = product?.magentoNameReviewRequired === true && !product?.nameConflict;
   if ((!readiness && !inheritedNameReview) || product?.status !== 'active') return null;
   const canEditName = product.categoryCode === 'SV' && permissions.includes('exports.create');
@@ -33,10 +36,10 @@ export function ProductMagentoAttention({ product, problems = [], onRepairCharac
   return <>
     <Surface {...(compact ? {} : { tone: 'warning' })}>{!compact && <><p className="font-semibold">{readiness ? 'Товар не готовий до синхронізації' : 'Потрібно перевірити назву для Magento'}</p>
       <p>{readiness
-        ? 'Потрібно доповнити або виправити дані товару.'
+        ? readiness.evaluationIssues?.[0]?.message || readiness.message || `Потрібно виправити: ${issueFields.map(field => FIELD_LABELS[field] || field).join(', ') || 'причина не надійшла — оновіть стан'}.`
         : 'Успадковані назви потребують підтвердження. Після перевірки сервер повторно оцінить готовність товару до синхронізації.'}</p>
-      {readiness?.evaluationIssues?.length > 0 ? <ul className="mt-2 list-disc pl-5">{readiness.evaluationIssues.map((issue, index) => <li key={index}>{issue.message || FIELD_LABELS[issue.field] || 'Перевірте поле товару.'}</li>)}</ul>
-        : labels.length > 0 && <ul className="mt-2 list-disc pl-5">{labels.map((label) => <li key={label}>{label}</li>)}</ul>}</>}
+      {readiness?.evaluationIssues?.length > 1 ? <ul className="mt-2 list-disc pl-5">{readiness.evaluationIssues.slice(1).map((issue, index) => <li key={index}>{issue.message || FIELD_LABELS[issue.field] || 'Перевірте поле товару.'}</li>)}</ul>
+        : !readiness?.evaluationIssues?.length && labels.length > 0 && <ul className="mt-2 list-disc pl-5">{labels.map((label) => <li key={label}>{label}</li>)}</ul>}</>}
       <div className="mt-2 flex flex-wrap gap-2">
         {(needsNameCompletion || inheritedNameReview) && canEditName && <button type="button" className="btn btn-primary" onClick={() => setOpen(true)}>
           {needsNameCompletion ? 'Заповнити назви' : 'Перевірити назви'}
@@ -45,10 +48,12 @@ export function ProductMagentoAttention({ product, problems = [], onRepairCharac
         {needsCharacteristics && canRepairCharacteristics && <button type="button" className="btn btn-primary" onClick={onRepairCharacteristics}>
           Виправити характеристики
         </button>}
-        {!compact && permissions.includes('export_templates.view') && product.categoryCode && issueFields.map((field) => <Link key={field} className="btn btn-outline" to={`/admin/magento/categories/${encodeURIComponent(product.categoryCode)}?field=${encodeURIComponent(field)}`}>
+        {!compact && permissions.includes('export_templates.view') && product.categoryCode && mappingFields.map((field) => <Link key={field} className="btn btn-outline" to={`/admin/magento/categories/${encodeURIComponent(product.categoryCode)}?field=${encodeURIComponent(field)}`}>
           Відповідності: {FIELD_LABELS[field] || field}
         </Link>)}
+        {!compact && needsProtectedContractReview && permissions.includes('export_templates.view') && product.categoryCode && <Link className="btn btn-outline" to={`/admin/magento/categories/${encodeURIComponent(product.categoryCode)}`}>Перевірити правила інтеграції</Link>}
       </div>
+      {needsProtectedContractReview && <p className="mt-2">Захищені поля потребують перевірки правил інтеграції адміністратором.</p>}
       {((needsNameCompletion || inheritedNameReview) && !canEditName) || (needsSize && !canRepairInformation) || (needsCharacteristics && !canRepairCharacteristics)
         ? <p className="mt-2">Передайте виправлення оператору з дозволом на відповідну зміну даних товару.</p>
         : null}
