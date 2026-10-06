@@ -11,18 +11,18 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: amber
-          POSTGRES_PASSWORD: amber_password
+          POSTGRES_USER: amber_test
+          POSTGRES_PASSWORD: amber_test_local_only
           POSTGRES_DB: amber_test
         ports:
-          - 5432:5432
+          - 55432:5432
         options: >-
-          --health-cmd "pg_isready -U amber -d amber_test"
+          --health-cmd "pg_isready -U amber_test -d amber_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
     env:
-      TEST_DATABASE_URL: postgresql://amber:amber_password@127.0.0.1:5432/amber_test
+      TEST_DATABASE_URL: postgresql://amber_test:amber_test_local_only@127.0.0.1:55432/amber_test
       NBU_RATE_OVERRIDE: "40"
     steps:
       - uses: actions/checkout@v4
