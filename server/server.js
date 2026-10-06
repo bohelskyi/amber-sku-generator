@@ -12,6 +12,12 @@ async function start() {
   await ensureLegacySkuSchemas();
   const automaticSync = require('./src/services/magento/automatic-sync-runtime')
     .startAutomaticSync(require('./src/config/env'), logger);
+  const media = require('./src/services/magento/product-media-delivery')
+    .startMediaRuntime(require('./src/config/env'), logger);
+  const productLifecycle = require('./src/services/product-lifecycle-runtime')
+    .startProductLifecycle(require('./src/config/env'), logger);
+  const historicalReactivation = require('./src/services/historical-reactivation-runtime')
+    .startHistoricalReactivation(require('./src/config/env'), logger);
   const server = app.listen(PORT, () => {
     logger.info('server.started', { port: PORT });
   });
@@ -19,7 +25,7 @@ async function start() {
   const shutdown = async (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    const workerStopped = automaticSync.stop();
+    const workerStopped = Promise.all([automaticSync.stop(), media.stop(), productLifecycle.stop(), historicalReactivation.stop()]);
     logger.info('server.shutdown.started', { signal });
     const forceTimer = setTimeout(() => {
       logger.error('server.shutdown.timeout', { timeoutMs: 10000 });

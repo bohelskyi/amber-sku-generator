@@ -66,6 +66,15 @@ text/single-select attribute creation and separate reviewed set membership.
 Administrator checks, uncertain-write recovery and stock Magento readback limits.
 This is repository implementation, not deployment or real Magento acceptance.
 
+The local October 2026 [Manager product workflows](docs/MANAGER_PRODUCT_WORKFLOWS.md)
+add native public-identity characteristics, explicit initial pricing, numeric and
+archived catalog metadata, original photos, reviewed catalog removal and explicit
+archive/restore visibility receipts in forward migrations 060–065. Historical SKUs,
+frozen evaluators and published bindings retain their meaning. Installation does
+not enroll existing archive/photo work or authorize a remote business operation.
+These implementation contracts do not imply production deployment or real-store
+acceptance.
+
 ## Repository and verification
 
 | Path | Responsibility |

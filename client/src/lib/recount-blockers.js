@@ -1,3 +1,4 @@
+import { numericQuestionPolicy, physicalWeightPolicy, validateNumericInput } from './product-numeric-input.js';
 import {
   getVisibleOptionsForQuestion,
   isQuestionVisible,
@@ -16,19 +17,23 @@ export function getRecountFieldBlockers({
   isCalibrated = answers.is_calibrated ?? null,
   requiresWeight = false,
   serverMessage = '',
+  fieldErrors = {},
+  previousAnswers = {},
+  categoryCode,
   weight,
 } = {}) {
   const blockers = [];
 
-  if (requiresWeight && !(Number(weight) > 0)) {
+  const weightResult = validateNumericInput(weight, physicalWeightPolicy);
+  if (requiresWeight && (!weightResult.valid || !(weightResult.normalized > 0))) {
     blockers.push({
       questionId: 'weight',
-      message: 'Вага виробу має бути більшою за 0.',
+      message: weightResult.error || 'Вага виробу має бути більшою за 0.',
     });
   }
 
   for (const question of questions) {
-    if (!isQuestionVisible(question, answers, isCalibrated)) continue;
+    if (question.archived === true || question.archived === 1 || !isQuestionVisible(question, answers, isCalibrated)) continue;
 
     const value = answers[question.id];
     const answered = hasAnswer(value);
@@ -40,6 +45,10 @@ export function getRecountFieldBlockers({
       continue;
     }
 
+    if (answered) {
+      const numeric = validateNumericInput(value, numericQuestionPolicy(question, categoryCode));
+      if (!numeric.valid) { blockers.push({ questionId: question.id, message: numeric.error }); continue; }
+    }
     if (!answered || isTextQuestion(question)) continue;
 
     const configuredOptions = question.options || [];
@@ -48,8 +57,13 @@ export function getRecountFieldBlockers({
       && !hasOptionValue(configuredOptions, value);
     if (isOptionalPlaceholder) continue;
 
+    const inheritedQuestion = { ...question, options: configuredOptions.map((option) => (
+      (option.archived === true || option.archived === 1) && Object.hasOwn(previousAnswers, question.id)
+        && String(previousAnswers[question.id]) === String(option.id)
+        ? { ...option, archived: false } : option
+    )) };
     const visibleOptions = getVisibleOptionsForQuestion(
-      question,
+      inheritedQuestion,
       answers,
       isCalibrated
     );
@@ -61,6 +75,11 @@ export function getRecountFieldBlockers({
     }
   }
 
+  for (const [questionId, message] of Object.entries(fieldErrors || {})) {
+    const index = blockers.findIndex((blocker) => blocker.questionId === questionId);
+    if (index >= 0) blockers[index] = { questionId, message };
+    else blockers.push({ questionId, message });
+  }
   if (!serverMessage) return blockers;
   const matchingIndex = blockers.findIndex((blocker) => {
     if (blocker.questionId === 'weight') return /ваг/i.test(serverMessage);

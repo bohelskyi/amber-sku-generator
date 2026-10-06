@@ -19,6 +19,13 @@ const {
 } = require('../../services/product-magento-name.service');
 
 const router = express.Router();
+function publicFieldErrors(error) {
+  if (error.statusCode !== 422 || !error.fieldErrors || typeof error.fieldErrors !== 'object') return {};
+  const fieldErrors = Object.fromEntries(Object.entries(error.fieldErrors)
+    .filter(([key, value]) => key.length <= 100 && typeof value === 'string' && value.length <= 1000));
+  return { fieldErrors, ...(error.code === 'WEIGHT_CONFLICT' ? { code: 'WEIGHT_CONFLICT',
+    details: { weight: error.details?.weight, answerWeight: error.details?.answerWeight } } : {}) };
+}
 
 for (const action of ['preview', 'apply']) {
   router.post(`/products/test-delete/${action}`, requirePermission('products.delete_test'), async (req, res) => {
@@ -79,23 +86,35 @@ router.post('/product-names/save', requirePermission('exports.create'), async (r
 router.get('/config', requirePermission('products.view'), async (req, res) => {
   try {
     const config = await getPublicConfig();
-    res.json({ ...config, productCreateRequirements: require('../../services/product/new-product-readiness').requirements });
+    const activation = (await require('../../db/pool').query('SELECT enabled FROM public_sku_activation WHERE singleton')).rows[0];
+    res.json({ ...config, productCreateRequirements: require('../../services/product/new-product-readiness').requirements,
+      productPhotoRequirements: { available: Boolean(activation?.enabled), maxPhotoBytes: require('../../services/product-photos.service').MAX_PHOTO_BYTES, maxPhotos: require('../../services/product-photos.service').MAX_PHOTOS, maxNewGalleryBytes: require('../../services/product-photos.service').MAX_PHOTO_BYTES * require('../../services/product-photos.service').MAX_PHOTOS, uploadEncoding: 'json-base64' },
+      productLifecycle: { available: Boolean(activation?.enabled) },
+      historicalReactivation: { available: Boolean(activation?.enabled), format: 'historical-reactivation-standard-v1', protocol: 'standard-rest-v1', administratorOnly: true, maxItems: 100, createTargetStatus: 2 },
+      productIntegrationRequests: { available: Boolean(activation?.enabled), version: 1 },
+      productCreation: { identityMode: activation?.enabled ? 'public_identity' : 'encoded_sku',
+        testProducts: { available: Boolean(activation?.enabled), administratorOnly: true, prefix: 'TEST-', targetStatus: 2 },
+        pricingDecision: { available: Boolean(activation?.enabled), modes: ['system_auto', 'manual_uah', 'usd_per_gram'] } } });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...publicFieldErrors(err),
+      ...(typeof err.code === 'string' && err.code.startsWith('TEST_PRODUCT_') ? { code: err.code } : {}) });
   }
 });
 
 router.post('/preview', requirePermission('products.create'), async (req, res) => {
   try {
-    const preview = await buildNewProductPreview(req.body || {});
+    const preview = await buildNewProductPreview(req.body || {}, { mutationContext: getRequestMutationContext(req) });
     res.json(preview);
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...publicFieldErrors(err),
+      ...(typeof err.code === 'string' && err.code.startsWith('TEST_PRODUCT_') ? { code: err.code } : {}) });
   }
 });
 
 router.post('/price-preview', requirePermission('products.create'), async (req, res) => {
   try {
+    const tests = require('../../services/product/test-products');
+    if (tests.normalizeFlag(req.body || {})) await tests.assertAdministrator(require('../../db/pool'), Number(req.applicationUser?.id), { readOnly: true });
     const { categoryCode, answers = {}, weight, isCalibrated } = req.body;
     const pricing = await calculatePricing(categoryCode, answers, weight, isCalibrated);
     res.json({
@@ -109,7 +128,8 @@ router.post('/price-preview', requirePermission('products.create'), async (req, 
       ...pricing.currencyPayload,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...publicFieldErrors(err),
+      ...(typeof err.code === 'string' && err.code.startsWith('TEST_PRODUCT_') ? { code: err.code } : {}) });
   }
 });
 
@@ -146,7 +166,7 @@ router.post('/recount/preview', requireAnyPermission(['products.recount', 'corre
     const preview = await buildProductRecountPreview(req.body || {});
     res.json(preview);
   } catch (err) {
-    res.status(err.statusCode || 400).json({ error: err.message });
+    res.status(err.statusCode || 400).json({ error: err.message, ...publicFieldErrors(err) });
   }
 });
 
@@ -162,7 +182,7 @@ router.post('/recount/apply', requirePermission('products.recount'), async (req,
     });
     res.json(result);
   } catch (err) {
-    res.status(err.statusCode || 400).json({ error: err.message,
+    res.status(err.statusCode || 400).json({ error: err.message, ...publicFieldErrors(err),
       ...(err.publicCode ? { code: err.publicCode } : {}) });
   }
 });
@@ -257,7 +277,8 @@ router.post('/save', requirePermission('products.create'), async (req, res) => {
     });
     res.json(result);
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...publicFieldErrors(err),
+      ...(typeof err.code === 'string' && err.code.startsWith('TEST_PRODUCT_') ? { code: err.code } : {}) });
   }
 });
 
@@ -273,7 +294,8 @@ router.post('/delete', requirePermission('products.archive'), async (req, res) =
     });
     res.json(result);
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...publicFieldErrors(err),
+      ...(typeof err.code === 'string' && err.code.startsWith('TEST_PRODUCT_') ? { code: err.code } : {}) });
   }
 });
 

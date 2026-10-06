@@ -63,6 +63,19 @@ test('SQLite import targets current schema and refuses implicit replacement', as
          WHERE q.category_code = 'IX'`
       );
       assert.deepEqual(imported.rows, [{ sku_code: 'A7', version: 1 }]);
+      assert.equal((await importedPool.query('SELECT 1 FROM catalog_semantic_values WHERE question_id=1 AND value_id=7')).rowCount, 1);
+      await suite.runNodeInDatabase(importUrl.toString(), `(async()=>{
+        const db=require('./src/db/pool'), assert=require('node:assert/strict');
+        try {
+          const actor=(await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Import fixture') RETURNING id")).rows[0].id;
+          await require('./src/services/catalog.service').createOption({question_id:1,label:'Later semantic choice'}, {mutationContext:{actorUserId:actor}});
+          const row=(await db.query("SELECT value_id,sku_code FROM options WHERE label='Later semantic choice'")).rows[0];
+          assert.ok(row.value_id>7); assert.equal(row.sku_code,null);
+        } finally {await db.end();}
+      })().catch(e=>{console.error(e);process.exitCode=1;});`);
+      await importedPool.query('DELETE FROM options WHERE question_id=1 AND value_id=7');
+      await assert.rejects(importedPool.query("INSERT INTO options(question_id,value_id,sku_code,label) VALUES(1,7,'A7','Reinterpreted import')"),
+        /Semantic catalog identities cannot be reused/);
     } finally {
       await importedPool.end();
     }

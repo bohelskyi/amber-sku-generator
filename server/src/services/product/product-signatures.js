@@ -22,6 +22,7 @@ function getProductStateSignature(product) {
     status: product?.status || 'active',
     correctedToProductId: product?.corrected_to_product_id || null,
     schemaVersionId: product?.sku_schema_version_id || null,
+    ...(product?.characteristic_version_id ? { characteristicVersionId: String(product.characteristic_version_id) } : {}),
     details: product?.details && typeof product.details === 'object' ? product.details : {},
   };
   return crypto.createHash('sha256').update(JSON.stringify(relevantState)).digest('hex');
@@ -39,7 +40,11 @@ function getRecountStateSignature(product) {
 
 function getProductPreviewToken(preview, categoryCode, answers, isCalibrated) {
   const payload = {
+    ...(preview.isTestProduct === true ? { isTestProduct: true, testTargetStatus: 2 } : {}),
     ...(preview.newProductInput ? { newProductInput: preview.newProductInput } : {}),
+    ...(preview.creationPhotos ? { creationPhotos: preview.creationPhotos } : {}),
+    ...(preview.pricingDecision ? { creationPricingDecision: preview.pricingDecision } : {}),
+    ...(preview.characteristicConfigHash ? { characteristicConfigHash: preview.characteristicConfigHash, characteristicConfigVersion: preview.characteristicConfigVersion } : {}),
     categoryCode,
     answers: stableAnswerEntries(answers),
     isCalibrated: Number(answers.is_calibrated ?? isCalibrated ?? 0),
@@ -70,6 +75,7 @@ function getCorrectionPreviewSignature(preview, { legacyDefaultRounding = false 
       answers: stableAnswerEntries(preview?.source?.answers),
     },
     corrected: {
+      ...(preview?.corrected?.characteristicConfigHash ? { characteristicConfigHash: preview.corrected.characteristicConfigHash } : {}),
       sku: preview?.corrected?.fullSku || null,
       proposedSku: preview?.corrected?.proposedFullSku || null,
       calculatedPriceUah: toUahNumber(preview?.corrected?.calculatedPriceUah),

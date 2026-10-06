@@ -8,6 +8,8 @@ import {
   buildRecountPreviewPayload,
   getCorrectionMarketingRoundingDefault,
   getDecodedAnswerMap,
+  getRecountWeightState,
+  haveRecountTargetChanged,
   getDirectRecountManualPrice,
   getInformationOnlyPatch,
   haveAnswersChanged,
@@ -531,4 +533,33 @@ test('correction request payload replaces the legacy manual field with the store
     weight: '10', reason: 'resize', pricingDecision: decision,
     previewSignature: 'signed-preview',
   });
+});
+
+
+test('archived catalog assignments survive unrelated edits without becoming new defaults', () => {
+  const questions = [
+    { id: 'retired', archived: 1, input_type: 'text', required: 1 },
+    { id: 'kind', input_type: 'options', required: 1, options: [{ id: 0, archived: 1 }, { id: 2 }] },
+    { id: 'notes', input_type: 'text' },
+  ];
+  const previousAnswers = { retired: '0012', kind: 0, notes: 'old' };
+  const result = normalizeRecountTargetState(questions, { ...previousAnswers, notes: '12,3mm' }, {}, { previousAnswers });
+  assert.deepEqual(result.answers, { retired: '0012', kind: 0, notes: '12,3mm' });
+  const empty = normalizeRecountTargetState(questions, { notes: 'new' }, {}, { previousAnswers: {} });
+  assert.equal(Object.hasOwn(empty.answers, 'retired'), false);
+  assert.equal(Object.hasOwn(empty.answers, 'kind'), false);
+});
+
+test('source weight conflict stays explicit until a canonical Manager value is selected', () => {
+  const decoded = { category: { code: 'SV', requires_weight: 0 }, product: { weight: '12.3', details: { answers: { weight: '14,2' } } } };
+  assert.deepEqual(getRecountWeightState(decoded), { physical: '12.3', answer: '14,2', conflict: true, initialWeight: '' });
+  assert.equal(haveRecountTargetChanged(decoded, { weight: '14,2' }, '12,3'), true);
+  assert.equal(getRecountWeightState({ ...decoded, product: { weight: '12.3', details: { answers: { weight: '12,3' } } } }).initialWeight, '12.3');
+});
+
+test('ordinary recount text retains exact leading zeros and unit text', () => {
+  const question = { id: 'notes', input_type: 'text' };
+  assert.equal(updateRecountTextAnswer({}, question, '0012').notes, '0012');
+  assert.equal(updateRecountTextAnswer({}, question, '12,3mm').notes, '12,3mm');
+  assert.equal(updateRecountTextAnswer({}, question, '  text  ').notes, '  text  ');
 });

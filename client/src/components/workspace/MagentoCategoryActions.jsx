@@ -62,7 +62,8 @@ function CategoryActionsWorkspace({ revision, observation, categoryCode, onResou
   const [preview, setPreview] = useState(null); const [actions, setActions] = useState([]);
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const sequence = useRef(0); const inFlight = useRef(false);
-  const canCreate = permissions.includes('export_templates.manage') && permissions.includes('export_templates.publish');
+  const canCreate = permissions.includes('export_templates.manage') && permissions.includes('export_templates.publish')
+    && !revision?.catalogAvailability?.publicationBlocked;
   useEffect(() => {
     const controller = new AbortController(); const requests = sequence;
     api.get(`${root}/actions`, { signal: controller.signal }).then(({ data }) => {
@@ -73,7 +74,7 @@ function CategoryActionsWorkspace({ revision, observation, categoryCode, onResou
     return () => { controller.abort(); ++requests.current; };
   }, []);
   async function run(name, command) {
-    if (inFlight.current) return;
+    if (inFlight.current || !canCreate) return;
     inFlight.current = true;
     const current = ++sequence.current; setBusy(true); setError('');
     try {
@@ -116,8 +117,9 @@ function CategoryActionsWorkspace({ revision, observation, categoryCode, onResou
     {observation && requirements.map((requirement) => <CategoryRequirement key={requirement.path} requirement={requirement} observation={observation}
       revision={revision} actions={actions} busy={busy} canCreate={canCreate} run={run} invalidatePreview={() => setPreview(null)} />)}
     {preview && preview.proof.bindingRevisionId === revision?.id && preview.proof.expectedRevision === revision?.revision && <Notice>
-      <p>Створити одну категорію: {preview.proof.path}. Батько: {preview.proof.parentId}. У меню не додаватиметься.</p>
-      <div className="mt-2 flex gap-2"><button className="btn btn-primary btn-compact-md" disabled={busy} onClick={() => run('apply', { ...preview.command, previewToken: preview.proof.previewToken })}>Створити підкатегорію</button>
+      <p>Створити одну категорію: {preview.proof.path}. Батьківський розділ: {preview.proof.parentPath || preview.proof.parentId} · ID {preview.proof.parentId}. У меню не додаватиметься.</p>
+      <p>Саме створення змінює 0 товарів. Прив’язку не застосовано; точний вплив правила перевіряється окремо перед публікацією.</p>
+      <div className="mt-2 flex gap-2"><button className="btn btn-primary btn-compact-md" disabled={busy || !canCreate} onClick={() => run('apply', { ...preview.command, previewToken: preview.proof.previewToken })}>Створити підкатегорію</button>
         <button className="btn btn-outline btn-compact-md" disabled={busy} onClick={() => setPreview(null)}>Скасувати</button></div>
     </Notice>}
     {categoryActions.filter(relevant).map(actionRow)}

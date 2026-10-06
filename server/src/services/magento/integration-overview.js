@@ -12,6 +12,7 @@ const { historicalAmbiguitySql } = require('./lifecycle-issue');
 const OPERATIONAL_COUNTS_SQL = `WITH pending AS (
   SELECT r.public_product_identity_id AS identity_id,p.category,(${historicalAmbiguitySql}) AS historical_ambiguity,
     CASE WHEN r.reason_code='reconciliation_required' THEN jsonb_build_array(jsonb_build_object('code',r.reason_code))
+      WHEN r.diagnostics @> '[{"code":"MAGENTO_NATIVE_IDENTITY_COLLISION"}]'::jsonb THEN r.diagnostics
       WHEN n.state IN ('conflict','baseline_required') THEN jsonb_build_array(jsonb_build_object('code',
         CASE WHEN n.state='conflict' THEN 'NAME_CONFLICT' ELSE 'NAME_BASELINE_REQUIRED' END))
       WHEN jsonb_array_length(r.diagnostics)>0 THEN r.diagnostics

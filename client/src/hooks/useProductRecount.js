@@ -10,12 +10,13 @@ import {
   getDecodedAnswerMap,
   getDirectRecountManualPrice,
   getInformationOnlyPatch,
-  getRecountSourceWeight,
+  getRecountWeightState,
   haveRecountTargetChanged,
   normalizeRecountTargetState,
   updateRecountOptionAnswer,
   updateRecountTextAnswer,
 } from '../lib/product-recount.js';
+import { normalizeNumericAnswers, numericQuestionPolicy, physicalWeightPolicy, validateNumericInput } from '../lib/product-numeric-input.js';
 import { getRecountFieldBlockers } from '../lib/recount-blockers.js';
 
 export function useProductRecount({
@@ -59,6 +60,7 @@ export function useProductRecount({
   const [recountValidationActive, setRecountValidationActive] = useState(false);
   const [recountValidationAttempt, setRecountValidationAttempt] = useState(0);
   const [recountValidationMessage, setRecountValidationMessage] = useState('');
+  const [recountFieldErrors, setRecountFieldErrors] = useState({});
   const [isRecountPreviewCurrent, setIsRecountPreviewCurrent] = useState(false);
   const [isRecountPreviewUnavailable, setIsRecountPreviewUnavailable] = useState(false);
   const [isPriceChangeOpen, setIsPriceChangeOpen] = useState(false);
@@ -113,41 +115,53 @@ export function useProductRecount({
     priceChangeMode,
     priceChangeUsdPerGram,
   ]);
+  const categoryQuestions = config?.questions?.[decodeData?.category?.code] || [];
+  const weightQuestion = categoryQuestions.find((question) => question.id === 'weight' && !question.archived);
+  const sourceWeightState = getRecountWeightState(decodeData);
+  const requiresRecountWeight = Number(decodeData?.category?.requires_weight) === 1
+    || (Number(weightQuestion?.required) === 1) || sourceWeightState.conflict;
   const recountPreviewPayload = useMemo(() => {
+    const questions = config?.questions?.[decodeData?.category?.code] || [];
+    const canonical = normalizeNumericAnswers(questions.filter((question) => !question.archived), recountAnswers, decodeData?.category?.code);
+    const numericWeight = validateNumericInput(recountWeight, numericQuestionPolicy(questions.find((question) => question.id === 'weight'), decodeData?.category?.code)
+      || { ...physicalWeightPolicy, minInclusive: !requiresRecountWeight });
+    if (numericWeight.valid && Object.hasOwn(canonical.answers, 'weight')) canonical.answers.weight = numericWeight.normalized;
     const basePayload = buildRecountPreviewPayload({
       sourceSku: decodeData?.publicSku || decodeData?.sku,
-      answers: recountAnswers,
+      answers: canonical.answers,
       isCalibrated: recountAnswers.is_calibrated ?? null,
-      weight: recountWeight,
+      weight: numericWeight.valid ? numericWeight.normalized : recountWeight,
       ...(recountNameChange ? { nameChange: recountNameChange } : {}),
     });
     if (recountNameChange) basePayload.nameChange = recountNameChange;
     if (!useDecisionPreview) return basePayload;
     const { manualPriceUah: _legacyManualPrice, ...decisionPayload } = basePayload;
     return { ...decisionPayload, pricingDecision };
-  }, [decodeData?.publicSku, decodeData?.sku, recountAnswers, recountWeight, recountNameChange, useDecisionPreview, pricingDecision]);
+  }, [decodeData?.publicSku, decodeData?.sku, recountAnswers, recountWeight, recountNameChange, useDecisionPreview, pricingDecision, config, decodeData?.category?.code, requiresRecountWeight]);
   const previewPath = useDecisionPreview && submitMode !== 'apply'
     ? '/admin/correction-requests/preview' : '/recount/preview';
-  const requiresRecountWeight = Number(decodeData?.category?.requires_weight) === 1;
-  const recountBlockers = recountValidationActive
+  const recountBlockers = recountValidationActive || Object.keys(recountFieldErrors).length > 0
     ? getRecountFieldBlockers({
       questions: config?.questions?.[decodeData?.category?.code] || [],
       answers: recountAnswers,
       requiresWeight: requiresRecountWeight,
       serverMessage: recountValidationMessage,
+      fieldErrors: recountFieldErrors, previousAnswers: getDecodedAnswerMap(decodeData), categoryCode: decodeData?.category?.code,
       weight: recountWeight,
     })
     : [];
 
-  const showRecountValidationFailure = (message = '') => {
+  const showRecountValidationFailure = (message = '', fieldErrors = {}) => {
+    setRecountFieldErrors(fieldErrors);
     const hasMatchingField = getRecountFieldBlockers({
       questions: config?.questions?.[decodeData?.category?.code] || [],
       answers: recountAnswers,
       requiresWeight: requiresRecountWeight,
       serverMessage: message,
+      fieldErrors, previousAnswers: getDecodedAnswerMap(decodeData), categoryCode: decodeData?.category?.code,
       weight: recountWeight,
     }).some((blocker) => blocker.message === message);
-    if (!hasMatchingField) {
+    if (!hasMatchingField && Object.keys(fieldErrors).length === 0) {
       setRecountValidationActive(false);
       setRecountValidationMessage('');
       return;
@@ -200,6 +214,7 @@ export function useProductRecount({
         setRecountError('');
         setRecountValidationActive(false);
         setRecountValidationMessage('');
+        setRecountFieldErrors({});
       })
       .catch((err) => {
         if (requestId !== decodeRequestIdRef.current) return;
@@ -235,6 +250,7 @@ export function useProductRecount({
     setRecountSuccess('');
     setRecountValidationActive(false);
     setRecountValidationMessage('');
+    setRecountFieldErrors({});
   };
 
   const handleStartRecount = () => {
@@ -249,7 +265,7 @@ export function useProductRecount({
       answers: getDecodedAnswerMap(decodeData),
       retainedHiddenAnswers: {},
     });
-    setRecountWeight(String(getRecountSourceWeight(decodeData) || ''));
+    setRecountWeight(getRecountWeightState(decodeData).initialWeight);
     setRecountReason('');
     resetRecountPricingDecision();
     setRecountPreview(null);
@@ -264,6 +280,7 @@ export function useProductRecount({
     setIsRecountOpen(true);
     setRecountValidationActive(false);
     setRecountValidationMessage('');
+    setRecountFieldErrors({});
   };
 
   const handleCancelRecount = () => {
@@ -283,6 +300,7 @@ export function useProductRecount({
     setRecountError('');
     setRecountValidationActive(false);
     setRecountValidationMessage('');
+    setRecountFieldErrors({});
   };
 
   const handleRecountAnswer = (questionId, valueId) => {
@@ -296,7 +314,8 @@ export function useProductRecount({
       return normalizeRecountTargetState(
         categoryQuestions,
         updateRecountOptionAnswer(previousTarget.answers, question, valueId),
-        retainedHiddenAnswers
+        retainedHiddenAnswers,
+        { previousAnswers: getDecodedAnswerMap(decodeData) }
       );
     });
     previewRequestIdRef.current = previewRequestGateRef.current.invalidate();
@@ -307,6 +326,7 @@ export function useProductRecount({
     setRecountError('');
     setRecountValidationActive(false);
     setRecountValidationMessage('');
+    setRecountFieldErrors({});
   };
 
   const handleRecountTextAnswer = (questionId, value) => {
@@ -321,7 +341,8 @@ export function useProductRecount({
       return normalizeRecountTargetState(
         categoryQuestions,
         updateRecountTextAnswer(previousTarget.answers, question, value),
-        retainedHiddenAnswers
+        retainedHiddenAnswers,
+        { previousAnswers: getDecodedAnswerMap(decodeData) }
       );
     });
     previewRequestIdRef.current = previewRequestGateRef.current.invalidate();
@@ -332,10 +353,15 @@ export function useProductRecount({
     setRecountError('');
     setRecountValidationActive(false);
     setRecountValidationMessage('');
+    setRecountFieldErrors({});
   };
 
   const handleRecountWeightChange = (value) => {
     setRecountWeight(value);
+    if (categoryQuestions.some((question) => question.id === 'weight' && !question.archived)
+      || Object.hasOwn(recountAnswers, 'weight')) {
+      setRecountTarget((previous) => ({ ...previous, answers: { ...previous.answers, weight: value } }));
+    }
     previewRequestIdRef.current = previewRequestGateRef.current.invalidate();
     setIsRecountConfirmOpen(false);
     setIsRecountPreviewCurrent(false);
@@ -344,14 +370,19 @@ export function useProductRecount({
     setRecountError('');
     setRecountValidationActive(false);
     setRecountValidationMessage('');
+    setRecountFieldErrors({});
   };
 
   const getRecountPayload = (requestMode = false) => {
+    const canonical = normalizeNumericAnswers(categoryQuestions.filter((question) => !question.archived), recountAnswers, decodeData?.category?.code);
+    const numericWeight = validateNumericInput(recountWeight, numericQuestionPolicy(weightQuestion, decodeData?.category?.code)
+      || { ...physicalWeightPolicy, minInclusive: !requiresRecountWeight });
+    if (numericWeight.valid && Object.hasOwn(canonical.answers, 'weight')) canonical.answers.weight = numericWeight.normalized;
     const payload = buildRecountPayload({
       sourceSku: decodeData?.sku,
-      answers: recountAnswers,
+      answers: canonical.answers,
       isCalibrated: recountAnswers.is_calibrated ?? null,
-      weight: recountWeight,
+      weight: numericWeight.valid ? numericWeight.normalized : recountWeight,
       reason: recountReason,
       manualPriceUah: getDirectRecountManualPrice(
         recountPreview,
@@ -371,6 +402,12 @@ export function useProductRecount({
 
   const requestRecountPreview = ({ openConfirmation = false, surfaceValidation = false } = {}) => {
     if (!decodeData?.sku) return;
+    if (sourceWeightState.conflict && !String(recountWeight).trim()) {
+      const message = 'Вага товару та збережена характеристика відрізняються. Вкажіть узгоджену вагу.';
+      setRecountError(message);
+      showRecountValidationFailure(message, { weight: message });
+      return;
+    }
     if (!hasRecountChanges) {
       setRecountPreview(null);
       setIsRecountPreviewCurrent(false);
@@ -397,18 +434,20 @@ export function useProductRecount({
         setIsRecountPreviewUnavailable(false);
         setRecountValidationActive(false);
         setRecountValidationMessage('');
+        setRecountFieldErrors({});
         if (openConfirmation) setIsRecountConfirmOpen(true);
       })
       .catch((err) => {
         if (requestId !== previewRequestIdRef.current
             || !previewRequestGateRef.current.isCurrent(requestId)) return;
         const message = err.response?.data?.error || err.message;
+        setRecountFieldErrors(err.response?.data?.fieldErrors || {});
         setRecountPreview(null);
         setIsRecountPreviewCurrent(false);
         setIsRecountPreviewUnavailable(true);
         if (surfaceValidation) {
           setRecountError(message);
-          showRecountValidationFailure(message);
+          showRecountValidationFailure(message, err.response?.data?.fieldErrors || {});
         }
       })
       .finally(() => {
@@ -455,10 +494,12 @@ export function useProductRecount({
           setIsRecountPreviewUnavailable(false);
           setRecountValidationActive(false);
           setRecountValidationMessage('');
+          setRecountFieldErrors({});
         })
-        .catch(() => {
+        .catch((err) => {
           if (requestId !== previewRequestIdRef.current
               || !previewRequestGateRef.current.isCurrent(requestId)) return;
+          setRecountFieldErrors(err.response?.data?.fieldErrors || {});
           if (!isRecountConfirmOpen) setRecountPreview(null);
           setIsRecountPreviewCurrent(false);
           setIsRecountPreviewUnavailable(true);
@@ -560,6 +601,12 @@ export function useProductRecount({
 
   const handleApplyRecount = () => {
     if (!decodeData?.sku) return;
+    if (sourceWeightState.conflict && !String(recountWeight).trim()) {
+      const message = 'Вага товару та збережена характеристика відрізняються. Вкажіть узгоджену вагу.';
+      setRecountError(message);
+      showRecountValidationFailure(message, { weight: message });
+      return;
+    }
     if (isInformationOnly && !isRecountApplying) {
       const productId = decodeData.product.id;
       const answersPatch = informationPatch;
@@ -640,6 +687,7 @@ export function useProductRecount({
     setRecountError('');
     setRecountValidationActive(false);
     setRecountValidationMessage('');
+    setRecountFieldErrors({});
   };
 
   const handleCancelPriceChange = () => {
@@ -799,6 +847,7 @@ export function useProductRecount({
       })
       .catch((err) => {
         setRecountError(err.response?.data?.error || err.message);
+        setRecountFieldErrors(err.response?.data?.fieldErrors || {});
       })
       .finally(() => {
         setIsRecountApplying(false);

@@ -285,3 +285,92 @@ it('reports a created catalog item honestly when the following refresh fails', a
   expect(await screen.findByText('Категорію створено, але дані не оновлено')).toBeTruthy();
   expect(screen.queryByText('Не вдалося створити категорію')).toBeNull();
 });
+
+
+it('waits for loaded catalog to focus the exact archived zero option without writing', async () => {
+  const linked = { categories: config.categories, extraConfig: {}, questions: { BR: [{ id: 'kind', q_db_id: 77,
+    label: 'Вид', input_type: 'options', required: 1, include_in_sku: 0, display_order: 1, sku_index: 0,
+    options: [{ id: 0, db_id: 88, label: 'Історичний нуль', archived: 1, sku_code: null }] }] } };
+  let resolveConfig;
+  vi.spyOn(api, 'get').mockImplementation((url) => {
+    if (url === '/admin/config') return new Promise((resolve) => { resolveConfig = resolve; });
+    if (url === '/admin/sku-schema/BR') return Promise.resolve(response({ active: null, draftChanged: false }));
+    throw new Error(`Unexpected GET ${url}`);
+  });
+  const post = vi.spyOn(api, 'post'); const patch = vi.spyOn(api, 'patch');
+  renderPage('catalog', ['catalog.view', 'catalog.manage'], '/admin/catalog?category=BR&question=kind&value=0&action=edit-option&returnTo=%2Fattention%3Fitem%3D9');
+  await waitFor(() => expect(resolveConfig).toBeTypeOf('function'));
+  resolveConfig(response(linked));
+  const label = await screen.findByRole('textbox', { name: /Назва українською/ });
+  expect(label.value).toBe('Історичний нуль');
+  await waitFor(() => expect(document.activeElement).toBe(label));
+  expect(screen.getByRole('link', { name: /Повернутися до задач/ }).getAttribute('href')).toBe('/attention?item=9');
+  expect(post).not.toHaveBeenCalled(); expect(patch).not.toHaveBeenCalled();
+});
+
+it('does not choose an unknown semantic value from an edit-option link', async () => {
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/admin/config') return response({ categories: config.categories, extraConfig: {}, questions: { BR: [{ id: 'kind', q_db_id: 77, label: 'Вид', input_type: 'options', options: [{ id: 0, db_id: 88, label: 'Нуль' }] }] } });
+    if (url === '/admin/sku-schema/BR') return response({ active: null, draftChanged: false });
+    throw new Error(`Unexpected GET ${url}`);
+  });
+  const post = vi.spyOn(api, 'post');
+  renderPage('catalog', ['catalog.view', 'catalog.manage'], '/admin/catalog?category=BR&question=kind&value=99&action=edit-option');
+  expect(await screen.findByText('Елемент каталогу не знайдено')).toBeTruthy();
+  expect(screen.queryByRole('textbox', { name: /Назва українською/ })).toBeNull();
+  expect(post).not.toHaveBeenCalled();
+});
+
+
+it('returns to the same Attention context only after an explicit successful catalog save', async () => {
+  const linked = { categories: config.categories, extraConfig: {}, questions: { BR: [{ id: 'kind', q_db_id: 77,
+    label: 'Вид', input_type: 'options', required: 1, include_in_sku: 0, display_order: 1, sku_index: 0,
+    options: [{ id: 0, db_id: 88, label: 'Нуль', archived: 0, sku_code: null }] }] } };
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/admin/config') return response(linked);
+    if (url === '/admin/sku-schema/BR') return response({ active: null, draftChanged: false });
+    throw new Error(`Unexpected GET ${url}`);
+  });
+  const put = vi.spyOn(api, 'put').mockRejectedValueOnce(new Error('Збереження недоступне')).mockResolvedValue(response({ success: true }));
+  const router = createMemoryRouter([
+    { path: '/admin/catalog', element: <AdminPage mode="catalog" /> },
+    { path: '/attention', element: <div>Повернулися до Attention</div> },
+  ], { initialEntries: ['/admin/catalog?category=BR&question=kind&value=0&action=edit-option&returnTo=%2Fattention%3Fitem%3D9'] });
+  render(<AuthContext.Provider value={authValue(['catalog.view', 'catalog.manage'])}><RouterProvider router={router} /></AuthContext.Provider>);
+  const label = await screen.findByRole('textbox', { name: /Назва українською/ });
+  fireEvent.change(label, { target: { value: 'Узгоджений нуль' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти зміни' }));
+  expect(await screen.findByText('Не вдалося зберегти варіант')).toBeTruthy();
+  expect(router.state.location.pathname).toBe('/admin/catalog');
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти зміни' }));
+  expect(await screen.findByText('Повернулися до Attention')).toBeTruthy();
+  expect(router.state.location.search).toBe('?item=9');
+  expect(put).toHaveBeenCalledTimes(2);
+});
+it('creates an exact local variant and returns to the preserved preparation only after a successful save', async () => {
+  const linked = { categories: config.categories, extraConfig: {}, questions: { BR: [{ id: 'kind', q_db_id: 77,
+    label: 'Вид', input_type: 'options', required: 1, include_in_sku: 0, options: [] }] } };
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/admin/config') return response(linked);
+    if (url === '/admin/sku-schema/BR') return response({ active: null, draftChanged: false });
+    throw new Error(`Unexpected GET ${url}`);
+  });
+  const post = vi.spyOn(api, 'post').mockRejectedValueOnce(new Error('not saved')).mockResolvedValue(response({ success: true }));
+  const back = '/admin/magento/prepare?category=BR&draft=kept&step=1&intent=option&question=kind&productId=42&returnTo=%2Fattention%3Fproblem%3D42';
+  const router = createMemoryRouter([
+    { path: '/admin/catalog', element: <AdminPage mode="catalog" /> },
+    { path: '/admin/magento/prepare', element: <div>Повернулися до підготовки</div> },
+  ], { initialEntries: [`/admin/catalog?${new URLSearchParams({ category: 'BR', question: 'kind', action: 'new-option', returnTo: back })}`] });
+  render(<AuthContext.Provider value={authValue(['catalog.view', 'catalog.manage'])}><RouterProvider router={router} /></AuthContext.Provider>);
+  const label = await screen.findByRole('textbox', { name: 'Назва українською' });
+  expect(post).not.toHaveBeenCalled();
+  fireEvent.change(label, { target: { value: 'Новий вид' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти варіант' }));
+  expect(await screen.findByText('Не вдалося створити варіант')).toBeTruthy();
+  expect(router.state.location.pathname).toBe('/admin/catalog');
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти варіант' }));
+  expect(await screen.findByText('Повернулися до підготовки')).toBeTruthy();
+  expect(router.state.location.pathname + router.state.location.search).toBe(back);
+  expect(post).toHaveBeenCalledTimes(2);
+  expect(post).toHaveBeenLastCalledWith('/admin/option', expect.objectContaining({ question_id: 77, label: 'Новий вид', sku_code: null }));
+});

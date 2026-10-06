@@ -2,6 +2,36 @@
 
 ## Category workspace
 
+The category workspace shows the intended category/language/field edits and the
+complete publication-package scope before review. A saved `reviewScope` projection
+lists unresolved decisions in the current and other categories without another
+binding read; unavailable scope is explicitly unknown. This snapshot does not
+replace structural validation, product-impact review or final revalidation. The
+sticky review/apply controls explain disabled actions and retain the global package
+boundary. Checking saves an isolated draft and prepares an inactive rules version;
+it is not a read-only action. No scoped apply bypasses unrelated package checks.
+
+Product repair context includes the exact question and semantic value, including
+zero. A uniquely attributable field opens directly; the exact value is highlighted
+and moved into the first bounded mapping page without selection or approval.
+Missing historical values are labelled as unknown local values with an ID. A safe
+return link still opens the same Attention product after application; configuration
+application alone never proves product delivery. Publication results remain visible
+after application and reload of the saved binding/source address. Durable handoffs
+distinguish pending enrollment, queued delivery and recorded Magento confirmation;
+missing receipt timestamps remain unavailable.
+
+Structural preparation explicitly offers an existing Magento resource or creation
+of a missing resource through the existing controlled actions. Field ownership
+explains its effect on existing products; generated names retain their separate
+Administrator application and pinned-name rules. If the server advertises
+`sources.nativeCharacteristicsUpgrade`, an explicit isolated-draft upgrade sends
+the exact revision/hash and `targetContract: public-product-characteristics-v1`.
+It neither publishes nor applies a binding until normal package review completes.
+
+Identical initial/base category reads reuse one request. Different revision or
+language/route contexts retain their original separate baseline read and fences.
+
 Settings → **Інтеграція Magento** (`/admin/magento`) opens manager categories.
 `?category=CODE` selects a category; `/categories/:categoryCode` also opens it.
 The left navigation shows search and the number of current characteristics unused
@@ -385,6 +415,14 @@ option route, initializes no default, and persists the exact returned option ID
 before exact GET verification in global and every applicable EN scope. A lost response remains
 uncertain; equal labels cannot recover attribution or authorize another POST.
 Creation never approves a semantic binding. Returned-ID recovery remains GET-only.
+For the first non-default option only, Magento may add `default_value: ""` to
+previously absent metadata. Verification accepts this representation change only
+when removing that empty field reproduces the exact sealed metadata fingerprint
+and the sealed prior options contain at most the empty placeholder. The receipt
+records both fingerprints and the preimage mode; the intent and attestation stay
+immutable. A real default, other metadata drift, existing nonempty options or a
+default-setting action still fail closed. Exact returned-ID, global/EN labels,
+prior options and EN scope checks remain mandatory; recovery never resends POST.
 An expired attestation on still-sealed work requires a fresh Administrator
 classification attestation, preview and explicit apply; 056 retains both attestations
 and intents. Expiry never permits replacement of previously dispatched work.
@@ -2134,6 +2172,23 @@ proof; fresh remote identity checks remain mandatory. The target keeps its own
 immutable option-domain hashes. Candidate `magento_managed` defaults do not
 replace an unchanged reviewed ownership policy.
 
+The official fixed-column → editable-column conversion can preserve those reviews
+only when every existing row/column position is proven equivalent after
+`upgradeColumns`. Existing order, definitions, source-support policy and readiness
+ownership must remain unchanged; additions keep their own unapproved decisions.
+Unprovable conversions retain the strict contract comparison. Fresh remote set,
+attribute, option, store and ownership verification is still required.
+Publication preview uses the same equivalence proof to classify existing routes;
+conversion alone does not require new-route CREATE representatives.
+
+For an explicitly scoped base-only field, `scopeBaseFieldToProductRoute` builds
+the existing expression AST from an exact public SKU and the selected route's
+semantic predicates, checking its observed set ID/name. A category/SKU condition
+alone covers every possible set route in that category. For the controlled
+`TEST-000001` SV field, the nonstone predicate confines requirements to set 151;
+the stone route creates no set-154 requirement. This authoring helper performs no
+persistence, publication or remote operation.
+
 After a carry fix, leave any incorrectly prepared draft unpublished and prepare
 a fresh successor from the **current publication**, selecting the already
 published corrected template. Existing drafts are not refreshed or repaired.
@@ -2177,6 +2232,14 @@ See [the disposable scale measurement](archive/implementation/WAVE2_PUBLICATION_
 Representative ready CREATE previews are required for newly
 enabled routes or changed attribute-set rules/identities. Actual current-product
 GET previews cover each affected route and optional explicitly selected products.
+Those current previews load exact acknowledged native ownership receipts in the
+same read-only product snapshot, even when reusing a paged product. A receipt remains
+bound to its immutable public identity, SKU, Magento origin and remote ID; changing
+the template or binding does not adopt a foreign counterpart. The immutable TEST
+marker is retained, so an externally enabled TEST counterpart still blocks delivery.
+Optional empty owned outputs are omitted from the declared delivery signature,
+matching transport omission rather than enrolling an unchanged product. Populated
+base/English outputs and zero values still contribute to publication impact.
 Local projections are not a claim that every remote product has been inspected.
 Remote reads reuse the existing evaluator/planner and the request-scoped 512-GET /
 60-second bound; no persistent background-report engine is introduced.
@@ -2244,3 +2307,16 @@ or prices. POST `controlled/preview` and `/apply` use local evidence hashes, cur
 publication CAS, existing permissions and final authorization; applying name rules
 also requires exports.create. No generic proxy, schema/set mutation or reconciliation
 reset is exposed.
+
+
+### General category authoring and retired cleanup resources (2026-10-06)
+
+Web authoring is not restricted to the two historical CLI category paths. An administrator may create a Manager category with a unique local code in **Категорії → Нова категорія**, then use **Додати категорію до правил**. For an existing type, open its **Розміщення в магазині** field and **Додати підкатегорію тут**. Both journeys select an unambiguous existing parent from an explicit store observation, enter a new name, and require **Перевірити шлях і вплив** before adding the path to the local rules draft.
+
+`POST /admin/magento-integration/categories/plan` is an authenticated authoring preview; it performs only read-only local SELECTs and bounded Magento GETs. The payload is exactly `{categoryCode,parentId,name}`. The Manager code must already exist; Magento category creation itself has a parent ID and name rather than that local code. Preview displays the exact normalized full path, parent ID, existing-versus-new status, one hidden active category creation or zero if it exists, zero product writes, and the current active-product count as an upper bound. It does not allocate a category, action, draft or SKU. Product and global binding effects are separately reviewed through the existing full publication preview.
+
+Creation remains limited to an exact category requirement in a reviewed immutable binding draft. Its separate preview and explicit apply retain existing administrator checks, durable intent/dispatch audit, origin and scope validation, fresh parent/path revalidation, no redispatch after an unknown outcome, and GET reconciliation requiring the exact returned category ID. Planning is not authorization to dispatch. New categories become visible to subsequent drafts only through a fresh observation; neither creating a resource nor adding an expression publishes a binding.
+
+Verified remote-only TEST cleanup is matched to actual enabled binding rows by exact Magento origin, attribute code and frozen attribute ID, and to an exact option ID for option cleanup. Unused frozen schema remains historical evidence. Referencing drafts are marked historical and publication is blocked server-side at preview and final apply context, even if an old successful preview is displayed. Their history and immutable versions remain readable; prepare a fresh draft from the current publication. No broad category/set/pricing block is introduced.
+
+The minimal safe per-category/language workflow is a fresh draft based on the current publication, an isolated category/row change with `assertCategoryScope` protecting other rows, categories and transitive fields, followed by the existing complete global validation and atomic publication. Independent publication of one category or language requires a different version and shared-reference model; it is not implemented by weakening full-publication invariants. No global publication or remote category creation was performed for this follow-up.

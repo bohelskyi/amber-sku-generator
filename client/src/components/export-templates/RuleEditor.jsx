@@ -41,7 +41,7 @@ function Scope({ context, trail, table }) {
 function CharacteristicPicker({ node, onInsert, context, copyLabels = false }) {
   const [source, setSource] = useState('');
   const [table, setTable] = useState(null);
-  const approved = availableSources(context.registry, context.group);
+  const approved = availableSources(context.registry, context.group, context.definition);
   const sources = Object.entries(context.definition.sources).filter(([, value]) => value.type !== 'boolean' && approved.some((entry) => entry.descriptor.kind === value.kind && entry.descriptor.category === value.category && entry.descriptor.key === value.key && entry.descriptor.field === value.field)).map(([id, descriptor]) => ({ id, descriptor }));
   const mappings = mappingsForSource(context.definition, source);
   const semantic = context.definition.sources[source]?.kind === 'semantic';
@@ -208,7 +208,7 @@ function TaskValue({ node: original, trail: originalTrail = [], context, output 
     {!context.focused && <details><summary>Перевірка готовності</summary><pre>{JSON.stringify({ if: node.if, error: node.error }, null, 2)}</pre><AdvancedRule context={context} /></details>}</>;
   if (node.op === 'lookup') return <Mapping node={node} trail={trail} context={context} />;
   if (node.op === 'source') {
-    const approved = availableSources(context.registry, context.group);
+    const approved = availableSources(context.registry, context.group, context.definition);
     if (context.focused && context.definition.sources[node.id]?.kind === 'semantic') return <p>Характеристика: <strong>{sourceLabel(context.definition, node.id, context.registry)}</strong>. Збережений спосіб запису доступний у технічних подробицях.</p>;
     const choices = Object.entries(context.definition.sources).filter(([, source]) => (!context.focused || source.kind !== 'semantic') && approved.some((entry) => entry.descriptor.kind === source.kind && entry.descriptor.category === source.category && entry.descriptor.key === source.key && entry.descriptor.field === source.field)).map(([id, descriptor]) => ({ id, descriptor }));
     return <><Scope context={context} trail={trail} /><SourcePicker registry={context.registry} group={context.group} choices={choices} disabled={context.readOnly} showDetails={!context.focused} value={node.id} onChange={(id) => update((value) => ({ ...value, id }))} /></>;

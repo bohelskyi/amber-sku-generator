@@ -28,6 +28,12 @@ Each guide is the maintained authority for its domain; other documents summarize
 | [Database and migrations](DATABASE_MIGRATIONS.md) | Migration/checksum policy, forward migration inventory and database protections. |
 | [Operations](OPERATIONS.md) | Topology, ordinary deployments, health, graceful shutdown, backup/restore and integrity audit. |
 
+Local October 2026 product workflows: [native characteristics and Manager flows](MANAGER_PRODUCT_WORKFLOWS.md),
+[original product photos](PRODUCT_PHOTOS.md), [reviewed catalog deletion](REVIEWED_CATALOG_DELETION.md),
+[historical reactivation](HISTORICAL_REACTIVATION.md), [durable integration tasks](PRODUCT_INTEGRATION_TASKS.md),
+and [archive/restore visibility](PRODUCT_LIFECYCLE.md). These are implementation
+contracts; real-store and authenticated browser acceptance remain separate.
+
 Local technical references: [client development](../client/README.md), [serialized PostgreSQL tests](../server/integration-test/README.md), [synthetic Magento fixture maintenance](../server/test/fixtures/magento-v1/README.md).
 
 Cross-application presentation: [Amber operations interface](APPLICATION_UX.md)

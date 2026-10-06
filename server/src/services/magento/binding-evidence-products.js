@@ -38,6 +38,9 @@ function evaluate(amber, product) {
     let mapped;
     try { product.magento_name_review_required = false; mapped = evaluateProduct(amber.compiled, product); }
     finally { if (ownedReview) product.magento_name_review_required = review; else delete product.magento_name_review_required; }
+    if (product.is_test_product === true) {
+      mapped.base = { ...mapped.base, product_online: '2' };
+    }
     const generatedNames = require('./name-reconciliation').applyNameOverride(mapped, product);
     return { base: mapped.base || {}, english: mapped.english || {}, ready: mapped.errors.length === 0,
       generatedNames,

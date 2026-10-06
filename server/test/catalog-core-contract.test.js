@@ -25,7 +25,7 @@ const {
   rewriteRuleKeyForTarget,
 } = require('../src/services/catalog/question-key-references');
 
-test('catalog service keeps its ten-export compatibility surface', () => {
+test('catalog service keeps its compatibility exports and catalog lifecycle extensions', () => {
   assert.deepEqual(Object.keys(catalogService), [
     'getAppConfig',
     'createCategory',
@@ -34,6 +34,8 @@ test('catalog service keeps its ten-export compatibility surface', () => {
     'updateQuestion',
     'createOption',
     'updateOption',
+    'setQuestionArchived',
+    'getCatalogItemImpact',
     'setOptionArchived',
     'updateQuestionsOrder',
     'deleteCatalogItem',

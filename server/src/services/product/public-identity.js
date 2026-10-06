@@ -26,7 +26,7 @@ function clean(row) {
 async function resolveProductLookup(queryable, value) {
   const sku = normalizeLookup(value);
   const rows = (await queryable.query(
-    `SELECT p.*, i.public_sku,
+    `SELECT p.*, i.public_sku, COALESCE((to_jsonb(i)->>'is_test_product')::boolean,FALSE) AS is_test_product,
             (i.public_sku = $1 AND p.status = 'active' AND p.corrected_to_product_id IS NULL) AS public_match,
             (p.full_sku = $1) AS internal_match
      FROM products p

@@ -3,7 +3,8 @@
 async function loadDraftPreviewProducts(client, productIds) {
   const result = await client.query(`
     SELECT p.id, p.full_sku, i.public_sku, p.category, p.weight, p.total_price_uah, p.details,
-           magento_name_subject_ua, magento_name_subject_en, magento_name_review_required, sku_schema_version_id
+           magento_name_subject_ua, magento_name_subject_en, magento_name_review_required, sku_schema_version_id,
+           to_jsonb(p)->>'characteristic_version_id' AS characteristic_version_id
     FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
     WHERE p.id = ANY($1::integer[]) ORDER BY p.id`, [productIds]);
   const found = new Set(result.rows.map((row) => Number(row.id)));

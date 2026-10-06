@@ -106,3 +106,24 @@ it('returns from an opened product to the reviewed filter and cursor page', asyn
     cursor: 'filtered-next', search: 'AG-', limit: 50,
   }));
 });
+
+it('archived TEST cleanup opens exact review only when an authorized callback is supplied, retaining the native history link',async()=>{
+  const selected=product(5012,{publicSku:'TEST-000001',internalSku:null,status:'archived',isTestProduct:true});
+  productsApi.listRegister.mockResolvedValue(response([selected]));const onDeleteArchivedTest=vi.fn();
+  const router=createMemoryRouter([{path:'*',element:<ProductRegister onDeleteArchivedTest={onDeleteArchivedTest}/>}],{initialEntries:['/products?lifecycle=archived']});
+  render(<RouterProvider router={router}/>);
+  const action=await screen.findByRole('button',{name:'Перевірити видалення TEST TEST-000001 з Magento'});
+  expect(onDeleteArchivedTest).not.toHaveBeenCalled();
+  expect(screen.getByRole('link',{name:'Відкрити історію товару TEST-000001'}).getAttribute('href')).toBe('/products/history?sku=TEST-000001');
+  fireEvent.click(action);expect(onDeleteArchivedTest).toHaveBeenCalledExactlyOnceWith(selected);
+});
+
+it('archived ordinary products and unproved TEST-looking identities cannot expose remote cleanup',async()=>{
+  productsApi.listRegister.mockResolvedValue(response([product(1,{status:'archived'}),product(2,{publicSku:'TEST-000002',status:'archived',isTestProduct:false})]));
+  const router=createMemoryRouter([{path:'*',element:<ProductRegister onDeleteArchivedTest={vi.fn()}/>}],{initialEntries:['/products?lifecycle=archived']});
+  render(<RouterProvider router={router}/>);await screen.findByText('TEST-000002');
+  expect(screen.queryByRole('button',{name:/Перевірити видалення TEST/})).toBeNull();
+  cleanup();productsApi.listRegister.mockResolvedValue(response([product(3,{publicSku:'TEST-000003',status:'archived',isTestProduct:true})]));
+  mount('/products?lifecycle=archived');await screen.findByText('TEST-000003');
+  expect(screen.queryByRole('button',{name:/Перевірити видалення TEST/})).toBeNull();
+});

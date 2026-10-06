@@ -1,7 +1,11 @@
 const pool = require('../../db/pool');
 const { originHash } = require('./binding-contract');
 const { eligibilityIssue, lifecycleProjectionSql } = require('./lifecycle-issue');
+const { isUpgradeProblem } = require('./native-characteristic-upgrade');
 const taxonomy = Object.freeze({
+  product_retired: 'Товар архівований у Manager; автоматичне передавання зупинено.',
+  TEST_PRODUCT_REMOTE_ENABLED: 'TEST товар увімкнено поза Amber. Передавання заблоковано; потрібна окрема перевірка Адміністратором.',
+  MAGENTO_NATIVE_IDENTITY_COLLISION: 'Артикул уже існує в Magento без підтвердження належності цьому новому товару. Доставку заблоковано; вибір назви не усуває колізію.',
   LIFECYCLE_HISTORICAL_AMBIGUITY: 'Потрібне підтвердження історії доставки',
   AMBER_SYNC_ELIGIBILITY_UNRESOLVED: 'Дозвіл на автоматичну доставку потребує перевірки відповідальним оператором.',
   TEST_DELETION_PENDING: 'Тестове видалення очікує підтвердження. Відкрийте товар і перевірте результат у дії «Видалити тестовий товар». Повторний DELETE після відправлення заборонено.',
@@ -41,6 +45,7 @@ function safeDiagnostics(blockers = []) {
   return blockers.slice(0, 40).map((item) => ({ code: String(item.code || 'data_or_binding').slice(0, 100),
     ...Object.fromEntries(['target', 'field', 'path', 'routeKey', 'status'].map((key) => [key, item[key] ?? item.diagnostic?.[key]])
       .filter(([, value]) => typeof value === 'string' && value.length <= 500)),
+    ...(isUpgradeProblem({ ...item, diagnosticCode: item.diagnostic?.code }) ? { question: item.question } : {}),
     ...(item.diagnostic?.code ? { diagnosticCode: String(item.diagnostic.code).slice(0, 100) } : {}),
     ...(Array.isArray(item.issueFields) ? { issueFields: item.issueFields.filter((f) => typeof f === 'string').slice(0, 20) } : {}),
     ...(Array.isArray(item.evaluationIssues) ? { evaluationIssues: item.evaluationIssues.slice(0, 40).map((issue) =>
@@ -49,6 +54,9 @@ function safeDiagnostics(blockers = []) {
   }));
 }
 function presentProblem(item, lifecycle) {
+  if (['MAGENTO_NATIVE_IDENTITY_COLLISION', 'TEST_PRODUCT_REMOTE_ENABLED'].includes(item.code)) return { ...item, resolution: 'administrator', message: taxonomy[item.code] };
+  if (isUpgradeProblem(item)) return { ...item, resolution: 'integration_configuration',
+    message: 'Товар збережено в Amber. Для його характеристик потрібно підготувати, перевірити й застосувати підтримку нових товарів у налаштуваннях категорії Magento.' };
   const issue = item.code === 'AMBER_SYNC_ELIGIBILITY_UNRESOLVED' ? eligibilityIssue(lifecycle) : null;
   if (issue) return { ...item, message: taxonomy.LIFECYCLE_HISTORICAL_AMBIGUITY,
     resolution: 'lifecycle_reconciliation', eligibilityIssue: issue };
@@ -92,16 +100,18 @@ async function summary(db = pool) {
   return { enabled: Boolean(result?.enabled), problemCount: Number(result?.problemCount || 0) };
 }
 function presentProblemRow(row) {
+  const foreignIdentity = row.diagnostics?.some(item => item.code === 'MAGENTO_NATIVE_IDENTITY_COLLISION');
   return { productId: row.productId, article: row.article, category: row.category,
     ...(row.category_name ? { categoryName: row.category_name } : {}),
     ...(row.product_status ? { productStatus: row.product_status } : {}),
     ...(row.state || (row.deletion_state && row.deletion_state !== 'finalized')
       ? { state: row.deletion_state && row.deletion_state !== 'finalized' ? 'needs_attention' : row.state } : {}),
     ...(row.observed_at ? { observedAt: row.observed_at } : {}),
+    ...(row.state === 'synced' && !(row.deletion_state && row.deletion_state !== 'finalized') && row.confirmed_at ? { confirmedAt: row.confirmed_at } : {}),
     problems: presentProblems(['reconciliation_required','TEST_DELETION_PENDING'].includes(row.reason_code) ? [{ code: row.reason_code }]
-      : ['conflict', 'baseline_required'].includes(row.name_state) ? [{ code: row.name_state === 'conflict' ? 'NAME_CONFLICT' : 'NAME_BASELINE_REQUIRED' }]
+      : foreignIdentity ? row.diagnostics : ['conflict', 'baseline_required'].includes(row.name_state) ? [{ code: row.name_state === 'conflict' ? 'NAME_CONFLICT' : 'NAME_BASELINE_REQUIRED' }]
         : row.diagnostics?.length ? row.diagnostics : [{ code: row.reason_code || 'data_or_binding' }], row.lifecycle),
-    nameConflict: !['reconciliation_required','TEST_DELETION_PENDING'].includes(row.reason_code) && ['conflict', 'baseline_required'].includes(row.name_state)
+    nameConflict: !foreignIdentity && !['reconciliation_required','TEST_DELETION_PENDING'].includes(row.reason_code) && ['conflict', 'baseline_required'].includes(row.name_state)
       ? { amber: row.observed_amber_names, magento: row.observed_remote_names } : null,
   };
 }
@@ -136,7 +146,12 @@ const problemJoinSql = `FROM products p JOIN public_product_identities i ON i.id
   LEFT JOIN magento_name_sync_states n ON n.public_product_identity_id=i.id AND n.origin_hash=$1
   LEFT JOIN magento_test_deletions d ON d.public_product_identity_id=i.id`;
 const problemSelectSql = `SELECT p.id AS "productId",i.public_sku AS "article",p.category,c.name AS category_name,p.status AS product_status,
-  r.state,d.state AS deletion_state,r.updated_at AS observed_at,
+  r.state,d.state AS deletion_state,r.updated_at AS observed_at,CASE WHEN r.state='synced' AND r.public_product_identity_id=p.public_product_identity_id THEN (SELECT max(j.acknowledged_at) FROM magento_sync_jobs j
+      WHERE j.product_id=p.id AND j.public_product_identity_id=p.public_product_identity_id
+        AND j.automatic_generation=r.desired_generation AND j.state='succeeded'
+        AND j.origin_hash=(SELECT b.origin_hash FROM magento_binding_revisions b
+          JOIN magento_auto_sync_activation a ON a.installation_key=b.installation_key AND a.singleton
+          WHERE b.state='published' ORDER BY b.version_number DESC LIMIT 1)) END AS confirmed_at,
   CASE WHEN d.state<>'finalized' THEN 'TEST_DELETION_PENDING' ELSE r.reason_code END AS reason_code,
   r.diagnostics,n.state AS name_state,n.observed_amber_names,n.observed_remote_names,${lifecycleProjectionSql}`;
 const reasonGroupSql = `CASE

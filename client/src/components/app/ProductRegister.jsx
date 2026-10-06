@@ -5,6 +5,7 @@ import { formatDecimal, formatUah } from '../../lib/formatters';
 import { useProductRegister } from '../../hooks/product/useProductRegister';
 import { CopyButton } from '../shared/CopyButton';
 import { EmptyState, LoadingState, Notice, StatusBadge } from './UiPrimitives';
+import { isTestProduct } from '../../lib/test-product.js';
 
 const lifecycleLabels = {
   current: 'Поточні',
@@ -28,7 +29,7 @@ function ProductStatus({ status }) {
   return <StatusBadge tone={presentation.tone}>{presentation.label}</StatusBadge>;
 }
 
-function ProductRowActions({ product, canDecode }) {
+function ProductRowActions({ product, canDecode, onDeleteArchivedTest }) {
   const location = useLocation();
   const article = product.publicSku;
   const currentProduct = product.status === 'active';
@@ -40,14 +41,17 @@ function ProductRowActions({ product, canDecode }) {
       <ExternalLink size={15} aria-hidden="true" />
     </Link>}
     {!currentProduct && <Link className="btn btn-outline btn-icon"
-      to={`/products/history?sku=${encodeURIComponent(product.internalSku)}`}
+      to={`/products/history?sku=${encodeURIComponent(product.internalSku || article)}`}
       aria-label={`Відкрити історію товару ${article}`} title="Відкрити історію товару">
       <ExternalLink size={15} aria-hidden="true" />
     </Link>}
+    {onDeleteArchivedTest && product.status === 'archived' && isTestProduct(product) && /^TEST-\d{6,}$/.test(article) &&
+      <button type="button" className="btn btn-outline" onClick={() => onDeleteArchivedTest(product)}
+        aria-label={`Перевірити видалення TEST ${article} з Magento`}>Видалити TEST з Magento</button>}
   </div>;
 }
 
-export function ProductRegister({ canDecode = true, refreshKey = 0 }) {
+export function ProductRegister({ canDecode = true, refreshKey = 0, onDeleteArchivedTest }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const filterKey = searchParams.toString();
@@ -62,12 +66,12 @@ export function ProductRegister({ canDecode = true, refreshKey = 0 }) {
     category: searchParams.get('category') || '',
     lifecycle: searchParams.get('lifecycle') || 'current',
   };
-  return <ProductRegisterContent key={filterKey} canDecode={canDecode} initialFilters={urlFilters}
+  return <ProductRegisterContent key={filterKey} canDecode={canDecode} onDeleteArchivedTest={onDeleteArchivedTest} initialFilters={urlFilters}
     initialPage={{ cursor, index: pageIndex, back }} locationState={location.state}
     refreshKey={refreshKey} searchParams={searchParams} setSearchParams={setSearchParams} />;
 }
 
-function ProductRegisterContent({ canDecode, initialFilters, initialPage, locationState, refreshKey, searchParams, setSearchParams }) {
+function ProductRegisterContent({ canDecode, onDeleteArchivedTest, initialFilters, initialPage, locationState, refreshKey, searchParams, setSearchParams }) {
   const register = useProductRegister({ initialFilters, initialPage, refreshKey });
   const [draftSearch, setDraftSearch] = useState(initialFilters.search);
 
@@ -171,12 +175,12 @@ function ProductRegisterContent({ canDecode, initialFilters, initialPage, locati
                 <th scope="col" className="table-cell text-right"><span className="sr-only">Дії</span></th>
               </tr></thead>
               <tbody>{register.items.map((product) => <tr key={product.id}>
-                <td className="table-cell" data-label="Артикул"><div className="font-mono font-semibold text-slate-900">{product.publicSku}</div></td>
+                <td className="table-cell" data-label="Артикул"><div className="font-mono font-semibold text-slate-900">{product.publicSku}</div>{isTestProduct(product) && <><StatusBadge tone="neutral">TEST</StatusBadge><p className="text-xs text-slate-500">TEST: лише вимкнений стан Magento</p></>}</td>
                 <td className="table-cell" data-label="Категорія"><div>{product.categoryName || product.categoryCode}</div><div className="text-xs text-slate-500">{product.categoryCode}</div></td>
                 <td className="table-cell" data-label="Стан"><ProductStatus status={product.status} /></td>
                 <td className="table-cell text-right tabular-nums" data-label="Вага">{Number(product.weight) > 0 ? `${formatDecimal(product.weight)} г` : '—'}</td>
                 <td className="table-cell text-right font-medium tabular-nums" data-label="Ціна">{product.priceUah !== null && product.priceUah !== undefined ? formatUah(product.priceUah) : '—'}</td>
-                <td className="table-cell" data-label="Дії"><ProductRowActions product={product} canDecode={canDecode} /></td>
+                <td className="table-cell" data-label="Дії"><ProductRowActions product={product} canDecode={canDecode} onDeleteArchivedTest={onDeleteArchivedTest} /></td>
               </tr>)}</tbody>
             </table>
           </div>

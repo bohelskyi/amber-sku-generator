@@ -155,8 +155,10 @@ it('keeps product creation, history, decode, recount and archive available witho
   expect(screen.getByText('Переоблік товару')).toBeTruthy(); button('Скасувати');
   fireEvent.click(screen.getByText('Додаткові дії')); button('Архівувати товар');
   const archiveDialog = await screen.findByRole('dialog', { name: 'Архівувати товар?' });
+  expect(within(archiveDialog).getByText('AG-000001')).toBeTruthy();
+  expect(productsApi.archive).not.toHaveBeenCalled();
   fireEvent.click(within(archiveDialog).getByRole('button', { name: 'Архівувати товар' }));
-  await waitFor(() => expect(productsApi.archive).toHaveBeenCalledWith('BR-A'));
+  await waitFor(() => expect(productsApi.archive).toHaveBeenCalledExactlyOnceWith('AG-000001'));
   await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Архівувати товар?' })).toBeNull());
   expect(productsApi.getRecent).not.toHaveBeenCalled();
   for (const service of [exports, sessions, templates]) for (const mock of Object.values(service)) expect(mock).not.toHaveBeenCalled();

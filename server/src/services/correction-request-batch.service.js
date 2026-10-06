@@ -39,9 +39,13 @@ async function preflight(options) {
       const requiredPermissions = ['corrections.view', 'corrections.complete',
         ...((row.claimed_by_user_id == null && row.claim_token_hash == null) ? ['corrections.claim'] : [])];
       let classification = e.classify(row, sourceEvidence, null, actorUserId), derived;
+      const product = sourceEvidence?.product;
+      const nativeOwnership = product?.characteristic_version_id != null
+        && ['full_sku','base_sku','sequence_number','sku_schema_version_id'].every(key => product[key] == null);
+      const legacyOwnership = sourceEvidence?.sku_count === 1
+        && sourceEvidence.reservation?.first_product_id === Number(row.source_product_id);
       if (!classification && sourceEvidence && (sourceEvidence.deletion_fence || !sourceEvidence.lifecycle
-        || sourceEvidence.sku_count !== 1 || sourceEvidence.current_identity_count !== 1
-        || sourceEvidence.reservation?.first_product_id !== Number(row.source_product_id))) {
+        || sourceEvidence.current_identity_count !== 1 || !(nativeOwnership || legacyOwnership))) {
         classification = { classification: 'INVALID_OR_BLOCKED', reasons: ['PRODUCT_IDENTITY_OR_DELETION_BLOCKED'] };
       }
       if (!classification) {
@@ -64,7 +68,7 @@ async function preflight(options) {
       if (missingPermissions.length && e.eligible(classification)) classification = { classification: 'INVALID_OR_BLOCKED', reasons: ['REQUIRED_PERMISSION_MISSING'] };
       const entry = { requestId, requestType: row.request_type || 'recount', status: row.status,
         sourceProductId: Number(row.source_product_id), publicArticle: sourceEvidence?.product.public_sku || null,
-        publicIdentityId: sourceEvidence?.product.public_product_identity_id || null, sourceInternalSku: row.source_sku,
+        publicIdentityId: sourceEvidence?.product.public_product_identity_id || null, sourceInternalSku: sourceEvidence?.product.full_sku || null,
         claimVersion: String(row.claim_version), ownerUserId: row.claimed_by_user_id == null ? null : Number(row.claimed_by_user_id),
         requestHash, sourceEvidence, storedIntent: { oldPayload: row.old_payload, proposedPayload: row.proposed_payload,
           pricingMode: row.pricing_mode, pricingUsdPerGram: row.pricing_usd_per_gram, pricingManualUah: row.pricing_manual_uah,

@@ -12,7 +12,7 @@ const {
 test('SV write inputs canonicalize decimal comma and dot without changing other answers or stored reads', () => {
   for (const weight of ['12,7', '12.7', 12.7, ' 12,7 ']) {
     const input = { weight, souvenir: '6', size: '3,2 см', notes: '10,2', is_calibrated: '2' };
-    assert.deepEqual(normalizeProductInputAnswers('SV', input), { weight: 12.7, souvenir: 6, size: '3,2 см', notes: '10,2', is_calibrated: 2 });
+    assert.deepEqual(normalizeProductInputAnswers('SV', input, [{ key: 'souvenir', input_type: 'options' }, { key: 'is_calibrated', input_type: 'options' }]), { weight: 12.7, souvenir: 6, size: '3,2 см', notes: '10,2', is_calibrated: 2 });
     assert.equal(input.weight, weight);
   }
   assert.equal(normalizeProductInputAnswers('BR', { weight: '12,7' }).weight, '12,7');
@@ -29,7 +29,7 @@ test('SV write inputs reject invalid mixed, nonnumeric and nonpositive weight wi
   assert.deepEqual(normalizeProductInputAnswers('SV', {}), {});
 });
 
-test('answer normalization preserves calibration states and semantic values', () => {
+test('answer maps preserve raw text until question metadata normalizes option values', () => {
   assert.deepEqual(normalizeAnswerMap({
     zero: '0',
     one: '1',
@@ -38,10 +38,10 @@ test('answer normalization preserves calibration states and semantic values', ()
     text: 'amber',
     absent: '',
   }), {
-    zero: 0,
-    one: 1,
-    two: 2,
-    semantic: 17,
+    zero: '0',
+    one: '1',
+    two: '2',
+    semantic: '17',
     text: 'amber',
   });
 });
@@ -62,7 +62,7 @@ test('stored answer context preserves calibration state 2', () => {
         isCalibrated: '2',
       },
     },
-  }), { shape: 7, quality: 4, is_calibrated: 2 });
+  }), { shape: 7, quality: '4', is_calibrated: 2 });
 });
 
 test('missing SV processing stays absent in recount; explicit semantic zero becomes a real change', () => {

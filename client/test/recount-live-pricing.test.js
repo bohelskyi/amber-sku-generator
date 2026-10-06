@@ -189,8 +189,9 @@ test('rapid edits invalidate older recount preview responses', () => {
 test('Continue stays gated while a recount preview is pending and no-change price access is explicit', () => {
   assert.match(
     dashboardSource,
-    /disabled=\{\(!hasRecountChanges && !canChangeProductPrice\)[\s\S]*?\|\| isRecountLoading \|\| isRecountApplying\}/
+    /disabled=\{unresolvedWeight \|\| \(!hasRecountChanges && !canChangeProductPrice\)\s*\|\| isRecountLoading \|\| isRecountApplying\}/
   );
+  assert.match(dashboardSource, /const unresolvedWeight = weightState\.conflict && \(!canonicalWeight\.valid \|\| canonicalWeight\.normalized === undefined\)/);
   assert.equal(dashboardSource.includes("'Змінити ціну'"), true);
   assert.equal(hookSource.includes('isRecountPreviewCurrent'), true);
 });

@@ -8,7 +8,7 @@ import { exportTemplatesApi as templates } from '../../api/export-templates-api.
 import { useDirtyNavigation } from '../../hooks/useDirtyNavigation.jsx';
 import { COLUMN_CONTRACT, columnChange } from '../../lib/export-template-columns.js';
 import { at, summary } from '../../lib/export-template-presentation.js';
-import { assertCategoryScope, changedFields, decisionKey, deliveryPolicies, routeLabel, rulesIdentity, uniqueOptionSuggestions } from '../../lib/magento-category-workspace.js';
+import { assertCategoryScope, changedFields, decisionKey, deliveryPolicies, deliveryPolicyEffect, localValueLabel, matchesRepairValue, reviewScopeSummary, routeLabel, rulesIdentity, uniqueOptionSuggestions } from '../../lib/magento-category-workspace.js';
 import { repairContext } from '../../lib/magento-repair-context.js';
 import { ColumnInspector } from '../export-templates/ColumnInspector.jsx';
 import { SampleProducts } from '../export-templates/SampleProducts.jsx';
@@ -20,6 +20,8 @@ import MagentoPublicationActions from './MagentoPublicationActions.jsx';
 import MagentoControlledActions from './MagentoControlledActions.jsx';
 import MagentoProductChecks from './MagentoProductChecks.jsx';
 import MagentoWorkspaceReview from './MagentoWorkspaceReview.jsx';
+import RetiredCatalogNotice from './RetiredCatalogNotice.jsx';
+import { CatalogDeletionEntry } from '../admin/CatalogDeletionEntry.jsx';
 import '../export-templates/export-template-editor.css';
 import './magento-category-workspace.css';
 
@@ -27,7 +29,7 @@ const root = '/admin/magento-integration';
 const date = (value) => value ? new Date(value).toLocaleString('uk-UA') : 'Спостереження відсутнє';
 const messages = { unmapped: 'Не передається', connected: 'Підключено', review: 'Потребує перевірки', empty: 'Не заповнюємо', excluded: 'Передавання виключено' };
 const fail = (cause) => cause.response?.data?.error || cause.message || 'Дію не завершено. Введені зміни збережено у формі.';
-const scopeParams = ['category', 'binding', 'source', 'ruleDraft', 'route', 'language', 'field', 'view', 'reviewField', 'tab', 'path'];
+const scopeParams = ['category', 'binding', 'source', 'ruleDraft', 'route', 'language', 'field', 'view', 'reviewField', 'tab', 'path', 'productId', 'question', 'value', 'returnTo'];
 const scopeIdentity = (categoryCode, params) => JSON.stringify([categoryCode, ...scopeParams.map((key) => params.get(key))]);
 
 function FieldSurface({ overlay, children, busy, suspended, onClose }) {
@@ -44,13 +46,20 @@ function SampleResult({ preview }) {
   </section>;
 }
 
-function FieldMappings({ field, questions, selections, setSelections, disabled }) {
+function FieldMappings({ field, questions, selections, setSelections, disabled, context, deletionContext }) {
   const entries = field.entries.filter((e) => e.kind === 'option');
+  const ordered = [...entries.filter((entry) => matchesRepairValue(entry, context)), ...entries.filter((entry) => !matchesRepairValue(entry, context))];
+  const focusRow = useRef(null);
+  useEffect(() => {
+    // Run after the generic column inspector's opening focus, then retain the
+    // exact repair row. Navigation still never chooses or approves a value.
+    const timer = setTimeout(() => { focusRow.current?.scrollIntoView?.({ block: 'nearest' }); focusRow.current?.focus({ preventScroll: true }); }, 0);
+    return () => clearTimeout(timer);
+  }, [field, context?.question, context?.value]);
   if (!entries.length) return null;
   const label = (entry) => {
     const match = entry.source.match(/\.([^.=]+)=value_id:(-?\d+)$/);
-    const question = match && questions.find((q) => q.id === match[1]);
-    return question?.options.find((o) => String(o.id) === match[2])?.label || entry.evaluated || entry.source;
+    return match ? localValueLabel(questions, match[1], match[2], entry.evaluated) : entry.evaluated || 'Значення правила';
   };
   const suggestions = uniqueOptionSuggestions(entries, field.options);
   const put = (entry, value) => setSelections((current) => ({ ...current, [decisionKey(entry)]: value }));
@@ -58,8 +67,10 @@ function FieldMappings({ field, questions, selections, setSelections, disabled }
     <h3 className="font-semibold">Наші значення → Magento</h3>
     <p>Навпроти кожного нашого значення виберіть відповідне значення магазину.</p>
     {suggestions.length > 0 && <button type="button" className="btn btn-outline" disabled={disabled} onClick={() => setSelections((current) => ({ ...current, ...Object.fromEntries(suggestions.map(({ entry, option }) => [decisionKey(entry), option.value])) }))}>Вибрати однозначні підказки ({suggestions.length})</button>}
-    <div className="mc-table-scroll"><table><thead><tr><th>Менеджер</th><th>Magento</th></tr></thead><tbody>{entries.slice(0, 50).map((entry) => <tr key={entry.id}>
-      <td>{label(entry)}</td><td><select className="input" aria-label={`Magento для ${label(entry)}`} disabled={disabled} value={selections[decisionKey(entry)] ?? entry.identity ?? ''} onChange={(e) => put(entry, e.target.value)}><option value="" disabled>Не вибрано</option>{field.options.filter((o) => !o.isEmpty).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></td>
+    <div className="mc-table-scroll"><table><thead><tr><th>Менеджер</th><th>Magento</th></tr></thead><tbody>{ordered.slice(0, 50).map((entry) => <tr key={entry.id} ref={matchesRepairValue(entry, context) ? focusRow : undefined} tabIndex={matchesRepairValue(entry, context) ? -1 : undefined} className={matchesRepairValue(entry, context) ? 'is-repair-target' : undefined}>
+      <td>{label(entry)}{matchesRepairValue(entry, context) && <small>Значення з проблеми цього товару</small>}</td><td><select className="input" aria-label={`Magento для ${label(entry)}`} disabled={disabled} value={selections[decisionKey(entry)] ?? entry.identity ?? ''} onChange={(e) => put(entry, e.target.value)}><option value="" disabled>Не вибрано</option>{field.options.filter((o) => !o.isEmpty).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+        {deletionContext?.isAdministrator && <CatalogDeletionEntry {...deletionContext} field={field} questions={questions} optionEntry={entry}/>}
+      </td>
     </tr>)}</tbody></table></div>
     {entries.length > 50 && <p>Показано перші 50 значень. Повний список доступний у перевірці підготовлених відповідностей.</p>}
   </section>;
@@ -67,6 +78,9 @@ function FieldMappings({ field, questions, selections, setSelections, disabled }
 
 function CategoryEditor({ initial, baseline, categories, activePublication, onPublished, onScopeCommit }) {
   const auth = useAuth(); const [params, setParams] = useSearchParams();
+  const entryContext = repairContext(params);
+  const repairTargets = [...new Set((initial.questions.find((question) => question.id === entryContext.question)?.uses || []).filter((use) => use.rowId === (params.get('language') === 'english' ? 'english' : 'base')).map((use) => use.target))];
+  const requestedField = params.get('field') || (repairTargets.length === 1 ? initial.attributes.find((attribute) => attribute.target === repairTargets[0])?.code : '') || '';
   const [projection, setProjection] = useState(initial);
   const [base, setBase] = useState(baseline);
   const [definition, setDefinition] = useState(initial.template.definition);
@@ -75,7 +89,7 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
   const [registry, setRegistry] = useState(null); const [error, setError] = useState(''); const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false); const [pending, setPending] = useState(false); const [discardPanel, setDiscardPanel] = useState(null);
   const [reviewPending, setReviewPending] = useState(false);
-  const [field, setField] = useState(params.get('field') || ''); const [loadedField, setLoadedField] = useState(null); const [fieldError, setFieldError] = useState('');
+  const [field, setField] = useState(requestedField); const [loadedField, setLoadedField] = useState(null); const [fieldError, setFieldError] = useState('');
   const [search, setSearch] = useState(''); const [filter, setFilter] = useState('all'); const [page, setPage] = useState(0);
   const [rowId, setRowId] = useState(params.get('language') === 'english' ? 'english' : 'base');
   const [routeKey, setRouteKey] = useState(projection.routeKey); const [tab, setTab] = useState(params.get('view') === 'placement' || params.get('tab') === 'placement' || params.get('path') || params.get('field') === 'categories' ? 'placement' : params.get('view') === 'text' || projection.attributes.some((a) => a.code === params.get('field') && a.text) ? 'text' : 'attributes');
@@ -86,6 +100,8 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
   const [showService, setShowService] = useState(false); const [reviewReady, setReviewReady] = useState(false); const [checkRequested, setCheckRequested] = useState(false);
   const [reviewProgress, setReviewProgress] = useState('');
   const [applied, setApplied] = useState(false);
+  const [activeDeletionReview, setActiveDeletionReview] = useState(null);
+  const [reviewScope, setReviewScope] = useState(initial.reviewScope || null);
   const [narrow, setNarrow] = useState(() => globalThis.matchMedia?.('(max-width: 1100px)').matches || false);
   const [fieldOverlay, setFieldOverlay] = useState(narrow);
   const flight = useRef(false); const alive = useRef(true); const fieldSequence = useRef(0); const creationKey = useRef(null);
@@ -97,7 +113,8 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
   const canManage = auth.permissions.includes('export_templates.manage');
   const canPublish = ['export_templates.manage', 'export_templates.publish', 'exports.view'].every((p) => auth.permissions.includes(p));
   const dirty = rulesIdentity(definition) !== rulesIdentity(savedDefinition);
-  const stale = (params.get('source') || base.revision.id) !== activePublication?.id;
+  const retired = Boolean(revision.catalogAvailability?.publicationBlocked);
+  const stale = (params.get('source') || base.revision.id) !== activePublication?.id || retired;
   const groupIndex = definition.groups.findIndex((g) => g.route === categoryCode);
   const rowIndex = definition.groups[groupIndex].rows.findIndex((r) => r.id === rowId);
   const changed = changedFields(base.template.definition, definition, categoryCode);
@@ -106,7 +123,7 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
   const fieldData = loadedField?.key === fieldKey ? loadedField.data : null;
   const loadSource = useCallback((descriptor, signal) => templates.sourceDetails(descriptor, signal), []);
   const searchSamples = useCallback((query, signal) => api.get('/admin/export-templates/sample-products', { params: query, signal }).then((r) => ({ ...r, data: { ...r.data, products: r.data.products.filter((p) => p.category === categoryCode) } })), [categoryCode]);
-  const navigation = useDirtyNavigation({ dirty: dirty || pending || selectionDirty || reviewPending, busy,
+  const navigation = useDirtyNavigation({ dirty: dirty || pending || selectionDirty || reviewPending, busy:busy || Boolean(activeDeletionReview),
     discard: () => { setDefinition(savedDefinition); setPending(false); setSelections({}); setSelectionDirty(false); setField(''); },
     shouldBlock: ({ currentLocation, nextLocation }) => currentLocation.pathname !== nextLocation.pathname || scopeParams.some((key) => new URLSearchParams(currentLocation.search).get(key) !== new URLSearchParams(nextLocation.search).get(key)) });
   useEffect(() => { urlParams.current = params; }, [params]);
@@ -256,17 +273,60 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
     }
   }, [prepared, busy, reviewTarget]);
   const hasChanges = changed.length > 0 || selectionDirty;
+  const packageScope = reviewScopeSummary(prepared ? reviewScope : projection.reviewScope, categoryCode);
+  const packageCategories = definition.groups.map((group) => categories.find((item) => item.code === group.route)?.name || group.route);
+  const disabledReason = busy ? 'Дія виконується. Дочекайтеся результату.' : pending ? 'Застосуйте або відкиньте введення відкритого поля.' : stale ? 'Чинна інтеграція змінилася. Потрібна нова перевірка.' : reviewPending ? 'Завершіть або відкиньте незбережені рішення перевірки.' : '';
+  const currentQuestion = projection.questions.find((question) => question.id === context.question);
+  const deletionDisabledReason = disabledReason || (dirty || selectionDirty || prepared ? 'Спочатку завершіть або відкиньте підготовку правил та відповідностей. Повне видалення має окрему перевірку.' : '');
+  const deletionContext = {categoryCode,revision,isAdministrator:isActualAdministrator(auth),permissions:auth.permissions,disabledReason:deletionDisabledReason,activeReviewKey:activeDeletionReview,onReviewChange:setActiveDeletionReview,
+    onCompleted:() => run(async()=>{
+      setLoadedField(null); setField(''); replaceParams({field:null});
+      const {data}=await api.get(`${root}/categories/${categoryCode}`,{params:{bindingRevisionId:revision.id,...(routeKey ? {routeKey} : {}),rowId}});
+      if(alive.current) { setProjection(data); setMessage('Вилучення з обох активних каталогів підтверджено. Історію збережено; майбутні SKU схеми публікуються окремо.'); }
+    })};
+  const durableResult = revision.state === 'published' && (applied || params.get('binding') === revision.id && params.get('source') === revision.id);
+  const nativeUpgrade = registry?.nativeCharacteristicsUpgrade;
+  const canUpgradeNative = canManage && nativeUpgrade?.targetContract === 'public-product-characteristics-v1' && nativeUpgrade.supportedEvaluatorVersions?.includes(definition.evaluatorVersion);
   const fieldRule = (attribute) => summary(definition, at(definition, ['groups', groupIndex, 'rows', rowIndex, 'cells', attribute.target]));
   return <div className={`mc-category-content${field ? ' has-editor' : ''}`}>
-    <section className="mc-fields space-y-4">
+    <section className="mc-fields space-y-4" inert={Boolean(activeDeletionReview)}>
       <header><h2>{initial.category.name}</h2><p className="mc-help">{tab === 'placement' ? 'Виберіть розділи магазину, у яких мають бути товари.' : tab === 'text' ? 'Виберіть назву або опис і відредагуйте текст.' : 'Натисніть на характеристику, щоб вибрати, що передавати з нашого менеджера.'}</p></header>
-      {context.returnTo && <Link className="mc-field-link" to={context.returnTo}>Повернутися до проблеми товару</Link>}
+      <RetiredCatalogNotice availability={revision.catalogAvailability} categoryCode={categoryCode} />
+      <section className="mc-scope-summary" aria-label="Обсяг редагування та перевірки">
+        <p><strong>Редагуємо:</strong> {initial.category.name} · {rowId === 'english' ? 'EN' : 'UA'}{currentField ? ` · ${currentField.label}` : ''}. Змінених полів: {changed.length}{selectionDirty ? ' · є вибрані відповідності' : ''}.</p>
+        <p><strong>Перевірка й застосування:</strong> увесь пакет правил ({packageCategories.length} категорій).</p>
+        {packageScope ? <p role="status">Непідтверджених відповідностей: {packageScope.total}. У цій категорії: {packageScope.local}. В інших категоріях: {packageScope.otherCount}{packageScope.otherCount > 0 && ` (${packageScope.otherCategories.map((code) => categories.find((item) => item.code === code)?.name || code).join(', ')})`}. {packageScope.otherCount > 0 && 'Вони також блокують застосування пакета.'}</p> : <p>Повний перелік перешкод пакета ще не перевірено. Відсутність локальних попереджень не підтверджує готовність пакета.</p>}
+        <MagentoDetails summary="Обсяг і наслідки перевірки">{() => <>
+          <p>Категорії пакета: {packageCategories.join(', ')}.</p>
+          <p>Перевірка збереже чернетку й підготує неактивну версію правил. Остаточне застосування окремо перевіряє всі категорії та товари пакета.</p>
+          <p>Це збережений стан відповідностей. Структурні перешкоди й вплив на товари додатково перевіряються перед застосуванням.</p>
+        </>}</MagentoDetails>
+      </section>
+      {(context.productId || context.question || context.path) && <section className="mc-repair-context" aria-label="Задача цього товару">
+        <p><strong>Виправлення для конкретного товару</strong>{context.question && <> · {currentQuestion?.label || 'Характеристика з проблеми'}{context.value !== undefined ? `: ${localValueLabel(projection.questions, context.question, context.value)}` : ''}</>}</p>
+        {context.path && <p>Шлях магазину: {context.path.replaceAll('/', ' → ')}</p>}
+        {context.returnTo && <Link className="mc-field-link" to={context.returnTo}>Повернутися до проблеми товару</Link>}
+        <small>Після застосування перевірте результат цього товару в Magento.</small>
+      </section>}
+      <p className="mc-work-state" role="status">{dirty || selectionDirty ? 'Є незбережені зміни.' : retired ? 'Історичну TEST чернетку не можна застосувати.' : prepared ? 'Підготовку збережено. Ще не застосовано.' : family ? 'Чернетку збережено. Ще не застосовано.' : durableResult ? 'Застосовано в Amber. Доставку Magento перевіряємо окремо.' : 'Переглядаємо чинні збережені правила.'}</p>
+      {context.returnTo && !(context.productId || context.question || context.path) && <Link className="mc-field-link" to={context.returnTo}>Повернутися до проблеми товару</Link>}
       {initial.category.operational?.count > 0 && <Notice tone="warning"><p>Синхронізацію зупинено для товарів цієї категорії: {initial.category.operational.count}. Відкрийте список, щоб побачити причину та виправити конкретний товар.</p><Link className="btn btn-outline" to={`/attention?category=${encodeURIComponent(categoryCode)}`}>Показати товари з проблемами ({initial.category.operational.count})</Link></Notice>}
-      {stale && <Notice tone="warning">Чинна інтеграція змінилася. Ваше введення залишено у формі. Підготовка потребує порівняння з новою версією; автоматичного перезапису немає. <Link className="underline" to={`/admin/magento?category=${categoryCode}`}>Відкрити чинну інтеграцію</Link></Notice>}
+      {stale && !retired && <Notice tone="warning">Чинна інтеграція змінилася. Ваше введення залишено у формі. Підготовка потребує порівняння з новою версією; автоматичного перезапису немає. <Link className="underline" to={`/admin/magento?category=${categoryCode}`}>Відкрити чинну інтеграцію</Link></Notice>}
       {error && <Notice tone="error">{error}</Notice>}{(message || prepared && reviewTarget === 'categories') && <Notice tone="success">{prepared && reviewTarget === 'categories' ? reviewProgress || 'Читаємо збережені підтвердження…' : message}</Notice>}
       {projection.routes.length > 1 && <label className="mc-label">Вид товару / набір Magento<select className="input" value={routeKey || ''} disabled={busy || pending} onChange={(e) => scope(e.target.value, rowId)}>{projection.routes.map((route) => <option key={route.routeKey} value={route.routeKey}>{routeLabel(route, projection.questions)}</option>)}</select></label>}
       {projection.routes.length === 1 && projection.routes[0].setName !== initial.category.name && <p className="mc-help">Поля для товарів: <strong>{projection.routes[0].setName}</strong></p>}
       {!projection.routes.length && <Notice>Категорію ще не підключено до набору Magento. <Link className="underline" to={`/admin/magento/prepare?category=${categoryCode}&intent=connect`}>Налаштувати підключення</Link></Notice>}
+      {canManage && (hasChanges || prepared || family) && <section className="mc-change-bar space-y-3" aria-label="Підготовлені зміни">
+        <h3 className="font-semibold">{hasChanges || family ? 'Ваші зміни' : 'Перевірка відповідностей'}{changed.length > 0 ? `: ${changed.length}` : ''}{selectionDirty ? ' · вибрані відповідності' : ''}</h3>
+        {changed.map((change) => <p key={`${change.field}:${change.rowId}`}>{projection.attributes.find((a) => a.target === change.field)?.label || change.field} · {change.rowId === 'english' ? 'EN' : 'UA'}</p>)}
+        {(!prepared || selectionDirty) && <div className="mc-actions">{canPublish ? <button type="button" className="btn btn-primary" disabled={busy || pending || stale || reviewPending} onClick={() => run(prepare)}>Перевірити зміни</button> : <button type="button" className="btn btn-primary" disabled={busy || pending || stale} onClick={() => run(async () => { await save(); setMessage('Чернетку збережено. Чинна інтеграція ще не змінена.'); })}>Зберегти чернетку</button>}</div>}
+        {prepared && !reviewReady && !selectionDirty && <button type="button" className="btn btn-primary" disabled={Boolean(disabledReason)} onClick={() => { reviewPanel.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }); reviewPanel.current?.focus({ preventScroll: true }); }}>Продовжити перевірку відповідностей</button>}
+        {disabledReason && <p role="status">{disabledReason}</p>}
+        <p className="mc-help">{prepared ? 'Перевірте відповідності нижче й застосуйте зміни.' : 'Перевірка збереже вашу роботу й покаже, що зміниться для товарів.'}</p>
+        {canPublish && <MagentoDetails summary="Зберегти й продовжити пізніше">{() => <button type="button" className="btn btn-outline" disabled={busy || pending || stale} onClick={() => run(async () => { await save(); setMessage('Чернетку збережено. Чинна інтеграція ще не змінена.'); })}>Зберегти чернетку</button>}</MagentoDetails>}
+        {!canPublish && <p className="text-sm">Збережену чернетку може продовжити користувач із правами публікації та перегляду експорту.</p>}
+        {definition.outputContract !== COLUMN_CONTRACT && <MagentoDetails summary="Підключення додаткових полів">{() => <><p>Для додавання поля потрібне явне оновлення формату чернетки. Поточна публікація зберігається.</p><button type="button" className="btn btn-outline" disabled={busy || pending || stale} onClick={() => run(async () => { const next = await save(); const draft = (await templates.upgrade(next.id, { expectedRevision: next.draft.revision, expectedDefinitionHash: next.draft.definitionHash })).data; setFamily({ ...next, draft }); setDefinition(draft.definition); setSavedDefinition(draft.definition); setMessage('Формат чернетки оновлено. Потрібно повторно перевірити відповідності перед застосуванням.'); })}>Оновити формат чернетки</button></>}</MagentoDetails>}
+      </section>}
       <nav className="mc-tabs" aria-label="Поля категорії">{[['attributes', 'Характеристики'], ['text', 'Назва й описи'], ['placement', 'Категорії магазину']].map(([value, label]) => <button type="button" key={value} disabled={busy || pending} aria-pressed={tab === value} onClick={() => { setTab(value); setPage(0); setShowService(false); replaceParams({ view: value, tab: null, path: null }); }}>{label}</button>)}<label>Мова<select aria-label="Мова полів" className="input" value={rowId} disabled={busy || pending} onChange={(e) => scope(routeKey, e.target.value)}><option value="base">UA</option><option value="english">EN</option></select></label></nav>
       {tab === 'placement' ? <section className="mc-placement space-y-3" aria-label="Категорії магазину для товарів">
         <h3 className="font-semibold">Де показувати товари «{initial.category.name}»</h3>
@@ -282,6 +342,7 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
         </div>
         {canManage && <MagentoDetails summary="Додати відсутній розділ Magento">{() => <><p>Створення розділу потребує окремої перевірки точного батьківського розділу.</p><Link className="mc-field-link" to={`/admin/magento/prepare?category=${categoryCode}&intent=subcategory`}>Відкрити створення розділу</Link></>}</MagentoDetails>}
       </section> : <>
+      <p className="mc-help">«Непідтверджені відповідності» рахує зв’язки значень у всьому пакеті. «Перевірити» рахує поля цієї вкладки: їхній текст, правило або спосіб передавання теж може потребувати уваги, навіть коли всі зв’язки підтверджено.</p>
       <div className="mc-status-counts" aria-label="Стан полів"><span>Підключено: <strong>{tabFields.filter((a) => !a.service && a.editable && a.state === 'connected').length}</strong></span><span>Не підключено: <strong>{tabFields.filter((a) => !a.service && a.editable && a.state === 'unmapped').length}</strong></span><span>Перевірити: <strong>{tabFields.filter((a) => !a.service && a.editable && a.state === 'review').length}</strong></span></div>
       <div className="mc-actions"><label className="mc-label">Пошук поля<input className="input" type="search" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} /></label><label className="mc-label">Показати<select className="input" value={filter} onChange={(e) => { setFilter(e.target.value); setPage(0); }}><option value="all">Усі</option><option value="unmapped">Без прив’язки</option><option value="review">Потребують перевірки</option></select></label></div>
       <div className="mc-table-scroll"><table className="mc-field-table"><caption className="sr-only">Поля Magento та джерела менеджера</caption><thead><tr><th>У Magento</th><th>{tab === 'text' ? 'Наш текст' : 'З нашого менеджера'}</th><th>Стан</th></tr></thead><tbody>{displayed.slice(currentPage * 30, (currentPage + 1) * 30).map((attribute) => <tr key={attribute.code} className={field === attribute.code ? 'is-selected' : ''}>
@@ -302,20 +363,13 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
         <MagentoDetails summary="Характеристики, використані в тексті">{() => projection.questions.filter((q) => q.uses.some((use) => projection.attributes.some((a) => a.target === use.target && a.text))).map((q) => <p key={q.id}>{q.label} · {q.uses.map((use) => use.target).join(', ')}</p>)}</MagentoDetails>
       </section>}
       </>}
-      {canManage && (hasChanges || prepared || family) && <section className="mc-change-bar space-y-3" aria-label="Підготовлені зміни">
-        <h3 className="font-semibold">{hasChanges || family ? 'Ваші зміни' : 'Перевірка відповідностей'}{changed.length > 0 ? `: ${changed.length}` : ''}{selectionDirty ? ' · вибрані відповідності' : ''}</h3>
-        {changed.map((change) => <p key={`${change.field}:${change.rowId}`}>{projection.attributes.find((a) => a.target === change.field)?.label || change.field} · {change.rowId === 'english' ? 'EN' : 'UA'}</p>)}
-        {(!prepared || selectionDirty) && <div className="mc-actions">{canPublish ? <button type="button" className="btn btn-primary" disabled={busy || pending || stale || reviewPending} onClick={() => run(prepare)}>Перевірити зміни</button> : <button type="button" className="btn btn-primary" disabled={busy || pending || stale} onClick={() => run(async () => { await save(); setMessage('Чернетку збережено. Чинна інтеграція ще не змінена.'); })}>Зберегти чернетку</button>}</div>}
-        <p className="mc-help">{prepared ? 'Перевірте відповідності нижче й застосуйте зміни.' : 'Перевірка збереже вашу роботу й покаже, що зміниться для товарів.'}</p>
-        {canPublish && <MagentoDetails summary="Зберегти й продовжити пізніше">{() => <button type="button" className="btn btn-outline" disabled={busy || pending || stale} onClick={() => run(async () => { await save(); setMessage('Чернетку збережено. Чинна інтеграція ще не змінена.'); })}>Зберегти чернетку</button>}</MagentoDetails>}
-        {!canPublish && <p className="text-sm">Збережену чернетку може продовжити користувач із правами публікації та перегляду експорту.</p>}
-        {definition.outputContract !== COLUMN_CONTRACT && <MagentoDetails summary="Підключення додаткових полів">{() => <><p>Для додавання поля потрібне явне оновлення формату чернетки. Поточна публікація зберігається.</p><button type="button" className="btn btn-outline" disabled={busy || pending || stale} onClick={() => run(async () => { const next = await save(); const draft = (await templates.upgrade(next.id, { expectedRevision: next.draft.revision, expectedDefinitionHash: next.draft.definitionHash })).data; setFamily({ ...next, draft }); setDefinition(draft.definition); setSavedDefinition(draft.definition); setMessage('Формат чернетки оновлено. Потрібно повторно перевірити відповідності перед застосуванням.'); })}>Оновити формат чернетки</button></>}</MagentoDetails>}
-      </section>}
+      {canManage && <MagentoDetails summary="Підготувати зміну структури">{() => <div className="mc-actions">{[['subcategory', 'Розділ магазину'], ['attribute', 'Характеристика'], ['option', 'Значення характеристики'], ['connect', 'Підключення категорії']].map(([intent, label]) => <Link key={intent} className="mc-field-link" to={`/admin/magento/prepare?${new URLSearchParams({ ...context, category: categoryCode, intent })}`}>{label}</Link>)}</div>}</MagentoDetails>}
+      {canUpgradeNative && <MagentoDetails summary="Підтримка характеристик нових товарів">{() => <div className="space-y-3"><p>Підготуйте підтримку збережених характеристик товарів, створених без старої SKU-схеми. Це збереже окрему чернетку; правила інших категорій і чинна доставка зміняться лише після перевірки та застосування всього пакета.</p><button type="button" className="btn btn-outline" disabled={Boolean(disabledReason)} onClick={() => run(async () => { const next = await save(); const updated = (await templates.upgrade(next.id, { expectedRevision: next.draft.revision, expectedDefinitionHash: next.draft.definitionHash, targetContract: nativeUpgrade.targetContract })).data; setFamily({ ...next, draft: updated }); setDefinition(updated.definition); setSavedDefinition(updated.definition); setReviewReady(false); setMessage('Підтримку нових товарів збережено у чернетці. Перевірте й застосуйте зміни пакета.'); })}>Підготувати підтримку характеристик нових товарів</button></div>}</MagentoDetails>}
       {tab === 'text' && canManage && auth.permissions.includes('exports.view') && <MagentoDetails summary="Приклад тексту на товарі">{() => <section className="space-y-3" aria-label="Приклад текстових шаблонів"><SampleProducts search={searchSamples} selected={samples} onChange={(next) => { setSamples(next.slice(-1)); setPreview(null); }} /><button type="button" className="btn btn-outline" disabled={busy || pending || !samples.length || stale} onClick={() => run(async () => { const next = await save(); const { data } = await templates.preview(next.id, { expectedRevision: next.draft.revision, expectedDefinitionHash: next.draft.definitionHash, productIds: samples.map((p) => p.id) }); setPreview(data); })}>Перевірити приклад</button>{preview && <SampleResult preview={preview} />}</section>}</MagentoDetails>}
       {prepared && <>
-        <div ref={reviewPanel} tabIndex={-1}><MagentoWorkspaceReview revision={revision} categoryCode={categoryCode} categories={categories} questions={projection.questions} focusTarget={reviewTarget} selections={selections} disabled={!canManage || busy || stale} onReadyChange={setReviewReady} onProgressChange={setReviewProgress} onPendingChange={setReviewPending} onChanged={reviewChanged} /></div>
+        <div ref={reviewPanel} tabIndex={-1}><MagentoWorkspaceReview revision={revision} categoryCode={categoryCode} categories={categories} questions={projection.questions} focusTarget={reviewTarget} selections={selections} disabled={!canManage || busy || stale} repairContext={context} onScopeChange={setReviewScope} onReadyChange={setReviewReady} onProgressChange={setReviewProgress} onPendingChange={setReviewPending} onChanged={reviewChanged} /></div>
         {canPublish && <MagentoDetails summary="Приклад на товарі">{() => <><button type="button" className="btn btn-outline" onClick={() => setProductChecks(!productChecks)}>{productChecks ? 'Сховати перевірку товарів' : 'Вибрати товар для перевірки'}</button>{productChecks && <MagentoProductChecks key={`${revision.id}:${revision.revision}`} revision={revision} categoryCode={categoryCode} onRepresentative={(example) => setRepresentatives((current) => [...current.filter((e) => e.routeKey !== example.routeKey), { ...example, revision: revision.revision }])} />}</>}</MagentoDetails>}
-        {reviewReady ? <MagentoPublicationActions compact autoPreview={checkRequested && reviewReady} disabled={busy || stale || selectionDirty || reviewPending} revision={revision} currentPublishedId={activePublication?.id} definition={definition} registry={registry} categories={categories} repairContext={context} onRepresentative={(example) => setRepresentatives((current) => [...current.filter((e) => e.routeKey !== example.routeKey), { ...example, revision: revision.revision }])} representatives={representatives.filter((e) => e.revision === revision.revision)} onPublished={(next) => {
+        {reviewReady ? <MagentoPublicationActions compact editScope={{ categoryName: initial.category.name, language: rowId === 'english' ? 'EN' : 'UA', changedCount: changed.length }} autoPreview={checkRequested && reviewReady} disabled={busy || stale || selectionDirty || reviewPending} revision={revision} currentPublishedId={activePublication?.id} definition={definition} registry={registry} categories={categories} repairContext={context} onRepresentative={(example) => setRepresentatives((current) => [...current.filter((e) => e.routeKey !== example.routeKey), { ...example, revision: revision.revision }])} representatives={representatives.filter((e) => e.revision === revision.revision)} onPublished={(next) => {
           setRevision(next); setBase({ ...projection, revision: next, template: { ...projection.template, definition } });
           setFamily(null); creationKey.current = null; setSavedDefinition(definition); setSelections({}); setSelectionDirty(false);
           replaceParams({ binding: next.id, source: next.id, ruleDraft: null });
@@ -324,11 +378,12 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
           api.get(`${root}/categories/${categoryCode}`, { params: { bindingRevisionId: next.id, ...(routeKey ? { routeKey } : {}), rowId } }).then(({ data }) => { if (alive.current) setProjection(data); }).catch((cause) => { if (alive.current) setError(fail(cause)); });
         }} /> : <p className="mc-help">Підтвердьте відповідності вище. Після цього тут з’явиться перевірка впливу та застосування змін.</p>}
       </>}
+      {durableResult && <MagentoPublicationActions compact revision={revision} currentPublishedId={activePublication?.id} repairContext={context} onPublished={onPublished} />}
       {revision.state === 'published' && isActualAdministrator(auth) && canPublish && auth.permissions.includes('exports.create') && <section className="space-y-3"><button type="button" className="btn btn-outline" onClick={() => setNamesOpen(!namesOpen)}>Застосувати назви до чинних товарів</button>{namesOpen && <MagentoControlledActions revision={revision} currentPublishedId={activePublication?.id} categoryCode={categoryCode} kind="name_rule" />}</section>}
       {busy && <LoadingState compact label="Зберігаємо й перевіряємо підготовку…" />}
       <MagentoDetails summary="Дані Magento та додаткові налаштування">{() => <div className="space-y-3"><p>Структура Magento: {date(projection.observedAt)}{projection.liveObservation && ' · щойно прочитано'}</p><div className="mc-actions"><button type="button" className="btn btn-outline" disabled={busy || pending || stale} onClick={() => run(async () => { const { data } = await api.post(`${root}/categories/${categoryCode}/observation`, { bindingRevisionId: revision.id, ...(routeKey ? { routeKey } : {}), rowId }); setProjection(data); setMessage('Дані Magento оновлено. Перегляньте нові поля та зміни, що потребують перевірки.'); })}>{busy ? 'Читаємо Magento…' : 'Оновити структуру Magento'}</button><Link className="text-sm underline" to={`/admin/magento/categories/${categoryCode}?tab=placement`}>Розміщення в магазині</Link>{canManage && canPublish && !hasChanges && !prepared && <button type="button" className="btn btn-outline" disabled={busy || pending || stale} onClick={() => run(prepare)}>Змінити поведінку передавання полів</button>}</div></div>}</MagentoDetails>
     </section>
-    {field && <FieldSurface overlay={fieldOverlay} busy={busy} suspended={Boolean(discardPanel)} onClose={() => chooseField('')}>
+    {field && <FieldSurface overlay={fieldOverlay} busy={busy || Boolean(activeDeletionReview)} suspended={Boolean(discardPanel)} onClose={() => chooseField('')}>
       {fieldError && <Notice tone="error">{fieldError}</Notice>}{currentField?.configured && !fieldData && !fieldError && <LoadingState compact label="Читаємо поле…" />}
       {currentField && <>
         {currentField.state === 'review' && <section className="mc-field-task space-y-3" aria-label="Що виправити в полі"><h3 className="font-semibold">Чому поле потребує перевірки</h3>
@@ -338,13 +393,14 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
         {currentField.state === 'empty' && <Notice>Це необов’язкове поле порожнє. Додайте текст, якщо хочете передавати його в магазин.</Notice>}
         {currentField.restriction && <Notice>{currentField.restriction}</Notice>}
         {currentField.service && !currentField.restriction && <Notice>Це службове поле Magento. Його правило доступне в додаткових налаштуваннях; воно не є описом або характеристикою для покупця.</Notice>}
-        {fieldData && <FieldMappings field={fieldData} questions={projection.questions} selections={selections} setSelections={setLocalSelections} disabled={!canManage || busy || stale || !currentField.editable} />}
+        {fieldData && <FieldMappings field={{...fieldData,attribute:currentField}} questions={projection.questions} context={context} selections={selections} setSelections={setLocalSelections} disabled={!canManage || busy || Boolean(activeDeletionReview) || stale || !currentField.editable} deletionContext={deletionContext} />}
+        {fieldData && <CatalogDeletionEntry {...deletionContext} field={{...fieldData,attribute:currentField}} questions={projection.questions}/>}
         {!fieldConfigured && currentField.editable && canManage && <section className="space-y-3"><h3>{currentField.label}</h3><p>Оберіть джерело й поведінку поля. Інша мова залишиться порожньою до окремого налаштування.</p><button type="button" className="btn btn-primary" disabled={busy || stale || definition.outputContract !== COLUMN_CONTRACT} onClick={() => { setDefinition(columnChange(definition, groupIndex, 'add', null, currentField.code)); setPreview(null); }}>Підключити поле</button>{definition.outputContract !== COLUMN_CONTRACT && <p>Спочатку оновіть формат чернетки в підготовлених змінах.</p>}</section>}
         {fieldConfigured && registry && <ColumnInspector key={`${field}:${rowId}:${routeKey}`} integration embedded localOnly simple textOnly={currentField.text} title={currentField.label} definition={definition} groupIndex={groupIndex} rowIndex={rowIndex} column={currentField.target} registry={registry} loadSource={loadSource}
-          suspended={busy || Boolean(discardPanel)} readOnly={!canManage || stale || !currentField.editable}
+          suspended={busy || Boolean(activeDeletionReview) || Boolean(discardPanel)} readOnly={!canManage || stale || !currentField.editable}
           onPendingChange={setPending} onRequestClose={() => chooseField('')} onCancel={() => chooseField('')}
           onApply={(next, base) => { if (base !== definition) return false; assertCategoryScope(definition, next, categoryCode, rowId); setDefinition(next); setPending(false); setPreview(null); setField(''); replaceParams({ field: null }); return true; }} />}
-        {currentField.policy && <p className="mc-help">{deliveryPolicies[currentField.policy]}</p>}
+        {currentField.policy && <div className="mc-help"><p>{deliveryPolicies[currentField.policy]}</p><p>{deliveryPolicyEffect(currentField.policy, currentField.target)}</p></div>}
         {!fieldConfigured && <MagentoDetails>{() => <p>Код: {currentField.code} · {currentField.inputType || 'службове поле'}</p>}</MagentoDetails>}
         {!fieldConfigured && <button type="button" className="btn btn-outline" onClick={() => chooseField('')}>Закрити поле</button>}
       </>}
@@ -355,7 +411,9 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
 }
 
 export default function MagentoCategoryWorkspace({ categories, activePublication, onPublished }) {
+  const auth = useAuth();
   const path = useParams(); const [params] = useSearchParams(); const [search, setSearch] = useState('');
+  const [categoryChoicesOpen, setCategoryChoicesOpen] = useState(false);
   const location = useLocation(); const navigationType = useNavigationType();
   const categoryCode = path.categoryCode || params.get('category');
   const scopeKey = scopeIdentity(categoryCode, params);
@@ -372,8 +430,9 @@ export default function MagentoCategoryWorkspace({ categories, activePublication
     const controller = new AbortController();
     const query = { ...(params.get('binding') || activePublication?.id ? { bindingRevisionId: params.get('binding') || activePublication.id } : {}), ...(params.get('route') ? { routeKey: params.get('route') } : {}), rowId: params.get('language') === 'english' ? 'english' : 'base' };
     const baseQuery = params.get('source') || activePublication?.id ? { bindingRevisionId: params.get('source') || activePublication.id } : {};
-    Promise.all([api.get(`${root}/categories/${categoryCode}`, { signal: controller.signal, params: query }),
-      api.get(`${root}/categories/${categoryCode}`, { signal: controller.signal, params: baseQuery })]).then(([selected, baseline]) => {
+    const selectedRead = api.get(`${root}/categories/${categoryCode}`, { signal: controller.signal, params: query });
+    const sameBaseline = query.bindingRevisionId === baseQuery.bindingRevisionId && !query.routeKey && query.rowId === 'base';
+    Promise.all([selectedRead, sameBaseline ? selectedRead : api.get(`${root}/categories/${categoryCode}`, { signal: controller.signal, params: baseQuery })]).then(([selected, baseline]) => {
       if (!controller.signal.aborted) { setOwnedScope(null); setLoaded({ categoryCode, scopeKey, editorKey: scopeKey, data: selected.data, baseline: baseline.data }); setError(''); }
     }).catch((cause) => { if (!controller.signal.aborted) setError(fail(cause)); });
     return () => controller.abort();
@@ -383,7 +442,7 @@ export default function MagentoCategoryWorkspace({ categories, activePublication
   const data = !ownedScope && loaded?.scopeKey === scopeKey || owned ? loaded?.data : null;
   const filtered = categories.filter((c) => `${c.name} ${c.code}`.toLocaleLowerCase('uk').includes(search.trim().toLocaleLowerCase('uk')));
   return <div className="mc-workspace">
-    <aside className="mc-categories" aria-label="Категорії менеджера"><h2>Категорії</h2><label className="mc-label">Пошук категорії<input className="input" type="search" value={search} onChange={(e) => setSearch(e.target.value)} /></label><nav>{filtered.map((c) => <Link key={c.code} aria-current={c.code === categoryCode ? 'page' : undefined} to={`/admin/magento?category=${encodeURIComponent(c.code)}`}><strong>{c.name}</strong><small>{c.unboundCount == null ? 'Відповідності — у категорії' : `Ще не передаємо: ${c.unboundCount}`}</small>{c.operational.count > 0 && <small>Проблеми товарів: {c.operational.count}</small>}</Link>)}</nav>{!filtered.length && <p>Категорій за цим пошуком немає.</p>}</aside>
+    <aside className="mc-categories" aria-label="Категорії менеджера"><h2>Категорії</h2><button type="button" className="mc-category-picker btn btn-outline" aria-expanded={categoryChoicesOpen || !categoryCode} aria-controls="mc-category-choices" onClick={() => setCategoryChoicesOpen((open) => !open)}>{categories.find((item) => item.code === categoryCode)?.name || 'Оберіть категорію'} · змінити категорію</button><div id="mc-category-choices" className={`mc-category-choices${categoryChoicesOpen || !categoryCode ? ' is-open' : ''}`}>{auth.permissions.includes('catalog.manage') && <Link className="mc-field-link" to="/admin/magento/categories/new">Додати категорію менеджера</Link>}<label className="mc-label">Пошук категорії<input className="input" type="search" value={search} onChange={(e) => setSearch(e.target.value)} /></label><nav>{filtered.map((c) => <Link key={c.code} aria-current={c.code === categoryCode ? 'page' : undefined} onClick={() => setCategoryChoicesOpen(false)} to={`/admin/magento?category=${encodeURIComponent(c.code)}`}><strong>{c.name}</strong><small>{c.unboundCount == null ? 'Відповідності — у категорії' : `Ще не передаємо: ${c.unboundCount}`}</small>{c.operational.count > 0 && <small>Проблеми товарів: {c.operational.count}</small>}</Link>)}</nav>{!filtered.length && <p>Категорій за цим пошуком немає.</p>}</div></aside>
     {!categoryCode ? <EmptyState title="Оберіть категорію менеджера">Побачите поля Magento, наші характеристики та текстові шаблони.</EmptyState> : error ? <Notice tone="error">{error}</Notice> : !data ? <LoadingState label="Читаємо категорію…" /> : !data.template || data.groupIndex < 0 ? <EmptyState title={data.category.name}>Категорію ще не включено до правил Magento. <Link className="underline" to={`/admin/magento/prepare?category=${categoryCode}&intent=connect`}>Налаштувати підключення</Link></EmptyState> : <CategoryEditor key={loaded.editorKey} categories={categories} initial={{ ...data, category: { ...data.category, operational: categories.find((c) => c.code === categoryCode)?.operational } }} baseline={loaded.baseline.template ? loaded.baseline : data} activePublication={activePublication} onPublished={onPublished} onScopeCommit={(nextScope) => setOwnedScope((current) => ({ key: nextScope, priorLocationKey: location.key, scopes: [...new Set([scopeKey, ...(current?.priorLocationKey === location.key ? current.scopes : []), nextScope])], editorKey: loaded.editorKey }))} />}
   </div>;
 }

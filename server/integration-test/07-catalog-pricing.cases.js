@@ -444,7 +444,7 @@ test('category rename revalidates a no-product schema after concurrent publicati
   }
 });
 
-test('question-key updates rewrite every live reference while published schemas stay immutable', async () => {
+test('used question keys reject reinterpretation and preserve every live reference and published schema', async () => {
   if (!suite.authenticatedSession) suite.authenticatedSession = await authenticateApplicationSession('/admin');
   const categoryCode = 'KR';
   const oldKey = 'old_key';
@@ -544,8 +544,10 @@ test('question-key updates rewrite every live reference while published schemas 
       visible_if_json: null,
     },
   });
-  assert.equal(renamed.response.status, 200, renamed.text);
-  assert.deepEqual(renamed.data, { success: true, key: newKey });
+  assert.equal(renamed.response.status, 409, renamed.text);
+  assert.ok(renamed.data.error);
+  const originalQuestion = await pool.query('SELECT key FROM questions WHERE id = $1', [questionIds[oldKey]]);
+  assert.equal(originalQuestion.rows[0].key, oldKey);
 
   const rewritten = await pool.query(
     `SELECT
@@ -568,28 +570,28 @@ test('question-key updates rewrite every live reference while published schemas 
   assert.deepEqual(rewritten.rows[0], {
     question_rule: {
       $and: [
-        { [newKey]: 1 },
-        { $or: [{ [newKey]: [1, 2] }, { other_key: 2 }] },
+        { [oldKey]: 1 },
+        { $or: [{ [oldKey]: [1, 2] }, { other_key: 2 }] },
       ],
     },
-    option_visible_rule: { $or: [{ [newKey]: 1 }, { other_key: 2 }] },
-    option_hidden_rule: { $and: [{ [newKey]: [2] }, { other_key: 1 }] },
+    option_visible_rule: { $or: [{ [oldKey]: 1 }, { other_key: 2 }] },
+    option_hidden_rule: { $and: [{ [oldKey]: [2] }, { other_key: 1 }] },
     scenario_rule: {
       $or: [
-        { [newKey]: 1 },
-        { $and: [{ other_key: 2 }, { [newKey]: [1, 2] }] },
+        { [oldKey]: 1 },
+        { $and: [{ other_key: 2 }, { [oldKey]: [1, 2] }] },
       ],
     },
-    axis_x_key: `${newKey}+other_key`,
-    axis_y_key: `other_key+${newKey}`,
+    axis_x_key: `${oldKey}+other_key`,
+    axis_y_key: `other_key+${oldKey}`,
     modifier_rule: {
       $and: [
-        { [newKey]: 1 },
-        { $or: [{ other_key: 2 }, { [newKey]: 2 }] },
+        { [oldKey]: 1 },
+        { $or: [{ other_key: 2 }, { [oldKey]: 2 }] },
       ],
     },
-    trigger_key: newKey,
-    product_answers: { [newKey]: 1, other_key: 2 },
+    trigger_key: oldKey,
+    product_answers: { [oldKey]: 1, other_key: 2 },
   });
 
   const publishedAfter = await pool.query(
@@ -986,8 +988,15 @@ test('catalog and pricing configuration mutations write concise semantic audit e
     assert.equal(deletedScenario.response.status, 200, deletedScenario.text);
   }
   for (const [type, id] of [['option', optionId], ['question', questionId], ['category', categoryCode]]) {
+    let confirmation = {};
+    if (type === 'question' || type === 'option') {
+      const impact = await request('/api/admin/catalog-impact', { method: 'POST', body: { type, id } });
+      assert.equal(impact.response.status, 200, impact.text);
+      assert.equal(impact.data.canDeleteLocal, true);
+      confirmation = { impactHash: impact.data.impactHash, confirmation: impact.data.confirmation };
+    }
     const deleted = await request('/api/admin/delete-item', {
-      method: 'POST', body: { type, id },
+      method: 'POST', body: { type, id, ...confirmation },
       ...mutationOptions(`audit-${type}-deleted`),
     });
     assert.equal(deleted.response.status, 200, deleted.text);

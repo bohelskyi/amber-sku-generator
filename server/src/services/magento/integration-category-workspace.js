@@ -96,6 +96,8 @@ function projectCategory(catalog, revision, definition, categoryCode, input = {}
     const service = PROTECTED.has(code) || SERVICE.has(code) || remote?.is_user_defined === false && !REGULAR_NATIVE.has(code);
     const empty = emptyLiteral(definition, expression);
     const reviewReasons = expression === undefined ? [] : fieldReview(binding, route, entries, remote, set?.attributeCodes.includes(code), empty);
+    if (revision?.catalogAvailability?.resources.some((resource) => resource.attributeCode === code)) reviewReasons.push({
+      kind: 'retired_resource', message: 'Цей тестовий ресурс Magento вже видалено. Чернетка збережена для історії й потребує нової підготовки від чинної публікації.' });
     const reason = PROTECTED.has(code) ? 'Системне правило захищено.'
       : remote && !set?.attributeCodes.includes(code) ? 'Атрибут не входить до вибраного набору Magento.'
         : remote && !EDITABLE.has(remote.frontend_input) ? 'Цей тип атрибута доступний лише для перегляду.'
@@ -108,11 +110,16 @@ function projectCategory(catalog, revision, definition, categoryCode, input = {}
       unresolved, editable: !reason && groupIndex >= 0, restriction: reason, inSet: set?.attributeCodes.includes(code) || false };
   });
   return { category: { code: categoryCode, name: catalog.categories[categoryCode].name },
-    revision: revision ? { id: revision.id, revision: revision.revision, state: revision.state, templateId: revision.templateId, templateVersionId: revision.templateVersionId } : null,
+    revision: revision ? { id: revision.id, revision: revision.revision, state: revision.state, publishedAt: revision.publishedAt || null, templateId: revision.templateId, templateVersionId: revision.templateVersionId,
+      ...(revision.catalogAvailability ? { catalogAvailability: revision.catalogAvailability } : {}) } : null,
     observedAt: revision?.observedAt || null, groupIndex, rowIndex,
     routes: routes.map((r) => ({ ...r, setName: revision.schema.attributeSets.find((s) => s.attribute_set_id === r.setId)?.attribute_set_name || 'Набір ще не вибрано' })),
     routeKey: route?.routeKey || null, attributes, questions,
     placements: decisions.filter((e) => e.kind === 'category'),
+    reviewScope: { categoryCount: definition?.groups.length || 0,
+      unresolved: revision ? review(revision).filter((entry) =>
+        !['approved', 'not_applicable', 'blocked'].includes(entry.reviewState))
+        .map(({ group, target, row, kind, reviewState }) => ({ group, target, row, kind, reviewState })) : [] },
     unboundCount: questions.filter((q) => !q.uses.length).length,
     template: definition ? { id: revision.templateId, versionId: revision.templateVersionId, definition } : null };
 }

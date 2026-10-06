@@ -44,6 +44,10 @@ function safeAttribute(raw) {
   if (!raw || !c.positive(raw.attribute_id) || !c.code(raw.attribute_code)) c.invalid();
   return c.safeData(raw, [], 32768);
 }
+// Stock REST omits nullable getters whose value is null. Restrict that
+// equivalence to these two empty-profile fields; present non-string values
+// remain invalid, and backend type/source identity remain mandatory.
+const emptyNullableRestField = (raw, field) => !Object.hasOwn(raw, field) || [null, ''].includes(raw[field]);
 function verifyCreated(intent, id, raw) {
   safeAttribute(raw);
   const wanted = intent.body.attribute;
@@ -53,7 +57,7 @@ function verifyCreated(intent, id, raw) {
     || raw.backend_type !== (wanted.frontend_input === 'select' ? 'int' : 'varchar')
     || (wanted.frontend_input === 'select' ? raw.source_model !== 'Magento\\Eav\\Model\\Entity\\Attribute\\Source\\Table'
       : ![null, ''].includes(raw.source_model))
-    || ![null, ''].includes(raw.backend_model) || ![null, ''].includes(raw.default_value)
+    || !emptyNullableRestField(raw, 'backend_model') || !emptyNullableRestField(raw, 'default_value')
     || c.hash(raw.apply_to) !== c.hash(['simple'])) {
     fail('MAGENTO_ATTRIBUTE_VERIFICATION_FAILED', 'Створений атрибут не відповідає перевіреним налаштуванням.');
   }

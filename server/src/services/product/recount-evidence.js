@@ -25,7 +25,7 @@ async function buildRecountEvidence(client, source, target, decodedAnswers, { lo
   // Confirmation never locks products. Re-read its exposure after the lifecycle
   // lock wait, so completion cannot apply evidence from before that confirmation.
   if (lock) disposition = await readLineageExposure(client, Number(source.id), source);
-  const schema = await getSchemaVersionById(target.skuSchemaVersionId, client);
+  const schema = target.skuSchemaVersionId ? await getSchemaVersionById(target.skuSchemaVersionId, client) : null;
   const questions = (await client.query(`SELECT key, include_in_sku, input_type
     FROM questions WHERE category_code=$1 ORDER BY id`, [target.categoryCode])).rows;
   const names = inheritRecountNames(source, target, schema, questions, decodedAnswers);
@@ -34,6 +34,7 @@ async function buildRecountEvidence(client, source, target, decodedAnswers, { lo
     publicSkuActivation: Boolean(activation.enabled),
     sourceState: getRecountStateSignature(source),
     target: { categoryCode: target.categoryCode, schemaVersionId: target.skuSchemaVersionId ?? null,
+      ...(target.characteristicConfigHash ? { characteristicConfigHash: target.characteristicConfigHash } : {}),
       answers: target.answers, weight: target.weight ?? null },
     lifecycle: states.map((s) => ({ productId: Number(s.product_id), revision: String(s.revision),
       confirmedRevision: String(s.confirmed_revision), deliveryVersion: String(s.delivery_version),

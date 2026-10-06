@@ -1,0 +1,40 @@
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import MagentoCategoryPlan from '../src/components/workspace/MagentoCategoryPlan.jsx';
+import { api } from '../src/lib/api.js';
+vi.mock('../src/lib/api.js', () => ({ api: { post: vi.fn() } }));
+afterEach(cleanup); beforeEach(() => vi.resetAllMocks());
+const categories = [{ categoryId: '10', normalizedPath: 'Default/Довільний/Parent', comparable: true }];
+const input = { categoryCode: 'NEW', categories, parentPath: categories[0].normalizedPath, name: 'Нова назва' };
+const proof = { categoryCode: 'NEW', parentId: 10, path: `${input.parentPath}/${input.name}`, status: 'would_create', magentoWriteAttempted: false, impact: { activeProductUpperBound: 12 } };
+it('checks an exact arbitrary path only after an explicit action and shows separate creation and product impact', async () => {
+  const verified = vi.fn(); api.post.mockResolvedValue({ data: proof });
+  render(<MagentoCategoryPlan {...input} onVerified={verified} />);
+  expect(api.post).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити шлях і вплив' }));
+  await screen.findByText('План створення перевірено');
+  expect(screen.getByText(/Саме створення змінює 0 товарів/)).toBeTruthy();
+  expect(screen.getByText(/Чинних товарів цього типу: 12/)).toBeTruthy();
+  expect(api.post.mock.calls[0].slice(0, 2)).toEqual(['/admin/magento-integration/categories/plan', { categoryCode: 'NEW', parentId: 10, name: 'Нова назва' }]);
+  expect(verified).toHaveBeenLastCalledWith(proof); expect(api.post).toHaveBeenCalledOnce();
+});
+it('does not authorize creating an existing or ambiguous path', async () => {
+  const verified = vi.fn(); api.post.mockResolvedValue({ data: { ...proof, status: 'existing', categoryId: '25' } });
+  render(<MagentoCategoryPlan {...input} onVerified={verified} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити шлях і вплив' }));
+  await screen.findByText('Розділ уже існує'); expect(verified).toHaveBeenLastCalledWith(null);
+  cleanup(); api.post.mockClear();
+  render(<MagentoCategoryPlan {...input} categories={[...categories, { ...categories[0], categoryId: '11' }]} onVerified={verified} />);
+  expect(screen.getByRole('button', { name: 'Перевірити шлях і вплив' }).disabled).toBe(true); expect(api.post).not.toHaveBeenCalled();
+});
+it('rejects a response for a different parent and ignores a response after the form context is replaced', async () => {
+  const verified = vi.fn(); api.post.mockResolvedValueOnce({ data: { ...proof, parentId: 99 } });
+  const view = render(<MagentoCategoryPlan key="old" {...input} onVerified={verified} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити шлях і вплив' }));
+  await screen.findByText('Повторно перевірте точний шлях.'); expect(verified).not.toHaveBeenCalledWith(proof);
+  let settle; api.post.mockImplementationOnce(() => new Promise(resolve => { settle = resolve; }));
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити шлях і вплив' }));
+  view.rerender(<MagentoCategoryPlan key="new" {...input} name="Інша назва" onVerified={verified} />);
+  await act(async () => settle({ data: proof }));
+  expect(screen.queryByText('План створення перевірено')).toBeNull(); expect(verified).not.toHaveBeenCalledWith(proof);
+});

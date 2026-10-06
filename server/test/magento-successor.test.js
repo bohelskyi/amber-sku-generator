@@ -1,8 +1,83 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { ruleProof, stableReviewedSource } = require('../src/services/magento/integration-successor');
+const { ruleProof, equivalentColumnUpgrade, stableReviewedSource } = require('../src/services/magento/integration-successor');
 const { carryReviewedBindings } = require('../src/services/magento/binding-carry-forward');
 const { fixture } = require('./fixtures/magento-successor');
+
+test('official lossless column upgrade with a scoped addition retains all seven reviewed routes and old decisions', () => {
+  const f = require('./fixtures/magento-test-field').testFieldFixture();
+  const { scopeBaseFieldToProductRoute } = require('../src/services/magento/integration-field-scope');
+  const definition = scopeBaseFieldToProductRoute(f.definition, f.schema, f.scope);
+  const oldDefinition = require('../src/services/export-templates/definition').compileDefinition(f.old).definition;
+  const comparison = equivalentColumnUpgrade(oldDefinition, definition);
+  assert.ok(comparison);
+  assert.ok(equivalentColumnUpgrade(f.old, definition), 'raw and persisted canonical definitions share the same official ownership conversion');
+  let positions = 0;
+  for (const group of f.old.groups) for (const row of group.rows) for (const target of group.columns) {
+    assert.equal(ruleProof(comparison, group.route, row.id, target), ruleProof(definition, group.route, row.id, target));
+    positions++;
+  }
+  assert.equal(positions, 328);
+  // Carry itself still verifies the exact old remote identities and memberships.
+  const result = carryReviewedBindings(stableReviewedSource(f.source, oldDefinition, definition),
+    { originHash: f.source.originHash, schema: f.source.schema, bindings: f.candidates(definition, f.source.schema) }, definition);
+  assert.deepEqual(result.blockers, []);
+  assert.equal(result.bindings.routes.length, 7);
+  for (const kind of ['routes', 'attributes', 'options', 'policies']) for (const old of f.source.bindings[kind]) {
+    const match = result.bindings[kind].find(next => kind === 'routes' ? next.routeKey === old.routeKey
+      : next.bindingKey === old.bindingKey && (kind !== 'options' || next.sourceKind === old.sourceKind
+        && (old.sourceKind === 'semantic' ? next.sourceKey === old.sourceKey : next.outputKey === old.outputKey)));
+    assert.ok(match, `${kind}/${old.bindingKey || old.routeKey}`);
+    assert.equal(match.reviewState, old.reviewState);
+    if (kind === 'routes') assert.equal(match.setId, old.setId);
+    if (kind === 'options') assert.equal(match.optionId, old.optionId);
+    if (kind === 'policies') { assert.equal(match.policy, old.policy); assert.equal(match.evidence.createValue, old.evidence.createValue); }
+  }
+  assert.ok(result.bindings.attributes.filter(a => a.target === f.target).every(a => a.reviewState !== 'approved'));
+});
+
+test('column upgrade refuses carry when any old semantics, order, source policy or store changes', () => {
+  const f = fixture();
+  const { upgradeColumns } = require('../src/services/export-templates/column-contract');
+  for (const [name, mutate] of [
+    ['expression', d => { d.groups[0].rows[0].cells.name = { op: 'literal', value: 'Changed name' }; }],
+    ['source', d => { d.sources['SV.color'].key = 'changed_color'; }],
+    ['mapping', d => { d.tables.svColor['1'] = 'Changed output'; }],
+    ['question policy', d => { d.questionContracts['SV.color'].required = true; }],
+    ['source support policy', d => { d.sourceSupport = require('../src/services/export-templates/source-support').upgradeSourceSupport(d, { schemas: [] }).sourceSupport; }],
+    ['columns', d => { [d.groups[0].columns[0], d.groups[0].columns[1]] = [d.groups[0].columns[1], d.groups[0].columns[0]]; }],
+    ['groups', d => { [d.groups[0], d.groups[1]] = [d.groups[1], d.groups[0]]; }],
+    ['bindings', d => { [d.bindings[0], d.bindings[1]] = [d.bindings[1], d.bindings[0]]; }],
+    ['rows', d => { d.groups[0].rows.reverse(); }],
+    ['store', d => { d.groups[0].rows[0].cells.store_view_code.value = 'uk'; }],
+    ['global readiness', d => { d.groups[0].evaluate.push({ op: 'error', field: 'unknown', message: { op: 'literal', value: 'Stop' } }); }],
+    ['readiness ownership', d => { d.groups.find(g => g.route === 'SV').outputChecks.find(check => check.columns.length > 1).columns.pop(); }],
+  ]) {
+    const next = upgradeColumns(f.old); mutate(next);
+    assert.equal(equivalentColumnUpgrade(f.old, next), null, name);
+    const guarded = stableReviewedSource(f.source, f.old, next);
+    assert.ok(guarded.bindings.routes.every(r => r.reviewState === 'review_required'), name);
+    assert.ok(guarded.bindings.attributes.every(a => a.reviewState === 'review_required'), name);
+    assert.ok(guarded.bindings.policies.every(p => p.reviewState === 'review_required'), name);
+  }
+});
+
+test('equivalent upgrade never waives fresh remote identity, membership or store checks', () => {
+  const f = fixture(), next = require('../src/services/export-templates/column-contract').upgradeColumns(f.old);
+  for (const mutate of [
+    s => { s.attributes.find(a => a.attribute_code === 'kolir').attribute_id++; },
+    s => { s.attributes.find(a => a.attribute_code === 'kolir').options[0].value = 'foreign-id'; },
+    s => { s.attributes.find(a => a.attribute_code === 'kolir').options[0].label += ' changed'; },
+    s => { s.attributeSets.forEach(set => { set.attributeCodes = set.attributeCodes.filter(code => code !== 'kolir'); }); },
+    s => { s.storeTopology.storeViews[0].id++; },
+  ]) {
+    const schema = structuredClone(f.schema); mutate(schema);
+    const result = carryReviewedBindings(stableReviewedSource(f.source, f.old, next, schema),
+      { originHash: f.source.originHash, schema, bindings: f.candidates(next, schema) }, next);
+    const keys = new Set(result.bindings.attributes.filter(a => a.target === 'kolir').map(a => a.bindingKey));
+    assert.ok(result.bindings.options.filter(o => keys.has(o.bindingKey)).some(o => o.reviewState !== 'approved'));
+  }
+});
 
 test('successor carry requires unchanged expression and transitive source/table proof', () => {
   const definition = { sources: { color: { kind: 'semantic', category: 'XX', key: 'color' } },

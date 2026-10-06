@@ -146,7 +146,7 @@ test('SUPPORT lifecycle current candidate/system-copy drafts start current; cata
     const q = (await pool.query("SELECT id,label FROM questions WHERE category_code='BR' AND key='color'")).rows[0];
     await pool.query('UPDATE questions SET label=$2 WHERE id=$1', [q.id, 'Synthetic renamed characteristic']);
     const option = (await pool.query(`INSERT INTO options(question_id,value_id,sku_code,label,archived)
-      VALUES($1,999999,'999999','Synthetic later option',false) RETURNING id`, [q.id])).rows[0];
+      VALUES($1,nextval('catalog_semantic_value_sequence'),'999999','Synthetic later option',false) RETURNING id`, [q.id])).rows[0];
     try {
       const afterCatalog = await templates.prepareSourceSupport(f.id, pre(f.draft));
       assert.equal(afterCatalog.changed, false);

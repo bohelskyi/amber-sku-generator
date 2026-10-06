@@ -1,6 +1,12 @@
 import { HomeDashboard } from '../components/app/HomeDashboard';
 import { PageHeader, Toast } from '../components/app/PageHeader';
 import { ProductArchiveDialog } from '../components/app/ProductArchiveDialog';
+import { HistoricalReactivationReview } from '../components/app/HistoricalReactivationReview.jsx';
+import { canUseHistoricalReactivation } from '../lib/historical-reactivation.js';
+import { ProductRestoreBatch } from '../components/app/ProductRestoreBatch.jsx';
+import { ProductLifecycleStatus } from '../components/app/ProductLifecycleStatus.jsx';
+import CreationDeliveryNotice from '../components/app/CreationDeliveryNotice.jsx';
+import CreationIntegrationResume from '../components/app/CreationIntegrationResume.jsx';
 import { ProductBuilder } from '../components/app/ProductBuilder';
 import { ProductRegister } from '../components/app/ProductRegister';
 import { ProductPriceChangeDialog } from '../components/app/ProductPriceChangeDialog';
@@ -9,7 +15,10 @@ import { LoadingState, Notice } from '../components/app/UiPrimitives.jsx';
 import { ConfirmDialog, CopyAction, OperationReceipt, StatusBadge } from '../components/ui';
 import { useAuth } from '../auth/auth-context.js';
 import { isActualAdministrator } from '../auth/auth-model.js';
+import { isTestProduct } from '../lib/test-product.js';
+import { TestProductNotice } from '../components/app/TestProductNotice.jsx';
 import { useDirtyNavigation } from '../hooks/useDirtyNavigation.jsx';
+import { useProductPhotos } from '../hooks/useProductPhotos.js';
 import { useSkuManager } from '../hooks/useSkuManager';
 import { getPermissionUiState, getRecountUiMode } from '../lib/permission-ui.js';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
@@ -24,7 +33,15 @@ function AppPage() {
   const location = useLocation();
   const [testDeletion, setTestDeletion] = useState(null);
   const [archiveTarget, setArchiveTarget] = useState(null);
-  const [archiveReceipt, setArchiveReceipt] = useState('');
+  const [archiveReceipt, setArchiveReceipt] = useState(null);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [restoreDirty, setRestoreDirty] = useState(false);
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [historicalOpen, setHistoricalOpen] = useState(false);
+  const [historicalDirty, setHistoricalDirty] = useState(false);
+  const [historicalBusy, setHistoricalBusy] = useState(false);
+  const [historicalSession, setHistoricalSession] = useState(0);
   const [deletionReceipt, setDeletionReceipt] = useState(null);
   const [registerRefresh, setRegisterRefresh] = useState(0);
   const [searchParams] = useSearchParams();
@@ -38,6 +55,7 @@ function AppPage() {
   const selectedCreateCategory = isCreateRoute
     ? searchParams.get('category')?.slice(0, 32)
     : null;
+  const integrationTaskId = isCreateRoute ? searchParams.get('integrationTask')?.slice(0,100) : null;
   const requestedRepair = isOpenRoute && searchParams.get('action') === 'recount';
   const requestedAttentionReturn = searchParams.get('returnTo');
   const attentionReturn = typeof requestedAttentionReturn === 'string'
@@ -54,6 +72,8 @@ function AppPage() {
     && auth.permissions.includes('products.delete_test');
   const sku = useSkuManager({
     canViewConfig,
+    canCreateProducts: canViewConfig && permissionUi.canCreateProducts,
+    canCreateTestProducts: isActualAdministrator(auth) && canViewConfig && permissionUi.canCreateProducts,
     canChangeProductPrice: permissionUi.canApplyDirectPriceChange,
     canApplyDirectPriceChange: permissionUi.canApplyDirectPriceChange,
     canCreatePriceChangeRequest: false,
@@ -66,25 +86,48 @@ function AppPage() {
   } = permissionUi;
   const canCreateProducts = canViewConfig && permittedToCreateProducts;
   const savedArticle = sku.savedProduct?.publicSku;
+  const photosAvailable = Boolean(sku.config?.productPhotoRequirements?.available);
+  const lifecycleAvailable = Boolean(sku.config?.productLifecycle?.available);
+  const canRestoreProducts = canViewConfig && canArchiveProducts && lifecycleAvailable;
+  const canHistoricalReactivate = canUseHistoricalReactivation(auth, sku.config);
+  const photoCanEdit = auth.permissions.includes('products.recount') && sku.decodeData?.product?.status === 'active'
+    && !sku.decodeData?.product?.corrected_to_product_id;
+  const productPhotos = useProductPhotos({
+    allowProductActivation: !isTestProduct(sku.decodeData),
+    productId: photosAvailable && canViewConfig && sku.decodeData?.existsInDb ? sku.decodeData.product?.id : null,
+    canEdit: photoCanEdit,
+    onSaved: () => sku.handleDecode(sku.decodeData?.publicSku || sku.decodeData?.sku),
+  });
   const isBuilderDirty = Boolean(sku.selectedCat && (
     Object.keys(sku.answers || {}).length > 0
     || Object.values(sku.nameSubjects || {}).some((value) => String(value || '').trim())
     || String(sku.weight || '').trim()
+    || sku.isTestProduct
     || String(sku.manualPriceUah || '').trim()
+    || String(sku.creationUsdPerGram || '').trim()
+    || sku.creationPhotos?.dirty
+    || sku.creationPhotos?.hasPendingUploads
     || sku.previewData
   ));
   const isProductDirty = isBuilderDirty
     || Boolean(sku.isRecountOpen && sku.hasRecountChanges)
-    || Boolean(sku.isPriceChangeOpen);
+    || Boolean(sku.isPriceChangeOpen)
+    || productPhotos.dirty || productPhotos.hasPendingUploads || restoreDirty || archiveBusy || restoreBusy || historicalDirty || historicalBusy;
   const discardProductChanges = () => {
     if (sku.isRecountOpen) sku.handleCancelRecount();
     if (sku.isPriceChangeOpen) sku.handleCancelPriceChange();
     if (sku.selectedCat) sku.resetProductFlow(null);
+    if (productPhotos.dirty || productPhotos.hasPendingUploads) productPhotos.reset();
+    if (restoreOpen) setRestoreOpen(false);
+    if (historicalOpen) {
+      setHistoricalOpen(false);
+      if (historicalDirty && !historicalBusy) setHistoricalSession((value) => value + 1);
+    }
   };
   const dirtyNavigation = useDirtyNavigation({
     dirty: isProductDirty,
     discard: discardProductChanges,
-    busy: sku.isSaving || sku.isRecountApplying || sku.isPriceChangeApplying,
+    busy: sku.isSaving || sku.isCreationSaveUncertain || sku.creationPhotos?.busy || sku.isRecountApplying || sku.isPriceChangeApplying || productPhotos.busy || restoreBusy || archiveBusy || historicalBusy,
   });
   const openedSku = useRef(null);
   const handoffCleanup = useRef(null);
@@ -113,7 +156,8 @@ function AppPage() {
       if (sku.selectedCat) sku.resetProductFlow(null);
       return;
     }
-    if (isCreateRoute && sku.config) {
+      if (isCreateRoute && sku.config) {
+        if (integrationTaskId) return;
       const validCategory = selectedCreateCategory
         && Object.hasOwn(sku.config.categories || {}, selectedCreateCategory);
       if (validCategory && sku.selectedCat !== selectedCreateCategory) {
@@ -130,7 +174,7 @@ function AppPage() {
   useEffect(() => {
     const timer = window.setTimeout(() => synchronizeRoute(), 0);
     return () => window.clearTimeout(timer);
-  }, [location.pathname, selectedCreateCategory, sku.config]);
+  }, [location.pathname, selectedCreateCategory, integrationTaskId, sku.config]);
   useEffect(() => {
     // StrictMode replays setup/cleanup on mount. Clear context only after a
     // genuine departure, not during that replay while the product opens.
@@ -190,24 +234,33 @@ function AppPage() {
               : openedProduct ? 'Код розшифровано. Збережений товар не знайдено.' : 'Читаємо актуальні дані товару.' : undefined}
           breadcrumbs={isLandingRoute ? undefined : [{ label: 'Товари', to: registerReturn }, { label: isCreateRoute ? 'Створення' : 'Картка товару' }]}
           status={productState && <StatusBadge tone={openedProduct.product.status === 'active' ? 'success' : 'neutral'}>{productState}</StatusBadge>}
-          actions={isOpenRoute && <>
+          actions={isOpenRoute ? <>
             {openedArticle && <CopyAction value={openedArticle} label="Скопіювати артикул товару" buttonLabel="Копіювати артикул" compact />}
             {attentionReturn ? <Link className="btn btn-outline" to={attentionReturn}>Повернутися до проблеми</Link>
               : <Link className="btn btn-outline" to={registerReturn} state={location.state?.productReturnState}>Повернутися до реєстру</Link>}
-          </>} />
+          </> : isLandingRoute ? <div className="flex flex-wrap gap-2">
+            {canRestoreProducts && <button type="button" className="btn btn-outline" onClick={() => dirtyNavigation.request(() => setRestoreOpen(true))}>Відновити за артикулами</button>}
+            {canHistoricalReactivate && <button type="button" className="btn btn-outline" onClick={() => dirtyNavigation.request(() => setHistoricalOpen(true))}>Нове історичне рішення Адміністратора</button>}
+          </div> : undefined} />
         {requestedRepair && !permissionUi.canApplyDirectRecount && <Notice tone="info">Для виправлення характеристик потрібен дозвіл на переоблік товару. Передайте артикул оператору з цим дозволом.</Notice>}
         <Toast message={sku.copyMessage} />
         {sku.savedProduct && !deletionReceipt && (
-          <OperationReceipt title="Товар збережено" identity={savedArticle}
+          <OperationReceipt title={isTestProduct(sku.savedProduct) ? 'TEST товар збережено' : 'Товар збережено'} identity={savedArticle}
             actions={savedArticle && <div className="flex flex-wrap gap-2">
                 <button type="button" className="btn btn-amber"
                   onClick={() => sku.handleCopyText(savedArticle, 'Артикул')}>Копіювати артикул</button>
                 <Link className="btn btn-outline" to={`/products/open?article=${encodeURIComponent(savedArticle)}`}>Відкрити товар</Link>
               </div>}>
             {!savedArticle && <p>Артикул недоступний у відповіді сервера.</p>}
+            <TestProductNotice product={sku.savedProduct} />
+            <CreationDeliveryNotice readiness={sku.savedProduct.creationDeliveryReadiness}
+              categoryCode={sku.savedProduct.creationDeliveryReadiness?.categoryCode} permissions={auth.permissions} saved />
           </OperationReceipt>
         )}
-        {archiveReceipt && <Notice tone="success" actions={<button type="button" className="btn btn-ghost" onClick={() => setArchiveReceipt('')}>Закрити</button>}>{archiveReceipt}</Notice>}
+        {archiveReceipt && <OperationReceipt title="Товар архівовано в Amber" identity={archiveReceipt.article}
+          description={archiveReceipt.message} actions={<button type="button" className="btn btn-ghost" onClick={() => setArchiveReceipt(null)}>Закрити</button>}>
+          {lifecycleAvailable && archiveReceipt.productId && <ProductLifecycleStatus productId={archiveReceipt.productId} />}
+        </OperationReceipt>}
         {deletionReceipt && <OperationReceipt title="Видалення тестового товару підтверджено"
           identity={deletionReceipt.publicSku} description="Видалення з Magento перевірено. В Amber збережено технічний запис; артикул залишається зарезервованим."
           actions={<button type="button" className="btn btn-ghost" onClick={() => setDeletionReceipt(null)}>Закрити</button>}
@@ -227,6 +280,8 @@ function AppPage() {
 
         {!sku.selectedCat && !sku.isDecodeLoading && (
           <HomeDashboard
+            productPhotos={photosAvailable && canViewConfig && sku.decodeData?.existsInDb ? productPhotos : null}
+            photoCanEdit={photoCanEdit}
             canArchiveProducts={canArchiveProducts}
             canDecodeProducts={canDecodeProducts}
             canDeleteTestProduct={canDeleteTestProduct}
@@ -272,16 +327,22 @@ function AppPage() {
             onStartPriceChange={sku.handleStartPriceChange}
             onDecode={openProduct}
             onDecodeInputChange={sku.handleDecodeInputChange}
-            onArchive={() => setArchiveTarget({
+            onArchive={() => dirtyNavigation.request(() => setArchiveTarget({
               article: sku.decodeData?.publicSku,
-              internalSku: sku.decodeData?.internalSku || sku.decodeData?.sku,
-            })}
+              productId: sku.decodeData?.product?.id,
+              internalSku: sku.decodeData?.publicSku || sku.decodeData?.internalSku || sku.decodeData?.sku,
+            }))}
             onDeleteTest={() => setTestDeletion({ ...sku.decodeData.product,
               public_sku: sku.decodeData.publicSku, full_sku: sku.decodeData.sku })}
           />
         )}
 
-        {canCreateProducts && sku.selectedCat && (
+        {lifecycleAvailable && canViewConfig && openedProduct?.existsInDb && openedProduct.product?.status === 'archived' && <ProductLifecycleStatus productId={openedProduct.product.id} />}
+
+          {canCreateProducts && integrationTaskId && <CreationIntegrationResume taskId={integrationTaskId}
+            config={sku.config} canCreate={canCreateProducts} busy={sku.isSaving || sku.isPreviewing || sku.isCreationSaveUncertain || sku.creationPhotos?.hasPendingUploads}
+            dirty={isBuilderDirty} onResume={sku.resumeIntegrationTask} />}
+          {canCreateProducts && sku.selectedCat && (
           <ProductBuilder
             config={sku.config}
             selectedCat={sku.selectedCat}
@@ -294,6 +355,14 @@ function AppPage() {
             answeredRequiredCount={sku.answeredRequiredCount}
             requiredCount={sku.requiredCount}
             previewData={sku.previewData}
+            isTestProduct={sku.isTestProduct}
+            canCreateTestProducts={sku.testProductCreationAvailable}
+            onTestProductChange={sku.handleTestProductChange}
+            creationIntegrationPermissions={auth.permissions}
+            onRequestIntegration={sku.onRequestIntegration}
+            creatingRequest={sku.creatingRequest}
+            requestReceipt={sku.requestReceipt}
+            integrationTaskError={sku.integrationTaskError}
             livePriceData={sku.livePriceData}
             isLivePriceLoading={sku.isLivePriceLoading}
             finalSku={sku.finalSku}
@@ -308,6 +377,18 @@ function AppPage() {
             requiresManualPrice={sku.requiresManualPrice}
             manualPriceUah={sku.manualPriceUah}
             saveError={sku.saveError}
+            creationFieldErrors={sku.creationFieldErrors}
+            isNativeCreation={sku.isNativeCreation}
+            isCreationSaveUncertain={sku.isCreationSaveUncertain}
+            creationPricingMode={sku.creationPricingMode}
+            creationUsdPerGram={sku.creationUsdPerGram}
+            creationMarketingRounding={sku.creationMarketingRounding}
+            creationPricingAvailable={sku.creationPricingAvailable}
+            creationPhotosAvailable={sku.creationPhotosAvailable}
+            creationPhotos={sku.creationPhotos}
+            onCreationPricingMode={sku.handleCreationPricingMode}
+            onCreationUsdPerGram={sku.handleCreationUsdPerGram}
+            onCreationMarketingRounding={sku.handleCreationMarketingRounding}
             getVisibleOptionsForQuestion={sku.getVisibleOptions}
             isQuestionVisible={sku.getQuestionVisibility}
             isTextQuestion={sku.isTextQuestion}
@@ -329,16 +410,25 @@ function AppPage() {
         )}
 
         {canViewRegister && isLandingRoute && !sku.selectedCat && !sku.decodeData && !sku.isDecodeLoading && (
-          <ProductRegister canDecode={canDecodeProducts} refreshKey={registerRefresh} />
+          <ProductRegister canDecode={canDecodeProducts} refreshKey={registerRefresh}
+            onDeleteArchivedTest={canDeleteTestProduct ? (product) => setTestDeletion({ ...product, public_sku: product.publicSku, full_sku: product.internalSku }) : undefined} />
         )}
       </div>
-      {archiveTarget && <ProductArchiveDialog article={archiveTarget.article} internalSku={archiveTarget.internalSku} onClose={() => setArchiveTarget(null)}
+      <HistoricalReactivationReview key={(auth.principalLifetime?.id || auth.applicationUser?.id || 'anonymous') + ':' + historicalSession}
+        open={historicalOpen} config={sku.config} onDirtyChange={setHistoricalDirty} onBusyChange={setHistoricalBusy}
+        onClose={() => dirtyNavigation.request(() => setHistoricalOpen(false))}
+        onReceipt={() => setRegisterRefresh((value) => value + 1)} />
+      {restoreOpen && canRestoreProducts && <ProductRestoreBatch onDirtyChange={setRestoreDirty} onBusyChange={setRestoreBusy}
+        onClose={() => dirtyNavigation.request(() => setRestoreOpen(false))}
+        onRestored={() => setRegisterRefresh((value) => value + 1)} />}
+      {archiveTarget && <ProductArchiveDialog article={archiveTarget.article} internalSku={archiveTarget.internalSku} lifecycleAvailable={lifecycleAvailable}
+        onBusyChange={setArchiveBusy} onClose={() => setArchiveTarget(null)}
         onArchived={({ message }) => {
+          setArchiveReceipt({ article: archiveTarget.article, productId: archiveTarget.productId, message });
           setArchiveTarget(null);
-          setArchiveReceipt(message);
           setRegisterRefresh((value) => value + 1);
           sku.handleDecodeInputChange('');
-          navigate('/products');
+          dirtyNavigation.commit(() => navigate('/products'));
         }} />}
       {testDeletion && canDeleteTestProduct && <TestProductDeletion
         key={testDeletion.id} product={testDeletion} onClose={() => setTestDeletion(null)}

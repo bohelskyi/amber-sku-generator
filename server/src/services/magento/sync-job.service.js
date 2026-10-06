@@ -13,6 +13,9 @@ const { APPLICATION_USER_ADMIN_LOCK_KEY, assertActorStillAuthorized } = require(
 const gate = require('../full-product-cutover-gate');
 const automatic = require('./automatic-sync-boundary');
 const { resolveProductLookup } = require('../product/public-identity');
+const { measurePhase } = require('./sync-performance');
+const historical = require('./historical-update-boundary');
+const standardHistorical = require('./historical-standard-boundary');
 
 async function ledger(db, actorUserId, action, operation) {
   const client = await db.connect();
@@ -66,6 +69,10 @@ async function guard(config, input, options, operation, applying = false) {
     const state = { productId: product.id, publicIdentityId: product.public_product_identity_id,
       publicSku: product.public_sku, amberHash: c.hash(plan.clean({ product, lifecycle })),
       bindingHash: c.hash(plan.clean(revision)), revision };
+    state.historicalUpdate = await historical.readConstraint(client, state.publicIdentityId, revision.originHash);
+    await historical.assertLocal(client, config, state.historicalUpdate, state);
+    state.historicalStandard = await standardHistorical.readConstraint(client, state.publicIdentityId, revision.originHash);
+    await standardHistorical.assertLocal(client, config, state.historicalStandard, state, options.actorUserId);
     if (options.recoveryInspectionOnly === true) {
       // A browser inspection owns only the SKU lane during remote GETs. It makes
       // no durable decision; reconciliation re-reads the exact reviewed state.
@@ -92,26 +99,42 @@ async function guard(config, input, options, operation, applying = false) {
   }
 }
 async function observe(config, input, options) {
+  return measurePhase(options, 'observation', async (fetchImpl) => {
   let observation;
+  let standardProof = null;
+  if (await standardHistorical.present(options.databasePool)) standardProof = (await options.databasePool.query(
+    `SELECT * FROM historical_standard_intents WHERE public_sku=$1 AND origin_hash=$2 AND state IN ('queued','delivering','blocked') ORDER BY created_at DESC LIMIT 1`,
+    [input.sku,c.originHash(config.baseUrl)])).rows[0];
+  // Automatic work retains the complete fresh schema contract, while independent
+  // set/option GETs use one bounded four-read observation budget. No cache spans
+  // enqueue, APPLY, jobs, products or publications.
+  const discover = options.automatic ? (config, reads) => measurePhase({ ...options, fetchImpl: reads.fetchImpl }, 'schema_discovery', (read) =>
+    require('./schema-audit').auditMagentoSchema(config, { ...reads, fetchImpl: read, concurrency: 4 })) : undefined;
   const report = await (options.preview || previewProduct)(config, { databasePool: options.databasePool,
-    fetchImpl: options.fetchImpl, sku: input.sku, bindingRevisionId: input.bindingRevisionId,
+    fetchImpl, sku: input.sku, bindingRevisionId: input.bindingRevisionId,
+    ...(discover ? { discover } : {}),
+    ...(standardProof ? { readAmber:standardHistorical.readProspective } : {}),
     sensitiveValues: options.sensitiveValues || [],
     onObservation: (value) => { observation = value; } });
   if (!observation) plan.fail('MAGENTO_SYNC_OBSERVATION_REQUIRED');
   return { observation, report };
+  });
 }
-async function refresh(config, observation, options) {
+async function refresh(config, observation, options, phase = 'precondition_read') {
+  return measurePhase(options, phase, async (fetchImpl) => {
   if (options.refresh) return options.refresh(observation);
-  const client = createMagentoClient(config, { fetchImpl: options.fetchImpl });
+  const client = createMagentoClient(config, { fetchImpl });
   const sku = observation.amber.product.public_sku || observation.amber.product.full_sku; let raw = null;
   try { raw = await client.findProductBySku(sku); }
   catch (e) { if (e.code !== 'MAGENTO_PRODUCT_NOT_FOUND') throw e; }
   const domainEvidence = await readDomains(config, { client, schema: observation.schema, sku, raw,
-    expected: evaluate(observation.amber, observation.amber.product), fetchImpl: options.fetchImpl });
+    expected: evaluate(observation.amber, observation.amber.product), fetchImpl });
   if (domainEvidence.failures.length) plan.fail('MAGENTO_SYNC_READ_FAILED');
   return { ...observation, raw, domainEvidence };
+  });
 }
 async function enqueue(config, input, options) {
+  options = { ...options, telemetryStage: 'enqueue' };
   return guard(config, input, options, async (state) => {
     const existing = (await options.databasePool.query(`SELECT * FROM magento_sync_jobs WHERE origin_hash=$1 AND sku=$2
       AND state <> 'superseded' AND (state <> 'succeeded' OR (binding_revision_id=$3 AND amber_hash=$4
@@ -138,6 +161,9 @@ async function enqueue(config, input, options) {
       plan.fail('MAGENTO_SYNC_READ_FAILED');
     }
     const intent = plan.intent(report); const baseline = plan.baseline(observation, report);
+    historical.assertPlan(state.historicalUpdate, intent, observation);
+    standardHistorical.assertPlan(state.historicalStandard, intent, observation);
+    if (state.historicalUpdate) await require('./historical-update-transport').capability(config, options);
     assertEvidenceSafe({ intent, baseline }, config, options.sensitiveValues || []);
     return ledger(options.databasePool, options.actorUserId, 'enqueued', async (client) => {
       if (options.automatic) await automatic.assertSnapshot(client, state, options);
@@ -154,6 +180,7 @@ async function enqueue(config, input, options) {
   });
 }
 async function applyJob(config, id, options) {
+  options = { ...options, telemetryStage: 'apply' };
   if (options.apply !== true) plan.fail('MAGENTO_SYNC_APPLY_REQUIRED');
   c.identity(id);
   let job = (await options.databasePool.query('SELECT * FROM magento_sync_jobs WHERE id=$1', [id])).rows[0];
@@ -194,6 +221,10 @@ async function applyJob(config, id, options) {
       }
       job = await saveState('running');
       let observation = reviewedObservation || (await observe(config, input, options)).observation;
+      historical.assertPlan(state.historicalUpdate, job.intent, observation);
+      const standardProgress = state.historicalStandard && (await options.databasePool.query('SELECT 1 FROM magento_sync_steps WHERE job_id=$1 LIMIT 1',[job.id])).rowCount>0;
+      standardHistorical.assertPlan(state.historicalStandard,job.intent,observation,standardProgress);
+      if (state.historicalUpdate) await require('./historical-update-transport').capability(config, options);
       if (options.automatic) {
         // Reject a mixed snapshot if a save committed during remote discovery.
         await ledger(options.databasePool, options.actorUserId, 'revalidated', async (client) => {
@@ -207,14 +238,19 @@ async function applyJob(config, id, options) {
         activeOrdinal = ordinal;
         const operation = job.intent.operations[ordinal];
         observation = await refresh(config, observation, options);
+        historical.assertObservation(state.historicalUpdate, observation);
+        standardHistorical.assertIdentity(state.historicalStandard,observation,job);
         plan.preserve(job, observation);
         const step = (await options.databasePool.query('SELECT * FROM magento_sync_steps WHERE job_id=$1 AND ordinal=$2', [id, ordinal])).rows[0];
+        if (state.historicalStandard && ordinal===0 && !step) standardHistorical.assertOriginalObservation(state.historicalStandard,observation);
         if (!step && ordinal === 0 && job.intent.mode === 'create' && observation.raw) plan.fail('MAGENTO_SYNC_REMOTE_STATE_CHANGED');
         if (!plan.matches(operation, observation)) {
           if (step) plan.fail('MAGENTO_SYNC_PREVIOUS_DISPATCH_UNRESOLVED');
           plan.precondition(job, operation, observation);
           // Committed before HTTP. There is deliberately no path that resets this marker.
           await ledger(options.databasePool, options.actorUserId, 'dispatched', async (client) => {
+            await historical.assertLocal(client, config, state.historicalUpdate, state);
+            await standardHistorical.assertLocal(client,config,state.historicalStandard,state,options.actorUserId);
             if (options.automatic) {
               await automatic.assertEnabled(client, options);
               await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`amber_magento_binding:${job.installation_key}`]);
@@ -226,9 +262,15 @@ async function applyJob(config, id, options) {
             return job;
           });
           let uncertain = false;
-          try { await (options.dispatch || dispatch)(config, operation, { apply: true, fetchImpl: options.fetchImpl }); }
+          try { await measurePhase(options, 'dispatch', (fetchImpl) =>
+            state.historicalUpdate
+              ? require('./historical-update-transport').dispatchExisting(config, state.historicalUpdate, operation,
+                { apply: true, fetchImpl, jobId: job.id, dispatchOther: options.dispatch || dispatch })
+              : (options.dispatch || dispatch)(config, operation, { apply: true, fetchImpl })); }
           catch { uncertain = true; }
-          observation = await refresh(config, observation, options);
+          observation = await refresh(config, observation, options, 'step_readback');
+          historical.assertObservation(state.historicalUpdate, observation);
+          standardHistorical.assertIdentity(state.historicalStandard,observation,job);
           plan.preserve(job, observation);
           if (!plan.verifyStep(operation, observation)) plan.fail(uncertain ? 'MAGENTO_SYNC_MUTATION_UNCERTAIN' : 'MAGENTO_SYNC_VERIFICATION_MISMATCH');
         }
@@ -240,12 +282,14 @@ async function applyJob(config, id, options) {
             updated_at=CURRENT_TIMESTAMP WHERE id=$1 RETURNING *`, [id, observation.raw.id])).rows[0];
         });
       }
-      observation = await refresh(config, observation, options);
+      observation = await refresh(config, observation, options, 'final_readback');
+      historical.assertObservation(state.historicalUpdate, observation);
+      standardHistorical.assertIdentity(state.historicalStandard,observation,job);
       plan.verifyAll(job, observation);
       return await saveState('succeeded');
     } catch (cause) {
       const pending = (await options.databasePool.query("SELECT 1 FROM magento_sync_steps WHERE job_id=$1 AND state='dispatched'", [id])).rowCount > 0;
-      const code = /^(MAGENTO|ADMIN|EXPORT)_[A-Z_]+$/.test(cause.code || '') ? cause.code : 'MAGENTO_SYNC_FAILED';
+      const code = /^(MAGENTO|ADMIN|EXPORT|HISTORICAL)_[A-Z_]+$/.test(cause.code || '') ? cause.code : 'MAGENTO_SYNC_FAILED';
       const status = pending ? 'uncertain' : /CHANGED|MISMATCH|INTEGRITY|NOT_SENDABLE|UNRESOLVED/.test(code) ? 'blocked' : 'retryable';
       return saveState(status, { code, ordinal: activeOrdinal,
         operation: activeOrdinal === null ? null : job.intent.operations[activeOrdinal].domain, reconciliationOnly: pending });

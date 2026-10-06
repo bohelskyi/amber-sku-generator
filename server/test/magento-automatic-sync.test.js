@@ -2,6 +2,33 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { presentStatus } = require('../src/services/magento/automatic-sync-status');
 
+test('worker keeps idle cadence and avoids another five seconds after a long nonoverlapping pass', async (t) => {
+  const { createAutomaticSyncWorker } = require('../src/services/magento/automatic-sync-worker');
+  const scheduled = []; let clock = 0, reads = 0, current = 0, peak = 0;
+  t.mock.method(globalThis, 'setTimeout', (callback, delay) => {
+    const timer = { callback, delay, unref() {} }; scheduled.push(timer); return timer;
+  });
+  t.mock.method(globalThis, 'clearTimeout', () => {});
+  const db = { async query() {
+    reads++; current++; peak = Math.max(peak, current);
+    await new Promise((resolve) => setImmediate(resolve)); current--; if (reads === 1) clock += 8000;
+    return { rows: [{ enabled: false }] };
+  } };
+  const worker = createAutomaticSyncWorker({}, { databasePool: db, now: () => clock });
+  worker.start(); worker.start(); assert.equal(scheduled.length, 1); assert.equal(scheduled[0].delay, 5000);
+  scheduled[0].callback(); worker.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(scheduled.length, 2); assert.equal(scheduled[1].delay, 0); assert.equal(peak, 1);
+  scheduled[1].callback();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(scheduled[2].delay, 5000, 'idle passes retain the original cadence');
+  await worker.stop(); scheduled[2].callback();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(reads, 2); assert.equal(scheduled.length, 3);
+});
+
 test('archive gap: automatic worker reports product_retired without dispatching a remote write', async () => {
   const { createAutomaticSyncWorker } = require('../src/services/magento/automatic-sync-worker');
   const { originHash } = require('../src/services/magento/binding-contract');

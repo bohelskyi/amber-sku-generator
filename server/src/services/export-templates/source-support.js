@@ -1,7 +1,7 @@
 // Closed, opt-in source policy. Captured questionContracts.allowed remains catalog
 // membership; mappings never confer authority. No DB access or client proof flags.
 const { fail } = require('./input-projection');
-const { EXTENSIBLE_EVALUATOR, isPublicEvaluator } = require('./version-contract');
+const { CHARACTERISTIC_CONTRACT, CHARACTERISTIC_EVALUATOR, EXTENSIBLE_EVALUATOR, isPublicEvaluator } = require('./version-contract');
 const { parseVariationSku, parseVersionedSkuPart, buildSkuSuffixDecodeAttempts, decodeStoredSkuAnswers } = require('../../utils/sku');
 const VERSION = 'historical-source-support-v1';
 const EVALUATOR = 'magento-declarative-2';
@@ -9,12 +9,13 @@ const PUBLIC_EVALUATOR = 'magento-declarative-3';
 const TARGETS = ['NM.extra', 'AR.size'];
 const DEFERRED = Object.freeze({ 'AR.size': Object.freeze(['29', '30', '31']) });
 const projections = new WeakMap();
+const prospectiveProjections = new WeakMap();
 const location = (s) => s?.kind !== 'product' ? `${s.category}.${s.key}` : null;
 const policyFor = (d, s) => d.sourceSupport?.sources[location(s)];
 
 function validateSupport(d, { check, shape, list, membership }) {
   if (!Object.hasOwn(d, 'sourceSupport')) { check(d.evaluatorVersion !== EVALUATOR, 'Source support policy required'); return; }
-  check([EVALUATOR, PUBLIC_EVALUATOR, EXTENSIBLE_EVALUATOR].includes(d.evaluatorVersion), 'Source support evaluator required');
+  check([EVALUATOR, PUBLIC_EVALUATOR, EXTENSIBLE_EVALUATOR, CHARACTERISTIC_EVALUATOR].includes(d.evaluatorVersion), 'Source support evaluator required');
   shape(d.sourceSupport, ['version', 'sources']);
   check(d.sourceSupport.version === VERSION, 'Unknown source support version');
   const expected = TARGETS.filter((key) => Object.values(d.sources).some((s) => location(s) === key));
@@ -83,13 +84,27 @@ function sourceSupportUpdate(definition) {
 
 // Server loaders supply the immutable schemas separately. JSON from a request or
 // product.details cannot manufacture an association in this private WeakMap.
-function projectSupportProducts(products, schemas) {
+function projectSupportProducts(products, schemas, characteristicVersions = []) {
   const byId = new Map(schemas.map((s) => [String(s.id), s]));
+  const characteristicsById = new Map(characteristicVersions.map((v) => [String(v.id), v]));
   return products.map((product) => {
     const projected = { ...product };
-    projections.set(projected, { schema: byId.get(String(product.sku_schema_version_id)) });
+    projections.set(projected, { schema: byId.get(String(product.sku_schema_version_id)), characteristics: characteristicsById.get(String(product.characteristic_version_id)) });
     return projected;
   });
+}
+
+// Only the read-only prospective loader supplies this live configuration. It is
+// not an immutable version and cannot confer authority on a stored product.
+function projectProspectiveSupportProduct(definition, product, configuration) {
+  if (definition.evaluatorVersion !== CHARACTERISTIC_EVALUATOR
+    || definition.sourceContractVersion !== CHARACTERISTIC_CONTRACT
+    || product.id !== null || product.public_sku !== 'AG-PREVIEW' || product.full_sku !== null
+    || product.characteristic_version_id != null || product.sku_schema_version_id != null
+    || configuration.category_code !== product.category) fail('SOURCE_SUPPORT_INVALID', 'Invalid prospective characteristic context');
+  const projected = { ...product };
+  prospectiveProjections.set(projected, { definition, configuration: structuredClone(configuration) });
+  return projected;
 }
 
 function reconstruct(product, context) {
@@ -115,6 +130,19 @@ function checkSourceSupport(d, descriptor, product, raw, context) {
   const reject = (reason) => fail('SOURCE_SUPPORT_INVALID', `${key}: ${reason}`);
   if (!['number', 'string'].includes(typeof raw) || !/^(0|[1-9][0-9]*)$/.test(String(raw))) reject('invalid semantic value');
   if (!context) reject('authoritative historical schema evidence required');
+  if (!product.full_sku) {
+    if (d.evaluatorVersion !== CHARACTERISTIC_EVALUATOR) reject('native characteristics require a reviewed evaluator 5 template and binding successor');
+    const prospective = context.prospective;
+    const version = prospective?.definition === d && product.id === null && product.public_sku === 'AG-PREVIEW'
+      && product.characteristic_version_id == null && product.sku_schema_version_id == null
+      ? prospective.configuration : context.characteristics;
+    if (!version || (!prospective && String(version.id) !== String(product.characteristic_version_id)) || version.category_code !== product.category) reject(prospective ? 'authoritative prospective characteristic evidence required' : 'authoritative immutable characteristic version required');
+    const questions = version.questions.filter((q) => q.key === descriptor.key);
+    if (questions.length !== 1 || (prospective && questions[0].archived)
+      || !questions[0].options.some((o) => String(o.value_id) === String(raw) && (!prospective || !o.archived))
+      || !p.semanticValues.includes(String(raw))) reject('semantic value is not supported by this template and characteristic version');
+    return;
+  }
   const decoded = reconstruct(product, context);
   const question = context.schema?.questions.filter((q) => q.key === descriptor.key);
   if (!decoded || question?.length !== 1) reject('schema ownership or stored SKU reconstruction failed');
@@ -132,11 +160,12 @@ function checkSourceSupport(d, descriptor, product, raw, context) {
 
 function sourceSupportChecker(definition, product) {
   const evidence = projections.get(product);
-  const context = evidence ? { schema: evidence.schema } : null;
+  const prospective = prospectiveProjections.get(product);
+  const context = evidence || prospective ? { schema: evidence?.schema, characteristics: evidence?.characteristics, prospective } : null;
   return (descriptor, raw) => checkSourceSupport(definition, descriptor, product, raw, context);
 }
 
 const isApprovedDeferredValue = (key, value) => DEFERRED[key]?.includes(String(value)) === true;
 
 module.exports = { VERSION, EVALUATOR, PUBLIC_EVALUATOR, validateSupport, upgradeSourceSupport, sourceSupportUpdate, policyFor,
-  projectSupportProducts, sourceSupportChecker, isApprovedDeferredValue };
+  projectSupportProducts, projectProspectiveSupportProduct, sourceSupportChecker, isApprovedDeferredValue };

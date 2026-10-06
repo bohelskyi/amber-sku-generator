@@ -42,12 +42,17 @@ async function amberSource(db, input, expected = null, lock = false) {
   if (lock) await db.query('SELECT id FROM questions WHERE category_code=$1 AND key=$2 FOR SHARE',[input.amberGroup,input.questionKey]);
   const values = (await db.query(`SELECT o.label,o.label_en,q.include_in_sku FROM options o JOIN questions q ON q.id=o.question_id
     JOIN categories cat ON cat.code=q.category_code WHERE q.category_code=$1 AND q.key=$2 AND o.value_id=$3
-      AND o.archived=false${lock ? ' FOR SHARE OF o' : ''}`, [input.amberGroup,input.questionKey,input.valueId])).rows;
+      AND o.archived=false AND COALESCE((to_jsonb(q)->>'archived')::boolean,false)=false${lock ? ' FOR SHARE OF o' : ''}`, [input.amberGroup,input.questionKey,input.valueId])).rows;
   const value=values[0];
   if(values.some(v=>v.label!==value.label || (v.label_en ?? null)!==(value.label_en ?? null)))
     fail('MAGENTO_OPTION_AMBER_SOURCE_AMBIGUOUS','Для цього значення Amber є різні назви. Уточніть українську та англійську назви в каталозі.');
   if (!value || (expected !== null && (value.label !== expected.label || (value.label_en ?? null) !== (expected.englishLabel ?? null)))) fail('MAGENTO_OPTION_AMBER_SOURCE_MISSING');
   if (value.include_in_sku) {
+    // With stable native creation, include_in_sku is historical catalog metadata.
+    // This resource action creates only an option; it confers no export support
+    // or binding approval. Current source/labels and all attestation guards remain.
+    const native = (await db.query('SELECT enabled FROM public_sku_activation WHERE singleton')).rows[0]?.enabled === true;
+    if (native) return value;
     const published = await db.query(`SELECT 1 FROM sku_schema_versions v JOIN sku_schema_questions q ON q.schema_version_id=v.id
       JOIN sku_schema_options o ON o.schema_question_id=q.id WHERE v.category_code=$1 AND v.status='active'
         AND q.question_key=$2 AND o.value_id=$3 AND o.archived=false${lock ? ' FOR SHARE OF v' : ''}`, [input.amberGroup,input.questionKey,input.valueId]);
@@ -72,10 +77,17 @@ async function target(config, input, options) {
 async function observe(config, code, options) {
   const fetchImpl = boundedGet(options.fetchImpl, { maxRequests: 6 });
   const client = createMagentoClient(config, { fetchImpl });
-  const capability = characterize(await client.getProductAttribute(code));
+  const raw = await client.getProductAttribute(code);
+  const capability = characterize(raw);
   if (capability.attribute.attribute_code !== code) c.invalid();
   const before = normalizeOptions(await client.getProductAttributeOptions(code));
   const result = { ...capability, before, englishStoreId: null };
+  // Magento may add an empty no-default field when creating the first option.
+  // Keep the original fingerprint contract; prove the exact sealed preimage separately.
+  if (Object.hasOwn(raw, 'default_value') && raw.default_value === '') {
+    const metadata = Object.fromEntries(Object.entries(raw).filter(([key]) => !['options','default_value'].includes(key)));
+    result.emptyDefaultPreimageFingerprint = c.hash(c.safeData(metadata,[],32768));
+  }
   const views = c.list(await client.getStoreViews(),1000);
   const englishViews=views.filter(v=>v?.code==='en');
   if (englishViews.some(v=>!Number.isSafeInteger(v.id)||v.id<=0||![true,false,0,1].includes(v.is_active))
@@ -154,12 +166,20 @@ function verifyOption(intent, id, raw) {
     || intent.before.some((old) => !rows.some((o) => o.value === old.value && o.label === old.label))) fail('MAGENTO_OPTION_VERIFICATION_FAILED');
   return true;
 }
+function verifyOptionMetadata(intent, observed) {
+  if (observed.metadataFingerprint === intent.metadataFingerprint) return null;
+  if (intent.body?.option?.is_default !== false || !Array.isArray(intent.before)
+    || intent.before.length > 1 || intent.before.some(o => o.value !== '' || o.isEmpty !== true)
+    || observed.emptyDefaultPreimageFingerprint !== intent.metadataFingerprint) fail('MAGENTO_OPTION_METADATA_DRIFT');
+  return { mode: 'first_non_default_option_empty_default_added', sealedFingerprint: intent.metadataFingerprint,
+    observedFingerprint: observed.metadataFingerprint };
+}
 async function reconcile(config, input, options = {}) {
   c.command(input, ['actionId']); const row = await actions.get(config, input.actionId, options);
   if (row.kind !== 'option') c.invalid(); if (row.state === 'verified') return actions.receipt(row);
   if (row.state !== 'returned') fail('MAGENTO_CONFIGURATION_RECONCILIATION_REQUIRED');
   const t = row.intent.target; const observed = await observe(config,t.attributeCode,options);
-  if (observed.metadataFingerprint !== row.intent.metadataFingerprint) fail('MAGENTO_OPTION_METADATA_DRIFT');
+  const metadataPreimage = verifyOptionMetadata(row.intent, observed);
   // New intents bind explicit absence too; historical immutable intents remain readable.
   if (Object.hasOwn(row.intent,'englishStoreId') && observed.englishStoreId!==row.intent.englishStoreId) fail('MAGENTO_OPTION_EN_SCOPE_UNRESOLVED');
   verifyOption(row.intent,row.remote_id,observed.before);
@@ -169,7 +189,8 @@ async function reconcile(config, input, options = {}) {
   }
   return actions.receipt(await actions.transition(row.id,'returned','verified',{ remoteId: row.remote_id,
     attributeId: row.intent.attributeId, attributeCode: t.attributeCode, label: t.label,
-    metadataFingerprint: observed.metadataFingerprint, optionsHash: c.hash(observed.before), ...(row.intent.englishStoreId ? { englishStoreId: observed.englishStoreId, englishLabel: t.englishLabel, englishOptionsHash: c.hash(observed.englishBefore) } : {}) }, options));
+    metadataFingerprint: observed.metadataFingerprint, ...(metadataPreimage ? { metadataPreimage } : {}),
+    optionsHash: c.hash(observed.before), ...(row.intent.englishStoreId ? { englishStoreId: observed.englishStoreId, englishLabel: t.englishLabel, englishOptionsHash: c.hash(observed.englishBefore) } : {}) }, options));
 }
 async function apply(config, input, options = {}) {
   c.command(input,[...TARGET_FIELDS,'attestationId','previewToken'],[]);
@@ -193,4 +214,4 @@ async function apply(config, input, options = {}) {
   } catch { throw c.error(409,'MAGENTO_CONFIGURATION_RECONCILIATION_REQUIRED','Amber надіслав зміну, але не підтвердив результат. Повторне надсилання недоступне.',{actionId:row.id}); }
   return reconcile(config,{actionId:row.id},options);
 }
-module.exports = { characterize, verifyOption, inspect, attest, preview, apply, reconcile, checkedAttestation, amberSource, label, observe, recordAttestation };
+module.exports = { characterize, verifyOption, verifyOptionMetadata, inspect, attest, preview, apply, reconcile, checkedAttestation, amberSource, label, observe, recordAttestation };

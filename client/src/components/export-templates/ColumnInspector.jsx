@@ -12,6 +12,8 @@ import { SourceSupportStatus } from './SourceSupportStatus';
 import { ColumnTechnicalDetails } from './ColumnTechnicalDetails';
 import { RuleSummary } from './RuleSummary';
 import MagentoPlacementRuleEditor from './MagentoPlacementRuleEditor.jsx';
+import NativeSourceValueReview from './NativeSourceValueReview.jsx';
+import MagentoFieldTargetReview from './MagentoFieldTargetReview.jsx';
 
 // One detached transaction across the normal, technical and advanced surfaces.
 // Opening/closing a surface never runs a definition adapter without an actual edit.
@@ -37,7 +39,7 @@ export function ColumnInspector({ integration = false, embedded = false, localOn
   const pending = touched || JSON.stringify(draft) !== JSON.stringify(base) || JSON.stringify(value) !== JSON.stringify(initialValue);
   useLayoutEffect(() => { active.current = { readOnly, suspended, secondary }; return () => { active.current = null; }; }, [readOnly, suspended, secondary]);
   const editable = () => active.current && !active.current.readOnly && !active.current.suspended;
-  const change = (next, origin = secondary) => { if (!editable() || active.current.secondary !== origin) return; setDraft(next); setTouched(true); };
+  const change = (next, origin = secondary) => { if (!editable() || active.current.secondary !== origin) return false; setDraft(next); setTouched(true); return true; };
   const changeValue = (next, origin = secondary) => { if (editable() && active.current.secondary === origin) setValue(next); };
   useEffect(() => { onPendingChange(pending); return () => onPendingChange(false); }, [pending, onPendingChange]);
   const valid = () => [...(secondary ? secondarySurface : surface).current?.querySelectorAll('input,textarea,select') || []].every((control) => control.reportValidity());
@@ -98,11 +100,12 @@ export function ColumnInspector({ integration = false, embedded = false, localOn
     return diagnostics?.some((d) => d.sourceId === id) || policy?.placeholder || policy?.deferredValues?.length;
   });
   const statusSources = mode === 'condition' ? sourceId ? [sourceId] : [] : exceptional.length ? exceptional : sources.slice(0, 1);
-  const approved = availableSources(registry, group.route);
+  const approved = availableSources(registry, group.route, draft);
   const content = <section ref={surface} tabIndex={-1} aria-label={fieldTitle} className="et-inspector-content et-intent-editor" onKeyDown={(e) => { if (!modal && !secondary && e.key === 'Escape') { e.preventDefault(); onRequestClose(); } }} onChangeCapture={() => capture(null)}>
     <header><div className="et-row"><h2>{title || group.columnLabels?.[column] || fieldLabels[column] || column}</h2><button type="button" className="et-link" onClick={onRequestClose}>Закрити налаштування</button></div>
       {simple ? <p className="et-muted">{textOnly ? 'Текст для товарів' : 'Відповідність для товарів'} · {rowIndex === 1 ? 'англійською' : 'українською'}</p> : <p className="et-muted"><code>{column}</code> · {categoryNames[group.route]} · <strong>{rowIndex === 1 ? 'EN' : 'Основний'}</strong></p>}
       {!simple && draft.outputContract === COLUMN_CONTRACT && !readOnly && <button type="button" className="et-link" onClick={() => setEditingLabel(!editingLabel)}>{integration ? 'Змінити назву поля' : 'Змінити назву колонки'}</button>}
+      {integration && draft.outputContract === COLUMN_CONTRACT && !requiredColumns.has(column) && !readOnly && <button type="button" className="et-link" disabled={suspended} onClick={() => openSecondary('target')}>Змінити атрибут Magento для цього поля</button>}
       {editingLabel && <label>{integration ? 'Назва поля' : 'Назва колонки'}<input className="input" maxLength={160} disabled={readOnly} value={group.columnLabels?.[column] ?? fieldLabels[column] ?? column} onChange={(e) => change(columnChange(draft, groupIndex, 'label', column, e.target.value), null)} /></label>}
       {!simple && requiredColumns.has(column) && <p className="et-muted">{integration ? 'Обов’язкове поле: код і наявність поля захищено.' : 'Обов’язкова колонка: код не можна перейменувати, колонку не можна видалити.'}{!protectedCells.has(column) && ' Правило заповнення можна редагувати.'}</p>}
     </header>
@@ -127,25 +130,27 @@ export function ColumnInspector({ integration = false, embedded = false, localOn
     {footer}
     {!simple && mode !== 'literal' && statusSources.map((id) => <SourceSupportStatus key={id} compact definition={draft} sourceId={id} diagnostics={diagnostics}
       confirmed={approved.some((entry) => ['kind', 'category', 'key', 'field'].every((key) => entry.descriptor[key] === draft.sources[id]?.[key]))} onDetails={() => openSecondary('technical')} />)}
+    {integration && statusSources.map((id) => <NativeSourceValueReview key={id} definition={draft} sourceId={id} loadSource={loadSource} disabled={readOnly || suspended || Boolean(secondary)} onChange={(next) => change(next, null)}/>) }
     <nav className="et-editor-tools" aria-label="Додаткові інструменти"><button type="button" className="et-link" onClick={() => openSecondary('technical')}>{simple ? 'Розширені налаштування' : 'Технічні подробиці'}</button>{!simple && <button type="button" className="et-link" onClick={() => openSecondary('advanced')}>{integration ? 'Розширені правила цього поля' : 'Розширені правила цієї колонки'}</button>}</nav>
   </section>;
   return <>
     {modal ? <WorkspaceDialog title={fieldTitle} className="et-inspector-dialog" onClose={onRequestClose} initialFocusRef={returnFocus} suspended={suspended || Boolean(secondary)}>{content}</WorkspaceDialog>
       : <aside hidden={suspended || Boolean(secondary)} className="et-column-drawer" aria-label={fieldTitle}>{content}</aside>}
-    {secondary && <WorkspaceDialog title={secondary === 'advanced' ? 'Розширені правила' : 'Технічні подробиці'} className="et-technical-dialog" onClose={closeSecondary} suspended={suspended}>
+    {secondary && <WorkspaceDialog title={secondary === 'target' ? 'Змінити атрибут призначення' : secondary === 'advanced' ? 'Розширені правила' : 'Технічні подробиці'} className="et-technical-dialog" onClose={closeSecondary} suspended={suspended}>
       <section ref={secondarySurface} onChangeCapture={() => capture(secondary)} className="et-inspector-content">
-        <h2>{secondary === 'advanced' ? 'Розширені правила' : 'Технічні подробиці'} · {group.columnLabels?.[column] || fieldLabels[column] || column}</h2>
+        <h2>{secondary === 'target' ? 'Змінити атрибут призначення' : secondary === 'advanced' ? 'Розширені правила' : 'Технічні подробиці'} · {group.columnLabels?.[column] || fieldLabels[column] || column}</h2>
         <p>{categoryNames[group.route]} · {column} · {rowIndex === 1 ? 'EN' : 'Основний'}</p>
         <button type="button" className="et-link" onClick={closeSecondary}>← Звичайні налаштування</button>
         {error && <p role="alert">{error}</p>}
-        {secondary === 'advanced' ? <AdvancedDefinitionEditor definition={draft} onChange={change} registry={registry} readOnly={readOnly} initialGroup={groupIndex} initialRow={rowIndex} initialColumn={column} /> : <>
+        {secondary === 'target' ? <MagentoFieldTargetReview definition={draft} groupIndex={groupIndex} column={column} disabled={readOnly || suspended}
+          onEditing={() => capture('target')} onApply={(next) => { if (!editable() || active.current.secondary !== 'target') return false; return onApply(next, base); }} /> : secondary === 'advanced' ? <AdvancedDefinitionEditor definition={draft} onChange={change} registry={registry} readOnly={readOnly} initialGroup={groupIndex} initialRow={rowIndex} initialColumn={column} /> : <>
           {simple && <><label>Як формується значення<select className="input" value={mode} disabled={readOnly || protectedCells.has(column)} onChange={(e) => changeIntent(e.target.value)}>{Object.entries(intentNames).filter(([intent]) => ruleTransformTarget(draft, path) || intent === mode || intent === 'complex').map(([intent, name]) => <option key={intent} value={intent}>{name}</option>)}</select></label><button type="button" className="et-link" onClick={() => openSecondary('advanced')}>Розширені правила цього поля</button></>}
           {draft.outputContract === COLUMN_CONTRACT && <label>{integration ? 'Назва поля' : 'Назва колонки'}<input className="input" maxLength={160} disabled={readOnly} value={group.columnLabels?.[column] ?? fieldLabels[column] ?? column} onChange={(e) => change(columnChange(draft, groupIndex, 'label', column, e.target.value))} /></label>}
           {value ? <ColumnValueForm integration={integration} definition={draft} registry={registry} group={group.route} value={value} loadSource={loadSource} readOnly={readOnly} onChange={changeValue} />
             : <FieldInspector integration={integration} localOnly={localOnly} definition={draft} cellPath={path} registry={registry} readOnly={readOnly} loadSource={loadSource} diagnostics={diagnostics} openSource={sourceId} onChange={change} onAdvanced={() => openSecondary('advanced')} />}
           <ColumnTechnicalDetails definition={draft} expression={at(draft, path)} registry={registry} loadSource={loadSource} diagnostics={diagnostics} sourceId={sourceId} />
         </>}
-        {footer}
+        {secondary !== 'target' && footer}
       </section>
     </WorkspaceDialog>}
   </>;

@@ -62,7 +62,7 @@ module.exports = async function automaticCases({ t, suite, scenario, config, pub
       const response = await suite.request('/api/product-timeline?sku=' + encodeURIComponent(s.input.sku),
         { authentication: await suite.authenticateApplicationSession() });
       assert.equal(response.response.status, 200, response.text);
-      assert.deepEqual(response.data.lineage.products[0].magentoSync, { state: 'synced', reason: null });
+      assert.deepEqual(response.data.lineage.products[0].magentoSync, { state: 'synced', reason: null, confirmedAt: new Date(job.acknowledged_at).toISOString() });
     });
     await t.test('automatic A to B to A is a new generation, never an old successful receipt', async () => {
       const s = await scenario(); await worker(s).runProduct(identity(s));

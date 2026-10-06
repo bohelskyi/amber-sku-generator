@@ -6,7 +6,7 @@ suite.test('stable recount exposure: reviewed UPDATE, atomic handoff and fail-cl
   const name = 'amber_stable_exposure_test', url = await recreateTestDatabase(name);
   const db = new Pool({ connectionString: url });
   try {
-    await runNodeInDatabase(url,"require('./src/db/run-migrations').runMigrations().catch(e=>{console.error(e);process.exitCode=1;});");
+    await require('./historical-runtime-fixture')(suite,url);
     const actor = Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Exposure test') RETURNING id")).rows[0].id);
     await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'",[actor]);
     const { scenario,config,published,installationKey } = await require('./stable-recount-exposure-fixture')(db,actor);

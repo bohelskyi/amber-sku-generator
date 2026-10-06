@@ -19,13 +19,13 @@ async function readPreviewProductOnClient(client, options) {
     const resolved = options.sku !== undefined ? await resolveProductLookup(client, options.sku) : null;
     const selected = options.sku !== undefined
       ? resolved.product
-      : (await client.query(`SELECT p.*, i.public_sku FROM products p
+      : (await client.query(`SELECT p.*, i.public_sku, COALESCE((to_jsonb(i)->>'is_test_product')::boolean,FALSE) AS is_test_product FROM products p
           JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id=$1`,
       [options.productId])).rows[0];
     if (!selected) throw error(422, 'MAGENTO_PREVIEW_PRODUCT_NOT_UNIQUE', 'Product selection must match exactly one Amber product');
     // An ID or an internal-SKU lookup must not hide historical duplicates. A
     // public lookup is intentionally resolved through the one-current invariant.
-    if (options.productId !== undefined || resolved.lookupKind === 'internal') {
+    if (selected.full_sku != null && (options.productId !== undefined || resolved.lookupKind === 'internal')) {
       const duplicates = (await client.query('SELECT id FROM products WHERE full_sku=$1 ORDER BY id LIMIT 2', [selected.full_sku])).rows;
       if (duplicates.length !== 1) throw error(422, 'MAGENTO_PREVIEW_PRODUCT_NOT_UNIQUE', 'Amber SKU is not unique');
     }
@@ -67,7 +67,9 @@ async function readPreviewProductOnClient(client, options) {
     const nameState = revision ? await require('./name-state').readNameState(client, revision.originHash,
       selected.public_product_identity_id, { lock: options.lockNameState === true }) : null;
     const observedAt = (await client.query('SELECT transaction_timestamp() AS observed_at')).rows[0].observed_at.toISOString();
-    return { product, compiled, template, revision, observedAt, nameState };
+    const result = { product, compiled, template, revision, observedAt, nameState };
+     await require('./native-identity-ownership').load(client, result, revision?.originHash);
+     return result;
 }
 async function readPreviewProduct(databasePool, options) {
   selection(options);

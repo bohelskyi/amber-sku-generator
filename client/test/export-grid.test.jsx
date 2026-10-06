@@ -2,7 +2,7 @@ import { changeControl } from './helpers/searchable-picker';
 import { useEffect, useState } from 'react';
 import { createRequire } from 'node:module';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { DefinitionEditor } from '../src/components/export-templates/DefinitionEditor';
 import { PreviewTable } from '../src/components/export-templates/PreviewTable';
 const require = createRequire(import.meta.url);
@@ -19,8 +19,10 @@ function Editor() {
   useEffect(() => { current = d; }, [d]);
   return <DefinitionEditor definition={d} registry={{ productFields: ['weight'] }} onChange={set} />;
 }
-const click = (name) => fireEvent.click(screen.getByRole('button', { name, exact: true }));
-const change = (name, value) => changeControl(screen.getByLabelText(name, { exact: true }), value);
+// Query the active task instead of computing names for every button in the grid.
+const task = () => { const dialog = screen.queryByRole('dialog'); return dialog ? within(dialog) : screen; };
+const click = (name) => fireEvent.click(task().getByRole('button', { name, exact: true }));
+const change = (name, value) => changeControl(task().getByLabelText(name, { exact: true }), value);
 it('rendered grid task adds an approved-source target, keeps EN blank, duplicates, renames, moves and deletes', () => {
   render(<Editor />);
   expect(screen.getByRole('table')).toBeTruthy();

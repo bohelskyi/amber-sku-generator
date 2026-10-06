@@ -64,6 +64,102 @@ function mockFetch(routes, calls = [], storeCode = 'all') {
 }
 const audit = (routes = fixture()) => auditMagentoSchema(config, { fetchImpl: mockFetch(routes) });
 
+test('automatic topology GETs overlap while manual topology stays sequential and evidence stays identical', async () => {
+  const routes = fixture(), read = mockFetch(routes); let release, first;
+  const barrier = new Promise((resolve) => { release = resolve; });
+  const entered = new Promise((resolve) => { first = resolve; });
+  const starts = [];
+  const fetchImpl = async (url, options) => {
+    const route = new URL(url).pathname.split('/V1/')[1];
+    if (route.startsWith('store/')) { starts.push(route); first(); await barrier; }
+    return read(url, options);
+  };
+  const pending = auditMagentoSchema(config, { fetchImpl, concurrency: 4 });
+  await entered; await new Promise((resolve) => setImmediate(resolve));
+  const beforeRelease = [...starts]; release();
+  const concurrent = await pending;
+  assert.deepEqual(beforeRelease, ['store/websites', 'store/storeGroups', 'store/storeViews']);
+  assert.deepEqual(concurrent, await audit(routes));
+  let active = 0, peak = 0;
+  await auditMagentoSchema(config, { fetchImpl: async (...args) => {
+    active++; peak = Math.max(peak, active);
+    try { await new Promise((resolve) => setImmediate(resolve)); return await read(...args); }
+    finally { active--; }
+  } });
+  assert.equal(peak, 1);
+});
+
+test('failed concurrent topology drains all started reads before rejection and never starts metadata discovery', async () => {
+  const routes = fixture(), read = mockFetch(routes); let release;
+  const barrier = new Promise((resolve) => { release = resolve; });
+  const starts = []; let settled = false, failure;
+  const pending = auditMagentoSchema(config, { concurrency: 4, fetchImpl: async (url, options) => {
+    const route = new URL(url).pathname.split('/V1/')[1]; starts.push(route);
+    if (route === 'store/websites') throw new TypeError('Synthetic private transport failure');
+    await barrier; return read(url, options);
+  } }).then(() => { settled = true; }, (cause) => { failure = cause; settled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  const beforeRelease = { starts: [...starts], settled }; release(); await pending;
+  assert.deepEqual(beforeRelease, { starts: ['store/websites', 'store/storeGroups', 'store/storeViews'], settled: false });
+  assert.equal(failure.code, 'MAGENTO_NETWORK_ERROR');
+  assert.equal(starts.every((path) => path.startsWith('store/')), true);
+});
+
+test('bounded automatic schema reads preserve every fresh endpoint and deterministic report', async () => {
+  const routes = fixture(), calls = [], sequentialCalls = [];
+  const sequential = await auditMagentoSchema(config, { fetchImpl: mockFetch(routes, sequentialCalls) });
+  let active = 0, peak = 0;
+  const read = mockFetch(routes, calls);
+  const fetchImpl = async (...args) => {
+    active++; peak = Math.max(peak, active);
+    try { await new Promise((resolve) => setImmediate(resolve)); return await read(...args); }
+    finally { active--; }
+  };
+  const concurrent = await auditMagentoSchema(config, { fetchImpl, concurrency: 4 });
+  assert.equal(peak, 4); assert.equal(active, 0);
+  assert.deepEqual(concurrent, sequential);
+  assert.deepEqual(calls.toSorted(), sequentialCalls.toSorted());
+  const before = calls.length;
+  routes['products/attributes/kolir/options'].push({ value: 'fresh', label: 'Fresh observation' });
+  const second = await auditMagentoSchema(config, { fetchImpl, concurrency: 4 });
+  assert.equal(calls.length - before, before, 'every audit reads every endpoint again');
+  assert.equal(second.attributes.find((a) => a.attribute_code === 'kolir').options.some((o) => o.value === 'fresh'), true);
+});
+
+test('failed concurrent membership read drains its batch and never starts options or later membership batches', async () => {
+  const routes = fixture(), calls = []; let active = 0;
+  const read = mockFetch(routes, calls);
+  const fetchImpl = async (url, options) => {
+    active++;
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      if (url.includes('/attribute-sets/4/attributes')) throw new TypeError('Synthetic failure');
+      return await read(url, options);
+    } finally { active--; }
+  };
+  await assert.rejects(auditMagentoSchema(config, { fetchImpl, concurrency: 4 }), { code: 'MAGENTO_NETWORK_ERROR' });
+  assert.equal(active, 0);
+  assert.equal(calls.some((path) => path.endsWith('/options')), false);
+  assert.equal(calls.some((path) => /attribute-sets\/(144|151)\/attributes/.test(path)), false);
+});
+
+test('concurrent discovery rejects conflicting metadata and reflected secrets with the same closed errors', async () => {
+  for (const corrupt of [
+    (routes) => { routes['products/attribute-sets/151/attributes'] = [attr(999, 'kolir', 'select')]; },
+    (routes) => { routes['products/attributes/kolir/options'][0].label = config.accessToken; },
+  ]) {
+    const routes = fixture(); corrupt(routes);
+    let sequentialCode;
+    try { await audit(routes); } catch (cause) { sequentialCode = cause.code; }
+    assert.ok(sequentialCode);
+    await assert.rejects(auditMagentoSchema(config, { fetchImpl: mockFetch(routes), concurrency: 4 }), { code: sequentialCode });
+  }
+  for (const concurrency of [0, 5, 1.5, '4']) {
+    await assert.rejects(auditMagentoSchema(config, { concurrency, fetchImpl: () => assert.fail('Invalid concurrency started HTTP') }),
+      { code: 'MAGENTO_INPUT_INVALID' });
+  }
+});
+
 test('product-type applicability and source model survive discovery with canonical array comparison', async () => {
   const routes = fixture();
   const input = routes['products/attributes'].items[0];

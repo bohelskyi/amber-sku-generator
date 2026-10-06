@@ -1,3 +1,7 @@
+import { ProductPhotos } from './ProductPhotos.jsx';
+import { TestProductNotice } from './TestProductNotice.jsx';
+import { isTestProduct } from '../../lib/test-product.js';
+import { getRecountWeightState as getDecodedWeightState } from '../../lib/product-recount.js';
 import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -26,8 +30,9 @@ import {
 import {
   getDecodedAnswerMap,
   getRecountPricingDependencyState,
+  getRecountWeightState,
 } from '../../lib/product-recount';
-import { handleNumberKeyDown, handleNumberWheel } from '../../lib/number-input';
+import { numericQuestionPolicy, physicalWeightPolicy, validateNumericInput } from '../../lib/product-numeric-input.js';
 import { ProductMagentoState } from './ProductMagentoState.jsx';
 import { RecountNameFields } from './RecountNameFields.jsx';
 
@@ -100,6 +105,8 @@ export function DecodeErrorPanel({ details, message }) {
 }
 
 export function HomeDashboard({
+  productPhotos = null,
+  photoCanEdit = false,
   canArchiveProducts = false,
   canDecodeProducts = true,
   canDeleteTestProduct = false,
@@ -200,7 +207,7 @@ export function HomeDashboard({
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold text-slate-900">{category.name}</div>
                     <div className="category-meta">
-                      {category.requires_weight === 1 ? 'Вага обов’язкова' : 'Без ваги'}
+                      {Number(category.requires_weight) === 1 || config.productCreateRequirements?.[category.code]?.requiredAnswers?.includes('weight') ? 'Вага обов’язкова' : 'Вага необов’язкова'}
                     </div>
                   </div>
                 </div>
@@ -212,6 +219,8 @@ export function HomeDashboard({
 
       {decodeData && (
         <DecodeWorkspace
+          productPhotos={productPhotos}
+          photoCanEdit={photoCanEdit}
           config={config}
           onDecode={onDecode}
           decodeData={decodeData}
@@ -254,6 +263,8 @@ export function HomeDashboard({
 }
 
 export function DecodeWorkspace({
+  productPhotos = null,
+  photoCanEdit = false,
   onDecode,
   canArchiveProducts = false,
   canDeleteTestProduct = false,
@@ -303,6 +314,7 @@ export function DecodeWorkspace({
   const decodedWeight = pricing?.weight
     ?? decodeData.product?.weight
     ?? (decodeData.suffix.type === 'weight' ? decodeData.suffix.value : null);
+  const weightState = getDecodedWeightState(decodeData);
   const calculatedPriceUah = pricing?.calculatedPriceUah;
   const finalStoredPriceUah = decodeData.existsInDb ? pricing?.totalPriceUah : null;
   const finalStoredPriceUsd = decodeData.existsInDb ? pricing?.totalPrice : null;
@@ -351,6 +363,7 @@ export function DecodeWorkspace({
   return (
     <section className="operational-split-layout decode-result-workspace fade-up stagger-3">
       <div className="decode-workspace builder-workspace card overflow-hidden">
+        <TestProductNotice product={decodeData} />
         <ProductMagentoState key={decodeData.product?.id || decodeData.sku} product={{ productId: decodeData.product?.id,
           publicSku: decodeData.publicSku, sku: decodeData.sku,
           categoryCode: decodeData.category.code, status: decodeData.product?.status || 'active',
@@ -379,6 +392,10 @@ export function DecodeWorkspace({
         </header>
 
         <div className="builder-field-list">
+          {weightState.conflict && <div className="decode-warning" role="alert">
+            <p>Потрібно перевірити вагу виробу</p>
+            <span>Збережена вага: {String(weightState.physical ?? 'не вказано')} г. Значення характеристики: {String(weightState.answer ?? 'не вказано')} г. Перед розрахунком або доставкою вкажіть підтверджену вагу через переоблік.</span>
+          </div>}
           {decodeData.decodedAnswers.filter((item) => !decodeData.existsInDb || shouldPresentDecodedAnswer(item)).map((item) => {
             const isPriceDriver = decodeData.pricing?.dependentKeys?.includes(item.key);
 
@@ -395,6 +412,7 @@ export function DecodeWorkspace({
             );
           })}
         </div>
+        {productPhotos && <ProductPhotos controller={productPhotos} canEdit={photoCanEdit} activationDisabledReason={isTestProduct(decodeData) ? 'TEST товар не вмикається для покупців після перевірки фото.' : null} existingProduct />}
       </div>
 
       <aside className="sticky-summary-container">
@@ -441,7 +459,7 @@ export function DecodeWorkspace({
             </div>
 
             <div className="builder-price-section">
-              <p className="builder-summary-section-title">Розрахункова ціна за грам</p>
+              <p className="builder-summary-section-title">Розрахункова ціна за грам · ₴ / USD</p>
               <div className="builder-price-row is-strong">
                 <span />
                 <span>{formatOptionalValue(pricing?.pricePerGramUah, formatUahPerGram)}</span>
@@ -453,7 +471,7 @@ export function DecodeWorkspace({
               <DecodeSummaryRow label="Матриця" value={pricing?.matrixName || '—'} />
               <DecodeSummaryRow
                 label="Вага"
-                value={decodedWeight !== null && decodedWeight !== undefined
+                value={weightState.conflict ? 'Потрібна перевірка' : decodedWeight !== null && decodedWeight !== undefined
                   ? `${formatDecimal(decodedWeight)} г`
                   : '—'}
               />
@@ -461,7 +479,9 @@ export function DecodeWorkspace({
 
             <details className="decode-details">
               <summary>Технічні деталі</summary>
-              <div className="decode-details-body"><DecodeSummaryRow label="Внутрішній SKU" value={decodeData.internalSku || decodeData.sku} mono />
+              <div className="decode-details-body">
+                {decodeData.characteristicConfig && <DecodeSummaryRow label="Версія характеристик" value={decodeData.characteristicConfig.version} />}
+                {!decodeData.characteristicConfig && <><DecodeSummaryRow label="Внутрішній SKU" value={decodeData.internalSku || decodeData.sku} mono />
                 <DecodeSummaryRow label="Базовий SKU" value={decodeData.baseSku} mono />
                 <DecodeSummaryRow
                   label={decodeData.variation
@@ -486,6 +506,7 @@ export function DecodeWorkspace({
                   label="Схема SKU"
                   value={`V${decodeData.skuSchema.version}${decodeData.skuSchema.marker ? ` · ${decodeData.skuSchema.marker}` : ''}`}
                 />
+                </>}
                 <DecodeSummaryRow
                   label="Джерело розрахунку"
                   value={pricing ? getPricingSourceLabel(pricing.source) : '—'}
@@ -615,9 +636,17 @@ function RecountPanel({
   const categoryCode = decodeData.category.code;
   const categoryQuestions = config.questions?.[categoryCode] || [];
   const originalAnswers = getDecodedAnswerMap(decodeData);
-  const visibleQuestions = categoryQuestions.filter((question) =>
-    isQuestionVisible(question, recountAnswers, recountAnswers.is_calibrated ?? null)
-  );
+  const visibleQuestions = categoryQuestions.filter((question) => question.archived
+    ? Object.hasOwn(originalAnswers, question.id)
+    : isQuestionVisible(question, recountAnswers, recountAnswers.is_calibrated ?? null));
+  const weightQuestion = visibleQuestions.find((question) => question.id === 'weight' && !question.archived);
+  const weightState = getRecountWeightState(decodeData);
+  const showWeightControl = Number(decodeData.category.requires_weight) === 1 || Boolean(weightQuestion) || weightState.conflict;
+  const requiresWeight = Number(decodeData.category.requires_weight) === 1 || Number(weightQuestion?.required) === 1 || weightState.conflict;
+  const weightPolicy = numericQuestionPolicy(weightQuestion, categoryCode) || { ...physicalWeightPolicy, minInclusive: !requiresWeight };
+  const canonicalWeight = validateNumericInput(recountWeight, weightPolicy);
+  const unresolvedWeight = weightState.conflict && (!canonicalWeight.valid || canonicalWeight.normalized === undefined);
+
   const blockerByQuestionId = new Map(
     recountBlockers.map((blocker) => [blocker.questionId, blocker])
   );
@@ -670,7 +699,8 @@ function RecountPanel({
         : hasRecountChanges
           ? 'Очікує перевірки'
           : 'Без змін';
-  const weightBlocker = blockerByQuestionId.get('weight');
+  const weightBlocker = blockerByQuestionId.get('weight')
+    || (String(recountWeight).trim() && !canonicalWeight.valid ? { message: canonicalWeight.error } : null);
 
   useEffect(() => {
     if (recountValidationAttempt > 0) focusFirstRecountBlocker(panelRef.current);
@@ -695,7 +725,7 @@ function RecountPanel({
         </header>
 
         <div className="builder-field-list">
-          {Number(decodeData.category.requires_weight) === 1 && (
+          {showWeightControl && (
             <div
               data-recount-blocker={weightBlocker ? 'true' : undefined}
               tabIndex={weightBlocker ? -1 : undefined}
@@ -704,23 +734,29 @@ function RecountPanel({
               <div className="builder-field-label">
                 <label htmlFor="recount-weight">
                   Вага виробу (г)
-                  <span className="required-marker" aria-label="обов’язкове поле">*</span>
+                  {requiresWeight && <span className="required-marker" aria-label="обов’язкове поле">*</span>}
                 </label>
               </div>
               <div>
                 <input
                   id="recount-weight"
-                  type="number"
-                  min="0"
+                  type="text"
+                  inputMode="decimal"
                   value={recountWeight}
                   disabled={isRecountApplying}
                   onChange={(event) => onRecountWeightChange(event.target.value)}
-                  onKeyDown={handleNumberKeyDown}
-                  onWheel={handleNumberWheel}
                   className="input builder-weight-input"
                   aria-invalid={weightBlocker ? 'true' : undefined}
                   aria-describedby={weightBlocker ? 'recount-blocker-weight' : undefined}
                 />
+                {weightState.conflict ? (
+                  <p className="mt-1 text-xs text-amber-700" role="alert">
+                    Збережена вага товару: {String(weightState.physical ?? '—')} г; характеристика: {String(weightState.answer ?? '—')} г.
+                    Вкажіть узгоджену вагу для перевірки змін.
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-slate-500">Збережена вага: {weightState.initialWeight || '—'} г.</p>
+                )}
                 {weightBlocker && (
                   <p id="recount-blocker-weight" className="builder-field-error" role="alert">
                     {weightBlocker.message}
@@ -729,17 +765,23 @@ function RecountPanel({
               </div>
             </div>
           )}
-          {visibleQuestions.map((question) => {
+          {visibleQuestions.filter((question) => question.id !== 'weight' || question.archived || !showWeightControl).map((question) => {
             const textQuestion = isTextQuestion(question);
+            const numericPolicy = numericQuestionPolicy(question, categoryCode);
+            const numericResult = !question.archived && textQuestion && numericPolicy
+              ? validateNumericInput(recountAnswers[question.id], numericPolicy) : null;
+            const historicalOption = (question.options || []).find((option) => option.archived
+              && Object.hasOwn(originalAnswers, question.id) && String(option.id) === String(originalAnswers[question.id]));
             const visibleOptions = getVisibleOptionsForQuestion(
               question,
               recountAnswers,
               recountAnswers.is_calibrated ?? null
             );
-            const isRequired = question.required === 1
+            const isRequired = !question.archived && question.required === 1
               && (textQuestion || visibleOptions.length > 0);
             const isChanged = localChanges.some((change) => change.key === question.id);
-            const blocker = blockerByQuestionId.get(question.id);
+            const blocker = blockerByQuestionId.get(question.id)
+              || (numericResult && !numericResult.valid ? { message: numericResult.error } : null);
             const isPriceDriver = pricingDependentKeys.has(question.id);
             const blockerMessageId = `recount-blocker-${question.id}`;
 
@@ -759,10 +801,16 @@ function RecountPanel({
                   </label>
                 </div>
                 <div className="min-w-0">
-                  {textQuestion ? (
+                  {question.archived ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="option-pill option-pill-idle">{getPresentedAnswerLabel(config, categoryCode, question.id, originalAnswers[question.id], decodeData)}</span>
+                      <span className="text-xs text-slate-500">Історичне значення · в архіві</span>
+                    </div>
+                  ) : textQuestion ? (
                     <input
                       id={`recount-${question.id}`}
                       type="text"
+                      inputMode={numericPolicy?.kind === 'integer' ? 'numeric' : numericPolicy ? 'decimal' : undefined}
                       className="input builder-text-input"
                       value={recountAnswers[question.id] ?? ''}
                       onChange={(event) => onRecountTextAnswer(question.id, event.target.value)}
@@ -778,17 +826,22 @@ function RecountPanel({
                       aria-invalid={blocker ? 'true' : undefined}
                       aria-describedby={blocker ? blockerMessageId : undefined}
                     >
+                    {historicalOption && (
+                      <span className={`option-pill ${String(recountAnswers[question.id]) === String(historicalOption.id) ? 'option-pill-active' : 'option-pill-idle'}`}>
+                        {historicalOption.label} · історичне значення
+                      </span>
+                    )}
                     {question.required !== 1
-                      && !visibleOptions.some((option) => Number(option.id) === 0) && (
+                      && !(question.options || []).some((option) => String(option.id) === '0') && (
                       <button
                         onClick={() => onRecountAnswer(question.id, null)}
                         disabled={isRecountApplying}
                         className={`option-pill builder-option ${
-                          Number(recountAnswers[question.id] || 0) === 0
+                          recountAnswers[question.id] == null || recountAnswers[question.id] === '' || String(recountAnswers[question.id]) === '0'
                             ? 'option-pill-active'
                             : 'option-pill-idle'
                         }`}
-                        aria-pressed={Number(recountAnswers[question.id] || 0) === 0}
+                        aria-pressed={recountAnswers[question.id] == null || recountAnswers[question.id] === '' || String(recountAnswers[question.id]) === '0'}
                       >
                         Не обрано
                       </button>
@@ -809,6 +862,7 @@ function RecountPanel({
                       })}
                     </div>
                   )}
+                  {numericPolicy?.unit && !question.archived && <p className="mt-1 text-xs text-slate-500">Одиниця: {numericPolicy.unit}</p>}
                   {isChanged && (
                     <div className="recount-inline-change">
                       <span>{getPresentedAnswerLabel(config, categoryCode, question.id, originalAnswers[question.id], decodeData)}</span>
@@ -963,7 +1017,7 @@ function RecountPanel({
               <button
                 onClick={onApplyRecount}
                 className="btn btn-primary w-full"
-                disabled={(!hasRecountChanges && !canChangeProductPrice)
+                disabled={unresolvedWeight || (!hasRecountChanges && !canChangeProductPrice)
                   || isRecountLoading || isRecountApplying}
               >
                 {isRecountApplying

@@ -47,7 +47,7 @@ function buildLineageGraph(products, corrections) {
       const product = byProduct.get(id);
       if (!product) issue(id, 'LINEAGE_PRODUCT_MISSING', { correctionId: correction.id });
       else {
-        if (product.full_sku !== sku) issue(id, 'CORRECTION_SKU_MISMATCH', { correctionId: correction.id, storedSku: sku });
+        if ((product.full_sku || product.public_sku) !== sku) issue(id, 'CORRECTION_SKU_MISMATCH', { correctionId: correction.id, storedSku: sku });
         if (Number(product[field]) !== other) issue(id, 'LINEAGE_LINK_MISMATCH', { correctionId: correction.id, field });
       }
     }

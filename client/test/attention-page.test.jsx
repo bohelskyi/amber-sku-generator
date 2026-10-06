@@ -33,9 +33,9 @@ it('turns repeated history diagnostics into one starting task without losing oth
   const post = vi.spyOn(api, 'post');
   renderPage(['products.view', 'exports.reconcile', 'export_templates.view']);
   const start = await screen.findByRole('region', { name: 'З чого почати' });
-  expect(start.querySelector('h3').textContent).toBe('Синхронізацію товару зупинено після попередніх змін');
+  expect(start.querySelector('h3').textContent).toBe('Потрібне підтвердження історії доставки');
   expect(start.querySelector('button').textContent).toBe('Перевірити товар у Magento');
-  expect(screen.getAllByRole('heading', { name: 'Синхронізацію товару зупинено після попередніх змін' })).toHaveLength(1);
+  expect(screen.getAllByRole('heading', { name: 'Потрібне підтвердження історії доставки' })).toHaveLength(1);
   const categoryLink = screen.getByRole('link', { name: 'Перевірити відповідність категорії' });
   expect(categoryLink.getAttribute('href')).toContain('path=Default+Category%2F');
   expect(categoryLink.getAttribute('href')).toContain('view=placement');
@@ -43,7 +43,7 @@ it('turns repeated history diagnostics into one starting task without losing oth
   expect(start.compareDocumentPosition(categoryLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(screen.getByRole('heading', { name: 'Інші перешкоди' })).toBeTruthy();
   expect(screen.queryByText('1368')).toBeNull();
-  fireEvent.click(screen.getByText('Технічні деталі'));
+  fireEvent.click(screen.getByText('Дані для підтримки'));
   expect(screen.getByText(/1368/)).toBeTruthy();
   expect(api.get.mock.calls.every(([url]) => url === '/magento/problems/page')).toBe(true);
   expect(post).not.toHaveBeenCalled();
@@ -80,9 +80,9 @@ it('optional Magento comparison mounts on demand and still requires an explicit 
   const post = vi.spyOn(api, 'post').mockResolvedValue({ data: { productId: 7, article: 'AG-000007', sendable: true } });
   renderPage(['products.view', 'export_templates.manage', 'exports.view']);
   await screen.findByRole('region', { name: 'З чого почати' });
-  expect(screen.queryByRole('button', { name: 'Перевірити категорії та характеристики' })).toBeNull();
-  fireEvent.click(screen.getByText('Порівняти категорії та характеристики з Magento'));
-  const check = screen.getByRole('button', { name: 'Перевірити категорії та характеристики' });
+  expect(screen.queryByRole('button', { name: 'Перевірити дані та очікувані зміни' })).toBeNull();
+  fireEvent.click(screen.getByText('Додаткова перевірка даних у Magento'));
+  const check = screen.getByRole('button', { name: 'Перевірити дані та очікувані зміни' });
   expect(post).not.toHaveBeenCalled();
   fireEvent.click(check);
   await waitFor(() => expect(post).toHaveBeenCalledWith('/admin/magento-integration/product-preview', { productId: 7 }, expect.any(Object)));
@@ -181,4 +181,50 @@ it('successful repair retains the selected product when it leaves the attention 
   expect(screen.getByRole('heading', { name: /AG-000007/ })).toBeTruthy();
   expect(screen.queryByText('Magento: Синхронізовано')).toBeNull();
   expect(api.get.mock.calls.some(([url]) => url === '/magento/problems/7')).toBe(true);
+});
+
+it('identity mismatch offers a read-only identity check and a handoff instead of a name choice', async () => {
+  const item={productId:7,article:'AG-000007',category:'SV',problems:[{code:'NAME_REMOTE_IDENTITY_CHANGED',resolution:'name',message:'Ідентичність товару відрізняється.'}]};
+  api.get.mockResolvedValue({data:{items:[item],pageInfo:{total:1}}});
+  const post=vi.spyOn(api,'post').mockResolvedValue({data:{productId:7,article:'AG-000007',sendable:false,
+    identity:{confirmedMagentoId:41,observedMagentoId:42,state:'found'},blockers:item.problems}});
+  renderPage(['products.view','export_templates.manage','exports.view']);
+  const check=await screen.findByRole('button',{name:'Перевірити ідентичність товару Magento'});
+  expect(post).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button',{name:/Обрати назву|Підтвердити назву/})).toBeNull();
+  fireEvent.click(check);
+  await screen.findByText('№41');await screen.findByText('№42');
+  expect(screen.getByText(/Зв’язок не збігається/)).toBeTruthy();
+  expect(post.mock.calls.map(([url])=>url)).toEqual(['/admin/magento-integration/product-preview']);
+  fireEvent.click(screen.getByText('Дані для підтримки'));
+  expect(screen.getByRole('heading',{name:'Спостереження Magento'})).toBeTruthy();
+  expect(screen.getAllByText('Дані для підтримки')).toHaveLength(1);
+});
+
+it('pending delivery polls without overlap then displays only the acknowledged timestamp and keeps selection until next is clicked', async () => {
+  vi.useFakeTimers();
+  try {
+    let state='pending';let completeDetail;let hold=false;
+    const date='2026-10-04T20:10:00.000Z';
+    api.get.mockImplementation(async(url)=>{
+      if(url==='/magento/problems/page')return {data:{items:[{productId:8,article:'AG-000008',problems:[{code:'configuration'}]}],pageInfo:{total:1}}};
+      if(hold)await new Promise(resolve=>{completeDetail=resolve;});
+      return {data:{productId:7,article:'AG-000007',state,confirmedAt:state==='synced'?date:undefined,observedAt:'2026-10-04T20:20:00Z',problems:[]}};
+    });
+    render(<AuthContext.Provider value={auth(['products.view'])}><MemoryRouter initialEntries={['/attention?problem=7']}><AttentionPage/></MemoryRouter></AuthContext.Provider>);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(0);});
+    expect(screen.getByText('Magento: Очікує синхронізації')).toBeTruthy();
+    expect(screen.queryByText(/Підтверджено/)).toBeNull();
+    hold=true;
+    await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});
+    const calls=api.get.mock.calls.length;
+    await act(async()=>{window.dispatchEvent(new Event('focus'));await vi.advanceTimersByTimeAsync(20000);});
+    expect(api.get.mock.calls).toHaveLength(calls);
+    state='synced';hold=false;
+    await act(async()=>{completeDetail();await vi.advanceTimersByTimeAsync(0);});
+    expect(screen.getByText('Magento: Синхронізовано')).toBeTruthy();
+    expect(document.querySelector('time').dateTime).toBe(date);
+    expect(screen.getByRole('heading',{name:/AG-000007/})).toBeTruthy();
+    expect(screen.getByRole('button',{name:'До наступного товару'})).toBeTruthy();
+  } finally {cleanup();vi.useRealTimers();}
 });

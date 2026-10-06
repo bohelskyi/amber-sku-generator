@@ -91,9 +91,49 @@ function signSyncRequest(url, credentials, method = 'POST', options) {
 function signTestDeleteRequest(url, credentials, options) {
   let parsed;
   try { parsed = new URL(url); } catch { throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID'); }
-  if (parsed.search || !/^\/rest\/all\/V1\/products\/AG-[0-9]{6,}$/.test(parsed.pathname)) {
+  if (parsed.search || !/^\/rest\/all\/V1\/products\/(?:AG|TEST)-[0-9]{6,}$/.test(parsed.pathname)) {
     throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID');
   }
   return signRequest('DELETE', url, credentials, options);
 }
-module.exports = { percentEncode, signGetRequest, signCategoryCreateRequest, signSyncRequest, signTestDeleteRequest, signOptionCreateRequest, signScopedOptionLabelRequest, signAttributeCreateRequest };
+function productSkuSegment(sku) {
+  if (typeof sku !== 'string' || !sku.trim() || sku.length > 256 || ['.','..'].includes(sku)
+    || /[\u0000-\u001f\u007f]/.test(sku)) throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID');
+  try { return percentEncode(sku); } catch { throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID'); }
+}
+function signProductMediaRequest(url, credentials, method, options, sku) {
+  let parsed;
+  let expectedOrigin;
+  try { parsed = new URL(url); expectedOrigin = new URL(credentials.baseUrl).origin; }
+  catch { throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID'); }
+  const prefix = `/rest/all/V1/products/${productSkuSegment(sku)}`;
+  const upload = parsed.pathname === `${prefix}/media`;
+  const metadata = parsed.pathname.startsWith(`${prefix}/media/`) && /^[1-9][0-9]*$/.test(parsed.pathname.slice(`${prefix}/media/`.length));
+  const status = parsed.pathname === prefix;
+  if (parsed.origin !== expectedOrigin || parsed.search || parsed.hash || !((upload && method === 'POST') || ((metadata || status) && method === 'PUT'))) {
+    throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID');
+  }
+  return signRequest(method, url, credentials, options);
+}
+function signProductVisibilityRequest(url, credentials, sku, options) {
+  let parsed;
+  let expectedOrigin;
+  try { parsed = new URL(url); expectedOrigin = new URL(credentials.baseUrl).origin; }
+  catch { throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID'); }
+  if (parsed.origin !== expectedOrigin || parsed.search || parsed.hash || parsed.pathname !== `/rest/all/V1/products/${productSkuSegment(sku)}`) {
+    throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID');
+  }
+  return signRequest('PUT', url, credentials, options);
+}
+function signExistingProductUpdateRequest(url, credentials, sku, expectedId, options) {
+  let parsed, expectedOrigin;
+  try { parsed = new URL(url); expectedOrigin = new URL(credentials.baseUrl).origin; }
+  catch { throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID'); }
+  const segment = productSkuSegment(sku);
+  if (!Number.isSafeInteger(Number(expectedId)) || Number(expectedId) <= 0 || parsed.origin !== expectedOrigin
+    || parsed.search || parsed.hash || !['all','en'].some(scope => parsed.pathname === `/rest/${scope}/V1/amber/products/${segment}/existing/${Number(expectedId)}`)) {
+    throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID');
+  }
+  return signRequest('PUT', url, credentials, options);
+}
+module.exports = { percentEncode, signGetRequest, signCategoryCreateRequest, signSyncRequest, signTestDeleteRequest, signOptionCreateRequest, signScopedOptionLabelRequest, signAttributeCreateRequest, signProductMediaRequest, signProductVisibilityRequest, signExistingProductUpdateRequest };

@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
-import { Archive, ChevronDown, GripVertical, Pencil, Plus, Send, Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { ArchiveRestore, Archive, ChevronDown, GripVertical, Pencil, Plus, Send, Trash2 } from 'lucide-react';
 import { SkuTemplatePreview } from './SkuTemplatePreview';
 import { formatConditionSummary } from '../../lib/admin-conditions';
 import { FormSection } from '../shared/FormSection';
-import { CategoryForm, MetaRow, OptionForm, OptionRow, QuestionForm } from './AdminCatalogForms';
+import { CatalogHistoricalSettings, CategoryForm, MetaRow, OptionForm, OptionRow, QuestionForm } from './AdminCatalogForms';
+import { isNativeCatalog } from '../../lib/catalog-workflow.js';
 
 const EMPTY_EDIT_OPTION = { id: null, value_id: '', sku_code: '', label: '', label_en: '', visible_if_json: '', hidden_if_json: '', archived: false };
 const EMPTY_NEW_CATEGORY = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false, marketing_rounding_enabled: true };
@@ -12,23 +14,26 @@ const draftsMatch = (left, right) => JSON.stringify(left) === JSON.stringify(rig
 const ruleText = (value) => value ? (typeof value === 'string' ? value : JSON.stringify(value)) : '';
 const isEnabled = (value) => value === 1 || value === true;
 export function AdminStructureEditor({
-  canManage = true, canPublish = false,
+  canManage = true, canPublish = false, canPrepareMagento = false,
   config, selectedCat, selectedQuestion, currentCatQuestions, currentOptions,
   selectedQuestionInputType, schemaStatus, schemaStatusError, retrySchemaStatus, schemaPublishState, editCat = {}, setEditCat,
   editQuestion = {}, setEditQuestion, newCat = EMPTY_NEW_CATEGORY, setNewCat, newQuest = {}, setNewQuest, newOpt = EMPTY_NEW_OPTION,
   setNewOpt, editOpt = EMPTY_EDIT_OPTION, setEditOpt, onSelectCategory, onSelectQuestion, addCategory,
   updateCategory, addQuestion, updateQuestion, reorderQuestions, autoAssignSkuIndexes,
-  fillNextNewQuestionSkuIndex, addOption, archiveOption, beginOptionEdit, updateOption,
+  fillNextNewQuestionSkuIndex, addOption, archiveOption, archiveQuestion, beginOptionEdit, updateOption,
   publishSkuSchema, deleteItem,
   onDirtyChange = () => {},
   entryAction = null,
 }) {
+  const editorRef = useRef(null);
+  const native = isNativeCatalog(config);
+  const focusedEntry = useRef(null);
   const [isCategoryEditOpen, setIsCategoryEditOpen] = useState(false);
   const [isNewCategoryOpen, setIsNewCategoryOpen] = useState(() => canManage && entryAction?.action === 'new-category');
   const [isQuestionEditOpen, setIsQuestionEditOpen] = useState(() => canManage && entryAction?.action === 'edit-question');
   const [isNewQuestionOpen, setIsNewQuestionOpen] = useState(() => canManage && entryAction?.action === 'new-question');
   const [isNewOptionOpen, setIsNewOptionOpen] = useState(() => canManage && entryAction?.action === 'new-option');
-  const [isArchivedOptionsOpen, setIsArchivedOptionsOpen] = useState(false);
+  const [isArchivedOptionsOpen, setIsArchivedOptionsOpen] = useState(() => entryAction?.action === 'edit-option');
   const [draggedQuestionId, setDraggedQuestionId] = useState(null);
   const [questionDropTarget, setQuestionDropTarget] = useState({ id: null, position: null });
   const activeOptions = currentOptions.filter((option) => !isEnabled(option.archived));
@@ -56,7 +61,7 @@ export function AdminStructureEditor({
     }))
     || (isNewQuestionOpen && !draftsMatch(newQuest, {
       key: '', label: '', display_order: nextDisplayOrder, sku_index: nextSkuIndex,
-      required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '',
+      required: true, include_in_sku: false, input_type: 'options', numeric_validation: null, sku_separator: '', visible_if_json: '',
     }))
     || (isQuestionEditOpen && selectedQuestion && !draftsMatch(editQuestion, {
       key: selectedQuestion.id,
@@ -66,6 +71,7 @@ export function AdminStructureEditor({
       required: isEnabled(selectedQuestion.required),
       include_in_sku: isEnabled(selectedQuestion.include_in_sku),
       input_type: selectedQuestion.input_type || 'options',
+      numeric_validation: selectedQuestion.numeric_validation || null,
       sku_separator: selectedQuestion.sku_separator || '',
       visible_if_json: ruleText(selectedQuestion.visible_if_json),
     }))
@@ -73,7 +79,7 @@ export function AdminStructureEditor({
     || Boolean(selectedOption && !draftsMatch(editOpt, {
       id: selectedOption.db_id,
       value_id: String(selectedOption.id),
-      sku_code: String(selectedOption.sku_code ?? selectedOption.id),
+      sku_code: String(selectedOption.sku_code ?? ''),
       label: selectedOption.label,
       label_en: selectedOption.label_en ?? '',
       visible_if_json: ruleText(selectedOption.visible_if_json),
@@ -87,6 +93,18 @@ export function AdminStructureEditor({
   }, [catalogDirty, onDirtyChange]);
 
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
+
+  useEffect(() => {
+    if (!canManage || !entryAction || focusedEntry.current === entryAction.key) return;
+    if (entryAction.questionDbId != null && selectedQuestion?.q_db_id !== entryAction.questionDbId) return;
+    if (entryAction.action === 'edit-option' && editOpt.id !== entryAction.optionDbId) return;
+    const selector = entryAction.action.endsWith('option') ? '.catalog-option-form input'
+      : entryAction.action.endsWith('question') ? '.catalog-detail-form input' : '.catalog-context-form input';
+    const input = editorRef.current?.querySelector(selector);
+    if (!input) return;
+    input.focus();
+    focusedEntry.current = entryAction.key;
+  }, [canManage, entryAction, selectedQuestion?.q_db_id, editOpt.id]);
 
   const resetOptionEdit = () => setEditOpt(EMPTY_EDIT_OPTION);
   const closeDetailEditors = () => {
@@ -169,8 +187,16 @@ export function AdminStructureEditor({
     reorderQuestions(nextQuestions);
   };
 
+  const publicationControl = canPublish && <button type="button" onClick={publishSkuSchema} disabled={!schemaStatus?.draftChanged || schemaPublishState.loading} className="btn btn-primary flex items-center gap-1.5 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45">
+    <Send size={14} />{schemaPublishState.loading
+      ? schemaPublishState.otherCategory ? `Публікується «${schemaPublishState.categoryName}»…` : 'Публікуємо…'
+      : schemaStatus?.nextVersion ? `Опублікувати V${schemaStatus.nextVersion}` : 'Опублікувати'}
+  </button>;
+  const preparationQuestion = isNewQuestionOpen ? null : selectedQuestion;
+  const prepareHref = selectedCat ? `/admin/magento/prepare?${new URLSearchParams({ category: selectedCat.code,
+    intent: preparationQuestion ? 'attribute' : 'connect', ...(preparationQuestion ? { question: preparationQuestion.id } : {}) })}` : null;
   return (
-    <div className="space-y-4 fade-up stagger-2">
+    <div ref={editorRef} className="space-y-4 fade-up stagger-2">
       <section className="catalog-category-context">
         <div className="catalog-category-heading">
           <div><h2>Структура каталогу</h2><p>Категорії, питання та варіанти</p></div>
@@ -188,33 +214,38 @@ export function AdminStructureEditor({
             <div className="catalog-category-bar">
               <div className="catalog-category-status">
                 <strong>{selectedCat.name}</strong><span className="font-mono">{selectedCat.code}</span>
-                {schemaStatus && (
+                {!native && schemaStatus && (
                   <span className={`catalog-schema-state ${schemaStatus.draftChanged ? 'is-draft' : 'is-published'}`}>
                     <i />{schemaStatus.active ? `Схема V${schemaStatus.active.version}` : 'Без активної схеми'}{schemaStatus.draftChanged ? ` · зміни для V${schemaStatus.nextVersion}` : ' · опубліковано'}
                   </span>
                 )}
-                {!schemaStatus && !schemaStatusError && <span className="catalog-schema-state"><i />Завантажуємо стан схеми…</span>}
+                {!native && !schemaStatus && !schemaStatusError && <span className="catalog-schema-state"><i />Завантажуємо стан схеми…</span>}
               </div>
               {(canManage || canPublish) && <div className="catalog-category-actions">
                 {canManage && <button type="button" onClick={() => { setIsNewCategoryOpen(false); setIsCategoryEditOpen((isOpen) => !isOpen); }} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Pencil size={14} />Категорія</button>}
-                {canPublish && <button type="button" onClick={publishSkuSchema} disabled={!schemaStatus?.draftChanged || schemaPublishState.loading} className="btn btn-primary flex items-center gap-1.5 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45">
-                  <Send size={14} />{schemaPublishState.loading
-                    ? schemaPublishState.otherCategory
-                      ? `Публікується «${schemaPublishState.categoryName}»…`
-                      : 'Публікуємо…'
-                    : schemaStatus?.nextVersion ? `Опублікувати V${schemaStatus.nextVersion}` : 'Опублікувати'}
-                </button>}
+                {!native && publicationControl}
                 {canManage && <button type="button" onClick={() => deleteItem('category', selectedCat.code)} className="catalog-icon-button is-danger" title="Видалити категорію" aria-label={`Видалити категорію ${selectedCat.name}`}><Trash2 size={15} /></button>}
               </div>}
             </div>
+            {native && <div className="catalog-delivery-handoff">
+              <p>Збереження оновлює характеристики каталогу. Передавання до Magento потребує окремої перевірки відповідностей і застосування правил.</p>
+              {canPrepareMagento && <Link className="btn btn-outline" to={prepareHref}>{preparationQuestion ? 'Підготувати характеристику для Magento' : 'Підготувати категорію для Magento'}</Link>}
+            </div>}
+            <CatalogHistoricalSettings native={native}>
+            {native && <>
+              <p>{schemaStatus?.active ? `Історична схема V${schemaStatus.active.version}` : 'Активну історичну схему не підтверджено'}{schemaStatus?.draftChanged ? ` · підготовлено зміни для V${schemaStatus.nextVersion}` : ''}</p>
+              <div className="catalog-history-actions">{publicationControl}{canManage && <button type="button" onClick={autoAssignSkuIndexes} className="btn btn-outline">Переіндексувати SKU</button>}</div>
+              <p className="catalog-neutral-note">Публікація цієї схеми не застосовує налаштування Magento й не потрібна для локального створення нових товарів за характеристиками.</p>
+            </>}
             {schemaStatusError && <div className="catalog-context-error" role="alert">Не вдалося завантажити стан схеми. <button type="button" className="et-link" onClick={retrySchemaStatus}>Спробувати ще раз</button></div>}
             {schemaPublishState.otherCategory && <p className="catalog-context-error" role="status">Завершуємо публікацію схеми для «{schemaPublishState.categoryName}». Дочекайтеся результату перед наступною публікацією.</p>}
             {schemaPublishState.error && <p className="catalog-context-error" role="alert">{schemaPublishState.error}</p>}
             <SkuTemplatePreview category={selectedCat} marker={schemaStatus?.draftChanged ? schemaStatus.nextMarker : schemaStatus?.active?.marker} questions={currentCatQuestions} />
+            </CatalogHistoricalSettings>
           </>
         )}
-        {canManage && isCategoryEditOpen && selectedCat && <CategoryForm category={editCat} isEdit onCancel={() => setIsCategoryEditOpen(false)} onChange={setEditCat} onSave={updateCategory} />}
-        {canManage && isNewCategoryOpen && <CategoryForm category={newCat} onCancel={() => setIsNewCategoryOpen(false)} onChange={setNewCat} onSave={addCategory} />}
+        {canManage && isCategoryEditOpen && selectedCat && <CategoryForm category={editCat} native={native} isEdit onCancel={() => setIsCategoryEditOpen(false)} onChange={setEditCat} onSave={updateCategory} />}
+        {canManage && isNewCategoryOpen && <CategoryForm category={newCat} native={native} onCancel={() => setIsNewCategoryOpen(false)} onChange={setNewCat} onSave={addCategory} />}
       </section>
 
       {selectedCat ? (
@@ -224,7 +255,7 @@ export function AdminStructureEditor({
               <div><h3>Питання</h3><p>{currentCatQuestions.length} у поточній категорії</p></div>
               {canManage && <button type="button" onClick={openNewQuestion} className="btn btn-amber flex items-center gap-1.5 px-3 py-2 text-xs"><Plus size={14} />Додати</button>}
             </div>
-            {canManage && <button type="button" onClick={autoAssignSkuIndexes} className="catalog-master-utility">Переіндексувати SKU</button>}
+            {!native && canManage && <button type="button" onClick={autoAssignSkuIndexes} className="catalog-master-utility">Переіндексувати SKU</button>}
             <div className="catalog-question-list">
               {currentCatQuestions.map((question) => {
                 const isConditional = formatConditionSummary(question.visible_if_json, currentCatQuestions, config) !== 'Завжди';
@@ -265,7 +296,7 @@ export function AdminStructureEditor({
                       <div className="catalog-question-flags">
                         <span>{(question.input_type || 'options') === 'text' ? 'Текст' : 'Варіанти'}</span>
                         {isEnabled(question.required) && <span>Обовʼязкове</span>}
-                        {isEnabled(question.include_in_sku) && <span>SKU</span>}
+                        {!native && isEnabled(question.include_in_sku) && <span>SKU</span>}
                         {isConditional && <span>За умовою</span>}
                       </div>
                     </div>
@@ -278,13 +309,14 @@ export function AdminStructureEditor({
 
           <div className="catalog-detail">
             {canManage && isNewQuestionOpen ? (
-              <QuestionForm config={config} currentCatQuestions={currentCatQuestions} fillNextSkuIndex={fillNextNewQuestionSkuIndex} isNew onCancel={() => setIsNewQuestionOpen(false)} onChange={setNewQuest} onSave={addQuestion} question={newQuest} />
+              <QuestionForm config={config} currentCatQuestions={currentCatQuestions} fillNextSkuIndex={fillNextNewQuestionSkuIndex} isNew onCancel={() => setIsNewQuestionOpen(false)} onChange={setNewQuest} onSave={native ? async () => { if (await addQuestion() === true) setIsNewQuestionOpen(false); } : addQuestion} question={newQuest} />
             ) : selectedQuestion ? (
               <>
                 <div className="catalog-detail-header">
-                  <div className="min-w-0"><h3>{selectedQuestion.label}</h3><p>{(selectedQuestion.input_type || 'options') === 'text' ? 'Текстове поле' : 'Поле з варіантами'}</p></div>
+                  <div className="min-w-0"><h3>{selectedQuestion.label}{isEnabled(selectedQuestion.archived) && ' · Архівне'}</h3><p>{(selectedQuestion.input_type || 'options') === 'text' ? 'Текстове поле' : 'Поле з варіантами'}</p></div>
                   {canManage && <div className="catalog-row-actions">
                     {!isQuestionEditOpen && <button type="button" onClick={openQuestionEdit} className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs"><Pencil size={14} />Редагувати</button>}
+                    <button type="button" onClick={() => archiveQuestion(selectedQuestion, !isEnabled(selectedQuestion.archived))} className="catalog-icon-button" title={isEnabled(selectedQuestion.archived) ? 'Відновити питання' : 'Архівувати питання'} aria-label={isEnabled(selectedQuestion.archived) ? 'Відновити питання' : 'Архівувати питання'}>{isEnabled(selectedQuestion.archived) ? <ArchiveRestore size={15} /> : <Archive size={15} />}</button>
                     <button type="button" onClick={() => deleteItem('question', selectedQuestion.q_db_id)} className="catalog-icon-button is-danger" title="Видалити питання" aria-label={`Видалити питання ${selectedQuestion.label}`}><Trash2 size={15} /></button>
                   </div>}
                 </div>
@@ -296,9 +328,9 @@ export function AdminStructureEditor({
                       <MetaRow label="Тип поля" value={(selectedQuestion.input_type || 'options') === 'text' ? 'Текстове поле' : 'Варіанти'} />
                       <MetaRow label="Обовʼязкове" value={isEnabled(selectedQuestion.required) ? 'Так' : 'Ні'} />
                     </FormSection>
-                    <FormSection title="SKU" variant="catalog">
+                    <CatalogHistoricalSettings native={native}><FormSection title="SKU" variant="catalog">
                       <MetaRow label="Включено в SKU" value={isEnabled(selectedQuestion.include_in_sku) ? 'Так' : 'Ні'} />
-                    </FormSection>
+                    </FormSection></CatalogHistoricalSettings>
                     <FormSection title="Видимість та умови" variant="catalog"><MetaRow label="Показувати" value={questionVisibilitySummary} /></FormSection>
                     <details className="catalog-technical-details catalog-technical-overview">
                       <summary>Технічні параметри</summary>
@@ -338,7 +370,7 @@ export function AdminStructureEditor({
             )}
           </div>
         </section>
-      ) : <section className="catalog-no-category"><h3>Виберіть категорію</h3><p>Питання та схема SKU відкриються для вибраної категорії.</p></section>}
+      ) : <section className="catalog-no-category"><h3>Виберіть категорію</h3><p>{native ? 'Характеристики та доступні значення відкриються для вибраної категорії.' : 'Питання та схема SKU відкриються для вибраної категорії.'}</p></section>}
     </div>
   );
 }

@@ -26,9 +26,10 @@ suite.test('stable public SKU migration backfills exact legacy identity and enfo
     await fs.copyFile(path.join(serverRoot, 'migrations', migration), path.join(directory, migration));
     await migrate(); await migrate();
     // Current recount evidence also binds the shared-name state. Upgrade the
-    // fixture to the current runtime schema before exercising that service.
+    // historical fixture through migration059 before exercising that service.
+    // Native creation060 is verified independently by native-characteristics.test.js.
     for (const file of (await fs.readdir(path.join(serverRoot, 'migrations')))
-      .filter((file) => file.endsWith('.sql') && file > migration)) {
+      .filter((file) => file.endsWith('.sql') && file > migration && file < '060')) {
       await fs.copyFile(path.join(serverRoot, 'migrations', file), path.join(directory, file));
     }
     await migrate();

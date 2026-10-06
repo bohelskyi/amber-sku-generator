@@ -4,7 +4,7 @@ async function getProductBySku(queryable, fullSku) {
 
 async function getRecentProducts(queryable) {
   const result = await queryable.query(
-    `SELECT p.*, i.public_sku
+    `SELECT p.*, i.public_sku, COALESCE((to_jsonb(i)->>'is_test_product')::boolean,FALSE) AS is_test_product
      FROM products p
      JOIN public_product_identities i ON i.id=p.public_product_identity_id
      WHERE COALESCE(status, 'active') NOT IN ('archived','voided')
@@ -116,6 +116,7 @@ async function getProductRegisterPage(queryable, query = {}) {
     queryable.query(
       `SELECT p.id,
               identity.public_sku AS "publicSku",
+              COALESCE((to_jsonb(identity)->>'is_test_product')::boolean,FALSE) AS "isTestProduct",
               p.full_sku AS "internalSku",
               p.category AS "categoryCode",
               category.name AS "categoryName",
@@ -145,6 +146,7 @@ async function getProductRegisterPage(queryable, query = {}) {
   const items = pageRows.map((row) => ({
     ...row,
     id: Number(row.id),
+    ...(row.isTestProduct === true ? { testTargetStatus: 2 } : {}),
   }));
   return {
     items,

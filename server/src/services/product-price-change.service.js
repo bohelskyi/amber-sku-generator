@@ -20,7 +20,7 @@ const { roundAutomaticUah, toUahNumber } = require('../utils/money');
 
 const PRODUCT_COLUMNS = `p.id,p.full_sku,i.public_sku,p.category,p.weight,p.total_price,p.total_price_uah,
   p.price_per_gram,p.uah_rate,p.details,p.status,p.corrected_to_product_id,
-  p.sku_schema_version_id`;
+  p.sku_schema_version_id,to_jsonb(p)->>'characteristic_version_id' AS characteristic_version_id`;
 
 function commandError(message, statusCode = 422, code = null) {
   const error = new Error(message);
@@ -234,7 +234,7 @@ function buildPreviewResponse(product, decision, projected) {
   const resultingPriceUah = toUahNumber(next.totalPriceUah);
   return {
     productId: Number(product.id),
-    sku: product.full_sku,
+    sku: product.full_sku || product.public_sku,
     internalSku: product.full_sku,
     publicSku: product.public_sku || product.full_sku,
     pricingDecision: decision,
@@ -411,7 +411,7 @@ async function applyProductPriceChangeInTransaction(payload = {}, options = {}) 
       const finalPayload = {
         requestType: 'price_change',
         productId,
-        sku: product.full_sku,
+        sku: product.full_sku || product.public_sku,
         pricingDecision: decision,
         currentPriceUah: authoritativePreview.currentPriceUah,
         resultingPriceUah: authoritativePreview.resultingPriceUah,
@@ -487,7 +487,7 @@ async function applyProductPriceChangeInTransaction(payload = {}, options = {}) 
     return {
       success: true,
       productId,
-      sku: product.full_sku,
+      sku: product.full_sku || product.public_sku,
       internalSku: product.full_sku,
       publicSku: product.public_sku || product.full_sku,
       pricingDecision: decision,

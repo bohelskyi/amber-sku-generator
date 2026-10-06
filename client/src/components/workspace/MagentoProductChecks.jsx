@@ -30,6 +30,10 @@ function ProductChecks({ revision, categoryCode, onRepresentative, initialProduc
     return () => { controller.abort(); ++requests.current; ++searches.current; };
   }, [categoryCode]);
   const questions = config?.questions[categoryCode] || [];
+  const requiresPhysicalWeight = Number(config?.categories[categoryCode]?.requires_weight) === 1;
+  const weightQuestion = questions.find((question) => question.id === 'weight');
+  const canCheckCreation = config?.productCreation?.identityMode === 'public_identity'
+    || Boolean(config?.categories[categoryCode]?.sku_schema_version_id);
   const calibrated = answers.is_calibrated == null ? null : Number(answers.is_calibrated);
   const rules = createRequirements(config, categoryCode, answers);
   function invalidate() { ++sequence.current; setBusy(false); setPreview(null); setError(''); }
@@ -64,7 +68,7 @@ function ProductChecks({ revision, categoryCode, onRepresentative, initialProduc
     finally { if (ticket === searchSequence.current) setSearching(false); }
   }
   const createInput = () => ({ product: { categoryCode, answers, isCalibrated: calibrated,
-    weight: Number(config.categories[categoryCode]?.requires_weight) === 1 ? weight : 0,
+    weight: requiresPhysicalWeight ? weight : 0,
     ...(rules.namesRequired ? { magentoNameSubjectUa: ua, magentoNameSubjectEn: en } : {}) },
     ...(price ? { pricingDecision: { mode: 'manual_uah', manualPriceUah: price } } : {}) });
   return <div className="space-y-5">
@@ -89,15 +93,20 @@ function ProductChecks({ revision, categoryCode, onRepresentative, initialProduc
     <section className="card space-y-3 p-5"><h3 className="font-semibold">Приклад нового товару</h3><p className="text-sm text-slate-600">Перевірка CREATE лише читає дані. Товар, публічний артикул і завдання доставки не створюються.</p>
       {!config && !error && <LoadingState />}
       {config && <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); check('create-preview', createInput()); }}>
-        {questions.filter((question) => isQuestionVisible(question, answers, calibrated)).map((question) => <label className="block text-sm" key={question.id}>{question.label}
+        {questions.filter((question) => (!requiresPhysicalWeight || question.id !== 'weight') && isQuestionVisible(question, answers, calibrated)).map((question) => <label className="block text-sm" key={question.id}>{question.label}
           {isTextQuestion(question) ? <input className="input" required={isCreateQuestionRequired(question, rules)} value={answers[question.id] ?? ''} onChange={(event) => changeAnswer(question, event.target.value)} />
             : <select className="input" required={isCreateQuestionRequired(question, rules)} value={answers[question.id] ?? ''} onChange={(event) => changeAnswer(question, event.target.value)}><option value="">Оберіть значення</option>{getVisibleOptionsForQuestion(question, answers, calibrated).map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select>}
         </label>)}
-        {Number(config.categories[categoryCode]?.requires_weight) === 1 && <label className="block text-sm">Вага, г<input className="input" required type="number" step="any" min="0" value={weight} onChange={(event) => { invalidate(); setWeight(event.target.value); }} /></label>}
+        {requiresPhysicalWeight && <label className="block text-sm">{weightQuestion?.label || 'Вага, г'}<input className="input" required inputMode="decimal" value={weight} onChange={(event) => {
+          const value = event.target.value; invalidate(); setWeight(value);
+          if (weightQuestion) setAnswers((current) => {
+            const next = { ...current }; if (value === '') delete next.weight; else next.weight = value; return next;
+          });
+        }} /></label>}
         {rules.namesRequired && <div className="grid gap-3 sm:grid-cols-2"><label className="text-sm">Назва українською<input className="input" required value={ua} onChange={(event) => { invalidate(); setUa(event.target.value); }} /></label><label className="text-sm">Назва англійською<input className="input" required value={en} onChange={(event) => { invalidate(); setEn(event.target.value); }} /></label></div>}
         <label className="block text-sm">Ручна ціна прикладу, грн (за потреби)<input className="input" type="number" min="0.01" step="0.01" value={price} onChange={(event) => { invalidate(); setPrice(event.target.value); }} /></label>
-        {!config.categories[categoryCode]?.sku_schema_version_id && <Notice tone="warning">Спочатку потрібна опублікована схема SKU цієї категорії.</Notice>}
-        <button className="btn btn-primary btn-compact-md" disabled={busy || !config.categories[categoryCode]?.sku_schema_version_id}>Перевірити приклад CREATE</button>
+        {!canCheckCreation && <Notice tone="warning">Спочатку потрібна опублікована схема SKU цієї категорії.</Notice>}
+        <button className="btn btn-primary btn-compact-md" disabled={busy || !canCheckCreation}>Перевірити приклад CREATE</button>
       </form>}
     </section>
     {error && <Notice>{error}</Notice>}{busy && <LoadingState label="Перевіряємо цей товар у Magento…" />}

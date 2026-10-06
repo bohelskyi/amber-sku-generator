@@ -1,7 +1,24 @@
 .admin-page { min-width: 0; }
 .admin-page-inner { width: min(100%, 1600px); margin: 0 auto; padding: 20px 24px 80px; display: grid; gap: 16px; }
 .admin-page .local-workspace-nav { position: sticky; top: var(--workspace-nav-height); z-index: 18; }
+.admin-page:has(.catalog-workspace) .local-workspace-nav { background: var(--surface, #fff); }
 .admin-category-picker { margin: 0; }
+.admin-page .catalog-workspace,
+.admin-page .catalog-master,
+.admin-page .catalog-detail,
+.admin-page .catalog-detail-form,
+.admin-page .catalog-context-form,
+.admin-page .catalog-option-form,
+.admin-page .catalog-field-control,
+.admin-page .catalog-field-control > div {
+  min-width: 0;
+  max-width: 100%;
+}
+.admin-page .catalog-detail-form { background: #fff; }
+.admin-page .catalog-field-control .input-sm { min-width: 0; max-width: 100%; }
+.admin-page .catalog-detail-form-title > div,
+.admin-page .catalog-context-form-header > div { min-width: 0; overflow-wrap: anywhere; }
+.admin-page .catalog-form-actions { padding-inline: 16px; }
 .pricing-matrix-table td { vertical-align: top; }
 .pricing-matrix-table .ui-save-state { display: block; margin-top: 4px; max-width: 160px; white-space: normal; overflow-wrap: anywhere; font-size: 12px; line-height: 1.35; }
 
@@ -18,6 +35,7 @@
   .admin-page .pricing-workspace { grid-template-columns: minmax(0, 1fr); }
   .admin-page .catalog-master,
   .admin-page .pricing-master { max-height: 360px; border-right: 0; border-bottom: 1px solid var(--border); }
+.admin-page .catalog-master { overflow-y: auto; overscroll-behavior-y: contain; }
   .admin-page .pricing-detail-header { align-items: flex-start; }
   .admin-page .pricing-detail-actions { width: 100%; }
 }
@@ -27,3 +45,9 @@
   .admin-page .catalog-category-actions .btn,
   .admin-page .pricing-detail-actions .btn { flex: 1 1 auto; }
 }
+.admin-page .catalog-history-details { margin-block: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); padding-inline: 12px; background: var(--surface-subtle, #f8fafc); }
+.admin-page .catalog-history-details > summary { display: list-item; min-height: 40px; padding-block: 10px; color: var(--text-muted); cursor: pointer; }
+.admin-page .catalog-history-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.admin-page .catalog-delivery-handoff { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-block: 12px; }
+.admin-page .catalog-delivery-handoff p { flex: 1 1 320px; margin: 0; color: var(--text-muted); font-size: var(--font-size-sm); }
+.admin-page .catalog-delivery-handoff .btn { min-height: 40px; }

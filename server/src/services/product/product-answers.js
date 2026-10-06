@@ -1,5 +1,5 @@
 const { isRuleMatched } = require('../../utils/rules');
-const { parsePositiveDecimal } = require('../../utils/numbers');
+const { validateNumericAnswer, parseStrictDecimal } = require('../../utils/numbers');
 
 function buildAnswerMap(decodedAnswers) {
   return decodedAnswers.reduce((answers, item) => {
@@ -22,31 +22,40 @@ function haveSameDecodedAnswers(firstAnswers, secondAnswers) {
 function normalizeAnswerMap(answers = {}) {
   return Object.entries(answers || {}).reduce((result, [key, value]) => {
     if (value === undefined || value === null || value === '') return result;
-    const numericValue = Number(value);
-    result[key] = Number.isNaN(numericValue) ? value : numericValue;
+    result[key] = value;
     return result;
   }, {});
 }
 
 // Write-input normalization only. Stored reads and the reviewed historical SV
 // representation repair retain their existing behavior; no source row is fixed.
-function normalizeProductInputAnswers(categoryCode, answers = {}) {
-  const input = { ...answers };
+function normalizeProductInputAnswers(categoryCode, answers = {}, questions = [], { previousAnswers = {} } = {}) {
+  const input = normalizeAnswerMap(answers);
   if (categoryCode === 'SV' && String(input.souvenir) === '6'
     && typeof input.size === 'string' && input.size.trim() === '') delete input.size;
-  if (categoryCode === 'SV' && Object.hasOwn(input, 'weight')) {
-    const value = input.weight;
-    if (value == null || String(value).trim() === '') delete input.weight;
-    else {
-      const text = typeof value === 'string' ? value.trim() : value;
-      if (typeof text === 'string' && text.includes(',') && !/^\d+,\d+$/.test(text)) {
-        throw Object.assign(new Error('Вкажіть додатну числову вагу SV.'), { statusCode: 422 });
+  const configured = new Map(questions.map((question) => [question.key || question.id, question]));
+  // Retain the existing SV write contract while administrators add metadata.
+  if (categoryCode === 'SV' && !configured.get('weight')?.numeric_validation) {
+    configured.set('weight', { ...configured.get('weight'), key: 'weight', label: 'Вага SV',
+      numeric_validation: { kind: 'decimal', min: 0, minInclusive: false, maxFractionDigits: 3 } });
+  }
+  for (const [key, question] of configured) {
+    const value = input[key];
+    if (question.archived && value != null && String(value).trim() !== '') {
+      if (!Object.hasOwn(previousAnswers, key) || String(previousAnswers[key]) !== String(value)) {
+        const message = `Питання «${question.label || key}» архівоване; новий вибір недоступний.`;
+        throw Object.assign(new Error(message), { statusCode: 422, fieldErrors: { [key]: message } });
       }
-      try { input.weight = parsePositiveDecimal(text, 'Вага SV'); }
-      catch (cause) { cause.statusCode = 422; throw cause; }
+      continue;
+    }
+    if (value == null || String(value).trim() === '') { delete input[key]; continue; }
+    if (question.numeric_validation) input[key] = validateNumericAnswer(question, value);
+    else if (question.input_type !== 'text') {
+      try { input[key] = parseStrictDecimal(value, { kind: 'integer' }, question.label || key); }
+      catch (error) { error.fieldErrors = { [key]: error.message }; throw error; }
     }
   }
-  return normalizeAnswerMap(input);
+  return input;
 }
 
 function mergeRecountAnswerPatch(previousAnswers, submittedAnswers) {
@@ -134,7 +143,7 @@ function isQuestionVisibleForSku(question, answers, isCalibrated) {
 
 function omitHiddenRecountAnswers(answers, schemaQuestions, isCalibrated) {
   return (schemaQuestions || []).reduce((result, question) => {
-    if (!isQuestionVisibleForSku(question, answers, isCalibrated)) {
+    if (!question.archived && !isQuestionVisibleForSku(question, answers, isCalibrated)) {
       delete result[question.key];
     }
     return result;

@@ -20,6 +20,8 @@ test('single-product read normalizes the exact SKU and preserves its row shape',
   assert.deepEqual(await getProductBySku(queryable, ' nm211 '), row);
   assert.deepEqual(calls[0].params, ['NM211']);
   assert.match(calls[0].sql, /ORDER BY p.id/);
+  assert.match(calls[0].sql, /COALESCE\(\(to_jsonb\(i\)->>'is_test_product'\)::boolean,FALSE\) AS is_test_product/);
+  assert.doesNotMatch(calls[0].sql, /i\.is_test_product/);
 });
 
 test('single-product read returns null when no product exists', async () => {
@@ -41,6 +43,7 @@ test('recent-product read preserves database order and archived filtering', asyn
   assert.deepEqual(call.params, []);
   assert.match(call.sql, /COALESCE\(status, 'active'\) NOT IN \('archived','voided'\)/);
   assert.match(call.sql, /ORDER BY p.created_at DESC\s+LIMIT 15/);
+  assert.match(call.sql, /COALESCE\(\(to_jsonb\(i\)->>'is_test_product'\)::boolean,FALSE\) AS is_test_product/);
 });
 
 test('product register is bounded, explicitly projected, and returns a filter-bound cursor', async () => {
@@ -70,6 +73,7 @@ test('product register is bounded, explicitly projected, and returns a filter-bo
   assert.deepEqual(first.filterOptions.categories, [{ code: 'BR', name: 'Браслети' }]);
   assert.match(calls[0].sql, /identity\.public_sku AS "publicSku"/);
   assert.doesNotMatch(calls[0].sql, /SELECT p\.\*/);
+  assert.match(calls[0].sql, /COALESCE\(\(to_jsonb\(identity\)->>'is_test_product'\)::boolean,FALSE\) AS "isTestProduct"/);
   assert.match(calls[0].sql, /corrected_to_product_id IS NULL/);
   assert.match(calls[0].sql, /ORDER BY p\.id DESC/);
   assert.deepEqual(calls[0].params, ['BR', '%AG-%', 2]);

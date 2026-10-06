@@ -1,9 +1,11 @@
+const { getCatalogWorkflow } = require('./catalog-workflow');
 const initialConfig = require('../../../data_config');
 const pool = require('../../db/pool');
 const { startPhase } = require('../../observability/performance-metrics');
 
 async function getAppConfig(queryable = pool) {
-  const config = { categories: {}, questions: {}, extraConfig: initialConfig.extraConfig };
+  const config = { categories: {}, questions: {}, extraConfig: initialConfig.extraConfig,
+    catalogWorkflow: await getCatalogWorkflow(queryable) };
 
   const categories = await queryable.query(
     `SELECT c.*,
@@ -45,6 +47,8 @@ async function getAppConfig(queryable = pool) {
       q.required,
       q.include_in_sku,
       q.input_type,
+      q.archived AS q_archived,
+      q.numeric_validation,
       q.sku_separator,
       q.visible_if_json AS q_visible_if_json,
       o.id AS o_db_id,
@@ -73,6 +77,8 @@ async function getAppConfig(queryable = pool) {
         required: row.required,
         include_in_sku: row.include_in_sku,
         input_type: row.input_type || 'options',
+        archived: row.q_archived ? 1 : 0,
+        numeric_validation: row.numeric_validation || null,
         sku_separator: row.sku_separator || '',
         visible_if_json: row.q_visible_if_json || null,
         cat: row.category_code,
@@ -84,7 +90,7 @@ async function getAppConfig(queryable = pool) {
       tempQuestions.get(row.q_db_id).options.push({
         db_id: row.o_db_id,
         id: row.value_id,
-        sku_code: String(row.sku_code ?? row.value_id),
+        sku_code: row.sku_code == null ? null : String(row.sku_code),
         label: row.o_label,
         label_en: row.o_label_en ?? null,
         visible_if_json: row.visible_if_json || null,

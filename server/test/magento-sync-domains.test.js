@@ -4,6 +4,7 @@ const { readDomains, planDomains } = require('../src/services/magento/sync-previ
 const { bindingKey } = require('../src/services/magento/binding-validation');
 const { parseMagentoConfig } = require('../src/config/magento');
 const { createMagentoClient } = require('../src/services/magento/client');
+const { MagentoIntegrationError } = require('../src/services/magento/errors');
 const config = parseMagentoConfig({ MAGENTO_BASE_URL: 'https://example.invalid', MAGENTO_CONSUMER_KEY: 'fake-key',
   MAGENTO_CONSUMER_SECRET: 'fake-secret', MAGENTO_ACCESS_TOKEN: 'fake-access', MAGENTO_ACCESS_TOKEN_SECRET: 'fake-access-secret' });
 function fixture() {
@@ -128,4 +129,128 @@ test('MSI truncation, nonexact SKU, invalid source status and scoped identity mi
   const n = network(f, { products: { total_count: 1, items: [{ ...f.raw, id: 99, custom_attributes: [] }] } });
   const e = await readDomains(config, { ...f, ...n });
   assert.equal(e.english, null); assert.equal(e.failures[0].code, 'STORE_VIEW_READ_UNAVAILABLE'); assert.ok(e.inventory);
+});
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+const nextTurn = () => new Promise((done) => setImmediate(done));
+
+test('fresh domain GETs overlap only independent branches, stay bounded and retain complete validated evidence', async () => {
+  const f = fixture(); const n = network(f); const stock = deferred(); const tails = deferred();
+  const started = []; let active = 0; let peak = 0;
+  const fetchImpl = async (url, init) => {
+    assert.equal(init.method, 'GET'); assert.equal(init.body, undefined);
+    const route = new URL(url).pathname.split('/V1/')[1]; started.push(route);
+    active++; peak = Math.max(peak, active);
+    try {
+      await (route.startsWith('inventory/stock-resolver/') ? stock.promise : tails.promise);
+      return await n.fetchImpl(url, init);
+    } finally { active--; }
+  };
+  const pending = readDomains(config, { ...f, fetchImpl, client: createMagentoClient(config, { fetchImpl }) });
+  try {
+    await nextTurn();
+    assert.deepEqual(started, ['inventory/stock-resolver/website/base', 'products']);
+    assert.equal(active, 2); // EN is independent of the unresolved stock lookup.
+    stock.resolve(); await nextTurn();
+    assert.deepEqual(started, ['inventory/stock-resolver/website/base', 'products',
+      'inventory/get-sources-assigned-to-stock-ordered-by-priority/1', 'inventory/source-items']);
+    assert.equal(active, 3); assert.equal(peak, 3);
+    tails.resolve(); const evidence = await pending;
+    assert.equal(active, 0);
+    assert.deepEqual(evidence, await readDomains(config, { ...f, ...network(f) }));
+    assert.deepEqual(evidence.failures, []); assert.equal(evidence.inventory.stockId, 1);
+    assert.equal(evidence.english.id, f.raw.id);
+  } finally { stock.resolve(); tails.resolve(); await pending; }
+});
+
+test('overlapping failures retain inventory-first ordering and cannot return while another GET is pending', async () => {
+  const f = fixture(); const n = network(f); const items = deferred(); const started = []; let returned = false;
+  const fetchImpl = async (url, init) => {
+    const route = new URL(url).pathname.split('/V1/')[1]; started.push(route);
+    if (route === 'products') return new Response('private detail', { status: 503 });
+    if (route.includes('get-sources-assigned')) throw Object.assign(Error('private detail'), { code: 'MAGENTO_NETWORK_ERROR' });
+    if (route === 'inventory/source-items') await items.promise;
+    return n.fetchImpl(url, init);
+  };
+  const pending = readDomains(config, { ...f, fetchImpl, client: createMagentoClient(config, { fetchImpl }) })
+    .then((value) => { returned = true; return value; });
+  try {
+    await nextTurn();
+    assert.ok(started.includes('inventory/source-items')); assert.equal(returned, false);
+    items.resolve(); const evidence = await pending;
+    assert.deepEqual(evidence, { inventory: null, english: null, failures: [
+      { code: 'INVENTORY_READ_UNAVAILABLE', operation: 'inventory', reason: 'MAGENTO_NETWORK_ERROR' },
+      { code: 'STORE_VIEW_READ_UNAVAILABLE', operation: 'storeViews', reason: 'MAGENTO_HTTP_ERROR' },
+    ] });
+    assert.ok(!JSON.stringify(evidence).includes('private detail'));
+  } finally { items.resolve(); await pending; }
+});
+
+test('invalid stock identity starts no dependent MSI reads while independent EN identity remains guarded', async () => {
+  const f = fixture();
+  for (const stock of [{ stock_id: 0 }, { stock_id: 1, extension_attributes: { sales_channels: [{ type: 'website', code: 'other' }] } }]) {
+    const n = network(f, { 'inventory/stock-resolver/website/base': stock });
+    const evidence = await readDomains(config, { ...f, ...n });
+    assert.deepEqual(n.calls.map((url) => url.pathname.split('/V1/')[1]).sort(), ['inventory/stock-resolver/website/base', 'products']);
+    assert.equal(evidence.inventory, null); assert.equal(evidence.english.id, f.raw.id);
+    assert.deepEqual(evidence.failures, [{ code: 'INVENTORY_READ_UNAVAILABLE', operation: 'inventory', reason: 'MAGENTO_RESPONSE_INVALID' }]);
+  }
+});
+
+test('source/item failures drain together and keep original sources-first failure precedence', async () => {
+  const f = fixture(); const n = network(f); const source = deferred(); let returned = false;
+  const fetchImpl = async (url, init) => {
+    const route = new URL(url).pathname.split('/V1/')[1];
+    if (route.includes('get-sources-assigned')) { await source.promise; throw new MagentoIntegrationError('MAGENTO_TIMEOUT'); }
+    if (route === 'inventory/source-items') throw Object.assign(Error('item'), { code: 'MAGENTO_NETWORK_ERROR' });
+    return n.fetchImpl(url, init);
+  };
+  const pending = readDomains(config, { ...f, fetchImpl, client: createMagentoClient(config, { fetchImpl }) })
+    .then((value) => { returned = true; return value; });
+  try {
+    await nextTurn(); assert.equal(returned, false);
+    source.resolve(); const evidence = await pending;
+    assert.equal(evidence.inventory, null); assert.ok(evidence.english);
+    assert.deepEqual(evidence.failures, [{ code: 'INVENTORY_READ_UNAVAILABLE', operation: 'inventory', reason: 'MAGENTO_TIMEOUT' }]);
+  } finally { source.resolve(); await pending; }
+});
+
+
+test('unexpected scoped input failure still drains an already started inventory branch', async () => {
+  const f = fixture(); f.schema.storeTopology.storeViews = null;
+  const n = network(f); const stock = deferred(); let returned = false;
+  const fetchImpl = async (url, init) => {
+    if (new URL(url).pathname.includes('/stock-resolver/')) await stock.promise;
+    return n.fetchImpl(url, init);
+  };
+  const pending = readDomains(config, { ...f, fetchImpl, client: createMagentoClient(config, { fetchImpl }) })
+    .then(() => { throw Error('Expected invalid internal input to fail'); }, (cause) => { returned = true; return cause; });
+  try {
+    await nextTurn(); assert.equal(returned, false);
+    stock.resolve(); assert.ok(await pending instanceof TypeError);
+    assert.equal(n.calls.length, 3);
+    assert.ok(n.calls.every((url) => url.pathname.includes('/inventory/')));
+  } finally { stock.resolve(); await pending; }
+});
+
+test('subsequent observation rereads every domain and cannot reuse prior inventory or scoped product evidence', async () => {
+  const f = fixture(); const n = network(f); let itemReads = 0; let englishReads = 0;
+  const fetchImpl = async (url, init) => {
+    const response = await n.fetchImpl(url, init);
+    const route = new URL(url).pathname.split('/V1/')[1];
+    if (!['inventory/source-items', 'products'].includes(route)) return response;
+    const body = await response.json();
+    if (route === 'inventory/source-items') body.items[0].quantity = ++itemReads;
+    else body.items[0].name = `Fresh EN ${++englishReads}`;
+    return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
+  };
+  const args = { ...f, fetchImpl, client: createMagentoClient(config, { fetchImpl }) };
+  const first = await readDomains(config, args); const second = await readDomains(config, args);
+  assert.equal(n.calls.length, 8); assert.deepEqual(first.failures, []); assert.deepEqual(second.failures, []);
+  assert.equal(first.inventory.sourceItems[0].qty, 1); assert.equal(second.inventory.sourceItems[0].qty, 2);
+  assert.equal(first.english.fields.name, 'Fresh EN 1'); assert.equal(second.english.fields.name, 'Fresh EN 2');
 });

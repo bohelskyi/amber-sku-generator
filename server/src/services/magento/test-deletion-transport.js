@@ -5,7 +5,7 @@ const { error, originHash } = require('./binding-contract');
 // This transport accepts only the service's committed dispatch record, never an HTTP body.
 async function deleteSealedProduct(config, intent, { fetchImpl = globalThis.fetch } = {}) {
   if (intent.state !== 'dispatched' || !intent.dispatched_at || !intent.id
-    || !/^AG-[0-9]{6,}$/.test(intent.public_sku) || !intent.remote_product_id
+    || !/^(?:AG|TEST)-[0-9]{6,}$/.test(intent.public_sku) || !intent.remote_product_id
     || intent.origin_hash !== originHash(config.baseUrl)) throw error(422, 'TEST_DELETE_INTENT_REQUIRED', 'Sealed dispatch required');
   const url = `${validateBaseUrl(config.baseUrl)}/rest/all/V1/products/${intent.public_sku}`;
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 10000);

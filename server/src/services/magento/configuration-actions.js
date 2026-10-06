@@ -69,6 +69,11 @@ async function get(config, id, options = {}) {
   if (!row) throw c.error(404, 'MAGENTO_CONFIGURATION_NOT_FOUND', 'Configuration action not found'); return row;
 }
 function receipt(row) {
+  if (['attribute_delete','option_delete'].includes(row.kind)) {
+    // Migration 063 requires exact local completion in the same commit as
+    // verified deletion. Never label a deletion as a successfully created item.
+    return require('../catalog/catalog-deletion.service').receipt(row);
+  }
   return { id: row.id, kind: row.kind, state: row.state, remoteId: row.remote_id,
     path: row.intent.path ?? null,
     attributeCode: row.intent.target?.attributeCode ?? null, label: row.intent.label ?? null,

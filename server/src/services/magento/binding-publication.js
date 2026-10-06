@@ -8,7 +8,7 @@ const { evaluate } = require('./binding-evidence-products');
 const { planPreview, previewProduct, preparePreview } = require('./sync-preview');
 const { loadSourceEvidence } = require('../export-templates/source-references');
 const scope = require('./publication-scope');
-const { ruleProof } = require('./integration-successor');
+const { ruleProof, equivalentColumnUpgrade } = require('./integration-successor');
 const { boundedGet, previewView } = require('./integration-readiness');
 const { syncEligibility } = require('./sync-eligibility');
 const { createMutationContext } = require('../../audit/mutation-context');
@@ -17,6 +17,8 @@ const { writeAuditEvent } = require('../../audit/audit-events');
 const { same } = require('./name-reconciliation');
 const { bindingKey } = require('./binding-validation');
 const { readResponseBytes } = require('./client');
+const nativeOwnership = require('./native-identity-ownership');
+const { populated } = require('./compatibility-evidence-comparisons');
 const MAX_PRODUCTS=scope.LIMITS.products;
 const clean=(value)=>JSON.parse(JSON.stringify(value));
 const names=(mapped)=>({all:mapped.base.name,en:mapped.english.name});
@@ -34,6 +36,7 @@ async function context(client,config,input,scanOptions={}){
   const currentRow=await repository.current(client,draft.installationKey);
   if(draft.state!=='draft'||draft.revision!==c.counter(input.expectedRevision)||(currentRow?.id || null)!==input.expectedCurrentId)
     throw c.error(409,'MAGENTO_BINDING_CONFLICT','Draft/current publication changed');
+  require('./retired-catalog-targets').assertAvailable(draft);
   const current=currentRow?await service.readRevisionOnClient(client,currentRow.id):null;
   const next=await editor.compiledRevision(client,draft),old=current?await editor.compiledRevision(client,current):null;
   const evidence=await loadSourceEvidence(client,next.compiled.definition);
@@ -54,11 +57,14 @@ function projection(amber,product,nodes){
     && report.attributes.every((a)=>a.diagnostics.length===0)
     && report.categories.requested.every((r)=>r.authority==='authoritative');
   const owned=new Set(amber.revision.bindings.policies.filter((p)=>p.reviewState==='approved' && p.policy==='authoritative_create_update').map((p)=>p.bindingKey));
-  const fields=report.diff.filter((d)=>owned.has(d.persistedDecision?.bindingKey)
-    || amber.revision.bindings.attributes.some((a)=>a.routeKey===report.attributeSet.routeKey && a.rowId==='base' && a.target===d.target && owned.has(a.bindingKey)))
+  // Optional empty outputs are omitted by transport and preserve remote values.
+  // Adding such a field must not enroll products whose managed delivery is unchanged.
+  const fields=report.diff.filter((d)=>d.authority!=='not_applicable' && (owned.has(d.persistedDecision?.bindingKey)
+    || amber.revision.bindings.attributes.some((a)=>a.routeKey===report.attributeSet.routeKey && a.rowId==='base' && a.target===d.target && owned.has(a.bindingKey))))
     .map((d)=>({target:d.target,value:d.candidate,
       destination:amber.revision.bindings.attributes.find((a)=>a.routeKey===report.attributeSet.routeKey && a.rowId==='base' && a.target===d.target)?.attributeCode ?? null}));
-  const english=amber.revision.bindings.attributes.filter((a)=>a.routeKey===report.attributeSet.routeKey && a.rowId==='english' && owned.has(a.bindingKey))
+  const english=amber.revision.bindings.attributes.filter((a)=>a.routeKey===report.attributeSet.routeKey && a.rowId==='english' && owned.has(a.bindingKey)
+    && populated(mapped.english[a.target]))
     .map((a)=>({target:a.target,destination:a.attributeCode,value:mapped.english[a.target] ?? null}));
   const categories=owned.has(bindingKey(report.attributeSet.routeKey || '', 'base', 'categories'))?report.categories.requested.map((r)=>({id:r.categoryId,path:r.requestedPath})):[];
   return {covered,routeKey:report.attributeSet.routeKey,names:names(mapped),generated:mapped.generatedNames,
@@ -144,7 +150,12 @@ async function boundedPreview(config,input,options={}){
       const affected=change.affected.find(a=>a.productId===p.id);
       if((input.currentProductIds || []).includes(p.id) || (affected && !firstByRoute.has(affected.routeKey))){
         if(affected && !firstByRoute.has(affected.routeKey))firstByRoute.set(affected.routeKey,p.id);
-        samples.set(p.id,{product:p,nameState:page.states.find(s=>String(s.public_product_identity_id)===String(p.public_product_identity_id)) || null});
+        const amber={...page.next,revision:page.draft,product:p,
+          nameState:page.states.find(s=>String(s.public_product_identity_id)===String(p.public_product_identity_id)) || null};
+        // The custom readAmber below bypasses the ordinary product reader. Load
+        // its private exact-identity receipt in this same read-only snapshot.
+        await nativeOwnership.load(client,amber,page.draft.originHash);
+        samples.set(p.id,amber);
         if(samples.size>74)scope.limit('representative_routes');
       }
     }
@@ -154,9 +165,10 @@ async function boundedPreview(config,input,options={}){
     throw c.error(409,'MAGENTO_BINDING_OBSERVATION_CHANGED','Prepare a draft with fresh Magento metadata');
   result.lostRoutes=local.current?scopes(local.current).filter(r=>!scopes(local.draft).includes(r)):[];
   const validation=local.validation;
+  const comparisonOld=local.old && (equivalentColumnUpgrade(local.old.compiled.definition,local.next.compiled.definition) || local.old.compiled.definition);
   const newRoutes=scopes(local.draft).filter((route)=>!local.current || !scopes(local.current).includes(route)
     || local.current.bindings.routes.find((r)=>r.routeKey===route)?.setId!==local.draft.bindings.routes.find((r)=>r.routeKey===route)?.setId
-    || ruleProof(local.old.compiled.definition,route.split(/[.:]/)[0],'base','attribute_set_code')!==ruleProof(local.next.compiled.definition,route.split(/[.:]/)[0],'base','attribute_set_code'));
+    || ruleProof(comparisonOld,route.split(/[.:]/)[0],'base','attribute_set_code')!==ruleProof(local.next.compiled.definition,route.split(/[.:]/)[0],'base','attribute_set_code'));
   const checked=[];
   for(const sample of input.representatives || []){
     const report=await (options.createPreview || editor.prospectivePreview)(config,{bindingRevisionId:local.draft.id,...sample},
@@ -167,10 +179,10 @@ async function boundedPreview(config,input,options={}){
   for(const [route,id] of firstByRoute)if(![...ids].some(productId=>result.affected.find(a=>a.productId===productId)?.routeKey===route))ids.add(id);
   if(ids.size>64)throw c.error(422,'MAGENTO_PUBLICATION_LIMIT','Too many representative routes');
   for(const productId of ids){
-    const sample=samples.get(productId);if(!sample)c.invalid();const {product,nameState}=sample;
+    const sample=samples.get(productId);if(!sample)c.invalid();
     const report=await (options.currentPreview || previewProduct)(config,{databasePool:options.databasePool || pool,fetchImpl,
       bindingRevisionId:local.draft.id,productId,discover:async()=>observation.schema,
-      readAmber:async()=>({...local.next,revision:local.draft,product,nameState})});
+      readAmber:async()=>sample});
     checked.push({kind:'current',productId,...previewView(report)});
   }
   const missingCreate=newRoutes.filter((route)=>!checked.some((p)=>p.kind==='create' && p.routeKey===route && p.sendable));

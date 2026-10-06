@@ -328,3 +328,37 @@ the transaction/checksum boundary; disposable coverage checks the 058 upgrade,
 transaction rollback, fresh installation and repeated startup. See the precise
 [attribute and membership workflow](MAGENTO_ATTRIBUTES.md), including stock
 Magento's point-in-time membership verification limits.
+
+## 060–065 — native characteristics and explicit product workflows
+
+- `060_public_identity_characteristics.sql` adds immutable characteristic versions
+  and native creation receipts. Active public identity requires new product rows
+  to use characteristic versions and null encoded identity fields; existing rows,
+  reservations and legacy Magento input projections remain unchanged.
+- `061_catalog_numeric_archive.sql` adds numeric metadata and local question/option
+  archival with permanent semantic-ID protection. Existing product answers retain
+  their historical IDs and values.
+- `062_product_photos.sql` adds immutable originals, versioned photo sets and
+  permanent media dispatch/readback evidence, without historical enrollment.
+- `063_reviewed_catalog_deletion.sql` adds reviewed exact-target deletion evidence;
+  it deletes no catalog or Magento resource during installation.
+- `064_product_archive_visibility.sql` adds future explicit visibility intents and
+  immutable reviewed restoration receipts. Existing archived products and all
+  historical delivery evidence are preserved without backfill.
+- `065_product_media_native_fence.sql` prevents native input/generation drift
+  during started media delivery and records exact same-identity recount
+  inheritance. Predispatch supersession requires a permanent linked successor;
+  existing originals and dispatch evidence remain unchanged.
+
+The migration runner owns transactions and checksum verification. None of these
+migrations activates a gate, publishes a template/binding, grants permissions,
+allocates a public identity or calls Magento. Applied migrations through 059 remain
+immutable. See [Manager workflows](MANAGER_PRODUCT_WORKFLOWS.md),
+[photos](PRODUCT_PHOTOS.md), [catalog deletion](REVIEWED_CATALOG_DELETION.md) and
+[archive/restore](PRODUCT_LIFECYCLE.md) for runtime contracts and acceptance limits.
+
+## 066–067 — explicit historical decisions and integration tasks
+
+Migration 066 adds permanent reviewed historical-reactivation intents and UPDATE-only identity fences. It enrolls no existing archive and preserves unknown prior facts. A new decision requires exact current product/counterpart proof and verified status 2 before local activation; the atomic remote adapter remains an installation prerequisite. See [historical reactivation](HISTORICAL_REACTIVATION.md).
+
+Migration 067 adds durable local integration tasks and immutable creation-context attempts. It creates no historical task, product, SKU reservation, sync job, permission or remote operation. Task resolution rechecks the current local configuration; it never confirms Magento delivery. See [integration tasks](PRODUCT_INTEGRATION_TASKS.md).

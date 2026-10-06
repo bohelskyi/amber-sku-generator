@@ -5,6 +5,7 @@ import { useAuth } from '../../auth/auth-context.js';
 import { isActualAdministrator } from '../../auth/auth-model.js';
 import { LoadingState, Notice } from '../app/UiPrimitives.jsx';
 import MagentoDetails from './MagentoDetails.jsx';
+import RetiredCatalogNotice from './RetiredCatalogNotice.jsx';
 import MagentoPublicationProblems from './MagentoPublicationProblems.jsx';
 import MagentoProductChecks from './MagentoProductChecks.jsx';
 
@@ -21,13 +22,16 @@ function ReviewList({ items, label, render }) {
     </nav>}
   </div>;
 }
-function PublicationWorkspace({ revision, currentPublishedId, representatives = empty, onPublished, onRepresentative, definition, registry, categories, repairContext, compact = false, autoPreview = false, disabled = false }) {
+function PublicationWorkspace({ revision, currentPublishedId, representatives = empty, onPublished, onRepresentative, definition, registry, categories, repairContext, compact = false, autoPreview = false, disabled: suppliedDisabled = false, editScope }) {
   const auth = useAuth(); const { permissions } = auth; const administrator = isActualAdministrator(auth);
+  const retired = Boolean(revision.catalogAvailability?.publicationBlocked);
+  const disabled = suppliedDisabled || retired;
   const canPublish = ['export_templates.manage', 'export_templates.publish', 'exports.view'].every((permission) => permissions.includes(permission));
   const [review, setReview] = useState(null); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const [rejectedReview, setRejectedReview] = useState(null);
   const [ack, setAck] = useState(false); const [reason, setReason] = useState('');
   const [status, setStatus] = useState([]); const [refresh, setRefresh] = useState(0);
+  const [statusLoaded, setStatusLoaded] = useState(false);
   const [exampleCategory, setExampleCategory] = useState(null);
   const sequence = useRef(0); const inFlight = useRef(false);
   const automaticallyChecked = useRef(false);
@@ -39,7 +43,7 @@ function PublicationWorkspace({ revision, currentPublishedId, representatives = 
       try {
         const { data } = await api.get(`${root}/bindings/${revision.id}/handoffs`, { signal: controller.signal });
         if (controller.signal.aborted) return;
-        setStatus(data); setError('');
+        setStatus(data); setStatusLoaded(true); setError('');
         if (data.some((item) => item.pending_handoff > 0 || item.waiting > 0)) timer = setTimeout(read, 5000);
       } catch (cause) { if (!controller.signal.aborted) setError(cause.response?.data?.error || 'Не вдалося прочитати стан передачі товарів.'); }
     };
@@ -72,12 +76,15 @@ function PublicationWorkspace({ revision, currentPublishedId, representatives = 
   const loss = Boolean(review && (review.lostRoutes.length || review.lostProducts.length));
   const statusRow = (item) => <article className="space-y-1 border-t py-2 text-sm" key={item.id}><p>{item.kind === 'publication' ? 'Після публікації' : item.kind === 'name_rule' ? 'Застосування правила назв' : 'Контрольована повторна синхронізація'} · {new Date(item.created_at).toLocaleString('uk-UA')}</p>
     <p>Magento: {item.synced} / {item.total} синхронізовано · {item.waiting} очікують · {item.pending_handoff} ще не передано · {item.needs_attention} потребують уваги</p>
+    <p>Підтвердження Magento: {item.lastConfirmedAt ? new Date(item.lastConfirmedAt).toLocaleString('uk-UA') : 'Час підтвердження недоступний у цьому огляді'}.</p>
     {item.protected > 0 && <p>Не передано через непідтверджену попередню роботу: {item.protected}. <Link className="underline" to="/sync-problems">Перевірити проблеми</Link></p>}
     {item.retired > 0 && <p>Товари більше не актуальні: {item.retired}</p>}
   </article>;
   const currentStatuses = status.filter((item, index) => index === 0 || item.pending_handoff > 0 || item.waiting > 0 || item.needs_attention > 0 || item.protected > 0);
   const history = status.filter((item) => !currentStatuses.includes(item));
-  return <section className="card space-y-3 p-5"><h2 className="font-semibold">{compact ? 'Застосування змін' : 'Публікація та передача товарів'}</h2>
+  const applyDisabledReason = busy ? 'Перевірка або застосування виконується.' : disabled ? 'Завершіть локальні рішення або оновіть неактуальну перевірку.' : review?.blockers.length ? `Застосування заблоковано: ${review.blockers.length} перешкод у пакеті.` : loss && (!ack || reason.trim().length < 3) ? 'Підтвердьте точну втрату покриття й додайте пояснення.' : '';
+  return <section className={`card space-y-3 p-5${compact ? ' mc-publication-actions' : ''}`}><h2 className="font-semibold">{compact ? 'Застосування змін' : 'Публікація та передача товарів'}</h2>
+    <RetiredCatalogNotice availability={revision.catalogAvailability} />
     {error && <Notice tone="error">{error}</Notice>}
     {rejectedReview && <MagentoPublicationProblems review={rejectedReview} revision={revision} currentPublishedId={currentPublishedId} definition={definition} registry={registry} categories={categories} repairContext={repairContext} compact={compact} />}
     {revision.state === 'draft' ? <>
@@ -93,11 +100,14 @@ function PublicationWorkspace({ revision, currentPublishedId, representatives = 
           {administrator && <><label className="block text-sm"><input type="checkbox" checked={ack} disabled={busy} onChange={(event) => setAck(event.target.checked)} /> Підтверджую точну втрату покриття</label>
             <label className="block text-sm">Пояснення скорочення<input className="input" maxLength={2000} value={reason} disabled={busy} onChange={(event) => setReason(event.target.value)} /></label></>}
         </Notice>}
-        {canPublish && (!loss || administrator) && <button type="button" className="btn btn-primary btn-compact-md" disabled={busy || disabled || review.blockers.length > 0 || (loss && (!ack || reason.trim().length < 3))}
-          onClick={() => action('publication/apply', { ...request, previewToken: review.previewToken, ...(loss ? { ackCoverageLoss: ack, coverageReason: reason } : {}) }, (data) => onPublished(data.revision))}>{compact ? 'Застосувати зміни' : 'Опублікувати відповідності'}</button>}
+        <div className="mc-publication-command">{editScope && <p>Редагували: {editScope.categoryName} · {editScope.language}. Змінених полів: {editScope.changedCount}. Застосування перевіряє весь пакет.</p>}<p>{review.blockers.length ? `Залишилося перешкод пакета: ${review.blockers.length}.` : 'Перевірку всього пакета завершено.'} До доставки: {review.affected.length} товарів. Назви чинних товарів залишаються збереженими.</p>{applyDisabledReason && <p role="status">{applyDisabledReason}</p>}{canPublish && (!loss || administrator) && <button type="button" className="btn btn-primary btn-compact-md" disabled={busy || disabled || review.blockers.length > 0 || (loss && (!ack || reason.trim().length < 3))}
+          onClick={() => action('publication/apply', { ...request, previewToken: review.previewToken, ...(loss ? { ackCoverageLoss: ack, coverageReason: reason } : {}) }, (data) => onPublished(data.revision))}>{compact ? 'Застосувати зміни' : 'Опублікувати відповідності'}</button>}</div>
       </div>}
     </> : <>
       <p className="text-sm">Опублікована версія незмінна. Передача товарів зберігається в Amber: можна залишити сторінку й повернутися пізніше.</p>
+      <p className="text-sm">Застосовано в Amber: {revision.publishedAt ? new Date(revision.publishedAt).toLocaleString('uk-UA') : 'Час застосування недоступний у цьому огляді'}.</p>
+      {!statusLoaded && !error && <LoadingState compact label="Читаємо збережений результат передачі…" />}
+      {statusLoaded && !status.length && <p>Для цієї публікації немає доступного запису передачі товарів. Підтвердження Magento не встановлено.</p>}
       {currentStatuses.map(statusRow)}
       {history.length > 0 && <MagentoDetails summary={`Попередні передачі (${history.length})`}>{() => history.map(statusRow)}</MagentoDetails>}
       <button type="button" className="btn btn-outline btn-compact-md" onClick={() => setRefresh((value) => value + 1)}>Оновити стан передачі</button>

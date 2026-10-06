@@ -10,7 +10,8 @@ const stale = (code) => ['MAGENTO_SYNC_AMBER_CHANGED', 'MAGENTO_SYNC_BINDING_CHA
 
 // One lane per process; session locks also serialize replicas. No product/request
 // row lock spans HTTP. This pool must be separate from the request-serving pool.
-function createAutomaticSyncWorker(config, { databasePool: db, jobOptions = {}, logger = { error() {} }, intervalMs = 5000 } = {}) {
+function createAutomaticSyncWorker(config, { databasePool: db, jobOptions = {}, logger = { error() {} }, intervalMs = 5000,
+  now = () => performance.now() } = {}) {
   let stopping = false; let timer; let active;
   async function runProduct(publicIdentityId) {
     const client = await db.connect(); let held = false; let request;
@@ -33,9 +34,10 @@ function createAutomaticSyncWorker(config, { databasePool: db, jobOptions = {}, 
         WHERE public_product_identity_id=$1`, [publicIdentityId])).rows[0];
       if (!request || request.state === 'synced') return;
       if (!config.configured) { await attention('configuration'); return; }
-      const options = { ...jobOptions, databasePool: db, actorUserId: Number(gate.actor_user_id), apply: true,
+      const options = { ...jobOptions, logger, databasePool: db, actorUserId: Number(gate.actor_user_id), apply: true,
         automatic: { publicIdentityId, productId: Number(request.product_id), generation: request.desired_generation,
           installationKey: gate.installation_key } };
+      require('./sync-performance').recordRequestClaim(options, request);
       const published = (await client.query(`SELECT id,origin_hash FROM magento_binding_revisions WHERE installation_key=$1
         AND state='published' ORDER BY version_number DESC LIMIT 1`, [gate.installation_key])).rows[0];
       if (!published || published.origin_hash !== originHash(config.baseUrl)) { await attention('data_or_binding'); return; }
@@ -90,7 +92,7 @@ function createAutomaticSyncWorker(config, { databasePool: db, jobOptions = {}, 
         else await attention(error.code === 'MAGENTO_SYNC_PREVIOUS_DISPATCH_UNRESOLVED' ? 'reconciliation_required'
           : error.code === 'ADMIN_PERMISSION_REVOKED' ? 'authorization'
           : error.code?.startsWith('MAGENTO_AUTO_') ? 'configuration'
-            : error.code?.startsWith('MAGENTO_') ? 'data_or_binding' : 'unexpected_failure');
+            : error.code?.startsWith('MAGENTO_') || error.code?.startsWith('HISTORICAL_') ? 'data_or_binding' : 'unexpected_failure');
       }
     } finally {
       if (held) await client.query('SELECT pg_advisory_unlock(hashtext($1))',
@@ -115,8 +117,13 @@ function createAutomaticSyncWorker(config, { databasePool: db, jobOptions = {}, 
     if (timer || active || stopping) return;
     const loop = () => {
       timer = null;
+      const startedAt = now();
       active = tick().catch(() => logger.error('magento.auto_sync.poll_failed', { code: 'LOCAL_WORKER_FAILURE' }))
-        .finally(() => { active = null; if (!stopping) { timer = setTimeout(loop, intervalMs); timer.unref(); } });
+        .finally(() => { active = null; if (!stopping) {
+          // Keep one lane and the idle cadence; long batches no longer add an
+          // unnecessary five-second sleep before selecting newly due work.
+          timer = setTimeout(loop, Math.max(0, intervalMs - (now() - startedAt))); timer.unref();
+        } });
     };
     timer = setTimeout(loop, intervalMs); timer.unref();
   }

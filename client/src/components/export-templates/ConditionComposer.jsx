@@ -19,7 +19,7 @@ function PredicateEditor({ node, context, onChange, creating, children, showSour
   const initial = conditionPredicate(context.definition, node);
   const [pending, setPending] = useState(null);
   const form = pending || initial || { source: '', operator: 'eq', value: undefined, values: [] };
-  const approved = availableSources(context.registry, context.group);
+  const approved = availableSources(context.registry, context.group, context.definition);
   const choices = Object.entries(context.definition.sources).filter(([, source]) => approved.some((entry) => ['kind', 'category', 'key', 'field'].every((key) => entry.descriptor[key] === source[key]))).map(([id, descriptor]) => ({ id, descriptor }));
   const source = context.definition.sources[form.source];
   const evidence = useSourceEvidence(source, context.loadSource);

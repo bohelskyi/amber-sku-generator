@@ -6,10 +6,11 @@ import { getPermissionUiState } from '../lib/permission-ui.js';
 import { useAdminPricingController } from './admin/useAdminPricingController';
 import { useAdminSchemaController } from './admin/useAdminSchemaController';
 import { getApiError } from '../lib/http-error';
+import { hasGeneratedQuestionKeys, isNativeCatalog } from '../lib/catalog-workflow.js';
 
 const emptyEditOption = { id: null, value_id: '', sku_code: '', label: '', label_en: '', visible_if_json: '', hidden_if_json: '', archived: false };
 const emptyNewCategory = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false, marketing_rounding_enabled: true };
-const emptyNewQuestion = { key: '', label: '', display_order: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' };
+const emptyNewQuestion = { key: '', label: '', display_order: '', sku_index: '', required: true, include_in_sku: false, input_type: 'options', numeric_validation: null, sku_separator: '', visible_if_json: '' };
 const emptyNewOption = { value_id: '', sku_code: '', label: '', label_en: '', visible_if_json: '', hidden_if_json: '', archived: false };
 const getNextDisplayOrder = (questions = []) => {
   const maxOrder = questions.reduce((maxValue, question) => {
@@ -63,7 +64,7 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
   const [selectedCat, setSelectedCat] = useState(null);
   const [selectedQuestion, setSelectedQuestion] = useState(null);
   const [editCat, setEditCat] = useState(emptyNewCategory);
-  const [editQuestion, setEditQuestion] = useState({ key: '', label: '', display_order: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', sku_separator: '', visible_if_json: '' });
+  const [editQuestion, setEditQuestion] = useState({ key: '', label: '', display_order: '', sku_index: '', required: true, include_in_sku: true, input_type: 'options', numeric_validation: null, sku_separator: '', visible_if_json: '' });
   const [newCat, setNewCat] = useState(emptyNewCategory);
   const [newQuest, setNewQuest] = useState(emptyNewQuestion);
   const [newOpt, setNewOpt] = useState(emptyNewOption);
@@ -99,6 +100,7 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
       required: question.required === 1,
       include_in_sku: question.include_in_sku === 1,
       input_type: question.input_type || 'options',
+      numeric_validation: question.numeric_validation || null,
       sku_separator: question.sku_separator || '',
       visible_if_json: question.visible_if_json ? formatMatchJson(question.visible_if_json) : '',
     });
@@ -233,13 +235,14 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
 
   const addQuestion = async () => {
     if (!selectedCat) return;
+    let createdQuestionId = null;
     const isNewTextQuestion = newQuest.input_type === 'text';
-    const shouldAddNewQuestionToSku = !isNewTextQuestion && newQuest.include_in_sku;
+    const shouldAddNewQuestionToSku = false;
     const parsedVisibleRule = parseVisibleRuleInput(newQuest.visible_if_json);
     if (!parsedVisibleRule.ok) return showFeedback({ tone: 'error', title: 'Питання не створено', message: 'Перевірте умову показу.' });
 
     try {
-      await api.post('/admin/question', {
+      const payload = {
         ...newQuest,
         sku_index: shouldAddNewQuestionToSku ? newQuest.sku_index : 0,
         required: newQuest.required ? 1 : 0,
@@ -253,7 +256,15 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
             : 0,
         visible_if_json: parsedVisibleRule.value,
         category_code: selectedCat.code,
-      });
+      };
+      if (isNativeCatalog(config)) {
+        delete payload.sku_index;
+        delete payload.include_in_sku;
+        delete payload.sku_separator;
+      }
+      if (hasGeneratedQuestionKeys(config) && !String(newQuest.key || '').trim()) delete payload.key;
+      const response = await api.post('/admin/question', payload);
+      if (isNativeCatalog(config) && Number.isSafeInteger(Number(response.data?.id)) && Number(response.data.id) > 0) createdQuestionId = Number(response.data.id);
     } catch (error) {
       showFeedback({ tone: 'error', title: 'Не вдалося створити питання', message: getApiError(error) });
       return false;
@@ -262,7 +273,7 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
     showFeedback({ title: 'Питання створено' });
     try {
       const nextConfig = await fetchConfig();
-      applyConfigWithSelection(nextConfig, selectedCat.code, null);
+      applyConfigWithSelection(nextConfig, selectedCat.code, createdQuestionId);
     } catch (error) {
       showRefreshWarning('Питання створено', error);
     }
@@ -290,6 +301,7 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
         required: editQuestion.required ? 1 : 0,
         include_in_sku: shouldAddEditedQuestionToSku ? 1 : 0,
         input_type: isEditedTextQuestion ? 'text' : 'options',
+        numeric_validation: isEditedTextQuestion ? editQuestion.numeric_validation || null : null,
         sku_separator: shouldAddEditedQuestionToSku ? editQuestion.sku_separator : '',
         visible_if_json: parsedVisibleRule.value,
       });
@@ -321,8 +333,7 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
     try {
       await api.post('/admin/option', {
         question_id: selectedQuestion.q_db_id,
-        value_id: newOpt.value_id,
-        sku_code: newOpt.sku_code || newOpt.value_id,
+        sku_code: null,
         label: newOpt.label,
         label_en: newOpt.label_en || null,
         visible_if_json: parsedVisibleRule.value,
@@ -346,7 +357,7 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
     setEditOpt({
       id: option.db_id,
       value_id: String(option.id),
-      sku_code: String(option.sku_code ?? option.id),
+      sku_code: String(option.sku_code ?? ''),
       label: option.label,
       label_en: option.label_en ?? '',
       visible_if_json: option.visible_if_json ? formatMatchJson(option.visible_if_json) : '',
@@ -367,7 +378,7 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
       await api.put('/admin/option', {
         id: editOpt.id,
         value_id: editOpt.value_id,
-        sku_code: editOpt.sku_code,
+        sku_code: editOpt.sku_code || null,
         label: editOpt.label,
         label_en: editOpt.label_en || null,
         visible_if_json: parsedVisibleRule.value,
@@ -386,6 +397,17 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
       showRefreshWarning('Варіант збережено', error);
     }
     return true;
+  };
+
+  const archiveQuestion = async (question, archived) => {
+    try {
+      await api.patch(`/admin/question/${question.q_db_id}/archive`, { archived });
+      const nextConfig = await fetchConfig();
+      applyConfigWithSelection(nextConfig, selectedCat.code, question.q_db_id);
+      showFeedback({ title: archived ? 'Питання перенесено в архів' : 'Питання відновлено',
+        message: 'Історію, призначення товарів і Magento збережено.' });
+      return true;
+    } catch (error) { showFeedback({ tone: 'error', title: 'Не вдалося змінити стан питання', message: getApiError(error) }); return false; }
   };
 
   const archiveOption = async (option, archived) => {
@@ -490,7 +512,15 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
     }));
   };
 
-  const deleteItem = (type, id) => {
+  const deleteItem = async (type, id) => {
+    let impact = null;
+    if (['question', 'option'].includes(type)) {
+      try {
+        impact = (await api.post('/admin/catalog-impact', { type, id })).data;
+        if (!impact.canDeleteLocal) return showFeedback({ tone: 'error', title: 'Видалення заблоковано',
+          message: `${impact.reason} Товарів: ${impact.affectedCounts.products}; схем: ${impact.affectedCounts.published_schemas}; прив’язок Magento: ${impact.affectedCounts.magento_bindings}; шаблонів: ${Number(impact.affectedCounts.published_templates || 0) + Number(impact.affectedCounts.template_drafts || 0)}; правил: ${impact.affectedCounts.rules}.` });
+      } catch (error) { return showFeedback({ tone: 'error', title: 'Не вдалося перевірити залежності', message: getApiError(error) }); }
+    }
     const labels = {
       category: selectedCat?.name,
       question: selectedQuestion?.label,
@@ -516,7 +546,7 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
       modifier: 'Правило та його множник більше не застосовуватимуться до нових розрахунків.',
     };
     setDeleteError('');
-    setDeleteConfirmation({ type, id, label: labels[type] || typeLabels[type] || 'Елемент', description: descriptions[type], consequence: consequences[type] });
+    setDeleteConfirmation({ type, id, label: labels[type] || typeLabels[type] || 'Елемент', description: descriptions[type], consequence: impact ? `${consequences[type]} ${impact.remoteDeletionReason}` : consequences[type], impact });
   };
 
   const cancelDelete = () => {
@@ -533,7 +563,8 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
     setDeleteBusy(true);
     setDeleteError('');
     try {
-      await api.post('/admin/delete-item', { type, id });
+      await api.post('/admin/delete-item', { type, id, ...(deleteConfirmation.impact ? { scope: 'local',
+        confirmation: deleteConfirmation.impact.confirmation, impactHash: deleteConfirmation.impact.impactHash } : {}) });
     } catch (error) {
       setDeleteError(getApiError(error));
       setDeleteBusy(false);
@@ -596,6 +627,7 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
     addOption,
     addQuestion,
     archiveOption,
+    archiveQuestion,
     autoAssignSkuIndexes,
     beginOptionEdit,
     canManagePricing,
@@ -610,7 +642,8 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
     deleteConfirmation,
     deleteError,
     discardLocalChanges,
-    canManageCatalog: auth.permissions.includes('catalog.manage'),
+      canManageCatalog: auth.permissions.includes('catalog.manage'),
+      canPrepareMagento: auth.permissions.includes('export_templates.view'),
     clearFeedback: () => setFeedback(null),
     effectiveMode,
     feedback,

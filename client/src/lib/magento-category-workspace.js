@@ -1,7 +1,7 @@
 export const deliveryPolicies = {
   authoritative_create_update: 'Оновлюється з менеджера',
-  initialize_create_only: 'Заповнюється лише при створенні',
-  magento_managed: 'Редагується в Magento',
+  initialize_create_only: 'Заповнюється лише для нового товару',
+  magento_managed: 'Вручну в Magento',
 };
 
 export function rulesIdentity(value) {
@@ -15,7 +15,7 @@ export function routeLabel(route, questions) {
   if (!match) return route.setName;
   const question = questions.find((q) => q.id === match[1]);
   const option = question?.options.find((o) => String(o.id) === match[3]);
-  return `${route.setName} · ${question?.label || match[1]} ${match[2] === '!=' ? 'крім' : '—'} ${option?.label || match[3]}`;
+  return `${route.setName} · ${question?.label || match[1]} ${match[2] === '!=' ? 'крім' : '—'} ${option?.label || `Невідоме локальне значення (ID ${match[3]})`}`;
 }
 
 export function changedFields(before, next, categoryCode) {
@@ -55,4 +55,34 @@ export function uniqueOptionSuggestions(entries, options) {
     const matches = options.filter((option) => !option.isEmpty && option.label === entry.evaluated);
     return matches.length === 1 ? [{ entry, option: matches[0] }] : [];
   });
+}
+
+export const deliveryPolicyEffects = {
+  authoritative_create_update: 'Для чинних товарів наступна підтверджена синхронізація оновить це поле з менеджера.',
+  initialize_create_only: 'Для чинних товарів це поле залишається без змін. Менеджер заповнює його тільки під час створення в Magento.',
+  magento_managed: 'Менеджер не змінює це поле в Magento. Підтримуйте його вручну в магазині.',
+};
+
+export function deliveryPolicyEffect(policy, target) {
+  return target === 'name' && policy === 'authoritative_create_update'
+    ? 'Нове правило формує назви нових товарів. Збережені назви чинних товарів залишаються закріпленими; їх застосування потребує окремого підтвердження Адміністратора.'
+    : deliveryPolicyEffects[policy];
+}
+
+export function localValueLabel(questions, questionKey, valueId, fallback) {
+  const question = questions.find((item) => item.id === questionKey);
+  const option = question?.options?.find((item) => String(item.id) === String(valueId));
+  return option?.label || fallback || `Невідоме локальне значення (ID ${valueId})`;
+}
+
+export function matchesRepairValue(entry, context = {}) {
+  const match = entry.source?.match(/\.([^.=]+)=value_id:(-?\d+)$/);
+  return Boolean(match && context.question === match[1] && context.value !== undefined && context.value === match[2]);
+}
+
+export function reviewScopeSummary(scope, categoryCode) {
+  if (!scope || !Array.isArray(scope.unresolved)) return null;
+  const others = scope.unresolved.filter((entry) => entry.group !== categoryCode);
+  return { total: scope.unresolved.length, local: scope.unresolved.length - others.length,
+    otherCount: others.length, otherCategories: [...new Set(others.map((entry) => entry.group))] };
 }

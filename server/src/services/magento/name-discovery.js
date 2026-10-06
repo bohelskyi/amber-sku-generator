@@ -83,11 +83,11 @@ function createNameDiscovery(config, { databasePool: db, fetchImpl, logger = { e
             const automatic = { publicIdentityId: product.public_product_identity_id, productId: Number(product.product_id),
               generation: product.desired_generation, installationKey: gate.installation_key };
             const result = await reconcileObservation(config, observation, { databasePool: db, actorUserId: Number(gate.actor_user_id), automatic });
-            if (['identity_changed', 'unavailable'].includes(result.action)) {
+            if (['identity_changed', 'unavailable', 'foreign_identity'].includes(result.action)) {
               await lane.query(`UPDATE magento_product_sync_requests SET state='needs_attention',reason_code='data_or_binding',
                 diagnostics=$3::jsonb WHERE public_product_identity_id=$1 AND desired_generation=$2
                 AND reason_code IS DISTINCT FROM 'reconciliation_required'`, [product.public_product_identity_id,
-              product.desired_generation, JSON.stringify([{ code: result.action === 'identity_changed' ? 'NAME_REMOTE_IDENTITY_CHANGED' : 'NAME_READ_UNAVAILABLE' }])]);
+              product.desired_generation, JSON.stringify([{ code: result.action === 'foreign_identity' ? require('./native-identity-ownership').CODE : result.action === 'identity_changed' ? 'NAME_REMOTE_IDENTITY_CHANGED' : 'NAME_READ_UNAVAILABLE' }])]);
             }
           }
         } catch (cause) {

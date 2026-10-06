@@ -6,6 +6,80 @@ const review = require('../src/services/magento/integration-binding-review');
 const fixture = require('../test/fixtures/magento-v4');
 const { REQUIRED } = require('../src/services/export-templates/column-contract');
 
+test('official column upgrade and exact TEST field preserve seven routes through actual successor preparation', async () => {
+  const name = 'amber_columns_successor_test', url = await recreateTestDatabase(name), db = new Pool({ connectionString: url });
+  try {
+    await runNodeInDatabase(url, "require('./src/db/run-migrations').runMigrations().catch(e=>{console.error(e);process.exitCode=1;});");
+    const actor = Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Column successor admin') RETURNING id")).rows[0].id);
+    await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'", [actor]);
+    const options = { databasePool: db, mutationContext: { actorUserId: actor } };
+    const f = require('../test/fixtures/magento-test-field').testFieldFixture();
+    const { scopeBaseFieldToProductRoute } = require('../src/services/magento/integration-field-scope');
+    const definition = scopeBaseFieldToProductRoute(f.definition, f.schema, f.scope);
+    for (const g of definition.groups) await db.query('INSERT INTO categories(code,name) VALUES($1,$1)', [g.route]);
+    for (const [id, source] of Object.entries(definition.sources)) {
+      if (source.kind === 'product') continue;
+      const q = (await db.query(`INSERT INTO questions(category_code,key,label,input_type,include_in_sku,required)
+        VALUES($1,$2,$2,$3,0,0) RETURNING id`, [source.category, source.key, source.kind === 'semantic' ? 'options' : 'text'])).rows[0];
+      const values = [...new Set(Object.values(definition.questionContracts).filter(q => q.source === id).flatMap(q => q.allowed))];
+      for (const value of values) await db.query('INSERT INTO options(question_id,value_id,sku_code,label) VALUES($1,$2,$3,$3)', [q.id, value, value]);
+    }
+    async function publishTemplate(d, key) {
+      const family = await templates.createTemplate({ key, displayName: key, definition: d }, options);
+      return templates.publishTemplate(family.id, { expectedRevision: family.draft.revision, expectedDefinitionHash: family.draft.definitionHash }, options);
+    }
+    const oldVersion = await publishTemplate(f.old, 'column-old'), nextVersion = await publishTemplate(definition, 'column-next');
+    const config = { configured: true, baseUrl: 'https://successor.invalid' };
+    const sourceBindings = structuredClone(f.source.bindings);
+    for (const route of sourceBindings.routes.filter(r => r.routeKey.startsWith('SV.'))) route.setId = 151;
+    let draft = await bindings.createDraft({ installationKey: 'column-successor', origin: config.baseUrl,
+      templateVersionId: oldVersion.id, observedAt: new Date().toISOString(), schema: f.schema }, options);
+    draft = await bindings.updateDraft(draft.id, { expectedRevision: draft.revision, bindings: sourceBindings }, options);
+    const published = await bindings.publishDraft(draft.id, { expectedRevision: draft.revision, expectedCurrentId: null }, options);
+    const before = await bindings.getRevision(published.id, options);
+    const remote = { ...options, discover: async () => ({ schema: f.schema, categories: [], observedAt: new Date().toISOString() }),
+      fetchImpl: async () => assert.fail('No real Magento request is permitted') };
+    const input = { sourceId: published.id, expectedSourceRevision: published.revision, templateVersionId: nextVersion.id, productIds: [] };
+    const prepared = await successor.prepare(config, input, remote);
+    assert.deepEqual(prepared.blockers, []);
+    assert.equal(prepared.bindings.routes.length, 7);
+    for (const route of before.bindings.routes) {
+      const carried = prepared.bindings.routes.find(r => r.routeKey === route.routeKey);
+      assert.equal(carried.reviewState, 'approved'); assert.equal(carried.setId, route.setId);
+    }
+    for (const kind of ['attributes', 'options', 'policies']) for (const old of before.bindings[kind]) {
+      const next = prepared.bindings[kind].find(n => n.bindingKey === old.bindingKey
+        && (kind !== 'options' || n.sourceKind === old.sourceKind
+          && (old.sourceKind === 'semantic' ? n.sourceKey === old.sourceKey : n.outputKey === old.outputKey)));
+      assert.ok(next); assert.equal(next.reviewState, old.reviewState);
+      if (kind === 'options') assert.equal(next.optionId, old.optionId);
+      if (kind === 'policies') { assert.equal(next.policy, old.policy); assert.equal(next.evidence.createValue, old.evidence.createValue); }
+    }
+    const additions = prepared.bindings.attributes.filter(a => a.target === f.target);
+    assert.equal(additions.length, 1); assert.equal(additions[0].routeKey, f.generalRoute);
+    assert.notEqual(additions[0].reviewState, 'approved');
+    assert.ok(prepared.bindings.options.filter(o => o.bindingKey === additions[0].bindingKey).every(o => o.reviewState !== 'approved'));
+    const successorDraft = await successor.apply(config, { ...input, previewToken: prepared.previewToken }, remote);
+    assert.equal(successorDraft.state, 'draft');
+    const validation = await bindings.validateDraft(successorDraft.id, options);
+    assert.ok(validation.diagnostics.some(d => d.code === 'BINDING_REVIEW_REQUIRED'));
+    const preview = await require('../src/services/magento/binding-publication').preview(config,
+      { bindingRevisionId: successorDraft.id, expectedRevision: successorDraft.revision, expectedCurrentId: published.id }, remote);
+    assert.deepEqual(preview.lostRoutes, []);
+    assert.equal(preview.blockers.filter(d => d.code === 'BINDING_REVIEW_REQUIRED').length, 3);
+    assert.ok(!preview.blockers.some(d => d.code === 'REPRESENTATIVE_CREATE_REQUIRED'),
+      'Equivalent column conversion must not turn seven existing routes into new routes');
+    assert.deepEqual(await bindings.getRevision(published.id, options), before);
+    assert.equal((await bindings.getCurrentPublished('column-successor', options)).id, published.id);
+    for (const version of [oldVersion, nextVersion]) assert.deepEqual(
+      (await db.query('SELECT definition,definition_hash FROM export_template_versions WHERE id=$1', [version.id])).rows[0],
+      { definition: version.definition, definition_hash: version.definitionHash });
+    for (const table of ['products','sku_registry','magento_sync_jobs','magento_product_sync_requests']) {
+      assert.equal((await db.query(`SELECT count(*)::int n FROM ${table}`)).rows[0].n, 0);
+    }
+  } finally { await db.end(); await dropTestDatabase(name); }
+});
+
 test('SV narrow requiredness successor retains unrelated reviewed decisions and policies', async (t) => {
   const name = 'amber_sv_successor_test', url = await recreateTestDatabase(name), db = new Pool({ connectionString: url });
   try {

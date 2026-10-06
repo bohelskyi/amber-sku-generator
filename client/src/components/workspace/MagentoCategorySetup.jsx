@@ -11,7 +11,7 @@ import './category-journeys.css';
 
 const emptyCategory = { code: '', name: '', requires_weight: true, skip_hidden_sku_questions: false, marketing_rounding_enabled: true };
 
-export function CategoryCheckpoints({ category, detail, permissions }) {
+export function CategoryCheckpoints({ category, detail, permissions, identityMode = 'encoded_sku' }) {
   const code = category.code; const encoded = encodeURIComponent(code);
   const back = `/admin/magento/categories/new?category=${encoded}`;
   const catalog = `/admin/catalog?category=${encoded}&returnTo=${encodeURIComponent(back)}`;
@@ -24,12 +24,14 @@ export function CategoryCheckpoints({ category, detail, permissions }) {
     { title: 'Розміщення та поля магазину', state: paths.length ? `У чинних правилах: ${paths.length} розділів магазину` : 'У чинних правилах розміщення ще немає', to: permissions.includes('export_templates.manage') ? `/admin/magento/prepare?intent=category&category=${encoded}` : null, action: 'Налаштувати магазин' },
     { title: 'Перевірка та підключення', state: category.ready ? 'Структурні відповідності підтверджено. Доставка товарів перевіряється окремо.' : 'Підключення ще потребує перевірки', to: `/admin/magento/categories/${encoded}?tab=products`, action: 'Перевірити товар' },
   ];
-  return <ol className="category-checkpoints" aria-label="Налаштування нової категорії">{steps.map((step) => <li key={step.title}><div><strong>{step.title}</strong><p>{step.state}</p></div>{step.to ? <Link className="btn btn-outline" to={step.to}>{step.action}</Link> : <span className="text-sm text-slate-600">Потрібен відповідний дозвіл</span>}</li>)}</ol>;
+  const native = identityMode === 'public_identity';
+  return <><p className="mb-4 text-sm text-slate-600">Пройдіть кроки нижче: опишіть товар, перевірте ціну, підготуйте магазин і перевірте приклад перед підключенням.</p><ol className="category-checkpoints" aria-label="Налаштування нової категорії">{steps.filter((step) => !native || step.title !== 'Схема внутрішнього SKU').map((step,index) => <li key={step.title}><div><strong>{index+1}. {step.title}</strong><p>{step.state}</p></div>{step.to ? <Link className="btn btn-outline" to={step.to}>{step.action}</Link> : <span className="text-sm text-slate-600">Потрібен відповідний дозвіл</span>}</li>)}</ol>{native && <details className="mt-3"><summary className="min-h-[34px] cursor-pointer py-2">Історична SKU-схема та підключення значень Magento</summary><p className="text-sm">Нові товари використовують чинні характеристики каталогу. Для нової інтеграції виберіть підтримку цих характеристик у чернетці правил, перевірте поля й значення Magento та опублікуйте перевірену версію. Історична SKU-схема залишається доказом старих товарів; її публікація не потрібна для нової характеристики.</p>{permissions.includes('catalog.view') && <Link className="btn btn-outline" to={catalog}>Переглянути історичну схему</Link>}</details>}</>;
 }
 
 export default function MagentoCategorySetup() {
   const { permissions } = useAuth(); const [params, setParams] = useSearchParams();
   const code = params.get('category') || '';
+  const [identityMode, setIdentityMode] = useState('encoded_sku');
   const [detail, setDetail] = useState(null); const [loadError, setLoadError] = useState(''); const [refresh, setRefresh] = useState(0);
   const [form, setForm] = useState(emptyCategory); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [receipt, setReceipt] = useState(null);
   const inFlight = useRef(false);
@@ -41,6 +43,11 @@ export default function MagentoCategorySetup() {
       .catch(() => { if (!controller.signal.aborted) setLoadError('Не вдалося прочитати стан категорії.'); });
     return () => controller.abort();
   }, [refresh, code]);
+  useEffect(() => {
+    const controller = new AbortController();
+    api.get('/config', { signal: controller.signal }).then(({ data }) => { if (!controller.signal.aborted) setIdentityMode(data?.productCreation?.identityMode === 'public_identity' ? 'public_identity' : 'encoded_sku'); }).catch(() => {});
+    return () => controller.abort();
+  }, []);
   useEffect(() => {
     if (!dirty) return undefined;
     const warn = (event) => { event.preventDefault(); event.returnValue = ''; };
@@ -67,7 +74,7 @@ export default function MagentoCategorySetup() {
     {!detail && !loadError && <LoadingState />}
     {detail && <label className="block text-sm">Продовжити налаштування наявної категорії<select className="input" value={code} onChange={(event) => { const next = event.target.value; navigation.request(() => { setReceipt(null); setError(''); setParams(next ? { category: next } : {}); }); }}><option value="">Створити нову категорію</option>{detail.categories.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>}
     {!code && !receipt && (permissions.includes('catalog.manage') ? <fieldset disabled={busy}>{error && <Notice tone="error">{error}</Notice>}<CategoryForm category={form} onChange={setForm} onSave={save} onCancel={() => navigation.request(() => setForm(emptyCategory))} /></fieldset> : <Notice>Для створення категорії потрібен дозвіл керування каталогом.</Notice>)}
-    {code && category && <CategoryCheckpoints category={category} detail={detail} permissions={permissions} />}
+    {code && category && <CategoryCheckpoints category={category} detail={detail} permissions={permissions} identityMode={identityMode} />}
     {code && detail && !category && <Notice>Категорія ще не відображається у прочитаному стані. Оновіть стан перед наступними діями.<button className="btn btn-outline" onClick={() => setRefresh((value) => value + 1)}>Оновити стан категорії</button></Notice>}
   </div>;
 }

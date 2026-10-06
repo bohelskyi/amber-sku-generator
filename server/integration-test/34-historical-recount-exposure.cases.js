@@ -6,7 +6,7 @@ for (const versionCount of [3,5]) suite.test(`historical recount exposure: ${ver
   const { assert, Pool, recreateTestDatabase, dropTestDatabase, runNodeInDatabase } = suite;
   const name='amber_historical_exposure_test',url=await recreateTestDatabase(name),db=new Pool({connectionString:url,options:'-c amber.lifecycle_writer_version=1'});
   try {
-    await runNodeInDatabase(url,"require('./src/db/run-migrations').runMigrations().catch(e=>{console.error(e);process.exitCode=1;});");
+    await require('./historical-runtime-fixture')(suite,url);
     const actor=Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Historical test') RETURNING id")).rows[0].id);
     await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'",[actor]);
     const {scenario,config,published,installationKey}=await require('./stable-recount-exposure-fixture')(db,actor);

@@ -92,7 +92,7 @@ function BindingReviewWorkspace({ revision, templateVersions = [], onChanged, mo
   }
   const request = { sourceId: revision.id, expectedSourceRevision: revision.revision, templateVersionId: versionId };
   const isCurrent = currentPublishedId === undefined || currentPublishedId === revision.id;
-  const reviewEntries = review && <ReviewEntries review={review} categoryCode={categoryCode} field={field} canManage={canManage} busy={busy}
+  const reviewEntries = review && <ReviewEntries review={review} categoryCode={categoryCode} field={field} canManage={canManage && !review?.revision.catalogAvailability?.publicationBlocked} busy={busy}
     act={(name, body) => action(`bindings/${revision.id}/${name}`, body, onChanged)} />;
   return <section className="card space-y-3 p-5"><h2 className="font-semibold">{mode === 'successor' ? guided ? refreshing ? 'Продовжити підключення' : 'Почати зміну налаштувань' : 'Підготовка наступної версії' : 'Перевірка відповідностей'}</h2>
     {error && <Notice tone="error">{error}</Notice>}

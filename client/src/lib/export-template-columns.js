@@ -97,23 +97,26 @@ export function columnChange(definition, groupIndex, action, code, value) {
 
 // Picker descriptors derive only from authorized registry metadata. Server source
 // proof remains mandatory; current SKU-only draft questions are deliberately absent.
-export function availableSources(registry, group) {
+export function availableSources(registry, group, definition) {
   const result = (registry?.productFields || []).map((field) => ({ id: field, label: field, descriptor: { kind: 'product', field, type: ['full_sku', 'public_sku', 'category'].includes(field) ? 'text' : 'scalar' } }));
   const questions = registry?.references?.questions || [];
   const historical = (registry?.references?.schemas || []).filter((s) => s.category_code === group).flatMap((s) => s.questions);
-  const keys = new Set([...historical.map((q) => q.key), ...questions.filter((q) => q.category_code === group && Number(q.include_in_sku) === 0).map((q) => q.key)]);
+  const native = registry?.nativeCharacteristicsAuthoring === true && definition?.evaluatorVersion === 'magento-declarative-5'
+    && definition?.sourceContractVersion === 'public-product-characteristics-v1';
+  const keys = new Set([...historical.map((q) => q.key), ...questions.filter((q) => q.category_code === group
+    && (native ? q.archived === false : Number(q.include_in_sku) === 0)).map((q) => q.key)]);
   for (const key of keys) {
     const current = questions.filter((q) => q.category_code === group && q.key === key);
     if (current.length > 1) continue;
     result.push({ id: group + '.' + key, label: group + ' · ' + (current[0]?.label || key) + ' · ' + key + ' · ' + (current[0]?.input_type || 'historical SKU'),
-      descriptor: { kind: current[0] && Number(current[0].include_in_sku) === 0 ? 'information' : 'semantic', category: group, key, type: 'scalar', provenance: 'supplied-stored-answers-v1', aliases: [] } });
+      descriptor: { kind: current[0] && (native ? current[0].input_type !== 'options' : Number(current[0].include_in_sku) === 0) ? 'information' : 'semantic', category: group, key, type: 'scalar', provenance: 'supplied-stored-answers-v1', aliases: [] } });
   }
   return result;
 }
 // Preserve a stored descriptor/identity when it represents an authorized source.
 // Presentation must not require the operator to replace generated local IDs.
 export function columnSourceChoices(definition, registry, group, selectedId) {
-  const choices = availableSources(registry, group);
+  const choices = availableSources(registry, group, definition);
   if (choices.some((choice) => choice.id === selectedId)) return choices;
   const stored = definition.sources[selectedId];
   if (!stored) return choices;

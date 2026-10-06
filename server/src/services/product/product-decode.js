@@ -173,15 +173,17 @@ async function projectStoredProduct(lookup, category, queryable) {
   const product = lookup.product;
   const details = getProductDetails(product);
   const answers = getStoredAnswers(product);
-  const schema = product.sku_schema_version_id
+  const semantic = product.characteristic_version_id
+    ? await require('./characteristic-config').getCharacteristicVersion(queryable, product.characteristic_version_id) : null;
+  const schema = semantic || (product.sku_schema_version_id
     ? await getSchemaVersionById(product.sku_schema_version_id, queryable)
-    : await getSchemaVersion(category.code, details.skuSchemaVersion || 1, queryable);
+    : await getSchemaVersion(category.code, details.skuSchemaVersion || 1, queryable));
   const questions = schema?.questions || [];
-  const decodedAnswers = questions.map((question) => {
+  const decodedAnswers = questions.filter(question => !semantic || Object.hasOwn(answers,question.key)).map((question) => {
     const value = answers[question.key];
     const option = getContextualOption(question, value, answers);
     const isPlaceholder = value === undefined
-      || (value === 0 && !option && !question.options.some((item) => item.sku_code === '0'));
+      || (!semantic && value === 0 && !option && !question.options.some((item) => item.sku_code === '0'));
     return {
       key: question.key,
       label: question.label,
@@ -198,7 +200,8 @@ async function projectStoredProduct(lookup, category, queryable) {
   });
   // Historical pricing is read from the row, never recalculated or hidden by today's rules.
   const scenario = details.pricingScenario;
-  const configuredMode = scenario?.price_mode || 'category_default';
+  const configuredMode = semantic && details.creationPricingDecision?.mode === 'manual_uah'
+    ? 'manual_uah' : scenario?.price_mode || 'category_default';
   const priceMode = configuredMode === 'category_default' && Number(product.price_per_gram) > 0
     ? 'per_gram_usd' : configuredMode;
   const dependentKeys = uniqueValues([
@@ -216,18 +219,26 @@ async function projectStoredProduct(lookup, category, queryable) {
       dependentKeys,
     } },
   });
+  let weightConflict = null;
+  if (Object.hasOwn(answers, 'weight')) {
+    try { require('../../utils/numbers').resolveProductWeight(product.weight, answers.weight); }
+    catch (cause) { weightConflict = { code: cause.code || 'WEIGHT_INVALID', details: cause.details || null, message: cause.message }; }
+  }
   const { baseFullSku, variationNumber } = parseVariationSku(product.full_sku);
   const suffixRaw = baseFullSku.startsWith(product.base_sku)
     ? baseFullSku.slice(product.base_sku.length) : '';
   const hasSuffix = /^\d+$/.test(suffixRaw);
   return {
-    sku: product.full_sku,
+    sku: product.full_sku || product.public_sku,
     internalSku: product.full_sku,
     publicSku: product.public_sku || null,
+    ...require('./test-products').projection(product),
     lookupKind: lookup.lookupKind,
     decodeSource: 'stored_history',
+    weightConflict,
+    characteristicConfig: semantic ? { id: String(semantic.id), version: String(semantic.version), configHash: semantic.config_hash } : null,
     skuSchema: {
-      id: schema ? Number(schema.id) : null,
+      id: !semantic && schema ? Number(schema.id) : null,
       version: schema?.version ?? details.skuSchemaVersion ?? null,
       marker: schema?.marker || '',
       status: schema?.status || null,

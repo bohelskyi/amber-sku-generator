@@ -1,3 +1,4 @@
+const { getCatalogItemImpact } = require('./catalog-impact');
 const lifecycleGate = require('../full-product-cutover-gate');
 const pool = require('../../db/pool');
 const { writeAuditEvent } = require('../../audit/audit-events');
@@ -6,6 +7,7 @@ const { normalizeCategoryCode } = require('./catalog-input');
 const { lockOptionWithUsage } = require('./option-mutation-state');
 
 async function setOptionArchived({ id, archived }, options = {}) {
+  if (typeof archived !== 'boolean') throw Object.assign(new Error('Потрібен явний стан архіву.'), { statusCode: 400 });
   const mutationContext = createMutationContext(options.mutationContext);
   const client = await pool.connect();
   try {
@@ -44,6 +46,26 @@ async function setOptionArchived({ id, archived }, options = {}) {
   } finally {
     await lifecycleGate.release(client); client.release();
   }
+}
+
+async function setQuestionArchived({ id, archived }, options = {}) {
+  if (typeof archived !== 'boolean') throw Object.assign(new Error('Потрібен явний стан архіву.'), { statusCode: 400 });
+  const client = await pool.connect();
+  try {
+    await lifecycleGate.begin(client, 'BEGIN');
+    const result = await client.query('SELECT id, category_code, key, label, archived FROM questions WHERE id=$1 FOR UPDATE', [Number(id)]);
+    const question = result.rows[0];
+    if (!question) throw Object.assign(new Error('Питання не знайдено.'), { statusCode: 404 });
+    if (Boolean(question.archived) !== archived) {
+      await client.query('UPDATE questions SET archived=$1 WHERE id=$2', [archived, Number(id)]);
+      await writeAuditEvent(client, { mutationContext: createMutationContext(options.mutationContext),
+        eventKey: archived ? 'catalog.question.archived' : 'catalog.question.unarchived',
+        subjectType: 'catalog_question', subjectId: Number(id),
+        details: { categoryCode: question.category_code, key: question.key, label: question.label } });
+    }
+    await lifecycleGate.commit(client);
+  } catch (error) { await lifecycleGate.rollback(client); throw error; }
+  finally { await lifecycleGate.release(client); client.release(); }
 }
 
 async function updateQuestionsOrder({ category_code, questions }, options = {}) {
@@ -141,6 +163,16 @@ async function deleteCatalogItem(type, id, options = {}) {
   try {
     await lifecycleGate.begin(client, 'BEGIN');
     let event = null;
+    if (['question', 'option'].includes(type)) {
+      if (options.scope === 'both') throw Object.assign(new Error('Видалення в обох системах ще не підтримується.'), { statusCode: 501 });
+      await client.query(type === 'question' ? 'SELECT id FROM questions WHERE id=$1 FOR UPDATE'
+        : 'SELECT id FROM options WHERE id=$1 FOR UPDATE', [Number(id)]);
+      const impact = await getCatalogItemImpact(type, id, client);
+      if (!impact.canDeleteLocal) throw Object.assign(new Error(impact.reason), { statusCode: 409, impact });
+      if (options.confirmation !== impact.confirmation || options.impactHash !== impact.impactHash) {
+        throw Object.assign(new Error('Оновіть перегляд залежностей і підтвердьте саме цю дію.'), { statusCode: 409, impact });
+      }
+    }
 
     if (type === 'category') {
       const categoryResult = await client.query(
@@ -293,6 +325,8 @@ async function deleteCatalogItem(type, id, options = {}) {
 }
 
 module.exports = {
+  setQuestionArchived,
+  getCatalogItemImpact,
   setOptionArchived,
   updateQuestionsOrder,
   deleteCatalogItem,

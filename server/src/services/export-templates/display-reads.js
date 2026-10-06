@@ -22,7 +22,9 @@ async function sourceDetails(client, input) {
     || !/^[A-Za-z0-9_]{1,80}$/.test(input.key) || ['__proto__', 'constructor', 'prototype'].includes(input.key)) invalid();
   const parameters = [input.category, input.key, 513];
   const current = (await client.query(`SELECT q.label, q.include_in_sku, q.input_type,
-    (SELECT COALESCE(jsonb_agg(o),'[]') FROM (SELECT value_id::text, label, sku_code
+    COALESCE((to_jsonb(q)->>'archived')::boolean,false) AS archived,
+    (SELECT COALESCE(jsonb_agg(o),'[]') FROM (SELECT value_id::text, label, sku_code, archived,
+      to_jsonb(options)->>'label_en' AS label_en
       FROM options WHERE question_id=q.id ORDER BY id LIMIT $3) o) AS options
     FROM questions q WHERE category_code=$1 AND key=$2 ORDER BY q.id LIMIT 2`, parameters)).rows;
   const historical = (await client.query(`SELECT q.label, v.version, v.status,
