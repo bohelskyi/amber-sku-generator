@@ -39,8 +39,8 @@ function schema() {
       attribute_code, frontend_input, options: opts.map(([value,label]) => ({ value, label })) })),
     attributeSets: [{ attribute_set_id: 8001, attribute_set_name: 'Explicit fixture decision', attributeCodes: definitions.map(([c]) => c) }] });
 }
-function approvedBindings(d = definition(), s = schema()) {
-  const plans = requirements(d, s); const selected = plans.find((p) => p.amberGroup === 'BR');
+function approvedBindings(d = definition(), s = schema(), group = 'BR') {
+  const plans = requirements(d, s); const selected = plans.find((p) => p.amberGroup === group);
   const bindings = { routes: plans.map((r) => ({ routeKey: r.routeKey, enabled: r === selected,
     setId: r === selected ? 8001 : null, reviewState: r === selected ? 'approved' : 'review_required' })),
   attributes: [], options: [], policies: [] };

@@ -14,7 +14,7 @@ const config = parseMagentoConfig({ MAGENTO_BASE_URL: 'https://sync.example.inva
 const literal = (value) => ({ op: 'literal', value });
 
 
-module.exports = async function setup(pool, actorUserId) {
+module.exports = async function setup(pool, actorUserId, { group = 'BR' } = {}) {
   const mutations = { databasePool: pool, mutationContext: { actorUserId, requestId: 'sync-fixture' } };
   for (const group of ['BR', 'NM', 'KL', 'CH', 'AR', 'SV']) await pool.query('INSERT INTO categories(code,name) VALUES($1,$1) ON CONFLICT(code) DO NOTHING', [group]);
   const d = structuredClone(fixture.definition()); d.sources = { sku: d.sources.sku,
@@ -39,7 +39,7 @@ module.exports = async function setup(pool, actorUserId) {
   const makeDraft = async () => {
     let draft = await bindings.createDraft({ installationKey, origin: config.baseUrl, templateVersionId: version.id,
       observedAt: new Date().toISOString(), schema }, mutations);
-    const b = fixture.approvedBindings(definition, schema);
+    const b = fixture.approvedBindings(definition, schema, group);
     const native = { attribute_set_code: 'attribute_set_id', product_type: 'type_id', product_online: 'status', visibility: 'visibility',
       categories: 'extension_attributes.category_links', product_websites: 'extension_attributes.website_ids', qty: 'inventory.qty', is_in_stock: 'inventory.is_in_stock', store_view_code: 'store_view_code' };
     for (const a of b.attributes) {
@@ -57,11 +57,10 @@ module.exports = async function setup(pool, actorUserId) {
   const draft = await makeDraft();
   const published = await bindings.publishDraft(draft.id, { expectedRevision: draft.revision, expectedCurrentId: null }, mutations);
 
-  async function scenario({ create = false, initialLinks = [] } = {}) {
-    const sku = 'SV5111010';
+  async function scenario({ create = false, initialLinks = [], sku = 'SV5111010', category = 'BR' } = {}) {
     const product = (await insertProductFixture(pool, `INSERT INTO products
       (full_sku,base_sku,sequence_number,category,weight,total_price,total_price_uah,price_per_gram,uah_rate,details)
-      VALUES ($1,$1,0,'BR',5,10,42,2,40,'{"answers":{}}') RETURNING id,public_product_identity_id`, [sku])).rows[0];
+      VALUES ($1,$1,0,$2,5,10,42,2,40,'{"answers":{}}') RETURNING id,public_product_identity_id`, [sku,category])).rows[0];
     await pool.query("UPDATE product_full_export_state SET business_exclusion_state='none',delivery_version=delivery_version+1 WHERE product_id=$1", [product.id]);
     const initial = { id: product.id + 100000, sku, attribute_set_id: 8001, name: 'Old name', type_id: 'simple', price: 40,
       status: 1, visibility: 4, custom_attributes: [{ attribute_code: 'unknown_attribute', value: 'Keep me' }], media_gallery_entries: [{ id: 100 }],
