@@ -25,21 +25,33 @@ const nativeProduct = {
   product: { id: 91, status: 'active', weight: 12.7, details: { answers: { weight: 12.7 } } },
   skuSchema: { id: null, version: null, marker: '' }, suffix: { type: 'none', raw: null, value: null }, pricing: null,
 };
-let config, decoded, post, owner, writeText;
+let config, decoded, post, owner, writeText, operations;
+const operation = (kind, id, skus, result, selectedSkus = null) => ({ format: 'historical-review-operation-v1',
+  operationId: id, kind, state: result ? 'ready' : 'queued', skus, selectedSkus, result,
+  deadlineAt: new Date(Date.now() + 300000).toISOString(), progress: { phase: result ? 'ready' : 'queued', completed: result ? skus.length : 0, total: skus.length } });
 beforeEach(() => {
   config = structuredClone(baseConfig); decoded = structuredClone(nativeProduct);
+  operations = new Map();
   owner = { id: 'root-integration-test', valid: true };
   writeText = vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
   Element.prototype.scrollIntoView = vi.fn();
   vi.spyOn(api, 'get').mockImplementation(async (url) => ({ data:
-    url === '/config' ? config : url === '/products' ? [] : url === '/products/91/photos'
+    url.startsWith('/products/historical-reactivation/operations/') ? operations.get(url.split('/').at(-1))
+      : url === '/config' ? config : url === '/products' ? [] : url === '/products/91/photos'
       ? { productId: 91, version: '0', photos: [], enableWhenVerified: false, delivery: null }
       : url === '/products/91/lifecycle' ? { productId: 91, visibility: null }
         : url === '/magento/product-status/91' ? { state: 'not_queued' } : {} }));
   post = vi.spyOn(api, 'post').mockImplementation(async (url, body) => {
-    if (url === '/products/historical-reactivation/preview') return {data:makeReview()};
-    if (url === '/products/historical-reactivation/confirm') return {data:{...makeReceipt(),batchId:body.idempotencyKey}};
+    if (url === '/products/historical-reactivation/preview') {
+      operations.set(body.operationId, operation('preview', body.operationId, body.skus, makeReview()));
+      return {status:202,data:operation('preview', body.operationId, body.skus, null)};
+    }
+    if (url === '/products/historical-reactivation/confirm') {
+      operations.set(body.idempotencyKey, operation('confirm', body.idempotencyKey, body.skus,
+        {...makeReceipt(),batchId:body.idempotencyKey}, body.selectedSkus));
+      return {status:202,data:operation('confirm', body.idempotencyKey, body.skus, null, body.selectedSkus)};
+    }
     if (url === '/decode') return { data: decoded };
     if (url === '/preview' || url === '/price-preview') return { data: config.productCreation.identityMode === 'encoded_sku'
       ? { fullProposedSku: 'NM-LEGACY-92', skuSchemaVersionId: 3, previewToken: 'reviewed-legacy-proof', weightVal: 12.7,
@@ -83,5 +95,5 @@ it('leaving an unsent historical list uses dirty-navigation Stay and Discard wit
 });
 
 it('root entry previews exact articles and only acknowledged selection creates a historical receipt through the existing authenticated API',async()=>{
- config.historicalReactivation={available:true,format:'historical-reactivation-v1',administratorOnly:true,maxItems:100,targetStatus:2};openWorkspace(historicalPermissions,'/products',[{key:'administrator'}]);fireEvent.click(await screen.findByRole('button',{name:'Нове історичне рішення Адміністратора'}));fireEvent.change(screen.getByLabelText('Точні артикули, по одному в рядку'),{target:{value:'AR-000001\nSV-000002\nMISSING'}});expect(post).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'Перевірити товари'}));await screen.findByText('Можна відновити: 2. Потребують уваги: 0. Пропущено: 1.');expect(post.mock.calls).toEqual([['/products/historical-reactivation/preview',{skus:['AR-000001','SV-000002','MISSING']}]]);fireEvent.click(screen.getByRole('checkbox',{name:'Обрати AR-000001'}));fireEvent.click(screen.getByRole('checkbox',{name:/Погоджую/}));fireEvent.click(screen.getByRole('button',{name:'Відновити вибране (1)'}));await screen.findByText('Результати відновлення');const [url,command]=post.mock.calls[1];expect(url).toBe('/products/historical-reactivation/confirm');expect(command.selectedSkus).toEqual(['AR-000001']);expect(command.skus).toEqual(['AR-000001','SV-000002','MISSING']);expect(command.reviewHash).toBe('a'.repeat(64));expect(command.confirmCurrentFactsAndHiddenUpdate).toBe(true);expect(screen.getByText(/Це ще не підтвердження завершення всіх етапів/)).toBeTruthy();
+ config.historicalReactivation={available:true,format:'historical-reactivation-v1',administratorOnly:true,maxItems:100,targetStatus:2};openWorkspace(historicalPermissions,'/products',[{key:'administrator'}]);fireEvent.click(await screen.findByRole('button',{name:'Нове історичне рішення Адміністратора'}));fireEvent.change(screen.getByLabelText('Точні артикули, по одному в рядку'),{target:{value:'AR-000001\nSV-000002\nMISSING'}});expect(post).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'Перевірити товари'}));await screen.findByText('Можна відновити: 2. Потребують уваги: 0. Пропущено: 1.', {}, { timeout: 3000 });expect(post.mock.calls).toEqual([['/products/historical-reactivation/preview',{skus:['AR-000001','SV-000002','MISSING'],operationId:expect.any(String)}]]);fireEvent.click(screen.getByRole('checkbox',{name:'Обрати AR-000001'}));fireEvent.click(screen.getByRole('checkbox',{name:/Погоджую/}));fireEvent.click(screen.getByRole('button',{name:'Відновити вибране (1)'}));await screen.findByText('Результати відновлення', {}, { timeout: 3000 });const [url,command]=post.mock.calls[1];expect(url).toBe('/products/historical-reactivation/confirm');expect(command.selectedSkus).toEqual(['AR-000001']);expect(command.skus).toEqual(['AR-000001','SV-000002','MISSING']);expect(command.reviewHash).toBe('a'.repeat(64));expect(command.confirmCurrentFactsAndHiddenUpdate).toBe(true);expect(screen.getByText(/Це ще не підтвердження завершення всіх етапів/)).toBeTruthy();
 });

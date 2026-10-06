@@ -22,6 +22,7 @@ const ENDPOINT_MANIFEST = Object.freeze([
   ...[
     ...['preview','confirm','reconcile','cancel'].map(action => ['POST', `/products/historical-reactivation/${action}`]),
     ['GET', '/products/historical-reactivation/batches/:batchId'],
+    ['GET', '/products/historical-reactivation/operations/:operationId'],
     ['GET', '/products/historical-reactivation/intents/:intentId/inspection'],
   ].map(([method,path]) => Object.freeze({...endpoint(method,path,'products.view'),
     additionalPermissions:Object.freeze(['products.archive','history.view','export_templates.manage','export_templates.publish'])})),
