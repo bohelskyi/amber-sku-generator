@@ -163,13 +163,13 @@ export function HistoricalReactivationReview({
   const standard = flow.receipt ? isStandardHistorical(flow.receipt) : config?.historicalReactivation?.protocol === 'standard-rest-v1';
   const createsReady = !isStandardHistorical(flow.review) || flow.review.items.filter((item) => flow.selected.includes(item.article) && item.deliveryMode === 'create').every((item) => flow.selectedCreate.includes(item.article));
   const missing = flow.review?.items.filter((item) => item.reasonCode === 'HISTORICAL_PRODUCT_NOT_FOUND').length || 0;
-  const formLocked = Boolean(flow.busyKind || flow.uncertain || flow.batchId);
+  const formLocked = Boolean(flow.busyKind || flow.uncertain || flow.batchId || flow.pendingOperation);
   const input = <div>
     <label htmlFor="historical-reactivation-skus" className="font-semibold">Точні артикули, по одному в рядку</label>
     <textarea id="historical-reactivation-skus" className="input mt-2 min-h-[96px] font-mono" rows={4}
       value={flow.text} disabled={formLocked} onChange={(event) => flow.editText(event.target.value)} />
     {!flow.uncertain && !flow.batchId && <button type="button" className={`btn ${flow.review ? 'btn-outline' : 'btn-primary'} mt-3`}
-      disabled={Boolean(flow.busyKind || !flow.text.trim())} onClick={() => void flow.preview()}>
+      disabled={Boolean(flow.busyKind || flow.pendingOperation || !flow.text.trim())} onClick={() => void flow.preview()}>
       {flow.busyKind === 'preview' ? 'Перевіряємо товари…' : flow.review ? 'Оновити перевірку' : 'Перевірити товари'}
     </button>}
     {!flow.review && <p className="mt-2 text-sm text-slate-500">Перевірка ще не відновлює товари.</p>}
@@ -178,6 +178,15 @@ export function HistoricalReactivationReview({
     <header><h2 className="text-xl font-semibold">Відновлення товарів</h2>
       <p className="mt-1 text-sm text-slate-500">Оберіть товари й погодьте, як їх відновити.</p></header>
     {!flow.allowed ? <p role="alert" className="text-red-700">{!historicalCapability(config) ? 'Історичне відновлення ще недоступне. Скористайтеся звичайним відновленням, якщо для нього є підтверджена історія.' : 'Потрібен Адміністратор із чинними правами на товари, історію та інтеграцію.'}</p> : <>
+      {flow.operation && !flow.receipt && <section className="rounded border p-3" aria-label="Прогрес перевірки">
+        <p role="status" className="font-semibold">{flow.operation.kind === 'confirm' ? 'Повторна перевірка перед відновленням' : 'Перевірка переліку'}: {({ queued: 'у черзі', running: 'виконується', ready: 'готово', failed: 'завершено з помилкою', unknown: 'читаємо стан' })[flow.operation.state]}.</p>
+        {flow.operation.progress && <p>Перевірено: {flow.operation.progress.completed} з {flow.operation.progress.total}.</p>}
+        <p className="mt-2 break-all font-mono">{flow.operation.operationId}</p>
+        {flow.pendingOperation && <>
+          <p className="mt-2 text-sm">Можна закрити вікно й повернутися. Результат зберігається; повторне підтвердження не надсилається.</p>
+          <button type="button" className="btn btn-outline mt-2" disabled={Boolean(flow.busyKind)} onClick={() => void flow.refresh()}>Прочитати прогрес цієї самої операції</button>
+        </>}
+      </section>}
       {!flow.receipt && (flow.review ? <details className="historical-evidence historical-input"><summary>Артикули для перевірки ({flow.review.skus.length})</summary><div className="mt-3">{input}</div></details> : input)}
       {flow.review && !flow.receipt && <section aria-label="Перевірений склад історичного рішення">
         <div className="historical-review-summary">
@@ -220,8 +229,8 @@ export function HistoricalReactivationReview({
         <summary>Знайти попередню операцію</summary>
         <label className="mt-2 block" htmlFor="historical-reactivation-lookup">Номер операції UUID</label>
         <input id="historical-reactivation-lookup" className="input mt-2 font-mono" value={flow.lookupId}
-          disabled={Boolean(flow.busyKind)} onChange={(event) => flow.setLookupId(event.target.value)} />
-        <button type="button" className="btn btn-outline mt-3" disabled={Boolean(flow.busyKind || !flow.lookupId.trim())}
+          disabled={formLocked} onChange={(event) => flow.setLookupId(event.target.value)} />
+        <button type="button" className="btn btn-outline mt-3" disabled={Boolean(formLocked || !flow.lookupId.trim())}
           onClick={() => void flow.refresh()}>Прочитати стан рішення</button>
       </details>}
     </>}

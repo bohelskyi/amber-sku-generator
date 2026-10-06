@@ -431,8 +431,25 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
       'Candidate category/option labels never create approved bindings. Preview preservation defaults are not persisted.'] };
 }
 
+async function readCategoryObservation(client, schema, concurrency = 1) {
+  const roots = [...new Set(schema.storeTopology.storeGroups.map((g) => g.root_category_id).filter((id) => id > 0))];
+  if (roots.length > 100) throw error(422, 'MAGENTO_PREVIEW_CATEGORY_LIMIT', 'Too many category roots');
+  const trees = [], categoryFailures = [];
+  await require('./schema-read-batches').readBatches(roots, concurrency, async id => {
+    try {
+      const tree = await client.getCategoryTree(id);
+      if (Number(tree?.id) !== id) throw error(422, 'MAGENTO_PREVIEW_CATEGORIES_INVALID', 'Category root differs');
+      return { tree };
+    } catch (cause) {
+      if (!['MAGENTO_HTTP_ERROR', 'MAGENTO_NETWORK_ERROR', 'MAGENTO_TIMEOUT'].includes(cause.code)) throw cause;
+      return { failure: { code: 'CATEGORY_TREE_UNAVAILABLE', operation: 'categories', rootCategoryId: id, reason: cause.code } };
+    }
+  }, (_id, result) => { if (result.tree) trees.push(result.tree); else categoryFailures.push(result.failure); });
+  return { trees, categoryFailures };
+}
+
 async function previewProduct(config, { databasePool, fetchImpl, storeCode = 'all', now = () => new Date().toISOString(),
-  readAmber = readPreviewProduct, discover = auditMagentoSchema, sensitiveValues = [], onObservation, ...selection } = {}) {
+  readAmber = readPreviewProduct, discover = auditMagentoSchema, sensitiveValues = [], onObservation, categoryObservation, ...selection } = {}) {
   const amber = await readAmber(databasePool, selection);
   if (amber.revision && (amber.revision.originHash !== originHash(config.baseUrl) || amber.revision.schema.storeCode !== storeCode)) {
     throw error(422, 'MAGENTO_BINDING_INSTALLATION_OR_SCOPE_MISMATCH', 'Binding installation or observation scope differs');
@@ -443,20 +460,7 @@ async function previewProduct(config, { databasePool, fetchImpl, storeCode = 'al
   let raw = null;
   try { raw = await client.findProductBySku(publicSku); }
   catch (cause) { if (cause.code !== 'MAGENTO_PRODUCT_NOT_FOUND') throw cause; }
-  const roots = [...new Set(schema.storeTopology.storeGroups.map((g) => g.root_category_id).filter((id) => id > 0))];
-  if (roots.length > 100) throw error(422, 'MAGENTO_PREVIEW_CATEGORY_LIMIT', 'Too many category roots');
-  const trees = []; const categoryFailures = [];
-  for (const id of roots) {
-    let tree;
-    try { tree = await client.getCategoryTree(id); }
-    catch (cause) {
-      if (!['MAGENTO_HTTP_ERROR', 'MAGENTO_NETWORK_ERROR', 'MAGENTO_TIMEOUT'].includes(cause.code)) throw cause;
-      categoryFailures.push({ code: 'CATEGORY_TREE_UNAVAILABLE', operation: 'categories', rootCategoryId: id, reason: cause.code });
-      continue;
-    }
-    if (Number(tree?.id) !== id) throw error(422, 'MAGENTO_PREVIEW_CATEGORIES_INVALID', 'Category root differs');
-    trees.push(tree);
-  }
+  const { trees, categoryFailures } = categoryObservation || await readCategoryObservation(client, schema);
   const domainEvidence = await readDomains(config, { client, schema, sku: publicSku, raw,
     expected: evaluate(amber, amber.product), fetchImpl });
   const report = planPreview(amber, schema, raw, indexTrees(trees), { storeCode, generatedAt: now(), domainEvidence });
@@ -469,4 +473,4 @@ async function previewProduct(config, { databasePool, fetchImpl, storeCode = 'al
   if (onObservation) await onObservation({ amber, schema, raw, categoryNodes: indexTrees(trees), domainEvidence, categoryFailures });
   return report;
 }
-module.exports = { previewProduct, planPreview, preparePreview, comparison };
+module.exports = { previewProduct, planPreview, preparePreview, comparison, readCategoryObservation };

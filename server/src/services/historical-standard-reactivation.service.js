@@ -53,8 +53,11 @@ async function readTargets(client, skus, origin) {
 }
 async function observe(config, db, item, bindingRevisionId, options) {
   let observation;
+  const shared = options.batchObservation ? await options.batchObservation.get() : null;
   const report=await (options.previewProduct || previewProduct)(config,{databasePool:db,sku:item.article,bindingRevisionId,
-    fetchImpl:options.fetchImpl,discover:options.discover,readAmber:standard.readProspective,onObservation:value=>{observation=value;}});
+    fetchImpl:options.batchObservation?.fetchImpl || options.fetchImpl,
+    discover:shared ? async () => shared.schema : options.discover, categoryObservation:shared?.categories,
+    readAmber:standard.readProspective,onObservation:value=>{observation=value;}});
   if (!observation) s.fail('HISTORICAL_OBSERVATION_REQUIRED');
   return { report,observation };
 }
@@ -78,11 +81,18 @@ async function preview(input, options={}) {
     }
     await client.query('COMMIT');
   }catch(cause){await client.query('ROLLBACK').catch(()=>{});throw cause;}finally{client.release();}
-  for(const item of items.filter(i=>i.disposition==='eligible')){
+  const eligible = items.filter(i=>i.disposition==='eligible');
+  const batch = require('./magento/historical-batch-observation').createBatchObservation(config, options);
+  let completed = items.length - eligible.length;
+  const progress = async phase => options.onProgress?.({ phase, completed, total:items.length });
+  try {
+  await progress('metadata');
+  await batch.map(eligible, async item => {
+    batch.check();
     let observed;
-    try{observed=await observe(config,db,item,context.row.id,options);}catch(cause){
+    try{observed=await observe(config,db,item,context.row.id,{...options,batchObservation:batch});}catch(cause){
       if(!['MAGENTO_PRODUCT_AMBIGUOUS','MAGENTO_RESPONSE_INVALID'].includes(cause.code))throw cause;
-      item.disposition='blocked';item.reasonCode='HISTORICAL_REMOTE_IDENTITY_MISMATCH';continue;
+      item.disposition='blocked';item.reasonCode='HISTORICAL_REMOTE_IDENTITY_MISMATCH';return;
     }
     const {observation,report}=observed,raw=observation.raw;
     item.bindingRevisionId=context.row.id;item.bindingHash=context.fingerprint;
@@ -107,7 +117,11 @@ async function preview(input, options={}) {
       {code:'CURRENT_DELIVERY_PLAN_VALID',met:!reason});
     if(!reason)item.deliveryPlanHash=c.hash(plan.intent(report));
     if(reason){item.disposition='blocked';item.reasonCode=reason;}
-  }
+  }, async () => { completed++; await progress('products'); });
+  batch.check();
+  await s.authority(db,actor,true);
+  batch.check();
+  } finally { batch.close(); }
   for(const item of items)item.blockerCodes=item.reasonCode?[item.reasonCode]:[];
   const review={format:FORMAT,protocol:standard.PROTOCOL,reviewNonce:options.reviewNonce || randomUUID(),
     reviewExpiresAt:options.reviewExpiresAt || new Date(now()+s.TTL).toISOString(),originHash:config.configured?c.originHash(config.baseUrl):null,
@@ -181,6 +195,11 @@ async function confirmLocked(input,options={}) {
           eventKey:'product.historical_standard_confirmed',subjectType:'product',subjectId:item.productId,
           details:{intentId:id,batchId:input.idempotencyKey,protocol:standard.PROTOCOL,deliveryMode:item.deliveryMode,priorFacts:'unknown',
             targetStatus:item.targetStatus,targetVisibility:item.targetVisibility,reviewedRemoteProductId:item.remoteProductId,planHash:item.deliveryPlanHash}});
+      }
+      if(options.onConfirmed) {
+        const batchRow=(await client.query('SELECT * FROM historical_standard_batches WHERE id=$1',[input.idempotencyKey])).rows[0];
+        const rows=(await client.query('SELECT * FROM historical_standard_intents WHERE batch_id=$1 ORDER BY product_id',[input.idempotencyKey])).rows;
+        await options.onConfirmed(client,{batchId:batchRow.id,createdAt:batchRow.created_at,protocol:standard.PROTOCOL,items:rows.map(receipt)});
       }
     }});
   return readBatch(input.idempotencyKey,options);

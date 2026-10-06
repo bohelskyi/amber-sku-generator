@@ -5,12 +5,21 @@ const { sendHttpError } = require('../../http/errors');
 const service = require('../../services/historical-standard-reactivation.service');
 const worker = require('../../services/magento/historical-standard-worker');
 const state = require('../../services/historical-reactivation-state');
+const operations = require('../../services/historical-review-operations');
 const router = express.Router();
 const prefix = '/products/historical-reactivation';
 const gates = state.PERMISSIONS.map(requirePermission);
 const options = req => ({ databasePool: require('../../db/pool'), mutationContext: getRequestMutationContext(req) });
-for (const action of ['preview', 'confirm', 'cancel']) router.post(`${prefix}/${action}`, ...gates, async (req, res) => {
-  try { res.json(await service[action](req.body || {}, options(req))); }
+for (const action of ['preview', 'confirm']) router.post(`${prefix}/${action}`, ...gates, async (req, res) => {
+  try { res.status(202).json(await operations.start(action, req.body || {}, options(req))); }
+  catch (cause) { sendHttpError(res, cause, { includeCode: true }); }
+});
+router.get(`${prefix}/operations/:operationId`, ...gates, async (req, res) => {
+  try { res.json(await operations.read(req.params.operationId, options(req))); }
+  catch (cause) { sendHttpError(res, cause, { includeCode: true }); }
+});
+router.post(`${prefix}/cancel`, ...gates, async (req, res) => {
+  try { res.json(await service.cancel(req.body || {}, options(req))); }
   catch (cause) { sendHttpError(res, cause, { includeCode: true }); }
 });
 router.get(`${prefix}/batches/:batchId`, ...gates, async (req, res) => {

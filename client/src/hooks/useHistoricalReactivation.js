@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { notifyExportReviewChanged } from '../lib/export-review-events.js';
 import { historicalReactivationApi } from '../api/historical-reactivation-api.js';
+import { OPERATION_FORMAT, operationPending, operationStorageKey, readStoredOperation, storeOperation, validateReviewOperation } from '../lib/historical-review-operation.js';
 import {
   canUseHistoricalReactivation, historicalConfirmation, historicalInput, historicalPending,
   isStandardHistorical, UUID_PATTERN, validateHistoricalInspection, validateHistoricalPreview, validateHistoricalReceipt,
@@ -21,6 +22,10 @@ export function useHistoricalReactivation({
   auth, config, open, apiClient = historicalReactivationApi, createRequestId = createUuid, onReceipt,
 }) {
   const allowed = canUseHistoricalReactivation(auth, config);
+  const storageKey = operationStorageKey(auth.applicationUser?.id);
+  const [operation, setOperation] = useState(() => readStoredOperation(storageKey));
+  const operationRef = useRef(operation);
+  const pendingOperation = operationPending(operation);
   const [text, setText] = useState('');
   const [review, setReview] = useState(null);
   const [selected, setSelected] = useState([]);
@@ -37,15 +42,25 @@ export function useHistoricalReactivation({
   const [error, setError] = useState('');
   const [clock, setClock] = useState(Date.now);
   const mounted = useRef(true), flight = useRef(false), attempt = useRef(null), notified = useRef(new Set()), generation = useRef(0);
+  const previousStorageKey = useRef(storageKey);
   const lifetime = auth.principalLifetime;
   const currentLifetime = useRef(lifetime), currentAllowed = useRef(allowed), currentOpen = useRef(open);
   useLayoutEffect(() => {
     currentLifetime.current = lifetime; currentAllowed.current = allowed; currentOpen.current = open;
-  }, [lifetime, allowed, open]);
+    operationRef.current = operation;
+  }, [lifetime, allowed, open, operation]);
   const ownerCurrent = useCallback(() => mounted.current && currentLifetime.current === lifetime
     && (!lifetime || lifetime.valid !== false), [lifetime]);
   const mayRead = useCallback(() => ownerCurrent() && currentAllowed.current, [ownerCurrent]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useLayoutEffect(() => {
+    if (previousStorageKey.current === storageKey) return;
+    previousStorageKey.current = storageKey; generation.current++; flight.current = false; attempt.current = null;
+    const own = readStoredOperation(storageKey); operationRef.current = own; setOperation(own);
+    setText(''); setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false);
+    setReceipt(null); setBatchId(null); setInspections({}); setReconcileAcknowledged({}); setCancelAcknowledged({});
+    setBusyKind(''); setUncertain(false); setError('');
+  }, [storageKey]);
   useEffect(() => {
     if (!open || !review) return undefined;
     const timer = setInterval(() => setClock(Date.now()), 1000);
@@ -78,6 +93,32 @@ export function useHistoricalReactivation({
     }
     return next;
   }, [onReceipt, receipt, review]);
+  const rememberOperation = useCallback((value) => {
+    operationRef.current = value; setOperation(value); storeOperation(storageKey, value);
+  }, [storageKey]);
+  const acceptOperation = useCallback((value, expected) => {
+    const next = validateReviewOperation(value, expected);
+    rememberOperation(next); setUncertain(false); setError('');
+    if (next.state === 'ready') {
+      if (next.kind === 'preview') {
+        setReview(next.result); setText(next.skus.join('\n')); setSelected([]); setSelectedCreate([]); setAcknowledged(false); setClock(Date.now());
+      } else {
+        attempt.current ||= { idempotencyKey: next.operationId, selectedSkus: Object.freeze([...next.selectedSkus]) };
+        acceptReceipt(next.result, next.operationId, next.selectedSkus);
+      }
+    } else if (next.state === 'failed') {
+      if (next.kind === 'confirm') { attempt.current = null; setBatchId(null); }
+      setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false);
+      setError('Перевірку завершено без нового рішення: ' + next.failureCode + '. Оновіть дані та явно почніть нову перевірку.');
+    } else if (next.kind === 'confirm') setBatchId(next.operationId);
+    return next;
+  }, [acceptReceipt, rememberOperation]);
+  const readOperation = useCallback(async (expected, signal) => {
+    const ticket = generation.current;
+    const result = await apiClient.operation(expected.operationId, signal ? { signal } : {});
+    if (mayRead() && !signal?.aborted && ticket === generation.current) return acceptOperation(result.data, expected);
+    return null;
+  }, [apiClient, mayRead, acceptOperation]);
   function start(kind) {
     if (!mayRead() || flight.current) return false;
     flight.current = true; setBusyKind(kind); setError(''); return true;
@@ -87,56 +128,72 @@ export function useHistoricalReactivation({
     if (ownerCurrent()) setBusyKind('');
   }
   function editText(next) {
-    if (!allowed || busyKind || uncertain || batchId) return;
+    if (!allowed || busyKind || uncertain || batchId || pendingOperation) return;
     generation.current++;
     setText(next); setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false); setError('');
   }
   function select(article, checked) {
-    if (!allowed || busyKind || uncertain || batchId
+    if (!allowed || busyKind || uncertain || batchId || pendingOperation
       || !review?.items.some((item) => item.article === article && item.disposition === 'eligible')) return;
     setSelected((previous) => checked ? [...new Set([...previous, article])] : previous.filter((sku) => sku !== article));
     setSelectedCreate((previous) => previous.filter((sku) => sku !== article));
     setAcknowledged(false);
   }
   function selectCreate(article, checked) {
-    if (!allowed || busyKind || uncertain || batchId || !selected.includes(article)
+    if (!allowed || busyKind || uncertain || batchId || pendingOperation || !selected.includes(article)
       || !review?.items.some((item) => item.article === article && item.deliveryMode === 'create' && item.disposition === 'eligible')) return;
     setSelectedCreate((previous) => checked ? [...new Set([...previous, article])] : previous.filter((sku) => sku !== article));
     setAcknowledged(false);
   }
   function selectEligible() {
-    if (!allowed || busyKind || uncertain || batchId || !review) return;
+    if (!allowed || busyKind || uncertain || batchId || pendingOperation || !review) return;
     setSelectedCreate([]);
     setSelected(review.items.filter((item) => item.disposition === 'eligible').map((item) => item.article));
     setAcknowledged(false);
   }
   async function preview() {
-    if (uncertain || batchId || !start('preview')) return;
+    if (uncertain || batchId || pendingOperation || !start('preview')) return;
     const ticket = ++generation.current;
+    let submitted;
     setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false);
     try {
       const skus = historicalInput(text, config.historicalReactivation.maxItems);
-      const result = await apiClient.preview(skus);
+      if (apiClient.operation) {
+        submitted = { operationId: createRequestId(), kind: 'preview', state: 'unknown' };
+        if (!UUID_PATTERN.test(submitted.operationId)) throw new Error('Некоректний номер перевірки.');
+        rememberOperation(submitted);
+      }
+      const result = submitted ? await apiClient.preview(skus, submitted.operationId) : await apiClient.preview(skus);
       if (mayRead() && ticket === generation.current) {
+        if (result.data?.format === OPERATION_FORMAT) { acceptOperation(result.data, submitted); return; }
+        if (submitted) throw new Error('Сервер не підтвердив номер перевірки. Прочитайте її стан.');
         setReview(validateHistoricalPreview(result.data)); setSelected([]); setSelectedCreate([]); setAcknowledged(false);
         setClock(Date.now());
       }
-    } catch (cause) { if (mayRead()) setError(errorMessage(cause, 'Не вдалося перевірити перелік.')); }
+    } catch (cause) {
+      if (mayRead()) {
+        if (submitted && cause.response?.status >= 400 && cause.response?.status < 500) rememberOperation(null);
+        setError(errorMessage(cause, submitted ? 'Відповідь втрачено. Прочитайте стан цієї самої перевірки.' : 'Не вдалося перевірити перелік.'));
+      }
+    }
     finally { finish(); }
   }
   async function confirm() {
-    if (!review || !acknowledged || uncertain || attempt.current || !start('confirm')) return;
+    if (!review || !acknowledged || uncertain || pendingOperation || attempt.current || !start('confirm')) return;
     let submitted;
     try {
       submitted = historicalConfirmation(review, selected, createRequestId(), Date.now(), selectedCreate);
       attempt.current = submitted; setBatchId(submitted.idempotencyKey);
+      if (apiClient.operation) rememberOperation({ operationId: submitted.idempotencyKey, kind: 'confirm', state: 'unknown' });
       const result = await apiClient.confirm(submitted);
       if (!ownerCurrent()) return;
       if (!currentAllowed.current) { setUncertain(true); setError(uncertainMessage); return; }
-      acceptReceipt(result.data, submitted.idempotencyKey, submitted.selectedSkus);
+      if (result.data?.format === OPERATION_FORMAT) acceptOperation(result.data, { operationId: submitted.idempotencyKey, kind: 'confirm' });
+      else acceptReceipt(result.data, submitted.idempotencyKey, submitted.selectedSkus);
     } catch (cause) {
       if (!ownerCurrent()) return;
       if (!submitted || noAcceptanceCodes.has(cause.response?.data?.code)) {
+        if (apiClient.operation) rememberOperation(null);
         attempt.current = null; setBatchId(null); setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false);
         setError(errorMessage(cause, 'Оновіть перевірку перед новим підтвердженням.'));
       } else { setUncertain(true); setError(uncertainMessage); }
@@ -147,16 +204,32 @@ export function useHistoricalReactivation({
     setInspections({}); setReconcileAcknowledged({}); setCancelAcknowledged({});
     const result = await apiClient.status(id, signal ? { signal } : {});
     if (mayRead() && !signal?.aborted && ticket === generation.current) {
-      try { return acceptReceipt(result.data, id, attempt.current?.idempotencyKey === id ? attempt.current.selectedSkus : null); }
+      try { return acceptReceipt(result.data, id, attempt.current?.idempotencyKey === id ? attempt.current.selectedSkus
+        : receipt?.batchId === id ? receipt.items.map(item => item.article) : null); }
       catch (cause) { setUncertain(true); throw cause; }
     }
     return null;
-  }, [apiClient, mayRead, acceptReceipt]);
+  }, [apiClient, mayRead, acceptReceipt, receipt]);
   async function refresh() {
+    if (operation && (pendingOperation || operation.kind === 'confirm' && !receipt && operation.state !== 'failed')) {
+      if (!start('status')) return;
+      try { await readOperation(operation); }
+      catch (cause) { if (mayRead()) setError(cause.response?.status === 404
+        ? 'Операцію за цим номером ще не знайдено. Повторне підтвердження не надсилатиметься.'
+        : errorMessage(cause, 'Не вдалося прочитати стан цієї самої операції.')); }
+      finally { finish(); }
+      return;
+    }
     const id = batchId || lookupId.trim();
     if (!UUID_PATTERN.test(id)) { setError('Введіть точний номер операції UUID.'); return; }
     if (!start('status')) return;
-    try { await readStatus(id); }
+    try {
+      if (apiClient.operation && !batchId) {
+        try { await readOperation({ operationId: id }); return; }
+        catch (cause) { if (cause.response?.status !== 404) throw cause; }
+      }
+      await readStatus(id);
+    }
     catch (cause) {
       if (mayRead()) setError(cause.response?.status === 404
         ? 'Операцію за цим номером ще не знайдено. Це не підтверджує відсутність змін. Підтвердження не буде надіслано повторно.'
@@ -164,6 +237,24 @@ export function useHistoricalReactivation({
     } finally { finish(); }
   }
   const waiting = historicalPending(receipt);
+  const operationId = operation?.operationId, operationState = operation?.state, operationKind = operation?.kind;
+  useEffect(() => {
+    if (!open || !allowed || !operationId || operationState === 'failed' || receipt || !apiClient.operation) return undefined;
+    // Also recover a ready preview once after reload. No POST is issued by this effect.
+    if (operationState === 'ready' && operationKind === 'preview' && review) return undefined;
+    const controller = new AbortController(); let stopped = false, timer;
+    async function poll() {
+      if (!flight.current && mayRead() && currentOpen.current) {
+        flight.current = true;
+        try { await readOperation(operationRef.current, controller.signal); }
+        catch (cause) { if (!stopped && mayRead()) setError(errorMessage(cause, 'Не вдалося прочитати прогрес. Повторюємо лише читання стану.')); }
+        finally { flight.current = false; }
+      }
+      if (!stopped && mayRead()) timer = setTimeout(poll, 5000);
+    }
+    timer = setTimeout(poll, operationState === 'unknown' ? 0 : 1000);
+    return () => { stopped = true; clearTimeout(timer); controller.abort(); };
+  }, [open, allowed, operationId, operationState, operationKind, receipt, review, apiClient, mayRead, readOperation]);
   useEffect(() => {
     if (!open || !allowed || !batchId || !waiting || uncertain) return undefined;
     const controller = new AbortController();
@@ -237,19 +328,20 @@ export function useHistoricalReactivation({
     finally { finish(); }
   }
   function reset() {
-    if (!allowed || busyKind || !canReset) return;
+    if (!allowed || busyKind || pendingOperation || !canReset) return;
     generation.current++;
     attempt.current = null; setText(''); setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false);
+    rememberOperation(null);
     setReceipt(null); setBatchId(null); setInspections({}); setReconcileAcknowledged({}); setError('');
   }
   const expired = Boolean(review && Date.parse(review.reviewExpiresAt) <= clock);
   return {
     allowed, text, review, selected, selectedCreate, cancelAcknowledged, canReset, acknowledged, receipt, batchId, lookupId, inspections,
-    reconcileAcknowledged, busyKind, uncertain, error, expired, waiting,
+    reconcileAcknowledged, busyKind, uncertain, error, expired, waiting, operation, pendingOperation,
     dirty: Boolean(open && (uncertain || !receipt && text.trim())),
     locked: Boolean(busyKind || uncertain), editText, select, selectCreate, selectEligible, preview, confirm, refresh, inspect, reconcile, cancel, reset,
-    setLookupId: (value) => { if (!busyKind && !batchId) setLookupId(value); },
-    setAcknowledged: (value) => { if (allowed && !busyKind && !uncertain && !batchId) setAcknowledged(value); },
+    setLookupId: (value) => { if (!busyKind && !batchId && !pendingOperation) setLookupId(value); },
+    setAcknowledged: (value) => { if (allowed && !busyKind && !uncertain && !batchId && !pendingOperation) setAcknowledged(value); },
     setCancelAcknowledged: (id, value) => { if (allowed && !busyKind && !uncertain) setCancelAcknowledged((previous) => ({ ...previous, [id]: value })); },
     setReconcileAcknowledged: (id, value) => { if (allowed && !busyKind && !uncertain) setReconcileAcknowledged((previous) => ({ ...previous, [id]: value })); },
   };
