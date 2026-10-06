@@ -56,7 +56,11 @@ async function read(client, config, sku, bindingRevisionId) {
 }
 function commonBlockers(state) {
   const p = state.product, s = state.stable;
-  const out = exposure.blockers(state).filter(b => b !== 'CORRECTION_LINEAGE');
+  // Native successors have no encoded SKU to reserve. Their complete component
+  // still proves public identity, correction links and each ancestor's ownership.
+  const nativeCurrent = p.full_sku === null && p.characteristic_version_id != null;
+  const out = exposure.blockers(state).filter(b => b !== 'CORRECTION_LINEAGE'
+    && !(b === 'SKU_RESERVATION_CONFLICT' && nativeCurrent));
   const block = code => out.push(code);
   if (!s.activation?.enabled) block('STABLE_PUBLIC_SKU_NOT_ACTIVE');
   if (s.automatic.legacy_product_csv_enabled !== false || !s.automatic.cutover_at) block('MAGENTO_DELIVERY_CUTOVER_REQUIRED');

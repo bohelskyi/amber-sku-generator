@@ -267,6 +267,11 @@ not an approval or a reusable plan:
 - Every member has the same immutable public identity and exact public SKU;
   internal SKUs differ across recount links. All reservations belong to their
   exact products, with no disconnected identity users or conflicting SKU owners.
+  A native successor carries `full_sku=NULL` and an immutable characteristic
+  version instead of an encoded SKU, so it has no legacy registry entry to own.
+  This does not relax the complete lineage/public-identity proof or any legacy
+  ancestor's reservation; changed identity, missing history and foreign owners
+  remain blocked.
 - All members have business exclusion `none`, no independent/unknown exclusion
   provenance, and no recount compatibility exclusion. The current product export
   flag must be zero. Recount's retired-source flag `exclude_from_export=1` is a
