@@ -41,6 +41,7 @@ const click = (name) => fireEvent.click(screen.getByRole('button', { name }));
 const optIn = () => fireEvent.click(screen.getByRole('checkbox', { name: /Експорт за опублікованим шаблоном/ }));
 async function start() { click(/Перевірити 1 новий товар/); await screen.findByRole('button', { name: /Створити файли/ }); }
 beforeEach(() => {
+  observedAuth = null; observedWorkflow = null;
   vi.clearAllMocks(); for (const mock of Object.values(exportsApi)) mock.mockReset();
   exportsApi.getStatus.mockResolvedValue(response({ delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false }, countSinceLastExport: 1, activation: { implementation: 'template', templateVersionId: 'selected' } }));
   exportsApi.getPriceStatus.mockResolvedValue(response({ pendingCount: 0 }));
@@ -261,8 +262,11 @@ it('A → B → A never revives the first lifetime, including stale actions and 
   const apiClient = { get: vi.fn().mockResolvedValue(response(session(1))), post: vi.fn() };
   render(authenticatedWorkflow(apiClient, () => () => {}, { pathname: '/exports', assign: vi.fn() }));
   await screen.findByText(/1 новий товар очікує/); await start(); click(/Створити файли/); await screen.findByText(/Збережені файли/);
+  // DOM readiness does not prove the passive observer captured this snapshot.
+  await waitFor(() => expect(observedWorkflow?.exportSnapshot?.id).toBe(snapshot.id));
   const first = observedWorkflow;
   let downloading; await act(async () => { downloading = first.handleDownloadMagentoArtifact('BR'); });
+  expect(exportsApi.downloadMagentoArtifact).toHaveBeenCalledExactlyOnceWith(snapshot.id, 'BR');
   for (const id of [2,1]) { apiClient.get.mockResolvedValue(response(session(id))); await act(async () => observedAuth.refresh()); }
   await act(async () => { first.handlePreviewExport(); first.handleCreateSnapshot(); first.handleConfirmSnapshot(); first.handlePriceExportCsv(); first.handleDownloadMagentoArtifact('BR'); first.setExportFromSku('PRIVATE'); });
   expect(exportsApi.preview).toHaveBeenCalledTimes(1); expect(exportsApi.createSnapshot).toHaveBeenCalledTimes(1);

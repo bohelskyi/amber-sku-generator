@@ -1224,6 +1224,18 @@ policies, deliberate skips and blockers. A retry of the same completed plan is
 idempotent. The command does not mutate the published source, publish the draft,
 activate public SKUs, create sync work or perform a Magento mutation.
 
+The same reviewed command also accepts an explicit evaluator-5
+`effective-product-names-v1` draft based on a public-identity publication. It uses
+the successor's exact official names-upgrade equivalence before carrying unchanged
+decisions. Existing approved target decisions, explicit blocks, changed selected IDs
+and ownership choices remain in that exact draft; a changed route or attribute
+identity also prevents inheriting its old child scope. Selecting the same already
+approved source ID can inherit approval without another confirmation. The sealed
+plan and audit receipt report preserved draft decisions and bind the original
+target counter/hash, so a later manual edit stales the plan. There is no draft
+regeneration, whole-package approval or publication. Unsaved browser fields are
+outside database evidence and remain under the existing dirty-navigation guard.
+
 `extend` uses the draft's pinned evaluator and existing bootstrap/resolver logic.
 It GET-checks the live schema against the frozen fingerprint and rejects drift;
 it never replaces observation rows or refreshes carried Magento IDs. Category
@@ -2189,9 +2201,12 @@ alone covers every possible set route in that category. For the controlled
 the stone route creates no set-154 requirement. This authoring helper performs no
 persistence, publication or remote operation.
 
-After a carry fix, leave any incorrectly prepared draft unpublished and prepare
-a fresh successor from the **current publication**, selecting the already
-published corrected template. Existing drafts are not refreshed or repaired.
+For the historical size-rule/column-conversion carry fix, leave any incorrectly
+prepared draft unpublished and prepare a fresh successor from the **current
+publication**, selecting the already published corrected template. Those drafts
+are not refreshed by deployment. For an existing effective-name preparation with
+saved manual decisions, use the reviewed carry-forward preflight/apply above on
+its exact ID/counter instead of replacing the draft.
 Review only the changed size mappings/policies and any independently changed
 remote/source evidence, then use H3b preview/publication. Exact clone preserves
 the original template pin and observation; it cannot switch template versions.

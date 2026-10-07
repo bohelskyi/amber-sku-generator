@@ -236,6 +236,32 @@ function uniqueMatch(rows, predicate, state, kind, id, approved) {
   return matches.length === 1 ? matches[0] : null;
 }
 
+// Current draft decisions win over inherited source decisions. A redundant
+// explicit selection of the same approved identity may still inherit approval.
+function preserveDraftDecisions(source, target) {
+  const copy = structuredClone(source), sourceEntries = entries(copy), preserved = [];
+  const protectedIds = new Set(), protectedRoutes = new Set(), protectedAttributes = new Set();
+  for (const entry of entries(target)) {
+    const id = entryStableId(entry), matches = sourceEntries.filter(row => entryStableId(row) === id);
+    const previous = matches.length === 1 ? matches[0] : null;
+    const decision = entry.decision, note = decision.note || decision.evidence?.note;
+    const selected = decision.evidence?.diagnosticCodes?.includes('EXPLICIT_CANDIDATE_SELECTION');
+    const changedSelection = selected && (!previous || entry.identity !== previous.identity);
+    const manual = ['approved', 'not_applicable'].includes(decision.reviewState)
+      || Boolean(note) && decision.reviewState !== 'proposed' || changedSelection;
+    if (!manual) continue;
+    protectedIds.add(id);
+    preserved.push({ kind: entry.kind, id, reviewState: decision.reviewState, identity: entry.identity });
+    if (previous && entry.kind === 'route' && (entry.identity !== previous.identity
+      || decision.enabled !== previous.decision.enabled || decision.reviewState === 'blocked')) protectedRoutes.add(entry.routeKey);
+    if (previous && entry.kind === 'attribute' && (entry.identity !== previous.identity
+      || decision.strategy !== previous.decision.strategy || decision.reviewState === 'blocked')) protectedAttributes.add(decision.bindingKey);
+  }
+  for (const entry of sourceEntries) if (protectedIds.has(entryStableId(entry))
+    || protectedRoutes.has(entry.routeKey) || protectedAttributes.has(entry.decision.bindingKey)) entry.decision.reviewState = 'review_required';
+  return { source: copy, preserved };
+}
+
 function carryReviewedBindings(source, target, targetDefinition, liveVerification = {
   format: LIVE_FORMAT, originHash: target.originHash, storeCode: target.schema.storeCode,
   categories: [], dynamicOptions: [],
@@ -518,7 +544,7 @@ async function loadContextClient(client, input) {
   if (database !== input.expectedDatabase) fail('MAGENTO_BINDING_CARRY_DATABASE_MISMATCH', 'Target database differs');
   const source = await bindingService.readRevisionOnClient(client, input.sourceId);
   const target = await bindingService.readRevisionOnClient(client, input.targetId);
-  await templateDefinition(client, source);
+  const sourceDefinition = await templateDefinition(client, source);
   const targetDefinition = await templateDefinition(client, target);
   const current = (await client.query(`SELECT id FROM magento_binding_revisions
     WHERE installation_key=$1 AND state='published' ORDER BY version_number DESC LIMIT 1`,
@@ -532,18 +558,28 @@ async function loadContextClient(client, input) {
   if (source.installationKey !== target.installationKey || source.originHash !== target.originHash) {
     blockers.push({ code: 'SOURCE_TARGET_INSTALLATION_MISMATCH' });
   }
-  if (target.evaluatorVersion !== 'magento-declarative-3'
-    || targetDefinition.sourceContractVersion !== 'public-product-identity-v1'
+  const { POLICY } = require('../export-templates/effective-product-names');
+  const contract = require('../export-templates/version-contract');
+  const legacyTarget = target.evaluatorVersion === 'magento-declarative-3'
+    && targetDefinition.sourceContractVersion === 'public-product-identity-v1';
+  const namesTarget = target.evaluatorVersion === contract.CHARACTERISTIC_EVALUATOR
+    && targetDefinition.sourceContractVersion === contract.CHARACTERISTIC_CONTRACT
+    && targetDefinition.nameReadiness === POLICY && contract.isPublicEvaluator(sourceDefinition.evaluatorVersion);
+  if (!(legacyTarget || namesTarget)
     || !Object.values(targetDefinition.sources).some((row) => row.kind === 'product' && row.field === 'public_sku')) {
     blockers.push({ code: 'TARGET_PUBLIC_SKU_CONTRACT_REQUIRED' });
   }
   if (!actor || actor.status !== 'active' || !actor.authorized) blockers.push({ code: 'ACTOR_UNAUTHORIZED' });
-  return { database, actorUserId: input.actorUserId, source, target, targetDefinition, blockers };
+  return { database, actorUserId: input.actorUserId, source, sourceDefinition, target, targetDefinition, blockers };
 }
 
 function inspectContext(context, liveVerification) {
   const { database, actorUserId, source, target, targetDefinition } = context;
-  const carry = carryReviewedBindings(source, target, targetDefinition, liveVerification);
+  const names = targetDefinition.nameReadiness === require('../export-templates/effective-product-names').POLICY;
+  const stableSource = names ? require('./integration-successor').stableReviewedSource(source, context.sourceDefinition, targetDefinition, target.schema) : source;
+  const preservation = names ? preserveDraftDecisions(stableSource, target) : null;
+  const carry = carryReviewedBindings(preservation?.source || stableSource, target, targetDefinition, liveVerification);
+  if (preservation) carry.summary.preservedDraftDecisions = preservation.preserved.length;
   const blockers = [...context.blockers, ...carry.blockers];
   const plan = {
     format: FORMAT,
@@ -561,6 +597,7 @@ function inspectContext(context, liveVerification) {
     resultBindingHash: c.hash(carry.bindings),
     carried: carry.carried,
     skipped: carry.skipped,
+    ...(preservation ? { preservedDraftDecisions: preservation.preserved } : {}),
     summary: carry.summary,
   };
   return { plan, blockers, resultBindings: carry.bindings };
@@ -649,7 +686,8 @@ async function apply(input, options = {}) {
         sourceRevision: input.plan.source.revision, targetRevisionId: input.plan.target.id,
         targetRevisionBefore: input.plan.target.revision, targetRevisionAfter: updated.revision,
         resultBindingHash: input.plan.resultBindingHash, summary: input.plan.summary,
-        carried: input.plan.carried, skipped: input.plan.skipped, conflicts: [] };
+        carried: input.plan.carried, skipped: input.plan.skipped, conflicts: [],
+        ...(input.plan.preservedDraftDecisions ? { preservedDraftDecisions: input.plan.preservedDraftDecisions } : {}) };
       await writeAuditEvent(client, { mutationContext: context, eventKey: EVENT,
         subjectType: 'magento_binding', subjectId: input.plan.target.id,
         details: { planHash: input.planHash, receipt } });
@@ -658,4 +696,4 @@ async function apply(input, options = {}) {
 }
 
 module.exports = { FORMAT, EVENT, LIVE_FORMAT, liveRequests, collectLiveVerification,
-  carryReviewedBindings, inspectClient, preflight, apply };
+  carryReviewedBindings, preserveDraftDecisions, inspectClient, preflight, apply };

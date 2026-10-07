@@ -467,7 +467,12 @@ preparation does not publish a binding. Existing definitions and immutable
 versions keep their original subject/readiness behavior. Only the official
 name-owned SV subject guard is removed; customized or shared guards fail closed.
 The policy participates in the definition hash and the name decision proof.
-Unrelated field decisions keep their own existing proofs.
+Unrelated field decisions keep their own existing proofs. The exact official names
+upgrade can normalize the evaluator/source-contract tags for comparison of those
+unchanged decisions; it does not rewrite immutable publications or waive expression,
+source, route, store or remote-identity checks. Name decisions retain their changed
+policy proof and require review. Any additional business definition edit falls back
+to the strict comparison.
 
 The same evaluator resolves generated UA/EN, binding name pins and exact anchored
 full-name overrides. A complete generated pair needs no manual subject entry.
