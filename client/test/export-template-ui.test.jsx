@@ -429,7 +429,11 @@ it('unfinished v2 column creation blocks dirty navigation and cannot be silently
   expect(screen.getByLabelText('Код у CSV').value).toBe('pending_color');
   fireEvent.click(screen.getByText('Інший розділ')); click('Зберегти й перейти');
   await screen.findByText(/Спочатку застосуйте або скасуйте/); expect(api.save).not.toHaveBeenCalled(); expect(router.state.location.pathname).toBe('/admin/export-templates/' + f.id);
-  click('Залишитися'); click('Скасувати');
+  // The error renders before the asynchronous save guard releases its controls.
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Залишитися', exact: true }).disabled).toBe(false));
+  click('Залишитися');
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Незбережені зміни' })).toBeNull());
+  click('Скасувати');
   expect(screen.getByText(/Збережено · редакція/)).toBeTruthy();
   fireEvent.click(screen.getByText('Інший розділ')); await screen.findByText('Інший екран');
 });
