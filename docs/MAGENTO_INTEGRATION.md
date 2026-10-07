@@ -1187,11 +1187,14 @@ as approval drift. IDs are never remapped by label.
 
 When the current published binding and a separately bootstrapped
 `magento-declarative-3` / `public-product-identity-v1` draft describe the same
-installation, carry reviewed decisions forward with an immutable preflight plan:
+installation, carry reviewed decisions forward with an immutable preflight plan. The CLI uses
+the application's configured `DATABASE_URL` or `PG*` / `POSTGRES_*` settings, SSL
+and database timeouts; no connection URL needs to be constructed or exported.
+Preflight's pool defaults to read-only transactions; apply retains its normal
+write transaction and actor/revision/hash guards.
 
 ```powershell
 cd server
-$env:DATABASE_URL = '<secret database URL>'
 npm run magento:binding-carry-forward -- preflight --expected-database <DATABASE_NAME> --actor-user-id <LOCAL_USER_ID> --source <CURRENT_PUBLISHED_UUID> --source-revision <N> --target <V3_DRAFT_UUID> --target-revision <N> --output <NEW_SECURE_PLAN_JSON>
 npm run magento:binding-carry-forward -- apply --expected-database <DATABASE_NAME> --actor-user-id <LOCAL_USER_ID> --plan <PLAN_JSON> --expected-hash <PLAN_SHA256>
 ```

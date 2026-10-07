@@ -49,14 +49,22 @@ async function readJson(file) {
   try { return JSON.parse(text); } catch { throw new Error('MAGENTO_BINDING_CARRY_PLAN_INVALID'); }
 }
 
+function createPool(env, action) {
+  if (action === 'preflight') return require('./magento-binding-evidence-audit').createReadOnlyPool(env);
+  if (action !== 'apply') throw new Error('MAGENTO_BINDING_CARRY_ARGUMENTS');
+  const config = require('../src/config/env').loadConfig(env);
+  return new Pool({ ...config.databaseOptions, ssl: config.useSsl ? { rejectUnauthorized: false } : false,
+    max: 2, idleTimeoutMillis: config.pgIdleTimeoutMs, connectionTimeoutMillis: config.pgConnectTimeoutMs,
+    query_timeout: config.pgQueryTimeoutMs, statement_timeout: config.pgStatementTimeoutMs });
+}
+
 async function run({ args = process.argv.slice(2), env = process.env, print = console.log,
   printError = console.error, databasePool, fetchImpl } = {}) {
   let owned;
   try {
     const input = parse(args);
     if (input.help) { print(HELP); return 0; }
-    if (!env.DATABASE_URL) throw new Error('DATABASE_URL_REQUIRED');
-    if (!databasePool) { owned = new Pool({ connectionString: env.DATABASE_URL, max: 2 }); databasePool = owned; }
+    if (!databasePool) { owned = createPool(env, input.action); databasePool = owned; }
     const config = parseMagentoConfig(env);
     if (!config.configured) throw new Error('MAGENTO_NOT_CONFIGURED');
     if (input.action === 'preflight') {
@@ -79,7 +87,8 @@ async function run({ args = process.argv.slice(2), env = process.env, print = co
     print(JSON.stringify({ ok: true, ...receipt }));
     return 0;
   } catch (error) {
-    printError(JSON.stringify({ code: error.code || error.message || 'MAGENTO_BINDING_CARRY_FAILED' }));
+    const code = error.code || (/^MAGENTO_[A-Z0-9_]+$/.test(error.message || '') ? error.message : 'MAGENTO_BINDING_CARRY_FAILED');
+    printError(JSON.stringify({ code }));
     return 1;
   } finally { if (owned) await owned.end().catch(() => {}); }
 }
@@ -89,4 +98,4 @@ if (require.main === module) {
   run({}).then((code) => { process.exitCode = code; });
 }
 
-module.exports = { parse, readJson, run };
+module.exports = { parse, readJson, createPool, run };
