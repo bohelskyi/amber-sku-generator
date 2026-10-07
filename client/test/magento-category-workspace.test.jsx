@@ -343,6 +343,7 @@ it('shows the exact remaining category after placement confirmation and applies 
   await screen.findByText('Оновлюємо підтвердження…');
   expect(screen.queryByText(/Чернетка змінилася/)).toBeNull();
   expect(screen.queryByRole('button', { name: 'Застосувати зміни' })).toBeNull();
+  await waitFor(() => expect(finishRead).toBeTypeOf('function'));
   await act(async () => finishRead());
   await screen.findByRole('heading', { name: 'Підтвердьте відповідності інших категорій' });
   await screen.findByText('Розділи «Браслети» підтверджено. Застосування чекає на підтвердження: Інші.');
