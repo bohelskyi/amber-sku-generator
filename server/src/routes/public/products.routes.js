@@ -65,7 +65,7 @@ router.get('/magento/product-status/:productId', requirePermission('products.vie
   } catch (error) { next(error); }
 });
 router.post('/magento/name-resolution/preview', requirePermission('exports.create'), async (req, res) => {
-  try { res.json(await require('../../services/magento/name-resolution.service').preview(req.body || {})); }
+  try { res.json(await require('../../services/magento/name-resolution.service').preview(req.body || {}, { mutationContext: getRequestMutationContext(req) })); }
   catch (error) { sendMagentoNameError(res, error); }
 });
 router.post('/magento/name-resolution/apply', requirePermission('exports.create'), async (req, res) => {

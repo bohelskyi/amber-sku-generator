@@ -5,6 +5,8 @@ export function createHistoricalReactivationApi(client = api) {
   return Object.freeze({
     preview: (skus, operationId) => client.post(root + '/preview', { skus, ...(operationId ? { operationId } : {}) }),
     confirm: (payload) => client.post(root + '/confirm', payload),
+    previewNames: (payload) => client.post('/magento/name-resolution/preview', payload),
+    acceptNames: (payload) => client.post('/magento/name-resolution/apply', payload),
     operation: (operationId, options = {}) => client.get(root + '/operations/' + encodeURIComponent(operationId), options),
     status: (batchId, options = {}) => client.get(root + '/batches/' + encodeURIComponent(batchId), options),
     inspect: (intentId, options = {}) => client.get(root + '/intents/' + encodeURIComponent(intentId) + '/inspection', options),

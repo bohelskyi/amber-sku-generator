@@ -7,6 +7,8 @@ import {
   isStandardHistorical, UUID_PATTERN, validateHistoricalInspection, validateHistoricalPreview, validateHistoricalReceipt,
 } from '../lib/historical-reactivation.js';
 
+import { historicalNameRepairRequest, validateHistoricalNames, validateHistoricalNameReceipt } from '../lib/historical-name-review.js';
+
 const noAcceptanceCodes = new Set([
   'HISTORICAL_REVIEW_STALE', 'HISTORICAL_SELECTION_INVALID', 'HISTORICAL_CONFIRMATION_REQUIRED',
 ]);
@@ -23,6 +25,10 @@ export function useHistoricalReactivation({
   auth, config, open, apiClient = historicalReactivationApi, createRequestId = createUuid, onReceipt,
 }) {
   const allowed = canUseHistoricalReactivation(auth, config);
+  const canReviewNames = Boolean(allowed && auth.permissions?.includes('exports.create'));
+  const currentNamesAllowed = useRef(canReviewNames);
+  const [nameReview, setNameReview] = useState(null);
+  const [nameNotice, setNameNotice] = useState('');
   const storageKey = operationStorageKey(auth.applicationUser?.id);
   const [operation, setOperation] = useState(() => readStoredOperation(storageKey));
   const operationRef = useRef(operation);
@@ -47,9 +53,9 @@ export function useHistoricalReactivation({
   const lifetime = auth.principalLifetime;
   const currentLifetime = useRef(lifetime), currentAllowed = useRef(allowed), currentOpen = useRef(open);
   useLayoutEffect(() => {
-    currentLifetime.current = lifetime; currentAllowed.current = allowed; currentOpen.current = open;
+    currentLifetime.current = lifetime; currentAllowed.current = allowed; currentOpen.current = open; currentNamesAllowed.current = canReviewNames;
     operationRef.current = operation;
-  }, [lifetime, allowed, open, operation]);
+  }, [lifetime, allowed, open, operation, canReviewNames]);
   const ownerCurrent = useCallback(() => mounted.current && currentLifetime.current === lifetime
     && (!lifetime || lifetime.valid !== false), [lifetime]);
   const mayRead = useCallback(() => ownerCurrent() && currentAllowed.current, [ownerCurrent]);
@@ -60,7 +66,7 @@ export function useHistoricalReactivation({
     const own = readStoredOperation(storageKey); operationRef.current = own; setOperation(own);
     setText(''); setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false);
     setReceipt(null); setBatchId(null); setInspections({}); setReconcileAcknowledged({}); setCancelAcknowledged({});
-    setBusyKind(''); setUncertain(false); setError('');
+    setBusyKind(''); setUncertain(false); setError(''); setNameReview(null); setNameNotice('');
   }, [storageKey]);
   useEffect(() => {
     if (!open || !review) return undefined;
@@ -129,31 +135,31 @@ export function useHistoricalReactivation({
     if (ownerCurrent()) setBusyKind('');
   }
   function editText(next) {
-    if (!allowed || busyKind || uncertain || batchId || pendingOperation) return;
+    if (!allowed || flight.current || uncertain || batchId || pendingOperation || nameReview) return;
     generation.current++;
-    setText(next); setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false); setError('');
+    setText(next); setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false); setError(''); setNameNotice('');
   }
   function select(article, checked) {
-    if (!allowed || busyKind || uncertain || batchId || pendingOperation
+    if (!allowed || flight.current || uncertain || batchId || pendingOperation || nameReview
       || !review?.items.some((item) => item.article === article && item.disposition === 'eligible')) return;
     setSelected((previous) => checked ? [...new Set([...previous, article])] : previous.filter((sku) => sku !== article));
     setSelectedCreate((previous) => previous.filter((sku) => sku !== article));
     setAcknowledged(false);
   }
   function selectCreate(article, checked) {
-    if (!allowed || busyKind || uncertain || batchId || pendingOperation || !selected.includes(article)
+    if (!allowed || flight.current || uncertain || batchId || pendingOperation || nameReview || !selected.includes(article)
       || !review?.items.some((item) => item.article === article && item.deliveryMode === 'create' && item.disposition === 'eligible')) return;
     setSelectedCreate((previous) => checked ? [...new Set([...previous, article])] : previous.filter((sku) => sku !== article));
     setAcknowledged(false);
   }
   function selectEligible() {
-    if (!allowed || busyKind || uncertain || batchId || pendingOperation || !review) return;
+    if (!allowed || flight.current || uncertain || batchId || pendingOperation || nameReview || !review) return;
     setSelectedCreate([]);
     setSelected(review.items.filter((item) => item.disposition === 'eligible').map((item) => item.article));
     setAcknowledged(false);
   }
-  async function preview() {
-    if (uncertain || batchId || pendingOperation || !start('preview')) return;
+  async function preview(afterNameReview = false) {
+    if (nameReview && afterNameReview !== true || uncertain || batchId || pendingOperation || !start('preview')) return;
     const ticket = ++generation.current;
     let submitted;
     setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false);
@@ -180,7 +186,7 @@ export function useHistoricalReactivation({
     finally { finish(); }
   }
   async function confirm() {
-    if (!review || !acknowledged || uncertain || pendingOperation || attempt.current || !start('confirm')) return;
+    if (!review || nameReview || !acknowledged || uncertain || pendingOperation || attempt.current || !start('confirm')) return;
     let submitted;
     try {
       submitted = historicalConfirmation(review, selected, createRequestId(), Date.now(), selectedCreate);
@@ -236,6 +242,61 @@ export function useHistoricalReactivation({
         ? 'Операцію за цим номером ще не знайдено. Це не підтверджує відсутність змін. Підтвердження не буде надіслано повторно.'
         : errorMessage(cause, 'Не вдалося прочитати стан. Збережіть номер та повторіть лише перевірку стану.'));
     } finally { finish(); }
+  }
+  const acceptNameResponse = ticket => mayRead() && currentNamesAllowed.current && currentOpen.current && ticket === generation.current;
+  async function readNameReview(request = nameReview?.request) {
+    if (!canReviewNames || !request || batchId || pendingOperation || uncertain || !apiClient.previewNames || !start('name_read')) return;
+    const ticket = generation.current;
+    setSelected([]); setSelectedCreate([]); setAcknowledged(false);
+    setNameReview({ request, preview: null, acknowledged: false, uncertain: Boolean(nameReview?.uncertain) });
+    try {
+      const response = await apiClient.previewNames(request);
+      if (acceptNameResponse(ticket)) setNameReview({ request, preview: validateHistoricalNames(response.data, request), acknowledged: false, uncertain: false });
+    } catch (cause) {
+      if (acceptNameResponse(ticket)) setError(errorMessage(cause, 'Не вдалося перевірити назви цього самого товару. Повторіть лише читання.'));
+    } finally { if (ticket === generation.current) finish(); }
+  }
+  async function reviewNames(item) {
+    const request = historicalNameRepairRequest(item);
+    if (request) await readNameReview(request);
+  }
+  async function repeatAfterNames() {
+    if (!mayRead() || flight.current || pendingOperation || batchId || uncertain) return;
+    setNameReview(null); rememberOperation(null); setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false);
+    await preview(true);
+  }
+  async function saveNames() {
+    const current = nameReview;
+    if (!canReviewNames || !current?.acknowledged || !current.preview || current.uncertain || current.preview.alreadyAccepted
+      || pendingOperation || batchId || uncertain || !apiClient.acceptNames) return;
+    try { validateHistoricalNames(current.preview, current.request); }
+    catch (cause) { setNameReview({ ...current, preview: null, acknowledged: false }); setError(cause.message); return; }
+    if (!start('name_save')) return;
+    const ticket = generation.current; let saved = false;
+    try {
+      const response = await apiClient.acceptNames({ ...current.request, previewToken: current.preview.previewToken, reviewExpiresAt: current.preview.reviewExpiresAt });
+      if (ownerCurrent() && ticket === generation.current && !acceptNameResponse(ticket)) {
+        setNameReview({ request: current.request, preview: null, acknowledged: false, uncertain: true });
+      }
+      if (acceptNameResponse(ticket)) {
+        validateHistoricalNameReceipt(response.data, current.request);
+        setNameNotice('Чинні назви Magento збережено в менеджері. Товар залишається архівованим; перевірку відновлення повторено.');
+        saved = true;
+      }
+    } catch (cause) {
+      if (ownerCurrent() && ticket === generation.current && !acceptNameResponse(ticket)) {
+        setNameReview({ request: current.request, preview: null, acknowledged: false, uncertain: true });
+      }
+      if (acceptNameResponse(ticket)) {
+        const unknown = !(cause.response?.status >= 400 && cause.response.status < 500);
+        setNameReview({ request: current.request, preview: null, acknowledged: false, uncertain: unknown });
+        setError(errorMessage(cause, unknown ? 'Відповідь збереження назв втрачено. Повторіть лише перевірку назв цього самого товару.' : 'Назви не збережено. Перевірте їх ще раз.'));
+      }
+    } finally { if (ticket === generation.current) finish(); }
+    if (saved && acceptNameResponse(ticket)) await repeatAfterNames();
+  }
+  function cancelNameReview() {
+    if (!flight.current) { setNameReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false); setError(''); }
   }
   const waiting = historicalPending(receipt);
   const operationId = operation?.operationId, operationState = operation?.state, operationKind = operation?.kind;
@@ -341,16 +402,19 @@ export function useHistoricalReactivation({
     generation.current++;
     attempt.current = null; setText(''); setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false);
     rememberOperation(null);
-    setReceipt(null); setBatchId(null); setInspections({}); setReconcileAcknowledged({}); setError('');
+    setReceipt(null); setBatchId(null); setInspections({}); setReconcileAcknowledged({}); setError(''); setNameReview(null); setNameNotice('');
   }
   const expired = Boolean(review && Date.parse(review.reviewExpiresAt) <= clock);
   return {
+    canReviewNames, nameReview, nameNotice, reviewNames, readNameReview, saveNames, repeatAfterNames, cancelNameReview,
+    namesExpired: Boolean(nameReview?.preview && Date.parse(nameReview.preview.reviewExpiresAt) <= clock),
+    acknowledgeNames: value => { if (canReviewNames && !flight.current && !nameReview?.uncertain) setNameReview(previous => previous ? { ...previous, acknowledged: value } : null); },
     allowed, text, review, selected, selectedCreate, cancelAcknowledged, canReset, acknowledged, receipt, batchId, lookupId, inspections,
     reconcileAcknowledged, busyKind, uncertain, error, expired, waiting, operation, pendingOperation,
     dirty: Boolean(open && (uncertain || !receipt && text.trim())),
     locked: Boolean(busyKind || uncertain), editText, select, selectCreate, selectEligible, preview, confirm, refresh, inspect, reconcile, cancel, reset,
     setLookupId: (value) => { if (!busyKind && !batchId && !pendingOperation) setLookupId(value); },
-    setAcknowledged: (value) => { if (allowed && !busyKind && !uncertain && !batchId && !pendingOperation) setAcknowledged(value); },
+    setAcknowledged: (value) => { if (allowed && !flight.current && !nameReview && !uncertain && !batchId && !pendingOperation) setAcknowledged(value); },
     setCancelAcknowledged: (id, value) => { if (allowed && !busyKind && !uncertain) setCancelAcknowledged((previous) => ({ ...previous, [id]: value })); },
     setReconcileAcknowledged: (id, value) => { if (allowed && !busyKind && !uncertain) setReconcileAcknowledged((previous) => ({ ...previous, [id]: value })); },
   };
