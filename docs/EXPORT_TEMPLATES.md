@@ -491,3 +491,25 @@ then saves full names as an override, never as subject fragments. Preview does
 not write. Missing local names cannot trigger automatic remote import, and an
 uncertain earlier dispatch cannot be reset by this command. Authentication,
 active-user, CSRF, permissions and atomic audit boundaries remain in force.
+
+
+## Wide category field editor
+
+The Magento category workspace opens one wide field dialog with the category and
+UA/EN scope in its header. `Формування значення` edits the existing expression;
+`Відповідність у Magento` selects remote option identities. The panels remain
+mounted while switching with mouse or Left/Right/Home/End, preserving pending
+inputs. Recognized condition rules show their If/Then/fallback structure directly.
+All advanced, typed, shared-rule, readiness and target-review tools remain available.
+
+Rule edits and option choices stay in one detached field transaction until `Готово`
+adds them to the local package. Closing/Escape/cancel with pending input requires
+an explicit discard or stay decision; discarding clears both pending panels while
+preserving previously applied package edits. Suggestions based on the saved text
+are suppressed while its rule is changing. Saving/preparing the package and binding
+approval/publication retain their existing separate server CAS/audit boundaries.
+Opening or navigating the editor never evaluates products or publishes a binding.
+
+The desktop dialog owns the vertical scroll; its mapping tables and nested
+inspector use the available width without additional bounded vertical scrollers.
+This is local UI implementation, not live browser or Magento acceptance.
