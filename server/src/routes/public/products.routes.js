@@ -233,7 +233,7 @@ router.post('/product-magento-name/suggest', requirePermission('exports.create')
 
 router.post('/product-magento-name/preview', requirePermission('exports.create'), async (req, res) => {
   try {
-    res.json(await previewProductMagentoName(req.body || {}));
+    res.json(await previewProductMagentoName(req.body || {}, { mutationContext: getRequestMutationContext(req) }));
   } catch (error) {
     sendMagentoNameError(res, error);
   }

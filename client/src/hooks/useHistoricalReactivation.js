@@ -8,6 +8,7 @@ import {
 } from '../lib/historical-reactivation.js';
 
 import { historicalNameRepairRequest, validateHistoricalNames, validateHistoricalNameReceipt } from '../lib/historical-name-review.js';
+import { historicalManualNameRequest, validateHistoricalManualNames, validateHistoricalManualNameReceipt } from '../lib/historical-manual-name-review.js';
 
 const noAcceptanceCodes = new Set([
   'HISTORICAL_REVIEW_STALE', 'HISTORICAL_SELECTION_INVALID', 'HISTORICAL_CONFIRMATION_REQUIRED',
@@ -91,7 +92,7 @@ export function useHistoricalReactivation({
       }
     }
     setInspections({}); setReconcileAcknowledged({}); setCancelAcknowledged({});
-    setReceipt(next); setBatchId(next.batchId); setUncertain(false); setError('');
+    setReceipt(next); setNameNotice(''); setBatchId(next.batchId); setUncertain(false); setError('');
     const activated = next.items.filter((item) => item.localActivatedAt && !notified.current.has(item.intentId));
     if (activated.length) {
       activated.forEach((item) => notified.current.add(item.intentId));
@@ -245,13 +246,18 @@ export function useHistoricalReactivation({
   }
   const acceptNameResponse = ticket => mayRead() && currentNamesAllowed.current && currentOpen.current && ticket === generation.current;
   async function readNameReview(request = nameReview?.request) {
-    if (!canReviewNames || !request || batchId || pendingOperation || uncertain || !apiClient.previewNames || !start('name_read')) return;
+    const manual = request?.intent === 'historical-create', readNames = manual ? apiClient.previewManualNames : apiClient.previewNames;
+    if (!canReviewNames || !request || batchId || pendingOperation || uncertain || !readNames || !start('name_read')) return;
     const ticket = generation.current;
     setSelected([]); setSelectedCreate([]); setAcknowledged(false);
     setNameReview({ request, preview: null, acknowledged: false, uncertain: Boolean(nameReview?.uncertain) });
     try {
-      const response = await apiClient.previewNames(request);
-      if (acceptNameResponse(ticket)) setNameReview({ request, preview: validateHistoricalNames(response.data, request), acknowledged: false, uncertain: false });
+      const response = await readNames(request);
+      if (acceptNameResponse(ticket)) {
+        const next = manual ? validateHistoricalManualNames(response.data, request) : validateHistoricalNames(response.data, request);
+        setNameReview({ request, preview: next, acknowledged: false, uncertain: false,
+          ...(manual ? { subjectUa: next.subjectUa || '', subjectEn: next.subjectEn || '' } : {}) });
+      }
     } catch (cause) {
       if (acceptNameResponse(ticket)) setError(errorMessage(cause, 'Не вдалося перевірити назви цього самого товару. Повторіть лише читання.'));
     } finally { if (ticket === generation.current) finish(); }
@@ -260,27 +266,59 @@ export function useHistoricalReactivation({
     const request = historicalNameRepairRequest(item);
     if (request) await readNameReview(request);
   }
+  async function completeManualNames(item) {
+    const request = historicalManualNameRequest(item);
+    if (request) await readNameReview(request);
+  }
+  function editManualSubject(key, value) {
+    if (!canReviewNames || flight.current || nameReview?.request.intent !== 'historical-create' || nameReview.uncertain
+      || !['subjectUa', 'subjectEn'].includes(key) || value.length > 200) return;
+    setNameReview(previous => ({ ...previous, [key]: value, preview: null, acknowledged: false }));
+  }
+  async function previewManualNames() {
+    const current = nameReview;
+    if (!canReviewNames || current?.request.intent !== 'historical-create' || current.uncertain || !apiClient.previewManualNames
+      || !current.subjectUa?.trim() || !current.subjectEn?.trim() || batchId || pendingOperation || uncertain || !start('name_read')) return;
+    const ticket = generation.current, subjects = { subjectUa: current.subjectUa, subjectEn: current.subjectEn };
+    setNameReview({ ...current, preview: null, acknowledged: false });
+    try {
+      const response = await apiClient.previewManualNames({ ...current.request, ...subjects });
+      if (acceptNameResponse(ticket)) {
+        const next = validateHistoricalManualNames(response.data, current.request, subjects);
+        setNameReview({ ...current, preview: next, subjectUa: next.subjectUa, subjectEn: next.subjectEn, acknowledged: false });
+      }
+    } catch (cause) {
+      if (acceptNameResponse(ticket)) setError(errorMessage(cause, 'Не вдалося перевірити введені назви.'));
+    } finally { if (ticket === generation.current) finish(); }
+  }
   async function repeatAfterNames() {
     if (!mayRead() || flight.current || pendingOperation || batchId || uncertain) return;
     setNameReview(null); rememberOperation(null); setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false);
     await preview(true);
   }
   async function saveNames() {
-    const current = nameReview;
-    if (!canReviewNames || !current?.acknowledged || !current.preview || current.uncertain || current.preview.alreadyAccepted
-      || pendingOperation || batchId || uncertain || !apiClient.acceptNames) return;
-    try { validateHistoricalNames(current.preview, current.request); }
+    const current = nameReview, manual = current?.request.intent === 'historical-create';
+    const applyNames = manual ? apiClient.saveManualNames : apiClient.acceptNames;
+    if (!canReviewNames || !current?.acknowledged || !current.preview || current.uncertain || current.preview.alreadyAccepted || current.preview.alreadyCompleted
+      || pendingOperation || batchId || uncertain || !applyNames) return;
+    try {
+      if (manual) validateHistoricalManualNames(current.preview, current.request, { subjectUa: current.subjectUa, subjectEn: current.subjectEn });
+      else validateHistoricalNames(current.preview, current.request);
+    }
     catch (cause) { setNameReview({ ...current, preview: null, acknowledged: false }); setError(cause.message); return; }
     if (!start('name_save')) return;
     const ticket = generation.current; let saved = false;
     try {
-      const response = await apiClient.acceptNames({ ...current.request, previewToken: current.preview.previewToken, reviewExpiresAt: current.preview.reviewExpiresAt });
+      const response = await applyNames({ ...current.request, previewToken: current.preview.previewToken, reviewExpiresAt: current.preview.reviewExpiresAt,
+        ...(manual ? { subjectUa: current.preview.subjectUa, subjectEn: current.preview.subjectEn } : {}) });
       if (ownerCurrent() && ticket === generation.current && !acceptNameResponse(ticket)) {
         setNameReview({ request: current.request, preview: null, acknowledged: false, uncertain: true });
       }
       if (acceptNameResponse(ticket)) {
-        validateHistoricalNameReceipt(response.data, current.request);
-        setNameNotice('Чинні назви Magento збережено в менеджері. Товар залишається архівованим; перевірку відновлення повторено.');
+        if (manual) validateHistoricalManualNameReceipt(response.data, current.request, current.preview);
+        else validateHistoricalNameReceipt(response.data, current.request);
+        setNameNotice(manual ? 'Ручну UA/EN пару збережено. Товар залишається архівованим; перевірку відновлення повторено.'
+          : 'Чинні назви Magento збережено в менеджері. Товар залишається архівованим; перевірку відновлення повторено.');
         saved = true;
       }
     } catch (cause) {
@@ -407,6 +445,7 @@ export function useHistoricalReactivation({
   const expired = Boolean(review && Date.parse(review.reviewExpiresAt) <= clock);
   return {
     canReviewNames, nameReview, nameNotice, reviewNames, readNameReview, saveNames, repeatAfterNames, cancelNameReview,
+    completeManualNames, editManualSubject, previewManualNames,
     namesExpired: Boolean(nameReview?.preview && Date.parse(nameReview.preview.reviewExpiresAt) <= clock),
     acknowledgeNames: value => { if (canReviewNames && !flight.current && !nameReview?.uncertain) setNameReview(previous => previous ? { ...previous, acknowledged: value } : null); },
     allowed, text, review, selected, selectedCreate, cancelAcknowledged, canReset, acknowledged, receipt, batchId, lookupId, inspections,

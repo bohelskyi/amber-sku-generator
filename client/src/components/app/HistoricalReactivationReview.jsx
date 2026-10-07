@@ -6,6 +6,8 @@ import { CopyAction } from '../ui/index.js';
 import { WorkspaceDialog } from '../workspace/WorkspaceDialog.jsx';
 import { historicalDeliveryBlockerLabels, historicalNameRepairRequest } from '../../lib/historical-name-review.js';
 import { HistoricalNameBaselineReview } from './HistoricalNameBaselineReview.jsx';
+import { HistoricalManualNameReview } from './HistoricalManualNameReview.jsx';
+import { historicalManualNameRequest } from '../../lib/historical-manual-name-review.js';
 import './HistoricalReactivationReview.css';
 
 const time = (value) => value ? new Date(value).toLocaleString('uk-UA') : 'Ще не підтверджено';
@@ -112,6 +114,7 @@ function ReviewItem({ item, flow, standard }) {
   const selected = Boolean(item.article && flow.selected.includes(item.article));
   const locked = Boolean(flow.busyKind || flow.uncertain || flow.batchId || flow.pendingOperation || flow.nameReview);
   const namesRequest = historicalNameRepairRequest(item);
+  const manualNamesRequest = historicalManualNameRequest(item);
   const name = typeof item.currentName === 'string' && item.currentName.trim() ? item.currentName : null;
   return <li className={`historical-product${selected ? ' is-selected' : ''}`}>
     <div className="historical-product-heading">
@@ -135,7 +138,12 @@ function ReviewItem({ item, flow, standard }) {
     {namesRequest && !flow.nameReview && (flow.canReviewNames
       ? <button type="button" className="btn btn-outline mt-3" disabled={locked} onClick={() => void flow.reviewNames(item)}>Перевірити назви Magento</button>
       : <p className="mt-2 text-sm">Прийняття назв потребує також чинного права на створення експорту.</p>)}
-    {flow.nameReview && flow.nameReview.request.productId === item.productId && <HistoricalNameBaselineReview flow={flow} />}
+    {manualNamesRequest && <p className="mt-2 text-sm">Потрібна ручна українська й англійська назва цього сувеніра.</p>}
+    {manualNamesRequest && !flow.nameReview && (flow.canReviewNames
+      ? <button type="button" className="btn btn-outline mt-3" disabled={locked} onClick={() => void flow.completeManualNames(item)}>Ввести ручну UA/EN назву</button>
+      : <p className="mt-2 text-sm">Збереження ручної назви потребує також чинного права на створення експорту.</p>)}
+    {flow.nameReview && flow.nameReview.request.productId === item.productId && (flow.nameReview.request.intent === 'historical-create'
+      ? <HistoricalManualNameReview flow={flow} /> : <HistoricalNameBaselineReview flow={flow} />)}
     {eligible && standard && item.deliveryMode === 'create' && <label className="historical-create-consent">
       <input type="checkbox" aria-label={'Окремо дозволити CREATE ' + item.article}
         disabled={locked || !selected || flow.expired} checked={flow.selectedCreate.includes(item.article)}
