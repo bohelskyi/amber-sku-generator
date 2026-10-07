@@ -103,7 +103,7 @@ export function ProductBuilder({
   const [verificationFieldErrors, setVerificationFieldErrors] = useState({});
   const [isVerifying, setIsVerifying] = useState(false);
   const category = config.categories[selectedCat];
-  const createRules = createRequirements(config, selectedCat, answers);
+  const createRules = createRequirements(config, selectedCat, answers, previewData, nameSubjects);
   const isVerified = Boolean(previewData);
   const isNativeCreation = nativeCreation ?? (config.productCreation?.identityMode === 'public_identity' || previewData?.identityMode === 'public_identity' || previewData?.mode === 'public_identity');
   const deliveryState = isNativeCreation ? creationDeliveryState(previewData?.creationDeliveryReadiness, selectedCat) : null;
@@ -339,15 +339,15 @@ export function ProductBuilder({
           })}
 
           {createRules.namesRequired && <>
-            <p className="text-sm text-slate-600">Вкажіть лише назву предмета. «З бурштину» та артикул додаються автоматично.</p>
+            <p className="text-sm text-slate-600">{createRules.fullNames ? 'Шаблон не сформував повну пару UA/EN. Введіть повні назви товару.' : 'Вкажіть лише назву предмета. «З бурштину» та артикул додаються автоматично.'}</p>
             {[['magento_name_subject_ua', 'Назва предмета українською'], ['magento_name_subject_en', 'Назва предмета англійською']].map(([field, label]) => (
               <div key={field} className={`builder-field-row ${blockerByFieldId.has(field) ? 'is-invalid' : ''}`}
                 data-builder-blocker={blockerByFieldId.has(field) ? 'true' : undefined} tabIndex={blockerByFieldId.has(field) ? -1 : undefined}>
                 <div className="builder-field-label">
-                  <label htmlFor={`builder-${field}`}>{label}<span className="required-marker" aria-label="обов’язкове поле">*</span></label>
+                  <label htmlFor={`builder-${field}`}>{createRules.fullNames ? label.replace('Назва предмета', 'Повна назва товару') : label}<span className="required-marker" aria-label="обов’язкове поле">*</span></label>
                 </div>
                 <div className="min-w-0">
-                  <input id={`builder-${field}`} className="input builder-text-input" required maxLength={200}
+                  <input id={`builder-${field}`} className="input builder-text-input" required maxLength={createRules.fullNames ? 1024 : 200}
                     value={nameSubjects[field] || ''} disabled={isVerifying || isSaving || isCreationSaveUncertain}
                     aria-invalid={blockerByFieldId.has(field) ? 'true' : undefined}
                     aria-describedby={blockerByFieldId.has(field) ? `builder-blocker-${field}` : undefined}
@@ -461,6 +461,7 @@ export function ProductBuilder({
           </div>
 
           <div className="builder-summary-actions">
+            {isVerified && previewData.creationNames?.ready && <div className="space-y-1 text-sm"><strong>Повні назви товару</strong><p>UA: {previewData.creationNames.names.all?.replaceAll('AG-PREVIEW', 'артикул після збереження')}</p><p>EN: {previewData.creationNames.names.en?.replaceAll('AG-PREVIEW', 'SKU after saving')}</p></div>}
             {isVerified && <TestProductNotice product={previewData} preview />}
             {isVerified && isNativeCreation && <CreationDeliveryNotice id={deliveryNoticeId}
                 readiness={previewData.creationDeliveryReadiness} categoryCode={selectedCat}
@@ -488,7 +489,7 @@ export function ProductBuilder({
                   onClick={onSave}
                   className="btn btn-amber"
                   aria-describedby={[photosPending && !isCreationSaveUncertain ? mediaBlockerId : null, deliveryState ? deliveryNoticeId : null].filter(Boolean).join(' ') || undefined}
-                  disabled={isVerifying || isSaving || !isCreationSaveUncertain && (isTestProduct && !canCreateTestProducts || requiresPriceAttention || creationPhotos?.hasPendingUploads || Object.keys(serverErrors).length > 0)}
+                  disabled={isVerifying || isSaving || !isCreationSaveUncertain && (isTestProduct && !canCreateTestProducts || previewData.creationNames?.ready === false || requiresPriceAttention || creationPhotos?.hasPendingUploads || Object.keys(serverErrors).length > 0)}
                 >
                   {isSaving ? isCreationSaveUncertain ? 'Перевіряємо результат…' : 'Зберігаємо...' : isCreationSaveUncertain ? 'Перевірити результат збереження' : 'Зберегти товар'}
                 </button>

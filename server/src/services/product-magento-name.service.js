@@ -88,6 +88,13 @@ async function previewProductMagentoName(payload = {}) {
     await lifecycleGate.begin(client, 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const product = (await client.query(`SELECT p.*,i.public_sku FROM products p
       JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id = $1`, [productId])).rows[0];
+    const effective = await require('./product/effective-name-readiness').current(client);
+    if (effective) {
+      if (Object.hasOwn(payload, 'subjectUa') || Object.hasOwn(payload, 'subjectEn')) throw nameError('Чинні правила використовують повні назви. Оновіть форму.', 409, 'PRODUCT_NAMES_POLICY_CHANGED');
+      const result = await require('./magento/product-names.service').read(productId, { queryable: client, readiness: true, allowUnavailable: true });
+      await lifecycleGate.commit(client);
+      return { ...result, effectiveNames: true, publicSku: product?.public_sku };
+    }
     assertEligible(product);
     const [lifecycle] = await readFullProductStates(client, [productId]);
     const readCurrent = !Object.hasOwn(payload, 'subjectUa') && !Object.hasOwn(payload, 'subjectEn');
@@ -118,6 +125,7 @@ async function applyProductMagentoName(payload = {}, options = {}) {
   const client = await (options.databasePool || pool).connect();
   try {
     await lifecycleGate.begin(client, 'BEGIN');
+    if (await require('./product/effective-name-readiness').current(client, { lock: true })) throw nameError('Чинні правила використовують повні назви. Оновіть форму.', 409, 'PRODUCT_NAMES_POLICY_CHANGED');
     const result = await client.query(`SELECT p.*,i.public_sku FROM products p
       JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id = $1 FOR UPDATE OF p`, [productId]);
     const product = result.rows[0];

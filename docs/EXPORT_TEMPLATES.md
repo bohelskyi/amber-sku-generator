@@ -457,3 +457,37 @@ the existing fingerprint. Capture rechecks locked products without changing lock
 ordering, atomic result links, exposure or cursors. Failed represented products
 block complete capture. Completed retries/downloads/confirmation continue using
 stored evidence and bytes, never today's policy.
+
+
+## Reviewed effective product names
+
+`effective-product-names-v1` is an explicit evaluator-5 successor policy. The
+category workspace prepares it through the existing draft CAS upgrade command;
+preparation does not publish a binding. Existing definitions and immutable
+versions keep their original subject/readiness behavior. Only the official
+name-owned SV subject guard is removed; customized or shared guards fail closed.
+The policy participates in the definition hash and the name decision proof.
+Unrelated field decisions keep their own existing proofs.
+
+The same evaluator resolves generated UA/EN, binding name pins and exact anchored
+full-name overrides. A complete generated pair needs no manual subject entry.
+Missing pairs can be completed with exact full names (1024 characters per
+language, no control characters). CREATE rechecks the current published binding,
+binds the policy/version/full names in its preview token, and anchors an explicit
+pair to the real server-assigned product identity inside the save transaction.
+Recount reanchors inherited full names against the persisted successor, preserving
+the source and immutable history. No new encoded SKU is introduced.
+
+`GET /api/product-names/:productId/readiness` is a local read. Explicit Magento
+completion uses the existing name-resolution preview/apply commands with
+`choice: magento, intent: complete`. It requires this published policy and an
+incomplete local pair. Three bounded GETs verify the base identity and main/all
+UA name, fresh active EN store and exact EN counterpart, with native ownership
+and both observations plus store evidence bound into the token. These are the
+same scopes used by delivery and ordinary name reconciliation; a separate
+ua-store override is not reinterpreted as the main name.
+Apply performs fresh GETs and normal actor/product/binding/state revalidation,
+then saves full names as an override, never as subject fragments. Preview does
+not write. Missing local names cannot trigger automatic remote import, and an
+uncertain earlier dispatch cannot be reset by this command. Authentication,
+active-user, CSRF, permissions and atomic audit boundaries remain in force.

@@ -24,14 +24,25 @@ async function preview(payload, options = {}) {
   if (await unresolvedDispatch(db, c.originHash(config.baseUrl), amber.product.public_sku)) {
     throw c.error(409, 'MAGENTO_SYNC_PREVIOUS_DISPATCH_UNRESOLVED', 'Попередню надіслану зміну ще не підтверджено. Потрібна перевірка адміністратором.');
   }
-  const observation = await readNames(config, amber, options);
+  const completion = payload.intent === 'complete';
+  if (payload.intent !== undefined && !completion) throw c.error(422, 'MAGENTO_NAME_SELECTION_INVALID', 'Некоректний спосіб заповнення назв.');
+  if (completion) {
+    const policy = require('../export-templates/effective-product-names');
+    const mapped = require('./binding-evidence-products').evaluate(amber, amber.product);
+    if (payload.choice !== 'magento' || amber.compiled.definition.nameReadiness !== policy.POLICY
+      || policy.validPair({ all: mapped.base.name, en: mapped.english.name })) {
+      throw c.error(409, 'MAGENTO_NAME_COMPLETION_UNAVAILABLE', 'Окреме заповнення потрібне лише для відсутньої повної пари назв.');
+    }
+  }
+  const observation = await readNames(config, amber, { ...options, ...(completion ? { completion: true, fetchImpl: require('./integration-readiness').boundedGet(options.fetchImpl, { maxRequests: 3 }) } : {}) });
   require('./native-identity-ownership').assertOwned(amber, observation.raw);
-  const result = decisionFor(observation);
+  const result = decisionFor(observation, { allowIncompleteAmber: completion });
   if (['unavailable', 'identity_changed'].includes(result.action)) throw c.error(409, 'MAGENTO_NAME_READ_UNAVAILABLE', 'Не вдалося безпечно перевірити назви.');
   const token = c.hash({ product: amber.product, binding: binding.id, state: nameStateEvidence(amber.nameState),
-    names: [result.amber, result.remote], remoteId: observation.raw.id, choice: payload.choice });
+    names: [result.amber, result.remote], remoteId: observation.raw.id, choice: payload.choice,
+    ...(completion ? { intent: 'complete', storeEvidence: observation.domainEvidence } : {}) });
   return { productId: payload.productId, article: amber.product.public_sku, choice: payload.choice,
-    amber: result.amber, magento: result.remote, previewToken: token,
+    amber: result.amber, magento: result.remote, previewToken: token, ...(completion ? { intent: 'complete', source: 'verified_magento_ua_en' } : {}),
     ...(options.internal ? { observation, result, bindingId: binding.id } : {}) };
 }
 async function apply(payload, options = {}) {
@@ -54,6 +65,11 @@ async function apply(payload, options = {}) {
     }
     return await runAccessAdminMutation({ databasePool: db, actorUserId: options.mutationContext?.actorUserId,
       requiredPermission: 'exports.create', createError: c.error, operation: async (client) => {
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`amber_magento_binding:${fresh.observation.amber.revision.installationKey}`]);
+        if (payload.intent === 'complete') {
+          const context = await require('../product/effective-name-readiness').current(client, { config, lock: true });
+          if (!context || context.binding.id !== fresh.bindingId) throw c.error(409, 'MAGENTO_NAME_PREVIEW_STALE', 'Опубліковані правила назв змінилися. Повторіть перегляд.');
+        }
         const current = (await client.query('SELECT * FROM products WHERE id=$1 FOR NO KEY UPDATE', [product.id])).rows[0];
         const expected = fresh.observation.amber.product;
         const state = await readNameState(client, c.originHash(config.baseUrl), product.public_product_identity_id);

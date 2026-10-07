@@ -150,6 +150,8 @@ async function getSourceRegistry(client) {
     formatVersion: 1, evaluatorVersion: 'magento-declarative-1', outputContract: 'magento-products-v1',
     nativeCharacteristicsUpgrade: { targetContract: require('./version-contract').CHARACTERISTIC_CONTRACT,
       evaluatorVersion: CHARACTERISTIC_EVALUATOR, supportedEvaluatorVersions: ['magento-declarative-3', 'magento-declarative-4'] },
+    effectiveNamesUpgrade: { targetContract: require('./effective-product-names').POLICY,
+      evaluatorVersion: CHARACTERISTIC_EVALUATOR, supportedEvaluatorVersions: ['magento-declarative-3', 'magento-declarative-4', CHARACTERISTIC_EVALUATOR] },
     productFields: PRODUCT_FIELDS, operations: OPERATIONS, limits: { ...LIMITS, previewProducts: 100 },
     productSourceContracts: [{ version: 'public-product-identity-v1', evaluatorVersion: PUBLIC_EVALUATOR,
       publicSource: 'public_sku', internalSource: 'full_sku' }],

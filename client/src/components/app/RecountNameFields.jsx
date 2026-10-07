@@ -29,8 +29,8 @@ export function RecountNameFields({ product, productId, mode, busy, onChange }) 
       const details = failure?.response?.data?.details;
       if (status === 422 && code === 'PRODUCT_NAMES_INVALID' && details?.nameConflict) {
         setError({ kind: 'controlled', message: 'Спочатку узгодьте назву в проблемах синхронізації.' });
-      } else if (status === 422 && code === 'PRODUCT_NAMES_INVALID' && details?.repair === 'product_magento_name') {
-        setError({ kind: 'missing-pair', message: 'Сервер не може сформувати чинну пару назв українською та англійською. Для цього сувеніра їх можна заповнити окремо від переобліку.' });
+      } else if (status === 422 && code === 'PRODUCT_NAMES_INVALID' && ['product_magento_name', 'effective_product_names'].includes(details?.repair)) {
+        setError({ kind: 'missing-pair', message: 'Сервер не може сформувати чинну пару назв українською та англійською. Їх можна заповнити окремо від переобліку.' });
       } else if (status === 403) {
         setError({ kind: 'permission', message: 'Назви недоступні для вашого рівня доступу. Зміни характеристик залишаються доступними.' });
       } else if (status === 409) {

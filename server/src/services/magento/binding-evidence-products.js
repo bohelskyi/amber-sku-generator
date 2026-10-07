@@ -41,9 +41,9 @@ function evaluate(amber, product) {
     if (product.is_test_product === true) {
       mapped.base = { ...mapped.base, product_online: '2' };
     }
-    const generatedNames = require('./name-reconciliation').applyNameOverride(mapped, product);
+    const generatedNames = mapped.generatedNames || require('./name-reconciliation').applyNameOverride(mapped, product);
     return { base: mapped.base || {}, english: mapped.english || {}, ready: mapped.errors.length === 0,
-      generatedNames,
+      generatedNames, ...(mapped.nameSource ? { nameSource: mapped.nameSource } : {}),
       evaluationIssues: mapped.errors.slice(0, 40).map((issue) => ({
         ...(typeof issue.code === 'string' ? { code: issue.code.slice(0, 100) } : {}),
         ...(typeof issue.field === 'string' ? { field: issue.field.slice(0, 100) } : {}),

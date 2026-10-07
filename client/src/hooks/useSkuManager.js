@@ -208,7 +208,7 @@ export function useSkuManager({
   const visibleQuestionsForSelected = questionsForSelected.filter((question) =>
     getQuestionVisibility(question)
   );
-  const createRules = createRequirements(config, selectedCat, answers);
+  const createRules = createRequirements(config, selectedCat, answers, previewData, nameSubjects);
   const requiredQuestions = visibleQuestionsForSelected
     .filter((question) => isCreateQuestionRequired(question, createRules))
     .filter((question) => isTextQuestion(question) || getVisibleOptions(question).length > 0);
@@ -349,7 +349,10 @@ export function useSkuManager({
     : creationPricingMode === 'usd_per_gram'
       ? { mode: 'usd_per_gram', usdPerGram: creationUsdPerGram.replace(',', '.'), marketingRoundingEnabled: creationMarketingRounding }
       : { mode: 'system_auto' };
-  const requestContext = JSON.stringify({ selectedCat, answers, weight, nameSubjects, pricingDecision, photoContext, isTestProduct });
+  const namePayload = createRules.fullNames
+    ? Object.values(nameSubjects).some(value => value.trim()) ? { magentoNames: { all: nameSubjects.magento_name_subject_ua, en: nameSubjects.magento_name_subject_en } } : {}
+    : nameSubjects;
+  const requestContext = JSON.stringify({ selectedCat, answers, weight, namePayload, pricingDecision, photoContext, isTestProduct });
   useLayoutEffect(() => { inputContext.current = requestContext; }, [requestContext]);
 
   const numericInputs = () => {
@@ -366,7 +369,7 @@ export function useSkuManager({
     canCreate: canCreateProducts && (!isTestProduct || testProductCreationAvailable),
     busy: isSaving || isPreviewing || isCreationSaveUncertain || creationPhotos.hasPendingUploads,
     previewData,
-    product: { ...nameSubjects, ...(isTestProduct ? { isTestProduct: true } : {}), categoryCode: selectedCat, answers: isNativeCreation ? taskNumeric.answers : answers,
+    product: { ...namePayload, ...(isTestProduct ? { isTestProduct: true } : {}), categoryCode: selectedCat, answers: isNativeCreation ? taskNumeric.answers : answers,
       weight: isNativeCreation ? taskNumeric.weight : isWeightRequired ? taskNumeric.weight : 0,
       ...(creationPricingAvailable ? { pricingDecision } : {}),
       ...(creationPhotosAvailable ? creationPhotoPayload : {}), isCalibrated },
@@ -467,7 +470,7 @@ export function useSkuManager({
     previewFlight.current = true; setIsPreviewing(true); setCreationFieldErrors({});
     return productsApi.preview({
       ...(isTestProduct ? { isTestProduct: true } : {}),
-      ...nameSubjects,
+      ...namePayload,
       categoryCode: selectedCat,
       answers: isNativeCreation ? numeric.answers : answers,
       weight: isNativeCreation ? numeric.weight : isWeightRequired ? numeric.weight : 0,
@@ -495,6 +498,7 @@ export function useSkuManager({
     if (!previewData || isSaving || previewFlight.current || saveFlight.current) return;
     if (!recoveringNativeSave && (isTestProduct && !testProductCreationAvailable || !matchesTestCreationResult(previewData, isTestProduct))) { setSaveError('Серверна перевірка типу товару не підтверджена. Потрібна нова перевірка й чинний доступ.'); return; }
     if (!recoveringNativeSave && creationPhotosAvailable && creationPhotos.hasPendingUploads) { setSaveError('Завершіть збереження фотографій або приберіть невдалі спроби.'); return; }
+    if (!recoveringNativeSave && previewData.creationNames?.ready === false) { setSaveError('Заповніть повні назви UA/EN і повторіть перевірку.'); return; }
     if (!recoveringNativeSave && isNativeCreation && (!previewData.characteristicConfigHash || !previewData.normalizedAnswers)) { setSaveError('Перевірка характеристик неповна. Повторіть перевірку даних.'); return; }
     if (!recoveringNativeSave && creationPricingMode === 'manual_uah' && !hasManualPrice) { setSaveError('Вкажіть додатну ручну ціну.'); return; }
     if (!recoveringNativeSave && requiresManualPrice && !hasManualPrice) {
@@ -508,7 +512,7 @@ export function useSkuManager({
 
     const payload = {
       ...(isTestProduct ? { isTestProduct: true } : {}),
-      ...nameSubjects,
+      ...namePayload,
       ...(isNativeCreation ? { characteristicConfigHash: previewData.characteristicConfigHash } : { skuSchemaVersionId: previewData.skuSchemaVersionId }),
       previewToken: previewData.previewToken,
       category: selectedCat,
@@ -549,7 +553,7 @@ export function useSkuManager({
     ++previewSequence.current;nativeSaveAttempt.current=null;
     setSelectedCat(product.categoryCode);setAnswers(product.answers);setWeight(String(product.weight ?? ''));
     setIsTestProduct(product.isTestProduct === true);
-    setNameSubjects({magento_name_subject_ua:product.magento_name_subject_ua || '',magento_name_subject_en:product.magento_name_subject_en || ''});
+    setNameSubjects({magento_name_subject_ua:product.magentoNames?.all || product.magento_name_subject_ua || '',magento_name_subject_en:product.magentoNames?.en || product.magento_name_subject_en || ''});
     setCreationPricingMode(product.pricingDecision?.mode || 'system_auto');
     setManualPriceUah(String(product.pricingDecision?.manualPriceUah ?? ''));
     setCreationUsdPerGram(String(product.pricingDecision?.usdPerGram ?? ''));
