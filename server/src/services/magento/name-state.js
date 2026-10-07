@@ -58,21 +58,26 @@ function namesFromObservation(observation) {
   const expected = evaluate(observation.amber, observation.amber.product);
   const amber = { ...(typeof expected.base.name === 'string' ? { all: expected.base.name } : {}),
     ...(typeof expected.english.name === 'string' ? { en: expected.english.name } : {}) };
-  const remote = { ...(typeof observation.raw?.name === 'string' ? { all: observation.raw.name } : {}),
+  const remoteUa = observation.raw?.name;
+  const remote = { ...(typeof remoteUa === 'string' ? { all: remoteUa } : {}),
     ...(typeof observation.domainEvidence?.english?.fields?.name === 'string'
       ? { en: observation.domainEvidence.english.fields.name } : {}) };
   return { amber, remote, generated: expected.generatedNames, ready: expected.ready };
 }
-function decisionFor(observation) {
+function decisionFor(observation, { allowIncompleteAmber = false } = {}) {
   const names = namesFromObservation(observation);
   const state = observation.amber.nameState;
   if (!observation.raw) return { action: 'create', ...names };
   if (require('./native-identity-ownership').issue(observation.amber, observation.raw)) return { action: 'foreign_identity', ...names };
-  if (!names.amber.all || !names.remote.all || !same(Object.keys(names.amber).sort(), Object.keys(names.remote).sort())) {
-    return { action: 'unavailable', ...names };
-  }
   if (state && Number(state.remote_product_id) !== Number(observation.raw.id)) {
     return { action: 'identity_changed', ...names };
+  }
+  if (allowIncompleteAmber && observation.amber.compiled.definition.nameReadiness === require('../export-templates/effective-product-names').POLICY
+    && require('../export-templates/effective-product-names').validPair(names.remote)) {
+    return { action: 'completion_review', ...names };
+  }
+  if (!names.amber.all || !names.remote.all || !same(Object.keys(names.amber).sort(), Object.keys(names.remote).sort())) {
+    return { action: 'unavailable', ...names };
   }
   return { ...reconcileNames(state?.baseline_names, names.amber, names.remote, state?.resolution), ...names };
 }

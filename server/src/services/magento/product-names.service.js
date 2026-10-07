@@ -25,8 +25,9 @@ function validateEvaluatedNames(names, amber, mapped) {
     const nameConflict = ['conflict', 'baseline_required'].includes(amber.nameState?.state);
     throw c.error(422, 'PRODUCT_NAMES_INVALID', error.message, {
       nameConflict,
-      repair: !nameConflict && amber.product.category === 'SV' && mapped.issueFields.includes('name')
-        ? 'product_magento_name' : null,
+      repair: !nameConflict && mapped.issueFields.includes('name')
+        ? amber.compiled?.definition.nameReadiness === require('../export-templates/effective-product-names').POLICY
+          ? 'effective_product_names' : amber.product.category === 'SV' ? 'product_magento_name' : null : null,
     });
   }
 }
@@ -47,11 +48,15 @@ async function read(productId, options = {}) {
   }
   const mapped = evaluate(amber, amber.product);
   let names = { all: mapped.base.name, en: mapped.english.name };
+  const effective = amber.compiled.definition.nameReadiness === require('../export-templates/effective-product-names').POLICY;
   if (options.allowUnavailable && (!names.all || !names.en)) names = null;
   else validateEvaluatedNames(names, amber, mapped);
   const previewToken = c.hash({ product: amber.product, template: amber.template, bindingId: binding?.id ?? null, names });
   return { productId, names, previewToken, nameConflict: ['conflict', 'baseline_required'].includes(amber.nameState?.state),
-    ...(options.internal ? { amber, generated: mapped.generatedNames } : {}) };
+    ...(options.readiness && effective ? { readiness: { policy: require('../export-templates/effective-product-names').POLICY,
+      ready: require('../product/effective-name-readiness').view(mapped).ready, source: mapped.nameSource || 'template',
+      generated: mapped.generatedNames, article: amber.product.public_sku } } : {}),
+    ...(options.internal ? { amber, generated: mapped.generatedNames, effective } : {}) };
 }
 
 async function save(payload, options = {}) {
@@ -62,11 +67,29 @@ async function save(payload, options = {}) {
   }
   return runAccessAdminMutation({ databasePool: db, actorUserId: options.mutationContext?.actorUserId,
     requiredPermission: 'exports.create', createError: c.error, operation: async (client) => {
+      const context = await require('../product/effective-name-readiness').current(client, { config: options.config || configuration.magento, lock: true });
       const product = (await client.query('SELECT * FROM products WHERE id=$1 FOR NO KEY UPDATE', [payload.productId])).rows[0];
-      const fresh = await read(payload.productId, { ...options, internal: true });
+      const fresh = await read(payload.productId, { ...options, queryable: client, lockNameState: true, internal: true, allowUnavailable: Boolean(context) });
+      if (fresh.effective && (['conflict', 'baseline_required'].includes(fresh.amber.nameState?.state)
+        || await require('./name-discovery').unresolvedDispatch(client, fresh.amber.revision.originHash, fresh.amber.product.public_sku))) {
+        throw c.error(409, 'MAGENTO_SYNC_PREVIOUS_DISPATCH_UNRESOLVED', 'Спочатку узгодьте попередню зміну або конфлікт назв.');
+      }
       if (fresh.previewToken !== payload.previewToken || !product
         || c.hash(product) !== c.hash(Object.fromEntries(Object.keys(product).map((key) => [key, fresh.amber.product[key]])))) {
         throw c.error(409, 'PRODUCT_NAMES_STALE', 'Товар або назви змінилися. Оновіть дані та повторіть зміни.');
+      }
+      if (fresh.effective) {
+        // Preserve the private source-support association on the loaded object.
+        const previous = fresh.amber.product.magento_name_override;
+        const owned = Object.hasOwn(fresh.amber.product, 'magento_name_override');
+        let valid;
+        try {
+          fresh.amber.product.magento_name_override = { generated: fresh.generated, values: names };
+          valid = require('../product/effective-name-readiness').view(evaluate(fresh.amber, fresh.amber.product)).ready;
+        } finally {
+          if (owned) fresh.amber.product.magento_name_override = previous; else delete fresh.amber.product.magento_name_override;
+        }
+        if (!valid) throw c.error(422, 'PRODUCT_NAMES_REQUIRED', 'Опубліковані правила не підтверджують цю пару назв.');
       }
       if (!same(names, fresh.names)) {
         await client.query('UPDATE products SET magento_name_override=$2::jsonb,magento_name_review_required=FALSE WHERE id=$1',

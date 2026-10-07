@@ -457,3 +457,65 @@ the existing fingerprint. Capture rechecks locked products without changing lock
 ordering, atomic result links, exposure or cursors. Failed represented products
 block complete capture. Completed retries/downloads/confirmation continue using
 stored evidence and bytes, never today's policy.
+
+
+## Reviewed effective product names
+
+`effective-product-names-v1` is an explicit evaluator-5 successor policy. The
+category workspace prepares it through the existing draft CAS upgrade command;
+preparation does not publish a binding. Existing definitions and immutable
+versions keep their original subject/readiness behavior. Only the official
+name-owned SV subject guard is removed; customized or shared guards fail closed.
+The policy participates in the definition hash and the name decision proof.
+Unrelated field decisions keep their own existing proofs.
+
+The same evaluator resolves generated UA/EN, binding name pins and exact anchored
+full-name overrides. A complete generated pair needs no manual subject entry.
+Missing pairs can be completed with exact full names (1024 characters per
+language, no control characters). CREATE rechecks the current published binding,
+binds the policy/version/full names in its preview token, and anchors an explicit
+pair to the real server-assigned product identity inside the save transaction.
+Recount reanchors inherited full names against the persisted successor, preserving
+the source and immutable history. No new encoded SKU is introduced.
+
+`GET /api/product-names/:productId/readiness` is a local read. Explicit Magento
+completion uses the existing name-resolution preview/apply commands with
+`choice: magento, intent: complete`. It requires this published policy and an
+incomplete local pair. Three bounded GETs verify the base identity and main/all
+UA name, fresh active EN store and exact EN counterpart, with native ownership
+and both observations plus store evidence bound into the token. These are the
+same scopes used by delivery and ordinary name reconciliation; a separate
+ua-store override is not reinterpreted as the main name.
+Apply performs fresh GETs and normal actor/product/binding/state revalidation,
+then saves full names as an override, never as subject fragments. Preview does
+not write. Missing local names cannot trigger automatic remote import, and an
+uncertain earlier dispatch cannot be reset by this command. Authentication,
+active-user, CSRF, permissions and atomic audit boundaries remain in force.
+
+
+## Wide category field editor
+
+The Magento category workspace opens one wide field dialog with the category and
+UA/EN scope in its header. `Формування значення` edits the existing expression;
+`Відповідність у Magento` selects remote option identities. The panels remain
+mounted while switching with mouse or Left/Right/Home/End, preserving pending
+inputs. Recognized condition rules show their If/Then/fallback structure directly.
+All advanced, typed, shared-rule, readiness and target-review tools remain available.
+
+Rule edits and option choices stay in one detached field transaction until `Готово`
+adds them to the local package. Closing/Escape/cancel with pending input requires
+an explicit discard or stay decision; discarding clears both pending panels while
+preserving previously applied package edits. Suggestions based on the saved text
+are suppressed while its rule is changing. Saving/preparing the package and binding
+approval/publication retain their existing separate server CAS/audit boundaries.
+Opening or navigating the editor never evaluates products or publishes a binding.
+
+The desktop dialog owns the vertical scroll; its mapping tables and nested
+inspector use the available width without additional bounded vertical scrollers.
+This is local UI implementation, not live browser or Magento acceptance.
+
+The field title, category/language and tabs stay visible while scrolling. Text
+output owns the remaining table width after a compact action column; visible
+textareas grow with their actual rendered content and viewport width. The header
+can focus the outer If/Then fallback without editing its value. Long selected
+values have keyboard-operable full-value disclosures.

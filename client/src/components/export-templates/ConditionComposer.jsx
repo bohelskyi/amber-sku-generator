@@ -43,7 +43,7 @@ function PredicateEditor({ node, context, onChange, creating, children, showSour
       semantic: semantic || form.semantic, value: form.value, values: form.values || (form.value !== undefined ? [form.value] : []) })}>
       <option value="eq">дорівнює</option><option value="in">є одним із</option><option value="present">заповнено</option><option value="absent">не заповнено</option>
     </select></label>
-    {semantic && form.operator === 'eq' ? <SearchablePicker label="Значення характеристики" required disabled={context.readOnly} value={form.value === undefined ? '' : JSON.stringify(form.value)} options={ids.map((id) => ({ value: JSON.stringify(id), label: optionDisplayLabel(evidence, id) }))} onChange={(value) => update({ value: JSON.parse(value) })} /> : form.source && ['eq', 'in'].includes(form.operator) && (semantic ? <label>{form.operator === 'in' ? 'Значення характеристики (можна кілька)' : 'Значення характеристики'}
+    {semantic && form.operator === 'eq' ? <div className="et-condition-value"><SearchablePicker label="Значення характеристики" required disabled={context.readOnly} value={form.value === undefined ? '' : JSON.stringify(form.value)} options={ids.map((id) => ({ value: JSON.stringify(id), label: optionDisplayLabel(evidence, id) }))} onChange={(value) => update({ value: JSON.parse(value) })} />{form.value !== undefined && optionDisplayLabel(evidence, form.value).length > 45 && <details className="et-selected-value"><summary>Повне значення</summary><p>{optionDisplayLabel(evidence, form.value)}</p></details>}</div> : form.source && ['eq', 'in'].includes(form.operator) && (semantic ? <label>{form.operator === 'in' ? 'Значення характеристики (можна кілька)' : 'Значення характеристики'}
       <select className="input" required disabled={context.readOnly} multiple={form.operator === 'in'} value={form.operator === 'in' ? (form.values || []).map((value) => JSON.stringify(value)) : form.value === undefined ? '' : JSON.stringify(form.value)} onChange={(e) => update(form.operator === 'in' ? { values: [...e.target.selectedOptions].map((option) => JSON.parse(option.value)) } : { value: JSON.parse(e.target.value) })}>
         {form.operator === 'eq' && <option value="" disabled>Оберіть значення</option>}
         {ids.map((id) => <option key={id} value={JSON.stringify(id)}>{optionDisplayLabel(evidence, id)}</option>)}
@@ -101,6 +101,6 @@ export function ConditionComposer({ node, trail, context, renderValue }) {
       // Start with the explicit fallback, preserving its result type and guards.
       if (structural([...chain.rows, { node: { op: 'when', if: { op: 'literal', value: false }, then: structuredClone(chain.fallback) } }], `[data-condition="${chain.rows.length}"] input[role="combobox"]`)) setCreating(chain.rows.length);
     }}>Додати умову</button>}
-    <section className="et-condition-default" aria-label="Інакше"><h4>Інакше → результат за замовчуванням</h4>{renderValue(chain.fallback, chain.fallbackTrail)}</section>
+    <section className="et-condition-default" tabIndex={-1} aria-label="Інакше"><h4>Інакше → результат за замовчуванням</h4>{renderValue(chain.fallback, chain.fallbackTrail)}</section>
   </section>;
 }

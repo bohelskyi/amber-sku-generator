@@ -5,14 +5,23 @@ const { evaluate } = require('./binding-evidence-products');
 const { reconcileObservation } = require('./name-state');
 const { assertActorStillAuthorized, APPLICATION_USER_ADMIN_LOCK_KEY } = require('../access-admin-transaction');
 
-// Exactly one base GET and, when required by the evaluator, one EN GET. This
-// discovery lane never invokes a Magento mutation or product/schema audit.
-async function readNames(config, amber, { fetchImpl } = {}) {
+// Canonical UA is the main/all name; EN is the en store name, matching delivery
+// and shared-name reconciliation. Completion also verifies the active EN view.
+// This discovery lane never invokes a Magento mutation or product/schema audit.
+async function readNames(config, amber, { fetchImpl, completion = false } = {}) {
   const expected = evaluate(amber, amber.product);
   const sku = amber.product.public_sku;
   const raw = await createMagentoClient(config, { fetchImpl, storeCode: 'all' }).findProductBySku(sku);
   const domainEvidence = { english: null, failures: [] };
-  if (typeof expected.english.name === 'string') {
+  if (completion) {
+    const stores = await createMagentoClient(config, { fetchImpl, storeCode: 'all' }).getStoreViews();
+    const enViews = Array.isArray(stores) ? stores.filter(store => store.code === 'en') : [];
+    if (enViews.length !== 1 || !Number.isSafeInteger(enViews[0].id) || enViews[0].id <= 0 || Number(enViews[0].is_active) !== 1) {
+      throw error(409, 'MAGENTO_NAME_STORE_UNAVAILABLE', 'Потрібна одна активна англійська вітрина Magento.');
+    }
+    domainEvidence.stores = enViews.map(store => ({ id: store.id, code: store.code, active: store.is_active }));
+  }
+  if (completion || typeof expected.english.name === 'string') {
     const remote = await createMagentoClient(config, { fetchImpl, storeCode: 'en' }).findProductBySku(sku);
     if (remote.id !== raw.id || remote.sku !== sku) throw error(409, 'MAGENTO_NAME_IDENTITY_CHANGED', 'Ідентичність Magento змінилася.');
     domainEvidence.english = { fields: { name: remote.name } };

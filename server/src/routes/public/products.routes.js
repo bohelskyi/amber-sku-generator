@@ -73,6 +73,10 @@ router.post('/magento/name-resolution/apply', requirePermission('exports.create'
     { mutationContext: getRequestMutationContext(req) })); } catch (error) { sendMagentoNameError(res, error); }
 });
 
+router.get('/product-names/:productId/readiness', requirePermission('products.decode'), async (req, res) => {
+  try { res.json(await require('../../services/magento/product-names.service').read(Number(req.params.productId), { readiness: true, allowUnavailable: true })); }
+  catch (error) { require('../../http/errors').sendHttpError(res, error, { includeCode: true, includeDetails: true }); }
+});
 router.get('/product-names/:productId', requirePermission('products.decode'), async (req, res) => {
   try { res.json(await require('../../services/magento/product-names.service').read(Number(req.params.productId))); }
   catch (error) { require('../../http/errors').sendHttpError(res, error, { includeCode: true, includeDetails: true }); }
@@ -87,7 +91,8 @@ router.get('/config', requirePermission('products.view'), async (req, res) => {
   try {
     const config = await getPublicConfig();
     const activation = (await require('../../db/pool').query('SELECT enabled FROM public_sku_activation WHERE singleton')).rows[0];
-    res.json({ ...config, productCreateRequirements: require('../../services/product/new-product-readiness').requirements,
+    const productNameReadiness = await require('../../services/product/effective-name-readiness').availability(require('../../db/pool'));
+    res.json({ ...config, productNameReadiness, productCreateRequirements: require('../../services/product/new-product-readiness').requirements,
       productPhotoRequirements: { available: Boolean(activation?.enabled), maxPhotoBytes: require('../../services/product-photos.service').MAX_PHOTO_BYTES, maxPhotos: require('../../services/product-photos.service').MAX_PHOTOS, maxNewGalleryBytes: require('../../services/product-photos.service').MAX_PHOTO_BYTES * require('../../services/product-photos.service').MAX_PHOTOS, uploadEncoding: 'json-base64' },
       productLifecycle: { available: Boolean(activation?.enabled) },
       historicalReactivation: { available: Boolean(activation?.enabled), format: 'historical-reactivation-standard-v1', protocol: 'standard-rest-v1', administratorOnly: true, maxItems: 100, createTargetStatus: 2 },

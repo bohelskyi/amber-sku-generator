@@ -726,6 +726,8 @@ async function applyProductRecount(payload, options = {}) {
       await lifecycleGate.enterExisting(client);
     }
 
+    const recountNameContext = await require('./product/effective-name-readiness').current(client,
+      { ...(options.magentoConfig ? { config: options.magentoConfig } : {}), lock: true });
     const sourceProductId = Number(preview.source.productId);
     const sourceLockResult = await client.query(
       `SELECT p.id, p.full_sku, p.category, p.weight, p.total_price, p.total_price_uah,
@@ -1049,6 +1051,8 @@ async function applyProductRecount(payload, options = {}) {
     }
 
     await fullExport.initializeRecountSuccessor(client, lockedSource, correctedProductId, productCorrectionId, evidence.disposition);
+    if (recountNameContext) await require('./product/effective-name-readiness').completeCreated(client,
+      recountNameContext, correctedProductId, evidence.exactNames?.next, mutationContext.actorUserId);
     await require('./product-photos.service').inheritRecountPhotos(
       client, sourceProductId, correctedProductId, mutationContext,
       { requiredPermission: completedRequest ? 'corrections.complete' : 'products.recount' }
@@ -1121,7 +1125,10 @@ async function buildNewProductPreview(payload, options = {}) {
   }
   const category = String(payload.categoryCode || '').trim().toUpperCase();
   payload = { ...payload, answers: { ...(payload.answers || {}) } };
-  const names = newReadiness.subjects(category, payload);
+  const namePolicy = require('./product/effective-name-readiness');
+  const nameContext = await namePolicy.current(options.queryable || pool, { ...(options.creationDeliveryConfig ? { config: options.creationDeliveryConfig } : {}), lock: Boolean(options.lockSequence) });
+  const names = nameContext ? null : newReadiness.subjects(category, payload);
+  if (!nameContext && payload.magentoNames !== undefined) throw Object.assign(new Error('Повні назви потребують перевіреної опублікованої версії правил.'), { statusCode: 409, code: 'PRODUCT_NAMES_POLICY_REQUIRED' });
   let creationDecision = null;
   if (payload.pricingDecision !== undefined) {
     const decision = { ...payload.pricingDecision };
@@ -1140,6 +1147,13 @@ async function buildNewProductPreview(payload, options = {}) {
   if (payload.photoIds !== undefined) {
     preview.creationPhotos = require('./product-photos.service').normalizeCreationPhotos(payload);
     preview.previewToken = getProductPreviewToken(preview, category, preview.normalizedAnswers || payload.answers, payload.isCalibrated);
+  }
+  if (nameContext) {
+    const evaluated = await namePolicy.prospective(options.queryable || pool, nameContext, payload, preview);
+    const result = { ...preview, creationNames: { ...evaluated, ...nameContext.metadata },
+      newProductInput: { version: 2, ...nameContext.metadata, fullNames: evaluated.manualNames } };
+    result.previewToken = getProductPreviewToken(result, category, preview.normalizedAnswers || payload.answers, payload.isCalibrated);
+    return result;
   }
   if (!names) return preview;
   await newReadiness.validate({ category, full_sku: preview.fullProposedSku,
@@ -1203,6 +1217,7 @@ async function saveProduct(payload, options = {}) {
       characteristicConfigHash: payload.characteristicConfigHash,
       ...(payload.photoIds !== undefined ? { photoIds: payload.photoIds, enableWhenPhotosVerified: payload.enableWhenPhotosVerified } : {}),
       ...(payload.pricingDecision !== undefined ? { pricingDecision: payload.pricingDecision } : {}),
+      ...(payload.magentoNames !== undefined ? { magentoNames: payload.magentoNames } : {}),
       magento_name_subject_ua: payload.magento_name_subject_ua,
       magento_name_subject_en: payload.magento_name_subject_en,
     }, { queryable: client, lockSequence: true, mutationContext, ...(options.creationDeliveryConfig ? { creationDeliveryConfig: options.creationDeliveryConfig } : {}) });
@@ -1277,8 +1292,10 @@ async function saveProduct(payload, options = {}) {
         stale: Boolean(preview.uahRateStale),
       },
     };
+    const effectiveNames = preview.newProductInput?.version === 2;
+    if (effectiveNames && !preview.creationNames?.ready) throw Object.assign(new Error('Потрібні повні українська та англійська назви товару.'), { statusCode: 422, code: 'PRODUCT_NAMES_REQUIRED' });
     const names = preview.newProductInput?.names;
-    await newReadiness.validate({ category: categoryCode, full_sku: fullSku, weight, total_price_uah: totalPriceUah,
+    if (!effectiveNames) await newReadiness.validate({ category: categoryCode, full_sku: fullSku, weight, total_price_uah: totalPriceUah,
       details, magento_name_subject_ua: names?.ua, magento_name_subject_en: names?.en }, client, { pendingPublicIdentity: preview.mode === 'public_identity' });
     if (preview.mode !== 'public_identity') await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`sku:${fullSku}`]);
     if (isTestProduct) {
@@ -1315,6 +1332,13 @@ async function saveProduct(payload, options = {}) {
       [result.rows[0].public_product_identity_id]
     )).rows[0].public_sku;
     await fullExport.initializeNewProduct(client, productId);
+    if (effectiveNames) {
+      const policy = require('./product/effective-name-readiness');
+      const context = await policy.current(client, { ...(options.creationDeliveryConfig ? { config: options.creationDeliveryConfig } : {}), lock: true });
+      if (!context || context.metadata.bindingRevisionId !== preview.newProductInput.bindingRevisionId
+        || context.metadata.definitionHash !== preview.newProductInput.definitionHash) throw Object.assign(new Error('Правила назв змінилися. Повторіть перевірку.'), { statusCode: 409, code: 'PRODUCT_NAMES_STALE' });
+      await policy.completeCreated(client, context, productId, preview.newProductInput.fullNames, mutationContext.actorUserId);
+    }
     if (preview.creationPhotos?.photoIds.length) await require('./product-photos.service').attachCreatedProduct(client, productId,
       preview.creationPhotos, mutationContext);
     await writeAuditEvent(client, {

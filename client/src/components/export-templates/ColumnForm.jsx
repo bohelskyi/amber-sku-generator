@@ -21,7 +21,7 @@ export function ColumnValueForm({ integration = false, definition, registry, gro
     ...(registry?.references?.schemas || []).filter((s) => s.category_code === group).flatMap((s) => s.questions.filter((q) => q.key === selected?.descriptor.key).flatMap((q) => q.value_ids || [])),
   ])];
   const update = (patch) => onChange({ ...value, ...patch });
-  return <div className="et-column-form">
+  return <div className="et-column-form et-value-settings">
     {!focused && <label>Звідки брати значення<select className="input" disabled={readOnly} value={value.mode} onChange={(e) => update({ mode: e.target.value, text: value.text ?? '' })}>
       <option value="literal">Постійний текст</option><option value="source">Характеристика товару</option>
     </select></label>}
@@ -39,7 +39,7 @@ export function ColumnValueForm({ integration = false, definition, registry, gro
         {(!focused || semantic || value.output === 'mapping') && <option value="mapping">Задати свої значення</option>}
       </select></label>
       {semantic && <>
-        <p className="et-muted">{frozenNamesHelp}</p>
+        {focused && integration ? <details className="et-value-help"><summary>Як зберігається текст</summary><p className="et-muted">{frozenNamesHelp}</p></details> : <p className="et-muted">{frozenNamesHelp}</p>}
         {!evidence && <p>Назви завантажуються або недоступні. Власні значення можна задати вручну.</p>}
         {value.output === 'raw' && <p>{focused ? 'Збережений спосіб запису налаштовано в технічних подробицях.' : 'Налаштовано технічний вивід внутрішнього ID. Його можна змінити вище або переглянути в розширених налаштуваннях.'}</p>}
         {!focused && <details><summary>Технічні налаштування</summary>

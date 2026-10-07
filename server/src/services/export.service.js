@@ -178,7 +178,7 @@ async function getExportRows(fromSku, toSku, options = {}) {
              p.category, p.weight, p.total_price_uah,
              p.details, p.created_at, p.magento_name_subject_ua,
              p.magento_name_subject_en, p.magento_name_review_required,
-             ${options.templateInputs ? 'p.sku_schema_version_id, p.exclude_from_export,' : ''}
+             ${options.templateInputs ? "p.sku_schema_version_id, p.exclude_from_export, to_jsonb(p)->'magento_name_override' AS magento_name_override," : ''}
              ${inRequestedRangeSql} AS in_requested_range
       FROM products p
       JOIN public_product_identities i ON i.id=p.public_product_identity_id

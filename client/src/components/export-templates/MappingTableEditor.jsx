@@ -8,7 +8,7 @@ export function MappingTableEditor({ integration = false, entries, onChange, ids
   const [newId, setNewId] = useState('');
   const values = [...new Set([...Object.keys(entries), ...ids.map(String), ...currentOptionIds(evidence)])];
   return <div className="et-mapping">
-    <div className="et-table-scroll"><table aria-label={integration ? "Відповідності значень поля" : "Відповідності для колонки"}><thead><tr><th>Значення характеристики</th><th>{integration ? 'Значення для Magento' : 'Значення у CSV'}</th>{!readOnly && <th>Дії</th>}</tr></thead>
+    <div className="et-table-scroll"><table className="et-mapping-table" aria-label={integration ? "Відповідності значень поля" : "Відповідності для колонки"}><colgroup><col className="et-mapping-source"/><col className="et-mapping-text"/>{!readOnly && <col className="et-mapping-action"/>}</colgroup><thead><tr><th>Значення характеристики</th><th>{integration ? 'Значення для Magento' : 'Значення у CSV'}</th>{!readOnly && <th>Дії</th>}</tr></thead>
       <tbody>{values.map((id) => <tr key={id}><th scope="row"><span>{optionDisplayLabel(evidence, id)}</span>
         {support?.deferredValues?.includes(id) && <small>Ще не підтримується цією версією шаблону</small>}
       </th><td>

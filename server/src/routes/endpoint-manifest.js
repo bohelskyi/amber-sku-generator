@@ -89,6 +89,7 @@ const ENDPOINT_MANIFEST = Object.freeze([
   endpoint('GET', '/magento/product-status/:productId', 'products.view'),
   endpoint('POST', '/magento/name-resolution/preview', 'exports.create'),
   endpoint('POST', '/magento/name-resolution/apply', 'exports.create'),
+  endpoint('GET', '/product-names/:productId/readiness', 'products.decode'),
   endpoint('GET', '/product-names/:productId', 'products.decode'),
   endpoint('POST', '/product-names/save', 'exports.create'),
   endpoint('POST', '/preview', 'products.create'),

@@ -142,3 +142,64 @@
   .magento-category-page .mc-tabs > button { flex: 0 0 auto; padding: 6px 8px; font-size: 12px; white-space: nowrap; }
   .magento-category-page .mc-tabs > label { flex: 1 1 100%; justify-content: flex-end; margin-left: 0; }
 }
+
+/* A field owns one wide editing surface and one vertical scroll. */
+.mc-category-content.has-editor { display: block; }
+.card.mc-field-dialog { width: min(1180px, calc(100vw - 64px)); max-width: 1180px; max-height: calc(100dvh - 48px); padding: 28px; color: #14203B; }
+.mc-field-dialog .mc-editor { position: static; border: 0; padding: 0; max-height: none; overflow: visible; }
+.mc-field-dialog .et-column-drawer { max-height: none; overflow: visible; }
+.mc-field-dialog .et-table-scroll, .mc-field-dialog .mc-table-scroll { max-height: none; overflow: visible; }
+.mc-field-dialog .et-inspector-content { overflow-wrap: break-word; word-break: normal; }
+.mc-field-dialog .et-inspector-content h2 { line-height: 1.4; max-width: 900px; }
+.mc-field-dialog table { table-layout: fixed; }
+.mc-field-dialog th, .mc-field-dialog td { overflow-wrap: break-word; word-break: normal; padding: 14px; }
+.mc-field-dialog .et-field-context { color: var(--text-muted); margin-top: 8px; }
+.mc-field-dialog .et-field-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--border); margin: 24px 0; }
+.mc-field-dialog .et-field-tabs button { padding: 12px 4px; color: #14203B; border-bottom: 3px solid transparent; }
+.mc-field-dialog .et-field-tabs button[aria-selected="true"] { border-bottom-color: #DD974A; font-weight: 650; }
+.mc-field-dialog .et-field-tabs button:focus-visible { outline: 2px solid #DD974A; outline-offset: 3px; }
+.mc-field-dialog .et-field-rule-panel > * { margin-bottom: 20px; }
+.mc-field-dialog .et-column-form, .mc-field-dialog .et-composer { gap: 18px; }
+.mc-field-dialog .et-condition-row { padding: 20px; margin: 20px 0; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.mc-field-dialog .et-condition-result { margin-top: 20px; }
+.mc-field-dialog .et-rule-summary p, .mc-field-dialog .et-rule-summary li { display: block; overflow: visible; -webkit-line-clamp: unset; }
+.mc-field-dialog .et-inspector-footer { bottom: -28px; margin: 20px 0 -28px; padding: 18px 0; background: white; }
+@media (max-width: 760px) {
+  .card.mc-field-dialog { width: calc(100vw - 32px); max-height: calc(100dvh - 32px); padding: 16px; }
+  .mc-field-dialog .et-field-tabs { gap: 12px; flex-wrap: wrap; }
+  .mc-field-dialog .et-inspector-footer { bottom: -16px; margin-bottom: -16px; }
+  .mc-field-dialog .et-condition-row { padding: 12px; }
+}
+
+/* Preserve scope at any row and give editable output most of the table width. */
+.mc-field-dialog .et-field-heading { position: sticky; top: 0; z-index: 4; background: white; padding: 8px 0 10px; border-bottom: 1px solid var(--border); }
+.mc-field-dialog .et-field-heading h2 { font-size: 18px; line-height: 1.35; }
+.mc-field-dialog .et-field-context-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mc-field-dialog .et-field-context-row .et-field-context { font-size: 13px; margin-top: 4px; }
+.mc-field-dialog .et-field-heading header > .et-link { font-size: 12px; min-height: 24px; }
+.mc-field-dialog .et-field-heading .et-field-tabs { margin: 10px 0 0; }
+.mc-field-dialog .et-field-heading .et-field-tabs button { padding: 8px 4px; }
+.mc-field-dialog .et-field-rule-panel > * { margin-bottom: 10px; }
+.mc-field-dialog .et-value-settings { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px 20px; }
+.mc-field-dialog .et-value-settings > :not(.et-source-picker):not(label), .mc-field-dialog .et-value-settings > label:has(textarea) { grid-column: 1 / -1; }
+.mc-field-dialog .et-value-help, .mc-field-dialog .et-value-help summary { font-size: 13px; }
+.mc-field-dialog .et-mapping-source { width: 30%; }
+.mc-field-dialog .et-mapping-action { width: 112px; }
+.mc-field-dialog .et-mapping-table th, .mc-field-dialog .et-mapping-table td { min-width: 0; }
+.mc-field-dialog .et-field-rule-panel textarea { min-width: 0; min-height: 64px; max-height: none; overflow-y: hidden; resize: none; }
+.mc-field-dialog .et-selected-value { font-size: 12px; margin-top: 6px; }
+.mc-field-dialog .et-selected-value p { margin-top: 6px; overflow-wrap: break-word; }
+.mc-field-dialog .et-condition-default { scroll-margin-top: calc(var(--et-field-heading-height, 140px) + 12px); }
+.mc-field-dialog .et-condition-default:focus { outline: 2px solid #DD974A; outline-offset: 4px; }
+@media (max-width: 760px) {
+  .mc-field-dialog .et-value-settings { grid-template-columns: minmax(0, 1fr); }
+  .mc-field-dialog .et-field-context-row { align-items: flex-start; flex-wrap: wrap; }
+  .mc-field-dialog .et-mapping-action { width: 100px; }
+}
+
+.mc-field-dialog .et-column-drawer > .et-inspector-content { margin: 0; }
+.mc-field-dialog .et-field-heading { top: -28px; }
+.mc-field-dialog .et-field-heading h2 { margin-bottom: 0; }
+.mc-field-dialog .et-field-context-row .et-link { font-size: 12px; flex-shrink: 0; }
+.mc-field-dialog .et-mapping textarea { min-height: 48px; }
+@media (max-width: 760px) { .mc-field-dialog .et-field-heading { top: -16px; } }

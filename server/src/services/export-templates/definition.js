@@ -75,13 +75,15 @@ function freeze(value) {
 
 function inspectDefinition(d) {
   const definitionBytes = preflight(d);
-  shape(d, ['formatVersion', 'evaluatorVersion', 'outputContract', 'sources', 'tables', 'questionContracts', 'bindings', 'groups'], ['sourceSupport', 'sourceContractVersion']);
+  shape(d, ['formatVersion', 'evaluatorVersion', 'outputContract', 'sources', 'tables', 'questionContracts', 'bindings', 'groups'], ['sourceSupport', 'sourceContractVersion', 'nameReadiness']);
   const extensible = isExtensibleEvaluator(d.evaluatorVersion);
   check(d.formatVersion === 1 && ['magento-declarative-1', 'magento-declarative-2', 'magento-declarative-3', EXTENSIBLE_EVALUATOR, CHARACTERISTIC_EVALUATOR].includes(d.evaluatorVersion)
     && ['magento-products-v1', CONTRACT].includes(d.outputContract), 'Unsupported version/contract');
   if (isPublicEvaluator(d.evaluatorVersion)) {
     check(d.sourceContractVersion === (d.evaluatorVersion === CHARACTERISTIC_EVALUATOR ? CHARACTERISTIC_CONTRACT : 'public-product-identity-v1'), 'Public product source contract required');
   } else check(d.sourceContractVersion === undefined, 'Public product source contract requires evaluator 3');
+  if (d.nameReadiness !== undefined) check(d.evaluatorVersion === CHARACTERISTIC_EVALUATOR
+    && d.nameReadiness === 'effective-product-names-v1', 'Effective names require a reviewed evaluator 5 policy');
   const editableColumns = d.outputContract === CONTRACT;
   let declaredCategories;
   if (extensible) {

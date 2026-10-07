@@ -21,14 +21,15 @@ export function ProductMagentoAttention({ product, problems = [], onRepairCharac
   const [busy, setBusy] = useState(false);
   const readiness = problems.find((problem) => problem.code === 'PRODUCT_EVALUATION_NOT_READY');
   const issueFields = [...new Set(readiness?.issueFields || [])];
-  const needsNameCompletion = product?.categoryCode === 'SV' && issueFields.includes('name') && !product?.nameConflict;
+  const effectiveNames = readiness?.evaluationIssues?.some(issue => ['effective_names_required', 'effective_names_invalid'].includes(issue.code));
+  const needsNameCompletion = (product?.categoryCode === 'SV' || effectiveNames) && issueFields.includes('name') && !product?.nameConflict;
   const needsSize = product?.categoryCode === 'SV' && issueFields.includes('rozmir_suveniriv');
   const needsProtectedContractReview = issueFields.includes('sku');
   const mappingFields = issueFields.filter((field) => field !== 'sku');
   const needsCharacteristics = mappingFields.some((field) => !['name', 'rozmir_suveniriv'].includes(field));
   const inheritedNameReview = product?.magentoNameReviewRequired === true && !product?.nameConflict;
   if ((!readiness && !inheritedNameReview) || product?.status !== 'active') return null;
-  const canEditName = product.categoryCode === 'SV' && permissions.includes('exports.create');
+  const canEditName = (product.categoryCode === 'SV' || effectiveNames) && permissions.includes('exports.create');
   const canRepairInformation = permissions.includes('products.recount');
   const canRepairCharacteristics = permissions.includes('products.recount') && onRepairCharacteristics;
   const labels = issueFields.map((field) => FIELD_LABELS[field]).filter(Boolean);

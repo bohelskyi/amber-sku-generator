@@ -427,8 +427,9 @@ it('keeps unsaved field input when closing, changing category, or switching lang
 
 it('stores explicit option IDs in the prepared draft with CAS but does not approve or apply it automatically', async () => {
   const { router } = mount(); fireEvent.click(await screen.findByRole('button', { name: 'Колір Magento' }));
-  fireEvent.change(await screen.findByLabelText('Magento для Нуль'), { target: { value: '20' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Закрити налаштування' }));
+  fireEvent.click(await screen.findByRole('tab', { name: 'Відповідність у Magento' }));
+  fireEvent.change(screen.getByLabelText('Magento для Нуль'), { target: { value: '20' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Готово' }));
   fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' }));
   await screen.findByText('Підготовку збережено. Перевірте відповідності й вплив перед застосуванням.');
   expect(api.post.mock.calls).toContainEqual(['/admin/magento-integration/successor/prepare', { sourceId: 'current', expectedSourceRevision: '4', templateVersionId: 'original-version' }]);
@@ -675,4 +676,98 @@ it('places optional structural preparation after the ordinary field table withou
   expect(screen.getByRole('link', { name: 'Характеристика', exact: true }).href).toContain('intent=attribute');
   expect(screen.getByRole('region', { name: 'Обсяг редагування та перевірки' }).textContent).toContain('увесь пакет правил (2 категорій)');
   expect(api.post).not.toHaveBeenCalled();
+});
+
+
+function mappedRuleFixture() {
+  const rules = structuredClone(definition);
+  rules.tables.colorText = { 0: 'Початковий текст' };
+  rules.groups[0].rows[0].cells.kolir = { op: 'lookup', table: 'colorText', input: { op: 'semanticKey', input: { op: 'source', id: 'color' } }, otherwise: { op: 'literal', value: '' } };
+  return rules;
+}
+function useLocalRuleFixture(rules, fieldLabel) {
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    if (url.endsWith('/source-details')) return { data: { current: [{ label: 'Колір', options: [{ value_id: '0', label: 'Нуль' }] }], historical: [] } };
+    const result = await get(url, config);
+    if (url.endsWith('/sources')) result.data.references = { questions: [{ category_code: 'BR', key: 'color', label: 'Колір', include_in_sku: 1, value_ids: ['0'] }], schemas: [] };
+    if (url.includes('/categories/') && !url.includes('/fields/')) {
+      result.data.template.definition = saved?.draft.definition || rules;
+      if (fieldLabel) result.data.attributes.find((attribute) => attribute.code === 'description').label = fieldLabel;
+    }
+    return result;
+  });
+}
+
+it('wide field context and keyboard tabs retain one staged rule and exact Magento choice until explicit apply', async () => {
+  const rules = mappedRuleFixture(); const before = JSON.stringify(rules); useLocalRuleFixture(rules);
+  mount(); fireEvent.click(await screen.findByRole('button', { name: 'Колір Magento' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Поле Magento' });
+  expect(within(dialog).getByText(/Браслети ·/).textContent).toContain('UA · українською');
+  const text = await within(dialog).findByLabelText('Значення для Magento: Нуль');
+  fireEvent.change(text, { target: { value: '  Ручне значення  ' } });
+  const ruleTab = within(dialog).getByRole('tab', { name: 'Формування значення' });
+  const mappingTab = within(dialog).getByRole('tab', { name: 'Відповідність у Magento' });
+  ruleTab.focus(); fireEvent.keyDown(ruleTab, { key: 'ArrowRight' });
+  expect(document.activeElement).toBe(mappingTab); expect(mappingTab.getAttribute('aria-selected')).toBe('true');
+  expect(within(dialog).queryByRole('button', { name: /Вибрати однозначні підказки/ })).toBeNull();
+  expect(within(dialog).queryByRole('textbox', { name: 'Значення для Magento: Нуль' })).toBeNull();
+  fireEvent.change(within(dialog).getByLabelText('Magento для Нуль'), { target: { value: '20' } });
+  fireEvent.keyDown(mappingTab, { key: 'Home' });
+  expect(document.activeElement).toBe(ruleTab); expect(within(dialog).getByLabelText('Значення для Magento: Нуль')).toBe(text);
+  expect(text.value).toBe('  Ручне значення  '); expect(api.post).not.toHaveBeenCalled();
+  fireEvent.keyDown(ruleTab, { key: 'End' }); expect(within(dialog).getByLabelText('Magento для Нуль').value).toBe('20');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Готово' }));
+  expect(screen.queryByRole('dialog', { name: 'Поле Magento' })).toBeNull(); expect(api.post).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Колір Magento' }));
+  expect((await screen.findByLabelText('Значення для Magento: Нуль')).value).toBe('  Ручне значення  ');
+  fireEvent.click(screen.getByRole('tab', { name: 'Відповідність у Magento' })); expect(screen.getByLabelText('Magento для Нуль').value).toBe('20');
+  fireEvent.click(screen.getByRole('button', { name: 'Закрити налаштування' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' }));
+  await screen.findByText('Підготовку збережено. Перевірте відповідності й вплив перед застосуванням.');
+  expect(changedFields(rules, saved.draft.definition, 'BR')).toEqual([{ field: 'kolir', rowId: 'base' }]);
+  expect(saved.draft.definition.groups[1]).toEqual(rules.groups[1]); expect(saved.draft.definition.groups[0].rows[1]).toEqual(rules.groups[0].rows[1]);
+  expect(api.post.mock.calls).toContainEqual(['/admin/magento-integration/bindings/isolated/select', { expectedRevision: '1', binding: entry.id, identity: '20' }]);
+  expect(api.post.mock.calls.some(([url]) => /decision|publication\/apply/.test(url))).toBe(false); expect(JSON.stringify(rules)).toBe(before);
+});
+
+it('Escape and explicit cancel retain or discard both pending tabs, and returning to the current identity is a no-op', async () => {
+  const rules = mappedRuleFixture(); const before = JSON.stringify(rules); useLocalRuleFixture(rules);
+  mount(); fireEvent.click(await screen.findByRole('button', { name: 'Колір Magento' }));
+  fireEvent.change(await screen.findByLabelText('Значення для Magento: Нуль'), { target: { value: 'Відкинути текст' } });
+  fireEvent.click(screen.getByRole('tab', { name: 'Відповідність у Magento' })); fireEvent.change(screen.getByLabelText('Magento для Нуль'), { target: { value: '20' } });
+  fireEvent.keyDown(document, { key: 'Escape' });
+  fireEvent.click(within(await screen.findByRole('dialog', { name: 'Незбережене поле' })).getByRole('button', { name: 'Залишитися' }));
+  expect(screen.getByLabelText('Magento для Нуль').value).toBe('20');
+  fireEvent.click(screen.getByRole('tab', { name: 'Формування значення' })); expect(screen.getByLabelText('Значення для Magento: Нуль').value).toBe('Відкинути текст');
+  fireEvent.click(screen.getByRole('button', { name: 'Скасувати' }));
+  fireEvent.click(within(await screen.findByRole('dialog', { name: 'Незбережене поле' })).getByRole('button', { name: 'Відкинути введення поля' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Колір Magento' }));
+  expect((await screen.findByLabelText('Значення для Magento: Нуль')).value).toBe('Початковий текст');
+  fireEvent.click(screen.getByRole('tab', { name: 'Відповідність у Magento' })); const choice = screen.getByLabelText('Magento для Нуль'); expect(choice.value).toBe('10');
+  fireEvent.change(choice, { target: { value: '20' } }); fireEvent.change(choice, { target: { value: '10' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Закрити налаштування' }));
+  expect(screen.queryByRole('dialog')).toBeNull(); expect(screen.queryByRole('region', { name: 'Підготовлені зміни' })).toBeNull();
+  expect(api.post).not.toHaveBeenCalled(); expect(api.put).not.toHaveBeenCalled(); expect(JSON.stringify(rules)).toBe(before);
+});
+
+it('long field names and visible If/Then rules preserve the condition, fallback, other language and shared definitions', async () => {
+  const rules = structuredClone(definition); const title = 'Додатково картини — характеристика з довгою зрозумілою назвою та уточненням для покупця';
+  const condition = { op: 'eq', left: { op: 'semanticKey', input: { op: 'source', id: 'color' } }, right: { op: 'literal', value: '0' } };
+  rules.groups[0].rows[0].cells.description = { op: 'when', if: condition, then: { op: 'literal', value: 'Довгий початковий текст для картини. '.repeat(20) }, else: { op: 'literal', value: 'Збережений результат інакше' } };
+  const before = JSON.stringify(rules); useLocalRuleFixture(rules, title);
+  mount('/admin/magento?category=BR&view=text'); fireEvent.click(await screen.findByRole('button', { name: title }));
+  const dialog = await screen.findByRole('dialog', { name: 'Поле Magento' }); expect(within(dialog).getByRole('heading', { name: title })).toBeTruthy();
+  const row = within(dialog).getByRole('region', { name: 'Умова 1' });
+  expect(within(row).getByText('Якщо')).toBeTruthy(); expect(within(row).getByText('Тоді →')).toBeTruthy();
+  const fallback = within(dialog).getByRole('region', { name: 'Інакше' }); expect(within(fallback).getByLabelText('Текст для магазину').value).toBe('Збережений результат інакше');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Перейти до «Інакше»' })); expect(document.activeElement).toBe(fallback); expect(api.post).not.toHaveBeenCalled();
+  fireEvent.change(within(row).getByLabelText('Текст для магазину'), { target: { value: '  Оновлений текст для картини  ' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Готово' })); saveDraft();
+  await screen.findByText('Чернетку збережено. Чинна інтеграція ще не змінена.');
+  const result = saved.draft.definition.groups[0].rows[0].cells.description;
+  expect(result.if).toEqual(condition); expect(result.then).toEqual({ op: 'literal', value: '  Оновлений текст для картини  ' });
+  expect(result.else).toEqual(rules.groups[0].rows[0].cells.description.else); expect(saved.draft.definition.groups[0].rows[1]).toEqual(rules.groups[0].rows[1]);
+  expect(saved.draft.definition.groups[1]).toEqual(rules.groups[1]); expect(saved.draft.definition.bindings).toEqual(rules.bindings);
+  expect(changedFields(rules, saved.draft.definition, 'BR')).toEqual([{ field: 'description', rowId: 'base' }]); expect(JSON.stringify(rules)).toBe(before);
 });

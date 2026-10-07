@@ -362,3 +362,18 @@ immutable. See [Manager workflows](MANAGER_PRODUCT_WORKFLOWS.md),
 Migration 066 adds permanent reviewed historical-reactivation intents and UPDATE-only identity fences. It enrolls no existing archive and preserves unknown prior facts. A new decision requires exact current product/counterpart proof and verified status 2 before local activation; the atomic remote adapter remains an installation prerequisite. See [historical reactivation](HISTORICAL_REACTIVATION.md).
 
 Migration 067 adds durable local integration tasks and immutable creation-context attempts. It creates no historical task, product, SKU reservation, sync job, permission or remote operation. Task resolution rechecks the current local configuration; it never confirms Magento delivery. See [integration tasks](PRODUCT_INTEGRATION_TASKS.md).
+
+
+## 072 — reviewed canonical SV stone weight repair
+
+[072_reviewed_canonical_weight_repair.sql](../server/migrations/072_reviewed_canonical_weight_repair.sql)
+adds immutable sealed plan/row receipts and a narrow transaction-bound exception
+to the ordinary Magento request trigger. It performs no backfill, enrollment,
+activation, product mutation or remote write. Normal writes retain generation
+and retirement behavior; a reviewed copy requires an exact zero-to-existing-answer
+weight-only delta, current unambiguous legacy SV5 identity, unchanged delivery state
+and an atomic audit receipt. Deferred completion rejects side effects and missing
+audit. Reviewed inverse receipts require the untouched original post-state.
+See [the canonical weight repair runbook](CANONICAL_WEIGHT_REPAIR.md) for preview,
+explicit selection, stale checks, retry, rollback and the separate production
+review boundary. This migration does not imply production application.

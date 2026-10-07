@@ -50,6 +50,7 @@ function ruleProof(definition, groupCode, rowId, target) {
     outputContract: definition.outputContract || null,
     sources: {}, tables: {}, bindings: {}, contracts: {}, support: {},
     sourceContractVersion: definition.sourceContractVersion || null };
+  if (target === 'name' && definition.nameReadiness) proof.nameReadiness = definition.nameReadiness;
   const visited = new Set();
   function visitRule(rule) {
     for (const [key, value] of Object.entries(rule || {})) {
@@ -115,7 +116,7 @@ function equivalentColumnUpgrade(oldDefinition, nextDefinition) {
     // canonicalization may change traversal order inside an expression before
     // the official upgrade gathers the same diagnostic owners.
     const checks = rows => rows.map(check => ({ ...check, columns: [...check.columns].sort() }));
-    for (const key of ['formatVersion', 'evaluatorVersion', 'sourceContractVersion', 'sourceSupport']) {
+    for (const key of ['formatVersion', 'evaluatorVersion', 'sourceContractVersion', 'sourceSupport', 'nameReadiness']) {
       if (!equal(before[key], after[key])) return null;
     }
     for (const key of ['sources', 'tables', 'questionContracts']) {

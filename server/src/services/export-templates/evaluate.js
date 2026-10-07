@@ -198,6 +198,18 @@ function runSupportedProduct(compiled, product, limits, observation) {
     return [k, value];
   })));
   if (observation) observation.target = null;
+  let effectiveNames;
+  if (d.nameReadiness === 'effective-product-names-v1') {
+    const generated = { all: rows[0].name, en: rows[1].name };
+    effectiveNames = require('./effective-product-names').resolveNames(generated, product);
+    rows[0].name = effectiveNames.names.all; rows[1].name = effectiveNames.names.en;
+    if (!effectiveNames.valid) errors.push({ field: 'name', code: effectiveNames.invalidStored ? 'effective_names_invalid' : 'effective_names_required',
+      message: effectiveNames.invalidStored ? 'Збережені повні назви потребують перевірки.' : 'Шаблон не сформував повну українську й англійську назви. Перевірте назви в Magento або введіть їх вручну.' });
+    if (observation) {
+      observation.rows.base.name = rows[0].name; observation.rows.english.name = rows[1].name;
+      if (!effectiveNames.valid) observation.issues.push({ ...errors.at(-1), target: { kind: 'column', column: 'name' } });
+    }
+  }
   if (d.outputContract === 'magento-products-columns-v2') {
     if (rows[0].sku !== identityText(own(product, identityField), identityField) || rows[1].sku !== rows[0].sku
       || rows[0].store_view_code !== '' || rows[1].store_view_code !== 'en'
@@ -207,7 +219,8 @@ function runSupportedProduct(compiled, product, limits, observation) {
       if (observation) observation.issues.push({ ...errors[errors.length - 1], target: { kind: 'row' } });
     }
   }
-  return { mapped: { group, sku: rows[0].sku, errors, base: rows[0], english: rows[1] }, work };
+  return { mapped: { group, sku: rows[0].sku, errors, base: rows[0], english: rows[1],
+    ...(effectiveNames ? { generatedNames: effectiveNames.generated, nameSource: effectiveNames.source } : {}) }, work };
 }
 
 function evaluateProduct(compiled, product, options) {

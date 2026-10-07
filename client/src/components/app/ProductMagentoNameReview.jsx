@@ -4,6 +4,7 @@ import { exportsApi } from '../../api/exports-api.js';
 import { getApiError } from '../../lib/http-error.js';
 import { LoadingState, Notice } from './UiPrimitives.jsx';
 import { TechnicalDisclosure } from '../ui';
+import { EffectiveProductNameReview } from './EffectiveProductNameReview.jsx';
 
 export function ProductMagentoNameReview({ product, onClose, onSaved, onBusyChange, translationSuggestionAvailable = false }) {
   const { principalLifetime } = useContext(AuthContext) || {};
@@ -65,6 +66,8 @@ export function ProductMagentoNameReview({ product, onClose, onSaved, onBusyChan
     finally { if (alive.current && principalLifetime?.valid !== false) setBusy(false); }
   };
 
+  if (loaded?.effectiveNames) return <EffectiveProductNameReview product={product} initial={loaded}
+    onClose={onClose} onSaved={onSaved} onBusyChange={onBusyChange} />;
   return <div className="space-y-4">
     <h2 className="text-lg font-semibold">Назви для Magento · {loaded?.publicSku || product.publicSku || 'Артикул недоступний'}</h2>
     {(loaded?.internalSku || product.internalSku || product.sku) && <TechnicalDisclosure summary="Технічна ідентичність">

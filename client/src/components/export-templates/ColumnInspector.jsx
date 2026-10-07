@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { COLUMN_CONTRACT, applyDirectColumn, availableSources, columnChange, directColumn, requiredColumns } from '../../lib/export-template-columns';
 import { fieldLabels, protectedCells } from '../../lib/export-template-editor';
 import { at } from '../../lib/export-template-presentation';
@@ -17,11 +17,13 @@ import MagentoFieldTargetReview from './MagentoFieldTargetReview.jsx';
 
 // One detached transaction across the normal, technical and advanced surfaces.
 // Opening/closing a surface never runs a definition adapter without an actual edit.
-export function ColumnInspector({ integration = false, embedded = false, localOnly = false, simple = false, textOnly = false, title, definition, groupIndex, rowIndex, column, registry, readOnly, loadSource, diagnostics, sourceId, overlay, suspended, onApply, onCancel, onRequestClose, onPendingChange }) {
+export function ColumnInspector({ integration = false, embedded = false, localOnly = false, simple = false, textOnly = false, title, contextLabel, extraPanel, initialPanel, definition, groupIndex, rowIndex, column, registry, readOnly, loadSource, diagnostics, sourceId, overlay, suspended, onApply, onCancel, onRequestClose, onPendingChange }) {
   const fieldTitle = integration ? 'Налаштування поля' : 'Налаштування колонки';
   const [base] = useState(definition);
   const [draft, setDraft] = useState(definition);
   const [secondary, setSecondary] = useState(null);
+  const [panel, setPanel] = useState(initialPanel === 'mapping' ? 'mapping' : 'rule');
+  const panelId = useId(); const panelTabs = useRef(null); const mappingSurface = useRef(null);
   const [touched, setTouched] = useState(false);
   const [error, setError] = useState('');
   const [editingLabel, setEditingLabel] = useState(false);
@@ -36,13 +38,51 @@ export function ColumnInspector({ integration = false, embedded = false, localOn
   const mode = intentOverride || (value ? value.mode === 'literal' ? 'literal' : 'characteristic' : columnIntent(draft, path));
   const modal = !embedded && (overlay || mode === 'condition');
   const surface = useRef(null); const secondarySurface = useRef(null); const active = useRef(null); const returnFocus = useRef(null);
-  const pending = touched || JSON.stringify(draft) !== JSON.stringify(base) || JSON.stringify(value) !== JSON.stringify(initialValue);
+  const rulePending = touched || JSON.stringify(draft) !== JSON.stringify(base) || JSON.stringify(value) !== JSON.stringify(initialValue);
+  const pending = rulePending || Boolean(extraPanel?.pending);
+  useLayoutEffect(() => {
+    const node = surface.current;
+    if (!embedded || !node?.closest('.mc-field-dialog')) return undefined;
+    const heading = node.querySelector('.et-field-heading');
+    let width = -1; let headingHeight = -1;
+    const fit = () => {
+      node.style.setProperty('--et-field-heading-height', `${Math.ceil(heading?.getBoundingClientRect().height || 0)}px`);
+      const controls = [...node.querySelectorAll('.et-field-rule-panel textarea')].filter((control) => control.getClientRects().length);
+      controls.forEach((control) => { control.style.height = 'auto'; });
+      const heights = controls.map((control) => {
+        const style = getComputedStyle(control);
+        const border = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
+        const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+        return Math.ceil(control.scrollHeight + (style.boxSizing === 'border-box' ? border : -padding));
+      });
+      controls.forEach((control, index) => { control.style.height = `${heights[index]}px`; });
+    };
+    fit();
+    const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+      const nextWidth = node.getBoundingClientRect().width; const nextHeadingHeight = heading?.getBoundingClientRect().height || 0;
+      if (nextWidth !== width || nextHeadingHeight !== headingHeight) { width = nextWidth; headingHeight = nextHeadingHeight; fit(); }
+    }) : null;
+    resize?.observe(node); if (heading) resize?.observe(heading);
+    const mutation = new MutationObserver(fit); mutation.observe(node, { childList: true, subtree: true });
+    node.addEventListener('input', fit); window.addEventListener('resize', fit);
+    return () => { resize?.disconnect(); mutation.disconnect(); node.removeEventListener('input', fit); window.removeEventListener('resize', fit); };
+  }, [embedded, panel, draft, value]);
+
   useLayoutEffect(() => { active.current = { readOnly, suspended, secondary }; return () => { active.current = null; }; }, [readOnly, suspended, secondary]);
   const editable = () => active.current && !active.current.readOnly && !active.current.suspended;
   const change = (next, origin = secondary) => { if (!editable() || active.current.secondary !== origin) return false; setDraft(next); setTouched(true); return true; };
   const changeValue = (next, origin = secondary) => { if (editable() && active.current.secondary === origin) setValue(next); };
   useEffect(() => { onPendingChange(pending); return () => onPendingChange(false); }, [pending, onPendingChange]);
-  const valid = () => [...(secondary ? secondarySurface : surface).current?.querySelectorAll('input,textarea,select') || []].every((control) => control.reportValidity());
+  const valid = () => {
+    const controls = [...(secondary ? secondarySurface : surface).current?.querySelectorAll('input,textarea,select') || []];
+    const invalid = controls.find((control) => !control.checkValidity());
+    if (!invalid) return true;
+    if (!secondary && extraPanel && panel === 'mapping' && !mappingSurface.current?.contains(invalid)) {
+      setPanel('rule'); setError('Перевірте заповнення правила значення.');
+      requestAnimationFrame(() => invalid.reportValidity());
+    } else invalid.reportValidity();
+    return false;
+  };
   const materialized = () => initialValue && JSON.stringify(value) !== JSON.stringify(initialValue) ? applyDirectColumn(draft, groupIndex, rowIndex, column, value, registry) : draft;
   const refresh = (next) => { const direct = getDirect(next); setDraft(next); setInitialValue(direct); setValue(direct); setIntentOverride(null); };
   const changeIntent = (intent) => {
@@ -101,15 +141,29 @@ export function ColumnInspector({ integration = false, embedded = false, localOn
   });
   const statusSources = mode === 'condition' ? sourceId ? [sourceId] : [] : exceptional.length ? exceptional : sources.slice(0, 1);
   const approved = availableSources(registry, group.route, draft);
-  const content = <section ref={surface} tabIndex={-1} aria-label={fieldTitle} className="et-inspector-content et-intent-editor" onKeyDown={(e) => { if (!modal && !secondary && e.key === 'Escape') { e.preventDefault(); onRequestClose(); } }} onChangeCapture={() => capture(null)}>
-    <header><div className="et-row"><h2>{title || group.columnLabels?.[column] || fieldLabels[column] || column}</h2><button type="button" className="et-link" onClick={onRequestClose}>Закрити налаштування</button></div>
-      {simple ? <p className="et-muted">{textOnly ? 'Текст для товарів' : 'Відповідність для товарів'} · {rowIndex === 1 ? 'англійською' : 'українською'}</p> : <p className="et-muted"><code>{column}</code> · {categoryNames[group.route]} · <strong>{rowIndex === 1 ? 'EN' : 'Основний'}</strong></p>}
+  const content = <section ref={surface} tabIndex={-1} aria-label={fieldTitle} className="et-inspector-content et-intent-editor" onKeyDown={(e) => { if (!modal && !secondary && e.key === 'Escape') { e.preventDefault(); onRequestClose(); } }} onChangeCapture={(event) => { if (!mappingSurface.current?.contains(event.target)) capture(null); }}>
+    <div className="et-field-heading"><header><div className="et-row"><h2>{title || group.columnLabels?.[column] || fieldLabels[column] || column}</h2><button type="button" className="et-link" onClick={onRequestClose}>Закрити налаштування</button></div>
+      {simple ? <div className="et-field-context-row"><p className="et-field-context">{contextLabel || categoryNames[group.route] || group.name || group.route} · <strong>{rowIndex === 1 ? 'EN · англійською' : 'UA · українською'}</strong></p>{integration && draft.outputContract === COLUMN_CONTRACT && !requiredColumns.has(column) && !readOnly && <button type="button" className="et-link" disabled={suspended} onClick={() => openSecondary('target')}>Змінити атрибут Magento для цього поля</button>}{mode === 'condition' && <button type="button" className="et-link" onClick={() => {
+        const fallback = surface.current?.querySelector('.et-conditions')?.querySelector(':scope > .et-condition-default');
+        fallback?.scrollIntoView?.({ block: 'start' }); fallback?.focus({ preventScroll: true });
+      }}>Перейти до «Інакше»</button>}</div> : <p className="et-muted"><code>{column}</code> · {categoryNames[group.route]} · <strong>{rowIndex === 1 ? 'EN' : 'Основний'}</strong></p>}
       {!simple && draft.outputContract === COLUMN_CONTRACT && !readOnly && <button type="button" className="et-link" onClick={() => setEditingLabel(!editingLabel)}>{integration ? 'Змінити назву поля' : 'Змінити назву колонки'}</button>}
-      {integration && draft.outputContract === COLUMN_CONTRACT && !requiredColumns.has(column) && !readOnly && <button type="button" className="et-link" disabled={suspended} onClick={() => openSecondary('target')}>Змінити атрибут Magento для цього поля</button>}
+      {!simple && integration && draft.outputContract === COLUMN_CONTRACT && !requiredColumns.has(column) && !readOnly && <button type="button" className="et-link" disabled={suspended} onClick={() => openSecondary('target')}>Змінити атрибут Magento для цього поля</button>}
       {editingLabel && <label>{integration ? 'Назва поля' : 'Назва колонки'}<input className="input" maxLength={160} disabled={readOnly} value={group.columnLabels?.[column] ?? fieldLabels[column] ?? column} onChange={(e) => change(columnChange(draft, groupIndex, 'label', column, e.target.value), null)} /></label>}
       {!simple && requiredColumns.has(column) && <p className="et-muted">{integration ? 'Обов’язкове поле: код і наявність поля захищено.' : 'Обов’язкова колонка: код не можна перейменувати, колонку не можна видалити.'}{!protectedCells.has(column) && ' Правило заповнення можна редагувати.'}</p>}
     </header>
     {error && <p role="alert">{error}</p>}
+    {extraPanel && <div ref={panelTabs} className="et-field-tabs" role="tablist" aria-label="Налаштування значення поля" onKeyDown={(event) => {
+      const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+      if (!keys.includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === 'Home' ? 'rule' : event.key === 'End' ? 'mapping' : panel === 'rule' ? 'mapping' : 'rule';
+      setPanel(next); panelTabs.current?.querySelector(`[data-panel="${next}"]`)?.focus();
+    }}>
+      {['rule', 'mapping'].map((key) => <button key={key} type="button" role="tab" data-panel={key} id={`${panelId}-${key}-tab`} aria-controls={`${panelId}-${key}`} aria-selected={panel === key} tabIndex={panel === key ? 0 : -1} onClick={() => setPanel(key)}>{key === 'rule' ? 'Формування значення' : extraPanel.title}</button>)}
+    </div>}
+    </div>
+    <div role={extraPanel ? 'tabpanel' : undefined} id={`${panelId}-rule`} aria-labelledby={extraPanel ? `${panelId}-rule-tab` : undefined} hidden={Boolean(extraPanel && panel === 'mapping')} className="et-field-rule-panel">
     {simple && !textOnly && !placementEditor && ruleTransformTarget(draft, path) && <label>Брати значення<select className="input" disabled={readOnly || suspended} value={['literal', 'characteristic'].includes(mode) ? mode : 'advanced'} onChange={(e) => changeIntent(e.target.value)}><option value="characteristic">З нашої характеристики</option><option value="literal">Вписати вручну</option>{!['literal', 'characteristic'].includes(mode) && <option value="advanced" disabled>За налаштованим правилом</option>}</select></label>}
     {!placementEditor && !simple && <section aria-label="Спосіб формування значення"><label>Як формується значення<select className="input et-intent-name" value={mode} disabled={readOnly || protectedCells.has(column)} onChange={(e) => changeIntent(e.target.value)}>
       {Object.entries(intentNames).filter(([intent]) => ruleTransformTarget(draft, path) || intent === mode || intent === 'complex').map(([intent, name]) => <option key={intent} value={intent}>{name}</option>)}
@@ -124,14 +178,18 @@ export function ColumnInspector({ integration = false, embedded = false, localOn
       {placementEditor ? <MagentoPlacementRuleEditor definition={draft} cellPath={path} registry={registry} loadSource={loadSource} readOnly={readOnly || suspended || Boolean(secondary)} onChange={(next) => change(next, null)} onEditing={() => capture(null)} /> : mode === 'empty' ? <p>{integration ? 'Поле матиме порожній текст у цій мові.' : 'Цей рядок матиме порожню клітинку.'}</p> : mode === 'complex' && !protectedCells.has(column) ? <div className="et-custom-rule"><p>{integration ? 'Це поле використовує складне правило.' : 'Ця колонка використовує складне правило.'}</p><p>Власне правило збережено без змін.</p><button type="button" className="et-link" onClick={() => openSecondary('advanced')}>Відкрити розширені правила</button></div>
         : simple && textOnly && ['literal', 'text'].includes(mode) ? <FieldInspector integration={integration} simple focused textOnly localOnly definition={draft} cellPath={path} registry={registry} readOnly={readOnly || suspended} loadSource={loadSource} diagnostics={diagnostics} onChange={(next) => { change(next, null); refresh(next); }} onAdvanced={() => openSecondary('advanced')} onTechnical={() => openSecondary('technical')} />
           : value ? <ColumnValueForm integration={integration} focused definition={draft} registry={registry} group={group.route} value={value} loadSource={loadSource} readOnly={readOnly} onChange={(next) => changeValue(next, null)} />
-            : <FieldInspector integration={integration} focused localOnly={localOnly} definition={draft} cellPath={path} registry={registry} readOnly={readOnly} loadSource={loadSource} diagnostics={diagnostics} openSource={sourceId} onChange={(next) => change(next, null)} onAdvanced={() => openSecondary('advanced')} onTechnical={() => openSecondary('technical')} />}
+            : <FieldInspector integration={integration} simple={simple} textOnly={textOnly} focused localOnly={localOnly} definition={draft} cellPath={path} registry={registry} readOnly={readOnly} loadSource={loadSource} diagnostics={diagnostics} openSource={sourceId} onChange={(next) => change(next, null)} onAdvanced={() => openSecondary('advanced')} onTechnical={() => openSecondary('technical')} />}
     </form>
     {!simple && !placementEditor && !['literal', 'empty'].includes(mode) && <RuleSummary definition={draft} expression={at(draft, path)} registry={registry} loadSource={loadSource} value={value} />}
-    {footer}
     {!simple && mode !== 'literal' && statusSources.map((id) => <SourceSupportStatus key={id} compact definition={draft} sourceId={id} diagnostics={diagnostics}
       confirmed={approved.some((entry) => ['kind', 'category', 'key', 'field'].every((key) => entry.descriptor[key] === draft.sources[id]?.[key]))} onDetails={() => openSecondary('technical')} />)}
     {integration && statusSources.map((id) => <NativeSourceValueReview key={id} definition={draft} sourceId={id} loadSource={loadSource} disabled={readOnly || suspended || Boolean(secondary)} onChange={(next) => change(next, null)}/>) }
     <nav className="et-editor-tools" aria-label="Додаткові інструменти"><button type="button" className="et-link" onClick={() => openSecondary('technical')}>{simple ? 'Розширені налаштування' : 'Технічні подробиці'}</button>{!simple && <button type="button" className="et-link" onClick={() => openSecondary('advanced')}>{integration ? 'Розширені правила цього поля' : 'Розширені правила цієї колонки'}</button>}</nav>
+    </div>
+    {extraPanel && <div ref={mappingSurface} role="tabpanel" id={`${panelId}-mapping`} aria-labelledby={`${panelId}-mapping-tab`} hidden={panel !== 'mapping'} className="et-field-mapping-panel">
+      {extraPanel.render({ active: panel === 'mapping' && !secondary && !suspended, rulePending })}
+    </div>}
+    {footer}
   </section>;
   return <>
     {modal ? <WorkspaceDialog title={fieldTitle} className="et-inspector-dialog" onClose={onRequestClose} initialFocusRef={returnFocus} suspended={suspended || Boolean(secondary)}>{content}</WorkspaceDialog>
