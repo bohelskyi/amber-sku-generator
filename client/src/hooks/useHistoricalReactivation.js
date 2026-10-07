@@ -8,7 +8,7 @@ import {
 } from '../lib/historical-reactivation.js';
 
 import { historicalNameRepairRequest, validateHistoricalNames, validateHistoricalNameReceipt } from '../lib/historical-name-review.js';
-import { historicalManualNameRequest, validateHistoricalManualNames, validateHistoricalManualNameReceipt } from '../lib/historical-manual-name-review.js';
+import { historicalManualNameRequest, validateHistoricalManualNames, validateHistoricalManualNameReceipt, validateHistoricalManualPreparation, renderHistoricalManualNames } from '../lib/historical-manual-name-review.js';
 
 const noAcceptanceCodes = new Set([
   'HISTORICAL_REVIEW_STALE', 'HISTORICAL_SELECTION_INVALID', 'HISTORICAL_CONFIRMATION_REQUIRED',
@@ -30,6 +30,9 @@ export function useHistoricalReactivation({
   const currentNamesAllowed = useRef(canReviewNames);
   const [nameReview, setNameReview] = useState(null);
   const [nameNotice, setNameNotice] = useState('');
+  const [savedManualNames, setSavedManualNames] = useState([]);
+  const [needsFinalReview, setNeedsFinalReview] = useState(false);
+  const finalReviewRequired = useRef(false);
   const storageKey = operationStorageKey(auth.applicationUser?.id);
   const [operation, setOperation] = useState(() => readStoredOperation(storageKey));
   const operationRef = useRef(operation);
@@ -68,6 +71,7 @@ export function useHistoricalReactivation({
     setText(''); setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false);
     setReceipt(null); setBatchId(null); setInspections({}); setReconcileAcknowledged({}); setCancelAcknowledged({});
     setBusyKind(''); setUncertain(false); setError(''); setNameReview(null); setNameNotice('');
+    finalReviewRequired.current = false; setNeedsFinalReview(false); setSavedManualNames([]);
   }, [storageKey]);
   useEffect(() => {
     if (!open || !review) return undefined;
@@ -106,9 +110,12 @@ export function useHistoricalReactivation({
   }, [storageKey]);
   const acceptOperation = useCallback((value, expected) => {
     const next = validateReviewOperation(value, expected);
+    if (next.kind === 'preview' && finalReviewRequired.current && next.operationId !== operationRef.current?.operationId)
+      throw new Error('Назви редагувалися. Почніть нову перевірку перед відновленням.');
     rememberOperation(next); setUncertain(false); setError('');
     if (next.state === 'ready') {
       if (next.kind === 'preview') {
+        finalReviewRequired.current = false; setNeedsFinalReview(false); setSavedManualNames([]);
         setReview(next.result); setText(next.skus.join('\n')); setSelected([]); setSelectedCreate([]); setAcknowledged(false); setClock(Date.now());
       } else {
         attempt.current ||= { idempotencyKey: next.operationId, selectedSkus: Object.freeze([...next.selectedSkus]) };
@@ -135,26 +142,32 @@ export function useHistoricalReactivation({
     flight.current = false;
     if (ownerCurrent()) setBusyKind('');
   }
+  function invalidateAfterManualEdit() {
+    finalReviewRequired.current = true; setNeedsFinalReview(true);
+    rememberOperation(null);
+    setReview(previous => previous ? { ...previous, reviewHash: null, reviewToken: null } : null);
+    setSelected([]); setSelectedCreate([]); setAcknowledged(false);
+  }
   function editText(next) {
     if (!allowed || flight.current || uncertain || batchId || pendingOperation || nameReview) return;
-    generation.current++;
-    setText(next); setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false); setError(''); setNameNotice('');
+    generation.current++; finalReviewRequired.current = false; setNeedsFinalReview(false); setSavedManualNames([]);
+    rememberOperation(null); setText(next); setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false); setError(''); setNameNotice('');
   }
   function select(article, checked) {
-    if (!allowed || flight.current || uncertain || batchId || pendingOperation || nameReview
+    if (!allowed || flight.current || uncertain || batchId || pendingOperation || nameReview || finalReviewRequired.current
       || !review?.items.some((item) => item.article === article && item.disposition === 'eligible')) return;
     setSelected((previous) => checked ? [...new Set([...previous, article])] : previous.filter((sku) => sku !== article));
     setSelectedCreate((previous) => previous.filter((sku) => sku !== article));
     setAcknowledged(false);
   }
   function selectCreate(article, checked) {
-    if (!allowed || flight.current || uncertain || batchId || pendingOperation || nameReview || !selected.includes(article)
+    if (!allowed || flight.current || uncertain || batchId || pendingOperation || nameReview || finalReviewRequired.current || !selected.includes(article)
       || !review?.items.some((item) => item.article === article && item.deliveryMode === 'create' && item.disposition === 'eligible')) return;
     setSelectedCreate((previous) => checked ? [...new Set([...previous, article])] : previous.filter((sku) => sku !== article));
     setAcknowledged(false);
   }
   function selectEligible() {
-    if (!allowed || flight.current || uncertain || batchId || pendingOperation || nameReview || !review) return;
+    if (!allowed || flight.current || uncertain || batchId || pendingOperation || nameReview || finalReviewRequired.current || !review) return;
     setSelectedCreate([]);
     setSelected(review.items.filter((item) => item.disposition === 'eligible').map((item) => item.article));
     setAcknowledged(false);
@@ -175,6 +188,7 @@ export function useHistoricalReactivation({
       if (mayRead() && ticket === generation.current) {
         if (result.data?.format === OPERATION_FORMAT) { acceptOperation(result.data, submitted); return; }
         if (submitted) throw new Error('Сервер не підтвердив номер перевірки. Прочитайте її стан.');
+        finalReviewRequired.current = false; setNeedsFinalReview(false); setSavedManualNames([]);
         setReview(validateHistoricalPreview(result.data)); setSelected([]); setSelectedCreate([]); setAcknowledged(false);
         setClock(Date.now());
       }
@@ -187,7 +201,7 @@ export function useHistoricalReactivation({
     finally { finish(); }
   }
   async function confirm() {
-    if (!review || nameReview || !acknowledged || uncertain || pendingOperation || attempt.current || !start('confirm')) return;
+    if (!review || nameReview || finalReviewRequired.current || !acknowledged || uncertain || pendingOperation || attempt.current || !start('confirm')) return;
     let submitted;
     try {
       submitted = historicalConfirmation(review, selected, createRequestId(), Date.now(), selectedCreate);
@@ -254,9 +268,9 @@ export function useHistoricalReactivation({
     try {
       const response = await readNames(request);
       if (acceptNameResponse(ticket)) {
-        const next = manual ? validateHistoricalManualNames(response.data, request) : validateHistoricalNames(response.data, request);
+        const next = manual ? validateHistoricalManualPreparation(response.data, request) : validateHistoricalNames(response.data, request);
         setNameReview({ request, preview: next, acknowledged: false, uncertain: false,
-          ...(manual ? { subjectUa: next.subjectUa || '', subjectEn: next.subjectEn || '' } : {}) });
+          ...(manual ? { preparation: next, subjectUa: next.subjectUa || '', subjectEn: next.subjectEn || '' } : {}) });
       }
     } catch (cause) {
       if (acceptNameResponse(ticket)) setError(errorMessage(cause, 'Не вдалося перевірити назви цього самого товару. Повторіть лише читання.'));
@@ -273,23 +287,18 @@ export function useHistoricalReactivation({
   function editManualSubject(key, value) {
     if (!canReviewNames || flight.current || nameReview?.request.intent !== 'historical-create' || nameReview.uncertain
       || !['subjectUa', 'subjectEn'].includes(key) || value.length > 200) return;
+    invalidateAfterManualEdit();
     setNameReview(previous => ({ ...previous, [key]: value, preview: null, acknowledged: false }));
   }
-  async function previewManualNames() {
+  function previewManualNames() {
     const current = nameReview;
-    if (!canReviewNames || current?.request.intent !== 'historical-create' || current.uncertain || !apiClient.previewManualNames
-      || !current.subjectUa?.trim() || !current.subjectEn?.trim() || batchId || pendingOperation || uncertain || !start('name_read')) return;
-    const ticket = generation.current, subjects = { subjectUa: current.subjectUa, subjectEn: current.subjectEn };
-    setNameReview({ ...current, preview: null, acknowledged: false });
+    if (!canReviewNames || !currentOpen.current || flight.current || current?.request.intent !== 'historical-create' || current.uncertain
+      || !current.preparation || !current.subjectUa?.trim() || !current.subjectEn?.trim() || batchId || pendingOperation || uncertain) return;
+    setError('');
     try {
-      const response = await apiClient.previewManualNames({ ...current.request, ...subjects });
-      if (acceptNameResponse(ticket)) {
-        const next = validateHistoricalManualNames(response.data, current.request, subjects);
-        setNameReview({ ...current, preview: next, subjectUa: next.subjectUa, subjectEn: next.subjectEn, acknowledged: false });
-      }
-    } catch (cause) {
-      if (acceptNameResponse(ticket)) setError(errorMessage(cause, 'Не вдалося перевірити введені назви.'));
-    } finally { if (ticket === generation.current) finish(); }
+      const next = renderHistoricalManualNames(current.preparation, current.request, { subjectUa: current.subjectUa, subjectEn: current.subjectEn });
+      setNameReview({ ...current, preview: next, subjectUa: next.subjectUa, subjectEn: next.subjectEn, acknowledged: false });
+    } catch (cause) { setNameReview({ ...current, preview: null, acknowledged: false }); setError(cause.message); }
   }
   async function repeatAfterNames() {
     if (!mayRead() || flight.current || pendingOperation || batchId || uncertain) return;
@@ -309,15 +318,20 @@ export function useHistoricalReactivation({
     if (!start('name_save')) return;
     const ticket = generation.current; let saved = false;
     try {
-      const response = await applyNames({ ...current.request, previewToken: current.preview.previewToken, reviewExpiresAt: current.preview.reviewExpiresAt,
-        ...(manual ? { subjectUa: current.preview.subjectUa, subjectEn: current.preview.subjectEn } : {}) });
+      const response = await applyNames({ ...current.request, reviewExpiresAt: current.preview.reviewExpiresAt,
+        ...(manual ? { preparationToken: current.preview.preparationToken, subjectUa: current.preview.subjectUa, subjectEn: current.preview.subjectEn,
+          reviewedNameUa: current.preview.nameUa, reviewedNameEn: current.preview.nameEn } : { previewToken: current.preview.previewToken }) });
       if (ownerCurrent() && ticket === generation.current && !acceptNameResponse(ticket)) {
         setNameReview({ request: current.request, preview: null, acknowledged: false, uncertain: true });
       }
       if (acceptNameResponse(ticket)) {
         if (manual) validateHistoricalManualNameReceipt(response.data, current.request, current.preview);
         else validateHistoricalNameReceipt(response.data, current.request);
-        setNameNotice(manual ? 'Ручну UA/EN пару збережено. Товар залишається архівованим; перевірку відновлення повторено.'
+        if (manual) {
+          invalidateAfterManualEdit(); setSavedManualNames(previous => [...new Set([...previous, current.request.article])]);
+          setNameReview({ ...current, preview: { ...current.preview, alreadyCompleted: true }, acknowledged: false, uncertain: false });
+        }
+        setNameNotice(manual ? 'Ручну UA/EN пару збережено. Товар залишається архівованим. Можна перейти до наступного товару.'
           : 'Чинні назви Magento збережено в менеджері. Товар залишається архівованим; перевірку відновлення повторено.');
         saved = true;
       }
@@ -331,7 +345,12 @@ export function useHistoricalReactivation({
         setError(errorMessage(cause, unknown ? 'Відповідь збереження назв втрачено. Повторіть лише перевірку назв цього самого товару.' : 'Назви не збережено. Перевірте їх ще раз.'));
       }
     } finally { if (ticket === generation.current) finish(); }
-    if (saved && acceptNameResponse(ticket)) await repeatAfterNames();
+    if (saved && !manual && acceptNameResponse(ticket)) await repeatAfterNames();
+  }
+  const nextManualItem = review?.items.find(item => historicalManualNameRequest(item) && !savedManualNames.includes(item.article)
+    && item.article !== nameReview?.request.article);
+  async function nextManualNames() {
+    if (nameReview?.preview?.alreadyCompleted && nextManualItem && !flight.current) await completeManualNames(nextManualItem);
   }
   function cancelNameReview() {
     if (!flight.current) { setNameReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false); setError(''); }
@@ -439,21 +458,21 @@ export function useHistoricalReactivation({
     if (!allowed || busyKind || pendingOperation || !canReset) return;
     generation.current++;
     attempt.current = null; setText(''); setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false);
-    rememberOperation(null);
+    rememberOperation(null); finalReviewRequired.current = false; setNeedsFinalReview(false); setSavedManualNames([]);
     setReceipt(null); setBatchId(null); setInspections({}); setReconcileAcknowledged({}); setError(''); setNameReview(null); setNameNotice('');
   }
   const expired = Boolean(review && Date.parse(review.reviewExpiresAt) <= clock);
   return {
     canReviewNames, nameReview, nameNotice, reviewNames, readNameReview, saveNames, repeatAfterNames, cancelNameReview,
-    completeManualNames, editManualSubject, previewManualNames,
-    namesExpired: Boolean(nameReview?.preview && Date.parse(nameReview.preview.reviewExpiresAt) <= clock),
+    completeManualNames, editManualSubject, previewManualNames, nextManualNames, nextManualArticle: nextManualItem?.article, needsFinalReview, savedManualNames,
+    namesExpired: Boolean((nameReview?.preparation || nameReview?.preview) && Date.parse((nameReview.preparation || nameReview.preview).reviewExpiresAt) <= clock),
     acknowledgeNames: value => { if (canReviewNames && !flight.current && !nameReview?.uncertain) setNameReview(previous => previous ? { ...previous, acknowledged: value } : null); },
     allowed, text, review, selected, selectedCreate, cancelAcknowledged, canReset, acknowledged, receipt, batchId, lookupId, inspections,
     reconcileAcknowledged, busyKind, uncertain, error, expired, waiting, operation, pendingOperation,
     dirty: Boolean(open && (uncertain || !receipt && text.trim())),
     locked: Boolean(busyKind || uncertain), editText, select, selectCreate, selectEligible, preview, confirm, refresh, inspect, reconcile, cancel, reset,
     setLookupId: (value) => { if (!busyKind && !batchId && !pendingOperation) setLookupId(value); },
-    setAcknowledged: (value) => { if (allowed && !flight.current && !nameReview && !uncertain && !batchId && !pendingOperation) setAcknowledged(value); },
+    setAcknowledged: (value) => { if (allowed && !flight.current && !nameReview && !finalReviewRequired.current && !uncertain && !batchId && !pendingOperation) setAcknowledged(value); },
     setCancelAcknowledged: (id, value) => { if (allowed && !busyKind && !uncertain) setCancelAcknowledged((previous) => ({ ...previous, [id]: value })); },
     setReconcileAcknowledged: (id, value) => { if (allowed && !busyKind && !uncertain) setReconcileAcknowledged((previous) => ({ ...previous, [id]: value })); },
   };

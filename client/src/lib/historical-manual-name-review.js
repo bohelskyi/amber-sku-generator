@@ -23,9 +23,25 @@ export function validateHistoricalManualNames(value, request, subjects = null) {
       || !validText(value.subjectUa, 200) || !validText(value.subjectEn, 200)) invalid();
   }
   if (subjects && (value.subjectUa !== subjects.subjectUa.trim() || value.subjectEn !== subjects.subjectEn.trim()
-    || !/^[a-f0-9]{64}$/.test(value.previewToken || '') || !Number.isFinite(Date.parse(value.reviewExpiresAt))
+    || !/^[a-f0-9]{64}$/.test(value.preparationToken || value.previewToken || '') || !Number.isFinite(Date.parse(value.reviewExpiresAt))
     || Date.parse(value.reviewExpiresAt) <= Date.now())) invalid();
   return value;
+}
+export function validateHistoricalManualPreparation(value, request) {
+  validateHistoricalManualNames(value, request);
+  const render = value.nameRender;
+  if (!/^[a-f0-9]{64}$/.test(value.preparationToken || '') || !Number.isFinite(Date.parse(value.reviewExpiresAt))
+    || Date.parse(value.reviewExpiresAt) <= Date.now() || render?.format !== 'historical-manual-render-v1'
+    || ['ua', 'en'].some(language => !render[language] || ['prefix', 'suffix'].some(key => typeof render[language][key] !== 'string'
+      || render[language][key].length > 1024 || hasControls(render[language][key])))) invalid();
+  return value;
+}
+export function renderHistoricalManualNames(preparation, request, subjects) {
+  validateHistoricalManualPreparation(preparation, request);
+  const subjectUa = subjects.subjectUa.trim(), subjectEn = subjects.subjectEn.trim(), render = preparation.nameRender;
+  const result = { ...preparation, subjectUa, subjectEn, nameUa: render.ua.prefix + subjectUa + render.ua.suffix,
+    nameEn: render.en.prefix + subjectEn + render.en.suffix };
+  return validateHistoricalManualNames(result, request, subjects);
 }
 export function validateHistoricalManualNameReceipt(value, request, preview) {
   scope(value, request);
