@@ -63,13 +63,14 @@ function FieldMappings({ active = true, rulePending = false, field, questions, s
   };
   const suggestions = rulePending ? [] : uniqueOptionSuggestions(entries, field.options);
   const put = (entry, value) => setSelections((current) => ({ ...current, [decisionKey(entry)]: value }));
+  const selectedLabel = (entry) => field.options.find((option) => String(option.value) === String(selections[decisionKey(entry)] ?? entry.identity ?? ''))?.label || '';
   return <section className="mc-field-mappings space-y-3" aria-label="Менеджер — Magento: значення">
     <h3 className="font-semibold">Варіанти магазину для наших значень</h3>
     <p>Виберіть варіанти Magento. Текст і умови налаштовуються у вкладці «Формування значення». «Готово» додасть обидві частини до змін.</p>
     {rulePending && <p className="mc-help">Правило змінено: перегляньте варіанти Magento вручну. Після підготовки підтвердьте їх у перевірці відповідностей.</p>}
     {suggestions.length > 0 && <button type="button" className="btn btn-outline" disabled={disabled} onClick={() => setSelections((current) => ({ ...current, ...Object.fromEntries(suggestions.map(({ entry, option }) => [decisionKey(entry), option.value])) }))}>Вибрати однозначні підказки ({suggestions.length})</button>}
     <div className="mc-table-scroll"><table><thead><tr><th>Менеджер</th><th>Magento</th></tr></thead><tbody>{ordered.slice(0, 50).map((entry) => <tr key={entry.id} ref={matchesRepairValue(entry, context) ? focusRow : undefined} tabIndex={matchesRepairValue(entry, context) ? -1 : undefined} className={matchesRepairValue(entry, context) ? 'is-repair-target' : undefined}>
-      <td>{label(entry)}{matchesRepairValue(entry, context) && <small>Значення з проблеми цього товару</small>}</td><td><select className="input" aria-label={`Magento для ${label(entry)}`} disabled={disabled} value={selections[decisionKey(entry)] ?? entry.identity ?? ''} onChange={(e) => put(entry, e.target.value)}><option value="" disabled>Не вибрано</option>{field.options.filter((o) => !o.isEmpty).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+      <td>{label(entry)}{matchesRepairValue(entry, context) && <small>Значення з проблеми цього товару</small>}</td><td><select className="input" aria-label={`Magento для ${label(entry)}`} disabled={disabled} value={selections[decisionKey(entry)] ?? entry.identity ?? ''} onChange={(e) => put(entry, e.target.value)}><option value="" disabled>Не вибрано</option>{field.options.filter((o) => !o.isEmpty).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>{selectedLabel(entry).length > 45 && <details className="et-selected-value"><summary>Повне значення</summary><p>{selectedLabel(entry)}</p></details>}
         {deletionContext?.isAdministrator && <CatalogDeletionEntry {...deletionContext} field={field} questions={questions} optionEntry={entry}/>}
       </td>
     </tr>)}</tbody></table></div>
@@ -406,7 +407,6 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
         {currentField.restriction && <Notice>{currentField.restriction}</Notice>}
         {currentField.service && !currentField.restriction && <Notice>Це службове поле Magento. Його правило доступне в додаткових налаштуваннях; воно не є описом або характеристикою для покупця.</Notice>}
 
-        {fieldData && <CatalogDeletionEntry {...deletionContext} field={{...fieldData,attribute:currentField}} questions={projection.questions}/>}
         {!fieldConfigured && currentField.editable && canManage && <section className="space-y-3"><h3>{currentField.label}</h3><p>Оберіть джерело й поведінку поля. Інша мова залишиться порожньою до окремого налаштування.</p><button type="button" className="btn btn-primary" disabled={busy || stale || definition.outputContract !== COLUMN_CONTRACT} onClick={() => { setDefinition(columnChange(definition, groupIndex, 'add', null, currentField.code)); setPreview(null); }}>Підключити поле</button>{definition.outputContract !== COLUMN_CONTRACT && <p>Спочатку оновіть формат чернетки в підготовлених змінах.</p>}</section>}
         {fieldConfigured && registry && <ColumnInspector key={`${field}:${rowId}:${routeKey}`} integration embedded localOnly simple textOnly={currentField.text} title={currentField.label} contextLabel={initial.category.name} definition={definition} groupIndex={groupIndex} rowIndex={rowIndex} column={currentField.target} registry={registry} loadSource={loadSource}
           initialPanel={context.question && context.value !== undefined ? 'mapping' : 'rule'}
@@ -415,6 +415,7 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
           suspended={busy || Boolean(activeDeletionReview) || Boolean(discardPanel)} readOnly={!canManage || stale || !currentField.editable}
           onPendingChange={setPending} onRequestClose={() => chooseField('')} onCancel={() => chooseField('')}
           onApply={(next, base) => { if (base !== definition) return false; assertCategoryScope(definition, next, categoryCode, rowId); setDefinition(next); if (mappingPending) { setSelections(fieldSelections); setSelectionDirty(true); } setFieldSelections(null); setPending(false); setPreview(null); setField(''); replaceParams({ field: null }); return true; }} />}
+        {fieldData && <CatalogDeletionEntry {...deletionContext} field={{...fieldData,attribute:currentField}} questions={projection.questions}/>}
         {currentField.policy && <div className="mc-help"><p>{deliveryPolicies[currentField.policy]}</p><p>{deliveryPolicyEffect(currentField.policy, currentField.target)}</p></div>}
         {!fieldConfigured && <MagentoDetails>{() => <p>Код: {currentField.code} · {currentField.inputType || 'службове поле'}</p>}</MagentoDetails>}
         {!fieldConfigured && <button type="button" className="btn btn-outline" onClick={() => chooseField('')}>Закрити поле</button>}

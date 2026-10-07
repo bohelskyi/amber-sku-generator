@@ -74,13 +74,22 @@ with independently verified values. Keep plans/receipts outside the repository.
 The commands below are instructions, not a production execution receipt.
 
 ```text
-node scripts/canonical-weight-repair.js
-  --expected-database EXACT_DATABASE
-  --installation-key EXACT_INSTALLATION
-  --binding-revision CURRENT_PUBLISHED_BINDING_UUID
-  --actor-user-id ACTIVE_APPLICATION_USER_ID
-  --output NEW_PLAN_FILE
+node scripts/canonical-weight-repair.js --expected-database EXACT_DATABASE --installation-key EXACT_INSTALLATION --binding-revision CURRENT_PUBLISHED_BINDING_UUID --actor-user-id ACTIVE_APPLICATION_USER_ID --output NEW_PLAN_FILE
 ```
+
+
+The preview command is one line; replace placeholders before executing it. Its
+output file must not exist and its private parent directory must already exist.
+Do not use the earlier `sv-stone-canonical-weight-review-draft-v1` diagnostic file
+as an apply plan; the committed tool generates `sv-canonical-weight-repair-v1`.
+
+| Placeholder | Independently verified value |
+| --- | --- |
+| `EXACT_DATABASE` | The database name on the authorized production connection; checked against the actual database. |
+| `EXACT_INSTALLATION` | The existing active installation key; do not create or substitute a new key. |
+| `CURRENT_PUBLISHED_BINDING_UUID` | The current published binding UUID on that same installation. |
+| `ACTIVE_APPLICATION_USER_ID` | The active application user ID with `exports.reconcile` and `products.recount`; not an OIDC subject. |
+| `NEW_PLAN_FILE` | A fresh private output file outside the repository; never a production connection string or credential. |
 
 Preview defaults to a read-only pool/transaction. It writes a new file and prints
 the hash, counts and up to five examples without credentials or a private origin.
@@ -90,15 +99,7 @@ After reviewing that fresh plan and its exact scope, explicitly apply only the
 approved eligible IDs:
 
 ```text
-node scripts/canonical-weight-repair.js --mode apply
-  --expected-database EXACT_DATABASE
-  --installation-key EXACT_INSTALLATION
-  --binding-revision CURRENT_PUBLISHED_BINDING_UUID
-  --actor-user-id ACTIVE_APPLICATION_USER_ID
-  --plan REVIEWED_PLAN_FILE
-  --confirm-plan-hash REVIEWED_SHA256
-  --product-ids ID1,ID2
-  --output NEW_RECEIPT_DIRECTORY
+node scripts/canonical-weight-repair.js --mode apply --expected-database EXACT_DATABASE --installation-key EXACT_INSTALLATION --binding-revision CURRENT_PUBLISHED_BINDING_UUID --actor-user-id ACTIVE_APPLICATION_USER_ID --plan REVIEWED_PLAN_FILE --confirm-plan-hash REVIEWED_SHA256 --product-ids ID1,ID2 --output NEW_RECEIPT_DIRECTORY
 ```
 
 `--output` must be a fresh directory for every apply attempt. PostgreSQL receipts,
@@ -110,13 +111,7 @@ Later legitimate data changes require fresh review and cannot be hidden by retry
 An inverse is a separate preview over explicit original receipt UUIDs:
 
 ```text
-node scripts/canonical-weight-repair.js --mode rollback-preview
-  --expected-database EXACT_DATABASE
-  --installation-key EXACT_INSTALLATION
-  --binding-revision CURRENT_PUBLISHED_BINDING_UUID
-  --actor-user-id ACTIVE_APPLICATION_USER_ID
-  --receipt-ids ORIGINAL_RECEIPT_UUID1,ORIGINAL_RECEIPT_UUID2
-  --output NEW_INVERSE_PLAN_FILE
+node scripts/canonical-weight-repair.js --mode rollback-preview --expected-database EXACT_DATABASE --installation-key EXACT_INSTALLATION --binding-revision CURRENT_PUBLISHED_BINDING_UUID --actor-user-id ACTIVE_APPLICATION_USER_ID --receipt-ids ORIGINAL_RECEIPT_UUID1,ORIGINAL_RECEIPT_UUID2 --output NEW_INVERSE_PLAN_FILE
 ```
 
 Review and execute that inverse plan with the same explicit `--mode apply` command.

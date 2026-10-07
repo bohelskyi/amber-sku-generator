@@ -513,3 +513,9 @@ Opening or navigating the editor never evaluates products or publishes a binding
 The desktop dialog owns the vertical scroll; its mapping tables and nested
 inspector use the available width without additional bounded vertical scrollers.
 This is local UI implementation, not live browser or Magento acceptance.
+
+The field title, category/language and tabs stay visible while scrolling. Text
+output owns the remaining table width after a compact action column; visible
+textareas grow with their actual rendered content and viewport width. The header
+can focus the outer If/Then fallback without editing its value. Long selected
+values have keyboard-operable full-value disclosures.

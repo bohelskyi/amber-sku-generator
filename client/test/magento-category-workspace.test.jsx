@@ -761,6 +761,7 @@ it('long field names and visible If/Then rules preserve the condition, fallback,
   const row = within(dialog).getByRole('region', { name: 'Умова 1' });
   expect(within(row).getByText('Якщо')).toBeTruthy(); expect(within(row).getByText('Тоді →')).toBeTruthy();
   const fallback = within(dialog).getByRole('region', { name: 'Інакше' }); expect(within(fallback).getByLabelText('Текст для магазину').value).toBe('Збережений результат інакше');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Перейти до «Інакше»' })); expect(document.activeElement).toBe(fallback); expect(api.post).not.toHaveBeenCalled();
   fireEvent.change(within(row).getByLabelText('Текст для магазину'), { target: { value: '  Оновлений текст для картини  ' } });
   fireEvent.click(within(dialog).getByRole('button', { name: 'Готово' })); saveDraft();
   await screen.findByText('Чернетку збережено. Чинна інтеграція ще не змінена.');
