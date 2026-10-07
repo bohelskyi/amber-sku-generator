@@ -6,26 +6,30 @@ const { readPreviewProduct } = require('./sync-preview-db');
 const { readNames, unresolvedDispatch } = require('./name-discovery');
 const { decisionFor, readNameState, nameStateEvidence, saveObservation, importRemote, auditName } = require('./name-state');
 const { same } = require('./name-reconciliation');
+const historicalNames = require('./historical-name-baseline');
 
 async function preview(payload, options = {}) {
   const db = options.databasePool || pool; const config = options.config || configuration.magento;
   if (!Number.isSafeInteger(payload.productId) || !['amber', 'magento'].includes(payload.choice)) {
     throw c.error(422, 'MAGENTO_NAME_SELECTION_INVALID', 'Оберіть товар і актуальну назву.');
   }
+  const historical = payload.intent === 'historical';
+  if (historical) historicalNames.selection(payload);
   if (!config.configured) throw c.error(422, 'MAGENTO_NAME_UNAVAILABLE', 'Magento не налаштовано.');
   const gate = (await db.query('SELECT * FROM magento_auto_sync_activation WHERE singleton')).rows[0];
   const binding = (await db.query(`SELECT id FROM magento_binding_revisions WHERE installation_key=$1
     AND origin_hash=$2 AND state='published' ORDER BY version_number DESC LIMIT 1`, [gate?.installation_key, c.originHash(config.baseUrl)])).rows[0];
   if (!binding) throw c.error(409, 'MAGENTO_NAME_BINDING_REQUIRED', 'Немає опублікованих відповідностей Magento.');
   const amber = await readPreviewProduct(db, { productId: payload.productId, bindingRevisionId: binding.id });
-  if (amber.product.status !== 'active' || amber.product.corrected_to_product_id) {
+  const historicalContext = historical ? await historicalNames.context(db, amber, payload, config, options) : null;
+  if (!historical && (amber.product.status !== 'active' || amber.product.corrected_to_product_id)) {
     throw c.error(409, 'MAGENTO_NAME_PRODUCT_RETIRED', 'Відкрийте актуальний товар.');
   }
   if (await unresolvedDispatch(db, c.originHash(config.baseUrl), amber.product.public_sku)) {
     throw c.error(409, 'MAGENTO_SYNC_PREVIOUS_DISPATCH_UNRESOLVED', 'Попередню надіслану зміну ще не підтверджено. Потрібна перевірка адміністратором.');
   }
   const completion = payload.intent === 'complete';
-  if (payload.intent !== undefined && !completion) throw c.error(422, 'MAGENTO_NAME_SELECTION_INVALID', 'Некоректний спосіб заповнення назв.');
+  if (payload.intent !== undefined && !completion && !historical) throw c.error(422, 'MAGENTO_NAME_SELECTION_INVALID', 'Некоректний спосіб заповнення назв.');
   if (completion) {
     const policy = require('../export-templates/effective-product-names');
     const mapped = require('./binding-evidence-products').evaluate(amber, amber.product);
@@ -34,18 +38,29 @@ async function preview(payload, options = {}) {
       throw c.error(409, 'MAGENTO_NAME_COMPLETION_UNAVAILABLE', 'Окреме заповнення потрібне лише для відсутньої повної пари назв.');
     }
   }
-  const observation = await readNames(config, amber, { ...options, ...(completion ? { completion: true, fetchImpl: require('./integration-readiness').boundedGet(options.fetchImpl, { maxRequests: 3 }) } : {}) });
+  const observation = await readNames(config, amber, { ...options, ...(completion || historical ? { completion: true, fetchImpl: require('./integration-readiness').boundedGet(options.fetchImpl, { maxRequests: 3 }) } : {}) });
   require('./native-identity-ownership').assertOwned(amber, observation.raw);
+  if (historical) {
+    historicalNames.assertRemote(payload, historicalContext, observation.raw);
+    await require('../historical-reactivation-state').authority(db, historicalNames.actor(options), true);
+  }
   const result = decisionFor(observation, { allowIncompleteAmber: completion });
   if (['unavailable', 'identity_changed'].includes(result.action)) throw c.error(409, 'MAGENTO_NAME_READ_UNAVAILABLE', 'Не вдалося безпечно перевірити назви.');
-  const token = c.hash({ product: amber.product, binding: binding.id, state: nameStateEvidence(amber.nameState),
+  const evidence = { product: amber.product, binding: binding.id, state: nameStateEvidence(amber.nameState),
     names: [result.amber, result.remote], remoteId: observation.raw.id, choice: payload.choice,
-    ...(completion ? { intent: 'complete', storeEvidence: observation.domainEvidence } : {}) });
+    ...(completion || historical ? { intent: payload.intent, storeEvidence: observation.domainEvidence } : {}) };
+  const historicalReview = historical ? historicalNames.review(evidence, historicalContext, options) : null;
+  const token = historicalReview?.previewToken || c.hash(evidence);
   return { productId: payload.productId, article: amber.product.public_sku, choice: payload.choice,
     amber: result.amber, magento: result.remote, previewToken: token, ...(completion ? { intent: 'complete', source: 'verified_magento_ua_en' } : {}),
-    ...(options.internal ? { observation, result, bindingId: binding.id } : {}) };
+    ...(historical ? { intent: 'historical', remoteProductId: observation.raw.id, bindingRevisionId: binding.id,
+      reviewExpiresAt: historicalReview.reviewExpiresAt, alreadyAccepted: amber.nameState?.state === 'common'
+        && same(amber.nameState.baseline_names, result.remote) && same(result.amber, result.remote) } : {}),
+    ...(options.internal ? { observation, result, bindingId: binding.id, historicalContext } : {}) };
 }
 async function apply(payload, options = {}) {
+  const historical = payload.intent === 'historical';
+  if (historical) options = historicalNames.applyOptions(payload, options);
   const db = options.databasePool || pool; const config = options.config || configuration.magento;
   const initial = await preview(payload, { ...options, internal: true });
   const product = initial.observation.amber.product;
@@ -79,10 +94,16 @@ async function apply(payload, options = {}) {
           || !same(nameStateEvidence(state), nameStateEvidence(fresh.observation.amber.nameState)) || binding?.id !== fresh.bindingId) {
           throw c.error(409, 'MAGENTO_NAME_PREVIEW_STALE', 'Товар або назви змінилися. Повторіть перегляд.');
         }
+        if (historical) {
+          const currentContext = await historicalNames.context(client, fresh.observation.amber, payload, config, options, { lock: true });
+          if (currentContext.fingerprint !== fresh.historicalContext.fingerprint) {
+            throw c.error(409, 'MAGENTO_NAME_PREVIEW_STALE', 'Стан архівованого товару змінився. Повторіть перевірку назв.');
+          }
+        }
         const result = fresh.result;
         let resolution = null; let baseline = state?.baseline_names ?? null;
         if (payload.choice === 'magento') {
-          await importRemote(client, options.mutationContext.actorUserId, current, result);
+          await importRemote(client, options.mutationContext.actorUserId, current, result, { preserveArchivedLifecycle: historical });
           baseline = result.remote; result.action = 'accept_external';
         } else {
           resolution = { amber: result.amber, remote: result.remote };
@@ -92,13 +113,16 @@ async function apply(payload, options = {}) {
         }
         await saveObservation(client, c.originHash(config.baseUrl), current, fresh.observation.raw.id, result, baseline, resolution);
         await auditName(client, options.mutationContext.actorUserId, current, 'conflict_resolved', { choice: payload.choice,
-          amber: result.amber, magento: result.remote });
+          amber: result.amber, magento: result.remote, ...(historical ? { intent: 'historical', remoteProductId: fresh.observation.raw.id } : {}) });
         // Only an explicit reviewed local change resumes ordinary evaluation.
         // Uncertain dispatch can never reach this path or be reset by it.
-        await client.query(`UPDATE magento_product_sync_requests SET desired_generation=desired_generation+1,
+        if (historical) await historicalNames.keepRetired(client, current);
+        else await client.query(`UPDATE magento_product_sync_requests SET desired_generation=desired_generation+1,
           state='pending',reason_code=NULL,diagnostics='[]'::jsonb,next_attempt_at=CURRENT_TIMESTAMP
           WHERE public_product_identity_id=$1 AND reason_code IS DISTINCT FROM 'reconciliation_required'`, [current.public_product_identity_id]);
-        return { productId: current.id, choice: payload.choice, state: 'pending' };
+        if (historical) historicalNames.applyOptions(payload, options);
+        return { productId: Number(current.id), choice: payload.choice, state: historical ? 'archived' : 'pending',
+          ...(historical ? { baselineSaved: true, article: payload.article, remoteProductId: payload.remoteProductId, bindingRevisionId: fresh.bindingId } : {}) };
       } });
   } finally {
     while (held > 0) await lockClient.query('SELECT pg_advisory_unlock(hashtext($1))', [locks[--held]]).catch(() => {});

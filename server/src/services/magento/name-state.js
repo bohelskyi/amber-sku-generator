@@ -105,11 +105,17 @@ async function auditName(client, actorUserId, product, event, details) {
   await writeAuditEvent(client, { mutationContext: { actorUserId, requestId: `magento-name-${randomUUID()}` },
     eventKey: `product.magento_name_${event}`, subjectType: 'product', subjectId: String(product.id), details });
 }
-async function importRemote(client, actorUserId, product, result) {
+async function importRemote(client, actorUserId, product, result, { preserveArchivedLifecycle = false } = {}) {
+  if (preserveArchivedLifecycle) {
+    const [lifecycle] = await require('../full-product-export.service').readFullProductStates(client, [Number(product.id)], { lock: true });
+    if (product.status !== 'archived' || lifecycle.route !== 'retired') throw c.error(409, 'MAGENTO_NAME_PREVIEW_STALE', 'Стан архівованого товару змінився. Повторіть перевірку.');
+  }
   await client.query(`UPDATE products SET magento_name_override=$2::jsonb,magento_name_review_required=FALSE
     WHERE id=$1`, [product.id, JSON.stringify({ generated: result.generated, values: result.remote })]);
-  const [lifecycle] = await require('../full-product-export.service').readFullProductStates(client, [Number(product.id)], { lock: true });
-  await require('../full-product-export.service').advanceFullProductRevision(client, Number(product.id), lifecycle.revision);
+  if (!preserveArchivedLifecycle) {
+    const [lifecycle] = await require('../full-product-export.service').readFullProductStates(client, [Number(product.id)], { lock: true });
+    await require('../full-product-export.service').advanceFullProductRevision(client, Number(product.id), lifecycle.revision);
+  }
   await auditName(client, actorUserId, product, 'external_accepted', { before: result.amber, after: result.remote });
 }
 async function reconcileObservation(config, observation, options) {

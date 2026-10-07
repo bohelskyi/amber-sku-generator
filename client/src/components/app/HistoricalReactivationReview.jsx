@@ -4,6 +4,8 @@ import { useHistoricalReactivation } from '../../hooks/useHistoricalReactivation
 import { historicalCapability, isStandardHistorical, historicalPrerequisiteLabels, historicalReasonLabels, historicalStateLabels } from '../../lib/historical-reactivation.js';
 import { CopyAction } from '../ui/index.js';
 import { WorkspaceDialog } from '../workspace/WorkspaceDialog.jsx';
+import { historicalDeliveryBlockerLabels, historicalNameRepairRequest } from '../../lib/historical-name-review.js';
+import { HistoricalNameBaselineReview } from './HistoricalNameBaselineReview.jsx';
 import './HistoricalReactivationReview.css';
 
 const time = (value) => value ? new Date(value).toLocaleString('uk-UA') : 'Ще не підтверджено';
@@ -17,7 +19,6 @@ function CurrentPrerequisites({ item }) {
       {condition.met ? 'Виконано: ' : 'Не виконано: '}
       {historicalPrerequisiteLabels[condition.code] || 'Додаткова умова поточного рішення'}
     </li>)}</ul>
-    {item.deliveryBlockerCodes?.length > 0 && <p className="mt-2">План доставки має блокування назв, характеристик або відповідностей. Виправте їх у чинній інтеграції та повторіть перевірку.</p>}
   </div>;
 }
 
@@ -109,7 +110,8 @@ function ReviewItem({ item, flow, standard }) {
   const sku = item.article || item.inputSku;
   const eligible = item.disposition === 'eligible';
   const selected = Boolean(item.article && flow.selected.includes(item.article));
-  const locked = Boolean(flow.busyKind || flow.uncertain || flow.batchId);
+  const locked = Boolean(flow.busyKind || flow.uncertain || flow.batchId || flow.pendingOperation || flow.nameReview);
+  const namesRequest = historicalNameRepairRequest(item);
   const name = typeof item.currentName === 'string' && item.currentName.trim() ? item.currentName : null;
   return <li className={`historical-product${selected ? ' is-selected' : ''}`}>
     <div className="historical-product-heading">
@@ -129,6 +131,11 @@ function ReviewItem({ item, flow, standard }) {
         : `Оновимо наявний товар у Magento. Він залишиться ${item.targetStatus === 1 ? 'увімкненим' : 'вимкненим'}; видимість — ${({ 1: 'не показувати окремо', 2: 'каталог', 3: 'пошук', 4: 'каталог і пошук' })[item.targetVisibility]}.`
       : 'Оновимо наявний товар у Magento й вимкнемо його для продажу.'}</p>
       : <p className="historical-product-outcome">{reason(item.reasonCode)}</p>}
+    {item.deliveryBlockerCodes?.length > 0 && <ul className="mt-2 space-y-1 text-sm text-amber-800">{item.deliveryBlockerCodes.map(code => <li key={code}>{historicalDeliveryBlockerLabels[code] || code}</li>)}</ul>}
+    {namesRequest && !flow.nameReview && (flow.canReviewNames
+      ? <button type="button" className="btn btn-outline mt-3" disabled={locked} onClick={() => void flow.reviewNames(item)}>Перевірити назви Magento</button>
+      : <p className="mt-2 text-sm">Прийняття назв потребує також чинного права на створення експорту.</p>)}
+    {flow.nameReview && flow.nameReview.request.productId === item.productId && <HistoricalNameBaselineReview flow={flow} />}
     {eligible && standard && item.deliveryMode === 'create' && <label className="historical-create-consent">
       <input type="checkbox" aria-label={'Окремо дозволити CREATE ' + item.article}
         disabled={locked || !selected || flow.expired} checked={flow.selectedCreate.includes(item.article)}
@@ -163,13 +170,13 @@ export function HistoricalReactivationReview({
   const standard = flow.receipt ? isStandardHistorical(flow.receipt) : config?.historicalReactivation?.protocol === 'standard-rest-v1';
   const createsReady = !isStandardHistorical(flow.review) || flow.review.items.filter((item) => flow.selected.includes(item.article) && item.deliveryMode === 'create').every((item) => flow.selectedCreate.includes(item.article));
   const missing = flow.review?.items.filter((item) => item.reasonCode === 'HISTORICAL_PRODUCT_NOT_FOUND').length || 0;
-  const formLocked = Boolean(flow.busyKind || flow.uncertain || flow.batchId || flow.pendingOperation);
+  const formLocked = Boolean(flow.busyKind || flow.uncertain || flow.batchId || flow.pendingOperation || flow.nameReview);
   const input = <div>
     <label htmlFor="historical-reactivation-skus" className="font-semibold">Точні артикули, по одному в рядку</label>
     <textarea id="historical-reactivation-skus" className="input mt-2 min-h-[96px] font-mono" rows={4}
       value={flow.text} disabled={formLocked} onChange={(event) => flow.editText(event.target.value)} />
     {!flow.uncertain && !flow.batchId && <button type="button" className={`btn ${flow.review ? 'btn-outline' : 'btn-primary'} mt-3`}
-      disabled={Boolean(flow.busyKind || flow.pendingOperation || !flow.text.trim())} onClick={() => void flow.preview()}>
+      disabled={Boolean(formLocked || !flow.text.trim())} onClick={() => void flow.preview()}>
       {flow.busyKind === 'preview' ? 'Перевіряємо товари…' : flow.review ? 'Оновити перевірку' : 'Перевірити товари'}
     </button>}
     {!flow.review && <p className="mt-2 text-sm text-slate-500">Перевірка ще не відновлює товари.</p>}
@@ -234,6 +241,7 @@ export function HistoricalReactivationReview({
           onClick={() => void flow.refresh()}>Прочитати стан рішення</button>
       </details>}
     </>}
+    {flow.nameNotice && <p role="status" className="text-sm">{flow.nameNotice}</p>}
     {flow.error && <p role="alert" className="text-red-700">{flow.error}</p>}
     <footer className="historical-restore-footer">
       {flow.allowed && flow.review && !flow.receipt && <>
@@ -253,7 +261,7 @@ export function HistoricalReactivationReview({
       <div className="historical-restore-actions">
         <button type="button" className="btn btn-outline" aria-label="Закрити історичне рішення" disabled={flow.locked} onClick={onClose}>Закрити</button>
         {flow.allowed && flow.review && !flow.receipt && !flow.uncertain && !flow.batchId && <button type="button" className="btn btn-primary"
-          disabled={Boolean(flow.busyKind || !flow.selected.length || !flow.acknowledged || !createsReady || flow.expired)}
+          disabled={Boolean(formLocked || !flow.selected.length || !flow.acknowledged || !createsReady || flow.expired)}
           onClick={() => void flow.confirm()}>Відновити вибране ({flow.selected.length})</button>}
       </div>
     </footer>
