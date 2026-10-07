@@ -17,6 +17,7 @@ const errorMessage = (error, fallback) => {
     : typeof error?.message === 'string' && error.message.trim() ? error.message : fallback;
 };
 const uncertainMessage = 'Результат нового рішення ще не підтверджено. Не надсилайте підтвердження повторно. Перевірте стан цієї самої операції за її номером.';
+const operationNotFoundMessage = 'Операцію за цим номером ще не знайдено. Повторне підтвердження не надсилатиметься.';
 
 export function useHistoricalReactivation({
   auth, config, open, apiClient = historicalReactivationApi, createRequestId = createUuid, onReceipt,
@@ -215,7 +216,7 @@ export function useHistoricalReactivation({
       if (!start('status')) return;
       try { await readOperation(operation); }
       catch (cause) { if (mayRead()) setError(cause.response?.status === 404
-        ? 'Операцію за цим номером ще не знайдено. Повторне підтвердження не надсилатиметься.'
+        ? operationNotFoundMessage
         : errorMessage(cause, 'Не вдалося прочитати стан цієї самої операції.')); }
       finally { finish(); }
       return;
@@ -245,16 +246,24 @@ export function useHistoricalReactivation({
     const controller = new AbortController(); let stopped = false, timer;
     async function poll() {
       if (!flight.current && mayRead() && currentOpen.current) {
-        flight.current = true;
+        const ticket = generation.current;
+        flight.current = true; setBusyKind('status');
         try { await readOperation(operationRef.current, controller.signal); }
-        catch (cause) { if (!stopped && mayRead()) setError(errorMessage(cause, 'Не вдалося прочитати прогрес. Повторюємо лише читання стану.')); }
-        finally { flight.current = false; }
+        catch (cause) { if (!stopped && mayRead() && ticket === generation.current) setError(cause.response?.status === 404
+          ? operationNotFoundMessage
+          : errorMessage(cause, 'Не вдалося прочитати прогрес. Повторюємо лише читання стану.')); }
+        finally {
+          if (ticket === generation.current) {
+            flight.current = false;
+            if (ownerCurrent()) setBusyKind('');
+          }
+        }
       }
       if (!stopped && mayRead()) timer = setTimeout(poll, 5000);
     }
     timer = setTimeout(poll, operationState === 'unknown' ? 0 : 1000);
     return () => { stopped = true; clearTimeout(timer); controller.abort(); };
-  }, [open, allowed, operationId, operationState, operationKind, receipt, review, apiClient, mayRead, readOperation]);
+  }, [open, allowed, operationId, operationState, operationKind, receipt, review, apiClient, ownerCurrent, mayRead, readOperation]);
   useEffect(() => {
     if (!open || !allowed || !batchId || !waiting || uncertain) return undefined;
     const controller = new AbortController();
