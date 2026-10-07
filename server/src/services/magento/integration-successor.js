@@ -142,8 +142,29 @@ function equivalentColumnUpgrade(oldDefinition, nextDefinition) {
     return null;
   }
 }
+// Only this exact official policy conversion may retag unchanged decisions.
+// Keep the old name guard and policy in the comparison: names still need review.
+function equivalentNameUpgrade(oldDefinition, nextDefinition) {
+  const { POLICY, upgradeNameReadiness } = require('../export-templates/effective-product-names');
+  if (oldDefinition.nameReadiness === POLICY || nextDefinition.nameReadiness !== POLICY) return null;
+  try {
+    const expected = compileDefinition(upgradeNameReadiness(oldDefinition)).definition;
+    const after = compileDefinition(nextDefinition).definition;
+    // JSONB/canonical object traversal can reorder diagnostic owners. Ownership
+    // is a set; execution order, expressions and every other definition fact stay strict.
+    const ownership = definition => ({ ...definition, groups: definition.groups.map(group => ({ ...group,
+      outputChecks: (group.outputChecks || []).map(check => ({ ...check, columns: [...check.columns].sort() })),
+    })) });
+    if (c.hash(ownership(expected)) !== c.hash(ownership(after))) return null;
+    const before = upgradeColumns(oldDefinition);
+    before.evaluatorVersion = expected.evaluatorVersion;
+    before.sourceContractVersion = expected.sourceContractVersion;
+    return before;
+  } catch { return null; }
+}
+
 function stableReviewedSource(source, oldDefinition, nextDefinition, nextSchema = source.schema) {
-  oldDefinition = equivalentColumnUpgrade(oldDefinition, nextDefinition) || oldDefinition;
+  oldDefinition = equivalentNameUpgrade(oldDefinition, nextDefinition) || equivalentColumnUpgrade(oldDefinition, nextDefinition) || oldDefinition;
   const result = structuredClone(source); const changed = new Set();
   for (const a of result.bindings.attributes) {
     const group = a.routeKey.split(/[.:]/)[0];
@@ -249,4 +270,4 @@ async function apply(config, input, options = {}) {
       return service.readRevisionOnClient(client, draft.id);
     } });
 }
-module.exports = { ruleProof, equivalentColumnUpgrade, stableReviewedSource, prepare, apply };
+module.exports = { ruleProof, equivalentColumnUpgrade, equivalentNameUpgrade, stableReviewedSource, prepare, apply };

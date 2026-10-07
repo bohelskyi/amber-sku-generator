@@ -8,7 +8,7 @@ const { evaluate } = require('./binding-evidence-products');
 const { planPreview, previewProduct, preparePreview } = require('./sync-preview');
 const { loadSourceEvidence } = require('../export-templates/source-references');
 const scope = require('./publication-scope');
-const { ruleProof, equivalentColumnUpgrade } = require('./integration-successor');
+const { ruleProof, equivalentColumnUpgrade, equivalentNameUpgrade } = require('./integration-successor');
 const { boundedGet, previewView } = require('./integration-readiness');
 const { syncEligibility } = require('./sync-eligibility');
 const { createMutationContext } = require('../../audit/mutation-context');
@@ -165,7 +165,7 @@ async function boundedPreview(config,input,options={}){
     throw c.error(409,'MAGENTO_BINDING_OBSERVATION_CHANGED','Prepare a draft with fresh Magento metadata');
   result.lostRoutes=local.current?scopes(local.current).filter(r=>!scopes(local.draft).includes(r)):[];
   const validation=local.validation;
-  const comparisonOld=local.old && (equivalentColumnUpgrade(local.old.compiled.definition,local.next.compiled.definition) || local.old.compiled.definition);
+  const comparisonOld=local.old && (equivalentNameUpgrade(local.old.compiled.definition,local.next.compiled.definition) || equivalentColumnUpgrade(local.old.compiled.definition,local.next.compiled.definition) || local.old.compiled.definition);
   const newRoutes=scopes(local.draft).filter((route)=>!local.current || !scopes(local.current).includes(route)
     || local.current.bindings.routes.find((r)=>r.routeKey===route)?.setId!==local.draft.bindings.routes.find((r)=>r.routeKey===route)?.setId
     || ruleProof(comparisonOld,route.split(/[.:]/)[0],'base','attribute_set_code')!==ruleProof(local.next.compiled.definition,route.split(/[.:]/)[0],'base','attribute_set_code'));
