@@ -81,9 +81,10 @@ function previewFor(product, subjectUa, subjectEn, lifecycle, confirmUnchanged =
   };
 }
 
-async function previewProductMagentoName(payload = {}) {
+async function previewProductMagentoName(payload = {}, options = {}) {
+  if (payload.intent === 'historical-create') return require('./magento/historical-create-names.service').preview(payload, options);
   const productId = parseProductId(payload.productId);
-  const client = await pool.connect();
+  const client = await (options.databasePool || pool).connect();
   try {
     await lifecycleGate.begin(client, 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const product = (await client.query(`SELECT p.*,i.public_sku FROM products p
@@ -116,6 +117,7 @@ async function previewProductMagentoName(payload = {}) {
 }
 
 async function applyProductMagentoName(payload = {}, options = {}) {
+  if (payload.intent === 'historical-create') return require('./magento/historical-create-names.service').apply(payload, options);
   const productId = parseProductId(payload.productId);
   const subjectUa = reviewedSubject(payload.subjectUa, 'українську', payload.confirmUnchanged);
   const subjectEn = reviewedSubject(payload.subjectEn, 'англійську', payload.confirmUnchanged);

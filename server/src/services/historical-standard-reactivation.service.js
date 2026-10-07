@@ -104,6 +104,7 @@ async function preview(input, options={}) {
     item.remoteObservationHash=standard.observationFingerprint(observation);
     item.remoteFingerprint=raw?item.remoteObservationHash:null;
     item.deliveryBlockerCodes=[...new Set(report.blockers.map(b=>b.code))];
+    item.manualNameCompletion=require('./magento/historical-manual-names').available(observation.amber,report);
     const exact=!raw || raw.sku===item.article && Number.isSafeInteger(raw.id) && raw.id>0;
     const currentName = report.candidatePayload?.product?.name ?? (exact ? raw?.name : null);
     item.currentName = typeof currentName === 'string' && currentName.trim() ? currentName.trim() : null;
