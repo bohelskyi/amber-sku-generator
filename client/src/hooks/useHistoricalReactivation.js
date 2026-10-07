@@ -91,7 +91,7 @@ export function useHistoricalReactivation({
       }
     }
     setInspections({}); setReconcileAcknowledged({}); setCancelAcknowledged({});
-    setReceipt(next); setBatchId(next.batchId); setUncertain(false); setError('');
+    setReceipt(next); setNameNotice(''); setBatchId(next.batchId); setUncertain(false); setError('');
     const activated = next.items.filter((item) => item.localActivatedAt && !notified.current.has(item.intentId));
     if (activated.length) {
       activated.forEach((item) => notified.current.add(item.intentId));

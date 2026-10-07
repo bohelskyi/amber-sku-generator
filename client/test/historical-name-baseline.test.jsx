@@ -133,3 +133,56 @@ it('transport reuses the existing authenticated preview/apply endpoints without 
   await api.previewNames(request);await api.acceptNames({...request,previewToken:'c'.repeat(64),reviewExpiresAt:'synthetic'});
   expect(transport.post.mock.calls).toEqual([['/magento/name-resolution/preview',request],['/magento/name-resolution/apply',{...request,previewToken:'c'.repeat(64),reviewExpiresAt:'synthetic'}]]);
 });
+
+const adoptedNotice = /^Чинні назви Magento збережено/;
+const restoreReceipt = (state = 'completed') => {
+  const verifiedAt = state === 'completed' ? '2026-10-07T12:00:00Z' : null;
+  return { protocol, batchId, createdAt: '2026-10-07T11:59:00Z', items: [{
+    protocol, intentId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', productId: request.productId, article,
+    state, deliveryMode: 'update', targetStatus: 1, targetVisibility: 4, remoteProductId: request.remoteProductId,
+    nativeJobId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', confirmedRemoteProductId: verifiedAt ? request.remoteProductId : null,
+    hiddenVerifiedAt: null, deliveryVerifiedAt: verifiedAt, nativeConfirmedAt: verifiedAt, localActivatedAt: verifiedAt,
+    cancelledAt: null, reasonCode: null,
+  }] };
+};
+async function adoptForRestore() {
+  await begin(); client.preview.mockResolvedValueOnce({ data: review(true) });
+  await read(); agree(); fireEvent.click(save());
+  await screen.findByText('Можна відновити: 1. Потребують уваги: 1.');
+  expect(screen.getByText(adoptedNotice).textContent).toContain('Товар залишається архівованим');
+}
+function submitRestore() {
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Обрати ' + article }));
+  fireEvent.click(screen.getByRole('checkbox', { name: /Погоджую відновлення/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Відновити вибране (1)' }));
+}
+it.each(['direct receipt', 'status recovery'])('adopted name notice belongs to review and is removed by successful restore and reset/new list: %s', async (mode) => {
+  client.confirm.mockResolvedValueOnce({ data: restoreReceipt(mode === 'direct receipt' ? 'completed' : 'queued') });
+  client.status = vi.fn().mockResolvedValue({ data: restoreReceipt() });
+  mount(); await adoptForRestore(); submitRestore();
+  await screen.findByText('Результати відновлення');
+  if (mode === 'status recovery') {
+    fireEvent.click(screen.getByRole('button', { name: 'Перевірити стан цього самого рішення' }));
+  }
+  await screen.findByText('Первісну доставку та окрему локальну активацію підтверджено.');
+  expect(screen.queryByText(adoptedNotice)).toBeNull();
+  expect(client.acceptNames).toHaveBeenCalledTimes(1); expect(client.confirm).toHaveBeenCalledTimes(1);
+  expect(client.confirm.mock.calls[0][0].selectedSkus).toEqual([article]);
+  fireEvent.click(screen.getByRole('button', { name: 'Новий перелік для окремої перевірки' }));
+  expect(screen.getByLabelText('Точні артикули, по одному в рядку').value).toBe('');
+  expect(screen.queryByText(adoptedNotice)).toBeNull();
+  const next = review(); next.skus = ['NEXT-SKU']; next.items = [{ ...next.items[1], inputSku: 'NEXT-SKU' }];
+  next.counts = { eligible: 0, blocked: 1, skipped: 0 }; client.preview.mockResolvedValueOnce({ data: next });
+  fireEvent.change(screen.getByLabelText('Точні артикули, по одному в рядку'), { target: { value: 'NEXT-SKU' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити товари' }));
+  await screen.findByText('Можна відновити: 0. Потребують уваги: 1.');
+  expect(screen.queryByText(adoptedNotice)).toBeNull();
+  expect(client.acceptNames).toHaveBeenCalledTimes(1); expect(client.confirm).toHaveBeenCalledTimes(1);
+});
+it('non-accepted restore preserves the correct adopted-name review notice until another accepted workflow stage', async () => {
+  client.confirm.mockRejectedValueOnce({ response: { status: 409, data: { code: 'HISTORICAL_REVIEW_STALE', error: 'Synthetic stale restore review' } } });
+  mount(); await adoptForRestore(); submitRestore(); await screen.findByText('Synthetic stale restore review');
+  expect(screen.getByText(adoptedNotice).textContent).toContain('Товар залишається архівованим');
+  expect(screen.queryByText('Результати відновлення')).toBeNull();
+  expect(client.acceptNames).toHaveBeenCalledTimes(1); expect(client.confirm).toHaveBeenCalledTimes(1);
+});
