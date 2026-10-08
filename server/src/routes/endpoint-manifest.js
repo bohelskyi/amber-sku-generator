@@ -26,6 +26,8 @@ const ENDPOINT_MANIFEST = Object.freeze([
     ['GET', '/products/historical-reactivation/intents/:intentId/inspection'],
   ].map(([method,path]) => Object.freeze({...endpoint(method,path,'products.view'),
     additionalPermissions:Object.freeze(['products.archive','history.view','export_templates.manage','export_templates.publish'])})),
+  ...['preview','apply'].map(action => Object.freeze({...endpoint('POST', `/products/historical-reactivation/weight-normalization/${action}`, 'products.view'),
+    additionalPermissions:Object.freeze(['products.archive','history.view','export_templates.manage','export_templates.publish','products.recount','exports.create'])})),
   endpoint('GET', '/admin/magento-recovery/products/:id', ['export_templates.publish', 'exports.reconcile']),
   endpoint('GET', '/admin/magento-recovery/jobs/:id', 'export_templates.publish'),
   ...['inspect', 'reconcile', 'continue'].map((action) => endpoint('POST', `/admin/magento-recovery/jobs/:id/${action}`, 'export_templates.publish')),

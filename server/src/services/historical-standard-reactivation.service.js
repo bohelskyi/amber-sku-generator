@@ -105,6 +105,8 @@ async function preview(input, options={}) {
     item.remoteFingerprint=raw?item.remoteObservationHash:null;
     item.deliveryBlockerCodes=[...new Set(report.blockers.map(b=>b.code))];
     item.manualNameCompletion=require('./magento/historical-manual-names').available(observation.amber,report);
+    const weightNormalization=require('./magento/historical-sv-weight-normalization.service').capability(observation.amber,report);
+    if(weightNormalization)item.weightNormalization=weightNormalization;
     const exact=!raw || raw.sku===item.article && Number.isSafeInteger(raw.id) && raw.id>0;
     const currentName = report.candidatePayload?.product?.name ?? (exact ? raw?.name : null);
     item.currentName = typeof currentName === 'string' && currentName.trim() ? currentName.trim() : null;

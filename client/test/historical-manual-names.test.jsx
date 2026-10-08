@@ -84,7 +84,7 @@ it('editing invalidates the whole-list token before save, including cancelled ed
   mount();await begin();await openNames();fill();expect(sessionStorage.getItem(operationStorageKey(49))).toBeNull();fireEvent.click(screen.getByRole('button',{name:'Закрити перевірку назв'}));
   expect(screen.queryByRole('button',{name:'Відновити вибране (0)'})).toBeNull();
   fireEvent.change(screen.getByLabelText('Номер операції UUID'),{target:{value:batchId}});fireEvent.click(screen.getByRole('button',{name:'Прочитати стан рішення'}));
-  await screen.findByText('Назви редагувалися. Почніть нову перевірку перед відновленням.');expect(sessionStorage.getItem(operationStorageKey(49))).toBeNull();expect(client.confirm).not.toHaveBeenCalled();
+  await screen.findByText('Дані редагувалися. Почніть нову перевірку перед відновленням.');expect(sessionStorage.getItem(operationStorageKey(49))).toBeNull();expect(client.confirm).not.toHaveBeenCalled();
 });
 it('reload after an edit cannot recover the discarded general review operation',async()=>{
   client.operation=vi.fn().mockResolvedValue({data:envelope(batchId,review())});client.preview.mockResolvedValue({data:envelope(batchId,review())});

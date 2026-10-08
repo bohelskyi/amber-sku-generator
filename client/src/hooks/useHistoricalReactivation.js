@@ -10,6 +10,8 @@ import {
 import { historicalNameRepairRequest, validateHistoricalNames, validateHistoricalNameReceipt } from '../lib/historical-name-review.js';
 import { historicalManualNameRequest, validateHistoricalManualNames, validateHistoricalManualNameReceipt, validateHistoricalManualPreparation, renderHistoricalManualNames } from '../lib/historical-manual-name-review.js';
 
+import { historicalWeightRequest, validateWeightPreview, validateWeightReceipt } from '../lib/historical-weight-normalization-review.js';
+
 const noAcceptanceCodes = new Set([
   'HISTORICAL_REVIEW_STALE', 'HISTORICAL_SELECTION_INVALID', 'HISTORICAL_CONFIRMATION_REQUIRED',
 ]);
@@ -27,6 +29,10 @@ export function useHistoricalReactivation({
 }) {
   const allowed = canUseHistoricalReactivation(auth, config);
   const canReviewNames = Boolean(allowed && auth.permissions?.includes('exports.create'));
+  const canNormalizeWeights = Boolean(canReviewNames && auth.permissions?.includes('products.recount'));
+  const currentWeightsAllowed = useRef(canNormalizeWeights);
+  const [normalizedWeights, setNormalizedWeights] = useState([]);
+  const [weightReviewChanged, setWeightReviewChanged] = useState(false);
   const currentNamesAllowed = useRef(canReviewNames);
   const [nameReview, setNameReview] = useState(null);
   const [nameNotice, setNameNotice] = useState('');
@@ -57,9 +63,9 @@ export function useHistoricalReactivation({
   const lifetime = auth.principalLifetime;
   const currentLifetime = useRef(lifetime), currentAllowed = useRef(allowed), currentOpen = useRef(open);
   useLayoutEffect(() => {
-    currentLifetime.current = lifetime; currentAllowed.current = allowed; currentOpen.current = open; currentNamesAllowed.current = canReviewNames;
+    currentLifetime.current = lifetime; currentAllowed.current = allowed; currentOpen.current = open; currentNamesAllowed.current = canReviewNames; currentWeightsAllowed.current = canNormalizeWeights;
     operationRef.current = operation;
-  }, [lifetime, allowed, open, operation, canReviewNames]);
+  }, [lifetime, allowed, open, operation, canReviewNames, canNormalizeWeights]);
   const ownerCurrent = useCallback(() => mounted.current && currentLifetime.current === lifetime
     && (!lifetime || lifetime.valid !== false), [lifetime]);
   const mayRead = useCallback(() => ownerCurrent() && currentAllowed.current, [ownerCurrent]);
@@ -71,7 +77,7 @@ export function useHistoricalReactivation({
     setText(''); setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false);
     setReceipt(null); setBatchId(null); setInspections({}); setReconcileAcknowledged({}); setCancelAcknowledged({});
     setBusyKind(''); setUncertain(false); setError(''); setNameReview(null); setNameNotice('');
-    finalReviewRequired.current = false; setNeedsFinalReview(false); setSavedManualNames([]);
+    finalReviewRequired.current = false; setNeedsFinalReview(false); setSavedManualNames([]); setNormalizedWeights([]); setWeightReviewChanged(false);
   }, [storageKey]);
   useEffect(() => {
     if (!open || !review) return undefined;
@@ -111,11 +117,11 @@ export function useHistoricalReactivation({
   const acceptOperation = useCallback((value, expected) => {
     const next = validateReviewOperation(value, expected);
     if (next.kind === 'preview' && finalReviewRequired.current && next.operationId !== operationRef.current?.operationId)
-      throw new Error('Назви редагувалися. Почніть нову перевірку перед відновленням.');
+      throw new Error('Дані редагувалися. Почніть нову перевірку перед відновленням.');
     rememberOperation(next); setUncertain(false); setError('');
     if (next.state === 'ready') {
       if (next.kind === 'preview') {
-        finalReviewRequired.current = false; setNeedsFinalReview(false); setSavedManualNames([]);
+        finalReviewRequired.current = false; setNeedsFinalReview(false); setSavedManualNames([]); setNormalizedWeights([]); setWeightReviewChanged(false);
         setReview(next.result); setText(next.skus.join('\n')); setSelected([]); setSelectedCreate([]); setAcknowledged(false); setClock(Date.now());
       } else {
         attempt.current ||= { idempotencyKey: next.operationId, selectedSkus: Object.freeze([...next.selectedSkus]) };
@@ -150,7 +156,7 @@ export function useHistoricalReactivation({
   }
   function editText(next) {
     if (!allowed || flight.current || uncertain || batchId || pendingOperation || nameReview) return;
-    generation.current++; finalReviewRequired.current = false; setNeedsFinalReview(false); setSavedManualNames([]);
+    generation.current++; finalReviewRequired.current = false; setNeedsFinalReview(false); setSavedManualNames([]); setNormalizedWeights([]); setWeightReviewChanged(false);
     rememberOperation(null); setText(next); setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false); setError(''); setNameNotice('');
   }
   function select(article, checked) {
@@ -188,7 +194,7 @@ export function useHistoricalReactivation({
       if (mayRead() && ticket === generation.current) {
         if (result.data?.format === OPERATION_FORMAT) { acceptOperation(result.data, submitted); return; }
         if (submitted) throw new Error('Сервер не підтвердив номер перевірки. Прочитайте її стан.');
-        finalReviewRequired.current = false; setNeedsFinalReview(false); setSavedManualNames([]);
+        finalReviewRequired.current = false; setNeedsFinalReview(false); setSavedManualNames([]); setNormalizedWeights([]); setWeightReviewChanged(false);
         setReview(validateHistoricalPreview(result.data)); setSelected([]); setSelectedCreate([]); setAcknowledged(false);
         setClock(Date.now());
       }
@@ -258,22 +264,24 @@ export function useHistoricalReactivation({
         : errorMessage(cause, 'Не вдалося прочитати стан. Збережіть номер та повторіть лише перевірку стану.'));
     } finally { finish(); }
   }
-  const acceptNameResponse = ticket => mayRead() && currentNamesAllowed.current && currentOpen.current && ticket === generation.current;
+  const acceptNameResponse = (ticket, request = nameReview?.request) => mayRead() && currentNamesAllowed.current && currentOpen.current
+    && (request?.intent !== 'historical-weight-normalization' || currentWeightsAllowed.current) && ticket === generation.current;
   async function readNameReview(request = nameReview?.request) {
-    const manual = request?.intent === 'historical-create', readNames = manual ? apiClient.previewManualNames : apiClient.previewNames;
-    if (!canReviewNames || !request || batchId || pendingOperation || uncertain || !readNames || !start('name_read')) return;
+    const manual = request?.intent === 'historical-create', weight = request?.intent === 'historical-weight-normalization';
+    const readNames = weight ? apiClient.previewWeightNormalization : manual ? apiClient.previewManualNames : apiClient.previewNames;
+    if (!canReviewNames || weight && !canNormalizeWeights || !request || batchId || pendingOperation || uncertain || !readNames || !start('name_read')) return;
     const ticket = generation.current;
     setSelected([]); setSelectedCreate([]); setAcknowledged(false);
     setNameReview({ request, preview: null, acknowledged: false, uncertain: Boolean(nameReview?.uncertain) });
     try {
       const response = await readNames(request);
-      if (acceptNameResponse(ticket)) {
-        const next = manual ? validateHistoricalManualPreparation(response.data, request) : validateHistoricalNames(response.data, request);
+      if (acceptNameResponse(ticket, request)) {
+        const next = weight ? validateWeightPreview(response.data, request) : manual ? validateHistoricalManualPreparation(response.data, request) : validateHistoricalNames(response.data, request);
         setNameReview({ request, preview: next, acknowledged: false, uncertain: false,
           ...(manual ? { preparation: next, subjectUa: next.subjectUa || '', subjectEn: next.subjectEn || '' } : {}) });
       }
     } catch (cause) {
-      if (acceptNameResponse(ticket)) setError(errorMessage(cause, 'Не вдалося перевірити назви цього самого товару. Повторіть лише читання.'));
+      if (acceptNameResponse(ticket, request)) setError(errorMessage(cause, weight ? 'Не вдалося прочитати вагу цього товару. Повторіть лише читання.' : 'Не вдалося перевірити назви цього самого товару. Повторіть лише читання.'));
     } finally { if (ticket === generation.current) finish(); }
   }
   async function reviewNames(item) {
@@ -282,6 +290,10 @@ export function useHistoricalReactivation({
   }
   async function completeManualNames(item) {
     const request = historicalManualNameRequest(item);
+    if (request) await readNameReview(request);
+  }
+  async function reviewWeight(item) {
+    const request = historicalWeightRequest(item);
     if (request) await readNameReview(request);
   }
   function editManualSubject(key, value) {
@@ -306,46 +318,52 @@ export function useHistoricalReactivation({
     await preview(true);
   }
   async function saveNames() {
-    const current = nameReview, manual = current?.request.intent === 'historical-create';
-    const applyNames = manual ? apiClient.saveManualNames : apiClient.acceptNames;
-    if (!canReviewNames || !current?.acknowledged || !current.preview || current.uncertain || current.preview.alreadyAccepted || current.preview.alreadyCompleted
+    const current = nameReview, manual = current?.request.intent === 'historical-create', weight = current?.request.intent === 'historical-weight-normalization';
+    const applyNames = weight ? apiClient.saveWeightNormalization : manual ? apiClient.saveManualNames : apiClient.acceptNames;
+    if (!canReviewNames || weight && !canNormalizeWeights || !current?.acknowledged || !current.preview || current.uncertain || current.preview.alreadyAccepted || current.preview.alreadyCompleted
       || pendingOperation || batchId || uncertain || !applyNames) return;
     try {
-      if (manual) validateHistoricalManualNames(current.preview, current.request, { subjectUa: current.subjectUa, subjectEn: current.subjectEn });
+      if (weight) validateWeightPreview(current.preview, current.request);
+      else if (manual) validateHistoricalManualNames(current.preview, current.request, { subjectUa: current.subjectUa, subjectEn: current.subjectEn });
       else validateHistoricalNames(current.preview, current.request);
     }
     catch (cause) { setNameReview({ ...current, preview: null, acknowledged: false }); setError(cause.message); return; }
     if (!start('name_save')) return;
+    if (weight) { invalidateAfterManualEdit(); setWeightReviewChanged(true); }
     const ticket = generation.current; let saved = false;
     try {
       const response = await applyNames({ ...current.request, reviewExpiresAt: current.preview.reviewExpiresAt,
-        ...(manual ? { preparationToken: current.preview.preparationToken, subjectUa: current.preview.subjectUa, subjectEn: current.preview.subjectEn,
+        ...(weight ? { previewToken: current.preview.previewToken, confirmEquivalentWeightNormalization: true } : manual ? { preparationToken: current.preview.preparationToken, subjectUa: current.preview.subjectUa, subjectEn: current.preview.subjectEn,
           reviewedNameUa: current.preview.nameUa, reviewedNameEn: current.preview.nameEn } : { previewToken: current.preview.previewToken }) });
-      if (ownerCurrent() && ticket === generation.current && !acceptNameResponse(ticket)) {
+      if (ownerCurrent() && ticket === generation.current && !acceptNameResponse(ticket, current.request)) {
         setNameReview({ request: current.request, preview: null, acknowledged: false, uncertain: true });
       }
-      if (acceptNameResponse(ticket)) {
-        if (manual) validateHistoricalManualNameReceipt(response.data, current.request, current.preview);
+      if (acceptNameResponse(ticket, current.request)) {
+        if (weight) validateWeightReceipt(response.data, current.request, current.preview);
+        else if (manual) validateHistoricalManualNameReceipt(response.data, current.request, current.preview);
         else validateHistoricalNameReceipt(response.data, current.request);
-        if (manual) {
+        if (weight) {
+          setNormalizedWeights(previous => [...new Set([...previous, current.request.article])]);
+          setNameReview({ ...current, preview: { ...current.preview, alreadyCompleted: true }, acknowledged: false, uncertain: false });
+        } else if (manual) {
           invalidateAfterManualEdit(); setSavedManualNames(previous => [...new Set([...previous, current.request.article])]);
           setNameReview({ ...current, preview: { ...current.preview, alreadyCompleted: true }, acknowledged: false, uncertain: false });
         }
-        setNameNotice(manual ? 'Ручну UA/EN пару збережено. Товар залишається архівованим. Можна перейти до наступного товару.'
+        setNameNotice(weight ? 'Формат ваги виправлено. Товар залишається архівованим. Потрібна свіжа перевірка перед відновленням.' : manual ? 'Ручну UA/EN пару збережено. Товар залишається архівованим. Можна перейти до наступного товару.'
           : 'Чинні назви Magento збережено в менеджері. Товар залишається архівованим; перевірку відновлення повторено.');
         saved = true;
       }
     } catch (cause) {
-      if (ownerCurrent() && ticket === generation.current && !acceptNameResponse(ticket)) {
+      if (ownerCurrent() && ticket === generation.current && !acceptNameResponse(ticket, current.request)) {
         setNameReview({ request: current.request, preview: null, acknowledged: false, uncertain: true });
       }
-      if (acceptNameResponse(ticket)) {
+      if (acceptNameResponse(ticket, current.request)) {
         const unknown = !(cause.response?.status >= 400 && cause.response.status < 500);
         setNameReview({ request: current.request, preview: null, acknowledged: false, uncertain: unknown });
         setError(errorMessage(cause, unknown ? 'Відповідь збереження назв втрачено. Повторіть лише перевірку назв цього самого товару.' : 'Назви не збережено. Перевірте їх ще раз.'));
       }
     } finally { if (ticket === generation.current) finish(); }
-    if (saved && !manual && acceptNameResponse(ticket)) await repeatAfterNames();
+    if (saved && !manual && !weight && acceptNameResponse(ticket, current.request)) await repeatAfterNames();
   }
   const nextManualItem = review?.items.find(item => historicalManualNameRequest(item) && !savedManualNames.includes(item.article)
     && item.article !== nameReview?.request.article);
@@ -458,11 +476,12 @@ export function useHistoricalReactivation({
     if (!allowed || busyKind || pendingOperation || !canReset) return;
     generation.current++;
     attempt.current = null; setText(''); setReview(null); setSelected([]); setSelectedCreate([]); setAcknowledged(false);
-    rememberOperation(null); finalReviewRequired.current = false; setNeedsFinalReview(false); setSavedManualNames([]);
+    rememberOperation(null); finalReviewRequired.current = false; setNeedsFinalReview(false); setSavedManualNames([]); setNormalizedWeights([]); setWeightReviewChanged(false);
     setReceipt(null); setBatchId(null); setInspections({}); setReconcileAcknowledged({}); setError(''); setNameReview(null); setNameNotice('');
   }
   const expired = Boolean(review && Date.parse(review.reviewExpiresAt) <= clock);
   return {
+    canNormalizeWeights, normalizedWeights, weightReviewChanged, reviewWeight,
     canReviewNames, nameReview, nameNotice, reviewNames, readNameReview, saveNames, repeatAfterNames, cancelNameReview,
     completeManualNames, editManualSubject, previewManualNames, nextManualNames, nextManualArticle: nextManualItem?.article, needsFinalReview, savedManualNames,
     namesExpired: Boolean((nameReview?.preparation || nameReview?.preview) && Date.parse((nameReview.preparation || nameReview.preview).reviewExpiresAt) <= clock),

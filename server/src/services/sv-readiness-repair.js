@@ -18,6 +18,22 @@ function normalizedWeight(value) {
   const normalized = value.replace(',', '.');
   return Number.isFinite(Number(normalized)) && Number(normalized) > 0 ? normalized : null;
 }
+// Compare decimal digits exactly; Number equality can hide a conflicting fraction.
+function decimalWeightKey(value) {
+  if (!['string', 'number'].includes(typeof value)) return null;
+  const text = String(value);
+  if (text.length > 64 || !/^\d+(?:\.\d+)?$/.test(text) || !Number.isFinite(Number(text)) || !(Number(text) > 0)) return null;
+  const [integer, fraction = ''] = text.split('.');
+  return (integer.replace(/^0+/, '') || '0') + '.' + fraction.replace(/0+$/, '');
+}
+function equivalentCommaWeight(product) {
+  const target = normalizedWeight(product.details?.answers?.weight), canonical = decimalWeightKey(product.weight);
+  return target !== null && canonical !== null && decimalWeightKey(target) === canonical ? target : null;
+}
+function equivalentDotWeight(product) {
+  const answer = product.details?.answers?.weight, canonical = decimalWeightKey(product.weight);
+  return typeof answer === 'string' && canonical !== null && decimalWeightKey(answer) === canonical;
+}
 function targetProduct(product) {
   const weight = normalizedWeight(product.details?.answers?.weight);
   return weight === null ? null : { ...product, details: { ...product.details,
@@ -140,4 +156,4 @@ async function apply(plan, options) {
   }
   result.complete = true; await checkpoint(); return result;
 }
-module.exports = { normalizedWeight, targetProduct, preview, verify, applyEntry, apply };
+module.exports = { normalizedWeight, targetProduct, decimalWeightKey, equivalentCommaWeight, equivalentDotWeight, preview, verify, applyEntry, apply };

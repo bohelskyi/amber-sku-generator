@@ -5,6 +5,9 @@ export function createHistoricalReactivationApi(client = api) {
   return Object.freeze({
     preview: (skus, operationId) => client.post(root + '/preview', { skus, ...(operationId ? { operationId } : {}) }),
     confirm: (payload) => client.post(root + '/confirm', payload),
+    previewWeightNormalization: ({ productId, article, bindingRevisionId }) => client.post(root + '/weight-normalization/preview', { productId, article, bindingRevisionId }),
+    saveWeightNormalization: ({ productId, article, bindingRevisionId, previewToken, reviewExpiresAt, confirmEquivalentWeightNormalization }) =>
+      client.post(root + '/weight-normalization/apply', { productId, article, bindingRevisionId, previewToken, reviewExpiresAt, confirmEquivalentWeightNormalization }),
     previewManualNames: (payload) => client.post('/product-magento-name/preview', payload),
     saveManualNames: (payload) => client.post('/product-magento-name/apply', payload),
     previewNames: (payload) => client.post('/magento/name-resolution/preview', payload),

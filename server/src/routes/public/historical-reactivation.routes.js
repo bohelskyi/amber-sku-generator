@@ -34,4 +34,9 @@ router.post(`${prefix}/reconcile`, ...gates, async (req, res) => {
   try { res.json(await worker.reconcile(require('../../config/env').magento, req.body || {}, options(req))); }
   catch (cause) { sendHttpError(res, cause, { includeCode: true }); }
 });
+for (const action of ['preview', 'apply']) router.post(`${prefix}/weight-normalization/${action}`,
+  ...gates, requirePermission('products.recount'), requirePermission('exports.create'), async (req, res) => {
+    try { res.json(await require('../../services/magento/historical-sv-weight-normalization.service')[action](req.body || {}, options(req))); }
+    catch (cause) { sendHttpError(res, cause, { includeCode: true }); }
+  });
 module.exports = router;
