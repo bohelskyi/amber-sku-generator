@@ -2,9 +2,10 @@ const c = require('./binding-contract');
 const plan = require('./sync-job-plan');
 const { assertActorStillAuthorized, APPLICATION_USER_ADMIN_LOCK_KEY } = require('../access-admin-transaction');
 const lifecycle = require('../full-product-cutover-gate');
+const { phase } = require('./sync-local-diagnostics');
 
 async function assertEnabled(client, options) {
-  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [APPLICATION_USER_ADMIN_LOCK_KEY]);
+  await phase('authority_lock', () => client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [APPLICATION_USER_ADMIN_LOCK_KEY]));
   await client.query('SELECT pg_advisory_xact_lock_shared(hashtext($1))', [lifecycle.LOCK_KEY]);
   if ((await lifecycle.readGate(client)).phase === 'preparing') plan.fail('MAGENTO_AUTO_DISABLED');
   const gate = (await client.query('SELECT * FROM magento_auto_sync_activation WHERE singleton FOR SHARE')).rows[0];
@@ -12,7 +13,7 @@ async function assertEnabled(client, options) {
   if (gate.installation_key !== options.automatic.installationKey || Number(gate.actor_user_id) !== options.actorUserId) {
     plan.fail('MAGENTO_AUTO_CONFIGURATION_CHANGED');
   }
-  await assertActorStillAuthorized(client, options.actorUserId, 'export_templates.publish', c.error);
+  await phase('actor_check', () => assertActorStillAuthorized(client, options.actorUserId, 'export_templates.publish', c.error));
 }
 
 async function assertGeneration(client, options) {

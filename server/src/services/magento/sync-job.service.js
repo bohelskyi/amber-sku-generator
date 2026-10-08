@@ -5,15 +5,15 @@ const { previewProduct } = require('./sync-preview');
 const { createMagentoClient } = require('./client');
 const { readDomains } = require('./sync-preview-domains');
 const { evaluate } = require('./binding-evidence-products');
-const { readRevisionOnClient } = require('./binding.service');
 const { dispatch } = require('./sync-write-client');
 const { assertEvidenceSafe } = require('./binding-evidence-audit');
 const { writeAuditEvent } = require('../../audit/audit-events');
-const { APPLICATION_USER_ADMIN_LOCK_KEY, assertActorStillAuthorized } = require('../access-admin-transaction');
 const gate = require('../full-product-cutover-gate');
 const automatic = require('./automatic-sync-boundary');
 const { resolveProductLookup } = require('../product/public-identity');
 const { measurePhase } = require('./sync-performance');
+const transaction = require('./sync-job-transaction');
+const local = require('./sync-local-diagnostics');
 const historical = require('./historical-update-boundary');
 const standardHistorical = require('./historical-standard-boundary');
 
@@ -23,19 +23,19 @@ async function ledger(db, actorUserId, action, operation) {
     await client.query('BEGIN');
     const job = await operation(client);
     if (action === 'succeeded') await require('./name-state').confirmJobNames(client, job);
-    await writeAuditEvent(client, { mutationContext: { actorUserId, requestId: `magento-sync-${randomUUID()}` },
+    await local.phase('job_audit', () => writeAuditEvent(client, { mutationContext: { actorUserId, requestId: `magento-sync-${randomUUID()}` },
       eventKey: `magento_sync.${action}`, subjectType: 'magento_sync_job', subjectId: job.id,
-      details: { state: job.state, planHash: job.plan_hash } });
-    await client.query('COMMIT'); return job;
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; }
-  finally { client.release(); }
+      details: { state: job.state, planHash: job.plan_hash } }));
+    await gate.commit(client); return job;
+  } catch (e) { await gate.rollback(client).catch(() => {}); throw e; }
+  finally { await gate.release(client).catch(() => {}); client.release(); }
 }
 async function guard(config, input, options, operation, applying = false) {
   c.identity(input.bindingRevisionId);
   if (!Number.isSafeInteger(options.actorUserId) || options.actorUserId <= 0) plan.fail('MAGENTO_SYNC_ACTOR_REQUIRED');
   if (typeof input.sku !== 'string' || !input.sku.trim() || input.sku.length > 256) plan.fail('MAGENTO_SYNC_SKU_REQUIRED');
   const db = options.databasePool; const client = await db.connect();
-  let canonicalSku; let lock; let held = false;
+  let canonicalSku; let lock; let held = false; let transactionOpen = false;
   try {
     const initiallyResolved = await resolveProductLookup(client, input.sku);
     if (!initiallyResolved.product || initiallyResolved.internalMatchCount > 1) plan.fail('MAGENTO_SYNC_PRODUCT_NOT_UNIQUE');
@@ -45,53 +45,18 @@ async function guard(config, input, options, operation, applying = false) {
       held = (await client.query('SELECT pg_try_advisory_lock(hashtext($1)) AS held', [lock])).rows[0].held;
       if (!held) plan.fail('MAGENTO_SYNC_BUSY');
     } else { await client.query('SELECT pg_advisory_lock(hashtext($1))', [lock]); held = true; }
-    await client.query('BEGIN');
-    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [APPLICATION_USER_ADMIN_LOCK_KEY]);
-    await assertActorStillAuthorized(client, options.actorUserId, 'export_templates.publish', c.error);
-    await gate.enterExisting(client);
-    if (!(await client.query("SELECT to_regclass('magento_sync_jobs') AS present")).rows[0].present) plan.fail('MAGENTO_SYNC_MIGRATION_REQUIRED');
-    const revision = await readRevisionOnClient(client, input.bindingRevisionId);
-    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`amber_magento_binding:${revision.installationKey}`]);
-    const current = (await client.query(`SELECT id FROM magento_binding_revisions WHERE installation_key=$1
-      AND state='published' ORDER BY version_number DESC LIMIT 1`, [revision.installationKey])).rows[0];
-    if (revision.state !== 'published' || current?.id !== revision.id) plan.fail('MAGENTO_SYNC_PUBLISHED_CURRENT_BINDING_REQUIRED');
-    if (revision.originHash !== c.originHash(config.baseUrl) || revision.schema.storeCode !== 'all') plan.fail('MAGENTO_SYNC_INSTALLATION_MISMATCH');
-    const resolved = await resolveProductLookup(client, canonicalSku);
-    if (!resolved.product) plan.fail('MAGENTO_SYNC_PRODUCT_NOT_UNIQUE');
-    const product = (await client.query(`SELECT p.*,i.public_sku FROM products p
-      JOIN public_product_identities i ON i.id=p.public_product_identity_id WHERE p.id=$1 FOR NO KEY UPDATE OF p`,
-    [resolved.product.id])).rows[0];
-    if (resolved.internalMatchCount > 1) plan.fail('MAGENTO_SYNC_PRODUCT_NOT_UNIQUE');
-    if ((await client.query('SELECT 1 FROM magento_test_deletions WHERE public_product_identity_id=$1',
-      [product.public_product_identity_id])).rowCount) plan.fail('MAGENTO_SYNC_TEST_DELETION');
-    const lifecycle = (await client.query('SELECT * FROM product_full_export_state WHERE product_id=$1 FOR NO KEY UPDATE', [product.id])).rows[0];
-    if (!lifecycle) plan.fail('MAGENTO_SYNC_PRODUCT_STATE_MISSING');
-    const state = { productId: product.id, publicIdentityId: product.public_product_identity_id,
-      publicSku: product.public_sku, amberHash: c.hash(plan.clean({ product, lifecycle })),
-      bindingHash: c.hash(plan.clean(revision)), revision };
-    state.historicalUpdate = await historical.readConstraint(client, state.publicIdentityId, revision.originHash);
-    await historical.assertLocal(client, config, state.historicalUpdate, state);
-    state.historicalStandard = await standardHistorical.readConstraint(client, state.publicIdentityId, revision.originHash);
-    await standardHistorical.assertLocal(client, config, state.historicalStandard, state, options.actorUserId);
-    if (options.recoveryInspectionOnly === true) {
-      // A browser inspection owns only the SKU lane during remote GETs. It makes
-      // no durable decision; reconciliation re-reads the exact reviewed state.
-      await gate.commit(client); await gate.release(client);
-      return await operation(state);
-    }
-    if (options.automatic) {
-      if (state.productId !== options.automatic.productId
-        || String(state.publicIdentityId) !== String(options.automatic.publicIdentityId)) plan.fail('MAGENTO_SYNC_AMBER_CHANGED');
-      await automatic.assertEnabled(client, options);
-      await automatic.assertGeneration(client, options);
-      // Keep the SKU session lock, but release every business/access/publication
-      // transaction lock before any remote read or write. Amber saves stay local.
-      await gate.commit(client); await gate.release(client);
-      return await operation(state);
-    }
-    const result = await operation(state);
-    await gate.commit(client); return result;
-  } catch (e) { await gate.rollback(client).catch(() => {}); throw e; }
+    await client.query('BEGIN'); transactionOpen = true;
+    const state = await transaction.readState(client, config, input, options, canonicalSku);
+    // Retain the SKU session lane, but release authority/publication/product
+    // transaction locks before every remote read or write. Manual mutations
+    // revalidate under short transactions immediately before committing evidence.
+    await gate.commit(client); transactionOpen = false;
+    return await operation(state);
+  } catch (e) {
+    local.log(e, options);
+    if (transactionOpen) await gate.rollback(client).catch(() => {});
+    throw e;
+  }
   finally {
     await gate.release(client).catch(() => {});
     if (held) await client.query('SELECT pg_advisory_unlock(hashtext($1))', [lock]).catch(() => {});
@@ -167,6 +132,7 @@ async function enqueue(config, input, options) {
     assertEvidenceSafe({ intent, baseline }, config, options.sensitiveValues || []);
     return ledger(options.databasePool, options.actorUserId, 'enqueued', async (client) => {
       if (options.automatic) await automatic.assertSnapshot(client, state, options);
+      else await transaction.revalidate(client, config, state, options);
       const job = (await client.query(`
       INSERT INTO magento_sync_jobs(id,product_id,public_product_identity_id,sku,installation_key,origin_hash,binding_revision_id,
         binding_hash,amber_hash,plan_hash,intent,baseline,created_by_user_id,automatic_generation)
@@ -184,13 +150,17 @@ async function applyJob(config, id, options) {
   if (options.apply !== true) plan.fail('MAGENTO_SYNC_APPLY_REQUIRED');
   c.identity(id);
   let job = (await options.databasePool.query('SELECT * FROM magento_sync_jobs WHERE id=$1', [id])).rows[0];
+  let guardedState;
   if (!job) plan.fail('MAGENTO_SYNC_JOB_NOT_FOUND');
   const input = { sku: job.sku, bindingRevisionId: job.binding_revision_id };
   const saveState = (state, failure = null) => ledger(options.databasePool, options.actorUserId, state, async (client) => {
-    const result = (await client.query(`UPDATE magento_sync_jobs SET state=$2, failure=$3::jsonb, updated_at=CURRENT_TIMESTAMP,
+    if (guardedState && !options.automatic && ['running','succeeded'].includes(state)) {
+      await transaction.revalidate(client, config, guardedState, options);
+    }
+    const result = (await local.phase('job_state', () => client.query(`UPDATE magento_sync_jobs SET state=$2, failure=$3::jsonb, updated_at=CURRENT_TIMESTAMP,
       attempts=attempts+CASE WHEN $2='running' THEN 1 ELSE 0 END,
       acknowledged_at=CASE WHEN $2='succeeded' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$1 RETURNING *`,
-    [id, state, JSON.stringify(failure)])).rows[0];
+    [id, state, JSON.stringify(failure)]))).rows[0];
     if (state === 'running' && options.recoveryReview) await writeAuditEvent(client, {
       mutationContext: { actorUserId: options.actorUserId, requestId: options.mutationContext?.requestId },
       eventKey: 'magento_sync.recovery_continued', subjectType: 'magento_sync_recovery', subjectId: c.hash(options.recoveryReview),
@@ -198,6 +168,7 @@ async function applyJob(config, id, options) {
     return result;
   });
   return guard(config, input, options, async (state) => {
+    guardedState = state;
     job = (await options.databasePool.query('SELECT * FROM magento_sync_jobs WHERE id=$1', [id])).rows[0];
     if (job.state === 'succeeded') return job;
     if (job.state === 'superseded') plan.fail('MAGENTO_SYNC_JOB_SUPERSEDED');
@@ -249,16 +220,17 @@ async function applyJob(config, id, options) {
           plan.precondition(job, operation, observation);
           // Committed before HTTP. There is deliberately no path that resets this marker.
           await ledger(options.databasePool, options.actorUserId, 'dispatched', async (client) => {
+            if (!options.automatic) await transaction.revalidate(client, config, state, options);
             await historical.assertLocal(client, config, state.historicalUpdate, state);
             await standardHistorical.assertLocal(client,config,state.historicalStandard,state,options.actorUserId);
             if (options.automatic) {
               await automatic.assertEnabled(client, options);
-              await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`amber_magento_binding:${job.installation_key}`]);
+              await local.phase('binding_lock', () => client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`amber_magento_binding:${job.installation_key}`]));
               const current = (await client.query(`SELECT id FROM magento_binding_revisions WHERE installation_key=$1
                 AND state='published' ORDER BY version_number DESC LIMIT 1`, [job.installation_key])).rows[0];
               if (current?.id !== job.binding_revision_id) plan.fail('MAGENTO_SYNC_PUBLISHED_CURRENT_BINDING_REQUIRED');
             }
-            await client.query("INSERT INTO magento_sync_steps(job_id,ordinal,state,dispatched_at) VALUES($1,$2,'dispatched',CURRENT_TIMESTAMP)", [id, ordinal]);
+            await local.phase('dispatch_marker', () => client.query("INSERT INTO magento_sync_steps(job_id,ordinal,state,dispatched_at) VALUES($1,$2,'dispatched',CURRENT_TIMESTAMP)", [id, ordinal]));
             return job;
           });
           let uncertain = false;
@@ -288,11 +260,14 @@ async function applyJob(config, id, options) {
       plan.verifyAll(job, observation);
       return await saveState('succeeded');
     } catch (cause) {
+      local.log(cause, options, { jobId: id });
       const pending = (await options.databasePool.query("SELECT 1 FROM magento_sync_steps WHERE job_id=$1 AND state='dispatched'", [id])).rowCount > 0;
       const code = /^(MAGENTO|ADMIN|EXPORT|HISTORICAL)_[A-Z_]+$/.test(cause.code || '') ? cause.code : 'MAGENTO_SYNC_FAILED';
-      const status = pending ? 'uncertain' : /CHANGED|MISMATCH|INTEGRITY|NOT_SENDABLE|UNRESOLVED/.test(code) ? 'blocked' : 'retryable';
+      const status = pending ? 'uncertain' : code === 'MAGENTO_SYNC_PUBLISHED_CURRENT_BINDING_REQUIRED'
+        || /CHANGED|MISMATCH|INTEGRITY|NOT_SENDABLE|UNRESOLVED/.test(code) ? 'blocked' : 'retryable';
       return saveState(status, { code, ordinal: activeOrdinal,
-        operation: activeOrdinal === null ? null : job.intent.operations[activeOrdinal].domain, reconciliationOnly: pending });
+        operation: activeOrdinal === null ? null : job.intent.operations[activeOrdinal].domain, reconciliationOnly: pending,
+        ...(local.diagnostic(cause) ? { sqlState: local.diagnostic(cause).sqlState, phase: local.diagnostic(cause).phase } : {}) });
     }
   }, true).catch(async (cause) => {
     // These checks happen after actor authorization but before entering the worker.
@@ -329,4 +304,4 @@ async function supersedeUndispatched(config, id, options) {
   }
 }
 module.exports = { enqueue, applyJob, supersedeUndispatched,
-  recoveryBoundary: { guard, observe, ledger } };
+  recoveryBoundary: { guard, observe, ledger, revalidate: transaction.revalidate } };

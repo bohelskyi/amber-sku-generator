@@ -1,5 +1,6 @@
 const jobs = require('./sync-job.service');
 const { originHash } = require('./binding-contract');
+const local = require('./sync-local-diagnostics');
 
 const transient = (code) => ['MAGENTO_NETWORK_ERROR', 'MAGENTO_TIMEOUT', 'MAGENTO_HTTP_ERROR',
   'MAGENTO_SYNC_READ_FAILED', 'MAGENTO_SYNC_CATEGORY_READ_FAILED', 'MAGENTO_SYNC_BUSY',
@@ -17,10 +18,13 @@ function createAutomaticSyncWorker(config, { databasePool: db, jobOptions = {}, 
     const client = await db.connect(); let held = false; let request;
     const update = (sql, values = []) => db.query(`UPDATE magento_product_sync_requests SET ${sql},updated_at=CURRENT_TIMESTAMP
       WHERE public_product_identity_id=$1`, [publicIdentityId, ...values]);
-    const attention = (reason) => update(`state=CASE WHEN desired_generation=$3::bigint OR $2='reconciliation_required'
+    const attention = (reason, error) => update(`state=CASE WHEN desired_generation=$3::bigint OR $2='reconciliation_required'
       THEN 'needs_attention' ELSE 'pending' END,
-      reason_code=CASE WHEN desired_generation=$3::bigint OR $2='reconciliation_required' THEN $2 ELSE NULL END`,
-    [reason, request.desired_generation]);
+      reason_code=CASE WHEN desired_generation=$3::bigint OR $2='reconciliation_required' THEN $2 ELSE NULL END,
+      diagnostics=CASE WHEN $4::jsonb IS NULL THEN diagnostics ELSE jsonb_build_array($4::jsonb) ||
+        (SELECT COALESCE(jsonb_agg(item),'[]'::jsonb) FROM jsonb_array_elements(diagnostics) item
+          WHERE item->>'code' IS DISTINCT FROM 'LOCAL_DATABASE_FAILURE') END`,
+    [reason, request.desired_generation, local.diagnostic(error) ? JSON.stringify(local.diagnostic(error)) : null]);
     const retry = () => update(`state='pending',reason_code=NULL,attempts=attempts+1,
       next_attempt_at=CURRENT_TIMESTAMP + (LEAST(300,5*power(2,LEAST(attempts,6))) * interval '1 second')`);
     try {
@@ -81,10 +85,11 @@ function createAutomaticSyncWorker(config, { databasePool: db, jobOptions = {}, 
         await update(`synced_generation=GREATEST(synced_generation,$2::bigint),active_job_id=NULL,active_generation=NULL,
           state=CASE WHEN desired_generation=$2::bigint THEN 'synced' ELSE 'pending' END,
           reason_code=NULL,attempts=0,next_attempt_at=CURRENT_TIMESTAMP`, [generation]);
-      } else if (job.state === 'uncertain') await attention('reconciliation_required');
+      } else if (job.state === 'uncertain') await attention('reconciliation_required', job.failure);
       else if (stale(job.failure?.code) || (job.state === 'retryable' && transient(job.failure?.code))) await retry();
-      else await attention('data_or_binding');
+      else await attention(local.diagnostic(job.failure) ? 'unexpected_failure' : 'data_or_binding', job.failure);
     } catch (error) {
+      local.log(error, { logger }, { publicIdentityId });
       // A lost DB acknowledgement of dispatch must be resolved from the ledger
       // on the next pass; no catch path issues HTTP or resets a dispatch marker.
       if (request) {
@@ -92,7 +97,7 @@ function createAutomaticSyncWorker(config, { databasePool: db, jobOptions = {}, 
         else await attention(error.code === 'MAGENTO_SYNC_PREVIOUS_DISPATCH_UNRESOLVED' ? 'reconciliation_required'
           : error.code === 'ADMIN_PERMISSION_REVOKED' ? 'authorization'
           : error.code?.startsWith('MAGENTO_AUTO_') ? 'configuration'
-            : error.code?.startsWith('MAGENTO_') || error.code?.startsWith('HISTORICAL_') ? 'data_or_binding' : 'unexpected_failure');
+            : error.code?.startsWith('MAGENTO_') || error.code?.startsWith('HISTORICAL_') ? 'data_or_binding' : 'unexpected_failure', error);
       }
     } finally {
       if (held) await client.query('SELECT pg_advisory_unlock(hashtext($1))',

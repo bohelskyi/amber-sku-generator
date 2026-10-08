@@ -104,6 +104,7 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
     const fetchImpl = async (url, init) => {
       const u = new URL(url); const route = u.pathname.split('/V1/')[1];
       if (init.method === 'GET') {
+        if (hooks.beforeRead) await hooks.beforeRead(route);
         if (hooks.readFailure) throw new Error('synthetic GET failure');
         if (route === 'products') {
           assert.equal(u.searchParams.get('searchCriteria[filter_groups][0][filters][0][value]'), sku);
@@ -158,6 +159,8 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
     return { input, options, product, writes, hooks, remote: () => remote, english: () => english, sources: () => sourceItems,
       enqueue: () => enqueue(config, input, options), apply: (job) => applyJob(config, job.id, options) };
   }
+
+  await require('./magento-manual-boundary-cases')({ t, suite, scenario, config, installationKey, actorUserId });
 
   await t.test('idempotent concurrent enqueue binds a single immutable exact plan and published revision', async () => {
     const s = await scenario(); const other = new Pool({ connectionString: TEST_DATABASE_URL });
@@ -462,8 +465,19 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
     const automaticJob = await enqueue(config, automaticProduct.input, { ...automaticProduct.options,
       automatic: { publicIdentityId: automaticProduct.product.public_product_identity_id,
         productId: automaticProduct.product.id, generation: '1', installationKey } });
-    const current = await bindings.publishDraft(newer.id, { expectedRevision: newer.revision, expectedCurrentId: published.id }, mutations);
-    const result = await s.apply(job);
+    let release, entered;
+    const arrived = new Promise(resolve => { entered = resolve; });
+    const hold = new Promise(resolve => { release = resolve; });
+    s.hooks.beforeRead = async () => { s.hooks.beforeRead = null; entered(); await hold; };
+    const applying = s.apply(job);
+    await arrived;
+    const publisher = new Pool({ connectionString: TEST_DATABASE_URL, statement_timeout: 2000 });
+    let current;
+    try {
+      current = await bindings.publishDraft(newer.id, { expectedRevision: newer.revision, expectedCurrentId: published.id },
+        { ...mutations, databasePool: publisher });
+    } finally { release(); await publisher.end(); }
+    const result = await applying;
     assert.equal(result.state, 'blocked'); assert.equal(result.failure.code, 'MAGENTO_SYNC_PUBLISHED_CURRENT_BINDING_REQUIRED'); assert.equal(s.writes.length, 0);
     try {
       const worker = require('../src/services/magento/automatic-sync-worker').createAutomaticSyncWorker(config,
