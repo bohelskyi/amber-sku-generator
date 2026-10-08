@@ -139,6 +139,12 @@ attached job is reconciled successfully, polling consumes its receipt, including
 requests previously marked needs-attention. No historical backfill or unrestricted
 retry/queue API is included.
 
+Local PostgreSQL failures retain a closed SQLSTATE and operation phase in safe
+job/request diagnostics and structured logs, without exception messages, SQL text,
+parameters or remote bodies. A local failure is presented as a database operation
+problem rather than a product-mapping diagnosis. Parked requests are not retried by
+this change; unresolved dispatch still requires explicit reconciliation.
+
 ## Test product deletion
 
 Migration 050 introduces a separate explicit Administrator workflow, **Видалити

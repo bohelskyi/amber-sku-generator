@@ -110,6 +110,7 @@ async function reconcile(config, id, input, options = {}) {
     // Only already-observed results are recorded. This function has no dispatch path.
     const result = await jobs.recoveryBoundary.ledger(options.databasePool, options.actorUserId,
       checked.review.complete ? 'succeeded' : 'recovery_verified', async (client) => {
+        await jobs.recoveryBoundary.revalidate(client, config, state, options);
         await assertActorStillAuthorized(client, options.actorUserId, 'export_templates.publish', c.error);
         for (const item of checked.steps) {
           if (item.state === 'verified' || (!checked.review.complete && item.state !== 'dispatched')) continue;

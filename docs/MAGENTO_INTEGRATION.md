@@ -328,8 +328,10 @@ inspection; changed or mismatched remote evidence never permits blind resend.
 GET-only inspection releases product/access/publication transaction locks before
 remote reads, retaining the SKU session lock and binding its result to the local
 snapshot. It exposes a bounded before/after review of remaining original changes.
-Acknowledgement and continuation preserve the existing manual executor's final
-transaction checks; they are not claimed to be lock-free remote operations.
+Reviewed acknowledgement revalidates the actor, current binding and local snapshot
+after GET in its short ledger transaction. Continuation uses the same short manual
+dispatch transactions; the SKU session lock spans its HTTP calls, while business,
+access and publication transaction locks do not.
 
 Lifecycle preview exposes the actual supported action and required evidence.
 Legacy replacement/first-delivery recipes remain unavailable after product-CSV
@@ -1916,8 +1918,14 @@ Enqueue is idempotent for installation/product/publication/Amber state, includin
 completed retries. A partial unique index prevents competing unfinished SKU jobs.
 Apply uses a per-installation/SKU PostgreSQL session lock (duplicate apply returns
 `MAGENTO_SYNC_BUSY`), access/lifecycle/publication coordination and product then
-lifecycle row locks. These retain local state and publication through remote dispatch;
-ledger commits use an independent connection so dispatch evidence survives crashes.
+lifecycle row locks. Manual, historical and automatic guards commit their initial
+transaction before HTTP, retaining the installation/SKU session lock. Manual enqueue,
+each unsent dispatch and final acknowledgement recheck the actor, current publication,
+product/lifecycle snapshot and historical constraints in short ledger transactions.
+A change committed during a remote read blocks the subsequent dispatch; a change
+after dispatch never deletes or resets its permanent evidence. Verification records
+the observed result, while later unsent steps require fresh authority and state.
+Ledger commits use an independent connection so dispatch evidence survives crashes.
 No export/cutover state or legacy queue cursor is advanced.
 
 States are `queued -> running -> succeeded`, or `retryable`, `blocked`, `uncertain`.
