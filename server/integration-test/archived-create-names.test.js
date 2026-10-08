@@ -46,6 +46,11 @@ test('archived CREATE manual subjects satisfy the unchanged SV published contrac
       row.cells.product_online = { op: 'literal', value: row.id === 'base' ? '2' : '' };
       row.cells.visibility = { op: 'literal', value: row.id === 'base' ? 'Catalog, Search' : '' };
     }
+    // Exact naming AST from the supplied immutable publication, including its distinct stone fallback.
+    const suppliedNames = require('../test/fixtures/historical-production-sv-names.json');
+    for (const row of definition.groups.find(g => g.route === 'SV').rows) {
+      row.cells.name = structuredClone(suppliedNames.definition.groups[0].rows.find(r => r.id === row.id).cells.name);
+    }
     const templates = require('../src/services/export-templates/template.service');
     const family = await templates.createTemplate({ key: 'create-names-fixture', displayName: 'Create names fixture', definition }, options);
     const version = await templates.publishTemplate(family.id, { expectedRevision: family.draft.revision, expectedDefinitionHash: family.draft.definitionHash }, options);
@@ -89,6 +94,8 @@ test('archived CREATE manual subjects satisfy the unchanged SV published contrac
       else { assert.ok(parsed.pathname.endsWith('/products'));value={items:present?[{id:900001,sku:'SV2314003',attribute_set_id:8001,name:'Unexpected remote',price:25000,status:2,visibility:4,type_id:'simple',custom_attributes:[],extension_attributes:{category_links:[],website_ids:[801]}}]:[],total_count:present?1:0}; }
       return new Response(JSON.stringify(value),{headers:{'content-type':'application/json'}});
     };
+    assert.deepEqual(version.definition.groups.find(g => g.route === 'SV').rows.map(r => r.cells.name),
+      suppliedNames.definition.groups[0].rows.map(r => r.cells.name));
     let schemaPasses=0;
     options.discover=async()=>{schemaPasses++;return schema;};
     const historical=require('../src/services/historical-standard-reactivation.service'), namesService=require('../src/services/product-magento-name.service');

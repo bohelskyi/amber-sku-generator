@@ -155,3 +155,50 @@ it('manual transport reuses existing protected preview/apply endpoints and keeps
   const post=vi.fn().mockResolvedValue({data:{}}),api=createHistoricalReactivationApi({post});await api.previewManualNames(request);await api.saveManualNames({...request,...pair,preparationToken:'c'.repeat(64),reviewExpiresAt:'synthetic',reviewedNameUa:full.nameUa,reviewedNameEn:full.nameEn});
   expect(post.mock.calls.map(call=>call[0])).toEqual(['/product-magento-name/preview','/product-magento-name/apply']);
 });
+
+it('successful retry reads an already completed pair authoritatively instead of retaining unsaved edits', async () => {
+  mount(); await begin(); await openNames(); await proposed();
+  fireEvent.change(screen.getByLabelText('Назва UA'), { target: { value: 'Unsaved UA draft' } });
+  fireEvent.change(screen.getByLabelText('Назва EN'), { target: { value: 'Unsaved EN draft' } });
+  client.previewManualNames.mockResolvedValueOnce({ data: current({ ...pair, ...full, alreadyCompleted: true }) });
+  fireEvent.click(screen.getByRole('button', { name: 'Прочитати збережені назви' }));
+  await screen.findByText(/Ручну пару вже збережено/);
+  expect(screen.getByLabelText('Назва UA').value).toBe(pair.subjectUa); expect(screen.getByLabelText('Назва EN').value).toBe(pair.subjectEn);
+  expect(screen.getByLabelText('Назва UA').disabled).toBe(true); expect(screen.queryByRole('button', { name: 'Зберегти ручну пару' })).toBeNull();
+  expect(client.saveManualNames).not.toHaveBeenCalled(); expect(client.confirm).not.toHaveBeenCalled();
+});
+
+it('failed preparation explains the server error inside the form and disables preview until an explicit successful retry', async () => {
+  const message = 'Ручна пара потрібна лише архівованому CREATE-кандидату SV.';
+  client.previewManualNames.mockRejectedValueOnce({ response: { status: 409, data: { error: message } } });
+  mount(); await begin(); await openNames();
+  const form = screen.getByRole('region', { name: 'Ручні назви ' + article });
+  await waitFor(() => expect(form.querySelector('[role="alert"]')?.textContent).toBe(message));
+  fill(); expect(show().disabled).toBe(true); expect(save().disabled).toBe(true);
+  fireEvent.click(show()); expect(client.previewManualNames).toHaveBeenCalledTimes(1);
+  const pending = deferred(); client.previewManualNames.mockReturnValueOnce(pending.promise);
+  fireEvent.click(screen.getByRole('button', { name: 'Прочитати збережені назви' }));
+  expect(screen.getByLabelText('Назва UA').value).toBe(pair.subjectUa); expect(screen.getByLabelText('Назва EN').value).toBe(pair.subjectEn);
+  expect(show().disabled).toBe(true);
+  await act(async () => pending.resolve({ data: current() }));
+  expect(screen.getByLabelText('Назва UA').value).toBe(pair.subjectUa); expect(screen.getByLabelText('Назва EN').value).toBe(pair.subjectEn);
+  expect(form.querySelector('[role="alert"]')).toBeNull(); expect(show().disabled).toBe(false);
+  fireEvent.click(show()); await screen.findByText(full.nameEn); expect(consent().checked).toBe(false);
+  expect(client.previewManualNames.mock.calls).toEqual([[request], [request]]);
+  expect(client.preview).toHaveBeenCalledTimes(1); expect(client.saveManualNames).not.toHaveBeenCalled(); expect(client.confirm).not.toHaveBeenCalled();
+});
+it('repeated preparation failures preserve edited subjects; successful reread uses only its fresh descriptor and clears consent', async () => {
+  mount(); await begin(); await openNames(); await proposed(); fireEvent.click(consent());
+  client.previewManualNames.mockRejectedValueOnce({ response: { status: 409, data: { error: 'Повторна підготовка не вдалася.' } } });
+  fireEvent.click(screen.getByRole('button', { name: 'Прочитати збережені назви' }));
+  await screen.findByText('Повторна підготовка не вдалася.');
+  expect(screen.getByLabelText('Назва UA').value).toBe(pair.subjectUa); expect(screen.getByLabelText('Назва EN').value).toBe(pair.subjectEn);
+  expect(show().disabled).toBe(true); expect(save().disabled).toBe(true); expect(screen.queryByText(full.nameEn)).toBeNull();
+  client.previewManualNames.mockResolvedValueOnce({ data: current({ nameRender: { format: 'historical-manual-render-v1',
+    ua: { prefix: 'Fresh ', suffix: ' Арт: ' + article }, en: { prefix: 'Current ', suffix: '. Art: ' + article } } }) });
+  fireEvent.click(screen.getByRole('button', { name: 'Прочитати збережені назви' }));
+  await waitFor(() => expect(show().disabled).toBe(false)); fireEvent.click(show());
+  await screen.findByText('Current ' + pair.subjectEn + '. Art: ' + article);
+  expect(consent().checked).toBe(false); expect(save().disabled).toBe(true);
+  expect(client.saveManualNames).not.toHaveBeenCalled(); expect(client.confirm).not.toHaveBeenCalled();
+});

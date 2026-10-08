@@ -18,9 +18,10 @@ function nameRender(amber) {
     || ['public_sku', 'magento_name_subject_ua', 'magento_name_subject_en'].some(field => !equal(d.sources[field],
       { kind: 'product', field, type: field === 'public_sku' ? 'text' : 'scalar' }))) return null;
   const result = { format: FORMAT };
-  for (const [language, rowId, id, subject] of [['ua', 'base', 'SV.nameUa', 'SV.manualUa'], ['en', 'english', 'SV.nameEn', 'SV.manualEn']]) {
-    const expression = binding(id), manual = expression?.then;
-    if (!equal(group.rows.find(r => r.id === rowId)?.cells.name, ref(id)) || expression?.op !== 'when'
+  for (const [language, rowId, subject] of [['ua', 'base', 'SV.manualUa'], ['en', 'english', 'SV.manualEn']]) {
+    const cell = group.rows.find(r => r.id === rowId)?.cells.name;
+    const expression = cell?.op === 'ref' ? binding(cell.id) : cell, manual = expression?.then;
+    if (expression?.op !== 'when'
       || !equal(expression.if, ref('SV.manualPair')) || manual?.op !== 'interpolate'
       || !equal(manual.slots, { subject: ref(subject), sku: ref('sku') })
       || typeof manual.template !== 'string' || manual.template.length > 1024
