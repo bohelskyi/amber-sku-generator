@@ -274,7 +274,8 @@ export function useHistoricalReactivation({
     setSelected([]); setSelectedCreate([]); setAcknowledged(false);
     const preserveDraft = manual && nameReview?.editedSubjects && !nameReview.uncertain
       && ['productId', 'article', 'bindingRevisionId', 'intent'].every(key => nameReview.request[key] === request[key]);
-    const draft = preserveDraft ? { subjectUa: nameReview.subjectUa, subjectEn: nameReview.subjectEn, editedSubjects: true } : {};
+    const draft = preserveDraft ? { subjectUa: nameReview.subjectUa, subjectEn: nameReview.subjectEn, editedSubjects: true,
+      nameMode: nameReview.nameMode, fullNameUa: nameReview.fullNameUa, fullNameEn: nameReview.fullNameEn } : {};
     setNameReview({ request, preview: null, acknowledged: false, uncertain: Boolean(nameReview?.uncertain), ...draft });
     try {
       const response = await readNames(request);
@@ -282,6 +283,7 @@ export function useHistoricalReactivation({
         const next = weight ? validateWeightPreview(response.data, request) : manual ? validateHistoricalManualPreparation(response.data, request) : validateHistoricalNames(response.data, request);
         setNameReview({ request, preview: next, acknowledged: false, uncertain: false,
           ...(manual ? { preparation: next, subjectUa: next.subjectUa || '', subjectEn: next.subjectEn || '',
+            nameMode: next.nameMode || 'template', fullNameUa: next.nameUa || '', fullNameEn: next.nameEn || '',
             ...(!next.alreadyCompleted ? draft : {}) } : {}) });
       }
     } catch (cause) {
@@ -311,13 +313,29 @@ export function useHistoricalReactivation({
     invalidateAfterManualEdit();
     setNameReview(previous => ({ ...previous, [key]: value, editedSubjects: true, preview: null, acknowledged: false }));
   }
+  function editManualFullName(key, value) {
+    if (!canReviewNames || flight.current || nameReview?.request.intent !== 'historical-create' || nameReview.uncertain
+      || nameReview.nameMode !== 'full' || !['fullNameUa', 'fullNameEn'].includes(key) || value.length > 255) return;
+    invalidateAfterManualEdit();
+    setNameReview(previous => ({ ...previous, [key]: value, editedSubjects: true, preview: null, acknowledged: false }));
+  }
+  function setManualFullNameMode(full) {
+    const current = nameReview;
+    if (!canReviewNames || flight.current || current?.request.intent !== 'historical-create' || current.uncertain
+      || current.preview?.alreadyCompleted || !current.preparation || full && (!current.preview?.nameUa || !current.preview?.nameEn
+        || current.preparation.fullNameEditing !== true)) return;
+    invalidateAfterManualEdit();
+    setNameReview({ ...current, nameMode: full ? 'full' : 'template', editedSubjects: true, preview: null, acknowledged: false,
+      fullNameUa: full ? current.preview.nameUa : '', fullNameEn: full ? current.preview.nameEn : '' });
+  }
   function previewManualNames() {
     const current = nameReview;
     if (!canReviewNames || !currentOpen.current || flight.current || current?.request.intent !== 'historical-create' || current.uncertain
       || !current.preparation || !current.subjectUa?.trim() || !current.subjectEn?.trim() || batchId || pendingOperation || uncertain) return;
     setError('');
     try {
-      const next = renderHistoricalManualNames(current.preparation, current.request, { subjectUa: current.subjectUa, subjectEn: current.subjectEn });
+      const next = renderHistoricalManualNames(current.preparation, current.request, { subjectUa: current.subjectUa, subjectEn: current.subjectEn,
+        nameMode: current.nameMode, fullNameUa: current.fullNameUa, fullNameEn: current.fullNameEn });
       setNameReview({ ...current, preview: next, subjectUa: next.subjectUa, subjectEn: next.subjectEn, acknowledged: false });
     } catch (cause) { setNameReview({ ...current, preview: null, acknowledged: false }); setError(cause.message); }
   }
@@ -333,7 +351,8 @@ export function useHistoricalReactivation({
       || pendingOperation || batchId || uncertain || !applyNames) return;
     try {
       if (weight) validateWeightPreview(current.preview, current.request);
-      else if (manual) validateHistoricalManualNames(current.preview, current.request, { subjectUa: current.subjectUa, subjectEn: current.subjectEn });
+      else if (manual) validateHistoricalManualNames(current.preview, current.request, { subjectUa: current.subjectUa, subjectEn: current.subjectEn,
+        nameMode: current.nameMode, fullNameUa: current.fullNameUa, fullNameEn: current.fullNameEn });
       else validateHistoricalNames(current.preview, current.request);
     }
     catch (cause) { setNameReview({ ...current, preview: null, acknowledged: false }); setError(cause.message); return; }
@@ -343,7 +362,8 @@ export function useHistoricalReactivation({
     try {
       const response = await applyNames({ ...current.request, reviewExpiresAt: current.preview.reviewExpiresAt,
         ...(weight ? { previewToken: current.preview.previewToken, confirmEquivalentWeightNormalization: true } : manual ? { preparationToken: current.preview.preparationToken, subjectUa: current.preview.subjectUa, subjectEn: current.preview.subjectEn,
-          reviewedNameUa: current.preview.nameUa, reviewedNameEn: current.preview.nameEn } : { previewToken: current.preview.previewToken }) });
+          reviewedNameUa: current.preview.nameUa, reviewedNameEn: current.preview.nameEn,
+          ...(current.preview.nameMode === 'full' ? { nameMode: 'full', fullNameUa: current.preview.nameUa, fullNameEn: current.preview.nameEn } : {}) } : { previewToken: current.preview.previewToken }) });
       if (ownerCurrent() && ticket === generation.current && !acceptNameResponse(ticket, current.request)) {
         setNameReview({ request: current.request, preview: null, acknowledged: false, uncertain: true });
       }
@@ -368,7 +388,7 @@ export function useHistoricalReactivation({
       }
       if (acceptNameResponse(ticket, current.request)) {
         const unknown = !(cause.response?.status >= 400 && cause.response.status < 500);
-        setNameReview({ request: current.request, preview: null, acknowledged: false, uncertain: unknown });
+        setNameReview({ ...(manual ? current : {}), request: current.request, preparation: null, preview: null, acknowledged: false, uncertain: unknown });
         setError(errorMessage(cause, unknown ? 'Відповідь збереження назв втрачено. Повторіть лише перевірку назв цього самого товару.' : 'Назви не збережено. Перевірте їх ще раз.'));
       }
     } finally { if (ticket === generation.current) finish(); }
@@ -492,7 +512,7 @@ export function useHistoricalReactivation({
   return {
     canNormalizeWeights, normalizedWeights, weightReviewChanged, reviewWeight,
     canReviewNames, nameReview, nameNotice, reviewNames, readNameReview, saveNames, repeatAfterNames, cancelNameReview,
-    completeManualNames, editManualSubject, previewManualNames, nextManualNames, nextManualArticle: nextManualItem?.article, needsFinalReview, savedManualNames,
+    completeManualNames, editManualSubject, editManualFullName, setManualFullNameMode, previewManualNames, nextManualNames, nextManualArticle: nextManualItem?.article, needsFinalReview, savedManualNames,
     namesExpired: Boolean((nameReview?.preparation || nameReview?.preview) && Date.parse((nameReview.preparation || nameReview.preview).reviewExpiresAt) <= clock),
     acknowledgeNames: value => { if (canReviewNames && !flight.current && !nameReview?.uncertain) setNameReview(previous => previous ? { ...previous, acknowledged: value } : null); },
     allowed, text, review, selected, selectedCreate, cancelAcknowledged, canReset, acknowledged, receipt, batchId, lookupId, inspections,
