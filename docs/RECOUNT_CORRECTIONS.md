@@ -48,7 +48,9 @@ locks and complete evidence CAS reject stale plans. Apply re-reads and evaluates
 its full-product content revision, and writes an atomic immutable audit receipt. Prices, SKU, reservations, exclusions,
 delivery acknowledgements, snapshots and cursors are preserved. No Magento client is used. Each outcome is checkpointed
 to a durable summary; a same-plan retry skips committed receipts, while a fresh preview excludes normalized rows.
-An error never credits a different row. No startup, HTTP or automatic repair hook exists.
+An error never credits a different row. This active-only CLI has no startup or automatic repair hook.
+
+A separate reviewed historical UI path handles an archived/current SV whose saved comma answer is exactly equal to its existing positive canonical weight. `/api/products/historical-reactivation/weight-normalization/preview` and `/apply` require the actual active Administrator, all historical-review capabilities, `products.recount`, `exports.create`, authentication and CSRF. Exact decimal digit comparison rejects absent, conflicting, malformed or rounded-equal values; zero canonical weight and five-stone canonical recovery are outside this path. Preview binds actor, expiry, identity, archived lifecycle/lineage/request, current binding/definition, weight-question and pricing evidence. Apply revalidates under existing access/product/lifecycle locks, replaces only the comma in `details.answers.weight`, verifies the persisted target, keeps the product retired and suppresses pending ordinary delivery, and writes an immutable atomic audit. It preserves physical weight, all prices, SKU, names and history, and makes no Magento call. The UI shows the exact original/target, requires unchecked explicit consent, invalidates old restore evidence on a save attempt, and offers a fresh whole-list historical check afterwards. A lost reply permits exact read recovery only. That fresh review may expose manual-name completion; names are never inferred.
 
 ## Direct apply
 

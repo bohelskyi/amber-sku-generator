@@ -8,6 +8,8 @@ import { historicalDeliveryBlockerLabels, historicalNameRepairRequest } from '..
 import { HistoricalNameBaselineReview } from './HistoricalNameBaselineReview.jsx';
 import { HistoricalManualNameReview } from './HistoricalManualNameReview.jsx';
 import { historicalManualNameRequest } from '../../lib/historical-manual-name-review.js';
+import { historicalWeightRequest } from '../../lib/historical-weight-normalization-review.js';
+import { HistoricalWeightNormalizationReview } from './HistoricalWeightNormalizationReview.jsx';
 import './HistoricalReactivationReview.css';
 
 const time = (value) => value ? new Date(value).toLocaleString('uk-UA') : 'Ще не підтверджено';
@@ -115,38 +117,46 @@ function ReviewItem({ item, flow, standard }) {
   const locked = Boolean(flow.busyKind || flow.uncertain || flow.batchId || flow.pendingOperation || flow.nameReview);
   const namesRequest = historicalNameRepairRequest(item);
   const manualNamesRequest = historicalManualNameRequest(item);
+  const weightRequest = historicalWeightRequest(item);
   const name = typeof item.currentName === 'string' && item.currentName.trim() ? item.currentName : null;
   return <li className={`historical-product${selected ? ' is-selected' : ''}`}>
     <div className="historical-product-heading">
       <label className="historical-product-identity">
-        <input type="checkbox" aria-label={'Обрати ' + sku} disabled={locked || !eligible || flow.expired}
+        <input type="checkbox" aria-label={'Обрати ' + sku} disabled={locked || !eligible || flow.expired || flow.needsFinalReview}
           checked={selected} onChange={(event) => flow.select(item.article, event.target.checked)} />
         <span><strong className="break-all font-mono">{sku}</strong>
           <span className="historical-product-name">{name || 'Назву не підтверджено'}</span></span>
       </label>
       <span className={`historical-product-status${eligible ? '' : ' needs-review'}`}>
-        {eligible ? 'Можна відновити' : item.disposition === 'skipped' ? 'Пропущено' : 'Потребує уваги'}
+        {flow.normalizedWeights.includes(sku) ? 'Формат ваги виправлено' : flow.savedManualNames.includes(sku) ? 'Назви збережено' : eligible ? flow.needsFinalReview ? 'Потрібна нова перевірка' : 'Можна відновити' : item.disposition === 'skipped' ? 'Пропущено' : 'Потребує уваги'}
       </span>
     </div>
-    {eligible ? <p className="historical-product-outcome">{standard
+    {flow.savedManualNames.includes(sku) ? <p className="historical-product-outcome">Товар залишається архівованим. Перед відновленням перевірте список заново.</p> : eligible ? <p className="historical-product-outcome">{standard
       ? item.deliveryMode === 'create'
         ? 'У Magento товар не знайдено. Створимо його під тим самим артикулом, вимкненим для продажу.'
         : `Оновимо наявний товар у Magento. Він залишиться ${item.targetStatus === 1 ? 'увімкненим' : 'вимкненим'}; видимість — ${({ 1: 'не показувати окремо', 2: 'каталог', 3: 'пошук', 4: 'каталог і пошук' })[item.targetVisibility]}.`
       : 'Оновимо наявний товар у Magento й вимкнемо його для продажу.'}</p>
       : <p className="historical-product-outcome">{reason(item.reasonCode)}</p>}
-    {item.deliveryBlockerCodes?.length > 0 && <ul className="mt-2 space-y-1 text-sm text-amber-800">{item.deliveryBlockerCodes.map(code => <li key={code}>{historicalDeliveryBlockerLabels[code] || code}</li>)}</ul>}
+    {!flow.savedManualNames.includes(sku) && item.deliveryBlockerCodes?.length > 0 && <ul className="mt-2 space-y-1 text-sm text-amber-800">{item.deliveryBlockerCodes.map(code => <li key={code}>{historicalDeliveryBlockerLabels[code] || code}</li>)}</ul>}
     {namesRequest && !flow.nameReview && (flow.canReviewNames
       ? <button type="button" className="btn btn-outline mt-3" disabled={locked} onClick={() => void flow.reviewNames(item)}>Перевірити назви Magento</button>
       : <p className="mt-2 text-sm">Прийняття назв потребує також чинного права на створення експорту.</p>)}
-    {manualNamesRequest && <p className="mt-2 text-sm">Потрібна ручна українська й англійська назва цього сувеніра.</p>}
-    {manualNamesRequest && !flow.nameReview && (flow.canReviewNames
+    {flow.savedManualNames.includes(sku) && <p className="mt-2 text-sm font-medium">Назви збережено. Потрібна фінальна перевірка відновлення.</p>}
+    {manualNamesRequest && !flow.savedManualNames.includes(sku) && <p className="mt-2 text-sm">Потрібна ручна українська й англійська назва цього сувеніра.</p>}
+    {manualNamesRequest && !flow.savedManualNames.includes(sku) && !flow.nameReview && (flow.canReviewNames
       ? <button type="button" className="btn btn-outline mt-3" disabled={locked} onClick={() => void flow.completeManualNames(item)}>Ввести ручну UA/EN назву</button>
       : <p className="mt-2 text-sm">Збереження ручної назви потребує також чинного права на створення експорту.</p>)}
-    {flow.nameReview && flow.nameReview.request.productId === item.productId && (flow.nameReview.request.intent === 'historical-create'
+    {weightRequest && !flow.normalizedWeights.includes(sku) && <p className="mt-2 text-sm">Вагу записано з комою: {item.weightNormalization.sourceWeight} → {item.weightNormalization.targetWeight} г. Потрібна згода на виправлення формату.</p>}
+    {weightRequest && !flow.normalizedWeights.includes(sku) && !flow.nameReview && (flow.canNormalizeWeights
+      ? <button type="button" className="btn btn-outline mt-3" disabled={locked} onClick={() => void flow.reviewWeight(item)}>Перевірити формат ваги</button>
+      : <p className="mt-2 text-sm">Виправлення формату ваги потребує чинних прав на перерахунок і експорт.</p>)}
+    {flow.normalizedWeights.includes(sku) && <p className="mt-2 text-sm">Виправлено лише формат ваги. Перед відновленням потрібна свіжа перевірка.</p>}
+    {flow.nameReview && flow.nameReview.request.productId === item.productId && (flow.nameReview.request.intent === 'historical-weight-normalization'
+      ? <HistoricalWeightNormalizationReview flow={flow} /> : flow.nameReview.request.intent === 'historical-create'
       ? <HistoricalManualNameReview flow={flow} /> : <HistoricalNameBaselineReview flow={flow} />)}
     {eligible && standard && item.deliveryMode === 'create' && <label className="historical-create-consent">
       <input type="checkbox" aria-label={'Окремо дозволити CREATE ' + item.article}
-        disabled={locked || !selected || flow.expired} checked={flow.selectedCreate.includes(item.article)}
+        disabled={locked || !selected || flow.expired || flow.needsFinalReview} checked={flow.selectedCreate.includes(item.article)}
         onChange={(event) => flow.selectCreate(item.article, event.target.checked)} />
       <span>Дозволяю створити цей товар у Magento вимкненим для продажу.</span>
     </label>}
@@ -185,7 +195,7 @@ export function HistoricalReactivationReview({
       value={flow.text} disabled={formLocked} onChange={(event) => flow.editText(event.target.value)} />
     {!flow.uncertain && !flow.batchId && <button type="button" className={`btn ${flow.review ? 'btn-outline' : 'btn-primary'} mt-3`}
       disabled={Boolean(formLocked || !flow.text.trim())} onClick={() => void flow.preview()}>
-      {flow.busyKind === 'preview' ? 'Перевіряємо товари…' : flow.review ? 'Оновити перевірку' : 'Перевірити товари'}
+      {flow.busyKind === 'preview' ? 'Перевіряємо товари…' : flow.needsFinalReview ? 'Перевірити перед відновленням' : flow.review ? 'Оновити перевірку' : 'Перевірити товари'}
     </button>}
     {!flow.review && <p className="mt-2 text-sm text-slate-500">Перевірка ще не відновлює товари.</p>}
   </div>;
@@ -205,16 +215,17 @@ export function HistoricalReactivationReview({
       {!flow.receipt && (flow.review ? <details className="historical-evidence historical-input"><summary>Артикули для перевірки ({flow.review.skus.length})</summary><div className="mt-3">{input}</div></details> : input)}
       {flow.review && !flow.receipt && <section aria-label="Перевірений склад історичного рішення">
         <div className="historical-review-summary">
-          <p className="font-semibold">Можна відновити: {flow.review.counts.eligible}. Потребують уваги: {flow.review.counts.blocked}.{flow.review.counts.skipped > 0 && ` Пропущено: ${flow.review.counts.skipped}.`}</p>
-          {flow.review.counts.eligible > 1 && <button type="button" className="btn btn-outline" disabled={formLocked || flow.expired}
+          <p className="font-semibold">{flow.needsFinalReview ? 'Попередня перевірка — готових' : 'Можна відновити'}: {flow.review.counts.eligible}. Потребують уваги: {flow.review.counts.blocked}.{flow.review.counts.skipped > 0 && ` Пропущено: ${flow.review.counts.skipped}.`}</p>
+          {flow.review.counts.eligible > 1 && <button type="button" className="btn btn-outline" disabled={formLocked || flow.expired || flow.needsFinalReview}
             onClick={flow.selectEligible}>Обрати всі дозволені ({flow.review.counts.eligible})</button>}
         </div>
         {missing > 0 && <p className="mt-2 text-sm">Не знайдено у Manager: {missing}. Ці артикули не відновлюватимуться.</p>}
         <p className="historical-unknown-history">Попередній стан цих товарів невідомий. Відновлення використає поточні дані.</p>
-        {flow.expired && <p role="alert" className="mt-2 text-amber-800">Перевірка застаріла. Оновіть її перед відновленням.</p>}
+        {flow.needsFinalReview && <p role="status" className="mt-2 text-sm font-medium">{flow.weightReviewChanged ? 'Формат ваги перевірявся. Перед відновленням прочитайте актуальні дані.' : 'Назви редагувалися. Завершіть введення назв.'} Натисніть «Перевірити перед відновленням». Перевіримо весь список і відповідники Magento. Після перевірки заново оберіть товари та погодьте відновлення.</p>}
+        {flow.expired && !flow.needsFinalReview && <p role="alert" className="mt-2 text-amber-800">Перевірка застаріла. Оновіть її перед відновленням.</p>}
         <ul className="mt-3 space-y-3">{flow.review.items.map((item, index) => <ReviewItem key={item.inputSku + ':' + index} item={item} flow={flow} standard={isStandardHistorical(flow.review)} />)}</ul>
         <details className="historical-evidence"><summary>Умови відновлення та історія</summary>
-          <p className="mt-2 text-sm">Перевірка чинна до {time(flow.review.reviewExpiresAt)}. Перед підтвердженням сервер повторно перевірить дані та відповідники. До підтвердженої доставки товар залишається архівованим у Manager.</p>
+          <p className="mt-2 text-sm">{flow.needsFinalReview ? 'Попередня перевірка вже не дозволяє відновлення.' : `Перевірка чинна до ${time(flow.review.reviewExpiresAt)}.`} Перед підтвердженням сервер повторно перевірить дані та відповідники. До підтвердженої доставки товар залишається архівованим у Manager.</p>
           {standard ? <p className="mt-2 text-sm">Стандартний REST Magento може створити або оновити товар. Тип запису не захищений від паралельних зовнішніх змін. Для кожного створення потрібна окрема згода.</p>
             : <p className="mt-2 text-sm">Дозволено лише UPDATE точного існуючого відповідника. CREATE, новий артикул, зміна історичного SKU та автоматична публікація правил не допускаються. Новий стан — прихований 2; показ товару потребуватиме окремого перевіреного рішення.</p>}
         </details>
@@ -259,7 +270,7 @@ export function HistoricalReactivationReview({
             : !flow.selected.length && <p className="mt-1 text-sm text-slate-500">Оберіть товари у списку.</p>}
         </section>
         <label className="historical-decision-consent"><input type="checkbox"
-          disabled={formLocked || !flow.selected.length || flow.expired} checked={flow.acknowledged}
+          disabled={formLocked || !flow.selected.length || flow.expired || flow.needsFinalReview} checked={flow.acknowledged}
           onChange={(event) => flow.setAcknowledged(event.target.checked)} />
           <span>{isStandardHistorical(flow.review) ? 'Погоджую відновлення вибраних товарів за поточними даними. Попередній стан невідомий.' : 'Погоджую оновлення вибраних товарів у Magento й вимкнення для продажу. Попередній стан невідомий.'}</span>
         </label>
@@ -268,7 +279,9 @@ export function HistoricalReactivationReview({
       </>}
       <div className="historical-restore-actions">
         <button type="button" className="btn btn-outline" aria-label="Закрити історичне рішення" disabled={flow.locked} onClick={onClose}>Закрити</button>
-        {flow.allowed && flow.review && !flow.receipt && !flow.uncertain && !flow.batchId && <button type="button" className="btn btn-primary"
+        {flow.allowed && flow.needsFinalReview && !flow.receipt && <button type="button" className="btn btn-primary"
+          disabled={formLocked} onClick={() => void flow.repeatAfterNames()}>Перевірити перед відновленням</button>}
+        {flow.allowed && flow.review && !flow.receipt && !flow.uncertain && !flow.batchId && !flow.needsFinalReview && <button type="button" className="btn btn-primary"
           disabled={Boolean(formLocked || !flow.selected.length || !flow.acknowledged || !createsReady || flow.expired)}
           onClick={() => void flow.confirm()}>Відновити вибране ({flow.selected.length})</button>}
       </div>
