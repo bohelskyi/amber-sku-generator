@@ -1,0 +1,355 @@
+{
+  "source": {
+    "templateVersionId": "f2a4cf28-ed0b-4c80-8d89-144e0a9d94e3",
+    "definitionHash": "201a0273ef764be3abf97396b4037405f3da22bc8f93f9d2f0057aed6468d498",
+    "libraryFileId": "libfile_bc32ec0f73e081918bccf7214b8c5339",
+    "extraction": "Exact SV naming sources, bindings and row expressions from the supplied immutable version; all other template fields omitted."
+  },
+  "definition": {
+    "sources": {
+      "public_sku": {
+        "kind": "product",
+        "type": "text",
+        "field": "public_sku"
+      },
+      "magento_name_subject_ua": {
+        "kind": "product",
+        "type": "scalar",
+        "field": "magento_name_subject_ua"
+      },
+      "magento_name_subject_en": {
+        "kind": "product",
+        "type": "scalar",
+        "field": "magento_name_subject_en"
+      }
+    },
+    "bindings": [
+      {
+        "id": "sku",
+        "group": "*",
+        "value": {
+          "op": "text",
+          "trim": false,
+          "input": {
+            "id": "public_sku",
+            "op": "source"
+          },
+          "format": "scalar-v1",
+          "onAbsent": "empty"
+        }
+      },
+      {
+        "id": "SV.manualUa",
+        "group": "SV",
+        "value": {
+          "op": "text",
+          "trim": true,
+          "input": {
+            "id": "magento_name_subject_ua",
+            "op": "source"
+          },
+          "format": "string-only-v1",
+          "onAbsent": "empty"
+        }
+      },
+      {
+        "id": "SV.manualEn",
+        "group": "SV",
+        "value": {
+          "op": "text",
+          "trim": true,
+          "input": {
+            "id": "magento_name_subject_en",
+            "op": "source"
+          },
+          "format": "string-only-v1",
+          "onAbsent": "empty"
+        }
+      },
+      {
+        "id": "SV.manualPair",
+        "group": "SV",
+        "value": {
+          "op": "all",
+          "items": [
+            {
+              "op": "present",
+              "input": {
+                "id": "SV.manualUa",
+                "op": "ref"
+              },
+              "policy": "answer-v1"
+            },
+            {
+              "op": "present",
+              "input": {
+                "id": "SV.manualEn",
+                "op": "ref"
+              },
+              "policy": "answer-v1"
+            }
+          ]
+        }
+      },
+      {
+        "id": "SV.nameUa",
+        "group": "SV",
+        "value": {
+          "if": {
+            "id": "SV.manualPair",
+            "op": "ref"
+          },
+          "op": "when",
+          "else": {
+            "if": {
+              "id": "SV.automaticName",
+              "op": "ref"
+            },
+            "op": "when",
+            "else": {
+              "op": "literal",
+              "value": ""
+            },
+            "then": {
+              "op": "interpolate",
+              "slots": {
+                "sku": {
+                  "id": "sku",
+                  "op": "ref"
+                }
+              },
+              "template": "Брелок з бурштину. Арт: {sku}"
+            }
+          },
+          "then": {
+            "op": "interpolate",
+            "slots": {
+              "sku": {
+                "id": "sku",
+                "op": "ref"
+              },
+              "subject": {
+                "id": "SV.manualUa",
+                "op": "ref"
+              }
+            },
+            "template": "{subject} з бурштину. Арт: {sku}"
+          }
+        }
+      },
+      {
+        "id": "SV.nameEn",
+        "group": "SV",
+        "value": {
+          "if": {
+            "id": "SV.manualPair",
+            "op": "ref"
+          },
+          "op": "when",
+          "else": {
+            "if": {
+              "id": "SV.automaticName",
+              "op": "ref"
+            },
+            "op": "when",
+            "else": {
+              "op": "literal",
+              "value": ""
+            },
+            "then": {
+              "op": "interpolate",
+              "slots": {
+                "sku": {
+                  "id": "sku",
+                  "op": "ref"
+                }
+              },
+              "template": "Amber key chain. Art: {sku}"
+            }
+          },
+          "then": {
+            "op": "interpolate",
+            "slots": {
+              "sku": {
+                "id": "sku",
+                "op": "ref"
+              },
+              "subject": {
+                "id": "SV.manualEn",
+                "op": "ref"
+              }
+            },
+            "template": "Amber {subject}. Art: {sku}"
+          }
+        }
+      }
+    ],
+    "groups": [
+      {
+        "route": "SV",
+        "rows": [
+          {
+            "id": "base",
+            "cells": {
+              "name": {
+                "if": {
+                  "id": "SV.manualPair",
+                  "op": "ref"
+                },
+                "op": "when",
+                "else": {
+                  "if": {
+                    "id": "SV.automaticName",
+                    "op": "ref"
+                  },
+                  "op": "when",
+                  "else": {
+                    "if": {
+                      "op": "eq",
+                      "left": {
+                        "op": "semanticKey",
+                        "input": {
+                          "id": "SV.souvenir",
+                          "op": "source"
+                        }
+                      },
+                      "right": {
+                        "op": "literal",
+                        "value": "5"
+                      }
+                    },
+                    "op": "when",
+                    "else": {
+                      "op": "literal",
+                      "value": ""
+                    },
+                    "then": {
+                      "op": "interpolate",
+                      "slots": {
+                        "public_sku": {
+                          "op": "text",
+                          "trim": false,
+                          "input": {
+                            "id": "public_sku",
+                            "op": "source"
+                          },
+                          "format": "scalar-v1",
+                          "onAbsent": "empty"
+                        }
+                      },
+                      "template": "Камінь бурштину. Арт: {public_sku}"
+                    }
+                  },
+                  "then": {
+                    "op": "interpolate",
+                    "slots": {
+                      "sku": {
+                        "id": "sku",
+                        "op": "ref"
+                      }
+                    },
+                    "template": "Брелок з бурштину. Арт: {sku}"
+                  }
+                },
+                "then": {
+                  "op": "interpolate",
+                  "slots": {
+                    "sku": {
+                      "id": "sku",
+                      "op": "ref"
+                    },
+                    "subject": {
+                      "id": "SV.manualUa",
+                      "op": "ref"
+                    }
+                  },
+                  "template": "{subject} з бурштину. Арт: {sku}"
+                }
+              }
+            }
+          },
+          {
+            "id": "english",
+            "cells": {
+              "name": {
+                "if": {
+                  "id": "SV.manualPair",
+                  "op": "ref"
+                },
+                "op": "when",
+                "else": {
+                  "if": {
+                    "id": "SV.automaticName",
+                    "op": "ref"
+                  },
+                  "op": "when",
+                  "else": {
+                    "if": {
+                      "op": "eq",
+                      "left": {
+                        "op": "semanticKey",
+                        "input": {
+                          "id": "SV.souvenir",
+                          "op": "source"
+                        }
+                      },
+                      "right": {
+                        "op": "literal",
+                        "value": "5"
+                      }
+                    },
+                    "op": "when",
+                    "else": {
+                      "op": "literal",
+                      "value": ""
+                    },
+                    "then": {
+                      "op": "interpolate",
+                      "slots": {
+                        "public_sku": {
+                          "op": "text",
+                          "trim": false,
+                          "input": {
+                            "id": "public_sku",
+                            "op": "source"
+                          },
+                          "format": "scalar-v1",
+                          "onAbsent": "empty"
+                        }
+                      },
+                      "template": "Amber stone. Art: {public_sku}"
+                    }
+                  },
+                  "then": {
+                    "op": "interpolate",
+                    "slots": {
+                      "sku": {
+                        "id": "sku",
+                        "op": "ref"
+                      }
+                    },
+                    "template": "Amber key chain. Art: {sku}"
+                  }
+                },
+                "then": {
+                  "op": "interpolate",
+                  "slots": {
+                    "sku": {
+                      "id": "sku",
+                      "op": "ref"
+                    },
+                    "subject": {
+                      "id": "SV.manualEn",
+                      "op": "ref"
+                    }
+                  },
+                  "template": "Amber {subject}. Art: {sku}"
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

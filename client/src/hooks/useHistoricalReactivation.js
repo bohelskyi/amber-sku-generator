@@ -272,16 +272,25 @@ export function useHistoricalReactivation({
     if (!canReviewNames || weight && !canNormalizeWeights || !request || batchId || pendingOperation || uncertain || !readNames || !start('name_read')) return;
     const ticket = generation.current;
     setSelected([]); setSelectedCreate([]); setAcknowledged(false);
-    setNameReview({ request, preview: null, acknowledged: false, uncertain: Boolean(nameReview?.uncertain) });
+    const preserveDraft = manual && nameReview?.editedSubjects && !nameReview.uncertain
+      && ['productId', 'article', 'bindingRevisionId', 'intent'].every(key => nameReview.request[key] === request[key]);
+    const draft = preserveDraft ? { subjectUa: nameReview.subjectUa, subjectEn: nameReview.subjectEn, editedSubjects: true } : {};
+    setNameReview({ request, preview: null, acknowledged: false, uncertain: Boolean(nameReview?.uncertain), ...draft });
     try {
       const response = await readNames(request);
       if (acceptNameResponse(ticket, request)) {
         const next = weight ? validateWeightPreview(response.data, request) : manual ? validateHistoricalManualPreparation(response.data, request) : validateHistoricalNames(response.data, request);
         setNameReview({ request, preview: next, acknowledged: false, uncertain: false,
-          ...(manual ? { preparation: next, subjectUa: next.subjectUa || '', subjectEn: next.subjectEn || '' } : {}) });
+          ...(manual ? { preparation: next, subjectUa: next.subjectUa || '', subjectEn: next.subjectEn || '',
+            ...(!next.alreadyCompleted ? draft : {}) } : {}) });
       }
     } catch (cause) {
-      if (acceptNameResponse(ticket, request)) setError(errorMessage(cause, weight ? 'Не вдалося прочитати вагу цього товару. Повторіть лише читання.' : 'Не вдалося перевірити назви цього самого товару. Повторіть лише читання.'));
+      if (acceptNameResponse(ticket, request)) {
+        const message = errorMessage(cause, weight ? 'Не вдалося прочитати вагу цього товару. Повторіть лише читання.' : 'Не вдалося перевірити назви цього самого товару. Повторіть лише читання.');
+        if (manual) setNameReview(previous => previous?.request === request
+          ? { ...previous, preparation: null, preview: null, acknowledged: false, preparationError: message } : previous);
+        else setError(message);
+      }
     } finally { if (ticket === generation.current) finish(); }
   }
   async function reviewNames(item) {
@@ -300,7 +309,7 @@ export function useHistoricalReactivation({
     if (!canReviewNames || flight.current || nameReview?.request.intent !== 'historical-create' || nameReview.uncertain
       || !['subjectUa', 'subjectEn'].includes(key) || value.length > 200) return;
     invalidateAfterManualEdit();
-    setNameReview(previous => ({ ...previous, [key]: value, preview: null, acknowledged: false }));
+    setNameReview(previous => ({ ...previous, [key]: value, editedSubjects: true, preview: null, acknowledged: false }));
   }
   function previewManualNames() {
     const current = nameReview;
