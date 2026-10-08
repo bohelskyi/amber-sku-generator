@@ -23,7 +23,7 @@ const review=(eligible=false)=>({format:config.historicalReactivation.format,pro
       prerequisites:[{code:'LOCAL_ARCHIVED_CURRENT',met:true},{code:'REVIEWED_REMOTE_OBSERVATION',met:true},{code:'CURRENT_DELIVERY_PLAN_VALID',met:eligible}]},
     {protocol,inputSku:'MISSING',disposition:'blocked',priorFacts:'unknown',reasonCode:'HISTORICAL_PRODUCT_NOT_FOUND',prerequisites:[],blockerCodes:['HISTORICAL_PRODUCT_NOT_FOUND']}
   ]});
-const current=(extra={})=>({...request,deliveryMode:'create',remoteProductId:null,alreadyCompleted:false,subjectUa:null,subjectEn:null,
+const current=(extra={})=>({...request,fullNameEditing:true,fullNameMaxLength:255,deliveryMode:'create',remoteProductId:null,alreadyCompleted:false,subjectUa:null,subjectEn:null,
   nameRender:{format:'historical-manual-render-v1',ua:{prefix:'',suffix:' з бурштину. Арт: '+article},en:{prefix:'Amber ',suffix:'. Art: '+article}},
   preparationToken:'c'.repeat(64),reviewExpiresAt:new Date(Date.now()+300000).toISOString(),...extra});
 const receipt=(extra={})=>({...request,remoteProductId:null,state:'archived',subjectsSaved:true,...pair,...extra});
@@ -201,4 +201,67 @@ it('repeated preparation failures preserve edited subjects; successful reread us
   await screen.findByText('Current ' + pair.subjectEn + '. Art: ' + article);
   expect(consent().checked).toBe(false); expect(save().disabled).toBe(true);
   expect(client.saveManualNames).not.toHaveBeenCalled(); expect(client.confirm).not.toHaveBeenCalled();
+});
+
+it('full-name opt-in pre-fills actual preview, exact edits invalidate consent and save no repeated affixes', async () => {
+  mount(); await begin(); await openNames(); await proposed(); fireEvent.click(consent());
+  fireEvent.click(screen.getByRole('button',{name:'Редагувати повну назву'}));
+  expect(screen.getByLabelText('Повна назва UA').value).toBe(full.nameUa);
+  expect(screen.getByLabelText('Повна назва EN').value).toBe(full.nameEn); expect(save().disabled).toBe(true);
+  const exact={nameUa:'  Камінь з інклюзом  ',nameEn:'Stone with an inclusion'};
+  fireEvent.change(screen.getByLabelText('Повна назва UA'),{target:{value:exact.nameUa}});
+  fireEvent.change(screen.getByLabelText('Повна назва EN'),{target:{value:exact.nameEn}});
+  fireEvent.click(show()); expect(consent().checked).toBe(false); fireEvent.click(consent());
+  fireEvent.change(screen.getByLabelText('Повна назва EN'),{target:{value:'Changed after confirmation'}});
+  expect(save().disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Повна назва EN'),{target:{value:exact.nameEn}});
+  fireEvent.click(show()); expect(consent().checked).toBe(false); fireEvent.click(consent());
+  client.saveManualNames.mockResolvedValueOnce({data:receipt({...exact,nameMode:'full'})}); fireEvent.click(save());
+  await screen.findByText(/Ручну пару вже збережено/);
+  expect(client.saveManualNames).toHaveBeenCalledExactlyOnceWith({...request,...pair,preparationToken:'c'.repeat(64),
+    reviewExpiresAt:expect.any(String),reviewedNameUa:exact.nameUa,reviewedNameEn:exact.nameEn,
+    nameMode:'full',fullNameUa:exact.nameUa,fullNameEn:exact.nameEn});
+  expect(client.confirm).not.toHaveBeenCalled(); expect(client.preview).toHaveBeenCalledTimes(1);
+});
+it('return to template discards full edits and requires a fresh unchecked preview', async () => {
+  mount(); await begin(); await openNames(); await proposed();
+  fireEvent.click(screen.getByRole('button',{name:'Редагувати повну назву'}));
+  fireEvent.change(screen.getByLabelText('Повна назва EN'),{target:{value:'Exact external text'}});
+  fireEvent.click(show()); fireEvent.click(consent());
+  fireEvent.click(screen.getByRole('button',{name:'Повернутися до шаблону'}));
+  expect(screen.queryByLabelText('Повна назва EN')).toBeNull(); expect(save().disabled).toBe(true);
+  fireEvent.click(show()); await screen.findByText(full.nameEn); expect(consent().checked).toBe(false);
+  expect(client.saveManualNames).not.toHaveBeenCalled();
+});
+it('full edits survive a preparation retry and a rejected save without automatic resubmission', async () => {
+  mount(); await begin(); await openNames(); await proposed();
+  fireEvent.click(screen.getByRole('button',{name:'Редагувати повну назву'}));
+  fireEvent.change(screen.getByLabelText('Повна назва EN'),{target:{value:'Exact draft'}});
+  client.previewManualNames.mockRejectedValueOnce({response:{status:409,data:{error:'Retry preparation'}}});
+  fireEvent.click(screen.getByRole('button',{name:'Прочитати збережені назви'})); await screen.findByText('Retry preparation');
+  expect(screen.getByLabelText('Повна назва EN').value).toBe('Exact draft');
+  fireEvent.click(screen.getByRole('button',{name:'Прочитати збережені назви'})); await waitFor(()=>expect(show().disabled).toBe(false));
+  fireEvent.click(show()); expect(consent().checked).toBe(false); fireEvent.click(consent());
+  client.saveManualNames.mockRejectedValueOnce({response:{status:409,data:{error:'New evidence required'}}}); fireEvent.click(save());
+  await screen.findByText('New evidence required'); expect(screen.getByLabelText('Повна назва EN').value).toBe('Exact draft');
+  expect(save().disabled).toBe(true); expect(client.saveManualNames).toHaveBeenCalledTimes(1); expect(client.confirm).not.toHaveBeenCalled();
+});
+it('full-name validation rejects controls, missing translation and 256 characters; keeps 255 exact', () => {
+  const preparation=current();
+  for(const change of [{fullNameUa:'A'.repeat(256)},{fullNameUa:'A\nB'},{fullNameEn:''}])
+    expect(()=>renderHistoricalManualNames(preparation,request,{...pair,nameMode:'full',fullNameUa:'A',fullNameEn:'B',...change})).toThrow();
+  const valid=renderHistoricalManualNames(preparation,request,{...pair,nameMode:'full',fullNameUa:'A'.repeat(255),fullNameEn:' B '});
+  expect(valid.nameUa).toHaveLength(255); expect(valid.nameEn).toBe(' B ');
+});
+
+it('lost full-name save reply recovers exact stored titles through read only', async () => {
+  mount(); await begin(); await openNames(); await proposed();
+  fireEvent.click(screen.getByRole('button',{name:'Редагувати повну назву'}));
+  fireEvent.change(screen.getByLabelText('Повна назва EN'),{target:{value:'Recovered exact English'}});
+  fireEvent.click(show()); fireEvent.click(consent()); client.saveManualNames.mockRejectedValueOnce(new Error('Lost full reply')); fireEvent.click(save());
+  await screen.findByText(/Результат збереження ще не підтверджено/);
+  client.previewManualNames.mockResolvedValueOnce({data:current({...pair,alreadyCompleted:true,nameMode:'full',nameUa:full.nameUa,nameEn:'Recovered exact English'})});
+  fireEvent.click(screen.getByRole('button',{name:'Прочитати збережені назви'})); await screen.findByText(/Ручну пару вже збережено/);
+  expect(screen.getByLabelText('Повна назва EN').value).toBe('Recovered exact English');
+  expect(client.saveManualNames).toHaveBeenCalledTimes(1); expect(client.confirm).not.toHaveBeenCalled();
 });

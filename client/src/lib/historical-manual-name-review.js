@@ -25,6 +25,9 @@ export function validateHistoricalManualNames(value, request, subjects = null) {
   if (subjects && (value.subjectUa !== subjects.subjectUa.trim() || value.subjectEn !== subjects.subjectEn.trim()
     || !/^[a-f0-9]{64}$/.test(value.preparationToken || value.previewToken || '') || !Number.isFinite(Date.parse(value.reviewExpiresAt))
     || Date.parse(value.reviewExpiresAt) <= Date.now())) invalid();
+  if (subjects?.nameMode === 'full' && (value.nameMode !== 'full'
+    || value.nameUa !== subjects.fullNameUa || value.nameEn !== subjects.fullNameEn
+    || !validText(value.nameUa, 255) || !validText(value.nameEn, 255))) invalid();
   return value;
 }
 export function validateHistoricalManualPreparation(value, request) {
@@ -39,12 +42,16 @@ export function validateHistoricalManualPreparation(value, request) {
 export function renderHistoricalManualNames(preparation, request, subjects) {
   validateHistoricalManualPreparation(preparation, request);
   const subjectUa = subjects.subjectUa.trim(), subjectEn = subjects.subjectEn.trim(), render = preparation.nameRender;
-  const result = { ...preparation, subjectUa, subjectEn, nameUa: render.ua.prefix + subjectUa + render.ua.suffix,
-    nameEn: render.en.prefix + subjectEn + render.en.suffix };
+  const full = subjects.nameMode === 'full';
+  if (full && (preparation.fullNameEditing !== true || !validText(subjects.fullNameUa, 255) || !validText(subjects.fullNameEn, 255))) invalid();
+  const result = { ...preparation, subjectUa, subjectEn, nameMode: full ? 'full' : 'template',
+    nameUa: full ? subjects.fullNameUa : render.ua.prefix + subjectUa + render.ua.suffix,
+    nameEn: full ? subjects.fullNameEn : render.en.prefix + subjectEn + render.en.suffix };
   return validateHistoricalManualNames(result, request, subjects);
 }
 export function validateHistoricalManualNameReceipt(value, request, preview) {
   scope(value, request);
-  if (value.state !== 'archived' || value.subjectsSaved !== true || value.subjectUa !== preview.subjectUa || value.subjectEn !== preview.subjectEn) invalid();
+  if (value.state !== 'archived' || value.subjectsSaved !== true || value.subjectUa !== preview.subjectUa || value.subjectEn !== preview.subjectEn
+    || preview.nameMode === 'full' && (value.nameMode !== 'full' || value.nameUa !== preview.nameUa || value.nameEn !== preview.nameEn)) invalid();
   return value;
 }

@@ -29,6 +29,8 @@ test('archived CREATE manual subjects satisfy the unchanged SV published contrac
       VALUES('SV2314003','SV',25000,531,'archived',1,'{"answers":{"souvenir":"4","weight":531},"logMessage":"unknown prior archive"}') RETURNING *`)).rows[0];
     const other=(await insertProductFixture(db, `INSERT INTO products(full_sku,category,total_price_uah,weight,status,exclude_from_export,details,
         magento_name_subject_ua,magento_name_subject_en) VALUES('SV2314004','SV',24000,500,'archived',1,'{"answers":{"souvenir":"4","weight":500}}','Другий тест','Second test') RETURNING *`)).rows[0];
+    const fullProduct=(await insertProductFixture(db,`INSERT INTO products(full_sku,category,total_price_uah,weight,status,exclude_from_export,details)
+      SELECT 'SV2314009',category,total_price_uah,weight,'archived',1,details FROM products WHERE id=$1 RETURNING *`,[product.id])).rows[0];
     const config = { configured: true, baseUrl: 'https://create-names.invalid', consumerKey: 'create-names-consumer-unique', consumerSecret: 'create-names-secret-unique', accessToken: 'create-names-access-unique', accessTokenSecret: 'create-names-access-secret-unique' };
     const options = { databasePool: db, config, reviewSecret: 'synthetic-archived-name-review-secret', actorUserId: actor, mutationContext: { actorUserId: actor, requestId: 'create-names-fixture' } };
     const fixture = require('../test/fixtures/magento-bindings'); const definition = structuredClone(fixture.definition());
@@ -198,6 +200,39 @@ test('archived CREATE manual subjects satisfy the unchanged SV published contrac
         CREATE TRIGGER reject_create_names_audit BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION reject_create_names_audit()`);
       await assert.rejects(apply(review),/CREATE_NAMES_AUDIT_FAILURE/);
       await db.query('DROP TRIGGER reject_create_names_audit ON audit_events; DROP FUNCTION reject_create_names_audit()');assert.deepEqual(await snapshot(),before);
+    });
+    await t.test('exact full-name choice persists archived and reaches both actual CREATE payloads without changing published rules',async()=>{
+      const exactCommand={...command,productId:fullProduct.id,article:'SV2314009'};
+      const exact={...exactCommand,subjectUa:'Камінь бурштину з інклюзом',subjectEn:'Amber stone with an inclusion',nameMode:'full',
+        fullNameUa:'  Камінь бурштину з інклюзом  ',fullNameEn:'Stone with an inclusion'};
+      const beforeRow=(await db.query('SELECT to_jsonb(p) p FROM products p WHERE id=$1',[fullProduct.id])).rows[0].p;
+      const beforeLifecycle=(await db.query('SELECT to_jsonb(f) f FROM product_full_export_state f WHERE product_id=$1',[fullProduct.id])).rows[0].f;
+      const form=await namesService.previewProductMagentoName(exactCommand,options);
+      const review=await namesService.previewProductMagentoName(exact,options);
+      assert.equal(review.nameUa,exact.fullNameUa);assert.equal(review.nameEn,exact.fullNameEn);assert.equal(review.nameMode,'full');
+      for(const value of ['', 'A'.repeat(256), 'A\nB']) await assert.rejects(namesService.previewProductMagentoName({...exact,fullNameEn:value},options),{code:'HISTORICAL_FULL_NAME_INVALID'});
+      const fallback=await namesService.previewProductMagentoName({...exactCommand,subjectUa:exact.subjectUa,subjectEn:exact.subjectEn,nameMode:'template'},options);
+      assert.equal(fallback.nameEn,'Amber '+exact.subjectEn+'. Art: SV2314009');
+      const prepared={...exact,preparationToken:form.preparationToken,reviewExpiresAt:form.reviewExpiresAt,
+        reviewedNameUa:review.nameUa,reviewedNameEn:review.nameEn};
+      await assert.rejects(namesService.applyProductMagentoName({...prepared,reviewedNameEn:'Different reviewed value'},options),{code:'HISTORICAL_REVIEW_STALE'});
+      const receipt=await namesService.applyProductMagentoName(prepared,options);
+      assert.equal(receipt.nameUa,exact.fullNameUa);assert.equal(receipt.nameEn,exact.fullNameEn);
+      const afterRow=(await db.query('SELECT to_jsonb(p) p FROM products p WHERE id=$1',[fullProduct.id])).rows[0].p;
+      assert.deepEqual(afterRow,{...beforeRow,magento_name_subject_ua:exact.subjectUa,magento_name_subject_en:exact.subjectEn,
+        magento_name_review_required:false,magento_name_override:{generated:{all:fallback.nameUa,en:fallback.nameEn},values:{all:exact.fullNameUa,en:exact.fullNameEn}}});
+      assert.deepEqual((await db.query('SELECT to_jsonb(f) f FROM product_full_export_state f WHERE product_id=$1',[fullProduct.id])).rows[0].f,beforeLifecycle);
+      const read=await namesService.previewProductMagentoName(exactCommand,options);
+      assert.equal(read.alreadyCompleted,true);assert.equal(read.nameMode,'full');assert.equal(read.nameUa,exact.fullNameUa);assert.equal(read.nameEn,exact.fullNameEn);
+      const amber=await require('../src/services/magento/sync-preview-db').readPreviewProduct(db,{productId:fullProduct.id,bindingRevisionId:published.id});
+      require('../src/services/magento/historical-standard-boundary').project(amber);
+      const plan=await require('../src/services/magento/sync-preview').previewProduct(config,{...options,readAmber:async()=>amber,productId:fullProduct.id,bindingRevisionId:published.id});
+      assert.equal(plan.sendable,true);assert.equal(plan.candidatePayload.product.sku,exactCommand.article);
+      assert.equal(plan.candidatePayload.product.name,exact.fullNameUa);assert.equal(plan.transport.storeViews.candidatePayload.product.name,exact.fullNameEn);
+      assert.deepEqual(amber.compiled.definition.groups.find(g=>g.route==='SV').rows.map(r=>r.cells.name),suppliedNames.definition.groups[0].rows.map(r=>r.cells.name));
+      const audit=(await db.query("SELECT details FROM audit_events WHERE event_key='product_magento_name.updated' AND subject_id=$1",[String(fullProduct.id)])).rows;
+      assert.equal(audit.length,1);assert.deepEqual(audit[0].details.names,{all:exact.fullNameUa,en:exact.fullNameEn});
+      assert.equal((await db.query('SELECT count(*)::int n FROM magento_sync_jobs WHERE product_id=$1',[fullProduct.id])).rows[0].n,0);
     });
     await t.test('explicit save persists only the reviewed subjects; fresh normal historical preview becomes eligible CREATE',async()=>{
       const oldList=await historical.preview({skus:[command.article]},options);
