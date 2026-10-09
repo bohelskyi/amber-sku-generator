@@ -161,7 +161,7 @@ router.post('/variation', requirePermission('products.create'), async (req, res)
 
 router.post('/recount/preview', requireAnyPermission(['products.recount', 'corrections.create']), async (req, res) => {
   try {
-    if (req.body?.nameChange !== undefined && (!req.permissions.includes('products.recount') || !req.permissions.includes('exports.create'))) {
+    if (req.body?.nameChange !== undefined && !req.permissions.includes('products.recount')) {
       return res.status(403).json({ error: 'Немає дозволу змінювати назву.', code: 'INSUFFICIENT_PERMISSION' });
     }
     if (req.body?.pricingDecision && !req.permissions.includes('products.recount')
@@ -177,9 +177,6 @@ router.post('/recount/preview', requireAnyPermission(['products.recount', 'corre
 
 router.post('/recount/apply', requirePermission('products.recount'), async (req, res) => {
   try {
-    if (req.body?.nameChange !== undefined && !req.permissions.includes('exports.create')) {
-      return res.status(403).json({ error: 'Немає дозволу змінювати назву.', code: 'INSUFFICIENT_PERMISSION' });
-    }
     const result = await applyProductRecount(req.body || {}, {
       authorizedDirectDecision: true,
       authorizedNameChange: true,

@@ -131,3 +131,11 @@ acceptance still needs controlled operator scenarios, including deployed Magento
 gallery semantics and original-file access on its configured origin. A CDN-only
 original URL fails closed. Local HTTP health and rendered tests do not substitute
 for authenticated browser acceptance or evidence of real business writes.
+
+## Warehouse recount names
+
+Editing an existing exact UA/EN pair during direct recount requires
+`products.recount`, including the post-lock server recheck. It does not additionally
+require `exports.create` and grants no role permissions. Separate missing-name
+repair, Magento name-conflict resolution, standalone name edits and export
+commands retain their existing capabilities.

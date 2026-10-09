@@ -714,7 +714,6 @@ async function applyProductRecount(payload, options = {}) {
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [access.APPLICATION_USER_ADMIN_LOCK_KEY]);
       await access.assertActorStillAuthorized(client, mutationContext.actorUserId, 'products.recount', createError);
-      await access.assertActorStillAuthorized(client, mutationContext.actorUserId, 'exports.create', createError);
       await lifecycleGate.enterExisting(client);
     } else if (options.batchReview) await require('./correction-request-batch-receipts').begin(client, options, 'corrections.complete');
     else {

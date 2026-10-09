@@ -42,7 +42,7 @@ export function RecountNameFields({ product, productId, mode, busy, onChange }) 
     return () => { live = false; controller.abort(); };
   }, [productId, product?.categoryCode, canRead, principalLifetime, reload]);
   if (!canRead) return null;
-  const canEdit = mode !== 'request' && permissions.includes('products.recount') && permissions.includes('exports.create') && onChange;
+  const canEdit = mode !== 'request' && permissions.includes('products.recount') && onChange;
   const invalid = editing && [draft.all, draft.en].some((name) => !name.trim() || name.length > 1024
     || Array.from(name).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127));
   return <>

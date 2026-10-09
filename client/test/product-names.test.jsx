@@ -214,8 +214,8 @@ it('keeps invalid names in a known conflict on the separate controlled path', as
   await screen.findByText('Спочатку узгодьте назву в проблемах синхронізації.');
   expect(screen.queryByRole('button', { name: 'Заповнити назви' })).toBeNull();
 });
-it('request-only and users without name-change permission retain read-only names', async () => {
-  for (const keys of [['products.decode', 'corrections.create'], ['products.decode', 'products.recount']]) {
+it('request-only and users without recount permission retain read-only names', async () => {
+  for (const keys of [['products.decode', 'corrections.create'], ['products.decode', 'exports.create']]) {
     const view = shell(<RecountNameFields productId={5010} mode={keys.includes('products.recount') ? 'apply' : 'request'} onChange={vi.fn()} />, keys);
     expect((await screen.findByLabelText('Назва товару українською')).readOnly).toBe(true);
     expect(screen.queryByRole('button', { name: 'Змінити', exact: true })).toBeNull();
@@ -306,4 +306,15 @@ it('an attention repair link cannot grant direct recount or use an external retu
   expect(screen.getByText(/Для виправлення характеристик потрібен дозвіл/)).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Повернутися до проблеми' }).getAttribute('href')).toBe('/attention');
   expect(screen.queryByRole('button', { name: 'Підготувати запит' })).toBeNull();
+});
+
+it('Storekeeper can edit both recount names without export creation permission', async () => {
+  const changed = vi.fn();
+  shell(<RecountNameFields productId={5010} mode="apply" onChange={changed} />, ['products.view', 'products.decode', 'products.recount', 'exports.view']);
+  const ua = await screen.findByLabelText('Назва товару українською');
+  fireEvent.click(screen.getByRole('button', { name: 'Змінити', exact: true }));
+  fireEvent.change(ua, { target: { value: 'Назва комірниці' } });
+  fireEvent.change(screen.getByLabelText('Назва товару англійською'), { target: { value: 'Warehouse name' } });
+  expect(changed).toHaveBeenLastCalledWith({ all: 'Назва комірниці', en: 'Warehouse name' });
+  expect(screen.queryByRole('button', { name: 'Заповнити назви' })).toBeNull();
 });
