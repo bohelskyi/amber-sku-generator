@@ -6,9 +6,15 @@ export const PRODUCT_FIELD_LABELS = Object.freeze({
   attribute_set_code: 'Набір характеристик', categories: 'Категорії Magento',
 });
 
+export function isFirstSyncFieldsProblem(problem = {}) {
+  return (problem.resolutionKind || problem.resolution) === 'first_sync_fields';
+}
+
 export function nextAction(problem = {}) {
+  if (isFirstSyncFieldsProblem(problem)) return 'Перевірити поля першого отримання';
   const code = problem.diagnosticCode || problem.code;
   if (code === 'NATIVE_CHARACTERISTICS_UPGRADE_REQUIRED' && problem.resolution === 'integration_configuration') return 'Підготувати підтримку нових товарів';
+  if (problem.code === 'unexpected_failure') return 'Перевірити можливість повторної доставки';
   if (problem.code === 'TEST_DELETION_PENDING') return 'Перевірити результат тестового видалення';
   if (problem.code === 'reconciliation_required') return 'Перевірити результат надісланої зміни';
   if (problem.resolution === 'lifecycle_reconciliation') return 'Перевірити товар і вибрати рішення';
@@ -29,12 +35,16 @@ export function nextAction(problem = {}) {
 
 export function problemSubject(problem = {}) {
   const target = problem.target || problem.field;
-  return { path: problem.path || null,
-    field: problem.fieldLabel || PRODUCT_FIELD_LABELS[target] || target || null,
+  const firstSync = isFirstSyncFieldsProblem(problem);
+  const scope = firstSync && typeof problem.scope === 'string' && problem.scope.trim() && problem.scope.length <= 160
+    && !Array.from(problem.scope).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127) ? problem.scope : null;
+  return { scope: scope === 'all' ? 'UA / основний магазин' : scope === 'en' ? 'EN' : scope, path: problem.path || null,
+    field: problem.fieldLabel || (firstSync && target === 'name' ? 'Назва' : PRODUCT_FIELD_LABELS[target]) || target || null,
     value: problem.expectedValue ?? problem.valueLabel ?? null };
 }
 
 export function problemTitle(problem = {}) {
+  if (problem.code === 'unexpected_failure') return 'Не вдалося завершити синхронізацію';
   if (problem.resolution === 'lifecycle_reconciliation') {
     if (problem.eligibilityIssue?.primaryReason === 'INFERRED_HISTORY_WITHOUT_EXACT_MEMBERSHIP') return 'Немає точного підтвердження, які попередні версії товару доставлено в Magento';
     if (problem.eligibilityIssue?.primaryReason === 'EVIDENCE_INTEGRITY_UNRESOLVED') return 'Цілісність підтверджень попередньої доставки потребує перевірки';
@@ -43,7 +53,7 @@ export function problemTitle(problem = {}) {
   const subject = problemSubject(problem);
   const message = problem.evaluationIssues?.[0]?.message || problem.message || 'Причину ще не визначено';
   if (problem.diagnosticCode === 'NATIVE_CHARACTERISTICS_UPGRADE_REQUIRED' && problem.resolution === 'integration_configuration') return problem.message;
-  return subject.path ? `${subject.path} — ${message}` : subject.field && !problem.evaluationIssues?.length ? `${subject.field}: ${message}` : message;
+  return subject.path ? `${subject.path} — ${message}` : subject.field && !problem.evaluationIssues?.length ? `${subject.field}${subject.scope ? ` · ${subject.scope}` : ''}: ${message}` : message;
 }
 
 export function problemRepairUrl(problem, product, returnTo) {
@@ -57,6 +67,8 @@ export function problemRepairUrl(problem, product, returnTo) {
 }
 
 export function problemImpact(problem = {}) {
+  if (isFirstSyncFieldsProblem(problem)) return 'Перше отримання полів Amber і Magento ще не завершено. Потрібно перевірити точні значення та рішення окремо для кожного поля й мови. Доставку заблоковано до підтвердження потрібних полів.';
+  if (problem.code === 'unexpected_failure') return 'Остання спроба не завершилася. Причину помилки ще не підтверджено; це не свідчить про неправильні відповідності. Перед повторним надсиланням потрібно перевірити поточний товар і незавершені операції.';
   if (problem.code === 'reconciliation_required') return 'Зміну вже надіслано. Поки результат не підтверджено, повторне надсилання заблоковане.';
   if (problem.code === 'TEST_DELETION_PENDING') return 'Результат видалення потрібно перевірити через початкову операцію товару.';
   if (problem.resolution === 'product') return 'Amber не може підготувати повні дані для Magento. Товар залишається збереженим в Amber.';
@@ -78,7 +90,7 @@ export function attentionProblemGroups(problems = []) {
   const groups = new Map();
   for (const problem of problems) {
     const key = problem.resolution === 'lifecycle_reconciliation' ? 'lifecycle_reconciliation'
-      : JSON.stringify([problem.code, problem.diagnosticCode, problem.resolution, problem.message,
+      : JSON.stringify([problem.code, problem.diagnosticCode, problem.resolution, problem.resolutionKind, problem.message, problem.scope, problem.reason,
         problem.target, problem.field, problem.path, problem.routeKey, problem.question, problem.questionKey,
         problem.value, problem.valueId, problem.expectedValue, problem.valueLabel,
         problem.issueFields, problem.evaluationIssues]);
@@ -88,7 +100,7 @@ export function attentionProblemGroups(problems = []) {
   const priority = ({ problem }) => problem.code === 'TEST_DELETION_PENDING' ? 0
     : problem.code === 'reconciliation_required' ? 1 : needsDeliveryRecovery(problem) ? 2
       : problem.code === 'PRODUCT_EVALUATION_NOT_READY' ? 3
-        : problem.resolution === 'product' ? 4 : problem.resolution === 'name' ? 5
+        : problem.resolution === 'product' ? 4 : isFirstSyncFieldsProblem(problem) ? 4.5 : problem.resolution === 'name' ? 5
           : (problem.diagnosticCode || problem.code) === 'data_or_binding' ? 7 : 6;
   return [...groups.values()].sort((a, b) => priority(a) - priority(b));
 }

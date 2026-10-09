@@ -40,3 +40,21 @@ test('repricing progress follows captured generations, including later edits and
   assert.deepEqual(await getBatchSyncStatus(3, database), { batchId: 3, status: 'completed', total: 5,
     synced: 2, pending: 1, needsAttention: 1, notTracked: 1 });
 });
+
+test('unknown failure remains administrator diagnosis rather than a fabricated mapping defect', () => {
+  const result = presentProblem({ code: 'unexpected_failure', target: 'price' });
+  assert.equal(result.resolution, 'administrator');
+  assert.match(result.message, /^Не вдалося завершити синхронізацію/);
+  assert.equal(result.target, 'price');
+  assert.notEqual(result.message, presentProblem({ code: 'data_or_binding' }).message);
+});
+
+test('first sync field diagnostics preserve language and exact reason without remote payloads',()=>{
+  const rows=safeDiagnostics([{code:'FIRST_SYNC_FIELD_CONFLICT',target:'name',scope:'en',reason:'VALUES_DIFFER',raw:{secret:'no'}},
+    {code:'FIRST_SYNC_FIELD_REVIEW_REQUIRED',target:'decor_weight',scope:'all',reason:'CANONICAL_WEIGHT_SETTER_UNSUPPORTED'}]);
+  assert.equal(rows[0].scope,'en');assert.equal(rows[0].reason,'VALUES_DIFFER');
+  assert.equal(JSON.stringify(rows).includes('secret'),false);
+  assert.equal(presentProblem(rows[0]).resolution,'first_sync_fields');
+  assert.match(presentProblem(rows[0]).message,/Адміністратор.*цього поля/);
+  assert.match(presentProblem(rows[1]).message,/ваги.*пов.*дані/);
+});

@@ -127,3 +127,12 @@ it('late local overview responses cannot overwrite a newer refresh', async () =>
   await act(async () => resolveOld({ data: { ...data, integration: { ...data.integration, activePublication: null } } }));
   expect(screen.getByText('Версія 3')).toBeTruthy();
 });
+
+it('on focus refreshes only local integration counters and never performs a remote check', async () => {
+  api.get.mockResolvedValue({ data }); shell('/admin/magento');
+  await screen.findByText('Автоматичну синхронізацію увімкнено');
+  const before = api.get.mock.calls.filter(([url]) => url === '/admin/magento-integration/overview').length;
+  fireEvent(window, new Event('focus'));
+  await vi.waitFor(() => expect(api.get.mock.calls.filter(([url]) => url === '/admin/magento-integration/overview').length).toBe(before + 1));
+  expect(api.post).not.toHaveBeenCalled();
+});

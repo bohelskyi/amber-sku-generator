@@ -59,7 +59,9 @@ async function inspectInside(config, job, steps, state, options) {
     ({ observation } = await jobs.recoveryBoundary.observe(config, { sku: job.sku, bindingRevisionId: job.binding_revision_id },
       { ...options, fetchImpl: boundedGet(options.fetchImpl) }));
     if (job.intent.mode === 'create' && !steps.some((s) => s.ordinal === 0) && observation.raw) fail('MAGENTO_SYNC_REMOTE_STATE_CHANGED');
-    plan.replan(job, observation); plan.preflight(job, observation);
+    const nameProof=await require('./first-sync-runtime').readNameProof(options.databasePool,job,observation);
+    if(job.baseline?.firstSyncNames && !nameProof) fail('MAGENTO_FIRST_SYNC_NAME_RECEIPT_CHANGED');
+    plan.replan(job, observation,{firstSyncNameProof:nameProof}); plan.preflight(job, observation);
     if (observation.domainEvidence.failures?.length) fail('MAGENTO_SYNC_READ_FAILED');
   } catch (cause) {
     blockers.push({ code: /^(MAGENTO|ADMIN|EXPORT)_[A-Z_]+$/.test(cause.code || '') ? cause.code : 'MAGENTO_SYNC_READ_FAILED' });
@@ -107,11 +109,18 @@ async function reconcile(config, id, input, options = {}) {
     const fresh = await readJob(id, options);
     const checked = await inspectInside(config, fresh.job, fresh.steps, state, options);
     if (checked.reviewHash !== input.reviewHash || !checked.canReconcile) fail();
+    let firstLane;
+    if(checked.review.complete) {
+      const firstSync=require('./first-sync-runtime');
+      const proof=firstSync.reviewedRecovery(fresh.job,fresh.steps,checked.observation,checked.review,{allowDispatched:true});
+      firstLane=await firstSync.enforce(config,checked.observation,state,{...options,firstSyncRecoveryProof:proof},{job:fresh.job});
+    }
     // Only already-observed results are recorded. This function has no dispatch path.
     const result = await jobs.recoveryBoundary.ledger(options.databasePool, options.actorUserId,
       checked.review.complete ? 'succeeded' : 'recovery_verified', async (client) => {
         await jobs.recoveryBoundary.revalidate(client, config, state, options);
         await assertActorStillAuthorized(client, options.actorUserId, 'export_templates.publish', c.error);
+        if(checked.review.complete) await require('./first-sync-runtime').assertDispatchOnClient(client,firstLane);
         for (const item of checked.steps) {
           if (item.state === 'verified' || (!checked.review.complete && item.state !== 'dispatched')) continue;
           await client.query(`INSERT INTO magento_sync_steps(job_id,ordinal,state,verified_at) VALUES($1,$2,'verified',CURRENT_TIMESTAMP)

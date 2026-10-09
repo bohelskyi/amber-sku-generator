@@ -94,6 +94,8 @@ export function useSkuManager({
   const [isPreviewing, setIsPreviewing] = useState(false);
   const previewSequence = useRef(0); const previewFlight = useRef(false); const saveFlight = useRef(false);
   const nativeSaveAttempt = useRef(null);
+  const creationContext = useRef(null);
+  const [reservedCreationSku, setReservedCreationSku] = useState(null);
   const inputContext = useRef('');
   const isNativeCreation = config?.productCreation?.identityMode === 'public_identity' || previewData?.identityMode === 'public_identity' || previewData?.mode === 'public_identity';
   const creationPricingAvailable = isNativeCreation && config?.productCreation?.pricingDecision?.available === true;
@@ -265,8 +267,15 @@ export function useSkuManager({
     return true;
   };
 
+  const endCreationContext = ({ confirmed = false } = {}) => {
+    const context = creationContext.current; creationContext.current = null; setReservedCreationSku(null);
+    if (context && !confirmed) void productsApi.cancelCreation(context).catch(() => {
+      // The abandoned identity remains permanently reserved even if cancellation cannot be confirmed.
+    });
+  };
   const resetProductFlow = (catCode, { confirmed = false } = {}) => {
     if (!confirmed && (isCreationSaveUncertain || saveFlight.current)) return;
+    endCreationContext({ confirmed });
     setIsCreationSaveUncertain(false);
     ++previewSequence.current;
     nativeSaveAttempt.current = null;
@@ -468,7 +477,12 @@ export function useSkuManager({
 
     const ticket = ++previewSequence.current; const context = inputContext.current;
     previewFlight.current = true; setIsPreviewing(true); setCreationFieldErrors({});
+    if (isNativeCreation && config?.productCreation?.skuReservation?.available === true) {
+      creationContext.current ||= { idempotencyKey: crypto.randomUUID(), categoryCode: selectedCat, isTestProduct };
+    }
+    const creationKey = creationContext.current?.idempotencyKey;
     return productsApi.preview({
+      ...(creationKey ? { idempotencyKey: creationKey } : {}),
       ...(isTestProduct ? { isTestProduct: true } : {}),
       ...namePayload,
       categoryCode: selectedCat,
@@ -480,6 +494,16 @@ export function useSkuManager({
     }).then((res) => {
       if (ticket !== previewSequence.current || context !== inputContext.current) return;
       if (!matchesTestCreationResult(res.data, isTestProduct)) throw new Error('Сервер не підтвердив обраний тип товару. Повторіть перевірку.');
+      if (creationKey) {
+        const reservation = res.data?.skuReservation;
+        if (reservation?.version !== 1 || reservation.idempotencyKey !== creationKey
+          || reservation.categoryCode !== selectedCat || reservation.isTestProduct !== isTestProduct
+          || !new RegExp(`^${isTestProduct ? 'TEST' : 'AG'}-[0-9]{6,}$`).test(reservation.publicSku)
+          || reservedCreationSku && reservation.publicSku !== reservedCreationSku.publicSku) {
+          throw new Error('Сервер не підтвердив незмінний зарезервований артикул. Повторіть перевірку тієї самої спроби.');
+        }
+        setReservedCreationSku(reservation);
+      }
       setPreviewData(res.data);
       setSaveError('');
       setDisplaySku(res.data.fullProposedSku);
@@ -515,6 +539,7 @@ export function useSkuManager({
       ...namePayload,
       ...(isNativeCreation ? { characteristicConfigHash: previewData.characteristicConfigHash } : { skuSchemaVersionId: previewData.skuSchemaVersionId }),
       previewToken: previewData.previewToken,
+      ...(previewData.skuReservation ? { skuReservation: previewData.skuReservation } : {}),
       category: selectedCat,
       answers: isNativeCreation ? previewData.normalizedAnswers : answers,
       isCalibrated,
@@ -524,12 +549,15 @@ export function useSkuManager({
       ...(!creationPricingAvailable ? { manualPriceUah: hasManualPrice ? effectiveTotalPriceUah : null } : {}),
       ...(!isNativeCreation ? { useVariation: Boolean(variationData) } : {}),
     };
-    if (isNativeCreation && !nativeSaveAttempt.current) nativeSaveAttempt.current = JSON.parse(JSON.stringify({ ...payload, idempotencyKey: crypto.randomUUID() }));
+    if (isNativeCreation && !nativeSaveAttempt.current) nativeSaveAttempt.current = JSON.parse(JSON.stringify({ ...payload, idempotencyKey: creationContext.current?.idempotencyKey || crypto.randomUUID() }));
     productsApi.save(isNativeCreation ? nativeSaveAttempt.current : payload).then((response) => {
       if (!matchesTestCreationResult(response.data, isNativeCreation ? nativeSaveAttempt.current?.isTestProduct === true : isTestProduct, true)) throw new Error('Сервер не підтвердив незмінну ознаку TEST товару та його окремий артикул.');
       if (isNativeCreation && (!Number.isSafeInteger(Number(response?.data?.id)) || Number(response.data.id) <= 0
         || typeof response.data.publicSku !== 'string' || !response.data.publicSku.trim() || response.data.success === false)) {
         throw new Error('Сервер не повернув підтвердження збереженого товару.');
+      }
+      if (nativeSaveAttempt.current?.skuReservation && response.data.publicSku !== nativeSaveAttempt.current.skuReservation.publicSku) {
+        throw new Error('Збережений артикул не відповідає зарезервованому. Перевірте результат тієї самої спроби.');
       }
       setSavedProduct(response.data);
       productExport.fetchExportStatus();
@@ -550,6 +578,7 @@ export function useSkuManager({
     if(!canCreateProducts || !creationPhotosAvailable || isCreationSaveUncertain || saveFlight.current || previewFlight.current
       || creationPhotos.hasPendingUploads || !Object.hasOwn(config?.categories || {},product.categoryCode))return false;
     if(!creationPhotos.restoreStaged(photos,product.enableWhenPhotosVerified))return false;
+    endCreationContext();
     ++previewSequence.current;nativeSaveAttempt.current=null;
     setSelectedCat(product.categoryCode);setAnswers(product.answers);setWeight(String(product.weight ?? ''));
     setIsTestProduct(product.isTestProduct === true);
@@ -621,10 +650,10 @@ export function useSkuManager({
 
   return {
     isTestProduct, testProductCreationAvailable,
-    handleTestProductChange: (value) => { if (!testProductCreationAvailable || !invalidateProductPreview()) return; setIsTestProduct(value === true); },
+    handleTestProductChange: (value) => { if (!testProductCreationAvailable || !invalidateProductPreview()) return; endCreationContext(); setIsTestProduct(value === true); },
     ...creationIntegrationTask,
     resumeIntegrationTask,
-    isCreationSaveUncertain,
+    isCreationSaveUncertain, reservedCreationSku,
     isNativeCreation, creationPricingAvailable, creationPricingMode, creationUsdPerGram, creationMarketingRounding, creationFieldErrors, isPreviewing, creationPhotosAvailable, creationPhotos,
     handleCreationPricingMode, handleCreationUsdPerGram, handleCreationMarketingRounding,
     nameSubjects,

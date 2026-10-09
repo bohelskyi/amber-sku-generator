@@ -64,7 +64,7 @@ function baseline(observation, report) {
     website_ids: raw.extension_attributes?.website_ids } } : null;
   return safeData(clean({ raw: minimized, domainEvidence, preservation }), [], 512 * 1024);
 }
-function replan(job, observation) {
+function replan(job, observation,{firstSyncNameProof=null}={}) {
   if (observation.categoryFailures?.length) fail('MAGENTO_SYNC_CATEGORY_READ_FAILED');
   const raw = job.baseline.raw && { ...job.baseline.raw };
   if (raw) {
@@ -81,8 +81,10 @@ function replan(job, observation) {
     delete raw.updated_at;
     if (observation.raw?.updated_at !== undefined) raw.updated_at = observation.raw.updated_at;
   }
-  const report = planPreview(observation.amber, observation.schema, raw, observation.categoryNodes,
+  let report = planPreview(observation.amber, observation.schema, raw, observation.categoryNodes,
     { domainEvidence: job.baseline.domainEvidence });
+  report=require('./sync-preview').applyFirstSyncNameProof(report,{...observation,raw,domainEvidence:job.baseline.domainEvidence},
+    firstSyncNameProof,{job,freshObservation:observation});
   if (!equal(intent(report, job.intent.version), job.intent)) fail('MAGENTO_SYNC_PLAN_CHANGED');
 }
 function matchesProduct(payload, raw, schema) {

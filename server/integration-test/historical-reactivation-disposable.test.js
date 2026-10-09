@@ -141,8 +141,21 @@ test('historical NEW intents preserve unknown history and use an exact atomic UP
       :'ordinary manual enqueue can insert through its separate ledger connection without a historical trigger deadlock',async()=>{
       const ordinary=await require('../src/services/access-admin-transaction').runAccessAdminMutation({databasePool:db,actorUserId:actor,requiredPermission:'products.create',createError:c.error,
         operation:async client=>{
-          const row=(await insertProductFixture(client,`INSERT INTO products(full_sku,category,total_price_uah,weight,status,exclude_from_export,details)
+          const row=(await client.query(`INSERT INTO products(full_sku,category,total_price_uah,weight,status,exclude_from_export,details)
             VALUES($1,'BR',240,12.7,'active',0,'{"answers":{}}') RETURNING *`,[`BR3/ORDINARY-${randomUUID()}`])).rows[0];
+
+          // This separate ordinary UPDATE fixture starts from an exact prior delivery.
+          // Historical restoration products above retain their own unchanged evidence.
+          const audit=await require('../src/audit/audit-events').writeAuditEvent(client,{
+            mutationContext:{actorUserId:actor,requestId:'historical-manual-fixture-prior-delivery'},
+            eventKey:'product.external_delivery_acknowledged',subjectType:'product',subjectId:row.id,
+            details:{fixture:true,fullRevision:'1',deliveryVersionBefore:'1',routeBefore:'normal',
+              externalDeliverySemantic:true,snapshotConfirmationClaimed:false,payloadEqualityClaimed:false,
+              automaticSyncSuccessClaimed:false,planHash:c.hash({fixture:'ordinary-manual-prior-delivery',productId:row.id}),
+              publicSku:row.full_sku,remote:{originHash:c.originHash(config.baseUrl),productId:row.id+10000,sku:row.full_sku}}});
+          await client.query(`INSERT INTO product_full_export_state(product_id,route,evidence,externally_delivered_revision,externally_delivered_event_id)
+            VALUES($1,'normal','{"origin":"ordinary_save","fixture":true}'::jsonb,1,$2)`,[row.id,audit.id]);
+
           await client.query("UPDATE product_full_export_state SET business_exclusion_state='none',delivery_version=delivery_version+1 WHERE product_id=$1",[row.id]);return row;
         }});
       rawBySku.set(ordinary.full_sku,{id:ordinary.id+10000,sku:ordinary.full_sku,attribute_set_id:8001,name:'Fixture name',price:200,status:1,visibility:4,type_id:'simple',

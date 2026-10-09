@@ -1,11 +1,11 @@
 import { StatusBadge } from '../ui/index.js';
+import { deliveryPolicies, deliveryPolicyEffect } from '../../lib/magento-category-workspace.js';
 import { PRODUCT_FIELD_LABELS } from './sync-problem-presentation.js';
 import './attention.css';
 
 const actions = { preserve: 'Зберігається Magento', unchanged: 'Без змін', would_update: 'Заплановано оновлення',
   would_add: 'Заплановано додавання', blocked: 'Потребує виправлення', unresolved: 'Не визначено' };
-const policies = { authoritative_create_update: 'Amber задає значення', initialize_create_only: 'Amber задає лише при створенні',
-  magento_managed: 'Керується в Magento', preserve_by_safe_preview: 'Збережено до окремого рішення',
+const policies = { ...deliveryPolicies, preserve_by_safe_preview: 'Збережено до окремого рішення',
   preview_default: 'Правило керування ще не підтверджено', optional_create_policy_required: 'Потрібне рішення для створення' };
 const warningText = {
   PRODUCT_ATTRIBUTE_SET_MISMATCH: 'Набір характеристик товару в Magento відрізняється від вибраного правилами. Це зауваження; можливість доставки визначена сервером окремо.',
@@ -39,6 +39,7 @@ export default function MagentoProductComparison({ result }) {
           {row.severity === 'blocked' ? 'Потребує виправлення' : actions[row.action] || 'Потрібна перевірка'}</StatusBadge>
           {policies[row.policy] && <small>{policies[row.policy]}{Object.hasOwn(row, 'policyState') && row.policyState !== 'approved'
             && ['authoritative_create_update', 'initialize_create_only', 'magento_managed'].includes(row.policy) ? ' · правило не підтверджене' : ''}</small>}
+          {deliveryPolicyEffect(row.policy, row.target) && <small>{deliveryPolicyEffect(row.policy, row.target)}</small>}
         </td>
       </tr>)}</tbody>
     </table>}

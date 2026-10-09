@@ -47,14 +47,15 @@ function view(mapped) {
   return { names, generated: mapped.generatedNames, ready: validPair(names) && !mapped.issueFields.includes('name'),
     source: mapped.nameSource || (mapped.generatedNames && mapped.generatedNames.all === names.all && mapped.generatedNames.en === names.en ? 'template' : 'stored_full_names') };
 }
-async function prospective(queryable, context, payload, preview) {
-  let product = { id: null, public_sku: 'AG-PREVIEW', full_sku: preview.fullProposedSku,
+async function prospective(queryable, context, payload, preview, { actorUserId } = {}) {
+  let product = { id: null, public_sku: preview.publicSku || 'AG-PREVIEW', full_sku: preview.fullProposedSku,
     category: String(payload.categoryCode).trim().toUpperCase(), status: 'active', exclude_from_export: 0,
     sku_schema_version_id: preview.skuSchemaVersionId, weight: preview.weightVal, total_price_uah: preview.totalPriceUah,
     details: { answers: preview.normalizedAnswers || payload.answers },
     magento_name_subject_ua: payload.magento_name_subject_ua || null, magento_name_subject_en: payload.magento_name_subject_en || null };
   product = preview.mode === 'public_identity'
-    ? await loadProspectiveSupportInput(queryable, context.compiled.definition, product, preview.characteristicConfigHash)
+    ? await loadProspectiveSupportInput(queryable, context.compiled.definition, product, preview.characteristicConfigHash,
+      { actorUserId, idempotencyKey: preview.skuReservation?.idempotencyKey })
     : (await loadSupportInputs(queryable, context.compiled.definition, [product])).products[0];
   const generated = evaluate(context, product);
   const supplied = manualNames(payload.magentoNames);

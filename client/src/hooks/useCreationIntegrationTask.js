@@ -36,7 +36,7 @@ export function useCreationIntegrationTask({available,canCreate,busy,product,pre
         response=await api.get('/integration-tasks/attempts/'+attempt.current.command.clientRequestId);
       } else {
         attempt.current={context,command:JSON.parse(JSON.stringify({clientRequestId:crypto.randomUUID(),
-          expectedPreviewToken:previewData.previewToken,product}))};
+          expectedPreviewToken:previewData.integrationTaskPreviewToken || previewData.previewToken,product}))};
         response=await api.post('/integration-tasks',attempt.current.command);
       }
       const confirmed=validateIntegrationTaskReceipt(response.data);

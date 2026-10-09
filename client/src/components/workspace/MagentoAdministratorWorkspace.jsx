@@ -13,7 +13,7 @@ const workflows = [
   { kind: 'broader_resync', title: 'Контрольована повторна синхронізація', description: 'Окремий перевірений список товарів. Непідтверджені відправлення не скидаються і не повторюються.' },
 ];
 
-function AdministratorWorkspace({ activePublication, readOnlyLabels = false }) {
+function AdministratorWorkspace({ activePublication, readOnlyLabels = false, onApplied }) {
   const auth = useAuth(); const { categoryCode: initialCategory } = useParams();
   const [params] = useSearchParams();
   const [workflow, setWorkflow] = useState(readOnlyLabels ? 'labels' : ['name_rule', 'broader_resync'].includes(params.get('action')) ? params.get('action') : '');
@@ -49,7 +49,7 @@ function AdministratorWorkspace({ activePublication, readOnlyLabels = false }) {
       {current && (workflow === 'labels' ? <>
         <label className="block text-sm">Категорія для порівняння<select className="input" value={category?.code || ''} onChange={(event) => setCategoryCode(event.target.value)}>{data.categories.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>
         <MagentoOptionActions mode="labels" readOnly={readOnlyLabels} revision={data.revision} currentPublishedId={activePublication.id} category={category} />
-      </> : <MagentoControlledActions revision={data.revision} currentPublishedId={activePublication.id} kind={workflow} />)}
+      </> : <MagentoControlledActions revision={data.revision} currentPublishedId={activePublication.id} kind={workflow} onApplied={onApplied} />)}
     </>}
   </div>;
 }

@@ -1,19 +1,22 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../auth/auth-context.js';
+import { isActualAdministrator } from '../../auth/auth-model.js';
 import { ProductNameConflict } from '../app/ProductNameConflict.jsx';
 import { ProductMagentoAttention } from '../app/ProductMagentoAttention.jsx';
 import { TechnicalDisclosure } from '../ui/index.js';
-import { MagentoRecovery } from './MagentoRecovery.jsx';
+import { MagentoRecovery, ProductResync } from './MagentoRecovery.jsx';
 import MagentoProductDiagnosis from './MagentoProductDiagnosis.jsx';
-import { attentionProblemGroups, needsDeliveryRecovery, nextAction, problemImpact, problemRepairUrl, problemSubject, problemTitle, PRODUCT_FIELD_LABELS } from './sync-problem-presentation.js';
+import MagentoFirstSyncFields from './MagentoFirstSyncFields.jsx';
+import { attentionProblemGroups, isFirstSyncFieldsProblem, needsDeliveryRecovery, nextAction, problemImpact, problemRepairUrl, problemSubject, problemTitle, PRODUCT_FIELD_LABELS } from './sync-problem-presentation.js';
 
 function ProblemFacts({ problem }) {
   const subject = problemSubject(problem);
   return <>
-    {(subject.path || subject.field || subject.value !== null) && <dl className="sync-problem-subject">
+    {(subject.path || subject.field || subject.scope || subject.value !== null) && <dl className="sync-problem-subject">
       {subject.path && <div><dt>Категорія Magento</dt><dd>{subject.path}</dd></div>}
       {subject.field && <div><dt>Характеристика</dt><dd>{subject.field}</dd></div>}
+      {subject.scope && <div><dt>Мова / магазин</dt><dd>{subject.scope}</dd></div>}
       {subject.value !== null && <div><dt>Значення за правилом Amber</dt><dd>{String(subject.value)}</dd></div>}
     </dl>}
     {problem.evaluationIssues?.length > 0 ? <ul className="sync-issue-fields">{problem.evaluationIssues.map((issue, index) => <li key={index}>
@@ -23,11 +26,17 @@ function ProblemFacts({ problem }) {
 }
 
 export default function AttentionProblemDetail({ product, productUrl, returnTo, onSaved, onRepairCharacteristics }) {
-  const { permissions } = useAuth();
+  const auth = useAuth(); const { permissions } = auth;
   const [recoveryEvidence, setRecoveryEvidence] = useState(null);
   const [comparisonEvidence, setComparisonEvidence] = useState(null);
   const groups = attentionProblemGroups(product.problems);
   const main = groups[0]?.problem;
+  const firstSyncProblem = groups.find(({ problem }) => isFirstSyncFieldsProblem(problem))?.problem;
+  const canReviewFirstSync = auth.principalLifetime?.valid === true && isActualAdministrator(auth)
+    && ['export_templates.manage', 'export_templates.publish', 'exports.view'].every((permission) => permissions.includes(permission));
+  const exactFirstSyncContext = [product.article, product.bindingRevisionId].every((value, index) => typeof value === 'string'
+    && value.length > 0 && value.length <= (index === 0 ? 256 : 160) && value === value.trim()
+    && !Array.from(value).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127));
   const recovery = groups.some(({ problem }) => needsDeliveryRecovery(problem));
   const identityProblem = (main?.diagnosticCode || main?.code) === 'NAME_REMOTE_IDENTITY_CHANGED';
   const canCompare = permissions.includes('export_templates.manage') && permissions.includes('exports.view');
@@ -38,6 +47,21 @@ export default function AttentionProblemDetail({ product, productUrl, returnTo, 
     status: product.productStatus || 'active', nameConflict: Boolean(product.nameConflict) };
 
   function repair(problem) {
+    if (isFirstSyncFieldsProblem(problem)) {
+      if (!canReviewFirstSync) return <p className="sync-problem-guidance">Передайте артикул і причини Адміністратору з дозволами на перевірку та застосування правил Magento.</p>;
+      if (!exactFirstSyncContext) return <p className="sync-problem-guidance">Точний артикул або чинну версію правил ще не підтверджено. Оновіть стан товару перед перевіркою полів.</p>;
+      return problem === firstSyncProblem
+        ? <MagentoFirstSyncFields sku={product.article} bindingRevisionId={product.bindingRevisionId} onChange={() => onSaved?.('first_sync_fields')} />
+        : <p className="sync-problem-guidance">Це поле перевіряється у спільній панелі першого отримання для цього товару.</p>;
+    }
+    if (problem.code === 'unexpected_failure') {
+      if (recovery) return <p className="sync-problem-guidance">Спочатку перевірте попередню операцію у процедурі відновлення вище.</p>;
+      const allowed = auth.principalLifetime?.valid !== false && isActualAdministrator(auth)
+        && ['export_templates.view', 'export_templates.manage', 'export_templates.publish', 'exports.view'].every((permission) => permissions.includes(permission));
+      return allowed && product.category ? <ProductResync productId={product.productId} categoryCode={product.category}
+        openingLabel="Перевірити можливість повторної доставки" onSaved={() => onSaved('recovery')} />
+        : <p className="sync-problem-guidance">Передайте артикул і опис Адміністратору, щоб перевірити поточний товар та дозволену повторну доставку.</p>;
+    }
     if (needsDeliveryRecovery(problem)) return null;
     if (problem.code === 'TEST_DELETION_PENDING') return canDecode && productUrl
       ? <Link className="btn btn-outline btn-compact-md" to={productUrl}>Перевірити тестове видалення у товарі</Link>
@@ -68,7 +92,7 @@ export default function AttentionProblemDetail({ product, productUrl, returnTo, 
       <h3>Інші перешкоди</h3>
       <p className="sync-problem-guidance">Ці причини також зафіксовано для товару. Після виправлення перевірте оновлений стан доставки.</p>
       <ul>{groups.slice(1).map(({ key, problem }) => <li key={key}>
-        <h4>{problem.message || 'Причину ще не визначено'}</h4>
+        <h4>{problemTitle(problem)}</h4>
         <ProblemFacts problem={problem} />
         {needsDeliveryRecovery(problem) ? <p className="sync-problem-guidance">Перевіряється у процедурі відновлення доставки на цій сторінці.</p> : repair(problem)}
       </li>)}</ul>

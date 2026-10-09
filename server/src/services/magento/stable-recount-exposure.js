@@ -202,7 +202,14 @@ async function apply(config,plan,expectedHash,options) {
       const sync = await inspect(config,local,options);
       if (sync.reasons.length || c.hash(sync.remote) !== c.hash(plan.sync.remote)) fail('EXPOSURE_REMOTE_CHANGED');
       if (options.signal?.aborted) fail('EXPOSURE_INTERRUPTED');
+      await require('./first-sync-history-admission').lockOnClient(client, {
+        productIds: plan.lineageProductIds, skus: s.members.map(member => member.product.public_sku),
+      });
       if (c.hash((await reader(client,config,plan.sku,plan.bindingRevisionId)).state) !== plan.beforeFingerprint) fail();
+      const firstSyncAdmission = await require('./first-sync-history-admission').captureOnClient(client, {
+        productId: plan.productId, publicIdentityId: plan.publicIdentityId, sku: plan.sku, originHash: plan.originHash,
+        installationKey: plan.installationKey, bindingRevisionId: plan.bindingRevisionId, remoteId: sync.remote.id,
+      });
       const prior = local.state.lifecycle;
       const evidence = { ...prior.evidence,origin: 'reconciliation',action,
         ...(reviewedEvidence ? { reviewedHistory: { ...proof(local.state), evidence: reviewedEvidence, remote: sync } } : {}),
@@ -217,14 +224,14 @@ async function apply(config,plan,expectedHash,options) {
       // their own actor, current-product and uncertain-work checks. No SQL repair
       // of a parked request, fabricated acknowledgement or Magento write here.
       const handoffId = await require('./binding-handoff').record(client,context,local.state.stable.binding,'broader_resync',plan.planHash,
-        { source,planHash: plan.planHash,doesNotAcknowledgeExport: true },
+        { source,planHash: plan.planHash,doesNotAcknowledgeExport: true,firstSyncAdmission },
         [{ productId: plan.productId,publicIdentityId: plan.publicIdentityId,reason: 'reviewed_resync' }]);
       const result = { productId: plan.productId,sku: plan.sku,publicIdentityId: plan.publicIdentityId,
         route: 'hold',holdReason: 'prior_exposure',deliveryVersion: changed.delivery_version,handoffId,planHash: plan.planHash };
       await writeAuditEvent(client,{ mutationContext: context,eventKey: event,subjectType: 'magento_exposure_resolution',subjectId: plan.planHash,
         details: { beforeFingerprint: plan.beforeFingerprint,transition,remote: sync.remote,lineageProductIds: plan.lineageProductIds,
           ...(reviewedEvidence ? { commandHash, reason: options.reason, reviewedHistory: { ...proof(local.state), evidence: reviewedEvidence, remote: sync } } : {}),
-          bindingRevisionId: plan.bindingRevisionId,originHash: plan.originHash,result,doesNotAcknowledgeExport: true } });
+          bindingRevisionId: plan.bindingRevisionId,originHash: plan.originHash,result,doesNotAcknowledgeExport: true,firstSyncAdmission } });
       return { ...result,alreadyApplied: false };
     });
   } finally {

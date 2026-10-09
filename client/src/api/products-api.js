@@ -11,6 +11,7 @@ export function createProductsApi(client = api) {
     previewPrice: (payload) => client.post('/price-preview', payload),
     preview: (payload) => client.post('/preview', payload),
     save: (payload) => client.post('/save', payload),
+    cancelCreation: (payload) => client.post('/products/creation/cancel', payload),
     getVariation: (sku) => client.post('/variation', { sku }),
     archive: (skuToDelete) => client.post('/delete', { skuToDelete }),
     previewTestDeletion: (productId) => client.post('/products/test-delete/preview', { productId }),

@@ -473,4 +473,16 @@ async function previewProduct(config, { databasePool, fetchImpl, storeCode = 'al
   if (onObservation) await onObservation({ amber, schema, raw, categoryNodes: indexTrees(trees), domainEvidence, categoryFailures });
   return report;
 }
-module.exports = { previewProduct, planPreview, preparePreview, comparison, readCategoryObservation };
+// Only exact request-owned, receipt-backed initial language authority can remove
+// a pair name blocker. Rebuild sendability from all remaining original blockers.
+function applyFirstSyncNameProof(report,observation,proof,{job=null,freshObservation=null}={}) {
+  const names=require('./first-sync-name-proof');
+  const allowed=job ? names.baselineObservationAllows(job,observation,freshObservation,proof) : names.allows(observation,proof);
+  if(!allowed) return report;
+  const codes=new Set(['NAME_BASELINE_REQUIRED','NAME_CONFLICT','NAME_EXTERNAL_CHANGE_PENDING','NAME_READ_UNAVAILABLE']);
+  const blockers=report.blockers.filter(blocker=>!codes.has(blocker.code));
+  if(blockers.length===report.blockers.length) return report;
+  return {...report,blockers,sendable:blockers.length===0,
+    sendability:sendability(blockers,report.candidatePayload,report.transport)};
+}
+module.exports = { previewProduct, planPreview, preparePreview, comparison, readCategoryObservation,applyFirstSyncNameProof };

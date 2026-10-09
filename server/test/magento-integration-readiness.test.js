@@ -38,7 +38,7 @@ test('integration routes preserve view/manage/exports permission boundaries', ()
     const permissions = layer.route.stack.map((s) => s.handle.permissionKey).filter(Boolean);
     const path=layer.route.path;
     assert.deepEqual(permissions, path.endsWith('/categories/plan') ? ['export_templates.manage','exports.view'] : /\/categories\/:categoryCode(?:\/fields\/:field|\/observation)?$/.test(path) ? ['export_templates.view'] : /\/(categories|options|option-labels|attributes)\//.test(path)
-      ? ['export_templates.manage','export_templates.publish'] : /\/(publication|controlled)\//.test(path)
+      ? ['export_templates.manage','export_templates.publish'] : /\/(publication|controlled|first-sync)\//.test(path)
         ? ['export_templates.manage','export_templates.publish','exports.view'] : path.endsWith('-preview') || path.endsWith('/creation-inputs')
           ? ['export_templates.manage','exports.view'] : /\/successor\//.test(path) || /\/(clone|select|decision)$/.test(path)
             ? ['export_templates.manage'] : ['export_templates.view']);

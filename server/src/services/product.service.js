@@ -714,7 +714,6 @@ async function applyProductRecount(payload, options = {}) {
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [access.APPLICATION_USER_ADMIN_LOCK_KEY]);
       await access.assertActorStillAuthorized(client, mutationContext.actorUserId, 'products.recount', createError);
-      await access.assertActorStillAuthorized(client, mutationContext.actorUserId, 'exports.create', createError);
       await lifecycleGate.enterExisting(client);
     } else if (options.batchReview) await require('./correction-request-batch-receipts').begin(client, options, 'corrections.complete');
     else {
@@ -1114,6 +1113,16 @@ async function applyProductRecount(payload, options = {}) {
 }
 
 async function buildNewProductPreview(payload, options = {}) {
+  if (payload.idempotencyKey !== undefined && !options.queryable) {
+    return require('./product/creation-sku-reservation').transaction(payload, options, async (client) => {
+      const result = await buildNewProductPreview(payload, { ...options, queryable: client, reserveCreationSku: true });
+      if (result.creationDeliveryReadiness?.status === 'configuration_required') {
+        const taskPayload = { ...payload }; delete taskPayload.idempotencyKey; delete taskPayload.skuReservation;
+        result.integrationTaskPreviewToken = (await buildNewProductPreview(taskPayload, { ...options, queryable: client })).previewToken;
+      }
+      return result;
+    });
+  }
   const tests = require('./product/test-products');
   const isTestProduct = tests.normalizeFlag(payload);
   if (isTestProduct) {
@@ -1137,6 +1146,12 @@ async function buildNewProductPreview(payload, options = {}) {
   }
   const preview = await buildProductPreview(payload, { ...options, ...(creationDecision ? { pricingDecision: creationDecision } : {}) });
   if (isTestProduct && preview.mode !== 'public_identity') throw Object.assign(new Error('TEST товари потребують активної публічної ідентичності.'), { statusCode: 409, code: 'TEST_PRODUCT_NATIVE_REQUIRED' });
+  if (options.reserveCreationSku || payload.skuReservation !== undefined) {
+    if (preview.mode !== 'public_identity') throw Object.assign(new Error('Резервація потребує публічної ідентичності.'), { statusCode: 409 });
+    preview.skuReservation = await require('./product/creation-sku-reservation').reserve(options.queryable,
+      payload, Number(options.mutationContext?.actorUserId), { allocate: options.reserveCreationSku === true });
+    preview.publicSku = preview.skuReservation.publicSku;
+  }
   preview.isTestProduct = isTestProduct;
   if (isTestProduct) preview.testTargetStatus = 2;
   preview.previewToken = getProductPreviewToken(preview, category, preview.normalizedAnswers || payload.answers, payload.isCalibrated);
@@ -1149,7 +1164,8 @@ async function buildNewProductPreview(payload, options = {}) {
     preview.previewToken = getProductPreviewToken(preview, category, preview.normalizedAnswers || payload.answers, payload.isCalibrated);
   }
   if (nameContext) {
-    const evaluated = await namePolicy.prospective(options.queryable || pool, nameContext, payload, preview);
+    const evaluated = await namePolicy.prospective(options.queryable || pool, nameContext, payload, preview,
+      { actorUserId: options.mutationContext?.actorUserId });
     const result = { ...preview, creationNames: { ...evaluated, ...nameContext.metadata },
       newProductInput: { version: 2, ...nameContext.metadata, fullNames: evaluated.manualNames } };
     result.previewToken = getProductPreviewToken(result, category, preview.normalizedAnswers || payload.answers, payload.isCalibrated);
@@ -1188,6 +1204,12 @@ async function saveProduct(payload, options = {}) {
       nativeAttempt = attempt;
       const recovered = await receipts.recover(client, nativeAttempt, mutationContext.actorUserId);
       if (recovered) { await lifecycleGate.commit(client); return recovered; }
+      const reservationsInstalled = (await client.query("SELECT to_regclass('product_creation_sku_reservations') AS name")).rows[0]?.name;
+      const reservation = reservationsInstalled && (await client.query(`SELECT state FROM product_creation_sku_reservations
+        WHERE actor_user_id=$1 AND idempotency_key=$2`, [mutationContext.actorUserId, nativeAttempt.key])).rows[0];
+      if (reservation && payload.skuReservation === undefined) {
+        throw Object.assign(new Error('Потрібна перевірка незмінної резервації артикула.'), { statusCode: 409, code: 'CREATION_RESERVATION_REQUIRED' });
+      }
     }
     if (!payload.skuSchemaVersionId && !payload.characteristicConfigHash) {
       throw validationError('Для збереження потрібен skuSchemaVersionId із актуального preview.');
@@ -1218,6 +1240,7 @@ async function saveProduct(payload, options = {}) {
       ...(payload.photoIds !== undefined ? { photoIds: payload.photoIds, enableWhenPhotosVerified: payload.enableWhenPhotosVerified } : {}),
       ...(payload.pricingDecision !== undefined ? { pricingDecision: payload.pricingDecision } : {}),
       ...(payload.magentoNames !== undefined ? { magentoNames: payload.magentoNames } : {}),
+      ...(payload.skuReservation !== undefined ? { skuReservation: payload.skuReservation, idempotencyKey: payload.idempotencyKey } : {}),
       magento_name_subject_ua: payload.magento_name_subject_ua,
       magento_name_subject_en: payload.magento_name_subject_en,
     }, { queryable: client, lockSequence: true, mutationContext, ...(options.creationDeliveryConfig ? { creationDeliveryConfig: options.creationDeliveryConfig } : {}) });
@@ -1301,6 +1324,8 @@ async function saveProduct(payload, options = {}) {
     if (isTestProduct) {
       await client.query("SELECT set_config('amber.create_test_product','on',TRUE), set_config('amber.create_test_product_actor',$1,TRUE)", [String(mutationContext.actorUserId)]);
     }
+    if (preview.skuReservation) await client.query(`SELECT set_config('amber.creation_reservation_key',$1,TRUE),
+      set_config('amber.creation_reservation_actor',$2,TRUE)`, [nativeAttempt.key, String(mutationContext.actorUserId)]);
     const result = await client.query(
       `INSERT INTO products
        (full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah,

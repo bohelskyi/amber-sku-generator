@@ -16,6 +16,7 @@ const transaction = require('./sync-job-transaction');
 const local = require('./sync-local-diagnostics');
 const historical = require('./historical-update-boundary');
 const standardHistorical = require('./historical-standard-boundary');
+const firstSync = require('./first-sync-runtime');
 
 async function ledger(db, actorUserId, action, operation) {
   const client = await db.connect();
@@ -74,7 +75,7 @@ async function observe(config, input, options) {
   // set/option GETs use one bounded four-read observation budget. No cache spans
   // enqueue, APPLY, jobs, products or publications.
   const discover = options.automatic ? (config, reads) => measurePhase({ ...options, fetchImpl: reads.fetchImpl }, 'schema_discovery', (read) =>
-    require('./schema-audit').auditMagentoSchema(config, { ...reads, fetchImpl: read, concurrency: 4 })) : undefined;
+    require('./schema-audit').auditMagentoSchema(config, { ...reads, fetchImpl: read, concurrency: 4, preferInlineOptions: true })) : undefined;
   const report = await (options.preview || previewProduct)(config, { databasePool: options.databasePool,
     fetchImpl, sku: input.sku, bindingRevisionId: input.bindingRevisionId,
     ...(discover ? { discover } : {}),
@@ -108,6 +109,10 @@ async function enqueue(config, input, options) {
     if (existing) {
       if (existing.amber_hash !== state.amberHash) plan.fail('MAGENTO_SYNC_AMBER_CHANGED');
       if (existing.binding_hash !== state.bindingHash) plan.fail('MAGENTO_SYNC_BINDING_CHANGED');
+      if (await firstSync.needsExistingReview(options.databasePool,state)) {
+        const {observation}=await observe(config,{...input,sku:state.publicSku},options);
+        await firstSync.enforce(config,observation,state,options,{job:existing});
+      }
       if (options.automatic) await ledger(options.databasePool, options.actorUserId, 'attached', async (client) => {
         await automatic.assertSnapshot(client, state, options);
         await automatic.attachJob(client, existing, options); return existing;
@@ -115,8 +120,16 @@ async function enqueue(config, input, options) {
       return existing; // Idempotent even after the successful plan changes the remote diff.
     }
     const externalInput = { ...input, sku: state.publicSku };
-    const { observation, report } = await observe(config, externalInput, options);
-    if (options.automatic && Object.hasOwn(observation.amber, 'nameState')) {
+    let { observation, report } = await observe(config, externalInput, options);
+    const reviewedManual = state.historicalUpdate?.state==='awaiting_native'
+      || (state.historicalStandard && !['completed','cancelled'].includes(state.historicalStandard.state)
+        && state.historicalStandard.delivery_mode==='update');
+    const reviewedIntent=reviewedManual ? plan.intent(report) : null;
+    const firstLane=await firstSync.enforce(config,observation,state,options,{intent:reviewedIntent});
+    const firstNameProof=firstSync.nameProof(firstLane);
+    report=require('./sync-preview').applyFirstSyncNameProof(report,observation,firstNameProof);
+    if (options.automatic && Object.hasOwn(observation.amber, 'nameState')
+      && !require('./first-sync-name-proof').allows(observation,firstNameProof)) {
       const nameResult = await require('./name-state').reconcileObservation(config, observation, options);
       if (nameResult.action === 'accept_external') plan.fail('MAGENTO_SYNC_AMBER_CHANGED');
     }
@@ -133,6 +146,9 @@ async function enqueue(config, input, options) {
     return ledger(options.databasePool, options.actorUserId, 'enqueued', async (client) => {
       if (options.automatic) await automatic.assertSnapshot(client, state, options);
       else await transaction.revalidate(client, config, state, options);
+      await firstSync.assertDispatchOnClient(client,firstLane);
+      const nameReceipt=await firstSync.nameBaselineOnClient(client,firstLane,observation);
+      if(nameReceipt) baseline.firstSyncNames=nameReceipt;
       const job = (await client.query(`
       INSERT INTO magento_sync_jobs(id,product_id,public_product_identity_id,sku,installation_key,origin_hash,binding_revision_id,
         binding_hash,amber_hash,plan_hash,intent,baseline,created_by_user_id,automatic_generation)
@@ -150,13 +166,14 @@ async function applyJob(config, id, options) {
   if (options.apply !== true) plan.fail('MAGENTO_SYNC_APPLY_REQUIRED');
   c.identity(id);
   let job = (await options.databasePool.query('SELECT * FROM magento_sync_jobs WHERE id=$1', [id])).rows[0];
-  let guardedState;
+  let guardedState; let finalFirstLane;
   if (!job) plan.fail('MAGENTO_SYNC_JOB_NOT_FOUND');
   const input = { sku: job.sku, bindingRevisionId: job.binding_revision_id };
   const saveState = (state, failure = null) => ledger(options.databasePool, options.actorUserId, state, async (client) => {
     if (guardedState && !options.automatic && ['running','succeeded'].includes(state)) {
       await transaction.revalidate(client, config, guardedState, options);
     }
+    if(state==='succeeded') await firstSync.assertDispatchOnClient(client,finalFirstLane);
     const result = (await local.phase('job_state', () => client.query(`UPDATE magento_sync_jobs SET state=$2, failure=$3::jsonb, updated_at=CURRENT_TIMESTAMP,
       attempts=attempts+CASE WHEN $2='running' THEN 1 ELSE 0 END,
       acknowledged_at=CASE WHEN $2='succeeded' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$1 RETURNING *`,
@@ -189,9 +206,12 @@ async function applyJob(config, id, options) {
       if (options.recoveryReview) {
         reviewedObservation = (await observe(config, input, options)).observation;
         require('./sync-job-recovery').assertReviewedRemote(reviewedObservation, options.recoveryReview);
+        const reviewedSteps=(await options.databasePool.query('SELECT * FROM magento_sync_steps WHERE job_id=$1 ORDER BY ordinal',[id])).rows;
+        options={...options,firstSyncRecoveryProof:firstSync.reviewedRecovery(job,reviewedSteps,reviewedObservation,options.recoveryReview)};
       }
-      job = await saveState('running');
       let observation = reviewedObservation || (await observe(config, input, options)).observation;
+      let firstLane=await firstSync.enforce(config,observation,state,options,{job});
+      job = await saveState('running');
       historical.assertPlan(state.historicalUpdate, job.intent, observation);
       const standardProgress = state.historicalStandard && (await options.databasePool.query('SELECT 1 FROM magento_sync_steps WHERE job_id=$1 LIMIT 1',[job.id])).rowCount>0;
       standardHistorical.assertPlan(state.historicalStandard,job.intent,observation,standardProgress);
@@ -202,7 +222,7 @@ async function applyJob(config, id, options) {
           await automatic.assertSnapshot(client, state, options); return job;
         });
       }
-      plan.replan(job, observation);
+      plan.replan(job, observation,{firstSyncNameProof:firstSync.nameProof(firstLane)});
       if (observation.domainEvidence.failures?.length) plan.fail('MAGENTO_SYNC_READ_FAILED');
       plan.preflight(job, observation);
       for (let ordinal = 0; ordinal < job.intent.operations.length; ordinal++) {
@@ -212,6 +232,8 @@ async function applyJob(config, id, options) {
         historical.assertObservation(state.historicalUpdate, observation);
         standardHistorical.assertIdentity(state.historicalStandard,observation,job);
         plan.preserve(job, observation);
+        firstLane=await firstSync.enforce(config,observation,state,options,{job,
+          createLane:firstSync.isCreateLane(firstLane)?firstLane:null});
         const step = (await options.databasePool.query('SELECT * FROM magento_sync_steps WHERE job_id=$1 AND ordinal=$2', [id, ordinal])).rows[0];
         if (state.historicalStandard && ordinal===0 && !step) standardHistorical.assertOriginalObservation(state.historicalStandard,observation);
         if (!step && ordinal === 0 && job.intent.mode === 'create' && observation.raw) plan.fail('MAGENTO_SYNC_REMOTE_STATE_CHANGED');
@@ -230,6 +252,7 @@ async function applyJob(config, id, options) {
                 AND state='published' ORDER BY version_number DESC LIMIT 1`, [job.installation_key])).rows[0];
               if (current?.id !== job.binding_revision_id) plan.fail('MAGENTO_SYNC_PUBLISHED_CURRENT_BINDING_REQUIRED');
             }
+            await firstSync.assertDispatchOnClient(client,firstLane);
             await local.phase('dispatch_marker', () => client.query("INSERT INTO magento_sync_steps(job_id,ordinal,state,dispatched_at) VALUES($1,$2,'dispatched',CURRENT_TIMESTAMP)", [id, ordinal]));
             return job;
           });
@@ -258,6 +281,9 @@ async function applyJob(config, id, options) {
       historical.assertObservation(state.historicalUpdate, observation);
       standardHistorical.assertIdentity(state.historicalStandard,observation,job);
       plan.verifyAll(job, observation);
+      firstLane=await firstSync.enforce(config,observation,state,options,{job,
+        createLane:firstSync.isCreateLane(firstLane)?firstLane:null});
+      finalFirstLane=firstLane;
       return await saveState('succeeded');
     } catch (cause) {
       local.log(cause, options, { jobId: id });

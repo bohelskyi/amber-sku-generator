@@ -521,6 +521,8 @@ async function applyProductPriceChange(payload = {}, options = {}) {
 }
 
 module.exports = {
+  // Internal preparation only; first-sync preserves mode and owns atomic persistence.
+  calculatePriceChange,
   applyProductPriceChange,
   applyProductPriceChangeInTransaction,
   buildPreviewResponse,

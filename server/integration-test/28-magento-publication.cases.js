@@ -53,7 +53,28 @@ async function setup(name){
   const initial=await draft(d,'initial'),current=await bindings.publishDraft(initial.id,{expectedRevision:initial.revision,expectedCurrentId:null},options);
   const products=[];
   for(const [index,category] of ['XG','YG','XG'].entries()){
-    const p=(await insertProductFixture(db,"INSERT INTO products(full_sku,category,weight,total_price_uah,details) VALUES($1,$2,5,42,'{\"answers\":{}}') RETURNING *",[category+'00'+index,category])).rows[0];products.push(p);
+
+    // This scenario starts with genuinely delivered ordinary products. A common
+    // name baseline and a synchronized generation alone do not prove delivery.
+    const client=await db.connect(),gate=require('../src/services/full-product-cutover-gate');
+    let p;
+    try {
+      await gate.begin(client,'BEGIN');
+      p=(await client.query("INSERT INTO products(full_sku,category,weight,total_price_uah,details) VALUES($1,$2,5,42,'{\"answers\":{}}') RETURNING *",
+        [category+'00'+index,category])).rows[0];
+      const audit=await require('../src/audit/audit-events').writeAuditEvent(client,{
+        mutationContext:{actorUserId:actor,requestId:'publication-fixture-prior-delivery'},
+        eventKey:'product.external_delivery_acknowledged',subjectType:'product',subjectId:p.id,
+        details:{fixture:true,fullRevision:'1',deliveryVersionBefore:'1',routeBefore:'normal',
+          externalDeliverySemantic:true,snapshotConfirmationClaimed:false,payloadEqualityClaimed:false,
+          automaticSyncSuccessClaimed:false,planHash:require('../src/services/magento/binding-contract').hash({fixture:'publication-prior-delivery',productId:p.id}),
+          publicSku:p.full_sku,remote:{originHash:current.originHash,productId:10000+Number(p.id),sku:p.full_sku}}});
+      await client.query(`INSERT INTO product_full_export_state(product_id,route,evidence,externally_delivered_revision,externally_delivered_event_id)
+        VALUES($1,'normal','{"origin":"ordinary_save","fixture":true}'::jsonb,1,$2)`,[p.id,audit.id]);
+      await gate.commit(client);
+    } catch(cause) {await gate.rollback(client);throw cause;}
+    finally {await gate.release(client);client.release();}
+    products.push(p);
     await db.query("UPDATE product_full_export_state SET business_exclusion_state='none',delivery_version=delivery_version+1 WHERE product_id=$1",[p.id]);
     const names={all:'Тестова назва',en:'Test name'};
     await db.query(`INSERT INTO magento_name_sync_states(origin_hash,public_product_identity_id,remote_product_id,baseline_names,observed_amber_names,observed_remote_names,state)
@@ -305,3 +326,26 @@ test('publication preserves acknowledged TEST 5816 ownership across source chang
 });
 
 module.exports={setup};
+
+test('exact controlled SKU list reports each public identity without fuzzy omissions or enqueue',async()=>{
+  const f=await setup('amber_exact_controlled_test');
+  try{
+    const [first,foreign,last]=f.products;
+    await f.db.query("UPDATE magento_product_sync_requests SET state='needs_attention',reason_code='reconciliation_required' WHERE product_id=$1",[last.id]);
+    const before=(await f.db.query('SELECT count(*)::int n FROM audit_events')).rows[0].n;
+    const skus=[first.full_sku,last.full_sku,first.full_sku,foreign.full_sku,'XG','XG-MISSING'];
+    const result=await controlled.candidates(f.config,f.current.id,f.options,{categoryCode:'XG',skus:JSON.stringify(skus)});
+    assert.deepEqual(result.results.map(r=>r.state),['eligible','blocked','duplicate','blocked','missing','missing']);
+    assert.deepEqual(result.results[1].blockers,['RECONCILIATION_REQUIRED']);
+    assert.deepEqual(result.results[3].blockers,['CATEGORY_SCOPE_MISMATCH']);
+    assert.equal(result.products.length,2);assert.equal(result.nextCursor,null);
+    assert.equal(f.calls.length,0);
+    assert.equal((await f.db.query('SELECT count(*)::int n FROM audit_events')).rows[0].n,before);
+    assert.equal((await f.db.query('SELECT count(*)::int n FROM magento_sync_jobs')).rows[0].n,0);
+    await f.db.query("UPDATE products SET status='archived' WHERE id=$1",[first.id]);
+    const retired=await controlled.candidates(f.config,f.current.id,f.options,{skus:JSON.stringify([first.full_sku])});
+    assert.deepEqual(retired.results,[{sku:first.full_sku,state:'blocked',blockers:['PRODUCT_NOT_CURRENT_OR_EXCLUDED']}]);
+    for(const query of [{skus:'[]'},{skus:'["XG"]',search:'XG'},{skus:JSON.stringify(Array(101).fill('XG'))}])
+      await assert.rejects(controlled.candidates(f.config,f.current.id,f.options,query));
+  }finally{await f.db.end();await dropTestDatabase('amber_exact_controlled_test');}
+});

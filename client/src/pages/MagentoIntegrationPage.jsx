@@ -51,6 +51,7 @@ export default function MagentoIntegrationPage() {
   const categoryWorkspace = pathname === '/admin/magento' || pathname === '/admin/magento/categories' || /^\/admin\/magento\/categories\/[^/]+$/.test(pathname);
   const narrowLayout = narrowViewport || categoryWorkspace || pathname !== '/admin/magento/overview';
   const discoverySequence = useRef(0);
+  useEffect(() => { const reload = () => setRefresh((value) => value + 1); window.addEventListener('focus', reload); return () => window.removeEventListener('focus', reload); }, []);
   useEffect(() => () => { ++discoverySequence.current; }, []);
   useEffect(() => {
     const controller = new AbortController();
@@ -130,7 +131,7 @@ export default function MagentoIntegrationPage() {
           <Route path="changes" element={<Changes activePublication={published} canManage={canManage} />} />
           <Route path="history" element={<Changes activePublication={published} canManage={canManage} history />} />
           <Route path="prepare" element={canManage ? <Preparation activePublication={published} observation={observation} onDiscover={discover} checking={checking} checkError={checkError} onPublished={() => setRefresh((value) => value + 1)} /> : <Notice>Немає доступу до підготовки змін.</Notice>} />
-          <Route path="administrator" element={isActualAdministrator(auth) ? <Administrator activePublication={published} /> : <Notice>Ці дії доступні лише Адміністратору.</Notice>} />
+          <Route path="administrator" element={isActualAdministrator(auth) ? <Administrator activePublication={published} onApplied={() => setRefresh((value) => value + 1)} /> : <Notice>Ці дії доступні лише Адміністратору.</Notice>} />
           <Route path="configuration" element={<Navigate to="/admin/magento/prepare" replace />} />
           <Route path="*" element={<Notice>Розділ не знайдено. <Link to="/admin/magento">До огляду</Link></Notice>} />
         </Routes></Suspense>

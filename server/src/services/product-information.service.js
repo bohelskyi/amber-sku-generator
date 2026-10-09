@@ -55,8 +55,8 @@ async function assertSafeCatalogField(client, category, key, lockCatalog) {
      FROM questions WHERE category_code = $1 ORDER BY id ${lockCatalog ? 'FOR SHARE' : ''}`,
     [category]
   );
-  const target = questions.rows.find((row) => row.key === key);
-  if (!target || Number(target.include_in_sku) !== 0 || target.input_type !== 'text') {
+  const targets = questions.rows.filter((row) => row.key === key), target = targets[0];
+  if (targets.length !== 1 || target.include_in_sku !== 0 || target.input_type !== 'text') {
     throw informationError(`Поле ${key} більше не є безпечним інформаційним полем.`, 409);
   }
   if (questions.rows.some((row) => getRuleDependencies(row.visible_if_json).includes(key))) {
@@ -250,7 +250,14 @@ async function applyProductInformation(payload = {}, options = {}) {
   }
 }
 
+// Internal transaction-compatible validator. The caller must retain the existing
+// access/lifecycle/product boundaries and persist changes plus its receipts atomically.
+async function prepareProductInformationOnClient(client, product, patch, { lockCatalog = false } = {}) {
+  return evaluate(client, product, normalizePatch(patch), lockCatalog);
+}
+
 module.exports = {
+  prepareProductInformationOnClient,
   INFORMATION_FIELDS_V1,
   applyProductInformation,
   previewProductInformation,

@@ -6,6 +6,10 @@ const { describeMapper, compare, sorted } = require('./mapper-schema');
 const LIMIT = 10000;
 const MAX_REPORT_BYTES = 64 * 1024 * 1024;
 const OPTION_INPUTS = new Set(['select', 'multiselect', 'boolean']);
+// Magento 2.4.6's product list and option endpoint call the same getOptions().
+// Keep exact native source contracts; unknown/custom sources remain dedicated GETs.
+const INLINE_OPTION_SOURCES = new Set(['Magento\\Eav\\Model\\Entity\\Attribute\\Source\\Table',
+  'Magento\\Eav\\Model\\Entity\\Attribute\\Source\\Boolean']);
 const SAFE_CODE = /^[a-zA-Z][a-zA-Z0-9_]{0,99}$/;
 function auditContext(stage, entityType, entity, config) {
   const context = { stage, entityType };
@@ -235,17 +239,34 @@ function compareMapper(mapper, attributes, attributeSets) {
     diagnostics: diagnostics.sort((a, b) => compare(JSON.stringify(a), JSON.stringify(b))) };
 }
 
-async function auditMagentoSchema(config, { fetchImpl = globalThis.fetch, storeCode = 'all', concurrency = 1 } = {}) {
-  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) {
+async function auditMagentoSchema(config, { fetchImpl = globalThis.fetch, storeCode = 'all', concurrency = 1,
+  preferInlineOptions = false } = {}) {
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4 || typeof preferInlineOptions !== 'boolean') {
     throw new MagentoIntegrationError('MAGENTO_INPUT_INVALID');
   }
-  if (concurrency === 1) return auditSchema(config, { fetchImpl, storeCode, concurrency });
+  if (concurrency === 1) return auditSchema(config, { fetchImpl, storeCode, concurrency, preferInlineOptions });
   return require('./schema-read-batches').withReadBudget(fetchImpl,
-    (bounded) => auditSchema(config, { fetchImpl: bounded, storeCode, concurrency }));
+    (bounded) => auditSchema(config, { fetchImpl: bounded, storeCode, concurrency, preferInlineOptions }));
 }
 
-async function auditSchema(config, { fetchImpl, storeCode, concurrency }) {
+async function auditSchema(config, { fetchImpl, storeCode, concurrency, preferInlineOptions }) {
   const client = createMagentoClient(config, { fetchImpl, storeCode });
+  const inlineOptions = new Map();
+  let inlineCount = 0, inlineBytes = 0;
+  const normalizeListedAttribute = (raw) => {
+    const attribute = normalizeAttribute(raw);
+    if (preferInlineOptions && Object.hasOwn(raw, 'options') && raw.options !== null) {
+      // Validate even unproven inline payloads. Malformed data is never hidden by fallback.
+      const options = located('option_normalization', 'attribute', raw, config, () => normalizeOptions(raw.options));
+      inlineCount += options.length; inlineBytes += Buffer.byteLength(JSON.stringify(options));
+      if (inlineCount > 100000 || inlineBytes > MAX_REPORT_BYTES) throw new MagentoIntegrationError('MAGENTO_DISCOVERY_LIMIT');
+      if (INLINE_OPTION_SOURCES.has(attribute.source_model) && OPTION_INPUTS.has(attribute.frontend_input)) {
+        inlineOptions.set(attribute.attribute_code, { attributeId: attribute.attribute_id,
+          sourceModel: attribute.source_model, frontendInput: attribute.frontend_input, options });
+      }
+    }
+    return attribute;
+  };
   const { readBatches } = require('./schema-read-batches');
   const storeTopology = {};
   // Independent fresh topology reads share the existing budget. A failed group
@@ -274,7 +295,7 @@ async function auditSchema(config, { fetchImpl, storeCode, concurrency }) {
     return set;
   }, 'attribute_set_id', 'attribute_set_metadata', 'attribute_set', config))
     .sort((a, b) => a.attribute_set_id - b.attribute_set_id);
-  const attributes = (await pages(client.listProductAttributes, normalizeAttribute, 'attribute_code',
+  const attributes = (await pages(client.listProductAttributes, normalizeListedAttribute, 'attribute_code',
     'product_attribute_normalization', 'attribute', config))
     .sort((a, b) => compare(a.attribute_code, b.attribute_code));
   located('product_attribute_normalization', 'attribute_list', null, config, () => unique(attributes, 'attribute_id'));
@@ -306,10 +327,12 @@ async function auditSchema(config, { fetchImpl, storeCode, concurrency }) {
   let optionCount = 0;
   const optionAttributes = attributes.filter((attribute) =>
     OPTION_INPUTS.has(attribute.frontend_input) || mapperTargets.has(attribute.attribute_code));
-  await readBatches(optionAttributes, concurrency,
-    (attribute) => located('option_normalization', 'attribute', attribute, config, async () =>
-      normalizeOptions(await client.getProductAttributeOptions(attribute.attribute_code))),
-    (attribute, options) => located('option_normalization', 'attribute', attribute, config, () => {
+  const reusable = (attribute) => {
+    const entry = inlineOptions.get(attribute.attribute_code);
+    return entry && entry.attributeId === attribute.attribute_id && entry.sourceModel === attribute.source_model
+      && entry.frontendInput === attribute.frontend_input ? entry.options : null;
+  };
+  const consumeOptions = (attribute, options) => located('option_normalization', 'attribute', attribute, config, () => {
     // Include all actual mapper targets, even non-select attributes: custom
     // source models and boolean fields can expose options too. An empty list
     // on a text attribute is not an unmatched-label finding.
@@ -317,7 +340,16 @@ async function auditSchema(config, { fetchImpl, storeCode, concurrency }) {
       attribute.optionCount = attribute.options.length;
       optionCount += attribute.optionCount;
       if (optionCount > 100000) throw new MagentoIntegrationError('MAGENTO_DISCOVERY_LIMIT');
-    }));
+    });
+  for (const attribute of optionAttributes) {
+    const options = reusable(attribute);
+    if (options) consumeOptions(attribute, options);
+  }
+  // Only fallback reads occupy remote slots. Every invocation still fetches list pages,
+  // topology and memberships afresh; no evidence crosses enqueue/APPLY or audit calls.
+  await readBatches(optionAttributes.filter((attribute) => !reusable(attribute)), concurrency,
+    (attribute) => located('option_normalization', 'attribute', attribute, config, async () =>
+      normalizeOptions(await client.getProductAttributeOptions(attribute.attribute_code))), consumeOptions);
   return located('report_assembly', 'report', null, config, () => {
     const report = { reportVersion: 1, storeCode, mapperSource: mapper.source,
       limitations: ['Fresh GET observations, not an atomic Magento snapshot.',

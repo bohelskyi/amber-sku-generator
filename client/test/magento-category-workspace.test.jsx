@@ -254,9 +254,9 @@ it('checks the originating product, confirms its new path and requires a separat
   expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/successor/apply', { ...request, previewToken: 'successor-proof' });
   expect((await screen.findByLabelText('Відповідність: Default/Браслети/Світлі')).value).toBe('42');
   expect(screen.getByText(/Перевірте шлях у колонці Magento/)).toBeTruthy();
-  expect(screen.queryByRole('button', { name: 'Застосувати зміни' })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Застосувати правила й передати / })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Підтвердити', exact: true }));
-  const apply = await screen.findByRole('button', { name: 'Застосувати зміни' });
+  const apply = await screen.findByRole('button', { name: /Застосувати правила й передати / });
   expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/bindings/isolated/decision', { expectedRevision: '1', binding: categoryEntry.id, action: 'approve', acceptReview: true });
   expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
   fireEvent.click(apply);
@@ -279,7 +279,7 @@ it('continues restored category review explicitly and checks impact without crea
   await screen.findByText('Відповідності перевірено');
   expect(api.post).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Продовжити перевірку розділів' }));
-  await screen.findByRole('button', { name: 'Застосувати зміни' });
+  await screen.findByRole('button', { name: /Застосувати правила й передати / });
   expect(api.post.mock.calls).toEqual([['/admin/magento-integration/publication/preview', {
     bindingRevisionId: 'isolated', expectedRevision: '1', expectedCurrentId: 'current', representatives: [],
   }]]);
@@ -302,7 +302,7 @@ it('keeps a source failure after category approvals in the same exact preparatio
   const target = new URL(within(issues).getByRole('link', { name: 'Перевірити поле: Браслети → Колір · UA' }).href);
   expect(Object.fromEntries(target.searchParams)).toMatchObject({ binding: 'isolated', source: 'current', field: 'kolir', language: 'base', productId: '5080', returnTo: '/attention?problem=5080' });
   expect(within(issues).queryByRole('link', { name: 'Проблеми синхронізації' })).toBeNull();
-  expect(screen.getByRole('button', { name: 'Застосувати зміни' }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: /Застосувати правила й передати / }).disabled).toBe(true);
   expect(api.post.mock.calls).toEqual([['/admin/magento-integration/publication/preview', {
     bindingRevisionId: 'isolated', expectedRevision: '1', expectedCurrentId: 'current', representatives: [],
   }]]);
@@ -342,7 +342,7 @@ it('shows the exact remaining category after placement confirmation and applies 
   fireEvent.click(screen.getByRole('button', { name: 'Підтвердити', exact: true }));
   await screen.findByText('Оновлюємо підтвердження…');
   expect(screen.queryByText(/Чернетка змінилася/)).toBeNull();
-  expect(screen.queryByRole('button', { name: 'Застосувати зміни' })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Застосувати правила й передати / })).toBeNull();
   await waitFor(() => expect(finishRead).toBeTypeOf('function'));
   await act(async () => finishRead());
   await screen.findByRole('heading', { name: 'Підтвердьте відповідності інших категорій' });
@@ -354,7 +354,7 @@ it('shows the exact remaining category after placement confirmation and applies 
   expect(api.post.mock.calls.filter(([url]) => url.endsWith('/decision'))).toHaveLength(1);
   expect(api.post.mock.calls.some(([url]) => url.includes('/publication/'))).toBe(false);
   fireEvent.click(within(row).getByRole('button', { name: 'Підтвердити', exact: true }));
-  const apply = await screen.findByRole('button', { name: 'Застосувати зміни' });
+  const apply = await screen.findByRole('button', { name: /Застосувати правила й передати / });
   expect(api.post.mock.calls.filter(([url]) => url.endsWith('/decision')).map(([, body]) => [body.binding, body.expectedRevision])).toEqual([[placement.id, '1'], [other.id, '2']]);
   expect(screen.queryByText(/Застосування чекає на підтвердження/)).toBeNull();
   expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
@@ -375,7 +375,7 @@ it('restores the remaining fields of another category visibly without automatic 
   const row = screen.getByRole('row', { name: /Золотиста оправа/ });
   expect(row.textContent).toContain('Інші');
   expect(within(row).queryByText('Колір: Нуль')).toBeNull();
-  expect(screen.queryByRole('button', { name: 'Застосувати зміни' })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Застосувати правила й передати / })).toBeNull();
   expect(api.post).not.toHaveBeenCalled();
 });
 
@@ -393,7 +393,7 @@ it('shows remaining local fields after the focused placement is confirmed and ke
   fireEvent.change(screen.getByLabelText('Пояснення перевірки'), { target: { value: 'Перевірено' } });
   fireEvent.click(screen.getByRole('button', { name: 'Підтвердити', exact: true }));
   expect(api.post).not.toHaveBeenCalled();
-  expect(screen.queryByRole('button', { name: 'Застосувати зміни' })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Застосувати правила й передати / })).toBeNull();
 });
 
 it('isolates a shared text rule to the chosen category and language and saves a separate family', async () => {
@@ -559,7 +559,7 @@ it('checks product impact after the single explicit check and waits for a separa
   fireEvent.change(await screen.findByLabelText('Текст для магазину'), { target: { value: 'Новий опис' } });
   fireEvent.click(screen.getByRole('button', { name: 'Готово' }));
   fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' }));
-  const apply = await screen.findByRole('button', { name: 'Застосувати зміни' });
+  const apply = await screen.findByRole('button', { name: /Застосувати правила й передати / });
   expect(apply.disabled).toBe(false);
   expect(api.post.mock.calls.filter(([url]) => url.endsWith('/publication/preview'))).toHaveLength(1);
   expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
@@ -771,4 +771,54 @@ it('long field names and visible If/Then rules preserve the condition, fallback,
   expect(result.else).toEqual(rules.groups[0].rows[0].cells.description.else); expect(saved.draft.definition.groups[0].rows[1]).toEqual(rules.groups[0].rows[1]);
   expect(saved.draft.definition.groups[1]).toEqual(rules.groups[1]); expect(saved.draft.definition.bindings).toEqual(rules.bindings);
   expect(changedFields(rules, saved.draft.definition, 'BR')).toEqual([{ field: 'description', rowId: 'base' }]); expect(JSON.stringify(rules)).toBe(before);
+});
+
+it('compatible tab=text opens text fields and preserves exact product, language and safe return context', async () => {
+  const { router } = mount('/admin/magento?category=BR&tab=text&language=english&productId=7&returnTo=%2Fattention%3Fproblem%3D7');
+  const tab = await screen.findByRole('button', { name: 'Назва й описи' });
+  expect(tab.getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByLabelText('Мова полів').value).toBe('english');
+  expect(screen.getByRole('region', { name: 'Повні назви товарів' })).toBeTruthy();
+  expect(api.post).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Характеристики' }));
+  const query = new URLSearchParams(router.state.location.search);
+  expect(query.get('view')).toBe('attributes'); expect(query.get('tab')).toBeNull();
+  expect(query.get('productId')).toBe('7'); expect(query.get('language')).toBe('english');
+  expect(query.get('returnTo')).toBe('/attention?problem=7');
+});
+
+it('full-name support stays visible as available, saved draft and current policy; duplicate preparation never upgrades twice', async () => {
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await get(url, config);
+    if (url.endsWith('/sources')) result.data.effectiveNamesUpgrade = { targetContract: 'effective-product-names-v1', supportedEvaluatorVersions: ['magento-declarative-4'] };
+    return result;
+  });
+  const post = api.post.getMockImplementation();
+  api.post.mockImplementation(async (url, body) => {
+    if (url.endsWith('/draft/upgrade-columns')) {
+      saved.draft = { ...saved.draft, revision: '2', definitionHash: 'names-hash', definition: { ...saved.draft.definition, nameReadiness: { contractVersion: 'effective-product-names-v1' } } };
+      return { data: saved.draft };
+    }
+    return post(url, body);
+  });
+  mount('/admin/magento?category=BR&tab=text');
+  const prepare = await screen.findByRole('button', { name: 'Підготувати підтримку повних назв' });
+  expect(screen.getByRole('region', { name: 'Повні назви товарів' }).textContent).toContain('Доступна підготовка');
+  fireEvent.click(prepare); fireEvent.click(prepare);
+  await screen.findByText('Підтримку повних назв збережено в чернетці. Перевірте весь пакет перед застосуванням.');
+  expect(screen.getByRole('region', { name: 'Повні назви товарів' }).textContent).toContain('Збережено в чернетці');
+  expect(screen.queryByRole('button', { name: 'Підготувати підтримку повних назв' })).toBeNull();
+  expect(api.post.mock.calls.filter(([url]) => url.endsWith('/draft/upgrade-columns'))).toHaveLength(1);
+  expect(api.post.mock.calls.some(([url]) => /successor|publication|\/publish$/.test(url))).toBe(false);
+  cleanup(); mocks();
+  const currentGet = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await currentGet(url, config);
+    if (url.includes('/categories/') && !url.includes('/fields/')) result.data.template.definition = { ...definition, nameReadiness: { contractVersion: 'effective-product-names-v1' } };
+    return result;
+  });
+  mount('/admin/magento?category=BR&tab=text');
+  await screen.findByText('Підтримка є в чинних правилах');
+  expect(screen.queryByRole('button', { name: 'Підготувати підтримку повних назв' })).toBeNull();
 });

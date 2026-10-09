@@ -4,6 +4,17 @@ const { eligibilityIssue, lifecycleProjectionSql } = require('./lifecycle-issue'
 const { isUpgradeProblem } = require('./native-characteristic-upgrade');
 const { PHASES } = require('./sync-local-diagnostics');
 const taxonomy = Object.freeze({
+  FIRST_SYNC_FIELD_CONFLICT: 'Значення Amber і Magento відрізняються. Адміністратор має вибрати значення для цього поля.',
+  FIRST_SYNC_FIELD_UNKNOWN: 'Не вдалося достовірно прочитати поле Magento. Відсутність значення не підтверджена.',
+  FIRST_SYNC_FIELD_REVIEW_REQUIRED: 'Для цього поля немає підтвердженого безпечного способу прийняти значення Magento.',
+  FIRST_SYNC_FIELD_VALIDATION_REQUIRED: 'Значення Magento не пройшло перевірку для збереження в Amber.',
+  FIRST_SYNC_UNSETTLED_PRIOR_FIELD: 'Попереднє рішення щодо поля ще не завершене, а поле змінилося в опублікованих відповідностях.',
+  FIRST_SYNC_POST_ADOPTION_RECHECK_REQUIRED: 'Дані прийнято в Amber. Перед доставкою потрібна нова перевірка товару.',
+  FIRST_SYNC_UNFINISHED_WORK: 'Незавершена операція товару блокує перше прийняття полів. Спочатку потрібно перевірити її результат.',
+  FIRST_SYNC_HISTORY_REVIEW_REQUIRED: 'Історія попередньої доставки не дає достовірного підтвердження першої синхронізації.',
+  FIRST_SYNC_ORIGIN_REVIEW_REQUIRED: 'Історія товару належить іншому підключенню Magento. Потрібна перевірка адміністратором.',
+  FIRST_SYNC_IDENTITY_CHANGED: 'SKU, товар Magento або підключення відрізняється від збереженої історії прийняття полів.',
+  unexpected_failure: 'Не вдалося завершити синхронізацію. Потрібна перевірка адміністратором; причина не підтверджена.',
   LOCAL_DATABASE_FAILURE: 'Внутрішня операція бази даних не завершилася. Потрібна технічна перевірка; подробиці доступні в даних для підтримки.',
   product_retired: 'Товар архівований у Manager; автоматичне передавання зупинено.',
   TEST_PRODUCT_REMOTE_ENABLED: 'TEST товар увімкнено поза Amber. Передавання заблоковано; потрібна окрема перевірка Адміністратором.',
@@ -47,7 +58,7 @@ function safeDiagnostics(blockers = []) {
   return blockers.slice(0, 40).map((item) => ({ code: String(item.code || 'data_or_binding').slice(0, 100),
     ...(/^LOCAL_DATABASE_FAILURE$/.test(item.code || '') && /^[0-9A-Z]{5}$/.test(item.sqlState || '')
       ? { sqlState: item.sqlState, phase: PHASES.has(item.phase) ? item.phase : 'unknown' } : {}),
-    ...Object.fromEntries(['target', 'field', 'path', 'routeKey', 'status'].map((key) => [key, item[key] ?? item.diagnostic?.[key]])
+    ...Object.fromEntries(['target', 'field', 'path', 'routeKey', 'status', 'scope', 'reason'].map((key) => [key, item[key] ?? item.diagnostic?.[key]])
       .filter(([, value]) => typeof value === 'string' && value.length <= 500)),
     ...(isUpgradeProblem({ ...item, diagnosticCode: item.diagnostic?.code }) ? { question: item.question } : {}),
     ...(item.diagnostic?.code ? { diagnosticCode: String(item.diagnostic.code).slice(0, 100) } : {}),
@@ -58,7 +69,16 @@ function safeDiagnostics(blockers = []) {
   }));
 }
 function presentProblem(item, lifecycle) {
-  if (['MAGENTO_NATIVE_IDENTITY_COLLISION', 'TEST_PRODUCT_REMOTE_ENABLED', 'LOCAL_DATABASE_FAILURE'].includes(item.code)) return { ...item, resolution: 'administrator', message: taxonomy[item.code] };
+  if(item.code.startsWith('FIRST_SYNC_')) {
+    const reasons={CANONICAL_WEIGHT_SETTER_UNSUPPORTED:'Автоматичне прийняття ваги поки не підтримує всі пов’язані дані товару.',
+      CANONICAL_GENERIC_SETTER_UNSUPPORTED:'Історичне значення характеристики потребує окремого підтвердженого способу збереження.',
+      POST_IMPORT_CANONICAL_RECHECK_REQUIRED:'Пов’язані поля потрібно порівняти заново після прийняття даних.',
+      OUTWARD_POLICY_NOT_AUTHORITATIVE:'Для цього поля не дозволено автоматично передавати значення Amber.',
+      REQUIRED_BOTH_EMPTY:'Обов’язкове поле порожнє і в Amber, і в Magento.'};
+    return {...item,resolution:'first_sync_fields',message:reasons[item.reason] || taxonomy[item.code]
+      || 'Перше прийняття поля потребує перевірки точного збереженого підтвердження.'};
+  }
+  if (['unexpected_failure', 'MAGENTO_NATIVE_IDENTITY_COLLISION', 'TEST_PRODUCT_REMOTE_ENABLED', 'LOCAL_DATABASE_FAILURE'].includes(item.code)) return { ...item, resolution: 'administrator', message: taxonomy[item.code] };
   if (isUpgradeProblem(item)) return { ...item, resolution: 'integration_configuration',
     message: 'Товар збережено в Amber. Для його характеристик потрібно підготувати, перевірити й застосувати підтримку нових товарів у налаштуваннях категорії Magento.' };
   const issue = item.code === 'AMBER_SYNC_ELIGIBILITY_UNRESOLVED' ? eligibilityIssue(lifecycle) : null;
@@ -105,7 +125,9 @@ async function summary(db = pool) {
 }
 function presentProblemRow(row) {
   const foreignIdentity = row.diagnostics?.some(item => item.code === 'MAGENTO_NATIVE_IDENTITY_COLLISION');
+  const firstFields=row.diagnostics?.some(item=>item.code.startsWith('FIRST_SYNC_'));
   return { productId: row.productId, article: row.article, category: row.category,
+    ...(row.binding_revision_id ? {bindingRevisionId:row.binding_revision_id} : {}),
     ...(row.category_name ? { categoryName: row.category_name } : {}),
     ...(row.product_status ? { productStatus: row.product_status } : {}),
     ...(row.state || (row.deletion_state && row.deletion_state !== 'finalized')
@@ -113,14 +135,14 @@ function presentProblemRow(row) {
     ...(row.observed_at ? { observedAt: row.observed_at } : {}),
     ...(row.state === 'synced' && !(row.deletion_state && row.deletion_state !== 'finalized') && row.confirmed_at ? { confirmedAt: row.confirmed_at } : {}),
     problems: presentProblems(['reconciliation_required','TEST_DELETION_PENDING'].includes(row.reason_code) ? [{ code: row.reason_code }]
-      : foreignIdentity ? row.diagnostics : ['conflict', 'baseline_required'].includes(row.name_state) ? [{ code: row.name_state === 'conflict' ? 'NAME_CONFLICT' : 'NAME_BASELINE_REQUIRED' }]
+      : foreignIdentity || firstFields ? row.diagnostics : ['conflict', 'baseline_required'].includes(row.name_state) ? [{ code: row.name_state === 'conflict' ? 'NAME_CONFLICT' : 'NAME_BASELINE_REQUIRED' }]
         : row.diagnostics?.length ? row.diagnostics : [{ code: row.reason_code || 'data_or_binding' }], row.lifecycle),
     nameConflict: !foreignIdentity && !['reconciliation_required','TEST_DELETION_PENDING'].includes(row.reason_code) && ['conflict', 'baseline_required'].includes(row.name_state)
       ? { amber: row.observed_amber_names, magento: row.observed_remote_names } : null,
   };
 }
 async function problems(config, db = pool) {
-  const rows = (await db.query(`SELECT p.id AS "productId",i.public_sku AS "article",p.category,
+  const rows = (await db.query(`SELECT p.id AS "productId",i.public_sku AS "article",p.category,(SELECT b.id FROM magento_binding_revisions b JOIN magento_auto_sync_activation a ON a.installation_key=b.installation_key AND a.singleton WHERE b.state='published' AND b.origin_hash=$1 ORDER BY b.version_number DESC LIMIT 1) AS binding_revision_id,
     CASE WHEN d.state<>'finalized' THEN 'TEST_DELETION_PENDING' ELSE r.reason_code END AS reason_code,
     r.diagnostics,n.state AS name_state,n.observed_amber_names,n.observed_remote_names,${lifecycleProjectionSql}
     FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
@@ -149,7 +171,7 @@ const problemJoinSql = `FROM products p JOIN public_product_identities i ON i.id
   LEFT JOIN product_full_export_state f ON f.product_id=p.id
   LEFT JOIN magento_name_sync_states n ON n.public_product_identity_id=i.id AND n.origin_hash=$1
   LEFT JOIN magento_test_deletions d ON d.public_product_identity_id=i.id`;
-const problemSelectSql = `SELECT p.id AS "productId",i.public_sku AS "article",p.category,c.name AS category_name,p.status AS product_status,
+const problemSelectSql = `SELECT p.id AS "productId",i.public_sku AS "article",p.category,(SELECT b.id FROM magento_binding_revisions b JOIN magento_auto_sync_activation a ON a.installation_key=b.installation_key AND a.singleton WHERE b.state='published' AND b.origin_hash=$1 ORDER BY b.version_number DESC LIMIT 1) AS binding_revision_id,c.name AS category_name,p.status AS product_status,
   r.state,d.state AS deletion_state,r.updated_at AS observed_at,CASE WHEN r.state='synced' AND r.public_product_identity_id=p.public_product_identity_id THEN (SELECT max(j.acknowledged_at) FROM magento_sync_jobs j
       WHERE j.product_id=p.id AND j.public_product_identity_id=p.public_product_identity_id
         AND j.automatic_generation=r.desired_generation AND j.state='succeeded'
@@ -161,6 +183,7 @@ const problemSelectSql = `SELECT p.id AS "productId",i.public_sku AS "article",p
 const reasonGroupSql = `CASE
   WHEN d.state<>'finalized' OR r.reason_code='reconciliation_required'
     OR r.diagnostics @> '[{"code":"AMBER_SYNC_ELIGIBILITY_UNRESOLVED"}]'::jsonb THEN 'recovery'
+  WHEN EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(r.diagnostics,'[]'::jsonb)) e WHERE e->>'code' LIKE 'FIRST_SYNC_%') THEN 'integration'
   WHEN n.state IN ('conflict','baseline_required') THEN 'names'
   WHEN r.diagnostics @> '[{"code":"PRODUCT_EVALUATION_NOT_READY"}]'::jsonb
     OR r.diagnostics @> '[{"code":"REQUIRED_ATTRIBUTE_VALUE_MISSING"}]'::jsonb

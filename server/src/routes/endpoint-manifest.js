@@ -13,6 +13,7 @@ function endpoint(method, path, permission, response = 'json') {
 }
 
 const ENDPOINT_MANIFEST = Object.freeze([
+  endpoint('POST', '/products/creation/cancel', 'products.create'),
   endpoint('POST', '/integration-tasks', 'products.create'),
   endpoint('GET', '/integration-tasks/attempts/:requestId', 'products.create'),
   endpoint('GET', '/integration-tasks', ['products.create','export_templates.manage']),
@@ -43,6 +44,9 @@ const ENDPOINT_MANIFEST = Object.freeze([
   endpoint('GET', '/admin/magento-integration/bindings/:id', 'export_templates.view'),
   endpoint('GET', '/admin/magento-integration/bindings/:id/handoffs', 'export_templates.view'),
   endpoint('GET', '/admin/magento-integration/bindings/:id/controlled-products', 'export_templates.view'),
+  endpoint('POST', '/admin/magento-integration/bindings/:id/controlled-products/resolve', 'export_templates.view'),
+  ...['first-sync/preview','first-sync/apply'].map((path)=>Object.freeze({
+    ...endpoint('POST', `/admin/magento-integration/${path}`, 'export_templates.manage'), additionalPermissions: Object.freeze(['export_templates.publish','exports.view']) })),
   ...['publication/preview','publication/apply','controlled/preview','controlled/apply'].map((path)=>Object.freeze({
     ...endpoint('POST', `/admin/magento-integration/${path}`, 'export_templates.manage'), additionalPermissions: Object.freeze(['export_templates.publish','exports.view']) })),
   endpoint('POST', '/admin/magento-integration/bindings/:id/clone', 'export_templates.manage'),
