@@ -50,12 +50,16 @@ function outputSources(definition, node, seen = new Set(), found = new Set()) {
   return found;
 }
 
-function questionUsage(catalog, definition, categoryCode) {
+function questionUsage(catalog, definition, categoryCode, cells) {
   const group = definition?.groups.find((g) => g.route === categoryCode);
-  return (catalog.questions[categoryCode] || []).map((q) => {
+  const questions = catalog.questions[categoryCode] || [];
+  const usageCells = cells || (questions.length ? (group?.rows || []).flatMap((row) =>
+    Object.entries(row.cells).map(([target, expression]) => ({ row, target,
+      sourceIds: [...outputSources(definition, expression)] }))) : []);
+  return questions.map((q) => {
     const uses = [];
-    for (const row of group?.rows || []) for (const [target, expression] of Object.entries(row.cells)) {
-      if ([...outputSources(definition, expression)].some((id) => {
+    for (const { row, target, sourceIds } of usageCells) {
+      if (sourceIds.some((id) => {
         const source = definition.sources[id];
         return source?.category === categoryCode && source.key === q.id && ['semantic', 'information'].includes(source.kind);
       })) uses.push({ target, rowId: row.id });
@@ -68,7 +72,10 @@ function projectCategory(catalog, revision, definition, categoryCode, input = {}
   if (!Object.hasOwn(catalog.categories, categoryCode)) throw c.error(404, 'MAGENTO_CATEGORY_NOT_FOUND', 'Категорію не знайдено.');
   const groupIndex = definition?.groups.findIndex((g) => g.route === categoryCode) ?? -1;
   const group = definition?.groups[groupIndex];
-  const questions = questionUsage(catalog, definition, categoryCode);
+  const cells = (catalog.questions[categoryCode] || []).length ? (group?.rows || []).flatMap((row) =>
+    Object.entries(row.cells).map(([target, expression]) => ({ row, target,
+      sourceIds: [...outputSources(definition, expression)] }))) : [];
+  const questions = questionUsage(catalog, definition, categoryCode, cells);
   const routes = (revision?.bindings.routes || []).filter((r) => r.routeKey.split(/[.:]/)[0] === categoryCode);
   if (input.routeKey && !routes.some((r) => r.routeKey === input.routeKey)) c.invalid();
   const route = routes.find((r) => r.routeKey === input.routeKey) || routes[0];
@@ -83,11 +90,13 @@ function projectCategory(catalog, revision, definition, categoryCode, input = {}
     const binding = revision?.bindings.attributes.find((a) => a.routeKey === route?.routeKey && a.rowId === rowId && (a.attributeCode || a.target) === code);
     const target = binding?.target || code;
     const expression = row?.cells[target];
-    const sources = expression ? [...outputSources(definition, expression)].map((id) => {
+    const sourceIds = expression ? (cells.find((cell) => cell.row === row && cell.target === target)?.sourceIds
+      || [...outputSources(definition, expression)]) : [];
+    const sources = sourceIds.map((id) => {
       const source = definition.sources[id];
       const question = source?.category === categoryCode && questions.find((q) => q.id === source.key);
       return { id, ...source, label: question?.label || source?.field || source?.key || id };
-    }) : [];
+    });
     const entries = decisions.filter((e) => e.target === target);
     const unresolved = entries.filter((e) => !['approved', 'not_applicable', 'blocked'].includes(e.reviewState)).length;
     const policy = entries.find((e) => e.kind === 'policy');
