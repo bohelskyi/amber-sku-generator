@@ -199,6 +199,43 @@ test('permission denial keeps its machine-readable capability contract', async (
   assert.equal(response.headers.get('cache-control'), 'no-store');
 });
 
+test('first-sync preview requires active authentication, CSRF and every existing capability before service reads', async t => {
+  const service = require('../src/services/magento/first-sync.service');
+  const calls = [];
+  t.mock.method(service, 'review', async (_config, input, options) => {
+    calls.push({ input, actor: options.mutationContext.actorUserId });
+    return { mode: 'review', fields: [], blockers: [] };
+  });
+  const path = '/api/admin/magento-integration/first-sync/preview';
+  const body = { sku: 'SV11500004', bindingRevisionId: '11111111-1111-4111-8111-111111111111' };
+  const capabilities = ['export_templates.manage', 'export_templates.publish', 'exports.view'];
+  accessBySubject.firstSyncReviewer = { applicationUser: { id: 17, status: 'active', displayName: 'Field reviewer' },
+    roles: [], permissions: capabilities };
+  try {
+    for (const [subject, expected] of [[undefined, 401], ['pending', 403], ['disabled', 403]]) {
+      const result = await request(path, { subject, method: 'POST', body, csrfToken: 'known-csrf-token' });
+      assert.equal(result.response.status, expected);
+    }
+    for (const csrfToken of [undefined, 'wrong-token']) {
+      const result = await request(path, { subject: 'firstSyncReviewer', method: 'POST', body, csrfToken });
+      assert.equal(result.response.status, 403); assert.equal(result.data.error, 'Invalid CSRF token');
+    }
+    for (const missing of capabilities) {
+      accessBySubject.firstSyncReviewer.permissions = capabilities.filter(permission => permission !== missing);
+      const result = await request(path, { subject: 'firstSyncReviewer', method: 'POST', body, csrfToken: 'known-csrf-token' });
+      assert.equal(result.response.status, 403); assert.equal(result.data.code, 'INSUFFICIENT_PERMISSION');
+      assert.equal(result.data.requiredPermission, missing);
+    }
+    assert.equal(calls.length, 0);
+    accessBySubject.firstSyncReviewer.permissions = capabilities;
+    const allowed = await request(path, { subject: 'firstSyncReviewer', method: 'POST', body, csrfToken: 'known-csrf-token' });
+    assert.equal(allowed.response.status, 200); assert.deepEqual(calls, [{ input: body, actor: 17 }]);
+    accessBySubject.firstSyncReviewer.permissions = [];
+    const revoked = await request(path, { subject: 'firstSyncReviewer', method: 'POST', body, csrfToken: 'known-csrf-token' });
+    assert.equal(revoked.response.status, 403); assert.equal(calls.length, 1);
+  } finally { delete accessBySubject.firstSyncReviewer; }
+});
+
 test('representative business validation and compatibility errors retain status and body', async () => {
   const archived = await request('/api/delete', {
     subject: 'archiver',

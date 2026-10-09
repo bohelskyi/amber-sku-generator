@@ -33,10 +33,11 @@ export default function AttentionProblemDetail({ product, productUrl, returnTo, 
   const main = groups[0]?.problem;
   const firstSyncProblem = groups.find(({ problem }) => isFirstSyncFieldsProblem(problem))?.problem;
   const canReviewFirstSync = auth.principalLifetime?.valid === true && isActualAdministrator(auth)
-    && ['export_templates.manage', 'export_templates.publish', 'exports.view'].every((permission) => permissions.includes(permission));
-  const exactFirstSyncContext = [product.article, product.bindingRevisionId].every((value, index) => typeof value === 'string'
-    && value.length > 0 && value.length <= (index === 0 ? 256 : 160) && value === value.trim()
-    && !Array.from(value).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127));
+    && ['export_templates.view', 'export_templates.manage', 'export_templates.publish', 'exports.view'].every((permission) => permissions.includes(permission));
+  const exactFirstSyncContext = typeof product.article === 'string' && product.article.length > 0 && product.article.length <= 256
+    && product.article === product.article.trim() && !Array.from(product.article).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
+  const firstSyncPanel = <MagentoFirstSyncFields key={JSON.stringify([product.productId, product.article, product.bindingRevisionId, product.observedAt])}
+    sku={product.article} bindingRevisionId={product.bindingRevisionId} onChange={() => onSaved?.('first_sync_fields')} />;
   const recovery = groups.some(({ problem }) => needsDeliveryRecovery(problem));
   const identityProblem = (main?.diagnosticCode || main?.code) === 'NAME_REMOTE_IDENTITY_CHANGED';
   const canCompare = permissions.includes('export_templates.manage') && permissions.includes('exports.view');
@@ -49,9 +50,9 @@ export default function AttentionProblemDetail({ product, productUrl, returnTo, 
   function repair(problem) {
     if (isFirstSyncFieldsProblem(problem)) {
       if (!canReviewFirstSync) return <p className="sync-problem-guidance">Передайте артикул і причини Адміністратору з дозволами на перевірку та застосування правил Magento.</p>;
-      if (!exactFirstSyncContext) return <p className="sync-problem-guidance">Точний артикул або чинну версію правил ще не підтверджено. Оновіть стан товару перед перевіркою полів.</p>;
+      if (!exactFirstSyncContext) return <p className="sync-problem-guidance">Точний артикул ще не підтверджено. Оновіть стан товару перед перевіркою полів.</p>;
       return problem === firstSyncProblem
-        ? <MagentoFirstSyncFields sku={product.article} bindingRevisionId={product.bindingRevisionId} onChange={() => onSaved?.('first_sync_fields')} />
+        ? firstSyncPanel
         : <p className="sync-problem-guidance">Це поле перевіряється у спільній панелі першого отримання для цього товару.</p>;
     }
     if (problem.code === 'unexpected_failure') {
@@ -88,6 +89,7 @@ export default function AttentionProblemDetail({ product, productUrl, returnTo, 
       {identityProblem && canCompare ? <MagentoProductDiagnosis product={product} returnTo={returnTo} identityOnly onTechnicalEvidence={setComparisonEvidence} /> : repair(main)}
       {main.resolution === 'name' && <ProductNameConflict productId={product.productId} available={Boolean(product.nameConflict)} onSaved={onSaved} />}
     </section>}
+    {!firstSyncProblem && canReviewFirstSync && exactFirstSyncContext && firstSyncPanel}
     {groups.length > 1 && <section className="sync-other-problems" aria-label="Інші перешкоди">
       <h3>Інші перешкоди</h3>
       <p className="sync-problem-guidance">Ці причини також зафіксовано для товару. Після виправлення перевірте оновлений стан доставки.</p>

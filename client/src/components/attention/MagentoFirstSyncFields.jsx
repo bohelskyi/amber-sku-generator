@@ -5,6 +5,7 @@ import { api } from '../../lib/api.js';
 import { Button, ConfirmDialog, Notice, Pagination, StatusBadge, TechnicalDisclosure } from '../ui/index.js';
 
 const root = '/admin/magento-integration/first-sync';
+const bindingIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const identifier = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
 const statuses = new Set(['imported', 'equal', 'optional_empty', 'pending_outward_confirmation', 'conflict', 'unknown', 'review_required']);
 const reasons = {
@@ -128,7 +129,7 @@ function checkedReceipt(data, request) {
 }
 
 const correctionReasons = new Set(['FIRST_SYNC_CANONICAL_CALIBRATION_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED', 'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_WEIGHT_IDENTITY_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN']);
-function FieldPanel({ sku, bindingRevisionId, onChange, principalLifetime, canRecount }) {
+function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
   const [preview, setPreview] = useState(null);
   const [receipt, setReceipt] = useState(null);
   const [decision, setDecision] = useState(null);
@@ -152,19 +153,29 @@ function FieldPanel({ sku, bindingRevisionId, onChange, principalLifetime, canRe
     setOperation({ actor: principalLifetime, kind }); setError(null); setPreview(null); setReceipt(null); setDecision(null);
     const current = () => sequence.current === version && !controller.signal.aborted && active();
     try {
-      const { data } = await api.post(`${root}/${kind}`, body, { signal: controller.signal });
-      if (current()) complete(data, current);
+      let command = body;
+      if (kind === 'preview') {
+        // Recorded problems may refer to a superseded publication. Resolve it on every explicit read.
+        const { data } = await api.get('/admin/magento-integration', { signal: controller.signal });
+        if (!current()) return;
+        if (typeof data?.currentPublishedId !== 'string' || !bindingIdPattern.test(data.currentPublishedId)) {
+          throw new Error('Чинну опубліковану версію правил не підтверджено. Оновіть перевірку або зверніться до налаштувань інтеграції.');
+        }
+        command = { ...body, bindingRevisionId: data.currentPublishedId };
+      }
+      const { data } = await api.post(`${root}/${kind}`, command, { signal: controller.signal });
+      if (current()) complete(data, current, command.bindingRevisionId);
     } catch (cause) {
       if (current()) setError({ actor: principalLifetime, text: boundedText(cause?.response?.data?.error, 1000) ? cause.response.data.error : cause?.message || 'Дію не підтверджено. Повторіть перевірку актуального стану.' });
     } finally { if (current()) { flight.current = null; setOperation(null); } }
   }
   function review() {
     setPage(0);
-    request('preview', { sku, bindingRevisionId }, (data) => setPreview({ actor: principalLifetime, data: checkedPreview(data, sku) }));
+    request('preview', { sku }, (data, _current, bindingRevisionId) => setPreview({ actor: principalLifetime, bindingRevisionId, data: checkedPreview(data, sku) }));
   }
   function apply() {
     if (!selected || !plan || busy || !active()) return;
-    const body = { sku, bindingRevisionId, previewToken: plan.previewToken, target: selected.field.target, scope: selected.field.scope, choice: selected.choice };
+    const body = { sku, bindingRevisionId: visible(preview).bindingRevisionId, previewToken: plan.previewToken, target: selected.field.target, scope: selected.field.scope, choice: selected.choice };
     request('apply', body, (data, isCurrent) => {
       const checked = checkedReceipt(data, body);
       setReceipt({ actor: principalLifetime, data: checked });
@@ -175,7 +186,7 @@ function FieldPanel({ sku, bindingRevisionId, onChange, principalLifetime, canRe
   const fields = plan?.fields.slice(page * 50, (page + 1) * 50) || [];
   return <section className="card space-y-4 p-5" aria-label={`Перше отримання полів ${sku}`}>
     <div><h2 className="font-semibold">Перше отримання полів</h2><p className="text-sm break-words">Артикул: <strong>{sku}</strong></p></div>
-    <p className="text-sm">Порівняйте поточні значення Amber і Magento. Кожне підтвердження стосується рішення для одного поля та однієї мови. Доставка перевіряється окремо.</p>
+    <p className="text-sm">Перевірка читає актуальні поля за чинними правилами незалежно від збереженої діагностики. Вона не змінює дані й не запускає синхронізацію. Збереження рішення для поля та доставка виконуються окремо.</p>
     <Button size="compactMd" busy={busy} disabled={!active()} onClick={review}>{busy ? visible(operation)?.kind === 'apply' ? 'Зберігаємо рішення поля…' : 'Читаємо актуальні поля…' : saved ? 'Перевірити поля після рішення' : 'Перевірити актуальні поля'}</Button>
     {currentError && <Notice tone="error">{currentError}</Notice>}
     {saved && <Notice tone="success"><p>{saved.receipt.alreadyApplied ? 'Це рішення вже було збережено.' : 'Рішення для поля збережено.'} {fieldLabel(saved)}</p>
@@ -210,6 +221,8 @@ function FieldPanel({ sku, bindingRevisionId, onChange, principalLifetime, canRe
 
 export default function MagentoFirstSyncFields(props) {
   const auth = useAuth();
-  if (!isActualAdministrator(auth) || auth.principalLifetime?.valid === false || !boundedText(props.sku, 256) || !boundedText(props.bindingRevisionId)) return null;
+  if (!isActualAdministrator(auth) || auth.principalLifetime?.valid !== true
+    || !['export_templates.view', 'export_templates.manage', 'export_templates.publish', 'exports.view'].every((permission) => auth.permissions?.includes(permission))
+    || !boundedText(props.sku, 256) || props.sku !== props.sku.trim()) return null;
   return <FieldPanel key={JSON.stringify([props.sku, props.bindingRevisionId, auth.principalLifetime?.id])} {...props} principalLifetime={auth.principalLifetime} canRecount={auth.permissions?.includes('products.decode') && auth.permissions?.includes('products.recount')} />;
 }

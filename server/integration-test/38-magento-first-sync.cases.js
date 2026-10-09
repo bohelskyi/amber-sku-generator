@@ -1,5 +1,5 @@
 // Registered by magento-first-sync.test.js; owns a unique disposable database.
-// All Magento observations are supplied; the only injected fetch permits GET storeConfigs.
+// Magento transport is synthetic and permits GET requests only.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
@@ -51,10 +51,13 @@ test('first-sync coordinator preserves real names, partial progress and transact
       } };
     for (const code of ['BR','NM','KL','CH','AR','SV']) await db.query('INSERT INTO categories(code,name) VALUES($1,$1) ON CONFLICT DO NOTHING', [code]);
     await db.query("INSERT INTO questions(category_code,key,label,input_type,include_in_sku,required) VALUES('BR','braclet_size','Size','text',0,0)");
+    await db.query("INSERT INTO questions(category_code,key,label,input_type,include_in_sku,required) VALUES('SV','weight','Weight','text',0,0)");
     const definition = structuredClone(fixture.definition()), literal = value => ({ op: 'literal', value });
     const size = { op: 'text', input: { op: 'source', id: 'size' }, trim: false, format: 'scalar-v1', onAbsent: 'empty' };
     definition.sources.size.key = 'braclet_size';
-    definition.sources = { sku: definition.sources.sku, size: definition.sources.size }; definition.tables = {};
+    definition.sources = { sku: definition.sources.sku, size: definition.sources.size,
+      svWeight: { kind: 'information', category: 'SV', key: 'weight', type: 'scalar',
+        provenance: 'supplied-stored-answers-v1', aliases: [] } }; definition.tables = {};
     for (const group of definition.groups) for (const row of group.rows) {
       delete row.cells.kolir; delete row.cells.decor_weight; delete row.cells.dovzhyna_brasletu_diuimiv;
       if (row.id === 'english') row.cells.price = literal('');
@@ -64,10 +67,16 @@ test('first-sync coordinator preserves real names, partial progress and transact
     br.rows[0].cells.name = { op: 'join', items: [literal('Generated UA'), size], delimiter: ' ', omitEmpty: true };
     br.rows[1].cells.name = literal('Local EN');
     br.rows[0].cells.product_websites = literal('fixture');
+    const sv = definition.groups.find(group => group.route === 'SV');
+    sv.rows[0].cells.decor_weight = { op: 'numberText', input: { op: 'source', id: 'svWeight' },
+      format: 'js-number-positive-v1', error: { op: 'error', field: 'decor_weight',
+        message: literal('Немає додатної ваги для Magento.') } };
     const rawSchema = structuredClone(fixture.schema());
     rawSchema.attributes.find(a => a.attribute_code === 'name').scope = 'store';
     const attribute = rawSchema.attributes.find(a => a.attribute_code === 'dovzhyna_brasletu_diuimiv');
     attribute.frontend_input = 'text'; attribute.options = [];
+    const weightAttribute = rawSchema.attributes.find(a => a.attribute_code === 'decor_weight');
+    weightAttribute.frontend_input = 'text'; weightAttribute.options = [];
     rawSchema.storeTopology.websites[0].default_group_id = 802;
     rawSchema.storeTopology.storeGroups[0].default_store_id = 805;
     rawSchema.storeTopology.storeViews.push({ id: 805, code: 'default', name: 'Ukrainian', website_id: 801, store_group_id: 802, is_active: true });
@@ -75,6 +84,9 @@ test('first-sync coordinator preserves real names, partial progress and transact
     const family = await templates.createTemplate({ key: 'coordinator-' + randomUUID(), displayName: 'First coordinator', definition }, options);
     const version = await templates.publishTemplate(family.id, { expectedRevision: family.draft.revision, expectedDefinitionHash: family.draft.definitionHash }, options);
     const approved = fixture.approvedBindings(definition, schema, 'BR');
+    const svApproved = fixture.approvedBindings(definition, schema, 'SV');
+    approved.routes = approved.routes.map(route => svApproved.routes.find(candidate => candidate.routeKey === route.routeKey && candidate.enabled) || route);
+    for (const key of ['attributes', 'options', 'policies']) approved[key].push(...svApproved[key]);
     for (const policy of approved.policies) policy.policy = 'authoritative_create_update';
     async function publish(expectedCurrentId) {
       let value = await bindings.createDraft({ installationKey: 'first-coordinator-fixture', origin: config.baseUrl,
@@ -131,7 +143,86 @@ test('first-sync coordinator preserves real names, partial progress and transact
       (SELECT jsonb_agg(r ORDER BY session_id,revision) FROM magento_first_sync_progress r) progress,
       (SELECT jsonb_agg(f ORDER BY session_id,revision,target,scope) FROM magento_first_sync_fields f) fields,
       (SELECT jsonb_agg(r ORDER BY public_product_identity_id) FROM magento_product_sync_requests r) requests,
+      (SELECT jsonb_agg(j ORDER BY id) FROM magento_sync_jobs j) jobs,
+      (SELECT jsonb_agg(s ORDER BY job_id,ordinal) FROM magento_sync_steps s) steps,
+      (SELECT jsonb_agg(i ORDER BY id) FROM public_product_identities i) identities,
+      (SELECT jsonb_agg(r ORDER BY full_sku) FROM sku_registry r) reservations,
+      (SELECT jsonb_agg(r ORDER BY currency_pair) FROM exchange_rate_cache r) rates,
       (SELECT jsonb_agg(a ORDER BY id) FROM audit_events a) audits`)).rows[0]);
+
+    await t.test('fresh public preview ignores saved diagnosis and preserves populated SV weight, names and all durable state', async () => {
+      const item = (await insertProductFixture(db, `INSERT INTO products(full_sku,category,weight,total_price_uah,details,magento_name_override)
+        VALUES('SV11500004','SV',132.300,42,'{"answers":{"weight":"132,3"},"manualPriceUah":42}',
+          '{"generated":{"all":"Fixture name","en":"Fixture name"},"values":{"all":"Existing Amber UA","en":"Existing Amber EN"}}')
+        RETURNING id,full_sku,public_product_identity_id`)).rows[0];
+      await db.query("UPDATE product_full_export_state SET business_exclusion_state='none',delivery_version=delivery_version+1 WHERE product_id=$1", [item.id]);
+      const request = { sku: item.full_sku, bindingRevisionId: binding.id }, http = [], methods = [];
+      // The remote ID is synthetic; the reported 1488 is Amber's local product ID.
+      const remote = { id: 91488, sku: item.full_sku, attribute_set_id: 8001, name: 'Existing Magento UA',
+        price: 42, custom_attributes: [{ attribute_code: 'decor_weight', value: '140' }] };
+      let report;
+      const previewOptions = { ...options,
+        observeRate: () => require('../src/services/currency.service').observeUsdRate({ databasePool: db,
+          fetchLive: async () => ({ rate: 40, rateDate: '2026-10-09', fetchedAt: '2026-10-09T00:00:00Z' }) }),
+        preview: async (config, input) => {
+          report = await require('../src/services/magento/sync-preview').previewProduct(config,
+            { ...input, discover: async () => schema, categoryObservation: { trees: [], categoryFailures: [] } });
+          return report;
+        },
+        fetchImpl: async (url, init) => {
+          const target = new URL(url), pathname = target.pathname;
+          methods.push(init?.method || 'GET');
+          assert.equal(init?.method || 'GET', 'GET', 'Preview must never write to Magento');
+          http.push(pathname);
+          if (pathname.endsWith('/store/storeConfigs')) return options.fetchImpl(url, init);
+          assert.ok(pathname.endsWith('/products'), pathname);
+          assert.equal(target.searchParams.get('searchCriteria[filter_groups][0][filters][0][value]'), item.full_sku);
+          return new Response(JSON.stringify({ total_count: 1,
+            items: [{ ...remote, name: pathname.includes('/rest/en/') ? 'Existing Magento EN' : remote.name }] }),
+            { status: 200, headers: { 'content-type': 'application/json' } });
+        } };
+      for (const code of ['PRODUCT_EVALUATION_NOT_READY', 'NAME_READ_UNAVAILABLE']) {
+        await db.query(`INSERT INTO magento_product_sync_requests(public_product_identity_id,product_id,state,reason_code,diagnostics)
+          VALUES($1,$2,'needs_attention','data_or_binding',$3::jsonb)
+          ON CONFLICT(public_product_identity_id) DO UPDATE SET diagnostics=EXCLUDED.diagnostics`,
+        [item.public_product_identity_id, item.id, JSON.stringify([{ code, issueFields: ['decor_weight'] }])]);
+        const before = await snapshot(), productBefore = await actual(item), start = http.length;
+        const preview = await service.review(config, request, previewOptions);
+        assert.equal(preview.mode, 'first');
+        assert.ok(report.blockers.some(blocker => blocker.code === 'PRODUCT_EVALUATION_NOT_READY' && blocker.issueFields.includes('decor_weight')));
+        assert.equal(preview.readyForOutbound, false, 'Opening first-sync does not repair the weight evaluator blocker');
+        const weight = preview.fields.find(field => field.target === 'decor_weight');
+        assert.ok(weight && ['review_required', 'conflict'].includes(weight.status));
+        assert.equal(weight.local.known, true); assert.equal(weight.local.present, true);
+        assert.equal(weight.local.value, '132.300'); assert.equal(weight.remote.value, '140');
+        assert.ok(http.slice(start).some(pathname => pathname.includes('/rest/all/')));
+        assert.ok(http.slice(start).some(pathname => pathname.includes('/rest/en/')));
+        assert.ok(methods.every(method => method === 'GET'), 'Even a caught transport failure cannot hide a write attempt');
+        assert.equal(await snapshot(), before, 'Preview cannot persist names, weight, jobs, requests, ledger, audit, rates or identifiers');
+        assert.deepEqual(await actual(item), productBefore);
+        assert.equal(productBefore.weight, '132.300'); assert.equal(productBefore.details.answers.weight, '132,3');
+        assert.deepEqual(productBefore.magento_name_override.values, { all: 'Existing Amber UA', en: 'Existing Amber EN' });
+        assert.equal(await session(item), undefined);
+        const repeated = await service.review(config, request, previewOptions);
+        assert.equal(repeated.previewToken, preview.previewToken);
+        assert.equal(await snapshot(), before, 'Repeated preview remains read-only');
+      }
+      const beforeHttp = http.length;
+      await db.query("UPDATE application_users SET status='disabled',deactivated_at=CURRENT_TIMESTAMP WHERE id=$1", [actor]);
+      try {
+        const before = await snapshot();
+        await assert.rejects(service.review(config, request, previewOptions), { code: 'ADMIN_PERMISSION_REVOKED' });
+        assert.equal(await snapshot(), before); assert.equal(http.length, beforeHttp, 'Revoked actor cannot start Magento reads');
+      } finally { await db.query("UPDATE application_users SET status='active',deactivated_at=NULL WHERE id=$1", [actor]); }
+      binding = await publish(binding.id);
+      const beforePublicationReview = await snapshot(), callsBeforePublicationReview = http.length;
+      await assert.rejects(service.review(config, request, previewOptions), { code: 'MAGENTO_SYNC_PUBLISHED_CURRENT_BINDING_REQUIRED' });
+      assert.equal(http.length, callsBeforePublicationReview, 'An old binding cannot start Magento reads');
+      const current = await service.review(config, { ...request, bindingRevisionId: binding.id }, previewOptions);
+      assert.equal(current.mode, 'first'); assert.equal(current.readyForOutbound, false);
+      assert.equal(await snapshot(), beforePublicationReview);
+      assert.ok(methods.every(method => method === 'GET'));
+    });
 
     const p = await product();
     await t.test('partial UA import preserves local EN and never fabricates a common name baseline', async () => {
