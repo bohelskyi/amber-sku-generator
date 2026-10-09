@@ -85,9 +85,33 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
 
   async function scenario({ create = false, initialLinks = [] } = {}) {
     const sku = `BR/SYNC-${crypto.randomUUID()}`.toUpperCase();
-    const product = (await insertProductFixture(pool, `INSERT INTO products
+    const insert = `INSERT INTO products
       (full_sku,base_sku,sequence_number,category,weight,total_price,total_price_uah,price_per_gram,uah_rate,details)
-      VALUES ($1,$1,0,'BR',5,10,42,2,40,'{"answers":{}}') RETURNING id,public_product_identity_id`, [sku])).rows[0];
+      VALUES ($1,$1,0,'BR',5,10,42,2,40,'{"answers":{}}') RETURNING id,public_product_identity_id`;
+    let product;
+    if (create) product = (await insertProductFixture(pool, insert, [sku])).rows[0];
+    else {
+      // Seed a synthetic historical external-delivery snapshot, not a live command.
+      // Ordinary UPDATE tests must not infer prior delivery from the name baseline.
+      const client = await pool.connect(), gate = require('../src/services/full-product-cutover-gate');
+      try {
+        await gate.begin(client, 'BEGIN');
+        product = (await client.query(insert, [sku])).rows[0];
+        const audit = await require('../src/audit/audit-events').writeAuditEvent(client, {
+          mutationContext: {actorUserId,requestId:'sync-fixture-prior-delivery'},
+          eventKey:'product.external_delivery_acknowledged',subjectType:'product',subjectId:product.id,
+          details:{fixture:true,fullRevision:'1',deliveryVersionBefore:'1',routeBefore:'normal',
+            externalDeliverySemantic:true,snapshotConfirmationClaimed:false,payloadEqualityClaimed:false,
+            automaticSyncSuccessClaimed:false,planHash:hash({fixture:'ordinary-sync-prior-delivery',productId:product.id,sku}),
+            publicSku:sku,remote:{originHash:require('../src/services/magento/binding-contract').originHash(config.baseUrl),
+              productId:product.id+100000,sku}} });
+        await client.query(`INSERT INTO product_full_export_state(product_id,route,evidence,
+          externally_delivered_revision,externally_delivered_event_id)
+          VALUES($1,'normal','{"origin":"ordinary_save","fixture":true}'::jsonb,1,$2)`, [product.id,audit.id]);
+        await gate.commit(client);
+      } catch (cause) {await gate.rollback(client);throw cause;}
+      finally {await gate.release(client);client.release();}
+    }
     await pool.query("UPDATE product_full_export_state SET business_exclusion_state='none',delivery_version=delivery_version+1 WHERE product_id=$1", [product.id]);
     const initial = { id: product.id + 100000, sku, attribute_set_id: 8001, name: 'Old name', type_id: 'simple', price: 40,
       status: 1, visibility: 4, custom_attributes: [{ attribute_code: 'unknown_attribute', value: 'Keep me' }], media_gallery_entries: [{ id: 100 }],

@@ -1,0 +1,288 @@
+# Magento first-sync field contract
+
+This document describes the local server implementation for adopting mapped data
+from one existing, exact Magento product on its first eligible synchronization.
+It does not record production deployment, binding publication or live acceptance.
+The ordinary delivery, historical recovery, lifecycle and authorization contracts
+remain authoritative; see [Magento integration](MAGENTO_INTEGRATION.md),
+[pricing](PRICING.md) and [manager workflows](MANAGER_PRODUCT_WORKFLOWS.md).
+
+## Eligibility and actual delivery history
+
+The server classifies the complete product/recount history before constructing a
+field plan. It never identifies a first synchronization solely from an empty
+`synced_at`, confirmed counter or UI label.
+
+| Evidence | Classification |
+| --- | --- |
+| Remote item absent, complete history, no prior delivery, historical ambiguity or other-origin evidence | Existing create lane; no remote field adoption |
+| Existing exact item, complete unambiguous history, no established delivery or protected work | First-sync field review |
+| Incomplete first-sync session | Keep its field gate, including after an outward job succeeds |
+| Completed session or acknowledged successful delivery for the same origin, public SKU and exact remote ID | Ordinary synchronization |
+| Actual `externally_delivered_revision > 0` with a linked immutable exact origin/SKU/remote-ID receipt in the history | Ordinary lane after identity, history and origin checks |
+| Snapshot membership, confirmed/cutover/CSV-retired counters or recount history without actual delivery proof | Historical review; these facts cannot initialize first-sync receipts |
+| Changed remote identity, native ownership collision, incomplete/inconsistent history or other-origin evidence | Review blocker |
+| Unfinished jobs, media/visibility/historical intents, protected reconciliation or test-deletion evidence | Protected work/recovery blocker |
+
+The implementation uses `first-sync-eligibility.js` and the existing recovery-history
+reader. Existing sessions and acknowledged IDs must match the observed Magento
+item; another item with the same displayed label cannot confer ownership.
+A positive external-delivery floor must reference the exact
+`product.external_delivery_acknowledged` event for its own lineage product and
+revision, with true delivery semantics and a valid plan hash. Every linked remote
+receipt must match the current origin, public SKU and remote ID. Foreign origins,
+changed/absent remote identities and malformed receipts remain explicit review
+blockers; they cannot fall through to adoption or CREATE. Complete same-identity
+predecessor history can carry the same exact receipt.
+Native ownership uses the server loader's private proof. An allocated native SKU
+without its own acknowledged remote identity remains a collision.
+
+## Exact field projection
+
+`first-sync-projection.js` consumes the original server-owned
+`observation: { amber, raw, schema, domainEvidence }`, optional per-field receipts
+and verified currency evidence. It requires the exact compiled published
+definition and its approved published binding. A JSON copy of the compiled object
+cannot replace the compiler's proof.
+
+The local category remains unchanged. There must be one approved enabled route
+for that category and the observed remote attribute-set ID. Ambiguous routes,
+changed attribute IDs/metadata/requiredness, missing membership and stale option
+identity produce precise blockers. Source reads and forward evaluation keep the
+original product object so immutable historical-source proof survives.
+
+Receipt identity is `target + scope`; `mappingHash` is mapping evidence, not a new
+receipt key. Metadata records persistence kind, canonical source key/field,
+binding revision, definition hash, route, outward policy and required runtime
+validation. Publication or mapping changes cannot silently make an already
+received field eligible for another import.
+
+| Local value | Fresh remote value | Decision before persistence |
+| --- | --- | --- |
+| Empty | Valid populated value with proven inverse and supported setter | Import into the canonical local source |
+| Populated | Exactly equal normalized value | Equal; persist receipt without restoring old local data |
+| Populated | Different populated value | Conflict requiring an exact administrator field decision |
+| Populated | Empty | Pending guarded outward confirmation, only with authoritative outward policy |
+| Empty | Empty, optional | Optional-empty receipt |
+| Empty | Empty, required locally or by pinned/fresh Magento metadata | Required-field review |
+| Unknown or invalid evidence | Any | Unknown/review; failed reads never become empty |
+
+Zero and false are populated data. Type validation can still reject them for a
+particular field, such as positive physical weight or price. Decimal comparison
+normalizes comma/dot and trailing zeros exactly at the declared scale and unit;
+it uses no tolerance, rounding or inferred unit conversion.
+
+Direct reverse mapping is limited to proven one-source expressions and approved
+wrappers. The exact same-source presence guard with an empty/error fallback is
+supported. Arbitrary conditionals, first-present selection, bands, joins and other
+composites are evaluated forward; their outputs never reconstruct canonical inputs.
+A missing input needed by that forward evaluation remains review.
+
+Approved semantic option identities come from binding source keys and native option
+IDs, not remote labels. A populated local semantic value can establish equality
+through its proven forward option even for many-to-one mappings. An empty local
+value requires a unique inverse; that does not authorize mutation of historical
+identity or immutable characteristic versions.
+
+## Names are received once per language
+
+The base `all`/main name and `en` name have independent receipts. On first receipt,
+a valid populated remote full name is authoritative even when the known prior
+local full name is different or invalid. The bounded original local evidence is
+retained for compare-and-swap. This adopts full-name overrides, not subject fields,
+SKU components or an inferred translation.
+
+Null or empty remote names preserve local names for the normal guarded outward
+path. EN is known only from a fresh exact product ID/SKU observation in the active
+pinned/current EN scope with no scoped read failure. Missing EN identity or a failed
+read leaves EN unknown while the base field keeps its own state.
+
+After `name_received`, retries preserve later manager edits. They delegate to
+ordinary name reconciliation and cannot reimport the former remote name. Partial
+language receipts do not initialize unresolved languages. Persistence still needs
+the existing generated-name anchor and a valid saved pair; inability to build that
+pair is an explicit setter blocker. Information/price changes retain accepted or
+manual names while reanchoring them to the resulting generated pair.
+
+## Canonical setters and unsupported coverage
+
+| Mapping | Current persistence support |
+| --- | --- |
+| Full names in `all` and `en` | Existing name-state/override path with generation, pair, source and exact remote checks |
+| Direct information `BR.braclet_size`, `NM.neckle_size`, `KL.exact_size`, `CH.bead_length`, `CH.bead_width`, `CH.rosary_length`, `SV.size` | Existing information validator/setter; category, catalog dependencies, active-product state and canonical normalization must pass |
+| Direct final price from `product.total_price_uah` | Existing guarded in-place Manual UAH price command, when currency, rate and automatic baseline are proven |
+| Custom gram targets `decor_weight`/`vaha_vyrobu` from the recognized physical/SV weight source | Exact gram/scale-three and physical-answer coherence checks; first-sync weight import setter is currently unsupported |
+| Generic semantic characteristics | Forward equality can be checked; historical/immutable characteristic import has no safe first-sync setter |
+| Native Magento `weight` | Ignored transport coverage; never a source for adopting local grams |
+| Derived outputs | Forward comparison/outward planning only; no canonical import |
+| Photos | Explicit unsupported URL-import coverage; no remote photo adoption |
+| Identity, archive/visibility, inventory and other transport controls | Outside canonical field adoption |
+
+The static information allowlist is not setter authority. The runtime information
+service rejects fields with unsafe catalog, pricing, visibility, option-rule or
+identity dependencies. Unchanged unsupported fields may be verified equal; an
+attempted unsupported import remains review.
+
+The direct price helper reads store configuration through the closed GET-only
+Magento client before database locks. It proves one approved bound website, the
+pinned/current website default group and active default UA store, and the active
+pinned/current EN store on that website. Store-config IDs, codes, websites,
+UA/EN locales and both `base_currency_code: UAH` must agree. Incomplete topology,
+unreadable configuration or another currency leaves price unverified. Its
+object-owned proof cannot be recreated by copying `{verified:true,currency:'UAH'}`.
+
+Rate evidence is captured outside the business transaction. Price preparation and
+apply perform no network requests: they use the caller's queryable transaction,
+the captured current rate observation and the existing price preview/apply command.
+The decision is `manual_uah` with marketing rounding disabled. The remote decimal
+must match the authoritative result exactly at scale two, including the existing
+numeric conversion boundary. A positive coherent automatic baseline, usable rate,
+exact current local state and preview token are mandatory. Manual/final UAH and
+calculated/automatic baseline fields remain separate; no custom USD/gram basis,
+rate or matrix result is fabricated. The existing price command owns pricing
+audit and export-revision changes.
+
+A derived native `price`, including literal or numeric-wrapper outputs, compares
+forward as positive scale-two UAH only when pinned/current native price metadata
+and verified UAH evidence prove that contract. REST number `42`, output `"42"`
+and `"42.000"` can then be equal. It remains `kind: derived`/
+`persistence: derived` and never writes `total_price_uah`. Arbitrary numeric text
+or dimensions have no guessed unit contract.
+
+## Durable receipts, decisions and replay
+
+Migration [073](../server/migrations/073_magento_first_sync_ledger.sql) adds the
+permanent session/progress/field ledger. A session is keyed by Magento origin hash
+and stable public product identity, with unique remote identity in that origin.
+It records installation, public SKU, initial product/binding and exact remote ID;
+a successor product or mapping hash cannot become a fresh receipt identity.
+
+Fields are bounded server-derived evidence, including local-before, fresh remote,
+accepted-after, source provenance and mapping hash. The complete mapped manifest
+is server-owned; a caller cannot finalize an arbitrary subset. Progress uses an
+expected session revision, exact preview/command hashes, transaction locks and an
+immutable audit receipt. Local setter changes and new field receipts commit in the
+same transaction. Terminal field receipts are permanent.
+
+Only newly accepted `imported`/`name_received` transitions enter local setters.
+Received, equal, unresolved and outward-only fields cannot restore old local values.
+Exact retry returns the recorded result without applying the same local mutation
+again. Changed preview evidence, a conflicting command at the same receipt,
+changed origin/identity or a stale session revision fails closed.
+
+The first-sync routes are:
+
+- `POST /api/admin/magento-integration/first-sync/preview`: exact SKU and published binding revision;
+- `POST /api/admin/magento-integration/first-sync/apply`: the same identity, current preview token, exact target/scope and `keep_local` or `accept_remote`.
+
+Both retain authenticated active-user, CSRF and the existing manage/publish/export
+permission checks. Apply additionally requires and revalidates Administrator
+authority. `accept_remote` is available only for a valid conflict with a supported
+canonical setter. `keep_local` requires the approved authoritative outward policy;
+it records pending outward confirmation and does not prove delivery.
+
+## Durable initial name authority and recovery
+
+For a reviewed initial write into an empty name scope, enqueue stores
+`baseline.firstSyncNames: {sessionId, revision, scopes}` in the job's immutable
+baseline. These are the exact originating ledger session, receipt revision and
+pending language scopes, not a later UI decision or a newly issued first-sync
+permission.
+
+On restart, APPLY and recovery reconstruct that narrow authority from the
+referenced immutable progress command and validate it against the latest session
+and field receipts. The checks bind product/public identity, origin, installation,
+SKU, exact remote ID, binding/definition, sent full names, initial empty remote
+evidence, source route and mapping hashes to the same immutable job. A received
+language may no longer differ from the current remote name; receipt progression
+never reauthorizes an ordinary received-name conflict. Missing, altered or
+mismatched references block with name-receipt review.
+
+Recovery inspection is read-only: it observes the exact job/product, loads the
+durable name proof and computes recovery checks. It does not invoke field imports
+or enroll a first-sync session. Uncertain/dispatched steps keep the existing
+reviewed recovery process.
+
+A reviewed continuation/reconciliation gets an opaque, request-owned
+`reviewedRecovery` proof bound to the exact job, plan/step fingerprints, remote
+observation, identity, origin, installation and binding. Only that proof permits
+the eligibility reader's narrow exception for a `reconciliation_required`
+request whose `active_job_id` is this same job. Other jobs, different active-job
+requests and unrelated protected work remain blocked.
+
+Completed reconciliation first verifies all observed operation results and enforces
+the first-sync field gate. Before recording job success, its existing transaction
+revalidates actor, product/binding context and the exact latest first-sync receipt
+revision/manifest. A concurrent receipt change prevents acknowledgment. The
+reconciliation path records already observed results and has no dispatch path.
+
+## Readiness, completion and ordinary delivery
+
+`readyForOutbound` allows pending outward fields so local-populated/remote-empty
+products can use the ordinary guarded delivery path. It still requires every mapped
+field to be accounted for, no conflict/unknown/review blocker and validated local
+setter work. It grants no independent Magento-write authority.
+
+`complete` requires terminal receipts for every target/scope in the server manifest. Pending
+outward fields remain incomplete until verified exact readback becomes
+`outward_verified`. Historical completion is not erased by a failed later read,
+but current read failures still block current first-sync readiness.
+
+The runtime gate runs during enqueue/APPLY and before dispatch/final
+acknowledgment. It checks the current session revision and full manifest against
+the exact job/identity/binding context. Reviewed recovery proofs remain tied to
+that exact job and observation; ordinary recovery/uncertain-write protections are
+preserved. A product created by its own verified CREATE step continues through its
+existing create lane rather than adopting a foreign item.
+
+Accepted information or price changes require a new local snapshot/forward review
+before outward transmission. Non-name equality/empty receipts based on old
+canonical inputs are deferred until that recheck. This prevents unchanged-looking
+derived fields from being initialized against inputs that have just changed.
+Unknown or unsupported fields remain visible; a partial successful receipt never
+globally marks the product initialized. Completion covers the mapped adoption
+manifest and does not claim photo URL import or replace independent media checks.
+
+Relevant implementation is under
+[the Magento services](../server/src/services/magento/first-sync.service.js):
+`first-sync-field-plan`, `first-sync-projection`, `first-sync-progress-plan`,
+`first-sync-eligibility`, `first-sync-ledger`, `first-sync-local-apply`,
+`first-sync-price` and `first-sync-runtime`. Focused unit and disposable PostgreSQL
+regressions are repository verification; they are not real-store acceptance.
+
+## Reviewed historical lanes
+
+Stable and mixed-history recount exposure reconciliation can admit first-field
+review through an opaque proof backed by the exact immutable audit, paired
+broader-resync handoff and enrolled item. The proof binds origin, installation,
+public identity, SKU, remote ID, current published binding, structural lineage
+and retained export history. Its scope is `first_sync_review_only`; the original
+`doesNotAcknowledgeExport` flag stays true. It never proves completed delivery.
+Receipts predating this explicit envelope require another reviewed decision;
+startup does not backfill authority into historical receipts.
+
+Field commit, dispatch and acknowledgment reread this proof under short local
+NOWAIT lineage/export locks. New retained files, lineage changes, binding or
+identity drift invalidate it. Canonical field imports and increasing obligation
+generations do not rewrite its immutable historical evidence. Actual field
+decisions and terminal verified readback remain necessary for completion.
+
+An already-confirmed historical standard UPDATE or atomic `awaiting_native`
+UPDATE uses a separate opaque execution capability for its exact immutable
+delivery plan. Each dispatch/ack transaction rereads the active intent and job,
+original actor, product/binding CAS, generation, remote identity provenance and
+protected work. Incomplete first-sync sessions or a foreign identity claiming
+the same origin/remote ID block execution. This lane grants no field/name
+imports, first-sync receipts or completion, and retains sticky uncertain-write
+and ordinary precondition/recovery protections. Explicit standard CREATE keeps
+its existing separate create path.
+
+Derived English text fields can compare a proven fresh forward output against
+the exact store-scoped remote value without a reverse setter: equality is a
+comparison receipt; empty remote plus authoritative policy is pending guarded
+outward delivery. Populated mismatch remains review. Direct English canonical
+imports remain unsupported, and missing store/remote evidence stays unknown.
+
+Repeated lifecycle revalidation on one client reuses its already-held session
+lock while rereading the writer/gate contract; it preserves shared/exclusive
+ownership so the final transaction release remains balanced.

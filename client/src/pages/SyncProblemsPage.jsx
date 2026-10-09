@@ -159,7 +159,8 @@ export default function SyncProblemsPage() {
               <MagentoSyncStatus status={{ state: selected.state || 'needs_attention', confirmedAt: selected.confirmedAt }} /></header>
             {savedCurrent && <Notice tone="success">{saved.kind === 'recovery'
               ? 'Результат перевірки доставки збережено в Amber. Поточний стан Magento показано окремо.'
-              : 'Дані виправлено в Amber. Результат доставки показано окремо у стані Magento.'}</Notice>}
+              : saved.kind === 'first_sync_fields' ? 'Рішення для поля збережено. Результат доставки перевіряється окремо.'
+                : 'Дані виправлено в Amber. Результат доставки показано окремо у стані Magento.'}</Notice>}
             {selected.state && selected.state !== 'needs_attention' && <Notice tone={selected.state === 'synced' ? 'success' : 'info'}>
               {selected.state === 'synced' ? 'Magento підтвердив синхронізацію поточного стану товару.'
                 : ['pending', 'syncing'].includes(selected.state) ? 'Поточна зміна очікує завершення доставки. Ця сторінка оновить стан автоматично.'

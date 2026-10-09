@@ -88,4 +88,8 @@ for (const [path, operation] of [['product-preview', editor.currentPreview], ['c
   router.post(`${root}/${path}`, requirePermission('export_templates.manage'), requirePermission('exports.view'),
     handle((req) => operation(config, req.body)));
 }
+for(const [path,operation] of [['preview','review'],['apply','apply']]) {
+  router.post(`${root}/first-sync/${path}`,requirePermission('export_templates.manage'),requirePermission('export_templates.publish'),requirePermission('exports.view'),
+    handle((req)=>require('../../services/magento/first-sync.service')[operation](config,req.body,{mutationContext:getRequestMutationContext(req)})));
+}
 module.exports = router;

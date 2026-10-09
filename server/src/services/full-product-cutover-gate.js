@@ -50,8 +50,13 @@ async function rollback(client) {
 // Access-administration commands already own their authority lock in an RC
 // transaction. Join the gate only after that lock; never reverse its ordering.
 async function enterExisting(client) {
-  await client.query('SELECT pg_advisory_lock_shared(hashtext($1))', [LOCK_KEY]);
-  held.set(client, false);
+  // A short mutation may revalidate more than once on the same client. Reuse
+  // its existing session lock; PostgreSQL counts repeated acquisitions, while
+  // this boundary owns one release. Preserve an existing exclusive lock too.
+  if (!held.has(client)) {
+    await client.query('SELECT pg_advisory_lock_shared(hashtext($1))', [LOCK_KEY]);
+    held.set(client, false);
+  }
   await client.query("SET LOCAL amber.lifecycle_writer_version = '1'");
   const gate = await readGate(client);
   if (gate.phase === 'preparing') throw error('EXPORT_CUTOVER_PREPARING', 'Export lifecycle cutover is preparing', 503);

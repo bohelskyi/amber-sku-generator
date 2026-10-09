@@ -9,7 +9,7 @@ for (const versionCount of [3,5]) suite.test(`historical recount exposure: ${ver
     await require('./historical-runtime-fixture')(suite,url);
     const actor=Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Historical test') RETURNING id")).rows[0].id);
     await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'",[actor]);
-    const {scenario,config,published,installationKey}=await require('./stable-recount-exposure-fixture')(db,actor);
+    const {scenario,config,published,installationKey}=await require('./stable-recount-exposure-fixture')(db,actor,{firstSyncReview:true});
     const s=await scenario(), chain=[];
     for (const sku of ['SV-LEGACY-A','SV-LEGACY-B'].slice(0,versionCount===3?1:2)) chain.push((await insertProductFixture(db,
       `INSERT INTO products(full_sku,base_sku,sequence_number,category,weight,total_price,total_price_uah,price_per_gram,uah_rate,details)
@@ -61,6 +61,7 @@ for (const versionCount of [3,5]) suite.test(`historical recount exposure: ${ver
       }
       await conn.query('COMMIT');
     } finally {await conn.query('ROLLBACK');conn.release();}
+    await runNodeInDatabase(url,"require('./src/db/run-migrations').runMigrations().finally(()=>require('./src/db/pool').end()).catch(e=>{console.error(e);process.exitCode=1;});");
     const current=chain.at(-1); let oldPresent=false,oldFailure=false,reads=0;
     const fetchImpl=async(url,init)=>{
       assert.equal(init.method,'GET','review/apply has no Magento writes');reads++;
@@ -181,8 +182,18 @@ for (const versionCount of [3,5]) suite.test(`historical recount exposure: ${ver
       const request=(await db.query('SELECT * FROM magento_product_sync_requests WHERE public_product_identity_id=$1',[current.public_product_identity_id])).rows[0];
       assert.equal(request.product_id,current.id);assert.equal(request.state,'pending');
       const remoteId=s.remote().id;
-      await require('../src/services/magento/automatic-sync-worker').createAutomaticSyncWorker(config,{databasePool:db,jobOptions:s.options}).runProduct(current.public_product_identity_id);
-      assert.equal(s.remote().id,remoteId);assert.equal(s.remote().sku,s.input.sku);assert.equal(s.remote().name,'Amber name');
+      const floors=async()=>(await db.query('SELECT product_id,externally_delivered_revision FROM product_full_export_state ORDER BY product_id')).rows;
+      const beforeFloors=await floors();assert.ok(beforeFloors.every(row=>row.externally_delivered_revision==='0'));
+      const worker=require('../src/services/magento/automatic-sync-worker').createAutomaticSyncWorker(config,{databasePool:db,jobOptions:s.options});
+      await worker.runProduct(current.public_product_identity_id);
+      assert.equal(s.writes.length,0,'Reviewed exposure does not authorize unresolved field dispatch');
+      const names=await s.reviewFirstSyncFields();
+      await worker.runProduct(current.public_product_identity_id);
+      const delivered=(await db.query('SELECT * FROM magento_product_sync_requests WHERE public_product_identity_id=$1',[current.public_product_identity_id])).rows[0];
+      assert.equal(delivered.state,'synced',JSON.stringify(delivered));
+      assert.equal(s.remote().id,remoteId);assert.equal(s.remote().sku,s.input.sku);assert.equal(s.remote().name,'Old name');
+      assert.equal(s.english().name,'Old English');await s.verifyFirstSyncReadback(names);
+      assert.deepEqual(await floors(),beforeFloors);await worker.stop();
     });
   } finally {await db.end();await dropTestDatabase(name);}
 });

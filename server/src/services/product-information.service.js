@@ -250,7 +250,14 @@ async function applyProductInformation(payload = {}, options = {}) {
   }
 }
 
+// Internal transaction-compatible validator. The caller must retain the existing
+// access/lifecycle/product boundaries and persist changes plus its receipts atomically.
+async function prepareProductInformationOnClient(client, product, patch, { lockCatalog = false } = {}) {
+  return evaluate(client, product, normalizePatch(patch), lockCatalog);
+}
+
 module.exports = {
+  prepareProductInformationOnClient,
   INFORMATION_FIELDS_V1,
   applyProductInformation,
   previewProductInformation,

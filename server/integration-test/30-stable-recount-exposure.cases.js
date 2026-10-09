@@ -9,7 +9,7 @@ suite.test('stable recount exposure: reviewed UPDATE, atomic handoff and fail-cl
     await require('./historical-runtime-fixture')(suite,url);
     const actor = Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Exposure test') RETURNING id")).rows[0].id);
     await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'",[actor]);
-    const { scenario,config,published,installationKey } = await require('./stable-recount-exposure-fixture')(db,actor);
+    const { scenario,config,published,installationKey } = await require('./stable-recount-exposure-fixture')(db,actor,{firstSyncReview:true});
     const s = await scenario(), sourceId = s.product.id;
     const conn = await db.connect(); let product;
     try {
@@ -32,6 +32,7 @@ suite.test('stable recount exposure: reviewed UPDATE, atomic handoff and fail-cl
         '{"origin":"recount","classification":"historical_ambiguous","primaryReason":"INFERRED_HISTORY_WITHOUT_EXACT_MEMBERSHIP"}',1)`,[product.id,correction.id]);
       await conn.query('COMMIT');
     } finally { await conn.query('ROLLBACK'); conn.release(); }
+    await runNodeInDatabase(url,"require('./src/db/run-migrations').runMigrations().finally(()=>require('./src/db/pool').end()).catch(e=>{console.error(e);process.exitCode=1;});");
     const options = { ...s.options,expectedDatabase: name,bindingRevisionId: published.id,mutationContext: { actorUserId: actor },databasePool: db };
     const worker = require('../src/services/magento/automatic-sync-worker').createAutomaticSyncWorker(config,{databasePool: db,jobOptions: s.options});
     const request = async () => (await db.query('SELECT * FROM magento_product_sync_requests WHERE product_id=$1',[product.id])).rows[0];
@@ -148,12 +149,19 @@ suite.test('stable recount exposure: reviewed UPDATE, atomic handoff and fail-cl
       await assert.rejects(db.query("UPDATE audit_events SET details='{}' WHERE event_key='product.magento_stable_recount_exposure_reconciled'"));
       assert.equal((await db.query('SELECT state FROM magento_binding_handoff_items WHERE handoff_id=$1',[result.handoffId])).rows[0].state,'pending');
     });
-    await t.test('existing reviewed enrollment advances parked generation and automatic delivery updates the same SKU',async () => {
+    await t.test('reviewed history admits first fields, explicit price choice and verified delivery of the same SKU',async () => {
       const before=await request(), remoteId=s.remote().id;
       await require('../src/services/magento/binding-handoff').processHandoffs(config,{databasePool:db});
       const pending=await request();assert.equal(pending.state,'pending');assert.equal(BigInt(pending.desired_generation),BigInt(before.desired_generation)+1n);
+      const floors=async()=>(await db.query('SELECT product_id,externally_delivered_revision FROM product_full_export_state ORDER BY product_id')).rows;
+      const beforeFloors=await floors();assert.ok(beforeFloors.every(row=>row.externally_delivered_revision==='0'));
       await worker.runProduct(product.public_product_identity_id);
-      assert.equal((await request()).state,'synced');assert.equal(s.remote().id,remoteId);assert.equal(s.remote().sku,'SV5111010');
+      assert.equal(s.writes.length,0,'Admission and safe field imports cannot dispatch unresolved price');
+      const names=await s.reviewFirstSyncFields();
+      await worker.runProduct(product.public_product_identity_id);
+      assert.equal((await request()).state,'synced',JSON.stringify(await request()));assert.equal(s.remote().id,remoteId);assert.equal(s.remote().sku,'SV5111010');
+      assert.equal(s.remote().name,'Old name');assert.equal(s.english().name,'Old English');
+      await s.verifyFirstSyncReadback(names);assert.deepEqual(await floors(),beforeFloors);
       const job=(await db.query('SELECT * FROM magento_sync_jobs WHERE product_id=$1',[product.id])).rows[0];
       assert.equal(job.sku,'SV5111010');assert.equal(job.intent.mode,'update');
       assert.equal((await lifecycle()).confirmed_revision,'0');
