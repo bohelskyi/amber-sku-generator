@@ -323,7 +323,8 @@ function projectFirstSyncFields(input) {
       const output = forward(target, scope);
       if (candidate && output.verified && output.value === candidate.evaluatedOutput) local.forwardOptionId = candidate.optionId;
       else if (local.present) reason ||= 'LOCAL_FORWARD_OPTION_NOT_PROVEN';
-      importBlocker = product.characteristic_version_id != null ? 'IMMUTABLE_CHARACTERISTIC_VERSION_IMPORT_UNSUPPORTED'
+      importBlocker = descriptor?.key === 'is_calibrated' ? 'FIRST_SYNC_CANONICAL_CALIBRATION_REVIEW_REQUIRED'
+        : product.characteristic_version_id != null && !product.full_sku ? null
         : 'HISTORICAL_IDENTITY_CHARACTERISTIC_IMPORT_UNSUPPORTED';
     } else if (descriptor?.kind === 'product' && descriptor.field === 'total_price_uah' && target === 'price') {
       persistence = 'price'; kind = 'scalar'; type = 'decimal'; unit = 'UAH'; scale = 2;
@@ -336,6 +337,7 @@ function projectFirstSyncFields(input) {
       || descriptor?.kind === 'information' && descriptor.category === 'SV' && descriptor.key === 'weight')
       && ['decor_weight', 'vaha_vyrobu'].includes(target) && scope === 'all') {
       persistence = 'weight'; kind = 'scalar'; type = 'decimal'; unit = 'g'; scale = 3;
+      if (!product.characteristic_version_id || product.full_sku) importBlocker = 'FIRST_SYNC_CANONICAL_NATIVE_VERSION_REQUIRED';
       constraints = { min: '0', minInclusive: false };
       const physical = own(product, 'weight'), answer = own(own(product, 'details'), 'answers');
       const answerWeight = answer && own(answer, 'weight');

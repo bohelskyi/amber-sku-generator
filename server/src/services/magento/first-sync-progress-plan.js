@@ -17,8 +17,11 @@ function prepareProgress(projection, progress, decision = null) {
       return { ...result, local:field.local,remote:field.remote,record:Object.fromEntries(['target','scope','state','before','remote','after','source','mappingHash'].map(name=>[name,prior[name]])),
         canAcceptRemote:false,canKeepLocal:false,terminal:true };
     }
-    const supported=['name','information','price'].includes(meta.persistence);
-    const canAcceptRemote=result.status==='conflict' && supported && field.mapping.proven;
+    const supported=['name','information','price','weight','characteristic'].includes(meta.persistence) && !meta.importBlocker && !meta.reason;
+    const reverseValues = field.kind==='option' ? [...new Set((field.reverseCandidates || [])
+      .filter(candidate=>candidate.optionId===String(field.remote.value)).map(candidate=>String(candidate.value)))] : null;
+    const canAcceptRemote=result.status==='conflict' && supported && field.mapping.proven
+      && (!reverseValues || reverseValues.length===1);
     const canKeepLocal=result.status==='conflict' && field.mapping.proven
       && meta.outwardPolicy==='authoritative_create_update';
     const priorKeep=prior?.state==='pending_outward_confirmation'
@@ -31,7 +34,7 @@ function prepareProgress(projection, progress, decision = null) {
     if (priorKeep || selected && decision.choice==='keep_local') {
       status='pending_outward_confirmation';reason='ADMINISTRATOR_KEPT_LOCAL_AWAITING_READBACK';
     } else if (selected && decision.choice==='accept_remote') {
-      status='imported';after=field.remote.value;reason='ADMINISTRATOR_ACCEPTED_REMOTE';
+      status='imported';after=reverseValues ? reverseValues[0] : field.remote.value;reason='ADMINISTRATOR_ACCEPTED_REMOTE';
     } else if (status==='imported') after=result.importValue;
     if (status==='imported' && !supported) {
       status='review_required';reason=meta.importBlocker || 'CANONICAL_' + meta.persistence.toUpperCase() + '_SETTER_UNSUPPORTED';
@@ -81,7 +84,7 @@ function blockImports(prepared, blocked) {
 function deferAfterCanonicalImports(prepared,projection) {
   const persistence=new Map(projection.projection.map(field=>[fieldKey(field),field.persistence]));
   if(!prepared.rows.some(row=>!row.received && row.record.state==='imported'
-    && ['information','price'].includes(persistence.get(fieldKey(row))))) return prepared;
+    && ['information','price','weight','characteristic'].includes(persistence.get(fieldKey(row))))) return prepared;
   // A changed canonical input can feed multiple direct and derived targets.
   // Never receipt their pre-import equality/emptiness as the final observation.
   for(const row of prepared.rows) {

@@ -44,6 +44,18 @@ const reasons = {
   IMMUTABLE_CHARACTERISTIC_VERSION_IMPORT_UNSUPPORTED: 'Отримання цієї версії характеристики не підтримується зі збереженням її історії.',
   HISTORICAL_IDENTITY_CHARACTERISTIC_IMPORT_UNSUPPORTED: 'Отримання характеристики історичної ідентичності потребує окремої перевірки.',
   PRICE_CURRENCY_UAH_NOT_PROVEN: 'Валюту ціни Magento не підтверджено як UAH.',
+  FIRST_SYNC_CANONICAL_PRICE_REVIEW_REQUIRED: 'Нова вага або характеристика змінює кінцеву ціну. Спочатку потрібне окреме цінове рішення.',
+  FIRST_SYNC_CANONICAL_PRICE_FIRST_REOBSERVE_REQUIRED: 'Спочатку узгодьте ціну й повторіть перевірку перед отриманням ваги або характеристик.',
+  FIRST_SYNC_CANONICAL_PRICE_MODE_UNPROVEN: 'Чинний режим ціни не підтверджено. Потрібне окреме цінове рішення.',
+  FIRST_SYNC_CANONICAL_NATIVE_VERSION_REQUIRED: 'Для історичного SKU потрібна окрема перевірка ваги та характеристик зі збереженням його значення.',
+  FIRST_SYNC_CANONICAL_TARGET_UNAVAILABLE: 'Характеристика архівована, прихована або відсутня в чинній чи історичній конфігурації.',
+  FIRST_SYNC_CANONICAL_DEPENDENT_ANSWER_HIDDEN: 'Нове значення приховує вже вибрану залежну характеристику. Потрібна окрема перевірка.',
+  FIRST_SYNC_CANONICAL_FORWARD_UNPROVEN: 'Передачу нового значення за чинним правилом Magento не підтверджено.',
+  FIRST_SYNC_CANONICAL_CALIBRATION_REVIEW_REQUIRED: 'Калібрування потребує окремої перевірки обох збережених відповідей.',
+  FIRST_SYNC_CANONICAL_WEIGHT_REQUIRED: 'Чинна або історична конфігурація вимагає додатної ваги.',
+  FIRST_SYNC_CANONICAL_ANSWER_UNAVAILABLE: 'Залежний варіант характеристики недоступний у чинній або історичній конфігурації.',
+  FIRST_SYNC_CANONICAL_ANSWER_REQUIRED: 'Після зміни бракує обов’язкової залежної характеристики.',
+  FIRST_SYNC_CANONICAL_RATE_REQUIRED: 'Курс для перевірки чинного цінового рішення не підтверджено.',
   CANONICAL_WEIGHT_ANSWER_INCOHERENT: 'Вага та її відповідь у характеристиках Amber не узгоджені.',
   OUTWARD_POLICY_NOT_AUTHORITATIVE: 'Чинну політику передачі цього поля не підтверджено.',
 };
@@ -56,7 +68,7 @@ const invalidKinds = {
   OPTION_INVALID: 'Варіант характеристики має непідтримуваний формат',
   TEXT_INVALID: 'Текст має непідтримуваний формат',
 };
-const labels = { name: 'Назва', nameUA: 'Назва UA', description: 'Опис', weight: 'Вага', decor_weight: 'Вага вставки', vaha_vyrobu: 'Вага виробу', price: 'Ціна', rozmir_suveniriv: 'Розмір сувеніру', kamin_obrobka: 'Обробка каменю' };
+const labels = { kolir: 'Колір', name: 'Назва', nameUA: 'Назва UA', description: 'Опис', weight: 'Вага', decor_weight: 'Вага вставки', vaha_vyrobu: 'Вага виробу', price: 'Ціна', rozmir_suveniriv: 'Розмір сувеніру', kamin_obrobka: 'Обробка каменю' };
 const statusLabels = { imported: 'Готове до отримання', equal: 'Значення збігаються', optional_empty: 'Необов’язкове, порожнє', pending_outward_confirmation: 'Потрібне підтвердження передачі', conflict: 'Потрібне рішення', unknown: 'Дані не підтверджено', review_required: 'Потрібна перевірка' };
 const fieldLabel = (field) => `${labels[field.target] || field.target} · ${field.scope === 'all' ? 'UA / основний магазин' : field.scope === 'en' ? 'EN' : field.scope}`;
 function reasonText(code) {

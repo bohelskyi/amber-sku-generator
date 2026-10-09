@@ -176,11 +176,11 @@ test('required weight zero is present but violates the positive canonical contra
   assert.equal(field(result, 'decor_weight').status, 'review_required');
   assert.equal(field(result, 'decor_weight').reason, 'REMOTE_DECIMAL_OUT_OF_RANGE');
 });
-test('weight imports retain gram scale and answer coherence contract', () => {
+test('legacy weight import remains reviewed while retaining the exact gram contract', () => {
   const input = fixture(); delete input.observation.amber.product.weight;
   const result = projectFirstSyncFields(input);
-  assert.equal(field(result, 'decor_weight').status, 'imported');
-  assert.equal(field(result, 'decor_weight').importValue, '5');
+  assert.equal(field(result, 'decor_weight').status, 'review_required');
+  assert.equal(field(result, 'decor_weight').evidenceReason, 'FIRST_SYNC_CANONICAL_NATIVE_VERSION_REQUIRED');
   const projected = result.fields.find(value => value.target === 'decor_weight');
   assert.equal(projected.unit, 'g'); assert.equal(projected.scale, 3);
   assert.equal(metadata(result, 'decor_weight').mirrorAnswerKey, 'weight');

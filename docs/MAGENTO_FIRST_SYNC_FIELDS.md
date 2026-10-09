@@ -111,8 +111,9 @@ manual names while reanchoring them to the resulting generated pair.
 | Full names in `all` and `en` | Existing name-state/override path with generation, pair, source and exact remote checks |
 | Direct information `BR.braclet_size`, `NM.neckle_size`, `KL.exact_size`, `CH.bead_length`, `CH.bead_width`, `CH.rosary_length`, `SV.size` | Existing information validator/setter; category, catalog dependencies, active-product state and canonical normalization must pass |
 | Direct final price from `product.total_price_uah` | Existing guarded in-place Manual UAH price command, when currency, rate and automatic baseline are proven |
-| Custom gram targets `decor_weight`/`vaha_vyrobu` from the recognized physical/SV weight source | Exact gram/scale-three and physical-answer coherence checks; first-sync weight import setter is currently unsupported |
-| Generic semantic characteristics | Forward equality can be checked; historical/immutable characteristic import has no safe first-sync setter |
+| Custom gram targets `decor_weight`/`vaha_vyrobu` from the recognized physical/SV weight source | Native existing-version import with exact gram/scale-three, physical-answer coherence and coherent pricing; legacy encoded imports remain review |
+| Generic semantic characteristics | Native values admitted by existing immutable version and current rules can be imported with unique approved inverse and forward validation; legacy encoded changes remain review |
+| Direct English canonical fields other than names | Reverse import unsupported; fresh proven derived forward comparisons remain available |
 | Native Magento `weight` | Ignored transport coverage; never a source for adopting local grams |
 | Derived outputs | Forward comparison/outward planning only; no canonical import |
 | Photos | Explicit unsupported URL-import coverage; no remote photo adoption |
@@ -235,7 +236,7 @@ that exact job and observation; ordinary recovery/uncertain-write protections ar
 preserved. A product created by its own verified CREATE step continues through its
 existing create lane rather than adopting a foreign item.
 
-Accepted information or price changes require a new local snapshot/forward review
+Accepted information, price, weight or characteristic changes require a new local snapshot/forward review
 before outward transmission. Non-name equality/empty receipts based on old
 canonical inputs are deferred until that recheck. This prevents unchanged-looking
 derived fields from being initialized against inputs that have just changed.
@@ -286,3 +287,37 @@ imports remain unsupported, and missing store/remote evidence stays unknown.
 Repeated lifecycle revalidation on one client reuses its already-held session
 lock while rereading the writer/gate contract; it preserves shared/exclusive
 ownership so the final transaction release remains balanced.
+
+
+## Narrow native weight and characteristic imports
+
+Native products may receive explicitly mapped gram sources (`decor_weight` or
+`vaha_vyrobu`, positive exact scale three) and uniquely reversed approved semantic
+options. Both the existing immutable characteristic version and current catalog
+must admit the complete candidate answer set. Changed questions/options must be
+visible and active; dependency changes cannot silently hide an existing answer.
+Physical weight and a required/existing answer mirror are persisted atomically.
+Identity, SKU, version reference and immutable historical records are preserved.
+
+The command retains a coherently proven existing Manual UAH, system automatic or
+custom USD/gram mode and recalculates its baseline against candidate inputs.
+Custom USD provenance remains unchanged. A changed final UAH amount requires a
+separate pricing decision; the import does not silently select Manual UAH.
+Historical/legacy-zero or incomplete pricing evidence remains review. If NEW price
+adoption is also pending, canonical input adoption waits for price resolution and
+a fresh snapshot. Name anchors are evaluated after all candidate inputs/pricing.
+
+Preview binds immutable/current configuration hashes, pricing context, existing
+mode and exact candidate economics. Apply takes short NOWAIT SHARE locks on the
+catalog/pricing tables, rereads those proofs and reproduces the preview hash before
+writing inputs, baseline, names, audit and receipts in the caller's transaction.
+Observation timestamp changes alone do not stale the economic proof; captured
+rate freshness is still validated. No HTTP occurs under these locks.
+
+Legacy encoded characteristic/weight changes, calibration (`is_calibrated`) mirror
+imports, new version pointers/overlays and direct English canonical imports other
+than names remain unsupported. Native Magento transport `weight` does not prove
+grams. Photo URLs do not represent original local media and are not imported.
+Fresh dependent field confirmation is required after weight/characteristic imports.
+
+Actual recount custom USD basis may omit `source`; that format requires matching stored correction lineage and the exact immutable `product.recounted` audit, with matching request ID when present. The original basis is retained byte-for-byte as data; no provenance string is fabricated.

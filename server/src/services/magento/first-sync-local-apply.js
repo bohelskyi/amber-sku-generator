@@ -10,6 +10,7 @@ const { validName, validPair } = require('../export-templates/effective-product-
 const lifecycle = require('../full-product-export.service');
 const audit = require('../../audit/audit-events');
 
+const canonical = require('./first-sync-canonical-inputs');
 const prepared = new WeakMap();
 const scopes = ['all', 'en'];
 const fail = (code, message = code) => { throw c.error(409, code, message); };
@@ -69,12 +70,15 @@ function evidenceFor(field, projection, amber) {
   const meta = metadata[0], input = inputs[0], decision = decisions[0];
   const { manifestHash, decision: choice, ...source } = field.source || {};
   const acceptedConflict = decision.status === 'conflict' && choice === 'accept_remote' && input.remote.known && input.remote.present;
+  const reverseValues = meta.persistence === 'characteristic' ? [...new Set((input.reverseCandidates || [])
+    .filter(candidate => candidate.optionId === String(input.remote.value)).map(candidate => String(candidate.value)))] : null;
+  const acceptedValue = acceptedConflict && reverseValues?.length === 1 ? reverseValues[0] : input.remote.value;
   const receivedEqualName = field.state === 'name_received' && meta.persistence === 'name' && decision.status === 'equal'
     && input.local.known && input.remote.known && input.local.value === input.remote.value;
   if (!['imported', 'name_received'].includes(field.state) || !(decision.status === 'imported' || acceptedConflict || receivedEqualName)
     || manifestHash !== undefined && !/^[a-f0-9]{64}$/.test(manifestHash)
     || choice !== undefined && choice !== 'accept_remote'
-    || !same(field.after, acceptedConflict || receivedEqualName ? input.remote.value : decision.importValue)
+    || !same(field.after, acceptedConflict || receivedEqualName ? acceptedValue : decision.importValue)
     || !same(field.before, input.local) || !same(field.remote, input.remote)
     || field.mappingHash !== meta.mappingHash || !same(source, { ...meta.source, productId: Number(amber.product.id) })
     || meta.source.bindingRevisionId !== amber.revision.id || meta.source.definitionHash !== amber.compiled.hash
@@ -83,6 +87,15 @@ function evidenceFor(field, projection, amber) {
     if (field.state !== 'imported' || field.scope !== 'all' || meta.source.kind !== 'information'
       || !information.INFORMATION_FIELDS_V1[amber.product.category]?.includes(meta.source.key)
       || meta.storagePath !== `details.answers.${meta.source.key}`) fail('FIRST_SYNC_LOCAL_SETTER_UNSUPPORTED');
+  } else if (meta.persistence === 'weight') {
+    if (field.state !== 'imported' || field.scope !== 'all' || input.unit !== 'g' || input.scale !== 3
+      || !['decor_weight', 'vaha_vyrobu'].includes(field.target) || meta.storagePath !== 'weight'
+      || !(meta.source.kind === 'product' && meta.source.field === 'weight'
+        || meta.source.kind === 'information' && meta.source.key === 'weight' && amber.product.category === 'SV')) fail('FIRST_SYNC_LOCAL_SETTER_UNSUPPORTED');
+  } else if (meta.persistence === 'characteristic') {
+    if (field.state !== 'imported' || field.scope !== 'all' || meta.source.kind !== 'semantic'
+      || meta.storagePath !== `details.answers.${meta.source.key}` || reverseValues?.length !== 1
+      || String(field.after) !== reverseValues[0]) fail('FIRST_SYNC_LOCAL_SETTER_UNSUPPORTED');
   } else if (meta.persistence === 'name') {
     if (field.target !== 'name' || !scopes.includes(field.scope) || meta.source.kind !== 'name'
       || meta.source.field !== `magento_name_override.values.${field.scope}`
@@ -92,7 +105,7 @@ function evidenceFor(field, projection, amber) {
   return meta;
 }
 
-async function prepareLocal(client, { observation, acceptedFields, projection, actorUserId, config, lockCatalog = false, reanchorAfterPrice = false }) {
+async function prepareLocal(client, { observation, acceptedFields, projection, actorUserId, config, lockCatalog = false, reanchorAfterPrice = false, rateObservation, canonicalPriceConflict = false, expectedCanonicalHash }) {
   if (!client || typeof client.query !== 'function' || !Array.isArray(acceptedFields) || acceptedFields.length > 500
     || !Array.isArray(projection?.projection) || !Array.isArray(projection?.fields)
     || !Number.isSafeInteger(actorUserId) || actorUserId <= 0) fail('FIRST_SYNC_LOCAL_INPUT_INVALID');
@@ -147,24 +160,40 @@ async function prepareLocal(client, { observation, acceptedFields, projection, a
     try { informationPreview = await information.prepareProductInformationOnClient(client, product, patch, { lockCatalog }); }
     catch (cause) { for (const item of active().filter(item => item.meta.persistence === 'information')) block(item.field, cause); }
   }
+  let canonicalPreview = null;
+  const canonicalFields = active().filter(item => ['weight', 'characteristic'].includes(item.meta.persistence));
+  if (canonicalFields.length) {
+    try {
+      if (canonicalPriceConflict) fail('FIRST_SYNC_CANONICAL_PRICE_FIRST_REOBSERVE_REQUIRED');
+      canonicalPreview = await canonical.prepareCanonicalInputs(client, { amber, entries: canonicalFields,
+        answers: informationPreview?.newAnswers || product.details?.answers || {}, rateObservation, lockCatalog });
+      if (expectedCanonicalHash !== undefined && canonicalPreview.evidenceHash !== expectedCanonicalHash) fail('FIRST_SYNC_CANONICAL_PREVIEW_STALE');
+    } catch (cause) { for (const item of canonicalFields) block(item.field, cause); }
+  }
+  result.canonicalHash = canonicalPreview?.evidenceHash || null;
   let nameChange = null;
   const nameFields = active().filter(item => item.meta.persistence === 'name');
-  if (nameFields.length || informationPreview || reanchorAfterPrice && (product.magento_name_override || product.magento_name_rule_pin)) {
+  if (nameFields.length || informationPreview || canonicalPreview || reanchorAfterPrice && (product.magento_name_override || product.magento_name_rule_pin)) {
     // A preceding authorized price setter may already have changed generated
     // inputs. Recognize active overrides against the original observed anchor.
     const before = evaluator.evaluate(original, original.product);
     const savedDetails = product.details;
+    const pricingKeys = ['weight','total_price','total_price_uah','price_per_gram','uah_rate'];
+    const savedPricing = Object.fromEntries(pricingKeys.filter(key => Object.hasOwn(product,key)).map(key => [key,product[key]]));
     let post, generated, retained;
     try {
       retained = retainedNames(original.product, generatedNames(before));
       if (informationPreview) product.details = { ...product.details, answers: informationPreview.newAnswers };
+      if (canonicalPreview) Object.assign(product, { weight: canonicalPreview.weight, details: canonicalPreview.pricing.details,
+        total_price: canonicalPreview.pricing.totalPrice, total_price_uah: canonicalPreview.pricing.totalPriceUah,
+        price_per_gram: canonicalPreview.pricing.pricePerGram, uah_rate: canonicalPreview.pricing.uahRate });
       post = evaluator.evaluate(amber, product);
       generated = generatedNames(post);
     } catch (cause) {
       if (reanchorAfterPrice && !acceptedFields.length) throw cause;
-      for (const item of [...nameFields, ...active().filter(item => item.meta.persistence === 'information')]) block(item.field, cause);
-      informationPreview = null;
-    } finally { product.details = savedDetails; }
+      for (const item of [...nameFields, ...active().filter(item => ['information','weight','characteristic'].includes(item.meta.persistence))]) block(item.field, cause);
+      informationPreview = null; canonicalPreview = null; result.canonicalHash = null;
+    } finally { product.details = savedDetails; Object.assign(product, savedPricing); for (const key of pricingKeys) if (!Object.hasOwn(savedPricing,key)) delete product[key]; }
     if (generated) {
       const values = { ...effectiveNames(post), ...retained };
       for (const item of nameFields) values[item.field.scope] = item.field.after;
@@ -173,8 +202,8 @@ async function prepareLocal(client, { observation, acceptedFields, projection, a
         // Information alone must not detach an active accepted/manual override.
         if (Object.keys(retained).length && !same(generated, before.generatedNames)) {
           if (reanchorAfterPrice && !acceptedFields.length) fail('FIRST_SYNC_LOCAL_NAME_PAIR_REQUIRED');
-          for (const item of active().filter(item => item.meta.persistence === 'information')) block(item.field, { code: 'FIRST_SYNC_LOCAL_NAME_PAIR_REQUIRED' });
-          informationPreview = null;
+          for (const item of active().filter(item => ['information','weight','characteristic'].includes(item.meta.persistence))) block(item.field, { code: 'FIRST_SYNC_LOCAL_NAME_PAIR_REQUIRED' });
+          informationPreview = null; canonicalPreview = null; result.canonicalHash = null;
         }
       } else if (nameFields.length || Object.keys(retained).length && !same(generated, before.generatedNames)) {
         nameChange = { generated, values, before: effectiveNames(before), remote: remoteNames(observation, projection),
@@ -184,7 +213,7 @@ async function prepareLocal(client, { observation, acceptedFields, projection, a
     }
   }
   result.supportedFields = active().map(item => item.field);
-  prepared.set(result, { amber, productId, informationPreview, nameChange });
+  prepared.set(result, { amber, productId, informationPreview, canonicalPreview, nameChange });
   return result;
 }
 
@@ -200,12 +229,20 @@ async function applyFirstSyncLocal(client, options) {
     const first = validation.blockedFields[0];
     fail(first.code === 'FIRST_SYNC_LOCAL_SETTER_UNSUPPORTED' ? first.code : 'FIRST_SYNC_LOCAL_VALIDATION_FAILED', first.reason);
   }
-  const { amber, productId, informationPreview, nameChange } = prepared.get(validation);
+  const { amber, productId, informationPreview, canonicalPreview, nameChange } = prepared.get(validation);
   if (!amber) return { changed: false, informationChanges: [], nameChanged: false, fullRevision: null };
   const product = amber.product;
   const nameChanged = Boolean(nameChange?.needsOverride && (!same(product.magento_name_override, { generated: nameChange.generated, values: nameChange.values })
     || product.magento_name_review_required === true));
-  if (informationPreview) {
+  if (canonicalPreview) {
+    const pricing = canonicalPreview.pricing;
+    const updated = await client.query(`UPDATE products SET weight=$2,details=$3::jsonb,total_price=$4,total_price_uah=$5,price_per_gram=$6,uah_rate=$7 WHERE id=$1`,
+      [productId,canonicalPreview.weight,JSON.stringify(pricing.details),pricing.totalPrice,pricing.totalPriceUah,pricing.pricePerGram,pricing.uahRate]);
+    if (updated.rowCount !== 1) fail('FIRST_SYNC_LOCAL_SOURCE_CHANGED');
+    await audit.writeAuditEvent(client, { mutationContext: { actorUserId: options.actorUserId },
+      eventKey: 'product.first_sync_canonical_adopted', subjectType: 'product', subjectId: productId,
+      details: { publicSku: product.public_sku, beforeWeight: product.weight, evidence: canonicalPreview.evidence } });
+  } else if (informationPreview) {
     const updated = await client.query(`UPDATE products SET details=jsonb_set(COALESCE(details,'{}'::jsonb),'{answers}',$2::jsonb,TRUE)
       WHERE id=$1`, [productId, JSON.stringify(informationPreview.newAnswers)]);
     if (updated.rowCount !== 1) fail('FIRST_SYNC_LOCAL_SOURCE_CHANGED');
@@ -216,7 +253,7 @@ async function applyFirstSyncLocal(client, options) {
     if (updated.rowCount !== 1) fail('FIRST_SYNC_LOCAL_SOURCE_CHANGED');
   }
   let fullRevision = null;
-  if (informationPreview || nameChanged) {
+  if (informationPreview || canonicalPreview || nameChanged) {
     const [state] = await lifecycle.readFullProductStates(client, [productId], { lock: true });
     fullRevision = (await lifecycle.advanceFullProductRevision(client, productId, informationPreview?.fullRevision || state.revision)).revision;
   }
@@ -233,6 +270,6 @@ async function applyFirstSyncLocal(client, options) {
     if (nameChanged) await names.auditName(client, options.actorUserId, product, nameChange.receiving ? 'external_accepted' : 'first_sync_reanchored',
       { before: nameChange.before, after: nameChange.values, ...(nameChange.receiving ? {} : { reason: 'preserve_existing_names' }) });
   }
-  return { productId, changed: Boolean(informationPreview || nameChanged), informationChanges: informationPreview?.changes || [], nameChanged, fullRevision };
+  return { productId, changed: Boolean(informationPreview || canonicalPreview || nameChanged), informationChanges: informationPreview?.changes || [], nameChanged, fullRevision };
 }
 module.exports = { prepareFirstSyncLocal, applyFirstSyncLocal };

@@ -14,7 +14,9 @@ async function validatePrepared(client,config,observation,projection,prepared,op
   const records=acceptedRecords(prepared);
   const persistence=field=>projection.projection.find(meta=>fieldKey(meta)===fieldKey(field))?.persistence;
   const local=await require('./first-sync-local-apply').prepareFirstSyncLocal(client,{config,observation,projection,
-    actorUserId:options.actorUserId,acceptedFields:records.filter(field=>persistence(field)!=='price')});
+    actorUserId:options.actorUserId,acceptedFields:records.filter(field=>persistence(field)!=='price'),rateObservation,
+    canonicalPriceConflict:records.some(field=>persistence(field)==='price')});
+  prepared.canonicalHash=local.canonicalHash || null;
   blockImports(prepared,local.blockedFields);
   const price=await require('./first-sync-price').prepareFirstSyncPrice(client,{observation,projection,rateObservation,currencyEvidence,
     acceptedFields:records.filter(field=>persistence(field)==='price')});
@@ -59,7 +61,7 @@ async function inspect(config, observation, options, {jobId=null,decision=null}=
   const product=observation.amber.product;
   const previewToken=c.hash({origin:first.key.originHash,identity:first.key.publicIdentityId,sku:product.public_sku,
     remoteId:observation.raw.id,bindingId:observation.amber.revision.id,definitionHash:observation.amber.compiled.hash,
-    eligibility:first.evidenceHash,manifestHash:prepared.manifestHash,rows:prepared.rows,
+    eligibility:first.evidenceHash,manifestHash:prepared.manifestHash,rows:prepared.rows,canonicalHash:prepared.canonicalHash,
     currencyEvidence,rateEvidence:rateObservation?.rateInfo ? Object.fromEntries(['rate','rateDate','source','stale']
       .map(key=>[key,rateObservation.rateInfo[key]])) : null});
   return {first,observation,projection,prepared,reviewedRecovery,currencyEvidence,rateObservation,previewToken,
@@ -100,7 +102,8 @@ async function commit(config, inspection, state, options, {jobId=null}={}) {
           acceptedFields:acceptedFields.filter(field=>kind(field)==='price'),actorUserId:options.actorUserId});
         localResult=await require('./first-sync-local-apply').applyFirstSyncLocal(tx,{config,observation,projection,
           acceptedFields:acceptedFields.filter(field=>kind(field)!=='price'),actorUserId:options.actorUserId,
-          reanchorAfterPrice:priceResult.changed===true});
+          reanchorAfterPrice:priceResult.changed===true,rateObservation:inspection.rateObservation,
+          canonicalPriceConflict:acceptedFields.some(field=>kind(field)==='price'),expectedCanonicalHash:prepared.canonicalHash});
       }
     });
     await gate.commit(client);

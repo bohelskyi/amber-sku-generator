@@ -155,9 +155,9 @@ test('old keep_local decision is reused only while before, remote and mapping ev
   }
 });
 
-test('unsupported canonical weight and generic import setters produce precise review without import', () => {
+test('unsupported generic and historical characteristic imports produce precise review', () => {
   for (const [target, persistence, expected] of [
-    ['decor_weight', 'weight', 'CANONICAL_WEIGHT_SETTER_UNSUPPORTED'],
+    ['decor_weight', 'generic', 'CANONICAL_GENERIC_SETTER_UNSUPPORTED'],
     ['unsupported', 'generic', 'CANONICAL_GENERIC_SETTER_UNSUPPORTED'],
   ]) {
     const prepared = prepareProgress(projection([field(target, { local: absent() })],
