@@ -11,7 +11,9 @@ const retired = { state: 'retired_targets', publicationBlocked: true, resources:
   { categoryCode: 'SV', attributeCode: 'test_261005102222', attributeId: '1535', optionId: null },
 ] };
 const permissions = ['export_templates.manage', 'export_templates.publish', 'exports.view'];
-const shell = (value, autoPreview = false) => <AuthContext.Provider value={{ permissions, roles: [{ key: 'administrator' }] }}><MemoryRouter><MagentoPublicationActions revision={value} currentPublishedId="current" autoPreview={autoPreview} onPublished={vi.fn()} /></MemoryRouter></AuthContext.Provider>;
+const principalLifetime = { id: 'retired-catalog-administrator', valid: true };
+const applyLabel = 'Застосувати правила й передати 0 товарів';
+const shell = (value, autoPreview = false) => <AuthContext.Provider value={{ permissions, principalLifetime, roles: [{ key: 'administrator' }] }}><MemoryRouter><MagentoPublicationActions revision={value} currentPublishedId="current" autoPreview={autoPreview} onPublished={vi.fn()} /></MemoryRouter></AuthContext.Provider>;
 it('shows the exact cleaned resource and a fresh preparation route while preventing automatic or explicit preview', async () => {
   render(shell({ ...revision, catalogAvailability: retired }, true));
   expect(screen.getByText(/test_261005102222/)).toBeTruthy();
@@ -22,11 +24,12 @@ it('blocks a previously successful zero-blocker preview as soon as recorded clea
   api.post.mockResolvedValue({ data: { previewToken: 'old-proof', totalProducts: 0, affected: [], preservedNames: [], lostProducts: [], lostRoutes: [], checked: [], blockers: [] } });
   const view = render(shell(revision));
   fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив публікації' }));
-  const apply = await screen.findByRole('button', { name: 'Опублікувати відповідності' });
+  const apply = await screen.findByRole('button', { name: applyLabel });
   expect(apply.disabled).toBe(false);
   view.rerender(shell({ ...revision, catalogAvailability: retired }));
-  expect(screen.getByRole('button', { name: 'Опублікувати відповідності' }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: applyLabel }).disabled).toBe(true);
   expect(screen.getByRole('button', { name: 'Перевірити вплив публікації' }).disabled).toBe(true);
-  fireEvent.click(screen.getByRole('button', { name: 'Опублікувати відповідності' }));
+  fireEvent.click(screen.getByRole('button', { name: applyLabel }));
   expect(api.post).toHaveBeenCalledOnce();
+  expect(api.post.mock.calls[0][0]).toBe('/admin/magento-integration/publication/preview');
 });

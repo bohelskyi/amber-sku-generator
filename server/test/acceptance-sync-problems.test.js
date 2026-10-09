@@ -40,3 +40,11 @@ test('repricing progress follows captured generations, including later edits and
   assert.deepEqual(await getBatchSyncStatus(3, database), { batchId: 3, status: 'completed', total: 5,
     synced: 2, pending: 1, needsAttention: 1, notTracked: 1 });
 });
+
+test('unknown failure remains administrator diagnosis rather than a fabricated mapping defect', () => {
+  const result = presentProblem({ code: 'unexpected_failure', target: 'price' });
+  assert.equal(result.resolution, 'administrator');
+  assert.match(result.message, /^Не вдалося завершити синхронізацію/);
+  assert.equal(result.target, 'price');
+  assert.notEqual(result.message, presentProblem({ code: 'data_or_binding' }).message);
+});

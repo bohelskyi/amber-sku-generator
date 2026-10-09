@@ -305,3 +305,26 @@ test('publication preserves acknowledged TEST 5816 ownership across source chang
 });
 
 module.exports={setup};
+
+test('exact controlled SKU list reports each public identity without fuzzy omissions or enqueue',async()=>{
+  const f=await setup('amber_exact_controlled_test');
+  try{
+    const [first,foreign,last]=f.products;
+    await f.db.query("UPDATE magento_product_sync_requests SET state='needs_attention',reason_code='reconciliation_required' WHERE product_id=$1",[last.id]);
+    const before=(await f.db.query('SELECT count(*)::int n FROM audit_events')).rows[0].n;
+    const skus=[first.full_sku,last.full_sku,first.full_sku,foreign.full_sku,'XG','XG-MISSING'];
+    const result=await controlled.candidates(f.config,f.current.id,f.options,{categoryCode:'XG',skus:JSON.stringify(skus)});
+    assert.deepEqual(result.results.map(r=>r.state),['eligible','blocked','duplicate','blocked','missing','missing']);
+    assert.deepEqual(result.results[1].blockers,['RECONCILIATION_REQUIRED']);
+    assert.deepEqual(result.results[3].blockers,['CATEGORY_SCOPE_MISMATCH']);
+    assert.equal(result.products.length,2);assert.equal(result.nextCursor,null);
+    assert.equal(f.calls.length,0);
+    assert.equal((await f.db.query('SELECT count(*)::int n FROM audit_events')).rows[0].n,before);
+    assert.equal((await f.db.query('SELECT count(*)::int n FROM magento_sync_jobs')).rows[0].n,0);
+    await f.db.query("UPDATE products SET status='archived' WHERE id=$1",[first.id]);
+    const retired=await controlled.candidates(f.config,f.current.id,f.options,{skus:JSON.stringify([first.full_sku])});
+    assert.deepEqual(retired.results,[{sku:first.full_sku,state:'blocked',blockers:['PRODUCT_NOT_CURRENT_OR_EXCLUDED']}]);
+    for(const query of [{skus:'[]'},{skus:'["XG"]',search:'XG'},{skus:JSON.stringify(Array(101).fill('XG'))}])
+      await assert.rejects(controlled.candidates(f.config,f.current.id,f.options,query));
+  }finally{await f.db.end();await dropTestDatabase('amber_exact_controlled_test');}
+});

@@ -22,7 +22,7 @@ const decisionEffects = { prior_exposure: 'Підтвердження збере
   release_exclusion: 'Підтвердження зніме окреме виключення цього товару. Далі перевірте його готовність до синхронізації.' };
 decisionEffects.historical_recount_exposure = 'Amber узгодить історію для поточної версії й поставить її оновлення в чергу. Оновлюватиметься наявний товар Magento з цим артикулом. Старі версії та записи переобліку залишаться збереженими.';
 
-function ProductResync({ productId, categoryCode, onSaved }) {
+export function ProductResync({ productId, categoryCode, onSaved, openingLabel = 'Переглянути оновлення товару' }) {
   const [data, setData] = useState(null); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
   const alive = useRef(true); const flight = useRef(false);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -37,7 +37,7 @@ function ProductResync({ productId, categoryCode, onSaved }) {
   }
   return <section className="space-y-3" aria-label="Оновлення цього товару в Magento">
     <p>Далі перевірте зміни для цього товару й підтвердьте їх надсилання.</p>
-    {!data && <Button busy={busy} onClick={open}>Переглянути оновлення товару</Button>}
+    {!data && <Button busy={busy} onClick={open}>{openingLabel}</Button>}
     {error && <Notice tone="error">{error}</Notice>}
     {data && <MagentoControlledActions revision={data.revision} currentPublishedId={data.currentPublishedId} categoryCode={categoryCode}
       singleProductId={productId} kind="broader_resync" onApplied={() => onSaved?.()} />}

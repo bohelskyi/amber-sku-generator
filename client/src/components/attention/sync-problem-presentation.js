@@ -9,6 +9,7 @@ export const PRODUCT_FIELD_LABELS = Object.freeze({
 export function nextAction(problem = {}) {
   const code = problem.diagnosticCode || problem.code;
   if (code === 'NATIVE_CHARACTERISTICS_UPGRADE_REQUIRED' && problem.resolution === 'integration_configuration') return 'Підготувати підтримку нових товарів';
+  if (problem.code === 'unexpected_failure') return 'Перевірити можливість повторної доставки';
   if (problem.code === 'TEST_DELETION_PENDING') return 'Перевірити результат тестового видалення';
   if (problem.code === 'reconciliation_required') return 'Перевірити результат надісланої зміни';
   if (problem.resolution === 'lifecycle_reconciliation') return 'Перевірити товар і вибрати рішення';
@@ -35,6 +36,7 @@ export function problemSubject(problem = {}) {
 }
 
 export function problemTitle(problem = {}) {
+  if (problem.code === 'unexpected_failure') return 'Не вдалося завершити синхронізацію';
   if (problem.resolution === 'lifecycle_reconciliation') {
     if (problem.eligibilityIssue?.primaryReason === 'INFERRED_HISTORY_WITHOUT_EXACT_MEMBERSHIP') return 'Немає точного підтвердження, які попередні версії товару доставлено в Magento';
     if (problem.eligibilityIssue?.primaryReason === 'EVIDENCE_INTEGRITY_UNRESOLVED') return 'Цілісність підтверджень попередньої доставки потребує перевірки';
@@ -57,6 +59,7 @@ export function problemRepairUrl(problem, product, returnTo) {
 }
 
 export function problemImpact(problem = {}) {
+  if (problem.code === 'unexpected_failure') return 'Остання спроба не завершилася. Причину помилки ще не підтверджено; це не свідчить про неправильні відповідності. Перед повторним надсиланням потрібно перевірити поточний товар і незавершені операції.';
   if (problem.code === 'reconciliation_required') return 'Зміну вже надіслано. Поки результат не підтверджено, повторне надсилання заблоковане.';
   if (problem.code === 'TEST_DELETION_PENDING') return 'Результат видалення потрібно перевірити через початкову операцію товару.';
   if (problem.resolution === 'product') return 'Amber не може підготувати повні дані для Magento. Товар залишається збереженим в Amber.';

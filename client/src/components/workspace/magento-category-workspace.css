@@ -203,3 +203,11 @@
 .mc-field-dialog .et-field-context-row .et-link { font-size: 12px; flex-shrink: 0; }
 .mc-field-dialog .et-mapping textarea { min-height: 48px; }
 @media (max-width: 760px) { .mc-field-dialog .et-field-heading { top: -16px; } }
+
+.mc-name-readiness { padding: 12px 14px; border: 1px solid var(--border); border-left: 3px solid var(--amber-500); background: var(--surface); }
+.mc-sticky-scope { color: var(--navy-900); font-size: 13px; }
+.mc-exact-skus, .mc-selected-products { padding: 14px 0; border-top: 1px solid var(--border); }
+.mc-exact-results li + li, .mc-selected-products li + li { margin-top: 8px; }
+
+.mc-selected-products > ul, .mc-exact-results { max-height: 260px; overflow: auto; }
+.mc-selected-products > ul:focus-visible, .mc-exact-results:focus-visible { outline: 2px solid var(--navy-900); outline-offset: 3px; }

@@ -4,6 +4,7 @@ const { eligibilityIssue, lifecycleProjectionSql } = require('./lifecycle-issue'
 const { isUpgradeProblem } = require('./native-characteristic-upgrade');
 const { PHASES } = require('./sync-local-diagnostics');
 const taxonomy = Object.freeze({
+  unexpected_failure: 'Не вдалося завершити синхронізацію. Потрібна перевірка адміністратором; причина не підтверджена.',
   LOCAL_DATABASE_FAILURE: 'Внутрішня операція бази даних не завершилася. Потрібна технічна перевірка; подробиці доступні в даних для підтримки.',
   product_retired: 'Товар архівований у Manager; автоматичне передавання зупинено.',
   TEST_PRODUCT_REMOTE_ENABLED: 'TEST товар увімкнено поза Amber. Передавання заблоковано; потрібна окрема перевірка Адміністратором.',
@@ -58,7 +59,7 @@ function safeDiagnostics(blockers = []) {
   }));
 }
 function presentProblem(item, lifecycle) {
-  if (['MAGENTO_NATIVE_IDENTITY_COLLISION', 'TEST_PRODUCT_REMOTE_ENABLED', 'LOCAL_DATABASE_FAILURE'].includes(item.code)) return { ...item, resolution: 'administrator', message: taxonomy[item.code] };
+  if (['unexpected_failure', 'MAGENTO_NATIVE_IDENTITY_COLLISION', 'TEST_PRODUCT_REMOTE_ENABLED', 'LOCAL_DATABASE_FAILURE'].includes(item.code)) return { ...item, resolution: 'administrator', message: taxonomy[item.code] };
   if (isUpgradeProblem(item)) return { ...item, resolution: 'integration_configuration',
     message: 'Товар збережено в Amber. Для його характеристик потрібно підготувати, перевірити й застосувати підтримку нових товарів у налаштуваннях категорії Magento.' };
   const issue = item.code === 'AMBER_SYNC_ELIGIBILITY_UNRESOLVED' ? eligibilityIssue(lifecycle) : null;

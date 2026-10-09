@@ -56,7 +56,7 @@ async function preview(config,input,options={}){
   return {...report,previewToken:c.hash({input,report})};
 }
 async function candidates(config,id,options={},query={}){
-  c.command(query,[],['after','search','categoryCode','productId']);
+  c.command(query,[],['after','search','categoryCode','productId','skus']);
   if(query.categoryCode !== undefined && (typeof query.categoryCode !== 'string' || !/^[A-Z][A-Z0-9_]{0,31}$/.test(query.categoryCode)))c.invalid();
   const search=query.search ?? '';
   if(typeof search!=='string'||search.length>100)c.invalid();
@@ -70,6 +70,7 @@ async function candidates(config,id,options={},query={}){
   return editor.read(options,async(client)=>{
     const revision=await editor.selected(client,config,id),current=await repository.current(client,revision.installationKey);
     if(revision.state!=='published'||current?.id!==id)throw c.error(409,'MAGENTO_BINDING_CONFLICT','Current publication changed');
+    if(query.skus!==undefined)return require('./exact-controlled-products').resolve(client,revision,query,inspect,config);
     const rows=(await client.query(`SELECT id FROM products p WHERE id>$1 AND status='active' AND corrected_to_product_id IS NULL
       AND exclude_from_export=0 AND NOT EXISTS(SELECT 1 FROM magento_test_deletions d WHERE d.public_product_identity_id=p.public_product_identity_id)
       AND ($2='' OR EXISTS(SELECT 1 FROM public_product_identities i WHERE i.id=p.public_product_identity_id

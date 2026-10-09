@@ -42,6 +42,11 @@ router.post(`${root}/categories/plan`, requirePermission('export_templates.manag
 router.get(`${root}/bindings/:id`, requirePermission('export_templates.view'), handle((req) => bindingReview.get(config,req.params.id)));
 router.get(`${root}/bindings/:id/handoffs`,requirePermission('export_templates.view'),handle((req)=>handoff.status(config,req.params.id)));
 router.get(`${root}/bindings/:id/controlled-products`,requirePermission('export_templates.view'),handle((req)=>controlled.candidates(config,req.params.id,{},{...req.query})));
+// Exact lists travel in a bounded body so 100 Unicode SKUs fit the proxy request line.
+router.post(`${root}/bindings/:id/controlled-products/resolve`,requirePermission('export_templates.view'),handle((req)=>{
+  require('../../services/magento/binding-contract').command(req.body,['skus'],['categoryCode']);
+  return controlled.candidates(config,req.params.id,{},req.body);
+}));
 for(const [path,operation] of [['publication/preview',publication.preview],['publication/apply',publication.publish],['controlled/preview',controlled.preview],['controlled/apply',controlled.apply]]){
   router.post(`${root}/${path}`,requirePermission('export_templates.manage'),requirePermission('export_templates.publish'),requirePermission('exports.view'),
     handle((req)=>operation(config,req.body,{mutationContext:getRequestMutationContext(req)})));
