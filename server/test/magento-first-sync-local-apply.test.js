@@ -36,9 +36,10 @@ function fixture() {
     options() { return { config, observation, projection, acceptedFields, actorUserId: 3 }; } };
 }
 async function withDependencies(f, operation, overrides = {}) {
-  const calls = { sql: [], information: [], evaluations: [], audit: [], nameAudit: [], revisions: [], states: [], previewReads: 0 };
+  const calls = { sql: [], catalogLocks: [], information: [], evaluations: [], audit: [], nameAudit: [], revisions: [], states: [], previewReads: 0 };
   const proof = new WeakSet([f.product, f.observation.amber.product]);
   const client = { async query(sql, values = []) {
+    if (sql.startsWith('LOCK TABLE')) {calls.catalogLocks.push(sql);return {rows:[]};}
     calls.sql.push({ sql, values });
     assert.doesNotMatch(sql, /^(BEGIN|COMMIT|ROLLBACK|SAVEPOINT)/);
     if (sql.startsWith('UPDATE products SET details=')) { f.product.details.answers = JSON.parse(values[1]); return { rowCount: 1, rows: [] }; }
@@ -61,7 +62,8 @@ async function withDependencies(f, operation, overrides = {}) {
       const mapped = { base: { name: `UA ${size}` }, english: { name: `EN ${size}` } };
       const generatedNames = reconciliation.applyNameOverride(mapped, product);
       calls.evaluations.push({ generated: structuredClone(generatedNames), answers: structuredClone(product.details.answers) });
-      return { ...mapped, generatedNames, ready: true };
+      return { ...mapped, base:{...mapped.base,...Object.fromEntries(f.projection.projection.filter(m=>m.persistence==='information')
+        .map(m=>[m.target,product.details.answers[m.source.key]]))}, generatedNames, ready: true };
     }],
     [information, 'prepareProductInformationOnClient', overrides.information || (async (received, product, patch, options) => {
       assert.equal(received, client); assert.equal(product, f.product); calls.information.push({ patch, lockCatalog: options.lockCatalog });
@@ -124,6 +126,21 @@ test('information-only adoption reanchors active accepted names and ignores unac
     const repeated = await helper.applyFirstSyncLocal(client, { ...f.options(), acceptedFields: [] });
     assert.equal(repeated.changed, false); assert.deepEqual(f.product, before); assert.equal(calls.sql.length, count);
   });
+});
+
+test('information forward mismatch or target/source error restores prospective state and produces no writes',async()=>{
+  for(const kind of ['value','target','source']){
+    const f=fixture();f.add('bead_length','all','information','20');
+    await withDependencies(f,async(client,calls)=>{
+      const original=evaluator.evaluate,before=structuredClone(f.product);
+      evaluator.evaluate=(amber,product)=>{const result=original(amber,product);if(product.details.answers.bead_length==='20'){
+        if(kind==='value')result.base.bead_length='different';else result.issueFields=[kind==='target'?'bead_length':'sourceSupport'];
+      }return result;};
+      try{const preview=await helper.prepareFirstSyncLocal(client,f.options());assert.equal(preview.supportedFields.length,0);assert.equal(preview.blockedFields[0].code,'FIRST_SYNC_LOCAL_INFORMATION_FORWARD_UNPROVEN');assert.deepEqual(f.product,before);
+        await assert.rejects(helper.applyFirstSyncLocal(client,f.options()),{code:'FIRST_SYNC_LOCAL_VALIDATION_FAILED'});assert.deepEqual(f.product,before);assert.equal(calls.sql.length,0);
+      }finally{evaluator.evaluate=original;}
+    });
+  }
 });
 
 test('per-field preparation keeps safe imports when runtime validation blocks another', async () => {
@@ -255,7 +272,7 @@ test('a prior same-transaction pricing change cannot detach the originally activ
     const evaluate = evaluator.evaluate;
     evaluator.evaluate = (amber, product) => {
       evaluate(amber, product); // Retain the private object-identity assertions.
-      const mapped = { base: { name: `UA ${product.total_price_uah}` }, english: { name: `EN ${product.total_price_uah}` } };
+      const mapped = { base: { name: `UA ${product.total_price_uah}`,bead_width:product.details.answers.bead_width }, english: { name: `EN ${product.total_price_uah}` } };
       return { ...mapped, generatedNames: reconciliation.applyNameOverride(mapped, product), ready: true };
     };
     try {

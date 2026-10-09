@@ -104,10 +104,11 @@ function directSource(cell, definition) {
     if (!node) return null;
     if (node.op === 'source') return { id: node.id, wrappers: [], required: false };
     if (['text', 'numberText', 'decimalText'].includes(node.op)) {
-      // Trimming and string-only coercion discard canonical information.
-      if (node.op === 'text' && (node.trim || node.format !== 'scalar-v1')) return null;
+      // Trimming is admitted only by the exact information-source check below.
+      // String-only coercion has no canonical scalar reverse contract.
+      if (node.op === 'text' && node.format !== 'scalar-v1') return null;
       const inner = visit(node.input, depth + 1);
-      return inner && { ...inner, wrappers: [...inner.wrappers, node.op] };
+      return inner && { ...inner, wrappers: [...inner.wrappers, node.op], trimmed: inner.trimmed || node.op === 'text' && node.trim };
     }
     if (node.op === 'questionValue') {
       const contract = definition.questionContracts[node.question];
@@ -233,9 +234,16 @@ function projectFirstSyncFields(input) {
     return emptyResult('review_required', [{ code: 'BINDING_OR_SCHEMA_EVIDENCE_INVALID' }]);
   }
   const category = own(product, 'category');
+  const routePlans = plans.filter(plan => plan.amberGroup === category && plan.predicates.every(predicate => {
+    const value = own(own(own(product, 'details'), 'answers'), predicate.questionKey);
+    // A missing/unknown semantic source cannot prove the negative branch.
+    return ['string','number'].includes(typeof value) && /^(0|-?[1-9][0-9]*)$/.test(String(value))
+      && Number.isSafeInteger(Number(value)) && (String(value) === predicate.valueId) === predicate.equal;
+  }));
+  if (routePlans.length !== 1) return emptyResult('review_required', [{
+    code: routePlans.length ? 'CATEGORY_REMOTE_ROUTE_AMBIGUOUS' : 'CATEGORY_REMOTE_ROUTE_NOT_APPROVED', category }]);
   const routes = bindings.routes.filter(route => route.enabled && route.reviewState === 'approved'
-    && route.setId === raw.attribute_set_id && plans.some(plan => plan.routeKey === route.routeKey
-      && plan.amberGroup === category));
+    && route.setId === raw.attribute_set_id && routePlans.some(plan => plan.routeKey === route.routeKey));
   if (routes.length !== 1) return emptyResult('review_required', [{
     code: routes.length ? 'CATEGORY_REMOTE_ROUTE_AMBIGUOUS' : 'CATEGORY_REMOTE_ROUTE_NOT_APPROVED',
     category, remoteAttributeSetId: raw.attribute_set_id }]);
@@ -299,6 +307,9 @@ function projectFirstSyncFields(input) {
     if (!remote.known && !enReason) reason ||= 'REMOTE_VALUE_TYPE_UNSUPPORTED';
     const direct = directSource(cell, compiled.definition);
     let descriptor = direct && compiled.definition.sources[direct.id];
+    if (direct?.trimmed && !(descriptor?.kind === 'information' && descriptor.category === category
+      && INFORMATION[category]?.includes(descriptor.key) && !descriptor.aliases.length && scope === 'all'
+      && direct.wrappers.every(wrapper => wrapper === 'text'))) descriptor = null;
     let persistence = 'derived', local = { known: true, present: false }, kind = 'derived', type = 'text';
     let unit, scale, constraints, prospective, reverseCandidates, importBlocker = null;
     if (target === 'name') {
@@ -355,6 +366,8 @@ function projectFirstSyncFields(input) {
       persistence = 'information'; kind = 'scalar'; type = 'text';
       local = sourceState(descriptor, product);
       if (local.known && local.present) local.value = String(local.value);
+      if (direct?.trimmed && remote.known && remote.present && (typeof remote.value !== 'string'
+        || remote.value.trim() !== remote.value)) reason ||= 'CANONICAL_INFORMATION_VALUE_NORMALIZED';
     } else {
       if (direct) reason ||= 'CANONICAL_SOURCE_SETTER_UNSUPPORTED';
       prospective = forward(target, scope);

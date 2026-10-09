@@ -2,10 +2,9 @@
 // rewrite a frozen publication or confer first-sync/remote dispatch authority.
 const c = require('./binding-contract');
 const schemas = require('../sku-schema.service');
-const { getRuleDependencies } = require('../../utils/rules');
+const { getRuleDependencies, isRuleMatched } = require('../../utils/rules');
 const { normalizeDecimal } = require('./first-sync-field-plan');
-const { parseVariationSku, parseVersionedSkuPart, buildSkuSuffixDecodeAttempts,
-  decodeStoredSkuAnswers, decodeSkuAnswers, decodeVisibleSkuAnswers, appendSkuSuffix } = require('../../utils/sku');
+const { parseVariationSku, parseVersionedSkuPart, decodeStoredSkuAnswers, appendSkuSuffix } = require('../../utils/sku');
 const fail = code => { throw c.error(409, code, code); };
 const present = value => value !== undefined && value !== null && String(value).trim() !== '';
 const isLegacySv = product => product.category === 'SV' && Boolean(product.full_sku)
@@ -31,42 +30,104 @@ function assertIndependent(schema,current,keys) {
     fail('FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED');
   }
 }
-// Existing recursive decoders return their first successful parse. Do not
-// mistake agreement between those first results for exhaustive uniqueness.
-// The missing-only lane admits only an intrinsically unambiguous grammar.
-function assertUnambiguousGrammar(schema) {
-  if(new Set(schema.questions.map(q=>q.key)).size!==schema.questions.length)fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
+// Rule inputs must have a defined historical meaning before they are evaluated.
+// Unknown/self/forward references and malformed trees stay with reviewed recount.
+function assertRule(rule, available, depth=0) {
+  if(rule==null)return;
+  if(depth>16 || typeof rule!=='object' || Array.isArray(rule))fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
+  for(const [key,value] of Object.entries(rule)) {
+    if(key==='$and' || key==='$or') {
+      if(!Array.isArray(value) || !value.length || value.length>32)fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
+      for(const branch of value){if(branch==null)fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');assertRule(branch,available,depth+1);}
+    } else if(!available.has(key) || (Array.isArray(value)?!value.length || value.length>256 || value.some(v=>!Number.isSafeInteger(v)):!Number.isSafeInteger(value))) {
+      fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
+    }
+  }
+}
+function assertSupportedGrammar(schema) {
+  if(schema.questions.length>32 || new Set(schema.questions.map(q=>q.key)).size!==schema.questions.length)fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
+  const available=new Set();
   for(const q of schema.questions){
     const codes=q.options.map(o=>String(o.sku_code));
-    if(Number(q.required)!==1 || getRuleDependencies(q.visible_if_json).length
-      || q.visible_if_json && Object.keys(q.visible_if_json).length || !codes.length
+    if(![0,1].includes(q.required) || !codes.length || codes.length>256
       || codes.some(code=>!/^\d+$/.test(code)) || new Set(codes).size!==codes.length
-      || new Set(codes.map(code=>code.length)).size!==1)fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
+      || new Set(q.options.map(o=>o.value_id)).size!==codes.length
+      || q.options.some(o=>!Number.isSafeInteger(o.value_id))
+      || q.sku_separator && !/^[._/-]{1,3}$/.test(q.sku_separator))fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
+    assertRule(q.visible_if_json,available);
+    // Historical decoders do not apply option display rules. Admit their codes
+    // as historical meanings, but do not evaluate an unknown rule context.
+    for(const o of q.options){assertRule(o.visible_if_json,available);assertRule(o.hidden_if_json,available);}
+    available.add(q.key);
   }
+}
+// Unlike the public first-success decoder, this proof explores every supported
+// full/visible configured and compact path. Budget exhaustion never proves unique.
+function enumerate(schema, encodedPart, answers) {
+  let work=0;
+  const results=new Map(),questions=schema.questions;
+  const add=semantics=>results.set(c.hash(semantics),semantics);
+  const separators=questions.some(q=>q.sku_separator && encodedPart.includes(q.sku_separator));
+  function walk(index,remaining,semantics,context,visible,configured) {
+    if(++work>10000)fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
+    if(index===questions.length){if(!remaining)add(semantics);return;}
+    const q=questions[index];
+    if(visible && !isRuleMatched(q.visible_if_json,context)){walk(index+1,remaining,semantics,context,visible,configured);return;}
+    const separator=configured?q.sku_separator:'';
+    const next=(valueId,placeholder,rest)=>walk(index+1,rest,[...semantics,{key:q.key,valueId,placeholder}],
+      {...context,[q.key]:placeholder?0:valueId},visible,configured);
+    if(separator){
+      if(!remaining.startsWith(separator))return;
+      const rest=remaining.slice(separator.length),closing=rest.indexOf(separator);
+      if(closing<0)return;
+      const code=rest.slice(0,closing),tail=rest.slice(closing+separator.length);
+      for(const o of q.options)if(o.sku_code===code)next(o.value_id,false,tail);
+      if(q.required!==1 && code==='0' && !q.options.some(o=>o.sku_code==='0'))next(null,true,tail);
+      return;
+    }
+    for(const o of q.options)if(remaining.startsWith(o.sku_code))next(o.value_id,false,remaining.slice(o.sku_code.length));
+    if(q.required!==1){
+      if(remaining.startsWith('0') && !q.options.some(o=>o.sku_code==='0'))next(null,true,remaining.slice(1));
+      next(null,true,remaining);
+    }
+  }
+  for(const visible of [false,true]){
+    if(separators)walk(0,encodedPart,[],{},visible,true);
+    walk(0,encodedPart.replace(/[._/-]/g,''),[],{},visible,false);
+  }
+  // Stored legacy layout permits explicit placeholders even for historically
+  // required hidden questions. Never manufacture a real zero from such a token.
+  const stored=decodeStoredSkuAnswers(questions,encodedPart,answers);
+  if(stored)add(stored.map(a=>({key:a.key,valueId:a.value_id,placeholder:a.is_placeholder})));
+  return [...results.values()];
 }
 function interpretations(product,schema,answers) {
   const variation=parseVariationSku(product.full_sku);
   if(variation.normalizedSku!==product.full_sku || !variation.baseFullSku.startsWith(product.category)) fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
   const parsed=parseVersionedSkuPart(variation.baseFullSku.slice(product.category.length));
   if(parsed.version!==Number(schema.version)) fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
+  const prefix=product.category+parsed.marker,sequence=Number(product.sequence_number);
+  if(typeof product.base_sku!=='string' || !product.base_sku.startsWith(prefix)
+    || product.sequence_number==null || !Number.isSafeInteger(sequence) || sequence<0
+    || appendSkuSuffix(product.base_sku,sequence)!==variation.baseFullSku)fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
+  const encodedPart=product.base_sku.slice(prefix.length),suffixRaw=String(sequence).padStart(3,'0');
+  if(!encodedPart || encodedPart.length>256)fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
   const results=new Map();
-  for(const attempt of buildSkuSuffixDecodeAttempts(parsed.encodedWithSuffix)){
-    for(const decoded of [decodeStoredSkuAnswers(schema.questions,attempt.encodedPart,answers),
-      decodeSkuAnswers(schema.questions,attempt.encodedPart),decodeVisibleSkuAnswers(schema.questions,attempt.encodedPart)]){
-      if(!decoded)continue;
-      const semantics=decoded.map(a=>({key:a.key,valueId:a.value_id,placeholder:a.is_placeholder}));
+  for(const semantics of enumerate(schema,encodedPart,answers)){
       // Stored answers must agree with every supported interpretation, including
       // hidden omission. An absent stored answer cannot manufacture semantic zero.
-      if(semantics.some(a=>present(answers[a.key]) && (a.placeholder
-        ? String(answers[a.key])!=='0' : String(answers[a.key])!==String(a.valueId)))) {
+      if(schema.questions.some(q=>{
+        if(!present(answers[q.key]))return false;
+        const a=semantics.find(answer=>answer.key===q.key);
+        return !a || (a.placeholder ? String(answers[q.key])!=='0' : String(answers[q.key])!==String(a.valueId));
+      })) {
         fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
       }
-      const result={encodedPart:attempt.encodedPart,suffixRaw:attempt.suffixRaw,semantics};
+      const result={encodedPart,suffixRaw,semantics};
       results.set(c.hash(result),result);
-    }
   }
   if(results.size!==1)fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
-  return {...[...results.values()][0],prefix:product.category+parsed.marker,variationNumber:variation.variationNumber};
+  return {...[...results.values()][0],prefix,baseSku:product.base_sku,sequenceNumber:sequence,variationNumber:variation.variationNumber};
 }
 function inspectLegacyInputs({product,schema,current,patch,weight,hasWeight}) {
   if(!isLegacySv(product) || product.status!=='active' || product.corrected_to_product_id
@@ -83,7 +144,7 @@ function inspectLegacyInputs({product,schema,current,patch,weight,hasWeight}) {
     if(present(previous[key]))fail('FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED');
   }
   assertIndependent(schema,current,keys);
-  assertUnambiguousGrammar(schema);
+  assertSupportedGrammar(schema);
   const before=interpretations(product,schema,previous),after=interpretations(product,schema,{...previous,...patch});
   if(c.hash(before)!==c.hash(after))fail('FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED');
   if(hasWeight){
@@ -98,7 +159,7 @@ function inspectLegacyInputs({product,schema,current,patch,weight,hasWeight}) {
       fail('FIRST_SYNC_LEGACY_WEIGHT_IDENTITY_REVIEW_REQUIRED');
     }
   }
-  return {proof:{version:1,sku:product.full_sku,schemaVersionId:schema.id,schemaHash:schema.config_hash,
+  return {proof:{version:2,sku:product.full_sku,schemaVersionId:schema.id,schemaHash:schema.config_hash,
     interpretation:before,currentSkuFlags:current.questions.map(q=>({key:q.key,includeInSku:q.include_in_sku})),...(hasWeight?{weightCompatibility:'sequence-or-rounded-weight'}:{})}};
 }
 module.exports={isLegacySv,inspectLegacyInputs};

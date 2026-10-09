@@ -104,6 +104,22 @@ test('direct information imports require the runtime catalog validator and exact
   assert.equal(item.source.routeKey, 'BR:all');
   assert.match(item.mappingHash, /^[a-f0-9]{64}$/);
 });
+
+test('allowlisted trimmed information imports only already canonical exact text', () => {
+  for(const value of ['17',' 17 ',17]){
+    const input=fixture({changeDefinition:d=>{d.groups[0].rows[0].cells.dovzhyna_brasletu_diuimiv.then.trim=true;}});
+    delete input.observation.amber.product.details.answers.braclet_size;
+    remote(input,'dovzhyna_brasletu_diuimiv',value);
+    const result=projectFirstSyncFields(input),decision=field(result,'dovzhyna_brasletu_diuimiv');
+    assert.equal(metadata(result,'dovzhyna_brasletu_diuimiv').persistence,'information');
+    assert.equal(decision.status,value==='17'?'imported':'review_required');
+    if(value!=='17')assert.equal(metadata(result,'dovzhyna_brasletu_diuimiv').reason,'CANONICAL_INFORMATION_VALUE_NORMALIZED');
+  }
+});
+test('trimmed transformed or non-information text cannot become a canonical setter', () => {
+  const input=fixture({changeDefinition:d=>{d.groups[0].rows[0].cells.decor_weight={op:'text',trim:true,format:'scalar-v1',onAbsent:'empty',input:source('weight')};}});
+  assert.equal(metadata(projectFirstSyncFields(input),'decor_weight').persistence,'derived');
+});
 test('exact same-source presence guards with empty fallbacks remain direct', () => {
   const input = fixture({ changeDefinition: definition => {
     definition.groups[0].rows[0].cells.dovzhyna_brasletu_diuimiv.else = literal('');
@@ -278,13 +294,40 @@ test('unchanged category has no route when remote set differs', () => {
   assert.equal(projectFirstSyncFields(input).blockers[0].code, 'CATEGORY_REMOTE_ROUTE_NOT_APPROVED');
   assert.equal(input.observation.amber.product.category, 'BR');
 });
-test('two approved same-set routes are ambiguous even if current answers favor one', () => {
+test('two approved same-set routes use the exact known local predicate; unknown never selects a negative branch', () => {
   const input = fixture({ changeDefinition: definition => {
     const route = { op: 'when', if: { op: 'eq', left: { op: 'semanticKey', input: source('color') }, right: literal('7') },
       then: literal('Set A'), else: literal('Set B') };
     definition.groups[0].rows.forEach(row => { row.cells.attribute_set_code = route; });
   } });
-  assert.equal(projectFirstSyncFields(input).blockers[0].code, 'CATEGORY_REMOTE_ROUTE_AMBIGUOUS');
+  assert.equal(projectFirstSyncFields(input).route.routeKey,'BR.binding_test_semantic=value_id:7');
+  input.observation.amber.product.details.answers.binding_test_semantic=8;
+  assert.equal(projectFirstSyncFields(input).route.routeKey,'BR.binding_test_semantic!=value_id:7');
+  for(const value of [undefined,null,'','invalid',7.1,true,'07']){
+    input.observation.amber.product.details.answers.binding_test_semantic=value;
+    assert.equal(projectFirstSyncFields(input).blockers[0].code,'CATEGORY_REMOTE_ROUTE_NOT_APPROVED');
+  }
+});
+
+test('known conditional route still requires its own approval, enabled state and remote set',()=>{
+  for(const change of ['disabled','review','set']){
+    const input=fixture({changeDefinition:d=>{const route={op:'when',if:{op:'eq',left:{op:'semanticKey',input:source('color')},right:literal('7')},then:literal('Set A'),else:literal('Set B')};d.groups[0].rows.forEach(r=>{r.cells.attribute_set_code=route;});}});
+    const chosen=input.observation.amber.revision.bindings.routes.find(r=>r.routeKey==='BR.binding_test_semantic=value_id:7');
+    if(change==='disabled')chosen.enabled=false;if(change==='review')chosen.reviewState='review_required';if(change==='set')input.observation.raw.attribute_set_id=8002;
+    assert.equal(projectFirstSyncFields(input).blockers[0].code,'CATEGORY_REMOTE_ROUTE_NOT_APPROVED');
+  }
+});
+
+test('actual published schema6 routes share151 but select the proved souvenir branch and exact size expression',()=>{
+  const real=require('./fixtures/legacy-sv-schema6'),p=real.publication(),compiled=compileDefinition(p.definition),schema=normalizeSchema(p.schema);
+  const revision={id:'11111111-1111-1111-1111-111111111111',state:'published',templateVersionId:'22222222-2222-2222-2222-222222222222',definitionHash:compiled.hash,evaluatorVersion:compiled.definition.evaluatorVersion,outputContract:compiled.definition.outputContract,formatVersion:compiled.definition.formatVersion,schemaFingerprint:hash(schema),topologyFingerprint:hash(schema.storeTopology),schema,bindings:normalizeBindings(p.bindings)};
+  for(const [id,routeKey] of [[1919,'SV.souvenir!=value_id:5'],[2198,'SV.souvenir=value_id:5']]){
+    const product=real.product(id);delete product.details.answers.size;
+    const raw={id:123,sku:product.full_sku,attribute_set_id:151,custom_attributes:[{attribute_code:'rozmir_suveniriv',value:'12/5/3'}]};
+    const observation={amber:{product,compiled,revision,template:{kind:'published',versionId:revision.templateVersionId,definitionHash:compiled.hash}},raw,schema,domainEvidence:{english:{id:raw.id,sku:raw.sku,fields:{name:'Fixture EN'}},failures:[]}};
+    const projected=projectFirstSyncFields({observation});assert.equal(projected.route.routeKey,routeKey);
+    assert.equal(metadata(projected,'rozmir_suveniriv').persistence,'information');assert.equal(field(projected,'rozmir_suveniriv').importValue,'12/5/3');
+  }
 });
 test('attribute identity drift blocks reused option IDs', () => {
   const input = fixture(); input.observation.schema = structuredClone(input.observation.schema);

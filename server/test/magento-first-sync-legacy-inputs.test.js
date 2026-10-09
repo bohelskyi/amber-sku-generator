@@ -12,7 +12,7 @@ function fixture() {
 }
 test('missing non-SKU semantic zero is safe without relabeling encoded identity',()=>{
   const f=fixture(),before=structuredClone(f.product),result=inspectLegacyInputs(f);
-  assert.deepEqual(f.product,before);assert.equal(result.proof.version,1);assert.equal(result.proof.sku,'SV5004');
+  assert.deepEqual(f.product,before);assert.equal(result.proof.version,2);assert.equal(result.proof.sku,'SV5004');
 });
 test('missing grams must reproduce the complete legacy SKU under either suffix interpretation',()=>{
   const f=fixture();Object.assign(f,{patch:{weight:'4.125'},weight:'4.125',hasWeight:true});
@@ -50,7 +50,7 @@ test('marker, separators and variation are reproduced exactly; numeric suffix eq
   const f=fixture();f.schema.version=2;f.schema.marker='2/';f.schema.questions[0].sku_separator='-';f.schema.config_hash=schemaService.hashSnapshot(f.schema.questions);
   f.product.full_sku='SV2/-5-004-003';f.product.base_sku='SV2/-5-';Object.assign(f,{patch:{weight:'4.125'},weight:'4.125',hasWeight:true});
   assert.equal(inspectLegacyInputs(f).proof.sku,f.product.full_sku);
-  f.product.full_sku='SV2/-5-0004-003';assert.throws(()=>inspectLegacyInputs(f),{code:'FIRST_SYNC_LEGACY_WEIGHT_IDENTITY_REVIEW_REQUIRED'});
+  f.product.full_sku='SV2/-5-0004-003';assert.throws(()=>inspectLegacyInputs(f),{code:'FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN'});
 });
 test('hidden omission disagreement, forged snapshot and stale identity fail closed',()=>{
   for(const kind of ['hidden','hash','version','category','hybrid','inactive']){
@@ -78,12 +78,65 @@ test('optional separated placeholder never disguises a contradictory populated e
   f.product.full_sku='SV-0-004';f.product.base_sku='SV-0-';f.product.details.answers.souvenir=5;
   assert.throws(()=>inspectLegacyInputs(f),{code:'FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN'});
 });
-test('conditional, optional, duplicate or non-digit fixed codes require explicit historical review',()=>{
-  for(const kind of ['conditional','optional','duplicate','separatorCode']){
+test('self-referential conditions, duplicate or non-digit codes require explicit historical review',()=>{
+  for(const kind of ['conditional','duplicate','separatorCode']){
     const f=fixture(),q=f.schema.questions[0];if(kind==='conditional')q.visible_if_json={souvenir:5};if(kind==='optional')q.required=0;
     if(kind==='duplicate')q.options.push({...q.options[0]});if(kind==='separatorCode')q.options[0].sku_code='-5-';
     f.schema.config_hash=schemaService.hashSnapshot(f.schema.questions);assert.throws(()=>inspectLegacyInputs(f));
   }
+});
+
+const real=require('./fixtures/legacy-sv-schema6');
+function realFixture(id=1919) {
+  return {product:real.product(id),schema:real.schema(),current:real.current(),patch:{size:'12/5/3'},hasWeight:false};
+}
+test('actual frozen schema6 hash, fractional display order, conditions and real zero remain exact',()=>{
+  const f=realFixture();assert.equal(f.schema.questions.length,11);
+  const clean=f.schema.questions.map(({id:_id,...q})=>q);
+  assert.equal(schemaService.hashSnapshot(clean),real.data.provenance.frozenHash);
+  assert.equal(f.schema.questions.find(q=>q.key==='stone_processing').display_order,9.5);
+  assert.equal(f.schema.questions.find(q=>q.key==='stone_processing').options[0].value_id,0);
+});
+test('actual schema6 keychain accepts independent missing information without omitting the frozen schema',()=>{
+  const f=realFixture(),before=structuredClone(f.product),proof=inspectLegacyInputs(f).proof;
+  assert.deepEqual(proof.interpretation.semantics.map(x=>x.key),['material','color','souvenir']);
+  assert.equal(proof.interpretation.baseSku,'SV116');assert.equal(proof.interpretation.sequenceNumber,7);
+  assert.deepEqual(f.product,before);
+});
+test('actual conditional stone and bird branches retain real option zero versus absent optional placeholders',()=>{
+  for(const id of [2198,4055]){
+    const f=realFixture(id);delete f.product.details.answers.size;
+    const proof=inspectLegacyInputs(f).proof;
+    const key=id===2198?'additional_stone':'bird';
+    assert.deepEqual(proof.interpretation.semantics.find(a=>a.key===key),{key,valueId:null,placeholder:true});
+  }
+  const f=realFixture(2198);f.product.base_sku='SV13500';f.product.full_sku='SV13500001';
+  f.product.details.answers.stone_processing=0;delete f.product.details.answers.size;
+  assert.deepEqual(inspectLegacyInputs(f).proof.interpretation.semantics.find(a=>a.key==='stone_processing'),{key:'stone_processing',valueId:0,placeholder:false});
+});
+test('schema6 controlled missing-weight variant proves only exact compatibility; actual zero and SKU inputs stay reviewed',()=>{
+  const f=realFixture();f.product.weight=null;delete f.product.details.answers.weight;
+  Object.assign(f,{patch:{weight:'7.125'},weight:'7.125',hasWeight:true});
+  assert.equal(inspectLegacyInputs(f).proof.weightCompatibility,'sequence-or-rounded-weight');
+  f.product.weight=0;assert.throws(()=>inspectLegacyInputs(f),{code:'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED'});
+  for(const key of ['stone_processing','bird','additional_stone']){
+    const g=realFixture();g.patch={[key]:0};assert.throws(()=>inspectLegacyInputs(g),{code:'FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED'});
+  }
+});
+test('conditional grammar rejects unknown/forward/malformed rules and populated hidden contradictions',()=>{
+  for(const rule of [{unknown:1},{souvenir:1},{'$or':[]},{'$and':[null]},{unknown:'invalid'},'invalid']){
+    const f=fixture();f.schema.questions[0].visible_if_json=rule;f.schema.config_hash=schemaService.hashSnapshot(f.schema.questions);
+    assert.throws(()=>inspectLegacyInputs(f),{code:'FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN'});
+  }
+  const f=realFixture(4055);delete f.product.details.answers.size;f.product.details.answers.bird=1;
+  assert.throws(()=>inspectLegacyInputs(f),{code:'FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN'});
+  const hidden=realFixture();hidden.product.details.answers.stone_processing=0;
+  assert.throws(()=>inspectLegacyInputs(hidden),{code:'FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN'});
+});
+test('bounded proof never treats exhausted optional parsing as unique',()=>{
+  const f=fixture();f.schema.questions=Array.from({length:20},(_,i)=>({...skuQuestion('q'+i,'1'),required:0,sku_index:i,display_order:i}));
+  f.schema.config_hash=schemaService.hashSnapshot(f.schema.questions);f.product.base_sku='SV'+'1'.repeat(10);f.product.full_sku=f.product.base_sku+'004';f.product.details.answers={};
+  assert.throws(()=>inspectLegacyInputs(f),{code:'FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN'});
 });
 
 test('nullable current include_in_sku never proves non-SKU authority or masks a dependency',()=>{

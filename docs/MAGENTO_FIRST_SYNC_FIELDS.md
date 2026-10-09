@@ -330,12 +330,18 @@ answer. The pinned SKU publication must omit the key; the current catalog must
 still classify it as non-SKU. Neither frozen nor current rules may connect the
 changed key, directly or transitively, to SKU question/option visibility. Every
 supported stored, ordinary and hidden-omission decode path must agree on one
-interpretation, before and after the patch. Since recursive decoders return their
-first match, this lane additionally requires all pinned questions to be static,
-required and have unique digit-only codes of one fixed width per question.
-Optional, conditional or variable-width publications require historical review.
-The exact reservation owner, pinned
+interpretation, before and after the patch. A separate proof enumerates all full
+and visible configured/compact paths with a 10,000-state budget; exhaustion
+fails closed. Conditional rules must be well-formed integer comparisons against
+earlier frozen keys. Unique digit-only codes may have different widths; ambiguous
+parses, unknown/forward/self dependencies and populated-answer contradictions
+require review. Real option zero remains distinct from an absent placeholder.
+No decoded answer is inferred or stored. The exact reservation owner, pinned
 schema hash and unchanged public identity remain part of validation.
+
+The stored base SKU and safe nonnegative integer sequence must reconstruct the
+complete stored SKU exactly, including marker and verified variation. They prove
+the suffix boundary, not historical weight mode, and are bound into proof v2.
 
 Missing gram weight additionally requires both physical and answer values to be
 strictly absent. Zero, malformed or populated values require correction. Exact
@@ -356,3 +362,73 @@ SKU-driving answers, calibration and unproven/mismatching suffixes remain explic
 Administrator correction/recount work. The UI links to the ordinary reviewed
 workflow; it neither creates a successor nor chooses answers or changes a receipt
 automatically. These repository tests do not establish production acceptance.
+
+## Actual conditional SV acceptance coverage
+
+Approved routes sharing one remote attribute set are selected by exactly one
+matching published local predicate before enabled state, approval and the exact
+remote set are checked. Missing or malformed semantic input cannot prove a
+negative branch. Other field, schema, source-support and readiness guards remain.
+
+The information allowlist supports a published scalar-v1 text trim wrapper only
+for the exact category/source without aliases, in global scope, and only when
+the received value is already trimmed text. Transformed numeric or generic text
+expressions do not become setters. The existing catalog/price dependency validator
+and canonical normalization check remain authoritative. Prospective evaluation on
+the original proof-owned product must reproduce the raw received target exactly
+without target/source errors; failure discards dependent candidates before writes
+or receipts and restores the temporary product state.
+
+Read-only local evidence on 2026-10-09 found 752 active/current SV rows pinned to
+the actual 11-question conditional schema6: 503 physical zero weights, 249 positive
+weights and no absent physical weight. Therefore none qualify for a missing-weight
+import as captured. The bounded identity proof independently succeeds for 462
+and remains unproven for 290; this is not a count of import-eligible products.
+All SKU questions remain reviewed recount work. The only current active non-SKU
+fields are weight and size; the TEST option question is archived and its unpublished
+draft mapping grants no authority. Published size is absent in 226 rows, including
+111 with positive weight. These are field-presence counts, not delivery eligibility.
+
+Regression fixtures copy the real frozen questions/options/hash, current SV
+catalog and complete published definition/detached mappings. Isolated PostgreSQL
+acceptance copies SV116007 and SV17001: exact missing-size adoption preserves
+identity, history and every price/weight field, advances one content revision and
+writes one atomic receipt; replay is a no-op and interrupted work rolls back.
+Zero weight remains unresolved. Controlled missing-weight variants are explicitly
+separate from these unchanged actual product copies and do not establish live
+Magento acceptance or permission to change the working database.
+
+### Actual copied rows and administrator completion
+
+Information-size adoption is independent of the canonical SKU/price lane. The
+unchanged local copies1919/SV116007 (16.2g, automatic1150UAH) and782/SV17001
+(0g, Manual40000UAH, legacy price flag true) both accept only missing size against
+a controlled remote text fixture.782 still has unresolved weight/SKU readiness;
+the information receipt does not mean complete first-sync or delivery acceptance.
+The current local SV catalog has no size-dependent visibility/option/price rule
+and no active correction request in the752-row set as of07:53UTC. The226 absent
+sizes are local field candidates, not verified remote imports.
+
+4042/SV11511058 already has physical2g, mirror2,6 and size. Its controlled positive
+weight variant removes physical/mirror weight and receives58.125g. The actual
+Manual600UAH is copied unchanged. This variant proves a bounded setter contract;
+the actual populated row requires explicit review if its weight is to change.
+
+1835/SV11510016 already has physical0g, mirror8,7, size4/3,5/1 and Manual950UAH
+with legacy_uah_price_unset=true. Neither missing-only import nor a raw flag clear
+is appropriate. Ordinary same-price change is rejected and does not clear this
+marker. The existing Administrator recount path is
+/products/open?article=SV11510016&action=recount: independently verify weight and
+visible answers, enter the same confirmed physical/mirror weight, select Manual
+UAH950, review a fresh preview and confirm. Do not infer weight from the mirror
+or suffix016, or invent the absent optional additional_stone answer. If the old
+decoder supplies its zero placeholder, explicitly choose the existing UI
+"Не обрано" (null); an inherited or explicit nonexistent semantic0 is rejected.
+
+An authorized recount with a real parameter change can retain950UAH. It creates
+an active reviewed native successor, retaining the public identity, with the new
+row's default legacy flag false. The original becomes corrected, linked and
+excluded, with its original flag, price and history preserved. Existing lineage
+holds/exclusions and delivery checks remain separate from local completion. Any
+fixture weight used to verify this path is an explicit test decision, not a
+claimed measurement or user acceptance of the real1835 product.

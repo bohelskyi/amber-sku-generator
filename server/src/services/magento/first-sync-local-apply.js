@@ -142,7 +142,14 @@ async function prepareLocal(client, { observation, acceptedFields, projection, a
     catch (cause) { block(field, cause); }
   }
   const informationFields = supported.filter(item => item.meta.persistence === 'information');
+  if (lockCatalog && informationFields.length) {
+    // Row locks cannot exclude newly inserted SKU/price dependencies. Keep this
+    // first-sync information apply snapshot stable through the short commit.
+    try { await client.query('LOCK TABLE categories,questions,options,price_scenarios,price_weight_bands,price_matrix,price_modifiers IN SHARE MODE NOWAIT'); }
+    catch (cause) { for (const item of informationFields) block(item.field, cause); }
+  }
   for (const item of informationFields) {
+    if (result.blockedFields.some(field => identity(field) === identity(item.field))) continue;
     try {
       const key = item.meta.source.key;
       if (!same(product.details?.answers?.[key], original.product.details?.answers?.[key])) fail('FIRST_SYNC_LOCAL_SOURCE_CHANGED');
@@ -158,7 +165,7 @@ async function prepareLocal(client, { observation, acceptedFields, projection, a
   const patch = Object.fromEntries(active().filter(item => item.meta.persistence === 'information').map(item => [item.meta.source.key, item.field.after]));
   if (Object.keys(patch).length) {
     try { informationPreview = await information.prepareProductInformationOnClient(client, product, patch, { lockCatalog }); }
-    catch (cause) { for (const item of active().filter(item => item.meta.persistence === 'information')) block(item.field, cause); }
+    catch (cause) { informationPreview = null; for (const item of active().filter(item => item.meta.persistence === 'information')) block(item.field, cause); }
   }
   let canonicalPreview = null;
   const canonicalFields = active().filter(item => ['weight', 'characteristic'].includes(item.meta.persistence));
@@ -188,6 +195,10 @@ async function prepareLocal(client, { observation, acceptedFields, projection, a
         total_price: canonicalPreview.pricing.totalPrice, total_price_uah: canonicalPreview.pricing.totalPriceUah,
         price_per_gram: canonicalPreview.pricing.pricePerGram, uah_rate: canonicalPreview.pricing.uahRate });
       post = evaluator.evaluate(amber, product);
+      for (const item of active().filter(item => item.meta.persistence === 'information')) {
+        if (post.failed || post.issueFields?.includes(item.field.target) || post.issueFields?.includes('sourceSupport')
+          || post.base?.[item.field.target] !== item.field.remote.value) fail('FIRST_SYNC_LOCAL_INFORMATION_FORWARD_UNPROVEN');
+      }
       generated = generatedNames(post);
     } catch (cause) {
       if (reanchorAfterPrice && !acceptedFields.length) throw cause;
