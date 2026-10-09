@@ -45,6 +45,7 @@ export function ProductBuilder({
   answeredRequiredCount,
   requiredCount,
   previewData,
+  reservedCreationSku,
   isTestProduct = false,
   canCreateTestProducts = false,
   onTestProductChange,
@@ -394,7 +395,11 @@ export function ProductBuilder({
               {!isNativeCreation && <details className="mt-2 text-xs"><summary className="cursor-pointer text-slate-500">Технічні деталі</summary>
                 <SummaryRow label="Внутрішній SKU" value={isVerified ? finalSku : '—'} mono />
               </details>}
-              <p className="text-xs text-slate-500">Артикул буде призначено сервером після збереження товару.</p>
+              {reservedCreationSku?.publicSku ? <div role="status">
+                <SummaryRow label="Артикул товару" value={reservedCreationSku.publicSku} mono />
+                <button type="button" className="text-xs underline" onClick={() => onCopyText?.(reservedCreationSku.publicSku)}>Копіювати артикул</button>
+                <p className="text-xs text-slate-500">Зарезервовано для цього товару. Після збереження артикул залишиться таким самим.</p>
+              </div> : <p className="text-xs text-slate-500">Артикул буде призначено сервером після збереження товару.</p>}
               {isVerified && !isNativeCreation && isVariationActive && (
                 <p className="builder-summary-note">
                   Варіація #{String(variationData.variationNumber).padStart(3, '0')}

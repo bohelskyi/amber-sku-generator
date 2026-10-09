@@ -13,6 +13,7 @@ function endpoint(method, path, permission, response = 'json') {
 }
 
 const ENDPOINT_MANIFEST = Object.freeze([
+  endpoint('POST', '/products/creation/cancel', 'products.create'),
   endpoint('POST', '/integration-tasks', 'products.create'),
   endpoint('GET', '/integration-tasks/attempts/:requestId', 'products.create'),
   endpoint('GET', '/integration-tasks', ['products.create','export_templates.manage']),

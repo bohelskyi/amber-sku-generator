@@ -98,6 +98,7 @@ router.get('/config', requirePermission('products.view'), async (req, res) => {
       historicalReactivation: { available: Boolean(activation?.enabled), format: 'historical-reactivation-standard-v1', protocol: 'standard-rest-v1', administratorOnly: true, maxItems: 100, createTargetStatus: 2 },
       productIntegrationRequests: { available: Boolean(activation?.enabled), version: 1 },
       productCreation: { identityMode: activation?.enabled ? 'public_identity' : 'encoded_sku',
+        skuReservation: { available: Boolean(activation?.enabled), version: 1 },
         testProducts: { available: Boolean(activation?.enabled), administratorOnly: true, prefix: 'TEST-', targetStatus: 2 },
         pricingDecision: { available: Boolean(activation?.enabled), modes: ['system_auto', 'manual_uah', 'usd_per_gram'] } } });
   } catch (err) {
@@ -114,6 +115,12 @@ router.post('/preview', requirePermission('products.create'), async (req, res) =
     res.status(err.statusCode || 500).json({ error: err.message, ...publicFieldErrors(err),
       ...(typeof err.code === 'string' && err.code.startsWith('TEST_PRODUCT_') ? { code: err.code } : {}) });
   }
+});
+
+router.post('/products/creation/cancel', requirePermission('products.create'), async (req, res) => {
+  try { res.json(await require('../../services/product/creation-sku-reservation').cancel(req.body || {},
+    { mutationContext: getRequestMutationContext(req) })); }
+  catch (error) { require('../../http/errors').sendHttpError(res, error, { includeCode: true }); }
 });
 
 router.post('/price-preview', requirePermission('products.create'), async (req, res) => {

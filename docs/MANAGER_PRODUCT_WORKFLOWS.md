@@ -139,3 +139,19 @@ Editing an existing exact UA/EN pair during direct recount requires
 require `exports.create` and grants no role permissions. Separate missing-name
 repair, Magento name-conflict resolution, standalone name edits and export
 commands retain their existing capabilities.
+
+## Guaranteed creation article
+
+Forward migration 074 adds permanent owner/creation-UUID/category/namespace SKU
+reservations. A native POST preview with a creation UUID allocates the actual
+public identity before reviewing names. Name/answer/photo edits keep that UUID;
+preview evidence binds the exact article. Save consumes it atomically with the
+product, audit and immutable creation receipt. Concurrent retries return one
+product. Cancellation closes the attempt without creating a product, including
+when cancellation wins before preview; the article is never reused. Sequence
+gaps are intentional. A lost save reply must recover the original exact request.
+Legacy no-reservation callers remain compatible; a UUID that already owns a
+reservation cannot bypass it by omitting reservation evidence. Preview and cancel
+recheck active `products.create`; TEST retains actual Administrator enforcement.
+Price-only preview and integration tasks allocate no identities.
+Installation creates no product, allocation, enrollment, binding publication or Magento operation.

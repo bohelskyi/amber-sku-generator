@@ -31,12 +31,27 @@ async function loadSupportInputs(client, definition, products) {
   return { products: projectSupportProducts(products, schemas, characteristicVersions), schemas, characteristicVersions };
 }
 
-async function loadProspectiveSupportInput(client, definition, product, expectedConfigHash) {
+async function loadProspectiveSupportInput(client, definition, product, expectedConfigHash, { actorUserId, idempotencyKey } = {}) {
   const configuration = await require('../product/characteristic-config').readCharacteristicConfiguration(client, product.category);
   if (typeof expectedConfigHash !== 'string' || configuration.config_hash !== expectedConfigHash) {
     throw Object.assign(new Error('Prospective characteristic configuration changed'), { code: 'PRODUCT_CHARACTERISTICS_CHANGED', statusCode: 409 });
   }
-  return projectProspectiveSupportProduct(definition, product, configuration);
+  let reservedSku = null;
+  if (product.public_sku !== 'AG-PREVIEW') {
+    if (!Number.isSafeInteger(Number(actorUserId)) || Number(actorUserId) <= 0
+      || typeof idempotencyKey !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
+      throw Object.assign(new Error('Invalid prospective characteristic context'), { code: 'SOURCE_SUPPORT_INVALID' });
+    }
+    const owned = (await client.query(`SELECT i.public_sku FROM product_creation_sku_reservations r
+      JOIN public_product_identities i ON i.id=r.public_product_identity_id
+      WHERE r.actor_user_id=$1 AND r.idempotency_key=$2 AND r.state='reserved'
+        AND r.category_code=$3 AND i.public_sku=$4 AND i.is_test_product=r.is_test_product
+        AND NOT EXISTS(SELECT 1 FROM products p WHERE p.public_product_identity_id=i.id)
+      FOR SHARE OF r`, [actorUserId,idempotencyKey,product.category,product.public_sku])).rows[0];
+    if (!owned) throw Object.assign(new Error('Invalid prospective characteristic context'), { code: 'SOURCE_SUPPORT_INVALID' });
+    reservedSku = owned.public_sku;
+  }
+  return projectProspectiveSupportProduct(definition, product, configuration, reservedSku);
 }
 
 module.exports = { loadSupportInputs, loadProspectiveSupportInput };

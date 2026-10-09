@@ -43,6 +43,7 @@ function getProductPreviewToken(preview, categoryCode, answers, isCalibrated) {
     ...(preview.isTestProduct === true ? { isTestProduct: true, testTargetStatus: 2 } : {}),
     ...(preview.newProductInput ? { newProductInput: preview.newProductInput } : {}),
     ...(preview.creationPhotos ? { creationPhotos: preview.creationPhotos } : {}),
+    ...(preview.skuReservation ? { skuReservation: preview.skuReservation } : {}),
     ...(preview.pricingDecision ? { creationPricingDecision: preview.pricingDecision } : {}),
     ...(preview.characteristicConfigHash ? { characteristicConfigHash: preview.characteristicConfigHash, characteristicConfigVersion: preview.characteristicConfigVersion } : {}),
     categoryCode,

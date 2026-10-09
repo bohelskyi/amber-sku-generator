@@ -86,3 +86,22 @@ test('prospective native projection uses authoritative normalized answers for ev
   assert.deepEqual(prospectiveAnswers({}, legacy), legacy.answers);
   assert.equal(prospectiveAnswers({}, { categoryCode: 'SV', answers: { weight: '12,3' } }).weight, 12.3);
 });
+
+test('real prospective article requires owned reservation proof and retains private exact-SKU provenance', async () => {
+  const compiled = definition(), db = database('AR','size',28);
+  const hash=(await readCharacteristicConfiguration(db,'AR')).config_hash;
+  const p=product('AR',{size:28},{id:null,full_sku:null,sku_schema_version_id:null,public_sku:'AG-000123'});
+  const key='00000000-0000-4000-8000-000000000123';
+  const originalQuery=db.query;
+  db.query=async(sql,params)=>sql.includes('product_creation_sku_reservations')
+    ?{rows:params[0]===21&&params[1]===key&&params[2]==='AR'&&params[3]==='AG-000123'?[{public_sku:'AG-000123'}]:[]}
+    :originalQuery(sql,params);
+  for(const context of [{},{actorUserId:22,idempotencyKey:key},{actorUserId:21,idempotencyKey:'00000000-0000-4000-8000-000000000124'}]){
+    await assert.rejects(loadProspectiveSupportInput(db,compiled.definition,p,hash,context),{code:'SOURCE_SUPPORT_INVALID'});
+  }
+  const supported=await loadProspectiveSupportInput(db,compiled.definition,p,hash,{actorUserId:21,idempotencyKey:key});
+  assert.deepEqual(evaluateProduct(compiled,supported).errors,[]);
+  assert.ok(evaluateProduct(compiled,{...supported}).errors.some(error=>error.code==='SOURCE_SUPPORT_INVALID'));
+  supported.public_sku='AG-000124';
+  assert.ok(evaluateProduct(compiled,supported).errors.some(error=>error.code==='SOURCE_SUPPORT_INVALID'));
+});

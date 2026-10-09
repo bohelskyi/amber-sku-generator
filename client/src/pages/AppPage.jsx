@@ -355,6 +355,7 @@ function AppPage() {
             answeredRequiredCount={sku.answeredRequiredCount}
             requiredCount={sku.requiredCount}
             previewData={sku.previewData}
+            reservedCreationSku={sku.reservedCreationSku}
             isTestProduct={sku.isTestProduct}
             canCreateTestProducts={sku.testProductCreationAvailable}
             onTestProductChange={sku.handleTestProductChange}

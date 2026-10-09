@@ -96,14 +96,14 @@ function projectSupportProducts(products, schemas, characteristicVersions = []) 
 
 // Only the read-only prospective loader supplies this live configuration. It is
 // not an immutable version and cannot confer authority on a stored product.
-function projectProspectiveSupportProduct(definition, product, configuration) {
+function projectProspectiveSupportProduct(definition, product, configuration, reservedSku = null) {
   if (definition.evaluatorVersion !== CHARACTERISTIC_EVALUATOR
     || definition.sourceContractVersion !== CHARACTERISTIC_CONTRACT
-    || product.id !== null || product.public_sku !== 'AG-PREVIEW' || product.full_sku !== null
+    || product.id !== null || product.public_sku !== (reservedSku || 'AG-PREVIEW') || product.full_sku !== null
     || product.characteristic_version_id != null || product.sku_schema_version_id != null
     || configuration.category_code !== product.category) fail('SOURCE_SUPPORT_INVALID', 'Invalid prospective characteristic context');
   const projected = { ...product };
-  prospectiveProjections.set(projected, { definition, configuration: structuredClone(configuration) });
+  prospectiveProjections.set(projected, { definition, publicSku: product.public_sku, configuration: structuredClone(configuration) });
   return projected;
 }
 
@@ -133,7 +133,7 @@ function checkSourceSupport(d, descriptor, product, raw, context) {
   if (!product.full_sku) {
     if (d.evaluatorVersion !== CHARACTERISTIC_EVALUATOR) reject('native characteristics require a reviewed evaluator 5 template and binding successor');
     const prospective = context.prospective;
-    const version = prospective?.definition === d && product.id === null && product.public_sku === 'AG-PREVIEW'
+    const version = prospective?.definition === d && product.id === null && product.public_sku === prospective.publicSku
       && product.characteristic_version_id == null && product.sku_schema_version_id == null
       ? prospective.configuration : context.characteristics;
     if (!version || (!prospective && String(version.id) !== String(product.characteristic_version_id)) || version.category_code !== product.category) reject(prospective ? 'authoritative prospective characteristic evidence required' : 'authoritative immutable characteristic version required');
