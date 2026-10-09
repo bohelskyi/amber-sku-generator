@@ -1,11 +1,13 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AuthContext } from '../src/auth/auth-context.js';
 import { api } from '../src/lib/api.js';
 import MagentoFirstSyncFields from '../src/components/attention/MagentoFirstSyncFields.jsx';
 
-vi.mock('../src/lib/api.js', () => ({ api: { post: vi.fn() } }));
-const auth = { roles: [{ key: 'administrator' }], principalLifetime: { id: '1', valid: true } };
+vi.mock('../src/lib/api.js', () => ({ api: { get: vi.fn(), post: vi.fn() } }));
+const permissions = ['export_templates.view', 'export_templates.manage', 'export_templates.publish', 'exports.view'];
+const auth = { permissions, roles: [{ key: 'administrator' }], principalLifetime: { id: '1', valid: true } };
+const bindingRevisionId = 'fed6b54b-88ae-4bfb-ad52-bc84db493e34';
 const token = 'a'.repeat(64);
 const known = (value) => ({ known: true, present: true, value });
 const empty = { known: true, present: false };
@@ -16,14 +18,16 @@ const shell = (props = {}, principal = auth) => <AuthContext.Provider value={pri
 const read = () => fireEvent.click(screen.getByRole('button', { name: 'Перевірити актуальні поля' }));
 const accept = () => fireEvent.click(screen.getByRole('button', { name: 'Отримати значення Magento: Вага · UA / основний магазин' }));
 const confirm = () => fireEvent.click(screen.getByRole('button', { name: 'Зберегти рішення цього поля' }));
+beforeEach(() => { api.get.mockResolvedValue({ data: { currentPublishedId: bindingRevisionId } }); });
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
 it('performs no reads, decisions or outward dispatch on mount; preview is an explicit separate read', async () => {
   api.post.mockResolvedValue({ data: plan() });
-  render(shell()); expect(api.post).not.toHaveBeenCalled(); read();
+  render(shell()); expect(api.get).not.toHaveBeenCalled(); expect(api.post).not.toHaveBeenCalled(); read();
   await screen.findByRole('region', { name: 'Вага · UA / основний магазин' });
   expect(api.post).toHaveBeenCalledTimes(1);
-  expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/first-sync/preview', { sku: 'SV1', bindingRevisionId: 'binding-id' }, { signal: expect.any(AbortSignal) });
+  expect(api.get).toHaveBeenCalledWith('/admin/magento-integration', { signal: expect.any(AbortSignal) });
+  expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/first-sync/preview', { sku: 'SV1', bindingRevisionId }, { signal: expect.any(AbortSignal) });
   expect(screen.queryByRole('button', { name: /передати|синхронізувати/i })).toBeNull();
 });
 
@@ -83,10 +87,36 @@ it('confirms the exact field, language and before/after then sends one scoped de
   await screen.findByText(/Рішення для поля збережено/);
   expect(api.post).toHaveBeenCalledTimes(2);
   expect(api.post.mock.calls[1][0]).toBe('/admin/magento-integration/first-sync/apply');
-  expect(api.post.mock.calls[1][1]).toEqual({ sku: 'SV1', bindingRevisionId: 'binding-id', previewToken: token, target: 'weight', scope: 'en', choice: 'accept_remote' });
+  expect(api.post.mock.calls[1][1]).toEqual({ sku: 'SV1', bindingRevisionId, previewToken: token, target: 'weight', scope: 'en', choice: 'accept_remote' });
   expect(change).toHaveBeenCalledWith(receipt({ scope: 'en' }));
   expect(screen.getByText(/Стан доставки товару не підтверджено/)).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Перевірити поля після рішення' })).toBeTruthy();
+});
+
+it('pins a decision to the freshly reviewed publication and reads a new publication only on the next preview', async () => {
+  const nextBinding = '371b5c26-441f-47f3-a5c3-083c267e9d35';
+  api.get.mockResolvedValueOnce({ data: { currentPublishedId: bindingRevisionId } }).mockResolvedValue({ data: { currentPublishedId: nextBinding } });
+  api.post.mockResolvedValueOnce({ data: plan() }).mockRejectedValueOnce({ response: { status: 409, data: { error: 'Чинні правила змінилися' } } }).mockResolvedValueOnce({ data: plan() });
+  const view = render(shell()); read();
+  await screen.findByRole('region', { name: 'Вага · UA / основний магазин' }); accept(); confirm();
+  await screen.findByText('Чинні правила змінилися');
+  expect(api.get).toHaveBeenCalledTimes(1);
+  expect(api.post.mock.calls[1][1]).toEqual({ sku: 'SV1', bindingRevisionId, previewToken: token, target: 'weight', scope: 'all', choice: 'accept_remote' });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByRole('button', { name: /Отримати значення Magento:/ })).toBeNull();
+  read(); await screen.findByRole('region', { name: 'Вага · UA / основний магазин' });
+  expect(api.get).toHaveBeenCalledTimes(2);
+  expect(api.post.mock.calls[2][1]).toEqual({ sku: 'SV1', bindingRevisionId: nextBinding });
+  view.unmount();
+});
+
+it.each(permissions)('revoking %s removes an open decision and prevents a subsequent apply', async (missing) => {
+  api.post.mockResolvedValue({ data: plan() });
+  const view = render(shell()); read(); await screen.findByRole('region', { name: 'Вага · UA / основний магазин' }); accept();
+  view.rerender(shell({}, { ...auth, permissions: permissions.filter((permission) => permission !== missing) }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Зберегти рішення цього поля' })).toBeNull();
+  expect(api.post).toHaveBeenCalledTimes(1);
 });
 
 it('cancel, Escape and Close do not save; cancel restores focus to the initiating field action', async () => {
@@ -135,7 +165,7 @@ it('preview failure clears all old choices and never claims success', async () =
 
 it('SKU change aborts and ignores an old unresolved preview even if its promise later resolves', async () => {
   let finish; api.post.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
-  const view = render(shell()); read(); const signal = api.post.mock.calls[0][2].signal;
+  const view = render(shell()); read(); await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1)); const signal = api.post.mock.calls[0][2].signal;
   view.rerender(shell({ sku: 'SV2' })); expect(signal.aborted).toBe(true);
   await act(async () => finish({ data: plan() }));
   expect(screen.getByRole('region', { name: 'Перше отримання полів SV2' })).toBeTruthy();
@@ -145,7 +175,7 @@ it('SKU change aborts and ignores an old unresolved preview even if its promise 
 
 it('actor replacement invalidates preview even for the same application user ID', async () => {
   let finish; api.post.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
-  const view = render(shell()); read(); const signal = api.post.mock.calls[0][2].signal;
+  const view = render(shell()); read(); await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1)); const signal = api.post.mock.calls[0][2].signal;
   view.rerender(shell({}, { ...auth, principalLifetime: { id: '1', valid: true } }));
   expect(signal.aborted).toBe(true); await act(async () => finish({ data: plan() }));
   expect(screen.queryByRole('region', { name: 'Вага · UA / основний магазин' })).toBeNull();
@@ -219,7 +249,7 @@ it('does not let a delayed old callback refresh error overwrite the next fresh p
 
 it('legacy SKU-driving fields offer an explicit administrator correction route without importing or creating a successor', async () => {
   api.post.mockResolvedValue({data:plan([field({reason:'FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED',status:'review_required',canAcceptRemote:false})])});
-  render(shell({}, {...auth,permissions:['products.decode','products.recount']}));read();
+  render(shell({}, {...auth,permissions:[...permissions,'products.decode','products.recount']}));read();
   const link=await screen.findByRole('link',{name:'Переглянути виправлення адміністратором'});
   expect(link.getAttribute('href')).toBe('/products/open?article=SV1&action=recount&returnTo=%2Fattention');
   expect(api.post).toHaveBeenCalledTimes(1);expect(screen.getByRole('button',{name:/Отримати значення Magento:/}).disabled).toBe(true);
@@ -228,14 +258,14 @@ it('does not offer legacy correction handoff after permissions are revoked or fi
   api.post.mockResolvedValue({data:plan([field({reason:'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED',status:'review_required',canAcceptRemote:false})])});
   const mounted=render(shell());read();await screen.findByRole('region',{name:'Вага · UA / основний магазин'});
   expect(screen.queryByRole('link',{name:/виправлення адміністратором/})).toBeNull();
-  mounted.rerender(shell({}, {...auth,permissions:['products.decode','products.recount']}));
+  mounted.rerender(shell({}, {...auth,permissions:[...permissions,'products.decode','products.recount']}));
   expect(screen.getByRole('link',{name:/виправлення адміністратором/})).toBeTruthy();
   mounted.rerender(shell());expect(screen.queryByRole('link',{name:/виправлення адміністратором/})).toBeNull();
 });
 
 it('calibration mirror review offers the same explicit administrator correction handoff', async () => {
   api.post.mockResolvedValue({data:plan([field({reason:'FIRST_SYNC_CANONICAL_CALIBRATION_REVIEW_REQUIRED',status:'review_required',canAcceptRemote:false})])});
-  render(shell({}, {...auth,permissions:['products.decode','products.recount']}));read();
+  render(shell({}, {...auth,permissions:[...permissions,'products.decode','products.recount']}));read();
   expect(await screen.findByRole('link',{name:'Переглянути виправлення адміністратором'})).toBeTruthy();
   expect(api.post).toHaveBeenCalledTimes(1);
 });

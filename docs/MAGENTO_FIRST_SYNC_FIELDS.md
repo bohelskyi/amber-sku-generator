@@ -182,6 +182,22 @@ authority. `accept_remote` is available only for a valid conflict with a support
 canonical setter. `keep_local` requires the approved authoritative outward policy;
 it records pending outward confirmation and does not prove delivery.
 
+In **Потребує уваги**, an active Administrator with `export_templates.view`,
+`export_templates.manage`, `export_templates.publish` and `exports.view` can open
+**Перше отримання полів** for the exact article regardless of its stored diagnostic,
+including older `PRODUCT_EVALUATION_NOT_READY` or `NAME_READ_UNAVAILABLE` problems.
+Opening the product starts no request. **Перевірити актуальні поля** first reads
+`GET /api/admin/magento-integration` and uses its `currentPublishedId` for the
+read-only first-sync preview. Each explicit recheck resolves the publication again;
+the recorded problem's binding is never substituted. Missing publication or denied
+access stops the check. The preview creates no field receipt, local adoption,
+sync obligation or Magento write. A field decision remains separately confirmed
+and bound to the publication/token actually reviewed, with server revalidation.
+Changing the selected product or recorded context, leaving the detail, or losing
+access discards pending responses and previous decisions. Existing blockers remain
+authoritative: this entry point does not repair populated physical weight or prove
+first-sync completion or delivery.
+
 ## Durable initial name authority and recovery
 
 For a reviewed initial write into an empty name scope, enqueue stores

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AuthContext } from '../src/auth/auth-context.js';
@@ -227,4 +227,53 @@ it('pending delivery polls without overlap then displays only the acknowledged t
     expect(screen.getByRole('heading',{name:/AG-000007/})).toBeTruthy();
     expect(screen.getByRole('button',{name:'До наступного товару'})).toBeTruthy();
   } finally {cleanup();vi.useRealTimers();}
+});
+
+it.each(['GET', 'POST', 'ready'])('returning to the first queue item discards first-sync %s evidence and requires another explicit check', async (phase) => {
+  const bindingRevisionId = 'fed6b54b-88ae-4bfb-ad52-bc84db493e34';
+  const item = { productId: 1488, article: 'SV11500004', category: 'SV', state: 'needs_attention', problems: [
+    { code: 'PRODUCT_EVALUATION_NOT_READY', resolution: 'product', issueFields: ['decor_weight'], message: 'Немає додатної ваги для Magento' },
+  ] };
+  const firstPreview = { mode: 'first', sku: item.article, previewToken: 'b'.repeat(64), complete: false, readyForOutbound: false, blockers: [], fields: [
+    { target: 'weight', scope: 'all', status: 'conflict', reason: 'POPULATED_VALUES_DIFFER', local: { known: true, present: true, value: '132.300' },
+      remote: { known: true, present: true, value: '140' }, canAcceptRemote: true, canKeepLocal: true },
+  ] };
+  let finish; const pending = new Promise((resolve) => { finish = resolve; }); let bindingReads = 0;
+  api.get.mockImplementation((url) => {
+    if (url === '/magento/problems/page') return Promise.resolve({ data: { items: [item], pageInfo: { total: 1, hasNext: false, hasPrevious: false } } });
+    if (url === '/magento/problems/1488') return Promise.resolve({ data: item });
+    if (url === '/integration-tasks') return Promise.resolve({ data: { items: [], nextOffset: null } });
+    if (url === '/admin/magento-integration') {
+      bindingReads += 1;
+      return phase === 'GET' && bindingReads === 1 ? pending : Promise.resolve({ data: { currentPublishedId: bindingRevisionId } });
+    }
+    throw new Error(`Unexpected read: ${url}`);
+  });
+  const post = vi.spyOn(api, 'post').mockResolvedValue({ data: firstPreview });
+  if (phase === 'POST') post.mockReturnValueOnce(pending);
+  const administrator = { ...auth(['products.view', 'export_templates.view', 'export_templates.manage', 'export_templates.publish', 'exports.view']),
+    roles: [{ key: 'administrator' }] };
+  render(<AuthContext.Provider value={administrator}><MemoryRouter initialEntries={['/attention?problem=1488']}><AttentionPage /></MemoryRouter></AuthContext.Provider>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Перевірити актуальні поля' }));
+  if (phase === 'POST') await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+  if (phase === 'ready') await screen.findByRole('button', { name: 'Отримати значення Magento: Вага · UA / основний магазин' });
+  const signal = phase === 'GET' ? api.get.mock.calls.find(([url]) => url === '/admin/magento-integration')[1].signal
+    : phase === 'POST' ? post.mock.calls[0][2].signal : null;
+
+  fireEvent.click(screen.getByRole('button', { name: 'До списку товарів' }));
+  if (signal) expect(signal.aborted).toBe(true);
+  expect(screen.queryByRole('button', { name: 'До списку товарів' })).toBeNull();
+  const queue = screen.getByRole('complementary', { name: 'Черга проблем доставки' });
+  fireEvent.click(within(queue).getByRole('button', { name: /SV11500004/ }));
+  await screen.findByRole('button', { name: 'До списку товарів' });
+  if (phase !== 'ready') await act(async () => finish(phase === 'GET' ? { data: { currentPublishedId: bindingRevisionId } } : { data: firstPreview }));
+  expect(screen.queryByRole('region', { name: 'Вага · UA / основний магазин' })).toBeNull();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Зберегти рішення цього поля' })).toBeNull();
+  expect(bindingReads).toBe(1); expect(post).toHaveBeenCalledTimes(phase === 'GET' ? 0 : 1);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити актуальні поля' }));
+  await screen.findByRole('region', { name: 'Вага · UA / основний магазин' });
+  expect(bindingReads).toBe(2); expect(post).toHaveBeenCalledTimes(phase === 'GET' ? 1 : 2);
+  expect(post.mock.calls.every(([url]) => url === '/admin/magento-integration/first-sync/preview')).toBe(true);
 });
