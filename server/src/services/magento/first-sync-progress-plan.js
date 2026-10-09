@@ -1,5 +1,8 @@
 const { hash } = require('./binding-contract');
 const TERMINAL = new Set(['imported','equal','optional_empty','outward_verified','name_received']);
+const CORRECTION_REASONS = new Set(['FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED',
+  'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_WEIGHT_IDENTITY_REVIEW_REQUIRED',
+  'FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN', 'FIRST_SYNC_CANONICAL_CALIBRATION_REVIEW_REQUIRED']);
 const fieldKey = field => field.scope + '/' + field.target;
 const fail = code => { throw Object.assign(new Error(code), {code:'MAGENTO_FIRST_SYNC_' + code,statusCode:409}); };
 
@@ -43,6 +46,12 @@ function prepareProgress(projection, progress, decision = null) {
     if(status==='pending_outward_confirmation' && meta.outwardPolicy!=='authoritative_create_update') {
       status='review_required';reason='OUTWARD_POLICY_NOT_AUTHORITATIVE';
     }
+    // Expose the correction route for populated historical inputs without
+    // replacing read/remote validation failures or changing decision authority.
+    if (['conflict','review_required'].includes(status) && !result.received
+      && field.local.known && field.remote.known && field.mapping.proven
+      && !meta.reason && !meta.readReason && !String(result.reason).startsWith('REMOTE_')
+      && CORRECTION_REASONS.has(meta.importBlocker)) reason=meta.importBlocker;
     let state=status;
     if (status==='equal' && prior?.state==='pending_outward_confirmation') state='outward_verified';
     else if (field.kind==='name' && ['imported','equal'].includes(status)) state='name_received';

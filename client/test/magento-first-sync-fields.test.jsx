@@ -216,3 +216,26 @@ it('does not let a delayed old callback refresh error overwrite the next fresh p
   await act(async () => failRefresh(new Error('old refresh')));
   expect(screen.queryByRole('alert')).toBeNull(); expect(screen.getByText('Підтверджені значення збігаються після нормалізації.')).toBeTruthy();
 });
+
+it('legacy SKU-driving fields offer an explicit administrator correction route without importing or creating a successor', async () => {
+  api.post.mockResolvedValue({data:plan([field({reason:'FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED',status:'review_required',canAcceptRemote:false})])});
+  render(shell({}, {...auth,permissions:['products.decode','products.recount']}));read();
+  const link=await screen.findByRole('link',{name:'Переглянути виправлення адміністратором'});
+  expect(link.getAttribute('href')).toBe('/products/open?article=SV1&action=recount&returnTo=%2Fattention');
+  expect(api.post).toHaveBeenCalledTimes(1);expect(screen.getByRole('button',{name:/Отримати значення Magento:/}).disabled).toBe(true);
+});
+it('does not offer legacy correction handoff after permissions are revoked or field is already received', async () => {
+  api.post.mockResolvedValue({data:plan([field({reason:'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED',status:'review_required',canAcceptRemote:false})])});
+  const mounted=render(shell());read();await screen.findByRole('region',{name:'Вага · UA / основний магазин'});
+  expect(screen.queryByRole('link',{name:/виправлення адміністратором/})).toBeNull();
+  mounted.rerender(shell({}, {...auth,permissions:['products.decode','products.recount']}));
+  expect(screen.getByRole('link',{name:/виправлення адміністратором/})).toBeTruthy();
+  mounted.rerender(shell());expect(screen.queryByRole('link',{name:/виправлення адміністратором/})).toBeNull();
+});
+
+it('calibration mirror review offers the same explicit administrator correction handoff', async () => {
+  api.post.mockResolvedValue({data:plan([field({reason:'FIRST_SYNC_CANONICAL_CALIBRATION_REVIEW_REQUIRED',status:'review_required',canAcceptRemote:false})])});
+  render(shell({}, {...auth,permissions:['products.decode','products.recount']}));read();
+  expect(await screen.findByRole('link',{name:'Переглянути виправлення адміністратором'})).toBeTruthy();
+  expect(api.post).toHaveBeenCalledTimes(1);
+});

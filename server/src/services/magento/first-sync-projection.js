@@ -8,6 +8,7 @@ const { normalizeSchema, hash } = require('./binding-contract');
 const { requirements, normalizeBindings, validateBindings } = require('./binding-validation');
 const { compareSchema } = require('./binding-drift');
 const ownership = require('./native-identity-ownership');
+const { isLegacySv } = require('./first-sync-legacy-inputs');
 const { planFirstSyncFields, normalizeDecimal } = require('./first-sync-field-plan');
 
 const INFORMATION = Object.freeze({ BR: ['braclet_size'], NM: ['neckle_size'],
@@ -324,6 +325,7 @@ function projectFirstSyncFields(input) {
       if (candidate && output.verified && output.value === candidate.evaluatedOutput) local.forwardOptionId = candidate.optionId;
       else if (local.present) reason ||= 'LOCAL_FORWARD_OPTION_NOT_PROVEN';
       importBlocker = descriptor?.key === 'is_calibrated' ? 'FIRST_SYNC_CANONICAL_CALIBRATION_REVIEW_REQUIRED'
+        : isLegacySv(product) ? local.present ? 'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED' : null
         : product.characteristic_version_id != null && !product.full_sku ? null
         : 'HISTORICAL_IDENTITY_CHARACTERISTIC_IMPORT_UNSUPPORTED';
     } else if (descriptor?.kind === 'product' && descriptor.field === 'total_price_uah' && target === 'price') {
@@ -337,7 +339,7 @@ function projectFirstSyncFields(input) {
       || descriptor?.kind === 'information' && descriptor.category === 'SV' && descriptor.key === 'weight')
       && ['decor_weight', 'vaha_vyrobu'].includes(target) && scope === 'all') {
       persistence = 'weight'; kind = 'scalar'; type = 'decimal'; unit = 'g'; scale = 3;
-      if (!product.characteristic_version_id || product.full_sku) importBlocker = 'FIRST_SYNC_CANONICAL_NATIVE_VERSION_REQUIRED';
+      if (!isLegacySv(product) && (!product.characteristic_version_id || product.full_sku)) importBlocker = 'FIRST_SYNC_CANONICAL_NATIVE_VERSION_REQUIRED';
       constraints = { min: '0', minInclusive: false };
       const physical = own(product, 'weight'), answer = own(own(product, 'details'), 'answers');
       const answerWeight = answer && own(answer, 'weight');
@@ -347,6 +349,7 @@ function projectFirstSyncFields(input) {
         reason ||= 'CANONICAL_WEIGHT_ANSWER_INCOHERENT';
       }
       local = state(present(physical) ? physical : answerWeight, unit);
+      if (isLegacySv(product) && (present(physical) || present(answerWeight))) importBlocker = 'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED';
     } else if (descriptor?.kind === 'information' && descriptor.category === category
       && INFORMATION[category]?.includes(descriptor.key) && !descriptor.aliases.length) {
       persistence = 'information'; kind = 'scalar'; type = 'text';

@@ -263,3 +263,101 @@ test('canonical import defers other new confirmations until a fresh observation 
   assert.equal(prepared.readyForOutbound, false); assert.equal(prepared.complete, false);
   assert.ok(prepared.blockers.some(b => b.code === 'FIRST_SYNC_POST_ADOPTION_RECHECK_REQUIRED'));
 });
+
+
+const missingOnly = 'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED';
+const legacyOption = () => field('legacy_option', { kind: 'option', type: 'option',
+  local: { ...present(7), forwardOptionId: 'old-option' }, remote: present('new-option'),
+  reverseCandidates: [{ value: 8, optionId: 'new-option' }] });
+const legacyMetadata = (reason = missingOnly) => ({
+  'all/legacy_option': { persistence: 'characteristic', importBlocker: reason },
+});
+
+test('populated legacy option conflict exposes correction while preserving exact values and keep-local authority', () => {
+  const input = legacyOption(), projected = projection([input], legacyMetadata()), before = structuredClone(projected);
+  const prepared = prepareProgress(projected, null), result = row(prepared, input.target);
+  assert.equal(result.status, 'conflict'); assert.equal(result.record.state, 'conflict');
+  assert.equal(result.reason, missingOnly); assert.equal(result.canAcceptRemote, false);
+  assert.equal(result.canKeepLocal, true); assert.equal(result.record.after, 7);
+  assert.deepEqual(result.local, input.local); assert.deepEqual(result.remote, input.remote);
+  assert.deepEqual(result.record.before, input.local); assert.deepEqual(result.record.remote, input.remote);
+  assert.ok(prepared.blockers.some(b => b.target === input.target && b.reason === missingOnly));
+  assert.equal(prepared.readyForOutbound, false); assert.deepEqual(projected, before);
+});
+
+test('zero legacy weight exposes correction without treating zero as absent or authorizing an import', () => {
+  const input = field('decor_weight', { type: 'decimal', scale: 3, unit: 'g',
+    constraints: { min: '0', minInclusive: false },
+    local: { ...present('0.000'), unit: 'g' }, remote: { ...present('4.125'), unit: 'g' } });
+  const projected = projection([input], { 'all/decor_weight': { persistence: 'weight', importBlocker: missingOnly } });
+  assert.equal(projected.plan.fields[0].reason, 'LOCAL_DECIMAL_OUT_OF_RANGE');
+  const result = row(prepareProgress(projected, null), input.target);
+  assert.equal(result.status, 'review_required'); assert.equal(result.reason, missingOnly);
+  assert.equal(result.record.after, '0.000'); assert.equal(result.canAcceptRemote, false);
+  assert.equal(result.canKeepLocal, false);
+});
+
+test('populated calibration conflict exposes its explicit administrator correction reason', () => {
+  const reason = 'FIRST_SYNC_CANONICAL_CALIBRATION_REVIEW_REQUIRED';
+  const result = row(prepareProgress(projection([legacyOption()], legacyMetadata(reason)), null), 'legacy_option');
+  assert.equal(result.status, 'conflict'); assert.equal(result.reason, reason);
+  assert.equal(result.canAcceptRemote, false); assert.equal(result.canKeepLocal, true);
+});
+
+test('legacy correction presentation preserves unknown reads, unproven mappings and metadata read failures', () => {
+  const input = legacyOption();
+  for (const [patched, metadata] of [
+    [{ ...input, remote: { known: false } }, legacyMetadata()],
+    [{ ...input, local: { known: false } }, legacyMetadata()],
+    [{ ...input, mapping: { proven: false, reason: 'MAPPING_EVIDENCE_MISSING' } }, legacyMetadata()],
+    [input, { 'all/legacy_option': { ...legacyMetadata()['all/legacy_option'], readReason: 'EN_STORE_READ_FAILED' } }],
+    [input, { 'all/legacy_option': { ...legacyMetadata()['all/legacy_option'], reason: 'DOMAIN_EVIDENCE_MISSING' } }],
+  ]) {
+    const projected = projection([patched], metadata);
+    const result = row(prepareProgress(projected, null), input.target), original = projected.plan.fields[0];
+    assert.equal(result.status, original.status);
+    assert.equal(result.reason, original.evidenceReason || original.reason);
+  }
+});
+
+test('legacy correction presentation preserves malformed remote decimal and presence evidence reasons', () => {
+  const input = field('decor_weight', { type: 'decimal', scale: 3, unit: 'g',
+    constraints: { min: '0', minInclusive: false }, local: { ...present('0.000'), unit: 'g' } });
+  for (const remote of [
+    { ...present('invalid'), unit: 'g' }, { ...present('4.1251'), unit: 'g' },
+    { ...present('0.000'), unit: 'g' }, { ...present('4.125'), unit: 'kg' },
+    { known: true, present: false, value: '4.125', unit: 'g' },
+  ]) {
+    const projected = projection([{ ...input, remote }], {
+      'all/decor_weight': { persistence: 'weight', importBlocker: missingOnly },
+    });
+    const result = row(prepareProgress(projected, null), input.target);
+    assert.ok(projected.plan.fields[0].reason.startsWith('REMOTE_'));
+    assert.equal(result.reason, projected.plan.fields[0].reason);
+    assert.equal(result.status, 'review_required'); assert.equal(result.canAcceptRemote, false);
+  }
+});
+
+test('legacy correction presentation does not rewrite explicit or prior keep-local decisions, terminal receipts or equality', () => {
+  const input = legacyOption(), metadata = legacyMetadata(), initial = projection([input], metadata);
+  const selected = row(prepareProgress(initial, null,
+    { target: input.target, scope: 'all', choice: 'keep_local' }), input.target);
+  assert.equal(selected.status, 'pending_outward_confirmation');
+  assert.equal(selected.reason, 'ADMINISTRATOR_KEPT_LOCAL_AWAITING_READBACK');
+  const progress = received(selected.record);
+  const reused = row(prepareProgress(projection([input], metadata, progress), progress), input.target);
+  assert.equal(reused.status, selected.status); assert.equal(reused.reason, selected.reason);
+  const terminalProgress = received({ ...selected.record, state: 'outward_verified' });
+  const settled = row(prepareProgress(projection([input], metadata, terminalProgress), terminalProgress), input.target);
+  assert.equal(settled.received, true); assert.equal(settled.terminal, true);
+  assert.deepEqual(settled.record, terminalProgress.fields[0] && Object.fromEntries(
+    ['target','scope','state','before','remote','after','source','mappingHash']
+      .map(key => [key, terminalProgress.fields[0][key]])));
+  assert.equal(settled.reason, 'FIELD_ALREADY_RECEIVED_USE_ORDINARY_RECONCILIATION');
+  const equal = row(prepareProgress(projection([{ ...input, remote: present('old-option') }], metadata), null), input.target);
+  assert.equal(equal.status, 'equal'); assert.equal(equal.reason, 'LOCAL_FORWARD_OPTION_EQUAL');
+  const ordinary = row(prepareProgress(projection([input], {
+    'all/legacy_option': { persistence: 'characteristic', importBlocker: 'OTHER_UNSUPPORTED_IMPORT' },
+  }), null), input.target);
+  assert.equal(ordinary.reason, 'POPULATED_OPTION_VALUES_DIFFER');
+});

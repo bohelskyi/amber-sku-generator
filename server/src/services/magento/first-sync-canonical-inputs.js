@@ -3,6 +3,8 @@
 const c = require('./binding-contract');
 const { normalizeDecimal } = require('./first-sync-field-plan');
 const configurations = require('../product/characteristic-config');
+const legacy = require('./first-sync-legacy-inputs');
+const schemas = require('../sku-schema.service');
 const { normalizeProductInputAnswers, isQuestionVisibleForSku } = require('../product/product-answers');
 const { inspectNonSkuAnswer } = require('../product/product-validation');
 const prices = require('../product-price-change.service');
@@ -86,17 +88,20 @@ function validateConfiguration(configuration, product, answers, changedKeys) {
 async function prepareCanonicalInputs(client, { amber, entries, answers, rateObservation, lockCatalog = false }) {
   if (!entries.length) return null;
   const product = amber.product;
-  if (product.full_sku || !product.characteristic_version_id || product.sku_schema_version_id) {
+  const legacySv = legacy.isLegacySv(product);
+  if (!legacySv && (product.full_sku || !product.characteristic_version_id || product.sku_schema_version_id)) {
     fail('FIRST_SYNC_CANONICAL_NATIVE_VERSION_REQUIRED');
   }
   if (lockCatalog) {
     // Existing writers have no shared category advisory lock. NOWAIT also
     // excludes insert phantoms; release with caller's short transaction.
-    await client.query('LOCK TABLE categories,questions,options,price_scenarios,price_weight_bands,price_matrix,price_modifiers IN SHARE MODE NOWAIT');
+    await client.query('LOCK TABLE categories,questions,options,price_scenarios,price_weight_bands,price_matrix,price_modifiers'
+      + (legacySv ? ',sku_schema_versions,sku_schema_questions,sku_schema_options,sku_registry' : '') + ' IN SHARE MODE NOWAIT');
   }
   if ((await client.query(`SELECT id FROM correction_requests WHERE source_product_id=$1
     AND status IN ('pending','in_progress') LIMIT 1`, [product.id])).rows.length) fail('ACTIVE_CORRECTION_REQUEST');
-  const frozen = await configurations.getCharacteristicVersion(client, product.characteristic_version_id);
+  const frozen = legacySv ? await schemas.getSchemaVersionById(product.sku_schema_version_id, client)
+    : await configurations.getCharacteristicVersion(client, product.characteristic_version_id);
   const current = await configurations.readCharacteristicConfiguration(client, product.category);
   const patch = {}, weights = [], changedKeys = new Set();
   for (const { field, meta } of entries) {
@@ -122,8 +127,24 @@ async function prepareCanonicalInputs(client, { amber, entries, answers, rateObs
     patch.weight = weight; changedKeys.add('weight');
   }
   const candidateAnswers = { ...answers, ...patch };
-  validateConfiguration(frozen, product, candidateAnswers, changedKeys);
-  validateConfiguration(current, product, candidateAnswers, changedKeys);
+  let legacyProof = null;
+  if (legacySv) {
+    // The general native projection normalizes NULL to zero, while historical
+    // SKU publication treats NULL as SKU. This lane requires the raw flag.
+    const rawFlags = (await client.query('SELECT id,key,include_in_sku FROM questions WHERE category_code=$1 ORDER BY id', [product.category])).rows;
+    const flags = new Map(rawFlags.map(q => [Number(q.id), q]));
+    const legacyCurrent = { ...current, questions: current.questions.map(q => ({ ...q,
+      include_in_sku: flags.get(Number(q.id))?.key === q.key ? flags.get(Number(q.id)).include_in_sku : null })) };
+    legacyProof = legacy.inspectLegacyInputs({ product, schema: frozen, current: legacyCurrent, patch, weight, hasWeight: weights.length > 0 }).proof;
+    const ownership = (await client.query('SELECT first_product_id FROM sku_registry WHERE full_sku=$1', [product.full_sku])).rows;
+    if (ownership.length !== 1 || Number(ownership[0].first_product_id) !== Number(product.id)) fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
+    // Existing encoded answers remain interpreted by their pinned publication.
+    // Today's SKU draft must not reinterpret historical placeholder semantics.
+    validateConfiguration({ ...current, questions: legacyCurrent.questions.filter(q => q.include_in_sku === 0) }, product, candidateAnswers, changedKeys);
+  } else {
+    validateConfiguration(frozen, product, candidateAnswers, changedKeys);
+    validateConfiguration(current, product, candidateAnswers, changedKeys);
+  }
   if ((Number(frozen.requires_weight) === 1 || Number(current.requires_weight) === 1) && !positive(weight)) fail('FIRST_SYNC_CANONICAL_WEIGHT_REQUIRED');
   const decision = existingDecision(product);
   let provenance = null;
@@ -176,7 +197,7 @@ async function prepareCanonicalInputs(client, { amber, entries, answers, rateObs
   } finally { Object.assign(product, saved); for (const key of prospectiveKeys) if (!Object.hasOwn(saved,key)) delete product[key]; }
   const changes = Object.entries(patch).map(([key, after]) => ({ key, before: product.details?.answers?.[key] ?? null, after }));
   const evidence = { version: 1, productId: product.id, characteristicVersionId: product.characteristic_version_id,
-    frozenHash: frozen.config_hash, currentHash: current.config_hash, pricingHash: getPricingContextFingerprint(context),
+    frozenHash: frozen.config_hash, ...(legacyProof ? { legacyProof } : {}), currentHash: current.config_hash, pricingHash: getPricingContextFingerprint(context),
     decision, provenance, weight, pricing: { ...pricing, details: { ...pricing.details,
       rateMetadata: Object.fromEntries(Object.entries(pricing.details.rateMetadata || {}).filter(([key]) => key !== 'fetchedAt')) } }, changes };
   return { weight, pricing, changes, evidenceHash: c.hash(evidence), evidence };

@@ -314,10 +314,45 @@ writing inputs, baseline, names, audit and receipts in the caller's transaction.
 Observation timestamp changes alone do not stale the economic proof; captured
 rate freshness is still validated. No HTTP occurs under these locks.
 
-Legacy encoded characteristic/weight changes, calibration (`is_calibrated`) mirror
+Legacy encoded SKU-driving characteristic changes, calibration (`is_calibrated`) mirror
 imports, new version pointers/overlays and direct English canonical imports other
 than names remain unsupported. Native Magento transport `weight` does not prove
 grams. Photo URLs do not represent original local media and are not imported.
 Fresh dependent field confirmation is required after weight/characteristic imports.
 
 Actual recount custom USD basis may omit `source`; that format requires matching stored correction lineage and the exact immutable `product.recounted` audit, with matching request ID when present. The original basis is retained byte-for-byte as data; no provenance string is fabricated.
+
+
+## Missing legacy SV inputs
+
+An active/current legacy SV may receive a strictly missing non-SKU semantic
+answer. The pinned SKU publication must omit the key; the current catalog must
+still classify it as non-SKU. Neither frozen nor current rules may connect the
+changed key, directly or transitively, to SKU question/option visibility. Every
+supported stored, ordinary and hidden-omission decode path must agree on one
+interpretation, before and after the patch. Since recursive decoders return their
+first match, this lane additionally requires all pinned questions to be static,
+required and have unique digit-only codes of one fixed width per question.
+Optional, conditional or variable-width publications require historical review.
+The exact reservation owner, pinned
+schema hash and unchanged public identity remain part of validation.
+
+Missing gram weight additionally requires both physical and answer values to be
+strictly absent. Zero, malformed or populated values require correction. Exact
+positive scale-three weight must fit NUMERIC(14,3), round-trip through Number and
+reproduce the entire stored SKU using rounded weight, including marker,
+separators, padding and variation suffix. This proves compatibility under both
+sequence and rounded-weight suffix interpretations; it does not recover the
+historical requires_weight flag or claim the original weight. Today's category
+flags alone never authorize this lane.
+
+Current non-SKU validation, unique approved reverse mappings, exact forward
+result, proven price mode and unchanged final UAH are still required. The
+automatic baseline, physical/mirror inputs, retained names, audit and receipt
+commit atomically; frozen schemas and historical snapshots are never changed.
+Preview binds the legacy proof and revalidates it under short NOWAIT locks.
+
+SKU-driving answers, calibration and unproven/mismatching suffixes remain explicit
+Administrator correction/recount work. The UI links to the ordinary reviewed
+workflow; it neither creates a successor nor chooses answers or changes a receipt
+automatically. These repository tests do not establish production acceptance.

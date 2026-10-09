@@ -47,6 +47,10 @@ const reasons = {
   FIRST_SYNC_CANONICAL_PRICE_REVIEW_REQUIRED: 'Нова вага або характеристика змінює кінцеву ціну. Спочатку потрібне окреме цінове рішення.',
   FIRST_SYNC_CANONICAL_PRICE_FIRST_REOBSERVE_REQUIRED: 'Спочатку узгодьте ціну й повторіть перевірку перед отриманням ваги або характеристик.',
   FIRST_SYNC_CANONICAL_PRICE_MODE_UNPROVEN: 'Чинний режим ціни не підтверджено. Потрібне окреме цінове рішення.',
+  FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED: 'Ця характеристика керує історичним SKU. Потрібне явне виправлення адміністратором зі збереженням попередньої версії.',
+  FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED: 'Legacy SV можна доповнити лише доведено відсутніми полями. Нуль або вже заповнене значення потребує окремого виправлення.',
+  FIRST_SYNC_LEGACY_WEIGHT_IDENTITY_REVIEW_REQUIRED: 'Нова вага не відтворює повний історичний SKU. Потрібен окремий підтверджений перерахунок.',
+  FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN: 'Історичну SKU-схему або єдине значення артикула не підтверджено. Потрібне окреме виправлення адміністратором.',
   FIRST_SYNC_CANONICAL_NATIVE_VERSION_REQUIRED: 'Для історичного SKU потрібна окрема перевірка ваги та характеристик зі збереженням його значення.',
   FIRST_SYNC_CANONICAL_TARGET_UNAVAILABLE: 'Характеристика архівована, прихована або відсутня в чинній чи історичній конфігурації.',
   FIRST_SYNC_CANONICAL_DEPENDENT_ANSWER_HIDDEN: 'Нове значення приховує вже вибрану залежну характеристику. Потрібна окрема перевірка.',
@@ -123,7 +127,8 @@ function checkedReceipt(data, request) {
   return data;
 }
 
-function FieldPanel({ sku, bindingRevisionId, onChange, principalLifetime }) {
+const correctionReasons = new Set(['FIRST_SYNC_CANONICAL_CALIBRATION_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED', 'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_WEIGHT_IDENTITY_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN']);
+function FieldPanel({ sku, bindingRevisionId, onChange, principalLifetime, canRecount }) {
   const [preview, setPreview] = useState(null);
   const [receipt, setReceipt] = useState(null);
   const [decision, setDecision] = useState(null);
@@ -189,6 +194,7 @@ function FieldPanel({ sku, bindingRevisionId, onChange, principalLifetime }) {
         <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{fieldLabel(field)}</h3><StatusBadge tone={field.received ? 'success' : field.status === 'conflict' || field.status === 'review_required' || field.status === 'unknown' ? 'warning' : 'neutral'}>{field.received ? 'Отримано один раз' : statusLabels[field.status] || 'Потрібне уточнення стану'}</StatusBadge></div>
         <dl className="grid gap-3 sm:grid-cols-2"><div><dt className="text-sm font-semibold">Поточне Amber</dt><dd className="whitespace-pre-wrap break-words text-sm">{valueText(field.local)}</dd></div><div><dt className="text-sm font-semibold">Поточне Magento</dt><dd className="whitespace-pre-wrap break-words text-sm">{valueText(field.remote)}</dd></div></dl>
         <p className="text-sm">{reasonText(field.reason)}</p>
+        {canRecount && !field.received && correctionReasons.has(field.reason) && <a className="btn btn-outline" href={`/products/open?article=${encodeURIComponent(sku)}&action=recount&returnTo=${encodeURIComponent('/attention')}`}>Переглянути виправлення адміністратором</a>}
         {plan.mode === 'first' && !field.received && <div className="flex flex-wrap gap-2"><Button size="compactMd" disabled={busy || !available || !field.canAcceptRemote} onClick={() => setDecision({ actor: principalLifetime, field, choice: 'accept_remote' })} aria-label={`Отримати значення Magento: ${fieldLabel(field)}`}>Отримати значення Magento</Button><Button size="compactMd" disabled={busy || !available || !field.canKeepLocal} onClick={() => setDecision({ actor: principalLifetime, field, choice: 'keep_local' })} aria-label={`Залишити значення Amber: ${fieldLabel(field)}`}>Залишити значення Amber</Button></div>}
         <TechnicalDisclosure summary="Причина й підтвердження поля">{() => <pre className="overflow-auto text-xs">{JSON.stringify({ target: field.target, scope: field.scope, status: field.status, reason: field.reason, received: field.received, blockers: plan.blockers.filter((blocker) => blocker.target === field.target && (!blocker.scope || blocker.scope === field.scope)) }, null, 2)}</pre>}</TechnicalDisclosure>
       </section>;
@@ -205,5 +211,5 @@ function FieldPanel({ sku, bindingRevisionId, onChange, principalLifetime }) {
 export default function MagentoFirstSyncFields(props) {
   const auth = useAuth();
   if (!isActualAdministrator(auth) || auth.principalLifetime?.valid === false || !boundedText(props.sku, 256) || !boundedText(props.bindingRevisionId)) return null;
-  return <FieldPanel key={JSON.stringify([props.sku, props.bindingRevisionId, auth.principalLifetime?.id])} {...props} principalLifetime={auth.principalLifetime} />;
+  return <FieldPanel key={JSON.stringify([props.sku, props.bindingRevisionId, auth.principalLifetime?.id])} {...props} principalLifetime={auth.principalLifetime} canRecount={auth.permissions?.includes('products.decode') && auth.permissions?.includes('products.recount')} />;
 }
