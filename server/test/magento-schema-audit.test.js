@@ -590,3 +590,142 @@ test('attribute field diagnostics distinguish legal nulls from malformed shapes 
     assert.ok(!/remoteMessage|Authorization|oauth_signature/.test(logged));
   }
 });
+
+function inlineFixture() {
+  const routes = fixture();
+  const [color, stone, , unused] = routes['products/attributes'].items;
+  color.source_model = 'Magento\\Eav\\Model\\Entity\\Attribute\\Source\\Table';
+  stone.source_model = 'Magento\\Eav\\Model\\Entity\\Attribute\\Source\\Boolean';
+  unused.source_model = color.source_model;
+  routes['products/attributes/unused_attribute/options'] = [];
+  for (const attribute of routes['products/attributes'].items) {
+    attribute.options = structuredClone(routes['products/attributes/' + attribute.attribute_code + '/options']);
+  }
+  return routes;
+}
+
+test('native fresh inline options preserve full report/fingerprints, zero/blank and empty arrays with fewer GETs', async () => {
+  const routes = inlineFixture(), dedicatedCalls = [], inlineCalls = [];
+  const dedicated = await auditMagentoSchema(config, { concurrency: 4, fetchImpl: mockFetch(routes, dedicatedCalls) });
+  const optimized = await auditMagentoSchema(config, { concurrency: 4, preferInlineOptions: true,
+    fetchImpl: mockFetch(routes, inlineCalls) });
+  assert.deepEqual(optimized, dedicated);
+  const { hash, normalizeSchema } = require('../src/services/magento/binding-contract');
+  assert.equal(hash(normalizeSchema(optimized)), hash(normalizeSchema(dedicated)));
+  assert.equal(dedicatedCalls.length - inlineCalls.length, 3);
+  assert.deepEqual(inlineCalls.filter((route) => route.endsWith('/options')), ['products/attributes/name/options']);
+  assert.equal(optimized.attributes.find((a) => a.attribute_code === 'kamin_suvenirnyi').options
+    .find((o) => o.value === '0').isEmpty, false);
+  assert.equal(optimized.attributes.find((a) => a.attribute_code === 'kolir').options
+    .find((o) => o.value === '').isEmpty, true);
+});
+
+test('missing/null inline options and every unproven source retain dedicated GETs', async () => {
+  for (const source of [undefined, null, '', 'Vendor\\DynamicSource',
+    'Magento\\Catalog\\Model\\Product\\Attribute\\Source\\Status']) {
+    const routes = inlineFixture(), color = routes['products/attributes'].items[0];
+    if (source === undefined) delete color.source_model; else color.source_model = source;
+    const calls = [];
+    await auditMagentoSchema(config, { concurrency: 4, preferInlineOptions: true, fetchImpl: mockFetch(routes, calls) });
+    assert.ok(calls.includes('products/attributes/kolir/options'));
+  }
+  for (const kind of ['missing', 'null']) {
+    const routes = inlineFixture(), color = routes['products/attributes'].items[0];
+    if (kind === 'missing') delete color.options; else color.options = null;
+    const calls = [];
+    await auditMagentoSchema(config, { concurrency: 4, preferInlineOptions: true, fetchImpl: mockFetch(routes, calls) });
+    assert.ok(calls.includes('products/attributes/kolir/options'));
+  }
+});
+
+test('membership enrichment cannot promote missing/null list sources or supply inline options', async () => {
+  for (const source of [undefined, null]) {
+    const routes = inlineFixture(), color = routes['products/attributes'].items[0];
+    if (source === undefined) delete color.source_model; else color.source_model = source;
+    for (const route of Object.keys(routes).filter((r) => /attribute-sets\/\d+\/attributes/.test(r))) {
+      routes[route] = routes[route].map((a) => a.attribute_code === 'kolir'
+        ? { ...a, source_model: 'Magento\\Eav\\Model\\Entity\\Attribute\\Source\\Table' } : a);
+    }
+    const calls = [];
+    const report = await auditMagentoSchema(config, { concurrency: 4, preferInlineOptions: true, fetchImpl: mockFetch(routes, calls) });
+    assert.equal(report.attributes.find((a) => a.attribute_code === 'kolir').source_model,
+      'Magento\\Eav\\Model\\Entity\\Attribute\\Source\\Table');
+    assert.ok(calls.includes('products/attributes/kolir/options'));
+  }
+  const routes = inlineFixture(), color = routes['products/attributes'].items[0];
+  for (const route of Object.keys(routes).filter((r) => /attribute-sets\/\d+\/attributes/.test(r))) {
+    routes[route] = routes[route].map((a) => a.attribute_code === 'kolir' ? { ...a, options: color.options } : a);
+  }
+  delete color.options;
+  const calls = [];
+  await auditMagentoSchema(config, { concurrency: 4, preferInlineOptions: true, fetchImpl: mockFetch(routes, calls) });
+  assert.ok(calls.includes('products/attributes/kolir/options'));
+});
+
+test('present malformed inline payloads fail closed even for custom source rather than fall back', async () => {
+  for (const source of ['Magento\\Eav\\Model\\Entity\\Attribute\\Source\\Table', 'Vendor\\DynamicSource']) {
+    for (const options of [{}, 'bad', [null], [{ value: null, label: 'Bad' }],
+      [{ value: '0', label: 'A' }, { value: 0, label: 'B' }],
+      [{ value: '1', label: 'A', sort_order: -1 }], [{ value: '1', label: 'A', is_default: 'yes' }]]) {
+      const routes = inlineFixture(), color = routes['products/attributes'].items[0], calls = [];
+      color.source_model = source; color.options = options;
+      await assert.rejects(auditMagentoSchema(config, { concurrency: 4, preferInlineOptions: true,
+        fetchImpl: mockFetch(routes, calls) }), { code: 'MAGENTO_RESPONSE_INVALID' });
+      assert.equal(calls.some((route) => route.endsWith('/options')), false);
+    }
+  }
+});
+
+test('inline payloads retain per-attribute/aggregate caps and sensitive-data rejection', async () => {
+  const excessive = inlineFixture();
+  excessive['products/attributes'].items[0].options = Array(10001).fill({ value: '1', label: 'A' });
+  await assert.rejects(auditMagentoSchema(config, { concurrency: 4, preferInlineOptions: true,
+    fetchImpl: mockFetch(excessive) }), { code: 'MAGENTO_DISCOVERY_LIMIT' });
+  const sensitive = inlineFixture();
+  sensitive['products/attributes'].items[0].options[0].label = config.accessToken;
+  await assert.rejects(auditMagentoSchema(config, { concurrency: 4, preferInlineOptions: true,
+    fetchImpl: mockFetch(sensitive) }), { code: 'MAGENTO_AUDIT_SENSITIVE_DATA' });
+  await assert.rejects(auditMagentoSchema(config, { preferInlineOptions: 'true', fetchImpl: () => assert.fail('No HTTP') }),
+    { code: 'MAGENTO_INPUT_INVALID' });
+});
+
+test('separate fresh inline audits observe option addition/deletion/label change and preserve store scope', async () => {
+  const routes = inlineFixture(), calls = [], read = mockFetch(routes, calls, 'en_custom');
+  const first = await auditMagentoSchema(config, { concurrency: 4, preferInlineOptions: true, storeCode: 'en_custom', fetchImpl: read });
+  routes['products/attributes'].items[0].options = [{ value: 'new', label: 'New scoped label' }];
+  const second = await auditMagentoSchema(config, { concurrency: 4, preferInlineOptions: true, storeCode: 'en_custom', fetchImpl: read });
+  const { hash, normalizeSchema } = require('../src/services/magento/binding-contract');
+  assert.notEqual(hash(normalizeSchema(first)), hash(normalizeSchema(second)));
+  assert.deepEqual(second.attributes.find((a) => a.attribute_code === 'kolir').options,
+    [{ value: 'new', label: 'New scoped label', isEmpty: false }]);
+  assert.equal(calls.filter((route) => route === 'products/attributes').length, 2);
+  assert.equal(calls.filter((route) => route === 'products/attributes/name/options').length, 2);
+  assert.equal(calls.some((route) => route === 'products/attributes/kolir/options'), false);
+});
+
+test('fallback failures still drain the bounded batch before rejection', async () => {
+  const routes = inlineFixture(); let active = 0, peak = 0;
+  const read = mockFetch(routes);
+  await assert.rejects(auditMagentoSchema(config, { concurrency: 4, preferInlineOptions: true, fetchImpl: async (url, options) => {
+    active++; peak = Math.max(peak, active);
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      if (url.endsWith('/name/options')) throw new TypeError('Synthetic network failure');
+      return await read(url, options);
+    } finally { active--; }
+  } }), { code: 'MAGENTO_NETWORK_ERROR' });
+  assert.equal(active, 0); assert.ok(peak <= 4);
+});
+
+test('all present inline arrays, including unproven sources, share the 100000 option cap', async () => {
+  const routes = inlineFixture();
+  for (let index = 0; index < 11; index++) routes['products/attributes'].items.push({
+    ...attr(1000 + index, 'extra_' + index, 'select'), source_model: 'Vendor\\DynamicSource',
+    options: Array.from({ length: 10000 }, (_, option) => ({ value: String(option), label: 'Option' })),
+  });
+  routes['products/attributes'].total_count = routes['products/attributes'].items.length;
+  const calls = [];
+  await assert.rejects(auditMagentoSchema(config, { concurrency: 4, preferInlineOptions: true,
+    fetchImpl: mockFetch(routes, calls) }), { code: 'MAGENTO_DISCOVERY_LIMIT' });
+  assert.equal(calls.some((route) => route.endsWith('/options')), false);
+});

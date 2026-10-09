@@ -89,6 +89,29 @@ manual discovery with concurrency 1 retains sequential reads. All three complete
 before cross-reference validation and attribute pagination. A failed batch drains;
 no read, identity check, dispatch marker or readback is skipped or reused.
 
+
+Automatic discovery prefers complete validated inline option arrays only for the
+exact Magento native Table and Boolean source classes declared on the fresh
+`products/attributes` list item. The original list identity/source/input must
+still match membership-enriched metadata. Missing/null options, undeclared,
+empty or custom/other sources retain their dedicated scoped option GET. Present
+non-null malformed inline data fails closed, including on fallback sources.
+All present inline arrays share the 100,000-option/64 MiB capture bounds in
+addition to the existing per-attribute and final-report limits.
+Every source remains in the schema fingerprint; empty arrays and numeric zero
+retain their meanings. Manual discovery retains dedicated option reads.
+The deployed 2026-10-08 audit observed 92 matching candidates (28 Table, 5 Boolean,
+59 custom/unspecified); it is observed equivalence, not a universal plugin or
+custom-source completeness guarantee. This implementation removes at most those
+33 proven native option GETs per fresh discovery. No evidence is reused between
+enqueue, APPLY, products or publications; all precondition/readback checks remain.
+
+
+Native source-contract evidence: [product repository](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Catalog/Model/Product/Attribute/Repository.php),
+[EAV repository](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Eav/Model/AttributeRepository.php),
+[option endpoint](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Eav/Model/Entity/Attribute/OptionManagement.php),
+and [getOptions implementation](https://github.com/magento/magento2/blob/2.4.6/app/code/Magento/Eav/Model/Entity/Attribute/AbstractAttribute.php).
+
 Phase logs distinguish `stage: enqueue|apply`, UTC start/end, total elapsed time
 and a bounded transport aggregate of at most 32 closed endpoint kinds/methods and
 scopes (`all`, `en`, `other`). Transport time ends when response headers arrive;

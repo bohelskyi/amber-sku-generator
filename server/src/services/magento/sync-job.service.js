@@ -74,7 +74,7 @@ async function observe(config, input, options) {
   // set/option GETs use one bounded four-read observation budget. No cache spans
   // enqueue, APPLY, jobs, products or publications.
   const discover = options.automatic ? (config, reads) => measurePhase({ ...options, fetchImpl: reads.fetchImpl }, 'schema_discovery', (read) =>
-    require('./schema-audit').auditMagentoSchema(config, { ...reads, fetchImpl: read, concurrency: 4 })) : undefined;
+    require('./schema-audit').auditMagentoSchema(config, { ...reads, fetchImpl: read, concurrency: 4, preferInlineOptions: true })) : undefined;
   const report = await (options.preview || previewProduct)(config, { databasePool: options.databasePool,
     fetchImpl, sku: input.sku, bindingRevisionId: input.bindingRevisionId,
     ...(discover ? { discover } : {}),
