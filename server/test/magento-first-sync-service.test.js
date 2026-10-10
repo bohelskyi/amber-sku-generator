@@ -112,6 +112,22 @@ test('public apply recovers a lost response exactly and retains blocked whole-pr
   assert.deepEqual(h.trace.slice(-2), ['authorize', 'receipt']);
 });
 
+test('historical decision replay stays idempotent while fresh optional-receipt review blocks new work', async t => {
+  const h=harness(t),input=await inputFor(h),committed=await service.apply(h.config,input,h.options);
+  const blockers=[{code:'FIRST_SYNC_OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED',target:'kamin_obrobka',scope:'all'}];
+  t.mock.method(require('../src/services/magento/first-sync-eligibility'),'readFirstSyncEligibility',
+    async()=>({mode:'review',blockers}));
+  const before={...h.calls};
+  const replay=await service.apply(h.config,input,h.options);
+  assert.deepEqual(replay,{...committed,receipt:{...committed.receipt,alreadyApplied:true}});
+  const review=await service.review(h.config,{sku:h.state.publicSku,bindingRevisionId:h.state.revision.id},h.options);
+  assert.deepEqual(review.blockers,blockers);assert.equal(review.mode,'review');
+  assert.equal(review.complete,false);assert.equal(review.readyForOutbound,false);assert.deepEqual(review.fields,[]);
+  await assert.rejects(service.apply(h.config,{...input,previewToken:'a'.repeat(64)},h.options),
+    {code:'MAGENTO_FIRST_SYNC_PREVIEW_STALE'});
+  for(const key of ['ledger','local','price','validated'])assert.equal(h.calls[key],before[key],key);
+});
+
 test('changed choice, target, scope or preview hash cannot reuse a committed decision receipt', async t => {
   const h = harness(t), input = await inputFor(h);
   await service.apply(h.config, input, h.options);

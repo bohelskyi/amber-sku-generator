@@ -6,6 +6,9 @@ const { evaluateProduct } = require('../export-templates/evaluate');
 const { own, readSource } = require('../export-templates/input-projection');
 const { normalizeSchema, hash } = require('./binding-contract');
 const { requirements, normalizeBindings, validateBindings } = require('./binding-validation');
+const { routeTools } = require('./binding-evidence-routes');
+const { productRoutePlans } = require('./first-sync-route');
+const { classifySemanticRequirement } = require('./first-sync-semantic-requirement');
 const { compareSchema } = require('./binding-drift');
 const ownership = require('./native-identity-ownership');
 const { isLegacySv } = require('./first-sync-legacy-inputs');
@@ -234,12 +237,7 @@ function projectFirstSyncFields(input) {
     return emptyResult('review_required', [{ code: 'BINDING_OR_SCHEMA_EVIDENCE_INVALID' }]);
   }
   const category = own(product, 'category');
-  const routePlans = plans.filter(plan => plan.amberGroup === category && plan.predicates.every(predicate => {
-    const value = own(own(own(product, 'details'), 'answers'), predicate.questionKey);
-    // A missing/unknown semantic source cannot prove the negative branch.
-    return ['string','number'].includes(typeof value) && /^(0|-?[1-9][0-9]*)$/.test(String(value))
-      && Number.isSafeInteger(Number(value)) && (String(value) === predicate.valueId) === predicate.equal;
-  }));
+  const routePlans = productRoutePlans(plans, product);
   if (routePlans.length !== 1) return emptyResult('review_required', [{
     code: routePlans.length ? 'CATEGORY_REMOTE_ROUTE_AMBIGUOUS' : 'CATEGORY_REMOTE_ROUTE_NOT_APPROVED', category }]);
   const routes = bindings.routes.filter(route => route.enabled && route.reviewState === 'approved'
@@ -248,6 +246,13 @@ function projectFirstSyncFields(input) {
     code: routes.length ? 'CATEGORY_REMOTE_ROUTE_AMBIGUOUS' : 'CATEGORY_REMOTE_ROUTE_NOT_APPROVED',
     category, remoteAttributeSetId: raw.attribute_set_id }]);
   const route = routes[0], routePlan = plans.find(plan => plan.routeKey === route.routeKey);
+  const syntax = routeTools(compiled.definition);
+  const syntaxPlan = syntax.plans.find(plan => plan.amberGroup === category
+    && plan.predicates.length === routePlan.predicates.length
+    && plan.predicates.every(predicate => routePlan.predicates.some(expected => expected.questionKey === predicate.key
+      && expected.valueId === predicate.value && expected.equal === predicate.equal)));
+  const currentSet = schema.attributeSets.find(set => set.attribute_set_id === route.setId);
+  const pinnedSet = pinned.attributeSets.find(set => set.attribute_set_id === route.setId);
   const group = compiled.definition.groups.find(candidate => candidate.route === category);
   const evidence = object(input.observation.domainEvidence, 'DOMAIN_EVIDENCE_INVALID');
   if (evidence.failures !== undefined) {
@@ -290,28 +295,38 @@ function projectFirstSyncFields(input) {
       && candidate.storeCode === scope);
     const attr = schema.attributes.find(attribute => attribute.attribute_code === target);
     const pinnedAttr = pinned.attributes.find(attribute => attribute.attribute_code === target);
+    const remoteValue = scope === 'all' ? getRemote(target) : evidence.english?.fields
+      && own(evidence.english.fields, target);
+    const remote = scope === 'en' && enReason ? { known: false } : state(remoteValue);
+    const direct = directSource(cell, compiled.definition);
+    const output = forward(target, scope);
+    // An intentionally inactive frozen expression needs no business binding.
+    // Retain its manifest row, but receipt emptiness only with fresh read,
+    // successful evaluation and unchanged optional attribute/set evidence.
+    const inactiveEmpty = !expected && syntaxPlan && !syntax.possible(cell, syntaxPlan.predicates)
+      && errors.length === 0 && output.verified && output.value === '' && remote.known && !remote.present
+      && attr && pinnedAttr && !attr.is_required && !pinnedAttr.is_required && !direct?.required
+      && hash(attr) === hash(pinnedAttr) && currentSet && pinnedSet
+      && currentSet.attributeCodes.includes(target) === pinnedSet.attributeCodes.includes(target)
+      && !drift.diagnostics.some(issue => issue.code === 'STORE_TOPOLOGY_CHANGED');
     let reason = routeReasons[0]?.code || null;
     if (attr && pinnedAttr && attr.is_required !== pinnedAttr.is_required) reason ||= 'ATTRIBUTE_REQUIREDNESS_CHANGED';
-    if (!expected || !binding || binding.reviewState !== 'approved'
-      || binding.attributeCode !== target || binding.strategy !== expected.strategy) reason ||= 'FIELD_BINDING_NOT_APPROVED';
-    if (!policy || policy.reviewState !== 'approved' || policy.policy === 'blocked') reason ||= 'FIELD_POLICY_NOT_APPROVED';
+    if (!inactiveEmpty && (!expected || !binding || binding.reviewState !== 'approved'
+      || binding.attributeCode !== target || binding.strategy !== expected.strategy)) reason ||= 'FIELD_BINDING_NOT_APPROVED';
+    if (!inactiveEmpty && (!policy || policy.reviewState !== 'approved' || policy.policy === 'blocked')) reason ||= 'FIELD_POLICY_NOT_APPROVED';
     const relevant = [...validation.diagnostics, ...drift.diagnostics]
       .filter(issue => issue.bindingKey === expected?.bindingKey);
     reason ||= relevant[0]?.code || null;
     if (scope === 'en' && (!attr || attr.scope !== 'store' || !['text', 'textarea'].includes(attr.frontend_input))) {
       reason ||= 'STORE_SCOPE_ATTRIBUTE_UNSUPPORTED';
     }
-    const remoteValue = scope === 'all' ? getRemote(target) : evidence.english?.fields
-      && own(evidence.english.fields, target);
-    const remote = scope === 'en' && enReason ? { known: false } : state(remoteValue);
     if (!remote.known && !enReason) reason ||= 'REMOTE_VALUE_TYPE_UNSUPPORTED';
-    const direct = directSource(cell, compiled.definition);
     let descriptor = direct && compiled.definition.sources[direct.id];
     if (direct?.trimmed && !(descriptor?.kind === 'information' && descriptor.category === category
       && INFORMATION[category]?.includes(descriptor.key) && !descriptor.aliases.length && scope === 'all'
       && direct.wrappers.every(wrapper => wrapper === 'text'))) descriptor = null;
     let persistence = 'derived', local = { known: true, present: false }, kind = 'derived', type = 'text';
-    let unit, scale, constraints, prospective, reverseCandidates, importBlocker = null;
+    let unit, scale, constraints, prospective, reverseCandidates, importBlocker = null, semanticRequired = false;
     if (target === 'name') {
       persistence = 'name'; kind = 'name'; local = effectiveLocalName(product, evaluated, scope);
       descriptor = { kind: 'name', field: scope === 'all' ? 'magento_name_override.values.all' : 'magento_name_override.values.en' };
@@ -324,6 +339,13 @@ function projectFirstSyncFields(input) {
       if (!descriptor) reason ||= 'SEMANTIC_SOURCE_NOT_PROVEN';
       persistence = 'characteristic'; kind = 'option'; type = 'option';
       local = descriptor ? sourceState(descriptor, product) : { known: false };
+      const requirement = classifySemanticRequirement({ compiled, target, scope, product,
+        source: { kind: 'semantic', key: descriptor?.key, definitionHash: compiled.hash, routeKey: route.routeKey } });
+      semanticRequired = requirement.state === 'required';
+      if (!receipts.has(scope + '/' + target) && requirement.state === 'unproven'
+        && local.known && !local.present && remote.known && !remote.present) {
+        reason ||= 'SEMANTIC_REQUIREMENT_UNPROVEN';
+      }
       const options = bindings.options.filter(option => option.bindingKey === expected.bindingKey
         && option.reviewState === 'approved' && option.sourceKind === 'semantic'
         && expected.options.some(candidate => candidate.sourceKey === option.sourceKey
@@ -370,7 +392,7 @@ function projectFirstSyncFields(input) {
         || remote.value.trim() !== remote.value)) reason ||= 'CANONICAL_INFORMATION_VALUE_NORMALIZED';
     } else {
       if (direct) reason ||= 'CANONICAL_SOURCE_SETTER_UNSUPPORTED';
-      prospective = forward(target, scope);
+      prospective = output;
       if (expected?.strategy?.endsWith('_option') && prospective.verified && present(prospective.value)) {
         const matches = bindings.options.filter(option => option.bindingKey === expected.bindingKey
           && option.reviewState === 'approved' && option.evaluatedOutput === prospective.value);
@@ -405,6 +427,9 @@ function projectFirstSyncFields(input) {
     // Derived store fields only compare a fresh forward result. They never
     // reverse or import an English canonical value; direct setters remain gated.
     if (scope === 'en' && !['name', 'derived'].includes(persistence)) reason ||= 'LOCALIZED_CANONICAL_SETTER_NOT_PROVEN';
+    // Derived values are current forward observations, never reversible inputs.
+    // Display the exact compared output without changing setter authority.
+    if (kind === 'derived') local = prospective?.verified ? state(prospective.value, unit) : { known: false };
     if (unit && remote.known) remote.unit = unit;
     const receipt = receipts.get(scope + '/' + target);
     if (!receipt && importBlocker && local.known && !local.present && remote.known && remote.present) reason ||= importBlocker;
@@ -413,15 +438,22 @@ function projectFirstSyncFields(input) {
     if (!receipt && outwardPresent && remote.known && !remote.present
       && policy?.policy !== 'authoritative_create_update') reason ||= 'OUTWARD_POLICY_NOT_AUTHORITATIVE';
     if (reverseCandidates?.length > 256) { reason ||= 'REVERSE_DOMAIN_LIMIT_EXCEEDED'; reverseCandidates = []; }
-    const field = { target, scope, kind, type, required: target === 'name' || target === 'price' || persistence === 'price'
-      || persistence === 'weight' || Boolean(direct?.required) || attr?.is_required === true, mapping: { proven: !reason, ...(reason ? { reason } : {}) },
+    const source = { kind: descriptor?.kind || 'derived', ...(descriptor?.key ? { key: descriptor.key } : {}),
+      ...(descriptor?.field ? { field: descriptor.field } : {}), bindingRevisionId: revision.id,
+      definitionHash: compiled.hash, routeKey: route.routeKey };
+    let required = target === 'name' || target === 'price' || persistence === 'price'
+      || persistence === 'weight' || Boolean(direct?.required) || semanticRequired || attr?.is_required === true;
+    if (!receipt && !required && !reason && local.known && !local.present && remote.known && !remote.present) {
+      const requirement = classifySemanticRequirement({ compiled, target, scope, source, product });
+      if (requirement.state === 'required') required = true;
+      else if (requirement.state === 'unproven') reason = 'SEMANTIC_REQUIREMENT_UNPROVEN';
+      else source.requirednessEvidence = requirement.evidence;
+    }
+    const field = { target, scope, kind, type, required, mapping: { proven: !reason, ...(reason ? { reason } : {}) },
     local, remote, ...(unit ? { unit } : {}), ...(scale !== undefined ? { scale, constraints } : {}),
     ...(receipt ? { receipt } : {}), ...(reverseCandidates ? { reverseCandidates } : {}),
     ...(kind === 'derived' ? { prospective: prospective || { verified: false } } : {}) };
     fields.push(field);
-    const source = { kind: descriptor?.kind || 'derived', ...(descriptor?.key ? { key: descriptor.key } : {}),
-      ...(descriptor?.field ? { field: descriptor.field } : {}), bindingRevisionId: revision.id,
-      definitionHash: compiled.hash, routeKey: route.routeKey };
     projection.push({ target, scope, persistence, source,
       mappingHash: hash({ definitionHash: compiled.hash, routeKey: route.routeKey, cell,
         binding: binding || null, policy: policy || null, attributeRequired: pinnedAttr?.is_required ?? null,

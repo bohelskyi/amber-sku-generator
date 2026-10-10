@@ -264,3 +264,125 @@ test('helper normalizer remains exact and currency rate currentness uses existin
   assert.equal(normalizeDecimal('43,250000', 2), '43.25');
   assert.throws(() => currency.assertUsdRateObservationCurrent({ rateInfo: { stale: true, fetchedAt: '2000-01-01Z' } }));
 });
+
+// Retain the actual conditional publication: both mutually exclusive SV routes
+// bind the same remote attribute set. Only local semantic evidence selects one.
+function conditionalSvObservation(souvenir) {
+  const real = require('./fixtures/legacy-sv-schema6');
+  const publication = real.publication();
+  const compiled = compileDefinition(publication.definition);
+  const schema = c.normalizeSchema(publication.schema);
+  const product = real.product(souvenir === 5 ? 2198 : 1919);
+  product.details.answers.souvenir = souvenir;
+  product.total_price_uah = '4600.00';
+  const revision = { id: '11111111-1111-1111-1111-111111111111', state: 'published',
+    templateVersionId: '22222222-2222-2222-2222-222222222222',
+    originHash: c.originHash(config.baseUrl), definitionHash: compiled.hash,
+    evaluatorVersion: compiled.definition.evaluatorVersion, outputContract: compiled.definition.outputContract,
+    formatVersion: compiled.definition.formatVersion, schema,
+    bindings: normalizeBindings(publication.bindings), schemaFingerprint: c.hash(schema),
+    topologyFingerprint: c.hash(schema.storeTopology) };
+  const raw = { id: 991919, sku: product.public_sku || product.full_sku, attribute_set_id: 151,
+    price: 10000, custom_attributes: [] };
+  return { amber: { product, compiled, revision,
+    template: { kind: 'published', versionId: revision.templateVersionId, definitionHash: compiled.hash } },
+  raw, schema, domainEvidence: { english: { id: raw.id, sku: raw.sku, fields: { name: 'Fixture EN' } }, failures: [] } };
+}
+const conditionalConfigs = () => [
+  { id: 1, code: 'ua', website_id: 1, locale: 'uk_UA', base_currency_code: 'UAH' },
+  { id: 3, code: 'en', website_id: 1, locale: 'en_US', base_currency_code: 'UAH' },
+];
+test('actual schema6 price proof selects souvenir 4, 5 and 6 before testing shared-set route uniqueness', async () => {
+  for (const souvenir of [4, 5, 6]) {
+    const observation = conditionalSvObservation(souvenir), calls = [];
+    const evidence = await readCurrencyEvidence(config, observation, { fetchImpl: async (url, init) => {
+      calls.push({ url, method: init.method });
+      return new Response(JSON.stringify(conditionalConfigs()), { headers: { 'content-type': 'application/json' } });
+    } });
+    assert.deepEqual(evidence, { verified: true, currency: 'UAH' }, `souvenir=${souvenir}`);
+    assert.deepEqual(calls, [{ url: 'https://fixture-magento.example/rest/all/V1/store/storeConfigs', method: 'GET' }]);
+  }
+});
+test('conditional currency proof rejects unknown semantic route values without treating them as the negative branch', async () => {
+  for (const souvenir of [undefined, null, '', 'invalid', true, 5.1, '05', '5 ', {}, Number.MAX_SAFE_INTEGER + 1]) {
+    const observation = conditionalSvObservation(souvenir);
+    let calls = 0;
+    const evidence = await readCurrencyEvidence(config, observation, { fetchImpl: async () => { calls++; throw Error('Unexpected fetch'); } });
+    assert.equal(evidence.verified, false);
+    assert.equal(evidence.reason, 'PRICE_BOUND_ROUTE_NOT_UNIQUE');
+    assert.equal(calls, 0);
+  }
+});
+test('conditional price route must itself be enabled, approved and match the remote set', async () => {
+  for (const souvenir of [4, 5, 6]) for (const change of ['disabled', 'review', 'different-set']) {
+    const observation = conditionalSvObservation(souvenir);
+    const selected = observation.amber.revision.bindings.routes.find(route => route.routeKey
+      === (souvenir === 5 ? 'SV.souvenir=value_id:5' : 'SV.souvenir!=value_id:5'));
+    if (change === 'disabled') selected.enabled = false;
+    if (change === 'review') selected.reviewState = 'review_required';
+    if (change === 'different-set') selected.setId = 999;
+    let calls = 0;
+    const evidence = await readCurrencyEvidence(config, observation, { fetchImpl: async () => { calls++; throw Error('Unexpected fetch'); } });
+    assert.equal(evidence.verified, false, `${souvenir}/${change}`);
+    assert.equal(evidence.reason, 'PRICE_BOUND_ROUTE_NOT_UNIQUE');
+    assert.equal(calls, 0, 'The other approved route cannot substitute for the selected route');
+  }
+});
+test('selected conditional route retains its website policy and remote UAH/read guards', async () => {
+  for (const change of ['website-policy', 'currency', 'unreadable']) {
+    const observation = conditionalSvObservation(4), rows = conditionalConfigs();
+    if (change === 'website-policy') {
+      const attribute = observation.amber.revision.bindings.attributes.find(attribute =>
+        attribute.routeKey === 'SV.souvenir!=value_id:5' && attribute.target === 'product_websites');
+      observation.amber.revision.bindings.policies.find(policy => policy.bindingKey === attribute.bindingKey).policy = 'magento_managed';
+    }
+    if (change === 'currency') rows[1].base_currency_code = 'USD';
+    const evidence = await readCurrencyEvidence(config, observation, { fetchImpl: async () => {
+      if (change === 'unreadable') throw Error('Fixture read failure');
+      return new Response(JSON.stringify(rows), { headers: { 'content-type': 'application/json' } });
+    } });
+    assert.equal(evidence.verified, false);
+    assert.equal(evidence.reason, { 'website-policy': 'PRICE_BOUND_WEBSITE_NOT_PROVEN',
+      currency: 'PRICE_BASE_CURRENCY_NOT_UAH', unreadable: 'PRICE_CURRENCY_READ_UNAVAILABLE' }[change]);
+  }
+});
+test('proven conditional price currency preserves populated price conflict and requires an explicit keep-local decision', async () => {
+  const { projectFirstSyncFields } = require('../src/services/magento/first-sync-projection');
+  const { prepareProgress } = require('../src/services/magento/first-sync-progress-plan');
+  const observation = conditionalSvObservation(4), before = JSON.stringify(observation.amber.product);
+  const currencyEvidence = await readCurrencyEvidence(config, observation, { fetchImpl: async () =>
+    new Response(JSON.stringify(conditionalConfigs()), { headers: { 'content-type': 'application/json' } }) });
+  const projection = projectFirstSyncFields({ observation, currencyEvidence });
+  const preview = prepareProgress(projection, null);
+  const price = preview.rows.find(field => field.target === 'price' && field.scope === 'all');
+  assert.equal(price.status, 'conflict');
+  assert.equal(price.local.value, '4600.00'); assert.equal(price.remote.value, 10000);
+  assert.equal(price.canKeepLocal, true); assert.equal(price.received, false);
+  assert.equal(price.record.state, 'conflict');
+  const selected = prepareProgress(projection, null, { target: 'price', scope: 'all', choice: 'keep_local' });
+  const kept = selected.rows.find(field => field.target === 'price' && field.scope === 'all');
+  assert.equal(kept.status, 'pending_outward_confirmation');
+  assert.equal(kept.record.after, '4600.00');
+  assert.equal(kept.record.source.decision, 'keep_local');
+  assert.equal(kept.terminal, false);
+  assert.equal(JSON.stringify(observation.amber.product), before, 'Neither preview nor an in-memory decision applies a price');
+});
+test('currency proof cannot be reused after the same product switches its conditional route', async () => {
+  const { projectFirstSyncFields } = require('../src/services/magento/first-sync-projection');
+  const { prepareProgress } = require('../src/services/magento/first-sync-progress-plan');
+  const observation = conditionalSvObservation(5);
+  const currencyEvidence = await readCurrencyEvidence(config, observation, { fetchImpl: async () =>
+    new Response(JSON.stringify(conditionalConfigs()), { headers: { 'content-type': 'application/json' } }) });
+  assert.equal(currencyEvidence.verified, true);
+  observation.amber.product.details.answers.souvenir = 4;
+  const projection = projectFirstSyncFields({ observation, currencyEvidence });
+  const selected = prepareProgress(projection, null, { target: 'price', scope: 'all', choice: 'accept_remote' });
+  const accepted = selected.rows.find(row => row.target === 'price' && row.scope === 'all').record;
+  accepted.source.productId = observation.amber.product.id;
+  let calls = 0;
+  prices.previewProductPriceChange = async () => { calls++; throw Error('Stale currency route must not reach the price command'); };
+  const result = await prepareFirstSyncPrice(client, { observation, projection, acceptedFields: [accepted],
+    currencyEvidence, actorUserId: 7, rateObservation: fixture().rateObservation });
+  assert.equal(result.blockedFields[0].code, 'FIRST_SYNC_PRICE_CURRENCY_NOT_PROVEN');
+  assert.equal(result.supportedFields.length, 0); assert.equal(calls, 0);
+});

@@ -51,6 +51,20 @@ changed attribute IDs/metadata/requiredness, missing membership and stale option
 identity produce precise blockers. Source reads and forward evaluation keep the
 original product object so immutable historical-source proof survives.
 
+Field projection and price-currency evidence select the same conditional route
+from the product's known semantic answers before checking route uniqueness and
+approval. Mutually exclusive routes may share a remote attribute-set ID. Missing
+or malformed semantic answers never establish the negative branch.
+
+A conditional field proven inactive in that route stays in the first-sync
+manifest. It can receive an optional-empty receipt only with successful empty
+forward evaluation, a confirmed empty remote value, unchanged optional attribute
+metadata and unchanged membership in the selected pinned/current set. It needs
+no business binding for an unreachable output. Active unapproved mappings,
+unknown or populated remote values, evaluation failures, required fields and
+schema drift remain blocked. This exception grants no import or outward authority
+and cannot renew a previously completed field's one-time acceptance.
+
 Receipt identity is `target + scope`; `mappingHash` is mapping evidence, not a new
 receipt key. Metadata records persistence kind, canonical source key/field,
 binding revision, definition hash, route, outward policy and required runtime
@@ -77,6 +91,13 @@ wrappers. The exact same-source presence guard with an empty/error fallback is
 supported. Arbitrary conditionals, first-present selection, bands, joins and other
 composites are evaluated forward; their outputs never reconstruct canonical inputs.
 A missing input needed by that forward evaluation remains review.
+
+For derived fields the preview's local value is the verified current forward
+output used in comparison, including approved option-ID conversion. Failed
+evaluation is shown as unknown. This observation is not a reversible canonical
+input and cannot authorize an import. The UI's completed-field badge describes
+completion of the first phase, which includes equality and optional-empty
+receipts; it does not claim that a value was imported.
 
 Approved semantic option identities come from binding source keys and native option
 IDs, not remote labels. A populated local semantic value can establish equality
@@ -131,6 +152,8 @@ pinned/current EN store on that website. Store-config IDs, codes, websites,
 UA/EN locales and both `base_currency_code: UAH` must agree. Incomplete topology,
 unreadable configuration or another currency leaves price unverified. Its
 object-owned proof cannot be recreated by copying `{verified:true,currency:'UAH'}`.
+The proof also binds the selected conditional route; changing the product to
+another route invalidates that evidence before the price command can run.
 
 Rate evidence is captured outside the business transaction. Price preparation and
 apply perform no network requests: they use the caller's queryable transaction,
@@ -448,3 +471,68 @@ excluded, with its original flag, price and history preserved. Existing lineage
 holds/exclusions and delivery checks remain separate from local completion. Any
 fixture weight used to verify this path is an explicit test decision, not a
 claimed measurement or user acceptance of the real1835 product.
+
+## Auditing previously recorded optional-empty fields
+
+An active required semantic question cannot be received as `optional_empty` merely
+because Magento marks the target attribute optional. A missing required local
+answer with a confirmed empty remote value stays unresolved. A valid populated
+remote value still follows the existing missing-local adoption checks; read errors,
+malformed values, zero and false never become confirmed emptiness.
+
+The read-only `first-sync-optional-receipt-audit` service checks saved
+`optional_empty` receipts before they can release either an incomplete or completed
+session into delivery. It resolves each receipt's original `bindingRevisionId`,
+`definitionHash`, route and field against the immutable published template and
+binding, including the pinned schema and mapping fingerprint. The originating
+product must belong to the same public identity. Its current answers, current
+publication and later terminal field values cannot establish historical requiredness.
+
+New receipts can retain bounded `source.requirednessEvidence`: the original
+definition/route/target/scope and the source observations used to decide a condition.
+This evidence is part of the immutable progress command and receipt; it is not a
+new permission or a client-supplied decision. Historical assessment checks its
+identity, shape, values and agreement with the original route. Truly optional fields
+and fields proven inactive by their original route or captured observations keep
+their permanent receipts.
+
+Older receipts may lack enough historical observations to establish inactivity.
+For example, a route proving only `souvenir != 5` does not establish that a question
+required for `souvenir = 1` was inactive when the receipt was created. Such a receipt
+remains explicit review, even if today's answer makes that question inactive.
+Missing publications, malformed provenance, inconsistent fingerprints, active
+required fields and unresolved historical conditions return
+`FIRST_SYNC_OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED`. A single assessment covers at
+most 500 fields and 32 original publications; exceeding the bound also requires
+review. The audit never deletes or rewrites a receipt, clears completion, imports
+values, enqueues work or writes Magento.
+
+An exact idempotent retry may still return its saved `alreadyApplied` response,
+including historical readiness or completion. That response does not establish
+current delivery authority; fresh runtime assessment and dispatch checks remain
+mandatory.
+
+Recovery workers can still finalize local state for an already succeeded and
+acknowledged delivery, including the automatic request's `synced` generation or
+the original historical reactivation's local activation. This preserves the prior
+delivery acknowledgement; it does not repair or accept an unsafe optional receipt.
+Any subsequent first-sync planning, enqueue or dispatch must pass the new audit.
+
+With an explicitly configured `DATABASE_URL`, run from `server/`:
+
+```sh
+node scripts/magento-first-sync-optional-audit.js --limit 100
+node scripts/magento-first-sync-optional-audit.js --session SESSION_UUID
+node scripts/magento-first-sync-optional-audit.js --limit 100 --after-session SESSION_UUID
+```
+
+The CLI opens one bounded `REPEATABLE READ READ ONLY` snapshot and emits JSON with
+session identifiers, per-field evidence, blockers, `evidenceHash`, `scopeComplete`,
+`truncated` and `nextAfterSession`. The limit is 1–500 sessions, default 100.
+Continue using `nextAfterSession` when the result is truncated; separate pages use
+separate snapshots. Exit codes are `0` for a complete requested scope without
+blockers, `2` when review blockers exist, `3` for a truncated page without blockers,
+and `1` for an error. An exact-session query with no matching optional receipts
+reports zero audited sessions; it does not establish product acceptance or delivery
+authority. The command performs no application startup, migration or HTTP/Magento
+request; its only external connection is the explicitly selected PostgreSQL database.

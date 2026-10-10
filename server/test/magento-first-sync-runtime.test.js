@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const runtime = require('../src/services/magento/first-sync-runtime');
 const service = require('../src/services/magento/first-sync.service');
 const ledger = require('../src/services/magento/first-sync-ledger');
+const optionalReceipts = require('../src/services/magento/first-sync-optional-receipt-audit');
 
 function fixture() {
   const state = { productId: 7, publicIdentityId: '17', publicSku: 'AG-000017',
@@ -30,9 +31,10 @@ function receipts() {
       manifest: fields.map(({ target, scope }) => ({ target, scope })), complete: false } };
 }
 async function withDependencies(operation) {
-  const calls = { inspect: [], commit: [], read: [], query: [], http: 0 };
+  const calls = { inspect: [], commit: [], read: [], query: [], audit: [], http: 0 };
   const controls = { inspection: { mode: 'create', readyForOutbound: true }, current: null,
-    verified: true, commitResult: { revision: '5', localChanged: false }, commitError: null };
+    verified: true, commitResult: { revision: '5', localChanged: false }, commitError: null,
+    optionalReceiptBlockers: [] };
   const client = { async query(sql, params) {
     calls.query.push({ sql, params });
     assert.match(sql, /^SELECT 1 FROM magento_sync_steps/);
@@ -44,6 +46,10 @@ async function withDependencies(operation) {
     [service, 'inspect', async (...args) => { calls.inspect.push(args); return controls.inspection; }],
     [service, 'commit', async (...args) => { calls.commit.push(args); if (controls.commitError) throw controls.commitError; return controls.commitResult; }],
     [ledger, 'readOnClient', async (received, key) => { assert.equal(received, client); calls.read.push(key); return controls.current; }],
+    [optionalReceipts, 'assessOnClient', async (received, progress) => {
+      assert.equal(received, client); calls.audit.push(progress);
+      return {blockers: controls.optionalReceiptBlockers, evidence: []};
+    }],
     [globalThis, 'fetch', async () => { calls.http++; assert.fail('Runtime guard must not perform HTTP'); }],
   ];
   const restore = patches.map(([object, key, value]) => { const original = object[key]; object[key] = value; return () => { object[key] = original; }; });
@@ -213,5 +219,39 @@ test('ledger compare-and-swap failure retains the first-sync error classificatio
     context.controls.commitError = Object.assign(new Error('revision advanced'), { code: 'FIRST_SYNC_REVISION_CHANGED' });
     await assert.rejects(runtime.enforce({}, f.observation, f.state, context.options, { job: f.job }), rejection('REVISION_CHANGED'));
     assert.equal(context.calls.commit.length, 1);
+  });
+});
+
+for (const mode of ['ordinary','create']) test(mode + ' dispatch rechecks optional receipts after lane issuance', async () => {
+  await withDependencies(async context => {
+    const f=fixture();context.controls.inspection={mode,readyForOutbound:true};
+    const lane=await runtime.enforce({},f.observation,f.state,context.options,{job:f.job});
+    context.controls.current={session:{completed_at:'2026-10-10'},fields:[{state:'optional_empty'}]};
+    context.controls.optionalReceiptBlockers=[{code:'FIRST_SYNC_OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED'}];
+    await assert.rejects(runtime.assertDispatchOnClient(context.client,lane),rejection('OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED'));
+    assert.deepEqual(context.calls.read,[{originHash:'origin-a',publicIdentityId:'17'}]);
+    assert.equal(context.calls.commit.length,0);
+  });
+});
+
+test('incomplete first-sync dispatch and reusable CREATE proof cannot bypass optional receipt quarantine', async () => {
+  await withDependencies(async context => {
+    const lane=await firstLane(context);
+    context.controls.optionalReceiptBlockers=[{code:'FIRST_SYNC_OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED'}];
+    await assert.rejects(runtime.assertDispatchOnClient(context.client,lane),rejection('OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED'));
+    context.controls.inspection={mode:'create',readyForOutbound:true};
+    const f=fixture(),create=await runtime.enforce({},f.observation,f.state,context.options,{job:f.job});
+    await assert.rejects(runtime.enforce({},f.observation,f.state,context.options,{job:f.job,createLane:create}),
+      rejection('OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED'));
+    assert.equal(context.calls.commit.length,0);
+  });
+});
+
+test('unsafe receipt inspection fails before progress commit', async () => {
+  await withDependencies(async context => {
+    const f=fixture();context.controls.inspection={mode:'review',readyForOutbound:false,
+      blockers:[{code:'FIRST_SYNC_OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED',target:'kamin_obrobka',scope:'all'}]};
+    await assert.rejects(runtime.enforce({},f.observation,f.state,context.options),rejection('OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED'));
+    assert.equal(context.calls.commit.length,0);assert.equal(context.calls.query.length,0);
   });
 });

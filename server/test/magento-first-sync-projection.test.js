@@ -5,6 +5,8 @@ const { compileDefinition } = require('../src/services/export-templates/definiti
 const { normalizeSchema, hash } = require('../src/services/magento/binding-contract');
 const { requirements, normalizeBindings } = require('../src/services/magento/binding-validation');
 const { projectFirstSyncFields } = require('../src/services/magento/first-sync-projection');
+const { prepareProgress, deferAfterCanonicalImports } = require('../src/services/magento/first-sync-progress-plan');
+const { classifySemanticRequirement } = require('../src/services/magento/first-sync-semantic-requirement');
 const literal = value => ({ op: 'literal', value });
 const source = id => ({ op: 'source', id });
 const text = id => ({ op: 'text', input: source(id), trim: false, format: 'scalar-v1', onAbsent: 'empty' });
@@ -156,6 +158,46 @@ test('derived forward output can establish equality without recovering its input
   const result = projectFirstSyncFields(input);
   assert.equal(field(result, 'dovzhyna_brasletu_diuimiv').status, 'equal');
   assert.equal(metadata(result, 'dovzhyna_brasletu_diuimiv').persistence, 'derived');
+  assert.deepEqual(result.fields.find(value => value.target === 'dovzhyna_brasletu_diuimiv').local,
+    { known: true, present: true, value: '17/5.000' });
+});
+test('received derived dimensions show the fresh forward value without rewriting the receipt or importing it', () => {
+  const target = 'dovzhyna_brasletu_diuimiv';
+  const input = fixture({ changeDefinition: definition => {
+    definition.groups[0].rows[0].cells[target] = { op: 'join', items: [text('size'), text('weight')], delimiter: '/', omitEmpty: true };
+  } });
+  remote(input, target, '17/5.000');
+  const original = prepareProgress(projectFirstSyncFields(input), null).rows.find(row => row.target === target).record;
+  input.receipts = [{ target, scope: 'all', state: 'equal' }];
+  input.observation.amber.product.details.answers.braclet_size = '18';
+  const before = JSON.stringify(input), result = projectFirstSyncFields(input);
+  const row = prepareProgress(result, { fields: [original] }).rows.find(item => item.target === target);
+  assert.equal(row.received, true); assert.deepEqual(row.record, original);
+  assert.deepEqual(row.local, { known: true, present: true, value: '18/5.000' });
+  assert.equal(row.remote.value, '17/5.000');
+  assert.equal(row.canAcceptRemote, false); assert.equal(row.canKeepLocal, false);
+  assert.equal(metadata(result, target).persistence, 'derived');
+  assert.equal(JSON.stringify(input), before);
+});
+test('derived option display uses the bound forward option ID and never gains an inverse setter', () => {
+  const input = fixture({ changeDefinition: definition => { definition.groups[0].rows[0].cells.kolir = literal('Red output'); } });
+  remote(input, 'kolir', 'blue-id');
+  const result = projectFirstSyncFields(input), row = prepareProgress(result, null).rows.find(item => item.target === 'kolir');
+  assert.deepEqual(row.local, { known: true, present: true, value: 'red-id' });
+  assert.equal(row.reason, 'DERIVED_FORWARD_MISMATCH');
+  assert.equal(metadata(result, 'kolir').persistence, 'derived');
+  assert.equal(row.canAcceptRemote, false); assert.equal(row.canKeepLocal, false);
+  assert.equal(Object.hasOwn(row, 'importValue'), false);
+});
+test('an unverified derived forward result is displayed as unknown rather than empty', () => {
+  const target = 'dovzhyna_brasletu_diuimiv';
+  const input = fixture({ changeDefinition: definition => {
+    definition.groups[0].rows[0].cells[target] = { op: 'join', items: [
+      { op: 'error', field: target, message: literal('Unverified dimensions') }, text('size')], delimiter: '/', omitEmpty: true };
+  } });
+  const result = projectFirstSyncFields(input), row = prepareProgress(result, null).rows.find(item => item.target === target);
+  assert.deepEqual(row.local, { known: false }); assert.equal(row.status, 'unknown');
+  assert.equal(row.canAcceptRemote, false); assert.equal(row.canKeepLocal, false);
 });
 test('current approved option forward equality tolerates many-to-one mappings', () => {
   const input = fixture();
@@ -318,6 +360,313 @@ test('known conditional route still requires its own approval, enabled state and
   }
 });
 
+function conditionalSvFixture(souvenir = 4, changePublication) {
+  const real = require('./fixtures/legacy-sv-schema6'), publication = real.publication();
+  changePublication?.(publication);
+  const compiled = compileDefinition(publication.definition), schema = normalizeSchema(publication.schema);
+  const revision = { id: '11111111-1111-1111-1111-111111111111', state: 'published',
+    templateVersionId: '22222222-2222-2222-2222-222222222222', definitionHash: compiled.hash,
+    evaluatorVersion: compiled.definition.evaluatorVersion, outputContract: compiled.definition.outputContract,
+    formatVersion: compiled.definition.formatVersion, schemaFingerprint: hash(schema),
+    topologyFingerprint: hash(schema.storeTopology), schema, bindings: normalizeBindings(publication.bindings) };
+  const product = real.product(1919);
+  // Synthetic complete product data under the copied publication, not live SV4001.
+  Object.assign(product.details.answers, { souvenir, size: '7.5/7.5/7', stone_processing: 1 });
+  product.magento_name_subject_ua = 'Тестовий сувенір'; product.magento_name_subject_en = 'Test souvenir';
+  const raw = { id: 123, sku: product.full_sku, attribute_set_id: 151, name: 'Remote UA',
+    price: product.total_price_uah, custom_attributes: [] };
+  return { observation: { amber: { product, compiled, revision,
+    template: { kind: 'published', versionId: revision.templateVersionId, definitionHash: compiled.hash } },
+  raw, schema, domainEvidence: { english: { id: raw.id, sku: raw.sku, fields: { name: 'Remote EN' } }, failures: [] } },
+  currencyEvidence: { verified: true, currency: 'UAH' } };
+}
+const inactiveSvTargets = ['fraction', 'kamin_obrobka', 'kamin_suvenirnyi'];
+
+function semanticRequirement(input, target, sourceKey, { historical = false, kind = 'semantic', routeKey } = {}) {
+  const { product, compiled } = input.observation.amber;
+  return classifySemanticRequirement({ compiled, target, scope: 'all',
+    source: { kind, ...(sourceKey ? { key: sourceKey } : {}), definitionHash: compiled.hash,
+      routeKey: routeKey || (product.details.answers.souvenir === 5 ? 'SV.souvenir=value_id:5' : 'SV.souvenir!=value_id:5') },
+    ...(historical ? {} : { product }) });
+}
+
+test('an active required semantic input cannot create an optional-empty receipt', () => {
+  for (const remoteValue of [undefined, null, '']) {
+    const input = conditionalSvFixture(5); delete input.observation.amber.product.details.answers.stone_processing;
+    if (remoteValue !== undefined) input.observation.raw.custom_attributes = [{ attribute_code: 'kamin_obrobka', value: remoteValue }];
+    const result = projectFirstSyncFields(input), row = prepareProgress(result, null).rows.find(item => item.target === 'kamin_obrobka');
+    assert.equal(result.fields.find(item => item.target === row.target).required, true);
+    assert.equal(row.status, 'review_required'); assert.equal(row.reason, 'REQUIRED_FIELD_EMPTY');
+    assert.equal(row.terminal, false); assert.equal(row.record.state, 'review_required');
+    assert.equal(row.canAcceptRemote, false); assert.equal(row.canKeepLocal, false);
+    assert.equal(semanticRequirement(input, row.target, 'stone_processing').state, 'required');
+    assert.equal(semanticRequirement(input, row.target, 'stone_processing', { historical: true }).state, 'required');
+  }
+});
+
+test('requiredness preserves valid inverse imports, equal zero options and unknown remote reads', () => {
+  const input = conditionalSvFixture(5); delete input.observation.amber.product.details.answers.stone_processing;
+  input.observation.raw.custom_attributes = [{ attribute_code: 'kamin_obrobka', value: '6039' }];
+  let result = projectFirstSyncFields(input);
+  assert.equal(field(result, 'kamin_obrobka').status, 'imported');
+  assert.equal(field(result, 'kamin_obrobka').importValue, '1');
+  assert.equal(metadata(result, 'kamin_obrobka').requiresRuntimeValidation, true);
+  input.observation.amber.product.details.answers.stone_processing = 0;
+  input.observation.raw.custom_attributes[0].value = '6040';
+  assert.equal(field(projectFirstSyncFields(input), 'kamin_obrobka').status, 'equal');
+  input.observation.raw.custom_attributes[0].value = {};
+  assert.equal(field(projectFirstSyncFields(input), 'kamin_obrobka').status, 'unknown');
+});
+
+test('required question activity follows outer AST guards and unknown semantic controls never prove inactivity', () => {
+  const input = conditionalSvFixture(5, publication => {
+    const binding = publication.definition.bindings.find(item => item.id === 'SV.kamin_obrobka');
+    binding.value = { op: 'when', if: { op: 'eq', left: { op: 'semanticKey', input: source('SV.material') }, right: literal('1') },
+      then: binding.value, else: literal('') };
+  });
+  assert.equal(semanticRequirement(input, 'kamin_obrobka', 'stone_processing').state, 'required');
+  input.observation.amber.product.details.answers.material = 2;
+  assert.equal(semanticRequirement(input, 'kamin_obrobka', 'stone_processing').state, 'inactive');
+  input.observation.amber.product.details.answers.material = 0;
+  assert.equal(semanticRequirement(input, 'kamin_obrobka', 'stone_processing').state, 'inactive');
+  for (const value of [undefined, null, '', false, 'bad', '01', {}]) {
+    input.observation.amber.product.details.answers.material = value;
+    assert.equal(semanticRequirement(input, 'kamin_obrobka', 'stone_processing').state, 'unproven');
+  }
+  input.observation.amber.product.details.answers.material = 1;
+  assert.equal(semanticRequirement(input, 'kamin_obrobka', 'stone_processing', { historical: true }).state, 'unproven');
+});
+
+test('unknown catalog-rule activity blocks new empty receipts without using absent controls as a negative answer', () => {
+  const input = conditionalSvFixture(5, publication => {
+    publication.definition.questionContracts['SV.stone_processing'].rule = { 'SV.material': 1 };
+  });
+  delete input.observation.amber.product.details.answers.stone_processing;
+  delete input.observation.amber.product.details.answers.material;
+  const result = projectFirstSyncFields(input);
+  assert.equal(field(result, 'kamin_obrobka').status, 'review_required');
+  assert.equal(field(result, 'kamin_obrobka').evidenceReason, 'SEMANTIC_REQUIREMENT_UNPROVEN');
+});
+
+test('raw semantic lookup retains its published required contract and respects reachable rule activity', () => {
+  const create = (change = () => {}) => fixture({ changeDefinition: definition => {
+    definition.sources.selector = { ...definition.sources.color, key: 'selector' };
+    definition.questionContracts.color = { source: 'color', exists: true, required: true, rule: {}, allowed: ['7', '8', '9'] };
+    change(definition);
+  } });
+  const assess = (input, historical = false) => {
+    const { compiled, product } = input.observation.amber;
+    return classifySemanticRequirement({ compiled, target: 'kolir', scope: 'all',
+      source: { kind: 'semantic', key: 'binding_test_semantic', definitionHash: compiled.hash, routeKey: 'BR:all' },
+      ...(historical ? {} : { product }) });
+  };
+  const required = create(); delete required.observation.amber.product.details.answers.binding_test_semantic;
+  remote(required, 'kolir', '');
+  assert.equal(assess(required).state, 'required'); assert.equal(assess(required, true).state, 'required');
+  assert.equal(field(projectFirstSyncFields(required), 'kolir').reason, 'REQUIRED_FIELD_EMPTY');
+  const conditional = create(definition => { definition.questionContracts.color.rule = { selector: 1 }; });
+  conditional.observation.amber.product.details.answers.selector = 1;
+  assert.equal(assess(conditional).state, 'required');
+  conditional.observation.amber.product.details.answers.selector = 2;
+  assert.equal(assess(conditional).state, 'inactive');
+  delete conditional.observation.amber.product.details.answers.selector;
+  assert.equal(assess(conditional).state, 'unproven'); assert.equal(assess(conditional, true).state, 'unproven');
+  const inactive = create(definition => {
+    const row = definition.groups[0].rows[0];
+    row.cells.kolir = { op: 'when', if: { op: 'eq', left: { op: 'semanticKey', input: source('selector') }, right: literal('1') },
+      then: row.cells.kolir, else: literal('') };
+  });
+  inactive.observation.amber.product.details.answers.selector = 2;
+  assert.equal(assess(inactive).state, 'inactive');
+  const optional = create(definition => { definition.questionContracts.color.required = false; });
+  assert.equal(assess(optional).state, 'optional'); assert.equal(assess(optional, true).state, 'optional');
+});
+
+test('original route proof preserves inactive and genuinely optional receipts independently of current answers', () => {
+  const inactive = conditionalSvFixture(4);
+  for (const target of inactiveSvTargets) {
+    assert.equal(semanticRequirement(inactive, target, null, { historical: true, kind: 'derived' }).state, 'inactive');
+  }
+  inactive.observation.amber.product.details.answers.souvenir = 5;
+  assert.equal(semanticRequirement(inactive, 'kamin_obrobka', null,
+    { historical: true, kind: 'derived', routeKey: 'SV.souvenir!=value_id:5' }).state, 'inactive');
+  const optional = conditionalSvFixture(5);
+  assert.equal(semanticRequirement(optional, 'kamin_suvenirnyi', 'additional_stone', { historical: true }).state, 'optional');
+  const { compiled } = optional.observation.amber;
+  const sourceEvidence = { kind: 'semantic', key: 'stone_processing', definitionHash: compiled.hash, routeKey: 'SV.souvenir=value_id:5' };
+  for (const patch of [{ definitionHash: '0'.repeat(64) }, { key: 'color' }, { routeKey: 'SV:all' }]) {
+    assert.equal(classifySemanticRequirement({ compiled, target: 'kamin_obrobka', scope: 'all',
+      source: { ...sourceEvidence, ...patch } }).state, 'unproven');
+  }
+});
+
+test('new optional receipts freeze only bounded condition evidence and later classify without current answers', () => {
+  const input = conditionalSvFixture(4), result = projectFirstSyncFields(input);
+  const { compiled, product } = input.observation.amber;
+  for (const target of ['nastlni_ihry', 'vyd_statuetky']) {
+    assert.equal(field(result, target).status, 'optional_empty');
+    const saved = metadata(result, target).source;
+    assert.equal(saved.requirednessEvidence.values['SV.souvenir'].value, 4);
+    const assess = source => classifySemanticRequirement({ compiled, target, scope: 'all', source });
+    assert.equal(assess(saved).state, 'inactive');
+    const withoutProof = { ...saved }; delete withoutProof.requirednessEvidence;
+    assert.equal(assess(withoutProof).state, 'unproven');
+    product.details.answers.souvenir = 1;
+    assert.equal(assess(saved).state, 'inactive');
+  }
+});
+
+test('frozen requiredness evidence cannot change publication, field or route identity or smuggle malformed values', () => {
+  const input = conditionalSvFixture(4), projected = projectFirstSyncFields(input);
+  const { compiled } = input.observation.amber, original = metadata(projected, 'nastlni_ihry').source;
+  const mutations = [
+    proof => { proof.version = 2; },
+    proof => { proof.definitionHash = '0'.repeat(64); },
+    proof => { proof.target = 'kamin_obrobka'; },
+    proof => { proof.scope = 'en'; },
+    proof => { proof.routeKey = 'SV.souvenir=value_id:5'; },
+    proof => { proof.values['SV.souvenir'].value = 5; },
+    proof => { proof.values['SV.souvenir'] = { known: true, present: false }; },
+    proof => { proof.values['SV.souvenir'].value = false; },
+    proof => { proof.values['SV.souvenir'].value = '04'; },
+    proof => { proof.values['SV.souvenir'].value = {}; },
+    proof => { proof.values['SV.souvenir'].value = 'x'.repeat(4097); },
+    proof => { proof.values = Object.fromEntries(Array.from({ length: 65 }, (_, index) => ['unknown' + index, { known: true, present: true, value: 4 }])); },
+  ];
+  for (const mutate of mutations) {
+    const source = structuredClone(original); mutate(source.requirednessEvidence);
+    assert.equal(classifySemanticRequirement({ compiled, target: 'nastlni_ihry', scope: 'all', source }).state, 'unproven');
+  }
+});
+
+test('actual publication keeps inactive conditional fields as proven optional-empty manifest rows', () => {
+  for (const souvenir of [4, 6]) {
+    const input = conditionalSvFixture(souvenir), before = JSON.stringify(input);
+    const result = projectFirstSyncFields(input), prepared = prepareProgress(result, null);
+    assert.equal(result.route.routeKey, 'SV.souvenir!=value_id:5');
+    for (const target of inactiveSvTargets) {
+      const selected = result.fields.find(value => value.target === target);
+      assert.equal(field(result, target).status, 'optional_empty');
+      assert.deepEqual(selected.local, { known: true, present: false, value: '' });
+      assert.deepEqual(selected.prospective, { verified: true, value: '' });
+      assert.equal(metadata(result, target).persistence, 'derived');
+      assert.equal(metadata(result, target).outwardPolicy, null);
+      assert.equal(metadata(result, target).requiresRuntimeValidation, false);
+      assert.equal(result.blockers.some(blocker => blocker.target === target), false);
+      assert.ok(prepared.manifest.some(item => item.target === target && item.scope === 'all'));
+      const row = prepared.rows.find(item => item.target === target);
+      assert.equal(row.record.state, 'optional_empty');
+      assert.equal(row.canAcceptRemote, false); assert.equal(row.canKeepLocal, false);
+    }
+    assert.equal(JSON.stringify(input), before);
+  }
+});
+
+test('active conditional fields still require their own approved bindings', () => {
+  const active = projectFirstSyncFields(conditionalSvFixture(5));
+  assert.equal(active.route.routeKey, 'SV.souvenir=value_id:5');
+  for (const target of inactiveSvTargets) {
+    assert.equal(active.fields.find(value => value.target === target).mapping.proven, true);
+  }
+  assert.equal(metadata(active, 'kamin_obrobka').persistence, 'characteristic');
+  for (const target of [...inactiveSvTargets, 'kolir']) {
+    const input = conditionalSvFixture(5);
+    input.observation.amber.revision.bindings.attributes.find(attribute => attribute.target === target
+      && attribute.routeKey === 'SV.souvenir=value_id:5').reviewState = 'review_required';
+    assert.equal(field(projectFirstSyncFields(input), target).evidenceReason, 'FIELD_BINDING_NOT_APPROVED');
+  }
+});
+
+test('inactive fields cannot receipt populated, zero, false or malformed remote values as empty', () => {
+  for (const value of ['6039', 0, false, ['6039'], {}, NaN]) {
+    const input = conditionalSvFixture();
+    input.observation.raw.custom_attributes = inactiveSvTargets.map(attribute_code => ({ attribute_code, value }));
+    const result = projectFirstSyncFields(input), prepared = prepareProgress(result, null);
+    for (const target of inactiveSvTargets) {
+      assert.ok(['review_required', 'unknown'].includes(field(result, target).status));
+      const row = prepared.rows.find(item => item.target === target);
+      assert.equal(row.canAcceptRemote, false); assert.equal(row.canKeepLocal, false);
+      assert.equal(row.terminal, false);
+    }
+  }
+});
+
+test('inactive fields require unchanged optional schema identity, metadata and set membership', () => {
+  const changes = [
+    schema => { schema.attributes.find(a => a.attribute_code === 'fraction').attribute_id += 100; },
+    schema => { schema.attributes.find(a => a.attribute_code === 'fraction').frontend_input = 'text'; },
+    schema => { schema.attributes.find(a => a.attribute_code === 'fraction').is_required = true; },
+    schema => { schema.attributes = schema.attributes.filter(a => a.attribute_code !== 'fraction'); },
+    schema => { const set = schema.attributeSets.find(s => s.attribute_set_id === 151); set.attributeCodes = set.attributeCodes.filter(code => code !== 'fraction'); },
+    schema => { schema.attributeSets = schema.attributeSets.filter(s => s.attribute_set_id !== 151); },
+  ];
+  for (const change of changes) {
+    const input = conditionalSvFixture(); input.observation.schema = structuredClone(input.observation.schema);
+    change(input.observation.schema);
+    const result = projectFirstSyncFields(input);
+    assert.equal(result.readyForOutbound, false);
+    if (result.plan) assert.equal(field(result, 'fraction').status, 'review_required');
+    else assert.equal(result.mode, 'review_required');
+  }
+  const required = conditionalSvFixture(4, publication => {
+    publication.schema.attributes.find(a => a.attribute_code === 'fraction').is_required = true;
+  });
+  assert.equal(field(projectFirstSyncFields(required), 'fraction').status, 'review_required');
+  const outsideSet = conditionalSvFixture(4, publication => {
+    const set = publication.schema.attributeSets.find(s => s.attribute_set_id === 151);
+    set.attributeCodes = set.attributeCodes.filter(code => !inactiveSvTargets.includes(code));
+  });
+  for (const target of inactiveSvTargets) assert.equal(field(projectFirstSyncFields(outsideSet), target).status, 'optional_empty');
+});
+
+test('an error-only empty expression cannot masquerade as an inactive field', () => {
+  const input = conditionalSvFixture(4, publication => {
+    publication.definition.bindings.find(binding => binding.id === 'SV.fraction').value = {
+      op: 'error', field: 'different_field', message: literal('Unproven empty output') };
+  });
+  assert.equal(field(projectFirstSyncFields(input), 'fraction').status, 'review_required');
+  const incomplete = conditionalSvFixture(); delete incomplete.observation.amber.product.details.answers.size;
+  for (const target of inactiveSvTargets) assert.equal(field(projectFirstSyncFields(incomplete), target).status, 'review_required');
+});
+
+test('inactive manifest rows preserve terminal receipts and defer new receipts after canonical imports', () => {
+  const input = conditionalSvFixture(), initial = prepareProgress(projectFirstSyncFields(input), null);
+  const previous = { fields: initial.rows.filter(row => inactiveSvTargets.includes(row.target)).map(row => structuredClone(row.record)) };
+  input.receipts = previous.fields.map(({ target, scope, state }) => ({ target, scope, state }));
+  let result = projectFirstSyncFields(input), prepared = prepareProgress(result, previous);
+  for (const prior of previous.fields) {
+    const row = prepared.rows.find(item => item.target === prior.target);
+    assert.deepEqual(row.record, prior); assert.equal(row.received, true);
+    assert.deepEqual(row.local, { known: true, present: false, value: '' });
+    assert.equal(row.canAcceptRemote, false); assert.equal(row.canKeepLocal, false);
+  }
+  input.observation.raw.custom_attributes = [{ attribute_code: 'fraction', value: [] }];
+  result = projectFirstSyncFields(input); prepared = prepareProgress(result, previous);
+  assert.equal(prepared.readyForOutbound, false);
+  assert.deepEqual(prepared.rows.find(row => row.target === 'fraction').record, previous.fields[0]);
+  assert.ok(prepared.blockers.some(blocker => blocker.target === 'fraction'));
+  delete input.receipts; input.observation.raw.custom_attributes = []; input.observation.raw.price = '10000';
+  result = projectFirstSyncFields(input);
+  prepared = prepareProgress(result, null, { target: 'price', scope: 'all', choice: 'accept_remote' });
+  deferAfterCanonicalImports(prepared, result);
+  for (const target of inactiveSvTargets) {
+    assert.equal(prepared.rows.find(row => row.target === target).reason, 'POST_IMPORT_CANONICAL_RECHECK_REQUIRED');
+  }
+});
+
+test('conditional handling preserves populated physical and comma-answer weight and its correction guard', () => {
+  const input = conditionalSvFixture();
+  input.observation.amber.product.weight = '132.300';
+  input.observation.amber.product.details.answers.weight = '132,3';
+  input.observation.raw.custom_attributes = [{ attribute_code: 'decor_weight', value: '99.5' }];
+  const before = JSON.stringify(input), result = projectFirstSyncFields(input);
+  const row = prepareProgress(result, null).rows.find(item => item.target === 'decor_weight');
+  assert.equal(row.local.value, '132.300'); assert.equal(row.status, 'conflict');
+  assert.equal(row.reason, 'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED');
+  assert.equal(row.canAcceptRemote, false); assert.equal(row.record.after, '132.300');
+  assert.equal(JSON.stringify(input), before);
+});
+
 test('actual published schema6 routes share151 but select the proved souvenir branch and exact size expression',()=>{
   const real=require('./fixtures/legacy-sv-schema6'),p=real.publication(),compiled=compileDefinition(p.definition),schema=normalizeSchema(p.schema);
   const revision={id:'11111111-1111-1111-1111-111111111111',state:'published',templateVersionId:'22222222-2222-2222-2222-222222222222',definitionHash:compiled.hash,evaluatorVersion:compiled.definition.evaluatorVersion,outputContract:compiled.definition.outputContract,formatVersion:compiled.definition.formatVersion,schemaFingerprint:hash(schema),topologyFingerprint:hash(schema.storeTopology),schema,bindings:normalizeBindings(p.bindings)};
@@ -448,6 +797,7 @@ test('derived native price literal compares exact REST numeric UAH without canon
   assert.equal(field(result, 'price').status, 'equal');
   assert.equal(projected.kind, 'derived'); assert.equal(projected.type, 'decimal');
   assert.equal(projected.unit, 'UAH'); assert.equal(projected.scale, 2);
+  assert.deepEqual(projected.local, { known: true, present: true, value: '42', unit: 'UAH' });
   assert.equal(metadata(result, 'price').persistence, 'derived');
   assert.equal(Object.hasOwn(field(result, 'price'), 'importValue'), false);
   assert.equal(Object.hasOwn(input.observation.amber.product, 'total_price_uah'), false);
