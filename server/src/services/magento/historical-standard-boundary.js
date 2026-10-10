@@ -14,6 +14,7 @@ async function readConstraint(client, identityId, origin) {
 }
 function project(amber) {
   // Keep the original mapped object: frozen source-support proof is object-bound.
+  require('../export-templates/input-projection').preserveNumericSourceReads(amber.product);
   amber.product.status = 'active'; amber.product.exclude_from_export = 0;
   amber.product.exportState = { ...amber.product.exportState, route:'normal', hold_reason:null,
     business_exclusion_state:'none', recount_compatibility_excluded:false, independentExclusion:false };

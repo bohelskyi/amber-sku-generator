@@ -1,4 +1,9 @@
 // Closed access to supplied data only. Validation is lazy: hidden answers are not read.
+const { parseStrictDecimal } = require('../../utils/numbers');
+const originalNumericReads = new WeakSet();
+// Explicit reviewed format repairs and historical projections retain their
+// original numeric diagnostics on the exact object owned by that workflow.
+function preserveNumericSourceReads(product) { originalNumericReads.add(product); }
 const PRODUCT_FIELDS = Object.freeze(['id', 'full_sku', 'public_sku', 'category', 'weight',
   'total_price_uah', 'magento_name_subject_ua', 'magento_name_subject_en', 'sku_schema_version_id']);
 function own(object, key) {
@@ -22,6 +27,30 @@ function scalar(value, source) {
 function identityText(value, source) {
   if (value != null && typeof value !== 'string') fail('INPUT_INVALID', `Text identity source: ${source}`);
   return value;
+}
+
+function numericSourceValue(descriptor, product, value) {
+  // Compatibility at the recognized gram-source boundary, not a new numeric
+  // evaluator format. Never rewrite the product or infer grams from a mirror.
+  if (descriptor?.kind !== 'information' || descriptor.category !== 'SV'
+    || descriptor.key !== 'weight' || typeof value !== 'string' || !value.includes(',')
+    || value.length > 128) return value;
+  // Archived products retain their separate reviewed normalization workflow.
+  // An absent/unknown lifecycle state cannot establish this active read lane.
+  if (originalNumericReads.has(product) || own(product, 'status') !== 'active') return value;
+  const rules = { min: 0, minInclusive: false, max: 99999999999.999, maxFractionDigits: 3 };
+  try {
+    const answer = parseStrictDecimal(value, rules);
+    const rawPhysical = scalar(own(product, 'weight'), 'weight');
+    if (typeof rawPhysical === 'string' && rawPhysical.length > 128) return value;
+    const physical = parseStrictDecimal(rawPhysical, rules);
+    if (answer !== physical) return value;
+  } catch {
+    // Keep the frozen evaluator's original invalid-input diagnostics. Only a
+    // positively proven compatibility projection may change this read value.
+    return value;
+  }
+  return value.trim().replace(',', '.');
 }
 
 function readSource(descriptor, product) {
@@ -49,4 +78,4 @@ function readSource(descriptor, product) {
   return value;
 }
 
-module.exports = { PRODUCT_FIELDS, own, fail, scalar, identityText, readSource };
+module.exports = { PRODUCT_FIELDS, own, fail, scalar, identityText, readSource, numericSourceValue, preserveNumericSourceReads };

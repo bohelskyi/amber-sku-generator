@@ -7,6 +7,7 @@ const { writeAuditEvent } = require('../audit/audit-events');
 const { compileDefinition } = require('./export-templates/definition');
 const { evaluateProduct } = require('./export-templates/evaluate');
 const { loadSupportInputs } = require('./export-templates/support-inputs');
+const { preserveNumericSourceReads } = require('./export-templates/input-projection');
 const { loadPricingContext } = require('./pricing/pricing-context');
 const { calculatePricingBase } = require('./pricing/pricing-calculator');
 
@@ -70,6 +71,8 @@ async function entry(client, state, ctx) {
   if (!target) blockers.push('NO_EXACT_COMMA_WEIGHT');
   const compiled = compileDefinition(ctx.definition);
   const projected = await loadSupportInputs(client, ctx.definition, [p, ...(target ? [target] : [])]);
+  // This reviewed format repair needs the original before/after diagnostics.
+  preserveNumericSourceReads(projected.products[0]);
   const before = evaluateProduct(compiled, projected.products[0]);
   const after = target ? evaluateProduct(compiled, projected.products[1]) : before;
   if (target) {

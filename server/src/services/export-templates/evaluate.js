@@ -1,6 +1,6 @@
 const { buildCsv, escapeCsvValue } = require('../../utils/csv');
 const { LIMITS, assertCompiled } = require('./definition');
-const { readSource, own, fail, scalar, identityText } = require('./input-projection');
+const { readSource, own, fail, scalar, identityText, numericSourceValue } = require('./input-projection');
 const { sourceSupportChecker } = require('./source-support');
 const { isPublicEvaluator } = require('./version-contract');
 
@@ -134,7 +134,9 @@ function runSupportedProduct(compiled, product, limits, observation) {
         return evaluate(n.value);
       }
       case 'numberText': {
-        const number = Number(evaluate(n.input));
+        const value = evaluate(n.input);
+        const descriptor = n.input.op === 'source' ? d.sources[n.input.id] : null;
+        const number = Number(numericSourceValue(descriptor, product, value));
         return Number.isFinite(number) && number > 0 ? String(number) : evaluate(n.error);
       }
       case 'decimalText': {

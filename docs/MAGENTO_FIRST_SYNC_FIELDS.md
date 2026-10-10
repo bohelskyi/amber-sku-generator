@@ -86,6 +86,30 @@ particular field, such as positive physical weight or price. Decimal comparison
 normalizes comma/dot and trailing zeros exactly at the declared scale and unit;
 it uses no tolerance, rounding or inferred unit conversion.
 
+For an explicitly active product's recognized stored `SV.weight` informational source, a comma-decimal
+mirror can be read by its direct numeric weight expression as dot-decimal grams
+only when whole positive plain decimals
+at scale three agree with the independently stored physical weight. The bounded
+NUMERIC(14,3) range, original alias checks and missing/invalid observations remain
+guarded. This read projection changes neither stored answer nor physical weight,
+price, SKU, publication/hash or historical receipt. No physical weight is inferred
+from a mirror; conflicting, unavailable, grouped or unit-bearing comma inputs
+remain invalid. The existing derived fraction consumes these same proven grams,
+including sub-gram values. Text reads and captured catalog conditions retain the
+original raw source value. Historical first-sync admission remains a separate gate.
+Archived products retain their separate reviewed weight-format repair; missing,
+unknown and other lifecycle states cannot establish the active compatibility read.
+The object-owned historical prospective projection also retains its original
+numeric diagnostics when it presents an archived row as active for review; this
+presentation cannot opt into the compatibility read or imply stored activation.
+The existing explicit active-product format repair also retains its original
+before/after diagnostics, reviewed plan, concurrency checks and audit receipt.
+
+`FIRST_SYNC_FIELD_CONFLICT` is the normal unresolved-field blocker for different
+populated values. The UI explains it as an administrator decision; its translation
+does not remove the blocker, choose a value or authorize delivery. Unknown codes
+retain their technical-detail fallback.
+
 Direct reverse mapping is limited to proven one-source expressions and approved
 wrappers. The exact same-source presence guard with an empty/error fallback is
 supported. Arbitrary conditionals, first-present selection, bands, joins and other
