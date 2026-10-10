@@ -367,3 +367,25 @@ it('calibration mirror review offers the same explicit administrator correction 
   expect(await screen.findByRole('link',{name:'Переглянути виправлення адміністратором'})).toBeTruthy();
   expect(api.post).toHaveBeenCalledTimes(1);
 });
+
+it('explains a populated price conflict blocker and confirms keeping 4600 without dispatch', async () => {
+  const price = field({ target: 'price', local: known('4600.00'), remote: known('10000') });
+  api.post.mockResolvedValueOnce({ data: plan([price], { blockers: [
+    { target: 'price', scope: 'all', code: 'FIRST_SYNC_FIELD_CONFLICT', reason: 'POPULATED_VALUES_DIFFER' },
+  ] }) }).mockResolvedValueOnce({ data: receipt({ target: 'price', choice: 'keep_local',
+    receipt: { sessionId: 'edcd2e97-8708-4e06-9c2b-55bdbf61a3e2', revision: '2',
+      state: 'pending_outward_confirmation', alreadyApplied: false } }) });
+  render(shell()); read();
+  await screen.findByText('Заповнені значення різняться. Потрібне рішення адміністратора для цього поля.');
+  expect(screen.queryByText('Причина потребує окремого технічного уточнення. Код наведено в деталях.')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Залишити значення Amber: Ціна · UA / основний магазин' }));
+  const dialog = screen.getByRole('dialog');
+  expect(within(dialog).getAllByText('4600.00')).toHaveLength(2);
+  expect(api.post).toHaveBeenCalledTimes(1);
+  confirm();
+  await screen.findByText(/Значення Amber залишено/);
+  expect(api.post).toHaveBeenLastCalledWith('/admin/magento-integration/first-sync/apply',
+    { sku: 'SV1', bindingRevisionId, previewToken: token, target: 'price', scope: 'all', choice: 'keep_local' },
+    { signal: expect.any(AbortSignal) });
+  expect(api.post).toHaveBeenCalledTimes(2);
+});

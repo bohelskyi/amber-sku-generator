@@ -189,8 +189,8 @@ test('first-sync coordinator preserves real names, partial progress and transact
         const before = await snapshot(), productBefore = await actual(item), start = http.length;
         const preview = await service.review(config, request, previewOptions);
         assert.equal(preview.mode, 'first');
-        assert.ok(report.blockers.some(blocker => blocker.code === 'PRODUCT_EVALUATION_NOT_READY' && blocker.issueFields.includes('decor_weight')));
-        assert.equal(preview.readyForOutbound, false, 'Opening first-sync does not repair the weight evaluator blocker');
+        assert.equal(report.blockers.some(blocker => blocker.code === 'PRODUCT_EVALUATION_NOT_READY' && blocker.issueFields.includes('decor_weight')),false);
+        assert.equal(preview.readyForOutbound, false, 'Readable filled grams still require a decision against different remote grams');
         const weight = preview.fields.find(field => field.target === 'decor_weight');
         assert.ok(weight && ['review_required', 'conflict'].includes(weight.status));
         assert.equal(weight.local.known, true); assert.equal(weight.local.present, true);

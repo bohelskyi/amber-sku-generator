@@ -94,6 +94,7 @@ test('actual schema6 first-sync size adoption uses the published conditional rou
     const durableSnapshot=async()=> (await db.query(`SELECT
       (SELECT jsonb_agg(p ORDER BY id) FROM products p) products,
       (SELECT jsonb_agg(f ORDER BY product_id) FROM product_full_export_state f) lifecycle,
+      (SELECT jsonb_agg(p ORDER BY product_id) FROM product_export_revisions p) priceExports,
       (SELECT jsonb_agg(s ORDER BY origin_hash,public_product_identity_id) FROM magento_name_sync_states s) names,
       (SELECT jsonb_agg(s ORDER BY id) FROM magento_first_sync_sessions s) sessions,
       (SELECT jsonb_agg(r ORDER BY session_id,revision) FROM magento_first_sync_progress r) progress,
@@ -113,6 +114,119 @@ test('actual schema6 first-sync size adoption uses the published conditional rou
         assert.ok(inspection.coverage.fields.some(f=>f.target===target&&f.scope==='all'&&f.persistence==='derived'));
       }
     }
+    // Known acceptance values on the real frozen/catalog/publication shapes.
+    // Names and remaining row fields are controlled copies, not live telemetry.
+    async function acceptanceCopy(id,sku,weight,answer,price,souvenir){
+      const x=fixture.product(souvenir===5?2198:5009);const details=structuredClone(x.details);
+      Object.assign(details.answers,{weight:answer,souvenir,size:'7.5/7.5/7'});
+      details.manualPriceUah=price;
+      const saved=(await require('./product-fixture').insertProductFixture(db,`INSERT INTO products(id,full_sku,base_sku,sequence_number,category,weight,sku_schema_version_id,total_price,total_price_uah,price_per_gram,uah_rate,details,legacy_uah_price_unset,magento_name_subject_ua,magento_name_subject_en)
+        VALUES($1,$2,$3,$4,'SV',$5,6,$6,$7,$8,$9,$10::jsonb,FALSE,'Тестовий товар','Test product') RETURNING *`,
+      [id,sku,x.base_sku,x.sequence_number,weight,x.total_price,price,x.price_per_gram,x.uah_rate,JSON.stringify(details)])).rows[0];
+      await db.query("UPDATE product_full_export_state SET business_exclusion_state='none',delivery_version=delivery_version+1 WHERE product_id=$1",[saved.id]);
+      return actual(saved.id);
+    }
+    async function matchingObservation(x,remotePrice=x.total_price_uah){
+      const amber=await previews.readPreviewProduct(db,{productId:x.id,bindingRevisionId:binding.id});
+      const evaluated=require('../src/services/export-templates/evaluate').evaluateProduct(compiled,amber.product);
+      assert.deepEqual(evaluated.errors,[]);
+      const route=require('../src/services/magento/first-sync-route').productRoutePlans(
+        require('../src/services/magento/binding-validation').requirements(compiled.definition,binding.schema),amber.product)[0];
+      const custom_attributes=binding.bindings.attributes.filter(a=>a.routeKey===route.routeKey
+        && a.rowId==='base' && a.strategy!=='transport_control' && !['sku','name','price'].includes(a.target)).map(a=>{
+        const output=evaluated.base[a.target]??'';
+        const mapped=binding.bindings.options.find(o=>o.bindingKey===a.bindingKey&&o.evaluatedOutput===output&&o.reviewState==='approved');
+        return {attribute_code:a.attributeCode,value:mapped?.optionId??output};
+      });
+      const raw={id:10000+x.id,sku:amber.product.public_sku,attribute_set_id:151,name:evaluated.base.name,
+        price:String(remotePrice),custom_attributes};
+      return {amber,raw,schema:binding.schema,domainEvidence:{english:{id:raw.id,sku:raw.sku,
+        fields:{name:evaluated.english.name}},failures:[]}};
+    }
+    await t.test('schema6 SV4001 keep4600 decision is read-only until confirmation, idempotent, currency-guarded and requires readback',async()=>{
+      const x=await acceptanceCopy(5087,'SV4001','102.400','102.4',4600,4);
+      let remotePrice='10000',currencyCode='UAH',observations=0;
+      const priceOptions={...conditionalOptions,preview:async(_config,input)=>{
+        observations++;input.onObservation(await matchingObservation(await actual(x.id),remotePrice));return {};
+      },fetchImpl:async(url,init)=>{
+        assert.equal(init.method,'GET');assert.ok(new URL(url).pathname.endsWith('/store/storeConfigs'));
+        return new Response(JSON.stringify([{id:1,code:'ua',website_id:1,locale:'uk_UA',base_currency_code:currencyCode},
+          {id:3,code:'en',website_id:1,locale:'en_US',base_currency_code:currencyCode}]),
+        {status:200,headers:{'content-type':'application/json'}});
+      }};
+      // First establish the already completed field receipts of this controlled
+      // case through the real service, while leaving price unresolved.
+      const initial=await firstSync.inspect(conditionalConfig,await matchingObservation(x,remotePrice),priceOptions);
+      await firstSync.commit(conditionalConfig,initial,await conditionalState(x),priceOptions);
+      const selection={sku:'SV4001',bindingRevisionId:binding.id};
+      const before=await durableSnapshot(),review=await firstSync.review(conditionalConfig,selection,priceOptions);
+      assert.deepEqual(await durableSnapshot(),before);
+      const price=review.fields.find(f=>f.target==='price'&&f.scope==='all');
+      assert.equal(price.status,'conflict');assert.equal(price.canKeepLocal,true);assert.equal(price.canAcceptRemote,true);
+      assert.equal(price.local.value,'4600.00');assert.equal(price.remote.value,'10000');
+      assert.ok(review.blockers.some(b=>b.target==='price'&&b.code==='FIRST_SYNC_FIELD_CONFLICT'
+        && b.reason==='POPULATED_VALUES_DIFFER'));
+      const command={...selection,previewToken:review.previewToken,target:'price',scope:'all',choice:'keep_local'};
+      currencyCode='USD';
+      const denied=await firstSync.review(conditionalConfig,selection,priceOptions);
+      assert.equal(denied.fields.find(f=>f.target==='price').reason,'PRICE_CURRENCY_UAH_NOT_PROVEN');
+      await assert.rejects(firstSync.apply(conditionalConfig,command,priceOptions),{code:'MAGENTO_FIRST_SYNC_PREVIEW_STALE'});
+      assert.deepEqual(await durableSnapshot(),before);currencyCode='UAH';
+      const canonical=await canonicalSnapshot(),saved=await firstSync.apply(conditionalConfig,command,priceOptions);
+      assert.equal(saved.receipt.state,'pending_outward_confirmation');assert.equal(saved.complete,false);
+      assert.equal(saved.readyForOutbound,true);assert.deepEqual(await canonicalSnapshot(),canonical);
+      const committed=await durableSnapshot(),calls=observations;
+      const retry=await firstSync.apply(conditionalConfig,command,{...priceOptions,preview:()=>assert.fail('Retry cannot reread Magento')});
+      assert.equal(retry.receipt.alreadyApplied,true);assert.equal(observations,calls);assert.deepEqual(await durableSnapshot(),committed);
+      const pending=await firstSync.review(conditionalConfig,selection,priceOptions);
+      assert.equal(pending.fields.find(f=>f.target==='price').status,'pending_outward_confirmation');
+      assert.equal(pending.complete,false);assert.deepEqual(await durableSnapshot(),committed);
+      // Controlled verified remote readback, not a live Magento delivery.
+      remotePrice='4600.000';
+      const readback=await firstSync.inspect(conditionalConfig,await matchingObservation(await actual(x.id),remotePrice),priceOptions);
+      assert.equal(readback.prepared.rows.find(f=>f.target==='price').record.state,'outward_verified');
+      assert.equal(readback.complete,true);assert.deepEqual(await durableSnapshot(),committed);
+      await firstSync.commit(conditionalConfig,readback,await conditionalState(x),priceOptions);
+      assert.deepEqual(await canonicalSnapshot(),canonical);
+      assert.equal((await firstSync.review(conditionalConfig,selection,priceOptions)).mode,'ordinary');
+      const final=await actual(x.id);assert.equal(final.total_price_uah,'4600.00');assert.equal(final.weight,'102.400');
+      assert.equal(final.details.answers.weight,'102.4');assert.equal(final.full_sku,'SV4001');
+      assert.equal((await db.query("SELECT count(*)::int n FROM audit_events WHERE subject_id=$1 AND event_key='product.price_changed'",[String(x.id)])).rows[0].n,0);
+    });
+    await t.test('schema6 SV11500004 reads coherent comma grams without imports and preserves the independent history gate',async()=>{
+      const x=await acceptanceCopy(1488,'SV11500004','132.300','132,3',2950,5),before=await durableSnapshot();
+      const observation=await matchingObservation(x);
+      const inspected=await firstSync.inspect(conditionalConfig,observation,conditionalOptions);
+      const weight=inspected.fields.find(f=>f.target==='decor_weight'),fraction=inspected.fields.find(f=>f.target==='fraction');
+      assert.equal(weight.local.value,'132.300');assert.equal(weight.status,'equal');assert.equal(weight.canAcceptRemote,false);
+      // The actual approved Magento option6054 represents100-200 grams.
+      assert.equal(fraction.local.value,'6054');assert.equal(fraction.status,'equal');
+      assert.deepEqual(await durableSnapshot(),before);
+      observation.raw.custom_attributes.find(a=>a.attribute_code==='decor_weight').value='140';
+      const conflict=await firstSync.inspect(conditionalConfig,observation,conditionalOptions);
+      assert.equal(conflict.fields.find(f=>f.target==='decor_weight').canAcceptRemote,false);
+      assert.equal(conflict.fields.find(f=>f.target==='decor_weight').local.value,'132.300');
+      assert.deepEqual(await durableSnapshot(),before);
+      for(const answer of ['132,3г','1,234.56','140,0',false]){
+        const details=structuredClone(x.details);details.answers.weight=answer;
+        await db.query('UPDATE products SET details=$2::jsonb WHERE id=$1',[x.id,JSON.stringify(details)]);
+        const invalidBefore=await durableSnapshot();
+        const invalidObservation={...observation,amber:await previews.readPreviewProduct(db,{productId:x.id,bindingRevisionId:binding.id})};
+        const invalid=await firstSync.inspect(conditionalConfig,invalidObservation,conditionalOptions);
+        const physical=invalid.fields.find(f=>f.target==='decor_weight'),derived=invalid.fields.find(f=>f.target==='fraction');
+        assert.equal(physical.canAcceptRemote,false);assert.equal(physical.local.value,'132.300');
+        assert.ok(['review_required','unknown'].includes(physical.status),JSON.stringify({answer,physical}));
+        assert.notEqual(derived.status,'optional_empty');assert.equal(invalid.readyForOutbound,false);
+        assert.deepEqual(await durableSnapshot(),invalidBefore);
+      }
+      await db.query('UPDATE products SET details=$2::jsonb WHERE id=$1',[x.id,JSON.stringify(x.details)]);
+      // A historical floor is not a delivery receipt and must not be bypassed.
+      await db.query('UPDATE product_full_export_state SET confirmed_revision=revision WHERE product_id=$1',[x.id]);
+      const historical=await durableSnapshot();
+      const blocked=await firstSync.inspect(conditionalConfig,await matchingObservation(await actual(x.id)),conditionalOptions);
+      assert.equal(blocked.mode,'review');assert.ok(blocked.blockers.some(b=>b.code==='FIRST_SYNC_HISTORY_REVIEW_REQUIRED'));
+      assert.deepEqual(await durableSnapshot(),historical);
+    });
     await t.test('actual positive-weight SV116007 adopts missing size through exact published trim and shared set route',async()=>{
       const x=await copy(1919),before=await actual(x.id),args=await prepare(x);assert.equal(args.decision.status,'imported');assert.deepEqual(args.validation.blockedFields,[]);
       assert.equal((await record(x,args)).alreadyApplied,false);const after=await actual(x.id);

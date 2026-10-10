@@ -9,6 +9,7 @@ const bindingIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0
 const identifier = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
 const statuses = new Set(['imported', 'equal', 'optional_empty', 'pending_outward_confirmation', 'conflict', 'unknown', 'review_required']);
 const reasons = {
+  FIRST_SYNC_FIELD_CONFLICT: 'Заповнені значення різняться. Потрібне рішення адміністратора для цього поля.',
   REMOTE_READ_UNKNOWN: 'Значення Magento не підтверджено. Повторіть читання перед рішенням.',
   LOCAL_VALUE_UNKNOWN: 'Значення Amber не підтверджено. Відсутність даних не означає порожнє поле.',
   NAME_ALREADY_RECEIVED_USE_ORDINARY_RECONCILIATION: 'Назву цією мовою вже отримано один раз. Подальші зміни перевіряються за звичайними правилами назв.',
