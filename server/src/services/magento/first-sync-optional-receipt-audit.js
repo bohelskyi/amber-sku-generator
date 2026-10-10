@@ -18,7 +18,7 @@ function emptyObservation(value) {
   return plain(value) && value.known === true && value.present === false
     && (!own(value, 'value') || empty(value.value));
 }
-function provenance(field, session) {
+function provenance(field, session, parent = false) {
   if (!plain(field) || !TARGET.test(field.target) || !['all', 'en'].includes(field.scope)
     || !plain(field.source) || !UUID.test(field.source.bindingRevisionId || '')
     || !['semantic', 'information', 'product', 'derived', 'name'].includes(field.source.kind)
@@ -27,13 +27,14 @@ function provenance(field, session) {
     || !HEX.test(field.source.definitionHash || '') || typeof field.source.routeKey !== 'string'
     || !field.source.routeKey || field.source.routeKey.length > 500
     || !HEX.test(field.source.manifestHash || '') || own(field.source, 'decision')
+      && (!parent || !['keep_local', 'accept_remote'].includes(field.source.decision))
     || !Number.isSafeInteger(field.source.productId) || field.source.productId < 1 || field.source.productId > 2147483647
     || !HEX.test(field.mappingHash || '') || !plain(session)
     || !HEX.test(session.origin_hash || '') || typeof session.installation_key !== 'string'
     || !/^[1-9][0-9]{0,18}$/.test(String(session.public_product_identity_id || ''))) {
     invalid('ORIGINAL_RECEIPT_PROVENANCE_UNPROVEN');
   }
-  if (!emptyObservation(field.before) || !emptyObservation(field.remote) || !empty(field.after)) {
+  if (!parent && (!emptyObservation(field.before) || !emptyObservation(field.remote) || !empty(field.after))) {
     invalid('ORIGINAL_EMPTY_OBSERVATION_UNPROVEN');
   }
 }
@@ -59,7 +60,7 @@ async function publication(client, id) {
     || schema.storeCode !== 'all') invalid('ORIGINAL_PUBLICATION_IDENTITY_MISMATCH');
   return { row, compiled, schema, bindings, plans };
 }
-function originalField(field, session, saved) {
+function originalMapping(field, session, saved) {
   const { row, compiled, schema, bindings, plans } = saved, source = field.source;
   if (row.id !== source.bindingRevisionId || row.origin_hash !== session.origin_hash
     || row.installation_key !== session.installation_key || compiled.hash !== source.definitionHash) {
@@ -82,6 +83,11 @@ function originalField(field, session, saved) {
     binding: binding || null, policy: policy || null, attributeRequired: attribute.is_required ?? null,
     options: bindings.options.filter(candidate => candidate.bindingKey === expected?.bindingKey) });
   if (mappingHash !== field.mappingHash) invalid('ORIGINAL_MAPPING_FINGERPRINT_MISMATCH');
+  return { expression, attribute };
+}
+function originalField(field, session, saved, source = field.source) {
+  const { attribute } = originalMapping(field, session, saved);
+  const { compiled } = saved;
   const physicalWeight = ['decor_weight', 'vaha_vyrobu'].includes(field.target)
     && (source.kind === 'product' && source.field === 'weight' || source.kind === 'information' && source.key === 'weight');
   if (attribute.is_required === true || ['name', 'price'].includes(field.target) || physicalWeight) {
@@ -99,7 +105,7 @@ async function assessOnClient(client, progress) {
     evidence.push(issue); blockers.push({ code: CODE, reason: issue.reason });
     return { blockers, evidence, evidenceHash: hash(evidence) };
   }
-  const publications = new Map(), products = new Map(), seen = new Set();
+  const publications = new Map(), products = new Map(), seen = new Set(), revisions = new Map();
   for (const field of progress.fields.filter(candidate => candidate?.state === 'optional_empty')) {
     let assessment;
     try {
@@ -117,7 +123,17 @@ async function assessOnClient(client, progress) {
       const id = field.source.bindingRevisionId;
       if (!publications.has(id) && publications.size >= 32) invalid('ORIGINAL_PUBLICATION_AUDIT_LIMIT');
       if (!publications.has(id)) publications.set(id, publication(client, id));
-      assessment = originalField(field, progress.session, await publications.get(id));
+      const saved = await publications.get(id);
+      assessment = originalField(field, progress.session, saved);
+      if (assessment.state === 'unproven' && assessment.reason === 'SEMANTIC_REQUIREMENT_UNPROVEN'
+        && !own(field.source, 'requirednessEvidence')) {
+        const proof = await require('./first-sync-original-evidence').readOriginalEvidence(client,
+          field, progress.session, saved.compiled, revisions, parent => {
+            provenance(parent, progress.session, true);
+            return originalMapping(parent, progress.session, saved).expression;
+          });
+        assessment = originalField(field, progress.session, saved, { ...field.source, requirednessEvidence: proof });
+      }
       if (!assessment || !['required', 'optional', 'inactive', 'unproven'].includes(assessment.state)) {
         invalid('ORIGINAL_REQUIREDNESS_UNPROVEN');
       }

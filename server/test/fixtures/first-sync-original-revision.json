@@ -1,0 +1,717 @@
+{
+  "provenance": {
+    "definitionHash": "898b6b6a1586d65f355d6aef188c9cc1fe2ca32ad4c7b4ccf3e966334eca9821",
+    "description": "Exact read-only production SV AST slice and canonical observations from one immutable original revision. Unrelated AST, names, actors, price, origin and product identities omitted. Test fixture rebinds this slice to detached normalized schema/mappings; it does not claim the reduced definition has the full publication hash."
+  },
+  "bindings": [
+    {
+      "id": "SV.suveniry",
+      "group": "SV",
+      "value": {
+        "op": "questionValue",
+        "value": {
+          "op": "lookup",
+          "input": {
+            "op": "semanticKey",
+            "input": {
+              "id": "SV.souvenir",
+              "op": "source"
+            }
+          },
+          "table": "svSouvenir",
+          "otherwise": {
+            "op": "error",
+            "field": "suveniry",
+            "message": {
+              "op": "interpolate",
+              "slots": {
+                "value": {
+                  "op": "semanticKey",
+                  "input": {
+                    "id": "SV.souvenir",
+                    "op": "source"
+                  }
+                }
+              },
+              "template": "Немає Magento-мапінгу для souvenir={value}."
+            }
+          }
+        },
+        "question": "SV.souvenir",
+        "missingAnswer": {
+          "op": "error",
+          "field": "suveniry",
+          "message": {
+            "op": "literal",
+            "value": "Немає відповіді souvenir."
+          }
+        },
+        "missingQuestion": {
+          "op": "error",
+          "field": "suveniry",
+          "message": {
+            "op": "literal",
+            "value": "В каталозі немає питання souvenir."
+          }
+        }
+      }
+    },
+    {
+      "id": "SV.vyd_statuetky",
+      "group": "SV",
+      "value": {
+        "op": "questionValue",
+        "value": {
+          "op": "lookup",
+          "input": {
+            "op": "semanticKey",
+            "input": {
+              "id": "SV.statuette",
+              "op": "source"
+            }
+          },
+          "table": "svStatuette",
+          "otherwise": {
+            "op": "error",
+            "field": "vyd_statuetky",
+            "message": {
+              "op": "interpolate",
+              "slots": {
+                "value": {
+                  "op": "semanticKey",
+                  "input": {
+                    "id": "SV.statuette",
+                    "op": "source"
+                  }
+                }
+              },
+              "template": "Немає Magento-мапінгу для statuette={value}."
+            }
+          }
+        },
+        "question": "SV.statuette",
+        "missingAnswer": {
+          "op": "error",
+          "field": "vyd_statuetky",
+          "message": {
+            "op": "literal",
+            "value": "Немає відповіді statuette."
+          }
+        },
+        "missingQuestion": {
+          "op": "error",
+          "field": "vyd_statuetky",
+          "message": {
+            "op": "literal",
+            "value": "В каталозі немає питання statuette."
+          }
+        }
+      }
+    },
+    {
+      "id": "SV.tematyka_vyrobu",
+      "group": "SV",
+      "value": {
+        "op": "questionValue",
+        "value": {
+          "op": "lookup",
+          "input": {
+            "op": "semanticKey",
+            "input": {
+              "id": "SV.2",
+              "op": "source"
+            }
+          },
+          "table": "svTheme",
+          "otherwise": {
+            "op": "error",
+            "field": "tematyka_vyrobu",
+            "message": {
+              "op": "interpolate",
+              "slots": {
+                "value": {
+                  "op": "semanticKey",
+                  "input": {
+                    "id": "SV.2",
+                    "op": "source"
+                  }
+                }
+              },
+              "template": "Немає Magento-мапінгу для 2={value}."
+            }
+          }
+        },
+        "question": "SV.2",
+        "missingAnswer": {
+          "op": "error",
+          "field": "tematyka_vyrobu",
+          "message": {
+            "op": "literal",
+            "value": "Немає відповіді 2."
+          }
+        },
+        "missingQuestion": {
+          "op": "error",
+          "field": "tematyka_vyrobu",
+          "message": {
+            "op": "literal",
+            "value": "В каталозі немає питання 2."
+          }
+        }
+      }
+    },
+    {
+      "id": "SV.vyd_ptakha",
+      "group": "SV",
+      "value": {
+        "op": "questionValue",
+        "value": {
+          "op": "lookup",
+          "input": {
+            "op": "semanticKey",
+            "input": {
+              "id": "SV.bird",
+              "op": "source"
+            }
+          },
+          "table": "svBird",
+          "otherwise": {
+            "op": "error",
+            "field": "vyd_ptakha",
+            "message": {
+              "op": "interpolate",
+              "slots": {
+                "value": {
+                  "op": "semanticKey",
+                  "input": {
+                    "id": "SV.bird",
+                    "op": "source"
+                  }
+                }
+              },
+              "template": "Немає Magento-мапінгу для bird={value}."
+            }
+          }
+        },
+        "question": "SV.bird",
+        "missingAnswer": {
+          "op": "error",
+          "field": "vyd_ptakha",
+          "message": {
+            "op": "literal",
+            "value": "Немає відповіді bird."
+          }
+        },
+        "missingQuestion": {
+          "op": "error",
+          "field": "vyd_ptakha",
+          "message": {
+            "op": "literal",
+            "value": "В каталозі немає питання bird."
+          }
+        }
+      }
+    },
+    {
+      "id": "SV.vyd_roslyny",
+      "group": "SV",
+      "value": {
+        "op": "questionValue",
+        "value": {
+          "op": "lookup",
+          "input": {
+            "op": "semanticKey",
+            "input": {
+              "id": "SV.plants",
+              "op": "source"
+            }
+          },
+          "table": "svPlants",
+          "otherwise": {
+            "op": "error",
+            "field": "vyd_roslyny",
+            "message": {
+              "op": "interpolate",
+              "slots": {
+                "value": {
+                  "op": "semanticKey",
+                  "input": {
+                    "id": "SV.plants",
+                    "op": "source"
+                  }
+                }
+              },
+              "template": "Немає Magento-мапінгу для plants={value}."
+            }
+          }
+        },
+        "question": "SV.plants",
+        "missingAnswer": {
+          "op": "error",
+          "field": "vyd_roslyny",
+          "message": {
+            "op": "literal",
+            "value": "Немає відповіді plants."
+          }
+        },
+        "missingQuestion": {
+          "op": "error",
+          "field": "vyd_roslyny",
+          "message": {
+            "op": "literal",
+            "value": "В каталозі немає питання plants."
+          }
+        }
+      }
+    },
+    {
+      "id": "SV.vyd_symvoliky",
+      "group": "SV",
+      "value": {
+        "op": "questionValue",
+        "value": {
+          "op": "lookup",
+          "input": {
+            "op": "semanticKey",
+            "input": {
+              "id": "SV.symbolic_stat",
+              "op": "source"
+            }
+          },
+          "table": "svSymbolic",
+          "otherwise": {
+            "op": "error",
+            "field": "vyd_symvoliky",
+            "message": {
+              "op": "interpolate",
+              "slots": {
+                "value": {
+                  "op": "semanticKey",
+                  "input": {
+                    "id": "SV.symbolic_stat",
+                    "op": "source"
+                  }
+                }
+              },
+              "template": "Немає Magento-мапінгу для symbolic_stat={value}."
+            }
+          }
+        },
+        "question": "SV.symbolic_stat",
+        "missingAnswer": {
+          "op": "error",
+          "field": "vyd_symvoliky",
+          "message": {
+            "op": "literal",
+            "value": "Немає відповіді symbolic_stat."
+          }
+        },
+        "missingQuestion": {
+          "op": "error",
+          "field": "vyd_symvoliky",
+          "message": {
+            "op": "literal",
+            "value": "В каталозі немає питання symbolic_stat."
+          }
+        }
+      }
+    },
+    {
+      "id": "SV.nastlni_ihry",
+      "group": "SV",
+      "value": {
+        "op": "questionValue",
+        "value": {
+          "op": "lookup",
+          "input": {
+            "op": "semanticKey",
+            "input": {
+              "id": "SV.table_games",
+              "op": "source"
+            }
+          },
+          "table": "svGames",
+          "otherwise": {
+            "op": "error",
+            "field": "nastlni_ihry",
+            "message": {
+              "op": "interpolate",
+              "slots": {
+                "value": {
+                  "op": "semanticKey",
+                  "input": {
+                    "id": "SV.table_games",
+                    "op": "source"
+                  }
+                }
+              },
+              "template": "Немає Magento-мапінгу для table_games={value}."
+            }
+          }
+        },
+        "question": "SV.table_games",
+        "missingAnswer": {
+          "op": "error",
+          "field": "nastlni_ihry",
+          "message": {
+            "op": "literal",
+            "value": "Немає відповіді table_games."
+          }
+        },
+        "missingQuestion": {
+          "op": "error",
+          "field": "nastlni_ihry",
+          "message": {
+            "op": "literal",
+            "value": "В каталозі немає питання table_games."
+          }
+        }
+      }
+    }
+  ],
+  "questionContracts": {
+    "SV.2": {
+      "rule": {
+        "SV.statuette": 1
+      },
+      "exists": true,
+      "source": "SV.2",
+      "allowed": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "required": true
+    },
+    "SV.bird": {
+      "rule": {
+        "SV.2": 2
+      },
+      "exists": true,
+      "source": "SV.bird",
+      "allowed": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7"
+      ],
+      "required": false
+    },
+    "SV.plants": {
+      "rule": {
+        "SV.statuette": 2
+      },
+      "exists": true,
+      "source": "SV.plants",
+      "allowed": [
+        "1",
+        "2",
+        "3"
+      ],
+      "required": true
+    },
+    "SV.souvenir": {
+      "rule": {},
+      "exists": true,
+      "source": "SV.souvenir",
+      "allowed": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9"
+      ],
+      "required": true
+    },
+    "SV.statuette": {
+      "rule": {
+        "SV.souvenir": 1
+      },
+      "exists": true,
+      "source": "SV.statuette",
+      "allowed": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7"
+      ],
+      "required": true
+    },
+    "SV.table_games": {
+      "rule": {
+        "SV.souvenir": 2
+      },
+      "exists": true,
+      "source": "SV.table_games",
+      "allowed": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "required": false
+    },
+    "SV.symbolic_stat": {
+      "rule": {
+        "SV.statuette": 5
+      },
+      "exists": true,
+      "source": "SV.symbolic_stat",
+      "allowed": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "required": false
+    }
+  },
+  "sources": {
+    "SV.2": {
+      "key": "2",
+      "kind": "semantic",
+      "type": "scalar",
+      "aliases": [],
+      "category": "SV",
+      "provenance": "supplied-stored-answers-v1"
+    },
+    "SV.bird": {
+      "key": "bird",
+      "kind": "semantic",
+      "type": "scalar",
+      "aliases": [],
+      "category": "SV",
+      "provenance": "supplied-stored-answers-v1"
+    },
+    "SV.plants": {
+      "key": "plants",
+      "kind": "semantic",
+      "type": "scalar",
+      "aliases": [],
+      "category": "SV",
+      "provenance": "supplied-stored-answers-v1"
+    },
+    "SV.souvenir": {
+      "key": "souvenir",
+      "kind": "semantic",
+      "type": "scalar",
+      "aliases": [],
+      "category": "SV",
+      "provenance": "supplied-stored-answers-v1"
+    },
+    "SV.statuette": {
+      "key": "statuette",
+      "kind": "semantic",
+      "type": "scalar",
+      "aliases": [],
+      "category": "SV",
+      "provenance": "supplied-stored-answers-v1"
+    },
+    "SV.table_games": {
+      "key": "table_games",
+      "kind": "semantic",
+      "type": "scalar",
+      "aliases": [],
+      "category": "SV",
+      "provenance": "supplied-stored-answers-v1"
+    },
+    "SV.symbolic_stat": {
+      "key": "symbolic_stat",
+      "kind": "semantic",
+      "type": "scalar",
+      "aliases": [],
+      "category": "SV",
+      "provenance": "supplied-stored-answers-v1"
+    }
+  },
+  "tables": {
+    "svBird": {
+      "1": "Орел",
+      "2": "Пава",
+      "3": "Сова",
+      "4": "Сокіл",
+      "5": "Фазан",
+      "6": "Лелека",
+      "7": "Фенікс"
+    },
+    "svGames": {
+      "1": "Шахи",
+      "2": "Нарди",
+      "3": "Доміно",
+      "4": "Шашки/дама"
+    },
+    "svPlants": {
+      "1": "Дерева",
+      "2": "Квіти",
+      "3": "Ікебана"
+    },
+    "svSouvenir": {
+      "1": "Статуетки",
+      "2": "Настільні ігри",
+      "3": "Ручки",
+      "4": "Письмові набори",
+      "5": "Камінь сувенірний",
+      "6": "Брелоки",
+      "7": "Лампи",
+      "8": "Скриньки",
+      "9": "Годинники"
+    },
+    "svStatuette": {
+      "1": "Тварини",
+      "2": "Дерева та квіти",
+      "3": "Військова техніка",
+      "4": "Зодіаки",
+      "5": "Символіка",
+      "6": "Вітрильники",
+      "7": "Авто"
+    },
+    "svSymbolic": {
+      "1": "Українська",
+      "2": "Військова",
+      "3": "Спортивна",
+      "4": "Професійна",
+      "5": "Релігійна",
+      "6": "Корпоративна"
+    },
+    "svTheme": {
+      "1": "Ссавці",
+      "2": "Птахи",
+      "3": "Риби",
+      "4": "Плазуни",
+      "5": "Земноводні",
+      "6": "Безхребетні"
+    }
+  },
+  "records": [
+    {
+      "after": null,
+      "scope": "all",
+      "state": "optional_empty",
+      "before": {
+        "known": true,
+        "present": false
+      },
+      "remote": {
+        "known": true,
+        "present": false
+      },
+      "target": "nastlni_ihry",
+      "key": "table_games",
+      "originalMappingHash": "9ea8bd08f401659844f8c2fa3f27cc1acd07966481d750cc97878b3a94d6f416"
+    },
+    {
+      "after": 4,
+      "scope": "all",
+      "state": "equal",
+      "before": {
+        "known": true,
+        "value": 4,
+        "present": true,
+        "forwardOptionId": "5734"
+      },
+      "remote": {
+        "known": true,
+        "value": "5734",
+        "present": true
+      },
+      "target": "suveniry",
+      "key": "souvenir",
+      "originalMappingHash": "4ade24264947f649f10d1e002e402dbe62ca87d5bff0cb8e50d9051df03a968d"
+    },
+    {
+      "after": null,
+      "scope": "all",
+      "state": "optional_empty",
+      "before": {
+        "known": true,
+        "present": false
+      },
+      "remote": {
+        "known": true,
+        "present": false
+      },
+      "target": "tematyka_vyrobu",
+      "key": "2",
+      "originalMappingHash": "c96aae14f87fcfc10de983bbcc7af1783eae21d3152062aaeab39119b84733a6"
+    },
+    {
+      "after": null,
+      "scope": "all",
+      "state": "optional_empty",
+      "before": {
+        "known": true,
+        "present": false
+      },
+      "remote": {
+        "known": true,
+        "present": false
+      },
+      "target": "vyd_ptakha",
+      "key": "bird",
+      "originalMappingHash": "c6a1ec94ed374c76f12550fb7b2b5635ace07cafa10a5b2117e0fd203a71eaaa"
+    },
+    {
+      "after": null,
+      "scope": "all",
+      "state": "optional_empty",
+      "before": {
+        "known": true,
+        "present": false
+      },
+      "remote": {
+        "known": true,
+        "present": false
+      },
+      "target": "vyd_roslyny",
+      "key": "plants",
+      "originalMappingHash": "348707c09fb40dc42d61ea92dc1104a45c4bd615b04eecc67ce52c8465a155f9"
+    },
+    {
+      "after": null,
+      "scope": "all",
+      "state": "optional_empty",
+      "before": {
+        "known": true,
+        "present": false
+      },
+      "remote": {
+        "known": true,
+        "present": false
+      },
+      "target": "vyd_statuetky",
+      "key": "statuette",
+      "originalMappingHash": "f747eb9b1b0646e24cbbdf53c468ff7e71c85df735746f9895db9c41dcc4b345"
+    },
+    {
+      "after": null,
+      "scope": "all",
+      "state": "optional_empty",
+      "before": {
+        "known": true,
+        "present": false
+      },
+      "remote": {
+        "known": true,
+        "present": false
+      },
+      "target": "vyd_symvoliky",
+      "key": "symbolic_stat",
+      "originalMappingHash": "e3549d7932e976c6790120e8ab23ef5e0f0c1cef879837348bddf4dcf6a30816"
+    }
+  ]
+}

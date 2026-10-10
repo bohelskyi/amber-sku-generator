@@ -496,9 +496,22 @@ identity, shape, values and agreement with the original route. Truly optional fi
 and fields proven inactive by their original route or captured observations keep
 their permanent receipts.
 
-Older receipts may lack enough historical observations to establish inactivity.
+For older receipts without that proof, the audit can recover canonical `before`
+observations from the immutable progress command of the receipt's exact original
+session/revision. It verifies command hash, identity and receipt membership, plus
+the original parent field's descriptor, route, manifest and mapping fingerprint.
+It never uses remote/after values, later revisions or current answers. Changed
+canonical imports, unknown/malformed observations, conflicting observations,
+missing history and mismatched provenance fail closed. The recovered proof is
+temporary; no receipt is amended. Reads are cached and capped at 32 original
+commands, each at most 1 MiB/500 fields, with at most 64 proof sources.
+
+Older receipts may still lack enough historical observations to establish inactivity.
 For example, a route proving only `souvenir != 5` does not establish that a question
-required for `souvenir = 1` was inactive when the receipt was created. Such a receipt
+required for `souvenir = 1` was inactive when the receipt was created. An original
+command proving `souvenir = 4` can establish that inactivity. Confirmed absent
+condition inputs use the evaluator's exact scalar comparison; they are distinct
+from unavailable reads, zero and false. Without that historical proof, the receipt
 remains explicit review, even if today's answer makes that question inactive.
 Missing publications, malformed provenance, inconsistent fingerprints, active
 required fields and unresolved historical conditions return
