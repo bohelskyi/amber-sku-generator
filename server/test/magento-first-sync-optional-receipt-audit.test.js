@@ -6,12 +6,13 @@ const { normalizeBindings, requirements } = require('../src/services/magento/bin
 const { assessOnClient, CODE } = require('../src/services/magento/first-sync-optional-receipt-audit');
 const real = require('./fixtures/legacy-sv-schema6');
 const saved = require('./fixtures/legacy-sv-publication.json');
+const originalProof = require('./fixtures/first-sync-original-revision.json');
 const BINDING = '11111111-1111-4111-8111-111111111111';
 const VERSION = '22222222-2222-4222-8222-222222222222';
 const TEMPLATE = '33333333-3333-4333-8333-333333333333';
 const SESSION = '44444444-4444-4444-8444-444444444444';
 
-function fixture({ optional = false, inactive = false, unknownRule = false, remoteRequired = false } = {}) {
+function fixture({ optional = false, inactive = false, unknownRule = false, remoteRequired = false, production = false } = {}) {
   const publication = real.publication(), tables = structuredClone(saved.tables);
   // The copied read-only fixture omits review evidence; real SQL rows include its default object.
   for (const name of ['routes', 'attributes', 'options', 'field_policies']) {
@@ -19,6 +20,13 @@ function fixture({ optional = false, inactive = false, unknownRule = false, remo
   }
   if (optional) publication.definition.questionContracts['SV.stone_processing'].required = false;
   if (unknownRule) publication.definition.questionContracts['SV.stone_processing'].rule = { 'SV.color': 1 };
+  if (production) {
+    // Exact production dependency slice, detached from unrelated private AST.
+    for (const node of originalProof.bindings) publication.definition.bindings.find(b => b.id === node.id).value = structuredClone(node.value);
+    Object.assign(publication.definition.questionContracts, structuredClone(originalProof.questionContracts));
+    Object.assign(publication.definition.sources, structuredClone(originalProof.sources));
+    Object.assign(publication.definition.tables, structuredClone(originalProof.tables));
+  }
   if (remoteRequired) {
     publication.schema.attributes.find(a => a.attribute_code === 'kamin_obrobka').is_required = true;
     tables.schema_attributes.find(a => a.code === 'kamin_obrobka').metadata.is_required = true;
@@ -62,6 +70,10 @@ function fixture({ optional = false, inactive = false, unknownRule = false, remo
       assert.deepEqual(params, [VERSION]);
       return { rows: controls.version ? [structuredClone(controls.version)] : [] };
     }
+    if (sql.includes('FROM magento_first_sync_progress')) {
+      assert.deepEqual(params, [SESSION, '1']);
+      return { rows: controls.originalCommand ? [structuredClone(controls.originalCommand)] : [] };
+    }
     assert.deepEqual(params, [BINDING]);
     const table = /FROM magento_binding_([a-z_]+)/.exec(sql)?.[1];
     if (table === 'revisions') return { rows: controls.binding ? [structuredClone(controls.binding)] : [] };
@@ -78,6 +90,120 @@ test('no optional receipts performs no publication or product reads', async () =
     assert.deepEqual(result.blockers, []); assert.deepEqual(result.evidence, []);
     assert.equal(result.evidenceHash, hash([]));
   }
+});
+
+function originalCommandFixture() {
+  const f = fixture({ production: true }), routeKey = 'SV.souvenir!=value_id:5';
+  const publication = real.publication(), bindings = normalizeBindings(publication.bindings);
+  const plans = requirements(f.compiled.definition, normalizeSchema(publication.schema));
+  const route = plans.find(p => p.routeKey === routeKey);
+  const cells = f.compiled.definition.groups.find(g => g.route === 'SV').rows.find(r => r.id === 'base').cells;
+  const records = originalProof.records.map(savedField => {
+    const { key, originalMappingHash, ...field } = structuredClone(savedField);
+    assert.match(originalMappingHash, /^[a-f0-9]{64}$/);
+    const expected = route.attributes.find(a => a.rowId === 'base' && a.target === field.target);
+    const binding = bindings.attributes.find(a => a.bindingKey === expected?.bindingKey);
+    const policy = bindings.policies.find(p => p.bindingKey === expected?.bindingKey && p.storeCode === field.scope);
+    return { ...field, source: { kind: 'semantic', key, productId: 1919, bindingRevisionId: BINDING,
+      definitionHash: f.compiled.hash, routeKey, manifestHash: 'b'.repeat(64) },
+    mappingHash: hash({ definitionHash: f.compiled.hash, routeKey, cell: cells[field.target],
+      binding: binding || null, policy: policy || null,
+      attributeRequired: publication.schema.attributes.find(a => a.attribute_code === field.target).is_required ?? null,
+      options: bindings.options.filter(o => o.bindingKey === expected?.bindingKey) }) };
+  });
+  Object.assign(f.progress.session, { public_sku: 'fixture-sku', remote_product_id: '2979',
+    initial_product_id: 1919, initial_binding_revision_id: BINDING, revision: '2' });
+  f.progress.fields = records.filter(p => p.state === 'optional_empty').map(p => ({ ...structuredClone(p), revision: '1' }));
+  const command = { key: { originHash: f.row.origin_hash, publicIdentityId: '800' },
+    identity: { installationKey: f.row.installation_key, publicSku: 'fixture-sku', remoteProductId: '2979',
+      initialProductId: 1919, initialBindingRevisionId: BINDING }, fields: records };
+  f.controls.originalCommand = { session_id: SESSION, revision: '1', command, command_hash: hash(command) };
+  f.seal = () => { f.controls.originalCommand.command_hash = hash(f.controls.originalCommand.command); };
+  return f;
+}
+
+test('exact production conditional AST and original canonical observations prove all six old receipts without writes', async () => {
+  assert.equal(originalProof.provenance.definitionHash, '898b6b6a1586d65f355d6aef188c9cc1fe2ca32ad4c7b4ccf3e966334eca9821');
+  for (const completed of [null, '2026-10-10T12:00:00Z']) {
+    const f = originalCommandFixture(); f.progress.session.completed_at = completed;
+    f.progress.currentProduct = { details: { answers: { souvenir: 1, statuette: 1, '2': 2 } } };
+    const before = JSON.stringify({ progress: f.progress, controls: f.controls });
+    const result = await assessOnClient(f.client, f.progress);
+    assert.deepEqual(result.blockers, []); assert.equal(result.evidence.length, 6);
+    assert.ok(result.evidence.every(p => p.state === 'inactive'));
+    assert.equal(f.calls.filter(c => c.sql.includes('FROM magento_first_sync_progress')).length, 1);
+    assert.equal(JSON.stringify({ progress: f.progress, controls: f.controls }), before);
+  }
+});
+
+test('historical evidence read, hash, identity, membership and bounds fail closed', async () => {
+  for (const mutation of [
+    f => { f.controls.originalCommand = null; },
+    f => { f.controls.originalCommand.command_hash = '0'.repeat(64); },
+    f => { f.controls.originalCommand.revision = '2'; },
+    f => { f.controls.originalCommand.session_id = VERSION; },
+    f => { f.controls.originalCommand.command.key.publicIdentityId = '801'; f.seal(); },
+    f => { f.controls.originalCommand.command.identity.initialProductId = 1920; f.seal(); },
+    f => { f.controls.originalCommand.command.fields = []; f.seal(); },
+    f => { f.controls.originalCommand.command.padding = 'x'.repeat(1048576); f.seal(); },
+    f => { f.controls.originalCommand.command.fields.push(...Array.from({ length: 501 }, () => ({}))); f.seal(); },
+    f => { f.progress.fields.forEach(p => { p.revision = '3'; }); },
+  ]) {
+    const f = originalCommandFixture(); mutation(f);
+    const result = await assessOnClient(f.client, f.progress);
+    assert.equal(result.blockers.length, 6); assert.ok(result.evidence.every(p => p.state === 'unproven'));
+  }
+});
+
+test('unproven, changed, contradictory or differently bound parents cannot prove historical inactivity', async () => {
+  for (const mutation of [
+    p => { p.before = { known: false }; },
+    p => { p.before = { known: true, present: false, value: false }; },
+    p => { p.before = { known: true, present: true, value: '4.0' }; },
+    p => { p.before = { known: true, present: true, value: 99 }; },
+    p => { p.source.productId = 1920; },
+    p => { p.source.bindingRevisionId = VERSION; },
+    p => { p.source.definitionHash = '0'.repeat(64); },
+    p => { p.source.routeKey = 'SV.souvenir=value_id:5'; },
+    p => { p.source.manifestHash = '0'.repeat(64); },
+    p => { p.mappingHash = '0'.repeat(64); },
+    p => { p.state = 'imported'; p.source.decision = 'accept_remote'; },
+  ]) {
+    const f = originalCommandFixture(), parent = f.controls.originalCommand.command.fields.find(p => p.target === 'suveniry');
+    mutation(parent); f.seal();
+    const result = await assessOnClient(f.client, f.progress);
+    assert.ok(result.blockers.some(b => b.target === 'vyd_statuetky')); assert.ok(result.blockers.some(b => b.target === 'nastlni_ihry'));
+  }
+  const f = originalCommandFixture(), parent = f.controls.originalCommand.command.fields.find(p => p.target === 'suveniry');
+  const other = structuredClone(parent); other.before.value = 1;
+  f.controls.originalCommand.command.fields.push(other); f.seal();
+  assert.ok((await assessOnClient(f.client, f.progress)).blockers.length > 0);
+});
+
+test('original required question active at the historical before value stays blocked regardless of later after', async () => {
+  const f = originalCommandFixture(), parent = f.controls.originalCommand.command.fields.find(p => p.target === 'suveniry');
+  parent.before.value = 1; parent.after = 4; f.seal();
+  const result = await assessOnClient(f.client, f.progress);
+  assert.equal(result.evidence.find(p => p.target === 'vyd_statuetky').state, 'required');
+  assert.ok(result.blockers.some(p => p.target === 'vyd_statuetky'));
+});
+
+test('known absence follows evaluator scalar semantics while malformed frozen evidence never uses fallback', async () => {
+  const classify = require('../src/services/magento/first-sync-semantic-requirement').classifySemanticRequirement;
+  const f = originalCommandFixture(), definition = structuredClone(f.compiled.definition);
+  definition.questionContracts['SV.2'].rule = { 'SV.statuette': 0 };
+  const compiled = compileDefinition(definition), field = f.progress.fields.find(p => p.target === 'tematyka_vyrobu');
+  for (const [observation, expected] of [[{ known: true, present: false }, 'inactive'],
+    [{ known: true, present: false, value: null }, 'inactive'], [{ known: true, present: false, value: '' }, 'required'],
+    [{ known: true, present: true, value: 0 }, 'required'], [{ known: true, present: false, value: false }, 'unproven']]) {
+    const source = { ...field.source, definitionHash: compiled.hash, requirednessEvidence: { version: 1,
+      definitionHash: compiled.hash, routeKey: field.source.routeKey, target: field.target, scope: field.scope,
+      values: { 'SV.statuette': observation } } };
+    assert.equal(classify({ compiled, target: field.target, scope: field.scope, source }).state, expected);
+  }
+  for (const receipt of f.progress.fields) receipt.source.requirednessEvidence = { version: 0 };
+  const result = await assessOnClient(f.client, f.progress);
+  assert.equal(result.blockers.length, 6); assert.equal(f.calls.some(c => c.sql.includes('FROM magento_first_sync_progress')), false);
 });
 
 test('old active required semantic receipt blocks incomplete and completed sessions without changing receipts', async () => {

@@ -130,7 +130,9 @@ function classifySemanticRequirement({ compiled, target, scope, source, product 
     }
     function matches(id, expected) {
       const read = valueFor(id);
-      if (read.known && present(read.value)) return expected.map(normalize).includes(normalize(read.value));
+      // A successful historical read can prove absence. Match the evaluator's
+      // scalar comparison exactly; only an unavailable read remains unknown.
+      if (read.known) return expected.map(normalize).includes(normalize(read.value));
       const excluded = syntax.predicates.filter(p => p.sourceId === id && !p.equal).map(p => normalize(p.value));
       return expected.every(value => excluded.includes(normalize(value))) ? false : null;
     }

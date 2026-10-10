@@ -437,13 +437,24 @@ test('required question activity follows outer AST guards and unknown semantic c
   assert.equal(semanticRequirement(input, 'kamin_obrobka', 'stone_processing', { historical: true }).state, 'unproven');
 });
 
-test('unknown catalog-rule activity blocks new empty receipts without using absent controls as a negative answer', () => {
+test('catalog-rule activity distinguishes confirmed absence from malformed inputs and missing historical proof', () => {
   const input = conditionalSvFixture(5, publication => {
     publication.definition.questionContracts['SV.stone_processing'].rule = { 'SV.material': 1 };
   });
   delete input.observation.amber.product.details.answers.stone_processing;
   delete input.observation.amber.product.details.answers.material;
-  const result = projectFirstSyncFields(input);
+  let result = projectFirstSyncFields(input);
+  assert.equal(field(result, 'kamin_obrobka').status, 'optional_empty');
+  assert.equal(semanticRequirement(input, 'kamin_obrobka', 'stone_processing').state, 'inactive');
+  assert.deepEqual(metadata(result, 'kamin_obrobka').source.requirednessEvidence.values['SV.material'],
+    { known: true, present: false });
+  assert.equal(semanticRequirement(input, 'kamin_obrobka', 'stone_processing', { historical: true }).state, 'unproven');
+  for (const value of [false, 'bad', '01', {}]) {
+    input.observation.amber.product.details.answers.material = value;
+    assert.equal(semanticRequirement(input, 'kamin_obrobka', 'stone_processing').state, 'unproven');
+  }
+  input.observation.amber.product.details.answers.material = false;
+  result = projectFirstSyncFields(input);
   assert.equal(field(result, 'kamin_obrobka').status, 'review_required');
   assert.equal(field(result, 'kamin_obrobka').evidenceReason, 'SEMANTIC_REQUIREMENT_UNPROVEN');
 });
@@ -470,7 +481,9 @@ test('raw semantic lookup retains its published required contract and respects r
   conditional.observation.amber.product.details.answers.selector = 2;
   assert.equal(assess(conditional).state, 'inactive');
   delete conditional.observation.amber.product.details.answers.selector;
-  assert.equal(assess(conditional).state, 'unproven'); assert.equal(assess(conditional, true).state, 'unproven');
+  assert.equal(assess(conditional).state, 'inactive'); assert.equal(assess(conditional, true).state, 'unproven');
+  conditional.observation.amber.product.details.answers.selector = false;
+  assert.equal(assess(conditional).state, 'unproven');
   const inactive = create(definition => {
     const row = definition.groups[0].rows[0];
     row.cells.kolir = { op: 'when', if: { op: 'eq', left: { op: 'semanticKey', input: source('selector') }, right: literal('1') },

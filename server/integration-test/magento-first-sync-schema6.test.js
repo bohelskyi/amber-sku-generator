@@ -232,6 +232,36 @@ test('actual schema6 first-sync size adoption uses the published conditional rou
       await assert.rejects(firstSync.inspect(conditionalConfig,malformed,conditionalOptions),{code:'FIRST_SYNC_PROJECTION_INPUT_INVALID'});
       assert.deepEqual(await durableSnapshot(),before);assert.ok(httpMethods.every(method=>method==='GET'));
     });
+    await t.test('all six legal historical empty fields recover same-revision before proof in read-only audit, including completed history',async()=>{
+      const savedProof=require('../test/fixtures/first-sync-original-revision.json');
+      for(const [id,complete] of [[1018,false],[955,true]]){
+        const x=await conditionalCopy(id),observed=await conditionalObservation(x);
+        const projection=project({observation:observed,currencyEvidence:{verified:true,currency:'UAH'}});
+        const manifestHash=require('../src/services/magento/first-sync-progress-plan').prepareProgress(projection,null).manifestHash;
+        // Explicit old snapshot copied from the production proof slice. Current
+        // fixture answers differ: they cannot establish the original conditions.
+        const fields=savedProof.records.map(saved=>{
+          const {key:_key,originalMappingHash:_originalHash,...record}=structuredClone(saved);
+          const meta=projection.projection.find(p=>p.target===record.target&&p.scope===record.scope);
+          const source={...meta.source,productId:id,manifestHash};delete source.requirednessEvidence;
+          return {...record,source,mappingHash:meta.mappingHash};
+        });
+        const tx=await db.connect();let receipt;
+        try{await gate.begin(tx,'BEGIN');receipt=await ledger.recordProgressOnClient(tx,{
+          key:{originHash:binding.originHash,publicIdentityId:String(x.public_product_identity_id)},
+          identity:{installationKey:binding.installationKey,publicSku:observed.raw.sku,remoteProductId:String(observed.raw.id),
+            contractVersion:'first-sync-v1',initialProductId:id,initialBindingRevisionId:binding.id},
+          expectedRevision:'0',previewHash:c.hash({fixture:'legal-original-empty',id}),fields,actorUserId:actor,
+          requiredScopes:fields.map(({target,scope})=>({target,scope})),complete,readyForOutbound:complete});await gate.commit(tx);
+        }catch(e){await gate.rollback(tx);throw e;}finally{await gate.release(tx);tx.release();}
+        const before=await durableSnapshot(),requests=httpMethods.length;
+        const report=await require('../scripts/magento-first-sync-optional-audit').runAudit(db,{session:receipt.sessionId});
+        assert.equal(report.readOnly,true);assert.equal(report.blockedSessionCount,0,JSON.stringify(report));
+        assert.equal(report.sessions[0].evidence.length,6);assert.ok(report.sessions[0].evidence.every(f=>f.state==='inactive'));
+        assert.deepEqual(await durableSnapshot(),before,'Original receipts, product, audit, jobs and cache stay unchanged');
+        assert.equal(httpMethods.length,requests,'Audit cannot call Magento');
+      }
+    });
     await t.test('old required-field optional receipts block incomplete and completed sessions before enqueue or dispatch without rewriting history',async()=>{
       const jobs=require('../src/services/magento/sync-job.service');
       const blocker='FIRST_SYNC_OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED';
