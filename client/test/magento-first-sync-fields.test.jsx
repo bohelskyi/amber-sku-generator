@@ -59,10 +59,108 @@ it('shows per-language received name and unresolved EN without claiming the whol
   ]) });
   render(shell()); read();
   const ua = await screen.findByRole('region', { name: 'Назва · UA / основний магазин' });
-  expect(within(ua).getByText('Отримано один раз')).toBeTruthy();
+  expect(within(ua).getByText('Перший етап завершено')).toBeTruthy();
   expect(within(ua).queryByRole('button', { name: /Отримати/ })).toBeNull();
   expect(screen.getByText(/Одноразове отримання ще не завершене/)).toBeTruthy();
   expect(screen.getByRole('region', { name: 'Назва · EN' })).toBeTruthy();
+});
+
+it('shows the current computed size after a completed first phase without claiming a canonical import', async () => {
+  api.post.mockResolvedValueOnce({ data: plan([field({ target: 'rozmir_suveniriv', status: 'review_required',
+    reason: 'FIELD_ALREADY_RECEIVED_USE_ORDINARY_RECONCILIATION', received: true,
+    local: known('7.5/7.5/7'), remote: known('7.5/7.5/7'), canAcceptRemote: false, canKeepLocal: false,
+  })], { coverage: { fields: [{ target: 'rozmir_suveniriv', scope: 'all', state: 'projected', persistence: 'derived' }], fullProductAdoption: false } }) });
+  render(shell()); read();
+  const size = await screen.findByRole('region', { name: 'Розмір сувеніру · UA / основний магазин' });
+  expect(within(size).getAllByText('7.5/7.5/7')).toHaveLength(2);
+  expect(within(size).queryByText('Не заповнено')).toBeNull();
+  expect(within(size).getByText('Перший етап завершено')).toBeTruthy();
+  expect(within(size).getByText(/Подальші зміни перевіряються за звичайними правилами синхронізації/)).toBeTruthy();
+  expect(within(size).queryByRole('button', { name: /Отримати|Залишити/ })).toBeNull();
+  expect(screen.queryByText('Отримано один раз')).toBeNull();
+  expect(screen.queryByText(/Значення Magento отримано в Amber/)).toBeNull();
+  expect(api.post).toHaveBeenCalledTimes(1);
+});
+
+it('a completed optional-empty field does not claim that a value was imported or that delivery completed', async () => {
+  api.post.mockResolvedValue({ data: plan([field({ target: 'rozmir_suveniriv', status: 'review_required',
+    reason: 'FIELD_ALREADY_RECEIVED_USE_ORDINARY_RECONCILIATION', received: true,
+    local: empty, remote: empty, canAcceptRemote: false, canKeepLocal: false,
+  })]) });
+  render(shell()); read();
+  const size = await screen.findByRole('region', { name: 'Розмір сувеніру · UA / основний магазин' });
+  expect(within(size).getAllByText('Не заповнено')).toHaveLength(2);
+  expect(within(size).getByText('Перший етап завершено')).toBeTruthy();
+  expect(within(size).queryByText(/отримано/i)).toBeNull();
+  expect(screen.getByText(/Одноразове отримання ще не завершене для всіх передбачених полів/)).toBeTruthy();
+  expect(screen.queryByRole('dialog')).toBeNull(); expect(api.post).toHaveBeenCalledTimes(1);
+});
+
+it('does not present an unverified current derived value as an empty value or a remembered received value', async () => {
+  api.post.mockResolvedValueOnce({ data: plan([field({ target: 'rozmir_suveniriv', status: 'review_required',
+    reason: 'FIELD_ALREADY_RECEIVED_USE_ORDINARY_RECONCILIATION', received: true,
+    local: known('7.5/7.5/7'), remote: known('7.5/7.5/7'), canAcceptRemote: false, canKeepLocal: false,
+  })]) }).mockResolvedValueOnce({ data: plan([field({ target: 'rozmir_suveniriv', status: 'unknown', reason: 'LOCAL_VALUE_UNKNOWN', received: true,
+    local: { known: false }, remote: known('8/8/8'), canAcceptRemote: false, canKeepLocal: false,
+  })]) });
+  render(shell()); read(); await screen.findByRole('region', { name: 'Розмір сувеніру · UA / основний магазин' }); read();
+  const size = await screen.findByRole('region', { name: 'Розмір сувеніру · UA / основний магазин' });
+  expect(within(size).getByText('Дані не підтверджено')).toBeTruthy();
+  expect(within(size).getByText('8/8/8')).toBeTruthy();
+  expect(within(size).queryByText('Не заповнено')).toBeNull();
+  expect(within(size).queryByText('7.5/7.5/7')).toBeNull();
+  expect(within(size).queryByRole('button', { name: /Отримати|Залишити/ })).toBeNull();
+  expect(api.post).toHaveBeenCalledTimes(2);
+});
+
+it('an unsafe old optional-empty receipt replaces an actionable preview with a read-only review', async () => {
+  const code = 'FIRST_SYNC_OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED';
+  api.post.mockResolvedValueOnce({ data: plan() }).mockResolvedValueOnce({ data: plan([], {
+    mode: 'review', previewToken: undefined, blockers: [{ code, target: 'rozmir_suveniriv', scope: 'all' }],
+  }) });
+  render(shell()); read();
+  await screen.findByRole('region', { name: 'Вага · UA / основний магазин' }); read();
+  await screen.findByText('Перше отримання недоступне до перевірки наведених причин.');
+  expect(screen.getByText(/Попередню позначку порожнього поля не можна безпечно зарахувати/)).toBeTruthy();
+  expect(screen.getByText('Розмір сувеніру · UA / основний магазин:')).toBeTruthy();
+  expect(screen.queryByText('Перший етап завершено')).toBeNull();
+  expect(screen.queryByRole('button', { name: /Отримати значення|Залишити значення|Зберегти рішення/ })).toBeNull();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(api.post).toHaveBeenCalledTimes(2);
+  expect(api.post.mock.calls.every(([url]) => url.endsWith('/preview'))).toBe(true);
+  fireEvent.click(screen.getByText('Межі перевірки й технічні причини'));
+  expect(screen.getByText(new RegExp(code))).toBeTruthy();
+});
+
+it('unproven semantic requiredness explains why a currently empty field cannot be accepted', async () => {
+  api.post.mockResolvedValueOnce({ data: plan([field({
+    target: 'kamin_obrobka', status: 'review_required', reason: 'SEMANTIC_REQUIREMENT_UNPROVEN',
+    local: empty, remote: empty, canAcceptRemote: false, canKeepLocal: false,
+  })]) });
+  render(shell()); read();
+  const treatment = await screen.findByRole('region', { name: 'Обробка каменю · UA / основний магазин' });
+  expect(within(treatment).getByText(/Обов’язковість цього поля не підтверджено за правилами товару/)).toBeTruthy();
+  expect(within(treatment).getByText('Потрібна перевірка')).toBeTruthy();
+  const actions = within(treatment).getAllByRole('button', { name: /Отримати значення|Залишити значення/ });
+  for (const action of actions) { expect(action.disabled).toBe(true); fireEvent.click(action); }
+  expect(screen.queryByRole('dialog')).toBeNull(); expect(api.post).toHaveBeenCalledTimes(1);
+});
+
+it('retains a populated 4600 UAH price only after explicit field confirmation and never claims remote delivery', async () => {
+  api.post.mockResolvedValueOnce({ data: plan([field({ target: 'price', local: known('4600'), remote: known('10000') })]) })
+    .mockResolvedValueOnce({ data: receipt({ target: 'price', choice: 'keep_local', receipt: { ...receipt().receipt, state: 'pending_outward_confirmation' } }) });
+  render(shell()); read();
+  const price = await screen.findByRole('region', { name: 'Ціна · UA / основний магазин' });
+  expect(within(price).getByText('4600')).toBeTruthy(); expect(within(price).getByText('10000')).toBeTruthy();
+  expect(api.post).toHaveBeenCalledTimes(1);
+  fireEvent.click(within(price).getByRole('button', { name: 'Залишити значення Amber: Ціна · UA / основний магазин' }));
+  const dialog = screen.getByRole('dialog', { name: 'Підтвердити поле: Ціна · UA / основний магазин' });
+  expect(within(dialog).getAllByText('4600')).toHaveLength(2);
+  expect(within(dialog).queryByText('10000')).toBeNull(); expect(api.post).toHaveBeenCalledTimes(1);
+  confirm(); await screen.findByText(/Значення Amber залишено/);
+  expect(api.post).toHaveBeenCalledTimes(2);
+  expect(api.post.mock.calls[1][1]).toEqual({ sku: 'SV1', bindingRevisionId, previewToken: token, target: 'price', scope: 'all', choice: 'keep_local' });
+  expect(screen.getByText(/Стан доставки товару не підтверджено/)).toBeTruthy();
 });
 
 it('displays unfamiliar reasons safely with their exact code in lazily opened technical evidence', async () => {

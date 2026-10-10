@@ -10,6 +10,7 @@ const taxonomy = Object.freeze({
   FIRST_SYNC_FIELD_VALIDATION_REQUIRED: 'Значення Magento не пройшло перевірку для збереження в Amber.',
   FIRST_SYNC_UNSETTLED_PRIOR_FIELD: 'Попереднє рішення щодо поля ще не завершене, а поле змінилося в опублікованих відповідностях.',
   FIRST_SYNC_POST_ADOPTION_RECHECK_REQUIRED: 'Дані прийнято в Amber. Перед доставкою потрібна нова перевірка товару.',
+  FIRST_SYNC_OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED: 'Попередню позначку порожнього поля не можна безпечно зарахувати. Потрібна окрема перевірка.',
   FIRST_SYNC_UNFINISHED_WORK: 'Незавершена операція товару блокує перше прийняття полів. Спочатку потрібно перевірити її результат.',
   FIRST_SYNC_HISTORY_REVIEW_REQUIRED: 'Історія попередньої доставки не дає достовірного підтвердження першої синхронізації.',
   FIRST_SYNC_ORIGIN_REVIEW_REQUIRED: 'Історія товару належить іншому підключенню Magento. Потрібна перевірка адміністратором.',

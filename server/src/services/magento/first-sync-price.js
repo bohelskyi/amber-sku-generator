@@ -4,6 +4,7 @@ const c = require('./binding-contract');
 const { createMagentoClient } = require('./client');
 const { evaluateProduct } = require('../export-templates/evaluate');
 const { requirements, normalizeBindings } = require('./binding-validation');
+const { productRoutePlans } = require('./first-sync-route');
 const { normalizeDecimal } = require('./first-sync-field-plan');
 const prices = require('../product-price-change.service');
 const currency = require('../currency.service');
@@ -40,10 +41,11 @@ async function readCurrencyEvidence(config, observation, { fetchImpl } = {}) {
       || c.hash(pinned) !== amber.revision.schemaFingerprint
       || c.hash(pinned.storeTopology) !== amber.revision.topologyFingerprint) return denied('PRICE_PINNED_SCHEMA_NOT_PROVEN');
     const bindings = normalizeBindings(amber.revision.bindings);
-    const plans = requirements(amber.compiled.definition, pinned);
+    const plans = productRoutePlans(requirements(amber.compiled.definition, pinned), amber.product);
+    if (plans.length !== 1) return denied('PRICE_BOUND_ROUTE_NOT_UNIQUE');
     const routes = bindings.routes.filter(route => route.enabled && route.reviewState === 'approved'
       && route.setId === observation.raw.attribute_set_id
-      && plans.some(plan => plan.routeKey === route.routeKey && plan.amberGroup === amber.product.category));
+      && route.routeKey === plans[0].routeKey);
     if (routes.length !== 1) return denied('PRICE_BOUND_ROUTE_NOT_UNIQUE');
     const websiteBinding = bindings.attributes.find(attribute => attribute.routeKey === routes[0].routeKey
       && attribute.rowId === 'base' && attribute.target === 'product_websites'
@@ -89,7 +91,7 @@ async function readCurrencyEvidence(config, observation, { fetchImpl } = {}) {
     }
     if (matches.some(rows => rows[0].base_currency_code !== 'UAH')) return denied('PRICE_BASE_CURRENCY_NOT_UAH');
     const evidence = { verified: true, currency: 'UAH' };
-    currencyProofs.set(evidence, { identity, observedSchemaHash: c.hash(current),
+    currencyProofs.set(evidence, { identity, routeKey: routes[0].routeKey, observedSchemaHash: c.hash(current),
       pinnedSchemaHash: c.hash(pinned), stores: [ua, en].map(view => ({ id: view.id, code: view.code, websiteId: view.website_id })) });
     return evidence;
   } catch {
@@ -99,10 +101,13 @@ async function readCurrencyEvidence(config, observation, { fetchImpl } = {}) {
 function currencyProven(observation, evidence) {
   try {
     const proof = evidence && currencyProofs.get(evidence);
-  return evidence?.verified === true && evidence.currency === 'UAH' && proof
-    && same(proof.identity, observationIdentity(observation))
-    && proof.observedSchemaHash === c.hash(c.normalizeSchema(observation.schema))
-    && proof.pinnedSchemaHash === c.hash(c.normalizeSchema(observation.amber.revision.schema));
+    if (evidence?.verified !== true || evidence.currency !== 'UAH' || !proof) return false;
+    const pinned = c.normalizeSchema(observation.amber.revision.schema);
+    const plans = productRoutePlans(requirements(observation.amber.compiled.definition, pinned), observation.amber.product);
+    return plans.length === 1 && plans[0].routeKey === proof.routeKey
+      && same(proof.identity, observationIdentity(observation))
+      && proof.observedSchemaHash === c.hash(c.normalizeSchema(observation.schema))
+      && proof.pinnedSchemaHash === c.hash(pinned);
   } catch { return false; }
 }
 function priceEvidence(args) {

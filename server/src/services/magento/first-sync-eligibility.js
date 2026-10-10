@@ -2,6 +2,7 @@ const c = require('./binding-contract');
 const { syncEligibility } = require('./sync-eligibility');
 const ledger = require('./first-sync-ledger');
 const historyAdmission = require('./first-sync-history-admission');
+const optionalReceipts = require('./first-sync-optional-receipt-audit');
 
 // A numeric floor proves delivery only through its immutable exact remote receipt.
 function externalDeliveryEvidence(receipts, {originHash,sku,remote}) {
@@ -35,6 +36,8 @@ function classifyFirstSyncEvidence(evidence) {
     || String(evidence.acknowledgedRemoteId) !== String(evidence.remote.id)))
     return block('FIRST_SYNC_IDENTITY_CHANGED');
   if (evidence.externalDeliveryIssue) return block(evidence.externalDeliveryIssue);
+  // Completion and later delivery cannot validate an earlier unsupported receipt.
+  if (evidence.optionalReceiptBlockers?.length) return {mode:'review',blockers:evidence.optionalReceiptBlockers};
   if (!evidence.remote) {
     if(evidence.otherOrigin) return block('FIRST_SYNC_ORIGIN_REVIEW_REQUIRED');
     if(evidence.previousDelivery) return block('FIRST_SYNC_IDENTITY_CHANGED');
@@ -76,6 +79,7 @@ async function readFirstSyncEligibility(client, config, observation, {jobId = nu
   const {amber,raw}=observation, product=amber.product, origin=c.originHash(config.baseUrl);
   const key={originHash:origin,publicIdentityId:String(product.public_product_identity_id)};
   const progress=await ledger.readOnClient(client,key);
+  const optionalReceiptAssessment=await optionalReceipts.assessOnClient(client,progress);
   const history=await require('./recovery-history').read(client,product.id);
   const ids=history.products.map(row=>row.productId);
   const facts=(await client.query(`SELECT
@@ -114,6 +118,7 @@ async function readFirstSyncEligibility(client, config, observation, {jobId = nu
     ? await historyAdmission.readOnClient(client,config,observation,{history})
     : {admission:null,evidenceHash:null};
   const evidence={historyAdmission:historyAdmission.allows(observation,admitted.admission),session:progress?.session,remote:raw,sku:product.public_sku,
+    optionalReceiptBlockers:optionalReceiptAssessment.blockers,
     installationKey:amber.revision.installationKey,history,
     ownershipIssue:require('./native-identity-ownership').issue(amber,raw),
     lifecycleBlockers:syncEligibility(product,raw).reasons.map(row=>({code:row.code})),
@@ -124,7 +129,8 @@ async function readFirstSyncEligibility(client, config, observation, {jobId = nu
     historicalEvidence:facts.historical_evidence||facts.snapshot_evidence||history.hasRecount};
   return {...classifyFirstSyncEvidence(evidence),progress,key,
     historyAdmission:admitted.admission,historyAdmissionHash:admitted.evidenceHash,
-    evidenceHash:c.hash({history,facts,historyAdmission:admitted.evidenceHash,identity:[product.public_product_identity_id,product.public_sku,raw?.id ?? null],
+    evidenceHash:c.hash({history,facts,historyAdmission:admitted.evidenceHash,optionalReceipts:optionalReceiptAssessment.evidence,
+      identity:[product.public_product_identity_id,product.public_sku,raw?.id ?? null],
       session:progress?.session,fields:progress?.fields})};
 }
 

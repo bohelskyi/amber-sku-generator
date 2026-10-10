@@ -290,6 +290,7 @@ async function applyJob(config, id, options) {
       const pending = (await options.databasePool.query("SELECT 1 FROM magento_sync_steps WHERE job_id=$1 AND state='dispatched'", [id])).rowCount > 0;
       const code = /^(MAGENTO|ADMIN|EXPORT|HISTORICAL)_[A-Z_]+$/.test(cause.code || '') ? cause.code : 'MAGENTO_SYNC_FAILED';
       const status = pending ? 'uncertain' : code === 'MAGENTO_SYNC_PUBLISHED_CURRENT_BINDING_REQUIRED'
+        || code==='MAGENTO_FIRST_SYNC_OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED'
         || /CHANGED|MISMATCH|INTEGRITY|NOT_SENDABLE|UNRESOLVED/.test(code) ? 'blocked' : 'retryable';
       return saveState(status, { code, ordinal: activeOrdinal,
         operation: activeOrdinal === null ? null : job.intent.operations[activeOrdinal].domain, reconciliationOnly: pending,

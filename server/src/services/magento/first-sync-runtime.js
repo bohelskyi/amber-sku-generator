@@ -1,16 +1,25 @@
 const c = require('./binding-contract');
 const service = require('./first-sync.service');
 const ledger = require('./first-sync-ledger');
+const optionalReceipts = require('./first-sync-optional-receipt-audit');
 const { TERMINAL, fieldKey } = require('./first-sync-progress-plan');
 const fail = code => {throw c.error(409,'MAGENTO_FIRST_SYNC_' + code,'Передавання потребує актуального рішення щодо полів першої синхронізації.');};
 const lanes = new WeakMap();
 const recoveryProofs = new WeakMap();
 const record = field => Object.fromEntries(['target','scope','state','before','remote','after','source','mappingHash'].map(key=>[key,field[key]]));
+const receiptKey = state => ({originHash:state.revision.originHash,publicIdentityId:String(state.publicIdentityId)});
+async function assertOptionalReceipts(client,key,current) {
+  const progress=current === undefined ? await ledger.readOnClient(client,key) : current;
+  if((await optionalReceipts.assessOnClient(client,progress)).blockers.length) fail('OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED');
+  return progress;
+}
 
 async function needsExistingReview(db,state) {
   // This fast path grants no new dispatch authority. APPLY still observes and
   // checks exact remote identity. An incomplete session always retains its gate.
   const row=(await db.query(`SELECT
+    EXISTS(SELECT 1 FROM magento_first_sync_sessions s JOIN magento_first_sync_fields f ON f.session_id=s.id
+      WHERE s.origin_hash=$1 AND s.public_product_identity_id=$2 AND f.revision<=s.revision AND f.state='optional_empty') OR
     EXISTS(SELECT 1 FROM magento_first_sync_sessions s WHERE s.origin_hash=$1
       AND s.public_product_identity_id=$2 AND s.completed_at IS NULL)
     OR (NOT EXISTS(SELECT 1 FROM magento_first_sync_sessions s WHERE s.origin_hash=$1
@@ -51,6 +60,7 @@ async function enforce(config,observation,state,options,{job=null,createLane=nul
       || job.sku!==state.publicSku || job.origin_hash!==state.revision.originHash
       || String(job.public_product_identity_id)!==String(state.publicIdentityId)) fail('CREATE_CONTEXT_CHANGED');
     if(observation.raw && !await ownedCreateContinuation(options.databasePool,job,observation)) fail('CREATE_IDENTITY_CHANGED');
+    await assertOptionalReceipts(options.databasePool,receiptKey(state));
     return createLane;
   }
   let manualProof=null;
@@ -61,6 +71,7 @@ async function enforce(config,observation,state,options,{job=null,createLane=nul
     try {
       await manualClient.query('BEGIN');
       await require('./sync-job-transaction').revalidate(manualClient,config,state,options);
+      await assertOptionalReceipts(manualClient,receiptKey(state));
       manualProof=await require('./first-sync-reviewed-manual').issueOnClient(manualClient,config,observation,state,options,{intent,job});
       await manualClient.query('COMMIT');
     } catch(cause) {await manualClient.query('ROLLBACK').catch(()=>{});throw cause;}
@@ -68,11 +79,14 @@ async function enforce(config,observation,state,options,{job=null,createLane=nul
   }
   if(manualProof) {
     const token=Object.freeze({});
-    lanes.set(token,{mode:'reviewed_manual',manualProof,nameProof:null});
+    lanes.set(token,{mode:'reviewed_manual',manualProof,nameProof:null,key:receiptKey(state)});
     return token;
   }
   if((job?.intent?.mode==='create' && recoveryIsReviewed(options.firstSyncRecoveryProof,job.id,observation))
-    || await ownedCreateContinuation(options.databasePool,job,observation)) inspection={mode:'create',readyForOutbound:true};
+    || await ownedCreateContinuation(options.databasePool,job,observation)) {
+    await assertOptionalReceipts(options.databasePool,receiptKey(state));
+    inspection={mode:'create',readyForOutbound:true};
+  }
   else inspection=await service.inspect(config,observation,options,{jobId:job?.id || null});
   let receiptRevision=inspection.first?.progress?.session.revision;
   let sessionId=inspection.first?.progress?.session.id;
@@ -89,6 +103,8 @@ async function enforce(config,observation,state,options,{job=null,createLane=nul
   if(options.automatic && inspection.blockers?.length) await require('./sync-problems').saveDiagnostics(
     options.databasePool,options.automatic,inspection.blockers);
   if(changed) throw c.error(409,'MAGENTO_SYNC_AMBER_CHANGED','Підтверджені дані прийнято. Потрібен новий snapshot перед передаванням.');
+  if(inspection.blockers?.some(blocker=>blocker.code==='FIRST_SYNC_OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED'))
+    fail('OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED');
   if(!inspection.readyForOutbound) fail('FIELDS_UNRESOLVED');
   const names=require('./first-sync-name-proof');
   let fieldNameProof=inspection.mode==='first' ? names.issue({observation,prepared:inspection.prepared,projection:inspection.projection,job}) : null;
@@ -97,7 +113,7 @@ async function enforce(config,observation,state,options,{job=null,createLane=nul
     if(!fieldNameProof) fail('NAME_RECEIPT_CHANGED');
   }
   const token=Object.freeze({});
-  lanes.set(token,{mode:inspection.mode,key:inspection.first?.key,receiptRevision,sessionId,
+  lanes.set(token,{mode:inspection.mode,key:inspection.first?.key || receiptKey(state),receiptRevision,sessionId,
     jobId:job?.id,productId:state.productId,bindingId:state.revision.id,
     originHash:state.revision.originHash,identityId:String(state.publicIdentityId),
     remoteId:observation.raw?.id,sku:observation.amber.product.public_sku,
@@ -167,6 +183,9 @@ function nameProof(token) {return lanes.get(token)?.nameProof || null;}
 function isCreateLane(token) {return lanes.get(token)?.mode==='create';}
 async function assertDispatchOnClient(client,token) {
   const proof=lanes.get(token);if(!proof) fail('DISPATCH_REVIEW_REQUIRED');
+  // Recheck every lane, including completed sessions and durable CREATE/manual
+  // recovery. A terminal receipt is immutable history, not proof of validity.
+  const current=await assertOptionalReceipts(client,proof.key);
   if(proof.mode==='reviewed_manual') {
     await require('./first-sync-reviewed-manual').assertOnClient(client,proof.manualProof);
     return;
@@ -174,7 +193,6 @@ async function assertDispatchOnClient(client,token) {
   if(proof.mode==='create' || proof.mode==='ordinary') return;
   if(proof.historyAdmission) await require('./first-sync-history-admission').assertOnClient(client,proof.config,proof.observation,proof.historyAdmission);
   if(!proof.key || !proof.receiptRevision || !proof.manifest?.length) fail('DISPATCH_REVIEW_REQUIRED');
-  const current=await ledger.readOnClient(client,proof.key);
   if(!current || current.session.revision!==proof.receiptRevision
     || current.session.public_sku!==proof.sku || Number(current.session.remote_product_id)!==proof.remoteId
     || current.session.installation_key!==proof.installationKey) fail('DISPATCH_RECEIPT_CHANGED');

@@ -12,13 +12,14 @@ const reasons = {
   REMOTE_READ_UNKNOWN: 'Значення Magento не підтверджено. Повторіть читання перед рішенням.',
   LOCAL_VALUE_UNKNOWN: 'Значення Amber не підтверджено. Відсутність даних не означає порожнє поле.',
   NAME_ALREADY_RECEIVED_USE_ORDINARY_RECONCILIATION: 'Назву цією мовою вже отримано один раз. Подальші зміни перевіряються за звичайними правилами назв.',
-  FIELD_ALREADY_RECEIVED_USE_ORDINARY_RECONCILIATION: 'Поле вже отримано один раз. Подальші зміни перевіряються за звичайними правилами синхронізації.',
+  FIELD_ALREADY_RECEIVED_USE_ORDINARY_RECONCILIATION: 'Перший етап для цього поля завершено. Подальші зміни перевіряються за звичайними правилами синхронізації.',
   MAPPING_NOT_PROVEN: 'Відповідність цього поля не підтверджено.',
   NAME_SCOPE_UNSUPPORTED: 'Отримання назви для цього магазину або мови не підтримується.',
   NORMALIZED_VALUES_EQUAL: 'Підтверджені значення збігаються після нормалізації.',
   EMPTY_LOCAL_VALID_REMOTE: 'Amber не має значення; підтверджене значення Magento можна отримати.',
   FIRST_REMOTE_NAME_AUTHORITATIVE: 'Під час першого отримання назва Magento має пріоритет окремо для кожної мови. Рішення діє один раз.',
   REQUIRED_FIELD_EMPTY: 'Обов’язкове поле порожнє.',
+  SEMANTIC_REQUIREMENT_UNPROVEN: 'Обов’язковість цього поля не підтверджено за правилами товару. Потрібна окрема перевірка.',
   BOTH_EMPTY_OPTIONAL: 'Необов’язкове поле порожнє в обох системах.',
   REMOTE_EMPTY_LOCAL_POPULATED: 'Magento не має значення, Amber має. Порожнє значення не стирає дані Amber.',
   POPULATED_VALUES_DIFFER: 'Обидві системи мають різні значення. Оберіть джерело для цього поля.',
@@ -35,6 +36,7 @@ const reasons = {
   FIRST_SYNC_IDENTITY_CHANGED: 'Змінилася підтверджена ідентичність товару. Потрібна нова перевірка.',
   FIRST_SYNC_UNFINISHED_WORK: 'Для товару є незавершена дія. Спочатку узгодьте її результат.',
   FIRST_SYNC_HISTORY_REVIEW_REQUIRED: 'Історія товару потребує окремої перевірки перед першим отриманням.',
+  FIRST_SYNC_OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED: 'Попередню позначку порожнього поля не можна безпечно зарахувати. Потрібна окрема перевірка.',
   FIRST_SYNC_ORIGIN_REVIEW_REQUIRED: 'Є історія передачі до іншого Magento. Потрібна окрема перевірка.',
   PHOTO_URL_IMPORT_NOT_IMPLEMENTED: 'Отримання фото за URL не підтримується цією дією.',
   FIELD_BINDING_NOT_APPROVED: 'Правило цього поля не погоджено.',
@@ -202,7 +204,7 @@ function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
     {fields.map((field) => {
       const available = plan.mode === 'first' && statuses.has(field.status) && !field.received;
       return <section key={JSON.stringify([field.target, field.scope])} className="space-y-2 rounded-xl border border-slate-200 p-4" aria-label={fieldLabel(field)}>
-        <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{fieldLabel(field)}</h3><StatusBadge tone={field.received ? 'success' : field.status === 'conflict' || field.status === 'review_required' || field.status === 'unknown' ? 'warning' : 'neutral'}>{field.received ? 'Отримано один раз' : statusLabels[field.status] || 'Потрібне уточнення стану'}</StatusBadge></div>
+        <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{fieldLabel(field)}</h3><StatusBadge tone={field.received ? 'success' : field.status === 'conflict' || field.status === 'review_required' || field.status === 'unknown' ? 'warning' : 'neutral'}>{field.received ? 'Перший етап завершено' : statusLabels[field.status] || 'Потрібне уточнення стану'}</StatusBadge></div>
         <dl className="grid gap-3 sm:grid-cols-2"><div><dt className="text-sm font-semibold">Поточне Amber</dt><dd className="whitespace-pre-wrap break-words text-sm">{valueText(field.local)}</dd></div><div><dt className="text-sm font-semibold">Поточне Magento</dt><dd className="whitespace-pre-wrap break-words text-sm">{valueText(field.remote)}</dd></div></dl>
         <p className="text-sm">{reasonText(field.reason)}</p>
         {canRecount && !field.received && correctionReasons.has(field.reason) && <a className="btn btn-outline" href={`/products/open?article=${encodeURIComponent(sku)}&action=recount&returnTo=${encodeURIComponent('/attention')}`}>Переглянути виправлення адміністратором</a>}

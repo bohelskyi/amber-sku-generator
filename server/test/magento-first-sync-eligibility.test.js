@@ -108,6 +108,16 @@ test('unusable external provenance is not hidden by a completed session or succe
     assert.equal(classify({...base,...extra,externalDeliveryIssue:'FIRST_SYNC_ORIGIN_REVIEW_REQUIRED'}).mode,'review');
 });
 
+test('unsafe optional receipt blocks completed, delivered and incomplete sessions',()=>{
+  const optionalReceiptBlockers=[{code:'FIRST_SYNC_OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED',
+    target:'kamin_obrobka',scope:'all',reason:'ORIGINAL_REQUIRED_FIELD_EMPTY'}];
+  for(const extra of [{session},{session:{...session,completed_at:'2026-10-10'}},
+    {sameOriginAcknowledged:true},{previousDelivery:true,externalDelivery:true}]) {
+    assert.deepEqual(classify({...base,...extra,optionalReceiptBlockers}),
+      {mode:'review',blockers:optionalReceiptBlockers});
+  }
+});
+
 test('audited recount admission permits first field review only and never delivery completion',()=>{
   const reviewed={...base,historyAdmission:true,historicalEvidence:true,
     history:{...base.history,issues:['reviewed_mixed_history'],identityChanged:true}};
