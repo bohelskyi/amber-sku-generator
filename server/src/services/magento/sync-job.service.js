@@ -149,6 +149,8 @@ async function enqueue(config, input, options) {
       await firstSync.assertDispatchOnClient(client,firstLane);
       const nameReceipt=await firstSync.nameBaselineOnClient(client,firstLane,observation);
       if(nameReceipt) baseline.firstSyncNames=nameReceipt;
+      const nativeCreateReference=firstSync.nativeCreateReference(firstLane);
+      if(nativeCreateReference) baseline.allocatedFirstCreate=nativeCreateReference;
       const job = (await client.query(`
       INSERT INTO magento_sync_jobs(id,product_id,public_product_identity_id,sku,installation_key,origin_hash,binding_revision_id,
         binding_hash,amber_hash,plan_hash,intent,baseline,created_by_user_id,automatic_generation)
@@ -246,7 +248,8 @@ async function applyJob(config, id, options) {
             await historical.assertLocal(client, config, state.historicalUpdate, state);
             await standardHistorical.assertLocal(client,config,state.historicalStandard,state,options.actorUserId);
             if (options.automatic) {
-              await automatic.assertEnabled(client, options);
+              if(job.baseline?.allocatedFirstCreate) await automatic.assertSnapshot(client,state,options);
+              else await automatic.assertEnabled(client, options);
               await local.phase('binding_lock', () => client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`amber_magento_binding:${job.installation_key}`]));
               const current = (await client.query(`SELECT id FROM magento_binding_revisions WHERE installation_key=$1
                 AND state='published' ORDER BY version_number DESC LIMIT 1`, [job.installation_key])).rows[0];

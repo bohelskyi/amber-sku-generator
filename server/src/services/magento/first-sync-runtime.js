@@ -2,6 +2,7 @@ const c = require('./binding-contract');
 const service = require('./first-sync.service');
 const ledger = require('./first-sync-ledger');
 const optionalReceipts = require('./first-sync-optional-receipt-audit');
+const nativeCreate = require('./first-sync-native-create');
 const { TERMINAL, fieldKey } = require('./first-sync-progress-plan');
 const fail = code => {throw c.error(409,'MAGENTO_FIRST_SYNC_' + code,'Передавання потребує актуального рішення щодо полів першої синхронізації.');};
 const lanes = new WeakMap();
@@ -39,6 +40,16 @@ async function ownedCreateContinuation(db,job,observation) {
   if(ordinal!==0 || job.intent.operations[0].payload?.product?.sku!==job.sku) return false;
   return (await db.query("SELECT 1 FROM magento_sync_steps WHERE job_id=$1 AND ordinal=0 AND state='verified'",[job.id])).rowCount===1;
 }
+async function readNativeCreate(config,observation,options,job,referenceOnly) {
+  const client=await options.databasePool.connect();
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const proof=await nativeCreate.readOnClient(client,config,observation,{jobId:job.id,referenceOnly});
+    if(!proof) fail('NATIVE_CREATE_CHANGED');
+    await client.query('COMMIT');return proof;
+  } catch(cause) {await client.query('ROLLBACK').catch(()=>{});throw cause;}
+  finally {client.release();}
+}
 function hasProgressChange(inspection) {
   if(!inspection.first.progress) return true;
   if(inspection.prepared.complete && !inspection.first.progress.session.completed_at) return true;
@@ -60,6 +71,7 @@ async function enforce(config,observation,state,options,{job=null,createLane=nul
       || job.sku!==state.publicSku || job.origin_hash!==state.revision.originHash
       || String(job.public_product_identity_id)!==String(state.publicIdentityId)) fail('CREATE_CONTEXT_CHANGED');
     if(observation.raw && !await ownedCreateContinuation(options.databasePool,job,observation)) fail('CREATE_IDENTITY_CHANGED');
+    if(job.baseline?.allocatedFirstCreate) proof.nativeCreate=await readNativeCreate(config,observation,options,job,Boolean(observation.raw));
     await assertOptionalReceipts(options.databasePool,receiptKey(state));
     return createLane;
   }
@@ -82,12 +94,19 @@ async function enforce(config,observation,state,options,{job=null,createLane=nul
     lanes.set(token,{mode:'reviewed_manual',manualProof,nameProof:null,key:receiptKey(state)});
     return token;
   }
-  if((job?.intent?.mode==='create' && recoveryIsReviewed(options.firstSyncRecoveryProof,job.id,observation))
-    || await ownedCreateContinuation(options.databasePool,job,observation)) {
+  const recovered=job?.intent?.mode==='create' && recoveryIsReviewed(options.firstSyncRecoveryProof,job.id,observation);
+  const owned=await ownedCreateContinuation(options.databasePool,job,observation);
+  if(recovered || owned) {
     await assertOptionalReceipts(options.databasePool,receiptKey(state));
-    inspection={mode:'create',readyForOutbound:true};
+    inspection={mode:'create',readyForOutbound:true,
+      ...(job.baseline?.allocatedFirstCreate ? {nativeCreate:await readNativeCreate(config,observation,options,job,Boolean(observation.raw))} : {})};
   }
   else inspection=await service.inspect(config,observation,options,{jobId:job?.id || null});
+  const birthProof=inspection.nativeCreate || inspection.first?.nativeCreate;
+  // This exception belongs to the existing automatic generation/attachment
+  // protocol. Do not mint a manual job that could not redeem its birth proof.
+  if(birthProof && !job && !options.automatic) fail('NATIVE_CREATE_AUTOMATIC_REQUIRED');
+  if(job?.baseline?.allocatedFirstCreate && !birthProof) fail('NATIVE_CREATE_CHANGED');
   let receiptRevision=inspection.first?.progress?.session.revision;
   let sessionId=inspection.first?.progress?.session.id;
   let changed=false;
@@ -120,7 +139,7 @@ async function enforce(config,observation,state,options,{job=null,createLane=nul
     installationKey:observation.amber.revision.installationKey,
     historyAdmission:inspection.first?.historyAdmission,reviewedRecovery:inspection.reviewedRecovery===true,config,observation,
     manifest:inspection.prepared?.manifest,
-    nameProof:fieldNameProof});
+    nameProof:fieldNameProof,nativeCreate:birthProof});
   return token;
 }
 function reviewedRecovery(job,steps,observation,review,{allowDispatched=false}={}) {
@@ -180,12 +199,14 @@ async function readNameProof(db,job,observation) {
   finally {client.release();}
 }
 function nameProof(token) {return lanes.get(token)?.nameProof || null;}
+function nativeCreateReference(token) {const proof=lanes.get(token)?.nativeCreate;return proof ? nativeCreate.baselineReference(proof) : null;}
 function isCreateLane(token) {return lanes.get(token)?.mode==='create';}
 async function assertDispatchOnClient(client,token) {
   const proof=lanes.get(token);if(!proof) fail('DISPATCH_REVIEW_REQUIRED');
   // Recheck every lane, including completed sessions and durable CREATE/manual
   // recovery. A terminal receipt is immutable history, not proof of validity.
   const current=await assertOptionalReceipts(client,proof.key);
+  if(proof.nativeCreate) await nativeCreate.assertOnClient(client,proof.nativeCreate);
   if(proof.mode==='reviewed_manual') {
     await require('./first-sync-reviewed-manual').assertOnClient(client,proof.manualProof);
     return;
@@ -202,4 +223,4 @@ async function assertDispatchOnClient(client,token) {
   if(current.fields.some(field=>!acceptable(field)) || proof.manifest.some(scope=>!acceptable(fields.get(fieldKey(scope)) || {})))
     fail('FIELDS_UNRESOLVED');
 }
-module.exports={needsExistingReview,enforce,isCreateLane,nameProof,nameBaselineOnClient,readNameProof,assertDispatchOnClient,reviewedRecovery,recoveryIsReviewed};
+module.exports={needsExistingReview,enforce,isCreateLane,nameProof,nativeCreateReference,nameBaselineOnClient,readNameProof,assertDispatchOnClient,reviewedRecovery,recoveryIsReviewed};
