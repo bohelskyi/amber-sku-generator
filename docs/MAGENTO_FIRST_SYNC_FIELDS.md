@@ -222,6 +222,11 @@ The first-sync routes are:
 
 - `POST /api/admin/magento-integration/first-sync/preview`: exact SKU and published binding revision;
 - `POST /api/admin/magento-integration/first-sync/apply`: the same identity, current preview token, exact target/scope and `keep_local` or `accept_remote`.
+- `POST /api/admin/magento-integration/first-sync/history-apply`: an actual administrator explicitly confirms the scoped history review token offered by a fresh preview for a singleton normal legacy product with only its approved cutover baseline. It records one immutable `first_sync_review_only` audit; it does not import fields, change counters, enqueue work or acknowledge delivery. The administrator must then request a new field preview.
+
+The cutover-only review requires the exact canonical approval, applied batch and linked baseline receipt; the baseline must explicitly say delivery was not proven. Recounts, exclusions, identity changes, snapshots (including parsed unindexed legacy CSV membership), actual external delivery and protected work remain outside this lane. Apply rechecks current publication, administrator authority, local state and the fresh remote observation before its short local transaction.
+
+An admitted session keeps its root audit ID in every immutable progress command. Its latest progress/audit receipt records revision and CSV-retirement counters after legitimate local imports, including when legacy product CSV is disabled. Unrelated counter changes cannot be sealed by another progress command. An incomplete session must keep a valid admission at commit, dispatch and acknowledgement; a new publication requires an explicit fresh review when protected work is clear, preserving terminal field receipts. Completed sessions return to ordinary rules. No field conflict is resolved by history admission.
 
 Both retain authenticated active-user, CSRF and the existing manage/publish/export
 permission checks. Apply additionally requires and revalidates Administrator

@@ -120,6 +120,12 @@ function checkedPreview(data, sku) {
     || item.target !== undefined && (typeof item.target !== 'string' || !identifier.test(item.target)) || item.scope !== undefined && (typeof item.scope !== 'string' || !identifier.test(item.scope)))) throw new Error('Причини обмежень не підтверджено. Повторіть перевірку.');
   return data;
 }
+function checkedHistoryReview(data, sku) {
+  if (!object(data) || data.scope !== 'first_sync_review_only' || data.sku !== sku
+    || !Number.isSafeInteger(data.remoteProductId) || data.remoteProductId < 1 || data.doesNotAcknowledgeExport !== true
+    || typeof data.previewToken !== 'string' || !/^[a-f0-9]{64}$/.test(data.previewToken)) throw new Error('Перевірку історії не підтверджено. Повторіть читання.');
+  return data;
+}
 function checkedReceipt(data, request) {
   const receipt = data?.receipt;
   if (!object(data) || ['sku', 'target', 'scope', 'choice'].some((key) => data[key] !== request[key])
@@ -136,6 +142,8 @@ function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
   const [preview, setPreview] = useState(null);
   const [receipt, setReceipt] = useState(null);
   const [decision, setDecision] = useState(null);
+  const [historyReceipt, setHistoryReceipt] = useState(null);
+  const [historyDecision, setHistoryDecision] = useState(null);
   const [operation, setOperation] = useState(null);
   const [error, setError] = useState(null);
   const [page, setPage] = useState(0);
@@ -146,6 +154,8 @@ function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
   const plan = visible(preview)?.data;
   const saved = visible(receipt)?.data;
   const selected = visible(decision);
+  const selectedHistory = visible(historyDecision);
+  const savedHistory = visible(historyReceipt)?.data;
   const busy = Boolean(visible(operation));
   const currentError = visible(error)?.text;
   const active = () => principalLifetime?.valid !== false;
@@ -153,7 +163,7 @@ function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
     if (flight.current || !active()) return;
     const controller = new AbortController(); flight.current = controller;
     const version = ++sequence.current;
-    setOperation({ actor: principalLifetime, kind }); setError(null); setPreview(null); setReceipt(null); setDecision(null);
+    setOperation({ actor: principalLifetime, kind }); setError(null); setPreview(null); setReceipt(null); setDecision(null); setHistoryDecision(null); setHistoryReceipt(null);
     const current = () => sequence.current === version && !controller.signal.aborted && active();
     try {
       let command = body;
@@ -174,7 +184,24 @@ function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
   }
   function review() {
     setPage(0);
-    request('preview', { sku }, (data, _current, bindingRevisionId) => setPreview({ actor: principalLifetime, bindingRevisionId, data: checkedPreview(data, sku) }));
+    request('preview', { sku }, (data, _current, bindingRevisionId) => {
+      const checked = checkedPreview(data, sku);
+      if (checked.historyReview !== undefined) {
+        if (checked.mode !== 'review' || checked.fields.length || checked.readyForOutbound || checked.complete) throw new Error('Межі перевірки історії не підтверджено. Повторіть читання.');
+        checkedHistoryReview(checked.historyReview, sku);
+      }
+      setPreview({ actor: principalLifetime, bindingRevisionId, data: checked });
+    });
+  }
+  function admitHistory() {
+    if (!selectedHistory || !plan?.historyReview || busy || !active()) return;
+    const body = { sku, bindingRevisionId: visible(preview).bindingRevisionId, previewToken: plan.historyReview.previewToken };
+    request('history-apply', body, (data) => {
+      if (!object(data) || data.sku !== sku || data.scope !== 'first_sync_review_only' || data.doesNotAcknowledgeExport !== true
+        || !object(data.receipt) || typeof data.receipt.auditEventId !== 'string' || !/^[1-9][0-9]{0,18}$/.test(data.receipt.auditEventId)
+        || typeof data.receipt.alreadyApplied !== 'boolean') throw new Error('Допуск до перегляду полів не підтверджено. Повторіть перевірку історії.');
+      setHistoryReceipt({ actor: principalLifetime, data });
+    });
   }
   function apply() {
     if (!selected || !plan || busy || !active()) return;
@@ -190,8 +217,9 @@ function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
   return <section className="card space-y-4 p-5" aria-label={`Перше отримання полів ${sku}`}>
     <div><h2 className="font-semibold">Перше отримання полів</h2><p className="text-sm break-words">Артикул: <strong>{sku}</strong></p></div>
     <p className="text-sm">Перевірка читає актуальні поля за чинними правилами незалежно від збереженої діагностики. Вона не змінює дані й не запускає синхронізацію. Збереження рішення для поля та доставка виконуються окремо.</p>
-    <Button size="compactMd" busy={busy} disabled={!active()} onClick={review}>{busy ? visible(operation)?.kind === 'apply' ? 'Зберігаємо рішення поля…' : 'Читаємо актуальні поля…' : saved ? 'Перевірити поля після рішення' : 'Перевірити актуальні поля'}</Button>
+    <Button size="compactMd" busy={busy} disabled={!active()} onClick={review}>{busy ? visible(operation)?.kind === 'history-apply' ? 'Зберігаємо перевірку історії…' : visible(operation)?.kind === 'apply' ? 'Зберігаємо рішення поля…' : 'Читаємо актуальні поля…' : saved ? 'Перевірити поля після рішення' : 'Перевірити актуальні поля'}</Button>
     {currentError && <Notice tone="error">{currentError}</Notice>}
+    {savedHistory && <Notice tone="success">{savedHistory.receipt.alreadyApplied ? 'Цю перевірку історії вже збережено.' : 'Перевірку історії збережено.'} Тепер повторіть перевірку актуальних полів. Значення полів, історичні лічильники та доставка не змінювалися.</Notice>}
     {saved && <Notice tone="success"><p>{saved.receipt.alreadyApplied ? 'Це рішення вже було збережено.' : 'Рішення для поля збережено.'} {fieldLabel(saved)}</p>
       <p>{saved.choice === 'keep_local' ? 'Значення Amber залишено. Передачу в Magento ще потрібно виконати звичайною захищеною синхронізацією та підтвердити читанням.' : saved.receipt.state === 'name_received' ? 'Назву цією мовою отримано один раз. Подальші зміни обробляються за звичайними правилами назв.' : 'Значення Magento отримано в Amber для цього поля.'}</p>
       <p>Ця квитанція підтверджує локальне рішення. Стан доставки товару не підтверджено.</p>
@@ -200,6 +228,7 @@ function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
     {plan?.mode === 'ordinary' && <Notice tone="info">Одноразове отримання вже завершено або товар має підтверджену передачу. Застосовуються звичайні правила синхронізації та узгодження назв.</Notice>}
     {plan?.mode === 'create' && <Notice tone="info">Товару з цим точним артикулом у Magento немає. Отримувати поля немає звідки; створення виконується окремою звичайною синхронізацією.</Notice>}
     {plan?.mode === 'review' && <Notice tone="warning">Перше отримання недоступне до перевірки наведених причин.</Notice>}
+    {plan?.historyReview && <Notice tone="info"><p>Підтверджено єдиний історичний товар і погоджений початковий baseline. Він не підтверджує фактичну доставку або рівність поточних полів.</p><p>Адміністратор може дозволити окремий перегляд полів для артикула <strong>{sku}</strong> · Magento ID <strong>{plan.historyReview.remoteProductId}</strong>. Кожний конфлікт полів і доставка потребують власної перевірки.</p><Button size="compactMd" disabled={busy} onClick={() => setHistoryDecision({ actor: principalLifetime })}>Переглянути допуск до полів</Button></Notice>}
     {plan?.blockers.length > 0 && <Notice tone="warning"><ul className="space-y-2">{plan.blockers.map((blocker, index) => <li key={index}>{blocker.target && <strong>{fieldLabel({ target: blocker.target, scope: blocker.scope || 'all' })}: </strong>}{reasonText(blocker.code)}</li>)}</ul></Notice>}
     {plan?.mode === 'first' && <div className="space-y-2 text-sm"><p>Під час збереження порожні підтверджені поля заповнюються автоматично за погодженими правилами; назви отримуються один раз окремо для кожної мови. Рішення нижче стосується одного вибраного поля.</p><p>{plan.complete ? 'Одноразове отримання всіх передбачених полів підтверджено.' : 'Одноразове отримання ще не завершене для всіх передбачених полів.'} {plan.readyForOutbound ? 'Попередня перевірка полів дозволяє перейти до окремої перевірки доставки.' : 'Перед доставкою залишаються непідтверджені поля або рішення.'}</p></div>}
     {fields.map((field) => {
@@ -218,6 +247,9 @@ function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
     <ConfirmDialog open={Boolean(selected)} title={selected ? `Підтвердити поле: ${fieldLabel(selected.field)}` : 'Підтвердити поле'} confirmLabel="Зберегти рішення цього поля" busy={busy} onClose={() => setDecision(null)} onConfirm={apply}>
       {selected && <div className="space-y-3"><p className="text-sm">Артикул: <strong>{sku}</strong></p><p>Значення Amber перед рішенням: <strong className="whitespace-pre-wrap break-words">{valueText(selected.field.local)}</strong></p><p>Значення Amber після рішення: <strong className="whitespace-pre-wrap break-words">{valueText(selected.choice === 'accept_remote' ? selected.field.remote : selected.field.local)}</strong></p>
         <p>{selected.choice === 'keep_local' ? 'Дані Amber зберігаються. Це рішення очікуватиме окремої захищеної передачі та підтвердження Magento.' : 'Обране рішення отримує підтверджене значення Magento в Amber для зазначеного поля й мови.'}</p><p className="text-sm">Порожні підтверджені поля та перші назви також обробляються за погодженими правилами отримання. Інші заповнені конфлікти потребують власного рішення.</p></div>}
+    </ConfirmDialog>
+    <ConfirmDialog open={Boolean(selectedHistory)} title="Підтвердити перегляд перших полів" confirmLabel="Дозволити перегляд полів" busy={busy} onClose={() => setHistoryDecision(null)} onConfirm={admitHistory}>
+      <p>Артикул: <strong>{sku}</strong> · Magento ID <strong>{plan?.historyReview?.remoteProductId}</strong>.</p><p>Підтвердження зберігає лише перевірку історії й дозволяє новий перегляд полів за чинними правилами. Воно не отримує значення, не змінює історичні лічильники, не підтверджує експорт і не запускає передачу.</p>
     </ConfirmDialog>
   </section>;
 }

@@ -35,6 +35,7 @@ async function inspect(config, observation, options, {jobId=null,decision=null}=
   } catch(cause) {await client.query('ROLLBACK').catch(()=>{});throw cause;}
   finally {client.release();}
   if (first.mode!=='first') return {first,observation,mode:first.mode,blockers:first.blockers,
+    ...(first.historyReview ? {historyReview:require('./first-sync-cutover-admission').descriptor(first.historyReview,observation)} : {}),
     readyForOutbound:['ordinary','create'].includes(first.mode),complete:first.mode==='ordinary',fields:[]};
   const price=require('./first-sync-price');
   // All network evidence is obtained before local transaction/product locks.
@@ -82,16 +83,21 @@ async function commit(config, inspection, state, options, {jobId=null}={}) {
     // Existing access/binding/lifecycle/product/generation locks and snapshot CAS.
     await require('./sync-job-transaction').revalidate(client,config,state,options);
     if(options.firstSyncDecision) await require('./binding-publication').administrator(client,options.actorUserId);
-    if(first.historyAdmission) await require('./first-sync-history-admission').assertOnClient(client,config,observation,first.historyAdmission);
+    if(first.historyAdmission) await require('./first-sync-history-admission').assertOnClient(client,config,observation,first.historyAdmission,
+      {jobId,reviewedRecovery:inspection.reviewedRecovery===true});
     const fresh=await eligibility.readFirstSyncEligibility(client,config,observation,{jobId,reviewedRecovery:inspection.reviewedRecovery===true});
     if(fresh.mode!=='first'||fresh.evidenceHash!==first.evidenceHash) fail('EVIDENCE_CHANGED');
     const identity=first.progress?.session;
+    const cutover=require('./first-sync-cutover-admission');
+    const admissionRoot=first.progress?.historyAdmissionEventId || cutover.rootId(first.historyAdmission);
     const result=await ledger.recordProgressOnClient(client,{
       key:first.key,identity:{installationKey:observation.amber.revision.installationKey,publicSku:product.public_sku,
         remoteProductId:String(observation.raw.id),contractVersion:'first-sync-v1',
         initialProductId:identity?.initial_product_id || product.id,
         initialBindingRevisionId:identity?.initial_binding_revision_id || observation.amber.revision.id},
       expectedRevision:first.progress?.session.revision || '0',previewHash:inspection.previewToken,
+      ...(admissionRoot ? {historyAdmissionEventId:admissionRoot,
+        captureAdmissionState:tx=>cutover.captureState(tx,product.id)} : {}),
       fields:prepared.rows.map(row=>cleanRecord(row.record)),actorUserId:options.actorUserId,
       requiredScopes:prepared.manifest,complete:prepared.complete,readyForOutbound:prepared.readyForOutbound,
       applyLocal:async(tx,acceptedFields)=>{
@@ -123,6 +129,7 @@ function command(input,applying=false) {
 }
 const response=inspection=>({mode:inspection.mode,sku:inspection.observation.amber.product.public_sku,
   ...(inspection.previewToken?{previewToken:inspection.previewToken}:{}),fields:inspection.fields,
+  ...(inspection.historyReview?{historyReview:inspection.historyReview}:{}),
   blockers:inspection.blockers,coverage:inspection.coverage,
   readyForOutbound:inspection.readyForOutbound,complete:inspection.complete});
 async function review(config,input,options={}) {

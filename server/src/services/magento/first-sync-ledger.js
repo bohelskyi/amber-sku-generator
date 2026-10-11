@@ -60,13 +60,16 @@ function scopeInput(field) {
 function validate(input) {
   // Strip only the explicitly allowed callback before traversing all data.
   plain(input, ['key', 'identity', 'expectedRevision', 'previewHash', 'fields', 'actorUserId'],
-    ['applyLocal', 'complete', 'requiredScopes', 'readyForOutbound']);
+    ['applyLocal', 'captureAdmissionState', 'historyAdmissionEventId', 'complete', 'requiredScopes', 'readyForOutbound']);
   const descriptors = Object.getOwnPropertyDescriptors(input);
   for (const d of Object.values(descriptors)) if (!Object.hasOwn(d, 'value')) fail('INPUT', 422);
   if (input.applyLocal !== undefined && typeof input.applyLocal !== 'function') fail('INPUT', 422);
-  const raw = { ...input }; delete raw.applyLocal;
+  if (input.captureAdmissionState !== undefined && typeof input.captureAdmissionState !== 'function') fail('INPUT', 422);
+  if ((input.historyAdmissionEventId !== undefined) !== (input.captureAdmissionState !== undefined)) fail('INPUT', 422);
+  const raw = { ...input }; delete raw.applyLocal; delete raw.captureAdmissionState;
   data(raw);
   const command = JSON.parse(JSON.stringify(raw)); keyInput(command.key);
+  if (command.historyAdmissionEventId !== undefined) counter(command.historyAdmissionEventId);
   plain(command.identity, ['installationKey', 'publicSku', 'remoteProductId', 'contractVersion', 'initialProductId', 'initialBindingRevisionId']);
   const i = command.identity;
   if (typeof i.installationKey !== 'string' || !/^[a-z][a-z0-9_-]{0,79}$/.test(i.installationKey)
@@ -119,12 +122,18 @@ async function transactionId(client) {
 }
 async function readOnClient(client, key) {
   keyInput(key);
-  const session = (await client.query(`SELECT * FROM magento_first_sync_sessions
-    WHERE origin_hash=$1 AND public_product_identity_id=$2`, [key.originHash, key.publicIdentityId])).rows[0];
+  const session = (await client.query(`SELECT * FROM magento_first_sync_sessions s LEFT JOIN LATERAL (
+    SELECT (SELECT command->>'historyAdmissionEventId' FROM magento_first_sync_progress WHERE session_id=s.id AND revision=1) admission_root,
+      (SELECT CASE WHEN command ? 'historyAdmissionEventId' THEN to_jsonb(p)||jsonb_build_object('audit_event_id',p.audit_event_id::text) END
+        FROM magento_first_sync_progress p WHERE p.session_id=s.id AND p.revision=s.revision) admission_progress
+    ) admission_meta ON true WHERE origin_hash=$1 AND public_product_identity_id=$2`, [key.originHash, key.publicIdentityId])).rows[0];
   if (!session) return null;
+  const historyAdmissionEventId=session.admission_root, admissionProgress=session.admission_progress;
+  delete session.admission_root; delete session.admission_progress;
   const fields = (await client.query(`SELECT DISTINCT ON (target,scope) target,scope,state,evidence,revision,recorded_at
     FROM magento_first_sync_fields WHERE session_id=$1 AND revision<=$2 ORDER BY target,scope,revision DESC`, [session.id, session.revision])).rows;
-  return { session, fields: fields.map(row => ({ ...row.evidence, revision: row.revision, recordedAt: row.recorded_at })) };
+  return { session, historyAdmissionEventId, admissionProgress,
+    fields: fields.map(row => ({ ...row.evidence, revision: row.revision, recordedAt: row.recorded_at })) };
 }
 async function recordProgressOnClient(client, input) {
   const command = validate(input), commandHash = hash(command);
@@ -136,6 +145,7 @@ async function recordProgressOnClient(client, input) {
   if (current) await client.query('SELECT id FROM magento_first_sync_sessions WHERE id=$1 FOR UPDATE', [current.session.id]);
   if (current) {
     const s = current.session, i = command.identity;
+    if ((current.historyAdmissionEventId || undefined) !== command.historyAdmissionEventId) fail('IDENTITY');
     if (s.installation_key !== i.installationKey || s.public_sku !== i.publicSku || s.remote_product_id !== i.remoteProductId
       || s.initial_product_id !== i.initialProductId || s.initial_binding_revision_id !== i.initialBindingRevisionId) fail('IDENTITY');
     const prior = (await client.query('SELECT command_hash,result FROM magento_first_sync_progress WHERE session_id=$1 AND preview_hash=$2',
@@ -182,6 +192,7 @@ async function recordProgressOnClient(client, input) {
     changedFields: changed.map(({ target, scope, state }) => ({ target, scope, state })),
     terminalScopes: [...latest.values()].filter(field => TERMINAL.has(field.state)).map(({ target, scope, state }) => ({ target, scope, state })),
     alreadyApplied: false };
+  if (input.captureAdmissionState) result.historyAdmissionState = data(await input.captureAdmissionState(client));
   const audit = await writeAuditEvent(client, { mutationContext: { actorUserId: command.actorUserId },
     eventKey: 'magento.first_sync_progress_recorded', subjectType: 'magento_first_sync', subjectId: id,
     details: { revision: next, previewHash: command.previewHash, commandHash, result } });

@@ -53,6 +53,7 @@ function classifyFirstSyncEvidence(evidence) {
   // An incomplete field session retains its gate after an outward job succeeds.
   if (evidence.session && !evidence.session.completed_at) {
     if (evidence.protectedWork) return block('FIRST_SYNC_UNFINISHED_WORK');
+    if(evidence.requiresHistoryAdmission && !evidence.historyAdmission) return block('FIRST_SYNC_HISTORY_REVIEW_REQUIRED');
     if (!evidence.history.complete || (!evidence.historyAdmission && (evidence.history.issues.length || evidence.history.identityChanged)))
       return block('FIRST_SYNC_HISTORY_REVIEW_REQUIRED');
     return {mode:'first',blockers:[]};
@@ -113,11 +114,15 @@ async function readFirstSyncEligibility(client, config, observation, {jobId = nu
         AND (NOT $7::boolean OR $5::text IS NULL OR r.active_job_id IS DISTINCT FROM $5::text)) AS protected_work`,
   [ids,origin,product.public_sku,raw?.id ?? null,progress ? jobId : null,product.public_product_identity_id,reviewedRecovery])).rows[0];
   const external=externalDeliveryEvidence(facts.external_delivery_receipts,{originHash:origin,sku:product.public_sku,remote:raw});
-  const admitted=raw && history.complete && (history.issues.length || history.identityChanged || history.hasRecount)
+  let admitted=raw && history.complete && (history.issues.length || history.identityChanged || history.hasRecount)
     && !(progress?.session.completed_at || (facts.previous_delivery && !progress))
     ? await historyAdmission.readOnClient(client,config,observation,{history})
     : {admission:null,evidenceHash:null};
-  const evidence={historyAdmission:historyAdmission.allows(observation,admitted.admission),session:progress?.session,remote:raw,sku:product.public_sku,
+  const cutover=require('./first-sync-cutover-admission');
+  if(raw && history.complete && !progress?.session.completed_at && !admitted.admission
+    && (progress?.historyAdmissionEventId || !progress && facts.historical_evidence))
+    admitted=await cutover.readOnClient(client,config,observation,{history,progress});
+  const evidence={requiresHistoryAdmission:Boolean(progress?.historyAdmissionEventId),historyAdmission:historyAdmission.allows(observation,admitted.admission),session:progress?.session,remote:raw,sku:product.public_sku,
     optionalReceiptBlockers:optionalReceiptAssessment.blockers,
     installationKey:amber.revision.installationKey,history,
     ownershipIssue:require('./native-identity-ownership').issue(amber,raw),
@@ -127,7 +132,12 @@ async function readFirstSyncEligibility(client, config, observation, {jobId = nu
     sameOriginAcknowledged:facts.previous_delivery,externalDelivery:external.externalDelivery,externalDeliveryIssue:external.issue,
     otherOrigin:facts.other_origin,protectedWork:facts.protected_work,
     historicalEvidence:facts.historical_evidence||facts.snapshot_evidence||history.hasRecount};
-  return {...classifyFirstSyncEvidence(evidence),progress,key,
+  const classification=classifyFirstSyncEvidence(evidence);
+  const historyReview=classification.mode==='review' && classification.blockers.length===1
+    && classification.blockers[0].code==='FIRST_SYNC_HISTORY_REVIEW_REQUIRED'
+    ? await cutover.proposal(client,config,observation,{history,progress,facts,evidence}) : null;
+  return {...classification,progress,key,historyReview,
+    admissionGuards:{protectedWork:evidence.protectedWork,otherOrigin:evidence.otherOrigin},
     historyAdmission:admitted.admission,historyAdmissionHash:admitted.evidenceHash,
     evidenceHash:c.hash({history,facts,historyAdmission:admitted.evidenceHash,optionalReceipts:optionalReceiptAssessment.evidence,
       identity:[product.public_product_identity_id,product.public_sku,raw?.id ?? null],
