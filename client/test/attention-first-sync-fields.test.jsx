@@ -43,6 +43,18 @@ it.each([evaluationProblem, nameProblem])('fresh first-sync preview is reachable
   expect(api.get).toHaveBeenCalledTimes(1); expect(api.post).toHaveBeenCalledTimes(1);
 });
 
+it('labels the saved weight diagnosis as historical beside a fresh populated132.3 comparison',async()=>{
+  const sku='SV11500004',observedAt='2026-10-05T22:00:00Z';
+  api.post.mockResolvedValue({data:{...preview(sku),fields:[{...field,target:'decor_weight',local:{known:true,present:true,value:'132.300'},
+    remote:{known:true,present:true,value:'132.3'},status:'equal',reason:'NORMALIZED_VALUES_EQUAL',canAcceptRemote:false,canKeepLocal:false}]}});
+  const saved=vi.fn();render(shell({...product,productId:1488,article:sku,observedAt,problems:[evaluationProblem]},auth,saved));
+  expect(screen.getByText(/Збережена діагностика ·/).textContent).toContain(new Date(observedAt).toLocaleString('uk-UA'));
+  expect(screen.getByText(/Вона описує попередню перевірку/)).toBeTruthy();startReview();
+  await screen.findByText('132.300');expect(screen.getByText('Підтверджені значення збігаються після нормалізації.')).toBeTruthy();
+  expect(screen.getByRole('button',{name:'Отримати значення Magento: Вага вставки · UA / основний магазин'}).disabled).toBe(true);
+  expect(saved).not.toHaveBeenCalled();expect(api.post).toHaveBeenCalledTimes(1);
+});
+
 it.each(permissions.filter((permission) => permission !== 'products.view'))('does not mount without required route permission %s', (missing) => {
   render(shell(product, { ...auth, permissions: permissions.filter((permission) => permission !== missing) }));
   expect(screen.queryByRole('region', { name: /Перше отримання полів/ })).toBeNull();

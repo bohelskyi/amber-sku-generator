@@ -111,8 +111,9 @@ test('explicit cutover-only first-sync admission preserves history and field dec
     async function observation(p, patch = {}) {
       const amber = await previews.readPreviewProduct(db, { productId: p.id, bindingRevisionId: binding.id });
       const raw = { id: patch.id || 1000 + p.id, sku: patch.sku || amber.product.public_sku, attribute_set_id: 8001,
-        name: patch.ua ?? 'Remote UA', price: '42.000',
-        custom_attributes: [{ attribute_code: 'dovzhyna_brasletu_diuimiv', value: patch.size ?? '18' }] };
+        name: patch.ua ?? 'Remote UA', price: patch.price ?? String(amber.product.total_price_uah),
+        custom_attributes: [{ attribute_code: p.category==='SV' ? 'decor_weight' : 'dovzhyna_brasletu_diuimiv',
+          value: p.category==='SV' ? patch.weight ?? '140' : patch.size ?? '18' }] };
       const domainEvidence = patch.unknownEnglish ? { failures: [{ operation: 'storeViews', code: 'STORE_VIEW_READ_UNAVAILABLE' }] }
         : { english: { id: raw.id, sku: raw.sku, fields: { name: patch.en ?? '' } }, failures: [] };
       return { amber, raw, schema, domainEvidence, categoryNodes: [], categoryFailures: [] };
@@ -139,6 +140,10 @@ test('explicit cutover-only first-sync admission preserves history and field dec
     const snapshot = async () => c.hash((await db.query(`SELECT
       (SELECT jsonb_agg(p ORDER BY id) FROM products p) products,
       (SELECT jsonb_agg(f ORDER BY product_id) FROM product_full_export_state f) lifecycle,
+      (SELECT jsonb_agg(r ORDER BY product_id) FROM product_export_revisions r) priceExports,
+      (SELECT jsonb_agg(s ORDER BY id) FROM export_snapshots s) snapshots,
+      (SELECT jsonb_agg(a ORDER BY snapshot_id,group_code,profile_version) FROM magento_export_artifacts a) artifacts,
+      (SELECT jsonb_agg(m ORDER BY snapshot_id,product_id) FROM export_snapshot_products m) memberships,
       (SELECT jsonb_agg(s ORDER BY origin_hash,public_product_identity_id) FROM magento_name_sync_states s) names,
       (SELECT jsonb_agg(s ORDER BY id) FROM magento_first_sync_sessions s) sessions,
       (SELECT jsonb_agg(r ORDER BY session_id,revision) FROM magento_first_sync_progress r) progress,
@@ -152,9 +157,16 @@ test('explicit cutover-only first-sync admission preserves history and field dec
       (SELECT jsonb_agg(a ORDER BY id) FROM audit_events a) audits`)).rows[0]);
 
     const products=[];
-    for(let n=0;n<11;n++) products.push(await product());
+    for(let n=0;n<13;n++) products.push(await product());
+    const svAcceptance=(await insertProductFixture(db,`INSERT INTO products(id,full_sku,category,weight,total_price_uah,details,
+      magento_name_subject_ua,magento_name_subject_en)
+      VALUES(1488,'SV11500004','SV',132.300,2950,'{"answers":{"weight":"132,3"},"manualPriceUah":2950}',
+        'Existing Amber UA','Existing Amber EN') RETURNING id,full_sku,category,public_product_identity_id`)).rows[0];
+    products.push(svAcceptance);
+    await db.query('INSERT INTO product_export_revisions(product_id,has_product_snapshot) SELECT unnest($1::int[]),TRUE',
+      [[products[0].id,products[1].id,products[3].id,products[8].id,products[10].id,products[11].id,products[12].id,svAcceptance.id]]);
     await db.query(`UPDATE product_full_export_state SET evidence='{"origin":"migration_039","coverage":"unresolved_historical"}',
-      delivery_version=delivery_version+1`);
+      business_exclusion_state='none',delivery_version=delivery_version+1`);
     await db.query('UPDATE export_state SET exported_to_product_id=$1',[products.at(-1).id]);
     const cutover=require('../src/services/full-product-cutover.service');
     const maintenance={...options,expectedDatabase:name,deploymentEvidence:'Disposable cutover fixture, no old writer'};
@@ -185,6 +197,8 @@ test('explicit cutover-only first-sync admission preserves history and field dec
     await t.test('preview is read-only and explicit admission only records one scoped immutable audit',async()=>{
       const p=products[0],before=await snapshot(),original=await counter(p);
       const preview=await review(p);assert.equal(preview.mode,'review');assert.ok(preview.historyReview);
+      assert.equal(preview.historyReview.legacySnapshotFlag,true);
+      assert.equal(preview.historyReviewAssessment.code,'FIRST_SYNC_LEGACY_SNAPSHOT_FLAG_REVIEW_AVAILABLE');
       assert.equal(preview.readyForOutbound,false);assert.equal(preview.complete,false);assert.deepEqual(preview.fields,[]);
       assert.equal(await snapshot(),before);
       const {command,result}=await admit(p);assert.equal(result.scope,'first_sync_review_only');assert.equal(result.doesNotAcknowledgeExport,true);
@@ -195,10 +209,34 @@ test('explicit cutover-only first-sync admission preserves history and field dec
       assert.equal(repeat.receipt.auditEventId,result.receipt.auditEventId);assert.equal(repeat.receipt.alreadyApplied,true);assert.equal(await snapshot(),after);
       const fields=await review(p);assert.equal(fields.mode,'first');assert.ok(fields.fields.some(f=>f.status==='conflict'));
       assert.equal(await snapshot(),after);assert.equal(await session(p),undefined);
+      assert.equal((await db.query('SELECT has_product_snapshot FROM product_export_revisions WHERE product_id=$1',[p.id])).rows[0].has_product_snapshot,true);
+    });
+    await t.test('SV11500004 populated comma grams and existing names enter field review only after explicit flag-only admission',async()=>{
+      const p=svAcceptance;
+      await db.query(`INSERT INTO magento_product_sync_requests(public_product_identity_id,product_id,state,reason_code,diagnostics)
+        VALUES($1,$2,'needs_attention','data_or_binding','[{"code":"PRODUCT_EVALUATION_NOT_READY","issueFields":["decor_weight"]}]')`,
+      [p.public_product_identity_id,p.id]);
+      const before=await snapshot(),productBefore=await actual(p),counters=await counter(p);
+      const plan=await review(p);assert.equal(plan.mode,'review');assert.deepEqual(plan.fields,[]);
+      assert.equal(plan.historyReview.legacySnapshotFlag,true);assert.equal(await snapshot(),before);
+      const {result}=await admit(p);assert.equal(result.doesNotAcknowledgeExport,true);
+      const admitted=await snapshot(),fields=await review(p),weight=fields.fields.find(f=>f.target==='decor_weight');
+      assert.equal(fields.mode,'first');assert.equal(weight.local.known,true);assert.equal(weight.local.present,true);
+      assert.equal(weight.local.value,'132.300');assert.equal(weight.remote.value,'140');assert.equal(weight.canAcceptRemote,false);
+      assert.equal(fields.readyForOutbound,false);assert.deepEqual(await actual(p),productBefore);
+      assert.deepEqual(await counter(p),counters);assert.equal(await snapshot(),admitted);assert.equal(await session(p),undefined);
+      assert.equal((await db.query('SELECT has_product_snapshot FROM product_export_revisions WHERE product_id=$1',[p.id])).rows[0].has_product_snapshot,true);
+      assert.equal(productBefore.total_price_uah,'2950.00');assert.equal(productBefore.details.answers.weight,'132,3');
+      assert.equal(productBefore.magento_name_subject_ua,'Existing Amber UA');assert.equal(productBefore.magento_name_subject_en,'Existing Amber EN');
+      assert.equal((await db.query('SELECT count(*)::int n FROM magento_sync_jobs WHERE product_id=$1',[p.id])).rows[0].n,0);
     });
     await t.test('stale local, remote and publication evidence cannot issue admission',async()=>{
       const p=products[1],plan=await review(p),command={...selection(p),previewToken:plan.historyReview.previewToken};
-      const count=await auditCount();remote={...remote,id:90001};
+      const count=await auditCount();
+      await write(tx=>tx.query('UPDATE product_export_revisions SET has_product_snapshot=FALSE WHERE product_id=$1',[p.id]));
+      await assert.rejects(admission.apply(config,command,requestOptions),{code:'MAGENTO_FIRST_SYNC_HISTORY_ADMISSION_CHANGED'});
+      await write(tx=>tx.query('UPDATE product_export_revisions SET has_product_snapshot=TRUE WHERE product_id=$1',[p.id]));
+      remote={...remote,id:90001};
       await assert.rejects(admission.apply(config,command,requestOptions),{code:'MAGENTO_FIRST_SYNC_HISTORY_ADMISSION_CHANGED'});
       remote={size:'18',en:'Remote EN'};
       await write(tx=>tx.query("UPDATE products SET details=jsonb_set(details,'{answers,braclet_size}','\"19\"') WHERE id=$1",[p.id]));
@@ -255,6 +293,23 @@ test('explicit cutover-only first-sync admission preserves history and field dec
       await admit(p);const resumed=await service.inspect(config,await observation(p,{size:'18',en:'Remote EN'}),options);
       assert.equal(resumed.mode,'first');assert.equal(resumed.first.progress.historyAdmissionEventId,root);assert.deepEqual(await scope(p,'name'),previous);
     });
+    await t.test('true indicator proof survives dedicated price-stream revision advancement',async()=>{
+      const p=products[11];await admit(p);
+      await commit(await reviewed(p,{size:'18',en:'Remote EN'}));
+      await write(tx=>tx.query('UPDATE product_export_revisions SET revision=revision+1 WHERE product_id=$1',[p.id]));
+      const price=(await db.query('SELECT * FROM product_export_revisions WHERE product_id=$1',[p.id])).rows[0];
+      assert.equal(price.has_product_snapshot,true);assert.ok(BigInt(price.revision)>0n);
+      const resumed=await service.inspect(config,await observation(p,{size:'18',en:'Remote EN'}),options);
+      assert.equal(resumed.mode,'first');assert.ok(resumed.first.historyAdmission);
+      await write(tx=>admission.assertOnClient(tx,config,resumed.observation,resumed.first.historyAdmission));
+      const receipts=await scope(p,'name');
+      await write(tx=>tx.query('UPDATE product_export_revisions SET has_product_snapshot=FALSE WHERE product_id=$1',[p.id]));
+      const changed=await review(p);assert.equal(changed.mode,'review');assert.equal(changed.historyReview,undefined);
+      assert.equal(changed.historyReviewAssessment.code,'FIRST_SYNC_REVIEW_PROGRESS_CHANGED');
+      assert.deepEqual(await scope(p,'name'),receipts);
+      await assert.rejects(write(tx=>admission.assertOnClient(tx,config,resumed.observation,resumed.first.historyAdmission)),
+        {code:'MAGENTO_FIRST_SYNC_HISTORY_ADMISSION_CHANGED'});
+    });
     await t.test('captured admission rechecks new jobs and media instead of relying on earlier eligibility',async()=>{
       const p=products[8];await admit(p);
       await commit(await reviewed(p,{size:'18',en:'Remote EN'}));
@@ -283,13 +338,31 @@ test('explicit cutover-only first-sync admission preserves history and field dec
       const before=await snapshot();await assert.rejects(write(tx=>require('../src/services/magento/first-sync-ledger').recordProgressOnClient(tx,command)),{code:'FIRST_SYNC_LEDGER_IDENTITY'});
       assert.equal(await snapshot(),before);
     });
-    await t.test('a retained legacy CSV for the exact SKU cannot enter this lane without indexed membership',async()=>{
+    await t.test('a new retained CSV cancels captured admission for the exact SKU without indexed membership',async()=>{
       const p=products[10],id=randomUUID();
+      await admit(p);
+      const captured=await service.inspect(config,await observation(p,{size:'18',en:'Remote EN'}),options);
+      assert.equal(captured.mode,'first');assert.ok(captured.first.historyAdmission);
       await write(tx=>tx.query(`INSERT INTO export_snapshots(id,idempotency_key,from_sku,to_sku,resolved_to_sku,exported_to_product_id,
         row_count,file_name,csv_content,status) VALUES($1,$1,$2,$2,$2,$3,1,'legacy.csv',$4,'generated')`,
       [id,p.full_sku,p.id,`sku,price_uah\r\n${p.full_sku},42\r\n`]));
       assert.equal((await db.query('SELECT count(*)::int n FROM export_snapshot_products WHERE product_id=$1',[p.id])).rows[0].n,0);
       const before=await snapshot(),plan=await review(p);assert.equal(plan.mode,'review');assert.equal(plan.historyReview,undefined);assert.equal(await snapshot(),before);
+      assert.equal(plan.historyReviewAssessment.code,'FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED');
+      assert.equal(plan.historyReviewAssessment.legacySnapshotFlag,true);
+      await assert.rejects(write(tx=>admission.assertOnClient(tx,config,captured.observation,captured.first.historyAdmission)),
+        {code:'MAGENTO_FIRST_SYNC_HISTORY_ADMISSION_CHANGED'});
+      assert.equal(await snapshot(),before);
+    });
+    await t.test('malformed unindexed retained bytes block flag-only admission even with no target membership',async()=>{
+      const p=products[12],id=randomUUID();
+      await write(tx=>tx.query(`INSERT INTO export_snapshots(id,idempotency_key,from_sku,to_sku,resolved_to_sku,exported_to_product_id,
+        row_count,file_name,csv_content,status) VALUES($1,$1,$2,$2,$2,$3,1,'unknown.csv',$4,'generated')`,
+      [id,p.full_sku,p.id,'sku,price_uah\r\n"UNKNOWN,42']));
+      assert.equal((await db.query('SELECT count(*)::int n FROM export_snapshot_products WHERE product_id=$1',[p.id])).rows[0].n,0);
+      const before=await snapshot(),plan=await review(p);assert.equal(plan.mode,'review');assert.equal(plan.historyReview,undefined);
+      assert.equal(plan.historyReviewAssessment.code,'FIRST_SYNC_RETAINED_FILES_UNRESOLVED');
+      assert.equal(plan.historyReviewAssessment.legacySnapshotFlag,true);assert.equal(await snapshot(),before);
     });
     await t.test('a duplicate approval or incomplete canonical chain cannot offer a history admission',async()=>{
       const approval=(await db.query("SELECT * FROM audit_events WHERE event_key='full_product_cutover.approved'")).rows[0];

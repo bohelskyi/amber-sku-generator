@@ -37,6 +37,16 @@ const reasons = {
   FIRST_SYNC_IDENTITY_CHANGED: 'Змінилася підтверджена ідентичність товару. Потрібна нова перевірка.',
   FIRST_SYNC_UNFINISHED_WORK: 'Для товару є незавершена дія. Спочатку узгодьте її результат.',
   FIRST_SYNC_HISTORY_REVIEW_REQUIRED: 'Історія товару потребує окремої перевірки перед першим отриманням.',
+  FIRST_SYNC_CUTOVER_REVIEW_AVAILABLE: 'Погоджений історичний baseline дозволяє окрему адміністративну перевірку перед переглядом полів.',
+  FIRST_SYNC_LEGACY_SNAPSHOT_FLAG_REVIEW_AVAILABLE: 'Збережено історичну позначку експорту. Вона не підтверджує доставку Magento. Погоджений baseline дозволяє окремий адміністративний допуск до перевірки полів.',
+  FIRST_SYNC_RETAINED_FILES_UNRESOLVED: 'Збережені CSV або їхня належність товарам не підтверджені. Потрібна перевірка історичних файлів; допуск до полів поки недоступний.',
+  FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED: 'Цей артикул є у збереженому CSV. Спочатку потрібне окреме узгодження цього файлу; допуск до полів поки недоступний.',
+  FIRST_SYNC_REMOTE_IDENTITY_UNPROVEN: 'Точний артикул і Magento ID не підтверджені свіжим читанням. Повторіть перевірку.',
+  FIRST_SYNC_HISTORY_COMPONENT_UNSUPPORTED: 'Історія містить зміну ідентичності, перерахунок або непідтверджені зв’язки. Для цього товару потрібна окрема процедура узгодження історії.',
+  FIRST_SYNC_CUTOVER_PROVENANCE_UNPROVEN: 'Повний ланцюг погодженого історичного baseline не підтверджено. Передайте причину відповідальному за інтеграцію.',
+  FIRST_SYNC_REVIEW_PROGRESS_CHANGED: 'Попередній допуск або прогрес першого отримання змінився. Повторіть перевірку; збережені рішення не скидаються.',
+  FIRST_SYNC_DELIVERY_HISTORY_CHANGED: 'Є інші свідчення передачі або зміна історичних лічильників. Потрібна окрема перевірка історії доставки.',
+  FIRST_SYNC_LIFECYCLE_REVIEW_REQUIRED: 'Поточний стан, утримання або виключення товару не дозволяє цей допуск. Потрібне окреме узгодження стану товару.',
   FIRST_SYNC_OPTIONAL_EMPTY_RECEIPT_REVIEW_REQUIRED: 'Попередню позначку порожнього поля не можна безпечно зарахувати. Потрібна окрема перевірка.',
   FIRST_SYNC_ORIGIN_REVIEW_REQUIRED: 'Є історія передачі до іншого Magento. Потрібна окрема перевірка.',
   PHOTO_URL_IMPORT_NOT_IMPLEMENTED: 'Отримання фото за URL не підтримується цією дією.',
@@ -106,6 +116,11 @@ function checkedPreview(data, sku) {
     || !Array.isArray(data.fields) || data.fields.length > 500 || !Array.isArray(data.blockers) || data.blockers.length > 1000
     || data.coverage != null && !object(data.coverage)
     || data.mode === 'first' && (typeof data.previewToken !== 'string' || !/^[a-f0-9]{64}$/.test(data.previewToken))) throw new Error('Відповідь перевірки не підтверджує товар і поля. Повторіть перевірку.');
+  const assessment = data.historyReviewAssessment;
+  if (assessment !== undefined && (!object(assessment) || !['available', 'blocked'].includes(assessment.status)
+    || !boundedText(assessment.code) || !identifier.test(assessment.code)
+    || assessment.legacySnapshotFlag !== undefined && typeof assessment.legacySnapshotFlag !== 'boolean'
+    || data.mode !== 'review' || (assessment.status === 'available') !== Boolean(data.historyReview))) throw new Error('Причину допуску до полів не підтверджено. Повторіть читання.');
   const seen = new Set();
   for (const field of data.fields) {
     if (!object(field) || typeof field.target !== 'string' || typeof field.scope !== 'string' || !identifier.test(field.target) || !identifier.test(field.scope)
@@ -123,6 +138,7 @@ function checkedPreview(data, sku) {
 function checkedHistoryReview(data, sku) {
   if (!object(data) || data.scope !== 'first_sync_review_only' || data.sku !== sku
     || !Number.isSafeInteger(data.remoteProductId) || data.remoteProductId < 1 || data.doesNotAcknowledgeExport !== true
+    || data.legacySnapshotFlag !== undefined && data.legacySnapshotFlag !== true
     || typeof data.previewToken !== 'string' || !/^[a-f0-9]{64}$/.test(data.previewToken)) throw new Error('Перевірку історії не підтверджено. Повторіть читання.');
   return data;
 }
@@ -228,6 +244,10 @@ function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
     {plan?.mode === 'ordinary' && <Notice tone="info">Одноразове отримання вже завершено або товар має підтверджену передачу. Застосовуються звичайні правила синхронізації та узгодження назв.</Notice>}
     {plan?.mode === 'create' && <Notice tone="info">Товару з цим точним артикулом у Magento немає. Отримувати поля немає звідки; створення виконується окремою звичайною синхронізацією.</Notice>}
     {plan?.mode === 'review' && <Notice tone="warning">Перше отримання недоступне до перевірки наведених причин.</Notice>}
+    {plan?.historyReviewAssessment && <Notice tone={plan.historyReviewAssessment.status === 'available' ? 'info' : 'warning'}>
+      <p>{reasonText(plan.historyReviewAssessment.code)}</p>
+      {plan.historyReviewAssessment.status === 'blocked' && plan.historyReviewAssessment.legacySnapshotFlag === true && <p>Історичну позначку експорту збережено. Вона не підтверджує доставку й не скасовує перевірку файлів.</p>}
+    </Notice>}
     {plan?.historyReview && <Notice tone="info"><p>Підтверджено єдиний історичний товар і погоджений початковий baseline. Він не підтверджує фактичну доставку або рівність поточних полів.</p><p>Адміністратор може дозволити окремий перегляд полів для артикула <strong>{sku}</strong> · Magento ID <strong>{plan.historyReview.remoteProductId}</strong>. Кожний конфлікт полів і доставка потребують власної перевірки.</p><Button size="compactMd" disabled={busy} onClick={() => setHistoryDecision({ actor: principalLifetime })}>Переглянути допуск до полів</Button></Notice>}
     {plan?.blockers.length > 0 && <Notice tone="warning"><ul className="space-y-2">{plan.blockers.map((blocker, index) => <li key={index}>{blocker.target && <strong>{fieldLabel({ target: blocker.target, scope: blocker.scope || 'all' })}: </strong>}{reasonText(blocker.code)}</li>)}</ul></Notice>}
     {plan?.mode === 'first' && <div className="space-y-2 text-sm"><p>Під час збереження порожні підтверджені поля заповнюються автоматично за погодженими правилами; назви отримуються один раз окремо для кожної мови. Рішення нижче стосується одного вибраного поля.</p><p>{plan.complete ? 'Одноразове отримання всіх передбачених полів підтверджено.' : 'Одноразове отримання ще не завершене для всіх передбачених полів.'} {plan.readyForOutbound ? 'Попередня перевірка полів дозволяє перейти до окремої перевірки доставки.' : 'Перед доставкою залишаються непідтверджені поля або рішення.'}</p></div>}
@@ -250,6 +270,7 @@ function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
     </ConfirmDialog>
     <ConfirmDialog open={Boolean(selectedHistory)} title="Підтвердити перегляд перших полів" confirmLabel="Дозволити перегляд полів" busy={busy} onClose={() => setHistoryDecision(null)} onConfirm={admitHistory}>
       <p>Артикул: <strong>{sku}</strong> · Magento ID <strong>{plan?.historyReview?.remoteProductId}</strong>.</p><p>Підтвердження зберігає лише перевірку історії й дозволяє новий перегляд полів за чинними правилами. Воно не отримує значення, не змінює історичні лічильники, не підтверджує експорт і не запускає передачу.</p>
+      {plan?.historyReview?.legacySnapshotFlag && <p>Історична позначка експорту залишається збереженою. Цей допуск не підтверджує імпорт історичного CSV або рівність заповнених полів.</p>}
     </ConfirmDialog>
   </section>;
 }

@@ -28,6 +28,26 @@ const historyReceipt = () => ({ sku: 'SV1', scope: 'first_sync_review_only', doe
 const openHistory = () => fireEvent.click(screen.getByRole('button', { name: 'Переглянути допуск до полів' }));
 const confirmHistory = () => fireEvent.click(screen.getByRole('button', { name: 'Дозволити перегляд полів' }));
 
+it('explains the legacy flag and confirms only the reviewed field-admission scope', async () => {
+  const data=historyPlan({historyReviewAssessment:{status:'available',code:'FIRST_SYNC_LEGACY_SNAPSHOT_FLAG_REVIEW_AVAILABLE',legacySnapshotFlag:true}});
+  data.historyReview.legacySnapshotFlag=true;api.post.mockResolvedValue({data});render(shell());read();
+  await screen.findByText(/Збережено історичну позначку експорту/);openHistory();
+  expect(within(screen.getByRole('dialog')).getByText(/Історична позначка експорту залишається/)).toBeTruthy();
+  expect(api.post).toHaveBeenCalledTimes(1);expect(screen.queryByRole('button',{name:/Отримати значення Magento:/})).toBeNull();
+});
+it.each(['FIRST_SYNC_RETAINED_FILES_UNRESOLVED','FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED'])('explains retained-file refusal %s without a token or admission action', async code => {
+  api.post.mockResolvedValue({data:plan([],{mode:'review',previewToken:undefined,blockers:[{code:'FIRST_SYNC_HISTORY_REVIEW_REQUIRED'}],
+    historyReviewAssessment:{status:'blocked',code,legacySnapshotFlag:true}})});
+  render(shell());read();await screen.findByText(/допуск до полів поки недоступний/);
+  expect(screen.getByText(/Історичну позначку експорту збережено/)).toBeTruthy();
+  expect(screen.queryByRole('button',{name:'Переглянути допуск до полів'})).toBeNull();expect(api.post).toHaveBeenCalledTimes(1);
+});
+it.each([{status:'available',code:'FIRST_SYNC_CUTOVER_REVIEW_AVAILABLE'},
+  {status:'blocked',code:'FIRST_SYNC_RETAINED_FILES_UNRESOLVED',legacySnapshotFlag:'true'}])('fails closed on an inconsistent assessment #%#',async assessment=>{
+  api.post.mockResolvedValue({data:plan([],{mode:'review',historyReviewAssessment:assessment})});render(shell());read();
+  await screen.findByRole('alert');expect(screen.queryByRole('button',{name:'Переглянути допуск до полів'})).toBeNull();
+});
+
 it('requires explicit scoped history confirmation, records no field decision, and waits for another fresh preview', async () => {
   api.post.mockResolvedValueOnce({ data: historyPlan() }).mockResolvedValueOnce({ data: historyReceipt() }).mockResolvedValueOnce({ data: plan() });
   render(shell()); expect(api.post).not.toHaveBeenCalled(); read(); await screen.findByRole('button', { name: 'Переглянути допуск до полів' });

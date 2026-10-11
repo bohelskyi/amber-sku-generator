@@ -81,6 +81,7 @@ export default function AttentionProblemDetail({ product, productUrl, returnTo, 
 
   return <div className="sync-problem-detail-body">
     {main && <section className="sync-start-task" aria-label="З чого почати">
+      <p className="sync-problem-guidance">Збережена діагностика{product.observedAt ? ` · ${new Date(product.observedAt).toLocaleString('uk-UA')}` : ' · час фіксації не підтверджено'}. Вона описує попередню перевірку; актуальні поля перевіряються окремо.</p>
       <h3>{problemTitle(main)}</h3>
       <p className="sync-problem-guidance">{problemImpact(main)}</p>
       <ProblemFacts problem={main} />
