@@ -133,10 +133,11 @@ async function readFirstSyncEligibility(client, config, observation, {jobId = nu
     otherOrigin:facts.other_origin,protectedWork:facts.protected_work,
     historicalEvidence:facts.historical_evidence||facts.snapshot_evidence||history.hasRecount};
   const classification=classifyFirstSyncEvidence(evidence);
-  const historyReview=classification.mode==='review' && classification.blockers.length===1
+  const reviewAssessment=classification.mode==='review' && classification.blockers.length===1
     && classification.blockers[0].code==='FIRST_SYNC_HISTORY_REVIEW_REQUIRED'
-    ? await cutover.proposal(client,config,observation,{history,progress,facts,evidence}) : null;
-  return {...classification,progress,key,historyReview,
+    ? await cutover.assessProposal(client,config,observation,{history,progress,facts,evidence}) : null;
+  return {...classification,progress,key,historyReview:reviewAssessment?.proposal || null,
+    ...(reviewAssessment ? {historyReviewAssessment:reviewAssessment.assessment} : {}),
     admissionGuards:{protectedWork:evidence.protectedWork,otherOrigin:evidence.otherOrigin},
     historyAdmission:admitted.admission,historyAdmissionHash:admitted.evidenceHash,
     evidenceHash:c.hash({history,facts,historyAdmission:admitted.evidenceHash,optionalReceipts:optionalReceiptAssessment.evidence,

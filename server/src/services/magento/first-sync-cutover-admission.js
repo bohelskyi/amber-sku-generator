@@ -88,41 +88,62 @@ async function baseline(client,i,history) {
   return {row, proof:{manifestHash:contentSha256,entryHash:digest(entry),approvalEventId:String(approvals[0].id),
     batchEventId:String(receipt.id),baselineEventId:row.cutover_baseline_event_id,deliveryVersion:row.delivery_version,evidenceHash:digest(row.evidence)}};
 }
-async function capture(client,observation,history,progress) {
+async function capture(client,observation,history,progress,reject=()=>null) {
   const i=identity(observation);
-  if(!observation.raw || observation.raw.sku!==i.sku || !Number.isSafeInteger(i.remoteId) || i.remoteId<1) return null;
+  if(!observation.raw || observation.raw.sku!==i.sku || !Number.isSafeInteger(i.remoteId) || i.remoteId<1) return reject('FIRST_SYNC_REMOTE_IDENTITY_UNPROVEN');
+  if(!historyShape(history,i)) return reject('FIRST_SYNC_HISTORY_COMPONENT_UNSUPPORTED');
   const base=await baseline(client,i,history);
-  if(!base) return null;
+  if(!base) return reject('FIRST_SYNC_CUTOVER_PROVENANCE_UNPROVEN');
   const {row}=base;
   if(progress) {
     const p=progress.admissionProgress, root=progress.historyAdmissionEventId;
     if(!id(root) || p?.command?.historyAdmissionEventId!==root || p.command_hash!==c.hash(p.command)
       || p.result?.sessionId!==progress.session.id || String(p.result.revision)!==progress.session.revision
-      || !sameIdentity(p.result.historyAdmissionState,stateView(row))) return null;
+      || !sameIdentity(p.result.historyAdmissionState,stateView(row))) return reject('FIRST_SYNC_REVIEW_PROGRESS_CHANGED');
     const audit=(await client.query('SELECT event_key,subject_type,subject_id,details FROM audit_events WHERE id=$1',[p.audit_event_id])).rows[0];
     if(audit?.event_key!=='magento.first_sync_progress_recorded' || audit.subject_type!=='magento_first_sync'
       || audit.subject_id!==progress.session.id || audit.details?.commandHash!==p.command_hash
-      || !sameIdentity(audit.details.result,p.result)) return null;
-  } else if(row.csv_retired_revision!=='0' || row.externally_delivered_revision!=='0') return null;
+      || !sameIdentity(audit.details.result,p.result)) return reject('FIRST_SYNC_REVIEW_PROGRESS_CHANGED');
+  } else if(row.csv_retired_revision!=='0' || row.externally_delivered_revision!=='0') return reject('FIRST_SYNC_DELIVERY_HISTORY_CHANGED');
   const input=await repair.readRepairInput(client), retained=buildHistoricalIndex(input);
+  const legacySnapshotFlag=input.revisions.some(r=>Number(r.product_id)===i.productId && r.has_product_snapshot===true);
+  // Unknown bytes/membership can hide this SKU. Never infer absence from an
+  // empty indexed-membership query, nor waive corrupt/unindexed retained files.
+  if(retained.diagnostics.length) return reject('FIRST_SYNC_RETAINED_FILES_UNRESOLVED',{legacySnapshotFlag});
   if(input.members.some(m=>Number(m.product_id)===i.productId)
     || retained.snapshots.some(s=>s.memberIds.includes(i.productId))
-    || retained.proposed.some(m=>Number(m.product_id)===i.productId)
-    || input.revisions.some(r=>Number(r.product_id)===i.productId && r.has_product_snapshot)) return null;
+    || retained.proposed.some(m=>Number(m.product_id)===i.productId)) return reject('FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED',{legacySnapshotFlag});
+  // Migration 032 can set this flag from cursor/ranges alone. Canonical cutover
+  // accepts these historical indicators; they are not delivery receipts. Seal
+  // true only: old flag-false receipts keep their exact v1 proof and price-stream
+  // counters may still legitimately advance during first-sync price adoption.
   return {format:FORMAT,scope:SCOPE,doesNotAcknowledgeExport:true,identity:i,baseline:base.proof,reviewState:stateView(row),
+    ...(legacySnapshotFlag ? {legacySnapshotFlag:true} : {}),
     historyHash:c.hash(history), retainedHash:c.hash({snapshots:retained.snapshots.map(s=>({id:s.snapshotId,fingerprint:s.beforeFingerprint})),
-      diagnostics:retained.diagnostics,events:input.events,cursor:input.state}),
+      diagnostics:retained.diagnostics,events:input.events,cursor:input.state,...(legacySnapshotFlag ? {legacySnapshotFlag:true} : {})}),
     rootAdmissionEventId:progress?.historyAdmissionEventId || null};
 }
-async function proposal(client,config,observation,{history,progress,facts,evidence}) {
-  if(evidence.ownershipIssue || evidence.lifecycleBlockers.length || facts.protected_work || facts.other_origin
-    || (!progress && (facts.previous_delivery || facts.acknowledged_remote_id || facts.external_delivery_receipts.length))
-    || progress?.session.completed_at || progress && !progress.historyAdmissionEventId) return null;
-  const envelope=await capture(client,observation,history,progress);
-  if(!envelope || envelope.identity.originHash!==c.originHash(config.baseUrl)) return null;
+async function assessProposal(client,config,observation,{history,progress,facts,evidence}) {
+  let assessment;
+  const reject=(code,details={})=>{assessment={status:'blocked',code,...details};return null;};
+  const denied=code=>{reject(code);return {proposal:null,assessment};};
+  if(evidence.ownershipIssue) return denied('FIRST_SYNC_IDENTITY_CHANGED');
+  if(evidence.lifecycleBlockers.length) return denied('FIRST_SYNC_LIFECYCLE_REVIEW_REQUIRED');
+  if(facts.protected_work) return denied('FIRST_SYNC_UNFINISHED_WORK');
+  if(facts.other_origin) return denied('FIRST_SYNC_ORIGIN_REVIEW_REQUIRED');
+  if(!progress && (facts.previous_delivery || facts.acknowledged_remote_id || facts.external_delivery_receipts.length))
+    return denied('FIRST_SYNC_DELIVERY_HISTORY_CHANGED');
+  if(progress?.session.completed_at || progress && !progress.historyAdmissionEventId) return denied('FIRST_SYNC_REVIEW_PROGRESS_CHANGED');
+  const envelope=await capture(client,observation,history,progress,reject);
+  if(!envelope) return {proposal:null,assessment};
+  if(envelope.identity.originHash!==c.originHash(config.baseUrl)) return denied('FIRST_SYNC_ORIGIN_REVIEW_REQUIRED');
   // A renewal cannot replace the immutable original provenance or remote identity.
-  if(progress && !await rootMatches(client,progress.historyAdmissionEventId,envelope)) return null;
-  return envelope;
+  if(progress && !await rootMatches(client,progress.historyAdmissionEventId,envelope)) return denied('FIRST_SYNC_REVIEW_PROGRESS_CHANGED');
+  return {proposal:envelope,assessment:{status:'available',legacySnapshotFlag:envelope.legacySnapshotFlag===true,
+    code:envelope.legacySnapshotFlag ? 'FIRST_SYNC_LEGACY_SNAPSHOT_FLAG_REVIEW_AVAILABLE' : 'FIRST_SYNC_CUTOVER_REVIEW_AVAILABLE'}};
+}
+async function proposal(client,config,observation,options) {
+  return (await assessProposal(client,config,observation,options)).proposal;
 }
 async function rootMatches(client,root,envelope) {
   const event=(await client.query('SELECT event_key,subject_type,details FROM audit_events WHERE id=$1',[root])).rows[0];
@@ -164,6 +185,7 @@ async function assertOnClient(client,config,observation,admission,{jobId=null,re
 }
 function descriptor(envelope,observation) {
   return {scope:SCOPE,sku:envelope.identity.sku,remoteProductId:envelope.identity.remoteId,doesNotAcknowledgeExport:true,
+    ...(envelope.legacySnapshotFlag ? {legacySnapshotFlag:true} : {}),
     previewToken:c.hash({envelope,local:c.hash(observation.amber.product),binding:c.hash(observation.amber.revision),
       remote:c.hash({raw:observation.raw,domainEvidence:observation.domainEvidence})})};
 }
@@ -200,4 +222,4 @@ async function apply(config,input,options={}) {
     finally{await gate.release(client).catch(()=>{});client.release();}
   });
 }
-module.exports={proposal,readOnClient,allows,assertOnClient,rootId,captureState,descriptor,apply};
+module.exports={proposal,assessProposal,readOnClient,allows,assertOnClient,rootId,captureState,descriptor,apply};

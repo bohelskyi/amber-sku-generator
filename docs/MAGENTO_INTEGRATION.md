@@ -2346,3 +2346,37 @@ Creation remains limited to an exact category requirement in a reviewed immutabl
 Verified remote-only TEST cleanup is matched to actual enabled binding rows by exact Magento origin, attribute code and frozen attribute ID, and to an exact option ID for option cleanup. Unused frozen schema remains historical evidence. Referencing drafts are marked historical and publication is blocked server-side at preview and final apply context, even if an old successful preview is displayed. Their history and immutable versions remain readable; prepare a fresh draft from the current publication. No broad category/set/pricing block is introduced.
 
 The minimal safe per-category/language workflow is a fresh draft based on the current publication, an isolated category/row change with `assertCategoryScope` protecting other rows, categories and transitive fields, followed by the existing complete global validation and atomic publication. Independent publication of one category or language requires a different version and shared-reference model; it is not implemented by weakening full-publication invariants. No global publication or remote category creation was performed for this follow-up.
+
+## Reviewed first-sync admission for canonical cutover inventory
+
+The Attention product detail exposes **Перше отримання полів** to an active
+Administrator with the existing integration permissions, independently of saved
+problem codes. Each explicit preview resolves `currentPublishedId` from the
+integration overview, then calls `first-sync/preview`. It reads current Magento
+fields without adoption, enqueue, audit or remote mutation. Saved problem text
+and its observation date are labelled as a previous diagnosis.
+
+For a singleton legacy product with the complete immutable canonical
+`legacy_baseline` approval and batch receipts, `has_product_snapshot=true` is a
+historical exposure indicator. Migration 032 can establish it from a cursor or
+range; it is not a Magento delivery receipt. It can be explicitly reviewed for
+field admission. Indexed membership, parsed retained CSV membership, proposed
+membership or any unresolved retained-index diagnostics block this lane. Empty
+indexed membership alone never establishes absence from historical files.
+
+Preview explains whether admission is available or the specific reason it was
+refused. **Переглянути допуск до полів → Дозволити перегляд полів** records one
+scoped administrative audit after fresh identity/publication/proof revalidation.
+It preserves the historical flag, all fields and delivery counters, creates no
+job and acknowledges no export. The true flag is sealed into retained evidence;
+changes invalidate the review and original session proof. Existing flag-false
+v1 proofs retain their exact representation. Dedicated price-stream counters are
+separate from full-product delivery evidence.
+
+After admission, obtain another fresh field preview. Filled physical weight
+remains filled; a different Magento value does not become an automatic import.
+Keep or receive each eligible conflict under the existing field policy. A
+`keep_local` price decision remains pending until the separately guarded job
+delivers it and fresh readback verifies it. First-name authority remains once per
+language. This repository path and disposable tests do not establish live
+production acceptance or resolve unknown retained-file history.

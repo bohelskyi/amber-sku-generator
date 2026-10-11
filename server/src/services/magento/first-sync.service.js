@@ -36,6 +36,7 @@ async function inspect(config, observation, options, {jobId=null,decision=null}=
   finally {client.release();}
   if (first.mode!=='first') return {first,observation,mode:first.mode,blockers:first.blockers,
     ...(first.historyReview ? {historyReview:require('./first-sync-cutover-admission').descriptor(first.historyReview,observation)} : {}),
+    ...(first.historyReviewAssessment ? {historyReviewAssessment:first.historyReviewAssessment} : {}),
     readyForOutbound:['ordinary','create'].includes(first.mode),complete:first.mode==='ordinary',fields:[]};
   const price=require('./first-sync-price');
   // All network evidence is obtained before local transaction/product locks.
@@ -130,6 +131,7 @@ function command(input,applying=false) {
 const response=inspection=>({mode:inspection.mode,sku:inspection.observation.amber.product.public_sku,
   ...(inspection.previewToken?{previewToken:inspection.previewToken}:{}),fields:inspection.fields,
   ...(inspection.historyReview?{historyReview:inspection.historyReview}:{}),
+  ...(inspection.historyReviewAssessment?{historyReviewAssessment:inspection.historyReviewAssessment}:{}),
   blockers:inspection.blockers,coverage:inspection.coverage,
   readyForOutbound:inspection.readyForOutbound,complete:inspection.complete});
 async function review(config,input,options={}) {
