@@ -94,4 +94,8 @@ for(const [path,operation] of [['preview','review'],['apply','apply']]) {
 }
 router.post(`${root}/first-sync/history-apply`,requirePermission('export_templates.manage'),requirePermission('export_templates.publish'),requirePermission('exports.view'),
   handle(req=>require('../../services/magento/first-sync-cutover-admission').apply(config,req.body,{mutationContext:getRequestMutationContext(req)})));
+for(const [path,operation] of [['preview','review'],['apply','apply']]) {
+  router.post(`${root}/first-sync/legacy-inputs/${path}`,requirePermission('export_templates.manage'),requirePermission('export_templates.publish'),requirePermission('exports.view'),requirePermission('products.recount'),
+    handle(req=>require('../../services/magento/first-sync-legacy-completion')[operation](config,req.body,{mutationContext:getRequestMutationContext(req)})));
+}
 module.exports = router;

@@ -38,10 +38,11 @@ test('actual schema6 first-sync size adoption uses the published conditional rou
     binding=await bindings.getRevision(binding.id,options);
     const config={baseUrl:'https://schema6.invalid'},previews=require('../src/services/magento/sync-preview-db'),project=require('../src/services/magento/first-sync-projection').projectFirstSyncFields;
     const helper=require('../src/services/magento/first-sync-local-apply'),ledger=require('../src/services/magento/first-sync-ledger'),gate=require('../src/services/full-product-cutover-gate'),c=require('../src/services/magento/binding-contract');
-    async function copy(id,missingWeightVariant=false){const x=fixture.product(id);
+    async function copy(id,missingWeightVariant=false,variant=null){const x=fixture.product(id);
       if(missingWeightVariant){x.weight=null;delete x.details.answers.weight;}
-      return (await require('./product-fixture').insertProductFixture(db,`INSERT INTO products(id,full_sku,base_sku,sequence_number,category,weight,sku_schema_version_id,total_price,total_price_uah,price_per_gram,uah_rate,details,legacy_uah_price_unset)
-      VALUES($1,$2,$3,$4,'SV',$5,6,$6,$7,$8,$9,$10::jsonb,$11) RETURNING *`,[x.id,x.full_sku,x.base_sku,x.sequence_number,x.weight,x.total_price,x.total_price_uah,x.price_per_gram,x.uah_rate,JSON.stringify(x.details),x.legacy_uah_price_unset])).rows[0];}
+      if(variant!==null){x.id+=100000*variant;x.full_sku+='-'+String(variant).padStart(3,'0');}
+      return (await require('./product-fixture').insertProductFixture(db,`INSERT INTO products(id,full_sku,base_sku,sequence_number,category,weight,sku_schema_version_id,total_price,total_price_uah,price_per_gram,uah_rate,details,legacy_uah_price_unset,created_at)
+      VALUES($1,$2,$3,$4,'SV',$5,6,$6,$7,$8,$9,$10::jsonb,$11,$12) RETURNING *`,[x.id,x.full_sku,x.base_sku,x.sequence_number,x.weight,x.total_price,x.total_price_uah,x.price_per_gram,x.uah_rate,JSON.stringify(x.details),x.legacy_uah_price_unset,variant===null?new Date().toISOString():'2000-01-01T00:00:00Z'])).rows[0];}
     const actual=async id=>(await db.query('SELECT * FROM products WHERE id=$1',[id])).rows[0];
     const rateObservation=await require('../src/services/currency.service').observeUsdRate({databasePool:db,fetchLive:async()=>({rate:40,rateDate:new Date().toLocaleDateString('en-CA',{timeZone:'Europe/Kyiv'}),fetchedAt:new Date().toISOString()})});
     async function prepare(x,value='12/5/3',targetField='rozmir_suveniriv'){
@@ -58,7 +59,8 @@ test('actual schema6 first-sync size adoption uses the published conditional rou
       return {...args,decision,validation,expectedCanonicalHash:validation.canonicalHash};
     }
     async function record(x,args,interrupt=false){const tx=await db.connect();try{await gate.begin(tx,'BEGIN');await tx.query('SELECT id FROM products WHERE id=$1 FOR UPDATE',[x.id]);
-      const result=await ledger.recordProgressOnClient(tx,{key:{originHash:binding.originHash,publicIdentityId:String(x.public_product_identity_id)},identity:{installationKey:binding.installationKey,publicSku:args.observation.raw.sku,remoteProductId:String(args.observation.raw.id),contractVersion:'first-sync-v1',initialProductId:x.id,initialBindingRevisionId:binding.id},expectedRevision:'0',previewHash:c.hash({id:x.id}),fields:args.acceptedFields,actorUserId:actor,complete:false,readyForOutbound:false,
+      const revision=args.observation.amber.revision;
+      const result=await ledger.recordProgressOnClient(tx,{key:{originHash:revision.originHash,publicIdentityId:String(x.public_product_identity_id)},identity:{installationKey:revision.installationKey,publicSku:args.observation.raw.sku,remoteProductId:String(args.observation.raw.id),contractVersion:'first-sync-v1',initialProductId:x.id,initialBindingRevisionId:revision.id},expectedRevision:'0',previewHash:c.hash({id:x.id}),fields:args.acceptedFields,actorUserId:actor,complete:false,readyForOutbound:false,
         applyLocal:async(client,acceptedFields)=>{await helper.applyFirstSyncLocal(client,{...args,acceptedFields});if(interrupt)throw new Error('fixture interrupt before commit');}});await gate.commit(tx);return result;
     }catch(e){await gate.rollback(tx);throw e;}finally{await gate.release(tx);tx.release();}}
     const inactiveTargets=['fraction','kamin_obrobka','kamin_suvenirnyi'];
@@ -226,6 +228,139 @@ test('actual schema6 first-sync size adoption uses the published conditional rou
       const blocked=await firstSync.inspect(conditionalConfig,await matchingObservation(await actual(x.id)),conditionalOptions);
       assert.equal(blocked.mode,'review');assert.ok(blocked.blockers.some(b=>b.code==='FIRST_SYNC_HISTORY_REVIEW_REQUIRED'));
       assert.deepEqual(await durableSnapshot(),historical);
+    });
+    await t.test('optional-size successor imports old souvenir-first size atomically, replays once and rejects a concurrently changed branch',async sizeTest=>{
+      // Controlled successor AST on the copied published shapes. This is an
+      // isolated fixture publication, not a claim about the live binding hash.
+      const definition=structuredClone(p.definition),size=definition.bindings.find(b=>b.id==='SV.rozmir_suveniriv');
+      size.value={op:'when',if:{op:'eq',left:{op:'semanticKey',input:{op:'source',id:'SV.souvenir'}},right:{op:'literal',value:'6'}},
+        then:{op:'text',input:{op:'source',id:'SV.size'},trim:true,format:'scalar-v1',onAbsent:'empty'},else:size.value};
+      const compiledSize=require('../src/services/export-templates/definition').compileDefinition(definition),sizeVersion=randomUUID();
+      const sizeRequirements=require('../src/services/magento/binding-validation').requirements(compiledSize.definition,p.schema);
+      const sizeBindings={...p.bindings,options:p.bindings.options.map(option=>{
+        if(option.sourceKind==='semantic')return option;
+        const matches=sizeRequirements.flatMap(plan=>plan.attributes).filter(attribute=>attribute.bindingKey===option.bindingKey);
+        assert.equal(matches.length,1);return {...option,domainKey:matches[0].domainKey};
+      })};
+      await db.query(`INSERT INTO export_template_versions(id,template_id,version_number,source_draft_revision,definition,definition_hash,format_version,evaluator_version,output_contract,published_by_user_id)
+        VALUES($1,$2,3,2,$3::jsonb,$4,$5,$6,$7,$8)`,[sizeVersion,family.id,JSON.stringify(compiledSize.definition),compiledSize.hash,compiledSize.definition.formatVersion,compiledSize.definition.evaluatorVersion,compiledSize.definition.outputContract,actor]);
+      let sizeBinding=await bindings.createDraft({installationKey:binding.installationKey+'-size',origin:config.baseUrl,templateVersionId:sizeVersion,observedAt:'2026-10-11T00:00:00Z',schema:p.schema},options);
+      sizeBinding=await bindings.updateDraft(sizeBinding.id,{expectedRevision:sizeBinding.revision,bindings:sizeBindings},options);
+      await db.query("UPDATE magento_binding_revisions SET state='published',revision=revision+1,version_number=3,published_by_user_id=$2,published_at=CURRENT_TIMESTAMP WHERE id=$1",[sizeBinding.id,actor]);
+      sizeBinding=await bindings.getRevision(sizeBinding.id,options);
+      async function sizeArgs(x){
+        const amber=await previews.readPreviewProduct(db,{productId:x.id,bindingRevisionId:sizeBinding.id});
+        const raw={id:10000+x.id,sku:amber.product.public_sku,attribute_set_id:151,name:'Fixture UA',price:x.total_price_uah,
+          custom_attributes:[{attribute_code:'rozmir_suveniriv',value:'9.5/3.5'}]};
+        const observation={amber,raw,schema:sizeBinding.schema,domainEvidence:{english:{id:raw.id,sku:raw.sku,fields:{name:'Fixture EN'}},failures:[]}};
+        const projection=project({observation,currencyEvidence:{verified:true,currency:'UAH'}});
+        const meta=projection.projection.find(m=>m.target==='rozmir_suveniriv'&&m.scope==='all'),field=projection.fields.find(f=>f.target===meta.target&&f.scope==='all');
+        const decision=projection.plan.fields.find(f=>f.target===meta.target&&f.scope==='all');
+        assert.equal(meta.persistence,'information');assert.equal(decision.status,'imported');
+        assert.equal(projection.readyForOutbound,false,'Missing processing remains blocked');
+        const acceptedFields=[{target:meta.target,scope:'all',state:'imported',before:field.local,remote:field.remote,
+          after:decision.importValue,source:{...meta.source,productId:x.id},mappingHash:meta.mappingHash}];
+        return {config,observation,projection,acceptedFields,actorUserId:actor,rateObservation};
+      }
+      const x=await copy(1359,false,1),before=await actual(x.id),args=await sizeArgs(x);
+      const previewBefore=await durableSnapshot(),preview=await helper.prepareFirstSyncLocal(db,args);
+      assert.deepEqual(preview.blockedFields,[]);assert.deepEqual(await durableSnapshot(),previewBefore);
+      await assert.rejects(record(x,args,true),/fixture interrupt/);assert.deepEqual(await durableSnapshot(),previewBefore);
+      await record(x,args);const expected=structuredClone(before);expected.details.answers.size='9.5/3.5';
+      assert.deepEqual(await actual(x.id),expected);assert.equal(expected.details.answers.stone_processing,undefined);
+      const committed=await durableSnapshot();assert.equal((await record(x,args)).alreadyApplied,true);assert.deepEqual(await durableSnapshot(),committed);
+      const state=(await db.query('SELECT * FROM product_full_export_state WHERE product_id=$1',[x.id])).rows[0];
+      assert.equal(state.revision,'2');assert.equal(state.confirmed_revision,'0');assert.equal(state.cutover_baseline_revision,'0');
+      assert.equal((await db.query('SELECT count(*)::int n FROM magento_sync_jobs WHERE product_id=$1',[x.id])).rows[0].n,0);
+      assert.equal((await db.query('SELECT count(*)::int n FROM magento_first_sync_fields f JOIN magento_first_sync_sessions s ON s.id=f.session_id WHERE s.public_product_identity_id=$1',[x.public_product_identity_id])).rows[0].n,1);
+      const raced=await copy(1359,false,2),raceArgs=await sizeArgs(raced),writer=await db.connect();
+      let attempt;
+      try{
+        await writer.query('BEGIN');await writer.query('SELECT id FROM products WHERE id=$1 FOR UPDATE',[raced.id]);
+        await writer.query("UPDATE products SET details=jsonb_set(details,'{answers,souvenir}','6'::jsonb) WHERE id=$1",[raced.id]);
+        attempt=record(raced,raceArgs);const rejected=assert.rejects(attempt,/SOURCE_CHANGED/);
+        let waiting=false;
+        for(let i=0;i<100&&!waiting;i++){
+          waiting=(await db.query("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE 'SELECT id FROM products WHERE id=%FOR UPDATE') waiting")).rows[0].waiting;
+          if(!waiting)await new Promise(resolve=>setTimeout(resolve,10));
+        }
+        assert.equal(waiting,true,'Independent adoption connection must actually wait for product lock');
+        await writer.query('COMMIT');await rejected;
+        const final=await actual(raced.id);assert.equal(final.details.answers.souvenir,6);assert.equal(final.details.answers.size,undefined);
+        assert.equal((await db.query('SELECT count(*)::int n FROM magento_first_sync_sessions WHERE public_product_identity_id=$1',[raced.public_product_identity_id])).rows[0].n,0);
+        assert.equal((await db.query("SELECT count(*)::int n FROM audit_events WHERE event_key='product_information.updated' AND subject_id=$1",[String(raced.id)])).rows[0].n,0);
+      }finally{await writer.query('ROLLBACK');writer.release();if(attempt)await attempt.catch(()=>{});}
+      await sizeTest.test('explicit Administrator completion preserves facts and names, records no received processing, and replays exactly once',async()=>{
+        const completion=require('../src/services/magento/first-sync-legacy-completion'),candidate=await copy(1359,false,3);
+        await db.query("UPDATE product_full_export_state SET business_exclusion_state='none',delivery_version=delivery_version+1 WHERE product_id=$1",[candidate.id]);
+        await db.query("UPDATE products SET weight=46.3,magento_name_subject_ua='Тестовий камінь',magento_name_subject_en='Test stone' WHERE id=$1",[candidate.id]);
+        const initial=await previews.readPreviewProduct(db,{productId:candidate.id,bindingRevisionId:sizeBinding.id});
+        const generated=require('../src/services/magento/binding-evidence-products').evaluate(initial,initial.product).generatedNames;
+        await db.query('UPDATE products SET magento_name_override=$2::jsonb WHERE id=$1',[candidate.id,JSON.stringify({generated,values:{all:'Accepted UA',en:'Accepted EN'}})]);
+        let remoteSize='9.5/3.5',remoteProcessing='',selectedId=candidate.id;
+        const runtime={...conditionalOptions,preview:async(_config,input)=>{
+          const amber=await previews.readPreviewProduct(db,{productId:selectedId,bindingRevisionId:sizeBinding.id});
+          const raw={id:900000+selectedId,sku:amber.product.public_sku,attribute_set_id:151,name:'Remote UA',price:'88000',
+            custom_attributes:[{attribute_code:'rozmir_suveniriv',value:remoteSize},{attribute_code:'kamin_obrobka',value:remoteProcessing}]};
+          input.onObservation({amber,raw,schema:sizeBinding.schema,domainEvidence:{english:{id:raw.id,sku:raw.sku,fields:{name:'Remote EN'}},failures:[]}});return {};
+        }};
+        const input={sku:candidate.full_sku,bindingRevisionId:sizeBinding.id,processingValueId:'1',
+          attestation:'processing_not_encoded_in_historical_sku',reason:'Explicit fixture polished stone; historical article does not encode processing'};
+        const schemaDate=(await db.query('SELECT created_at FROM sku_schema_versions WHERE id=6')).rows[0].created_at;
+        for(const born of [null,schemaDate,'2099-01-01T00:00:00Z']){
+          await db.query('UPDATE products SET created_at=$2 WHERE id=$1',[candidate.id,born]);const invalid=await durableSnapshot();
+          await assert.rejects(completion.review(conditionalConfig,input,runtime),{code:'MAGENTO_LEGACY_INPUT_BOOTSTRAP_PROVENANCE_REQUIRED'});
+          assert.deepEqual(await durableSnapshot(),invalid);
+        }
+        await db.query("UPDATE products SET created_at='2000-01-01T00:00:00Z' WHERE id=$1",[candidate.id]);
+        for(const filled of [0,'0',1,false]){
+          await db.query("UPDATE products SET details=jsonb_set(details,'{answers,stone_processing}',$2::jsonb) WHERE id=$1",[candidate.id,JSON.stringify(filled)]);
+          const invalid=await durableSnapshot();await assert.rejects(completion.review(conditionalConfig,input,runtime),{code:'MAGENTO_LEGACY_INPUT_MISSING_ONLY'});
+          assert.deepEqual(await durableSnapshot(),invalid);
+        }
+        await db.query("UPDATE products SET details=details #- '{answers,stone_processing}' WHERE id=$1",[candidate.id]);
+        const modern=await copy(2198,false,4);await db.query("UPDATE products SET details=details #- '{answers,stone_processing}' WHERE id=$1",[modern.id]);
+        selectedId=modern.id;const encoded=await durableSnapshot();
+        await assert.rejects(completion.review(conditionalConfig,{...input,sku:modern.full_sku},runtime),{code:'MAGENTO_LEGACY_INPUT_ENCODED_CHARACTERISTIC_REQUIRES_CORRECTION'});
+        assert.deepEqual(await durableSnapshot(),encoded);selectedId=candidate.id;
+        const other=Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Other completion fixture administrator') RETURNING id")).rows[0].id);
+        await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'",[other]);
+        const beforeRow=await actual(candidate.id),before=await durableSnapshot(),review=await completion.review(conditionalConfig,input,runtime);
+        assert.deepEqual(await durableSnapshot(),before,'Preview is local/remote read-only');
+        assert.equal(review.proofKind,'administrator_attested_historical_characteristic');assert.equal(review.processing.remoteOptionId,'6039');
+        const command={...input,previewToken:review.previewToken};remoteSize='10/4';
+        await assert.rejects(completion.apply(conditionalConfig,command,runtime),{code:'MAGENTO_LEGACY_INPUT_PREVIEW_STALE'});
+        assert.deepEqual(await durableSnapshot(),before);remoteSize='9.5/3.5';
+        remoteProcessing='6040';await assert.rejects(completion.apply(conditionalConfig,command,runtime),{code:'MAGENTO_LEGACY_INPUT_REMOTE_PROCESSING_DIFFERS'});
+        assert.deepEqual(await durableSnapshot(),before);remoteProcessing='';
+        await assert.rejects(completion.apply(conditionalConfig,command,{...runtime,actorUserId:other,mutationContext:{actorUserId:other}}),{code:'MAGENTO_LEGACY_INPUT_PREVIEW_STALE'});
+        assert.deepEqual(await durableSnapshot(),before);
+        await db.query("UPDATE application_users SET status='disabled' WHERE id=$1",[actor]);
+        await assert.rejects(completion.apply(conditionalConfig,command,{...runtime,preview:()=>assert.fail('Revoked authority cannot read Magento')}),{statusCode:403});
+        assert.deepEqual(await durableSnapshot(),before);await db.query("UPDATE application_users SET status='active' WHERE id=$1",[actor]);
+        await db.query(`CREATE FUNCTION legacy_completion_abort_fixture() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN IF NEW.event_key='product.magento_legacy_inputs_completed' THEN RAISE EXCEPTION 'fixture completion interrupt'; END IF; RETURN NEW; END; $$`);
+        await db.query('CREATE TRIGGER legacy_completion_abort_fixture BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION legacy_completion_abort_fixture()');
+        try{await assert.rejects(completion.apply(conditionalConfig,command,runtime),/fixture completion interrupt/);assert.deepEqual(await durableSnapshot(),before);}
+        finally{await db.query('DROP TRIGGER legacy_completion_abort_fixture ON audit_events');await db.query('DROP FUNCTION legacy_completion_abort_fixture()');}
+        const concurrent=await Promise.all([completion.apply(conditionalConfig,command,runtime),completion.apply(conditionalConfig,command,runtime)]);
+        assert.deepEqual(concurrent.map(r=>r.alreadyApplied).sort(),[false,true]);
+        const applied=concurrent.find(r=>!r.alreadyApplied),after=await actual(candidate.id);
+        assert.equal(applied.readyForOutbound,false);assert.equal(applied.syncJobEnqueued,false);assert.equal(applied.remoteWrites,0);
+        const old=beforeRow;
+        for(const key of ['full_sku','base_sku','sequence_number','public_product_identity_id','sku_schema_version_id','characteristic_version_id','weight','total_price_uah','price_per_gram','uah_rate'])assert.equal(after[key],old[key]);
+        assert.deepEqual(after.details,{...old.details,answers:{...old.details.answers,size:'9.5/3.5',stone_processing:'1'}});
+        assert.deepEqual(after.magento_name_override.values,old.magento_name_override.values);
+        const fields=(await db.query('SELECT f.state,f.evidence FROM magento_first_sync_fields f JOIN magento_first_sync_sessions s ON s.id=f.session_id WHERE s.public_product_identity_id=$1',[candidate.public_product_identity_id])).rows;
+        assert.ok(fields.length>0);assert.ok(fields.every(f=>f.state==='review_required'),'Manual local facts cannot mint received-field receipts');
+        const committed=await durableSnapshot();assert.equal((await completion.apply(conditionalConfig,command,{...runtime,preview:()=>assert.fail('Receipt replay cannot reread Magento')})).alreadyApplied,true);
+        assert.deepEqual(await durableSnapshot(),committed);
+        await db.query("UPDATE application_users SET status='disabled' WHERE id=$1",[actor]);
+        await assert.rejects(completion.apply(conditionalConfig,command,{...runtime,preview:()=>assert.fail('Revoked replay cannot read Magento')}),{statusCode:403});
+        assert.deepEqual(await durableSnapshot(),committed);await db.query("UPDATE application_users SET status='active' WHERE id=$1",[actor]);
+        await assert.rejects(completion.review(conditionalConfig,input,runtime),{code:'MAGENTO_LEGACY_INPUT_MISSING_ONLY'});
+        assert.deepEqual(await durableSnapshot(),committed);
+      });
     });
     await t.test('actual positive-weight SV116007 adopts missing size through exact published trim and shared set route',async()=>{
       const x=await copy(1919),before=await actual(x.id),args=await prepare(x);assert.equal(args.decision.status,'imported');assert.deepEqual(args.validation.blockedFields,[]);

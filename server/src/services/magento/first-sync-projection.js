@@ -93,7 +93,7 @@ function sourceState(descriptor, product, unit) {
   try { return state(readSource(descriptor, product), unit); }
   catch { return { known: false }; }
 }
-function directSource(cell, definition) {
+function directSource(cell, definition, product) {
   const refs = new Map(definition.bindings.map(binding => [binding.id, binding.value]));
   const deref = (node, count = 0) => count > 40 ? null
     : node?.op === 'ref' ? deref(refs.get(node.id), count + 1) : node;
@@ -125,8 +125,33 @@ function directSource(cell, definition) {
       const conditionSource = condition?.op === 'present' ? visit(condition.input, depth + 1) : null;
       const value = visit(node.op === 'require' ? node.value : node.then, depth + 1);
       const fallback = node.op === 'require' ? node.error : node.else;
-      return conditionSource && value && conditionSource.id === value.id
-        && emptyOrError(fallback) ? { ...value, required: value.required || deref(fallback).op === 'error' } : null;
+      if (conditionSource && value && conditionSource.id === value.id && emptyOrError(fallback)) {
+        return { ...value, required: value.required || deref(fallback).op === 'error' };
+      }
+      // The published SV size successor selects optional/required text with a
+      // semantic guard. Both branches must remain the SAME reversible input;
+      // a conditional calculation or alternate source is never an inverse.
+      if (node.op !== 'when' || condition?.op !== 'eq') return null;
+      const left = deref(condition.left), right = deref(condition.right);
+      const guard = left?.op === 'semanticKey' && deref(left.input);
+      const guardSource = guard?.op === 'source' && definition.sources[guard.id];
+      const other = visit(node.else, depth + 1);
+      const descriptor = value && definition.sources[value.id];
+      if (!value || !other || value.id !== other.id || value.trimmed !== other.trimmed
+        || hash(value.wrappers) !== hash(other.wrappers)
+        || value.wrappers.some(wrapper => wrapper !== 'text')
+        || descriptor?.kind !== 'information' || descriptor.category !== 'SV' || descriptor.key !== 'size'
+        || descriptor.aliases.length || product?.category !== 'SV'
+        || guardSource?.kind !== 'semantic' || guardSource.category !== 'SV' || guardSource.key === 'size'
+        || guardSource.aliases.length || right?.op !== 'literal' || typeof right.value !== 'string') return null;
+      let observed;
+      try { observed = readSource(guardSource, product); } catch { return null; }
+      if (!['string', 'number'].includes(typeof observed) || !/^(0|-?[1-9][0-9]*)$/.test(String(observed))
+        || !Number.isSafeInteger(Number(observed))) return null;
+      const contracts = Object.values(definition.questionContracts).filter(contract => contract.source === guard.id);
+      if (!contracts.length || contracts.some(contract => !contract.exists || !contract.allowed.includes(String(observed)))) return null;
+      const selected = String(observed) === right.value ? value : other;
+      return { ...selected, conditions: [...(selected.conditions || []), { sourceId: guard.id, value: observed }] };
     }
     return null;
   };
@@ -298,7 +323,7 @@ function projectFirstSyncFields(input) {
     const remoteValue = scope === 'all' ? getRemote(target) : evidence.english?.fields
       && own(evidence.english.fields, target);
     const remote = scope === 'en' && enReason ? { known: false } : state(remoteValue);
-    const direct = directSource(cell, compiled.definition);
+    const direct = directSource(cell, compiled.definition, product);
     const output = forward(target, scope);
     // An intentionally inactive frozen expression needs no business binding.
     // Retain its manifest row, but receipt emptiness only with fresh read,
@@ -440,7 +465,8 @@ function projectFirstSyncFields(input) {
     if (reverseCandidates?.length > 256) { reason ||= 'REVERSE_DOMAIN_LIMIT_EXCEEDED'; reverseCandidates = []; }
     const source = { kind: descriptor?.kind || 'derived', ...(descriptor?.key ? { key: descriptor.key } : {}),
       ...(descriptor?.field ? { field: descriptor.field } : {}), bindingRevisionId: revision.id,
-      definitionHash: compiled.hash, routeKey: route.routeKey };
+      definitionHash: compiled.hash, routeKey: route.routeKey,
+      ...(direct?.conditions ? { informationConditions: direct.conditions } : {}) };
     let required = target === 'name' || target === 'price' || persistence === 'price'
       || persistence === 'weight' || Boolean(direct?.required) || semanticRequired || attr?.is_required === true;
     if (!receipt && !required && !reason && local.known && !local.present && remote.known && !remote.present) {

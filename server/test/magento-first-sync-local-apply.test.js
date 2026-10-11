@@ -98,6 +98,34 @@ test('information and both names use post-information anchor, preserve private p
   });
 });
 
+test('conditional SV size adoption rechecks the sealed semantic guard before any setter or receipt', async () => {
+  for (const changed of [false, true]) {
+    const f = fixture(); f.product.category = 'SV'; f.product.details.answers.souvenir = 5;
+    f.amber.compiled.definition = { sources: { 'SV.souvenir': { kind: 'semantic', category: 'SV', key: 'souvenir', aliases: [] } } };
+    const accepted = f.add('size', 'all', 'information', '9.5/3.5');
+    const condition = [{ sourceId: 'SV.souvenir', value: 5 }];
+    accepted.source.informationConditions = condition;
+    f.projection.projection[0].source.informationConditions = condition;
+    if (changed) f.product.details.answers.souvenir = 6;
+    await withDependencies(f, async (client, calls) => {
+      const before = structuredClone(f.product), preview = await helper.prepareFirstSyncLocal(client, f.options());
+      assert.deepEqual(f.product, before); assert.equal(calls.sql.length, 0);
+      if (changed) {
+        assert.equal(preview.blockedFields[0].code, 'FIRST_SYNC_LOCAL_SOURCE_CHANGED');
+        assert.equal(preview.supportedFields.length, 0); assert.equal(calls.information.length, 0);
+        await assert.rejects(helper.applyFirstSyncLocal(client, f.options()), { code: 'FIRST_SYNC_LOCAL_VALIDATION_FAILED' });
+        assert.deepEqual(f.product, before); assert.equal(calls.audit.length, 0); assert.equal(calls.revisions.length, 0);
+      } else {
+        assert.deepEqual(preview.blockedFields, []);
+        const result = await helper.applyFirstSyncLocal(client, f.options());
+        assert.equal(result.changed, true); assert.equal(result.fullRevision, '5');
+        assert.equal(f.product.details.answers.size, '9.5/3.5'); assert.equal(f.product.details.answers.souvenir, 5);
+        assert.equal(f.product.total_price_uah, before.total_price_uah); assert.equal(f.product.weight, before.weight);
+      }
+    });
+  }
+});
+
 test('partial remote names preserve active local other language without fabricating a common baseline', async () => {
   const f = fixture(); f.observation.domainEvidence.english.fields.name = '';
   f.product.magento_name_override = { generated: { all: 'UA empty', en: 'EN empty' }, values: { all: 'Manager UA', en: 'Manager EN' } };

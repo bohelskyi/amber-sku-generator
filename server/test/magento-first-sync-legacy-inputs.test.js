@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { inspectLegacyInputs } = require('../src/services/magento/first-sync-legacy-inputs');
+const { inspectLegacyInputs,inspectBootstrapEncoding } = require('../src/services/magento/first-sync-legacy-inputs');
 const schemaService = require('../src/services/sku-schema.service');
 const skuQuestion = (key='souvenir', code='5') => ({key,label:key,sku_index:0,display_order:0,required:1,sku_separator:'',visible_if_json:null,options:[{value_id:5,sku_code:code,label:'Stone',visible_if_json:null,hidden_if_json:null,archived:false}]});
 function fixture() {
@@ -121,6 +121,29 @@ test('schema6 controlled missing-weight variant proves only exact compatibility;
   f.product.weight=0;assert.throws(()=>inspectLegacyInputs(f),{code:'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED'});
   for(const key of ['stone_processing','bird','additional_stone']){
     const g=realFixture();g.patch={[key]:0};assert.throws(()=>inspectLegacyInputs(g),{code:'FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED'});
+  }
+});
+test('old souvenir-first SV511 identity does not gain frozen authority to fill absent processing',()=>{
+  const f=realFixture(1359);f.patch={stone_processing:1};
+  assert.equal(f.product.details.answers.stone_processing,undefined);
+  assert.throws(()=>inspectLegacyInputs(f),{code:'FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED'});
+  f.patch={size:'9.5/3.5'};
+  assert.throws(()=>inspectLegacyInputs(f),{code:'FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN'});
+});
+test('attestation classification distinguishes a valid non-reconstructable bootstrap from modern encoded layouts and invalid proof',()=>{
+  const old=realFixture(1359);assert.equal(inspectBootstrapEncoding(old.product,old.schema).reconstructable,false);
+  for(const id of [2198,1919]){
+    const modern=realFixture(id);delete modern.product.details.answers.stone_processing;
+    assert.equal(inspectBootstrapEncoding(modern.product,modern.schema).reconstructable,true);
+  }
+  for(const kind of ['hash','duplicate','forward','suffix']){
+    const f=realFixture(1359);
+    if(kind==='hash')f.schema.config_hash='0'.repeat(64);
+    if(kind==='duplicate')f.schema.questions[0].options.push({...f.schema.questions[0].options[0]});
+    if(kind==='forward')f.schema.questions[0].visible_if_json={stone_processing:1};
+    if(kind==='suffix')f.product.sequence_number=2;
+    if(['duplicate','forward'].includes(kind))f.schema.config_hash=schemaService.hashSnapshot(f.schema.questions.map(({id:_id,...q})=>q));
+    assert.throws(()=>inspectBootstrapEncoding(f.product,f.schema),{code:'FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN'});
   }
 });
 test('conditional grammar rejects unknown/forward/malformed rules and populated hidden contradictions',()=>{

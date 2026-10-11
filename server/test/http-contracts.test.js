@@ -273,6 +273,90 @@ test('first-sync history admission requires active authentication, CSRF and ever
   } finally { delete accessBySubject.firstSyncHistoryReviewer; }
 });
 
+test('legacy first-sync completion retains authentication, active access, CSRF and current capabilities for preview and apply', async t => {
+  const service = require('../src/services/magento/first-sync-legacy-completion');
+  const calls = [];
+  const capabilities = ['export_templates.manage', 'export_templates.publish', 'exports.view', 'products.recount'];
+  const body = { sku: 'SV5111001', bindingRevisionId: '11111111-1111-4111-8111-111111111111',
+    processingValueId: '1', attestation: 'processing_not_encoded_in_historical_sku',
+    reason: 'Адміністратор підтвердив: камінь полірований.' };
+  accessBySubject.legacyCompletionAdministrator = {
+    applicationUser: { id: 18, status: 'active', displayName: 'Legacy input reviewer' },
+    roles: [{ key: 'administrator', displayName: 'Administrator' }], permissions: capabilities,
+  };
+  for (const operation of ['review', 'apply']) t.mock.method(service, operation, async (_config, input, options) => {
+    calls.push({ operation, input, actor: options.mutationContext.actorUserId });
+    return { sku: input.sku, changed: operation === 'apply' };
+  });
+  try {
+    for (const [path, operation] of [['preview', 'review'], ['apply', 'apply']]) {
+      const input = path === 'apply' ? { ...body, previewToken: 'a'.repeat(64) } : body;
+      const route = `/api/admin/magento-integration/first-sync/legacy-inputs/${path}`;
+      const before = calls.length;
+      for (const [subject, status] of [[undefined, 401], ['pending', 403], ['disabled', 403]]) {
+        const result = await request(route, { subject, method: 'POST', body: input, csrfToken: 'known-csrf-token' });
+        assert.equal(result.response.status, status);
+      }
+      for (const csrfToken of [undefined, 'wrong-token']) {
+        const result = await request(route, { subject: 'legacyCompletionAdministrator', method: 'POST', body: input, csrfToken });
+        assert.equal(result.response.status, 403); assert.equal(result.data.error, 'Invalid CSRF token');
+      }
+      for (const missing of capabilities) {
+        accessBySubject.legacyCompletionAdministrator.permissions = capabilities.filter(key => key !== missing);
+        const result = await request(route, { subject: 'legacyCompletionAdministrator', method: 'POST', body: input, csrfToken: 'known-csrf-token' });
+        assert.equal(result.response.status, 403); assert.equal(result.data.code, 'INSUFFICIENT_PERMISSION');
+        assert.equal(result.data.requiredPermission, missing);
+      }
+      assert.equal(calls.length, before, 'denied requests must not reach the service');
+      accessBySubject.legacyCompletionAdministrator.permissions = capabilities;
+      const allowed = await request(route, { subject: 'legacyCompletionAdministrator', method: 'POST', body: input, csrfToken: 'known-csrf-token' });
+      assert.equal(allowed.response.status, 200);
+      assert.deepEqual(calls.at(-1), { operation, input, actor: 18 });
+      accessBySubject.legacyCompletionAdministrator.permissions = [];
+      const revoked = await request(route, { subject: 'legacyCompletionAdministrator', method: 'POST', body: input, csrfToken: 'known-csrf-token' });
+      assert.equal(revoked.response.status, 403); assert.equal(calls.length, before + 1);
+    }
+  } finally { delete accessBySubject.legacyCompletionAdministrator; }
+});
+
+test('legacy completion malformed commands fail before any database or Magento reads', async t => {
+  const pool = require('../src/db/pool');
+  let reads = 0; let remoteReads = 0;
+  t.mock.method(pool, 'connect', async () => { reads++; throw new Error('unexpected database read'); });
+  t.mock.method(pool, 'query', async () => { reads++; throw new Error('unexpected database read'); });
+  const nativeFetch = globalThis.fetch;
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (String(url).startsWith(baseUrl + '/api/')) return nativeFetch(url, init);
+    remoteReads++; throw new Error('unexpected Magento read');
+  });
+  const capabilities = ['export_templates.manage', 'export_templates.publish', 'exports.view', 'products.recount'];
+  accessBySubject.legacyCompletionAdministrator = {
+    applicationUser: { id: 18, status: 'active' }, roles: [{ key: 'administrator' }], permissions: capabilities,
+  };
+  const body = { sku: 'SV5111001', bindingRevisionId: '11111111-1111-4111-8111-111111111111',
+    processingValueId: '1', attestation: 'processing_not_encoded_in_historical_sku', reason: 'Перевірений факт обробки каменю.' };
+  try {
+    for (const path of ['preview', 'apply']) {
+      const valid = path === 'apply' ? { ...body, previewToken: 'a'.repeat(64) } : body;
+      const malformed = [[], {}, { ...valid, extra: true }, { ...valid, bindingRevisionId: 'old-binding' },
+        { ...valid, sku: '' }, { ...valid, processingValueId: '1.0' }, { ...valid, attestation: true },
+        { ...valid, attestation: 'infer_from_sku' }, { ...valid, reason: 'short' }, { ...valid, reason: 'x'.repeat(501) }];
+      for (const key of Object.keys(valid)) {
+        const missing = { ...valid }; delete missing[key]; malformed.push(missing);
+      }
+      if (path === 'apply') malformed.push({ ...valid, previewToken: 'not-a-preview-token' });
+      for (const input of malformed) {
+        const result = await request(`/api/admin/magento-integration/first-sync/legacy-inputs/${path}`, {
+          subject: 'legacyCompletionAdministrator', method: 'POST', body: input, csrfToken: 'known-csrf-token',
+        });
+        assert.equal(result.response.status, 422, JSON.stringify(input));
+        assert.equal(result.data.code, 'MAGENTO_BINDING_INVALID');
+      }
+    }
+    assert.equal(reads, 0); assert.equal(remoteReads, 0);
+  } finally { delete accessBySubject.legacyCompletionAdministrator; }
+});
+
 test('representative business validation and compatibility errors retain status and body', async () => {
   const archived = await request('/api/delete', {
     subject: 'archiver',

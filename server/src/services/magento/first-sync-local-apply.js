@@ -9,6 +9,7 @@ const { same, reconcileNames } = require('./name-reconciliation');
 const { validName, validPair } = require('../export-templates/effective-product-names');
 const lifecycle = require('../full-product-export.service');
 const audit = require('../../audit/audit-events');
+const { readSource } = require('../export-templates/input-projection');
 
 const canonical = require('./first-sync-canonical-inputs');
 const prepared = new WeakMap();
@@ -87,6 +88,10 @@ function evidenceFor(field, projection, amber) {
     if (field.state !== 'imported' || field.scope !== 'all' || meta.source.kind !== 'information'
       || !information.INFORMATION_FIELDS_V1[amber.product.category]?.includes(meta.source.key)
       || meta.storagePath !== `details.answers.${meta.source.key}`) fail('FIRST_SYNC_LOCAL_SETTER_UNSUPPORTED');
+    for (const condition of meta.source.informationConditions || []) {
+      const descriptor = amber.compiled.definition.sources[condition.sourceId];
+      if (!descriptor || !same(readSource(descriptor, amber.product), condition.value)) fail('FIRST_SYNC_LOCAL_SOURCE_CHANGED');
+    }
   } else if (meta.persistence === 'weight') {
     if (field.state !== 'imported' || field.scope !== 'all' || input.unit !== 'g' || input.scale !== 3
       || !['decor_weight', 'vaha_vyrobu'].includes(field.target) || meta.storagePath !== 'weight'
