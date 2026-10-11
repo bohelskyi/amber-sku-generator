@@ -61,19 +61,32 @@ async function replaceBindings(client, id, bindings, requirements) {
       policy: p.policy, review_state: p.reviewState, evidence: p.evidence };
   }));
 }
+// Per-load indexes preserve the driver's exact keys and the SQL row order.
+function groupRows(rows, key) {
+  const groups = new Map();
+  for (const row of rows) {
+    const value = row[key], group = groups.get(value);
+    if (group) group.push(row);
+    else groups.set(value, [row]);
+  }
+  return groups;
+}
 async function load(client, id, lock = false) {
   const row = (await client.query(`SELECT * FROM magento_binding_revisions WHERE id=$1${lock ? ' FOR UPDATE' : ''}`, [id])).rows[0];
   if (!row) return null;
   const tables = {};
   for (const table of Object.keys(TABLES)) tables[table] = (await client.query(`SELECT * FROM magento_binding_${table}
     WHERE revision_id=$1 ORDER BY to_jsonb(magento_binding_${table})::text`, [id])).rows;
+  const members = groupRows(tables.schema_members, 'set_id');
+  const options = groupRows(tables.schema_options, 'attribute_code');
+  const stores = groupRows(tables.schema_stores, 'kind');
   const schema = { storeCode: row.observation_store_code,
     attributeSets: tables.schema_sets.map((s) => ({ attribute_set_id: Number(s.set_id), attribute_set_name: s.name,
-      attributeCodes: tables.schema_members.filter((m) => m.set_id === s.set_id).map((m) => m.attribute_code).sort() })),
+      attributeCodes: (members.get(s.set_id) || []).map((m) => m.attribute_code).sort() })),
     attributes: tables.schema_attributes.map((a) => ({ ...a.metadata,
-      options: tables.schema_options.filter((o) => o.attribute_code === a.code).map((o) => ({ value: o.option_id, label: o.label, isEmpty: o.option_id === '' })) })),
+      options: (options.get(a.code) || []).map((o) => ({ value: o.option_id, label: o.label, isEmpty: o.option_id === '' })) })),
     storeTopology: Object.fromEntries(['websites','storeGroups','storeViews'].map((kind) => [kind,
-      tables.schema_stores.filter((s) => s.kind === kind).map((s) => s.metadata)])) };
+      (stores.get(kind) || []).map((s) => s.metadata)])) };
   const bindings = {
     routes: tables.routes.map((r) => ({ routeKey: r.route_key, evaluatorSetName: r.evaluator_set_name, enabled: r.enabled, setId: r.set_id === null ? null : Number(r.set_id), reviewState: r.review_state, evidence: r.evidence })),
     attributes: tables.attributes.map((a) => ({ routeKey: a.route_key, rowId: a.row_id, target: a.target,

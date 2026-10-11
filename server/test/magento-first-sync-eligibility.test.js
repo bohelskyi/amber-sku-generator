@@ -30,6 +30,11 @@ test('partial session retains unresolved fields after own job delivery; completi
   assert.equal(classify({...base,session,previousDelivery:true}).mode,'first');
   assert.equal(classify({...base,session:{...session,completed_at:'2026-10-09'}}).mode,'ordinary');
 });
+test('a session admitted through historical review always retains its admission requirement until completion',()=>{
+  assert.equal(classify({...base,session,requiresHistoryAdmission:true}).mode,'review');
+  assert.equal(classify({...base,session,requiresHistoryAdmission:true,historyAdmission:true}).mode,'first');
+  assert.equal(classify({...base,session:{...session,completed_at:'2026-10-11'},requiresHistoryAdmission:true}).mode,'ordinary');
+});
 test('public SKU, remote ID, installation and origin changes do not enable re-adoption',()=>{
   for(const remote of [{id:802,sku:'SV001'},{id:801,sku:'OTHER'}])
     assert.equal(classify({...base,remote,session}).blockers[0].code,'FIRST_SYNC_IDENTITY_CHANGED');

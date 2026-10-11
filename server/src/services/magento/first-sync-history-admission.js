@@ -125,6 +125,7 @@ async function readOnClient(client, config, observation, { history = null } = {}
   return { admission, reason: null, evidenceHash };
 }
 function allows(observation, admission) {
+  if(require('./first-sync-cutover-admission').allows(observation,admission)) return true;
   const proof = proofs.get(admission);
   return Boolean(proof && observation?.amber?.product === proof.product
     && observation.raw?.sku === proof.identity.sku && c.hash(identityFromObservation(observation)) === c.hash(proof.identity));
@@ -155,7 +156,9 @@ async function lockOnClient(client, { productIds, skus }) {
     throw cause;
   }
 }
-async function assertOnClient(client, config, observation, admission) {
+async function assertOnClient(client, config, observation, admission, options={}) {
+  if(require('./first-sync-cutover-admission').allows(observation,admission))
+    return require('./first-sync-cutover-admission').assertOnClient(client,config,observation,admission,options);
   const proof = proofs.get(admission);
   if (!proof || !allows(observation, admission)) throw changed();
   await lockOnClient(client, proof);

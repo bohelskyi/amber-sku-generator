@@ -70,7 +70,7 @@ function fixture(t, kind = 'standard') {
     else if (sql.startsWith('SELECT * FROM historical_')) rows=f.proof ? [structuredClone(f.proof)] : [];
     else if (sql.startsWith('SELECT * FROM magento_sync_jobs')) rows=f.job ? [structuredClone(f.job)] : [];
     else if (sql.startsWith('SELECT 1 FROM magento_sync_steps')) rows=f.steps.map(() => ({}));
-    else if (sql.includes('FROM magento_first_sync_sessions\n')) rows=f.progress ? [f.progress.session] : [];
+    else if (sql.startsWith('SELECT * FROM magento_first_sync_sessions')) rows=f.progress ? [f.progress.session] : [];
     else if (sql.includes('FROM magento_first_sync_fields')) rows=(f.progress?.fields || []).map(evidence => ({evidence}));
     else if (sql.startsWith('SELECT desired_generation') || sql.startsWith('SELECT product_id,desired_generation')) rows=f.request ? [f.request] : [];
     else if (sql.includes('AS protected_work')) {
@@ -108,7 +108,7 @@ test('confirmed standard UPDATE has only opaque exact-execution authority and wr
   assert.equal(f.revalidations,1);assert.equal(f.authorityCalls,2);
   assert.deepEqual(f.factValues.slice(5,8),[null,UUID,null]);
   const lock=f.queries.find(row=>row.values[0]==='amber_magento_first_sync:' + f.state.revision.originHash + ':31');
-  assert.ok(lock);assert.ok(f.queries.indexOf(lock)<f.queries.findIndex(row=>row.sql.includes('FROM magento_first_sync_sessions\n')));
+  assert.ok(lock);assert.ok(f.queries.indexOf(lock)<f.queries.findIndex(row=>row.sql.startsWith('SELECT * FROM magento_first_sync_sessions')));
 });
 test('ordinary history, completed intents and reviewed CREATE do not grant this UPDATE lane',async t => {
   const f=fixture(t);

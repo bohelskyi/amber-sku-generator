@@ -21,6 +21,63 @@ const confirm = () => fireEvent.click(screen.getByRole('button', { name: 'Збе
 beforeEach(() => { api.get.mockResolvedValue({ data: { currentPublishedId: bindingRevisionId } }); });
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
+const historyPlan = (overrides = {}) => plan([], { mode: 'review', blockers: [{ code: 'FIRST_SYNC_HISTORY_REVIEW_REQUIRED' }],
+  historyReview: { sku: 'SV1', remoteProductId: 3732, scope: 'first_sync_review_only', doesNotAcknowledgeExport: true, previewToken: token }, ...overrides });
+const historyReceipt = () => ({ sku: 'SV1', scope: 'first_sync_review_only', doesNotAcknowledgeExport: true,
+  receipt: { auditEventId: '4615', alreadyApplied: false } });
+const openHistory = () => fireEvent.click(screen.getByRole('button', { name: 'Переглянути допуск до полів' }));
+const confirmHistory = () => fireEvent.click(screen.getByRole('button', { name: 'Дозволити перегляд полів' }));
+
+it('requires explicit scoped history confirmation, records no field decision, and waits for another fresh preview', async () => {
+  api.post.mockResolvedValueOnce({ data: historyPlan() }).mockResolvedValueOnce({ data: historyReceipt() }).mockResolvedValueOnce({ data: plan() });
+  render(shell()); expect(api.post).not.toHaveBeenCalled(); read(); await screen.findByRole('button', { name: 'Переглянути допуск до полів' });
+  openHistory(); expect(api.post).toHaveBeenCalledTimes(1);
+  const dialog = screen.getByRole('dialog'); expect(within(dialog).getByText(/не отримує значення/)).toBeTruthy();
+  expect(within(dialog).getByText('3732')).toBeTruthy(); confirmHistory();
+  await screen.findByText(/Тепер повторіть перевірку актуальних полів/);
+  expect(api.post).toHaveBeenCalledTimes(2);
+  expect(api.post).toHaveBeenLastCalledWith('/admin/magento-integration/first-sync/history-apply',
+    { sku: 'SV1', bindingRevisionId, previewToken: token }, { signal: expect.any(AbortSignal) });
+  expect(screen.queryByRole('button', { name: /Отримати значення Magento:/ })).toBeNull();
+  read(); await screen.findByRole('region', { name: 'Вага · UA / основний магазин' });
+  expect(api.get).toHaveBeenCalledTimes(2); expect(api.post).toHaveBeenCalledTimes(3);
+});
+
+it('history cancel, closing and returning require a new read and perform no mutation', async () => {
+  api.post.mockResolvedValue({ data: historyPlan() }); const view = render(shell()); read();
+  await screen.findByRole('button', { name: 'Переглянути допуск до полів' }); openHistory();
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Скасувати' }));
+  expect(api.post).toHaveBeenCalledTimes(1); expect(screen.queryByRole('dialog')).toBeNull();
+  view.unmount(); render(shell()); expect(screen.queryByRole('button', { name: 'Переглянути допуск до полів' })).toBeNull();
+  expect(api.post).toHaveBeenCalledTimes(1);
+});
+
+it('history confirmation suppresses repeated clicks and ignores a late receipt after changing product', async () => {
+  let resolve; api.post.mockResolvedValueOnce({ data: historyPlan() }).mockImplementationOnce(() => new Promise(r => { resolve = r; }));
+  const view = render(shell()); read(); await screen.findByRole('button', { name: 'Переглянути допуск до полів' }); openHistory();
+  confirmHistory(); fireEvent.click(screen.getByRole('button', { name: 'Зберігаємо перевірку історії…' }));
+  expect(api.post).toHaveBeenCalledTimes(2); const signal = api.post.mock.calls[1][2].signal;
+  view.rerender(shell({ sku: 'SV2' })); expect(signal.aborted).toBe(true);
+  await act(async () => resolve({ data: historyReceipt() }));
+  expect(screen.queryByText(/перевірку історії.*збережено/i)).toBeNull();
+  expect(screen.queryByRole('dialog')).toBeNull(); expect(api.post).toHaveBeenCalledTimes(2);
+});
+
+it('denied or stale history apply clears its review token and requires a fresh read', async () => {
+  api.post.mockResolvedValueOnce({ data: historyPlan() }).mockRejectedValueOnce({ response: { status: 403, data: { error: 'Право адміністратора відкликано.' } } });
+  render(shell()); read(); await screen.findByRole('button', { name: 'Переглянути допуск до полів' }); openHistory(); confirmHistory();
+  await screen.findByText('Право адміністратора відкликано.'); expect(screen.queryByRole('button', { name: 'Переглянути допуск до полів' })).toBeNull();
+  expect(screen.queryByRole('dialog')).toBeNull(); expect(api.post).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+  { scope: 'ordinary_delivery' }, { sku: 'OTHER' }, { remoteProductId: '3732' }, { doesNotAcknowledgeExport: false }, { previewToken: 'old' },
+])('rejects malformed history review boundaries %j', async (patch) => {
+  const data = historyPlan(); Object.assign(data.historyReview, patch); api.post.mockResolvedValue({ data });
+  render(shell()); read(); await screen.findByText(/Перевірку історії не підтверджено/);
+  expect(screen.queryByRole('button', { name: 'Переглянути допуск до полів' })).toBeNull();
+});
+
 it('performs no reads, decisions or outward dispatch on mount; preview is an explicit separate read', async () => {
   api.post.mockResolvedValue({ data: plan() });
   render(shell()); expect(api.get).not.toHaveBeenCalled(); expect(api.post).not.toHaveBeenCalled(); read();

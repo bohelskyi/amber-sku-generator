@@ -118,7 +118,7 @@ async function enforce(config,observation,state,options,{job=null,createLane=nul
     originHash:state.revision.originHash,identityId:String(state.publicIdentityId),
     remoteId:observation.raw?.id,sku:observation.amber.product.public_sku,
     installationKey:observation.amber.revision.installationKey,
-    historyAdmission:inspection.first?.historyAdmission,config,observation,
+    historyAdmission:inspection.first?.historyAdmission,reviewedRecovery:inspection.reviewedRecovery===true,config,observation,
     manifest:inspection.prepared?.manifest,
     nameProof:fieldNameProof});
   return token;
@@ -191,7 +191,8 @@ async function assertDispatchOnClient(client,token) {
     return;
   }
   if(proof.mode==='create' || proof.mode==='ordinary') return;
-  if(proof.historyAdmission) await require('./first-sync-history-admission').assertOnClient(client,proof.config,proof.observation,proof.historyAdmission);
+  if(proof.historyAdmission) await require('./first-sync-history-admission').assertOnClient(client,proof.config,proof.observation,proof.historyAdmission,
+    {jobId:proof.jobId || null,reviewedRecovery:proof.reviewedRecovery});
   if(!proof.key || !proof.receiptRevision || !proof.manifest?.length) fail('DISPATCH_REVIEW_REQUIRED');
   if(!current || current.session.revision!==proof.receiptRevision
     || current.session.public_sku!==proof.sku || Number(current.session.remote_product_id)!==proof.remoteId
